@@ -49,10 +49,12 @@ typedef struct hu_turing_score {
 /* Evaluate a response for human-likeness using heuristic scoring.
  * conversation_context: recent messages for context (may be NULL).
  * response: the message being scored.
+ * max_channel_chars: outbound cap from channel constraints (0 = use built-in
+ * casual-text thresholds for structural/length tells).
  * Returns HU_OK on success, fills out. */
 hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
                                      const char *conversation_context, size_t context_len,
-                                     hu_turing_score_t *out);
+                                     uint32_t max_channel_chars, hu_turing_score_t *out);
 
 /* Evaluate using an LLM judge for semantic scoring.
  * provider: the LLM to use as judge (should be cheap/fast model).

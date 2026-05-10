@@ -89,16 +89,20 @@ typedef struct hu_memory_store_opts {
  * Memory vtable
  * ────────────────────────────────────────────────────────────────────────── */
 
-struct hu_memory_vtable;
+struct hu_legacy_memory_vtable;
 
-typedef struct hu_memory {
+typedef struct hu_legacy_memory {
     void *ctx;
-    const struct hu_memory_vtable *vtable;
+    const struct hu_legacy_memory_vtable *vtable;
     const char *current_session_id;
     size_t current_session_id_len;
-} hu_memory_t;
+} hu_legacy_memory_t;
 
-typedef struct hu_memory_vtable {
+/* Legacy vector-store handle. W7 dispatching facade uses `hu_memory_facade_t`
+ * in `human/memory/memory.h` — names no longer collide (Phase 0). */
+typedef hu_legacy_memory_t hu_memory_t;
+
+typedef struct hu_legacy_memory_vtable {
     const char *(*name)(void *ctx);
     hu_error_t (*store)(void *ctx, const char *key, size_t key_len, const char *content,
                         size_t content_len, const hu_memory_category_t *category,
@@ -120,7 +124,9 @@ typedef struct hu_memory_vtable {
     hu_error_t (*count)(void *ctx, size_t *out);
     bool (*health_check)(void *ctx);
     void (*deinit)(void *ctx);
-} hu_memory_vtable_t;
+} hu_legacy_memory_vtable_t;
+
+typedef hu_legacy_memory_vtable_t hu_memory_vtable_t;
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Factory functions (when HU_ENABLE_SQLITE: sqlite; else none)
@@ -128,6 +134,12 @@ typedef struct hu_memory_vtable {
 
 /* Free heap-allocated fields of an entry (from list/recall). Does not free the struct. */
 void hu_memory_entry_free_fields(hu_allocator_t *alloc, hu_memory_entry_t *e);
+
+/* Export all memory entries to a JSON file at `output_path`. Streams entries
+ * so arbitrarily large stores don't materialise as a single string. Returns
+ * HU_ERR_IO on file-open failure, or the error from vtable->list. */
+hu_error_t hu_memory_export_json(hu_memory_t *mem, hu_allocator_t *alloc,
+                                 const char *output_path);
 
 /* Store with source provenance: uses store_ex if available, else falls back to store. */
 hu_error_t hu_memory_store_with_source(hu_memory_t *mem, const char *key, size_t key_len,
@@ -157,6 +169,21 @@ hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem);
 #include <sqlite3.h>
 sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem);
 #endif
+
+/* W15 envelope encryption opt-in. Attach a keystore to a sqlite
+ * memory backend; when `encrypt_at_rest` is true and `ks` is
+ * unlocked, every store wraps `content` via
+ * `hu_encrypted_store_wrap` and every read transparently unwraps
+ * rows that carry the envelope magic. Legacy plaintext rows
+ * remain readable unchanged. Pass `ks=NULL` and
+ * `encrypt_at_rest=false` to disable.
+ *
+ * Returns HU_ERR_NOT_SUPPORTED when `mem` is not a sqlite-backed
+ * memory, or HU_ERR_INVALID_ARGUMENT when `encrypt_at_rest=true`
+ * is requested without a keystore. */
+struct hu_keystore;
+hu_error_t hu_sqlite_memory_attach_keystore(hu_memory_t *mem, struct hu_keystore *ks,
+                                             bool encrypt_at_rest);
 hu_memory_t hu_markdown_memory_create(hu_allocator_t *alloc, const char *dir_path);
 
 #endif /* HU_MEMORY_H */

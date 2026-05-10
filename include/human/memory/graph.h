@@ -154,6 +154,29 @@ hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const c
 void hu_graph_entities_free(hu_allocator_t *alloc, hu_graph_entity_t *entities, size_t count);
 void hu_graph_relations_free(hu_allocator_t *alloc, hu_graph_relation_t *relations, size_t count);
 
+/* W14 belief-reverify support — write back a refined scalar confidence
+ * on an existing relation row. Variance is forced to 0 (treats the
+ * update as deterministic). `last_seen_now_ms` advances `last_seen`
+ * so re-verification counts as recency. NO-OP and HU_OK on
+ * relation_id <= 0. For full Bayesian (mean, variance) updates use
+ * hu_graph_set_relation_belief instead. */
+hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
+                                            float confidence, int64_t last_seen_now_ms);
+
+/* W8 P2A — write back a full Bayesian posterior (mean + variance).
+ * Both `mean` and `variance` are clamped to safe ranges:
+ * mean ∈ [0,1], variance ∈ [0, 0.25] (Beta posterior cap). Mirrors
+ * the value into the legacy `confidence` column so existing readers
+ * see the new mean. NO-OP and HU_OK on relation_id <= 0. */
+hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id,
+                                        float mean, float variance,
+                                        int64_t last_seen_now_ms);
+
+/* W8 P2A — read the (mean, variance) belief for a single relation
+ * row. Returns HU_ERR_NOT_FOUND if relation_id is missing. */
+hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id,
+                                        float *out_mean, float *out_variance);
+
 /* Ebbinghaus recall tracking: record that an entity was recalled */
 hu_error_t hu_graph_record_recall(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
                                   int64_t entity_id);

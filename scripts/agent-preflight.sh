@@ -59,6 +59,14 @@ if [ "$C_CHANGED" -eq 1 ]; then
         fail "C build"
     fi
 
+    if [ -f scripts/check-memory-v2-header-collision.sh ]; then
+        if bash scripts/check-memory-v2-header-collision.sh; then
+            pass "memory-v2 header collision (src/)"
+        else
+            fail "memory-v2 header collision (src/)"
+        fi
+    fi
+
     if [ "$FULL" -eq 1 ]; then
         if ./build/human_tests 2>&1 | tail -3; then
             pass "Full test suite"

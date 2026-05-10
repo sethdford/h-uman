@@ -69,6 +69,20 @@ static int count_ai_tells(const char *s, size_t len) {
         "I'd love to help",
         "I want to be",
         "here are some",
+        "furthermore",
+        "moreover",
+        "based on your message",
+        "based on what you've",
+        "to be clear",
+        "in conclusion",
+        "i don't have access",
+        "i do not have access",
+        "happy to help",
+        "delighted to",
+        "i hear you",
+        "i can imagine",
+        "thank you for sharing",
+        "thanks for sharing",
         "**",
     };
     int count = 0;
@@ -79,10 +93,35 @@ static int count_ai_tells(const char *s, size_t len) {
     return count;
 }
 
-static int count_structural_tells(const char *s, size_t len) {
+static void turing_structural_len_thresholds(uint32_t max_channel_chars, size_t *t1,
+                                             size_t *t2) {
+    if (max_channel_chars == 0) {
+        *t1 = 260;
+        *t2 = 360;
+        return;
+    }
+    *t2 = (size_t)max_channel_chars;
+    *t1 = (size_t)max_channel_chars * 72 / 100;
+    if (*t1 == 0)
+        *t1 = 1;
+    if (*t2 < *t1)
+        *t2 = *t1;
+}
+
+static int count_structural_tells(const char *s, size_t len, uint32_t max_channel_chars) {
     int count = 0;
-    if (memchr(s, ';', len))
-        count++;
+    /* Multiple semicolons read as formal/AI; a single semicolon is common in human text */
+    {
+        int semi = 0;
+        for (size_t i = 0; i < len; i++) {
+            if (s[i] == ';')
+                semi++;
+        }
+        if (semi >= 2)
+            count++;
+        else if (semi == 1 && len > 220)
+            count++;
+    }
     for (size_t i = 0; i + 1 < len; i++) {
         if (s[i] == '\n' && (s[i + 1] == '-' || s[i + 1] == '*'))
             count += 2;
@@ -133,9 +172,15 @@ static int count_structural_tells(const char *s, size_t len) {
     if (paragraphs >= 3)
         count += paragraphs;
 
-    /* Overly long responses on a texting-style channel are tells */
-    if (len > 500)
-        count += 2;
+    /* Overly long vs channel cap (or default casual-text tiers when cap is 0). */
+    {
+        size_t t1, t2;
+        turing_structural_len_thresholds(max_channel_chars, &t1, &t2);
+        if (len > t2)
+            count += 2;
+        else if (len > t1)
+            count += 1;
+    }
 
     /* "First...Second...Third" enumeration */
     if (ci_has(s, len, "first") && ci_has(s, len, "second"))
@@ -573,13 +618,13 @@ static int cross_turn_consistency(const char *response, size_t response_len, con
 
 hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
                                      const char *conversation_context, size_t context_len,
-                                     hu_turing_score_t *out) {
+                                     uint32_t max_channel_chars, hu_turing_score_t *out) {
     if (!response || !out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     int ai_tells = count_ai_tells(response, response_len);
-    int structural = count_structural_tells(response, response_len);
+    int structural = count_structural_tells(response, response_len, max_channel_chars);
     int contractions = has_contractions(response, response_len);
     int casual = has_casual_markers(response, response_len);
     int emotional = has_emotional_words(response, response_len);
@@ -611,9 +656,9 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
 
         /* Empathy markers: asking about feelings, validating, reflecting back */
         static const char *empathy_phrases[] = {
-            "how are you",   "how do you feel", "that must",     "that sounds",
-            "i can imagine", "i hear you",      "makes sense",   "i get that",
-            "are you okay",  "you doing ok",    "what happened", "tell me more",
+            "how are you",   "how do you feel", "that sounds",   "makes sense",
+            "i get that",    "are you okay",    "you doing ok",  "what happened",
+            "tell me more",  "rough",           "that sucks",
         };
         int empathy = 0;
         for (size_t i = 0; i < sizeof(empathy_phrases) / sizeof(empathy_phrases[0]); i++) {
@@ -651,7 +696,28 @@ hu_error_t hu_turing_score_heuristic(const char *response, size_t response_len,
     }
 
     /* appropriate_length: iMessage-appropriate. Ultra-short is peak human texting. */
-    if (response_len < 10)
+    if (max_channel_chars > 0) {
+        size_t cap = (size_t)max_channel_chars;
+        if (response_len < cap / 25)
+            out->dimensions[HU_TURING_APPROPRIATE_LENGTH] = 10;
+        else if (response_len < cap / 5)
+            out->dimensions[HU_TURING_APPROPRIATE_LENGTH] = 9;
+        else if (response_len < cap * 3 / 4)
+            out->dimensions[HU_TURING_APPROPRIATE_LENGTH] = 8;
+        else if (response_len < cap)
+            out->dimensions[HU_TURING_APPROPRIATE_LENGTH] = 6;
+        else {
+            size_t denom = cap > 200 ? cap / 2 : 100;
+            if (denom == 0)
+                denom = 1;
+            int v = 4 - (int)(response_len / denom);
+            if (v < 1)
+                v = 1;
+            if (v > 10)
+                v = 10;
+            out->dimensions[HU_TURING_APPROPRIATE_LENGTH] = v;
+        }
+    } else if (response_len < 10)
         out->dimensions[HU_TURING_APPROPRIATE_LENGTH] = 10;
     else if (response_len < 50)
         out->dimensions[HU_TURING_APPROPRIATE_LENGTH] = 9;
@@ -998,7 +1064,7 @@ hu_error_t hu_turing_score_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
         return HU_ERR_INVALID_ARGUMENT;
     if (!provider->vtable || !provider->vtable->chat_with_system)
         return hu_turing_score_heuristic(response, response_len, conversation_context, context_len,
-                                         out);
+                                         0, out);
 
     static const char SYSTEM[] =
         "You are a Turing test evaluator. Score this response on 18 dimensions "
@@ -1055,7 +1121,7 @@ hu_error_t hu_turing_score_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
     }
     if (n < 0 || (size_t)n >= sizeof(user_buf))
         return hu_turing_score_heuristic(response, response_len, conversation_context, context_len,
-                                         out);
+                                         0, out);
 
     char *llm_out = NULL;
     size_t llm_out_len = 0;
@@ -1067,7 +1133,7 @@ hu_error_t hu_turing_score_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
         if (llm_out)
             alloc->free(alloc->ctx, llm_out, llm_out_len + 1);
         return hu_turing_score_heuristic(response, response_len, conversation_context, context_len,
-                                         out);
+                                         0, out);
     }
 
     memset(out, 0, sizeof(*out));
@@ -1095,7 +1161,7 @@ hu_error_t hu_turing_score_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
 
     if (parsed < HU_TURING_DIM_COUNT)
         return hu_turing_score_heuristic(response, response_len, conversation_context, context_len,
-                                         out);
+                                         0, out);
 
     /* Weighted average matching heuristic path: text dims (0-11) weight 3, voice dims weight 1 */
     {

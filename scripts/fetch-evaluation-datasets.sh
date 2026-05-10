@@ -87,7 +87,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 # pipeline.
 
 fetch_locomo() {
-  local upstream="https://raw.githubusercontent.com/snap-stanford/locomo/main/data/locomo10.json"
+  local upstream="https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
   local pinned_sha=""  # set after first known-good fetch; honored when non-empty
   local raw="$TMP_DIR/locomo_raw.json"
   echo "[locomo] fetching $upstream"
@@ -150,7 +150,7 @@ fetch_locomo() {
 # not done here).
 
 fetch_longmemeval() {
-  local upstream="https://raw.githubusercontent.com/xiaowu0162/LongMemEval/main/data/longmemeval_s.json"
+  local upstream="https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json"
   local pinned_sha=""
   local raw="$TMP_DIR/longmemeval_raw.json"
   echo "[longmemeval] fetching $upstream"
@@ -176,14 +176,14 @@ fetch_longmemeval() {
       else "single_hop"
       end;
     def kws(ans):
-      [ ans | tostring | ascii_downcase
+      ans | tostring | ascii_downcase
               | gsub("[^a-z0-9 ]"; " ")
               | split(" ")
               | map(select(length > 2 and . != "the" and . != "and"
                            and . != "for" and . != "are" and . != "was"
                            and . != "were" and . != "with" and . != "from"))
               | unique
-              | .[0:4] ];
+              | .[0:4];
     {
       name: "longmemeval",
       version: 1,

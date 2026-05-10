@@ -7,8 +7,12 @@
 #include "human/core/log.h"
 #include "human/ml/checkpoint.h"
 #include "human/ml/dataloader.h"
+#include "human/core/string.h"
+#include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include "human/ml/dpo.h"
 #include "human/ml/experiment.h"
+#include "human/ml/learner.h"
 #include "human/ml/lora.h"
 #include "human/ml/ml.h"
 #include "human/ml/model.h"
@@ -16,6 +20,7 @@
 #include "human/ml/prepare.h"
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
+#include "human/agent/scheduler_status_json.h"
 #include "human/persona.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
@@ -30,6 +35,20 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Free a synthetic example array (incoming/response strdup'd by caller).
+ * Safe to call with NULL/0 — used by lora-persona cleanup paths. */
+static void free_delta_examples(hu_allocator_t *alloc, hu_persona_example_t *ex, size_t n) {
+    if (!ex || n == 0)
+        return;
+    for (size_t i = 0; i < n; i++) {
+        if (ex[i].incoming)
+            alloc->free(alloc->ctx, ex[i].incoming, strlen(ex[i].incoming) + 1);
+        if (ex[i].response)
+            alloc->free(alloc->ctx, ex[i].response, strlen(ex[i].response) + 1);
+    }
+    alloc->free(alloc->ctx, ex, n * sizeof(*ex));
+}
 
 static int parse_int_arg(const char *val, int *out) {
     if (!val || !out)
@@ -253,14 +272,60 @@ hu_error_t hu_ml_cli_prepare(hu_allocator_t *alloc, int argc, const char **argv)
 #endif
 }
 
+/* Print the W14 scheduler snapshot the running daemon last persisted to
+ * ~/.human/scheduler.status. Uses `hu_scheduler_status_parse_json` (same as
+ * `human doctor scheduler`) so key order and whitespace never drift between tools. */
+static void print_scheduler_status_block(void) {
+    const char *home = getenv("HOME");
+    if (!home || !*home)
+        return;
+    char path[512];
+    int n = snprintf(path, sizeof(path), "%s/.human/scheduler.status", home);
+    if (n <= 0 || (size_t)n >= sizeof(path))
+        return;
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return;
+    char buf[4096];
+    size_t got = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[got] = '\0';
+
+    unsigned long long jp = 0, jc = 0;
+    long long bat = 0, ue = 0;
+    char ac[16] = {0};
+    if (hu_scheduler_status_parse_json(buf, &jp, &jc, &bat, ac, sizeof(ac), &ue) != HU_OK) {
+        printf("[w14-scheduler] (%s)\n"
+               "  (unparseable status JSON — run `human doctor scheduler`)\n\n",
+               path);
+        return;
+    }
+
+    printf("[w14-scheduler] (%s)\n", path);
+    printf("  jobs_pending:         %llu\n", (unsigned long long)jp);
+    printf("  jobs_completed_today: %llu\n", (unsigned long long)jc);
+    if (bat >= 0)
+        printf("  battery_pct:          %lld%%\n", (long long)bat);
+    else
+        printf("  battery_pct:          (unknown)\n");
+    printf("  on_ac_power:          %s\n", (ac[0] && strcmp(ac, "true") == 0) ? "yes" : "no");
+    if (ue > 0) {
+        time_t age_sec = time(NULL) - (time_t)ue;
+        printf("  status_age:           %lds\n", (long)age_sec);
+    }
+    printf("\n");
+}
+
 hu_error_t hu_ml_cli_status(hu_allocator_t *alloc, int argc, const char **argv) {
     (void)alloc;
     (void)argc;
     (void)argv;
 #ifdef HU_IS_TEST
+    print_scheduler_status_block();
     printf("No experiments found\n");
     return HU_OK;
 #else
+    print_scheduler_status_block();
     const char *path = "results.tsv";
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -456,6 +521,13 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     const char *persona_name = NULL;
     const char *checkpoint_path = NULL;
     const char *output_path = NULL;
+    /* P0 #3 — signal-builder wiring. When --from-deltas is set, we
+     * read applied persona deltas from a memory DB and treat them as
+     * additional training examples. The previously-dead
+     * `hu_learner_signals_from_persona_deltas` builder becomes a real
+     * data source for LoRA. */
+    const char *from_deltas_db = NULL;
+    const char *signal_contact = NULL;
     int rank = 8;
     int max_steps = 200;
     for (int i = 1; i < argc; i++) {
@@ -477,6 +549,18 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             i++;
             continue;
         }
+        v = get_opt(argv, argc, i, "--from-deltas");
+        if (v) {
+            from_deltas_db = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--contact");
+        if (v) {
+            signal_contact = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--rank");
         if (v) {
             parse_int_arg(v, &rank);
@@ -492,15 +576,19 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         if (strcmp(argv[i], "--help") == 0) {
             printf("Usage: human ml lora-persona --persona <name> "
                    "[--checkpoint <path>] [--output <path>] "
+                   "[--from-deltas <memory.db> --contact <id>] "
                    "[--rank <N>] [--max-steps <N>] [--help]\n");
-            printf("\n  --checkpoint  Optional HUML base GPT checkpoint to warm-start "
+            printf("\n  --checkpoint   Optional HUML base GPT checkpoint to warm-start "
                    "before LoRA attaches.\n");
-            printf("                Must match the reference GPT dims (see "
+            printf("                 Must match the reference GPT dims (see "
                    "hu_experiment_config_default).\n");
-            printf("                NOTE: this is the reference HUML GPT, NOT a "
+            printf("                 NOTE: this is the reference HUML GPT, NOT a "
                    "frontier model.\n");
-            printf("                Frontier model fine-tuning is tracked in\n");
-            printf("                docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
+            printf("                 Frontier model fine-tuning is tracked in\n");
+            printf("                 docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
+            printf("\n  --from-deltas  Augment the persona example bank with applied\n");
+            printf("                 persona deltas read from a memory database.\n");
+            printf("                 Requires --contact to scope the read.\n");
             return HU_OK;
         }
     }
@@ -527,15 +615,104 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         return err;
     }
 
+    /* P0 #3 — pull applied persona deltas as additional training pairs.
+     * Each delta becomes one synthetic (incoming, response) example:
+     *   incoming = "[<channel>] <kind>"  (e.g. "[slack] tone")
+     *   response = delta.value           (the new style instruction)
+     * We hold the synthesized examples in `delta_examples` so the
+     * standard training loop can iterate them just like persona-bank
+     * examples; they're freed at the end alongside the persona. */
+    hu_persona_example_t *delta_examples = NULL;
+    size_t delta_examples_count = 0;
+    if (from_deltas_db && from_deltas_db[0]) {
+#ifdef HU_ENABLE_SQLITE
+        if (!signal_contact) {
+            fprintf(stderr,
+                    "[lora-persona] --from-deltas requires --contact <id>\n");
+            hu_persona_deinit(alloc, &persona);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        hu_graph_t *signal_graph = NULL;
+        hu_memory_facade_t *signal_mem = NULL;
+        hu_error_t s_err =
+            hu_graph_open(alloc, from_deltas_db, strlen(from_deltas_db), &signal_graph);
+        if (s_err != HU_OK) {
+            fprintf(stderr,
+                    "[lora-persona] failed to open --from-deltas db '%s': %d\n",
+                    from_deltas_db, s_err);
+            hu_persona_deinit(alloc, &persona);
+            return s_err;
+        }
+        s_err = hu_memory_facade_open(alloc, signal_graph, &signal_mem);
+        if (s_err != HU_OK) {
+            hu_graph_close(signal_graph, alloc);
+            hu_persona_deinit(alloc, &persona);
+            return s_err;
+        }
+        hu_training_signal_t *signals = NULL;
+        size_t signals_n = 0;
+        s_err = hu_learner_signals_from_persona_deltas(
+            signal_mem, alloc, signal_contact, strlen(signal_contact), &signals, &signals_n);
+        if (s_err == HU_OK && signals_n > 0) {
+            delta_examples =
+                (hu_persona_example_t *)alloc->alloc(alloc->ctx, signals_n * sizeof(*delta_examples));
+            if (!delta_examples) {
+                hu_learner_signals_free(alloc, signals, signals_n);
+                hu_memory_facade_close(signal_mem, alloc);
+                hu_graph_close(signal_graph, alloc);
+                hu_persona_deinit(alloc, &persona);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memset(delta_examples, 0, signals_n * sizeof(*delta_examples));
+            for (size_t i = 0; i < signals_n; i++) {
+                if (signals[i].kind != HU_TRAIN_PERSONA_DELTA)
+                    continue;
+                const hu_persona_delta_t *d = &signals[i].as.persona.delta;
+                if (d->value[0] == '\0')
+                    continue;
+                char in_buf[256];
+                const char *kind_str = "tone";
+                switch (d->kind) {
+                case HU_PERSONA_DELTA_TONE:        kind_str = "tone"; break;
+                case HU_PERSONA_DELTA_VOCAB_AVOID: kind_str = "vocab-avoid"; break;
+                case HU_PERSONA_DELTA_LENGTH:      kind_str = "length"; break;
+                case HU_PERSONA_DELTA_BOUNDARY:    kind_str = "boundary"; break;
+                default: kind_str = "style"; break;
+                }
+                snprintf(in_buf, sizeof(in_buf), "[%s] %s", d->key[0] ? d->key : "any",
+                         kind_str);
+                delta_examples[delta_examples_count].incoming =
+                    hu_strndup(alloc, in_buf, strlen(in_buf));
+                delta_examples[delta_examples_count].response =
+                    hu_strndup(alloc, d->value, strlen(d->value));
+                delta_examples_count++;
+            }
+        }
+        hu_learner_signals_free(alloc, signals, signals_n);
+        hu_memory_facade_close(signal_mem, alloc);
+        hu_graph_close(signal_graph, alloc);
+#else
+        fprintf(stderr,
+                "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE\n");
+        hu_persona_deinit(alloc, &persona);
+        return HU_ERR_NOT_SUPPORTED;
+#endif
+    }
+
     size_t total_examples = 0;
     for (size_t b = 0; b < persona.example_banks_count; b++)
         total_examples += persona.example_banks[b].examples_count;
+    total_examples += delta_examples_count;
 
     if (total_examples == 0) {
         fprintf(stderr, "Persona '%s' has no example banks to train on\n", persona_name);
+        free_delta_examples(alloc, delta_examples, delta_examples_count);
         hu_persona_deinit(alloc, &persona);
         return HU_ERR_INVALID_ARGUMENT;
     }
+    if (delta_examples_count > 0)
+        printf("[lora-persona] augmented with %zu applied-delta example pairs\n",
+               delta_examples_count);
 
     hu_experiment_config_t cfg = hu_experiment_config_default();
 
@@ -543,6 +720,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     err = hu_gpt_create(alloc, &cfg.gpt, &model);
     if (err != HU_OK) {
         fprintf(stderr, "Model creation failed: %d\n", err);
+        free_delta_examples(alloc, delta_examples, delta_examples_count);
         hu_persona_deinit(alloc, &persona);
         return err;
     }
@@ -567,6 +745,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             fprintf(stderr, "[lora-persona] failed to create warm-start optimizer: %d\n",
                     base_err);
             model.vtable->deinit(model.ctx, alloc);
+            free_delta_examples(alloc, delta_examples, delta_examples_count);
             hu_persona_deinit(alloc, &persona);
             return base_err;
         }
@@ -584,6 +763,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                     checkpoint_path, base_err, cfg.gpt.vocab_size, cfg.gpt.n_layer,
                     cfg.gpt.n_embd);
             model.vtable->deinit(model.ctx, alloc);
+            free_delta_examples(alloc, delta_examples, delta_examples_count);
             hu_persona_deinit(alloc, &persona);
             return base_err;
         }
@@ -602,6 +782,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     if (err != HU_OK) {
         fprintf(stderr, "LoRA adapter creation failed: %d\n", err);
         model.vtable->deinit(model.ctx, alloc);
+        free_delta_examples(alloc, delta_examples, delta_examples_count);
         hu_persona_deinit(alloc, &persona);
         return err;
     }
@@ -612,6 +793,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         fprintf(stderr, "LoRA attach failed: %d\n", err);
         hu_lora_destroy(alloc, adapter);
         model.vtable->deinit(model.ctx, alloc);
+        free_delta_examples(alloc, delta_examples, delta_examples_count);
         hu_persona_deinit(alloc, &persona);
         return err;
     }
@@ -621,6 +803,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     if (err != HU_OK) {
         hu_lora_destroy(alloc, adapter);
         model.vtable->deinit(model.ctx, alloc);
+        free_delta_examples(alloc, delta_examples, delta_examples_count);
         hu_persona_deinit(alloc, &persona);
         return err;
     }
@@ -630,6 +813,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         optimizer.vtable->deinit(optimizer.ctx, alloc);
         hu_lora_destroy(alloc, adapter);
         model.vtable->deinit(model.ctx, alloc);
+        free_delta_examples(alloc, delta_examples, delta_examples_count);
         hu_persona_deinit(alloc, &persona);
         return err;
     }
@@ -640,6 +824,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         optimizer.vtable->deinit(optimizer.ctx, alloc);
         hu_lora_destroy(alloc, adapter);
         model.vtable->deinit(model.ctx, alloc);
+        free_delta_examples(alloc, delta_examples, delta_examples_count);
         hu_persona_deinit(alloc, &persona);
         return err;
     }
@@ -656,10 +841,15 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         if (optimizer.vtable->zero_grad)
             optimizer.vtable->zero_grad(optimizer.ctx);
 
-        for (size_t b = 0; b < persona.example_banks_count; b++) {
-            const hu_persona_example_bank_t *bank = &persona.example_banks[b];
-            for (size_t e = 0; e < bank->examples_count; e++) {
-                const hu_persona_example_t *ex = &bank->examples[e];
+        /* Iterate persona example banks in pass 0, delta-derived
+         * examples in pass 1. Same training body for both. */
+        for (int pass = 0; pass < 2; pass++) {
+        size_t pass_count = pass == 0 ? persona.example_banks_count : delta_examples_count;
+        for (size_t b = 0; b < pass_count; b++) {
+            size_t inner = pass == 0 ? persona.example_banks[b].examples_count : 1;
+            for (size_t e = 0; e < inner; e++) {
+                const hu_persona_example_t *ex = pass == 0 ? &persona.example_banks[b].examples[e]
+                                                            : &delta_examples[b];
                 if (!ex->incoming || !ex->response)
                     continue;
 
@@ -754,6 +944,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                 alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
             }
         }
+        } /* pass */
 
         /* Optimizer step: update LoRA weights */
         if (examples_this_step > 0 && optimizer.vtable->step) {
@@ -791,6 +982,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     optimizer.vtable->deinit(optimizer.ctx, alloc);
     hu_lora_destroy(alloc, adapter);
     model.vtable->deinit(model.ctx, alloc);
+    free_delta_examples(alloc, delta_examples, delta_examples_count);
     hu_persona_deinit(alloc, &persona);
     return err;
 #endif

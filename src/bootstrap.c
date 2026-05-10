@@ -30,7 +30,9 @@
 #include "human/providers/apple.h"
 #endif
 #include "human/runtime.h"
+#include "human/ml/learner.h"
 #include "human/security/audit.h"
+#include "human/security/keystore.h"
 #include "human/security/sandbox.h"
 #include "human/security/sandbox_internal.h"
 #include "human/tool.h"
@@ -364,6 +366,15 @@ typedef struct hu_bootstrap_internal {
 
     hu_provider_t provider;
     hu_memory_t memory;
+    /* W15 envelope keystore. Owned + closed by bootstrap. NULL when
+     * `cfg.memory.encrypt_at_rest` is false OR when the unlock
+     * passphrase env var was unset. */
+    hu_keystore_t *keystore;
+    /* W13 on-device learner. Owned + closed by bootstrap. Always opens
+     * (the deterministic CPU backend is always available); the daemon
+     * will gate training on AC + idle so an open learner has zero
+     * runtime cost when the device is busy. NULL only on open failure. */
+    struct hu_learner *learner;
     hu_agent_t agent;
     hu_voice_config_t voice_cfg;
     hu_embedder_t embedder;
@@ -572,6 +583,64 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
     if (with_agent && bi->memory.vtable && bi->cfg.memory.backend &&
         strcmp(bi->cfg.memory.backend, "sqlite") == 0)
         bi->session_store = hu_sqlite_memory_get_session_store(&bi->memory);
+
+    /* W15 envelope encryption opt-in.
+     *
+     * When `cfg.memory.encrypt_at_rest=true` AND the sqlite backend is in
+     * use, open a per-user keystore and attach it to the memory engine so
+     * `content` columns are wrapped on insert and unwrapped on read. The
+     * passphrase comes from `HU_KEYSTORE_PASSPHRASE` so the daemon can be
+     * launched non-interactively under launchd / systemd; future work
+     * will integrate macOS Keychain / Linux Secret Service so users
+     * never see the env var. Failure to open or unlock is loud (logged)
+     * but non-fatal — encryption is opt-in and the daemon must keep
+     * serving messages even if the passphrase rotation broke. The
+     * sqlite backend then runs in plaintext mode and existing rows
+     * stay readable. */
+    if (with_agent && bi->memory.vtable && bi->cfg.memory.encrypt_at_rest &&
+        bi->cfg.memory.backend && strcmp(bi->cfg.memory.backend, "sqlite") == 0) {
+        const char *pp = getenv("HU_KEYSTORE_PASSPHRASE");
+        if (!pp || !*pp) {
+            hu_log_error("bootstrap", &bi->observer,
+                         "encrypt_at_rest=true but HU_KEYSTORE_PASSPHRASE is unset; "
+                         "memory will run in plaintext mode this session");
+        } else {
+            const char *uid = getenv("USER");
+            if (!uid || !*uid)
+                uid = "default";
+            hu_error_t ks_err = hu_keystore_open(alloc, uid, &bi->keystore);
+            if (ks_err == HU_OK && bi->keystore) {
+                ks_err = hu_keystore_unlock_with_passphrase(bi->keystore, pp, strlen(pp));
+                if (ks_err == HU_OK) {
+                    hu_error_t at_err = hu_sqlite_memory_attach_keystore(
+                        &bi->memory, bi->keystore, true);
+                    if (at_err == HU_OK) {
+                        hu_log_info("bootstrap", &bi->observer,
+                                    "memory encrypt_at_rest=ON (keystore for user=%s)", uid);
+                    } else {
+                        hu_log_error("bootstrap", &bi->observer,
+                                     "keystore attach failed (%s); plaintext mode",
+                                     hu_error_string(at_err));
+                        hu_keystore_close(bi->keystore, alloc);
+                        bi->keystore = NULL;
+                    }
+                } else {
+                    hu_log_error(
+                        "bootstrap", &bi->observer,
+                        "keystore unlock failed (%s); plaintext mode (passphrase rotated?)",
+                        hu_error_string(ks_err));
+                    hu_keystore_close(bi->keystore, alloc);
+                    bi->keystore = NULL;
+                }
+            } else {
+                hu_log_error("bootstrap", &bi->observer,
+                             "keystore open failed (%s); plaintext mode",
+                             hu_error_string(ks_err));
+                bi->keystore = NULL;
+            }
+        }
+    }
+
     if (with_agent) {
         ctx->memory = &bi->memory;
         ctx->session_store = &bi->session_store;
@@ -843,6 +912,29 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (err != HU_OK)
             goto fail;
         hu_metacognition_apply_config(&bi->agent.infra.metacognition, &bi->cfg.agent.metacognition);
+
+        /* W13 on-device learner: open the best-available backend and attach
+         * to the agent so signal-source modules (delta_observer,
+         * outcome_tracker bridge) can deposit pending signals between
+         * sleep-time training cycles. The deterministic CPU backend is
+         * always available, so the learner pointer should be non-NULL on
+         * any sane host. The W14 sleep scheduler is responsible for
+         * draining and training; we just open + attach + close here. */
+        {
+            hu_error_t le = hu_learner_open_default(alloc, &bi->learner);
+            if (le == HU_OK && bi->learner) {
+                hu_agent_set_learner(&bi->agent, bi->learner);
+                hu_log_info("bootstrap", obs, "w13: learner attached (backend=%s)",
+                            bi->learner->vt && bi->learner->vt->name ? bi->learner->vt->name
+                                                                      : "(unknown)");
+            } else {
+                hu_log_warn("bootstrap", obs,
+                            "w13: learner_open_default failed (%s); persona deltas will "
+                            "still be persisted but on-device personalisation training will "
+                            "not run this session",
+                            hu_error_string(le));
+            }
+        }
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
         if (bi->cfg.agent.mr_on_device_enabled) {
             bi->agent.on_device_available = hu_apple_probe(alloc, NULL, 0);
@@ -1700,6 +1792,13 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         if (bi->agent.policy_engine)
             hu_policy_engine_destroy(bi->agent.policy_engine);
         hu_agent_deinit(&bi->agent);
+        /* W13 learner is owned here. Close after agent_deinit so any
+         * final signal flush still has a live learner. The agent holds a
+         * non-owning pointer; no double-close risk. */
+        if (bi->learner) {
+            hu_learner_close(bi->learner);
+            bi->learner = NULL;
+        }
         bi->provider.vtable = NULL;
         bi->provider.ctx = NULL;
     }
@@ -1718,6 +1817,14 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         bi->embedder.vtable->deinit(bi->embedder.ctx, alloc);
     if (bi->memory.vtable && bi->memory.vtable->deinit)
         bi->memory.vtable->deinit(bi->memory.ctx);
+    /* W15 keystore must close AFTER memory.deinit so any final flush
+     * still has a live keystore to encrypt against. The sqlite engine
+     * holds a non-owning pointer to bi->keystore — closing here zeroes
+     * the master key in memory before free. */
+    if (bi->keystore) {
+        hu_keystore_close(bi->keystore, alloc);
+        bi->keystore = NULL;
+    }
     if (ctx->provider_ok && bi->provider.vtable && bi->provider.vtable->deinit)
         bi->provider.vtable->deinit(bi->provider.ctx, alloc);
     if (bi->policy.tracker)

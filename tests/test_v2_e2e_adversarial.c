@@ -62,17 +62,17 @@ static hu_allocator_t *A(void) {
 }
 
 /* Open a fresh in-memory facade with the v1 backend wired. */
-static hu_memory_t *open_facade(hu_graph_t **out_g) {
+static hu_memory_facade_t *open_facade(hu_graph_t **out_g) {
     hu_graph_t *g = NULL;
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, &g), HU_OK);
-    hu_memory_t *m = NULL;
-    HU_ASSERT_EQ(hu_memory_open(A(), g, &m), HU_OK);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
     if (out_g) *out_g = g;
     return m;
 }
 
-static void close_facade(hu_memory_t *m, hu_graph_t *g) {
-    hu_memory_close(m, A());
+static void close_facade(hu_memory_facade_t *m, hu_graph_t *g) {
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -83,7 +83,7 @@ static void close_facade(hu_memory_t *m, hu_graph_t *g) {
  * record set comes back. Proves layers 1-4 wire end-to-end. */
 static void test_v2_e2e_facade_world_model_planner_happy_path(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = open_facade(&g);
+    hu_memory_facade_t *m = open_facade(&g);
 
     int64_t alice = 0, acme = 0;
     HU_ASSERT_EQ(
@@ -141,7 +141,7 @@ static void test_v2_e2e_belief_widens_then_self_rag_abstains(void) {
  * a sentinel orphan node. Proves W8 hyperedges + W12 PageRank co-operate. */
 static void test_v2_e2e_hyperedge_and_pagerank_seeded(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = open_facade(&g);
+    hu_memory_facade_t *m = open_facade(&g);
 
     int64_t alice = 0, bob = 0, acme = 0, funding = 0, orphan = 0;
     hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice);
@@ -206,7 +206,7 @@ static void test_v2_e2e_hyperedge_and_pagerank_seeded(void) {
  * primitive directly. */
 static void test_v2_e2e_kv_cache_invalidates_on_model_bump(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = open_facade(&g);
+    hu_memory_facade_t *m = open_facade(&g);
 
     hu_kv_cache_entry_t e = {0};
     snprintf(e.prompt_hash, sizeof(e.prompt_hash), "%s", "abc123");
@@ -238,7 +238,7 @@ static void test_v2_e2e_kv_cache_invalidates_on_model_bump(void) {
  * pending jobs decrease (or stay <= 200). */
 static void test_v2_e2e_scheduler_flood_resists(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = open_facade(&g);
+    hu_memory_facade_t *m = open_facade(&g);
     hu_scheduler_t *s = NULL;
     HU_ASSERT_EQ(hu_scheduler_open(A(), m, &s), HU_OK);
 
@@ -352,7 +352,7 @@ static void test_v2_e2e_evaluation_regression_fires_on_drop(void) {
  * produces well-formed signals with no self-inconsistencies. */
 static void test_v2_e2e_persona_deltas_to_learner_signals(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = open_facade(&g);
+    hu_memory_facade_t *m = open_facade(&g);
 
     /* Propose a few applied deltas through the v1 store. */
     for (int i = 0; i < 3; i++) {
@@ -415,7 +415,7 @@ static void test_v2_e2e_planner_resists_query_injection(void) {
  * compose under stress. */
 static void test_v2_e2e_full_chain_under_poisoning(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = open_facade(&g);
+    hu_memory_facade_t *m = open_facade(&g);
 
     int64_t alice = 0, acme = 0, globex = 0;
     hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice);

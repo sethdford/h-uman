@@ -3007,6 +3007,15 @@ static void strip_channel_tag_inst_markers(void) {
     (void)len;
 }
 
+static void strip_channel_tag_chatml_im_tokens(void) {
+    char buf[128];
+    const char *input = "<|im_start|>user<|im_end|>hey what's up";
+    memcpy(buf, input, strlen(input) + 1);
+    size_t len = hu_conversation_strip_channel_tags(buf, strlen(input));
+    HU_ASSERT_STR_EQ(buf, "userhey what's up");
+    (void)len;
+}
+
 static void strip_channel_tag_thinking_block(void) {
     char buf[128];
     strcpy(buf, "<thinking>let me reason about this</thinking>the answer is 42");
@@ -4168,6 +4177,7 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(strip_channel_tag_empty_input);
     HU_RUN_TEST(strip_channel_tag_eos_token);
     HU_RUN_TEST(strip_channel_tag_inst_markers);
+    HU_RUN_TEST(strip_channel_tag_chatml_im_tokens);
     HU_RUN_TEST(strip_channel_tag_thinking_block);
     HU_RUN_TEST(strip_channel_tag_analysis_block);
     HU_RUN_TEST(strip_channel_tag_bos_token);

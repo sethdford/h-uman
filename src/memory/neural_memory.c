@@ -72,8 +72,8 @@ static hu_error_t ensure_schema(struct sqlite3 *db) {
     return HU_OK;
 }
 
-static struct sqlite3 *get_db(hu_memory_t *m) {
-    hu_graph_t *g = hu_memory_graph_handle(m);
+static struct sqlite3 *get_db(hu_memory_facade_t *m) {
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     return g ? hu_graph__db_handle(g) : NULL;
 }
 
@@ -168,7 +168,7 @@ static int anchors_overlap(const char *csv, const int64_t *query, size_t n) {
 
 /* ── KV-cache ─────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_kv_cache_get(hu_memory_t *m, const char *prompt_hash,
+hu_error_t hu_kv_cache_get(hu_memory_facade_t *m, const char *prompt_hash,
                             const char *model_version,
                             hu_allocator_t *alloc, hu_kv_cache_entry_t **out) {
     if (!m || !prompt_hash || !model_version || !alloc || !out)
@@ -232,7 +232,7 @@ hu_error_t hu_kv_cache_get(hu_memory_t *m, const char *prompt_hash,
     return HU_OK;
 }
 
-hu_error_t hu_kv_cache_put(hu_memory_t *m, const hu_kv_cache_entry_t *entry) {
+hu_error_t hu_kv_cache_put(hu_memory_facade_t *m, const hu_kv_cache_entry_t *entry) {
     if (!m || !entry || !entry->prompt_hash[0] || !entry->model_version[0])
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -274,7 +274,7 @@ hu_error_t hu_kv_cache_put(hu_memory_t *m, const hu_kv_cache_entry_t *entry) {
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_IO;
 }
 
-hu_error_t hu_kv_cache_invalidate_for_model(hu_memory_t *m,
+hu_error_t hu_kv_cache_invalidate_for_model(hu_memory_facade_t *m,
                                               const char *model_version) {
     if (!m || !model_version)
         return HU_ERR_INVALID_ARGUMENT;
@@ -308,7 +308,7 @@ void hu_kv_cache_entry_free(hu_allocator_t *alloc, hu_kv_cache_entry_t *e) {
 
 /* ── Reasoning traces ─────────────────────────────────────────────────────── */
 
-hu_error_t hu_reasoning_trace_record(hu_memory_t *m, const char *contact_id,
+hu_error_t hu_reasoning_trace_record(hu_memory_facade_t *m, const char *contact_id,
                                       size_t cid_len,
                                       const hu_reasoning_trace_t *trace,
                                       int64_t *out_id) {
@@ -364,7 +364,7 @@ hu_error_t hu_reasoning_trace_record(hu_memory_t *m, const char *contact_id,
     return HU_OK;
 }
 
-hu_error_t hu_reasoning_trace_recall(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_reasoning_trace_recall(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                       const char *contact_id, size_t cid_len,
                                       const char *goal_verb, size_t goal_len,
                                       const int64_t *anchors, size_t anchors_count,
@@ -530,7 +530,7 @@ void hu_reasoning_traces_free(hu_allocator_t *alloc,
 
 /* ── Multimodal blobs ─────────────────────────────────────────────────────── */
 
-hu_error_t hu_memory_blob_put(hu_memory_t *m, const char *contact_id,
+hu_error_t hu_memory_blob_put(hu_memory_facade_t *m, const char *contact_id,
                                size_t cid_len, const hu_memory_blob_t *blob,
                                int64_t *out_id) {
     if (!m || !blob || !out_id)
@@ -586,7 +586,7 @@ hu_error_t hu_memory_blob_put(hu_memory_t *m, const char *contact_id,
     return HU_OK;
 }
 
-hu_error_t hu_memory_blob_get(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_memory_blob_get(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                int64_t blob_id, hu_memory_blob_t **out) {
     if (!m || !alloc || !out || blob_id <= 0)
         return HU_ERR_INVALID_ARGUMENT;

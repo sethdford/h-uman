@@ -218,7 +218,12 @@ def detect_structural_tells(response):
     if any(p in response.lower() for p in ["let me know", "hope this helps",
                                             "feel free", "don't hesitate"]):
         tells.append("offer of further help")
-    if len(response) > 500:
+    if re.search(
+        r"(?i)^(love that|great point|so true|haha yeah)[,.!]?\s+.{20,}",
+        response,
+    ):
+        tells.append("hollow opener then pivot")
+    if len(response) > 360:
         tells.append(f"overly long ({len(response)} chars)")
     paragraphs = [p for p in response.split('\n\n') if p.strip()]
     if len(paragraphs) >= 3:

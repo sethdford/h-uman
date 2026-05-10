@@ -95,7 +95,7 @@ typedef struct hu_world_model {
 /* Build a fresh world model for `contact_id`. Caller owns the returned
  * struct; free with hu_world_model_free. The function does not consult any
  * cache — for the cached path use hu_world_model_load. */
-hu_error_t hu_world_model_build(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                  const char *contact_id, size_t cid_len,
                                  int64_t now_ms,
                                  hu_world_model_t **out);
@@ -106,13 +106,13 @@ hu_error_t hu_world_model_build(hu_memory_t *m, hu_allocator_t *alloc,
  * Caller still owns the returned pointer and must free with
  * hu_world_model_free. The TTL defaults to 60s; tune via the env var
  * HU_WORLD_MODEL_TTL_MS for tests. */
-hu_error_t hu_world_model_load(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                 const char *contact_id, size_t cid_len,
                                 int64_t now_ms,
                                 hu_world_model_t **out);
 
 /* Invalidate the cached entry for `contact_id`. Called by every
- * hu_memory_write/erase for that contact (wired in this commit). */
+ * hu_memory_facade_write/erase for that contact (wired in this commit). */
 void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
 
 /* Free a world model returned by build/load. Safe with NULL. */

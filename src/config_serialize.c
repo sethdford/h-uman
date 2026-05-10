@@ -87,6 +87,8 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
                 &a, mem, "sqlite_path",
                 hu_json_string_new(&a, cfg->memory.sqlite_path, strlen(cfg->memory.sqlite_path)));
         hu_json_object_set(&a, mem, "auto_save", hu_json_bool_new(&a, cfg->memory.auto_save));
+        hu_json_object_set(&a, mem, "encrypt_at_rest",
+                           hu_json_bool_new(&a, cfg->memory.encrypt_at_rest));
         hu_json_object_set(&a, mem, "consolidation_interval_hours",
                            hu_json_number_new(&a, cfg->memory.consolidation_interval_hours));
         hu_json_object_set(&a, root, "memory", mem);

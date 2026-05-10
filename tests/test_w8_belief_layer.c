@@ -1,7 +1,7 @@
 /* W8 — Belief layer + hyperedge adversarial tests.
  *
  * belief.c: deterministic math (no SQLite dependency).
- * hyperedge.c: SQLite-backed; tests run in-memory via hu_memory_open().
+ * hyperedge.c: SQLite-backed; tests run in-memory via hu_memory_facade_open().
  */
 
 #include "human/core/allocator.h"
@@ -111,21 +111,21 @@ static hu_allocator_t *A(void) {
     return &g_alloc;
 }
 
-static void open_facade(hu_graph_t **g, hu_memory_t **m) {
+static void open_facade(hu_graph_t **g, hu_memory_facade_t **m) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
     HU_ASSERT_NOT_NULL(*g);
-    HU_ASSERT_EQ(hu_memory_open(A(), *g, m), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), *g, m), HU_OK);
     HU_ASSERT_NOT_NULL(*m);
 }
 
-static void close_facade(hu_graph_t *g, hu_memory_t *m) {
-    hu_memory_close(m, A());
+static void close_facade(hu_graph_t *g, hu_memory_facade_t *m) {
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
 static void test_w8_hyperedge_zero_members_rejected(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_hyperedge_t he;
@@ -143,7 +143,7 @@ static void test_w8_hyperedge_zero_members_rejected(void) {
 
 static void test_w8_hyperedge_upsert_round_trip(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     /* Insert two entities via the graph API. */
@@ -190,7 +190,7 @@ static void test_w8_hyperedge_upsert_round_trip(void) {
 static void test_w8_hyperedge_query_by_any_member(void) {
     /* Insert a 4-member hyperedge; verify it's findable from each member. */
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     int64_t ids[4] = {0, 0, 0, 0};

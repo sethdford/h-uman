@@ -33,6 +33,7 @@ option(HU_ENABLE_PERSONA "Enable persona system" ON)
 option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
+option(HU_ENABLE_NEURAL_MEMORY "W10 neural memory placeholder (schema/ONNX path; default OFF)" OFF)
 # W13: learning loop (LoRA + DPO from W4/W5/W3 signals). Defaults follow ML.
 if(HU_ENABLE_ML)
     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" ON)
@@ -43,6 +44,7 @@ option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
 option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time LoRA merging (W13 Bridge A)" OFF)
+option(HU_ENABLE_LIBSODIUM "Link libsodium for production-grade AEAD (XChaCha20-Poly1305) and KDF (Argon2id)" OFF)
 option(HU_ENABLE_COREML "Enable CoreML/MLX provider (macOS only)" OFF)
 if(APPLE)
     option(HU_ENABLE_APPLE_INTELLIGENCE "Enable Apple Intelligence provider (on-device)" ON)
@@ -596,6 +598,7 @@ set(HU_CORE_SOURCES
     ${MEMORY_ENGINE_SOURCES}
     src/memory/engines/registry.c
     src/memory/factory.c
+    src/memory/encrypted_store.c
     src/memory/util.c
     src/memory/contact_memory.c
     src/memory/stm.c
@@ -614,6 +617,11 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/hallucination_guard.c
+    # W7: graph.h is the internal graph API. Direct includes from outside
+    # src/memory/ and tests/ are deprecated — callers should migrate to
+    # hu_memory_read / hu_memory_write via the facade (include/human/memory/memory.h).
+    # Known remaining callers: src/agent/autodream.c (1 site),
+    # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
@@ -625,6 +633,7 @@ set(HU_CORE_SOURCES
     src/agent/self_rag_inline.c
     src/memory/memory.c
     src/memory/memory_v1_backend.c
+    src/memory/encrypted_store.c
     src/memory/belief.c
     src/memory/hyperedge.c
     src/memory/pagerank.c
@@ -634,13 +643,18 @@ set(HU_CORE_SOURCES
     src/agent/autodream.c
     src/agent/scheduler.c
     src/agent/scheduler_probes.c
+    src/agent/scheduler_status_json.c
     src/agent/counterfactual.c
     src/agent/autodream_runner.c
     src/agent/case_based.c
     src/agent/response_verifier.c
     src/agent/response_guard.c
+    src/agent/response_guard_retry.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
+    src/agent/lora_training_runner.c
+    src/agent/kv_prewarm_runner.c
+    src/agent/belief_reverify_runner.c
     src/persona/persona_deltas.c
     src/persona/delta_observer.c
     src/memory/multimodal_index.c
@@ -890,6 +904,7 @@ list(APPEND HU_CORE_SOURCES
     src/evaluation/evaluation_minja.c
     src/evaluation/evaluation_memoryagentbench.c
     src/evaluation/evaluation_frontier_compare.c
+    src/evaluation/evaluation_legacy_bridge.c
     src/evaluation/evaluation_baseline.c
     src/evaluation/evaluation_regression.c
     src/eval/turing_score.c
@@ -1159,6 +1174,7 @@ if(HU_ENABLE_LEARNING)
         src/ml/learner_cpu.c
         src/ml/learner_mlx.c
         src/ml/learner_ggml.c
+        src/ml/learner_bridge.c
     )
 endif()
 
@@ -1308,6 +1324,9 @@ if(HU_ENABLE_ML)
 endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_LEARNING=1)
+endif()
+if(HU_ENABLE_NEURAL_MEMORY)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
 if(HU_ENABLE_MCP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_MCP=1)
@@ -1518,9 +1537,16 @@ endif()
 # either a vendored `third_party/llama.cpp/` build, find_package(Llama),
 # or pkg-config. Today the source compiles unconditionally and the
 # vtable returns HU_ERR_NOT_SUPPORTED until the upstream is linked.
+#
+# Mirroring the libsodium pattern below: resolve everything against the
+# already-defined human_core target now and stash includes/defines into
+# cache variables so the test target (added later in this file) can pick
+# them up without re-running detection.
+set(HU_LLAMACPP_FOUND OFF CACHE INTERNAL "Whether llama.cpp was located")
+set(HU_LLAMACPP_INCLUDE_DIRS "" CACHE INTERNAL "")
 if(HU_ENABLE_LLAMACPP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_LLAMACPP=1)
-    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_LLAMACPP=1)
+    set(HU_LLAMACPP_FOUND ON CACHE INTERNAL "")
     if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt")
         # Vendored llama.cpp. Build it as a static lib without examples
         # (those drag in unrelated deps and fail under -Werror).
@@ -1529,7 +1555,7 @@ if(HU_ENABLE_LLAMACPP)
         set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
         add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
         target_include_directories(human_core PRIVATE third_party/llama.cpp/include)
-        target_include_directories(human_core_test PRIVATE third_party/llama.cpp/include)
+        set(HU_LLAMACPP_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include" CACHE INTERNAL "")
         target_link_libraries(human_core PRIVATE llama)
         message(STATUS "llama.cpp provider: enabled (vendored)")
     else()
@@ -1537,6 +1563,64 @@ if(HU_ENABLE_LLAMACPP)
     endif()
 else()
     message(STATUS "llama.cpp provider: disabled (compiles as NOT_SUPPORTED stub)")
+endif()
+
+# W15 — libsodium upgrade.
+#
+# Resolve the include + library locations now (human_core exists). The
+# corresponding human_core_test wiring lives after that target is added,
+# below. Defines HU_HAS_LIBSODIUM=1 on success so keystore.c routes
+# random + KDF + AEAD through XChaCha20-Poly1305-IETF and Argon2id. The
+# ciphertext envelope is versioned, so existing v0 (PBKDF2 +
+# ChaCha20+HMAC) blobs remain decryptable.
+set(HU_LIBSODIUM_FOUND OFF CACHE INTERNAL "Whether libsodium was located")
+set(HU_LIBSODIUM_INCLUDE_DIRS "" CACHE INTERNAL "")
+set(HU_LIBSODIUM_LIBRARIES "" CACHE INTERNAL "")
+set(HU_LIBSODIUM_LIBRARY_DIRS "" CACHE INTERNAL "")
+if(HU_ENABLE_LIBSODIUM)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(LIBSODIUM QUIET libsodium)
+        if(LIBSODIUM_FOUND)
+            set(HU_LIBSODIUM_INCLUDE_DIRS ${LIBSODIUM_INCLUDE_DIRS} CACHE INTERNAL "")
+            set(HU_LIBSODIUM_LIBRARIES ${LIBSODIUM_LIBRARIES} CACHE INTERNAL "")
+            set(HU_LIBSODIUM_LIBRARY_DIRS ${LIBSODIUM_LIBRARY_DIRS} CACHE INTERNAL "")
+            set(HU_LIBSODIUM_FOUND ON CACHE INTERNAL "")
+        endif()
+    endif()
+    if(NOT HU_LIBSODIUM_FOUND)
+        # Manual fallback: probe common install prefixes (Homebrew Apple
+        # Silicon, Homebrew Intel, /usr/local, /usr).
+        find_path(SODIUM_INCLUDE_DIR sodium.h
+            PATHS /opt/homebrew/include /usr/local/include /usr/include)
+        find_library(SODIUM_LIB sodium
+            PATHS /opt/homebrew/lib /usr/local/lib /usr/lib)
+        if(SODIUM_INCLUDE_DIR AND SODIUM_LIB)
+            set(HU_LIBSODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR} CACHE INTERNAL "")
+            set(HU_LIBSODIUM_LIBRARIES ${SODIUM_LIB} CACHE INTERNAL "")
+            set(HU_LIBSODIUM_FOUND ON CACHE INTERNAL "")
+            message(STATUS "libsodium: found manually at ${SODIUM_LIB}")
+        endif()
+    endif()
+    if(HU_LIBSODIUM_FOUND)
+        target_include_directories(human_core PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
+        # PUBLIC link so the production `human` executable (which links
+        # human_core as a static lib) inherits the libsodium symbol +
+        # search-path resolution. Without this, ld emits
+        # "library 'sodium' not found" at the human executable's link step
+        # because PRIVATE link directories don't propagate from a static
+        # library to its consumers.
+        target_link_libraries(human_core PUBLIC ${HU_LIBSODIUM_LIBRARIES})
+        if(HU_LIBSODIUM_LIBRARY_DIRS)
+            target_link_directories(human_core PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
+        endif()
+        target_compile_definitions(human_core PRIVATE HU_HAS_LIBSODIUM=1)
+        message(STATUS "libsodium: enabled (XChaCha20-Poly1305 + Argon2id)")
+    else()
+        message(WARNING "HU_ENABLE_LIBSODIUM=ON but libsodium not found; falling back to PBKDF2 + ChaCha20+HMAC")
+    endif()
+else()
+    message(STATUS "libsodium: disabled (using PBKDF2 + ChaCha20+HMAC)")
 endif()
 
 if(HU_ENABLE_APPLE_INTELLIGENCE)
@@ -1653,6 +1737,37 @@ endif()
 # --- Main executable ---
 add_executable(human src/main.c src/bootstrap.c)
 target_link_libraries(human human_core)
+
+# ──────────────────────────────────────────────────────────────────────────
+# P2E — Layer-direction topology check (memory v2 roadmap)
+#
+# Enforces the rule from `docs/plans/2026-05-10-memory-v2-roadmap-overview.md`
+# §"Cross-cutting principles": "A workstream may never depend on a layer
+# above its own. Violations are a build error (CMake topology check)."
+#
+# The check runs `scripts/check-layer-topology.sh`, which scans every .c
+# file in the L0-L7 memory v2 stack and rejects any `#include` directive
+# whose target header is owned by a higher layer. Bridge / wiring files
+# are listed explicitly with rationale in the script.
+#
+# Skip on Windows (script is POSIX bash) and when explicitly disabled.
+option(HU_ENABLE_TOPOLOGY_CHECK
+       "Enforce 7-layer architectural dependency direction (memory v2 P2E)" ON)
+if(HU_ENABLE_TOPOLOGY_CHECK AND NOT WIN32)
+    add_custom_target(human_topology_check
+        COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/check-layer-topology.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Checking 7-layer architectural topology (P2E)"
+        VERBATIM)
+    add_dependencies(human human_topology_check)
+    # W7 Phase 1 — informational `hu_graph_*` inventory (agent/persona/feeds).
+    # Run: cmake --build build --target human_w7_phase1_inventory
+    add_custom_target(human_w7_phase1_inventory
+        COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/w7-phase1-graph-bypass-inventory.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "W7 Phase 1 graph bypass inventory (informational)"
+        VERBATIM)
+endif()
 # Embed Info.plist for macOS TCC (accessibility, AppleEvents) identity
 if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/resources/Info.plist")
     target_link_options(human PRIVATE
@@ -1898,7 +2013,8 @@ if(NOT HU_ENABLE_ML)
 endif()
 if(NOT HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_EXTRA_MODULES
-        src/ml/learner.c src/ml/learner_cpu.c src/ml/learner_mlx.c src/ml/learner_ggml.c)
+        src/ml/learner.c src/ml/learner_cpu.c src/ml/learner_mlx.c src/ml/learner_ggml.c
+        src/ml/learner_bridge.c)
 endif()
 # Phase 7 modules (experience, forgetting, weakness) — tests need them when SQLite is OFF (minimal build)
 if(NOT HU_ENABLE_SQLITE)
@@ -1913,6 +2029,25 @@ add_library(human_core_test STATIC ${HU_CORE_SOURCES} ${HU_TEST_EXTRA_CHANNELS} 
 target_include_directories(human_core_test PUBLIC ${HU_ROOT}/include)
 target_include_directories(human_core_test PRIVATE ${HU_ROOT}/asm/generic)
 target_compile_definitions(human_core_test PRIVATE HU_IS_TEST=1)
+# W15 — wire libsodium into the test build to mirror production keystore.c.
+# We use PUBLIC link directives so that human_tests (which links the static
+# human_core_test library) inherits the libsodium link directory and library
+# without needing to repeat the discovery dance.
+if(HU_LIBSODIUM_FOUND)
+    target_include_directories(human_core_test PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
+    target_link_libraries(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARIES})
+    if(HU_LIBSODIUM_LIBRARY_DIRS)
+        target_link_directories(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
+    endif()
+    target_compile_definitions(human_core_test PRIVATE HU_HAS_LIBSODIUM=1)
+endif()
+# W13 Bridge A — mirror llama.cpp wiring into the test build.
+if(HU_LLAMACPP_FOUND)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_LLAMACPP=1)
+    if(HU_LLAMACPP_INCLUDE_DIRS)
+        target_include_directories(human_core_test PRIVATE ${HU_LLAMACPP_INCLUDE_DIRS})
+    endif()
+endif()
 if(HU_ENABLE_APPLE_INTELLIGENCE)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_APPLE_INTELLIGENCE=1)
 endif()
@@ -1928,6 +2063,9 @@ endif()
 target_compile_definitions(human_core_test PRIVATE HU_ENABLE_PERSONA=1)
 # Tests always have all module groups available
 target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_ENABLE_ML=1 HU_ENABLE_LEARNING=1)
+if(HU_ENABLE_NEURAL_MEMORY)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
+endif()
 target_compile_options(human_core_test PRIVATE -UNDEBUG)
 if(Threads_FOUND)
     target_link_libraries(human_core_test PUBLIC Threads::Threads)
@@ -2311,11 +2449,18 @@ set(HU_TEST_SOURCES
     tests/test_w10_neural_memory.c
     tests/test_w11_self_rag.c
     tests/test_w12_planner.c
+    tests/test_w12_verifier_loop.c
     tests/test_w13_learner.c
+    tests/test_w14_runners.c
+    tests/test_w15_backup_restore.c
+    tests/test_learner_bridge.c
     tests/test_w14_scheduler.c
     tests/test_w15_keystore.c
+    tests/test_encrypted_store.c
     tests/test_w16_evaluation.c
+    tests/test_w16_eval_cli.c
     tests/test_v2_e2e_adversarial.c
+    tests/test_v2_wiring_e2e.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c

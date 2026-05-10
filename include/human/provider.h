@@ -270,4 +270,32 @@ void hu_chat_response_free(hu_allocator_t *alloc, hu_chat_response_t *resp);
 
 const char *hu_compatible_provider_url(const char *name);
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * W11 — Self-RAG convenience wrapper
+ *
+ * Calls `provider->vtable->chat`, then post-processes the response through
+ * the self-RAG inline verifier to parse <retrieve>, <critique>, <refuse>
+ * control tokens. The inline control-token path requires provider-native
+ * support (model fine-tuned to emit these tokens); this stub runs the
+ * normal chat path and feeds the output through the verifier as a
+ * deterministic post-hoc filter.
+ *
+ * `memory` is used by the verifier to score claims. Pass NULL to skip
+ * verification (acts as a pass-through to normal chat).
+ *
+ * `out_verified` receives the verification outcome: 0=SUPPORTED,
+ * 1=HEDGED, 2=REWRITTEN, 3=ABSTAINED. Pass NULL to ignore. When HEDGED
+ * or ABSTAINED, `out->content` is replaced with the modified/refusal text
+ * (caller frees via hu_chat_response_free as usual).
+ * ────────────────────────────────────────────────────────────────────────── */
+struct hu_memory_facade;
+hu_error_t hu_provider_chat_with_self_rag(hu_provider_t *provider,
+                                          hu_allocator_t *alloc,
+                                          const hu_chat_request_t *request,
+                                          const char *model, size_t model_len,
+                                          double temperature,
+                                          struct hu_memory_facade *memory,
+                                          hu_chat_response_t *out,
+                                          int *out_verified);
+
 #endif /* HU_PROVIDER_H */

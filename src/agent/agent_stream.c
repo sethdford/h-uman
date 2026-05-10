@@ -24,6 +24,8 @@
 #include "human/humanness.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
+#include "human/agent/response_guard.h"
+#include "human/agent/response_guard_retry.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/memory/personal_model.h"
 #include "human/persona.h"
@@ -70,6 +72,7 @@ typedef struct v2_stream_wrap {
     void *event_ctx;
     uint32_t initial_delay_ms; /* emotional pacing */
     bool first_content_sent;
+    bool suppress_content;
 } v2_stream_wrap_t;
 
 static bool stream_chunk_to_event_cb(void *ctx, const hu_stream_chunk_t *chunk) {
@@ -83,6 +86,8 @@ static bool stream_chunk_to_event_cb(void *ctx, const hu_stream_chunk_t *chunk) 
     switch (chunk->type) {
     case HU_STREAM_CONTENT:
         if (!chunk->delta || chunk->delta_len == 0)
+            return true;
+        if (w->suppress_content)
             return true;
         /* Emotional pacing: pause before first content chunk */
         if (!w->first_content_sent && w->initial_delay_ms > 0) {
@@ -102,6 +107,8 @@ static bool stream_chunk_to_event_cb(void *ctx, const hu_stream_chunk_t *chunk) 
         break;
     case HU_STREAM_THINKING:
         if (!chunk->delta || chunk->delta_len == 0)
+            return true;
+        if (w->suppress_content)
             return true;
         ev.type = HU_AGENT_STREAM_THINKING;
         ev.data = chunk->delta;
@@ -321,6 +328,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         hu_memory_loader_t loader;
         hu_memory_loader_init(&loader, agent->alloc, agent->memory, agent->retrieval_engine, 10,
                               4000);
+        loader.facade = agent->w7_facade;
         hu_error_t mem_err =
             hu_memory_loader_load(&loader, msg, msg_len, "", 0, &memory_ctx, &memory_ctx_len);
         if (mem_err != HU_OK && mem_err != HU_ERR_NOT_SUPPORTED)
@@ -488,7 +496,9 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
                     "7. Text like you're on your phone texting a friend.\n"
                     "8. NEVER use numbered or bulleted lists.\n"
-                    "9. Don't address every point in their message, pick what matters most.\n"
+                    "9. Don't address every point in their message, pick what matters most. "
+                    "Never open with a fake 'love that' / 'great point' then ignore what they "
+                    "said and change the subject.\n"
                     "10. No topic-colon patterns like 'Weather: it's nice'.\n"
                     "11. No 'First...Second...Third' enumeration.\n"
                     "12. No concluding summaries or offers of further help.\n"
@@ -925,20 +935,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         req.tools = (turn_needs_tools && agent->tool_specs_count > 0) ? agent->tool_specs : NULL;
         req.tools_count = turn_needs_tools ? agent->tool_specs_count : 0;
 
-        /* Stream from the provider (with emotional pacing on first chunk).
-         * When quality systems (GVR/Constitutional) are enabled, suppress streaming
-         * so we can run the quality pipeline before the user sees the response. */
-        bool quality_buffered = false;
-#ifndef HU_IS_TEST
-        if (!agent->lean_prompt)
-            quality_buffered = agent->sota.gvr_config.enabled || agent->constitutional_enabled;
-#endif
+        /* Buffer provider text until the final content clears guards. Tool
+         * events still stream through stream_chunk_to_event_cb. */
+        bool quality_buffered = (on_event != NULL);
         hu_emotional_weight_t v2_ew = hu_emotional_weight_classify(msg, msg_len);
         uint32_t v2_pacing = (uint32_t)hu_emotional_pacing_adjust(0, v2_ew);
-        v2_stream_wrap_t wrap = {.on_event = quality_buffered ? NULL : on_event,
-                                 .event_ctx = quality_buffered ? NULL : event_ctx,
+        v2_stream_wrap_t wrap = {.on_event = on_event,
+                                 .event_ctx = event_ctx,
                                  .initial_delay_ms = v2_pacing,
-                                 .first_content_sent = false};
+                                 .first_content_sent = false,
+                                 .suppress_content = quality_buffered};
         hu_stream_chat_result_t sresp;
         memset(&sresp, 0, sizeof(sresp));
         if (getenv("HU_DEBUG"))
@@ -949,9 +955,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                                   turn_model, turn_model_len, turn_temp,
                                                   stream_chunk_to_event_cb, &wrap, &sresp);
 
-        agent->alloc->free(agent->alloc->ctx, all_msgs, total_msgs * sizeof(hu_chat_message_t));
-
         if (err != HU_OK) {
+            agent->alloc->free(agent->alloc->ctx, all_msgs, total_msgs * sizeof(hu_chat_message_t));
             if (getenv("HU_DEBUG"))
                 hu_log_error("agent_stream", NULL, "stream_v2: stream_chat FAILED: %s",
                              hu_error_string(err));
@@ -967,15 +972,72 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
 
         /* No tool calls → this is the final response */
         if (sresp.tool_calls_count == 0) {
+            char *safe_content = NULL;
+            size_t safe_content_len = 0;
+            bool safe_owned = false;
             if (sresp.content && sresp.content_len > 0) {
+                char *guard_out = NULL;
+                size_t guard_out_len = 0;
+                hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
+                hu_guard_report_t guard_report;
+                memset(&guard_report, 0, sizeof(guard_report));
+                hu_error_t guard_err = hu_response_guard_check(
+                    agent->alloc, sresp.content, sresp.content_len, &guard_out, &guard_out_len,
+                    &guard_outcome, &guard_report);
+                if (guard_err == HU_OK && guard_outcome == HU_GUARD_REJECT) {
+                    hu_log_error(
+                        "agent_stream", agent->observer,
+                        "response_guard REJECT: degenerate stream output (run=%zu, len=%zu) — "
+                        "retrying once with repair prompt",
+                        guard_report.max_repetition_run, sresp.content_len);
+                    hu_guard_report_t retry_report;
+                    memset(&retry_report, 0, sizeof(retry_report));
+                    hu_error_t retry_err = hu_response_guard_retry_slim(
+                        agent->alloc, agent->observer, agent->config, &agent->provider, turn_model,
+                        turn_model_len, msg, msg_len, &safe_content, &safe_content_len,
+                        &retry_report);
+                    if (retry_err == HU_OK && safe_content && safe_content_len > 0) {
+                        safe_owned = true;
+                        hu_log_warn(
+                            "agent_stream", agent->observer,
+                            "response_guard RECOVERED: stream retry passed (len=%zu, stripped=%zu)",
+                            safe_content_len, retry_report.bytes_stripped);
+                    } else {
+                        hu_log_error("agent_stream", agent->observer,
+                                     "response_guard stream retry failed (err=%s)",
+                                     hu_error_string(retry_err));
+                    }
+                } else if (guard_err == HU_OK && guard_outcome == HU_GUARD_REWROTE) {
+                    safe_content = guard_out;
+                    safe_content_len = guard_out_len;
+                    safe_owned = true;
+                    hu_log_warn("agent_stream", agent->observer,
+                                "response_guard REWROTE: stripped %zu stream bytes",
+                                guard_report.bytes_stripped);
+                } else if (guard_err == HU_OK) {
+                    safe_content = (char *)sresp.content;
+                    safe_content_len = sresp.content_len;
+                }
+            }
+
+            if (safe_content && safe_content_len > 0) {
                 hu_error_t hist_err = hu_agent_internal_append_history(
-                    agent, HU_ROLE_ASSISTANT, sresp.content, sresp.content_len, NULL, 0, NULL, 0);
+                    agent, HU_ROLE_ASSISTANT, safe_content, safe_content_len, NULL, 0, NULL, 0);
                 if (hist_err != HU_OK)
                     hu_log_error("agent_stream_v2", NULL, "append_history failed: %s",
                                  hu_error_string(hist_err));
-                final_content = hu_strndup(agent->alloc, sresp.content, sresp.content_len);
-                final_content_len = sresp.content_len;
+                if (safe_owned) {
+                    final_content = safe_content;
+                    final_content_len = safe_content_len;
+                    safe_owned = false;
+                } else {
+                    final_content = hu_strndup(agent->alloc, safe_content, safe_content_len);
+                    final_content_len = final_content ? safe_content_len : 0;
+                }
             }
+            if (safe_owned && safe_content)
+                agent->alloc->free(agent->alloc->ctx, safe_content, safe_content_len + 1);
+            agent->alloc->free(agent->alloc->ctx, all_msgs, total_msgs * sizeof(hu_chat_message_t));
             hu_stream_chat_result_free(agent->alloc, &sresp);
             break;
         }
@@ -986,6 +1048,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             agent, sresp.content ? sresp.content : "", sresp.content_len, sresp.tool_calls,
             sresp.tool_calls_count);
         if (err != HU_OK) {
+            agent->alloc->free(agent->alloc->ctx, all_msgs, total_msgs * sizeof(hu_chat_message_t));
             hu_log_error("agent_stream_v2", NULL, "append_history_with_tool_calls failed: %s",
                          hu_error_string(err));
             hu_stream_chat_result_free(agent->alloc, &sresp);
@@ -994,6 +1057,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             hu_agent_clear_current_for_tools();
             return err;
         }
+        agent->alloc->free(agent->alloc->ctx, all_msgs, total_msgs * sizeof(hu_chat_message_t));
 
         /* Execute each tool call and emit TOOL_RESULT events */
         for (size_t tc = 0; tc < sresp.tool_calls_count; tc++) {
@@ -1247,24 +1311,6 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         }
     }
 
-    /* If quality systems buffered the response (suppressed streaming), emit now.
-     * Must match the suppression check: lean_prompt disables buffering. */
-    {
-        bool was_buffered = false;
-#ifndef HU_IS_TEST
-        if (!agent->lean_prompt)
-            was_buffered = agent->sota.gvr_config.enabled || agent->constitutional_enabled;
-#endif
-        if (was_buffered && final_content && on_event) {
-            hu_agent_stream_event_t final_ev;
-            memset(&final_ev, 0, sizeof(final_ev));
-            final_ev.type = HU_AGENT_STREAM_TEXT;
-            final_ev.data = final_content;
-            final_ev.data_len = final_content_len;
-            on_event(&final_ev, event_ctx);
-        }
-    }
-
     /* Post-response guards (matching batch path) */
     if (final_content && final_content_len > 0) {
         /* Hallucination guard */
@@ -1478,6 +1524,69 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     }
 
     if (final_content) {
+        /* Last-mile response guard — strips Harmony / ChatML special tokens
+         * and rejects degenerate model output. Same instance as agent_turn.c
+         * (post-FIX 2026-05-10 production leak). */
+        {
+            char *guard_out = NULL;
+            size_t guard_out_len = 0;
+            hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
+            hu_guard_report_t guard_report;
+            memset(&guard_report, 0, sizeof(guard_report));
+            hu_error_t guard_err = hu_response_guard_check(
+                agent->alloc, final_content, final_content_len, &guard_out, &guard_out_len,
+                &guard_outcome, &guard_report);
+            if (guard_err == HU_OK) {
+                if (guard_outcome == HU_GUARD_REJECT) {
+                    hu_log_error(
+                        "agent_stream", agent->observer,
+                        "response_guard REJECT: degenerate stream output (run=%zu, len=%zu) — "
+                        "retrying slim path",
+                        guard_report.max_repetition_run, final_content_len);
+                    agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                       final_content_len + 1);
+                    final_content = NULL;
+                    final_content_len = 0;
+                    {
+                        const char *tm = agent->turn_model && agent->turn_model_len > 0
+                                             ? agent->turn_model
+                                             : agent->model_name;
+                        size_t tml = agent->turn_model && agent->turn_model_len > 0
+                                         ? agent->turn_model_len
+                                         : agent->model_name_len;
+                        char *retry_txt = NULL;
+                        size_t retry_txt_len = 0;
+                        hu_guard_report_t rr;
+                        memset(&rr, 0, sizeof(rr));
+                        hu_error_t rre = hu_response_guard_retry_slim(
+                            agent->alloc, agent->observer, agent->config, &agent->provider, tm, tml,
+                            msg, msg_len, &retry_txt, &retry_txt_len, &rr);
+                        if (rre == HU_OK && retry_txt && retry_txt_len > 0) {
+                            final_content = retry_txt;
+                            final_content_len = retry_txt_len;
+                            hu_log_warn("agent_stream", agent->observer,
+                                        "response_guard RECOVERED: post-stream slim retry "
+                                        "(len=%zu)",
+                                        retry_txt_len);
+                        }
+                    }
+                } else if (guard_outcome == HU_GUARD_REWROTE) {
+                    hu_log_warn("agent_stream", agent->observer,
+                                "response_guard REWROTE: stripped %zu bytes (harmony=%d "
+                                "think=%d)",
+                                guard_report.bytes_stripped,
+                                guard_report.stripped_harmony_tokens ? 1 : 0,
+                                guard_report.stripped_thinking_block ? 1 : 0);
+                    agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                       final_content_len + 1);
+                    final_content = guard_out;
+                    final_content_len = guard_out_len;
+                }
+            }
+        }
+    }
+
+    if (final_content) {
         /* If post-processing revised the content, update the stored history entry
          * so conversation state matches the user-visible response. */
         if (agent->history_count > 0 &&
@@ -1494,6 +1603,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 agent->history[agent->history_count - 1].content = revised;
                 agent->history[agent->history_count - 1].content_len = final_content_len;
             }
+        }
+        if (on_event && final_content_len > 0) {
+            hu_agent_stream_event_t ev;
+            memset(&ev, 0, sizeof(ev));
+            ev.type = HU_AGENT_STREAM_TEXT;
+            ev.data = final_content;
+            ev.data_len = final_content_len;
+            on_event(&ev, event_ctx);
         }
         *response_out = final_content;
         if (response_len_out)

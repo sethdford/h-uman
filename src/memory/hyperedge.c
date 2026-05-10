@@ -51,14 +51,14 @@ static hu_error_t ensure_schema(struct sqlite3 *db) {
     return HU_OK;
 }
 
-hu_error_t hu_hyperedge_upsert(hu_memory_t *m, const char *contact_id, size_t cid_len,
+hu_error_t hu_hyperedge_upsert(hu_memory_facade_t *m, const char *contact_id, size_t cid_len,
                                const hu_hyperedge_t *he, int64_t *out_id) {
     if (!m || !he || !out_id)
         return HU_ERR_INVALID_ARGUMENT;
     if (!he->members || he->members_count == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
     struct sqlite3 *db = hu_graph__db_handle(g);
@@ -128,7 +128,7 @@ static char *dup_str(hu_allocator_t *alloc, const char *s, size_t len) {
     return o;
 }
 
-hu_error_t hu_hyperedge_query_by_member(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_hyperedge_query_by_member(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                          int64_t entity_id,
                                          hu_hyperedge_t **out, size_t *out_count) {
     if (!m || !alloc || entity_id <= 0 || !out || !out_count)
@@ -136,7 +136,7 @@ hu_error_t hu_hyperedge_query_by_member(hu_memory_t *m, hu_allocator_t *alloc,
     *out = NULL;
     *out_count = 0;
 
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
     struct sqlite3 *db = hu_graph__db_handle(g);
@@ -288,13 +288,13 @@ void hu_hyperedges_free(hu_allocator_t *alloc, hu_hyperedge_t *edges, size_t cou
 
 #else /* !HU_ENABLE_SQLITE */
 
-hu_error_t hu_hyperedge_upsert(hu_memory_t *m, const char *contact_id, size_t cid_len,
+hu_error_t hu_hyperedge_upsert(hu_memory_facade_t *m, const char *contact_id, size_t cid_len,
                                const hu_hyperedge_t *he, int64_t *out_id) {
     (void)m; (void)contact_id; (void)cid_len; (void)he; (void)out_id;
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_hyperedge_query_by_member(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_hyperedge_query_by_member(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                          int64_t entity_id,
                                          hu_hyperedge_t **out, size_t *out_count) {
     (void)m; (void)alloc; (void)entity_id; (void)out; (void)out_count;

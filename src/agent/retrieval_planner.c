@@ -10,6 +10,7 @@
 
 #include "human/core/error.h"
 #include "human/memory/memory.h"
+#include "human/memory/pagerank.h"
 
 #include <ctype.h>
 #include <stddef.h>
@@ -19,6 +20,10 @@
 #include <time.h>
 
 /* ── Allocator shorthands ───────────────────────────────────────────────── */
+
+static inline void *xalloc(hu_allocator_t *a, size_t n) {
+    return a->alloc(a->ctx, n);
+}
 
 static inline void xfree(hu_allocator_t *a, void *p, size_t n) {
     if (p) a->free(a->ctx, p, n);
@@ -287,7 +292,50 @@ void hu_planner_records_free(hu_allocator_t *alloc, hu_memory_record_t *records,
     xfree(alloc, records, count * sizeof(*records));
 }
 
-hu_error_t hu_planner_execute(hu_memory_t *m, hu_self_rag_t *self_rag,
+/* Per-step W11 verifier filter (P0 #2).
+ *
+ * When a plan step has `verify_after` and the caller supplied a
+ * non-NULL `self_rag` handle, we filter records by W8 confidence
+ * before they propagate to the next hop or aggregate. The threshold
+ * mirrors W11's `abstain_threshold` default (0.3). Records with
+ * `confidence == 0` (no W8 belief recorded yet — legacy writes) are
+ * kept under "innocent until proven guilty" semantics: dropping them
+ * silently would invalidate every memory written before W8 landed.
+ *
+ * Memory contract: we cannot rearrange records[] in place because the
+ * payload pointers are heap-allocated by the backend and freed by
+ * `hu_memory_facade_records_free` walking ALL n slots. Aliasing two slots'
+ * payloads (struct copies) leads to double-free in records_free.
+ * Instead, we return a parallel keep_mask[] so the caller iterates
+ * selectively. records_free runs over the unmodified array.
+ *
+ * Returns count kept; sets *out_abstain_ratio = (n - kept) / scored,
+ * where `scored` excludes confidence==0 (no W8 belief) records. */
+static size_t verifier_filter_records(const hu_memory_record_t *records, size_t n,
+                                      float kept_threshold, bool *keep_mask,
+                                      float *out_abstain_ratio) {
+    if (n == 0) {
+        if (out_abstain_ratio) *out_abstain_ratio = 0.0f;
+        return 0;
+    }
+    size_t kept = 0;
+    size_t scored = 0;
+    for (size_t i = 0; i < n; i++) {
+        const hu_memory_record_t *r = &records[i];
+        bool drop = false;
+        if (r->confidence > 0.0f) {
+            scored++;
+            if (r->confidence < kept_threshold) drop = true;
+        }
+        keep_mask[i] = !drop;
+        if (!drop) kept++;
+    }
+    size_t denom = scored > 0 ? scored : n;
+    if (out_abstain_ratio) *out_abstain_ratio = (float)(n - kept) / (float)denom;
+    return kept;
+}
+
+hu_error_t hu_planner_execute(hu_memory_facade_t *m, hu_self_rag_t *self_rag,
                               const hu_retrieval_plan_t *plan, hu_allocator_t *alloc,
                               hu_memory_record_t **out, size_t *out_count) {
     if (!m || !plan || !alloc || !out || !out_count)
@@ -299,11 +347,24 @@ hu_error_t hu_planner_execute(hu_memory_t *m, hu_self_rag_t *self_rag,
     if (plan->total_budget_ms > HU_PLANNER_MAX_TOTAL_BUDGET_MS)
         return HU_ERR_INVALID_ARGUMENT;
 
-#ifndef HU_W11_AVAILABLE
-    /* Without W11, the verifier is a no-op. Capture the pointer to keep
-     * the ABI stable; ignore at execution time. */
-    (void)self_rag;
-#endif
+    /* W11 verifier wiring (P0 #2):
+     *
+     * When `self_rag` is non-NULL AND `step->verify_after` is true, we
+     * filter the per-step records by W8 confidence (the W11 belief
+     * layer's primary signal). Records below `kept_threshold` (0.3 —
+     * mirrors W11's `abstain_threshold`) are dropped before
+     * propagation. If the abstain ratio crosses 0.5, the rest of the
+     * plan is aborted: continuing would compound unsupported evidence
+     * and is the exact failure mode the W11 inline-per-step loop
+     * exists to prevent.
+     *
+     * `self_rag == NULL` keeps the v1 behaviour (no filtering) so
+     * existing call sites that haven't migrated to the verifier loop
+     * yet are unaffected. The post-response verifier in
+     * `world_model_bridge.c::hu_w11_self_rag_verify` continues to run
+     * on the final draft regardless. */
+    const float kept_threshold = 0.3f;
+    const float abort_ratio = 0.5f;
 
     *out = NULL;
     *out_count = 0;
@@ -325,7 +386,7 @@ hu_error_t hu_planner_execute(hu_memory_t *m, hu_self_rag_t *self_rag,
         const hu_retrieval_step_t *step = &plan->steps[i];
         hu_memory_record_t *recs = NULL;
         size_t n = 0;
-        hu_error_t err = hu_memory_read(m, &step->query, alloc, &recs, &n);
+        hu_error_t err = hu_memory_facade_read(m, &step->query, alloc, &recs, &n);
         if (err == HU_ERR_NOT_FOUND) {
             /* Empty result — keep walking; not a failure. */
             continue;
@@ -341,27 +402,266 @@ hu_error_t hu_planner_execute(hu_memory_t *m, hu_self_rag_t *self_rag,
             break;
         }
 
-#ifdef HU_W11_AVAILABLE
-        /* W11 verifier hook (skipped if self_rag is NULL). The actual call
-         * surface lands when W11 merges; this commit just structures the
-         * branch so wire-up is a one-line change. */
-        if (step->verify_after && self_rag) {
-            /* TODO(W12-W11-wire): hu_self_rag_filter(self_rag, recs, n, ...); */
+        bool abort_plan = false;
+        bool *keep_mask = NULL;
+        size_t kept = n;
+        if (self_rag && step->verify_after && n > 0) {
+            keep_mask = (bool *)alloc->alloc(alloc->ctx, n * sizeof(*keep_mask));
+            if (!keep_mask) {
+                hu_memory_facade_records_free(m, alloc, recs, n);
+                hu_planner_records_free(alloc, a.items, a.count);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            float abstain_ratio = 0.0f;
+            kept = verifier_filter_records(recs, n, kept_threshold, keep_mask, &abstain_ratio);
+            if (abstain_ratio >= abort_ratio) {
+                abort_plan = true;
+            }
         }
-#endif
 
         for (size_t j = 0; j < n; j++) {
+            if (keep_mask && !keep_mask[j]) continue;
             hu_error_t e = agg_push(&a, &recs[j]);
             if (e != HU_OK) {
-                hu_memory_records_free(m, alloc, recs, n);
+                if (keep_mask)
+                    alloc->free(alloc->ctx, keep_mask, n * sizeof(*keep_mask));
+                hu_memory_facade_records_free(m, alloc, recs, n);
                 hu_planner_records_free(alloc, a.items, a.count);
                 return e;
             }
         }
-        hu_memory_records_free(m, alloc, recs, n);
+        (void)kept;
+        if (keep_mask)
+            alloc->free(alloc->ctx, keep_mask, n * sizeof(*keep_mask));
+        hu_memory_facade_records_free(m, alloc, recs, n);
+
+        if (abort_plan) break;
     }
 
     *out = a.items;
     *out_count = a.count;
     return final_err;
+}
+
+/* ── Goal-conditioned (PageRank) backend ──────────────────────────────── */
+
+typedef struct gc_ctx {
+    hu_memory_facade_t     *m;
+    hu_allocator_t  *alloc;
+} gc_ctx_t;
+
+/* Top-K entities to expand neighbors for after PageRank scoring. Beyond 4
+ * the budget pressure dominates and extra steps rarely help. */
+#define GC_TOP_K 4
+
+static hu_error_t gc_plan(void *raw_ctx, const char *goal, size_t goal_len,
+                          const hu_world_model_t *wm, hu_retrieval_plan_t *out) {
+    gc_ctx_t *ctx = (gc_ctx_t *)raw_ctx;
+    if (!out) return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+
+    /* No world model or no entities: delegate to heuristic plan. */
+    if (!wm || wm->entities_count == 0 || !ctx || !ctx->m) {
+        return heuristic_plan(NULL, goal, goal_len, wm, out);
+    }
+
+    /* Extract seed entity IDs from the world model. */
+    size_t seeds_count = wm->entities_count;
+    int64_t *seeds = xalloc(ctx->alloc, seeds_count * sizeof(*seeds));
+    if (!seeds) return HU_ERR_OUT_OF_MEMORY;
+    for (size_t i = 0; i < seeds_count; i++)
+        seeds[i] = wm->entities[i].id;
+
+    /* Compute contact_id length. */
+    size_t cid_len = 0;
+    size_t cid_max = sizeof(wm->contact_id);
+    while (cid_len < cid_max && wm->contact_id[cid_len]) cid_len++;
+
+    /* Run personalized PageRank. */
+    int64_t *pr_ids = NULL;
+    float   *pr_scores = NULL;
+    size_t   pr_count = 0;
+    hu_error_t err = hu_memory_pagerank_seeds(
+        ctx->m, ctx->alloc, wm->contact_id, cid_len,
+        seeds, seeds_count,
+        0.0f, 0, /* defaults */
+        &pr_ids, &pr_scores, &pr_count);
+
+    xfree(ctx->alloc, seeds, seeds_count * sizeof(*seeds));
+
+    if (err != HU_OK || pr_count == 0) {
+        xfree(ctx->alloc, pr_ids, pr_count * sizeof(*pr_ids));
+        xfree(ctx->alloc, pr_scores, pr_count * sizeof(*pr_scores));
+        return heuristic_plan(NULL, goal, goal_len, wm, out);
+    }
+
+    /* Build plan steps: expand neighbors for the top-K ranked entities.
+     * PageRank output is already sorted by score descending. */
+    size_t top_k = pr_count < GC_TOP_K ? pr_count : GC_TOP_K;
+    size_t avail = HU_PLANNER_MAX_STEPS - 1; /* reserve last slot for relations */
+    if (top_k > avail) top_k = avail;
+
+    size_t step_idx = 0;
+    for (size_t i = 0; i < top_k; i++) {
+        out->steps[step_idx] = step_neighbors(wm, pr_ids[i], 1, 16, true);
+        step_idx++;
+    }
+
+    /* Final step: time-windowed relations for completeness. */
+    out->steps[step_idx] = step_relations_window(wm, 0, INT64_MAX, 16, true);
+    step_idx++;
+
+    out->steps_count = step_idx;
+    out->total_budget_ms = (int)(step_idx * 120);
+    if (out->total_budget_ms > HU_PLANNER_MAX_TOTAL_BUDGET_MS)
+        out->total_budget_ms = HU_PLANNER_MAX_TOTAL_BUDGET_MS;
+
+    xfree(ctx->alloc, pr_ids, pr_count * sizeof(*pr_ids));
+    xfree(ctx->alloc, pr_scores, pr_count * sizeof(*pr_scores));
+    return HU_OK;
+}
+
+static void gc_deinit(void *raw_ctx) {
+    gc_ctx_t *ctx = (gc_ctx_t *)raw_ctx;
+    if (ctx) ctx->alloc->free(ctx->alloc->ctx, ctx, sizeof(*ctx));
+}
+
+static hu_planner_vtable_t s_gc_vt = {
+    .name   = "goal_conditioned",
+    .plan   = gc_plan,
+    .deinit = gc_deinit,
+};
+
+hu_error_t hu_planner_goal_conditioned(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                       hu_planner_t *out) {
+    if (!m || !alloc || !out) return HU_ERR_INVALID_ARGUMENT;
+    gc_ctx_t *ctx = xalloc(alloc, sizeof(*ctx));
+    if (!ctx) return HU_ERR_OUT_OF_MEMORY;
+    ctx->m = m;
+    ctx->alloc = alloc;
+    out->vt = &s_gc_vt;
+    out->ctx = ctx;
+    return HU_OK;
+}
+
+/* ── Multi-hop traversal ──────────────────────────────────────────────── */
+
+hu_error_t hu_planner_multi_hop(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                const hu_memory_query_t *initial_query,
+                                size_t max_hops,
+                                hu_memory_record_t **out, size_t *out_count) {
+    if (!m || !alloc || !initial_query || !out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    *out = NULL;
+    *out_count = 0;
+
+    if (max_hops == 0) max_hops = HU_PLANNER_MULTI_HOP_DEFAULT;
+    if (max_hops > HU_PLANNER_MULTI_HOP_MAX) max_hops = HU_PLANNER_MULTI_HOP_MAX;
+
+    agg_t a;
+    memset(&a, 0, sizeof(a));
+    a.alloc = alloc;
+
+    /* Hop 0: execute the initial query directly. */
+    hu_memory_record_t *recs = NULL;
+    size_t n = 0;
+    hu_error_t err = hu_memory_facade_read(m, initial_query, alloc, &recs, &n);
+    if (err != HU_OK && err != HU_ERR_NOT_FOUND && err != HU_ERR_NOT_SUPPORTED) {
+        return err;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+        hu_error_t e = agg_push(&a, &recs[i]);
+        if (e != HU_OK) {
+            hu_memory_facade_records_free(m, alloc, recs, n);
+            hu_planner_records_free(alloc, a.items, a.count);
+            return e;
+        }
+    }
+    if (recs) hu_memory_facade_records_free(m, alloc, recs, n);
+
+    /* Iterative hops: extract entity IDs from current aggregate, run
+     * PageRank, expand neighbors for top-scored entities. */
+    for (size_t hop = 1; hop <= max_hops; hop++) {
+        if (a.count == 0) break;
+
+        /* Collect entity IDs from the aggregate as PageRank seeds. Only
+         * entity-kind records contribute meaningful seed IDs. */
+        size_t seed_cap = a.count;
+        int64_t *seeds = xalloc(alloc, seed_cap * sizeof(*seeds));
+        if (!seeds) {
+            hu_planner_records_free(alloc, a.items, a.count);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        size_t seeds_count = 0;
+        for (size_t i = 0; i < a.count; i++) {
+            if (a.items[i].kind == HU_MEM_ENTITY && a.items[i].id != 0) {
+                /* Deduplicate seeds. */
+                bool dup = false;
+                for (size_t j = 0; j < seeds_count; j++) {
+                    if (seeds[j] == a.items[i].id) { dup = true; break; }
+                }
+                if (!dup) seeds[seeds_count++] = a.items[i].id;
+            }
+        }
+
+        if (seeds_count == 0) {
+            xfree(alloc, seeds, seed_cap * sizeof(*seeds));
+            break;
+        }
+
+        /* Run PageRank to prioritize which entities to expand. */
+        int64_t *pr_ids = NULL;
+        float   *pr_scores = NULL;
+        size_t   pr_count = 0;
+        hu_error_t pr_err = hu_memory_pagerank_seeds(
+            m, alloc, initial_query->contact_id, initial_query->contact_id_len,
+            seeds, seeds_count, 0.0f, 0, &pr_ids, &pr_scores, &pr_count);
+
+        xfree(alloc, seeds, seed_cap * sizeof(*seeds));
+
+        if (pr_err != HU_OK || pr_count == 0) {
+            xfree(alloc, pr_ids, pr_count * sizeof(*pr_ids));
+            xfree(alloc, pr_scores, pr_count * sizeof(*pr_scores));
+            break;
+        }
+
+        /* Expand neighbors for top-K PageRank-scored entities. */
+        size_t expand_k = pr_count < GC_TOP_K ? pr_count : GC_TOP_K;
+        for (size_t k = 0; k < expand_k; k++) {
+            hu_memory_query_t nq;
+            memset(&nq, 0, sizeof(nq));
+            nq.kind = HU_MEM_ENTITY;
+            nq.contact_id = initial_query->contact_id;
+            nq.contact_id_len = initial_query->contact_id_len;
+            nq.as.neighbors.entity_id = pr_ids[k];
+            nq.as.neighbors.hops = 1;
+            nq.as.neighbors.limit = 16;
+
+            hu_memory_record_t *hop_recs = NULL;
+            size_t hop_n = 0;
+            hu_error_t he = hu_memory_facade_read(m, &nq, alloc, &hop_recs, &hop_n);
+            if (he == HU_OK) {
+                for (size_t j = 0; j < hop_n; j++) {
+                    hu_error_t pe = agg_push(&a, &hop_recs[j]);
+                    if (pe != HU_OK) {
+                        hu_memory_facade_records_free(m, alloc, hop_recs, hop_n);
+                        xfree(alloc, pr_ids, pr_count * sizeof(*pr_ids));
+                        xfree(alloc, pr_scores, pr_count * sizeof(*pr_scores));
+                        hu_planner_records_free(alloc, a.items, a.count);
+                        return pe;
+                    }
+                }
+                hu_memory_facade_records_free(m, alloc, hop_recs, hop_n);
+            }
+        }
+
+        xfree(alloc, pr_ids, pr_count * sizeof(*pr_ids));
+        xfree(alloc, pr_scores, pr_count * sizeof(*pr_scores));
+    }
+
+    *out = a.items;
+    *out_count = a.count;
+    return HU_OK;
 }

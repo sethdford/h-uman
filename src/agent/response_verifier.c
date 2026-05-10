@@ -1,4 +1,5 @@
 #include "human/agent/response_verifier.h"
+#include "human/agent/self_rag.h"
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -218,7 +219,7 @@ static float verify_claim_against_graph(struct sqlite3 *db, const char *contact_
 
 #endif
 
-hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_graph_t *graph, const char *contact_id,
+hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory, const char *contact_id,
                               size_t contact_id_len, const char *draft, size_t draft_len,
                               const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report) {
     if (!alloc || !draft || !cfg || !out_report)
@@ -239,9 +240,9 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_graph_t *graph, const ch
         return HU_OK;
 
 #ifdef HU_ENABLE_SQLITE
+    hu_graph_t *graph = memory ? hu_memory_facade_graph_handle(memory) : NULL;
     struct sqlite3 *db = graph ? hu_graph__db_handle(graph) : NULL;
     if (!db) {
-        /* No graph: every claim is unsupported. SOFT mode hedges all of them. */
         for (size_t i = 0; i < n; i++) {
             hu_verifier_claim_t *c = &out_report->claims[i];
             c->score = 0.0f;
@@ -250,6 +251,12 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_graph_t *graph, const ch
                      "I'm not certain — I don't have memory backing this:");
         }
         out_report->claims_flagged = n;
+        if (cfg->abstain_threshold > 0.0f) {
+            out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
+            hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE,
+                                        out_report->refusal_text,
+                                        sizeof(out_report->refusal_text));
+        }
         return HU_OK;
     }
     int cid_len = contact_id ? (int)contact_id_len : 0;
@@ -288,13 +295,28 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_graph_t *graph, const ch
         }
     }
 
+    /* Abstention decision. Opt-in: callers that want the verifier to signal
+     * refusal must set `abstain_threshold > 0`. The self-RAG backends handle
+     * their own abstention; this path exists for callers that go through the
+     * v1 verifier directly but still want an explicit abstention signal. */
+    if (cfg->abstain_threshold > 0.0f) {
+        float flagged_ratio = n > 0 ? (float)out_report->claims_flagged / (float)n : 0.0f;
+        if (n > 0 && flagged_ratio >= cfg->abstain_threshold) {
+            out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
+            hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE,
+                                        out_report->refusal_text,
+                                        sizeof(out_report->refusal_text));
+            return HU_OK;
+        }
+    }
+
     if (cfg->mode == HU_VERIFY_SOFT && any_modified) {
         snprintf(out_report->modified_draft, sizeof(out_report->modified_draft), "%s", rebuilt);
         out_report->draft_modified = true;
+        out_report->outcome = HU_VERIFY_RESULT_HEDGED;
+    } else {
+        out_report->outcome = HU_VERIFY_RESULT_SUPPORTED;
     }
-    /* HU_VERIFY_STRICT: corrective rewrite is the LLM-driven path; defer to a
-     * follow-up that wires src/memory/corrective_rag.c. For now, STRICT just
-     * reports flagged claims without rewriting. */
 
     return HU_OK;
 #else

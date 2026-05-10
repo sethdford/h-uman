@@ -7,6 +7,7 @@
 #include "human/memory/cross_graph.h"
 #include "human/memory/erasure.h"
 #include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include "test_framework.h"
 
 #include <stdint.h>
@@ -47,7 +48,7 @@ static void test_w4_verifier_off_mode_is_passthrough(void) {
     cfg.mode = HU_VERIFY_OFF;
     hu_verifier_report_t r;
     const char *draft = "Alice works at Acme.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), NULL, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT(!r.draft_modified);
     HU_ASSERT_EQ(r.claims_extracted, 0);
     hu_graph_close(g, A());
@@ -59,16 +60,19 @@ static void test_w4_verifier_telemetry_mode_extracts_without_mutation(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
     seed_alice_works_at_acme(g, "imessage", 1735689600000LL);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
 
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_TELEMETRY;
     hu_verifier_report_t r;
     const char *draft = "Alice works at Acme.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT_EQ(r.claims_extracted, 1);
     HU_ASSERT_EQ(r.claims_supported, 1);
     HU_ASSERT(!r.draft_modified);
     HU_ASSERT_EQ(r.modified_draft[0], '\0');
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -77,16 +81,19 @@ static void test_w4_verifier_telemetry_mode_flags_unsupported(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
     seed_alice_works_at_acme(g, "imessage", 1735689600000LL);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
 
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_TELEMETRY;
     hu_verifier_report_t r;
     const char *draft = "Bob is the CEO of Globex.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT_EQ(r.claims_extracted, 1);
     HU_ASSERT_EQ(r.claims_flagged, 1);
     HU_ASSERT(!r.claims[0].supported);
     HU_ASSERT(!r.draft_modified);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -95,18 +102,21 @@ static void test_w4_verifier_supports_known_fact(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
     seed_alice_works_at_acme(g, "imessage", 1735689600000LL);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
 
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_SOFT;
     hu_verifier_report_t r;
     const char *draft = "Alice works at Acme.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT_EQ(r.claims_extracted, 1);
     HU_ASSERT_EQ(r.claims_supported, 1);
     HU_ASSERT_EQ(r.claims_flagged, 0);
     HU_ASSERT(r.claims[0].supported);
     HU_ASSERT(r.claims[0].score >= cfg.confidence_threshold);
     HU_ASSERT(strstr(r.claims[0].receipt.rendered, "imessage") != NULL);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -115,19 +125,22 @@ static void test_w4_verifier_flags_unsupported_claim(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
     seed_alice_works_at_acme(g, "imessage", 1735689600000LL);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
 
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_SOFT;
     hu_verifier_report_t r;
     /* No memory backs this. */
     const char *draft = "Bob is the CEO of Globex.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT_EQ(r.claims_extracted, 1);
     HU_ASSERT_EQ(r.claims_flagged, 1);
     HU_ASSERT(!r.claims[0].supported);
     HU_ASSERT(r.claims[0].suggested_hedge[0] != '\0');
     HU_ASSERT(r.draft_modified);
     HU_ASSERT(strstr(r.modified_draft, "not 100%") != NULL);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -136,6 +149,8 @@ static void test_w4_verifier_adversarial_poisoning_is_flagged(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
     seed_alice_works_at_acme(g, "imessage", 1735689600000LL);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
 
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_SOFT;
@@ -143,10 +158,11 @@ static void test_w4_verifier_adversarial_poisoning_is_flagged(void) {
     hu_verifier_report_t r;
     /* Real names mixed with fabricated nonsense - should not score above threshold. */
     const char *draft = "Alice secretly was kidnapped by martians during her vacation.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT_EQ(r.claims_extracted, 1);
     HU_ASSERT(!r.claims[0].supported);
     HU_ASSERT(r.claims_flagged >= 1);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 

@@ -126,9 +126,9 @@ static void test_world_model_record_and_retrieve(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    hu_world_model_t wm;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &wm), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&wm), HU_OK);
+    hu_causal_world_model_t wm;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&wm), HU_OK);
 
     /* Record an outcome */
     HU_ASSERT_EQ(hu_world_record_outcome(&wm, S("file_read"), S("read 100 lines"),
@@ -141,7 +141,7 @@ static void test_world_model_record_and_retrieve(void) {
     HU_ASSERT(pred.confidence > 0.0);
     HU_ASSERT(pred.outcome_len > 0);
 
-    hu_world_model_deinit(&wm);
+    hu_causal_world_model_deinit(&wm);
     sqlite3_close(db);
 }
 
@@ -150,9 +150,9 @@ static void test_world_model_multiple_outcomes_highest_confidence(void) {
     sqlite3 *db = NULL;
     sqlite3_open(":memory:", &db);
 
-    hu_world_model_t wm;
-    hu_world_model_create(&alloc, db, &wm);
-    hu_world_model_init_tables(&wm);
+    hu_causal_world_model_t wm;
+    hu_causal_world_model_create(&alloc, db, &wm);
+    hu_causal_world_model_init_tables(&wm);
 
     /* Record multiple outcomes with different confidence */
     hu_world_record_outcome(&wm, S("web_search"), S("found results"), 0.9, 1000);
@@ -163,7 +163,7 @@ static void test_world_model_multiple_outcomes_highest_confidence(void) {
     /* Should return the higher-confidence outcome */
     HU_ASSERT(pred.confidence >= 0.3);
 
-    hu_world_model_deinit(&wm);
+    hu_causal_world_model_deinit(&wm);
     sqlite3_close(db);
 }
 

@@ -56,16 +56,12 @@
 extern "C" {
 #endif
 
-/* W11 hu_self_rag_t may not be merged in this worktree yet (parallel work).
- * Forward-declare an opaque handle so this header always compiles; the
- * planner skips verification when the pointer is NULL or when W11 is not
- * available. Callers that have W11 simply pass their hu_self_rag_t*; the
- * implementation gates real verifier calls behind `#ifdef HU_W11_AVAILABLE`. */
-#ifdef HU_W11_AVAILABLE
+/* W11 self-RAG verifier is now in-tree at all times (`include/human/agent/
+ * self_rag.h`). The planner accepts a verifier handle for callers that want
+ * inline per-step verification but, until the inline integration ships,
+ * simply records the pointer and lets W11 run post-response from
+ * `world_model_bridge.c`. Pass NULL to opt out entirely. */
 #include "human/agent/self_rag.h"
-#else
-typedef struct hu_self_rag hu_self_rag_t;
-#endif
 
 /* Forward-declare hu_provider_t to keep this header lean (provider.h pulls
  * in chat / tool / streaming surface area not needed here). */
@@ -125,18 +121,50 @@ void hu_planner_close(hu_planner_t *p);
  * W11 verifier when available (no-op today if `self_rag` is NULL), and
  * aggregates summary records into `*out`. Records carry id, kind,
  * confidence, event_start/end. Payloads are NOT carried through; callers
- * needing payload re-fetch via hu_memory_read.
+ * needing payload re-fetch via hu_memory_facade_read.
  *
  * The output array is allocated via `alloc` and MUST be freed with
  * hu_planner_records_free. Returns HU_ERR_INVALID_ARGUMENT if the plan
  * exceeds the hard caps. `self_rag` may be NULL. */
-hu_error_t hu_planner_execute(hu_memory_t *m, hu_self_rag_t *self_rag,
+hu_error_t hu_planner_execute(hu_memory_facade_t *m, hu_self_rag_t *self_rag,
                               const hu_retrieval_plan_t *plan, hu_allocator_t *alloc,
                               hu_memory_record_t **out, size_t *out_count);
 
 /* Free the records array returned by hu_planner_execute. Safe with NULL/0. */
 void hu_planner_records_free(hu_allocator_t *alloc, hu_memory_record_t *records,
                              size_t count);
+
+/* ── Goal-conditioned (PageRank) backend ──────────────────────────────── */
+
+/* W12: HippoRAG-style goal-conditioned planner. Runs personalized PageRank
+ * over the contact's entity graph, seeded by world-model entities, to
+ * prioritize which neighbors to expand. Falls back to the heuristic backend
+ * when the graph is empty or PageRank returns no results.
+ *
+ * `m` must remain valid for the lifetime of the planner (borrowed, not
+ * owned). `alloc` is used for scratch allocations during plan(). */
+hu_error_t hu_planner_goal_conditioned(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                       hu_planner_t *out);
+
+/* ── Multi-hop traversal ──────────────────────────────────────────────── */
+
+#define HU_PLANNER_MULTI_HOP_DEFAULT    3
+#define HU_PLANNER_MULTI_HOP_MAX        5
+
+/* W12: iterative multi-hop retrieval with PageRank scoring.
+ *
+ * 1. Execute `initial_query` against the memory facade.
+ * 2. For each hop (up to `max_hops`, clamped to HU_PLANNER_MULTI_HOP_MAX):
+ *    extract entity IDs from current results, query neighbors, score with
+ *    personalized PageRank, keep top-K.
+ * 3. Deduplicate across all hops.
+ *
+ * `max_hops == 0` uses HU_PLANNER_MULTI_HOP_DEFAULT.
+ * Caller frees `*out` via hu_planner_records_free. */
+hu_error_t hu_planner_multi_hop(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                const hu_memory_query_t *initial_query,
+                                size_t max_hops,
+                                hu_memory_record_t **out, size_t *out_count);
 
 #ifdef __cplusplus
 }

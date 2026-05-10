@@ -49,12 +49,12 @@ typedef struct hu_hyperedge {
  * he->id is ignored on input; *out_id receives the assigned row id.
  * On conflict (same contact_id + relation_label + member set), the belief and
  * event window are updated via the Welford-style belief update. */
-hu_error_t hu_hyperedge_upsert(hu_memory_t *m, const char *contact_id, size_t cid_len,
+hu_error_t hu_hyperedge_upsert(hu_memory_facade_t *m, const char *contact_id, size_t cid_len,
                                const hu_hyperedge_t *he, int64_t *out_id);
 
 /* Return all hyperedges containing entity_id as a member.
  * Results are allocated from `alloc`; caller must free with hu_hyperedges_free. */
-hu_error_t hu_hyperedge_query_by_member(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_hyperedge_query_by_member(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                          int64_t entity_id,
                                          hu_hyperedge_t **out, size_t *out_count);
 

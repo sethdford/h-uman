@@ -7,6 +7,7 @@
 #include "human/config_mutator.h"
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
+#include "human/agent/scheduler_status_json.h"
 #include "human/doctor.h"
 #include "human/security.h"
 #include "human/security/sandbox.h"
@@ -75,6 +76,159 @@ static void test_doctor_parse_df(void) {
         "Filesystem 1M-blocks Used Available Use% Mounted on\n/dev/sda1 1000 500 500 50% /\n";
     unsigned long mb = hu_doctor_parse_df_available_mb(df, strlen(df));
     HU_ASSERT_EQ(mb, 500ul);
+}
+
+static void test_scheduler_status_json_canonical(void) {
+    unsigned long long jp = 0, jc = 0;
+    long long bat = 0, ue = 0;
+    char ac[16] = {0};
+    const char *j = "{\n"
+                    "  \"jobs_pending\": 3,\n"
+                    "  \"jobs_completed_today\": 9,\n"
+                    "  \"battery_pct\": 42,\n"
+                    "  \"on_ac_power\": true,\n"
+                    "  \"updated_epoch\": 1700000000\n"
+                    "}\n";
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_EQ(jp, 3ULL);
+    HU_ASSERT_EQ(jc, 9ULL);
+    HU_ASSERT_EQ(bat, 42LL);
+    HU_ASSERT_STR_EQ(ac, "true");
+    HU_ASSERT_EQ(ue, 1700000000LL);
+}
+
+static void test_scheduler_status_json_minified_reordered(void) {
+    unsigned long long jp = 0, jc = 0;
+    long long bat = 0, ue = 0;
+    char ac[16] = {0};
+    const char *j = "{\"updated_epoch\":100,\"jobs_pending\":1,\"on_ac_power\":false,"
+                    "\"battery_pct\":-1,\"jobs_completed_today\":2}";
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_EQ(jp, 1ULL);
+    HU_ASSERT_EQ(jc, 2ULL);
+    HU_ASSERT_EQ(bat, -1LL);
+    HU_ASSERT_STR_EQ(ac, "false");
+    HU_ASSERT_EQ(ue, 100LL);
+}
+
+static void test_scheduler_status_json_bad_json(void) {
+    unsigned long long jp = 0, jc = 0;
+    long long bat = 0, ue = 0;
+    char ac[16] = {0};
+    HU_ASSERT_NEQ(
+        hu_scheduler_status_parse_json("{ not json", &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+}
+
+static void test_scheduler_status_json_null_args(void) {
+    unsigned long long jp = 0, jc = 0;
+    long long bat = 0, ue = 0;
+    char ac[16] = {0};
+    const char *ok = "{\"jobs_pending\":0,\"jobs_completed_today\":0,\"battery_pct\":0,"
+                     "\"on_ac_power\":true,\"updated_epoch\":0}";
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json(NULL, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json(ok, NULL, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json(ok, &jp, NULL, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json(ok, &jp, &jc, NULL, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json(ok, &jp, &jc, &bat, NULL, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json(ok, &jp, &jc, &bat, ac, 2, &ue), HU_OK);
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json(ok, &jp, &jc, &bat, ac, sizeof(ac), NULL), HU_OK);
+}
+
+static void test_doctor_deprecated_scheduler_status_matches_shared(void) {
+    unsigned long long jp_d = 0, jp_n = 0;
+    unsigned long long jc_d = 0, jc_n = 0;
+    long long bat_d = 0, bat_n = 0;
+    long long ue_d = 0, ue_n = 0;
+    char ac_d[16] = {0};
+    char ac_n[16] = {0};
+    const char *j = "{\"jobs_pending\":5,\"jobs_completed_today\":6,\"battery_pct\":7,"
+                     "\"on_ac_power\":false,\"updated_epoch\":8}";
+    HU_ASSERT_EQ(
+        hu_doctor_parse_scheduler_status_json(j, &jp_d, &jc_d, &bat_d, ac_d, sizeof(ac_d), &ue_d),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_scheduler_status_parse_json(j, &jp_n, &jc_n, &bat_n, ac_n, sizeof(ac_n), &ue_n), HU_OK);
+    HU_ASSERT_EQ(jp_d, jp_n);
+    HU_ASSERT_EQ(jc_d, jc_n);
+    HU_ASSERT_EQ(bat_d, bat_n);
+    HU_ASSERT_STR_EQ(ac_d, ac_n);
+    HU_ASSERT_EQ(ue_d, ue_n);
+}
+
+static void doctor_sch_write_status(const char *home, const char *body) {
+    char dir[256];
+    snprintf(dir, sizeof(dir), "%s/.human", home);
+    mkdir(home, 0700);
+    mkdir(dir, 0700);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/.human/scheduler.status", home);
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fputs(body, f);
+        fclose(f);
+    }
+}
+
+static void doctor_sch_remove_status(const char *home) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/.human/scheduler.status", home);
+    unlink(path);
+}
+
+static void doctor_sch_swap_home(const char *new_home, char **old_out) {
+    const char *h = getenv("HOME");
+    *old_out = h ? strdup(h) : NULL;
+    setenv("HOME", new_home, 1);
+}
+
+static void doctor_sch_restore_home(char *old) {
+    if (old) {
+        setenv("HOME", old, 1);
+        free(old);
+    } else {
+        unsetenv("HOME");
+    }
+}
+
+static void test_doctor_check_scheduler_minified_file(void) {
+    char *old = NULL;
+    doctor_sch_swap_home("/tmp/hu_doctor_sch_parse", &old);
+    doctor_sch_write_status("/tmp/hu_doctor_sch_parse",
+                            "{\"updated_epoch\":5000,\"jobs_pending\":7,\"on_ac_power\":true,"
+                            "\"battery_pct\":88,\"jobs_completed_today\":3}");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    /* status_age = 100s — threshold must exceed age or we take the STALE branch */
+    HU_ASSERT_EQ(hu_doctor_check_scheduler(&alloc, 5100, 3600, &items, &count, &cap), HU_OK);
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "pending=7"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "completed_24h=3"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "battery_pct=88"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "on_ac=true"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "fresh (status_age=100s)"));
+    doctor_free_semantics_result(&alloc, items, count);
+    doctor_sch_remove_status("/tmp/hu_doctor_sch_parse");
+    doctor_sch_restore_home(old);
+}
+
+static void test_doctor_check_scheduler_stale_warn(void) {
+    char *old = NULL;
+    doctor_sch_swap_home("/tmp/hu_doctor_sch_stale", &old);
+    doctor_sch_write_status("/tmp/hu_doctor_sch_stale",
+                            "{\"jobs_pending\":0,\"jobs_completed_today\":0,\"battery_pct\":100,"
+                            "\"on_ac_power\":false,\"updated_epoch\":1000}");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    HU_ASSERT_EQ(hu_doctor_check_scheduler(&alloc, 6000, 3600, &items, &count, &cap), HU_OK);
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "STALE"));
+    doctor_free_semantics_result(&alloc, items, count);
+    doctor_sch_remove_status("/tmp/hu_doctor_sch_stale");
+    doctor_sch_restore_home(old);
 }
 
 static void test_doctor_truncate_null_alloc(void) {
@@ -616,6 +770,13 @@ void run_ported_modules_tests(void) {
     HU_RUN_TEST(test_config_mutator_mutate_denied_path);
     HU_RUN_TEST(test_config_mutator_mutate_unset);
     HU_RUN_TEST(test_doctor_parse_df);
+    HU_RUN_TEST(test_scheduler_status_json_canonical);
+    HU_RUN_TEST(test_scheduler_status_json_minified_reordered);
+    HU_RUN_TEST(test_scheduler_status_json_bad_json);
+    HU_RUN_TEST(test_scheduler_status_json_null_args);
+    HU_RUN_TEST(test_doctor_deprecated_scheduler_status_matches_shared);
+    HU_RUN_TEST(test_doctor_check_scheduler_minified_file);
+    HU_RUN_TEST(test_doctor_check_scheduler_stale_warn);
     HU_RUN_TEST(test_doctor_truncate_null_alloc);
     HU_RUN_TEST(test_doctor_truncate_null_string);
     HU_RUN_TEST(test_doctor_truncate_zero_len);

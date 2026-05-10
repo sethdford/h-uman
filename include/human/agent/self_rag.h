@@ -5,7 +5,7 @@
  *
  * Moves verification *into* generation. The agent's draft is decomposed into
  * atomic noun-phrase claims; each claim is scored against the W7 memory
- * facade (`hu_memory_t`) and the W9 world model (`hu_world_model_t`); the
+ * facade (`hu_memory_facade_t`) and the W9 world model (`hu_world_model_t`); the
  * support score is carried as a W8 belief posterior (`hu_belief_t`). When
  * the draft as a whole carries too little evidence, the verifier returns
  * an explicit ABSTAINED outcome with a deterministic refusal template.
@@ -28,7 +28,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory/belief.h"           /* hu_belief_t, hu_provenance_atom_t */
-#include "human/memory/memory.h"           /* hu_memory_t */
+#include "human/memory/memory.h"           /* hu_memory_facade_t */
 #include "human/provider.h"                /* hu_provider_t (forward use only) */
 #include <stdbool.h>
 #include <stddef.h>
@@ -56,6 +56,7 @@ typedef enum hu_refusal_reason {
     HU_REFUSAL_UNKNOWN_FACT = 0,
     HU_REFUSAL_POLICY = 1,
     HU_REFUSAL_NEGATIVE_MEMORY_MATCH = 2,
+    HU_REFUSAL_LOW_CONFIDENCE = 3,
 } hu_refusal_reason_t;
 
 /* A single noun-phrase atomic claim extracted from a draft.
@@ -116,13 +117,13 @@ typedef struct hu_self_rag {
 } hu_self_rag_t;
 
 /* Construct the heuristic backend (v1 parity). Wraps `hu_response_verify`. */
-hu_error_t hu_self_rag_heuristic(hu_memory_t *m, hu_self_rag_t *out);
+hu_error_t hu_self_rag_heuristic(hu_memory_facade_t *m, hu_self_rag_t *out);
 
 /* Construct the atomic backend. Decomposes drafts into noun-phrase atomic
- * claims and verifies each against `hu_memory_t`. `embedder` may be NULL —
+ * claims and verifies each against `hu_memory_facade_t`. `embedder` may be NULL —
  * the deterministic decomposer in this commit does not require it; the
  * parameter is reserved for the future LLM-driven decomposer. */
-hu_error_t hu_self_rag_atomic(hu_memory_t *m, hu_provider_t *embedder,
+hu_error_t hu_self_rag_atomic(hu_memory_facade_t *m, hu_provider_t *embedder,
                               hu_self_rag_t *out);
 
 /* Construct the inline backend. Parses control tokens emitted by a
@@ -130,7 +131,7 @@ hu_error_t hu_self_rag_atomic(hu_memory_t *m, hu_provider_t *embedder,
  * provider streaming integration is a follow-up. The deterministic
  * placeholder parses the protocol from the supplied draft string so the
  * rest of the pipeline can be built and tested. */
-hu_error_t hu_self_rag_inline(hu_memory_t *m, hu_provider_t *chat,
+hu_error_t hu_self_rag_inline(hu_memory_facade_t *m, hu_provider_t *chat,
                               hu_self_rag_t *out);
 
 /* Dispatch to the bound backend. `alloc` is used for any temporary

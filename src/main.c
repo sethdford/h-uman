@@ -553,8 +553,8 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
      * and reports total runs, claim counts, flagged-rate, and heartbeat
      * freshness. Same JSON format as the imessage subcommand for parity. */
     if (argc >= 3 && argv[2] &&
-        (strcmp(argv[2], "imessage") == 0 || strcmp(argv[2], "verifier") == 0)) {
-        const bool is_verifier = (strcmp(argv[2], "verifier") == 0);
+        (strcmp(argv[2], "imessage") == 0 || strcmp(argv[2], "verifier") == 0 ||
+         strcmp(argv[2], "scheduler") == 0 || strcmp(argv[2], "responses") == 0)) {
         bool emit_json = false;
         for (int i = 3; i < argc; i++) {
             if (argv[i] && strcmp(argv[i], "--json") == 0)
@@ -570,15 +570,20 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
         /* WARN if no successful poll in the last 10 minutes — well beyond the
          * normal poll interval and short enough to catch silent FDA loss. */
         const int64_t kStaleAfterSecs = 600;
-        hu_error_t err;
-        if (is_verifier) {
+        hu_error_t err = HU_OK;
+        if (strcmp(argv[2], "verifier") == 0) {
             /* Verifier flush cadence is 60s; 300s WARN threshold gives 4x
              * headroom and catches a wedged daemon within 5 minutes. WARN at
              * a 10% flagged-rate is a starting point; tune from production. */
             err = hu_doctor_check_verifier(alloc, now_epoch, 300, 0.10, &items, &item_count, &cap);
-        } else {
+        } else if (strcmp(argv[2], "imessage") == 0) {
             err = hu_doctor_check_imessage(alloc, now_epoch, kStaleAfterSecs, &items, &item_count,
                                            &cap);
+        } else if (strcmp(argv[2], "scheduler") == 0) {
+            err = hu_doctor_check_scheduler(alloc, now_epoch, kStaleAfterSecs, &items, &item_count,
+                                            &cap);
+        } else if (strcmp(argv[2], "responses") == 0) {
+            err = hu_doctor_check_response_pipeline(alloc, &items, &item_count, &cap);
         }
         size_t ok_n = 0, warn_n = 0, err_n = 0;
         for (size_t i = 0; i < item_count; i++) {
@@ -630,7 +635,7 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
             }
             printf("]}\n");
         } else {
-            printf("\n  human doctor %s — diagnostics\n\n", is_verifier ? "verifier" : "imessage");
+            printf("\n  human doctor %s — diagnostics\n\n", argv[2]);
             for (size_t i = 0; i < item_count; i++) {
                 const char *sev_str = (items[i].severity == HU_DIAG_ERR)    ? "error  "
                                        : (items[i].severity == HU_DIAG_WARN) ? "warn   "

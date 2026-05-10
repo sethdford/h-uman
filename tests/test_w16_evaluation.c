@@ -601,7 +601,7 @@ static void test_w16_dmr_recall_at_k_correct_on_known_index(void) {
     hu_evaluation_close(&e);
 }
 
-/* ── 12. MemoryAgentBench stub deterministic ───────────────────────────── */
+/* ── 12. MemoryAgentBench runs deterministically with per-dimension metrics ─ */
 
 static void test_w16_memoryagentbench_stub_runs_deterministically(void) {
     hu_evaluation_t e1 = {0};
@@ -622,8 +622,13 @@ static void test_w16_memoryagentbench_stub_runs_deterministically(void) {
     HU_ASSERT_NOT_NULL(s1);
     HU_ASSERT_NOT_NULL(s2);
     HU_ASSERT_FLOAT_EQ(s1->score, s2->score, 1e-9);
-    /* error_summary documents the stub status. */
-    HU_ASSERT_NOT_NULL(r1.error_summary);
+
+    HU_ASSERT_GT(r1.prompts_total, (size_t)0);
+    HU_ASSERT_GT(r1.prompts_passed, (size_t)0);
+    HU_ASSERT_GT((int)r1.metrics_count, 1);
+
+    const hu_evaluation_metric_t *handoff = find_metric(&r1, "memory_handoff");
+    HU_ASSERT_NOT_NULL(handoff);
 
     hu_evaluation_report_free(A(), &r1);
     hu_evaluation_report_free(A(), &r2);

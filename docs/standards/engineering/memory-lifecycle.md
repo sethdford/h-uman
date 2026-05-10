@@ -246,7 +246,7 @@ This keeps working memory lean while preserving historical context.
 
 ## RAG Pipeline Safety (Hallucination Guards)
 
-When retrieving facts from memory for agent response, validate against knowledge base:
+When retrieving facts from memory for agent response, validate against memory:
 
 ### Hallucination Guard Protocol
 

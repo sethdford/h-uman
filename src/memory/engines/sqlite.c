@@ -12,6 +12,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "human/memory/encrypted_store.h"
 #include "human/memory/entropy_gate.h"
 #include "human/memory/graph_index.h"
 #include "human/memory/sql_common.h"
@@ -25,6 +26,14 @@ typedef struct hu_sqlite_memory {
     hu_graph_hierarchy_t graph_hierarchy;
     bool graph_initialized;
     bool graph_hierarchy_ready;
+    /* W15 envelope encryption opt-in. When `encrypt_at_rest` is true
+     * and `keystore` is non-NULL+unlocked, impl_store wraps `content`
+     * via hu_encrypted_store_wrap before INSERT and read_entry_from_row
+     * unwraps it on SELECT. Legacy plaintext rows (no magic header)
+     * are passed through unchanged so an upgrade can flip the flag
+     * without re-writing the database. */
+    hu_keystore_t *keystore;
+    bool encrypt_at_rest;
 } hu_sqlite_memory_t;
 
 static const char *const schema_parts[] = {
@@ -496,11 +505,50 @@ static const char *category_to_string(const hu_memory_category_t *cat) {
     }
 }
 
+/* Decrypt a row's content column when it carries the W15 envelope
+ * magic and `self` has an attached keystore. Legacy plaintext rows
+ * (no magic header) and rows read while encryption is OFF are passed
+ * through unchanged.
+ *
+ * Returns true on a successful decrypt; `*out_content` then points
+ * to a heap buffer (NUL-terminated by the keystore) and `*out_len`
+ * is the plaintext length — the caller frees with
+ * `alloc->free(alloc->ctx, *out_content, *out_len + 1)`.
+ *
+ * Returns false when the caller should fall through to the legacy
+ * `hu_strndup` path. We never lose data: a decrypt failure on a
+ * wrapped row falls through too so the envelope bytes are surfaced
+ * verbatim instead of dropping the row silently. */
+static bool maybe_decrypt_content(hu_sqlite_memory_t *self, hu_allocator_t *alloc,
+                                  const void *raw, size_t raw_len,
+                                  char **out_content, size_t *out_len) {
+    if (!self || !self->keystore || !self->encrypt_at_rest)
+        return false;
+    if (!hu_encrypted_store_is_encrypted(raw, raw_len))
+        return false;
+
+    void *pt = NULL;
+    size_t pt_len = 0;
+    hu_error_t err = hu_encrypted_store_unwrap(self->keystore, raw, raw_len, &pt, &pt_len);
+    if (err != HU_OK || !pt) {
+        if (pt)
+            alloc->free(alloc->ctx, pt, pt_len + 1);
+        return false;
+    }
+    *out_content = (char *)pt;
+    *out_len = pt_len;
+    return true;
+}
+
 static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
+                                      hu_sqlite_memory_t *self,
                                       hu_memory_entry_t *out) {
     const char *id_p = (const char *)sqlite3_column_text(stmt, 0);
     const char *key_p = (const char *)sqlite3_column_text(stmt, 1);
-    const char *content_p = (const char *)sqlite3_column_text(stmt, 2);
+    /* Use _blob accessors for `content` so the W15 envelope (which
+     * may contain NUL bytes inside the keystore payload) round-trips
+     * cleanly even when written into a TEXT column. */
+    const void *content_blob = sqlite3_column_blob(stmt, 2);
     const char *category_p = (const char *)sqlite3_column_text(stmt, 3);
     const char *timestamp_p = (const char *)sqlite3_column_text(stmt, 4);
     const char *session_id_p = (const char *)sqlite3_column_text(stmt, 5);
@@ -508,7 +556,7 @@ static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
 
     size_t id_len = id_p ? (size_t)sqlite3_column_bytes(stmt, 0) : 0;
     size_t key_len = key_p ? (size_t)sqlite3_column_bytes(stmt, 1) : 0;
-    size_t content_len = content_p ? (size_t)sqlite3_column_bytes(stmt, 2) : 0;
+    size_t content_len = content_blob ? (size_t)sqlite3_column_bytes(stmt, 2) : 0;
     size_t timestamp_len = timestamp_p ? (size_t)sqlite3_column_bytes(stmt, 4) : 0;
     size_t session_id_len = session_id_p ? (size_t)sqlite3_column_bytes(stmt, 5) : 0;
     size_t source_len = source_p ? (size_t)sqlite3_column_bytes(stmt, 6) : 0;
@@ -517,8 +565,19 @@ static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
     out->id_len = id_len;
     out->key = key_p ? hu_strndup(alloc, key_p, key_len) : NULL;
     out->key_len = key_len;
-    out->content = content_p ? hu_strndup(alloc, content_p, content_len) : NULL;
-    out->content_len = content_len;
+
+    char *decrypted = NULL;
+    size_t decrypted_len = 0;
+    if (maybe_decrypt_content(self, alloc, content_blob, content_len,
+                              &decrypted, &decrypted_len)) {
+        out->content = decrypted;
+        out->content_len = decrypted_len;
+    } else {
+        out->content = content_blob ? hu_strndup(alloc, (const char *)content_blob,
+                                                 content_len)
+                                    : NULL;
+        out->content_len = content_len;
+    }
     out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
     out->category.data.custom.name =
         category_p
@@ -560,6 +619,26 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     if (!id)
         return HU_ERR_OUT_OF_MEMORY;
 
+    /* W15 envelope encryption (opt-in). Wrap `content` before bind
+     * so the on-disk row is opaque without the per-user master key.
+     * On wrap failure (locked keystore, OOM) we fail the store rather
+     * than silently writing plaintext — better to surface the error
+     * than to violate the user's encrypt-at-rest expectation. */
+    void *wrapped = NULL;
+    size_t wrapped_len = 0;
+    const char *bind_content = content;
+    int bind_content_len = (int)content_len;
+    if (self->encrypt_at_rest && self->keystore && content) {
+        hu_error_t enc_err = hu_encrypted_store_wrap(
+            self->keystore, self->alloc, content, content_len, &wrapped, &wrapped_len);
+        if (enc_err != HU_OK) {
+            hu_str_free(self->alloc, id);
+            return enc_err;
+        }
+        bind_content = (const char *)wrapped;
+        bind_content_len = (int)wrapped_len;
+    }
+
     const char *cat_str = category_to_string(category);
     const char *sql =
         "INSERT INTO memories (id, key, content, category, session_id, created_at, updated_at) "
@@ -572,12 +651,14 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         hu_str_free(self->alloc, id);
+        if (wrapped)
+            self->alloc->free(self->alloc->ctx, wrapped, wrapped_len);
         return HU_ERR_MEMORY_STORE;
     }
 
     sqlite3_bind_text(stmt, 1, id, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, key, (int)key_len, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, content, (int)content_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, bind_content, bind_content_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 4, cat_str, -1, SQLITE_STATIC);
     if (session_id && session_id_len > 0)
         sqlite3_bind_text(stmt, 5, session_id, (int)session_id_len, SQLITE_STATIC);
@@ -589,6 +670,8 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     hu_str_free(self->alloc, id);
+    if (wrapped)
+        self->alloc->free(self->alloc->ctx, wrapped, wrapped_len);
 
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_STORE;
@@ -729,7 +812,7 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
 
             while (sqlite3_step(stmt) == SQLITE_ROW && count < limit) {
                 hu_memory_entry_t *e = &entries[count];
-                read_entry_from_row(stmt, alloc, e);
+                read_entry_from_row(stmt, alloc, self, e);
                 if (session_id && session_id_len > 0 && e->session_id &&
                     (e->session_id_len != session_id_len ||
                      memcmp(e->session_id, session_id, session_id_len) != 0)) {
@@ -829,7 +912,7 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
                                                               (int)gn->memory_key_len, NULL);
                                             if (sqlite3_step(sa_stmt) == SQLITE_ROW) {
                                                 hu_memory_entry_t *e = &entries[count];
-                                                read_entry_from_row(sa_stmt, alloc, e);
+                                                read_entry_from_row(sa_stmt, alloc, self, e);
                                                 bool session_ok = true;
                                                 if (session_id && session_id_len > 0 &&
                                                     e->session_id &&
@@ -897,7 +980,7 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
                                                   (int)gn->memory_key_len, NULL);
                                 if (sqlite3_step(hi_stmt) == SQLITE_ROW) {
                                     hu_memory_entry_t *e = &entries[count];
-                                    read_entry_from_row(hi_stmt, alloc, e);
+                                    read_entry_from_row(hi_stmt, alloc, self, e);
                                     bool session_ok = true;
                                     if (session_id && session_id_len > 0 && e->session_id &&
                                         (e->session_id_len != session_id_len ||
@@ -994,7 +1077,7 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
     }
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && count < limit) {
-        read_entry_from_row(stmt, alloc, &entries[count]);
+        read_entry_from_row(stmt, alloc, self, &entries[count]);
         if (session_id && session_id_len > 0 && entries[count].session_id &&
             (entries[count].session_id_len != session_id_len ||
              memcmp(entries[count].session_id, session_id, session_id_len) != 0)) {
@@ -1024,7 +1107,7 @@ static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, si
 
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
-        read_entry_from_row(stmt, alloc, out);
+        read_entry_from_row(stmt, alloc, self, out);
         *found = true;
     }
     sqlite3_finalize(stmt);
@@ -1071,7 +1154,7 @@ static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_ca
             entries = n;
             cap *= 2;
         }
-        read_entry_from_row(stmt, alloc, &entries[count]);
+        read_entry_from_row(stmt, alloc, self, &entries[count]);
         if (session_id && session_id_len > 0 && entries[count].session_id &&
             (entries[count].session_id_len != session_id_len ||
              memcmp(entries[count].session_id, session_id, session_id_len) != 0)) {
@@ -1308,6 +1391,8 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
     }
     self->db = db;
     self->alloc = alloc;
+    self->keystore = NULL;
+    self->encrypt_at_rest = false;
     self->graph_initialized = (hu_graph_index_init(&self->graph_index, alloc) == HU_OK);
     self->graph_hierarchy_ready = false;
     if (self->graph_initialized)
@@ -1317,6 +1402,26 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
         .ctx = self,
         .vtable = &sqlite_vtable,
     };
+}
+
+hu_error_t hu_sqlite_memory_attach_keystore(hu_memory_t *mem, hu_keystore_t *ks,
+                                             bool encrypt_at_rest) {
+    if (!mem || !mem->ctx || !mem->vtable)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *n = mem->vtable->name(mem->ctx);
+    if (!n || strcmp(n, "sqlite") != 0)
+        return HU_ERR_NOT_SUPPORTED;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
+    self->keystore = ks;
+    /* Encryption only takes effect when both flag and keystore are
+     * set; allowing one without the other would either leave us
+     * unable to wrap (no key) or unable to decrypt prior writes
+     * (key but flag off). We refuse to enable the flag without a
+     * keystore so the failure is loud at attach time. */
+    if (encrypt_at_rest && !ks)
+        return HU_ERR_INVALID_ARGUMENT;
+    self->encrypt_at_rest = encrypt_at_rest;
+    return HU_OK;
 }
 
 hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {

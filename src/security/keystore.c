@@ -58,17 +58,50 @@
 #endif
 #endif
 
+/* libsodium upgrade: when HU_HAS_LIBSODIUM is defined we route random,
+ * KDF, and AEAD through libsodium's XChaCha20-Poly1305-IETF and Argon2id.
+ * Existing v0 ciphertext (PBKDF2 + ChaCha20+HMAC) remains decryptable
+ * via a 1-byte version prefix on every new write. */
+#ifdef HU_HAS_LIBSODIUM
+#include <sodium.h>
+#endif
+
 /* ── constants ─────────────────────────────────────────────────────────── */
 
 #define KS_KEY_LEN      32   /* master key and per-table data key length */
-#define KS_NONCE_LEN    12   /* ChaCha20 nonce length */
+#define KS_NONCE_LEN    12   /* legacy ChaCha20 nonce length (v0) */
 #define KS_HMAC_LEN     32   /* HMAC-SHA256 output length */
-#define KS_SALT_LEN     16   /* PBKDF2 per-user salt length */
+#define KS_SALT_LEN     16   /* per-user salt length (works for PBKDF2 and Argon2id) */
 #define KS_PBKDF2_ITERS 600000 /* OWASP 2023 PBKDF2-HMAC-SHA256 minimum */
 #define KS_CT_OVERHEAD  (KS_NONCE_LEN + KS_HMAC_LEN)
 #define KS_USER_ID_MAX  128
 #define KS_DIR_MAX      512
 #define KS_PATH_MAX     (KS_DIR_MAX + KS_USER_ID_MAX + 16)
+
+/* Ciphertext version tags (first byte of the on-disk envelope).
+ *
+ * v0 (pre-libsodium) layout: [nonce:12][ct:N][hmac:32]. No leading
+ * version byte — detection on decrypt is by length plus a v1-magic
+ * byte check (see hu_keystore_decrypt). New writes never produce v0
+ * once libsodium is linked.
+ *
+ * v1 layout: [magic:0x01][nonce:24][ct:N][tag:16] using
+ * crypto_aead_xchacha20poly1305_ietf_*. Authenticated by Poly1305 so
+ * misdetection from a v0 leading-byte collision fails fast and the
+ * decoder transparently falls through to v0. */
+#define KS_V1_MAGIC          0x01
+#ifdef HU_HAS_LIBSODIUM
+#define KS_V1_NONCE_LEN      crypto_aead_xchacha20poly1305_ietf_NPUBBYTES /* 24 */
+#define KS_V1_TAG_LEN        crypto_aead_xchacha20poly1305_ietf_ABYTES    /* 16 */
+#define KS_V1_OVERHEAD       (1 + KS_V1_NONCE_LEN + KS_V1_TAG_LEN)
+#endif
+
+/* KDF flag file values. The flag is a sibling to the salt file:
+ * <key_dir>/<user_id>.kdf. Single byte file. Missing => v0 (PBKDF2).
+ * Written once on first unlock so subsequent unlocks pick the same
+ * algorithm and the master key stays reproducible. */
+#define KS_KDF_V0_PBKDF2     0x00
+#define KS_KDF_V1_ARGON2ID   0x01
 
 /* ── secure zero ────────────────────────────────────────────────────────── */
 
@@ -143,11 +176,30 @@ static void salt_path(const char *user_id, char *out, size_t cap) {
 
 /* ── cryptographic randomness ──────────────────────────────────────────── */
 
+#ifdef HU_HAS_LIBSODIUM
+/* Lazy one-shot sodium_init. Thread-safe per upstream contract: it is
+ * safe to call from multiple threads, but only once per process. */
+static int ks_sodium_init_once(void) {
+    static int initialized = -1;
+    if (initialized < 0) {
+        initialized = sodium_init() < 0 ? -1 : 1;
+    }
+    return initialized > 0 ? 0 : -1;
+}
+#endif
+
 /* Returns 0 on success, -1 on failure. Never returns deterministic data:
  * we'd rather fail encrypt than produce a same-key/same-nonce reuse. */
 static int ks_random_bytes(uint8_t *buf, size_t len) {
     if (len == 0)
         return 0;
+#ifdef HU_HAS_LIBSODIUM
+    if (ks_sodium_init_once() == 0) {
+        randombytes_buf(buf, len);
+        return 0;
+    }
+    /* sodium_init failed — fall through to OS-native sources. */
+#endif
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
     arc4random_buf(buf, len);
     return 0;
@@ -246,6 +298,55 @@ static int ks_load_or_create_salt(const char *user_id, uint8_t out[KS_SALT_LEN])
     return 0;
 }
 
+/* ── KDF version flag ──────────────────────────────────────────────────── */
+
+static void kdf_path(const char *user_id, char *out, size_t cap) {
+    char dir[KS_DIR_MAX];
+    keystore_dir(dir, sizeof(dir));
+    snprintf(out, cap, "%s/%s.kdf", dir, user_id);
+}
+
+/* Returns the algorithm tag persisted for this user, or KS_KDF_V0_PBKDF2
+ * when no flag file exists (legacy default). I/O errors also yield v0
+ * — the goal is "never decrypt-broken existing data". */
+static uint8_t ks_kdf_version_for(const char *user_id) {
+    char path[KS_PATH_MAX];
+    kdf_path(user_id, path, sizeof(path));
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return KS_KDF_V0_PBKDF2;
+    uint8_t v = KS_KDF_V0_PBKDF2;
+    (void)fread(&v, 1, 1, f);
+    fclose(f);
+    return v;
+}
+
+/* Persist the KDF version exactly once. If the flag already exists we
+ * leave it alone — the chosen algorithm must be sticky across the
+ * lifetime of the salt file or the master key would change. */
+static void ks_kdf_version_persist(const char *user_id, uint8_t version) {
+    char path[KS_PATH_MAX];
+    kdf_path(user_id, path, sizeof(path));
+    FILE *probe = fopen(path, "rb");
+    if (probe) {
+        fclose(probe);
+        return;
+    }
+#if !defined(_WIN32) && !defined(_WIN64)
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return;
+    (void)write(fd, &version, 1);
+    close(fd);
+#else
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    (void)fwrite(&version, 1, 1, f);
+    fclose(f);
+#endif
+}
+
 /* ── KDF ────────────────────────────────────────────────────────────────── */
 
 /* PBKDF2-HMAC-SHA256 RFC 8018, single-block (output_len == hash_len == 32).
@@ -286,8 +387,18 @@ static void pbkdf2_hmac_sha256(const uint8_t *password, size_t password_len,
     ks_secure_zero(salt_with_idx, sizeof(salt_with_idx));
 }
 
-/* Production KDF: PBKDF2-HMAC-SHA256 over (passphrase, per-user salt, 600k iters).
- * Returns 0 on success, -1 if the salt could not be loaded or generated. */
+/* Production KDF: dispatches to PBKDF2-HMAC-SHA256 (legacy) or Argon2id
+ * (libsodium) based on the persisted per-user algorithm flag.
+ *
+ * Algorithm selection rules:
+ *   1. Flag file present → use that algorithm (sticky; required so the
+ *      master key is reproducible across unlocks).
+ *   2. Flag file missing AND libsodium linked → Argon2id (and write
+ *      the flag).
+ *   3. Otherwise → PBKDF2-HMAC-SHA256.
+ *
+ * Returns 0 on success, -1 if the salt couldn't be loaded/generated or
+ * the chosen KDF failed. */
 static int kdf_passphrase(const char *pp, size_t pp_len, const char *user_id,
                           uint8_t out[KS_KEY_LEN]) {
     uint8_t salt[KS_SALT_LEN];
@@ -295,16 +406,69 @@ static int kdf_passphrase(const char *pp, size_t pp_len, const char *user_id,
         memset(out, 0, KS_KEY_LEN);
         return -1;
     }
-    /* In test mode we cap iterations dramatically to keep the suite fast.
-     * Production builds always use the full OWASP iteration count. */
-#if defined(HU_IS_TEST) && HU_IS_TEST
-    uint32_t iters = 1000;
-#else
-    uint32_t iters = KS_PBKDF2_ITERS;
+
+    uint8_t version = ks_kdf_version_for(user_id);
+#ifdef HU_HAS_LIBSODIUM
+    /* Fresh keystores get the strongest KDF available. The flag file
+     * locks this in for subsequent unlocks. */
+    if (version == KS_KDF_V0_PBKDF2) {
+        char fpath[KS_PATH_MAX];
+        kdf_path(user_id, fpath, sizeof(fpath));
+        FILE *probe = fopen(fpath, "rb");
+        if (!probe) {
+            version = KS_KDF_V1_ARGON2ID;
+            ks_kdf_version_persist(user_id, version);
+        } else {
+            fclose(probe);
+        }
+    }
 #endif
-    pbkdf2_hmac_sha256((const uint8_t *)pp, pp_len, salt, KS_SALT_LEN, iters, out);
+
+    int rc = -1;
+    if (version == KS_KDF_V1_ARGON2ID) {
+#ifdef HU_HAS_LIBSODIUM
+        if (ks_sodium_init_once() == 0) {
+            /* Test mode: use the interactive limits — sub-second on
+             * commodity hardware. Production: moderate limits, ~0.7s on
+             * a recent CPU per the libsodium 1.0.18 calibration table. */
+#if defined(HU_IS_TEST) && HU_IS_TEST
+            unsigned long long ops = crypto_pwhash_OPSLIMIT_INTERACTIVE;
+            size_t mem = crypto_pwhash_MEMLIMIT_INTERACTIVE;
+#else
+            unsigned long long ops = crypto_pwhash_OPSLIMIT_MODERATE;
+            size_t mem = crypto_pwhash_MEMLIMIT_MODERATE;
+#endif
+            rc = crypto_pwhash(out, KS_KEY_LEN,
+                               (const char *)pp, pp_len, salt, ops, mem,
+                               crypto_pwhash_ALG_ARGON2ID13);
+        }
+#endif
+        if (rc != 0) {
+            /* libsodium not linked or pwhash failed — fall back to v0
+             * so the keystore stays openable. The flag file already
+             * captured the upgrade attempt; we just log the regression
+             * here by NOT updating the flag (keystore stays on v1
+             * preference for next attempt with libsodium present). */
+        }
+    }
+    if (version == KS_KDF_V0_PBKDF2 || rc != 0) {
+        /* In test mode we cap iterations dramatically to keep the suite
+         * fast. Production builds always use the full OWASP iteration
+         * count. */
+#if defined(HU_IS_TEST) && HU_IS_TEST
+        uint32_t iters = 1000;
+#else
+        uint32_t iters = KS_PBKDF2_ITERS;
+#endif
+        pbkdf2_hmac_sha256((const uint8_t *)pp, pp_len, salt, KS_SALT_LEN, iters, out);
+        rc = 0;
+        /* If we ended up here because v1 was preferred but failed, persist
+         * the v0 fallback so the next unlock doesn't keep retrying. */
+        ks_kdf_version_persist(user_id, KS_KDF_V0_PBKDF2);
+    }
+
     ks_secure_zero(salt, sizeof(salt));
-    return 0;
+    return rc;
 }
 
 /* Per-table data key: HMAC-SHA256(master_key, table_name). */
@@ -381,9 +545,41 @@ hu_error_t hu_keystore_encrypt(hu_keystore_t *ks, const char *table_name,
     uint8_t dk[KS_KEY_LEN];
     derive_data_key(ks->master_key, table_name, dk);
 
-    /* Per-call random nonce. Bail if the OS RNG is unavailable rather
-     * than fall back to a deterministic value — same-key/same-nonce
-     * with ChaCha20 is catastrophic. */
+#ifdef HU_HAS_LIBSODIUM
+    /* v1 envelope: [magic:0x01][nonce:24][ct+poly1305_tag:N+16].
+     * AEAD additional-data is the table name so a ciphertext from one
+     * table can't be replayed under another (same plaintext, different
+     * derived key already prevents this; AAD makes it explicit). */
+    if (ks_sodium_init_once() == 0) {
+        size_t total = KS_V1_OVERHEAD + pt_len;
+        uint8_t *ct = ks->alloc->alloc(ks->alloc->ctx, total);
+        if (!ct) {
+            ks_secure_zero(dk, KS_KEY_LEN);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        ct[0] = KS_V1_MAGIC;
+        uint8_t *nonce = ct + 1;
+        randombytes_buf(nonce, KS_V1_NONCE_LEN);
+        unsigned long long ct_len_out = 0;
+        if (crypto_aead_xchacha20poly1305_ietf_encrypt(
+                ct + 1 + KS_V1_NONCE_LEN, &ct_len_out,
+                (const unsigned char *)plaintext, (unsigned long long)pt_len,
+                (const unsigned char *)table_name,
+                (unsigned long long)strlen(table_name), NULL, nonce, dk) != 0) {
+            ks->alloc->free(ks->alloc->ctx, ct, total);
+            ks_secure_zero(dk, KS_KEY_LEN);
+            return HU_ERR_CRYPTO_ENCRYPT;
+        }
+        ks_secure_zero(dk, KS_KEY_LEN);
+        ks->data_keys_count++;
+        *out_ciphertext = ct;
+        *out_len = 1 + KS_V1_NONCE_LEN + (size_t)ct_len_out;
+        return HU_OK;
+    }
+    /* sodium_init failed; fall through to v0 below. */
+#endif
+
+    /* v0 envelope: [nonce:12][ciphertext:pt_len][hmac:32]. */
     uint8_t nonce[KS_NONCE_LEN];
     if (ks_random_bytes(nonce, KS_NONCE_LEN) != 0) {
         ks_secure_zero(dk, KS_KEY_LEN);
@@ -397,13 +593,9 @@ hu_error_t hu_keystore_encrypt(hu_keystore_t *ks, const char *table_name,
         ks_secure_zero(nonce, KS_NONCE_LEN);
         return HU_ERR_OUT_OF_MEMORY;
     }
-
-    /* Layout: [nonce:12][ciphertext:pt_len][hmac:32] */
     memcpy(ct, nonce, KS_NONCE_LEN);
     if (pt_len > 0)
         hu_chacha20_encrypt(dk, nonce, 0, plaintext, ct + KS_NONCE_LEN, pt_len);
-
-    /* Authentication tag over nonce || ciphertext. */
     hu_hmac_sha256(dk, KS_KEY_LEN, ct, KS_NONCE_LEN + pt_len,
                    ct + KS_NONCE_LEN + pt_len);
 
@@ -422,19 +614,57 @@ hu_error_t hu_keystore_decrypt(hu_keystore_t *ks, const char *table_name,
         return HU_ERR_INVALID_ARGUMENT;
     if (!ks->master_key_present)
         return HU_ERR_CRYPTO_DECRYPT;
-    if (ct_len < KS_CT_OVERHEAD)
-        return HU_ERR_CRYPTO_DECRYPT;
 
+    const uint8_t *blob = (const uint8_t *)ciphertext;
     uint8_t dk[KS_KEY_LEN];
     derive_data_key(ks->master_key, table_name, dk);
 
+#ifdef HU_HAS_LIBSODIUM
+    /* Attempt v1 envelope first when the leading byte and minimum
+     * length match. Poly1305 fails fast on a wrong key/AAD, so a v0
+     * blob whose first byte happens to be 0x01 just falls through. */
+    if (ct_len >= KS_V1_OVERHEAD && blob[0] == KS_V1_MAGIC &&
+        ks_sodium_init_once() == 0) {
+        const uint8_t *nonce = blob + 1;
+        const uint8_t *body = blob + 1 + KS_V1_NONCE_LEN;
+        unsigned long long body_len =
+            (unsigned long long)(ct_len - 1 - KS_V1_NONCE_LEN);
+        size_t pt_capacity =
+            ct_len - 1 - KS_V1_NONCE_LEN - KS_V1_TAG_LEN;
+        uint8_t *pt = ks->alloc->alloc(ks->alloc->ctx, pt_capacity + 1);
+        if (!pt) {
+            ks_secure_zero(dk, KS_KEY_LEN);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        unsigned long long pt_len_out = 0;
+        if (crypto_aead_xchacha20poly1305_ietf_decrypt(
+                pt, &pt_len_out, NULL, body, body_len,
+                (const unsigned char *)table_name,
+                (unsigned long long)strlen(table_name), nonce, dk) == 0) {
+            pt[pt_len_out] = '\0';
+            ks_secure_zero(dk, KS_KEY_LEN);
+            *out_plaintext = pt;
+            *out_len = (size_t)pt_len_out;
+            return HU_OK;
+        }
+        ks->alloc->free(ks->alloc->ctx, pt, pt_capacity + 1);
+        /* AEAD verification failed — could be a v0 blob whose first
+         * byte collided with 0x01, or a real corruption. Fall through
+         * to v0 attempt; that path also has its own auth check. */
+    }
+#endif
+
+    /* v0 path. */
+    if (ct_len < KS_CT_OVERHEAD) {
+        ks_secure_zero(dk, KS_KEY_LEN);
+        return HU_ERR_CRYPTO_DECRYPT;
+    }
+
     size_t pt_len = ct_len - KS_CT_OVERHEAD;
-    const uint8_t *blob = (const uint8_t *)ciphertext;
     const uint8_t *nonce     = blob;
     const uint8_t *encrypted = blob + KS_NONCE_LEN;
     const uint8_t *stored_tag = blob + KS_NONCE_LEN + pt_len;
 
-    /* Verify authentication tag. */
     uint8_t expected_tag[KS_HMAC_LEN];
     hu_hmac_sha256(dk, KS_KEY_LEN, blob, KS_NONCE_LEN + pt_len, expected_tag);
 
@@ -457,7 +687,7 @@ hu_error_t hu_keystore_decrypt(hu_keystore_t *ks, const char *table_name,
 
     if (pt_len > 0)
         hu_chacha20_decrypt(dk, nonce, 0, encrypted, pt, pt_len);
-    pt[pt_len] = '\0'; /* null-terminate for convenience */
+    pt[pt_len] = '\0';
 
     ks_secure_zero(dk, KS_KEY_LEN);
     *out_plaintext = pt;
@@ -488,11 +718,17 @@ hu_error_t hu_keystore_destroy_master_key(const char *user_id) {
         return HU_ERR_IO;
     fclose(f);
 
-    /* Also remove the per-user salt: re-deriving the master key requires
-     * BOTH the passphrase AND the original salt. Removing the salt makes
-     * the destruction stick even if the tombstone is later deleted. */
+    /* Also remove the per-user salt and KDF flag: re-deriving the master
+     * key requires BOTH the passphrase AND the original salt. Removing
+     * the salt makes the destruction stick even if the tombstone is
+     * later deleted. The KDF flag is removed in lock-step so a future
+     * unlock with the same user_id starts fresh and picks the strongest
+     * available algorithm. */
     char spath[KS_PATH_MAX];
     salt_path(user_id, spath, sizeof(spath));
     (void)remove(spath);
+    char kpath[KS_PATH_MAX];
+    kdf_path(user_id, kpath, sizeof(kpath));
+    (void)remove(kpath);
     return HU_OK;
 }

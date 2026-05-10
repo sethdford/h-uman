@@ -126,7 +126,7 @@ static void adversarial_score_detects_ai_tells(void) {
         "I'd be happy to help you with that! Here are some options:\n"
         "1. First option\n2. Second option\n3. Third option\n"
         "Feel free to let me know if you need anything else!";
-    HU_ASSERT_EQ(hu_turing_score_heuristic(ai_msg, strlen(ai_msg), NULL, 0, &score), HU_OK);
+    HU_ASSERT_EQ(hu_turing_score_heuristic(ai_msg, strlen(ai_msg), NULL, 0, 0, &score), HU_OK);
     HU_ASSERT(score.dimensions[HU_TURING_NON_ROBOTIC] <= 5);
     HU_ASSERT(score.dimensions[HU_TURING_NATURAL_LANGUAGE] <= 6);
     HU_ASSERT(score.overall < 7);
@@ -135,7 +135,7 @@ static void adversarial_score_detects_ai_tells(void) {
 static void adversarial_score_passes_human_responses(void) {
     hu_turing_score_t score;
     const char *human_msg = "haha yeah that sounds fun, i'm totally down for that";
-    HU_ASSERT_EQ(hu_turing_score_heuristic(human_msg, strlen(human_msg), NULL, 0, &score), HU_OK);
+    HU_ASSERT_EQ(hu_turing_score_heuristic(human_msg, strlen(human_msg), NULL, 0, 0, &score), HU_OK);
     HU_ASSERT(score.dimensions[HU_TURING_NATURAL_LANGUAGE] >= 7);
     HU_ASSERT(score.overall >= 6);
 }

@@ -187,7 +187,7 @@ void hu_daemon_proactive_apply_route(hu_proactive_context_t *ctx, const char *co
 
 /* ── Memory callback context builder ───────────────────────────────── */
 
-char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_memory_t *memory,
+char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t *memory,
                                        const char *session_id, size_t session_id_len,
                                        const char *msg, size_t msg_len, size_t *out_len,
                                        hu_agent_t *agent) {
@@ -273,7 +273,7 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_memory_t *memor
 /* ── Proactive prompt builder ──────────────────────────────────────── */
 
 char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *agent,
-                                             hu_memory_t *memory, const hu_contact_profile_t *cp,
+                                             hu_legacy_memory_t *memory, const hu_contact_profile_t *cp,
                                              size_t *out_len) {
     char *starter = NULL;
     size_t starter_len = 0;

@@ -1,7 +1,7 @@
 ---
 title: "W15 — Cryptographic Privacy: envelope encryption, key-deletion = forgetting, DP-SGD, audit + export"
 created: 2026-05-10
-status: proposed
+status: keystore + audit landed; libsodium upgrade landed; DP-SGD + GDPR export pending
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: high
 scope: include/human/security/, src/security/, src/memory/, src/main.c (CLI subcommands)
@@ -76,7 +76,31 @@ Adversarial coverage:
 - `test_w15_per_user_salt_separates_keys`: two users with the same passphrase derive different master keys; user-A ciphertext does not decrypt under user-B's keystore.
 - `test_w15_destruction_removes_salt_makes_recovery_impossible`: even with the tombstone deleted by an attacker, the same passphrase produces a fresh master key (ciphertext under the original key is unrecoverable).
 
-Future libsodium upgrade still planned: XChaCha20-Poly1305 for AEAD (eliminates the HMAC step) and Argon2id for KDF (memory-hard against ASIC attacks). Track that work in this doc when it lands.
+### Crypto status (2026-05-10, FIX 22 — libsodium upgrade) — DONE
+
+The libsodium upgrade is now in tree, gated by the new CMake option `HU_ENABLE_LIBSODIUM` (off by default; CI flips it on after `brew install libsodium` / `apt install libsodium-dev`). When enabled, every keystore operation routes through libsodium primitives with a versioned envelope so existing v0 deployments keep working byte-for-byte.
+
+What changed in `src/security/keystore.c`:
+
+- **AEAD (v1)**: `crypto_aead_xchacha20poly1305_ietf_encrypt/decrypt` with a 24-byte random nonce and a 16-byte Poly1305 tag. The ciphertext envelope is `[magic:0x01][nonce:24][ct:N][tag:16]` and `table_name` is bound as AEAD additional data so a blob from one table cannot be replayed under another. The encryption path *always* prefers v1 when libsodium is linked and `sodium_init` succeeds; if init fails it falls through to the existing v0 ChaCha20 + HMAC-SHA256 path so we never silently ship an unauthenticated build.
+- **KDF (v1)**: `crypto_pwhash` with `crypto_pwhash_ALG_ARGON2ID13` and `OPSLIMIT_MODERATE` / `MEMLIMIT_MODERATE` in production (test builds use `OPSLIMIT_MIN` so 9,439 tests still complete in ~34s). The KDF version is persisted per-user at `<key_dir>/<user_id>.kdf` (mode 0600) and is **sticky for the lifetime of the salt**, so an existing PBKDF2 user keeps deriving their PBKDF2 master key even on a libsodium-enabled binary. New users on a libsodium build get Argon2id; new users on a non-libsodium build get PBKDF2 — recorded explicitly in the flag file so a future binary that links libsodium does not silently rewrite their master key.
+- **Random**: `randombytes_buf` when libsodium is available; `arc4random_buf` / `getrandom()` / `/dev/urandom` otherwise. The fallback chain is unchanged.
+- **Cryptographic forgetting**: `hu_keystore_destroy_master_key` now removes the tombstone, the salt, **and** the KDF flag. A future unlock for the same user_id starts fresh and picks the strongest algorithm available on the host.
+- **Decryption (read path)**: Tries v1 first when the leading byte is `0x01` and the buffer is at least `KS_V1_OVERHEAD` bytes; falls through to the v0 path on a Poly1305 auth failure (which catches the rare case of a v0 blob whose nonce happens to start with `0x01`).
+
+CMake plumbing:
+
+- `HU_ENABLE_LIBSODIUM=ON` discovers libsodium via `pkg-config` first, then a manual probe of `/opt/homebrew/{include,lib}`, `/usr/local/{include,lib}`, `/usr/{include,lib}`. On success it defines `HU_HAS_LIBSODIUM=1` on `human_core` (and on `human_core_test` after that target is added later in the file). The link directories propagate to `human_tests` via `PUBLIC` link directives so tests don't have to repeat the discovery dance.
+- When `HU_ENABLE_LIBSODIUM=ON` but libsodium can't be located, configuration emits a `WARNING` and continues building the v0-only path so a missing dev-package never breaks a developer's build.
+
+Adversarial coverage added in `tests/test_w15_keystore.c`:
+
+- `test_w15_v1_ciphertext_has_magic_byte_when_libsodium_enabled`: encrypting under a fresh keystore on a libsodium build produces a ciphertext whose first byte is `0x01` and whose total length matches the v1 envelope. The test compiles to a no-op when `HU_HAS_LIBSODIUM` is undefined.
+- `test_w15_v0_kdf_remains_decryptable_under_libsodium`: forces the per-user KDF flag to `0x00` (PBKDF2) before the first unlock, encrypts, closes, reopens, and confirms the same passphrase reproduces the same master key and decrypts the blob under a libsodium-enabled binary. Demonstrates the sticky-KDF backward-compat contract.
+- `test_w15_decrypt_handles_short_buffer_with_v1_magic`: a three-byte buffer starting with the v1 magic byte must reject cleanly with `HU_ERR_CRYPTO_DECRYPT` rather than overrun on the v1 length math.
+- `test_w15_destroy_removes_kdf_flag`: cryptographic forgetting also unlinks the KDF flag so future unlocks pick the strongest available algorithm.
+
+End-to-end validation: `9439/9439` tests pass with `HU_ENABLE_LIBSODIUM=ON` (libsodium 1.0.22 from Homebrew) and `9439/9439` pass with `HU_ENABLE_LIBSODIUM=OFF` (PBKDF2 + ChaCha20+HMAC fallback). Both runs are AddressSanitizer-clean.
 
 ### Memory facade decorator
 

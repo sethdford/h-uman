@@ -90,8 +90,8 @@ static uint64_t simple_hash(const char *str, size_t len) {
     return hash;
 }
 
-hu_error_t hu_world_model_create(hu_allocator_t *alloc, sqlite3 *db,
-                                 hu_world_model_t *out) {
+hu_error_t hu_causal_world_model_create(hu_allocator_t *alloc, sqlite3 *db,
+                                 hu_causal_world_model_t *out) {
     if (!alloc || !db || !out)
         return HU_ERR_INVALID_ARGUMENT;
     out->alloc = alloc;
@@ -99,11 +99,11 @@ hu_error_t hu_world_model_create(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
-void hu_world_model_deinit(hu_world_model_t *model) {
+void hu_causal_world_model_deinit(hu_causal_world_model_t *model) {
     (void)model;
 }
 
-hu_error_t hu_world_model_init_tables(hu_world_model_t *model) {
+hu_error_t hu_causal_world_model_init_tables(hu_causal_world_model_t *model) {
     if (!model || !model->db)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -203,7 +203,7 @@ static void copy_to_prediction(hu_wm_prediction_t *out, const char *outcome, siz
     }
 }
 
-hu_error_t hu_world_simulate(hu_world_model_t *model,
+hu_error_t hu_world_simulate(hu_causal_world_model_t *model,
                              const char *action, size_t action_len,
                              const char *context, size_t context_len,
                              hu_wm_prediction_t *out) {
@@ -375,7 +375,7 @@ hu_error_t hu_world_simulate(hu_world_model_t *model,
     return HU_OK;
 }
 
-hu_error_t hu_world_simulate_with_context(hu_world_model_t *model,
+hu_error_t hu_world_simulate_with_context(hu_causal_world_model_t *model,
                                            const char *action, size_t action_len,
                                            const hu_world_context_t *ctx,
                                            hu_wm_prediction_t *out) {
@@ -571,7 +571,7 @@ static int compare_ranked_options(const void *a, const void *b) {
     return 0;
 }
 
-hu_error_t hu_world_compare_actions(hu_world_model_t *model,
+hu_error_t hu_world_compare_actions(hu_causal_world_model_t *model,
                                      const char **actions, const size_t *lens,
                                      size_t count, const hu_world_context_t *ctx,
                                      hu_action_option_t *ranked_out) {
@@ -605,7 +605,7 @@ hu_error_t hu_world_compare_actions(hu_world_model_t *model,
     return HU_OK;
 }
 
-hu_error_t hu_world_what_if(hu_world_model_t *model,
+hu_error_t hu_world_what_if(hu_causal_world_model_t *model,
                              const char *action, size_t action_len,
                              const hu_world_context_t *ctx,
                              hu_wm_prediction_t *scenarios, size_t max_scenarios,
@@ -666,7 +666,7 @@ hu_error_t hu_world_what_if(hu_world_model_t *model,
     return HU_OK;
 }
 
-hu_error_t hu_world_counterfactual(hu_world_model_t *model,
+hu_error_t hu_world_counterfactual(hu_causal_world_model_t *model,
                                    const char *original_action, size_t orig_len,
                                    const char *alternative, size_t alt_len,
                                    const char *context, size_t ctx_len,
@@ -711,7 +711,7 @@ static int compare_options_by_score(const void *a, const void *b) {
     return 0;
 }
 
-hu_error_t hu_world_evaluate_options(hu_world_model_t *model,
+hu_error_t hu_world_evaluate_options(hu_causal_world_model_t *model,
                                       const char **actions, const size_t *action_lens,
                                       size_t count,
                                       const char *context, size_t ctx_len,
@@ -780,7 +780,7 @@ hu_error_t hu_world_evaluate_options(hu_world_model_t *model,
     return HU_OK;
 }
 
-hu_error_t hu_world_record_outcome(hu_world_model_t *model,
+hu_error_t hu_world_record_outcome(hu_causal_world_model_t *model,
                                    const char *action, size_t action_len,
                                    const char *outcome, size_t outcome_len,
                                    double confidence, int64_t now_ts) {
@@ -807,7 +807,7 @@ hu_error_t hu_world_record_outcome(hu_world_model_t *model,
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
-hu_error_t hu_world_causal_depth(hu_world_model_t *model,
+hu_error_t hu_world_causal_depth(hu_causal_world_model_t *model,
                                  const char *action, size_t action_len,
                                  size_t *out_depth) {
     if (!model || !model->db || !out_depth)
@@ -885,7 +885,7 @@ static hu_error_t fetch_node(sqlite3 *db, int64_t node_id, hu_causal_node_t *out
     return HU_OK;
 }
 
-hu_error_t hu_world_add_node(hu_world_model_t *model, const char *label, size_t label_len,
+hu_error_t hu_world_add_node(hu_causal_world_model_t *model, const char *label, size_t label_len,
                              const char *type, size_t type_len, int64_t *out_id) {
     if (!model || !model->db || !out_id)
         return HU_ERR_INVALID_ARGUMENT;
@@ -914,7 +914,7 @@ hu_error_t hu_world_add_node(hu_world_model_t *model, const char *label, size_t 
     return HU_OK;
 }
 
-hu_error_t hu_world_add_edge(hu_world_model_t *model, int64_t source, int64_t target,
+hu_error_t hu_world_add_edge(hu_causal_world_model_t *model, int64_t source, int64_t target,
                              hu_causal_edge_type_t type, double confidence, int64_t timestamp) {
     if (!model || !model->db)
         return HU_ERR_INVALID_ARGUMENT;
@@ -941,7 +941,7 @@ hu_error_t hu_world_add_edge(hu_world_model_t *model, int64_t source, int64_t ta
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
-hu_error_t hu_world_get_neighbors(hu_world_model_t *model, int64_t node_id,
+hu_error_t hu_world_get_neighbors(hu_causal_world_model_t *model, int64_t node_id,
                                   hu_causal_edge_t *edges, size_t max_edges, size_t *out_count) {
     if (!model || !model->db || !edges || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -975,7 +975,7 @@ hu_error_t hu_world_get_neighbors(hu_world_model_t *model, int64_t node_id,
     return HU_OK;
 }
 
-hu_error_t hu_world_trace_causal_chain(hu_world_model_t *model, int64_t start_node,
+hu_error_t hu_world_trace_causal_chain(hu_causal_world_model_t *model, int64_t start_node,
                                        int max_depth, hu_causal_node_t *path, size_t max_path,
                                        size_t *out_len) {
     if (!model || !model->db || !path || !out_len)
@@ -1053,7 +1053,7 @@ hu_error_t hu_world_trace_causal_chain(hu_world_model_t *model, int64_t start_no
     return HU_OK;
 }
 
-hu_error_t hu_world_find_paths(hu_world_model_t *model, int64_t from, int64_t to,
+hu_error_t hu_world_find_paths(hu_causal_world_model_t *model, int64_t from, int64_t to,
                                int max_depth, hu_causal_node_t *path, size_t max_path,
                                size_t *out_len) {
     if (!model || !model->db || !path || !out_len)
@@ -1140,7 +1140,7 @@ hu_error_t hu_world_find_paths(hu_world_model_t *model, int64_t from, int64_t to
     return HU_OK;
 }
 
-hu_error_t hu_world_record_accuracy(hu_world_model_t *model,
+hu_error_t hu_world_record_accuracy(hu_causal_world_model_t *model,
                                      const char *action, size_t action_len,
                                      const char *predicted, size_t predicted_len,
                                      const char *actual, size_t actual_len,
@@ -1193,7 +1193,7 @@ hu_error_t hu_world_record_accuracy(hu_world_model_t *model,
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
-hu_error_t hu_world_get_accuracy(hu_world_model_t *model,
+hu_error_t hu_world_get_accuracy(hu_causal_world_model_t *model,
                                   double *accuracy_out, size_t *sample_count) {
     if (!model || !model->db || !accuracy_out || !sample_count)
         return HU_ERR_INVALID_ARGUMENT;

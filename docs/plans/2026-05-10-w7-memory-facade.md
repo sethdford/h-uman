@@ -1,5 +1,5 @@
 ---
-title: "W7 — Memory Facade: hu_memory_t single read/write/erase surface"
+title: "W7 — Memory Facade: hu_memory_facade_t read/write/erase surface"
 created: 2026-05-10
 status: proposed
 parent: 2026-05-10-memory-v2-roadmap-overview.md
@@ -9,9 +9,13 @@ scope: include/human/memory/, src/memory/, every consumer of graph/persona/cross
 
 # W7 — Memory Facade
 
+**Implementation naming (Phase 0, 2026-05-10):** the dispatch type is `hu_memory_facade_t` with `hu_memory_facade_read` / `hu_memory_facade_write` / … in `include/human/memory/memory.h`. Legacy vector/chat memory remains `hu_memory_t` in `include/human/memory.h`. Design snippets below still show the pre-rename `hu_memory_*` spellings where not yet edited; treat them as pseudocode for the facade API.
+
+**Phase 1 bypass inventory:** [`2026-05-10-w7-phase1-bypass-inventory.md`](2026-05-10-w7-phase1-bypass-inventory.md).
+
 ## Goal
 
-Introduce one and only one read/write/erase surface for memory. Every consumer (planner, prompt builder, verifier, channels, daemon) goes through `hu_memory_t`. Every existing backend (graph, vector, persona deltas, cross_edges, cases, quarantine, neural memory) becomes a vtable implementation behind it. v2 cannot stay clean without this — every later workstream consumes memory and would otherwise reach into 7 different APIs.
+Introduce one and only one read/write/erase surface for structured memory kinds. Every consumer (planner, prompt builder, verifier, channels, daemon) goes through **`hu_memory_facade_t`**. Every existing backend (graph, vector, persona deltas, cross_edges, cases, quarantine, neural memory) becomes a vtable implementation behind it. v2 cannot stay clean without this — every later workstream consumes memory and would otherwise reach into 7 different APIs.
 
 ## Motivation
 

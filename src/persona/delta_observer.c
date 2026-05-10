@@ -1,6 +1,10 @@
 #include "human/persona/delta_observer.h"
 #include "human/persona/persona_deltas.h"
 
+#ifdef HU_ENABLE_LEARNING
+#include "human/ml/learner_bridge.h"
+#endif
+
 #include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -297,5 +301,53 @@ hu_error_t hu_persona_observe_user_correction(hu_graph_t *graph, const char *con
 
     if (out_proposed)
         *out_proposed = local_count;
+    return HU_OK;
+}
+
+hu_error_t hu_persona_observe_user_correction_with_learner(
+    hu_graph_t *graph, struct hu_learner *learner, const char *contact_id, size_t contact_id_len,
+    const char *channel, size_t channel_len, const char *msg, size_t msg_len, int64_t now_ms,
+    size_t *out_proposed) {
+    /* Step 1: run the standard observation. Same semantics as the original
+     * function — the graph receives delta proposals, *out_proposed counts
+     * matches, no signal-collection side effects yet. */
+    size_t observed = 0;
+    hu_error_t e = hu_persona_observe_user_correction(graph, contact_id, contact_id_len, channel,
+                                                      channel_len, msg, msg_len, now_ms, &observed);
+    if (out_proposed)
+        *out_proposed = observed;
+    if (e != HU_OK)
+        return e;
+
+    /* Step 2: emit signals to the learner if one is present. NULL learner
+     * is a clean no-op — callers wire this in unconditionally and the
+     * disabled-installation path stays free of branches. */
+    if (!learner || observed == 0)
+        return HU_OK;
+
+#if defined(HU_ENABLE_LEARNING) && defined(HU_ENABLE_SQLITE)
+    /* The just-proposed deltas are PENDING in the graph. Drain them and
+     * hand them to the bridge, which uses its watermark to ensure replays
+     * (e.g. the same message processed twice on retry) don't double-emit.
+     *
+     * The list is bounded to the most recent 64 deltas — the rate limiter
+     * in hu_persona_delta_propose caps a single call to far fewer than
+     * that, so we never miss anything in practice. */
+    hu_learner_t *l = learner;
+    hu_allocator_t *alloc = l->alloc;
+    if (!alloc)
+        return HU_OK;
+
+    hu_persona_delta_t *deltas = NULL;
+    size_t n = 0;
+    if (hu_persona_delta_list(graph, alloc, contact_id, contact_id_len, HU_DELTA_STATUS_PENDING, 64,
+                              &deltas, &n) != HU_OK)
+        return HU_OK;
+    if (n > 0)
+        (void)hu_learner_bridge_emit_persona_deltas(l, deltas, n);
+    hu_persona_delta_free(alloc, deltas, n);
+#else
+    (void)learner;
+#endif
     return HU_OK;
 }

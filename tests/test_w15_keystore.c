@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifdef HU_ENABLE_SQLITE
@@ -51,6 +53,50 @@ static void remove_salt(const char *user_id) {
     if (!dir) dir = "/tmp";
     snprintf(path, sizeof(path), "%s/%s.salt", dir, user_id);
     (void)remove(path);
+}
+
+/* Remove the KDF version flag file for `user_id`. The keystore writes
+ * this on first unlock to record whether the user's master key is
+ * derived via PBKDF2 (v0) or Argon2id (v1). Removing it lets a test
+ * force a fresh, deterministic algorithm choice on the next unlock. */
+static void remove_kdf_flag(const char *user_id) {
+    char path[256];
+    const char *dir = getenv("HU_KEYSTORE_DIR");
+    if (!dir) dir = "/tmp";
+    snprintf(path, sizeof(path), "%s/%s.kdf", dir, user_id);
+    (void)remove(path);
+}
+
+/* Write a KDF version byte for `user_id` BEFORE the keystore is opened.
+ * Used by the backward-compat test to force v0 (PBKDF2) under a
+ * libsodium-enabled build. */
+static void force_kdf_flag(const char *user_id, unsigned char version) {
+    char path[256];
+    const char *dir = getenv("HU_KEYSTORE_DIR");
+    if (!dir) dir = "/tmp";
+    /* Best-effort mkdir; ignore EEXIST. */
+    (void)mkdir(dir, 0700);
+    snprintf(path, sizeof(path), "%s/%s.kdf", dir, user_id);
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    (void)fwrite(&version, 1, 1, f);
+    fclose(f);
+}
+
+/* Read the persisted KDF version for `user_id`. Returns 0xFF if the
+ * file is absent or unreadable so callers can distinguish "not written"
+ * from a legitimate v0 (0x00) flag. */
+static unsigned char read_kdf_flag(const char *user_id) {
+    char path[256];
+    const char *dir = getenv("HU_KEYSTORE_DIR");
+    if (!dir) dir = "/tmp";
+    snprintf(path, sizeof(path), "%s/%s.kdf", dir, user_id);
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0xFF;
+    unsigned char v = 0xFF;
+    (void)fread(&v, 1, 1, f);
+    fclose(f);
+    return v;
 }
 
 /* ── keystore tests ─────────────────────────────────────────────────────── */
@@ -342,6 +388,171 @@ static void test_w15_destruction_removes_salt_makes_recovery_impossible(void) {
     remove_salt("user_destruct");
 }
 
+/* W15 libsodium upgrade — when HU_HAS_LIBSODIUM is compiled in, fresh
+ * keystores write XChaCha20-Poly1305 ciphertext with the v1 envelope:
+ * `[magic:0x01][nonce:24][ct:N][tag:16]`. The first byte of every
+ * encryption MUST be the magic byte. Without libsodium, the v0
+ * envelope (`[nonce:12][ct:N][hmac:32]`) has no magic byte and the
+ * test is skipped to avoid false failures on builds that haven't
+ * linked libsodium. */
+static void test_w15_v1_ciphertext_has_magic_byte_when_libsodium_enabled(void) {
+#if !defined(HU_HAS_LIBSODIUM)
+    /* No libsodium → v0 only → skip cleanly. */
+    return;
+#else
+    set_ks_dir();
+    remove_tombstone("user_v1magic");
+    remove_salt("user_v1magic");
+    remove_kdf_flag("user_v1magic");
+
+    hu_keystore_t *ks = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_v1magic", &ks), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks, "v1-passphrase", 13), HU_OK);
+
+    const char *pt = "v1 envelope";
+    void *ct = NULL;
+    size_t ct_len = 0;
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, strlen(pt), &ct, &ct_len),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(ct);
+    /* v1 overhead = 1 (magic) + 24 (nonce) + 16 (tag) = 41. */
+    HU_ASSERT_GT(ct_len, strlen(pt) + 40);
+    HU_ASSERT_EQ(((const unsigned char *)ct)[0], 0x01u);
+
+    /* Round-trip must still succeed. */
+    void *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_keystore_decrypt(ks, "entities", ct, ct_len, &out, &out_len),
+                 HU_OK);
+    HU_ASSERT_EQ(out_len, strlen(pt));
+    HU_ASSERT_EQ(memcmp(out, pt, out_len), 0);
+
+    A()->free(A()->ctx, out, out_len + 1);
+    A()->free(A()->ctx, ct, ct_len);
+    hu_keystore_close(ks, A());
+
+    /* The KDF flag MUST be persisted as v1 (Argon2id) so subsequent
+     * unlocks reproduce the same master key. */
+    HU_ASSERT_EQ(read_kdf_flag("user_v1magic"), 0x01u);
+
+    remove_kdf_flag("user_v1magic");
+    remove_salt("user_v1magic");
+#endif
+}
+
+/* W15 backward compat — a user whose master key was derived with v0
+ * PBKDF2 MUST keep decrypting their data under a libsodium-enabled
+ * binary. The KDF flag is independent of the AEAD envelope: under
+ * libsodium the envelope is always v1 (XChaCha20-Poly1305), but the
+ * master-key derivation honors the per-user KDF flag so existing
+ * data stays addressable. We force the flag to v0 before the first
+ * unlock, encrypt + close, then reopen with the same passphrase
+ * (must reproduce the same PBKDF2 master key) and decrypt. The flag
+ * is sticky across keystore close/reopen. */
+static void test_w15_v0_kdf_remains_decryptable_under_libsodium(void) {
+    set_ks_dir();
+    remove_tombstone("user_v0compat");
+    remove_salt("user_v0compat");
+    remove_kdf_flag("user_v0compat");
+
+    /* Pin the user to v0 BEFORE the first unlock. The keystore reads
+     * this flag in `kdf_passphrase` and chooses PBKDF2 accordingly. */
+    force_kdf_flag("user_v0compat", 0x00);
+
+    hu_keystore_t *ks = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_v0compat", &ks), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks, "legacy-pp", 9), HU_OK);
+
+    const char *pt = "legacy-kdf payload";
+    void *ct = NULL;
+    size_t ct_len = 0;
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, strlen(pt), &ct, &ct_len),
+                 HU_OK);
+
+    hu_keystore_close(ks, A());
+
+    /* Reopen with the same flag and passphrase — must reproduce the
+     * same master key (sticky v0 KDF) and decrypt the blob. */
+    hu_keystore_t *ks2 = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_v0compat", &ks2), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks2, "legacy-pp", 9), HU_OK);
+
+    void *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_keystore_decrypt(ks2, "entities", ct, ct_len, &out, &out_len),
+                 HU_OK);
+    HU_ASSERT_EQ(out_len, strlen(pt));
+    HU_ASSERT_EQ(memcmp(out, pt, out_len), 0);
+
+    /* Flag is still v0 after the second unlock — sticky KDF. */
+    HU_ASSERT_EQ(read_kdf_flag("user_v0compat"), 0x00u);
+
+    A()->free(A()->ctx, out, out_len + 1);
+    A()->free(A()->ctx, ct, ct_len);
+    hu_keystore_close(ks2, A());
+
+    remove_kdf_flag("user_v0compat");
+    remove_salt("user_v0compat");
+}
+
+/* W15 — the v1 AEAD path falls through to v0 decryption when a blob's
+ * leading byte happens to be 0x01 by coincidence. We cannot easily
+ * craft a colliding v0 blob in-process (it would require knowing the
+ * derived key), so this test instead exercises the negative path: a
+ * one-byte buffer of 0x01 fails clean (no SIGSEGV) with
+ * HU_ERR_CRYPTO_DECRYPT rather than crashing on the v1 length math. */
+static void test_w15_decrypt_handles_short_buffer_with_v1_magic(void) {
+    set_ks_dir();
+    remove_tombstone("user_short");
+    remove_salt("user_short");
+    remove_kdf_flag("user_short");
+
+    hu_keystore_t *ks = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_short", &ks), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks, "short-pp", 8), HU_OK);
+
+    /* A truncated buffer that starts with the v1 magic byte but is
+     * shorter than the v1 overhead AND shorter than the v0 minimum
+     * (12 nonce + 32 hmac = 44). Both paths must reject it cleanly. */
+    unsigned char tiny[3] = { 0x01, 0xAA, 0xBB };
+    void *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(
+        hu_keystore_decrypt(ks, "entities", tiny, sizeof(tiny), &out, &out_len),
+        HU_ERR_CRYPTO_DECRYPT);
+    HU_ASSERT_NULL(out);
+
+    hu_keystore_close(ks, A());
+    remove_salt("user_short");
+    remove_kdf_flag("user_short");
+}
+
+/* W15 destruction — destroying the master key MUST also remove the
+ * KDF version flag so a future unlock starts fresh and picks the
+ * strongest algorithm available on the host. */
+static void test_w15_destroy_removes_kdf_flag(void) {
+    set_ks_dir();
+    remove_tombstone("user_kdf_destroy");
+    remove_salt("user_kdf_destroy");
+    remove_kdf_flag("user_kdf_destroy");
+
+    hu_keystore_t *ks = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_kdf_destroy", &ks), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks, "destroy-me", 10), HU_OK);
+    hu_keystore_close(ks, A());
+
+    /* After the first unlock the flag must exist (some valid version). */
+    unsigned char v_before = read_kdf_flag("user_kdf_destroy");
+    HU_ASSERT(v_before == 0x00u || v_before == 0x01u);
+
+    HU_ASSERT_EQ(hu_keystore_destroy_master_key("user_kdf_destroy"), HU_OK);
+
+    /* The flag must be gone (along with the salt). */
+    HU_ASSERT_EQ(read_kdf_flag("user_kdf_destroy"), 0xFFu);
+
+    remove_tombstone("user_kdf_destroy");
+}
+
 static void test_w15_invalid_args_rejected(void) {
     set_ks_dir();
     hu_keystore_t *ks = NULL;
@@ -369,7 +580,7 @@ static void test_w15_audit_log_round_trip(void) {
     HU_ASSERT_NOT_NULL(log);
 
     /* Append three events with explicit timestamps so ordering is stable. */
-    hu_audit_event_t ev1 = {
+    hu_audit_log_event_t ev1 = {
         .operation   = HU_AUDIT_OP_WRITE,
         .kind        = HU_MEM_ENTITY,
         .target_id   = 42,
@@ -378,7 +589,7 @@ static void test_w15_audit_log_round_trip(void) {
         .summary     = "upsert entity",
         .contact_id  = "user_audit1",
     };
-    hu_audit_event_t ev2 = {
+    hu_audit_log_event_t ev2 = {
         .operation   = HU_AUDIT_OP_READ,
         .kind        = HU_MEM_RELATION,
         .target_id   = 7,
@@ -387,7 +598,7 @@ static void test_w15_audit_log_round_trip(void) {
         .summary     = "recall relation",
         .contact_id  = "user_audit1",
     };
-    hu_audit_event_t ev3 = {
+    hu_audit_log_event_t ev3 = {
         .operation   = HU_AUDIT_OP_ERASE,
         .kind        = HU_MEM_ENTITY,
         .target_id   = 42,
@@ -403,7 +614,7 @@ static void test_w15_audit_log_round_trip(void) {
     /* Query with no filters — should return all three in insertion order. */
     hu_audit_query_t q;
     memset(&q, 0, sizeof(q));
-    hu_audit_event_t *results = NULL;
+    hu_audit_log_event_t *results = NULL;
     size_t count = 0;
     HU_ASSERT_EQ(hu_audit_log_query(log, &q, A(), &results, &count), HU_OK);
     HU_ASSERT_EQ(count, (size_t)3);
@@ -422,7 +633,7 @@ static void test_w15_audit_log_round_trip(void) {
     HU_ASSERT_EQ(results[2].operation, HU_AUDIT_OP_ERASE);
     HU_ASSERT_NULL(results[2].summary);
 
-    hu_audit_events_free(A(), results, count);
+    hu_audit_log_events_free(A(), results, count);
     hu_audit_log_close(log, A());
 }
 
@@ -430,21 +641,21 @@ static void test_w15_audit_log_filter_by_actor(void) {
     hu_audit_log_t *log = NULL;
     HU_ASSERT_EQ(hu_audit_log_open(A(), NULL, "user_filter", &log), HU_OK);
 
-    hu_audit_event_t ev_agent = {
+    hu_audit_log_event_t ev_agent = {
         .operation   = HU_AUDIT_OP_WRITE,
         .kind        = HU_MEM_ENTITY,
         .actor       = "agent",
         .occurred_at = 100,
         .contact_id  = "user_filter",
     };
-    hu_audit_event_t ev_user = {
+    hu_audit_log_event_t ev_user = {
         .operation   = HU_AUDIT_OP_READ,
         .kind        = HU_MEM_RELATION,
         .actor       = "user",
         .occurred_at = 200,
         .contact_id  = "user_filter",
     };
-    hu_audit_event_t ev_agent2 = {
+    hu_audit_log_event_t ev_agent2 = {
         .operation   = HU_AUDIT_OP_ERASE,
         .kind        = HU_MEM_ENTITY,
         .actor       = "agent",
@@ -460,7 +671,7 @@ static void test_w15_audit_log_filter_by_actor(void) {
     memset(&q, 0, sizeof(q));
     q.actor = "agent";
 
-    hu_audit_event_t *results = NULL;
+    hu_audit_log_event_t *results = NULL;
     size_t count = 0;
     HU_ASSERT_EQ(hu_audit_log_query(log, &q, A(), &results, &count), HU_OK);
     HU_ASSERT_EQ(count, (size_t)2);
@@ -470,7 +681,7 @@ static void test_w15_audit_log_filter_by_actor(void) {
     HU_ASSERT_EQ(strcmp(results[1].actor, "agent"), 0);
     HU_ASSERT_EQ(results[1].operation, HU_AUDIT_OP_ERASE);
 
-    hu_audit_events_free(A(), results, count);
+    hu_audit_log_events_free(A(), results, count);
 
     /* Filter: only "user" events — expect exactly 1. */
     memset(&q, 0, sizeof(q));
@@ -480,7 +691,7 @@ static void test_w15_audit_log_filter_by_actor(void) {
     HU_ASSERT_EQ(strcmp(results[0].actor, "user"), 0);
     HU_ASSERT_EQ(results[0].operation, HU_AUDIT_OP_READ);
 
-    hu_audit_events_free(A(), results, count);
+    hu_audit_log_events_free(A(), results, count);
     hu_audit_log_close(log, A());
 }
 
@@ -490,12 +701,12 @@ static void test_w15_audit_log_empty_query_returns_zero(void) {
 
     hu_audit_query_t q;
     memset(&q, 0, sizeof(q));
-    hu_audit_event_t *results = NULL;
+    hu_audit_log_event_t *results = NULL;
     size_t count = 99;
     HU_ASSERT_EQ(hu_audit_log_query(log, &q, A(), &results, &count), HU_OK);
     HU_ASSERT_EQ(count, (size_t)0);
     /* results may be a zero-length allocation; free it properly. */
-    hu_audit_events_free(A(), results, count);
+    hu_audit_log_events_free(A(), results, count);
 
     hu_audit_log_close(log, A());
 }
@@ -509,7 +720,7 @@ static void test_w15_audit_log_invalid_args_rejected(void) {
     HU_ASSERT_EQ(hu_audit_log_append(NULL, NULL), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_audit_log_append(log,  NULL), HU_ERR_INVALID_ARGUMENT);
 
-    hu_audit_event_t *r = NULL;
+    hu_audit_log_event_t *r = NULL;
     size_t n = 0;
     HU_ASSERT_EQ(hu_audit_log_query(NULL, NULL, A(), &r, &n), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_audit_log_query(log,  NULL, A(), NULL, &n), HU_ERR_INVALID_ARGUMENT);
@@ -534,6 +745,10 @@ void run_w15_keystore_tests(void) {
     HU_RUN_TEST(test_w15_random_nonce_makes_ciphertext_unique);
     HU_RUN_TEST(test_w15_per_user_salt_separates_keys);
     HU_RUN_TEST(test_w15_destruction_removes_salt_makes_recovery_impossible);
+    HU_RUN_TEST(test_w15_v1_ciphertext_has_magic_byte_when_libsodium_enabled);
+    HU_RUN_TEST(test_w15_v0_kdf_remains_decryptable_under_libsodium);
+    HU_RUN_TEST(test_w15_decrypt_handles_short_buffer_with_v1_magic);
+    HU_RUN_TEST(test_w15_destroy_removes_kdf_flag);
     HU_RUN_TEST(test_w15_invalid_args_rejected);
     HU_RUN_TEST(test_w15_audit_log_round_trip);
     HU_RUN_TEST(test_w15_audit_log_filter_by_actor);

@@ -4,6 +4,8 @@ created: 2026-05-10
 status: proposed
 parent: 2026-05-10-memory-roadmap-overview.md
 related:
+  - 2026-05-10-memory-v2-execution-plan.md
+  - 2026-05-10-w7-phase1-bypass-inventory.md
   - 2026-05-10-w1-bitemporal-foundation.md
   - 2026-05-10-w2-background-consolidation.md
   - 2026-05-10-w3-multi-graph-topology.md
@@ -13,6 +15,8 @@ related:
 ---
 
 # Memory v2 Roadmap — Overview
+
+**Execution sequence and gates:** [`2026-05-10-memory-v2-execution-plan.md`](2026-05-10-memory-v2-execution-plan.md).
 
 ## Why this exists
 
@@ -57,7 +61,7 @@ v2 is a 7-layer stack. Every workstream extends exactly one layer through exactl
    ├──────────────────────────────────────────────────────────────────────┤
    │  Layer 2 — Belief Layer           [W8]    hu_belief_t                │
    ├──────────────────────────────────────────────────────────────────────┤
-   │  Layer 1 — Memory Facade          [W7]    hu_memory_t (unified)      │
+   │  Layer 1 — Memory Facade          [W7]    hu_memory_facade_t        │
    ├──────────────────────────────────────────────────────────────────────┤
    │  Layer 0 — v1 storage substrate                                      │
    │            graph + vector + persona + cross_edges + cases + deltas   │
@@ -78,7 +82,7 @@ Five concrete artifacts are owned by Layer 1–3 and consumed by every layer abo
 
 | Artifact | Owner | Consumers | Purpose |
 |----------|-------|-----------|---------|
-| `hu_memory_t` (unified facade) | W7 | W11, W12, W13, W14, W16 | One read/write surface that hides graph vs vector vs KV-cache vs activations |
+| `hu_memory_facade_t` (W7 dispatch facade) | W7 | W11, W12, W13, W14, W16 | One read/write/erase surface over kinds (graph, cases, deltas, …). Legacy chat/vector store remains `hu_memory_t` in `human/memory.h` (Phase 0 rename; see type-collision cleanup doc). |
 | `hu_belief_t` (posterior + provenance) | W8 | W7, W11, W14 | Replaces `float confidence` everywhere; carries (mean, variance, prov) |
 | `hu_world_model_t` (per-contact snapshot) | W9 | W11, W12, W13, W14 | Single struct: entities + beliefs + persona + emotion + goals + ToM + negatives |
 | `hu_self_rag_t` (verifier vtable) | W11 | response-path, W14 | Heuristic backend (W4-existing) + inline-LLM backend + future model-native |
@@ -103,13 +107,13 @@ Every other type already exists in v1 and is reused. Nothing in v2 introduces a 
 
 ### What each workstream does (one paragraph)
 
-**W7 — Memory facade.** Introduces `hu_memory_t` as the single entry point for read/write/erase. Implements `hu_memory_v1_backend_t` that wraps existing graph, vector store, persona deltas, cross_edges, cases, quarantine. Every existing call site (`src/agent/`, `src/persona/`, `src/feeds/`, channels) is migrated to go through the facade in one mechanical pass. Old direct calls become deprecated; tests catch new direct uses. The facade itself is dumb — it just dispatches; backends do the work. This is the foundation that lets later workstreams swap memory backends (KV-cache, activations, etc.) without rewriting consumers.
+**W7 — Memory facade.** Introduces `hu_memory_facade_t` (`hu_memory_facade_read` / `hu_memory_facade_write` / … in `human/memory/memory.h`) as the single entry point for structured memory kinds. Implements `hu_memory_v1_backend_t` that wraps existing graph, vector projections, persona deltas, cross_edges, cases, quarantine. Every existing call site (`src/agent/`, `src/persona/`, `src/feeds/`, channels) is migrated to go through the facade in phased passes (see Phase 1 inventory doc). The facade dispatches; backends do the work. This is the foundation that lets later workstreams swap memory backends (KV-cache, activations, etc.) without rewriting consumers.
 
 **W8 — Belief layer.** Replaces the raw `float confidence` field on every memory entry with `hu_belief_t { float mean; float variance; hu_provenance_t prov; }`. Adds Bayesian update primitives (`hu_belief_update`, `hu_belief_combine`) and a fast-path LLM-judge-backed semantic-conflict detector (`hu_belief_semantic_conflict`) that supersedes the v1 deterministic key-match resolver when paraphrase detection is needed. Also adds **hyperedges**: `hu_belief_hyperedge_t` lets the graph store n-ary facts ("Alice met Bob at Acme on Friday about funding") as a single edge. v1's binary edges are a special case.
 
 **W9 — World model.** A new struct `hu_world_model_t` per contact. Fields: entities snapshot, persona snapshot, emotional state, active goals, theory-of-mind sub-model (the user's beliefs about you), negative memory ("things I should not do or say"), recent topics. Built lazily, cached, invalidated on relevant writes. Replaces the four parallel calls (`hu_persona_load`, `hu_graph_neighbors`, `hu_emotion_state_load`, `hu_contact_get`) with one: `hu_world_model_load(graph, contact, &out)`. Every consumer (planner, prompt builder, verifier) reads from this single artifact going forward.
 
-**W10 — Neural memory tier.** Extends `hu_memory_t` with two new entry kinds: **KV-cache memory** (compressed activations for past prompts, retrievable by prompt-prefix hash) and **reasoning-trace memory** (chain-of-thought for past plans, retrievable by goal+anchor). Adds joined storage of (entity, embedding, KV-blob) co-resident in SQLite via a separate `neural_memory` table. Multimodal entries (image / voice / video bytes) get a generic `hu_memory_blob_t` cell. Cleanup falls under W14's sleep scheduler. KV-blobs are model-version-tagged so a model upgrade invalidates the right rows automatically.
+**W10 — Neural memory tier.** Extends the W7 facade (`hu_memory_facade_t`) with two new entry kinds: **KV-cache memory** (compressed activations for past prompts, retrievable by prompt-prefix hash) and **reasoning-trace memory** (chain-of-thought for past plans, retrievable by goal+anchor). Adds joined storage of (entity, embedding, KV-blob) co-resident in SQLite via a separate `neural_memory` table. Multimodal entries (image / voice / video bytes) get a generic `hu_memory_blob_t` cell. Cleanup falls under W14's sleep scheduler. KV-blobs are model-version-tagged so a model upgrade invalidates the right rows automatically.
 
 **W11 — Inline Self-RAG with abstention.** The big one for trust. New `hu_self_rag_t` vtable replaces v1's heuristic verifier (which becomes the fallback backend). New backends: an **inline backend** that interleaves `<retrieve>`/`<critique>`/`<refuse>` control tokens during generation; an **atomic-claim decomposition backend** that splits a draft sentence into noun-phrase atomic claims and verifies each. Adds an explicit **refusal head**: when no claim crosses the threshold, the model returns `HU_VERIFY_ABSTAIN` and the channel layer renders "I don't have enough memory to say." The provider layer learns one new chat call: `hu_provider_chat_with_self_rag`.
 
@@ -151,7 +155,7 @@ Inherited from v1's roadmap, with two additions:
 - **One concern per branch.** No mixed feature + refactor + infra. (`AGENTS.md` §6)
 - **Vtable discipline.** v2 introduces exactly five new vtables (memory facade, learner, scheduler, self-RAG, eval). Every other addition extends an existing struct.
 - **HU_IS_TEST guards on side effects.** Subagents must be scriptable in tests without spawning real processes.
-- **Binary size budget.** v1 added ~430 KB (1.75 MB → 2.18 MB). v2 budget is +500 KB (target ≤ 2.7 MB MinSizeRel+LTO). W10 KV-cache and W13 LoRA are gated behind `HU_ENABLE_NEURAL_MEMORY` and `HU_ENABLE_LEARNING` respectively.
+- **Binary size budget.** v1 added ~430 KB (1.75 MB → 2.18 MB). v2 budget is +500 KB (target ≤ 2.7 MB MinSizeRel+LTO). W13 LoRA is gated behind the existing `HU_ENABLE_LEARNING` CMake option. W10 KV-cache will be gated behind `HU_ENABLE_NEURAL_MEMORY` *(planned — not yet defined as a CMake option since W10 implementation has not landed)*.
 - **Zero ASan errors.** Every allocation freed; `SQLITE_STATIC` only.
 - **Conventional commits.** Pre-commit hooks already enforce.
 - **Test discipline.** Each workstream lands ≥1 boundary/failure-mode test per new public function. The W6-style E2E adversarial suite gets one new scenario per workstream (W17 of the existing eval suite, not a new file).
@@ -165,7 +169,7 @@ v2 introduces three schema changes:
 
 - **W7** — adds a `memory_facade_routes` table that maps logical entry kinds to backend names. Pure metadata; old DBs auto-populated with `v1_backend` for every kind.
 - **W8** — promotes every `confidence REAL` column to a paired `(confidence_mean REAL, confidence_variance REAL)`; old rows get variance = 0 (deterministic). Hyperedges live in a new `hyperedges` + `hyperedge_members` pair.
-- **W10** — adds `neural_memory(blob, kind, model_version, prompt_hash, created_at)` and `kv_cache(prompt_hash, model_version, blob)`. Both gated behind `HU_ENABLE_NEURAL_MEMORY`.
+- **W10** — adds `neural_memory(blob, kind, model_version, prompt_hash, created_at)` and `kv_cache(prompt_hash, model_version, blob)`. Both will be gated behind `HU_ENABLE_NEURAL_MEMORY` once the option is added (W10 implementation has not landed; macro is reserved naming, not yet defined).
 
 All three follow v1's pattern: idempotent ALTERs, schema-version bump, refuse-to-open on mismatch, round-trip test per migration.
 

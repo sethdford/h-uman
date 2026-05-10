@@ -35,9 +35,11 @@
 extern "C" {
 #endif
 
-/* Forward decl — keeps memory.h optional for callers that only consume the
- * vtable. The signal builders below dereference it. */
-typedef struct hu_memory hu_memory_t;
+/* Forward decl — W7 graph-backed memory facade (`human/memory/memory.h`).
+ * Distinct from legacy `hu_memory_t` in `human/memory.h` (Phase 0).
+ * Incomplete `struct hu_memory_facade` only — do not duplicate the typedef
+ * from memory/memory.h here. */
+struct hu_memory_facade;
 
 typedef enum hu_training_signal_kind {
     HU_TRAIN_DPO_PAIR = 0,        /* (preferred, dispreferred) — from W4 flags */
@@ -76,8 +78,18 @@ typedef struct hu_learner_config {
     int max_steps;                /* default 200 */
     float learning_rate;          /* default 1e-4 */
     int batch_size;               /* default 4 */
-    bool dp_enabled;              /* W15: DP-SGD */
-    float dp_epsilon;             /* W15: privacy budget; > 0 required if dp_enabled */
+    bool dp_enabled;              /* W15: DP-SGD — all backends (mlx, ggml, cpu) MUST
+                                   * honor this flag. When true, gradient updates are
+                                   * clipped per-sample and Gaussian noise is added
+                                   * before the optimizer step. The privacy accountant
+                                   * tracks cumulative (epsilon, delta) and aborts
+                                   * training when the budget is exhausted. */
+    float dp_epsilon;             /* W15: privacy budget; > 0 required if dp_enabled.
+                                   * Recommended range: 1.0–10.0. Lower values give
+                                   * stronger privacy but slower convergence. The CPU
+                                   * backend enforces this; MLX/ggml backends MUST
+                                   * also implement DP-SGD clipping + noise when this
+                                   * flag is set. */
     int64_t budget_ms;            /* total wall budget; 0 = short-circuit */
     uint64_t seed;                /* seeds the backend PRNG; 0 → default */
 } hu_learner_config_t;
@@ -107,7 +119,24 @@ typedef struct hu_learner {
     const hu_learner_vtable_t *vt;
     void *ctx;
     hu_allocator_t *alloc;
+    /* W13 wire-up (learner_bridge.c): pending signals queued by signal-source
+     * adapters between training cycles. The W14 sleep scheduler drains this
+     * via hu_learner_pending_drain() and feeds it to vt->train. NULL until
+     * the first emit; capacity grows up to HU_LEARNER_PENDING_MAX. */
+    struct hu_training_signal *pending;
+    size_t pending_count;
+    size_t pending_cap;
+    /* Idempotency watermarks: the bridge drops anything with id/ts at or
+     * below these values, so replaying the same source produces no extra
+     * signals. 0 means "no signals consumed yet". */
+    int64_t pending_persona_delta_id_high;
+    int64_t pending_outcome_ts_high;
 } hu_learner_t;
+
+/* Hard cap on the per-learner pending buffer. Once full, new signals are
+ * dropped on the floor and the watermark still advances — this prevents
+ * unbounded growth when the scheduler is offline for a long time. */
+#define HU_LEARNER_PENDING_MAX 128
 
 /* Constructors. `hu_learner_open_default` picks the best available backend
  * (mlx → ggml → cpu) and never returns HU_ERR_NOT_SUPPORTED — the CPU
@@ -128,7 +157,7 @@ void hu_learner_close(hu_learner_t *l);
 /* ──────────────────────────────────────────────────────────────────────────
  * Convenience signal builders.
  *
- * Each function reads a v1 store via `hu_memory_t`'s underlying graph and
+ * Each function reads a v1 store via the facade's underlying graph and
  * emits a freshly-allocated signal array. The reads are PURE — calling a
  * builder twice returns the same set of signals (idempotent). Real
  * consumers must track their own watermark (e.g. by `observed_at`) to avoid
@@ -141,19 +170,19 @@ void hu_learner_close(hu_learner_t *l);
  * persona deltas (the v1 capture point for "the agent suggested X but the
  * verifier rejected it"). preferred = "" (the absence), dispreferred =
  * delta.value. Future revisions will read a dedicated flag log. */
-hu_error_t hu_learner_signals_from_verifier_flags(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_verifier_flags(struct hu_memory_facade *m, hu_allocator_t *alloc,
                                                   const char *contact_id, size_t cid_len,
                                                   hu_training_signal_t **out, size_t *out_count);
 
 /* W5 applied persona deltas → positive style adaptation signals. */
-hu_error_t hu_learner_signals_from_persona_deltas(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_persona_deltas(struct hu_memory_facade *m, hu_allocator_t *alloc,
                                                   const char *contact_id, size_t cid_len,
                                                   hu_training_signal_t **out, size_t *out_count);
 
 /* W3 case outcomes → reward signal. Reward is derived from the outcome
  * string ("ok"/"good"/"success" → 1.0, "bad"/"pushed back"/"failed" → 0.0,
  * everything else → 0.5). */
-hu_error_t hu_learner_signals_from_case_outcomes(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_case_outcomes(struct hu_memory_facade *m, hu_allocator_t *alloc,
                                                  const char *contact_id, size_t cid_len,
                                                  hu_training_signal_t **out, size_t *out_count);
 

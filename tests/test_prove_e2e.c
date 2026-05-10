@@ -32,9 +32,9 @@ static void test_prove_world_model_loop_closes(void) {
     sqlite3 *db = NULL;
     HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
 
-    hu_world_model_t wm;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &wm), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&wm), HU_OK);
+    hu_causal_world_model_t wm;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&wm), HU_OK);
 
     /* Record 3 tool outcomes */
     HU_ASSERT_EQ(
@@ -58,7 +58,7 @@ static void test_prove_world_model_loop_closes(void) {
     HU_ASSERT_EQ(hu_world_simulate(&wm, S("web_search"), NULL, 0, &pred2), HU_OK);
     HU_ASSERT(pred2.outcome_len > 0);
 
-    hu_world_model_deinit(&wm);
+    hu_causal_world_model_deinit(&wm);
     sqlite3_close(db);
     fprintf(stderr, "  [PROVE] World model: record→simulate CLOSED\n");
 }

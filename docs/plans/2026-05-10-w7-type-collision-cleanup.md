@@ -1,6 +1,6 @@
 ---
 title: W7 type collision cleanup
-status: deferred (workaround in production)
+status: resolved (Option A — facade rename landed 2026-05-10)
 owner: memory subsystem
 created: 2026-05-10
 ---
@@ -95,10 +95,13 @@ expose. This is a multi-month migration that has to land in lockstep with
 W7 backend work for embedded, vector, and session state.
 **Estimated effort:** 2-3 months.
 
-# Decision
+# Decision (2026-05-10 update)
 
-Stay with the bridge workaround (FIX 2 / FIX 12 pattern). When v2 is the
-primary surface for new features, revisit Option A.
+**Option A implemented:** W7 public surface is `hu_memory_facade_t` and
+`hu_memory_facade_*` APIs in `include/human/memory/memory.h`. Legacy vector
+store remains `hu_memory_t` in `include/human/memory.h` (unconditional typedef).
+The FIX 12 bridge (`world_model_bridge`) remains for header isolation and
+daemon wiring, not for typedef survival.
 
 # Migration triggers
 

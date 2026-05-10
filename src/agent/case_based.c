@@ -94,14 +94,15 @@ static int parse_anchor_string(hu_allocator_t *alloc, const char *s, int64_t **o
     return 0;
 }
 
-hu_error_t hu_case_record(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+hu_error_t hu_case_record(hu_memory_facade_t *m, const char *contact_id, size_t contact_id_len,
                           const char *goal_verb, size_t goal_verb_len,
                           const int64_t *anchor_entity_ids, size_t anchor_count,
                           const char *plan_text, size_t plan_text_len, const char *outcome,
                           size_t outcome_len, int64_t happened_at, int64_t *out_id) {
-    if (!g || !goal_verb || goal_verb_len == 0)
+    if (!m || !goal_verb || goal_verb_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
+    struct sqlite3 *db = g ? hu_graph__db_handle(g) : NULL;
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_schema(db) != HU_OK)
@@ -164,15 +165,16 @@ static float score_case(const int64_t *q_anchors, size_t q_n, const int64_t *r_a
     return 0.7f * ov + 0.3f * rec;
 }
 
-hu_error_t hu_case_recall(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_case_recall(hu_memory_facade_t *m, hu_allocator_t *alloc, const char *contact_id,
                           size_t contact_id_len, const char *goal_verb, size_t goal_verb_len,
                           const int64_t *anchor_entity_ids, size_t anchor_count, int64_t now_ms,
                           size_t top_k, hu_case_record_t **out, size_t *out_count) {
-    if (!g || !alloc || !goal_verb || !out || !out_count || top_k == 0)
+    if (!m || !alloc || !goal_verb || !out || !out_count || top_k == 0)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_count = 0;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
+    struct sqlite3 *db = g ? hu_graph__db_handle(g) : NULL;
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_schema(db) != HU_OK)
@@ -302,12 +304,12 @@ void hu_case_records_free(hu_allocator_t *alloc, hu_case_record_t *records, size
 
 #else /* !HU_ENABLE_SQLITE */
 
-hu_error_t hu_case_record(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+hu_error_t hu_case_record(hu_memory_facade_t *m, const char *contact_id, size_t contact_id_len,
                           const char *goal_verb, size_t goal_verb_len,
                           const int64_t *anchor_entity_ids, size_t anchor_count,
                           const char *plan_text, size_t plan_text_len, const char *outcome,
                           size_t outcome_len, int64_t happened_at, int64_t *out_id) {
-    (void)g;
+    (void)m;
     (void)contact_id;
     (void)contact_id_len;
     (void)goal_verb;
@@ -323,11 +325,11 @@ hu_error_t hu_case_record(hu_graph_t *g, const char *contact_id, size_t contact_
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_case_recall(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_case_recall(hu_memory_facade_t *m, hu_allocator_t *alloc, const char *contact_id,
                           size_t contact_id_len, const char *goal_verb, size_t goal_verb_len,
                           const int64_t *anchor_entity_ids, size_t anchor_count, int64_t now_ms,
                           size_t top_k, hu_case_record_t **out, size_t *out_count) {
-    (void)g;
+    (void)m;
     (void)alloc;
     (void)contact_id;
     (void)contact_id_len;

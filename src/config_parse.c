@@ -284,6 +284,10 @@ static hu_error_t parse_memory(hu_allocator_t *a, hu_config_t *cfg, const hu_jso
     if (max_ent >= 0 && max_ent <= 1000000)
         cfg->memory.max_entries = (uint32_t)max_ent;
     cfg->memory.auto_save = hu_json_get_bool(obj, "auto_save", cfg->memory.auto_save);
+    /* W15 envelope encryption opt-in. Default stays false unless the
+     * user explicitly sets memory.encrypt_at_rest = true. */
+    cfg->memory.encrypt_at_rest =
+        hu_json_get_bool(obj, "encrypt_at_rest", cfg->memory.encrypt_at_rest);
     double cih = hu_json_get_number(obj, "consolidation_interval_hours",
                                     cfg->memory.consolidation_interval_hours);
     if (cih >= 0 && cih <= 8760)

@@ -68,14 +68,14 @@ static hu_error_t ensure_counterfactual_schema(struct sqlite3 *db) {
     return HU_OK;
 }
 
-hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                               int64_t budget_ms, void *user_data) {
     (void)spec;
     (void)budget_ms;
     (void)user_data;
     if (!m)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_OK;
     struct sqlite3 *db = hu_graph__db_handle(g);
@@ -171,7 +171,7 @@ hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_t *m, const hu_job_spec_
 
 #else /* !HU_ENABLE_SQLITE */
 
-hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                               int64_t budget_ms, void *user_data) {
     (void)m;
     (void)spec;

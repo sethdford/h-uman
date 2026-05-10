@@ -3,6 +3,14 @@
 #include "human/core/string.h"
 #include "human/memory/conflict_resolver.h"
 #include "human/memory/consolidation.h"
+
+/* P2 #7 — write→invalidate hook. We forward-declare the W9 invalidate
+ * function instead of including world_model.h to avoid the agent/memory
+ * header cycle. The function lives in src/agent/world_model.c and is
+ * always linked (it's part of human_core). When the world-model cache
+ * has no slot for this contact, the call is a 1-line array scan; cost
+ * is negligible. */
+extern void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
 #include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -138,6 +146,18 @@ static const char *const MIGRATION[] = {
     "ALTER TABLE entities ADD COLUMN provenance TEXT",
     "UPDATE relations SET event_start = first_seen WHERE event_start = 0",
     "UPDATE entities SET event_start = first_seen WHERE event_start = 0",
+    /* W8 P2A — promote scalar confidence to a (mean, variance) Bayesian
+     * posterior. Old rows get variance = 0 (the deterministic-truth
+     * default), and confidence_mean is back-filled from the existing
+     * confidence column. New writes populate both columns; legacy
+     * readers that look only at `confidence` keep working because we
+     * keep that column in sync (UPDATE below + write paths). */
+    "ALTER TABLE relations ADD COLUMN confidence_mean REAL NOT NULL DEFAULT 1.0",
+    "ALTER TABLE relations ADD COLUMN confidence_variance REAL NOT NULL DEFAULT 0.0",
+    "UPDATE relations SET confidence_mean = confidence WHERE confidence_mean = 1.0 AND confidence != 1.0",
+    "ALTER TABLE entities ADD COLUMN confidence_mean REAL NOT NULL DEFAULT 1.0",
+    "ALTER TABLE entities ADD COLUMN confidence_variance REAL NOT NULL DEFAULT 0.0",
+    "UPDATE entities SET confidence_mean = confidence WHERE confidence_mean = 1.0 AND confidence != 1.0",
     "CREATE INDEX IF NOT EXISTS idx_entities_contact ON entities(contact_id, name)",
     "CREATE INDEX IF NOT EXISTS idx_relations_contact ON relations(contact_id)",
     "CREATE INDEX IF NOT EXISTS idx_temporal_events_contact ON temporal_events(contact_id)",
@@ -312,6 +332,8 @@ hu_error_t hu_graph_upsert_entity(hu_graph_t *g, const char *contact_id, size_t 
             return HU_ERR_MEMORY_BACKEND;
         }
         *out_id = new_id;
+        /* P2 #7 — new entity → world-model cache for this contact is stale. */
+        hu_world_model_invalidate(cid, (size_t)cid_len);
         return HU_OK;
     }
     if (rc != SQLITE_CONSTRAINT) {
@@ -462,14 +484,18 @@ hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_
     /* Legacy upsert: bitemporal columns get sane defaults (event_start = ts,
      * event_end = 0 = "still true", confidence = 1.0, no provenance). New
      * callers should prefer hu_graph_upsert_relation_ex which goes through the
-     * conflict resolver. ON CONFLICT keeps backward semantics for legacy paths. */
-    const char *sql = "INSERT INTO relations (contact_id, source_id, target_id, relation_type,"
-                      " weight, first_seen, last_seen, context, event_start, event_end,"
-                      " confidence, supersedes_id, provenance)"
-                      " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0, NULL) "
-                      "ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET "
-                      "weight = (weight + excluded.weight) / 2.0, last_seen = excluded.last_seen, "
-                      "context = excluded.context";
+     * conflict resolver. ON CONFLICT keeps backward semantics for legacy paths.
+     * W8: writes confidence_mean/confidence_variance explicitly to stay in
+     * sync with the scalar confidence column. */
+    const char *sql =
+        "INSERT INTO relations (contact_id, source_id, target_id, relation_type,"
+        " weight, first_seen, last_seen, context, event_start, event_end,"
+        " confidence, supersedes_id, provenance,"
+        " confidence_mean, confidence_variance)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0, NULL, 1.0, 0.0) "
+        "ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET "
+        "weight = (weight + excluded.weight) / 2.0, last_seen = excluded.last_seen, "
+        "context = excluded.context";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -569,12 +595,15 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
     /* INSERT the proposed row. Always a fresh row — the resolver may close the
      * prior afterwards. We don't use ON CONFLICT here: bitemporal history
      * requires multiple rows, so we want a new id even if (source,target,type)
-     * already exists. */
+     * already exists. W8 P2A: also seed confidence_mean = confidence (variance
+     * = 0 by default per migration); upserts that want a non-zero variance
+     * should call hu_graph_set_relation_belief after upsert. */
     sqlite3_stmt *ins = NULL;
     const char *ins_sql =
         "INSERT INTO relations (contact_id, source_id, target_id, relation_type, weight,"
         " first_seen, last_seen, context, event_start, event_end, confidence, supersedes_id,"
-        " provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)";
+        " provenance, confidence_mean, confidence_variance)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0.0)";
     int rc = sqlite3_prepare_v2(g->db, ins_sql, -1, &ins, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
@@ -597,6 +626,7 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
         sqlite3_bind_text(ins, 12, provenance, (int)provenance_len, SQLITE_STATIC);
     else
         sqlite3_bind_null(ins, 12);
+    sqlite3_bind_double(ins, 13, (double)confidence);
 
     rc = sqlite3_step(ins);
     int64_t proposed_id = (rc == SQLITE_DONE) ? sqlite3_last_insert_rowid(g->db) : 0;
@@ -612,6 +642,10 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
             return apply_rc;
     }
 
+    /* P2 #7 — invalidate the W9 world-model cache for this contact.
+     * Wildcard invalidation (NULL contact_id) is also wired so global
+     * facts invalidate every cached slot. */
+    hu_world_model_invalidate(cid, (size_t)cid_len);
     return HU_OK;
 }
 
@@ -1517,6 +1551,101 @@ void hu_graph_relations_free(hu_allocator_t *alloc, hu_graph_relation_t *relatio
             alloc->free(alloc->ctx, relations[i].provenance, relations[i].provenance_len + 1);
     }
     alloc->free(alloc->ctx, relations, count * sizeof(hu_graph_relation_t));
+}
+
+hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
+                                            float confidence, int64_t last_seen_now_ms) {
+    if (!g || !g->db)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (relation_id <= 0)
+        return HU_OK;
+    if (confidence < 0.0f) confidence = 0.0f;
+    if (confidence > 1.0f) confidence = 1.0f;
+    sqlite3_stmt *stmt = NULL;
+    /* W8 P2A — keep the legacy `confidence` column in sync with the
+     * new `confidence_mean`. Variance is intentionally NOT touched
+     * here: callers who do a Bayesian update should use
+     * hu_graph_set_relation_belief() (added below) to write the full
+     * posterior. The scalar setter assumes "deterministic update",
+     * which is variance = 0. */
+    const char *sql =
+        "UPDATE relations SET confidence = ?, confidence_mean = ?, "
+        "confidence_variance = 0.0, last_seen = "
+        "CASE WHEN ? > 0 THEN ? ELSE last_seen END WHERE id = ?";
+    int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_double(stmt, 1, (double)confidence);
+    sqlite3_bind_double(stmt, 2, (double)confidence);
+    sqlite3_bind_int64(stmt, 3, last_seen_now_ms);
+    sqlite3_bind_int64(stmt, 4, last_seen_now_ms);
+    sqlite3_bind_int64(stmt, 5, relation_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+    /* P2 #7 — confidence change is a write; invalidate any cached
+     * world-model that depends on this relation. We don't have the
+     * contact_id at this granularity (it's an indexed by relation_id),
+     * so wildcard-invalidate. The cache is small (HU_WM_CACHE_SLOTS),
+     * the cost of dropping all slots is bounded. */
+    hu_world_model_invalidate(NULL, 0);
+    return HU_OK;
+}
+
+hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id,
+                                        float mean, float variance,
+                                        int64_t last_seen_now_ms) {
+    if (!g || !g->db)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (relation_id <= 0)
+        return HU_OK;
+    if (mean < 0.0f) mean = 0.0f;
+    if (mean > 1.0f) mean = 1.0f;
+    if (variance < 0.0f) variance = 0.0f;
+    if (variance > 0.25f) variance = 0.25f;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "UPDATE relations SET confidence = ?, confidence_mean = ?, "
+        "confidence_variance = ?, last_seen = "
+        "CASE WHEN ? > 0 THEN ? ELSE last_seen END WHERE id = ?";
+    int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_double(stmt, 1, (double)mean);
+    sqlite3_bind_double(stmt, 2, (double)mean);
+    sqlite3_bind_double(stmt, 3, (double)variance);
+    sqlite3_bind_int64(stmt, 4, last_seen_now_ms);
+    sqlite3_bind_int64(stmt, 5, last_seen_now_ms);
+    sqlite3_bind_int64(stmt, 6, relation_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+    hu_world_model_invalidate(NULL, 0);
+    return HU_OK;
+}
+
+hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id,
+                                        float *out_mean, float *out_variance) {
+    if (!g || !g->db || relation_id <= 0 || (!out_mean && !out_variance))
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(
+        g->db, "SELECT confidence_mean, confidence_variance FROM relations WHERE id = ?",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int64(stmt, 1, relation_id);
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        if (out_mean)     *out_mean     = (float)sqlite3_column_double(stmt, 0);
+        if (out_variance) *out_variance = (float)sqlite3_column_double(stmt, 1);
+        sqlite3_finalize(stmt);
+        return HU_OK;
+    }
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE ? HU_ERR_NOT_FOUND : HU_ERR_IO;
 }
 
 hu_entity_type_t hu_entity_type_from_string(const char *s, size_t len) {

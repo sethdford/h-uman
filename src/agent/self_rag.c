@@ -8,7 +8,7 @@
  * KISS notes:
  *   - The response is a fixed-size struct; no heap allocations are owned by
  *     the response itself. Backends use stack/temporary buffers internally.
- *   - The heuristic backend stores only `hu_memory_t *`. The graph handle
+ *   - The heuristic backend stores only `hu_memory_facade_t *`. The graph handle
  *     is fetched on each call; this matches W9/W10 patterns and avoids
  *     storing pointers that might be invalidated by the facade between
  *     verify() calls.
@@ -41,6 +41,9 @@ void hu_self_rag_render_refusal(hu_refusal_reason_t reason, char *buf, size_t ca
         break;
     case HU_REFUSAL_NEGATIVE_MEMORY_MATCH:
         s = "Based on what I know, I'd rather not weigh in here.";
+        break;
+    case HU_REFUSAL_LOW_CONFIDENCE:
+        s = "I don't have enough memory to confirm this.";
         break;
     case HU_REFUSAL_UNKNOWN_FACT:
     default:
@@ -77,7 +80,7 @@ void hu_self_rag_close(hu_self_rag_t *r) {
  * default until a provider opts in to inline mode. */
 
 typedef struct heuristic_ctx {
-    hu_memory_t *m;
+    hu_memory_facade_t *m;
 } heuristic_ctx_t;
 
 /* Map a verifier_claim's score into a W8 belief posterior. We treat the
@@ -125,11 +128,9 @@ static hu_error_t heuristic_verify(void *vctx, hu_allocator_t *alloc,
                    : HU_VERIFY_STRICT;
     cfg.now_ms = req->now_ms;
 
-    hu_graph_t *g = hu_memory_graph_handle(ctx->m);
-
     hu_verifier_report_t report;
     memset(&report, 0, sizeof(report));
-    hu_error_t err = hu_response_verify(alloc, g, req->contact_id,
+    hu_error_t err = hu_response_verify(alloc, ctx->m, req->contact_id,
                                          req->contact_id_len, req->draft,
                                          req->draft_len, &cfg, &report);
     if (err != HU_OK)
@@ -194,7 +195,80 @@ static hu_self_rag_vtable_t heuristic_vt = {
     .deinit = heuristic_deinit,
 };
 
-hu_error_t hu_self_rag_heuristic(hu_memory_t *m, hu_self_rag_t *out) {
+/* ── Provider self-RAG wrapper ────────────────────────────────────────────
+ * Calls the normal chat path and post-processes via the inline backend.
+ * A real inline-control-token path requires the provider to emit
+ * <retrieve>/<critique>/<refuse> tokens mid-stream; this stub is the
+ * deterministic fallback that parses the same protocol from a completed
+ * response. */
+
+hu_error_t hu_provider_chat_with_self_rag(hu_provider_t *provider,
+                                          hu_allocator_t *alloc,
+                                          const hu_chat_request_t *request,
+                                          const char *model, size_t model_len,
+                                          double temperature,
+                                          hu_memory_facade_t *memory,
+                                          hu_chat_response_t *out,
+                                          int *out_verified) {
+    if (out_verified)
+        *out_verified = 0;
+    if (!provider || !provider->vtable || !provider->vtable->chat ||
+        !alloc || !request || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_error_t err = provider->vtable->chat(provider->ctx, alloc, request,
+                                             model, model_len, temperature,
+                                             out);
+    if (err != HU_OK)
+        return err;
+
+    if (!memory || !out->content || out->content_len == 0)
+        return HU_OK;
+
+    hu_self_rag_t r = {0};
+    err = hu_self_rag_inline(memory, NULL, &r);
+    if (err != HU_OK)
+        return HU_OK; /* verification failed; return the raw response */
+
+    hu_self_rag_request_t vreq;
+    memset(&vreq, 0, sizeof(vreq));
+    vreq.draft = out->content;
+    vreq.draft_len = out->content_len;
+    vreq.mode = HU_VERIFY_INLINE;
+    vreq.abstain_threshold = 0.3f;
+
+    hu_self_rag_response_t vresp;
+    memset(&vresp, 0, sizeof(vresp));
+    err = hu_self_rag_verify(&r, alloc, &vreq, &vresp);
+    if (err != HU_OK) {
+        hu_self_rag_close(&r);
+        return HU_OK; /* verification failed; return the raw response */
+    }
+
+    if (out_verified)
+        *out_verified = (int)vresp.outcome;
+
+    if (vresp.draft_modified && vresp.modified_draft[0] != '\0') {
+        size_t new_len = strnlen(vresp.modified_draft,
+                                  sizeof(vresp.modified_draft));
+        char *new_content = (char *)alloc->alloc(alloc->ctx, new_len + 1);
+        if (new_content) {
+            memcpy(new_content, vresp.modified_draft, new_len);
+            new_content[new_len] = '\0';
+            /* Free the original content and replace. */
+            if (out->content)
+                alloc->free(alloc->ctx, (void *)out->content,
+                            out->content_len + 1);
+            out->content = new_content;
+            out->content_len = new_len;
+        }
+    }
+
+    hu_self_rag_close(&r);
+    return HU_OK;
+}
+
+hu_error_t hu_self_rag_heuristic(hu_memory_facade_t *m, hu_self_rag_t *out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
     heuristic_ctx_t *ctx = (heuristic_ctx_t *)calloc(1, sizeof(*ctx));

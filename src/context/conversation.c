@@ -3658,6 +3658,13 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
                          "Respond to the most important thing only.\n");
             POS_ADVANCE(w, pos, cap);
         }
+        /* Brief-style caps: reinforce single-thread answer when they packed several ideas in. */
+        if (max_chars <= 90 && sentence_ends >= 2) {
+            w = snprintf(buf + pos, cap - pos,
+                         "You have a very tight reply budget and they raised several threads — "
+                         "answer only the single most important one.\n");
+            POS_ADVANCE(w, pos, cap);
+        }
     }
 
     /* Generic guidance (data-driven, not prescriptive) */
@@ -6585,6 +6592,9 @@ size_t hu_conversation_strip_channel_tags(char *buf, size_t len) {
         size_t len;
     } standalone[] = {
         {"</s>", 4},   {"<s>", 3},       {"<|endoftext|>", 14},
+        {"<|im_start|>", 12},
+        /* Split literal so "\\r" in "redacted\\r..." is not parsed as a carriage return. */
+        {"<|redacted" "_im_end|>", 19},
         {"[INST]", 6}, {"[/INST]", 7},   {"<<SYS>>", 7},
         {"<</SYS>>", 8},
     };

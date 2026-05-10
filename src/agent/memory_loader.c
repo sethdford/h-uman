@@ -1,5 +1,8 @@
 #include "human/agent/memory_loader.h"
+#include "human/agent/world_model_bridge.h"
+#include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory/retrieval/adaptive.h"
 #include <string.h>
@@ -39,6 +42,7 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
     loader->retrieval_engine = retrieval_engine;
     loader->max_entries = max_entries ? max_entries : 10;
     loader->max_context_chars = max_context_chars ? max_context_chars : 4000;
+    loader->facade = NULL;
     return HU_OK;
 }
 
@@ -94,12 +98,27 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
             .use_reranking = false,
             .temporal_decay_factor = 0.0,
         };
+        /* TODO(W12-partial): planner integration deferred for the retrieval-
+         * engine path. Replacing this with the goal-conditioned planner
+         * requires redesigning the strategy-learner feedback loop (lines
+         * above and below) to record planner-sourced results instead of
+         * engine strategy categories. Sites 3 and 4 (v1 recall fallbacks)
+         * are migrated via hu_w12_planner_recall in this file. */
         hu_retrieval_result_t res = {0};
         err =
             loader->retrieval_engine->vtable->retrieve(loader->retrieval_engine->ctx, loader->alloc,
                                                        query ? query : "", query_len, &opts, &res);
-        if (err != HU_OK)
+        if (err == HU_ERR_JSON_PARSE) {
+            /* Corrupt / unexpected JSON in the retrieval index (observed in
+             * production with embedding-backed stores). Fall back to v1
+             * SQLite recall instead of failing the entire agent turn. */
+            hu_log_warn("memory_loader", NULL,
+                        "retrieval engine returned JSON parse error; falling back to v1 recall");
+            memset(&res, 0, sizeof(res));
+            err = HU_OK;
+        } else if (err != HU_OK) {
             return err;
+        }
         if (res.count > 0) {
             entries = res.entries;
             count = res.count;
@@ -137,6 +156,59 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                 }
             }
 #endif
+        }
+        /* W12: when retrieval yields nothing, try the goal-conditioned
+         * planner before falling back to v1 recall. The planner's multi-hop
+         * PageRank traversal provides better entity-affinity scoring. */
+        if (count == 0 && loader->facade) {
+            char *planner_text = NULL;
+            size_t planner_len = 0;
+            hu_error_t pe = hu_w12_planner_recall(
+                loader->facade, loader->alloc, session_id ? session_id : "",
+                session_id_len, query ? query : "", query_len,
+                loader->max_entries, loader->max_context_chars,
+                &planner_text, &planner_len);
+            if (pe == HU_OK && planner_text && planner_len > 0) {
+                *out_context = planner_text;
+                if (out_context_len)
+                    *out_context_len = planner_len;
+                return HU_OK;
+            }
+        }
+        if (count == 0 && loader->memory && loader->memory->vtable &&
+            loader->memory->vtable->recall) {
+            err = loader->memory->vtable->recall(
+                loader->memory->ctx, loader->alloc, query ? query : "", query_len,
+                loader->max_entries, session_id ? session_id : "", session_id_len, &entries,
+                &count);
+            if (err != HU_OK)
+                return err;
+        }
+    } else if (loader->facade) {
+        /* W12: route through the goal-conditioned planner when available. */
+        char *planner_text = NULL;
+        size_t planner_len = 0;
+        hu_error_t pe = hu_w12_planner_recall(
+            loader->facade, loader->alloc, session_id ? session_id : "",
+            session_id_len, query ? query : "", query_len,
+            loader->max_entries, loader->max_context_chars,
+            &planner_text, &planner_len);
+        if (pe == HU_OK && planner_text && planner_len > 0) {
+            *out_context = planner_text;
+            if (out_context_len)
+                *out_context_len = planner_len;
+            return HU_OK;
+        }
+        /* Planner failed or empty — fall through to v1 recall. */
+        if (loader->memory && loader->memory->vtable && loader->memory->vtable->recall) {
+            err = loader->memory->vtable->recall(
+                loader->memory->ctx, loader->alloc, query ? query : "", query_len,
+                loader->max_entries, session_id ? session_id : "", session_id_len, &entries,
+                &count);
+            if (err != HU_OK)
+                return err;
+        } else {
+            return HU_OK;
         }
     } else if (loader->memory && loader->memory->vtable && loader->memory->vtable->recall) {
         err = loader->memory->vtable->recall(

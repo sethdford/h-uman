@@ -18,6 +18,7 @@
 #include "human/memory/tiers.h"
 #include "human/webhook.h"
 #ifdef HU_ENABLE_SQLITE
+#include "human/agent/world_model_bridge.h"
 #include "human/cognition/db.h"
 #include "human/intelligence/meta_learning.h"
 #endif
@@ -413,6 +414,11 @@ hu_error_t hu_agent_from_config(
             out->persona = (hu_persona_t *)alloc->alloc(alloc->ctx, sizeof(hu_persona_t));
             if (out->persona) {
                 memset(out->persona, 0, sizeof(hu_persona_t));
+                /* TODO(W9): needs hu_memory_facade_t* in scope to migrate.
+                 * w7_facade is not wired until after init (daemon.c sets it
+                 * post-hu_graph_open), and agent.c cannot include
+                 * world_model.h (struct hu_memory tag collision). Also no
+                 * contact_id available at init time. */
                 hu_error_t perr = hu_persona_load(alloc, persona, persona_len, out->persona);
                 if (perr != HU_OK) {
 #ifndef HU_IS_TEST
@@ -699,6 +705,11 @@ hu_error_t hu_agent_set_persona(hu_agent_t *agent, const char *name, size_t name
         return HU_ERR_OUT_OF_MEMORY;
     memset(new_persona, 0, sizeof(hu_persona_t));
 
+    /* TODO(W9): needs bridge extension + contact_id to migrate.
+     * agent.c cannot include world_model.h (struct hu_memory tag
+     * collision via human/agent.h → human/memory.h).  Persona reload
+     * is global (no contact_id), and no bridge API exposes persona
+     * data from the W9 world model yet. */
     hu_error_t err = hu_persona_load(agent->alloc, name, name_len, new_persona);
     if (err != HU_OK) {
         agent->alloc->free(agent->alloc->ctx, new_persona, sizeof(hu_persona_t));
@@ -821,6 +832,12 @@ void hu_agent_set_outcomes(hu_agent_t *agent, struct hu_outcome_tracker *tracker
     if (!agent)
         return;
     agent->outcomes = tracker;
+}
+
+void hu_agent_set_learner(hu_agent_t *agent, struct hu_learner *learner) {
+    if (!agent)
+        return;
+    agent->learner = learner;
 }
 
 void hu_agent_set_voice_config(hu_agent_t *agent, hu_voice_config_t *voice_cfg) {
@@ -986,6 +1003,14 @@ void hu_agent_deinit(hu_agent_t *agent) {
         agent->infra.webhook_manager = NULL;
     }
 #ifdef HU_ENABLE_SQLITE
+    if (agent->w14_scheduler) {
+        hu_w14_scheduler_close(agent->w14_scheduler, agent->alloc);
+        agent->w14_scheduler = NULL;
+    }
+    if (agent->w7_facade) {
+        hu_w7_facade_close(agent->w7_facade, agent->alloc);
+        agent->w7_facade = NULL;
+    }
     if (agent->infra.cognition_db) {
         hu_cognition_db_close(agent->infra.cognition_db);
         agent->infra.cognition_db = NULL;

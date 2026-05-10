@@ -208,6 +208,16 @@ bool hu_imessage_test_record_open_result(hu_channel_t *ch, int rc, int64_t now_e
 
 /* Drive a synthetic successful poll (resets breaker, advances last_success_epoch). */
 void hu_imessage_test_record_poll_success(hu_channel_t *ch, int64_t now_epoch);
+
+/* Mark the imsg-watch process as running (or not) for tests. The pid recorded
+ * is purely diagnostic — the test harness must not actually fork imsg. Used
+ * to drive `hu_imessage_poll` through its watch-active short-circuit so we
+ * can assert the idle-poll heartbeat refreshes the success epoch. */
+void hu_imessage_test_set_watch_running(hu_channel_t *ch, bool running);
+
+/* Read the persisted last_successful_poll_epoch (mirrors what the doctor
+ * reads from the JSON status file). */
+int64_t hu_imessage_test_get_last_success_epoch(const hu_channel_t *ch);
 #endif
 
 #if HU_IS_TEST

@@ -7,6 +7,10 @@
 #include "human/memory/retrieval.h"
 #include <stddef.h>
 
+/* Forward-declare the W7 facade handle to avoid the legacy hu_memory_t /
+ * hu_memory_facade_t type collision. See world_model_bridge.h for details. */
+struct hu_w7_facade;
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Memory loader — recall relevant memories, format as markdown for context
  * ────────────────────────────────────────────────────────────────────────── */
@@ -17,6 +21,7 @@ typedef struct hu_memory_loader {
     hu_allocator_t *alloc;
     size_t max_entries;
     size_t max_context_chars;
+    struct hu_w7_facade *facade; /* optional W7 facade for W12 planner recall */
 } hu_memory_loader_t;
 
 hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *alloc,

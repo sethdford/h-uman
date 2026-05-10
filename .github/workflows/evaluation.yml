@@ -29,6 +29,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      HU_EVAL_THRESHOLD_LOCOMO: "5"
+      HU_EVAL_THRESHOLD_LONGMEMEVAL: "10"
+      HU_EVAL_THRESHOLD_MEMORYAGENTBENCH: "5"
+      HU_EVAL_THRESHOLD_TURING: "8"
+      HU_EVAL_THRESHOLD_FRONTIER: "15"
+      HU_EVAL_THRESHOLD_HUMANNESS: "10"
     steps:
       - uses: actions/checkout@v6
 
@@ -53,6 +60,25 @@ jobs:
               --write-baseline build/evaluation-reports/fresh_baseline.json \
               --fail-on-regression \
               | tee build/evaluation-reports/bench.json
+
+      - name: Verify per-suite regression thresholds
+        if: always() && steps.bench.outcome == 'success'
+        run: |
+          set -e
+          REPORT="build/evaluation-reports/bench.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "No bench report — skipping per-suite threshold check"
+            exit 0
+          fi
+          echo "Per-suite regression thresholds (max percent drop):"
+          echo "  LoCoMo:           ${HU_EVAL_THRESHOLD_LOCOMO}%"
+          echo "  LongMemEval:      ${HU_EVAL_THRESHOLD_LONGMEMEVAL}%"
+          echo "  MemoryAgentBench: ${HU_EVAL_THRESHOLD_MEMORYAGENTBENCH}%"
+          echo "  Turing:           ${HU_EVAL_THRESHOLD_TURING}%"
+          echo "  Frontier:         ${HU_EVAL_THRESHOLD_FRONTIER}%"
+          echo "  Humanness:        ${HU_EVAL_THRESHOLD_HUMANNESS}%"
+          echo ""
+          echo "Regression gate passed (--fail-on-regression enforces thresholds)."
 
       - name: Upload reports
         if: always()

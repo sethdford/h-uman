@@ -38,7 +38,7 @@ extern "C" {
  * function returns `*out_count = 0` and HU_OK (caller's choice — empty seed
  * means "no preference"; HippoRAG treats this as a no-op rather than
  * uniform PageRank, which is rarely what callers want). */
-hu_error_t hu_memory_pagerank_seeds(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_memory_pagerank_seeds(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                     const char *contact_id, size_t cid_len,
                                     const int64_t *seed_entity_ids, size_t seeds_count,
                                     float damping, size_t iterations,

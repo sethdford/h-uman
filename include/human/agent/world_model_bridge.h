@@ -3,11 +3,9 @@
 
 /* W9 wire bridge (FIX 12).
  *
- * The W7 memory facade and the legacy `hu_memory_t` from `human/memory.h`
- * use the same struct tag (`struct hu_memory`), so any translation unit that
- * already pulls in legacy `human/memory.h` (e.g. anything that includes
- * `human/agent.h`) cannot also include `human/memory/memory.h` or
- * `human/agent/world_model.h` -- the C compiler sees a redefinition.
+ * Historically the W7 facade and legacy store shared the `hu_memory_t` name
+ * (now split: `hu_memory_facade_t` vs legacy `hu_memory_t`). This bridge still
+ * isolates W7/W9/W11 headers from `agent_turn.c` so the TU stays lean.
  *
  * This bridge gives `agent_turn.c` and `daemon.c` a way to use the W7 facade
  * + `hu_world_model_load` without paying that include cost. The bridge owns
@@ -21,6 +19,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -37,6 +36,10 @@ typedef struct hu_w7_facade hu_w7_facade_t;
 hu_error_t hu_w7_facade_open(hu_graph_t *graph, hu_allocator_t *alloc, hu_w7_facade_t **out);
 
 void hu_w7_facade_close(hu_w7_facade_t *facade, hu_allocator_t *alloc);
+
+/* Borrow the W7 memory facade held inside `facade`. NULL if `facade` is NULL.
+ * Valid until `hu_w7_facade_close`. */
+hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade);
 
 /* Render the cached world model for `contact_id` into a prompt-ready text
  * block. Returns HU_OK with `*out_text == NULL`, `*out_len == 0` when there
@@ -90,16 +93,14 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
 
 /* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
  *
- * The W14 scheduler is the same shape problem: `human/agent/scheduler.h`
- * pulls in `human/memory/memory.h`, which redefines `struct hu_memory`
- * for any TU that already has the legacy `human/memory.h` (i.e. anything
- * including `human/agent.h`). This bridge gives the daemon a way to
- * open / tick / close the scheduler without paying that include cost. */
+ * The W14 scheduler pulls `human/memory/memory.h`; daemon code uses this
+ * bridge so it can tick the scheduler without including scheduler internals
+ * in every TU. */
 
 struct hu_w14_scheduler;
 typedef struct hu_w14_scheduler hu_w14_scheduler_t;
 
-/* Open a scheduler over the same `hu_memory_t` the W7 facade owns. The
+/* Open a scheduler over the same `hu_memory_facade_t` the W7 facade owns. The
  * scheduler does not take ownership of the facade — both must outlive
  * the lifetime of the daemon main loop. Returns HU_OK and `*out_sched`
  * is non-NULL on success; on failure `*out_sched` is NULL. */
@@ -140,6 +141,70 @@ hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now
 hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pending,
                                    size_t *out_jobs_completed_today, int *out_battery_pct,
                                    int *out_on_ac_power);
+
+/* ── W12 goal-conditioned planner recall bridge ───────────────────────────
+ *
+ * Bridge for `hu_planner_plan` + manual execution with payload-preserving
+ * facade reads. Callers in TUs that include legacy `human/memory.h` (e.g.
+ * `agent_turn.c`, `memory_loader.c`) cannot use the planner or facade
+ * types directly due to the `struct hu_memory` tag collision. This bridge
+ * runs the plan in world_model_bridge.c (where only W7 headers are
+ * visible) and returns pre-formatted text ready for prompt injection.
+ *
+ * `contact_id` scopes the retrieval to one contact (may be "" for global).
+ * `query` is the user message or search goal. `limit` caps the number of
+ * records surfaced (0 = default 5). `max_chars` caps output text length
+ * (0 = default 4000).
+ *
+ * Returns HU_OK with `*out_text = NULL, *out_len = 0` when the planner
+ * finds nothing. Returns a non-OK error on planner/facade failure so the
+ * caller can fall back to the v1 recall path. Caller owns `*out_text`
+ * and must free via `alloc->free`. */
+hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                 const char *contact_id, size_t contact_id_len,
+                                 const char *query, size_t query_len,
+                                 size_t limit, size_t max_chars,
+                                 char **out_text, size_t *out_len);
+
+/* W14 P0 #4 — runner registration helpers.
+ *
+ * The bridge cannot embed `hu_lora_runner_ctx_t` / `hu_kv_cache_manager_t` /
+ * `hu_belief_reverify_ctx_t` directly without re-introducing the legacy
+ * memory.h collision. Callers include the relevant runner headers
+ * (lora_runner.h / kv_cache.h / belief_reverify_runner.h) and pass
+ * already-constructed contexts in. NULL ctx is rejected. */
+struct hu_lora_runner_ctx;
+struct hu_kv_cache_manager;
+struct hu_belief_reverify_ctx;
+struct hu_scheduler;
+
+hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s,
+                                                 struct hu_lora_runner_ctx *ctx);
+hu_error_t hu_w14_scheduler_register_kv_prewarm_runner(hu_w14_scheduler_t *s,
+                                                       struct hu_kv_cache_manager *mgr);
+hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
+                                                     struct hu_belief_reverify_ctx *ctx);
+
+/* Surface the inner `hu_scheduler_t *` so callers can wire it into a
+ * `hu_lora_runner_ctx_t::scheduler` (`struct hu_scheduler *`) for the follow-up KV-warm
+ * enqueue path. The bridge retains ownership; callers must not
+ * `hu_scheduler_close` the returned pointer. */
+struct hu_scheduler *hu_w14_scheduler_inner(hu_w14_scheduler_t *s);
+
+/* Persist the scheduler's current status to `~/.human/scheduler.status`
+ * as a tiny hand-emitted JSON document so out-of-process tools (the
+ * `human ml status` CLI, the doctor command, monitoring) can read it
+ * without IPC into the running daemon.
+ *
+ * Best-effort: returns HU_OK whenever the file is written or the path
+ * resolution would no-op (HOME unset). Mirrors the proven pattern used
+ * by `~/.human/imessage.poll_status`. The daemon should call this on
+ * the same cadence it ticks the scheduler. */
+hu_error_t hu_w14_scheduler_status_save(hu_w14_scheduler_t *s);
+
+/* Resolve the canonical status file path. Returns false on overflow or
+ * when HOME is unset. */
+bool hu_w14_scheduler_status_path(char *out_path, size_t cap);
 
 #ifdef __cplusplus
 }

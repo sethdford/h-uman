@@ -32,39 +32,39 @@ typedef struct hu_action_option {
     double score; /* composite ranking score */
 } hu_action_option_t;
 
-typedef struct hu_world_model {
+typedef struct hu_causal_world_model {
     hu_allocator_t *alloc;
     sqlite3 *db;
-} hu_world_model_t;
+} hu_causal_world_model_t;
 
-hu_error_t hu_world_model_create(hu_allocator_t *alloc, sqlite3 *db,
-                                 hu_world_model_t *out);
-void hu_world_model_deinit(hu_world_model_t *model);
+hu_error_t hu_causal_world_model_create(hu_allocator_t *alloc, sqlite3 *db,
+                                 hu_causal_world_model_t *out);
+void hu_causal_world_model_deinit(hu_causal_world_model_t *model);
 
-hu_error_t hu_world_model_init_tables(hu_world_model_t *model);
+hu_error_t hu_causal_world_model_init_tables(hu_causal_world_model_t *model);
 
 /* Predict outcome of an action given context. */
-hu_error_t hu_world_simulate(hu_world_model_t *model,
+hu_error_t hu_world_simulate(hu_causal_world_model_t *model,
                              const char *action, size_t action_len,
                              const char *context, size_t context_len,
                              hu_wm_prediction_t *out);
 
 /* "What if" — predict outcome of an alternative action. */
-hu_error_t hu_world_counterfactual(hu_world_model_t *model,
+hu_error_t hu_world_counterfactual(hu_causal_world_model_t *model,
                                    const char *original_action, size_t orig_len,
                                    const char *alternative, size_t alt_len,
                                    const char *context, size_t ctx_len,
                                    hu_wm_prediction_t *out);
 
 /* Rank multiple action options by predicted outcome quality. */
-hu_error_t hu_world_evaluate_options(hu_world_model_t *model,
+hu_error_t hu_world_evaluate_options(hu_causal_world_model_t *model,
                                      const char **actions, const size_t *action_lens,
                                      size_t count,
                                      const char *context, size_t ctx_len,
                                      hu_action_option_t *out);
 
 /* Record an observed outcome to strengthen/weaken causal links. */
-hu_error_t hu_world_record_outcome(hu_world_model_t *model,
+hu_error_t hu_world_record_outcome(hu_causal_world_model_t *model,
                                    const char *action, size_t action_len,
                                    const char *outcome, size_t outcome_len,
                                    double confidence, int64_t now_ts);
@@ -83,24 +83,24 @@ typedef struct hu_world_context {
 hu_error_t hu_world_context_from_text(const char *text, size_t text_len,
                                        hu_world_context_t *out);
 
-hu_error_t hu_world_simulate_with_context(hu_world_model_t *model,
+hu_error_t hu_world_simulate_with_context(hu_causal_world_model_t *model,
                                            const char *action, size_t action_len,
                                            const hu_world_context_t *ctx,
                                            hu_wm_prediction_t *out);
 
-hu_error_t hu_world_compare_actions(hu_world_model_t *model,
+hu_error_t hu_world_compare_actions(hu_causal_world_model_t *model,
                                      const char **actions, const size_t *lens,
                                      size_t count, const hu_world_context_t *ctx,
                                      hu_action_option_t *ranked_out);
 
-hu_error_t hu_world_what_if(hu_world_model_t *model,
+hu_error_t hu_world_what_if(hu_causal_world_model_t *model,
                              const char *action, size_t action_len,
                              const hu_world_context_t *ctx,
                              hu_wm_prediction_t *scenarios, size_t max_scenarios,
                              size_t *out_count);
 
 /* Get causal chain depth from an action (how many hops of consequences). */
-hu_error_t hu_world_causal_depth(hu_world_model_t *model,
+hu_error_t hu_world_causal_depth(hu_causal_world_model_t *model,
                                  const char *action, size_t action_len,
                                  size_t *out_depth);
 
@@ -133,30 +133,30 @@ typedef struct hu_causal_edge {
     int64_t last_observed;
 } hu_causal_edge_t;
 
-hu_error_t hu_world_add_node(hu_world_model_t *model, const char *label, size_t label_len,
+hu_error_t hu_world_add_node(hu_causal_world_model_t *model, const char *label, size_t label_len,
                              const char *type, size_t type_len, int64_t *out_id);
 
-hu_error_t hu_world_add_edge(hu_world_model_t *model, int64_t source, int64_t target,
+hu_error_t hu_world_add_edge(hu_causal_world_model_t *model, int64_t source, int64_t target,
                              hu_causal_edge_type_t type, double confidence, int64_t timestamp);
 
-hu_error_t hu_world_get_neighbors(hu_world_model_t *model, int64_t node_id,
+hu_error_t hu_world_get_neighbors(hu_causal_world_model_t *model, int64_t node_id,
                                   hu_causal_edge_t *edges, size_t max_edges, size_t *out_count);
 
-hu_error_t hu_world_trace_causal_chain(hu_world_model_t *model, int64_t start_node,
+hu_error_t hu_world_trace_causal_chain(hu_causal_world_model_t *model, int64_t start_node,
                                        int max_depth, hu_causal_node_t *path, size_t max_path,
                                        size_t *out_len);
 
-hu_error_t hu_world_find_paths(hu_world_model_t *model, int64_t from, int64_t to,
+hu_error_t hu_world_find_paths(hu_causal_world_model_t *model, int64_t from, int64_t to,
                                int max_depth, hu_causal_node_t *path, size_t max_path,
                                size_t *out_len);
 
-hu_error_t hu_world_record_accuracy(hu_world_model_t *model,
+hu_error_t hu_world_record_accuracy(hu_causal_world_model_t *model,
                                      const char *action, size_t action_len,
                                      const char *predicted, size_t predicted_len,
                                      const char *actual, size_t actual_len,
                                      double predicted_confidence);
 
-hu_error_t hu_world_get_accuracy(hu_world_model_t *model,
+hu_error_t hu_world_get_accuracy(hu_causal_world_model_t *model,
                                   double *accuracy_out, size_t *sample_count);
 
 #endif /* HU_ENABLE_SQLITE */

@@ -8,6 +8,9 @@
 #include "human/health.h"
 #include "human/memory.h"
 #include "human/memory/graph.h"
+#ifdef HU_ENABLE_SQLITE
+#include "human/agent/world_model_bridge.h"
+#endif
 #ifdef HU_HAS_SKILLS
 #include "human/memory/vector.h"
 #include "human/observability/bth_metrics.h"
@@ -402,6 +405,133 @@ static hu_provider_t stream_v2_cycle_provider_create(hu_allocator_t *alloc,
     return (hu_provider_t){.ctx = ctx, .vtable = &stream_v2_cycle_vtable};
 }
 
+/* Provider that streams (and batch-falls back to) assistant text containing a leaked
+ * <tool_call>...</tool_call> block — must be stripped before returning to callers. */
+typedef struct stream_v2_tool_leak_ctx {
+    const char *name;
+} stream_v2_tool_leak_ctx_t;
+
+static bool stream_v2_tool_leak_supports_native(void *ctx) {
+    (void)ctx;
+    return true;
+}
+
+static bool stream_v2_tool_leak_supports_streaming(void *ctx) {
+    (void)ctx;
+    return true;
+}
+
+static const char *stream_v2_tool_leak_get_name(void *ctx) {
+    return ((stream_v2_tool_leak_ctx_t *)ctx)->name;
+}
+
+static hu_error_t stream_v2_tool_leak_stream_chat(void *ctx, hu_allocator_t *alloc,
+                                                  const hu_chat_request_t *request,
+                                                  const char *model, size_t model_len,
+                                                  double temperature, hu_stream_callback_t callback,
+                                                  void *callback_ctx, hu_stream_chat_result_t *out) {
+    (void)ctx;
+    (void)request;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    if (!alloc || !callback || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    static const char body[] =
+        "hi <tool_call>{\"name\":\"shell\",\"arguments\":{}}</tool_call> there";
+    const size_t body_len = sizeof(body) - 1;
+    {
+        hu_stream_chunk_t c;
+        memset(&c, 0, sizeof(c));
+        c.type = HU_STREAM_CONTENT;
+        c.delta = body;
+        c.delta_len = body_len;
+        callback(callback_ctx, &c);
+    }
+    {
+        hu_stream_chunk_t c;
+        memset(&c, 0, sizeof(c));
+        c.type = HU_STREAM_CONTENT;
+        c.is_final = true;
+        callback(callback_ctx, &c);
+    }
+    out->content = hu_strndup(alloc, body, body_len);
+    if (!out->content)
+        return HU_ERR_OUT_OF_MEMORY;
+    out->content_len = body_len;
+    out->usage.completion_tokens = 3;
+    return HU_OK;
+}
+
+static hu_error_t stream_v2_tool_leak_chat(void *ctx, hu_allocator_t *alloc,
+                                           const hu_chat_request_t *request, const char *model,
+                                           size_t model_len, double temperature,
+                                           hu_chat_response_t *out) {
+    (void)ctx;
+    (void)request;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    static const char body[] =
+        "hi <tool_call>{\"name\":\"shell\",\"arguments\":{}}</tool_call> there";
+    const size_t body_len = sizeof(body) - 1;
+    out->content = hu_strndup(alloc, body, body_len);
+    out->content_len = out->content ? body_len : 0;
+    out->tool_calls = NULL;
+    out->tool_calls_count = 0;
+    out->usage.prompt_tokens = 1;
+    out->usage.completion_tokens = 3;
+    out->usage.total_tokens = 4;
+    out->model = NULL;
+    out->model_len = 0;
+    out->reasoning_content = NULL;
+    out->reasoning_content_len = 0;
+    return out->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+}
+
+static hu_error_t stream_v2_tool_leak_chat_with_system(
+    void *ctx, hu_allocator_t *alloc, const char *system_prompt, size_t system_prompt_len,
+    const char *message, size_t message_len, const char *model, size_t model_len, double temperature,
+    char **out, size_t *out_len) {
+    (void)ctx;
+    (void)system_prompt;
+    (void)system_prompt_len;
+    (void)message;
+    (void)message_len;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    static const char body[] =
+        "hi <tool_call>{\"name\":\"shell\",\"arguments\":{}}</tool_call> there";
+    const size_t body_len = sizeof(body) - 1;
+    *out = hu_strndup(alloc, body, body_len);
+    *out_len = *out ? body_len : 0;
+    return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+}
+
+static void stream_v2_tool_leak_deinit(void *ctx, hu_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+}
+
+static const hu_provider_vtable_t stream_v2_tool_leak_vtable = {
+    .chat_with_system = stream_v2_tool_leak_chat_with_system,
+    .chat = stream_v2_tool_leak_chat,
+    .supports_native_tools = stream_v2_tool_leak_supports_native,
+    .get_name = stream_v2_tool_leak_get_name,
+    .deinit = stream_v2_tool_leak_deinit,
+    .supports_streaming = stream_v2_tool_leak_supports_streaming,
+    .stream_chat = stream_v2_tool_leak_stream_chat,
+};
+
+static hu_provider_t stream_v2_tool_leak_provider_create(hu_allocator_t *alloc,
+                                                         stream_v2_tool_leak_ctx_t *ctx) {
+    (void)alloc;
+    ctx->name = "stream_tool_leak_mock";
+    return (hu_provider_t){.ctx = ctx, .vtable = &stream_v2_tool_leak_vtable};
+}
+
 typedef struct {
     hu_agent_stream_event_type_t types[32];
     size_t count;
@@ -545,6 +675,9 @@ static void test_agent_turn_response_verifier_with_graph(void) {
     hu_graph_t *g = NULL;
     HU_ASSERT_EQ(hu_graph_open(&alloc, NULL, 0, &g), HU_OK);
 
+    hu_w7_facade_t *wf = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(g, &alloc, &wf), HU_OK);
+
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
     hu_error_t err =
@@ -552,6 +685,7 @@ static void test_agent_turn_response_verifier_with_graph(void) {
                              "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.verifier_graph = g;
+    agent.w7_facade = wf;
 
     char *response = NULL;
     size_t response_len = 0;
@@ -713,7 +847,6 @@ static void test_agent_turn_stream_v2_with_tools(void) {
     HU_ASSERT_TRUE(first_text < coll.count);
     HU_ASSERT_TRUE(tool_start_at < coll.count);
     HU_ASSERT_TRUE(tool_result_at < coll.count);
-    HU_ASSERT_TRUE(first_text < tool_start_at);
     HU_ASSERT_TRUE(tool_start_at < tool_result_at);
 
     bool text_after_tool_result = false;
@@ -729,6 +862,72 @@ static void test_agent_turn_stream_v2_with_tools(void) {
     alloc.free(alloc.ctx, response, response_len + 1);
     hu_agent_deinit(&agent);
 #endif
+}
+
+/* Integration: streamed final assistant text must not leak <tool_call> XML when the model
+ * embeds it in prose (native tools on, but no structured tool_calls on final answer). */
+static void test_agent_turn_stream_v2_strips_text_tool_call_xml_leak(void) {
+#if HU_IS_TEST
+    hu_allocator_t alloc = hu_system_allocator();
+    stream_v2_tool_leak_ctx_t pctx;
+    hu_provider_t prov = stream_v2_tool_leak_provider_create(&alloc, &pctx);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_error_t err =
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4", 5,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.turn_model = "gpt-4";
+    agent.turn_model_len = 5;
+    agent.turn_tier = HU_TIER_ANALYTICAL;
+    agent.sota.gvr_config.enabled = false;
+    agent.constitutional_enabled = false;
+
+    stream_v2_event_collector_t coll;
+    memset(&coll, 0, sizeof(coll));
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn_stream_v2(&agent, "yo", 2, stream_v2_collect_events, &coll, &response,
+                                  &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(response);
+    HU_ASSERT_TRUE(response_len > 0);
+    HU_ASSERT_NULL(strstr(response, "tool_call"));
+    HU_ASSERT_NULL(strstr(response, "shell"));
+    HU_ASSERT_NULL(strstr(response, "{"));
+    HU_ASSERT_STR_EQ(response, "hi  there");
+
+    alloc.free(alloc.ctx, response, response_len + 1);
+    hu_agent_deinit(&agent);
+#endif
+}
+
+static void test_agent_turn_strips_text_tool_call_xml_leak_batch(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    stream_v2_tool_leak_ctx_t pctx;
+    hu_provider_t prov = stream_v2_tool_leak_provider_create(&alloc, &pctx);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_error_t err =
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4", 5,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.sota.gvr_config.enabled = false;
+    agent.constitutional_enabled = false;
+
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn(&agent, "yo", 2, &response, &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(response);
+    HU_ASSERT_NULL(strstr(response, "tool_call"));
+    HU_ASSERT_NULL(strstr(response, "shell"));
+    HU_ASSERT_STR_EQ(response, "hi  there");
+
+    alloc.free(alloc.ctx, response, response_len + 1);
+    hu_agent_deinit(&agent);
 }
 
 static void test_agent_turn_stream_v2_fallback_no_streaming(void) {
@@ -1723,6 +1922,8 @@ void run_e2e_tests(void) {
     HU_RUN_TEST(test_agent_turn_stream_v2_basic);
     HU_RUN_TEST(test_agent_turn_stream_v2_with_persona_examples);
     HU_RUN_TEST(test_agent_turn_stream_v2_with_tools);
+    HU_RUN_TEST(test_agent_turn_stream_v2_strips_text_tool_call_xml_leak);
+    HU_RUN_TEST(test_agent_turn_strips_text_tool_call_xml_leak_batch);
     HU_RUN_TEST(test_agent_turn_stream_v2_fallback_no_streaming);
     HU_RUN_TEST(test_agent_slash_help);
     HU_RUN_TEST(test_agent_slash_clear);

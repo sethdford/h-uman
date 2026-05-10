@@ -15,9 +15,11 @@
  * scheduler also enforces a total per-tick budget so an OS-level fault in
  * any single runner cannot stall the daemon loop.
  *
- * Layer 4 of the v2 stack. The integration point in `src/daemon.c`'s 1 Hz
- * tick loop is intentionally NOT wired in this commit — see scheduler.c
- * for the documented hook.
+ * Layer 4 of the v2 stack. The wiring in `src/daemon.c`'s 1 Hz
+ * tick loop opens the scheduler via `hu_w14_scheduler_open` after the W7
+ * facade is up, calls `hu_w14_scheduler_tick` once per minute, and closes
+ * it on shutdown via `hu_w14_scheduler_close`. Job enqueuing happens in
+ * the daemon's housekeeping path — search `hu_w14_scheduler_enqueue_*`.
  *
  * All OS-level probes (load, battery, AC power, quiet hours) honor
  * `HU_IS_TEST` and read deterministic values from
@@ -84,7 +86,7 @@ typedef struct hu_scheduler hu_scheduler_t;
  * the scheduler enforces a total per-tick budget but cannot interrupt a
  * runner already in C code.  Returning anything other than `HU_OK`
  * marks the job `failed` with the error string `hu_error_string(rc)`. */
-typedef hu_error_t (*hu_job_runner_fn)(hu_memory_t *m, const hu_job_spec_t *spec,
+typedef hu_error_t (*hu_job_runner_fn)(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                        int64_t budget_ms, void *user_data);
 
 /* Lifecycle.  `hu_scheduler_open` ensures the `scheduler_jobs` and
@@ -92,7 +94,7 @@ typedef hu_error_t (*hu_job_runner_fn)(hu_memory_t *m, const hu_job_spec_t *spec
  * registers a no-op runner for every `hu_job_kind_t`.  Tests and the
  * daemon overwrite individual runners with `hu_scheduler_register_runner`
  * before calling `hu_scheduler_tick`. */
-hu_error_t hu_scheduler_open(hu_allocator_t *alloc, hu_memory_t *m,
+hu_error_t hu_scheduler_open(hu_allocator_t *alloc, hu_memory_facade_t *m,
                              hu_scheduler_t **out);
 void hu_scheduler_close(hu_scheduler_t *s, hu_allocator_t *alloc);
 
@@ -146,7 +148,7 @@ bool hu_scheduler_probe_quiet_hours(int64_t now_ms, const hu_persona_t *persona)
  * `hu_scheduler_register_runner(s, HU_JOB_COUNTERFACTUAL_REHEARSAL,
  *                                hu_counterfactual_rehearsal_runner,
  *                                NULL)`. */
-hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_t *m,
+hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m,
                                               const hu_job_spec_t *spec,
                                               int64_t budget_ms,
                                               void *user_data);
@@ -168,7 +170,7 @@ hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_t *m,
  * scratch allocations. Register once per kind:
  *   hu_scheduler_register_runner(s, HU_JOB_AUTODREAM_QUARANTINE,
  *                                hu_autodream_runner, NULL); */
-hu_error_t hu_autodream_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                int64_t budget_ms, void *user_data);
 
 #ifdef __cplusplus

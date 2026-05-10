@@ -37,7 +37,7 @@
 #include <string.h>
 
 typedef struct inline_ctx {
-    hu_memory_t *m;
+    hu_memory_facade_t *m;
     /* `chat` is stored for the future provider streaming path. The
      * deterministic placeholder does not call into it. */
 } inline_ctx_t;
@@ -193,7 +193,7 @@ static hu_error_t inline_verify(void *vctx, hu_allocator_t *alloc,
                                 (int64_t)open_at);
             /* Both retrieve and critique start as unknown-support beliefs;
              * a future provider integration replaces these with real
-             * scores from hu_memory_read / atomic verifier calls. The
+             * scores from hu_memory_facade_read / atomic verifier calls. The
              * primary provenance source is the control-token name itself
              * so callers can route the claim downstream by tag. */
             c->support = hu_belief_init(0.0f, kind, now);
@@ -255,7 +255,7 @@ static hu_self_rag_vtable_t inline_vt = {
     .deinit = inline_deinit,
 };
 
-hu_error_t hu_self_rag_inline(hu_memory_t *m, hu_provider_t *chat,
+hu_error_t hu_self_rag_inline(hu_memory_facade_t *m, hu_provider_t *chat,
                                hu_self_rag_t *out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;

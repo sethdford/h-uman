@@ -271,10 +271,9 @@ struct hu_agent {
      * supported-vs-flagged is only meaningful when verifier_graph is set).
      * Tests inspect these to prove the verifier ran on the response path. */
     struct hu_graph *verifier_graph;  /* optional, not owned. Decoupled from
-                                       * agent->memory because legacy
-                                       * hu_memory_t and the W7 facade
-                                       * hu_memory_t are different types
-                                       * with the same name. */
+                                       * agent->memory: legacy vector store is
+                                       * hu_memory_t; W7 dispatching facade is
+                                       * hu_memory_facade_t (graph-only verify path). */
     uint64_t verifier_runs;           /* total invocations across the agent's lifetime */
     uint64_t verifier_claims_total;   /* total claims extracted */
     uint64_t verifier_claims_flagged; /* total claims scoring below threshold */
@@ -284,12 +283,10 @@ struct hu_agent {
      * (FIX 3) reads the same table on the consumer side. */
     uint64_t persona_deltas_proposed;
 
-    /* W7+W9 facade handle (FIX 12). Opaque on purpose: legacy `hu_memory_t`
-     * (human/memory.h) and the W7 `hu_memory_t` share a struct tag and cannot
-     * coexist in one TU. The bridge in src/agent/world_model_bridge.c owns
-     * the only translation unit that includes the W7 headers; everyone else
-     * refers to this field by the unique forward-declared `struct
-     * hu_w7_facade` tag. Wired by daemon.c after hu_graph_open. */
+    /* W7+W9 facade handle (FIX 12). Opaque `struct hu_w7_facade`: holds the
+     * W7 `hu_memory_facade_t` plus world-model / self-RAG helpers so agent_turn
+     * does not need to include W7/W9 headers directly. Wired by daemon.c after
+     * hu_graph_open. Legacy chat memory remains `agent->memory` (hu_memory_t). */
     struct hu_w7_facade *w7_facade;
     uint64_t world_model_loads; /* telemetry: per-turn world_model render count */
 
@@ -300,6 +297,13 @@ struct hu_agent {
     uint64_t self_rag_claims_total;
     uint64_t self_rag_claims_flagged;
     uint64_t self_rag_abstentions;
+    /* W11 P0 #1 — counts ABSTAINED outcomes that actually replaced the
+     * user-visible response with the refusal template (i.e. ran under
+     * SOFT or STRICT mode). `self_rag_abstentions` counts ABSTAINED
+     * outcomes regardless of whether the response was swapped (telemetry
+     * mode increments it without rendering). The delta between the two
+     * is the rate at which we silently shipped unverified drafts. */
+    uint64_t self_rag_refusals_rendered;
 
     /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
      * trick as w7_facade above. Wired by daemon.c after hu_w7_facade_open;
@@ -343,6 +347,14 @@ struct hu_agent {
     struct hu_cron_scheduler *scheduler; /* optional; in-memory cron scheduler for agent jobs */
     hu_reflection_config_t reflection;
     struct hu_outcome_tracker *outcomes; /* optional; tracks tool results and user corrections */
+
+    /* W13 on-device learner. Optional. When set, signal sources
+     * (delta_observer, outcome tracker) emit pending training signals
+     * through the bridge in src/ml/learner_bridge.c. The W14 sleep
+     * scheduler later drains the pending buffer and trains. NULL on
+     * disabled installations or when the learner backend declined to
+     * open — agent code must guard with `agent->learner != NULL`. */
+    struct hu_learner *learner;
 
     bool chain_of_thought;    /* inject reasoning instructions into prompt */
     bool on_device_available; /* true if on-device inference server was detected at startup */
@@ -474,6 +486,14 @@ const struct hu_awareness *hu_agent_get_awareness(const hu_agent_t *agent);
 /* Optional: set outcome tracker for continuous learning. Caller owns tracker lifecycle. */
 struct hu_outcome_tracker;
 void hu_agent_set_outcomes(hu_agent_t *agent, struct hu_outcome_tracker *tracker);
+
+/* Optional: set on-device learner for personalisation signal collection.
+ * Caller owns learner lifecycle (open with hu_learner_open_default, free
+ * with hu_learner_close). When set, signal-source modules emit signals
+ * into the learner's pending buffer; the sleep-time scheduler trains
+ * later. Pass NULL to detach. */
+struct hu_learner;
+void hu_agent_set_learner(hu_agent_t *agent, struct hu_learner *learner);
 
 /* Point the agent at a hu_voice_config_t (e.g. from hu_voice_config_from_settings).
  * Borrowed pointers inside that struct must outlive the agent. Pass NULL to disable TTS. */

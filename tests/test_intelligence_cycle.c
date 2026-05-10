@@ -548,9 +548,9 @@ static void cycle_simulation_cache_returns_cached_result(void) {
     sqlite3 *db = hu_sqlite_memory_get_db(&mem);
     HU_ASSERT_NOT_NULL(db);
 
-    hu_world_model_t wm;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &wm), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&wm), HU_OK);
+    hu_causal_world_model_t wm;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&wm), HU_OK);
 
     /* Seed a causal observation */
     int64_t now = (int64_t)time(NULL);
@@ -577,7 +577,7 @@ static void cycle_simulation_cache_returns_cached_result(void) {
     /* Confidence should be same from cache */
     HU_ASSERT_TRUE(pred1.confidence == pred2.confidence);
 
-    hu_world_model_deinit(&wm);
+    hu_causal_world_model_deinit(&wm);
     mem.vtable->deinit(mem.ctx);
 }
 
@@ -623,9 +623,9 @@ static void cycle_context_changes_prediction(void) {
     sqlite3 *db = hu_sqlite_memory_get_db(&mem);
     HU_ASSERT_NOT_NULL(db);
 
-    hu_world_model_t wm;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &wm), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&wm), HU_OK);
+    hu_causal_world_model_t wm;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&wm), HU_OK);
 
     int64_t now = (int64_t)time(NULL);
     /* Record outcomes with different contexts */
@@ -646,7 +646,7 @@ static void cycle_context_changes_prediction(void) {
     HU_ASSERT_TRUE(pred_none.confidence >= 0.0);
     HU_ASSERT_TRUE(pred_ctx.confidence >= 0.0);
 
-    hu_world_model_deinit(&wm);
+    hu_causal_world_model_deinit(&wm);
     mem.vtable->deinit(mem.ctx);
 }
 

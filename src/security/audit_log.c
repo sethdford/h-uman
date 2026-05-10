@@ -148,7 +148,7 @@ void hu_audit_log_close(hu_audit_log_t *log, hu_allocator_t *alloc) {
 /* ── append ─────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_audit_log_append(hu_audit_log_t *log,
-                                const hu_audit_event_t *ev) {
+                                const hu_audit_log_event_t *ev) {
     if (!log || !ev)
         return HU_ERR_INVALID_ARGUMENT;
 #ifndef HU_ENABLE_SQLITE
@@ -220,7 +220,7 @@ static char *dup_col(hu_allocator_t *alloc, sqlite3_stmt *st, int col) {
 
 hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
                                hu_allocator_t *alloc,
-                               hu_audit_event_t **out, size_t *out_count) {
+                               hu_audit_log_event_t **out, size_t *out_count) {
     if (!log || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -269,7 +269,7 @@ hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
     /* Collect results — two-pass: count then allocate. */
     size_t capacity = 16;
     size_t count = 0;
-    hu_audit_event_t *events = alloc->alloc(alloc->ctx,
+    hu_audit_log_event_t *events = alloc->alloc(alloc->ctx,
                                              capacity * sizeof(*events));
     if (!events) {
         sqlite3_finalize(st);
@@ -280,7 +280,7 @@ hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
     while ((rc = sqlite3_step(st)) == SQLITE_ROW) {
         if (count == capacity) {
             size_t new_cap = capacity * 2;
-            hu_audit_event_t *grown = alloc->alloc(alloc->ctx,
+            hu_audit_log_event_t *grown = alloc->alloc(alloc->ctx,
                                                     new_cap * sizeof(*events));
             if (!grown) {
                 /* Free what we have so far, then bail. */
@@ -305,7 +305,7 @@ hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
             capacity = new_cap;
         }
 
-        hu_audit_event_t *ev = &events[count++];
+        hu_audit_log_event_t *ev = &events[count++];
         memset(ev, 0, sizeof(*ev));
 
         ev->contact_id  = dup_col(alloc, st, 0);
@@ -320,7 +320,7 @@ hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
     sqlite3_finalize(st);
 
     if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
-        hu_audit_events_free(alloc, events, count);
+        hu_audit_log_events_free(alloc, events, count);
         alloc->free(alloc->ctx, events, capacity * sizeof(*events));
         return HU_ERR_IO;
     }
@@ -333,8 +333,8 @@ hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
 
 /* ── free ───────────────────────────────────────────────────────────────── */
 
-void hu_audit_events_free(hu_allocator_t *alloc,
-                           hu_audit_event_t *events, size_t count) {
+void hu_audit_log_events_free(hu_allocator_t *alloc,
+                           hu_audit_log_event_t *events, size_t count) {
     if (!alloc || !events || count == 0)
         return;
     for (size_t i = 0; i < count; i++) {

@@ -479,6 +479,11 @@ typedef struct hu_memory_config {
     char *api_base_url;
     char *api_key;
     uint32_t api_timeout_ms;
+    /* W15 envelope encryption opt-in. When true AND a keystore is
+     * attached to the active backend, memory rows are wrapped via
+     * hu_encrypted_store_wrap on insert and unwrapped on read.
+     * Default false — encryption-by-default is an M3 milestone. */
+    bool encrypt_at_rest;
 } hu_memory_config_t;
 
 typedef struct hu_tunnel_config {

@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/memory.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -12,7 +13,6 @@
  * ────────────────────────────────────────────────────────────────────────── */
 
 /* Forward declarations to avoid circular includes */
-typedef struct hu_memory hu_memory_t;
 typedef struct hu_channel hu_channel_t;
 typedef struct hu_provider hu_provider_t;
 

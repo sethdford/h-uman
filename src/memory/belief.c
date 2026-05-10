@@ -1,5 +1,6 @@
 #include "human/memory/belief.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <string.h>
 
@@ -143,4 +144,129 @@ bool hu_belief_significantly_disagrees(const hu_belief_t *a, const hu_belief_t *
     if (spread < 1e-9f)
         return diff > 1e-6f;
     return diff > sigma_threshold * spread;
+}
+
+/* ── Semantic conflict detector (deterministic fallback) ────────────── */
+
+#define BELIEF_MAX_WORDS 128
+
+static size_t tokenize_lower(const char *text, size_t len,
+                             char words[][64], size_t max_words) {
+    size_t count = 0;
+    size_t i = 0;
+    while (i < len && count < max_words) {
+        while (i < len && !isalpha((unsigned char)text[i]))
+            i++;
+        if (i >= len)
+            break;
+        size_t start = i;
+        while (i < len && isalpha((unsigned char)text[i]))
+            i++;
+        size_t wlen = i - start;
+        if (wlen == 0 || wlen >= 64)
+            continue;
+        for (size_t j = 0; j < wlen; j++)
+            words[count][j] = (char)tolower((unsigned char)text[start + j]);
+        words[count][wlen] = '\0';
+        count++;
+    }
+    return count;
+}
+
+static bool is_negation(const char *word) {
+    return strcmp(word, "not") == 0 ||
+           strcmp(word, "never") == 0 ||
+           strcmp(word, "no") == 0 ||
+           strcmp(word, "none") == 0 ||
+           strcmp(word, "neither") == 0 ||
+           strcmp(word, "nor") == 0 ||
+           strcmp(word, "cannot") == 0 ||
+           strcmp(word, "cant") == 0;
+}
+
+static bool starts_with_dont(const char *word) {
+    if (strlen(word) < 4)
+        return false;
+    return (strncmp(word, "don", 3) == 0) ||
+           (strncmp(word, "doesn", 5) == 0) ||
+           (strncmp(word, "didn", 4) == 0) ||
+           (strncmp(word, "won", 3) == 0 && word[3] == 't') ||
+           (strncmp(word, "wasn", 4) == 0) ||
+           (strncmp(word, "isn", 3) == 0 && word[3] == 't') ||
+           (strncmp(word, "aren", 4) == 0) ||
+           (strncmp(word, "hasn", 4) == 0) ||
+           (strncmp(word, "haven", 5) == 0) ||
+           (strncmp(word, "couldn", 6) == 0) ||
+           (strncmp(word, "wouldn", 6) == 0) ||
+           (strncmp(word, "shouldn", 7) == 0);
+}
+
+hu_belief_conflict_t hu_belief_semantic_conflict(
+    const char *text_a, size_t len_a,
+    const char *text_b, size_t len_b) {
+    if (!text_a || !text_b || len_a == 0 || len_b == 0)
+        return HU_BELIEF_CONFLICT_NONE;
+
+    char words_a[BELIEF_MAX_WORDS][64];
+    char words_b[BELIEF_MAX_WORDS][64];
+    size_t na = tokenize_lower(text_a, len_a, words_a, BELIEF_MAX_WORDS);
+    size_t nb = tokenize_lower(text_b, len_b, words_b, BELIEF_MAX_WORDS);
+
+    if (na == 0 || nb == 0)
+        return HU_BELIEF_CONFLICT_NONE;
+
+    /* Count negation words in each text. */
+    size_t neg_a = 0, neg_b = 0;
+    for (size_t i = 0; i < na; i++) {
+        if (is_negation(words_a[i]) || starts_with_dont(words_a[i]))
+            neg_a++;
+    }
+    for (size_t i = 0; i < nb; i++) {
+        if (is_negation(words_b[i]) || starts_with_dont(words_b[i]))
+            neg_b++;
+    }
+
+    /* Count shared non-negation content words (skip very short words). */
+    size_t shared = 0;
+    size_t content_a = 0;
+    for (size_t i = 0; i < na; i++) {
+        if (strlen(words_a[i]) < 3)
+            continue;
+        if (is_negation(words_a[i]) || starts_with_dont(words_a[i]))
+            continue;
+        content_a++;
+        for (size_t j = 0; j < nb; j++) {
+            if (strcmp(words_a[i], words_b[j]) == 0) {
+                shared++;
+                break;
+            }
+        }
+    }
+    size_t content_b = 0;
+    for (size_t i = 0; i < nb; i++) {
+        if (strlen(words_b[i]) < 3)
+            continue;
+        if (is_negation(words_b[i]) || starts_with_dont(words_b[i]))
+            continue;
+        content_b++;
+    }
+
+    size_t content_max = content_a > content_b ? content_a : content_b;
+    if (content_max == 0)
+        return HU_BELIEF_CONFLICT_NONE;
+
+    /* Negation asymmetry with shared root content → contradiction.
+     * One text negates while the other doesn't, and they share enough
+     * content words to be about the same subject. */
+    bool neg_asym = (neg_a > 0) != (neg_b > 0);
+    float overlap = (float)shared / (float)content_max;
+
+    if (neg_asym && overlap > 0.3f)
+        return HU_BELIEF_CONFLICT_CONTRADICT;
+
+    /* >60% word overlap → paraphrase (same fact, different wording). */
+    if (overlap > 0.6f)
+        return HU_BELIEF_CONFLICT_PARAPHRASE;
+
+    return HU_BELIEF_CONFLICT_NONE;
 }

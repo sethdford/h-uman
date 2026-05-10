@@ -4,7 +4,7 @@
 /* W10 — Neural Memory Tier: KV-cache reuse, reasoning-trace memory, multimodal blobs.
  *
  * Three new memory kinds (HU_MEM_KV_CACHE, HU_MEM_REASONING_TRACE, HU_MEM_BLOB)
- * backed by SQLite tables.  All functions accept a hu_memory_t facade and derive
+ * backed by SQLite tables.  All functions accept a hu_memory_facade_t facade and derive
  * the SQLite handle internally — callers never touch SQLite directly.
  *
  * Eviction (W14) and provider integration (chat_with_kv_cache) are out of scope
@@ -67,17 +67,17 @@ typedef struct hu_memory_blob {
 
 /* Look up a cached KV entry by (prompt_hash, model_version).
  * On HU_OK, *out is heap-allocated; caller must free with hu_kv_cache_entry_free. */
-hu_error_t hu_kv_cache_get(hu_memory_t *m, const char *prompt_hash,
+hu_error_t hu_kv_cache_get(hu_memory_facade_t *m, const char *prompt_hash,
                             const char *model_version,
                             hu_allocator_t *alloc, hu_kv_cache_entry_t **out);
 
 /* Insert or replace a KV entry.  UNIQUE(prompt_hash, model_version) is
  * enforced: a duplicate put overwrites the previous blob. */
-hu_error_t hu_kv_cache_put(hu_memory_t *m, const hu_kv_cache_entry_t *entry);
+hu_error_t hu_kv_cache_put(hu_memory_facade_t *m, const hu_kv_cache_entry_t *entry);
 
 /* Delete every KV entry for the given model_version.
  * W14 eviction hook: call when a model upgrade is detected. */
-hu_error_t hu_kv_cache_invalidate_for_model(hu_memory_t *m,
+hu_error_t hu_kv_cache_invalidate_for_model(hu_memory_facade_t *m,
                                               const char *model_version);
 
 /* Free an entry returned by hu_kv_cache_get. */
@@ -86,7 +86,7 @@ void hu_kv_cache_entry_free(hu_allocator_t *alloc, hu_kv_cache_entry_t *e);
 /* ── Reasoning-trace API ──────────────────────────────────────────────────── */
 
 /* Persist a reasoning trace.  *out_id receives the new row id. */
-hu_error_t hu_reasoning_trace_record(hu_memory_t *m, const char *contact_id,
+hu_error_t hu_reasoning_trace_record(hu_memory_facade_t *m, const char *contact_id,
                                       size_t cid_len,
                                       const hu_reasoning_trace_t *trace,
                                       int64_t *out_id);
@@ -95,7 +95,7 @@ hu_error_t hu_reasoning_trace_record(hu_memory_t *m, const char *contact_id,
  * filtered to those that share at least one anchor with the query set.
  * At most `limit` results are returned (0 → no limit, use 1000).
  * On HU_OK, *out is heap-allocated; caller frees with hu_reasoning_traces_free. */
-hu_error_t hu_reasoning_trace_recall(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_reasoning_trace_recall(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                       const char *contact_id, size_t cid_len,
                                       const char *goal_verb, size_t goal_len,
                                       const int64_t *anchors, size_t anchors_count,
@@ -110,13 +110,13 @@ void hu_reasoning_traces_free(hu_allocator_t *alloc,
 
 /* Store a blob.  *out_id receives the new row id.
  * Returns HU_ERR_INVALID_ARGUMENT if blob->bytes_len > 100 MB. */
-hu_error_t hu_memory_blob_put(hu_memory_t *m, const char *contact_id,
+hu_error_t hu_memory_blob_put(hu_memory_facade_t *m, const char *contact_id,
                                size_t cid_len, const hu_memory_blob_t *blob,
                                int64_t *out_id);
 
 /* Retrieve a blob by id.
  * On HU_OK, *out is heap-allocated; caller frees with hu_memory_blob_free. */
-hu_error_t hu_memory_blob_get(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_memory_blob_get(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                int64_t blob_id, hu_memory_blob_t **out);
 
 /* Free a blob returned by hu_memory_blob_get. */

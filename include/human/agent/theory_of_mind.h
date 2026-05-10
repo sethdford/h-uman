@@ -45,43 +45,43 @@ typedef struct hu_tom_gap {
     hu_tom_expected_knowledge_t knowledge_type;
 } hu_tom_gap_t;
 
-typedef struct hu_belief {
+typedef struct hu_tom_belief {
     char *topic;
     size_t topic_len;
     hu_belief_type_t type;
     float confidence; /* 0.0-1.0 */
     int64_t last_updated;
-} hu_belief_t;
+} hu_tom_belief_t;
 
-typedef struct hu_belief_state {
+typedef struct hu_tom_belief_state {
     char *contact_id;
     size_t contact_id_len;
-    hu_belief_t beliefs[HU_TOM_MAX_BELIEFS];
+    hu_tom_belief_t beliefs[HU_TOM_MAX_BELIEFS];
     size_t belief_count;
     hu_tom_expectation_t expectations[HU_TOM_MAX_EXPECTATIONS];
     size_t expectation_count;
-} hu_belief_state_t;
+} hu_tom_belief_state_t;
 
 /* Initialize a belief state for a contact */
-hu_error_t hu_tom_init(hu_belief_state_t *state, hu_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_tom_init(hu_tom_belief_state_t *state, hu_allocator_t *alloc, const char *contact_id,
                        size_t contact_id_len);
 
 /* Record a belief from conversation evidence */
-hu_error_t hu_tom_record_belief(hu_belief_state_t *state, hu_allocator_t *alloc, const char *topic,
+hu_error_t hu_tom_record_belief(hu_tom_belief_state_t *state, hu_allocator_t *alloc, const char *topic,
                                 size_t topic_len, hu_belief_type_t type, float confidence);
 
 /* Build context string summarizing what the contact knows/doesn't know */
-hu_error_t hu_tom_build_context(const hu_belief_state_t *state, hu_allocator_t *alloc, char **out,
+hu_error_t hu_tom_build_context(const hu_tom_belief_state_t *state, hu_allocator_t *alloc, char **out,
                                 size_t *out_len);
 
 /* Record what the user expects the AI to know about a topic */
-hu_error_t hu_tom_record_user_expectation(hu_belief_state_t *state, hu_allocator_t *alloc,
+hu_error_t hu_tom_record_user_expectation(hu_tom_belief_state_t *state, hu_allocator_t *alloc,
                                           const char *topic, size_t topic_len,
                                           hu_tom_expected_knowledge_t knowledge_type);
 
 /* Detect gaps: topics where user expects knowledge AI doesn't have.
  * Returns array of gaps (caller owns). gap_count set to number found. */
-hu_error_t hu_tom_detect_gaps(const hu_belief_state_t *state, hu_allocator_t *alloc,
+hu_error_t hu_tom_detect_gaps(const hu_tom_belief_state_t *state, hu_allocator_t *alloc,
                               hu_tom_gap_t **gaps_out, size_t *gap_count);
 
 /* Build directive string for detected gaps, for prompt injection.
@@ -100,6 +100,6 @@ bool hu_tom_detect_user_expectation(const char *text, size_t text_len, const cha
                                     hu_tom_expected_knowledge_t *knowledge_type_out);
 
 /* Free all beliefs in a state */
-void hu_tom_deinit(hu_belief_state_t *state, hu_allocator_t *alloc);
+void hu_tom_deinit(hu_tom_belief_state_t *state, hu_allocator_t *alloc);
 
 #endif /* HU_THEORY_OF_MIND_H */

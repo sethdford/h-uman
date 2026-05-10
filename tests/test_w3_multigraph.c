@@ -5,6 +5,7 @@
 #include "human/core/allocator.h"
 #include "human/memory/cross_graph.h"
 #include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include "test_framework.h"
 
 #include <stdint.h>
@@ -98,14 +99,17 @@ static void test_w3_cross_graph_traverse_filters_by_window(void) {
 static void test_w3_case_recall_empty_store_returns_zero(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
     hu_case_record_t *out = NULL;
     size_t n = 0;
     int64_t anchors[] = {1, 2};
-    HU_ASSERT_EQ(hu_case_recall(g, A(), "u1", 2, "send-email", 10, anchors, 2, 1735689600000LL,
+    HU_ASSERT_EQ(hu_case_recall(m, A(), "u1", 2, "send-email", 10, anchors, 2, 1735689600000LL,
                                  5, &out, &n),
                  HU_OK);
     HU_ASSERT_EQ(n, 0);
     HU_ASSERT_NULL(out);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -113,22 +117,24 @@ static void test_w3_case_recall_empty_store_returns_zero(void) {
 static void test_w3_case_recall_ranks_by_anchor_overlap(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
 
     int64_t a1[] = {10, 20};        /* matches the query */
     int64_t a2[] = {30, 40};        /* no overlap */
     int64_t a3[] = {10};            /* partial overlap */
     int64_t id_match = 0, id_partial = 0, id_none = 0;
-    hu_case_record(g, "u1", 2, "send-email", 10, a2, 2, NULL, 0, "ok", 2, 1735689600000LL,
+    hu_case_record(m, "u1", 2, "send-email", 10, a2, 2, NULL, 0, "ok", 2, 1735689600000LL,
                    &id_none);
-    hu_case_record(g, "u1", 2, "send-email", 10, a1, 2, "use friendly tone", 17, "ok", 2,
+    hu_case_record(m, "u1", 2, "send-email", 10, a1, 2, "use friendly tone", 17, "ok", 2,
                    1735689600000LL + 1000, &id_match);
-    hu_case_record(g, "u1", 2, "send-email", 10, a3, 1, NULL, 0, "user pushed back", 16,
+    hu_case_record(m, "u1", 2, "send-email", 10, a3, 1, NULL, 0, "user pushed back", 16,
                    1735689600000LL + 2000, &id_partial);
 
     int64_t query[] = {10, 20};
     hu_case_record_t *out = NULL;
     size_t n = 0;
-    HU_ASSERT_EQ(hu_case_recall(g, A(), "u1", 2, "send-email", 10, query, 2,
+    HU_ASSERT_EQ(hu_case_recall(m, A(), "u1", 2, "send-email", 10, query, 2,
                                  1735689600000LL + 5000, 3, &out, &n),
                  HU_OK);
     HU_ASSERT_EQ(n, 3);
@@ -145,6 +151,7 @@ static void test_w3_case_recall_ranks_by_anchor_overlap(void) {
     HU_ASSERT(found_pushback);
 
     hu_case_records_free(A(), out, n);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -152,21 +159,24 @@ static void test_w3_case_recall_ranks_by_anchor_overlap(void) {
 static void test_w3_case_recall_respects_top_k(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
 
     int64_t anchors[] = {7};
     for (int i = 0; i < 10; i++) {
         int64_t id = 0;
-        hu_case_record(g, "u1", 2, "schedule", 8, anchors, 1, NULL, 0, "ok", 2,
+        hu_case_record(m, "u1", 2, "schedule", 8, anchors, 1, NULL, 0, "ok", 2,
                        1735689600000LL + (int64_t)i * 1000, &id);
     }
 
     hu_case_record_t *out = NULL;
     size_t n = 0;
-    HU_ASSERT_EQ(hu_case_recall(g, A(), "u1", 2, "schedule", 8, anchors, 1,
+    HU_ASSERT_EQ(hu_case_recall(m, A(), "u1", 2, "schedule", 8, anchors, 1,
                                  1735689600000LL + 100000, 3, &out, &n),
                  HU_OK);
     HU_ASSERT_EQ(n, 3);
     hu_case_records_free(A(), out, n);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 

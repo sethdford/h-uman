@@ -173,6 +173,12 @@ static hu_error_t phase_quarantine_review(hu_graph_t *g, const hu_autodream_conf
             char prefixed[512];
             int n = snprintf(prefixed, sizeof(prefixed), "released:autodream:%.*s",
                              (int)(prov_len < 480 ? prov_len : 480), prov ? prov : "");
+            /* TODO(W7-blocked): hu_memory_facade_write cannot be used here
+             * because hu_memory_record_t lacks a contact_id field. The v1
+             * backend's v1_relation_write passes "" for contact_id, losing
+             * the per-contact scoping this call requires. Migration is
+             * blocked until hu_memory_record_t is extended with contact_id
+             * or the facade write path gains a contact-scoping parameter. */
             (void)hu_graph_upsert_relation_ex(g, cid_t, cid_len, source_id, target_id, rtype,
                                               weight, event_start, event_end, confidence, ctx,
                                               ctx_len, prefixed, n > 0 ? (size_t)n : 0);

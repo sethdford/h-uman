@@ -33,18 +33,18 @@ static hu_allocator_t *A(void) {
     return &g_alloc;
 }
 
-static void open_facade(hu_graph_t **g, hu_memory_t **m) {
+static void open_facade(hu_graph_t **g, hu_memory_facade_t **m) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
     HU_ASSERT_NOT_NULL(*g);
-    HU_ASSERT_EQ(hu_memory_open(A(), *g, m), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), *g, m), HU_OK);
     HU_ASSERT_NOT_NULL(*m);
     /* Keep the world-model cache from leaking entries between tests. */
     hu_world_model_invalidate(NULL, 0);
 }
 
-static void close_facade(hu_graph_t *g, hu_memory_t *m) {
+static void close_facade(hu_graph_t *g, hu_memory_facade_t *m) {
     hu_world_model_invalidate(NULL, 0);
-    hu_memory_close(m, A());
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -83,7 +83,7 @@ static hu_self_rag_request_t make_request(const char *draft,
 
 static void test_w11_heuristic_supported_when_strong_evidence(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
     seed_alice_works_at_acme(g);
 
@@ -107,7 +107,7 @@ static void test_w11_heuristic_supported_when_strong_evidence(void) {
 
 static void test_w11_heuristic_abstains_when_no_evidence(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
     /* No relations seeded → every claim is unsupported. */
 
@@ -128,7 +128,7 @@ static void test_w11_heuristic_abstains_when_no_evidence(void) {
 
 static void test_w11_heuristic_off_mode_passes_through(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_self_rag_t r = {0};
@@ -148,7 +148,7 @@ static void test_w11_heuristic_off_mode_passes_through(void) {
 
 static void test_w11_heuristic_invalid_args_returns_invalid_argument(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_self_rag_t r = {0};
@@ -168,7 +168,7 @@ static void test_w11_heuristic_invalid_args_returns_invalid_argument(void) {
 
 static void test_w11_atomic_decomposes_compound_claim(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_self_rag_t r = {0};
@@ -192,7 +192,7 @@ static void test_w11_atomic_decomposes_compound_claim(void) {
 
 static void test_w11_atomic_abstains_when_majority_unsupported(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
     /* Seed unrelated entity so the graph is non-empty but doesn't back the
      * draft. */
@@ -227,7 +227,7 @@ static void test_w11_atomic_abstains_when_majority_unsupported(void) {
 
 static void test_w11_atomic_skips_questions(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
     seed_alice_works_at_acme(g);
 
@@ -248,7 +248,7 @@ static void test_w11_atomic_skips_questions(void) {
 
 static void test_w11_atomic_short_sentence_emits_one_claim(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
     seed_alice_works_at_acme(g);
 
@@ -272,7 +272,7 @@ static void test_w11_atomic_short_sentence_emits_one_claim(void) {
 
 static void test_w11_inline_strips_retrieve_tokens_from_output(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_self_rag_t r = {0};
@@ -297,7 +297,7 @@ static void test_w11_inline_strips_retrieve_tokens_from_output(void) {
 
 static void test_w11_inline_records_critique_claim(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_self_rag_t r = {0};
@@ -321,7 +321,7 @@ static void test_w11_inline_records_critique_claim(void) {
 
 static void test_w11_inline_refuse_tag_triggers_abstention(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_self_rag_t r = {0};
@@ -344,7 +344,7 @@ static void test_w11_inline_refuse_tag_triggers_abstention(void) {
 
 static void test_w11_inline_handles_unclosed_tag_gracefully(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_self_rag_t r = {0};
@@ -380,6 +380,79 @@ static void test_w11_refusal_renders_template(void) {
                                 sizeof(buf));
     HU_ASSERT_STR_EQ(
         buf, "Based on what I know, I'd rather not weigh in here.");
+
+    hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE, buf, sizeof(buf));
+    HU_ASSERT_STR_EQ(
+        buf, "I don't have enough memory to confirm this.");
+}
+
+/* ── v1 verifier abstention outcome ──────────────────────────────────── */
+
+static void test_w11_v1_verifier_abstains_when_majority_unsupported(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_SOFT;
+    cfg.abstain_threshold = 0.5f;
+
+    hu_verifier_report_t report;
+    const char *draft = "Zelda builds starships at Mars. Samus races at Saturn.";
+    hu_error_t err = hu_response_verify(A(), m, "u1", 2, draft, strlen(draft),
+                                         &cfg, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)report.outcome, HU_VERIFY_RESULT_ABSTAIN);
+    HU_ASSERT(report.refusal_text[0] != '\0');
+    HU_ASSERT_STR_CONTAINS(report.refusal_text, "enough memory to confirm");
+
+    close_facade(g, m);
+}
+
+static void test_w11_v1_verifier_supported_with_evidence(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_SOFT;
+    cfg.abstain_threshold = 0.5f;
+
+    hu_verifier_report_t report;
+    const char *draft = "Alice works at Acme.";
+    hu_error_t err = hu_response_verify(A(), m, "u1", 2, draft, strlen(draft),
+                                         &cfg, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT((int)report.outcome == HU_VERIFY_RESULT_SUPPORTED ||
+              (int)report.outcome == HU_VERIFY_RESULT_HEDGED);
+    HU_ASSERT_EQ((int)report.refusal_text[0], 0);
+
+    close_facade(g, m);
+}
+
+/* ── Corrective RAG wiring in atomic STRICT mode ─────────────────────── */
+
+static void test_w11_atomic_strict_attempts_corrective_rag(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_atomic(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req = make_request(
+        "Zelda builds starships at Mars.", HU_VERIFY_STRICT);
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    /* With no matching memory, STRICT either drops or abstains. The
+     * corrective-RAG path fires but finds nothing relevant. */
+    HU_ASSERT(resp.outcome == HU_SELF_RAG_ABSTAINED ||
+              resp.outcome == HU_SELF_RAG_REWRITTEN);
+
+    hu_self_rag_close(&r);
+    close_facade(g, m);
 }
 
 /* ── Adversarial ──────────────────────────────────────────────────────── */
@@ -390,7 +463,7 @@ static void test_w11_adversarial_prompt_injection_to_avoid_refusal(void) {
      * are unsupported — the preface is just unsupported instruction text,
      * not evidence. */
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
     hu_self_rag_t r = {0};
@@ -412,7 +485,7 @@ static void test_w11_adversarial_paraphrase_attack_low_support(void) {
     /* A claim that paraphrases the seeded fact using only synonyms (no
      * shared content tokens) must not be falsely marked supported. */
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
     seed_alice_works_at_acme(g);
 
@@ -440,7 +513,7 @@ static void test_w11_adversarial_paraphrase_attack_low_support(void) {
 
 static void test_w11_e2e_inline_with_world_model_and_memory(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
     seed_alice_works_at_acme(g);
 
@@ -488,6 +561,9 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_inline_refuse_tag_triggers_abstention);
     HU_RUN_TEST(test_w11_inline_handles_unclosed_tag_gracefully);
     HU_RUN_TEST(test_w11_refusal_renders_template);
+    HU_RUN_TEST(test_w11_v1_verifier_abstains_when_majority_unsupported);
+    HU_RUN_TEST(test_w11_v1_verifier_supported_with_evidence);
+    HU_RUN_TEST(test_w11_atomic_strict_attempts_corrective_rag);
     HU_RUN_TEST(test_w11_adversarial_prompt_injection_to_avoid_refusal);
     HU_RUN_TEST(test_w11_adversarial_paraphrase_attack_low_support);
     HU_RUN_TEST(test_w11_e2e_inline_with_world_model_and_memory);

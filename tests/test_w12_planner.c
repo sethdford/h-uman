@@ -20,17 +20,17 @@
 static hu_allocator_t g_alloc;
 static hu_allocator_t *A(void) { g_alloc = hu_system_allocator(); return &g_alloc; }
 
-static void open_facade_(hu_graph_t **g, hu_memory_t **m) {
+static void open_facade_(hu_graph_t **g, hu_memory_facade_t **m) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
     HU_ASSERT_NOT_NULL(*g);
-    HU_ASSERT_EQ(hu_memory_open(A(), *g, m), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), *g, m), HU_OK);
     HU_ASSERT_NOT_NULL(*m);
     hu_world_model_invalidate(NULL, 0);
 }
 
-static void close_facade_(hu_graph_t *g, hu_memory_t *m) {
+static void close_facade_(hu_graph_t *g, hu_memory_facade_t *m) {
     hu_world_model_invalidate(NULL, 0);
-    hu_memory_close(m, A());
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -49,7 +49,7 @@ static void add_relation(hu_graph_t *g, const char *cid, int64_t s, int64_t t,
                  HU_OK);
 }
 
-static hu_world_model_t *load_wm(hu_memory_t *m, const char *cid) {
+static hu_world_model_t *load_wm(hu_memory_facade_t *m, const char *cid) {
     hu_world_model_t *wm = NULL;
     HU_ASSERT_EQ(hu_world_model_build(m, A(), cid, strlen(cid), 1735690000000LL, &wm),
                  HU_OK);
@@ -61,7 +61,7 @@ static hu_world_model_t *load_wm(hu_memory_t *m, const char *cid) {
 
 static void test_w12_heuristic_planner_emits_3_hop_plan_for_relationship_query(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
     /* Two anchors so the "between" branch fires fully. */
@@ -97,7 +97,7 @@ static void test_w12_heuristic_planner_emits_3_hop_plan_for_relationship_query(v
 
 static void test_w12_heuristic_planner_temporal_query_emits_window(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     add_entity(g, "u1", "Alice", HU_ENTITY_PERSON);
     hu_world_model_t *wm = load_wm(m, "u1");
@@ -118,7 +118,7 @@ static void test_w12_heuristic_planner_temporal_query_emits_window(void) {
 
 static void test_w12_heuristic_planner_default_plan_for_bare_goal(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     hu_world_model_t *wm = load_wm(m, "u1");
 
@@ -153,7 +153,7 @@ static void test_w12_heuristic_planner_caps_steps_and_budget(void) {
 
 static void test_w12_planner_handles_empty_world_model_gracefully(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     /* No entities, no relations. */
     hu_world_model_t *wm = load_wm(m, "u-empty");
@@ -214,7 +214,7 @@ static void test_w12_adversarial_planner_resists_query_injection(void) {
 
 static void test_w12_planner_execute_aggregates_relation_records(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
     int64_t alice = add_entity(g, "u1", "Alice", HU_ENTITY_PERSON);
@@ -249,7 +249,7 @@ static void test_w12_planner_execute_respects_total_budget(void) {
     /* Construct a max plan and run it with budget = 0 (unlimited): must
      * complete without rejection. */
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     int64_t a = add_entity(g, "u1", "Alice", HU_ENTITY_PERSON);
     int64_t b = add_entity(g, "u1", "Acme",  HU_ENTITY_ORGANIZATION);
@@ -294,11 +294,11 @@ static void test_w12_planner_execute_invalid_args_rejected(void) {
     size_t n = 0;
     HU_ASSERT_EQ(hu_planner_execute(NULL, NULL, &plan, A(), &out, &n),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_planner_execute((hu_memory_t *)1, NULL, NULL, A(), &out, &n),
+    HU_ASSERT_EQ(hu_planner_execute((hu_memory_facade_t *)1, NULL, NULL, A(), &out, &n),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_planner_execute((hu_memory_t *)1, NULL, &plan, NULL, &out, &n),
+    HU_ASSERT_EQ(hu_planner_execute((hu_memory_facade_t *)1, NULL, &plan, NULL, &out, &n),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_planner_execute((hu_memory_t *)1, NULL, &plan, A(), NULL, &n),
+    HU_ASSERT_EQ(hu_planner_execute((hu_memory_facade_t *)1, NULL, &plan, A(), NULL, &n),
                  HU_ERR_INVALID_ARGUMENT);
 }
 
@@ -356,7 +356,7 @@ static float score_for(int64_t id, const int64_t *ids, const float *sc, size_t n
 
 static void test_w12_pagerank_top_k_matches_expected_subgraph(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
     int64_t ids[6];
@@ -398,7 +398,7 @@ static void test_w12_pagerank_top_k_matches_expected_subgraph(void) {
 
 static void test_w12_pagerank_deterministic_repeated_calls(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     int64_t ids[6];
     seed_pagerank_graph(g, ids);
@@ -424,7 +424,7 @@ static void test_w12_pagerank_deterministic_repeated_calls(void) {
 
 static void test_w12_pagerank_zero_seeds_returns_empty(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     int64_t ids[6];
     seed_pagerank_graph(g, ids);
@@ -443,7 +443,7 @@ static void test_w12_pagerank_unknown_seed_yields_empty(void) {
     /* Caller passes seed ids that don't exist in this contact's graph: the
      * function returns success with empty output (no usable teleport mass). */
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     int64_t ids[6];
     seed_pagerank_graph(g, ids);
@@ -461,7 +461,7 @@ static void test_w12_pagerank_unknown_seed_yields_empty(void) {
 
 static void test_w12_pagerank_invalid_args_rejected(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     int64_t seeds[1] = { 1 };
     int64_t *out_ids = NULL; float *out_sc = NULL; size_t n = 0;
@@ -486,7 +486,7 @@ static void test_w12_pagerank_invalid_args_rejected(void) {
 
 static void test_w12_pagerank_handles_empty_graph(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
     int64_t seeds[1] = { 1 };
@@ -502,7 +502,7 @@ static void test_w12_pagerank_handles_empty_graph(void) {
 
 static void test_w12_pagerank_default_damping_when_out_of_range(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
     int64_t ids[6];
     seed_pagerank_graph(g, ids);

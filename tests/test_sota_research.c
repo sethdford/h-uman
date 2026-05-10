@@ -306,7 +306,7 @@ static void test_graph_index_null_args(void) {
 static void test_turing_18_dimensions_all_scored(void) {
     hu_turing_score_t score;
     const char *resp = "yeah haha that's so true! I mean, I was honestly thinking the same thing";
-    HU_ASSERT_EQ(hu_turing_score_heuristic(resp, strlen(resp), NULL, 0, &score), HU_OK);
+    HU_ASSERT_EQ(hu_turing_score_heuristic(resp, strlen(resp), NULL, 0, 0, &score), HU_OK);
     for (int i = 0; i < HU_TURING_DIM_COUNT; i++) {
         HU_ASSERT_TRUE(score.dimensions[i] >= 1);
         HU_ASSERT_TRUE(score.dimensions[i] <= 10);
@@ -330,8 +330,8 @@ static void test_turing_filler_usage_boosts_score(void) {
     hu_turing_score_t with_fillers, without_fillers;
     const char *with = "yeah um I think, like, that's probably right, hmm";
     const char *without = "I think that is probably right";
-    hu_turing_score_heuristic(with, strlen(with), NULL, 0, &with_fillers);
-    hu_turing_score_heuristic(without, strlen(without), NULL, 0, &without_fillers);
+    hu_turing_score_heuristic(with, strlen(with), NULL, 0, 0, &with_fillers);
+    hu_turing_score_heuristic(without, strlen(without), NULL, 0, 0, &without_fillers);
     HU_ASSERT_TRUE(with_fillers.dimensions[HU_TURING_FILLER_USAGE] >
                    without_fillers.dimensions[HU_TURING_FILLER_USAGE]);
 }
@@ -339,7 +339,7 @@ static void test_turing_filler_usage_boosts_score(void) {
 static void test_turing_repair_markers_detected(void) {
     hu_turing_score_t score;
     const char *resp = "I mean, wait, actually I think it was Tuesday";
-    hu_turing_score_heuristic(resp, strlen(resp), NULL, 0, &score);
+    hu_turing_score_heuristic(resp, strlen(resp), NULL, 0, 0, &score);
     HU_ASSERT_TRUE(score.dimensions[HU_TURING_CONVERSATIONAL_REPAIR] >= 6);
 }
 

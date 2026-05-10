@@ -1,4 +1,5 @@
 #include "human/doctor.h"
+#include "human/agent/scheduler_status_json.h"
 #include "human/agent/verifier_metrics.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
@@ -909,5 +910,111 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
         }
     }
 
+    return HU_OK;
+}
+
+hu_error_t hu_doctor_parse_scheduler_status_json(const char *json,
+                                                   unsigned long long *jobs_pending,
+                                                   unsigned long long *jobs_completed_today,
+                                                   long long *battery_pct, char *on_ac_power_text,
+                                                   size_t on_ac_power_cap, long long *updated_epoch) {
+    return hu_scheduler_status_parse_json(json, jobs_pending, jobs_completed_today, battery_pct,
+                                          on_ac_power_text, on_ac_power_cap, updated_epoch);
+}
+
+hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
+                                     int64_t stale_after_secs, hu_diag_item_t **items,
+                                     size_t *count, size_t *cap) {
+    if (!alloc || !items || !count || !cap)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                                "[doctor] scheduler: $HOME unset");
+
+    char path[512];
+    int pn = snprintf(path, sizeof(path), "%s/.human/scheduler.status", home);
+    if (pn <= 0 || (size_t)pn >= sizeof(path))
+        return doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                                "[doctor] scheduler: path overflow");
+
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        char *msg = hu_sprintf(alloc,
+                               "[doctor] scheduler: no status file yet (%s) — daemon may not "
+                               "have ticked W14",
+                               path);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+        return HU_OK;
+    }
+    char buf[4096];
+    size_t nread = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[nread] = '\0';
+
+    unsigned long long jp = 0, jc = 0;
+    long long bat = 0;
+    char acbuf[16] = {0};
+    long long ue = 0;
+    if (hu_scheduler_status_parse_json(buf, &jp, &jc, &bat, acbuf, sizeof(acbuf), &ue) != HU_OK) {
+        (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                               "[doctor] scheduler: status file present but parse failed "
+                               "(upgrade skew?)");
+        return HU_OK;
+    }
+
+    {
+        char *msg = hu_sprintf(alloc,
+                               "[doctor] scheduler: pending=%llu completed_24h=%llu "
+                               "battery_pct=%lld on_ac=%s",
+                               jp, jc, bat, acbuf[0] ? acbuf : "?");
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    }
+    int64_t age = now_epoch - ue;
+    if (age < 0)
+        age = 0;
+    if (stale_after_secs > 0 && age > stale_after_secs) {
+        char *msg = hu_sprintf(alloc,
+                               "[doctor] scheduler heartbeat: STALE — status_age=%llds "
+                               "(threshold %llds)",
+                               (long long)age, (long long)stale_after_secs);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    } else {
+        char *msg =
+            hu_sprintf(alloc, "[doctor] scheduler heartbeat: fresh (status_age=%llds)",
+                       (long long)age);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    }
+    return HU_OK;
+}
+
+hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item_t **items,
+                                             size_t *count, size_t *cap) {
+    if (!alloc || !items || !count || !cap)
+        return HU_ERR_INVALID_ARGUMENT;
+    (void)doctor_push_line(
+        alloc, items, count, cap, HU_DIAG_OK,
+        "[doctor] responses: degenerate output is retried via a slim 2-message request, then "
+        "cloud fallback (gemini → openai) when HU_ENABLE_CURL=1");
+    (void)doctor_push_line(
+        alloc, items, count, cap, HU_DIAG_OK,
+        "[doctor] responses: grep ~/.human/logs/service-loop-error.log for "
+        "\"response_guard\" and \"empty assistant response\"");
+    (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                           "[doctor] responses: MLX HTTP 52 (empty reply) usually means the "
+                           "local server rejected an oversized body — slim retry addresses this");
     return HU_OK;
 }

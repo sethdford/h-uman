@@ -1,4 +1,5 @@
 #include "human/cli_commands.h"
+#include "human/cli_eval_w16_internal.h"
 #include "human/agent/hula.h"
 #include "human/agent/hula_analytics.h"
 #include "human/agent/hula_compiler.h"
@@ -18,10 +19,13 @@
 #include "human/eval/turing_adversarial.h"
 #include "human/eval_benchmarks.h"
 #include "human/eval_dashboard.h"
+#include "human/evaluation/evaluation.h"
 #include "human/memory.h"
 #include "human/memory/factory.h"
 #include "human/providers/factory.h"
 #include "human/security.h"
+#include "human/security/audit.h"
+#include "human/security/audit_log.h"
 #include "human/security/sandbox.h"
 #include "human/tools/factory.h"
 #ifdef HU_ENABLE_FEEDS
@@ -366,7 +370,7 @@ hu_error_t cmd_hardware(hu_allocator_t *alloc, int argc, char **argv) {
 
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
-        printf("Usage: human memory <stats|count|list|search|get|forget>\n");
+        printf("Usage: human memory <stats|count|list|search|get|forget|export|audit>\n");
         return HU_OK;
     }
     const char *sub = argv[2];
@@ -376,6 +380,10 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
     }
     if (strcmp(sub, "forget") == 0 && argc < 4) {
         fprintf(stderr, "Usage: human memory forget <key>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    if (strcmp(sub, "export") == 0 && argc < 4) {
+        fprintf(stderr, "Usage: human memory export [--json] <output_path>\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
     hu_config_t cfg;
@@ -467,6 +475,151 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         bool deleted = false;
         err = mem.vtable->forget(mem.ctx, argv[3], strlen(argv[3]), &deleted);
         printf("%s: %s\n", argv[3], deleted ? "forgotten" : "not found");
+
+        /* W15 P1 #5 — audit-log every GDPR-significant memory write
+         * (forget = right-to-erasure). Best-effort: failure to log MUST
+         * NOT block the user's deletion. */
+        if (cfg.security.audit.enabled) {
+            hu_audit_config_t acfg = HU_AUDIT_CONFIG_DEFAULT;
+            acfg.enabled = true;
+            acfg.log_path = cfg.security.audit.log_path
+                ? cfg.security.audit.log_path : "audit.log";
+            hu_audit_logger_t *logger = hu_audit_logger_create(alloc, &acfg, ws);
+            if (logger) {
+                hu_audit_event_t ev;
+                hu_audit_event_init(&ev, HU_AUDIT_FILE_ACCESS);
+                hu_audit_event_with_actor(&ev, "cli", NULL, "user");
+                hu_audit_event_with_action(&ev, "memory.forget",
+                                            deleted ? "low" : "low", true, true);
+                hu_audit_event_with_result(&ev, deleted, deleted ? 0 : 1, 0,
+                                           deleted ? NULL : "key not found");
+                (void)hu_audit_logger_log(logger, &ev);
+                hu_audit_logger_destroy(logger, alloc);
+            }
+        }
+    } else if (strcmp(sub, "export") == 0) {
+        /* W15 P1 #5 — full export of memory entries to JSON for GDPR
+         * data-portability via hu_memory_export_json. Accepts optional
+         * --json flag for forward-compat with future format switches. */
+        const char *path = argv[3];
+        if (strcmp(path, "--json") == 0) {
+            if (argc < 5) {
+                fprintf(stderr, "Usage: human memory export --json <output_path>\n");
+                err = HU_ERR_INVALID_ARGUMENT;
+                goto done;
+            }
+            path = argv[4];
+        }
+        err = hu_memory_export_json(&mem, alloc, path);
+        if (err == HU_ERR_IO) {
+            fprintf(stderr, "Failed to open '%s' for export: %s\n",
+                    path, strerror(errno));
+            goto done;
+        }
+        if (err != HU_OK) {
+            fprintf(stderr, "Export failed: %s\n", hu_error_string(err));
+            goto done;
+        }
+        size_t exported = 0;
+        if (mem.vtable->count)
+            mem.vtable->count(mem.ctx, &exported);
+        printf("Exported %zu entries to %s\n", exported, path);
+
+        if (cfg.security.audit.enabled) {
+            hu_audit_config_t acfg = HU_AUDIT_CONFIG_DEFAULT;
+            acfg.enabled = true;
+            acfg.log_path = cfg.security.audit.log_path
+                ? cfg.security.audit.log_path : "audit.log";
+            hu_audit_logger_t *logger = hu_audit_logger_create(alloc, &acfg, ws);
+            if (logger) {
+                hu_audit_event_t ev;
+                hu_audit_event_init(&ev, HU_AUDIT_FILE_ACCESS);
+                hu_audit_event_with_actor(&ev, "cli", NULL, "user");
+                hu_audit_event_with_action(&ev, "memory.export", "low", true, true);
+                hu_audit_event_with_result(&ev, true, 0, 0, NULL);
+                (void)hu_audit_logger_log(logger, &ev);
+                hu_audit_logger_destroy(logger, alloc);
+            }
+        }
+    } else if (strcmp(sub, "audit") == 0) {
+        /* W15 — query recent audit entries from the SQLite-backed
+         * audit log, then verify the HMAC chain on the text log. */
+        static const char *const op_names[] = {
+            [HU_AUDIT_OP_READ]   = "read",
+            [HU_AUDIT_OP_WRITE]  = "write",
+            [HU_AUDIT_OP_ERASE]  = "erase",
+            [HU_AUDIT_OP_EXPORT] = "export",
+        };
+
+        char db_path[1024];
+        snprintf(db_path, sizeof(db_path), "%s/audit_log.db", ws);
+
+        hu_audit_log_t *alog = NULL;
+        hu_error_t alog_err = hu_audit_log_open(alloc, db_path, NULL, &alog);
+        if (alog_err == HU_OK && alog) {
+            hu_audit_query_t q;
+            memset(&q, 0, sizeof(q));
+            hu_audit_log_event_t *events = NULL;
+            size_t event_count = 0;
+            alog_err = hu_audit_log_query(alog, &q, alloc, &events, &event_count);
+            if (alog_err == HU_OK && event_count > 0) {
+                printf("Audit log (%zu entries):\n", event_count);
+                for (size_t i = 0; i < event_count; i++) {
+                    const hu_audit_log_event_t *ev = &events[i];
+                    const char *op_str = "unknown";
+                    if ((int)ev->operation >= 0 &&
+                        (size_t)ev->operation < sizeof(op_names) / sizeof(op_names[0])
+                        && op_names[ev->operation])
+                        op_str = op_names[ev->operation];
+
+                    time_t ts = (time_t)(ev->occurred_at / 1000);
+                    struct tm tm_buf;
+                    struct tm *tm = gmtime_r(&ts, &tm_buf);
+                    char tbuf[32];
+                    if (tm)
+                        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", tm);
+                    else
+                        snprintf(tbuf, sizeof(tbuf), "%lld", (long long)ev->occurred_at);
+
+                    printf("  [%s] %-6s actor=%-10s key=%s%s%s\n",
+                           tbuf, op_str,
+                           ev->actor ? ev->actor : "-",
+                           ev->contact_id ? ev->contact_id : "-",
+                           ev->summary ? "  " : "",
+                           ev->summary ? ev->summary : "");
+                }
+                hu_audit_log_events_free(alloc, events, event_count);
+            } else if (event_count == 0) {
+                printf("audit: no entries recorded yet\n");
+            } else {
+                fprintf(stderr, "audit: query failed: %s\n",
+                        hu_error_string(alog_err));
+            }
+            hu_audit_log_close(alog, alloc);
+        } else {
+            printf("audit: no SQLite audit log at %s\n", db_path);
+        }
+
+        /* Also verify the HMAC text-based chain if it exists. */
+        const char *audit_path = cfg.security.audit.log_path
+            ? cfg.security.audit.log_path : "audit.log";
+        char full[1024];
+        if (audit_path[0] != '/') {
+            snprintf(full, sizeof(full), "%s/%s", ws, audit_path);
+            audit_path = full;
+        }
+        struct stat st;
+        if (stat(audit_path, &st) != 0) {
+            printf("audit: no HMAC log at %s (nothing to verify)\n", audit_path);
+        } else {
+            err = hu_audit_verify_chain(audit_path, NULL);
+            if (err == HU_OK) {
+                printf("audit: chain ok (%lld bytes)\n", (long long)st.st_size);
+            } else {
+                fprintf(stderr, "audit: chain verification failed: %s\n",
+                        hu_error_string(err));
+            }
+        }
     } else {
         fprintf(stderr, "Unknown memory subcommand: %s\n", sub);
         err = HU_ERR_INVALID_ARGUMENT;
@@ -864,12 +1017,182 @@ static int eval_json_basename_cmp(const void *a, const void *b) {
 }
 #endif
 
+/* ── W16 dispatcher: `human eval --w16 <suite> [--offline]` ─────────────── */
+
+/* Mapping table for the W16 dispatcher. The CLI flag accepts the same
+ * suite ids exposed by `human evaluation list`, plus `legacy-bridge` for the
+ * adapter that wraps `hu_eval_run_suite`. Keep this list in sync with
+ * `kEvaluationFactories` in `src/cli_evaluation.c`. */
+typedef struct hu_w16_factory_entry {
+    const char *id;
+    hu_error_t (*factory)(hu_allocator_t *alloc, hu_evaluation_t *out);
+} hu_w16_factory_entry_t;
+
+static const hu_w16_factory_entry_t HU_W16_CLI_FACTORIES[] = {
+    {"locomo", hu_evaluation_locomo},
+    {"longmemeval", hu_evaluation_longmemeval},
+    {"dmr", hu_evaluation_dmr},
+    {"minja", hu_evaluation_minja},
+    {"memoryagentbench", hu_evaluation_memoryagentbench},
+    {"frontier", hu_evaluation_frontier_compare},
+    {"legacy-bridge", hu_evaluation_legacy_bridge},
+};
+static const size_t HU_W16_CLI_FACTORIES_N =
+    sizeof(HU_W16_CLI_FACTORIES) / sizeof(HU_W16_CLI_FACTORIES[0]);
+
+/* The status struct + init/free helpers are declared in
+ * `human/cli_eval_w16_internal.h` so the test TU can assert on the
+ * populated fields after a dispatch call. The struct documents which
+ * flags the dispatcher saw and which steps it completed before
+ * returning. */
+void hu_w16_cli_status_init(hu_w16_cli_status_t *s, hu_allocator_t *alloc) {
+    if (!s)
+        return;
+    memset(s, 0, sizeof(*s));
+    s->alloc = alloc;
+    s->status = HU_OK;
+}
+
+void hu_w16_cli_status_free(hu_w16_cli_status_t *s) {
+    if (!s)
+        return;
+    if (s->suite_name_owned && s->suite_name && s->alloc)
+        s->alloc->free(s->alloc->ctx, s->suite_name, strlen(s->suite_name) + 1);
+    s->suite_name = NULL;
+    s->suite_name_owned = false;
+}
+
+static const hu_w16_factory_entry_t *hu_w16_find_factory(const char *id) {
+    if (!id)
+        return NULL;
+    for (size_t i = 0; i < HU_W16_CLI_FACTORIES_N; i++) {
+        if (strcmp(HU_W16_CLI_FACTORIES[i].id, id) == 0)
+            return &HU_W16_CLI_FACTORIES[i];
+    }
+    return NULL;
+}
+
+static void hu_w16_cli_print_usage(FILE *out) {
+    fprintf(out,
+            "Usage: human eval --w16 <suite> [--offline]\n"
+            "  Run one of the W16 continuous-evaluation backends through the\n"
+            "  `hu_evaluation_t` vtable and print the report JSON on stdout.\n\n"
+            "  Suites:\n");
+    for (size_t i = 0; i < HU_W16_CLI_FACTORIES_N; i++)
+        fprintf(out, "    %s\n", HU_W16_CLI_FACTORIES[i].id);
+    fprintf(out,
+            "\n  --offline   Force synthetic-dataset paths (no network, no real\n"
+            "              corpus). Backends are already offline-by-default;\n"
+            "              this flag pins HU_EVAL_DATA_DIR to a guaranteed-empty\n"
+            "              path so a host-installed corpus cannot bleed in.\n");
+}
+
+/* Parse `--w16 <suite> [--offline]` from argv starting at index 2 and run
+ * the matching backend. Writes status flags into `*status` (caller owns). */
+static hu_error_t hu_w16_cli_dispatch(hu_allocator_t *alloc, int argc, char **argv,
+                                      hu_w16_cli_status_t *status) {
+    if (!alloc || !argv || !status)
+        return HU_ERR_INVALID_ARGUMENT;
+    status->requested = true;
+
+    const char *suite_id = NULL;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--offline") == 0) {
+            status->offline = true;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            hu_w16_cli_print_usage(stdout);
+            return HU_OK;
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Unknown --w16 flag: %s\n", argv[i]);
+            status->status = HU_ERR_INVALID_ARGUMENT;
+            return HU_ERR_INVALID_ARGUMENT;
+        } else if (!suite_id) {
+            suite_id = argv[i];
+        } else {
+            fprintf(stderr, "Unexpected positional arg after suite: %s\n", argv[i]);
+            status->status = HU_ERR_INVALID_ARGUMENT;
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+    }
+    if (!suite_id) {
+        hu_w16_cli_print_usage(stderr);
+        status->status = HU_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    const hu_w16_factory_entry_t *entry = hu_w16_find_factory(suite_id);
+    if (!entry) {
+        fprintf(stderr,
+                "Unknown W16 suite '%s' (try `human eval --w16 --help`)\n",
+                suite_id);
+        status->suite_name = hu_strdup(alloc, suite_id);
+        status->suite_name_owned = (status->suite_name != NULL);
+        status->status = HU_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
+    }
+    status->suite_name = hu_strdup(alloc, entry->id);
+    status->suite_name_owned = (status->suite_name != NULL);
+
+    /* Offline mode: pin the dataset loader at a guaranteed-empty directory
+     * so backends that look up `~/.human/eval-datasets/...` cannot pick up
+     * a host corpus. The synthetic-fallback path inside each backend then
+     * runs, which has no IO beyond reading the inline tables. */
+    if (status->offline) {
+#if defined(_POSIX_VERSION) || defined(__APPLE__) || defined(__unix__)
+        setenv("HU_EVAL_DATA_DIR", "/tmp/hu_w16_offline_no_corpus", 1);
+#endif
+    }
+
+    hu_evaluation_t backend;
+    memset(&backend, 0, sizeof(backend));
+    hu_error_t err = entry->factory(alloc, &backend);
+    if (err != HU_OK) {
+        fprintf(stderr, "W16 factory failed for '%s': %s\n", entry->id,
+                hu_error_string(err));
+        status->status = err;
+        return err;
+    }
+    status->dispatched = true;
+
+    hu_evaluation_run_report_t report;
+    memset(&report, 0, sizeof(report));
+    err = hu_evaluation_run_suite(&backend, &report);
+    hu_evaluation_close(&backend);
+    if (err != HU_OK) {
+        fprintf(stderr, "W16 run failed for '%s': %s\n", entry->id,
+                hu_error_string(err));
+        hu_evaluation_report_free(alloc, &report);
+        status->status = err;
+        return err;
+    }
+
+    char *json = NULL;
+    size_t json_len = 0;
+    err = hu_evaluation_report_to_json(alloc, &report, &json, &json_len);
+    if (err == HU_OK && json) {
+        fwrite(json, 1, json_len, stdout);
+        fputc('\n', stdout);
+        status->report_emitted = true;
+        alloc->free(alloc->ctx, json, json_len + 1);
+    }
+    hu_evaluation_report_free(alloc, &report);
+    status->status = err;
+    return err;
+}
+
+/* Test entry from `human/cli_eval_w16_internal.h`. Forwards to the
+ * static dispatcher with a caller-provided status buffer. */
+hu_error_t hu_cmd_eval_w16_dispatch_for_test(hu_allocator_t *alloc, int argc, char **argv,
+                                             hu_w16_cli_status_t *status) {
+    return hu_w16_cli_dispatch(alloc, argc, argv, status);
+}
+
 /* ── eval (run/list/compare) ────────────────────────────────────────────── */
 hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
         printf("Usage: human eval "
                "<run|baseline|validate|check-regression|list|compare|dashboard|history|trend|"
-               "benchmark|turing-adversarial> [args]\n");
+               "benchmark|turing-adversarial|--w16> [args]\n");
         printf("  run <suite.json>     Load and run an eval suite, print report JSON\n");
         printf("  baseline [dir]       Run all *.json suites in dir (default: eval_suites/), print "
                "score table\n");
@@ -883,9 +1206,40 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
         printf("  history [--last N] [--benchmark X]  Show eval history from SQLite\n");
         printf("  trend                Compare eval scores over time (requires prior baselines)\n");
         printf("  benchmark <gaia|swebench|tooluse> <suite.json>  Load and run a benchmark\n");
+        printf("  --w16 <suite> [--offline]  Run a W16 vtable backend (locomo, longmemeval,\n");
+        printf("                              dmr, minja, memoryagentbench, frontier,\n");
+        printf("                              legacy-bridge); --offline pins synthetic data.\n");
         return HU_OK;
     }
     const char *sub = argv[2];
+
+    if (strcmp(sub, "--help") == 0 || strcmp(sub, "-h") == 0 || strcmp(sub, "help") == 0) {
+        printf("Usage: human eval "
+               "<run|baseline|validate|check-regression|list|compare|dashboard|history|trend|"
+               "benchmark|turing-adversarial|--w16> [args]\n");
+        printf("  run <suite.json>     Load and run an eval suite, print report JSON\n");
+        printf("  baseline [dir]       Run all *.json suites in dir (default: eval_suites/)\n");
+        printf("  validate <dir>       Check all *.json suites parse; unique ids\n");
+        printf("  check-regression <dir>  Compare fresh baseline against SQLite history\n");
+        printf("  list                 List eval_suites/*.json with task counts (POSIX)\n");
+        printf("  compare <r1> <r2>    Compare two run report JSON files\n");
+        printf("  dashboard [r1.json]  Render terminal dashboard from run report(s)\n");
+        printf("  history              Show eval history from SQLite\n");
+        printf("  trend                Compare eval scores over time\n");
+        printf("  benchmark <kind> <suite.json>  Load and run a benchmark\n");
+        printf("  --w16 <suite> [--offline]  Run a W16 vtable backend (locomo, longmemeval,\n");
+        printf("                              dmr, minja, memoryagentbench, frontier,\n");
+        printf("                              legacy-bridge); --offline pins synthetic data.\n");
+        return HU_OK;
+    }
+
+    if (strcmp(sub, "--w16") == 0) {
+        hu_w16_cli_status_t status;
+        hu_w16_cli_status_init(&status, alloc);
+        hu_error_t w16_err = hu_w16_cli_dispatch(alloc, argc, argv, &status);
+        hu_w16_cli_status_free(&status);
+        return w16_err;
+    }
 
     if (strcmp(sub, "run") == 0) {
         if (argc < 4) {

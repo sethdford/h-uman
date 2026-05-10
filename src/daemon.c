@@ -19,7 +19,11 @@
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
 #include "human/agent/verifier_metrics.h"
+#include "human/agent/kv_cache.h"
+#include "human/agent/lora_runner.h"
 #include "human/agent/world_model_bridge.h"
+#include "human/ml/learner.h"
+#include "human/ml/learner_bridge.h"
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
@@ -116,6 +120,11 @@ static size_t g_classify_model_len = 29;
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((unused))
 #endif
+/* TODO(W9): needs bridge extension to migrate.  This function does
+ * real-time per-message emotion detection from history entries, while
+ * the W9 world model stores a cached emotional snapshot.  A bridge
+ * API that updates and returns wm->dominant_emotion / arousal /
+ * valence from the live history is needed before this can migrate. */
 static hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t *agent,
                                                      const hu_channel_history_entry_t *entries,
                                                      size_t count) {
@@ -229,12 +238,34 @@ static bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined,
                                     size_t entry_count, hu_director_result_t *result) {
 #if defined(HU_IS_TEST) && HU_IS_TEST
     (void)alloc;
-    (void)combined;
-    (void)combined_len;
     (void)entries;
     (void)entry_count;
-    (void)result;
-    return false;
+    memset(result, 0, sizeof(*result));
+    result->action = DIR_TEXT;
+    result->delay_s = 3;
+    (void)snprintf(result->direction, sizeof(result->direction), "test director: casual short");
+    if (combined && combined_len > 0 &&
+        hu_conversation_is_media_message(combined, combined_len, NULL, 0)) {
+        result->action = DIR_TAPBACK;
+        result->reaction = HU_REACTION_HEART;
+        result->delay_s = 1;
+        return true;
+    }
+    if (combined && combined_len <= 4) {
+        /* Standalone "k"/"ok" style ack → tapback in production director rubric */
+        bool short_ack = true;
+        for (size_t i = 0; i < combined_len; i++) {
+            unsigned char c = (unsigned char)combined[i];
+            if (c != 'k' && c != 'K' && c != 'o' && c != 'O' && c != '\n' && c != '\r')
+                short_ack = false;
+        }
+        if (short_ack && combined_len >= 1) {
+            result->action = DIR_TAPBACK;
+            result->reaction = HU_REACTION_THUMBS_UP;
+            result->delay_s = 1;
+        }
+    }
+    return true;
 #else
     memset(result, 0, sizeof(*result));
     if (!g_classify_provider_ok || !g_classify_provider.vtable ||
@@ -2102,6 +2133,10 @@ static bool daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_
 
 /* ── Service loop ──────────────────────────────────────────────────────── */
 
+/* Consecutive successful turns that produced zero-length assistant text
+ * (e.g. MLX HTTP 52 after response_guard retry). Used for loud logging. */
+static unsigned g_empty_agent_response_streak;
+
 hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                           hu_service_channel_t *channels, size_t channel_count, hu_agent_t *agent,
                           const hu_config_t *config) {
@@ -2273,6 +2308,51 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         else
             hu_log_warn("human", agent->observer, "W14 scheduler open failed: %d", (int)se);
     }
+    /* W14 — register LoRA + KV runners (context-dependent) so sleep-time
+     * ticks can drain the W13 learner and prune the KV cache. */
+    if (agent && agent->w14_scheduler && agent->learner && config && alloc) {
+        static bool w14_lora_wired;
+        static hu_lora_runner_ctx_t w14_lora_ctx;
+        if (!w14_lora_wired) {
+            memset(&w14_lora_ctx, 0, sizeof(w14_lora_ctx));
+            w14_lora_ctx.learner = agent->learner;
+            w14_lora_ctx.scheduler = hu_w14_scheduler_inner(agent->w14_scheduler);
+            w14_lora_ctx.alloc = alloc;
+            w14_lora_ctx.kv_cache = agent->infra.kv_cache;
+            w14_lora_ctx.config_template = hu_learner_default_config();
+            {
+                const char *hm = getenv("HOME");
+                if (hm && hm[0]) {
+                    (void)snprintf(w14_lora_ctx.config_template.adapter_output_path,
+                                   sizeof(w14_lora_ctx.config_template.adapter_output_path),
+                                   "%s/.human/ml/w14_learner_adapter.lora", hm);
+                } else {
+                    (void)snprintf(w14_lora_ctx.config_template.adapter_output_path,
+                                   sizeof(w14_lora_ctx.config_template.adapter_output_path), "%s",
+                                   "/tmp/human_w14_learner_adapter.lora");
+                }
+            }
+            if (hu_w14_scheduler_register_lora_runner(agent->w14_scheduler, &w14_lora_ctx) ==
+                HU_OK) {
+                w14_lora_wired = true;
+                hu_log_info("human", agent->observer,
+                            "W14: LoRA training runner registered (adapter_out=%s)",
+                            w14_lora_ctx.config_template.adapter_output_path);
+            } else {
+                hu_log_warn("human", agent->observer,
+                            "W14: LoRA training runner registration failed");
+            }
+            if (agent->infra.kv_cache) {
+                hu_error_t kve = hu_w14_scheduler_register_kv_prewarm_runner(
+                    agent->w14_scheduler, agent->infra.kv_cache);
+                if (kve != HU_OK)
+                    hu_log_warn("human", agent->observer,
+                                "W14: KV prewarm runner registration failed: %d", (int)kve);
+                else
+                    hu_log_info("human", agent->observer, "W14: KV prewarm runner registered");
+            }
+        }
+    }
     /* W13 Phase 4.1 — auto-load the configured LoRA adapter into the live
      * provider. Closes the on-device personalization loop without a
      * separate `human ml apply-adapter` invocation. Failures log a warning
@@ -2348,7 +2428,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
     /* Per-contact Theory of Mind belief states */
 #define HU_TOM_MAX_CONTACTS    16
-    static hu_belief_state_t tom_states[HU_TOM_MAX_CONTACTS];
+    static hu_tom_belief_state_t tom_states[HU_TOM_MAX_CONTACTS];
     static char tom_contact_keys[HU_TOM_MAX_CONTACTS][64];
     static size_t tom_contact_count = 0;
     (void)tom_states;
@@ -2667,6 +2747,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     int64_t now_ms = (int64_t)t * 1000LL;
                     if (agent->scheduler_last_tick_ms == 0 ||
                         now_ms - agent->scheduler_last_tick_ms >= 60000) {
+                        /* W13 outcome-bridge drain — must run BEFORE the
+                         * scheduler tick so any newly-emitted signals are
+                         * visible to the same training pass that the tick
+                         * may dispatch. The bridge is a no-op when learner
+                         * is NULL (ML build disabled) or when no new
+                         * outcomes have arrived since the last drain. */
+                        if (agent->learner && agent->outcomes) {
+                            hu_error_t be =
+                                hu_learner_bridge_emit_outcomes(agent->learner, agent->outcomes);
+                            if (be != HU_OK && be != HU_ERR_OUT_OF_MEMORY) {
+                                /* OOM is the only expected failure (pending
+                                 * buffer full). Anything else is unexpected
+                                 * but not worth halting the scheduler over. */
+                                hu_log_warn(
+                                    "human", agent->observer,
+                                    "w13 outcome-bridge drain failed (%s); continuing",
+                                    hu_error_string(be));
+                            }
+                        }
                         hu_error_t te = hu_w14_scheduler_tick(agent->w14_scheduler, now_ms);
                         agent->scheduler_last_tick_ms = now_ms;
                         agent->scheduler_ticks++;
@@ -2674,14 +2773,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             hu_log_warn("human", agent->observer,
                                         "scheduler tick failed: %s", hu_error_string(te));
                         }
+                        /* Persist the post-tick snapshot for `human ml status`
+                         * and the doctor command. Best-effort: silent on
+                         * failure (matches the imessage poll-status pattern). */
+                        (void)hu_w14_scheduler_status_save(agent->w14_scheduler);
                     }
                 }
-                /* W2 AutoDream + W5 persona evolver — daily housekeeping that
-                 * was previously shipped as code with zero callers. Runs once
-                 * per day in the 3-5 AM window so it doesn't compete with the
-                 * 2 AM reflection cycle for sqlite write locks. Both functions
-                 * respect their own runtime budgets and never block channel
-                 * polling on the daemon. */
+                /* TODO(W14-partial): AutoDream (below) is scheduler-aware —
+                 * it prefers hu_w14_scheduler_enqueue_autodream when
+                 * available and falls back to sync. The sync fallback
+                 * MUST remain for graceful degradation when the scheduler
+                 * is unavailable (test mode, facade open failure).
+                 *
+                 * Remaining work to fully retire this block:
+                 *  1. Add HU_JOB_PERSONA_EVOLVER to hu_job_kind_t
+                 *  2. Implement a persona-evolver runner
+                 *  3. Wire hu_w14_scheduler_enqueue_persona_evolver bridge
+                 *  4. Add scheduler path here (same pattern as autodream)
+                 *  5. After 2 release cycles of scheduler stability, remove
+                 *     the hard-coded clock checks and sync fallbacks
+                 *
+                 * W2 AutoDream + W5 persona evolver — daily housekeeping.
+                 * Runs once per day in the 3-5 AM window so it doesn't
+                 * compete with the 2 AM reflection cycle for sqlite write
+                 * locks. */
                 {
                     static bool autodream_done_today = false;
                     static bool evolver_done_today = false;
@@ -2694,28 +2809,70 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (lt_dream && graph) {
                         if (lt_dream->tm_hour == 3 && lt_dream->tm_min == 0 &&
                             !autodream_done_today) {
-                            hu_autodream_config_t ad_cfg = hu_autodream_default_config();
-                            ad_cfg.now_ms = (int64_t)t * 1000LL;
-                            hu_autodream_report_t ad_report;
-                            memset(&ad_report, 0, sizeof(ad_report));
-                            hu_error_t ad_err =
-                                hu_autodream_run(alloc, graph, &ad_cfg, &ad_report);
-                            if (ad_err == HU_OK) {
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "autodream: quarantine reviewed=%zu released=%zu "
-                                            "dropped=%zu communities=%zu edges=%zu derived=%zu "
-                                            "budget_exceeded=%d",
-                                            ad_report.quarantine_reviewed,
-                                            ad_report.quarantine_released,
-                                            ad_report.quarantine_dropped,
-                                            ad_report.communities_summarized,
-                                            ad_report.edges_reweighted,
-                                            ad_report.derived_facts_added,
-                                            ad_report.budget_exceeded ? 1 : 0);
+                            /* Prefer the W14 scheduler path: enqueue the
+                             * three AutoDream phases as separate jobs so
+                             * they run paced + budgeted + idle/battery-
+                             * gated, instead of blocking the 1 Hz daemon
+                             * loop while quarantine review walks the
+                             * graph. The scheduler's default runners
+                             * already invoke hu_autodream_run with the
+                             * right enable_* flags per phase
+                             * (src/agent/scheduler.c
+                             * default_autodream_*_runner). When the
+                             * scheduler is unavailable (e.g. test mode,
+                             * or W7 facade failed to open), fall back to
+                             * the synchronous direct call so AutoDream
+                             * still runs every night. */
+                            if (agent && agent->w14_scheduler) {
+                                hu_error_t enq_err =
+                                    hu_w14_scheduler_enqueue_autodream(
+                                        agent->w14_scheduler, (int64_t)t * 1000LL,
+                                        60000 /* 1 min budget per phase */);
+                                if (enq_err == HU_OK) {
+                                    hu_log_info(
+                                        "human", agent ? agent->observer : NULL,
+                                        "autodream: enqueued 3 phases via W14 scheduler");
+                                } else {
+                                    hu_log_error(
+                                        "human", agent ? agent->observer : NULL,
+                                        "autodream W14 enqueue failed (%s) — falling "
+                                        "back to direct sync run",
+                                        hu_error_string(enq_err));
+                                    hu_autodream_config_t ad_cfg =
+                                        hu_autodream_default_config();
+                                    ad_cfg.now_ms = (int64_t)t * 1000LL;
+                                    hu_autodream_report_t ad_report;
+                                    memset(&ad_report, 0, sizeof(ad_report));
+                                    (void)hu_autodream_run(alloc, graph, &ad_cfg,
+                                                           &ad_report);
+                                }
                             } else {
-                                hu_log_error("human", agent ? agent->observer : NULL,
-                                             "autodream failed: %s (last_error=%s)",
-                                             hu_error_string(ad_err), ad_report.last_error);
+                                hu_autodream_config_t ad_cfg =
+                                    hu_autodream_default_config();
+                                ad_cfg.now_ms = (int64_t)t * 1000LL;
+                                hu_autodream_report_t ad_report;
+                                memset(&ad_report, 0, sizeof(ad_report));
+                                hu_error_t ad_err =
+                                    hu_autodream_run(alloc, graph, &ad_cfg, &ad_report);
+                                if (ad_err == HU_OK) {
+                                    hu_log_info(
+                                        "human", agent ? agent->observer : NULL,
+                                        "autodream (sync): quarantine reviewed=%zu "
+                                        "released=%zu dropped=%zu communities=%zu "
+                                        "edges=%zu derived=%zu budget_exceeded=%d",
+                                        ad_report.quarantine_reviewed,
+                                        ad_report.quarantine_released,
+                                        ad_report.quarantine_dropped,
+                                        ad_report.communities_summarized,
+                                        ad_report.edges_reweighted,
+                                        ad_report.derived_facts_added,
+                                        ad_report.budget_exceeded ? 1 : 0);
+                                } else {
+                                    hu_log_error(
+                                        "human", agent ? agent->observer : NULL,
+                                        "autodream failed: %s (last_error=%s)",
+                                        hu_error_string(ad_err), ad_report.last_error);
+                                }
                             }
                             autodream_done_today = true;
                         }
@@ -4134,6 +4291,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     agent->timing_model->contact_id = hu_strdup(alloc, batch_key);
                     if (agent->timing_model->contact_id)
                         agent->timing_model->contact_id_len = key_len;
+                }
+#endif
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+                /* Deterministic director (no cloud classify provider in tests). */
+                if (llm_decides) {
+                    director_result_valid =
+                        hu_daemon_director_call(alloc, combined, combined_len, early_history,
+                                                early_history_count, &director_result);
+                    if (early_history) {
+                        alloc->free(alloc->ctx, early_history,
+                                    early_history_count * sizeof(hu_channel_history_entry_t));
+                        early_history = NULL;
+                        early_history_count = 0;
+                    }
+                    goto llm_decides_skip_delays;
                 }
 #endif
 
@@ -6995,15 +7168,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                /* GraphRAG: inject knowledge graph context (cross-contact synthesis via batch_key).
-                 * Skip in llm_decides mode — prompt inflation. */
+                /* W9: inject unified world-model context (entities, relations,
+                 * goals, negatives, theory-of-mind, recent topics) via the
+                 * W7 facade bridge.  Falls back to legacy GraphRAG when the
+                 * facade is unavailable.  Skip in llm_decides mode — prompt
+                 * inflation. */
 #ifdef HU_ENABLE_SQLITE
-                if (graph && !llm_decides) {
+                if (!llm_decides && batch_key && key_len > 0) {
                     char *graph_ctx = NULL;
                     size_t graph_ctx_len = 0;
-                    hu_error_t gerr = hu_graph_build_contact_context(
-                        graph, alloc, combined, combined_len, batch_key, key_len, 2, 1024,
-                        &graph_ctx, &graph_ctx_len);
+                    hu_error_t gerr = HU_ERR_NOT_SUPPORTED;
+                    if (agent && agent->w7_facade)
+                        gerr = hu_w7_render_world_model(agent->w7_facade, alloc,
+                                                        batch_key, key_len, 0,
+                                                        &graph_ctx, &graph_ctx_len);
+                    if (gerr != HU_OK && graph) {
+                        gerr = hu_graph_build_contact_context(
+                            graph, alloc, combined, combined_len, batch_key, key_len,
+                            2, 1024, &graph_ctx, &graph_ctx_len);
+                    }
                     if (gerr == HU_OK && graph_ctx && graph_ctx_len > 0) {
                         if (convo_ctx) {
                             size_t total = convo_ctx_len + graph_ctx_len + 2;
@@ -7855,7 +8038,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (tom_idx == (size_t)-1 && tom_contact_count < HU_TOM_MAX_CONTACTS &&
                         key_len < 64) {
                         tom_idx = tom_contact_count;
-                        memset(&tom_states[tom_idx], 0, sizeof(hu_belief_state_t));
+                        memset(&tom_states[tom_idx], 0, sizeof(hu_tom_belief_state_t));
                         hu_tom_init(&tom_states[tom_idx], alloc, batch_key, key_len);
                         memcpy(tom_contact_keys[tom_idx], batch_key, key_len);
                         tom_contact_keys[tom_idx][key_len] = '\0';
@@ -8934,6 +9117,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 "agent turn result: err=%s response_len=%zu for %.*s",
                                 hu_error_string(err), response_len,
                                 (int)(key_len > 20 ? 20 : key_len), batch_key);
+                    if (err == HU_OK && (!response || response_len == 0)) {
+                        g_empty_agent_response_streak++;
+                        hu_log_error(
+                            "human", agent ? agent->observer : NULL,
+                            "empty assistant response (consecutive=%u) for %.*s — check MLX "
+                            "server, response_guard retry, and cloud fallback logs",
+                            g_empty_agent_response_streak, (int)key_len, batch_key);
+                        if (g_empty_agent_response_streak >= 3U)
+                            hu_log_error(
+                                "human", agent ? agent->observer : NULL,
+                                "ALERT: 3+ consecutive empty assistant responses; channel may be "
+                                "silent to users");
+                    } else if (err == HU_OK && response_len > 0) {
+                        g_empty_agent_response_streak = 0;
+                    }
                     /* Hex dump first 80 bytes of response for encoding diagnostics */
                     if (err == HU_OK && response && response_len > 0) {
                         char hex[256];
@@ -8955,6 +9153,38 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                      "agent turn failed for %.*s: %s", (int)key_len, batch_key,
                                      hu_error_string(err));
 
+                    /* W14 counterfactual rehearsal — enqueue at most once
+                     * per hour for the active contact after a successful
+                     * turn. Counterfactual rehearsal walks recent
+                     * episodic memory for the contact and synthesises
+                     * "what could have been said differently?" pairs that
+                     * the W13 learner uses to refine the persona's tone
+                     * without needing real conversational data. The
+                     * scheduler tick (60s cadence) gates dispatch on
+                     * idle/AC; we just enqueue. The static rate limit is
+                     * intentionally global, not per-contact, to keep the
+                     * queue from filling under bursts; per-contact
+                     * fairness is handled by the scheduler's job-kind
+                     * priority (see scheduler.c). */
+                    if (err == HU_OK && agent && agent->w14_scheduler && batch_key &&
+                        key_len > 0) {
+                        static int64_t last_cf_enqueue_ms = 0;
+                        int64_t now_ms = (int64_t)time(NULL) * 1000LL;
+                        if (last_cf_enqueue_ms == 0 ||
+                            now_ms - last_cf_enqueue_ms >= 3600000LL) {
+                            hu_error_t cf_err = hu_w14_scheduler_enqueue_counterfactual(
+                                agent->w14_scheduler, batch_key, key_len, 50 /* budget_ms */);
+                            if (cf_err == HU_OK) {
+                                last_cf_enqueue_ms = now_ms;
+                                hu_log_info("human", agent->observer,
+                                            "w14: enqueued counterfactual rehearsal for %.*s",
+                                            (int)(key_len > 32 ? 32 : key_len), batch_key);
+                            }
+                            /* enqueue failures are silent — the next
+                             * eligible turn will retry naturally */
+                        }
+                    }
+
                     /* Best-of-N: generate additional candidates, score with Turing heuristic */
                     if (err == HU_OK && response && response_len > 0 && !retried && config &&
                         config->agent.best_of_n >= 2 && !llm_decides) {
@@ -8963,7 +9193,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             n_extra = 4;
                         hu_turing_score_t best_ts;
                         hu_turing_score_heuristic(response, response_len, combined, combined_len,
-                                                  &best_ts);
+                                                  max_chars, &best_ts);
                         if (agent->active_channel)
                             hu_turing_apply_channel_weights(&best_ts, agent->active_channel,
                                                             agent->active_channel_len);
@@ -8996,7 +9226,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                             hu_turing_score_t cand_ts;
                             hu_turing_score_heuristic(cand, cand_len, combined, combined_len,
-                                                      &cand_ts);
+                                                      max_chars, &cand_ts);
                             if (agent->active_channel)
                                 hu_turing_apply_channel_weights(&cand_ts, agent->active_channel,
                                                                 agent->active_channel_len);
@@ -9206,7 +9436,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides) {
                         hu_turing_score_t pre_tscore;
                         hu_error_t pre_ts_err = hu_turing_score_heuristic(
-                            response, response_len, combined, combined_len, &pre_tscore);
+                            response, response_len, combined, combined_len, max_chars, &pre_tscore);
                         if (pre_ts_err == HU_OK && agent->active_channel)
                             hu_turing_apply_channel_weights(&pre_tscore, agent->active_channel,
                                                             agent->active_channel_len);
@@ -10049,18 +10279,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         all_send_media_n > 0 ? all_send_media : NULL;
                     size_t all_send_media_cnt = all_send_media_n;
 
-#ifndef HU_IS_TEST
-                    /* Strip hallucinated model tags (e.g. <|channel>thought<channel|>) */
+                    /* Strip pipeline + send buffer cursor: shared by prod and HU_IS_TEST so tests
+                     * exercise the same outbound text shaping as production. */
+                    char *send_buf_ack = NULL;
                     response_len =
                         hu_conversation_strip_channel_tags(response, response_len);
-
-                    /* BTH: Banned AI phrases filter — strip giveaway language */
                     response_len = hu_conversation_strip_ai_phrases(response, response_len);
-
-                    /* Strip formal structure (numbered lists, em-dashes) on casual channels */
                     response_len =
                         hu_conversation_strip_formal_structure(response, response_len);
 
+#ifndef HU_IS_TEST
                     /* Apply typing quirks from persona overlay as post-processing.
                      * This shrinks the buffer in-place; keep original size for free. */
                     const hu_persona_overlay_t *overlay = NULL;
@@ -10534,7 +10762,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                         const char *send_ptr = response;
                         size_t send_len = response_len;
-                        char *send_buf_ack = NULL;
                         {
                             time_t now_ts = time(NULL);
                             time_t msg_ts = (msgs[batch_start].timestamp_sec > 0)
@@ -10579,8 +10806,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             mod_r.sexual ? "sexual " : "",
                                             mod_r.self_harm ? "self-harm " : "");
                                 static const char mod_safe_reply[] =
-                                    "I need to rethink my response. Let me try again with "
-                                    "something more appropriate.";
+                                    "ugh brain fart — lemme rephrase that";
                                 if (send_buf_ack) {
                                     alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
                                     send_buf_ack = NULL;
@@ -10620,7 +10846,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 hu_log_warn("human", agent ? agent->observer : NULL,
                                             "companion safety flagged output, replacing");
                                 static const char cs_safe_reply[] =
-                                    "Let me reconsider what I was about to say.";
+                                    "wait actually scratch that — bad take on my end";
                                 if (send_buf_ack) {
                                     alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
                                     send_buf_ack = NULL;
@@ -10907,6 +11133,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
 #endif
                         {
+                            const char *send_ptr = (const char *)response;
+                            size_t send_len = response_len;
                             char *fmt_text = NULL;
                             size_t fmt_len = 0;
                             const char *send_text = send_ptr;
@@ -10955,8 +11183,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * Skip in llm_decides mode — heuristic scoring adds latency. */
                 if (response && response_len > 0 && agent->memory && !llm_decides) {
                     hu_turing_score_t tscore;
-                    hu_error_t ts_err = hu_turing_score_heuristic(response, response_len, combined,
-                                                                  combined_len, &tscore);
+                    hu_error_t ts_err = hu_turing_score_heuristic(
+                        response, response_len, combined, combined_len,
+                        agent->max_response_chars ? agent->max_response_chars : 0u, &tscore);
                     if (ts_err == HU_OK && agent->active_channel) {
                         hu_turing_apply_channel_weights(&tscore, agent->active_channel,
                                                         agent->active_channel_len);

@@ -22,6 +22,7 @@
 #include "test_framework.h"
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
 
 #define S(lit) (lit), (sizeof(lit) - 1)
@@ -2157,6 +2158,54 @@ static void imessage_watchdog_default_threshold_used_when_zero(void) {
     hu_imessage_destroy(&ch);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Regression: idle imsg-watch must refresh the success epoch.
+ *
+ * Production failure (2026-05-10): `human doctor imessage` reported STALE
+ * within ~120s of every daemon restart even though the channel was
+ * perfectly healthy and `imsg watch` (pid 46205) was alive. Root cause was
+ * `hu_imessage_poll`'s watch-active short-circuit: when the watch was
+ * running but no new data had arrived, it returned HU_OK without recording
+ * a poll heartbeat. The first poll on watch-start updated
+ * `last_successful_poll_epoch`, then the value froze and the doctor's
+ * 120s threshold tripped. Behavior we want: every poll cycle that finds
+ * the watch alive (even idle) is a heartbeat. Drains noise, never lies.
+ * ───────────────────────────────────────────────────────────────────────── */
+static void imessage_idle_watch_poll_refreshes_success_epoch(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+
+    /* Seed: pretend the watch just started and recorded one success. */
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    hu_imessage_test_set_watch_running(&ch, true);
+    HU_ASSERT_EQ(hu_imessage_test_get_last_success_epoch(&ch), (int64_t)1000);
+
+    /* The daemon now ticks `hu_imessage_poll` repeatedly. The watch is
+     * alive but no new messages arrived. Each idle poll should refresh
+     * the heartbeat — otherwise the doctor flips to STALE after 120s
+     * even though everything is fine. */
+    hu_channel_loop_msg_t msgs[2];
+    size_t count = 99;
+    HU_ASSERT_EQ(hu_imessage_poll(ch.ctx, &alloc, msgs, 2, &count), HU_OK);
+    HU_ASSERT_EQ(count, 0u);
+
+    int64_t now = (int64_t)time(NULL);
+    int64_t after = hu_imessage_test_get_last_success_epoch(&ch);
+    /* The post-poll epoch must have moved forward to at least the current
+     * wall clock — not be stuck at the 1000-seed. */
+    HU_ASSERT_TRUE(after > 1000);
+    HU_ASSERT_TRUE(after <= now);
+
+    /* Health must be OK with a tight 60s threshold relative to "now"
+     * (i.e. the heartbeat is recent), proving the live doctor would
+     * not see STALE. */
+    HU_ASSERT_EQ(hu_imessage_health(&ch, now, 60), HU_IMESSAGE_HEALTH_OK);
+
+    hu_imessage_test_set_watch_running(&ch, false);
+    hu_imessage_destroy(&ch);
+}
+
 static void imessage_watchdog_null_safe(void) {
     /* All public watchdog calls must be safe on NULL channels (matches the
      * style of the breaker accessors). */
@@ -2426,6 +2475,7 @@ void run_imessage_adversarial_tests(void) {
     HU_RUN_TEST(imessage_watchdog_records_recovery_on_success);
     HU_RUN_TEST(imessage_watchdog_records_breaker_trip);
     HU_RUN_TEST(imessage_watchdog_default_threshold_used_when_zero);
+    HU_RUN_TEST(imessage_idle_watch_poll_refreshes_success_epoch);
     HU_RUN_TEST(imessage_watchdog_null_safe);
 #endif
 }

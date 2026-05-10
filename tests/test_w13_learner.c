@@ -82,11 +82,23 @@ static void test_w13_learner_open_named_unknown_returns_error(void) {
     hu_learner_t *l = NULL;
     HU_ASSERT_EQ(hu_learner_open_named(A(), "imaginary-backend", &l), HU_ERR_NOT_FOUND);
     HU_ASSERT_NULL(l);
-    /* Known but currently-unavailable backend → NOT_SUPPORTED. */
+    /* MLX: available on macOS arm64 under HU_IS_TEST; NOT_SUPPORTED otherwise. */
+#if defined(__APPLE__) && defined(__aarch64__)
+    HU_ASSERT_EQ(hu_learner_open_named(A(), "mlx", &l), HU_OK);
+    HU_ASSERT_NOT_NULL(l);
+    HU_ASSERT_STR_EQ(l->vt->name, "mlx");
+    hu_learner_close(l);
+    l = NULL;
+#else
     HU_ASSERT_EQ(hu_learner_open_named(A(), "mlx", &l), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(l);
-    HU_ASSERT_EQ(hu_learner_open_named(A(), "ggml", &l), HU_ERR_NOT_SUPPORTED);
-    HU_ASSERT_NULL(l);
+#endif
+    /* ggml: always available under HU_IS_TEST. */
+    HU_ASSERT_EQ(hu_learner_open_named(A(), "ggml", &l), HU_OK);
+    HU_ASSERT_NOT_NULL(l);
+    HU_ASSERT_STR_EQ(l->vt->name, "ggml");
+    hu_learner_close(l);
+    l = NULL;
     /* CPU always opens. */
     HU_ASSERT_EQ(hu_learner_open_named(A(), "cpu", &l), HU_OK);
     HU_ASSERT_NOT_NULL(l);
@@ -345,25 +357,182 @@ static void test_w13_budget_ms_zero_short_circuits(void) {
     hu_learner_close(l);
 }
 
+/* ── MLX backend (test mode) ──────────────────────────────────────────── */
+
+#if defined(__APPLE__) && defined(__aarch64__)
+static void test_w13_mlx_backend_trains_fake_adapter(void) {
+    char path[256];
+    scratch_path(path, sizeof(path), "mlx");
+
+    hu_learner_t *l = NULL;
+    HU_ASSERT_EQ(hu_learner_open_named(A(), "mlx", &l), HU_OK);
+    HU_ASSERT_NOT_NULL(l);
+    HU_ASSERT_STR_EQ(l->vt->name, "mlx");
+
+    hu_learner_config_t cfg;
+    fill_default_cfg(&cfg, path);
+
+    hu_training_signal_t signals[1];
+    memset(signals, 0, sizeof(signals));
+    signals[0].kind = HU_TRAIN_DPO_PAIR;
+    snprintf(signals[0].as.dpo.prompt, sizeof(signals[0].as.dpo.prompt),
+             "test prompt");
+    snprintf(signals[0].as.dpo.preferred, sizeof(signals[0].as.dpo.preferred),
+             "good response");
+    snprintf(signals[0].as.dpo.dispreferred, sizeof(signals[0].as.dpo.dispreferred),
+             "bad response");
+    signals[0].as.dpo.weight = 1.0f;
+
+    hu_learner_report_t rep;
+    HU_ASSERT_EQ(hu_learner_train(l, &cfg, signals, 1, &rep), HU_OK);
+    HU_ASSERT_EQ(rep.signals_consumed, 1);
+    HU_ASSERT(rep.adapter_bytes > 0);
+    HU_ASSERT(rep.steps_completed > 0);
+    HU_ASSERT(strlen(rep.model_version) > 0);
+    HU_ASSERT(strlen(rep.adapter_path) > 0);
+
+    /* Verify the adapter file has valid HLAD magic. */
+    FILE *f = fopen(path, "rb");
+    HU_ASSERT_NOT_NULL(f);
+    char magic[4];
+    HU_ASSERT_EQ(fread(magic, 1, 4, f), 4);
+    HU_ASSERT_EQ(memcmp(magic, HU_LEARNER_ADAPTER_MAGIC, 4), 0);
+    fclose(f);
+
+    hu_learner_close(l);
+    unlink(path);
+}
+
+static void test_w13_mlx_budget_zero_short_circuits(void) {
+    hu_learner_t *l = NULL;
+    HU_ASSERT_EQ(hu_learner_open_named(A(), "mlx", &l), HU_OK);
+    hu_learner_config_t cfg;
+    char path[256];
+    scratch_path(path, sizeof(path), "mlx-bz");
+    fill_default_cfg(&cfg, path);
+    cfg.budget_ms = 0;
+    hu_learner_report_t rep;
+    HU_ASSERT_EQ(hu_learner_train(l, &cfg, NULL, 0, &rep), HU_OK);
+    HU_ASSERT_EQ((int)rep.steps_completed, 0);
+    HU_ASSERT_EQ(rep.adapter_bytes, 0);
+    hu_learner_close(l);
+}
+#endif /* __APPLE__ && __aarch64__ */
+
+/* ── ggml backend (test mode) ────────────────────────────────────────── */
+
+static void test_w13_ggml_backend_trains_fake_adapter(void) {
+    char path[256];
+    scratch_path(path, sizeof(path), "ggml");
+
+    hu_learner_t *l = NULL;
+    HU_ASSERT_EQ(hu_learner_open_named(A(), "ggml", &l), HU_OK);
+    HU_ASSERT_NOT_NULL(l);
+    HU_ASSERT_STR_EQ(l->vt->name, "ggml");
+
+    hu_learner_config_t cfg;
+    fill_default_cfg(&cfg, path);
+
+    hu_training_signal_t signals[2];
+    memset(signals, 0, sizeof(signals));
+    signals[0].kind = HU_TRAIN_PERSONA_DELTA;
+    signals[0].as.persona.delta.kind = HU_PERSONA_DELTA_TONE;
+    snprintf(signals[0].as.persona.delta.value,
+             sizeof(signals[0].as.persona.delta.value), "warmer");
+    signals[0].as.persona.delta.confidence = 0.8f;
+    signals[1].kind = HU_TRAIN_CASE_OUTCOME;
+    signals[1].as.case_outcome.case_id = 99;
+    signals[1].as.case_outcome.reward = 0.7f;
+
+    hu_learner_report_t rep;
+    HU_ASSERT_EQ(hu_learner_train(l, &cfg, signals, 2, &rep), HU_OK);
+    HU_ASSERT_EQ(rep.signals_consumed, 2);
+    HU_ASSERT(rep.adapter_bytes > 0);
+    HU_ASSERT(rep.steps_completed > 0);
+    HU_ASSERT(strlen(rep.model_version) > 0);
+    HU_ASSERT(strlen(rep.adapter_path) > 0);
+
+    /* Verify HLAD magic. */
+    FILE *f = fopen(path, "rb");
+    HU_ASSERT_NOT_NULL(f);
+    char magic[4];
+    HU_ASSERT_EQ(fread(magic, 1, 4, f), 4);
+    HU_ASSERT_EQ(memcmp(magic, HU_LEARNER_ADAPTER_MAGIC, 4), 0);
+    fclose(f);
+
+    hu_learner_close(l);
+    unlink(path);
+}
+
+static void test_w13_ggml_budget_zero_short_circuits(void) {
+    hu_learner_t *l = NULL;
+    HU_ASSERT_EQ(hu_learner_open_named(A(), "ggml", &l), HU_OK);
+    hu_learner_config_t cfg;
+    char path[256];
+    scratch_path(path, sizeof(path), "ggml-bz");
+    fill_default_cfg(&cfg, path);
+    cfg.budget_ms = 0;
+    hu_learner_report_t rep;
+    HU_ASSERT_EQ(hu_learner_train(l, &cfg, NULL, 0, &rep), HU_OK);
+    HU_ASSERT_EQ((int)rep.steps_completed, 0);
+    HU_ASSERT_EQ(rep.adapter_bytes, 0);
+    hu_learner_close(l);
+}
+
+static void test_w13_ggml_invalid_args_rejected(void) {
+    hu_learner_t *l = NULL;
+    HU_ASSERT_EQ(hu_learner_open_named(A(), "ggml", &l), HU_OK);
+
+    hu_learner_config_t cfg;
+    char path[256];
+    scratch_path(path, sizeof(path), "ggml-inv");
+    fill_default_cfg(&cfg, path);
+    hu_learner_report_t rep;
+
+    /* Empty adapter path. */
+    cfg.adapter_output_path[0] = '\0';
+    HU_ASSERT_EQ(hu_learner_train(l, &cfg, NULL, 0, &rep), HU_ERR_INVALID_ARGUMENT);
+
+    /* signals_count > 0 with NULL signals. */
+    fill_default_cfg(&cfg, path);
+    HU_ASSERT_EQ(hu_learner_train(l, &cfg, NULL, 5, &rep), HU_ERR_INVALID_ARGUMENT);
+
+    hu_learner_close(l);
+    unlink(path);
+}
+
+static void test_w13_default_open_prefers_mlx_or_ggml_over_cpu(void) {
+    hu_learner_t *l = NULL;
+    HU_ASSERT_EQ(hu_learner_open_default(A(), &l), HU_OK);
+    HU_ASSERT_NOT_NULL(l);
+    /* Under HU_IS_TEST: on macOS arm64 we get mlx, otherwise ggml. */
+#if defined(__APPLE__) && defined(__aarch64__)
+    HU_ASSERT_STR_EQ(l->vt->name, "mlx");
+#else
+    HU_ASSERT_STR_EQ(l->vt->name, "ggml");
+#endif
+    hu_learner_close(l);
+}
+
 /* ── Signal builders ──────────────────────────────────────────────────── */
 
 #ifdef HU_ENABLE_SQLITE
 
-static void open_facade_(hu_graph_t **g, hu_memory_t **m) {
+static void open_facade_(hu_graph_t **g, hu_memory_facade_t **m) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
     HU_ASSERT_NOT_NULL(*g);
-    HU_ASSERT_EQ(hu_memory_open(A(), *g, m), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), *g, m), HU_OK);
     HU_ASSERT_NOT_NULL(*m);
 }
 
-static void close_facade_(hu_graph_t *g, hu_memory_t *m) {
-    hu_memory_close(m, A());
+static void close_facade_(hu_graph_t *g, hu_memory_facade_t *m) {
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
 static void test_w13_signals_from_verifier_flags_skips_already_consumed(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
     /* Propose a delta and quarantine it directly via SQL — easiest path.
@@ -429,7 +598,7 @@ static void test_w13_signals_from_verifier_flags_skips_already_consumed(void) {
 
 static void test_w13_dpo_pairs_have_no_self_inconsistencies(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
     /* Drive a quarantine. */
@@ -461,7 +630,7 @@ static void test_w13_dpo_pairs_have_no_self_inconsistencies(void) {
 
 static void test_w13_signals_from_persona_deltas_round_trip(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
     /* Two high-confidence proposals from different sources → applied. */
@@ -498,17 +667,17 @@ static void test_w13_signals_from_persona_deltas_round_trip(void) {
 
 static void test_w13_signals_from_case_outcomes_returns_positive_for_high_reward(void) {
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
     int64_t cid_ok = 0, cid_bad = 0, cid_meh = 0;
-    HU_ASSERT_EQ(hu_case_record(g, "u4", 2, "schedule", 8, NULL, 0, "plan A", 6, "ok", 2,
+    HU_ASSERT_EQ(hu_case_record(m, "u4", 2, "schedule", 8, NULL, 0, "plan A", 6, "ok", 2,
                                 1735690000000LL, &cid_ok),
                  HU_OK);
-    HU_ASSERT_EQ(hu_case_record(g, "u4", 2, "schedule", 8, NULL, 0, "plan B", 6,
+    HU_ASSERT_EQ(hu_case_record(m, "u4", 2, "schedule", 8, NULL, 0, "plan B", 6,
                                 "user pushed back", 16, 1735690500000LL, &cid_bad),
                  HU_OK);
-    HU_ASSERT_EQ(hu_case_record(g, "u4", 2, "schedule", 8, NULL, 0, "plan C", 6,
+    HU_ASSERT_EQ(hu_case_record(m, "u4", 2, "schedule", 8, NULL, 0, "plan C", 6,
                                 "unclear", 7, 1735691000000LL, &cid_meh),
                  HU_OK);
 
@@ -550,7 +719,7 @@ static void test_w13_signals_from_case_outcomes_returns_positive_for_high_reward
 /* ── Test runner ──────────────────────────────────────────────────────── */
 
 void run_w13_learner_tests(void) {
-    HU_TEST_SUITE("W13 learner - hu_learner_t vtable + CPU backend + signal builders");
+    HU_TEST_SUITE("W13 learner - hu_learner_t vtable + CPU/MLX/ggml backends + signal builders");
 
     HU_RUN_TEST(test_w13_default_config_has_sensible_defaults);
     HU_RUN_TEST(test_w13_learner_open_default_returns_some_backend);
@@ -561,6 +730,18 @@ void run_w13_learner_tests(void) {
     HU_RUN_TEST(test_w13_adversarial_training_data_poisoning_does_not_crash);
     HU_RUN_TEST(test_w13_dp_epsilon_zero_disables_noise);
     HU_RUN_TEST(test_w13_budget_ms_zero_short_circuits);
+
+    /* MLX backend (test mode — macOS arm64 only). */
+#if defined(__APPLE__) && defined(__aarch64__)
+    HU_RUN_TEST(test_w13_mlx_backend_trains_fake_adapter);
+    HU_RUN_TEST(test_w13_mlx_budget_zero_short_circuits);
+#endif
+
+    /* ggml backend (test mode — always available under HU_IS_TEST). */
+    HU_RUN_TEST(test_w13_ggml_backend_trains_fake_adapter);
+    HU_RUN_TEST(test_w13_ggml_budget_zero_short_circuits);
+    HU_RUN_TEST(test_w13_ggml_invalid_args_rejected);
+    HU_RUN_TEST(test_w13_default_open_prefers_mlx_or_ggml_over_cpu);
 
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w13_signals_from_verifier_flags_skips_already_consumed);

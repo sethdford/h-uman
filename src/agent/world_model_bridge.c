@@ -6,6 +6,10 @@
  * the bridge exists to dodge. */
 
 #include "human/agent/world_model_bridge.h"
+#include "human/agent/belief_reverify_runner.h"
+#include "human/agent/kv_prewarm_runner.h"
+#include "human/agent/lora_runner.h"
+#include "human/agent/retrieval_planner.h"
 #include "human/agent/scheduler.h"
 #include "human/agent/self_rag.h"
 #include "human/agent/world_model.h"
@@ -19,7 +23,7 @@
 #include <time.h>
 
 struct hu_w7_facade {
-    hu_memory_t *m;
+    hu_memory_facade_t *m;
 };
 
 hu_error_t hu_w7_facade_open(hu_graph_t *graph, hu_allocator_t *alloc, hu_w7_facade_t **out) {
@@ -30,7 +34,7 @@ hu_error_t hu_w7_facade_open(hu_graph_t *graph, hu_allocator_t *alloc, hu_w7_fac
     if (!f)
         return HU_ERR_OUT_OF_MEMORY;
     f->m = NULL;
-    hu_error_t e = hu_memory_open(alloc, graph, &f->m);
+    hu_error_t e = hu_memory_facade_open(alloc, graph, &f->m);
     if (e != HU_OK) {
         alloc->free(alloc->ctx, f, sizeof(*f));
         return e;
@@ -39,11 +43,15 @@ hu_error_t hu_w7_facade_open(hu_graph_t *graph, hu_allocator_t *alloc, hu_w7_fac
     return HU_OK;
 }
 
+hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade) {
+    return facade ? facade->m : NULL;
+}
+
 void hu_w7_facade_close(hu_w7_facade_t *facade, hu_allocator_t *alloc) {
     if (!facade)
         return;
     if (facade->m)
-        hu_memory_close(facade->m, alloc);
+        hu_memory_facade_close(facade->m, alloc);
     if (alloc)
         alloc->free(alloc->ctx, facade, sizeof(*facade));
 }
@@ -113,11 +121,15 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
      * default valence/arousal as "no signal". */
     bool emo_signal = wm->dominant_emotion[0] != '\0' &&
                       strcmp(wm->dominant_emotion, "neutral") != 0;
+    bool tom_signal = (wm->tom.user_thinks_we_are[0] &&
+                       strcmp(wm->tom.user_thinks_we_are, "unknown") != 0) ||
+                      (wm->tom.user_expects_we_can[0] &&
+                       strcmp(wm->tom.user_expects_we_can, "unknown") != 0) ||
+                      (wm->tom.user_expects_we_cannot[0] &&
+                       strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0);
     bool any = wm->entities_count > 0 || wm->relations_count > 0 || wm->goals_count > 0 ||
                wm->negatives_count > 0 || wm->recent_topics_count > 0 || emo_signal ||
-               wm->tom.user_thinks_we_are[0] != '\0' ||
-               wm->tom.user_expects_we_can[0] != '\0' ||
-               wm->tom.user_expects_we_cannot[0] != '\0';
+               tom_signal;
     if (!any) {
         hu_world_model_free(alloc, wm);
         return HU_OK;
@@ -145,17 +157,19 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                    wm->negatives[i].reason[0] ? wm->negatives[i].reason : "");
         }
     }
-    if (wm->tom.user_thinks_we_are[0] || wm->tom.user_expects_we_can[0] ||
-        wm->tom.user_expects_we_cannot[0]) {
+    if (tom_signal) {
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Theory of mind (what they think of me):\n",
                               strlen("Theory of mind (what they think of me):\n"));
-        if (wm->tom.user_thinks_we_are[0])
+        if (wm->tom.user_thinks_we_are[0] &&
+            strcmp(wm->tom.user_thinks_we_are, "unknown") != 0)
             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They see me as: %s\n",
                                    wm->tom.user_thinks_we_are);
-        if (wm->tom.user_expects_we_can[0])
+        if (wm->tom.user_expects_we_can[0] &&
+            strcmp(wm->tom.user_expects_we_can, "unknown") != 0)
             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They expect I can: %s\n",
                                    wm->tom.user_expects_we_can);
-        if (wm->tom.user_expects_we_cannot[0])
+        if (wm->tom.user_expects_we_cannot[0] &&
+            strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0)
             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They expect I cannot: %s\n",
                                    wm->tom.user_expects_we_cannot);
     }
@@ -186,16 +200,13 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
     return HU_OK;
 }
 
-/* W11 self-RAG bridge entry point (FIX 12b). Constructs the heuristic
- * backend, loads the W9 world model, runs verification, copies relevant
- * scalars back through the opaque-typed outputs.
+/* W11 self-RAG bridge entry point (FIX 12b → upgraded to atomic backend).
  *
- * The atomic backend would be richer but it depends on a provider for
- * embeddings (the noun-phrase decomposer is deterministic but the scoring
- * leans on similarity); we'll wire that as a follow-up. The heuristic
- * backend is what the codebase already trusted via FIX 2's
- * hu_response_verify -- this just lets self-RAG outputs flow through with
- * structured claims + an explicit abstention outcome. */
+ * Prefers the atomic backend for SOFT/STRICT/INLINE modes — it decomposes
+ * the draft into noun-phrase atomic claims and verifies each against the
+ * memory graph, providing finer-grained abstention. Falls back to the
+ * heuristic backend if atomic construction fails (defensive). The atomic
+ * decomposer is fully deterministic (no LLM, no embedder). */
 hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                   const char *contact_id, size_t contact_id_len,
                                   const char *draft, size_t draft_len, int mode, int64_t now_ms,
@@ -226,8 +237,13 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
         return HU_OK;
     }
 
+    /* Prefer atomic backend (noun-phrase decomposition, per-claim scoring).
+     * Fall back to heuristic if construction fails. The inline backend is
+     * reserved for providers that emit control tokens mid-stream. */
     hu_self_rag_t r = {0};
-    hu_error_t e = hu_self_rag_heuristic(facade->m, &r);
+    hu_error_t e = hu_self_rag_atomic(facade->m, NULL, &r);
+    if (e != HU_OK)
+        e = hu_self_rag_heuristic(facade->m, &r);
     if (e != HU_OK)
         return e;
 
@@ -284,30 +300,191 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
         }
         *out_claims_flagged = flagged;
     }
-    if (out_modified && out_modified_len && resp.draft_modified) {
-        size_t mlen = strlen(resp.modified_draft);
-        char *copy = (char *)alloc->alloc(alloc->ctx, mlen + 1);
-        if (copy) {
-            memcpy(copy, resp.modified_draft, mlen);
-            copy[mlen] = '\0';
-            *out_modified = copy;
-            *out_modified_len = mlen;
+    /* Surface either the rewritten draft (HEDGED/REWRITTEN) or the
+     * deterministic refusal template (ABSTAINED) through `out_modified`.
+     * The agent loop's replacement path treats both as "swap the response
+     * with this string" — semantically distinct (a hedge is the same
+     * answer with a caveat; a refusal is a different answer entirely)
+     * but mechanically the same buffer transfer. We unify them here so
+     * `agent_turn.c` doesn't need a third branch.
+     *
+     * Heuristic backend leaves `resp.refusal_text` empty on ABSTAINED;
+     * we render the deterministic UNKNOWN_FACT template in that case so
+     * the user always sees an honest "I don't know" instead of the
+     * unverified draft. */
+    if (out_modified && out_modified_len) {
+        const char *src = NULL;
+        size_t src_len = 0;
+        if (resp.outcome == HU_SELF_RAG_ABSTAINED) {
+            char tmpl[256];
+            if (resp.refusal_text[0] != '\0') {
+                src = resp.refusal_text;
+                src_len = strnlen(resp.refusal_text, sizeof(resp.refusal_text));
+            } else {
+                hu_self_rag_render_refusal(HU_REFUSAL_UNKNOWN_FACT, tmpl, sizeof(tmpl));
+                src = tmpl;
+                src_len = strnlen(tmpl, sizeof(tmpl));
+            }
+            if (src_len > 0) {
+                char *copy = (char *)alloc->alloc(alloc->ctx, src_len + 1);
+                if (copy) {
+                    memcpy(copy, src, src_len);
+                    copy[src_len] = '\0';
+                    *out_modified = copy;
+                    *out_modified_len = src_len;
+                }
+            }
+        } else if (resp.draft_modified) {
+            src_len = strnlen(resp.modified_draft, sizeof(resp.modified_draft));
+            char *copy = (char *)alloc->alloc(alloc->ctx, src_len + 1);
+            if (copy) {
+                memcpy(copy, resp.modified_draft, src_len);
+                copy[src_len] = '\0';
+                *out_modified = copy;
+                *out_modified_len = src_len;
+            }
         }
     }
-    /* Note: when outcome == ABSTAINED, the refusal text lives in
-     * resp.refusal_text; callers that want it should ask via a future
-     * extension to this bridge. The agent's existing FIX 2 verifier wire
-     * already handles the SOFT/STRICT modify path; this function exposes the
-     * structured outcome + claim counts so we can layer it on without
-     * reworking the response path yet. */
     hu_self_rag_close(&r);
+    return HU_OK;
+}
+
+/* ── W12 goal-conditioned planner recall bridge ───────────────────────────
+ *
+ * Runs the heuristic planner, executes each step via facade_read (preserving
+ * payloads unlike hu_planner_execute which strips them), and formats results
+ * into a markdown text block for prompt injection. */
+
+hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                 const char *contact_id, size_t contact_id_len,
+                                 const char *query, size_t query_len,
+                                 size_t limit, size_t max_chars,
+                                 char **out_text, size_t *out_len) {
+    if (!facade || !facade->m || !alloc || !out_text || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_text = NULL;
+    *out_len = 0;
+
+    if (limit == 0) limit = 5;
+    if (max_chars == 0) max_chars = 4000;
+
+    hu_planner_t planner;
+    memset(&planner, 0, sizeof(planner));
+    hu_error_t err = hu_planner_goal_conditioned(facade->m, alloc, &planner);
+    if (err != HU_OK) {
+        err = hu_planner_heuristic(&planner);
+        if (err != HU_OK)
+            return err;
+    }
+
+    hu_retrieval_plan_t plan;
+    memset(&plan, 0, sizeof(plan));
+    err = hu_planner_plan(&planner, query, query_len, NULL, &plan);
+    if (err != HU_OK) {
+        hu_planner_close(&planner);
+        return err;
+    }
+
+    char *buf = NULL;
+    size_t buf_len = 0;
+    size_t buf_cap = 0;
+
+    size_t total_records = 0;
+
+    for (size_t i = 0; i < plan.steps_count && total_records < limit && buf_len < max_chars; i++) {
+        hu_retrieval_step_t *step = &plan.steps[i];
+        if (contact_id && contact_id_len > 0) {
+            step->query.contact_id = contact_id;
+            step->query.contact_id_len = contact_id_len;
+        }
+        hu_memory_record_t *recs = NULL;
+        size_t n = 0;
+        hu_error_t re = hu_memory_facade_read(facade->m, &step->query, alloc, &recs, &n);
+        if (re != HU_OK || n == 0) continue;
+
+        for (size_t j = 0; j < n && total_records < limit && buf_len < max_chars; j++) {
+            hu_memory_record_t *rec = &recs[j];
+            const char *name = NULL;
+            size_t name_len = 0;
+            const char *detail = NULL;
+            size_t detail_len = 0;
+
+            if (rec->kind == HU_MEM_ENTITY && rec->payload) {
+                hu_graph_entity_t *ent = (hu_graph_entity_t *)rec->payload;
+                name = ent->name;
+                name_len = ent->name_len;
+                detail = ent->metadata_json;
+                detail_len = detail ? strlen(detail) : 0;
+            } else if (rec->kind == HU_MEM_RELATION && rec->payload) {
+                hu_graph_relation_t *rel = (hu_graph_relation_t *)rec->payload;
+                name = "relation";
+                name_len = 8;
+                detail = rel->context;
+                detail_len = rel->context_len;
+            } else {
+                continue;
+            }
+
+            if (!name) name = "memory";
+            if (!name_len) name_len = 6;
+
+            size_t overhead = 15 + name_len + 2;
+            size_t block_len = overhead + detail_len;
+            if (buf_len + block_len > max_chars) {
+                size_t remain = max_chars - buf_len;
+                if (remain <= overhead) break;
+                detail_len = remain - overhead;
+                block_len = remain;
+            }
+
+            size_t needed = buf_len + block_len + 1;
+            if (needed > buf_cap) {
+                size_t newcap = buf_cap == 0 ? 512 : buf_cap * 2;
+                if (newcap < needed) newcap = needed;
+                void *p = alloc->realloc(alloc->ctx, buf, buf_cap, newcap);
+                if (!p) {
+                    hu_memory_facade_records_free(facade->m, alloc, recs, n);
+                    if (buf) alloc->free(alloc->ctx, buf, buf_cap);
+                    hu_planner_close(&planner);
+                    return HU_ERR_OUT_OF_MEMORY;
+                }
+                buf = p;
+                buf_cap = newcap;
+            }
+
+            memcpy(buf + buf_len, "### Memory: ", 12);
+            buf_len += 12;
+            memcpy(buf + buf_len, name, name_len);
+            buf_len += name_len;
+            buf[buf_len++] = '\n';
+            if (detail && detail_len > 0) {
+                memcpy(buf + buf_len, detail, detail_len);
+                buf_len += detail_len;
+            }
+            buf[buf_len++] = '\n';
+            buf[buf_len++] = '\n';
+
+            total_records++;
+        }
+        hu_memory_facade_records_free(facade->m, alloc, recs, n);
+    }
+
+    hu_planner_close(&planner);
+
+    if (buf && buf_len > 0) {
+        buf[buf_len] = '\0';
+        *out_text = buf;
+        *out_len = buf_len;
+    } else {
+        if (buf) alloc->free(alloc->ctx, buf, buf_cap);
+    }
     return HU_OK;
 }
 
 /* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
  *
  * Owns a `hu_scheduler_t *` and a borrowed reference to the facade's
- * `hu_memory_t *`. The scheduler does NOT take ownership of the memory
+ * `hu_memory_facade_t *`. The scheduler does NOT take ownership of the memory
  * handle (it just uses it for SQLite + dispatch). On close we destroy
  * the scheduler before the facade so the per-tick SQL handle stays
  * valid through the last tick.
@@ -339,10 +516,11 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
         alloc->free(alloc->ctx, w, sizeof(*w));
         return e;
     }
-    /* Wire the runners that this commit ships. Other kinds (KV cache
-     * eviction/warming, LoRA training, belief reverification) keep the
-     * no-op default the scheduler installs in hu_scheduler_open until
-     * their own dependencies land. */
+    /* Wire the runners that this commit ships. The KV-cache + LoRA +
+     * belief-reverify runners need caller-provided context (cache
+     * handle, learner, etc.) so they're registered separately via the
+     * bridge helpers below. The counterfactual + autodream runners are
+     * context-free and always available. */
     (void)hu_scheduler_register_runner(w->s, HU_JOB_COUNTERFACTUAL_REHEARSAL,
                                        hu_counterfactual_rehearsal_runner, NULL);
     /* AutoDream: same C function handles all three kinds; spec->kind
@@ -353,8 +531,53 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                        hu_autodream_runner, NULL);
     (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_DECAY,
                                        hu_autodream_runner, NULL);
+    /* Belief reverification: pure DB-side, no caller context needed,
+     * defaults are sane (30 day age, 64 rows/tick). Daemon overrides
+     * via hu_w14_scheduler_register_belief_reverify if it wants to
+     * pin a contact filter or surface counters. */
+    (void)hu_scheduler_register_runner(w->s, HU_JOB_BELIEF_REVERIFICATION,
+                                       hu_belief_reverify_runner, NULL);
+    /* KV cache + LoRA training: stay as no-ops until the daemon binds
+     * them via the helpers below. */
     *out_sched = w;
     return HU_OK;
+}
+
+hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s,
+                                                 hu_lora_runner_ctx_t *ctx) {
+    if (!s || !s->s || !ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    return hu_scheduler_register_runner(s->s, HU_JOB_LORA_TRAINING,
+                                        hu_lora_training_runner, ctx);
+}
+
+hu_error_t hu_w14_scheduler_register_kv_prewarm_runner(hu_w14_scheduler_t *s,
+                                                       hu_kv_cache_manager_t *mgr) {
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_error_t e1 = hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_EVICTION,
+                                                 hu_kv_prewarm_runner, mgr);
+    if (e1 != HU_OK)
+        return e1;
+    return hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_WARMING,
+                                        hu_kv_prewarm_runner, mgr);
+}
+
+hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
+                                                     hu_belief_reverify_ctx_t *ctx) {
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    return hu_scheduler_register_runner(s->s, HU_JOB_BELIEF_REVERIFICATION,
+                                        hu_belief_reverify_runner, ctx);
+}
+
+/* Allow the LoRA training runner to fire its KV-warm follow-up through
+ * the same bridge handle the daemon owns. Without this, the runner has
+ * no scheduler reference (it's a `hu_scheduler_t *`, not the bridge
+ * type). Daemon callers wire `ctx->scheduler` to the unwrapped pointer
+ * via this helper. */
+hu_scheduler_t *hu_w14_scheduler_inner(hu_w14_scheduler_t *s) {
+    return s ? s->s : NULL;
 }
 
 void hu_w14_scheduler_close(hu_w14_scheduler_t *s, hu_allocator_t *alloc) {
@@ -453,5 +676,56 @@ hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pendi
         *out_battery_pct = st.battery_pct;
     if (out_on_ac_power)
         *out_on_ac_power = st.on_ac_power ? 1 : 0;
+    return HU_OK;
+}
+
+bool hu_w14_scheduler_status_path(char *out_path, size_t cap) {
+    if (!out_path || cap == 0)
+        return false;
+    const char *home = getenv("HOME");
+    if (!home || !*home)
+        return false;
+    int n = snprintf(out_path, cap, "%s/.human/scheduler.status", home);
+    return n > 0 && (size_t)n < cap;
+}
+
+hu_error_t hu_w14_scheduler_status_save(hu_w14_scheduler_t *s) {
+    if (!s)
+        return HU_ERR_INVALID_ARGUMENT;
+    char path[512];
+    if (!hu_w14_scheduler_status_path(path, sizeof(path)))
+        return HU_OK; /* HOME unset — best effort no-op like imessage */
+
+    size_t pending = 0, completed = 0;
+    int battery = -1, on_ac = 1;
+    hu_error_t e = hu_w14_scheduler_status(s, &pending, &completed, &battery, &on_ac);
+    if (e != HU_OK)
+        return e;
+
+    /* Atomic write via tempfile + rename so concurrent readers (`human ml
+     * status`, `human doctor scheduler`) never see a partial document. Both
+     * tools parse via `hu_scheduler_status_parse_json` (any key order).
+     * Shape matches other ~/.human status JSON files for grep/jq. */
+    char tmp[600];
+    int tn = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    if (tn <= 0 || (size_t)tn >= sizeof(tmp))
+        return HU_OK;
+
+    FILE *f = fopen(tmp, "w");
+    if (!f)
+        return HU_OK;
+    int64_t now = (int64_t)time(NULL);
+    fprintf(f,
+            "{\n"
+            "  \"jobs_pending\": %zu,\n"
+            "  \"jobs_completed_today\": %zu,\n"
+            "  \"battery_pct\": %d,\n"
+            "  \"on_ac_power\": %s,\n"
+            "  \"updated_epoch\": %lld\n"
+            "}\n",
+            pending, completed, battery, on_ac ? "true" : "false", (long long)now);
+    fclose(f);
+    if (rename(tmp, path) != 0)
+        (void)remove(tmp);
     return HU_OK;
 }

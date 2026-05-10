@@ -8,7 +8,7 @@
 
 static void record_expectation_stores_topic(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_belief_state_t state;
+    hu_tom_belief_state_t state;
     memset(&state, 0, sizeof(state));
     hu_error_t err = hu_tom_init(&state, &alloc, "alice", 5);
     HU_ASSERT_EQ(err, HU_OK);
@@ -24,7 +24,7 @@ static void record_expectation_stores_topic(void) {
 
 static void record_expectation_updates_existing(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_belief_state_t state;
+    hu_tom_belief_state_t state;
     memset(&state, 0, sizeof(state));
     HU_ASSERT_EQ(hu_tom_init(&state, &alloc, "bob", 3), HU_OK);
 
@@ -46,7 +46,7 @@ static void record_expectation_null_returns_error(void) {
 
 static void detect_gaps_finds_missing_knowledge(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_belief_state_t state;
+    hu_tom_belief_state_t state;
     memset(&state, 0, sizeof(state));
     hu_tom_init(&state, &alloc, "carol", 5);
 
@@ -68,7 +68,7 @@ static void detect_gaps_finds_missing_knowledge(void) {
 
 static void detect_gaps_no_gap_when_ai_knows(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_belief_state_t state;
+    hu_tom_belief_state_t state;
     memset(&state, 0, sizeof(state));
     hu_tom_init(&state, &alloc, "dave", 4);
 
@@ -89,7 +89,7 @@ static void detect_gaps_no_gap_when_ai_knows(void) {
 
 static void detect_gaps_low_confidence_still_gap(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_belief_state_t state;
+    hu_tom_belief_state_t state;
     memset(&state, 0, sizeof(state));
     hu_tom_init(&state, &alloc, "eve", 3);
 
@@ -109,7 +109,7 @@ static void detect_gaps_low_confidence_still_gap(void) {
 
 static void detect_gaps_empty_expectations_returns_zero(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_belief_state_t state;
+    hu_tom_belief_state_t state;
     memset(&state, 0, sizeof(state));
     hu_tom_init(&state, &alloc, "frank", 5);
 
@@ -126,7 +126,7 @@ static void detect_gaps_empty_expectations_returns_zero(void) {
 
 static void build_gap_directive_produces_context(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_belief_state_t state;
+    hu_tom_belief_state_t state;
     memset(&state, 0, sizeof(state));
     hu_tom_init(&state, &alloc, "grace", 5);
 
@@ -229,7 +229,7 @@ static void detect_expectation_tracking(void) {
 
 static void deinit_frees_expectations(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_belief_state_t state;
+    hu_tom_belief_state_t state;
     memset(&state, 0, sizeof(state));
     hu_tom_init(&state, &alloc, "heidi", 5);
 

@@ -184,10 +184,13 @@ typedef struct hu_imessage_ctx {
      * recovery is detected promptly. The counter resets on each probe and
      * after a successful poll. */
     uint32_t breaker_recovery_probe_counter;
+    /* `imsg_watch_running` is always compiled so test builds can drive the
+     * watch-active code path through the test seam (the prod fields below
+     * remain platform-gated). */
+    bool imsg_watch_running;
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
     pid_t imsg_watch_pid;
     int imsg_watch_fd;
-    bool imsg_watch_running;
     bool imsg_target_validated;
     void *imcore_handle;
     bool imcore_tried;
@@ -308,6 +311,23 @@ static bool imessage_record_open_result(hu_imessage_ctx_t *c, int rc, int64_t no
 
 static void imessage_record_poll_success(hu_imessage_ctx_t *c, int64_t now) {
     (void)imessage_record_open_result(c, 0, now);
+}
+
+/* Record a heartbeat from a healthy idle watch tick.
+ *
+ * Production failure (2026-05-10): `human doctor imessage` reported STALE
+ * within ~120s of every daemon restart even when `imsg watch` was alive
+ * and the channel was perfectly healthy. The first poll after watch
+ * startup updated `last_successful_poll_epoch`, then the value froze
+ * because the watch-active short-circuit returned HU_OK without recording
+ * any subsequent heartbeat. This helper centralizes the policy: every
+ * healthy idle poll IS a heartbeat. The disk write is ~170 bytes, well
+ * within the daemon's 1Hz cadence budget. */
+static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now) {
+    if (!c)
+        return;
+    imessage_record_poll_success(c, now);
+    imessage_save_poll_status(c);
 }
 
 bool hu_imessage_breaker_tripped(const hu_channel_t *ch) {
@@ -440,6 +460,19 @@ void hu_imessage_test_record_poll_success(hu_channel_t *ch, int64_t now_epoch) {
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     imessage_record_poll_success(c, now_epoch);
     imessage_save_poll_status(c);
+}
+
+void hu_imessage_test_set_watch_running(hu_channel_t *ch, bool running) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    c->imsg_watch_running = running;
+}
+
+int64_t hu_imessage_test_get_last_success_epoch(const hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return 0;
+    return ((const hu_imessage_ctx_t *)ch->ctx)->last_successful_poll_epoch;
 }
 #endif
 
@@ -3531,6 +3564,11 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 #if HU_IS_TEST
     {
         hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)channel_ctx;
+        /* Mirror the production heartbeat contract: a healthy idle watch
+         * tick refreshes the success epoch. Tests use
+         * `hu_imessage_test_set_watch_running` to drive this branch. */
+        if (c->imsg_watch_running)
+            imessage_record_poll_heartbeat(c, (int64_t)time(NULL));
         if (c->mock_count > 0) {
             size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
             for (size_t i = 0; i < n; i++) {
@@ -3582,8 +3620,19 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
      * This avoids redundant queries while maintaining sub-second latency.
      * If the watch process died, attempt restart before falling back to SQL. */
     if (c->imsg_watch_running) {
-        if (!imsg_watch_has_data(c))
+        if (!imsg_watch_has_data(c)) {
+            /* Two cases here:
+             *   1. Read returned EAGAIN: watch is alive, just no new data.
+             *      `imsg_watch_running` stays true. This idle tick IS a
+             *      successful poll cycle — record the heartbeat so the
+             *      doctor's stall threshold doesn't trip on quiet hours.
+             *   2. Read returned EOF / error: `imsg_watch_has_data` already
+             *      tore down the watch and cleared `imsg_watch_running`.
+             *      Don't claim success; let the next poll restart it. */
+            if (c->imsg_watch_running)
+                imessage_record_poll_heartbeat(c, (int64_t)time(NULL));
             return HU_OK;
+        }
     } else if (c->use_imsg_cli && imsg_cli_available(c)) {
         imsg_watch_start(c);
     }

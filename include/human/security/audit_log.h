@@ -48,8 +48,8 @@ typedef enum hu_audit_operation {
  * ownership; must remain valid for the duration of the call).
  *
  * When returned from hu_audit_log_query: strings are owned by the struct;
- * free the entire result set with hu_audit_events_free. */
-typedef struct hu_audit_event {
+ * free the entire result set with hu_audit_log_events_free. */
+typedef struct hu_audit_log_event {
     hu_audit_operation_t operation;
     hu_memory_kind_t     kind;
     int64_t              target_id;   /* 0 if not applicable */
@@ -57,7 +57,7 @@ typedef struct hu_audit_event {
     int64_t              occurred_at; /* Unix ms timestamp */
     char                *summary;     /* nullable human-readable note */
     char                *contact_id;  /* user/contact scope */
-} hu_audit_event_t;
+} hu_audit_log_event_t;
 
 /* Query filter for hu_audit_log_query. Set a field to NULL / 0 to skip. */
 typedef struct hu_audit_query {
@@ -79,18 +79,18 @@ hu_error_t hu_audit_log_open(hu_allocator_t *alloc, const char *db_path,
 void hu_audit_log_close(hu_audit_log_t *log, hu_allocator_t *alloc);
 
 /* Append one event to the log. All string fields in `ev` are borrowed. */
-hu_error_t hu_audit_log_append(hu_audit_log_t *log, const hu_audit_event_t *ev);
+hu_error_t hu_audit_log_append(hu_audit_log_t *log, const hu_audit_log_event_t *ev);
 
-/* Query the log. Allocates *out (array of hu_audit_event_t, *out_count long)
+/* Query the log. Allocates *out (array of hu_audit_log_event_t, *out_count long)
  * via `alloc`. Strings inside each event are also allocated; free the whole
- * result set with hu_audit_events_free. */
+ * result set with hu_audit_log_events_free. */
 hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
                                hu_allocator_t *alloc,
-                               hu_audit_event_t **out, size_t *out_count);
+                               hu_audit_log_event_t **out, size_t *out_count);
 
 /* Free a result set returned by hu_audit_log_query. */
-void hu_audit_events_free(hu_allocator_t *alloc,
-                           hu_audit_event_t *events, size_t count);
+void hu_audit_log_events_free(hu_allocator_t *alloc,
+                              hu_audit_log_event_t *events, size_t count);
 
 #ifdef __cplusplus
 }

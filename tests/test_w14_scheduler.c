@@ -41,18 +41,18 @@ static void clear_w14_env(void) {
     unsetenv("HU_TEST_QUIET_HOURS");
 }
 
-static void open_stack_(hu_graph_t **g, hu_memory_t **m, hu_scheduler_t **s) {
+static void open_stack_(hu_graph_t **g, hu_memory_facade_t **m, hu_scheduler_t **s) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
     HU_ASSERT_NOT_NULL(*g);
-    HU_ASSERT_EQ(hu_memory_open(A(), *g, m), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), *g, m), HU_OK);
     HU_ASSERT_NOT_NULL(*m);
     HU_ASSERT_EQ(hu_scheduler_open(A(), *m, s), HU_OK);
     HU_ASSERT_NOT_NULL(*s);
 }
 
-static void close_stack_(hu_graph_t *g, hu_memory_t *m, hu_scheduler_t *s) {
+static void close_stack_(hu_graph_t *g, hu_memory_facade_t *m, hu_scheduler_t *s) {
     hu_scheduler_close(s, A());
-    hu_memory_close(m, A());
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -74,7 +74,7 @@ static int count_jobs_with_status(struct sqlite3 *db, const char *status) {
 static int dispatch_log[256];
 static size_t dispatch_log_len;
 
-static hu_error_t recording_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+static hu_error_t recording_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                     int64_t budget_ms, void *user_data) {
     (void)m;
     (void)budget_ms;
@@ -85,7 +85,7 @@ static hu_error_t recording_runner(hu_memory_t *m, const hu_job_spec_t *spec,
 }
 
 static int g_increment_counter;
-static hu_error_t increment_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+static hu_error_t increment_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                     int64_t budget_ms, void *user_data) {
     (void)m;
     (void)spec;
@@ -96,7 +96,7 @@ static hu_error_t increment_runner(hu_memory_t *m, const hu_job_spec_t *spec,
     return HU_OK;
 }
 
-static hu_error_t error_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+static hu_error_t error_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                 int64_t budget_ms, void *user_data) {
     (void)m;
     (void)spec;
@@ -105,7 +105,7 @@ static hu_error_t error_runner(hu_memory_t *m, const hu_job_spec_t *spec,
     return HU_ERR_INTERNAL;
 }
 
-static hu_error_t slow_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+static hu_error_t slow_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                int64_t budget_ms, void *user_data) {
     (void)m;
     (void)spec;
@@ -122,7 +122,7 @@ static hu_error_t slow_runner(hu_memory_t *m, const hu_job_spec_t *spec,
 static void test_w14_open_close_round_trip(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
@@ -143,7 +143,7 @@ static void test_w14_open_close_round_trip(void) {
 static void test_w14_enqueue_invalid_args_rejected(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
@@ -175,7 +175,7 @@ static void test_w14_enqueue_invalid_args_rejected(void) {
 static void test_w14_scheduler_respects_priority(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
@@ -208,7 +208,7 @@ static void test_w14_scheduler_skips_jobs_on_battery_when_required(void) {
     clear_w14_env();
     setenv("HU_TEST_ON_AC", "0", 1);
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
     int counter = 0;
@@ -241,7 +241,7 @@ static void test_w14_scheduler_respects_quiet_hours(void) {
     clear_w14_env();
     setenv("HU_TEST_QUIET_HOURS", "1", 1);
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_AUTODREAM_DECAY,
@@ -281,7 +281,7 @@ static void test_w14_scheduler_respects_quiet_hours(void) {
 static void test_w14_scheduler_budget_enforced_per_job(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_EVICTION,
@@ -305,7 +305,7 @@ static void test_w14_scheduler_budget_enforced_per_job(void) {
 static void test_w14_autodream_runner_registered_by_default(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
@@ -338,7 +338,7 @@ static void test_w14_autodream_runner_registered_by_default(void) {
 static void test_w14_register_custom_runner_dispatches_correctly(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
@@ -369,7 +369,7 @@ static void test_w14_register_custom_runner_dispatches_correctly(void) {
 static void test_w14_status_returns_pending_count(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
@@ -393,7 +393,7 @@ static void test_w14_status_returns_pending_count(void) {
 static void test_w14_adversarial_job_flood_respects_total_budget(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
@@ -426,7 +426,7 @@ static void test_w14_adversarial_job_flood_respects_total_budget(void) {
 static void test_w14_adversarial_runner_returns_error_does_not_crash_scheduler(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
@@ -461,7 +461,7 @@ static void test_w14_adversarial_runner_returns_error_does_not_crash_scheduler(v
 static void test_w14_counterfactual_rehearsal_caps_at_five_per_tick(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
@@ -541,7 +541,7 @@ static void test_w14_counterfactual_rehearsal_caps_at_five_per_tick(void) {
 static void test_w14_expired_jobs_marked_after_latest_at(void) {
     clear_w14_env();
     hu_graph_t *g = NULL;
-    hu_memory_t *m = NULL;
+    hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 

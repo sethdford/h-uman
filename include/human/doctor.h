@@ -64,4 +64,25 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
                                     int64_t stale_after_secs, double flagged_warn_rate,
                                     hu_diag_item_t **items, size_t *count, size_t *cap);
 
+/* Parse ~/.human/scheduler.status JSON body.
+ *
+ * Deprecated for new callers: use `hu_scheduler_status_parse_json` from
+ * `human/agent/scheduler_status_json.h` so non-doctor modules (e.g. ML CLI) do not
+ * depend on this header. This symbol remains as a thin compatibility wrapper. */
+hu_error_t hu_doctor_parse_scheduler_status_json(const char *json,
+                                                 unsigned long long *jobs_pending,
+                                                 unsigned long long *jobs_completed_today,
+                                                 long long *battery_pct, char *on_ac_power_text,
+                                                 size_t on_ac_power_cap, long long *updated_epoch);
+
+/* Read ~/.human/scheduler.status (written by the daemon after each W14 tick)
+ * and report pending/completed counts + freshness vs `now_epoch`. */
+hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
+                                     int64_t stale_after_secs, hu_diag_item_t **items,
+                                     size_t *count, size_t *cap);
+
+/* Operational hints for response_guard / empty-reply triage (no secrets). */
+hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item_t **items,
+                                             size_t *count, size_t *cap);
+
 #endif /* HU_DOCTOR_H */

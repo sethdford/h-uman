@@ -3,7 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -34,7 +34,7 @@ typedef struct hu_case_record {
 } hu_case_record_t;
 
 /* Persist a case the agent just handled. anchor_entity_ids may be NULL/0. */
-hu_error_t hu_case_record(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+hu_error_t hu_case_record(hu_memory_facade_t *m, const char *contact_id, size_t contact_id_len,
                           const char *goal_verb, size_t goal_verb_len,
                           const int64_t *anchor_entity_ids, size_t anchor_count,
                           const char *plan_text, size_t plan_text_len, const char *outcome,
@@ -43,7 +43,7 @@ hu_error_t hu_case_record(hu_graph_t *g, const char *contact_id, size_t contact_
 /* Recall the top-K cases similar to (goal_verb, anchor_entity_ids). Score is
  * 0..1, combining anchor-entity overlap and recency. Returns 0 results
  * gracefully when no matches exist. */
-hu_error_t hu_case_recall(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_case_recall(hu_memory_facade_t *m, hu_allocator_t *alloc, const char *contact_id,
                           size_t contact_id_len, const char *goal_verb, size_t goal_verb_len,
                           const int64_t *anchor_entity_ids, size_t anchor_count, int64_t now_ms,
                           size_t top_k, hu_case_record_t **out, size_t *out_count);

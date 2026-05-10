@@ -48,6 +48,8 @@ static const evaluation_factory_entry_t kEvaluationFactories[] = {
      hu_evaluation_memoryagentbench},
     {"frontier", "h-uman vs frontier no-memory baseline (stub)",
      hu_evaluation_frontier_compare},
+    {"legacy-bridge", "Legacy task-list framework adapted to W16 vtable",
+     hu_evaluation_legacy_bridge},
 };
 
 static const size_t kEvaluationFactoriesCount =

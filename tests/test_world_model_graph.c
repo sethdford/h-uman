@@ -22,24 +22,24 @@ static void close_test_db(sqlite3 *db) {
 static void world_graph_add_node_and_retrieve(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &model), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&model), HU_OK);
+    hu_causal_world_model_t model;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &model), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&model), HU_OK);
 
     int64_t id = 0;
     HU_ASSERT_EQ(hu_world_add_node(&model, "rain", 4, "event", 5, &id), HU_OK);
     HU_ASSERT_GT(id, 0);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void world_graph_add_edge_creates_link(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &model), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&model), HU_OK);
+    hu_causal_world_model_t model;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &model), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&model), HU_OK);
 
     int64_t a = 0, b = 0;
     HU_ASSERT_EQ(hu_world_add_node(&model, "A", 1, "entity", 6, &a), HU_OK);
@@ -53,16 +53,16 @@ static void world_graph_add_edge_creates_link(void) {
     HU_ASSERT_EQ(edges[0].target_id, b);
     HU_ASSERT_EQ(edges[0].type, HU_EDGE_CAUSES);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void world_graph_edge_confidence_updates(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &model), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&model), HU_OK);
+    hu_causal_world_model_t model;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &model), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&model), HU_OK);
 
     int64_t a = 0, b = 0;
     HU_ASSERT_EQ(hu_world_add_node(&model, "X", 1, "action", 6, &a), HU_OK);
@@ -77,16 +77,16 @@ static void world_graph_edge_confidence_updates(void) {
     HU_ASSERT_EQ(edges[0].evidence_count, 2);
     HU_ASSERT_TRUE(edges[0].confidence >= 0.8 && edges[0].confidence <= 0.9);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void world_graph_trace_chain_depth_1(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &model), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&model), HU_OK);
+    hu_causal_world_model_t model;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &model), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&model), HU_OK);
 
     int64_t a = 0, b = 0;
     HU_ASSERT_EQ(hu_world_add_node(&model, "A", 1, "entity", 6, &a), HU_OK);
@@ -102,16 +102,16 @@ static void world_graph_trace_chain_depth_1(void) {
     HU_ASSERT_EQ(path[1].id, b);
     HU_ASSERT_STR_EQ(path[1].label, "B");
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void world_graph_trace_chain_depth_3(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &model), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&model), HU_OK);
+    hu_causal_world_model_t model;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &model), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&model), HU_OK);
 
     int64_t ids[4] = {0};
     HU_ASSERT_EQ(hu_world_add_node(&model, "A", 1, "entity", 6, &ids[0]), HU_OK);
@@ -131,16 +131,16 @@ static void world_graph_trace_chain_depth_3(void) {
     HU_ASSERT_STR_EQ(path[2].label, "C");
     HU_ASSERT_STR_EQ(path[3].label, "D");
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void world_graph_find_paths_simple(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &model), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&model), HU_OK);
+    hu_causal_world_model_t model;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &model), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&model), HU_OK);
 
     int64_t a = 0, b = 0, c = 0;
     HU_ASSERT_EQ(hu_world_add_node(&model, "A", 1, "entity", 6, &a), HU_OK);
@@ -157,16 +157,16 @@ static void world_graph_find_paths_simple(void) {
     HU_ASSERT_STR_EQ(path[1].label, "B");
     HU_ASSERT_STR_EQ(path[2].label, "C");
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void world_graph_null_model_returns_error(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    HU_ASSERT_EQ(hu_world_model_create(&alloc, db, &model), HU_OK);
-    HU_ASSERT_EQ(hu_world_model_init_tables(&model), HU_OK);
+    hu_causal_world_model_t model;
+    HU_ASSERT_EQ(hu_causal_world_model_create(&alloc, db, &model), HU_OK);
+    HU_ASSERT_EQ(hu_causal_world_model_init_tables(&model), HU_OK);
 
     int64_t id = 0;
     hu_causal_edge_t edges[4];
@@ -180,7 +180,7 @@ static void world_graph_null_model_returns_error(void) {
     HU_ASSERT_EQ(hu_world_trace_causal_chain(NULL, 1, 3, path, 4, &len), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_world_find_paths(NULL, 1, 2, 5, path, 4, &len), HU_ERR_INVALID_ARGUMENT);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 

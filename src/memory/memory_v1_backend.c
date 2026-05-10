@@ -1,27 +1,29 @@
 /* W7 v1 backend.
  *
  * Wraps the existing graph + persona deltas + cross_edges + cases + quarantine
- * APIs behind the hu_memory_t facade. Each backend ctx is one struct holding
+ * APIs behind the hu_memory_facade_t. Each backend ctx is one struct holding
  * the graph handle (since v1 stores all of these in one SQLite DB). The
- * routing table in hu_memory dispatches per kind to the same backend ctx —
+ * routing table in hu_memory_facade dispatches per kind to the same backend ctx —
  * this avoids creating six copies of the same pointer.
  *
  * Layer 1 backend per the v2 architecture (docs/plans/2026-05-10-memory-v2-
- * roadmap-overview.md). New code should call through hu_memory_t; this module
+ * roadmap-overview.md). New code should call through hu_memory_facade_t; this module
  * exists to make migration mechanical and zero-behavior-change.
  */
 
 #include "human/memory/memory.h"
 #include "human/memory/erasure.h"
 #include "human/memory/graph.h"
+#include "human/memory/hyperedge.h"
 
 #include "human/core/error.h"
 #include <stdlib.h>
 #include <string.h>
 
 /* Bridges declared by memory.c. */
-hu_error_t hu_memory__v1_backend_register(struct hu_memory *m, hu_graph_t *graph);
-void hu_memory__v1_backend_unregister_all(struct hu_memory *m);
+hu_error_t hu_memory__v1_backend_register(struct hu_memory_facade *m, hu_graph_t *graph);
+void hu_memory__v1_backend_unregister_all(struct hu_memory_facade *m);
+void hu_memory__v1_set_bundle_for_close(hu_memory_facade_t *m, void *ctx);
 
 /* Local allocator helpers. The h-uman allocator is method-pointer style. */
 static inline void *xalloc(hu_allocator_t *a, size_t n) {
@@ -31,13 +33,19 @@ static inline void xfree(hu_allocator_t *a, void *p, size_t n) {
     if (p) a->free(a->ctx, p, n);
 }
 
-/* Shared ctx — held once by hu_memory and pointed to by every kind that the
- * v1 backend services. We keep deinit a no-op for all but the FIRST kind so
- * the ctx isn't double-freed; the FIRST kind owns it. */
+/* Shared ctx — held once by hu_memory_facade and pointed to by every kind that the
+ * v1 backend services. Facade close frees the bundle via memory.c (v1_bundle_ctx). */
 struct hu_memory_v1_ctx {
+    hu_memory_facade_t *facade; /* not owned; provided at register time */
     hu_graph_t *graph;
-    int owner_kind; /* the single slot whose deinit free()s ctx */
 };
+
+/* Tiny accessors used by the hyperedge facade backend to reach the
+ * facade pointer without exposing the full struct outside this TU. */
+hu_memory_facade_t *hu_memory__v1_ctx_facade(void *vctx) {
+    struct hu_memory_v1_ctx *ctx = vctx;
+    return ctx ? ctx->facade : NULL;
+}
 
 /* --------- ENTITY ----------------------------------------------------- */
 
@@ -207,24 +215,18 @@ static void v1_entity_records_free(void *vctx, hu_allocator_t *alloc,
     xfree(alloc, r, n * sizeof(*r));
 }
 
-static void v1_ctx_deinit_owner(void *vctx) {
-    struct hu_memory_v1_ctx *ctx = vctx;
-    if (ctx == NULL) return;
-    free(ctx); /* allocated with raw malloc; see register below. */
-}
-
 static void v1_ctx_deinit_noop(void *vctx) {
     (void)vctx;
 }
 
-static hu_memory_vtable_t s_v1_entity_vt = {
+static hu_memory_facade_vtable_t s_v1_entity_vt = {
     .name = "v1-entity",
     .read = v1_entity_read,
     .write = v1_entity_write,
     .erase = v1_entity_erase,
     .erase_by_provenance = v1_entity_erase_by_prov,
     .records_free = v1_entity_records_free,
-    .deinit = v1_ctx_deinit_owner,
+    .deinit = v1_ctx_deinit_noop,
 };
 
 /* --------- RELATION --------------------------------------------------- */
@@ -381,7 +383,7 @@ static void v1_relation_records_free(void *vctx, hu_allocator_t *alloc,
     xfree(alloc, r, n * sizeof(*r));
 }
 
-static hu_memory_vtable_t s_v1_relation_vt = {
+static hu_memory_facade_vtable_t s_v1_relation_vt = {
     .name = "v1-relation",
     .read = v1_relation_read,
     .write = v1_relation_write,
@@ -391,32 +393,160 @@ static hu_memory_vtable_t s_v1_relation_vt = {
     .deinit = v1_ctx_deinit_noop,
 };
 
+/* --------- HYPEREDGE -------------------------------------------------- */
+
+/* The hyperedge module already owns its SQLite tables and the
+ * (mean,variance) belief schema; the facade backend is a thin shim
+ * that adapts hu_memory_record_t <-> hu_hyperedge_t and routes through
+ * the v1 hyperedge API. We DO NOT duplicate storage or schema: this
+ * is the single source of truth for HU_MEM_HYPEREDGE. */
+
+/* The hyperedge facade backend is a thin shim that adapts
+ * hu_memory_record_t <-> hu_hyperedge_t and routes through the v1
+ * hyperedge API. The shared ctx (defined at the top of this file)
+ * holds the facade pointer that hu_hyperedge_upsert/query expects. */
+
+static hu_error_t v1_hyperedge_read(void *vctx, const hu_memory_query_t *q,
+                                     hu_allocator_t *alloc,
+                                     hu_memory_record_t **out, size_t *out_count) {
+    if (q->kind != HU_MEM_HYPEREDGE) return HU_ERR_INVALID_ARGUMENT;
+    if (q->as.neighbors.entity_id == 0) {
+        /* Hyperedge query is "by member entity"; without an anchor we
+         * decline rather than scan the whole table. */
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_memory_facade_t *m = hu_memory__v1_ctx_facade(vctx);
+    if (!m) return HU_ERR_INVALID_ARGUMENT;
+
+    hu_hyperedge_t *edges = NULL;
+    size_t count = 0;
+    hu_error_t err = hu_hyperedge_query_by_member(m, alloc,
+                                                   q->as.neighbors.entity_id,
+                                                   &edges, &count);
+    if (err != HU_OK) {
+        *out = NULL;
+        *out_count = 0;
+        return err;
+    }
+    if (count == 0) {
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
+    }
+
+    hu_memory_record_t *recs = xalloc(alloc, sizeof(*recs) * count);
+    if (recs == NULL) {
+        hu_hyperedges_free(alloc, edges, count);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(recs, 0, sizeof(*recs) * count);
+    for (size_t i = 0; i < count; i++) {
+        recs[i].kind = HU_MEM_HYPEREDGE;
+        recs[i].id = edges[i].id;
+        recs[i].event_start = edges[i].event_start;
+        recs[i].event_end = edges[i].event_end;
+        /* Record carries the (mean) so legacy float-confidence callers
+         * see the posterior point estimate. Variance is preserved on
+         * the payload itself for callers who need it. */
+        recs[i].confidence = edges[i].belief.mean;
+        hu_hyperedge_t *p = xalloc(alloc, sizeof(*p));
+        if (p == NULL) {
+            for (size_t j = 0; j < i; j++) {
+                hu_hyperedge_t *prev = (hu_hyperedge_t *)recs[j].payload;
+                if (prev) {
+                    hu_hyperedges_free(alloc, prev, 1);
+                }
+            }
+            hu_hyperedges_free(alloc, edges, count);
+            xfree(alloc, recs, 0);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        *p = edges[i];
+        recs[i].payload = p;
+        recs[i].payload_len = sizeof(*p);
+    }
+    /* Free the array backing only — payloads now own the strings. */
+    xfree(alloc, edges, 0);
+    *out = recs;
+    *out_count = count;
+    return HU_OK;
+}
+
+static hu_error_t v1_hyperedge_write(void *vctx, const hu_memory_record_t *rec) {
+    if (rec->kind != HU_MEM_HYPEREDGE || rec->payload == NULL)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_memory_facade_t *m = hu_memory__v1_ctx_facade(vctx);
+    if (!m) return HU_ERR_INVALID_ARGUMENT;
+    const hu_hyperedge_t *he = rec->payload;
+    int64_t out_id = 0;
+    return hu_hyperedge_upsert(m, "", 0, he, &out_id);
+}
+
+static hu_error_t v1_hyperedge_erase(void *vctx, hu_memory_kind_t kind, int64_t id) {
+    (void)vctx;
+    (void)id;
+    if (kind != HU_MEM_HYPEREDGE) return HU_ERR_INVALID_ARGUMENT;
+    /* v1 has no row-level hyperedge delete yet (cascading erasure goes
+     * through entity-level erase). Surface honestly. */
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+static void v1_hyperedge_records_free(void *vctx, hu_allocator_t *alloc,
+                                       hu_memory_record_t *r, size_t n) {
+    (void)vctx;
+    if (r == NULL || n == 0) return;
+    for (size_t i = 0; i < n; i++) {
+        hu_hyperedge_t *p = (hu_hyperedge_t *)r[i].payload;
+        if (p != NULL) {
+            hu_hyperedges_free(alloc, p, 1);
+        }
+        if (r[i].provenance) {
+            xfree(alloc, r[i].provenance, r[i].provenance_len + 1);
+        }
+    }
+    xfree(alloc, r, n * sizeof(*r));
+}
+
+static hu_memory_facade_vtable_t s_v1_hyperedge_vt = {
+    .name = "v1-hyperedge",
+    .read = v1_hyperedge_read,
+    .write = v1_hyperedge_write,
+    .erase = v1_hyperedge_erase,
+    .erase_by_provenance = NULL,
+    .records_free = v1_hyperedge_records_free,
+    .deinit = v1_ctx_deinit_noop,
+};
+
 /* --------- registration ---------------------------------------------- */
 
-hu_error_t hu_memory__v1_backend_register(struct hu_memory *m, hu_graph_t *graph) {
+hu_error_t hu_memory__v1_backend_register(struct hu_memory_facade *m, hu_graph_t *graph) {
     if (m == NULL || graph == NULL) return HU_ERR_INVALID_ARGUMENT;
-    /* One ctx, shared across the kinds the v1 backend services. The owner is
-     * the FIRST registered slot (HU_MEM_ENTITY). When the facade closes, that
-     * slot's deinit free()s the ctx; sibling slots use a no-op deinit. */
+    /* One ctx, shared across the kinds the v1 backend services. memory.c frees
+     * it once at hu_memory_facade_close via v1_bundle_ctx after all slots clear. */
     struct hu_memory_v1_ctx *ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) return HU_ERR_OUT_OF_MEMORY;
+    ctx->facade = m;
     ctx->graph = graph;
-    ctx->owner_kind = HU_MEM_ENTITY;
+    hu_memory__v1_set_bundle_for_close(m, ctx);
 
-    hu_error_t e = hu_memory_register_backend(m, HU_MEM_ENTITY, &s_v1_entity_vt, ctx);
+    hu_error_t e = hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &s_v1_entity_vt, ctx);
     if (e != HU_OK) {
         free(ctx);
         return e;
     }
-    e = hu_memory_register_backend(m, HU_MEM_RELATION, &s_v1_relation_vt, ctx);
+    e = hu_memory_facade_register_backend(m, HU_MEM_RELATION, &s_v1_relation_vt, ctx);
     if (e != HU_OK) {
         /* The entity slot still owns ctx; closing the facade will free it. */
+        return e;
+    }
+    e = hu_memory_facade_register_backend(m, HU_MEM_HYPEREDGE, &s_v1_hyperedge_vt, ctx);
+    if (e != HU_OK) {
         return e;
     }
     return HU_OK;
 }
 
-void hu_memory__v1_backend_unregister_all(struct hu_memory *m) {
+void hu_memory__v1_backend_unregister_all(struct hu_memory_facade *m) {
     /* Nothing to do here — facade close walks slots and calls each vtable's
      * deinit. The entity slot's deinit owns the ctx free. We keep this hook
      * for symmetry and as an extension point for kinds that want to do extra

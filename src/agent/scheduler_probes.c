@@ -42,8 +42,9 @@
  * Quiet-hours: persona currently exposes time-of-day overlay strings
  * (`time_overlay_late_night` etc) but not a structured quiet-hours
  * window.  The probe accepts a persona pointer for future use; today
- * it falls back to the env override + a fixed 22:00–07:00 default
- * when persona is non-NULL. */
+ * it falls back to the env override + a fixed 01:00–06:00 default
+ * when persona is non-NULL (the sleep-compute sweet spot on most
+ * personal devices). */
 
 static int read_env_int(const char *name, int fallback) {
 #ifdef HU_IS_TEST
@@ -318,9 +319,11 @@ bool hu_scheduler_probe_quiet_hours(int64_t now_ms, const hu_persona_t *persona)
     }
 #endif
     /* Production fallback: when a persona is in scope, use a fixed
-     * 22:00–07:00 quiet window. The persona overlay strings will
-     * eventually drive this; for now a sane default beats "always
-     * available". A NULL persona means "no quiet-hours opinion" -> false. */
+     * 01:00–06:00 quiet window — the sleep-compute sweet spot where
+     * most personal devices are idle and on AC power. The persona
+     * overlay strings will eventually provide per-user overrides; for
+     * now a sane default beats "always available". A NULL persona
+     * means "no quiet-hours opinion" → false. */
     (void)persona;
     if (now_ms <= 0)
         return false;
@@ -336,5 +339,5 @@ bool hu_scheduler_probe_quiet_hours(int64_t now_ms, const hu_persona_t *persona)
         return false;
 #endif
     int hour = tm_local.tm_hour;
-    return (hour >= 22 || hour < 7);
+    return (hour >= 1 && hour < 6);
 }

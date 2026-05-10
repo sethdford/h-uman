@@ -266,31 +266,31 @@ static void test_goal_status_str(void) {
 /* -- World Model ----------------------------------------------------- */
 
 static void test_world_model_create_null(void) {
-    hu_world_model_t model;
-    HU_ASSERT_EQ(hu_world_model_create(NULL, NULL, &model), HU_ERR_INVALID_ARGUMENT);
+    hu_causal_world_model_t model;
+    HU_ASSERT_EQ(hu_causal_world_model_create(NULL, NULL, &model), HU_ERR_INVALID_ARGUMENT);
 }
 
 static void test_world_model_simulate_no_data(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    hu_world_model_create(&alloc, db, &model);
-    hu_world_model_init_tables(&model);
+    hu_causal_world_model_t model;
+    hu_causal_world_model_create(&alloc, db, &model);
+    hu_causal_world_model_init_tables(&model);
 
     hu_wm_prediction_t pred;
     HU_ASSERT_EQ(hu_world_simulate(&model, "deploy app", 10, "production", 10, &pred), HU_OK);
     HU_ASSERT_TRUE(pred.confidence <= 0.2);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void test_world_model_record_and_simulate(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    hu_world_model_create(&alloc, db, &model);
-    hu_world_model_init_tables(&model);
+    hu_causal_world_model_t model;
+    hu_causal_world_model_create(&alloc, db, &model);
+    hu_causal_world_model_init_tables(&model);
 
     HU_ASSERT_EQ(
         hu_world_record_outcome(&model, "restart server", 14, "server recovered", 16, 0.9, 1000),
@@ -300,16 +300,16 @@ static void test_world_model_record_and_simulate(void) {
     HU_ASSERT_EQ(hu_world_simulate(&model, "restart service", 15, "outage", 6, &pred), HU_OK);
     HU_ASSERT_TRUE(pred.outcome_len > 0);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void test_world_model_counterfactual(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    hu_world_model_create(&alloc, db, &model);
-    hu_world_model_init_tables(&model);
+    hu_causal_world_model_t model;
+    hu_causal_world_model_create(&alloc, db, &model);
+    hu_causal_world_model_init_tables(&model);
 
     hu_world_record_outcome(&model, "deploy fast", 11, "crash", 5, 0.7, 1000);
     hu_world_record_outcome(&model, "deploy slow", 11, "success", 7, 0.8, 1001);
@@ -319,31 +319,31 @@ static void test_world_model_counterfactual(void) {
         hu_world_counterfactual(&model, "deploy fast", 11, "deploy slow", 11, "prod", 4, &pred),
         HU_OK);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void test_world_model_causal_depth(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    hu_world_model_create(&alloc, db, &model);
-    hu_world_model_init_tables(&model);
+    hu_causal_world_model_t model;
+    hu_causal_world_model_create(&alloc, db, &model);
+    hu_causal_world_model_init_tables(&model);
 
     size_t depth = 99;
     HU_ASSERT_EQ(hu_world_causal_depth(&model, "unknown", 7, &depth), HU_OK);
     HU_ASSERT_EQ(depth, 0u);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
 static void test_world_evaluate_options(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
-    hu_world_model_t model;
-    hu_world_model_create(&alloc, db, &model);
-    hu_world_model_init_tables(&model);
+    hu_causal_world_model_t model;
+    hu_causal_world_model_create(&alloc, db, &model);
+    hu_causal_world_model_init_tables(&model);
 
     hu_world_record_outcome(&model, "restart", 7, "recovered", 9, 0.9, 1000);
     hu_world_record_outcome(&model, "restart", 7, "recovered", 9, 0.85, 1001);
@@ -359,7 +359,7 @@ static void test_world_evaluate_options(void) {
     HU_ASSERT_TRUE(opts[0].score >= 0.0);
     HU_ASSERT_TRUE(opts[1].score >= 0.0);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
 
@@ -370,10 +370,10 @@ static void world_model_evaluate_options_scores_order(void) {
     sqlite3 *db = hu_sqlite_memory_get_db(&mem);
     HU_ASSERT_NOT_NULL(db);
 
-    hu_world_model_t model;
-    hu_error_t err = hu_world_model_create(&alloc, db, &model);
+    hu_causal_world_model_t model;
+    hu_error_t err = hu_causal_world_model_create(&alloc, db, &model);
     HU_ASSERT_EQ(err, HU_OK);
-    (void)hu_world_model_init_tables(&model);
+    (void)hu_causal_world_model_init_tables(&model);
 
     /* Record some outcomes to bias scoring */
     hu_world_record_outcome(&model, "high_confidence_action", 22, "good result", 11, 0.9, 1000);
@@ -391,7 +391,7 @@ static void world_model_evaluate_options_scores_order(void) {
     for (int i = 0; i < 3; i++)
         HU_ASSERT_TRUE(opts[i].score >= 0.0);
 
-    hu_world_model_deinit(&model);
+    hu_causal_world_model_deinit(&model);
     mem.vtable->deinit(mem.ctx);
 }
 

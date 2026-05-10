@@ -3,7 +3,7 @@
  * The world model is a lightweight derived view: entities (top-K by mention),
  * their relations, current emotional snapshot, active goals, negative memory,
  * theory-of-mind, and recent topics. Built lazily from the W7 facade and
- * cached behind a small process-local LRU. Every hu_memory_write that
+ * cached behind a small process-local LRU. Every hu_memory_facade_write that
  * targets a contact_id calls hu_world_model_invalidate so the next load
  * rebuilds.
  *
@@ -15,6 +15,7 @@
 
 #include "human/agent/world_model.h"
 
+#include "human/agent/goals.h"
 #include "human/core/error.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
@@ -23,6 +24,7 @@
 #include <string.h>
 
 #ifdef HU_ENABLE_SQLITE
+#include "human/memory/emotional_residue.h"
 #include <sqlite3.h>
 extern struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
@@ -225,7 +227,7 @@ static void free_entities_local(hu_allocator_t *alloc, hu_graph_entity_t *arr, s
     xfree(alloc, arr, n * sizeof(*arr));
 }
 
-hu_error_t hu_world_model_build(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                  const char *contact_id, size_t cid_len,
                                  int64_t now_ms,
                                  hu_world_model_t **out) {
@@ -244,7 +246,7 @@ hu_error_t hu_world_model_build(hu_memory_t *m, hu_allocator_t *alloc,
     wm->valid_until = now_ms + 60 * 1000; /* 60s default TTL */
 
     /* Top-K entities via graph helper (list_entities). */
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (g) {
         hu_graph_entity_t *ents = NULL;
         size_t n = 0;
@@ -278,7 +280,7 @@ hu_error_t hu_world_model_build(hu_memory_t *m, hu_allocator_t *alloc,
                 arr[i] = rels[i];
                 /* We do NOT carry context/provenance through into the world
                  * model — keep this snapshot lean. Callers that need them
-                 * fetch directly via hu_memory_read. */
+                 * fetch directly via hu_memory_facade_read. */
                 arr[i].context = NULL;
                 arr[i].context_len = 0;
                 arr[i].provenance = NULL;
@@ -299,17 +301,146 @@ hu_error_t hu_world_model_build(hu_memory_t *m, hu_allocator_t *alloc,
         }
     }
 
-    /* Emotional state, goals, ToM, recent topics: stub for now. Persona-
-     * driven synthesis is the W9 follow-up. */
+    /* P2D — Emotion: pull active emotional residues for this contact and
+     * fold them into a single (valence, intensity) summary. The residue
+     * table is populated by F76 (`src/memory/emotional_residue.c`) every
+     * turn, so by the time the world-model is built, the recent
+     * emotional arc is already on disk. We weight by intensity, so a
+     * single intense distress signal out-shouts a string of mild
+     * positives. dominant_emotion comes from valence-banding (same
+     * buckets the prompt builder uses). */
     strcpy(wm->dominant_emotion, "neutral");
     wm->arousal = 0.5f;
     wm->valence = 0.0f;
+#ifdef HU_ENABLE_SQLITE
+    if (g) {
+        struct sqlite3 *db = hu_graph__db_handle(g);
+        if (db) {
+            hu_emotional_residue_t *residues = NULL;
+            size_t residue_n = 0;
+            int64_t now_ts = now_ms / 1000;
+            if (hu_emotional_residue_get_active(alloc, db, contact_id, cid_len,
+                                                now_ts, &residues, &residue_n) == HU_OK
+                && residue_n > 0) {
+                double total_weight = 0.0;
+                double weighted_valence = 0.0;
+                double max_intensity = 0.0;
+                for (size_t i = 0; i < residue_n; i++) {
+                    double w = residues[i].intensity > 0.0 ? residues[i].intensity : 0.1;
+                    weighted_valence += residues[i].valence * w;
+                    total_weight += w;
+                    if (residues[i].intensity > max_intensity)
+                        max_intensity = residues[i].intensity;
+                }
+                if (total_weight > 0.0)
+                    wm->valence = (float)(weighted_valence / total_weight);
+                wm->arousal = (float)max_intensity;
+                if (wm->valence >= 0.5f)        strcpy(wm->dominant_emotion, "joy");
+                else if (wm->valence >= 0.15f)  strcpy(wm->dominant_emotion, "calm");
+                else if (wm->valence > -0.15f)  strcpy(wm->dominant_emotion, "neutral");
+                else if (wm->valence > -0.5f)   strcpy(wm->dominant_emotion, "concerned");
+                else                            strcpy(wm->dominant_emotion, "distressed");
+                alloc->free(alloc->ctx, residues, residue_n * sizeof(*residues));
+            }
+        }
+    }
+#endif
 
-    /* ToM placeholder so consumers can read fields safely. */
-    wm->tom.confidence = hu_belief_init(0.5f, "stub", now_ms);
-    strcpy(wm->tom.user_thinks_we_are, "");
-    strcpy(wm->tom.user_expects_we_can, "");
-    strcpy(wm->tom.user_expects_we_cannot, "");
+    /* Active goals from the autonomous goal engine. Best-effort: if the
+     * goals table doesn't exist yet the engine returns 0 rows. */
+#ifdef HU_ENABLE_SQLITE
+    if (g) {
+        struct sqlite3 *db = hu_graph__db_handle(g);
+        if (db) {
+            hu_goal_engine_t ge;
+            if (hu_goal_engine_create(alloc, db, &ge) == HU_OK) {
+                hu_goal_t *active = NULL;
+                size_t active_n = 0;
+                if (hu_goal_list_active(&ge, &active, &active_n) == HU_OK && active_n > 0) {
+                    size_t cap = active_n > 8 ? 8 : active_n;
+                    for (size_t i = 0; i < cap; i++) {
+                        hu_active_goal_t *ag = &wm->goals[i];
+                        size_t dlen = active[i].description_len;
+                        if (dlen >= sizeof(ag->text))
+                            dlen = sizeof(ag->text) - 1;
+                        memcpy(ag->text, active[i].description, dlen);
+                        ag->text[dlen] = '\0';
+                        ag->salience = (float)active[i].priority;
+                        ag->expressed_at = active[i].created_at;
+                        ag->expires_at = active[i].deadline;
+                    }
+                    wm->goals_count = cap;
+                    hu_goal_free(alloc, active, active_n);
+                }
+                hu_goal_engine_deinit(&ge);
+            }
+        }
+    }
+#endif
+
+    /* Recent topics: derive from the top entities already loaded. Entity
+     * names are a reasonable proxy for "what we've been talking about"
+     * until a dedicated topic-extraction pass is added. */
+    if (wm->entities && wm->entities_count > 0) {
+        size_t topic_cap = wm->entities_count > 10 ? 10 : wm->entities_count;
+        for (size_t i = 0; i < topic_cap; i++) {
+            if (!wm->entities[i].name || wm->entities[i].name_len == 0)
+                continue;
+            size_t nlen = wm->entities[i].name_len;
+            if (nlen >= sizeof(wm->recent_topics[0]))
+                nlen = sizeof(wm->recent_topics[0]) - 1;
+            memcpy(wm->recent_topics[wm->recent_topics_count], wm->entities[i].name, nlen);
+            wm->recent_topics[wm->recent_topics_count][nlen] = '\0';
+            wm->recent_topics_count++;
+        }
+    }
+
+    /* P2D — Theory-of-mind: synthesize from negatives + top-mention
+     * entities. Best-effort heuristic; goal here is RIGHT MORE OFTEN
+     * THAN WRONG so the planner can sidestep known sore spots.
+     *
+     *   user_expects_we_cannot = '; '-joined negative-memory text
+     *   user_thinks_we_are     = name of the most-mentioned entity
+     *   user_expects_we_can    = empty (W12 planner territory)
+     *
+     * Confidence rises with corroboration: 0 signals → 0.4 floor,
+     * each adds 0.1, capped at 0.7 — we never claim certainty here. */
+    int signals = 0;
+    {
+        size_t cap = sizeof(wm->tom.user_expects_we_cannot) - 1;
+        size_t off = 0;
+        for (size_t i = 0; i < wm->negatives_count && off < cap; i++) {
+            const char *t = wm->negatives[i].text;
+            if (!t || !t[0]) continue;
+            size_t tl = strlen(t);
+            if (tl == 0) continue;
+            if (off > 0 && off + 2 < cap) {
+                wm->tom.user_expects_we_cannot[off++] = ';';
+                wm->tom.user_expects_we_cannot[off++] = ' ';
+            }
+            size_t copy = (cap - off) < tl ? (cap - off) : tl;
+            memcpy(wm->tom.user_expects_we_cannot + off, t, copy);
+            off += copy;
+            signals++;
+        }
+        wm->tom.user_expects_we_cannot[off < cap ? off : cap] = '\0';
+    }
+    wm->tom.user_thinks_we_are[0] = '\0';
+    if (wm->entities_count > 0) {
+        const hu_graph_entity_t *top = &wm->entities[0];
+        if (top->name && top->name_len > 0) {
+            size_t cap = sizeof(wm->tom.user_thinks_we_are) - 1;
+            size_t copy = top->name_len < cap ? top->name_len : cap;
+            memcpy(wm->tom.user_thinks_we_are, top->name, copy);
+            wm->tom.user_thinks_we_are[copy] = '\0';
+            signals++;
+        }
+    }
+    wm->tom.user_expects_we_can[0] = '\0';
+
+    float tom_mean = 0.4f + 0.1f * (float)(signals < 3 ? signals : 3);
+    if (tom_mean > 0.7f) tom_mean = 0.7f;
+    wm->tom.confidence = hu_belief_init(tom_mean, "wm-synth", now_ms);
 
     *out = wm;
     return HU_OK;
@@ -412,7 +543,7 @@ static hu_world_model_t *clone_wm(hu_allocator_t *alloc, const hu_world_model_t 
     return wm;
 }
 
-hu_error_t hu_world_model_load(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                 const char *contact_id, size_t cid_len,
                                 int64_t now_ms, hu_world_model_t **out) {
     if (!m || !alloc || !contact_id || !out) return HU_ERR_INVALID_ARGUMENT;

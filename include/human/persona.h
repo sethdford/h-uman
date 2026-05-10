@@ -623,10 +623,11 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
 
 /* Style learning loop: re-analyze recent conversations to refine persona.
  * Call periodically (e.g. every 50 turns) to close the style feedback loop. */
-struct hu_memory;
+struct hu_legacy_memory;
 struct hu_provider;
 hu_error_t hu_persona_style_reanalyze(hu_allocator_t *alloc, struct hu_provider *provider,
-                                      const char *model, size_t model_len, struct hu_memory *memory,
+                                      const char *model, size_t model_len,
+                                      struct hu_legacy_memory *memory,
                                       const char *persona_name, size_t persona_name_len,
                                       const char *channel, size_t channel_len,
                                       const char *contact_id, size_t contact_id_len);

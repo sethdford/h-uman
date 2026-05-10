@@ -168,6 +168,25 @@ hu_error_t hu_evaluation_minja(hu_allocator_t *alloc, hu_evaluation_t *out);
 hu_error_t hu_evaluation_memoryagentbench(hu_allocator_t *alloc, hu_evaluation_t *out);
 hu_error_t hu_evaluation_frontier_compare(hu_allocator_t *alloc, hu_evaluation_t *out);
 
+/* Adapter that wraps the legacy task-list framework (`include/human/eval.h`,
+ * `src/eval.c`) behind the W16 vtable. Lets the `human eval --w16
+ * legacy-bridge` CLI surface exercise the W16 dispatcher end-to-end. The
+ * bridge is deterministic and offline: in `HU_IS_TEST` builds it loads an
+ * inline fixture suite and runs it through the legacy runner with a NULL
+ * provider, which returns mock responses. In production builds the bridge
+ * returns a structured stub report instead of booting a real provider so it
+ * never opens a network connection. `name` returns "legacy-bridge";
+ * `available` always returns true. */
+hu_error_t hu_evaluation_legacy_bridge(hu_allocator_t *alloc, hu_evaluation_t *out);
+
+/* Inject an agent handle into the frontier-compare backend so the run path
+ * generates h-uman responses via hu_agent_turn instead of using static
+ * reference strings. The agent is borrowed (not owned); caller must keep
+ * it alive for the lifetime of the backend. Pass NULL to revert. */
+struct hu_agent;
+void hu_evaluation_frontier_compare_set_agent(hu_evaluation_t *backend,
+                                              struct hu_agent *agent);
+
 #ifdef __cplusplus
 }
 #endif

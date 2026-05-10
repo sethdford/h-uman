@@ -25,6 +25,7 @@
 #include "human/memory/cross_graph.h"
 #include "human/memory/erasure.h"
 #include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include "human/memory/write_trust.h"
 #include "human/persona/persona_deltas.h"
 #include "test_framework.h"
@@ -65,13 +66,16 @@ static void test_e2e_honest_write_yields_supported_claim_with_receipt(void) {
                                               "imessage", 8),
                  HU_OK);
 
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_SOFT;
     hu_verifier_report_t r;
     const char *draft = "Alice works at Acme.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT_EQ(r.claims_supported, 1);
     HU_ASSERT(strstr(r.claims[0].receipt.rendered, "imessage") != NULL);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -97,16 +101,19 @@ static void test_e2e_bitemporal_supersession_survives_verifier(void) {
                                               1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
                  HU_OK);
 
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_SOFT;
     hu_verifier_report_t r;
     const char *draft = "Alice works at Globex.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT(r.claims[0].supported);
     /* The other claim about Acme should now NOT be supported as live. */
     const char *stale = "Alice works at Acme.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, stale, strlen(stale), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, stale, strlen(stale), &cfg, &r), HU_OK);
     HU_ASSERT(!r.claims[0].supported);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -142,12 +149,15 @@ static void test_e2e_write_trust_blocks_injection_attack(void) {
     HU_ASSERT_EQ(dec.outcome, HU_WRITE_OUTCOME_DROP);
 
     /* The verifier should still see Alice@Acme intact. */
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_SOFT;
     hu_verifier_report_t r;
     const char *draft = "Alice works at Acme.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
     HU_ASSERT(r.claims[0].supported);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -180,24 +190,27 @@ static void test_e2e_autodream_summary_roundtrip(void) {
 static void test_e2e_case_based_planning_picks_relevant_history(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
     int64_t past_id = 0;
     int64_t alice_anchors[] = {42};
-    hu_case_record(g, "u1", 2, "send-email", 10, alice_anchors, 1, "use friendly tone", 17,
+    hu_case_record(m, "u1", 2, "send-email", 10, alice_anchors, 1, "use friendly tone", 17,
                    "ok", 2, 1735689600000LL, &past_id);
     /* Unrelated case. */
     int64_t bob_anchors[] = {99};
-    hu_case_record(g, "u1", 2, "send-email", 10, bob_anchors, 1, "be terse", 8, "user happy", 10,
+    hu_case_record(m, "u1", 2, "send-email", 10, bob_anchors, 1, "be terse", 8, "user happy", 10,
                    1735689600000LL + 1000, NULL);
 
     int64_t query_anchors[] = {42};
     hu_case_record_t *out = NULL;
     size_t n = 0;
-    HU_ASSERT_EQ(hu_case_recall(g, A(), "u1", 2, "send-email", 10, query_anchors, 1,
+    HU_ASSERT_EQ(hu_case_recall(m, A(), "u1", 2, "send-email", 10, query_anchors, 1,
                                  1735689600000LL + 5000, 5, &out, &n),
                  HU_OK);
     HU_ASSERT(n >= 1);
     HU_ASSERT_EQ(out[0].id, past_id);
     hu_case_records_free(A(), out, n);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -239,7 +252,9 @@ static void test_e2e_targeted_erasure_leaves_no_residue(void) {
     hu_cross_edge_upsert(g, "u1", 2, "entity", alice, "episode", 100, "ABOUT", 1.0f,
                          1735689600000LL, 0, 1.0f);
     int64_t anchors[] = {alice};
-    hu_case_record(g, "u1", 2, "send-email", 10, anchors, 1, NULL, 0, "ok", 2,
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
+    hu_case_record(m, "u1", 2, "send-email", 10, anchors, 1, NULL, 0, "ok", 2,
                    1735689600000LL, NULL);
 
     hu_erase_report_t er;
@@ -251,6 +266,7 @@ static void test_e2e_targeted_erasure_leaves_no_residue(void) {
 
     /* Re-running erase reports NOT_FOUND. */
     HU_ASSERT_EQ(hu_memory_erase_entity(g, alice, &er), HU_ERR_NOT_FOUND);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -278,12 +294,15 @@ static void test_e2e_full_pipeline_honest_then_erase(void) {
     hu_autodream_report_t adr;
     HU_ASSERT_EQ(hu_autodream_run(A(), g, &adcfg, &adr), HU_OK);
 
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
+
     /* Verifier finds Alice@Acme. */
     hu_verifier_config_t vcfg = hu_verifier_default_config();
     vcfg.mode = HU_VERIFY_SOFT;
     hu_verifier_report_t vr;
     const char *draft = "Alice works at Acme.";
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &vcfg, &vr), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &vcfg, &vr), HU_OK);
     HU_ASSERT(vr.claims[0].supported);
 
     /* User invokes the right-to-be-forgotten. */
@@ -292,9 +311,10 @@ static void test_e2e_full_pipeline_honest_then_erase(void) {
     HU_ASSERT(er.entity_deleted);
 
     /* Verifier no longer supports the claim. */
-    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &vcfg, &vr), HU_OK);
+    HU_ASSERT_EQ(hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &vcfg, &vr), HU_OK);
     HU_ASSERT(!vr.claims[0].supported);
     HU_ASSERT(vr.draft_modified);
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 

@@ -11,7 +11,7 @@
 
 struct hu_agent;
 struct hu_contact_profile;
-struct hu_memory;
+struct hu_legacy_memory;
 struct hu_memory_vtable;
 
 /**
@@ -75,14 +75,14 @@ void hu_daemon_proactive_apply_route(hu_proactive_context_t *ctx, const char *co
 
 /** Build memory callback context for a contact (recalls + degradation + protective filter).
  *  Used by both proactive prompt builder and daemon main loop. */
-char *hu_daemon_build_callback_context(hu_allocator_t *alloc, struct hu_memory *memory,
+char *hu_daemon_build_callback_context(hu_allocator_t *alloc, struct hu_legacy_memory *memory,
                                        const char *session_id, size_t session_id_len,
                                        const char *msg, size_t msg_len, size_t *out_len,
                                        struct hu_agent *agent);
 
 /** Build proactive prompt for a contact with memory context, weather, feeds, calendar. */
 char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, struct hu_agent *agent,
-                                             struct hu_memory *memory,
+                                             struct hu_legacy_memory *memory,
                                              const struct hu_contact_profile *cp, size_t *out_len);
 
 #endif /* HU_DAEMON_PROACTIVE_H */

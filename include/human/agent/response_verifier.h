@@ -4,6 +4,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -58,23 +59,39 @@ typedef struct hu_verifier_config {
     float confidence_threshold; /* default 0.6 */
     size_t max_claims;          /* cap per response; default 16 */
     int64_t now_ms;             /* 0 = use OS clock */
+    float abstain_threshold;    /* fraction of flagged claims that triggers
+                                 * ABSTAIN; default 0.5 (set 0 = use default) */
 } hu_verifier_config_t;
 
+/* Outcome of a v1 verification pass. Mirrors hu_self_rag_outcome_t for
+ * callers that go through the v1 verifier directly (e.g. telemetry). */
+typedef enum hu_verifier_outcome {
+    HU_VERIFY_RESULT_SUPPORTED = 0,
+    HU_VERIFY_RESULT_HEDGED    = 1,
+    HU_VERIFY_RESULT_REWRITTEN = 2,
+    HU_VERIFY_RESULT_ABSTAIN   = 3,
+} hu_verifier_outcome_t;
+
 typedef struct hu_verifier_report {
+    hu_verifier_outcome_t outcome;
     size_t claims_extracted;
     size_t claims_supported;
     size_t claims_flagged;
     bool draft_modified;        /* true when SOFT/STRICT made changes */
     char modified_draft[2048];  /* populated when draft_modified is true */
+    char refusal_text[256];     /* populated when outcome == ABSTAIN */
     hu_verifier_claim_t claims[16];
 } hu_verifier_report_t;
 
 hu_verifier_config_t hu_verifier_default_config(void);
 
 /* Run synchronous verification over a draft. The caller passes the draft text
- * plus a contact_id to scope the graph queries. Returns HU_OK and fills
- * out_report on success. The graph is NEVER modified by this call. */
-hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_graph_t *graph, const char *contact_id,
+ * plus a contact_id to scope queries. Returns HU_OK and fills out_report on
+ * success. Memory is NEVER modified by this call.
+ *
+ * `memory` is the W7 facade; pass NULL for graph-less telemetry (every claim
+ * scores unsupported). */
+hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory, const char *contact_id,
                               size_t contact_id_len, const char *draft, size_t draft_len,
                               const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report);
 

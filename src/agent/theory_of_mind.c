@@ -4,7 +4,7 @@
 #include <string.h>
 #include <time.h>
 
-hu_error_t hu_tom_init(hu_belief_state_t *state, hu_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_tom_init(hu_tom_belief_state_t *state, hu_allocator_t *alloc, const char *contact_id,
                        size_t contact_id_len) {
     if (!state || !alloc || !contact_id)
         return HU_ERR_INVALID_ARGUMENT;
@@ -21,10 +21,10 @@ hu_error_t hu_tom_init(hu_belief_state_t *state, hu_allocator_t *alloc, const ch
     return HU_OK;
 }
 
-static hu_belief_t *find_belief_by_topic(hu_belief_state_t *state, const char *topic,
+static hu_tom_belief_t *find_belief_by_topic(hu_tom_belief_state_t *state, const char *topic,
                                          size_t topic_len) {
     for (size_t i = 0; i < state->belief_count; i++) {
-        hu_belief_t *b = &state->beliefs[i];
+        hu_tom_belief_t *b = &state->beliefs[i];
         if (!b->topic || b->topic_len != topic_len)
             continue;
         if (strncmp(b->topic, topic, topic_len) == 0)
@@ -33,7 +33,7 @@ static hu_belief_t *find_belief_by_topic(hu_belief_state_t *state, const char *t
     return NULL;
 }
 
-hu_error_t hu_tom_record_belief(hu_belief_state_t *state, hu_allocator_t *alloc, const char *topic,
+hu_error_t hu_tom_record_belief(hu_tom_belief_state_t *state, hu_allocator_t *alloc, const char *topic,
                                 size_t topic_len, hu_belief_type_t type, float confidence) {
     if (!state || !alloc || !topic)
         return HU_ERR_INVALID_ARGUMENT;
@@ -53,7 +53,7 @@ hu_error_t hu_tom_record_belief(hu_belief_state_t *state, hu_allocator_t *alloc,
 
     int64_t ts = (int64_t)time(NULL);
 
-    hu_belief_t *existing = find_belief_by_topic(state, topic, len);
+    hu_tom_belief_t *existing = find_belief_by_topic(state, topic, len);
     if (existing) {
         existing->type = type;
         existing->confidence = clamped;
@@ -68,7 +68,7 @@ hu_error_t hu_tom_record_belief(hu_belief_state_t *state, hu_allocator_t *alloc,
     if (!dup)
         return HU_ERR_OUT_OF_MEMORY;
 
-    hu_belief_t *b = &state->beliefs[state->belief_count];
+    hu_tom_belief_t *b = &state->beliefs[state->belief_count];
     b->topic = dup;
     b->topic_len = strlen(dup);
     b->type = type;
@@ -97,7 +97,7 @@ static bool belief_shows_confidence(hu_belief_type_t type) {
     return type == HU_BELIEF_KNOWS || type == HU_BELIEF_ASSUMES || type == HU_BELIEF_MISTAKEN;
 }
 
-hu_error_t hu_tom_build_context(const hu_belief_state_t *state, hu_allocator_t *alloc, char **out,
+hu_error_t hu_tom_build_context(const hu_tom_belief_state_t *state, hu_allocator_t *alloc, char **out,
                                 size_t *out_len) {
     if (!state || !alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
@@ -149,7 +149,7 @@ hu_error_t hu_tom_build_context(const hu_belief_state_t *state, hu_allocator_t *
     return HU_OK;
 }
 
-hu_error_t hu_tom_record_user_expectation(hu_belief_state_t *state, hu_allocator_t *alloc,
+hu_error_t hu_tom_record_user_expectation(hu_tom_belief_state_t *state, hu_allocator_t *alloc,
                                           const char *topic, size_t topic_len,
                                           hu_tom_expected_knowledge_t knowledge_type) {
     if (!state || !alloc || !topic)
@@ -186,7 +186,7 @@ hu_error_t hu_tom_record_user_expectation(hu_belief_state_t *state, hu_allocator
     return HU_OK;
 }
 
-hu_error_t hu_tom_detect_gaps(const hu_belief_state_t *state, hu_allocator_t *alloc,
+hu_error_t hu_tom_detect_gaps(const hu_tom_belief_state_t *state, hu_allocator_t *alloc,
                               hu_tom_gap_t **gaps_out, size_t *gap_count) {
     if (!state || !alloc || !gaps_out || !gap_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -208,7 +208,7 @@ hu_error_t hu_tom_detect_gaps(const hu_belief_state_t *state, hu_allocator_t *al
         /* Check if AI actually has knowledge about this topic */
         bool ai_knows = false;
         for (size_t j = 0; j < state->belief_count; j++) {
-            const hu_belief_t *b = &state->beliefs[j];
+            const hu_tom_belief_t *b = &state->beliefs[j];
             if (b->topic_len == exp->topic_len &&
                 strncmp(b->topic, exp->topic, exp->topic_len) == 0 && b->type == HU_BELIEF_KNOWS &&
                 b->confidence >= 0.5f) {
@@ -360,7 +360,7 @@ bool hu_tom_detect_user_expectation(const char *text, size_t text_len, const cha
     return false;
 }
 
-void hu_tom_deinit(hu_belief_state_t *state, hu_allocator_t *alloc) {
+void hu_tom_deinit(hu_tom_belief_state_t *state, hu_allocator_t *alloc) {
     if (!state || !alloc)
         return;
     hu_str_free(alloc, state->contact_id);

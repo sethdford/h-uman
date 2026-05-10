@@ -66,6 +66,9 @@ static hu_error_t open_with(hu_allocator_t *alloc, const hu_learner_vtable_t *vt
             vt->deinit(ctx);
         return HU_ERR_OUT_OF_MEMORY;
     }
+    /* Zero-init: ensures the bridge's pending fields start NULL/zero so the
+     * first emit allocates lazily and the close path frees cleanly. */
+    memset(l, 0, sizeof(*l));
     l->vt = vt;
     l->ctx = ctx;
     l->alloc = alloc;
@@ -124,8 +127,14 @@ void hu_learner_close(hu_learner_t *l) {
         return;
     if (l->vt && l->vt->deinit)
         l->vt->deinit(l->ctx);
-    if (l->alloc)
+    if (l->alloc) {
+        if (l->pending) {
+            l->alloc->free(l->alloc->ctx, l->pending,
+                           l->pending_cap * sizeof(*l->pending));
+            l->pending = NULL;
+        }
         l->alloc->free(l->alloc->ctx, l, sizeof(*l));
+    }
 }
 
 void hu_learner_signals_free(hu_allocator_t *alloc, hu_training_signal_t *signals,
@@ -157,7 +166,7 @@ static hu_error_t alloc_signals(hu_allocator_t *alloc, size_t count,
     return HU_OK;
 }
 
-static hu_error_t signals_from_deltas_with_status(hu_memory_t *m, hu_allocator_t *alloc,
+static hu_error_t signals_from_deltas_with_status(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                                   const char *contact_id, size_t cid_len,
                                                   hu_persona_delta_status_t status,
                                                   bool as_dpo_dispreferred,
@@ -168,7 +177,7 @@ static hu_error_t signals_from_deltas_with_status(hu_memory_t *m, hu_allocator_t
     *out = NULL;
     *out_count = 0;
 
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -217,7 +226,7 @@ static hu_error_t signals_from_deltas_with_status(hu_memory_t *m, hu_allocator_t
     return HU_OK;
 }
 
-hu_error_t hu_learner_signals_from_verifier_flags(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_verifier_flags(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                                   const char *contact_id, size_t cid_len,
                                                   hu_training_signal_t **out,
                                                   size_t *out_count) {
@@ -226,7 +235,7 @@ hu_error_t hu_learner_signals_from_verifier_flags(hu_memory_t *m, hu_allocator_t
                                            /*as_dpo_dispreferred=*/true, out, out_count);
 }
 
-hu_error_t hu_learner_signals_from_persona_deltas(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_persona_deltas(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                                   const char *contact_id, size_t cid_len,
                                                   hu_training_signal_t **out,
                                                   size_t *out_count) {
@@ -256,7 +265,7 @@ static float reward_from_outcome(const char *outcome) {
     return 0.5f;
 }
 
-hu_error_t hu_learner_signals_from_case_outcomes(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_case_outcomes(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                                  const char *contact_id, size_t cid_len,
                                                  hu_training_signal_t **out,
                                                  size_t *out_count) {
@@ -265,7 +274,7 @@ hu_error_t hu_learner_signals_from_case_outcomes(hu_memory_t *m, hu_allocator_t 
     *out = NULL;
     *out_count = 0;
 
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
     struct sqlite3 *db = hu_graph__db_handle(g);
@@ -331,7 +340,7 @@ hu_error_t hu_learner_signals_from_case_outcomes(hu_memory_t *m, hu_allocator_t 
 
 #else /* !HU_ENABLE_SQLITE */
 
-hu_error_t hu_learner_signals_from_verifier_flags(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_verifier_flags(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                                   const char *contact_id, size_t cid_len,
                                                   hu_training_signal_t **out,
                                                   size_t *out_count) {
@@ -346,7 +355,7 @@ hu_error_t hu_learner_signals_from_verifier_flags(hu_memory_t *m, hu_allocator_t
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_learner_signals_from_persona_deltas(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_persona_deltas(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                                   const char *contact_id, size_t cid_len,
                                                   hu_training_signal_t **out,
                                                   size_t *out_count) {
@@ -361,7 +370,7 @@ hu_error_t hu_learner_signals_from_persona_deltas(hu_memory_t *m, hu_allocator_t
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_learner_signals_from_case_outcomes(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_learner_signals_from_case_outcomes(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                                  const char *contact_id, size_t cid_len,
                                                  hu_training_signal_t **out,
                                                  size_t *out_count) {

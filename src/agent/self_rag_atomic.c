@@ -22,11 +22,8 @@
 
 #include "human/agent/self_rag.h"
 
-#include "human/agent/response_verifier.h"
-#include "human/core/error.h"
-#include "human/memory/belief.h"
+#include "human/memory/corrective_rag.h"
 #include "human/memory/graph.h"
-#include "human/memory/memory.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -43,7 +40,7 @@ static const char *const k_preps[] = {
 };
 
 typedef struct atomic_ctx {
-    hu_memory_t *m;
+    hu_memory_facade_t *m;
 } atomic_ctx_t;
 
 /* Trim leading/trailing ASCII whitespace and write into dst. dst_cap must be
@@ -231,10 +228,82 @@ static size_t decompose_draft(const char *draft, size_t draft_len,
     return out_n;
 }
 
+/* P2F — Corrective-RAG via the W7 facade.
+ *
+ * For a fabricated claim under STRICT mode, look in the contact's relation
+ * graph for any edge whose `context` text grades RELEVANT against the
+ * claim. The grading reuses `hu_crag_grade_document` (token-overlap
+ * scoring) — the same logic legacy CRAG uses for its production grader.
+ *
+ * The bridge lives entirely in the W11 layer: we go from the W7 facade
+ * down to its graph handle (downward call, layer-OK), pull relations,
+ * grade, and pick the best one. We do NOT touch the legacy
+ * `hu_legacy_memory_t` at all, so this works in non-test builds.
+ *
+ * On success, writes the correction into `out_correction` (caller-owned
+ * buffer, NUL-terminated) and returns true. On no-match, returns false
+ * and leaves the buffer untouched. Never throws or allocates beyond what
+ * `hu_graph_list_relations` requires (which is freed before return). */
+static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
+                                           hu_memory_facade_t *m,
+                                           const char *contact_id,
+                                           size_t contact_id_len,
+                                           const char *claim, size_t claim_len,
+                                           char *out_correction,
+                                           size_t out_cap) {
+    if (!alloc || !m || !claim || claim_len == 0 || !out_correction || out_cap == 0)
+        return false;
+    if (!contact_id || contact_id_len == 0)
+        return false;
+
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
+    if (!g)
+        return false;
+
+    /* Cap at 64 relations: corrections come from the most-weighted edges,
+     * and grading every edge in the graph is wasteful. */
+    hu_graph_relation_t *rels = NULL;
+    size_t n = 0;
+    hu_error_t err = hu_graph_list_relations(g, alloc, contact_id, contact_id_len,
+                                             64, &rels, &n);
+    if (err != HU_OK || !rels || n == 0) {
+        if (rels) hu_graph_relations_free(alloc, rels, n);
+        return false;
+    }
+
+    int best_idx = -1;
+    double best_score = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        const char *doc = rels[i].context;
+        size_t doc_len = rels[i].context_len;
+        if (!doc || doc_len == 0)
+            continue;
+        hu_rag_graded_doc_t grade = {0};
+        if (hu_crag_grade_document(alloc, claim, claim_len, doc, doc_len,
+                                   &grade) != HU_OK)
+            continue;
+        if (grade.relevance == HU_RAG_RELEVANT && grade.score > best_score) {
+            best_score = grade.score;
+            best_idx = (int)i;
+        }
+    }
+
+    bool ok = false;
+    if (best_idx >= 0) {
+        size_t copy = rels[best_idx].context_len;
+        if (copy >= out_cap) copy = out_cap - 1;
+        memcpy(out_correction, rels[best_idx].context, copy);
+        out_correction[copy] = '\0';
+        ok = true;
+    }
+    hu_graph_relations_free(alloc, rels, n);
+    return ok;
+}
+
 /* Score a single atomic claim against the graph by reusing v1's verifier on
  * a single-sentence "draft". Returns the supporting receipt + score in
  * *out_supported / *out_score / *out_receipt. Failures map to score = 0. */
-static void score_atomic_claim(hu_allocator_t *alloc, hu_graph_t *g,
+static void score_atomic_claim(hu_allocator_t *alloc, hu_memory_facade_t *m,
                                 const char *contact_id, size_t cid_len,
                                 const hu_atomic_claim_t *claim,
                                 float *out_score,
@@ -252,7 +321,7 @@ static void score_atomic_claim(hu_allocator_t *alloc, hu_graph_t *g,
 
     hu_verifier_report_t report;
     memset(&report, 0, sizeof(report));
-    hu_error_t err = hu_response_verify(alloc, g, contact_id, cid_len,
+    hu_error_t err = hu_response_verify(alloc, m, contact_id, cid_len,
                                          sentence, strlen(sentence), &cfg,
                                          &report);
     if (err != HU_OK || report.claims_extracted == 0) return;
@@ -285,7 +354,6 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
     }
 
     /* 2. Score each atomic claim. */
-    hu_graph_t *g = hu_memory_graph_handle(ctx->m);
     int64_t now = req->now_ms;
     size_t flagged = 0;
     /* Default abstain threshold matches the spec (0.5 of claims unsupported
@@ -301,8 +369,8 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
         float score = 0.0f;
         hu_provenance_receipt_t rcpt;
         memset(&rcpt, 0, sizeof(rcpt));
-        if (g) {
-            score_atomic_claim(alloc, g, req->contact_id, req->contact_id_len,
+        if (ctx->m) {
+            score_atomic_claim(alloc, ctx->m, req->contact_id, req->contact_id_len,
                                 c, &score, &rcpt);
         }
         c->support = hu_belief_init(score, "atomic-graph", now);
@@ -329,8 +397,8 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
     /* 4. SOFT/STRICT/INLINE: rebuild the draft with hedges around fabricated
      * claims, supported claims emitted verbatim. We rebuild claim-by-claim
      * rather than sentence-by-sentence so atomic granularity carries
-     * through. STRICT removes flagged claims entirely; SOFT/INLINE prepend
-     * a hedge. */
+     * through. STRICT attempts corrective-RAG retrieval for flagged claims
+     * before dropping them; SOFT/INLINE prepend a hedge. */
     char rebuilt[2048];
     size_t off = 0;
     bool any_modified = false;
@@ -340,7 +408,24 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
         int w;
         if (c->fabricated) {
             if (req->mode == HU_VERIFY_STRICT) {
-                /* drop entirely */
+                /* P2F — Corrective-RAG via W7 facade. Bypasses the legacy
+                 * `hu_crag_retrieve` (which expects v1 `hu_legacy_memory_t`)
+                 * by going graph-direct through the W7 facade. Works in
+                 * both test and production builds. */
+                if (ctx->m) {
+                    char correction[1024];
+                    if (retrieve_correction_via_facade(
+                            alloc, ctx->m, req->contact_id, req->contact_id_len,
+                            c->text, strlen(c->text),
+                            correction, sizeof(correction))) {
+                        w = snprintf(rebuilt + off, sizeof(rebuilt) - off,
+                                     "%s%s.",
+                                     off == 0 ? "" : " ", correction);
+                        if (w > 0) off += (size_t)w;
+                        any_modified = true;
+                        continue;
+                    }
+                }
                 any_modified = true;
                 continue;
             }
@@ -379,7 +464,7 @@ static hu_self_rag_vtable_t atomic_vt = {
     .deinit = atomic_deinit,
 };
 
-hu_error_t hu_self_rag_atomic(hu_memory_t *m, hu_provider_t *embedder,
+hu_error_t hu_self_rag_atomic(hu_memory_facade_t *m, hu_provider_t *embedder,
                                hu_self_rag_t *out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;

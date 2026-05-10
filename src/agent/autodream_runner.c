@@ -32,12 +32,12 @@
 
 #ifdef HU_ENABLE_SQLITE
 
-hu_error_t hu_autodream_runner(hu_memory_t *m, const hu_job_spec_t *spec, int64_t budget_ms,
+hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec, int64_t budget_ms,
                                void *user_data) {
     (void)user_data;
     if (!m || !spec)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_OK;
 
@@ -86,7 +86,7 @@ hu_error_t hu_autodream_runner(hu_memory_t *m, const hu_job_spec_t *spec, int64_
 
 #else /* !HU_ENABLE_SQLITE */
 
-hu_error_t hu_autodream_runner(hu_memory_t *m, const hu_job_spec_t *spec, int64_t budget_ms,
+hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec, int64_t budget_ms,
                                void *user_data) {
     (void)m;
     (void)spec;

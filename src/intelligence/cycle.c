@@ -231,12 +231,12 @@ hu_error_t hu_intelligence_run_cycle(hu_allocator_t *alloc, sqlite3 *db,
                           "WHERE status = 'pending' AND priority != 'LOW'";
         sqlite3_stmt *stmt = NULL;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
-            hu_world_model_t wm = {0};
+            hu_causal_world_model_t wm = {0};
             hu_online_learning_t ol = {0};
-            hu_error_t wm_err = hu_world_model_create(alloc, db, &wm);
+            hu_error_t wm_err = hu_causal_world_model_create(alloc, db, &wm);
             hu_error_t ol_err = hu_online_learning_create(alloc, db, 0.1, &ol);
             if (wm_err == HU_OK) {
-                hu_error_t tbl_err = hu_world_model_init_tables(&wm);
+                hu_error_t tbl_err = hu_causal_world_model_init_tables(&wm);
                 if (tbl_err != HU_OK)
                     hu_log_error("cycle", NULL, "world_model table init failed: %s", hu_error_string(tbl_err));
             }
@@ -309,7 +309,7 @@ hu_error_t hu_intelligence_run_cycle(hu_allocator_t *alloc, sqlite3 *db,
             }
             sqlite3_finalize(stmt);
             if (wm_err == HU_OK)
-                hu_world_model_deinit(&wm);
+                hu_causal_world_model_deinit(&wm);
             if (ol_err == HU_OK)
                 hu_online_learning_deinit(&ol);
             if (result->findings_actioned > 0)
@@ -325,8 +325,8 @@ hu_error_t hu_intelligence_run_cycle(hu_allocator_t *alloc, sqlite3 *db,
                              "WHERE status = 'actioned' AND priority = 'HIGH' LIMIT 5";
         sqlite3_stmt *cf_stmt = NULL;
         if (sqlite3_prepare_v2(db, cf_sql, -1, &cf_stmt, NULL) == SQLITE_OK) {
-            hu_world_model_t cf_wm = {0};
-            if (hu_world_model_create(alloc, db, &cf_wm) == HU_OK) {
+            hu_causal_world_model_t cf_wm = {0};
+            if (hu_causal_world_model_create(alloc, db, &cf_wm) == HU_OK) {
                 while (sqlite3_step(cf_stmt) == SQLITE_ROW) {
                     const char *action = (const char *)sqlite3_column_text(cf_stmt, 0);
                     if (!action)
@@ -342,7 +342,7 @@ hu_error_t hu_intelligence_run_cycle(hu_allocator_t *alloc, sqlite3 *db,
                             23, action, action_len, cf_pred.confidence, now_ts);
                     }
                 }
-                hu_world_model_deinit(&cf_wm);
+                hu_causal_world_model_deinit(&cf_wm);
             }
             sqlite3_finalize(cf_stmt);
         }

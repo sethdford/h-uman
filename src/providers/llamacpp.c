@@ -1,7 +1,7 @@
 /*
  * llama.cpp provider — frontier-model bridge with chat-time LoRA merging.
  *
- * Today this file is the integration point, not the integration. When
+ * Today this file is the adapter boundary, not the full bridge stack. When
  * `HU_ENABLE_LLAMACPP` is undefined (the default) every vtable method
  * returns HU_ERR_NOT_SUPPORTED. Selecting `llamacpp` from config or
  * the W13 personalization auto-load path will see that, log a benign

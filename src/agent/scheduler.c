@@ -1,4 +1,5 @@
 #include "human/agent/scheduler.h"
+#include "human/core/log.h"
 
 #include "human/agent/autodream.h"
 #include "human/core/log.h"
@@ -37,7 +38,7 @@ typedef struct runner_slot {
 
 struct hu_scheduler {
     hu_allocator_t *alloc;
-    hu_memory_t *m;
+    hu_memory_facade_t *m;
     runner_slot_t runners[HU_JOB_KIND_MAX];
 };
 
@@ -51,7 +52,7 @@ static int64_t scheduler_now_ms(void) {
 
 /* ── Default runners ─────────────────────────────────────────────────── */
 
-static hu_error_t default_noop_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+static hu_error_t default_noop_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                       int64_t budget_ms, void *user_data) {
     (void)m;
     (void)spec;
@@ -71,10 +72,10 @@ static hu_error_t default_noop_runner(hu_memory_t *m, const hu_job_spec_t *spec,
  * still tracked by ASan because the system allocator is what every
  * other agent-layer module also passes.
  */
-static hu_error_t run_autodream_phase(hu_memory_t *m, int64_t budget_ms,
+static hu_error_t run_autodream_phase(hu_memory_facade_t *m, int64_t budget_ms,
                                       bool quarantine, bool communities,
                                       bool reweight, bool derived) {
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_OK;
     hu_autodream_config_t cfg = hu_autodream_default_config();
@@ -89,7 +90,7 @@ static hu_error_t run_autodream_phase(hu_memory_t *m, int64_t budget_ms,
     return hu_autodream_run(&sys, g, &cfg, &rep);
 }
 
-static hu_error_t default_autodream_quarantine_runner(hu_memory_t *m,
+static hu_error_t default_autodream_quarantine_runner(hu_memory_facade_t *m,
                                                       const hu_job_spec_t *spec,
                                                       int64_t budget_ms, void *user_data) {
     (void)spec;
@@ -97,7 +98,7 @@ static hu_error_t default_autodream_quarantine_runner(hu_memory_t *m,
     return run_autodream_phase(m, budget_ms, true, false, false, false);
 }
 
-static hu_error_t default_autodream_community_runner(hu_memory_t *m,
+static hu_error_t default_autodream_community_runner(hu_memory_facade_t *m,
                                                      const hu_job_spec_t *spec,
                                                      int64_t budget_ms, void *user_data) {
     (void)spec;
@@ -105,7 +106,7 @@ static hu_error_t default_autodream_community_runner(hu_memory_t *m,
     return run_autodream_phase(m, budget_ms, false, true, false, false);
 }
 
-static hu_error_t default_autodream_decay_runner(hu_memory_t *m,
+static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m,
                                                  const hu_job_spec_t *spec,
                                                  int64_t budget_ms, void *user_data) {
     (void)spec;
@@ -113,7 +114,7 @@ static hu_error_t default_autodream_decay_runner(hu_memory_t *m,
     return run_autodream_phase(m, budget_ms, false, false, true, true);
 }
 #else
-static hu_error_t default_autodream_quarantine_runner(hu_memory_t *m,
+static hu_error_t default_autodream_quarantine_runner(hu_memory_facade_t *m,
                                                       const hu_job_spec_t *spec,
                                                       int64_t budget_ms, void *user_data) {
     (void)m;
@@ -122,7 +123,7 @@ static hu_error_t default_autodream_quarantine_runner(hu_memory_t *m,
     (void)user_data;
     return HU_OK;
 }
-static hu_error_t default_autodream_community_runner(hu_memory_t *m,
+static hu_error_t default_autodream_community_runner(hu_memory_facade_t *m,
                                                      const hu_job_spec_t *spec,
                                                      int64_t budget_ms, void *user_data) {
     (void)m;
@@ -131,7 +132,7 @@ static hu_error_t default_autodream_community_runner(hu_memory_t *m,
     (void)user_data;
     return HU_OK;
 }
-static hu_error_t default_autodream_decay_runner(hu_memory_t *m,
+static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m,
                                                  const hu_job_spec_t *spec,
                                                  int64_t budget_ms, void *user_data) {
     (void)m;
@@ -195,8 +196,8 @@ static hu_error_t ensure_schema(struct sqlite3 *db) {
     return HU_OK;
 }
 
-static struct sqlite3 *get_db(hu_memory_t *m) {
-    hu_graph_t *g = hu_memory_graph_handle(m);
+static struct sqlite3 *get_db(hu_memory_facade_t *m) {
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     return g ? hu_graph__db_handle(g) : NULL;
 }
 
@@ -204,7 +205,7 @@ static struct sqlite3 *get_db(hu_memory_t *m) {
 
 /* ── Lifecycle ───────────────────────────────────────────────────────── */
 
-hu_error_t hu_scheduler_open(hu_allocator_t *alloc, hu_memory_t *m, hu_scheduler_t **out) {
+hu_error_t hu_scheduler_open(hu_allocator_t *alloc, hu_memory_facade_t *m, hu_scheduler_t **out) {
     if (!alloc || !m || !out)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -443,6 +444,11 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
     int64_t total_elapsed = 0;
     (void)battery_pct;
 
+    if (nrows > 0)
+        hu_log_info("scheduler", NULL,
+                      "tick: %zu pending job(s) eligible for dispatch (load=%d%% ac=%d quiet=%d)",
+                      nrows, load_pct, on_ac ? 1 : 0, quiet ? 1 : 0);
+
     for (size_t i = 0; i < nrows; i++) {
         dispatch_row_t *r = &rows[i];
         if (total_elapsed > HU_SCHED_TOTAL_BUDGET_MS)
@@ -456,6 +462,9 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
 
         const char *reason = NULL;
         if (!job_eligible(r, load_pct, battery_pct, on_ac, quiet, &reason)) {
+            hu_log_info("scheduler", NULL,
+                          "job id=%lld kind=%d deferred: %s (load=%d%%)",
+                          (long long)r->id, r->kind, reason ? reason : "?", load_pct);
             /* Don't change status: leave job pending so a later tick
              * (under different system conditions) can pick it up.  We
              * record the reason as a transient note via last_error so
@@ -487,6 +496,8 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
         spec.requires_ac_power = r->requires_ac_power != 0;
         spec.latest_at = r->latest_at;
 
+        hu_log_info("scheduler", NULL, "dispatch job id=%lld kind=%d budget_ms=%lld",
+                      (long long)r->id, r->kind, (long long)job_budget);
         set_running(db, r->id);
         int64_t job_start = scheduler_now_ms();
         hu_error_t rc = slot.fn ? slot.fn(s->m, &spec, job_budget, slot.user_data)
@@ -499,12 +510,20 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
         if (rc != HU_OK) {
             status_str = "failed";
             err = hu_error_string(rc);
+            hu_log_warn("scheduler", NULL, "job id=%lld kind=%d finished %s (%s) elapsed_ms=%lld",
+                          (long long)r->id, r->kind, status_str, err ? err : "?",
+                          (long long)job_elapsed);
         } else if (job_elapsed > job_budget + 5 /* small grace */) {
             /* Runner overran its declared budget. We can't preempt
              * already-returned C code, but we can record the violation
              * so observability surfaces it. */
             status_str = "failed";
             err = "budget_exceeded";
+            hu_log_warn("scheduler", NULL, "job id=%lld kind=%d budget_exceeded elapsed_ms=%lld",
+                          (long long)r->id, r->kind, (long long)job_elapsed);
+        } else {
+            hu_log_info("scheduler", NULL, "job id=%lld kind=%d completed ok elapsed_ms=%lld",
+                          (long long)r->id, r->kind, (long long)job_elapsed);
         }
         update_status(db, r->id, status_str, err,
                       (int64_t)time(NULL) * 1000, r->interval_sec, now_ms);

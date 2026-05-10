@@ -6,6 +6,7 @@
  * (so callers cleanly skip injection). */
 
 #include "human/agent/world_model_bridge.h"
+#include "human/agent/self_rag.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "test_framework.h"
@@ -222,6 +223,71 @@ static void w11_telemetry_extracts_claims_without_modifying(void) {
     cleanup(g, f);
 }
 
+/* P0 #1 — when the heuristic verifier ABSTAINS (>=50% of extracted
+ * claims are unsupported), the bridge MUST surface the deterministic
+ * refusal template through out_modified so the agent loop can swap
+ * the user-visible response. Previously this was dropped on the
+ * floor (see TODO note in world_model_bridge.c) and the user saw
+ * the unverified draft. */
+static void w11_abstain_emits_refusal_text_through_bridge(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    /* Empty graph + fact-shaped draft → every claim is unsupported →
+     * heuristic backend ABSTAINS and renders UNKNOWN_FACT template. */
+    const char *draft = "Paris is the capital of France. The Earth orbits the Sun.";
+    hu_w11_outcome_t outc = HU_W11_OUTCOME_SUPPORTED;
+    size_t total = 0, flagged = 0;
+    char *modified = NULL;
+    size_t modified_len = 0;
+
+    HU_ASSERT_EQ(
+        hu_w11_self_rag_verify(f, A(), "u_abstain", 9, draft, strlen(draft),
+                               2 /* SOFT */, 0, &outc, &total, &flagged,
+                               &modified, &modified_len),
+        HU_OK);
+
+    HU_ASSERT_EQ(outc, HU_W11_OUTCOME_ABSTAINED);
+    HU_ASSERT_NOT_NULL(modified);
+    HU_ASSERT_GT(modified_len, (size_t)0);
+
+    /* The refusal template MUST be the canonical UNKNOWN_FACT string —
+     * tests + channel renderer share this source of truth. */
+    char expected[256];
+    hu_self_rag_render_refusal(HU_REFUSAL_UNKNOWN_FACT, expected, sizeof(expected));
+    HU_ASSERT_EQ(strcmp(modified, expected), 0);
+
+    /* The refusal MUST replace the draft, not concatenate with it. */
+    HU_ASSERT(strstr(modified, "Paris") == NULL);
+    HU_ASSERT(strstr(modified, "Earth") == NULL);
+
+    A()->free(A()->ctx, modified, modified_len + 1);
+    cleanup(g, f);
+}
+
+/* P0 #1 — when the agent runs in TELEMETRY mode the bridge still
+ * reports the ABSTAINED outcome but does NOT allocate refusal text
+ * (the agent loop deliberately doesn't request it). Proves the
+ * counter-only mode is preserved for users who want the metric
+ * without the user-visible refusal swap. */
+static void w11_telemetry_does_not_render_refusal(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *draft = "Paris is the capital of France. The Earth orbits the Sun.";
+    hu_w11_outcome_t outc = HU_W11_OUTCOME_SUPPORTED;
+    /* Pass NULL for the modified-out pair → telemetry-only path. */
+    HU_ASSERT_EQ(
+        hu_w11_self_rag_verify(f, A(), "u_abstain_t", 11, draft, strlen(draft),
+                               1 /* TELEMETRY */, 0, &outc, NULL, NULL, NULL,
+                               NULL),
+        HU_OK);
+    HU_ASSERT_EQ(outc, HU_W11_OUTCOME_ABSTAINED);
+    cleanup(g, f);
+}
+
 static void w11_rejects_invalid_args(void) {
     hu_graph_t *g = NULL;
     hu_w7_facade_t *f = NULL;
@@ -359,6 +425,8 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(bridge_render_uses_cache_within_ttl);
     HU_RUN_TEST(w11_off_mode_is_noop);
     HU_RUN_TEST(w11_telemetry_extracts_claims_without_modifying);
+    HU_RUN_TEST(w11_abstain_emits_refusal_text_through_bridge);
+    HU_RUN_TEST(w11_telemetry_does_not_render_refusal);
     HU_RUN_TEST(w11_rejects_invalid_args);
     HU_RUN_TEST(w14_scheduler_open_close_clean);
     HU_RUN_TEST(w14_scheduler_rejects_null_args);

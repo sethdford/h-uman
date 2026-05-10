@@ -2,7 +2,7 @@
  * W12 — HippoRAG-style personalized PageRank.
  *
  * Pure-CPU power iteration over the per-contact entity adjacency. We pull
- * entities and relations through hu_memory_t (via the underlying
+ * entities and relations through hu_memory_facade_t (via the underlying
  * hu_graph_t handle, since the W7 facade does not yet expose a "list all
  * entities" facet — see TODO below). No global state, deterministic
  * output (sorted by score desc, then by id asc as a stable tiebreaker).
@@ -68,7 +68,7 @@ static int32_t find_idx(const int64_t *ids, size_t n, int64_t id) {
     return -1;
 }
 
-hu_error_t hu_memory_pagerank_seeds(hu_memory_t *m, hu_allocator_t *alloc,
+hu_error_t hu_memory_pagerank_seeds(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                     const char *contact_id, size_t cid_len,
                                     const int64_t *seed_entity_ids, size_t seeds_count,
                                     float damping, size_t iterations,
@@ -97,7 +97,7 @@ hu_error_t hu_memory_pagerank_seeds(hu_memory_t *m, hu_allocator_t *alloc,
      * contact" query yet (only by_name / by_id / neighbors). Until it does,
      * we read directly from the underlying graph handle. The W12 spec
      * explicitly permits this with a TODO marker. */
-    hu_graph_t *g = hu_memory_graph_handle(m);
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g) return HU_ERR_NOT_SUPPORTED;
 
     hu_graph_entity_t *ents = NULL;

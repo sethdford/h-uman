@@ -18,6 +18,7 @@
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
 #include "human/providers/huml.h"
+#include "human/agent/scheduler_status_json.h"
 #include "test_framework.h"
 
 #include <math.h>
@@ -1452,6 +1453,61 @@ static void test_ml_cli_status(void) {
     const char *argv[] = {"human", "ml", "status"};
     hu_error_t err = hu_ml_cli_status(&alloc, 3, argv);
     HU_ASSERT_EQ(err, HU_OK);
+}
+
+/* W14 scheduler.status: `hu_scheduler_status_parse_json` + `human ml status` banner
+ * (minified + reordered keys). */
+static void test_ml_cli_status_scheduler_file_e2e(void) {
+#ifndef _WIN32
+    const char *td = "/tmp/hu_ml_sched_status_e2e";
+    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+
+    mkdir_p(td);
+    char humandir[512];
+    snprintf(humandir, sizeof(humandir), "%s/.human", td);
+    mkdir_p(humandir);
+    char path[600];
+    snprintf(path, sizeof(path), "%s/scheduler.status", humandir);
+    write_text_file(path,
+                     "{\"updated_epoch\":2000,\"jobs_pending\":11,\"on_ac_power\":false,"
+                     "\"battery_pct\":77,\"jobs_completed_today\":4}");
+
+    HU_ASSERT_EQ(setenv("HOME", td, 1), 0);
+
+    char body[4096];
+    FILE *rf = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(rf);
+    size_t n = fread(body, 1, sizeof(body) - 1, rf);
+    fclose(rf);
+    body[n] = '\0';
+
+    unsigned long long jp = 0, jc = 0;
+    long long bat = 0, ue = 0;
+    char ac[16] = {0};
+    HU_ASSERT_EQ(
+        hu_scheduler_status_parse_json(body, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_EQ(jp, 11ULL);
+    HU_ASSERT_EQ(jc, 4ULL);
+    HU_ASSERT_EQ(bat, 77LL);
+    HU_ASSERT_STR_EQ(ac, "false");
+    HU_ASSERT_EQ(ue, 2000LL);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"human", "ml", "status"};
+    HU_ASSERT_EQ(hu_ml_cli_status(&alloc, 3, argv), HU_OK);
+
+    unlink(path);
+    rmdir(humandir);
+    rmdir(td);
+    if (old_home) {
+        setenv("HOME", old_home, 1);
+        free(old_home);
+    } else {
+        unsetenv("HOME");
+    }
+#else
+    (void)0;
+#endif
 }
 
 /* ─── experiment loop: convergence threshold stops early ───────────────── */
@@ -4734,6 +4790,7 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_ml_cli_experiment_help);
     HU_RUN_TEST(test_ml_cli_prepare_help);
     HU_RUN_TEST(test_ml_cli_status);
+    HU_RUN_TEST(test_ml_cli_status_scheduler_file_e2e);
     /* New SOTA tests */
     HU_RUN_TEST(test_gpt_kv_head_validation);
     HU_RUN_TEST(test_train_byte_weighted_loss);

@@ -17,6 +17,7 @@
 /* Tone hint strings — loaded from data or use defaults */
 static const char *g_tone_hints[3] = {NULL, NULL, NULL}; /* casual, technical, formal */
 static size_t g_tone_hints_len[3] = {0, 0, 0};
+static bool g_prompt_data_loaded = false;
 
 /* Default fallbacks */
 static const char *DEFAULT_TONE_HINTS[3] = {
@@ -29,13 +30,8 @@ static hu_error_t hu_prompt_data_init(hu_allocator_t *alloc) {
     if (!alloc)
         return HU_ERR_INVALID_ARGUMENT;
 
-    for (size_t i = 0; i < 3; i++) {
-        if (g_tone_hints[i]) {
-            hu_str_free(alloc, (char *)g_tone_hints[i]);
-            g_tone_hints[i] = NULL;
-            g_tone_hints_len[i] = 0;
-        }
-    }
+    if (g_prompt_data_loaded)
+        return HU_OK;
 
     /* Load tone hints */
     char *json_data = NULL;
@@ -65,6 +61,7 @@ static hu_error_t hu_prompt_data_init(hu_allocator_t *alloc) {
         }
     }
 
+    g_prompt_data_loaded = true;
     return HU_OK;
 }
 
@@ -93,6 +90,20 @@ static hu_error_t append(hu_allocator_t *alloc, char **buf, size_t *len, size_t 
     (*buf)[*len + slen] = '\0';
     *len += slen;
     return HU_OK;
+}
+
+/* Tier-1 messaging channels use ~50–600 char caps (iMessage/Telegram/Discord/Slack vtables). */
+static hu_error_t append_texting_shape_rules(hu_allocator_t *alloc, char **buf, size_t *len,
+                                             size_t *cap, uint32_t max_response_chars) {
+    if (max_response_chars < 50 || max_response_chars > 600)
+        return HU_OK;
+    static const char shape[] =
+        "\n### Text message shape\n"
+        "- Never use numbered or bulleted lists in a text.\n"
+        "- Do not answer every sub-point they raised; pick what matters most.\n"
+        "- Do not open with a hollow reaction then pivot to an unrelated topic.\n"
+        "- One main topic per message; extra thoughts can be a follow-up.\n";
+    return append(alloc, buf, len, cap, shape, sizeof(shape) - 1);
 }
 
 hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_t *config,
@@ -233,6 +244,9 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 if (err != HU_OK)
                     goto fail;
             }
+            err = append_texting_shape_rules(alloc, &buf, &len, &cap, config->max_response_chars);
+            if (err != HU_OK)
+                goto fail;
         }
         {
             time_t now = time(NULL);
@@ -1122,6 +1136,9 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             if (err != HU_OK)
                 goto fail;
         }
+        err = append_texting_shape_rules(alloc, &buf, &len, &cap, config->max_response_chars);
+        if (err != HU_OK)
+            goto fail;
     }
 
     *out = buf;
