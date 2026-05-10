@@ -1165,6 +1165,56 @@ static void max_response_chars_medium_range(void) {
     HU_ASSERT_EQ(max, 150);
 }
 
+static void max_response_chars_relational_default_matches_plain(void) {
+    for (size_t n = 1; n < 120; n += 17) {
+        HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(n, NULL, HU_REL_NEW),
+                     hu_conversation_max_response_chars(n));
+    }
+}
+
+static void max_response_chars_relational_trusted_higher(void) {
+    int plain = hu_conversation_max_response_chars(80);
+    int warm = hu_conversation_max_response_chars_relational(80, NULL, HU_REL_TRUSTED);
+    HU_ASSERT_TRUE(warm > plain);
+    HU_ASSERT_EQ(warm, 240);
+}
+
+static void brief_char_cap_redteam(void) {
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(true, NULL, HU_REL_TRUSTED), 50u);
+    HU_ASSERT_TRUE(hu_conversation_brief_char_cap(false, NULL, HU_REL_NEW) > 50u);
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, NULL, HU_REL_TRUSTED), 220u);
+    hu_contact_profile_t cp = {0};
+    cp.relationship_type = (char *)"friend";
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_NEW), 185u);
+    cp.prefers_short_texts = true;
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_TRUSTED), 72u);
+}
+
+static void calibrate_for_contact_softens_ping_for_warm_dm(void) {
+    char buf[1024];
+    hu_contact_profile_t cp = {0};
+    cp.relationship_type = (char *)"friend";
+    const char *m = "call me soon";
+    size_t cal_len = hu_conversation_calibrate_length_for_contact(m, strlen(m), NULL, 0, false,
+                                                                  &cp, HU_REL_TRUSTED, buf,
+                                                                  sizeof(buf));
+    HU_ASSERT_TRUE(cal_len > 80);
+    HU_ASSERT_TRUE(strstr(buf, "real friend") != NULL);
+}
+
+static void calibrate_for_contact_group_uses_neutral_ratio(void) {
+    char buf[1024];
+    hu_contact_profile_t cp = {0};
+    cp.relationship_type = (char *)"friend";
+    const char *m = "everyone free saturday?";
+    size_t cal_len = hu_conversation_calibrate_length_for_contact(m, strlen(m), NULL, 0, true, &cp,
+                                                                  HU_REL_TRUSTED, buf, sizeof(buf));
+    HU_ASSERT_TRUE(cal_len > 40);
+    HU_ASSERT_TRUE(strstr(buf, "Moderate length") != NULL || strstr(buf, "Their last message") != NULL);
+    /* Group path: 2x cap only — numeric limit in buf should reflect ~46 chars max, not ~69 */
+    HU_ASSERT_TRUE(strstr(buf, "48") != NULL || strstr(buf, "46") != NULL);
+}
+
 static void quality_penalizes_length_mismatch(void) {
     hu_quality_score_t score = hu_conversation_evaluate_quality(
         "Well, I think that's a really interesting question and I'd be happy to elaborate "
@@ -3964,6 +4014,11 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(max_response_chars_long_paragraph_capped);
     HU_RUN_TEST(max_response_chars_zero_returns_min);
     HU_RUN_TEST(max_response_chars_medium_range);
+    HU_RUN_TEST(max_response_chars_relational_default_matches_plain);
+    HU_RUN_TEST(max_response_chars_relational_trusted_higher);
+    HU_RUN_TEST(brief_char_cap_redteam);
+    HU_RUN_TEST(calibrate_for_contact_softens_ping_for_warm_dm);
+    HU_RUN_TEST(calibrate_for_contact_group_uses_neutral_ratio);
     HU_RUN_TEST(quality_penalizes_length_mismatch);
     HU_RUN_TEST(quality_rewards_length_match);
 

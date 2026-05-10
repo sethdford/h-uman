@@ -3440,6 +3440,103 @@ int hu_conversation_max_response_chars(size_t incoming_len) {
     return result;
 }
 
+int hu_conversation_max_response_chars_relational(size_t incoming_len,
+                                                  const hu_contact_profile_t *contact,
+                                                  hu_relationship_stage_t session_stage) {
+    if (incoming_len == 0)
+        return (int)g_min_response_chars;
+    double mult = 2.0;
+    if (session_stage >= HU_REL_DEEP)
+        mult = 3.25;
+    else if (session_stage >= HU_REL_TRUSTED)
+        mult = 3.0;
+    else if (session_stage >= HU_REL_FAMILIAR)
+        mult = 2.55;
+
+    if (contact) {
+        if (contact->prefers_short_texts)
+            mult = 2.0;
+        if (contact->relationship_type && contact->relationship_type[0]) {
+            size_t tl = strlen(contact->relationship_type);
+            if (str_contains_ci(contact->relationship_type, tl, "family") ||
+                str_contains_ci(contact->relationship_type, tl, "friend")) {
+                if (mult < 2.75)
+                    mult = 2.75;
+            }
+        }
+        if (contact->relationship_stage && contact->relationship_stage[0]) {
+            const char *rs = contact->relationship_stage;
+            size_t rsl = strlen(rs);
+            if (str_contains_ci(rs, rsl, "close") || str_contains_ci(rs, rsl, "best") ||
+                str_contains_ci(rs, rsl, "intimate") || str_contains_ci(rs, rsl, "friend")) {
+                if (mult < 2.7)
+                    mult = 2.7;
+            }
+        }
+        if (contact->warmth_level && contact->warmth_level[0]) {
+            const char *w = contact->warmth_level;
+            size_t wl = strlen(w);
+            if (str_contains_ci(w, wl, "high") || str_contains_ci(w, wl, "warm")) {
+                if (mult < 2.65)
+                    mult = 2.65;
+            }
+        }
+    }
+
+    double scaled = (double)incoming_len * mult;
+    int result = (int)scaled;
+    if (result < (int)g_min_response_chars)
+        result = (int)g_min_response_chars;
+    if (result > (int)g_max_response_chars)
+        result = (int)g_max_response_chars;
+    return result;
+}
+
+uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_t *contact,
+                                        hu_relationship_stage_t session_stage) {
+    if (is_group)
+        return 50u;
+
+    if (contact && contact->prefers_short_texts)
+        return 72u;
+
+    if (session_stage >= HU_REL_DEEP)
+        return 260u;
+    if (session_stage >= HU_REL_TRUSTED)
+        return 220u;
+    if (session_stage >= HU_REL_FAMILIAR)
+        return 160u;
+
+    if (contact) {
+        if (contact->relationship_type && contact->relationship_type[0]) {
+            size_t tl = strlen(contact->relationship_type);
+            if (str_contains_ci(contact->relationship_type, tl, "family") ||
+                str_contains_ci(contact->relationship_type, tl, "friend"))
+                return 185u;
+        }
+        if (contact->relationship_stage && contact->relationship_stage[0]) {
+            const char *rs = contact->relationship_stage;
+            size_t rsl = strlen(rs);
+            if (str_contains_ci(rs, rsl, "close") || str_contains_ci(rs, rsl, "best") ||
+                str_contains_ci(rs, rsl, "intimate") || str_contains_ci(rs, rsl, "friend"))
+                return 195u;
+            if (str_contains_ci(rs, rsl, "work") || str_contains_ci(rs, rsl, "acquaint") ||
+                str_contains_ci(rs, rsl, "new"))
+                return 85u;
+        }
+        if (contact->warmth_level && contact->warmth_level[0]) {
+            const char *w = contact->warmth_level;
+            size_t wl = strlen(w);
+            if (str_contains_ci(w, wl, "high") || str_contains_ci(w, wl, "warm"))
+                return 175u;
+            if (str_contains_ci(w, wl, "low") || str_contains_ci(w, wl, "cold"))
+                return 72u;
+        }
+    }
+
+    return 96u;
+}
+
 /*
  * Instead of "keep under 50 chars", tell the model WHY a certain length
  * is right. Humans calibrate response length by message type, not by
@@ -3447,9 +3544,10 @@ int hu_conversation_max_response_chars(size_t incoming_len) {
  * and produces a directive that mimics human instinct.
  */
 
-size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_len,
-                                        const hu_channel_history_entry_t *entries, size_t count,
-                                        char *buf, size_t cap) {
+static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
+                                    const hu_channel_history_entry_t *entries, size_t count,
+                                    bool is_group, const hu_contact_profile_t *contact,
+                                    hu_relationship_stage_t session_stage, char *buf, size_t cap) {
     if (!last_msg || last_msg_len == 0 || !buf || cap < 64)
         return 0;
 
@@ -3492,12 +3590,22 @@ size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_le
     }
 
     /* Last message length (structural) + numeric char limit for prompt */
-    int max_chars = hu_conversation_max_response_chars(last_msg_len);
+    int max_chars = is_group ? hu_conversation_max_response_chars(last_msg_len)
+                             : hu_conversation_max_response_chars_relational(last_msg_len, contact,
+                                                                           session_stage);
     w = snprintf(buf + pos, cap - pos, "Their last message: %zu chars. ", last_msg_len);
     POS_ADVANCE(w, pos, cap);
     if (last_msg_len < 15) {
-        w = snprintf(buf + pos, cap - pos, "Very brief — match that brevity. Target: 1-%d chars.\n",
-                     max_chars);
+        /* Cold caps stay telegraphic; warm relationships get permission for a human sentence. */
+        if (!is_group && max_chars >= 30) {
+            w = snprintf(buf + pos, cap - pos,
+                         "Short line — still sound like a real friend, not a bot. Natural voice, "
+                         "up to %d chars.\n",
+                         max_chars);
+        } else {
+            w = snprintf(buf + pos, cap - pos, "Very brief — match that brevity. Target: 1-%d chars.\n",
+                         max_chars);
+        }
     } else if (last_msg_len > 100) {
         w = snprintf(buf + pos, cap - pos,
                      "Substantial — you can respond with more depth, but don't over-match. "
@@ -3563,6 +3671,23 @@ size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_le
 
     buf[pos] = '\0';
     return pos;
+}
+
+size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_len,
+                                        const hu_channel_history_entry_t *entries, size_t count,
+                                        char *buf, size_t cap) {
+    return calibrate_length_impl(last_msg, last_msg_len, entries, count, false, NULL, HU_REL_NEW,
+                                 buf, cap);
+}
+
+size_t hu_conversation_calibrate_length_for_contact(const char *last_msg, size_t last_msg_len,
+                                                    const hu_channel_history_entry_t *entries,
+                                                    size_t count, bool is_group,
+                                                    const hu_contact_profile_t *contact,
+                                                    hu_relationship_stage_t session_stage,
+                                                    char *buf, size_t cap) {
+    return calibrate_length_impl(last_msg, last_msg_len, entries, count, is_group, contact,
+                                 session_stage, buf, cap);
 }
 
 /* ── Texting style analysis ───────────────────────────────────────────── */
@@ -6252,12 +6377,20 @@ typedef struct {
 
 /* Hardcoded fallback when conversation/ai_phrases.json cannot be loaded */
 static const hu_ai_phrase_replacement_t s_ai_phrases_fallback[] = {
+    {"Let me know if you need anything", 32, "", 0},
+    {"That's a great question! ", 24, "", 0},
+    {"That's a great question", 23, "", 0},
+    {"Here's what I think: ", 21, "", 0},
+    {"I understand your ", 18, "", 0},
+    {"I hope this helps", 17, "", 0},
+    {"Let me know if ", 15, "", 0},
     {"Great question! ", 16, "", 0},
     {"Great question. ", 16, "", 0},
     {"That's a great point! ", 22, "", 0},
     {"That's a great point. ", 22, "", 0},
     {"I appreciate you sharing that. ", 31, "", 0},
     {"I appreciate you sharing that! ", 31, "", 0},
+    {"I appreciate ", 13, "", 0},
     {"Let me break this down. ", 24, "", 0},
     {"Let me break this down: ", 24, "", 0},
     {"Here's the thing: ", 18, "", 0},
@@ -6275,6 +6408,7 @@ static const hu_ai_phrase_replacement_t s_ai_phrases_fallback[] = {
     {"I completely understand", 23, "I get it", 8},
     {"Absolutely! ", 12, "", 0},
     {"Certainly! ", 11, "", 0},
+    {"Certainly!", 10, "", 0},
     {"Of course! ", 11, "", 0},
     {"Feel free to ", 13, "", 0},
     {"Don't hesitate to ", 18, "", 0},

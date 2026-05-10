@@ -313,6 +313,18 @@ size_t hu_conversation_split_response(hu_allocator_t *alloc, const char *respons
  * Use for max_response_chars to match response length within ~1.5x ratio. */
 int hu_conversation_max_response_chars(size_t incoming_len);
 
+/* Like hu_conversation_max_response_chars, but scales length with relationship warmth
+ * (session stage + optional persona contact hints). Group threads should pass contact=NULL
+ * and rely on the caller forcing plain max for is_group. */
+int hu_conversation_max_response_chars_relational(size_t incoming_len,
+                                                  const hu_contact_profile_t *contact,
+                                                  hu_relationship_stage_t session_stage);
+
+/* When the daemon is in "brief mode", this is the hard character ceiling before truncation.
+ * Group chats stay tight (50). Trusted 1:1 contacts get headroom so replies stay human. */
+uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_t *contact,
+                                        hu_relationship_stage_t session_stage);
+
 /* Classify the last incoming message and produce human-level length guidance.
  * Analyzes message type (question, emotional, greeting, logistics, etc.) and
  * produces a short directive string for the prompt like:
@@ -321,6 +333,15 @@ int hu_conversation_max_response_chars(size_t incoming_len);
 size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_len,
                                         const hu_channel_history_entry_t *entries, size_t count,
                                         char *buf, size_t cap);
+
+/* Same as hu_conversation_calibrate_length, but uses relational caps for DMs when is_group
+ * is false; when is_group is true, uses the neutral 2x ratio only. */
+size_t hu_conversation_calibrate_length_for_contact(const char *last_msg, size_t last_msg_len,
+                                                    const hu_channel_history_entry_t *entries,
+                                                    size_t count, bool is_group,
+                                                    const hu_contact_profile_t *contact,
+                                                    hu_relationship_stage_t session_stage,
+                                                    char *buf, size_t cap);
 
 /* ── Texting style analysis ───────────────────────────────────────────── */
 

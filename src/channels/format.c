@@ -12,13 +12,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#if defined(_WIN32) || defined(_WIN64)
-#define hu_strncasecmp _strnicmp
-#else
-#include <strings.h>
-#define hu_strncasecmp strncasecmp
-#endif
-
 static bool channel_name_eq(const char *n, size_t nl, const char *lit, size_t lit_len) {
     return nl == lit_len && memcmp(n, lit, lit_len) == 0;
 }
@@ -100,65 +93,10 @@ hu_error_t hu_channel_strip_markdown(hu_allocator_t *alloc, const char *text, si
     return HU_OK;
 }
 
-static size_t strip_ai_phrases_inplace(char *buf, size_t len) {
+/* Collapse double spaces and trim ends (phrases handled in hu_conversation_strip_ai_phrases). */
+static size_t strip_channel_output_whitespace(char *buf, size_t len) {
     if (!buf || len == 0)
         return 0;
-
-    static const struct {
-        const char *phrase;
-        size_t phrase_len;
-        bool case_sensitive;
-    } phrases[] = {
-        {"I'd be happy to ", 16, false},
-        {"Certainly! ", 12, false},
-        {"Certainly!", 10, false},
-        {"Great question! ", 16, false},
-        {"That's a great question", 23, false},
-        {"Let me know if you need anything", 32, false},
-        {"Let me know if ", 15, false},
-        {"Feel free to ", 13, false},
-        {"Absolutely! ", 12, true},
-        {"I understand your ", 18, false},
-        {"I appreciate ", 13, false},
-        {"Here's what I think: ", 21, false},
-        {"I hope this helps", 17, false},
-        {"Don't hesitate to ", 18, false},
-        {"I'm here to help", 16, false},
-        {"As an AI", 8, false},
-        {"As a language model", 19, false},
-    };
-
-    for (;;) {
-        bool changed = false;
-        for (size_t p = 0; p < sizeof(phrases) / sizeof(phrases[0]); p++) {
-            const char *needle = phrases[p].phrase;
-            size_t needle_len = phrases[p].phrase_len;
-            if (needle_len > len)
-                continue;
-
-            char *pos = buf;
-            while (pos + needle_len <= buf + len) {
-                bool match = false;
-                if (phrases[p].case_sensitive) {
-                    match = (memcmp(pos, needle, needle_len) == 0);
-                } else {
-                    match = (hu_strncasecmp(pos, needle, needle_len) == 0);
-                }
-                if (match) {
-                    memmove(pos, pos + needle_len, (size_t)((buf + len) - (pos + needle_len)) + 1);
-                    len -= needle_len;
-                    buf[len] = '\0';
-                    changed = true;
-                    break;
-                }
-                pos++;
-            }
-            if (changed)
-                break;
-        }
-        if (!changed)
-            break;
-    }
 
     for (size_t i = 1; i < len; i++) {
         if (buf[i] == ' ' && buf[i - 1] == ' ') {
@@ -201,7 +139,7 @@ hu_error_t hu_channel_strip_ai_phrases(hu_allocator_t *alloc, const char *text, 
     /* Delegate to the canonical AI phrase list in conversation.c, then
      * run the format.c-specific extras (double space, trim) for compat. */
     size_t n = hu_conversation_strip_ai_phrases(buf, text_len);
-    n = strip_ai_phrases_inplace(buf, n);
+    n = strip_channel_output_whitespace(buf, n);
     *out = buf;
     *out_len = n;
     return HU_OK;

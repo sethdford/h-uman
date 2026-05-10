@@ -6111,8 +6111,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * When it doesn't, we still want message-type guidance. */
                 if (!convo_ctx && combined_len > 0) {
                     char cal_buf[1024];
-                    size_t cal_len = hu_conversation_calibrate_length(combined, combined_len, NULL,
-                                                                      0, cal_buf, sizeof(cal_buf));
+                    const hu_contact_profile_t *cp_cal =
+                        (agent->persona && batch_key && key_len > 0)
+                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                            : NULL;
+                    size_t cal_len = hu_conversation_calibrate_length_for_contact(
+                        combined, combined_len, NULL, 0, msgs[batch_start].is_group, cp_cal,
+                        agent->relationship.stage, cal_buf, sizeof(cal_buf));
                     if (cal_len > 0) {
                         convo_ctx = (char *)alloc->alloc(alloc->ctx, cal_len + 1);
                         if (convo_ctx) {
@@ -7306,14 +7311,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* F15: Apply ratio-based length calibration */
                 {
-                    int calibrated = hu_conversation_max_response_chars(combined_len);
+                    const hu_contact_profile_t *cp_lim =
+                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
+                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                            : NULL;
+                    int calibrated = msgs[batch_start].is_group
+                                         ? hu_conversation_max_response_chars(combined_len)
+                                         : hu_conversation_max_response_chars_relational(
+                                               combined_len, cp_lim, agent->relationship.stage);
                     if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
                         max_chars = (uint32_t)calibrated;
                 }
 
-                /* Brief mode: force ultra-short response */
-                if (brief_mode && max_chars > 50)
-                    max_chars = 50;
+                /* Brief mode: cap length (tight in groups; headroom for trusted 1:1). */
+                if (brief_mode) {
+                    const hu_contact_profile_t *cp_brief =
+                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
+                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                            : NULL;
+                    uint32_t brief_cap = hu_conversation_brief_char_cap(msgs[batch_start].is_group,
+                                                                        cp_brief,
+                                                                        agent->relationship.stage);
+                    if (max_chars > brief_cap)
+                        max_chars = brief_cap;
+                }
 
                 /* Honesty guardrail: inject if they asked "did you do X?" */
                 {

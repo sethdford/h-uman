@@ -196,10 +196,19 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 goto fail;
         }
         if (config->max_response_chars > 0) {
-            char lbuf[128];
-            int ln = snprintf(lbuf, sizeof(lbuf),
-                              "\nRESPONSE LIMIT: Maximum %u characters. Truncate gracefully.\n",
+            char lbuf[192];
+            int ln;
+            if (config->max_response_chars <= 80) {
+                ln = snprintf(lbuf, sizeof(lbuf),
+                              "\nRESPONSE LIMIT: Maximum %u characters. Keep it tight.\n",
                               config->max_response_chars);
+            } else {
+                ln = snprintf(
+                    lbuf, sizeof(lbuf),
+                    "\nRESPONSE LIMIT: Maximum %u characters. Stay within it, but sound like a "
+                    "real text thread — natural wording beats robotic truncation.\n",
+                    config->max_response_chars);
+            }
             if (ln > 0) {
                 size_t w = ((size_t)ln < sizeof(lbuf)) ? (size_t)ln : sizeof(lbuf) - 1;
                 err = append(alloc, &buf, &len, &cap, lbuf, w);
