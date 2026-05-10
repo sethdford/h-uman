@@ -18,6 +18,7 @@ runs:
     - name: Run tests
       shell: bash
       run: |
+        set -euo pipefail
         SHARD_FLAG=""
         if [ -n "${{ inputs.shard }}" ]; then
           SHARD_FLAG="--shard=${{ inputs.shard }}"
