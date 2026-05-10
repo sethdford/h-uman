@@ -224,9 +224,12 @@ static void imessage_save_poll_status(const hu_imessage_ctx_t *c) {
     char path[512];
     if (!hu_imessage_status_path(path, sizeof(path)))
         return;
-    /* Ensure ~/.human exists. mkdir is idempotent (EEXIST ignored). */
+    /* Ensure ~/.human exists. mkdir is idempotent (EEXIST ignored). Also
+     * mkdir the parent so test fixtures that pin HOME to a fresh tmp path
+     * don't silently fail before .human is reached. */
     const char *home = getenv("HOME");
     if (home && home[0]) {
+        (void)mkdir(home, 0700);
         char dir[512];
         int dn = snprintf(dir, sizeof(dir), "%s/.human", home);
         if (dn > 0 && (size_t)dn < sizeof(dir))
