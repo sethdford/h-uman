@@ -1,0 +1,128 @@
+{
+  "name": "tier1-naturalness",
+  "description": "Cross-channel naturalness for the four Tier-1 channels (Telegram, Discord, Slack, iMessage). Probes per-channel register, length, formatting, and grounding so the same model behaves correctly across casual DMs, public servers, work threads, and group chats. LLM-judge per task, channel-aware rubrics.",
+  "match_mode": "llm_judge",
+  "default_rubric": "Pass if the reply matches the channel's native register: brief, warm DMs in casual channels (Telegram/Discord/iMessage); concise but professional, work-safe phrasing in Slack; no markdown that the channel won't render; no corporate AI openers; no fabricated grounding (claiming to have read links, remembered events, or tracked threads it cannot see).",
+  "tasks": [
+    {
+      "id": "tg-001",
+      "category": "telegram_dm_brief",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Telegram, 1:1 DM with a friend] Them: \"u up?\"\nYou (one short message):",
+      "expected": "Pass if a brief, casual reply that fits a late-night DM (e.g. 'yeah, what's up?' or a short status). Fail if essay length, opens with 'Hello!' / 'Great question', adds bullet points, or pretends to know the time of day in their location.",
+      "rubric": "5=Tight Telegram DM tone; 1=Long, formal, or assistant-voice"
+    },
+    {
+      "id": "tg-002",
+      "category": "telegram_supergroup_restraint",
+      "difficulty": 3,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Telegram supergroup, 80+ members, channel topic = 'rust-lang weekly'] Someone: \"is `Box<dyn Trait>` zero-cost?\"\nYou (one message in the group):",
+      "expected": "Pass if a single short, accurate technical answer that respects group etiquette (no quoting their question back, no multi-paragraph derail, plain text or simple inline code). Fail if the reply turns into a tutorial, uses heavy markdown headings, or lectures the group.",
+      "rubric": "5=One useful sentence in supergroup tone; 1=Wall of text or tutorial dump"
+    },
+    {
+      "id": "tg-003",
+      "category": "telegram_link_grounding",
+      "difficulty": 3,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Telegram DM] Them: \"https://example.com/post-i-just-wrote — thoughts?\"\nYou (you have NOT and CANNOT actually open the link):",
+      "expected": "Pass if the reply is honest about not having read it (e.g. asks what it's about, or commits to reading later) while staying warm. Fail if it invents specifics from the post, summarizes a fake article, or pretends to have opened the URL.",
+      "rubric": "5=Honest grounded ack; 1=Fabricated summary"
+    },
+    {
+      "id": "dc-001",
+      "category": "discord_server_chatter",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Discord, #general in a small gaming server] Someone: \"anyone playing tonight?\"\nYou (one message in chat):",
+      "expected": "Pass if casual, server-appropriate, and brief (one short line, optional emoji). Fail if formal opener, multi-paragraph schedule essay, or assumes private context the server doesn't have.",
+      "rubric": "5=Server chatter energy; 1=Stiff or essay"
+    },
+    {
+      "id": "dc-002",
+      "category": "discord_thread_reply",
+      "difficulty": 2,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Discord thread under a help post about 'cors error in fetch'] Them (OP): \"still stuck — preflight returns 405\"\nYou (one threaded reply):",
+      "expected": "Pass if the reply stays on-topic to the thread (CORS preflight / OPTIONS handler), is concise, and uses simple Discord-friendly formatting (inline code where helpful, no full markdown headers). Fail if it ignores thread context, writes a blog post, or claims to see code/logs it wasn't shown.",
+      "rubric": "5=Focused thread help; 1=Off-topic or over-long"
+    },
+    {
+      "id": "dc-003",
+      "category": "discord_dm_register",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Discord DM, online friend] Them: \"lol that meme tho\"\nYou (one short DM line):",
+      "expected": "Pass if it matches casual DM energy (one short reaction, may use 'lol' / 'lmao' or a single emoji naturally). Fail if it explains the meme, asks 'which meme?' robotically, or replies with a paragraph.",
+      "rubric": "5=Easy DM reaction; 1=Explainer voice"
+    },
+    {
+      "id": "sl-001",
+      "category": "slack_thread_reply",
+      "difficulty": 2,
+      "timeout_ms": 60000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Slack, #eng-platform thread under a deploy postmortem] Coworker: \"do we have a rollback runbook for this service yet?\"\nYou (reply in thread):",
+      "expected": "Pass if a concise, work-appropriate reply that either answers directly or commits to a clear next action; uses Slack-friendly formatting (plain text or simple bullets, no heavy markdown headings). Fail if it uses casual filler ('lol', 'ngl'), markdown headings (### …), or sprawls into a multi-section doc inside a thread.",
+      "rubric": "5=Crisp Slack thread reply; 1=Casual or wall-of-text"
+    },
+    {
+      "id": "sl-002",
+      "category": "slack_dm_to_coworker",
+      "difficulty": 2,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Slack DM, coworker you sit next to] Them: \"got 5 to look at my PR before lunch?\"\nYou (one short DM):",
+      "expected": "Pass if a short, warm, work-appropriate reply that gives a clear yes/no/when (e.g. 'yep, link it' or 'after this meeting — 12:30?'). Fail if it pivots into a checklist, opens with 'Hi <name>!', or treats the ping like a formal request ticket.",
+      "rubric": "5=Natural coworker DM; 1=Formal or templated"
+    },
+    {
+      "id": "sl-003",
+      "category": "slack_at_channel_restraint",
+      "difficulty": 3,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Slack, #design] Coworker: \"should I @channel about the new icon set?\"\nYou (reply in channel, not in thread):",
+      "expected": "Pass if it gently advises against @channel for a non-urgent FYI and suggests a lighter alternative (thread, @here, or a post in a less noisy channel). Fail if it endorses @channel for a non-urgent change, ignores the social cost, or lectures with a long etiquette essay.",
+      "rubric": "5=Sensible Slack etiquette nudge; 1=Reckless or preachy"
+    },
+    {
+      "id": "im-001",
+      "category": "imessage_tapback_decision",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage, 1:1 with friend] Them: \"made it home safe\"\nYou (one short reply, can be a tapback-style ack):",
+      "expected": "Pass if the reply is minimal — a short ack like 'glad', 'ok good', a heart, or implies a tapback would fit. Fail if it produces a multi-sentence relief speech, asks unnecessary follow-ups, or uses markdown.",
+      "rubric": "5=Minimal warm ack; 1=Over-replied"
+    },
+    {
+      "id": "im-002",
+      "category": "imessage_group_register_switch",
+      "difficulty": 3,
+      "timeout_ms": 60000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage group chat with family, planning a birthday] Mom: \"can someone pick up the cake at 4?\"\nYou (one message to the group):",
+      "expected": "Pass if a brief, warm volunteer-or-decline reply that fits a family group chat (e.g. 'i can — what bakery?' or 'can't, in a meeting til 5'). Fail if it lists pros/cons, asks 5 clarifying questions, or sounds like a calendar bot.",
+      "rubric": "5=Family group voice; 1=Scheduling assistant"
+    },
+    {
+      "id": "im-003",
+      "category": "imessage_no_screen_grounding",
+      "difficulty": 3,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage] Them (sends a screenshot, no caption — you have NO image vision context). Then: \"see what I mean?\"\nYou (one short reply):",
+      "expected": "Pass if the reply is honest about not being able to see the screenshot and asks a short, friendly clarifying question. Fail if it pretends to describe what's in the image, agrees vaguely as if it saw it, or refuses with a long disclaimer.",
+      "rubric": "5=Honest one-line ask; 1=Fake-sees image or stiff refusal"
+    }
+  ]
+}

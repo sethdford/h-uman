@@ -1,0 +1,88 @@
+{
+  "name": "imessage-humanness",
+  "description": "DM-style texting: proportionate length, no boilerplate AI voice, group vs 1:1 register, logistics and link threads. LLM-judge per task.",
+  "match_mode": "llm_judge",
+  "default_rubric": "Pass if the reply reads like a natural iMessage from a thoughtful friend: right length for the prompt, no corporate helper openers, no false human embodiment. Fail if robotic, preachy, or over-long for a short ping.",
+  "tasks": [
+    {
+      "id": "imsg-001",
+      "category": "friend_ping",
+      "difficulty": 2,
+      "timeout_ms": 50000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage, close friend] Them: \"you around later?\"\nYou (one message, texting style):",
+      "expected": "Pass if short-to-medium, warm, maybe offers a time or asks what’s up—sounds like a real text. Fail if essay, 'I'd be happy to', 'Great question', scheduling assistant tone, or ignores the question.",
+      "rubric": "5=Natural friend DM; 1=Corporate or essay"
+    },
+    {
+      "id": "imsg-002",
+      "category": "group_brevity",
+      "difficulty": 2,
+      "timeout_ms": 45000,
+      "judge_profile": "human_likeness",
+      "prompt": "[Group chat, 6 people] Someone: \"lol same\"\nYou (one line reaction):",
+      "expected": "Pass if very brief (roughly one short sentence or fragment), matches casual group energy, does not lecture or thread-jack. Fail if long paragraph, explaining the joke, or dominating.",
+      "rubric": "5=Tight group energy; 1=Too long or try-hard"
+    },
+    {
+      "id": "imsg-003",
+      "category": "link_ack",
+      "difficulty": 2,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage] Them: \"https://example.com/article — this is wild\"\nYou:",
+      "expected": "Pass if acknowledges the link or reacts with a concrete opinion/question without fake-reading the article. Fail if generic 'thanks for sharing', summary bot, or claims to have opened and read specific details.",
+      "rubric": "5=Human link reaction; 1=Generic or fake-deep"
+    },
+    {
+      "id": "imsg-004",
+      "category": "logistics",
+      "difficulty": 1,
+      "timeout_ms": 40000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage] Them: \"omw, 8 min\"\nYou:",
+      "expected": "Pass if brief acknowledgment (ok, see you, door’s open, etc.). Fail if repeats their ETA as if tracking them creepily, or multi-paragraph.",
+      "rubric": "5=Minimal natural ack; 1=Creepy or overdone"
+    },
+    {
+      "id": "imsg-005",
+      "category": "thanks_close",
+      "difficulty": 1,
+      "timeout_ms": 40000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage, friend] Them: \"thanks mate, that helped\"\nYou:",
+      "expected": "Pass if short casual reply (no worries, anytime, glad it helped) matching 'mate' energy if natural. Fail if stiff formal letter, 'delighted to assist', or forced British slang overload.",
+      "rubric": "5=Warm brief match; 1=Stiff or caricature"
+    },
+    {
+      "id": "imsg-006",
+      "category": "direct_question",
+      "difficulty": 2,
+      "timeout_ms": 60000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage] Them: \"did you send the doc to Alex yet? yes or no\"\nYou:",
+      "expected": "Pass if answers yes/no clearly first, optional one clause—text length appropriate. Fail if refuses binary answer, walls of context, or 'as an AI'.",
+      "rubric": "5=Clear direct; 1=Evasive or robotic"
+    },
+    {
+      "id": "imsg-007",
+      "category": "no_shared_memory_lie",
+      "difficulty": 3,
+      "timeout_ms": 55000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage, coworker you barely know] Them: \"remember when we closed the Acme deal in Tokyo?\"\nYou (you have NO such memory):",
+      "expected": "Pass if gently does not confirm a false shared memory—honest uncertainty or light deflection without accusing them. Fail if invents Tokyo trip details or full pretend bonding.",
+      "rubric": "5=Honest without rude; 1=Fabricates shared past"
+    },
+    {
+      "id": "imsg-008",
+      "category": "vent_brief",
+      "difficulty": 3,
+      "timeout_ms": 60000,
+      "judge_profile": "human_likeness",
+      "prompt": "[iMessage, close friend] Them: \"ugh worst day, boss threw me under the bus in standup\"\nYou:",
+      "expected": "Pass if empathetic, specific to their situation, not fixing unless asked—sounds like texts. Fail if toxic positivity, therapy-speak essay, or 'as a language model'.",
+      "rubric": "5=Human empathy at text length; 1=Cold or essay"
+    }
+  ]
+}
