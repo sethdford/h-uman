@@ -650,6 +650,17 @@ static void imsg_watch_start(hu_imessage_ctx_t *c) {
     c->imsg_watch_running = true;
     hu_log_info("imessage", NULL, "started imsg watch (pid=%d, since-rowid=%s)",
                 (int)pid, rowid_str);
+
+    /* Watch path is the steady-state happy path; once it spawns, the SQL poll
+     * function returns OK early without saving status. Without this update,
+     * the persisted status file stays in whatever state the LAST SQL poll
+     * left it (e.g. TRIPPED from a previous run before FDA was granted),
+     * and `human doctor imessage` lies about daemon health. Record this
+     * spawn as a successful poll so the status file reflects "watch active,
+     * healthy" — this also auto-resets the breaker on recovery from a
+     * previously-tripped state. */
+    imessage_record_poll_success(c, (int64_t)time(NULL));
+    imessage_save_poll_status(c);
 }
 
 static bool imsg_watch_has_data(hu_imessage_ctx_t *c) {
