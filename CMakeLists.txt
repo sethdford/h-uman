@@ -2213,6 +2213,7 @@ set(HU_TEST_SOURCES
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
     tests/test_w5_persona_deltas.c
+    tests/test_w6_e2e_adversarial.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
