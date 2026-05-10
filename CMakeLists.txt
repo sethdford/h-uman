@@ -2266,6 +2266,7 @@ set(HU_TEST_SOURCES
     tests/test_w5_persona_deltas.c
     tests/test_persona_delta_observer.c
     tests/test_world_model_bridge.c
+    tests/test_signal_channel_wire.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
@@ -2280,6 +2281,7 @@ set(HU_TEST_SOURCES
     tests/test_w14_scheduler.c
     tests/test_w15_keystore.c
     tests/test_w16_evaluation.c
+    tests/test_v2_e2e_adversarial.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
