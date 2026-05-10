@@ -54,4 +54,14 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                                     int64_t stale_after_secs, hu_diag_item_t **items,
                                     size_t *count, size_t *cap);
 
+/* Diagnose the response verifier (W4) by reading the metrics heartbeat file
+ * (~/.human/verifier_metrics.json) the daemon flushes every minute. Reports
+ * total runs, total/supported/flagged claims, the flagged-rate, and warns
+ * when the heartbeat is older than `stale_after_secs` (suggests the daemon
+ * is offline or never reached its first flush) or when the flagged rate
+ * exceeds `flagged_warn_rate` in the closed interval [0,1]. */
+hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
+                                    int64_t stale_after_secs, double flagged_warn_rate,
+                                    hu_diag_item_t **items, size_t *count, size_t *cap);
+
 #endif /* HU_DOCTOR_H */

@@ -633,6 +633,7 @@ set(HU_CORE_SOURCES
     src/agent/autodream.c
     src/agent/case_based.c
     src/agent/response_verifier.c
+    src/agent/verifier_metrics.c
     src/persona/persona_deltas.c
     src/memory/multimodal_index.c
     src/memory/lifecycle/cache.c
@@ -2251,6 +2252,7 @@ set(HU_TEST_SOURCES
     tests/test_w5_persona_deltas.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
+    tests/test_verifier_metrics.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
     tests/test_w8_belief_layer.c

@@ -1,4 +1,5 @@
 #include "human/doctor.h"
+#include "human/agent/verifier_metrics.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
 #include "human/core/process_util.h"
@@ -808,5 +809,105 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
 
     *items = buf;
     *count = n;
+    return HU_OK;
+}
+
+hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
+                                    int64_t stale_after_secs, double flagged_warn_rate,
+                                    hu_diag_item_t **items, size_t *count, size_t *cap) {
+    if (!alloc || !items || !count || !cap)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char path[512];
+    if (!hu_verifier_metrics_path(path, sizeof(path))) {
+        return doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                                "[doctor] verifier: $HOME unset; cannot locate metrics file");
+    }
+
+    hu_verifier_metrics_t m;
+    hu_error_t lerr = hu_verifier_metrics_load(&m);
+
+    if (lerr == HU_ERR_NOT_FOUND) {
+        char *msg =
+            hu_sprintf(alloc,
+                       "[doctor] verifier: no metrics yet — daemon hasn't completed its first "
+                       "60s flush (file: %s)",
+                       path);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+        return HU_OK;
+    }
+    if (lerr != HU_OK) {
+        char *msg = hu_sprintf(alloc, "[doctor] verifier: failed to read %s (err=%d)", path,
+                               (int)lerr);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+        return HU_OK;
+    }
+
+    int64_t age = now_epoch - m.last_update_epoch;
+    if (age < 0)
+        age = 0;
+    bool stale = stale_after_secs > 0 && age > stale_after_secs;
+
+    /* Counts line — always emit so users can sanity-check that turns are
+     * actually flowing through the verifier. Zero runs is a real signal:
+     * either the daemon just started, or no chat has happened. */
+    {
+        char *msg = hu_sprintf(
+            alloc,
+            "[doctor] verifier: %llu turns, %llu claims (flagged %llu, %.1f%% rate)",
+            (unsigned long long)m.total_runs, (unsigned long long)m.total_claims_extracted,
+            (unsigned long long)m.total_claims_flagged,
+            hu_verifier_metrics_flagged_rate(&m) * 100.0);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    }
+
+    /* Heartbeat line — STALE means the daemon stopped flushing. The flush
+     * cadence is 60s, so default 300s = 5 min gives plenty of headroom for
+     * normal scheduling jitter while still catching a wedged daemon fast. */
+    if (stale) {
+        char *msg =
+            hu_sprintf(alloc,
+                       "[doctor] verifier heartbeat: STALE — last flush %lld seconds ago "
+                       "(threshold %lld); daemon may be offline or wedged",
+                       (long long)age, (long long)stale_after_secs);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    } else {
+        char *msg = hu_sprintf(alloc, "[doctor] verifier heartbeat: fresh (%llds ago)",
+                               (long long)age);
+        if (msg) {
+            (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    }
+
+    /* Flagged-rate line — only meaningful with at least one extracted claim;
+     * the rate is undefined for zero-claim runs. */
+    if (m.total_claims_extracted > 0) {
+        double rate = hu_verifier_metrics_flagged_rate(&m);
+        if (flagged_warn_rate > 0.0 && rate >= flagged_warn_rate) {
+            char *msg = hu_sprintf(
+                alloc,
+                "[doctor] verifier flagged-rate: HIGH (%.1f%% >= threshold %.1f%%) — "
+                "memory may be under-populated or the model is hallucinating",
+                rate * 100.0, flagged_warn_rate * 100.0);
+            if (msg) {
+                (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+            }
+        }
+    }
+
     return HU_OK;
 }

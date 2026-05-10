@@ -18,6 +18,7 @@
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
+#include "human/agent/verifier_metrics.h"
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
@@ -2416,6 +2417,32 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_bth_metrics_log(agent->bth_metrics);
                 }
 #ifndef HU_IS_TEST
+                /* W4 verifier metrics flush — snapshot the per-process counters
+                 * onto disk so `human doctor verifier` (and any future
+                 * dashboard) can show the last known hallucination rate even
+                 * when the daemon is offline. 60s cadence is a heartbeat, not
+                 * a real-time stream; the file is small (~150B) and overwritten
+                 * in place, so cost is negligible. Skipped under HU_IS_TEST
+                 * because the test harness has its own ad-hoc HOME and the
+                 * shared metrics file would race across parallel tests. */
+                if (agent) {
+                    static int64_t last_verifier_flush_ms = 0;
+                    struct timespec ts_vf;
+                    clock_gettime(CLOCK_MONOTONIC, &ts_vf);
+                    int64_t now_vf_ms = (int64_t)ts_vf.tv_sec * 1000 + ts_vf.tv_nsec / 1000000;
+                    if (last_verifier_flush_ms == 0)
+                        last_verifier_flush_ms = now_vf_ms;
+                    if (now_vf_ms - last_verifier_flush_ms >= 60000) {
+                        hu_verifier_metrics_t snap = {
+                            .total_runs = agent->verifier_runs,
+                            .total_claims_extracted = agent->verifier_claims_total,
+                            .total_claims_flagged = agent->verifier_claims_flagged,
+                            .last_update_epoch = 0, /* set by save() */
+                        };
+                        (void)hu_verifier_metrics_save(&snap);
+                        last_verifier_flush_ms = now_vf_ms;
+                    }
+                }
                 /* Periodic memory consolidation */
                 if (config && config->consolidation_interval_hours > 0 && agent && agent->memory) {
                     static int64_t last_consolidation_ms = 0;
