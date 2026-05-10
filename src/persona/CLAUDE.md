@@ -69,3 +69,35 @@ hu_persona_build_prompt
 - Never hardcode persona data — always load from profile
 - Use neutral test data in tests — no real personal information
 - Free all allocations from `hu_persona_load` via `hu_persona_deinit`
+
+## Contacts JSON shape (drives relational length / brevity)
+
+The relational response-length and brevity-cap logic in `src/context/conversation.c`
+reads `hu_contact_profile_t.prefers_short_texts`, `texts_in_bursts`, etc.
+These fields are populated from JSON in **two accepted shapes**:
+
+```jsonc
+"contacts": {
+  "+15555550123": {                            // key becomes contact_id
+    "name": "Casey",
+    "relationship_type": "friend",
+    "warmth_level": "high",
+    "relationship_stage": "close",            // unlocks deeper rapport behaviors
+    // Canonical (preferred) — nested under communication_patterns:
+    "communication_patterns": {
+      "prefers_short_texts": true,
+      "texts_in_bursts": true,
+      "sends_links_often": false,
+      "uses_emoji": true
+    }
+    // Forgiving fallback — same booleans at the top level when no nested
+    // object exists. Useful for hand-edited persona files. Nested wins
+    // when both are present.
+  }
+}
+```
+
+Lookup: `hu_persona_find_contact` matches the query string against
+`contact_id` (the key) → `email` → `name` (case-insensitive). The runtime
+passes the channel-specific `batch_key` (e.g. `+1…` for iMessage), so
+contact keys must match the format the channel emits.

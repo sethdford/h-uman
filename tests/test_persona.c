@@ -4146,6 +4146,59 @@ static void test_lean_prompt_full_pipeline_sp_len(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+/* Forgiving fallback: contact entries that put communication-pattern booleans
+ * at the top level (not nested under "communication_patterns") should still
+ * populate hu_contact_profile_t so the relational length / brevity logic is
+ * not silently dead. Real personas authored by hand often look like this. */
+static void test_persona_contact_top_level_comm_booleans_fallback(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json =
+        "{\"name\":\"forgiving\","
+        "\"contacts\":{\"casey\":{"
+        "\"name\":\"Casey\",\"relationship_type\":\"friend\","
+        "\"warmth_level\":\"high\","
+        "\"prefers_short_texts\":true,"
+        "\"texts_in_bursts\":true,"
+        "\"sends_links_often\":false,"
+        "\"uses_emoji\":true"
+        "}}}";
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    const hu_contact_profile_t *cp = hu_persona_find_contact(&p, "casey", 5);
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_TRUE(cp->prefers_short_texts);
+    HU_ASSERT_TRUE(cp->texts_in_bursts);
+    HU_ASSERT_FALSE(cp->sends_links_often);
+    HU_ASSERT_TRUE(cp->uses_emoji);
+    hu_persona_deinit(&alloc, &p);
+}
+
+/* Canonical nested shape still wins. Confirms the fallback does not stomp
+ * the canonical reading. */
+static void test_persona_contact_nested_comm_patterns_take_precedence(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json =
+        "{\"name\":\"canonical\","
+        "\"contacts\":{\"riley\":{"
+        "\"name\":\"Riley\",\"relationship_type\":\"family\","
+        "\"prefers_short_texts\":true,"
+        "\"communication_patterns\":{\"prefers_short_texts\":false,"
+        "\"texts_in_bursts\":false,\"sends_links_often\":true,"
+        "\"uses_emoji\":false}"
+        "}}}";
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    const hu_contact_profile_t *cp = hu_persona_find_contact(&p, "riley", 5);
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_FALSE(cp->prefers_short_texts); /* nested wins over top-level */
+    HU_ASSERT_FALSE(cp->texts_in_bursts);
+    HU_ASSERT_TRUE(cp->sends_links_often);
+    HU_ASSERT_FALSE(cp->uses_emoji);
+    hu_persona_deinit(&alloc, &p);
+}
+
 void run_persona_tests(void) {
     HU_TEST_SUITE("Persona");
 
@@ -4352,6 +4405,10 @@ void run_persona_tests(void) {
 
     /* E2E dry run */
     HU_RUN_TEST(test_e2e_mindy_message_full_pipeline);
+
+    /* Forgiving fallback for top-level communication-pattern booleans */
+    HU_RUN_TEST(test_persona_contact_top_level_comm_booleans_fallback);
+    HU_RUN_TEST(test_persona_contact_nested_comm_patterns_take_precedence);
 
     /* Lean prompt E2E fleet */
     HU_RUN_TEST(test_lean_prompt_size_under_5kb);

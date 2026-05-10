@@ -2067,6 +2067,16 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
                 cp->prefers_short_texts = hu_json_get_bool(comm, "prefers_short_texts", false);
                 cp->sends_links_often = hu_json_get_bool(comm, "sends_links_often", false);
                 cp->uses_emoji = hu_json_get_bool(comm, "uses_emoji", false);
+            } else {
+                /* Forgiving fallback: many human-edited persona files put these
+                 * booleans at the top level of the contact entry rather than
+                 * under "communication_patterns". Read them there if no nested
+                 * object exists, so the relational length / brevity logic is
+                 * not silently dead. The canonical shape is still nested. */
+                cp->texts_in_bursts = hu_json_get_bool(cval, "texts_in_bursts", false);
+                cp->prefers_short_texts = hu_json_get_bool(cval, "prefers_short_texts", false);
+                cp->sends_links_often = hu_json_get_bool(cval, "sends_links_often", false);
+                cp->uses_emoji = hu_json_get_bool(cval, "uses_emoji", false);
             }
 
             /* Proactive engagement config */
