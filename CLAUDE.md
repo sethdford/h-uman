@@ -49,11 +49,11 @@ Every mission below includes an honest difficulty assessment from code-level red
 
 | # | Mission | Honest Difficulty | Success Metric |
 |---|---------|------------------|----------------|
-| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays. 9,063 tests passing. Remaining: onboarding wizard, A/B validation. | Persona context in every agent turn ✅; starter persona on first run ✅ |
-| **M2** | **Personal Model** — Unified model-of-the-person from memory | **Very Hard.** No unified artifact exists. Fact extraction is brittle pattern matching ("i like", "i never"). Many parallel memory mechanisms, no single learned representation. | Measurable adaptation in tone/timing after 50 conversations |
+| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays. `human onboard` exists (`src/onboard.c`, 405 LOC) and is auto-suggested on first run when no config exists. 9,291 tests passing. Remaining: A/B validation, expanded persona examples per channel. | Persona context in every agent turn ✅; starter persona on first run ✅; onboarding wizard ✅ |
+| **M2** | **Personal Model** — Unified model-of-the-person from memory | **Hard.** Single artifact exists (`hu_personal_model_t`, `src/memory/personal_model.c`); facts/topics/goals/style are accumulated per turn, summarized via `hu_personal_model_build_prompt`, and injected into every system prompt (FIX 1, commit d1d9b0ee — `tests/test_personal_model.c::personal_model_reaches_system_prompt_via_config`). Fact extraction is still heuristic pattern matching ("i like", "i never"); learned-style adaptation lives only in the prompt summary, not in a model checkpoint. | Measurable adaptation in tone/timing after 50 conversations |
 | **M3** | **Private Learning** — On-device ML personalization | **Hardest. Narrative doesn't match code.** `lora-persona` trains a reference GPT on example banks, not the frontier chat model. `--checkpoint` is accepted but `(void)checkpoint_path`. CPU-only. ggml "planned." | LoRA adapter that measurably improves persona fidelity on inference |
-| **M4** | **Ship to Users** — 100 DAU | **Medium.** First-run drops to defaults with a log line. No onboarding wizard. Persona defaults are NULL. Config assumes cloud provider credentials. | 100 DAU with 30% day-7 retention |
-| **M5** | **HuLa as Platform** — Developer-facing SDK | **Hard.** HuLa is internal C IR coupled to agent/policy/spawn. No semver, no bindings, no hosted docs. | External devs write and run HuLa programs |
+| **M4** | **Ship to Users** — 100 DAU | **Medium.** `human onboard` exists (interactive setup wizard). First-run code path checks for missing config and points the user at the wizard. Persona defaults still need to be richer per channel; config still assumes cloud provider credentials. | 100 DAU with 30% day-7 retention |
+| **M5** | **HuLa as Platform** — Developer-facing SDK | **Hard.** Public SDK header lives at `include/human/hula_sdk.h` with semver macros (`HU_HULA_SDK_VERSION_STRING "0.1.0"`); JSON wire format is documented in the header. Still missing: language bindings (Python/Node), hosted docs, public examples gallery. | External devs write and run HuLa programs |
 | **M6** | **Channel Focus** — Prioritize 4 Tier-1 (Telegram, Discord, iMessage, Slack) across 31 messaging channels | **Easy (strategy), Medium (execution).** 43 channel `.c` files. This is prioritization, not a code change. | Tier 1 score 8/10+ on naturalness eval |
 
 ### Competitive Position (April 2026 — Honest)
@@ -79,7 +79,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (8,500+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (9,291+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -151,7 +151,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 8,500+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 9,291+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -178,7 +178,7 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 | --------------------------------- | --------------------------------------------------------------------- |
 | `src/`                            | All C source (~710 files, ~270K lines)                                |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 423 test files, 8,500+ tests                                          |
+| `tests/`                          | 423 test files, 9,291+ tests                                          |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |
