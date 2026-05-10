@@ -203,9 +203,25 @@ Landed via FIX 24 (`feat(daemon): config-driven LoRA adapter auto-load`):
   `test_huml_provider_load_unload_adapter` covers the load path the
   daemon dispatches into.
 
-### 4.2 Frontier-provider chat-time merge (blocked on Bridge A or B)
+### 4.2 Frontier-provider chat-time merge (Bridge A scaffold landed; libllama vendor-in pending)
 
-- Only applies once `llamacpp` or `mlx` provider lands.
+- The provider exists at `src/providers/llamacpp.c` with the full
+  vtable wired (chat, load_adapter, unload_adapter, active_adapter,
+  deinit). All hooks return `HU_ERR_NOT_SUPPORTED` until the
+  CMake option `HU_ENABLE_LLAMACPP=ON` is set AND `third_party/llama.cpp/`
+  is vendored (or libllama is reachable via the system include path).
+- Factory dispatch (`src/providers/factory.c`): selecting `provider:
+  "llamacpp"` in config now succeeds; the daemon will tolerate the
+  NOT_SUPPORTED return from chat by falling back to whatever real
+  provider is configured alongside.
+- Six scaffold tests (`tests/test_llamacpp_provider.c`) lock down
+  the contract: factory ownership, NULL-arg rejection, NOT_SUPPORTED
+  fallthrough on chat / load_adapter / unload_adapter, NULL active
+  adapter when nothing is loaded.
+- Real implementation is gated behind `__has_include("llama.h")` so
+  vendoring upstream is the only remaining step. When that lands the
+  six placeholder paths flip to live calls (annotated inline in
+  `llamacpp.c`).
 - Same vtable triple, but the implementation maps onto the underlying
   framework's adapter API.
 

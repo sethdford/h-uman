@@ -42,6 +42,7 @@ endif()
 option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
+option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time LoRA merging (W13 Bridge A)" OFF)
 option(HU_ENABLE_COREML "Enable CoreML/MLX provider (macOS only)" OFF)
 if(APPLE)
     option(HU_ENABLE_APPLE_INTELLIGENCE "Enable Apple Intelligence provider (on-device)" ON)
@@ -930,6 +931,7 @@ list(APPEND HU_CORE_SOURCES
     src/voice/turn_signal.c
     src/voice/semantic_eot.c
     src/providers/embedded.c
+    src/providers/llamacpp.c
 )
 
 if(HU_ENABLE_COREML)
@@ -1509,6 +1511,32 @@ if(HU_ENABLE_EMBEDDED_MODEL)
     message(STATUS "Embedded model provider: enabled (llama.cpp/llama-cli)")
 else()
     message(STATUS "Embedded model provider: disabled")
+endif()
+
+# W13 Bridge A — in-process llama.cpp with chat-time LoRA merging.
+# When ON, expects libllama headers and library to be reachable via
+# either a vendored `third_party/llama.cpp/` build, find_package(Llama),
+# or pkg-config. Today the source compiles unconditionally and the
+# vtable returns HU_ERR_NOT_SUPPORTED until the upstream is linked.
+if(HU_ENABLE_LLAMACPP)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_LLAMACPP=1)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_LLAMACPP=1)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt")
+        # Vendored llama.cpp. Build it as a static lib without examples
+        # (those drag in unrelated deps and fail under -Werror).
+        set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+        add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
+        target_include_directories(human_core PRIVATE third_party/llama.cpp/include)
+        target_include_directories(human_core_test PRIVATE third_party/llama.cpp/include)
+        target_link_libraries(human_core PRIVATE llama)
+        message(STATUS "llama.cpp provider: enabled (vendored)")
+    else()
+        message(STATUS "llama.cpp provider: enabled (no vendored upstream; vtable will return NOT_SUPPORTED until libllama is linked)")
+    endif()
+else()
+    message(STATUS "llama.cpp provider: disabled (compiles as NOT_SUPPORTED stub)")
 endif()
 
 if(HU_ENABLE_APPLE_INTELLIGENCE)
@@ -2492,6 +2520,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_lsp.c
     tests/test_webrtc.c
     tests/test_embedded_provider.c
+    tests/test_llamacpp_provider.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c

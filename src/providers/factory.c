@@ -1,6 +1,7 @@
 #include "human/providers/factory.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/string.h"
 #include "human/provider.h"
 #include "human/providers/anthropic.h"
 #include "human/providers/claude_cli.h"
@@ -15,6 +16,10 @@
 #ifdef HU_ENABLE_EMBEDDED_MODEL
 #include "human/providers/embedded.h"
 #endif
+/* W13 Bridge A — always include the header so the dispatcher can
+ * compile-test the symbol; the implementation falls through to
+ * HU_ERR_NOT_SUPPORTED when HU_ENABLE_LLAMACPP is undefined. */
+#include "human/providers/llamacpp.h"
 #ifdef HU_ENABLE_ML
 #include "human/providers/huml.h"
 #endif
@@ -223,6 +228,24 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
         return hu_embedded_provider_create(alloc, &ec, out);
     }
 #endif
+
+    /* W13 Bridge A — in-process llama.cpp. The factory always succeeds
+     * when selected; the chat/load_adapter hooks return NOT_SUPPORTED
+     * when libllama isn't linked. base_url, when present, is treated
+     * as the GGUF model path. */
+    if (name_len == 8 && memcmp(name, "llamacpp", 8) == 0) {
+        hu_llamacpp_config_t lc = {0};
+        if (base_url && base_url_len > 0) {
+            char *path = hu_strndup(alloc, base_url, base_url_len);
+            if (!path)
+                return HU_ERR_OUT_OF_MEMORY;
+            lc.model_path = path;
+        }
+        hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
+        if (lc.model_path)
+            alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
+        return r;
+    }
 
 #ifdef HU_ENABLE_ML
     if (name_len == 4 && memcmp(name, "huml", 4) == 0) {
