@@ -609,8 +609,10 @@ set(HU_CORE_SOURCES
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
     src/memory/cross_graph.c
+    src/memory/erasure.c
     src/agent/autodream.c
     src/agent/case_based.c
+    src/agent/response_verifier.c
     src/memory/multimodal_index.c
     src/memory/lifecycle/cache.c
     src/memory/lifecycle/hygiene.c
@@ -2208,6 +2210,7 @@ set(HU_TEST_SOURCES
     tests/test_w1_bitemporal.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
+    tests/test_w4_verifier.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
