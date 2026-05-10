@@ -873,6 +873,15 @@ list(APPEND HU_CORE_SOURCES
     src/a2a.c
     src/eval.c
     src/eval/consistency.c
+    src/evaluation/evaluation.c
+    src/evaluation/evaluation_locomo.c
+    src/evaluation/evaluation_longmemeval.c
+    src/evaluation/evaluation_dmr.c
+    src/evaluation/evaluation_minja.c
+    src/evaluation/evaluation_memoryagentbench.c
+    src/evaluation/evaluation_frontier_compare.c
+    src/evaluation/evaluation_baseline.c
+    src/evaluation/evaluation_regression.c
     src/eval/turing_score.c
     src/eval/turing_adversarial.c
     src/eval_judge.c
@@ -2262,6 +2271,7 @@ set(HU_TEST_SOURCES
     tests/test_w12_planner.c
     tests/test_w13_learner.c
     tests/test_w15_keystore.c
+    tests/test_w16_evaluation.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
