@@ -2,8 +2,9 @@
 #
 # W16 — Fetch real evaluation datasets and transform them into our schema.
 #
-# Today this populates the LoCoMo corpus.  LongMemEval and MINJA loaders
-# follow once their backends adopt the same disk-corpus pattern.
+# Today this populates LoCoMo and LongMemEval corpora.  MINJA and
+# MemoryAgentBench loaders follow once their backends adopt the same
+# disk-corpus pattern.
 #
 # Defaults output dir to $HU_EVAL_DATA_DIR or $HOME/.human/eval-datasets.
 # Use `--dir <path>` to override and `--suite <name>` to fetch a single
@@ -14,6 +15,7 @@
 #
 # Public sources (research-licensed, redistributable for non-commercial use):
 #   - LoCoMo: https://github.com/snap-stanford/locomo (MIT)
+#   - LongMemEval: https://github.com/xiaowu0162/LongMemEval (Apache-2.0)
 #
 # Schema (per <suite>.json):
 #   {
@@ -134,14 +136,94 @@ fetch_locomo() {
   echo "[locomo] wrote $count items to $OUT_DIR/locomo.json"
 }
 
+# ── LongMemEval ─────────────────────────────────────────────────────────────
+#
+# Upstream releases the oracle QA split as a single JSON file with rows shaped:
+#   { question_id, question_type, question, answer, ... }
+#
+# We bucket question_type into our 5 categories and synthesise keyword sets
+# from the gold answer (lowercased, stop-word filtered, capped at 4). The
+# scorer is keyword-overlap against `candidate_answer` — for the bundled
+# corpus we set `candidate_answer = answer` so loading produces an honest
+# 1.0 baseline. To score a real provider, regenerate this file with
+# `candidate_answer` set to the model's output (post-generation pipeline,
+# not done here).
+
+fetch_longmemeval() {
+  local upstream="https://raw.githubusercontent.com/xiaowu0162/LongMemEval/main/data/longmemeval_s.json"
+  local pinned_sha=""
+  local raw="$TMP_DIR/longmemeval_raw.json"
+  echo "[longmemeval] fetching $upstream"
+  if ! curl -fsSL --max-time 60 -o "$raw" "$upstream"; then
+    echo "[longmemeval] download failed" >&2
+    return 2
+  fi
+  if [[ -n "$pinned_sha" ]]; then
+    local got
+    got=$(sha256 "$raw")
+    if [[ "$got" != "$pinned_sha" ]]; then
+      echo "[longmemeval] checksum mismatch: expected $pinned_sha got $got" >&2
+      return 2
+    fi
+  fi
+
+  jq '
+    def bucket(t):
+      if (t // "" | ascii_downcase) | test("temporal") then "temporal"
+      elif (t // "" | ascii_downcase) | test("multi") then "multi_hop"
+      elif (t // "" | ascii_downcase) | test("knowledge") then "knowledge_update"
+      elif (t // "" | ascii_downcase) | test("abstention|refus") then "abstention"
+      else "single_hop"
+      end;
+    def kws(ans):
+      [ ans | tostring | ascii_downcase
+              | gsub("[^a-z0-9 ]"; " ")
+              | split(" ")
+              | map(select(length > 2 and . != "the" and . != "and"
+                           and . != "for" and . != "are" and . != "was"
+                           and . != "were" and . != "with" and . != "from"))
+              | unique
+              | .[0:4] ];
+    {
+      name: "longmemeval",
+      version: 1,
+      items: [
+        ( . // [] )[] |
+        select(.answer != null and .question != null and (.answer | tostring | length) > 0) |
+        {
+          category: bucket(.question_type),
+          prompt: (.question | tostring),
+          candidate_answer: (.answer | tostring),
+          keywords: kws(.answer)
+        } |
+        select((.keywords | length) > 0)
+      ]
+    }
+  ' "$raw" > "$TMP_DIR/longmemeval.json"
+
+  local count
+  count=$(jq '.items | length' "$TMP_DIR/longmemeval.json")
+  if [[ "$count" -eq 0 ]]; then
+    echo "[longmemeval] transform produced 0 items; refusing to overwrite" >&2
+    return 2
+  fi
+
+  mv "$TMP_DIR/longmemeval.json" "$OUT_DIR/longmemeval.json"
+  echo "[longmemeval] wrote $count items to $OUT_DIR/longmemeval.json"
+}
+
 case "$SUITE" in
   all)
     fetch_locomo
+    fetch_longmemeval
     ;;
   locomo)
     fetch_locomo
     ;;
-  longmemeval|minja|memoryagentbench)
+  longmemeval)
+    fetch_longmemeval
+    ;;
+  minja|memoryagentbench)
     echo "[$SUITE] fetcher pending — backend still uses inline synthetic split" >&2
     exit 1
     ;;

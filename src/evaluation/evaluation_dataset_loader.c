@@ -236,3 +236,171 @@ hu_error_t hu_eval_locomo_load(hu_allocator_t *alloc, hu_eval_locomo_dataset_t *
     out->count = kept;
     return HU_OK;
 }
+
+/* ── LongMemEval loader ───────────────────────────────────────────────── */
+
+void hu_eval_lme_free(hu_allocator_t *alloc, hu_eval_lme_dataset_t *ds) {
+    if (!alloc || !ds || !ds->items)
+        return;
+    for (size_t i = 0; i < ds->count; i++) {
+        hu_eval_lme_item_t *it = &ds->items[i];
+        if (it->category)
+            alloc->free(alloc->ctx, it->category, strlen(it->category) + 1);
+        if (it->prompt)
+            alloc->free(alloc->ctx, it->prompt, strlen(it->prompt) + 1);
+        if (it->candidate_answer)
+            alloc->free(alloc->ctx, it->candidate_answer, strlen(it->candidate_answer) + 1);
+        for (size_t k = 0; k < HU_EVAL_LME_MAX_KEYWORDS; k++)
+            if (it->keywords[k])
+                alloc->free(alloc->ctx, it->keywords[k], strlen(it->keywords[k]) + 1);
+    }
+    alloc->free(alloc->ctx, ds->items, ds->count * sizeof(hu_eval_lme_item_t));
+    ds->items = NULL;
+    ds->count = 0;
+}
+
+/* Free a partially-populated row + the rows accumulated so far + the
+ * (still-original-sized) array. Used in OOM rollback paths. */
+static void lme_rollback_partial(hu_allocator_t *alloc, hu_eval_lme_item_t *cur,
+                                  hu_eval_lme_item_t *list, size_t kept,
+                                  size_t array_n) {
+    if (cur) {
+        if (cur->category)
+            alloc->free(alloc->ctx, cur->category, strlen(cur->category) + 1);
+        if (cur->prompt)
+            alloc->free(alloc->ctx, cur->prompt, strlen(cur->prompt) + 1);
+        if (cur->candidate_answer)
+            alloc->free(alloc->ctx, cur->candidate_answer,
+                        strlen(cur->candidate_answer) + 1);
+        for (size_t k = 0; k < HU_EVAL_LME_MAX_KEYWORDS; k++)
+            if (cur->keywords[k])
+                alloc->free(alloc->ctx, cur->keywords[k], strlen(cur->keywords[k]) + 1);
+        memset(cur, 0, sizeof(*cur));
+    }
+    for (size_t i = 0; i < kept; i++) {
+        hu_eval_lme_item_t *prev = &list[i];
+        if (prev->category)
+            alloc->free(alloc->ctx, prev->category, strlen(prev->category) + 1);
+        if (prev->prompt)
+            alloc->free(alloc->ctx, prev->prompt, strlen(prev->prompt) + 1);
+        if (prev->candidate_answer)
+            alloc->free(alloc->ctx, prev->candidate_answer,
+                        strlen(prev->candidate_answer) + 1);
+        for (size_t k = 0; k < HU_EVAL_LME_MAX_KEYWORDS; k++)
+            if (prev->keywords[k])
+                alloc->free(alloc->ctx, prev->keywords[k], strlen(prev->keywords[k]) + 1);
+    }
+    alloc->free(alloc->ctx, list, array_n * sizeof(hu_eval_lme_item_t));
+}
+
+hu_error_t hu_eval_lme_load(hu_allocator_t *alloc, hu_eval_lme_dataset_t *out) {
+    if (!alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    out->items = NULL;
+    out->count = 0;
+
+    char path[768];
+    if (!hu_eval_dataset_resolve_path("longmemeval", path, sizeof(path)))
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char *buf = NULL;
+    size_t buflen = 0;
+    hu_error_t err = read_file(alloc, path, &buf, &buflen);
+    if (err != HU_OK)
+        return err;
+
+    hu_json_value_t *root = NULL;
+    err = hu_json_parse(alloc, buf, buflen, &root);
+    alloc->free(alloc->ctx, buf, buflen + 1);
+    if (err != HU_OK)
+        return err;
+    if (!root || root->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
+        return HU_ERR_TOOL_VALIDATION;
+    }
+    hu_json_value_t *items = hu_json_object_get(root, "items");
+    if (!items || items->type != HU_JSON_ARRAY || items->data.array.len == 0) {
+        hu_json_free(alloc, root);
+        return HU_ERR_TOOL_VALIDATION;
+    }
+
+    size_t n = items->data.array.len;
+    hu_eval_lme_item_t *list = (hu_eval_lme_item_t *)alloc->alloc(
+        alloc->ctx, n * sizeof(hu_eval_lme_item_t));
+    if (!list) {
+        hu_json_free(alloc, root);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(list, 0, n * sizeof(hu_eval_lme_item_t));
+
+    size_t kept = 0;
+    for (size_t i = 0; i < n; i++) {
+        hu_json_value_t *e = items->data.array.items[i];
+        if (!e || e->type != HU_JSON_OBJECT)
+            continue;
+        const char *cat = hu_json_get_string(e, "category");
+        const char *pr = hu_json_get_string(e, "prompt");
+        const char *ans = hu_json_get_string(e, "candidate_answer");
+        hu_json_value_t *kws = hu_json_object_get(e, "keywords");
+        if (!cat || !pr || !ans || !kws || kws->type != HU_JSON_ARRAY ||
+            kws->data.array.len == 0)
+            continue; /* skip malformed rows */
+
+        hu_eval_lme_item_t *it = &list[kept];
+        it->category = dup_or_null(alloc, cat);
+        it->prompt = dup_or_null(alloc, pr);
+        it->candidate_answer = dup_or_null(alloc, ans);
+        if (!it->category || !it->prompt || !it->candidate_answer) {
+            lme_rollback_partial(alloc, it, list, kept, n);
+            hu_json_free(alloc, root);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        size_t kw_total = kws->data.array.len;
+        if (kw_total > HU_EVAL_LME_MAX_KEYWORDS)
+            kw_total = HU_EVAL_LME_MAX_KEYWORDS;
+        size_t kept_kw = 0;
+        for (size_t k = 0; k < kw_total; k++) {
+            hu_json_value_t *kw = kws->data.array.items[k];
+            if (!kw || kw->type != HU_JSON_STRING || !kw->data.string.ptr)
+                continue;
+            char *copy = (char *)alloc->alloc(alloc->ctx, kw->data.string.len + 1);
+            if (!copy) {
+                lme_rollback_partial(alloc, it, list, kept, n);
+                hu_json_free(alloc, root);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memcpy(copy, kw->data.string.ptr, kw->data.string.len);
+            copy[kw->data.string.len] = '\0';
+            it->keywords[kept_kw++] = copy;
+        }
+        if (kept_kw == 0) {
+            /* No usable keywords — skip this row. */
+            alloc->free(alloc->ctx, it->category, strlen(it->category) + 1);
+            alloc->free(alloc->ctx, it->prompt, strlen(it->prompt) + 1);
+            alloc->free(alloc->ctx, it->candidate_answer,
+                        strlen(it->candidate_answer) + 1);
+            memset(it, 0, sizeof(*it));
+            continue;
+        }
+        it->keyword_count = kept_kw;
+        kept++;
+    }
+    hu_json_free(alloc, root);
+
+    if (kept == 0) {
+        alloc->free(alloc->ctx, list, n * sizeof(hu_eval_lme_item_t));
+        return HU_ERR_TOOL_VALIDATION;
+    }
+    if (kept < n) {
+        hu_eval_lme_item_t *tight = (hu_eval_lme_item_t *)alloc->alloc(
+            alloc->ctx, kept * sizeof(hu_eval_lme_item_t));
+        if (tight) {
+            memcpy(tight, list, kept * sizeof(hu_eval_lme_item_t));
+            alloc->free(alloc->ctx, list, n * sizeof(hu_eval_lme_item_t));
+            list = tight;
+        }
+    }
+    out->items = list;
+    out->count = kept;
+    return HU_OK;
+}

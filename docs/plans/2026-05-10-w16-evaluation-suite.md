@@ -69,11 +69,22 @@ synthetic split when the file is absent or malformed. The
 | Suite | Disk loader landed | Fetcher landed |
 |-------|---------------------|----------------|
 | locomo | ✅ `evaluation_dataset_loader.c` | ✅ `scripts/fetch-evaluation-datasets.sh --suite locomo` |
-| longmemeval | ⏳ pending | ⏳ pending |
+| longmemeval | ✅ `hu_eval_lme_load` (5-category split) | ✅ `scripts/fetch-evaluation-datasets.sh --suite longmemeval` |
 | dmr | ⏳ pending | ⏳ pending |
 | minja | ⏳ pending (uses W1 trust scorer offline) | ⏳ pending |
 | memoryagentbench | ⏳ stub | ⏳ stub |
 | frontier_compare | ⏳ stub | ⏳ stub (live API gated) |
+
+Per-suite schema:
+
+- `locomo`: `{ fact_id, fact, query, expected_id }`
+- `longmemeval`: `{ category, prompt, candidate_answer, keywords[1..4] }`
+  - `category` ∈ `{temporal, multi_hop, single_hop, abstention, knowledge_update}`
+  - Scorer is whole-word, case-insensitive keyword overlap on
+    `candidate_answer` (no provider call). To score a real model,
+    regenerate the file with `candidate_answer` set to the model
+    output; the bundled fetcher uses the gold answer so loading
+    produces a clean 1.0 baseline.
 
 Source URLs (LoCoMo: https://github.com/snap-stanford/locomo, MIT)
 documented inline in the fetch script. Each download is checksum-pinned

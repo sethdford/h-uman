@@ -369,7 +369,8 @@ static void test_w16_offline_judge_works_without_api_key(void) {
     HU_ASSERT_EQ(make_lme(A(), &lme_e), HU_OK);
     hu_evaluation_run_report_t mr = {0};
     HU_ASSERT_EQ(hu_evaluation_run_suite(&lme_e, &mr), HU_OK);
-    HU_ASSERT_EQ((int)mr.metrics_count, 5);
+    /* 5 categories + real_corpus indicator. */
+    HU_ASSERT_EQ((int)mr.metrics_count, 6);
 
     hu_evaluation_report_free(A(), &lr);
     hu_evaluation_report_free(A(), &mr);
@@ -456,11 +457,14 @@ static void test_w16_invalid_args_rejected(void) {
 /* ── 10. LongMemEval reports five categories ───────────────────────────── */
 
 static void test_w16_longmemeval_returns_five_categories(void) {
+    /* Pin to synthetic mode by pointing at a guaranteed-empty directory. */
+    setenv("HU_EVAL_DATA_DIR", "/tmp/hu_w16_no_corpus_dir_lme", 1);
     hu_evaluation_t e = {0};
     HU_ASSERT_EQ(make_lme(A(), &e), HU_OK);
     hu_evaluation_run_report_t r = {0};
     HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
-    HU_ASSERT_EQ((int)r.metrics_count, 5);
+    /* 5 category metrics + real_corpus indicator. */
+    HU_ASSERT_EQ((int)r.metrics_count, 6);
 
     static const char *const cats[] = {"category_temporal", "category_multi_hop",
                                        "category_single_hop", "category_abstention",
@@ -470,9 +474,105 @@ static void test_w16_longmemeval_returns_five_categories(void) {
         HU_ASSERT_NOT_NULL(m);
         HU_ASSERT(m->score >= 0.0 && m->score <= 1.0);
     }
+    const hu_evaluation_metric_t *rc = find_metric(&r, "real_corpus");
+    HU_ASSERT_NOT_NULL(rc);
+    HU_ASSERT_FLOAT_EQ(rc->score, 0.0, 1e-9);
 
     hu_evaluation_report_free(A(), &r);
     hu_evaluation_close(&e);
+    unsetenv("HU_EVAL_DATA_DIR");
+}
+
+/* ── 10b. LongMemEval loads a real corpus when a JSON file is present ──── */
+
+static void test_w16_longmemeval_loads_real_corpus_from_disk(void) {
+    char dir_template[] = "/tmp/hu_w16_lme_corpus_XXXXXX";
+    char *dir = mkdtemp(dir_template);
+    HU_ASSERT_NOT_NULL(dir);
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/longmemeval.json", dir);
+    FILE *f = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(f);
+    /* 4 rows, every keyword appears in candidate_answer so the prompt
+     * passes — we're testing data plumbing, not the keyword scorer. */
+    const char *body =
+        "{\n"
+        "  \"name\": \"longmemeval\",\n"
+        "  \"version\": 1,\n"
+        "  \"items\": [\n"
+        "    {\"category\": \"temporal\", \"prompt\": \"when?\","
+        " \"candidate_answer\": \"saturday afternoon april\","
+        " \"keywords\": [\"saturday\", \"april\"]},\n"
+        "    {\"category\": \"multi_hop\", \"prompt\": \"who?\","
+        " \"candidate_answer\": \"alice and bob met in paris\","
+        " \"keywords\": [\"alice\", \"paris\"]},\n"
+        "    {\"category\": \"single_hop\", \"prompt\": \"what?\","
+        " \"candidate_answer\": \"raspberry pi 5 board\","
+        " \"keywords\": [\"raspberry\", \"pi\"]},\n"
+        "    {\"category\": \"knowledge_update\", \"prompt\": \"now?\","
+        " \"candidate_answer\": \"firmware version 2 active\","
+        " \"keywords\": [\"firmware\", \"active\"]}\n"
+        "  ]\n"
+        "}\n";
+    fwrite(body, 1, strlen(body), f);
+    fclose(f);
+
+    setenv("HU_EVAL_DATA_DIR", dir, 1);
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_lme(A(), &e), HU_OK);
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+
+    HU_ASSERT_EQ((int)r.prompts_total, 4);
+    const hu_evaluation_metric_t *rc = find_metric(&r, "real_corpus");
+    HU_ASSERT_NOT_NULL(rc);
+    HU_ASSERT_FLOAT_EQ(rc->score, 1.0, 1e-9);
+    /* Every keyword appears in its candidate_answer → all 4 prompts pass. */
+    HU_ASSERT_EQ((int)r.prompts_passed, 4);
+
+    /* And every represented category should score 1.0; the remaining
+     * "abstention" bucket has 0 items in this corpus and reports 0.0. */
+    const hu_evaluation_metric_t *temp = find_metric(&r, "category_temporal");
+    HU_ASSERT_NOT_NULL(temp);
+    HU_ASSERT_FLOAT_EQ(temp->score, 1.0, 1e-9);
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+    unsetenv("HU_EVAL_DATA_DIR");
+    (void)remove(path);
+    (void)rmdir(dir);
+}
+
+/* ── 10c. LongMemEval falls back gracefully when JSON is malformed ─────── */
+
+static void test_w16_longmemeval_falls_back_when_corpus_malformed(void) {
+    char dir_template[] = "/tmp/hu_w16_lme_bad_XXXXXX";
+    char *dir = mkdtemp(dir_template);
+    HU_ASSERT_NOT_NULL(dir);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/longmemeval.json", dir);
+    FILE *f = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"name\": \"longmemeval\", \"version\": 1}\n", f);
+    fclose(f);
+
+    setenv("HU_EVAL_DATA_DIR", dir, 1);
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_lme(A(), &e), HU_OK);
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+    /* Inline synthetic split has 10 rows. */
+    HU_ASSERT_EQ((int)r.prompts_total, 10);
+    const hu_evaluation_metric_t *rc = find_metric(&r, "real_corpus");
+    HU_ASSERT_NOT_NULL(rc);
+    HU_ASSERT_FLOAT_EQ(rc->score, 0.0, 1e-9);
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+    unsetenv("HU_EVAL_DATA_DIR");
+    (void)remove(path);
+    (void)rmdir(dir);
 }
 
 /* ── 11. DMR recall@K is correct on the known synthetic index ──────────── */
@@ -548,6 +648,8 @@ void run_w16_evaluation_tests(void) {
     HU_RUN_TEST(test_w16_evaluation_run_report_serialize_round_trip);
     HU_RUN_TEST(test_w16_invalid_args_rejected);
     HU_RUN_TEST(test_w16_longmemeval_returns_five_categories);
+    HU_RUN_TEST(test_w16_longmemeval_loads_real_corpus_from_disk);
+    HU_RUN_TEST(test_w16_longmemeval_falls_back_when_corpus_malformed);
     HU_RUN_TEST(test_w16_dmr_recall_at_k_correct_on_known_index);
     HU_RUN_TEST(test_w16_memoryagentbench_stub_runs_deterministically);
 }

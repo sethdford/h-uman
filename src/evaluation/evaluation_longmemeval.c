@@ -15,6 +15,7 @@
  */
 
 #include "human/evaluation/evaluation.h"
+#include "evaluation_dataset_loader.h"
 #include "evaluation_internal.h"
 
 #include "human/core/allocator.h"
@@ -97,8 +98,21 @@ static const char *const LME_CATEGORIES[] = {
 };
 static const size_t LME_CAT_N = sizeof(LME_CATEGORIES) / sizeof(LME_CATEGORIES[0]);
 
+/* Working-set view: same lifetime model as LoCoMo — either a borrowed
+ * pointer into the inline synthetic table OR a malloc-owned array
+ * materialised from a real on-disk corpus. */
 typedef struct {
-    int unused;
+    const char *category;
+    const char *candidate_answer;
+    const char *keywords[HU_EVAL_LME_MAX_KEYWORDS];
+    size_t keyword_count;
+} lme_view_t;
+
+typedef struct {
+    int loaded;
+    lme_view_t *items;
+    size_t count;
+    hu_eval_lme_dataset_t owned;
 } lme_ctx_t;
 
 /* ── helpers ────────────────────────────────────────────────────────────── */
@@ -127,15 +141,15 @@ static bool contains_word_ci(const char *hay, const char *word) {
     return false;
 }
 
-/* Pass iff every non-NULL keyword appears as a whole word in the candidate. */
-static bool item_passes(const lme_item_t *item) {
-    for (size_t k = 0; k < sizeof(item->keywords) / sizeof(item->keywords[0]); k++) {
+/* Pass iff every keyword appears as a whole word in the candidate. */
+static bool view_passes(const lme_view_t *item) {
+    for (size_t k = 0; k < item->keyword_count; k++) {
         if (!item->keywords[k])
-            break;
+            return false;
         if (!contains_word_ci(item->candidate_answer, item->keywords[k]))
             return false;
     }
-    return true;
+    return item->keyword_count > 0;
 }
 
 /* ── vtable ─────────────────────────────────────────────────────────────── */
@@ -154,31 +168,86 @@ static int64_t now_ms(void) {
     return (int64_t)time(NULL) * 1000;
 }
 
-static hu_error_t lme_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_report_t *out) {
-    (void)ctx;
-    if (!alloc || !out)
-        return HU_ERR_INVALID_ARGUMENT;
+/* Materialise the working set from disk, falling back to the inline
+ * synthetic split when the on-disk corpus is missing or malformed. */
+static hu_error_t lme_ensure_working_set(lme_ctx_t *c, hu_allocator_t *alloc) {
+    if (c->items)
+        return HU_OK;
+    hu_error_t err = hu_eval_lme_load(alloc, &c->owned);
+    if (err == HU_OK && c->owned.count > 0) {
+        lme_view_t *view = (lme_view_t *)alloc->alloc(
+            alloc->ctx, c->owned.count * sizeof(lme_view_t));
+        if (!view) {
+            hu_eval_lme_free(alloc, &c->owned);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        for (size_t i = 0; i < c->owned.count; i++) {
+            view[i].category = c->owned.items[i].category;
+            view[i].candidate_answer = c->owned.items[i].candidate_answer;
+            view[i].keyword_count = c->owned.items[i].keyword_count;
+            for (size_t k = 0; k < HU_EVAL_LME_MAX_KEYWORDS; k++)
+                view[i].keywords[k] = c->owned.items[i].keywords[k];
+        }
+        c->items = view;
+        c->count = c->owned.count;
+        c->loaded = 1;
+        return HU_OK;
+    }
+    /* Fall back to inline synthetic. */
+    lme_view_t *view = (lme_view_t *)alloc->alloc(
+        alloc->ctx, LME_N * sizeof(lme_view_t));
+    if (!view)
+        return HU_ERR_OUT_OF_MEMORY;
+    for (size_t i = 0; i < LME_N; i++) {
+        view[i].category = LME_ITEMS[i].category;
+        view[i].candidate_answer = LME_ITEMS[i].candidate_answer;
+        size_t kw = 0;
+        for (; kw < HU_EVAL_LME_MAX_KEYWORDS; kw++) {
+            if (!LME_ITEMS[i].keywords[kw])
+                break;
+            view[i].keywords[kw] = LME_ITEMS[i].keywords[kw];
+        }
+        view[i].keyword_count = kw;
+        /* zero unused keyword slots */
+        for (; kw < HU_EVAL_LME_MAX_KEYWORDS; kw++)
+            view[i].keywords[kw] = NULL;
+    }
+    c->items = view;
+    c->count = LME_N;
+    c->loaded = 0;
+    return HU_OK;
+}
 
-    hu_error_t err = hu_evaluation_report_init(alloc, "longmemeval", out);
+static hu_error_t lme_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_report_t *out) {
+    if (!alloc || !out || !ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    lme_ctx_t *c = (lme_ctx_t *)ctx;
+
+    hu_error_t err = lme_ensure_working_set(c, alloc);
+    if (err != HU_OK)
+        return err;
+
+    err = hu_evaluation_report_init(alloc, "longmemeval", out);
     if (err != HU_OK)
         return err;
     out->started_at_ms = now_ms();
 
     /* Aggregate per category. */
     size_t total_passed = 0;
-    for (size_t c = 0; c < LME_CAT_N; c++) {
+    for (size_t cat_idx = 0; cat_idx < LME_CAT_N; cat_idx++) {
         size_t passed = 0;
         size_t in_cat = 0;
-        for (size_t i = 0; i < LME_N; i++) {
-            if (strcmp(LME_ITEMS[i].category, LME_CATEGORIES[c]) != 0)
+        for (size_t i = 0; i < c->count; i++) {
+            if (strcmp(c->items[i].category, LME_CATEGORIES[cat_idx]) != 0)
                 continue;
             in_cat++;
-            if (item_passes(&LME_ITEMS[i]))
+            if (view_passes(&c->items[i]))
                 passed++;
         }
         double score = in_cat == 0 ? 0.0 : (double)passed / (double)in_cat;
         char metric_name[64];
-        int n = snprintf(metric_name, sizeof(metric_name), "category_%s", LME_CATEGORIES[c]);
+        int n = snprintf(metric_name, sizeof(metric_name), "category_%s",
+                         LME_CATEGORIES[cat_idx]);
         if (n < 0 || (size_t)n >= sizeof(metric_name)) {
             hu_evaluation_report_free(alloc, out);
             return HU_ERR_INTERNAL;
@@ -191,9 +260,16 @@ static hu_error_t lme_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_re
         total_passed += passed;
     }
 
-    out->prompts_total = LME_N;
+    out->prompts_total = c->count;
     out->prompts_passed = total_passed;
-    out->prompts_failed = LME_N - total_passed;
+    out->prompts_failed = c->count - total_passed;
+
+    err = hu_evaluation_report_add_metric(alloc, out, "real_corpus",
+                                          c->loaded ? 1.0 : 0.0, c->count);
+    if (err != HU_OK) {
+        hu_evaluation_report_free(alloc, out);
+        return err;
+    }
     out->finished_at_ms = now_ms();
     return HU_OK;
 }
@@ -201,7 +277,14 @@ static hu_error_t lme_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_re
 static void lme_deinit(void *ctx, hu_allocator_t *alloc) {
     if (!ctx || !alloc)
         return;
-    alloc->free(alloc->ctx, ctx, sizeof(lme_ctx_t));
+    lme_ctx_t *c = (lme_ctx_t *)ctx;
+    if (c->items) {
+        alloc->free(alloc->ctx, c->items, c->count * sizeof(lme_view_t));
+        c->items = NULL;
+    }
+    if (c->loaded)
+        hu_eval_lme_free(alloc, &c->owned);
+    alloc->free(alloc->ctx, c, sizeof(lme_ctx_t));
 }
 
 static const hu_evaluation_vtable_t LME_VTABLE = {

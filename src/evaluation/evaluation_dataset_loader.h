@@ -49,6 +49,28 @@ typedef struct hu_eval_locomo_dataset {
 hu_error_t hu_eval_locomo_load(hu_allocator_t *alloc, hu_eval_locomo_dataset_t *out);
 void hu_eval_locomo_free(hu_allocator_t *alloc, hu_eval_locomo_dataset_t *ds);
 
+/* ── LongMemEval ─────────────────────────────────────────────────────── */
+
+/* Up to 4 keywords per item — same shape as the inline synthetic table. */
+#define HU_EVAL_LME_MAX_KEYWORDS 4
+
+typedef struct hu_eval_lme_item {
+    char *category;
+    char *prompt;
+    char *candidate_answer;
+    char *keywords[HU_EVAL_LME_MAX_KEYWORDS];
+    /* Number of populated keyword slots (always <= HU_EVAL_LME_MAX_KEYWORDS). */
+    size_t keyword_count;
+} hu_eval_lme_item_t;
+
+typedef struct hu_eval_lme_dataset {
+    hu_eval_lme_item_t *items;
+    size_t count;
+} hu_eval_lme_dataset_t;
+
+hu_error_t hu_eval_lme_load(hu_allocator_t *alloc, hu_eval_lme_dataset_t *out);
+void hu_eval_lme_free(hu_allocator_t *alloc, hu_eval_lme_dataset_t *ds);
+
 /* Path resolution helper — exposed for tests and the regression CLI.
  * Writes `<dir>/<suite>.json` into `out_buf`.  Returns false when the
  * resolved path doesn't fit. */
