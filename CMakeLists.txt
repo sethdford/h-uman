@@ -384,6 +384,8 @@ set(HU_CORE_SOURCES
     src/security/sensitivity.c
     src/security/sandbox.c
     src/security/skill_trust.c
+    src/security/keystore.c
+    src/security/audit_log.c
     src/observability.c
     src/observability/log_observer.c
     src/observability/metrics_observer.c
@@ -2224,6 +2226,7 @@ set(HU_TEST_SOURCES
     tests/test_w8_belief_layer.c
     tests/test_w9_world_model.c
     tests/test_w10_neural_memory.c
+    tests/test_w15_keystore.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
