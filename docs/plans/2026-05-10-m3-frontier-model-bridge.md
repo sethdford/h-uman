@@ -181,10 +181,16 @@ Landed via FIX 24 (`feat(daemon): config-driven LoRA adapter auto-load`):
     "personalization": {
       "enabled": true,
       "lora_adapter_path": "~/.human/personas/persona-default.lora",
-      "lora_adapter_id": "persona-default"
+      "lora_adapter_id": "persona-default",
+      "m3_adapter_probe_path": "~/.human/ml/m3_probe.bin"
     }
   }
   ```
+
+  `m3_adapter_probe_path` is optional: when set, the daemon runs
+  `hu_m3_frontier_adapter_try_open` at startup (see `human/ml/m3_frontier_adapter.h`)
+  and logs OK or failure — useful to validate the M3 seam before real GGUF/LoRA
+  wiring lands.
 
 - `hu_personalization_config_t` lives in `include/human/config_types.h`;
   parser at `src/config_parse.c::parse_personalization`; serializer at

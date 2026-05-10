@@ -53,11 +53,16 @@ typedef struct hu_scheduler_config {
  * Production deployments will typically set this from `human ml
  * lora-persona`'s output path; on-device personalization closes the
  * loop without a separate `human ml apply-adapter` invocation.
+ *
+ * `m3_adapter_probe_path` (optional): when set, the daemon probes the M3
+ * frontier-adapter stub (`hu_m3_frontier_adapter_try_open`) at startup and
+ * logs success or failure — validates the seam without loading LoRA.
  */
 typedef struct hu_personalization_config {
     bool enabled;
     char *lora_adapter_path;
     char *lora_adapter_id;
+    char *m3_adapter_probe_path;
 } hu_personalization_config_t;
 
 typedef struct hu_behavior_config {

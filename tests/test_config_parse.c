@@ -975,7 +975,8 @@ static void test_config_parses_personalization_block(void) {
     const char *json =
         "{\"personalization\":{\"enabled\":true,"
         "\"lora_adapter_path\":\"/tmp/persona-default.lora\","
-        "\"lora_adapter_id\":\"persona-default\"}}";
+        "\"lora_adapter_id\":\"persona-default\","
+        "\"m3_adapter_probe_path\":\"/tmp/hu_m3_probe.bin\"}}";
     hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(cfg_local.personalization.enabled);
@@ -983,6 +984,8 @@ static void test_config_parses_personalization_block(void) {
     HU_ASSERT_STR_EQ(cfg_local.personalization.lora_adapter_path,
                      "/tmp/persona-default.lora");
     HU_ASSERT_STR_EQ(cfg_local.personalization.lora_adapter_id, "persona-default");
+    HU_ASSERT_NOT_NULL(cfg_local.personalization.m3_adapter_probe_path);
+    HU_ASSERT_STR_EQ(cfg_local.personalization.m3_adapter_probe_path, "/tmp/hu_m3_probe.bin");
     hu_arena_destroy(arena);
 }
 
@@ -1001,7 +1004,73 @@ static void test_config_personalization_disabled_by_default(void) {
     HU_ASSERT_FALSE(cfg_local.personalization.enabled);
     HU_ASSERT(cfg_local.personalization.lora_adapter_path == NULL);
     HU_ASSERT(cfg_local.personalization.lora_adapter_id == NULL);
+    HU_ASSERT(cfg_local.personalization.m3_adapter_probe_path == NULL);
     hu_arena_destroy(arena);
+}
+
+static void test_config_parse_personalization_m3_probe_only(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"personalization\":{\"m3_adapter_probe_path\":\"/opt/human/m3.bin\"}}";
+    hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_FALSE(cfg_local.personalization.enabled);
+    HU_ASSERT_NULL(cfg_local.personalization.lora_adapter_path);
+    HU_ASSERT_NOT_NULL(cfg_local.personalization.m3_adapter_probe_path);
+    HU_ASSERT_STR_EQ(cfg_local.personalization.m3_adapter_probe_path, "/opt/human/m3.bin");
+    hu_arena_destroy(arena);
+}
+
+static void test_config_save_roundtrip_m3_probe_path(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.allocator = hu_arena_allocator(arena);
+    cfg.arena = arena;
+    cfg.workspace_dir = hu_strdup(&cfg.allocator, "/tmp/test-workspace");
+    cfg.default_provider = hu_strdup(&cfg.allocator, "ollama");
+    cfg.default_model = hu_strdup(&cfg.allocator, "llama3");
+    cfg.gateway.port = 3000;
+    cfg.personalization.m3_adapter_probe_path =
+        hu_strdup(&cfg.allocator, "/tmp/hu_m3_probe_fixture.bin");
+
+    char tmp_path[] = "/tmp/hu_cfg_m3_XXXXXX";
+    int fd = mkstemp(tmp_path);
+    HU_ASSERT(fd >= 0);
+    close(fd);
+    cfg.config_path = tmp_path;
+
+    HU_ASSERT_EQ(hu_config_save(&cfg), HU_OK);
+    FILE *f = fopen(tmp_path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    unlink(tmp_path);
+    HU_ASSERT_NOT_NULL(strstr(buf, "m3_adapter_probe_path"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "/tmp/hu_m3_probe_fixture.bin"));
+
+    hu_config_t cfg2;
+    memset(&cfg2, 0, sizeof(cfg2));
+    hu_arena_t *arena2 = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena2);
+    cfg2.allocator = hu_arena_allocator(arena2);
+    cfg2.arena = arena2;
+    hu_error_t err2 = hu_config_parse_json(&cfg2, buf, n);
+    HU_ASSERT_EQ(err2, HU_OK);
+    HU_ASSERT_NOT_NULL(cfg2.personalization.m3_adapter_probe_path);
+    HU_ASSERT_STR_EQ(cfg2.personalization.m3_adapter_probe_path, "/tmp/hu_m3_probe_fixture.bin");
+
+    hu_arena_destroy(arena);
+    hu_arena_destroy(arena2);
 }
 
 void run_config_parse_tests(void) {
@@ -1011,6 +1080,7 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_all_sections);
     HU_RUN_TEST(test_config_parses_personalization_block);
     HU_RUN_TEST(test_config_personalization_disabled_by_default);
+    HU_RUN_TEST(test_config_parse_personalization_m3_probe_only);
     HU_RUN_TEST(test_config_parse_malformed_missing_brace);
     HU_RUN_TEST(test_config_parse_malformed_bad_types);
     HU_RUN_TEST(test_config_env_overrides);
@@ -1057,6 +1127,7 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_save_null_cfg_returns_error);
     HU_RUN_TEST(test_config_save_null_path_returns_error);
     HU_RUN_TEST(test_config_save_roundtrip_key_fields);
+    HU_RUN_TEST(test_config_save_roundtrip_m3_probe_path);
 
     HU_TEST_SUITE("Config sandbox roundtrip");
     HU_RUN_TEST(test_config_sandbox_save_roundtrip);

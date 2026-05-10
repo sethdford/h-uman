@@ -24,6 +24,9 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
+#ifdef HU_ENABLE_ML
+#include "human/ml/m3_frontier_adapter.h"
+#endif
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
@@ -2373,6 +2376,27 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
         if (cg_db)
             hu_contact_graph_init(alloc, cg_db);
+    }
+#endif
+
+#ifdef HU_ENABLE_ML
+    /* M3 — optional stub-adapter probe (Track D1.1): validates the frontier seam
+     * without wiring chat-time inference. Logs only; never fails startup. */
+    if (config && config->personalization.m3_adapter_probe_path && alloc) {
+        const char *mp = config->personalization.m3_adapter_probe_path;
+        hu_m3_frontier_adapter_t *stub = NULL;
+        hu_error_t pe =
+            hu_m3_frontier_adapter_try_open(alloc, mp, strlen(mp), &stub);
+        if (pe == HU_OK && stub) {
+            (void)hu_m3_frontier_adapter_noop_infer(stub);
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "M3: adapter probe OK (path=%s schema=%u)", mp,
+                        (unsigned)hu_m3_frontier_adapter_schema_version(stub));
+            hu_m3_frontier_adapter_close(alloc, stub);
+        } else {
+            hu_log_warn("human", agent ? agent->observer : NULL,
+                        "M3: adapter probe failed for %s (%d)", mp, (int)pe);
+        }
     }
 #endif
 

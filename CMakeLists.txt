@@ -498,6 +498,7 @@ set(HU_CORE_SOURCES
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/contact_style_overlay.c
     src/context/style_tracker.c
     src/context/theory_of_mind.c
     src/context/mood.c
@@ -2432,6 +2433,7 @@ set(HU_TEST_SOURCES
     tests/test_emotional_graph.c
     tests/test_comfort_patterns.c
     tests/test_emotional_moments.c
+    tests/test_contact_style_overlay.c
     tests/test_graph.c
     tests/test_w1_bitemporal.c
     tests/test_w2_autodream.c

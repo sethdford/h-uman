@@ -166,7 +166,8 @@ static hu_error_t parse_scheduler(hu_allocator_t *a, hu_config_t *cfg, const hu_
  *   {
  *     "enabled": true,
  *     "lora_adapter_path": "~/.human/personas/persona-default.lora",
- *     "lora_adapter_id": "persona-default"   // optional; defaults to file basename
+ *     "lora_adapter_id": "persona-default",  // optional; defaults to file basename
+ *     "m3_adapter_probe_path": "~/.human/ml/m3_probe.bin" // optional; M3 stub probe
  *   }
  */
 static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
@@ -188,6 +189,13 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
             a->free(a->ctx, cfg->personalization.lora_adapter_id,
                     strlen(cfg->personalization.lora_adapter_id) + 1);
         cfg->personalization.lora_adapter_id = hu_strdup(a, id);
+    }
+    const char *m3p = hu_json_get_string(obj, "m3_adapter_probe_path");
+    if (m3p) {
+        if (cfg->personalization.m3_adapter_probe_path)
+            a->free(a->ctx, cfg->personalization.m3_adapter_probe_path,
+                    strlen(cfg->personalization.m3_adapter_probe_path) + 1);
+        cfg->personalization.m3_adapter_probe_path = hu_strdup(a, m3p);
     }
     return HU_OK;
 }
