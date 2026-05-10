@@ -125,7 +125,7 @@ Each extension point is a struct of function pointers. Your plugin allocates con
 | Binary size        | ~1696 KB                          |
 | Cold start         | 4–27 ms avg                       |
 | Peak RSS           | ~5.7 MB                           |
-| Test suite (6858+) | 700+ tests/sec                  |
+| Test suite (9,500+) | 700+ tests/sec                  |
 
 ## See Also
 

@@ -90,7 +90,7 @@ Requirements:
 | Gate        | Threshold                                                       |
 | ----------- | --------------------------------------------------------------- |
 | Compilation | Zero warnings (`-Wall -Wextra -Wpedantic -Werror`)              |
-| Test suite  | All 6858+ tests pass                                            |
+| Test suite  | All 9,500+ tests pass                                            |
 | ASan        | Zero AddressSanitizer errors (leaks, overflows, use-after-free) |
 | Memory      | Every allocation freed via `free()` or cleanup function         |
 

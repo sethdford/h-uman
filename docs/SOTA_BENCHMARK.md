@@ -92,7 +92,7 @@ This document benchmarks the `human` runtime against state-of-the-art AI agent p
 | **Security policy** | — | Deny-by-default, autonomy levels, AEAD encryption, pairing, HTTPS-only | **SOTA** | First-class security model exceeding any open-source agent platform |
 | **Eval framework** | SWE-bench, GAIA | Suite runner with LLM-as-judge, per-task match_mode, SQLite history | **COMPETITIVE** | Now honors match_mode from JSON. Supports exact, contains, numeric_close, and LLM judge. |
 | **Observability** | LangSmith | hu_observer_t vtable, metrics, structured logging | **COMPETITIVE** | Real implementation. No hosted dashboard or trace visualization. |
-| **CI/CD** | — | 6858+ tests, ASan, clang-tidy, Lighthouse, visual regression, competitive benchmarks | **SOTA** | More comprehensive than any comparable open-source project |
+| **CI/CD** | — | 9,500+ tests, ASan, clang-tidy, Lighthouse, visual regression, competitive benchmarks | **SOTA** | More comprehensive than any comparable open-source project |
 
 ---
 
@@ -170,7 +170,7 @@ Test-mode scores reflect the system's deterministic mock behavior. Production sc
 3. **Typo simulation** with QWERTY adjacency modeling
 4. **Spaced-repetition forgetting curves** for memory (not just LRU or sliding window)
 5. **Constitutional AI principles** injected from persona config
-6. **1696 KB binary** with 6858 tests — zero-dependency C11 runtime (vs. 100+ MB for Node.js agents)
+6. **1696 KB binary** with 9,500+ tests — zero-dependency C11 runtime (vs. 100+ MB for Node.js agents)
 7. **MCTS-driven planning** that produces plans directly from tree search (not just hint-based)
 8. **Proactive cross-channel routing** — messages routed to the contact's most recently active channel
 9. **Feed-driven outreach** — news/social feed relevance scoring triggers relationship-appropriate check-ins

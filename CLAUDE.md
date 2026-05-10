@@ -49,7 +49,7 @@ Every mission below includes an honest difficulty assessment from code-level red
 
 | # | Mission | Honest Difficulty | Success Metric |
 |---|---------|------------------|----------------|
-| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays. `human onboard` exists (`src/onboard.c`, 405 LOC) and is auto-suggested on first run when no config exists. 9,291 tests passing. Remaining: A/B validation, expanded persona examples per channel. | Persona context in every agent turn ✅; starter persona on first run ✅; onboarding wizard ✅ |
+| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays. `human onboard` exists (`src/onboard.c`, 405 LOC) and is auto-suggested on first run when no config exists. 9,500+ tests passing. Remaining: A/B validation, expanded persona examples per channel. | Persona context in every agent turn ✅; starter persona on first run ✅; onboarding wizard ✅ |
 | **M2** | **Personal Model** — Unified model-of-the-person from memory | **Hard.** Single artifact exists (`hu_personal_model_t`, `src/memory/personal_model.c`); facts/topics/goals/style are accumulated per turn, summarized via `hu_personal_model_build_prompt`, and injected into every system prompt (FIX 1, commit d1d9b0ee — `tests/test_personal_model.c::personal_model_reaches_system_prompt_via_config`). Fact extraction is still heuristic pattern matching ("i like", "i never"); learned-style adaptation lives only in the prompt summary, not in a model checkpoint. | Measurable adaptation in tone/timing after 50 conversations |
 | **M3** | **Private Learning** — On-device ML personalization | **Hardest. Phase 0 honest as of FIX 15.** `lora-persona` trains a reference HUML GPT on persona example banks (not the frontier chat model). `--checkpoint` now actually warm-starts a HUML base via `hu_ml_checkpoint_load` (no longer silently dropped); the CLI prints a clear caveat directing users to the bridge plan. CPU-only. Frontier model bridge (llama.cpp / MLX) is planned in `docs/plans/2026-05-10-m3-frontier-model-bridge.md`. | LoRA adapter that measurably improves persona fidelity on inference |
 | **M4** | **Ship to Users** — 100 DAU | **Medium.** `human onboard` exists (interactive setup wizard). First-run code path checks for missing config and points the user at the wizard. Persona defaults still need to be richer per channel; config still assumes cloud provider credentials. | 100 DAU with 30% day-7 retention |
@@ -79,7 +79,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (9,291+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (9,500+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -151,7 +151,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 9,291+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 9,500+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -178,7 +178,7 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 | --------------------------------- | --------------------------------------------------------------------- |
 | `src/`                            | All C source (~710 files, ~270K lines)                                |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 423 test files, 9,291+ tests                                          |
+| `tests/`                          | 423 test files, 9,500+ tests                                          |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |

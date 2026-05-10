@@ -29,7 +29,7 @@ Key extension points:
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 - `src/ml/` — on-device ML training (BPE, GPT, DPO, LoRA, feed predictor) — `HU_ENABLE_ML`
 
-Current scale: **~1,330 source + header files, ~290K lines of C, ~144K lines of tests, 9,291+ tests, 31 channels**.
+Current scale: **~1,330 source + header files, ~290K lines of C, ~144K lines of tests, 9,500+ tests, 31 channels**.
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
@@ -77,7 +77,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `HU_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 9,291+ tests must pass at zero ASan errors**
+5. **All 9,500+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `HU_IS_TEST` mock paths in tests — no network, no process spawning.
@@ -119,7 +119,7 @@ src/
 
 include/human/       public C headers
 
-tests/                 423 test files, 9,291+ tests
+tests/                 423 test files, 9,500+ tests
 
 apps/                  iOS, macOS, Android, shared (4 app directories)
 
@@ -263,6 +263,7 @@ For faster iteration, use targeted tests:
 ./build/human_tests --filter=config_parse  # run tests matching "config_parse"
 scripts/agent-preflight.sh                 # change-aware validation (auto-detects what changed)
 scripts/run-native-fleet-local.sh quick    # native apps: HumanKit + iOS/macOS SPM + Android unit (no Simulator)
+python3 scripts/eval_synthetic_imessage_offline.py  # offline iMessage-shaped gates (seconds; mirrors CI)
 ```
 
 CI runs **XCUITest** and **Android instrumented** in `.github/workflows/native-apps-fleet.yml` (matrix + SOTA gate) and a single iOS simulator in `ci.yml` via `.github/actions/ios-uitest`. Optional full local parity on macOS: `scripts/run-native-fleet-local.sh full` or `VERIFY_NATIVE=1 ./scripts/verify-all.sh`. Optional red-team / eval aggregation (offline): `VERIFY_REDTEAM=1 ./scripts/verify-all.sh` or `bash scripts/redteam-eval-fleet.sh`.
