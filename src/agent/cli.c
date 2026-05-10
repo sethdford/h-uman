@@ -1150,7 +1150,10 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             struct tm *lt = localtime(&now_rt);
             int hour = lt ? lt->tm_hour : 12;
             hu_model_selection_t sel;
-            if (cfg.agent.mr_judge_enabled) {
+            /* One-shot `-m` is used by scripts and smoke tests; skip the judge
+             * LLM round-trip (extra provider.chat_with_system) so completion
+             * stays bounded. Interactive sessions keep full judge routing. */
+            if (cfg.agent.mr_judge_enabled && !single_message_mode) {
                 static hu_route_cache_t cli_judge_cache;
                 static bool cli_judge_cache_inited = false;
                 if (!cli_judge_cache_inited) {
