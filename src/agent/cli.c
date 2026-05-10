@@ -414,14 +414,12 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
 #endif
 
     size_t prov_name_len = strlen(prov_name);
-    const char *api_key = hu_config_default_provider_key(&cfg);
-    size_t api_key_len = api_key ? strlen(api_key) : 0;
-    const char *base_url = hu_config_get_provider_base_url(&cfg, prov_name);
-    size_t base_url_len = base_url ? strlen(base_url) : 0;
-
+    /* Use hu_provider_create_default so interactive `human agent` sessions
+     * also get the auto-fallback wrapping that the daemon path enjoys.
+     * If cfg->reliability.fallback_providers is set, the provider is
+     * transparently wrapped in a self-healing reliable composite. */
     hu_provider_t provider;
-    err = hu_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len, base_url,
-                             base_url_len, &provider);
+    err = hu_provider_create_default(alloc, &cfg, &provider);
     if (err != HU_OK) {
         hu_log_error("human", NULL, "provider '%s' init failed: %s", prov_name,
                      hu_error_string(err));
