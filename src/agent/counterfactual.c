@@ -1,11 +1,9 @@
 #include "human/agent/scheduler.h"
 
-#include "human/memory/graph.h"
 #include "human/memory/memory.h"
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <stdbool.h>
@@ -75,10 +73,7 @@ hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m, const hu_jo
     (void)user_data;
     if (!m)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    if (!g)
-        return HU_OK;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
     if (!db)
         return HU_OK;
 

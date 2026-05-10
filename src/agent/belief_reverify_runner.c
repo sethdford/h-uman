@@ -24,7 +24,6 @@
 #include "human/agent/scheduler.h"
 #include "human/agent/self_rag.h"
 #include "human/core/allocator.h"
-#include "human/memory/graph.h"
 #include "human/memory/memory.h"
 
 #include <string.h>
@@ -39,6 +38,8 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
     hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_OK;
+    /* Belief mean/variance updates are still graph-local UPDATE-by-id until a
+     * facade write shape covers that without upsert semantics. */
 
     hu_belief_reverify_ctx_t *ctx = (hu_belief_reverify_ctx_t *)user_data;
     int64_t max_age_ms = ctx ? ctx->max_age_ms : 0;
@@ -65,16 +66,23 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
     int64_t now_ms = spec->earliest_at > 0 ? spec->earliest_at : 0;
     int64_t cutoff_ms = now_ms > 0 ? now_ms - max_age_ms : -max_age_ms;
 
-    /* Pull a window of aging relations. The contact filter is optional;
-     * when NULL, we walk all contacts (interpret hu_graph_list_relations
-     * with empty contact_id as "any"). */
+    /* Pull top-N relations for the contact through the facade (same ordering
+     * as v1 `hu_graph_list_relations`: weight desc). Contact filter optional;
+     * NULL/0 matches legacy graph list (empty scoped key). */
     const char *contact_id = ctx ? ctx->contact_id : NULL;
     size_t contact_id_len = contact_id ? strlen(contact_id) : 0;
 
-    hu_graph_relation_t *rows = NULL;
+    hu_memory_query_t rq;
+    memset(&rq, 0, sizeof(rq));
+    rq.kind = HU_MEM_RELATION;
+    rq.contact_id = contact_id;
+    rq.contact_id_len = contact_id_len;
+    /* v1_relation_read "default list" path: window timestamps both zero. */
+    rq.as.window.limit = max_per_tick;
+
+    hu_memory_record_t *recs = NULL;
     size_t n = 0;
-    hu_error_t e = hu_graph_list_relations(g, alloc, contact_id, contact_id_len,
-                                           max_per_tick, &rows, &n);
+    hu_error_t e = hu_memory_facade_read(m, &rq, alloc, &recs, &n);
     if (e != HU_OK) {
         hu_self_rag_close(&verifier);
         return e;
@@ -83,7 +91,9 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
     size_t reverified = 0;
     size_t decayed = 0;
     for (size_t i = 0; i < n; i++) {
-        const hu_graph_relation_t *r = &rows[i];
+        const hu_graph_relation_t *r = (const hu_graph_relation_t *)recs[i].payload;
+        if (r == NULL)
+            continue;
         if (cutoff_ms != 0 && r->last_seen >= cutoff_ms)
             continue;  /* fresh enough */
 
@@ -129,7 +139,7 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
     if (ctx && ctx->out_decayed)
         *ctx->out_decayed = decayed;
 
-    hu_graph_relations_free(alloc, rows, n);
+    hu_memory_facade_records_free(m, alloc, recs, n);
     hu_self_rag_close(&verifier);
     return HU_OK;
 }

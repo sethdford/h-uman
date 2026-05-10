@@ -63,12 +63,51 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
     struct hu_memory_v1_ctx *ctx = vctx;
     if (q->kind != HU_MEM_ENTITY) return HU_ERR_INVALID_ARGUMENT;
 
-    /* Two query shapes today: by_name lookup, neighbors traversal. The two
-     * branches are union members and share storage; we discriminate solely on
-     * `by_name.name`. Callers wanting neighbors leave name=NULL and set
-     * entity_id; callers wanting by_name set name (non-NULL). Setting both is
-     * ambiguous and rejected as INVALID_ARGUMENT below. */
-    if (q->as.by_name.name != NULL && q->as.by_name.name_len > 0) {
+    /* Two query shapes today: by_name lookup, neighbors traversal.
+     *
+     * The union members ALIAS in memory (e.g. `neighbors.entity_id` and
+     * `by_name.name` both sit at byte 0 of the union; `neighbors.hops` and
+     * `by_name.name_len` both sit at byte 8). With AUTO callers can no
+     * longer be reliably distinguished if both fields would test "set" —
+     * setting `entity_id = 42, hops = 1` makes the by_name shape look
+     * like `{name=(char*)0x2A, name_len=1}`, which dereferences a wild
+     * pointer.
+     *
+     * Resolve the variant in this strict order:
+     *   1. Explicit `variant` tag (preferred for new callers).
+     *   2. AUTO heuristic for backward compat:
+     *        - If `by_name.name_len` fits a sane entity-name range
+     *          [1, 256] AND `by_name.name` points to a printable string,
+     *          prefer by_name.
+     *        - Else if `neighbors.entity_id != 0`, prefer neighbors.
+     *        - Else invalid.
+     */
+    hu_memory_query_variant_t v = q->variant;
+    if (v == HU_MEMORY_QUERY_AUTO) {
+        /* AUTO heuristic: trust by_name only when the discriminating
+         * fields look like a real (name, len) pair — len in [1, 256]
+         * and the first byte of the name pointer is a printable ASCII
+         * character. A wild pointer crafted from an entity_id (small
+         * integer) fails both filters because dereferencing it would
+         * read from page 0. We guard the deref with the length check
+         * below: if name_len > 256, we never touch `name`. */
+        size_t nlen = q->as.by_name.name_len;
+        const char *nptr = q->as.by_name.name;
+        if (nlen >= 1 && nlen <= 256 && nptr != NULL) {
+            /* Final sanity: if the pointer is in the low-address range
+             * (< 0x10000) it's almost certainly an entity_id, not a
+             * pointer. This protects against the multi_hop crash. */
+            if ((uintptr_t)nptr > 0x10000u) {
+                v = HU_MEMORY_QUERY_BY_NAME;
+            }
+        }
+        if (v == HU_MEMORY_QUERY_AUTO && q->as.neighbors.entity_id != 0) {
+            v = HU_MEMORY_QUERY_NEIGHBORS;
+        }
+    }
+
+    if (v == HU_MEMORY_QUERY_BY_NAME && q->as.by_name.name != NULL &&
+        q->as.by_name.name_len > 0) {
         hu_graph_entity_t e;
         memset(&e, 0, sizeof(e));
         hu_error_t err = hu_graph_find_entity(ctx->graph,
@@ -107,7 +146,7 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
     }
 
     /* Neighbors traversal. */
-    if (q->as.neighbors.entity_id != 0) {
+    if (v == HU_MEMORY_QUERY_NEIGHBORS && q->as.neighbors.entity_id != 0) {
         hu_graph_entity_t *ents = NULL;
         hu_graph_relation_t *rels = NULL;
         size_t count = 0;

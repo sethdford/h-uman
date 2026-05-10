@@ -12,10 +12,10 @@
  *     last/between/with) and synthesizes 1-3 step plans against the W7
  *     facade (HU_MEM_ENTITY, HU_MEM_RELATION). Cheap, no I/O, no provider.
  *
- *   - llm: takes a `hu_provider_t *` for a future LLM-driven plan. THIS
- *     COMMIT SHIPS A STUB that returns a deterministic single-step plan.
- *     The provider pointer is captured but not invoked; a follow-up commit
- *     will wire real JSON plan emission.
+ *   - llm: takes a `hu_provider_t *`, calls it with a JSON-schema-locked
+ *     prompt, parses the response into a plan, and clamps to hard caps.
+ *     Falls back to a deterministic single-step plan when the provider is
+ *     NULL, the call fails, or the JSON is malformed.
  *
  * `hu_planner_execute` walks the plan, dispatches each step through the
  * memory facade, optionally runs the W11 self-RAG verifier between hops,

@@ -121,6 +121,11 @@ hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out);
 hu_error_t hu_scheduler_register_runner(hu_scheduler_t *s, hu_job_kind_t kind,
                                         hu_job_runner_fn fn, void *user_data);
 
+/* Set the persona used by the quiet-hours probe. The scheduler does NOT
+ * take ownership — the caller must keep `p` alive while the scheduler is
+ * open. Pass NULL to disable quiet-hours detection (the default). */
+void hu_scheduler_set_persona(hu_scheduler_t *s, hu_persona_t *p);
+
 /* ── System-state probes (HU_IS_TEST aware) ──────────────────────────── */
 
 /* Returns 0–100, or -1 if the host can't report load. */

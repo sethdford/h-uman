@@ -2,10 +2,11 @@
  * W12 — HippoRAG-style personalized PageRank.
  *
  * Pure-CPU power iteration over the per-contact entity adjacency. We pull
- * entities and relations through hu_memory_facade_t (via the underlying
- * hu_graph_t handle, since the W7 facade does not yet expose a "list all
- * entities" facet — see TODO below). No global state, deterministic
- * output (sorted by score desc, then by id asc as a stable tiebreaker).
+ * entities through `hu_memory_facade_list_entities` and relations through
+ * `hu_memory_facade_read` with the open-window query. No graph-handle
+ * bypass; the facade is the only seam for L0 reads. No global state.
+ * Deterministic output (sorted by score desc, then by id asc as a stable
+ * tiebreaker).
  *
  * The implementation favors clarity over micro-optimization. For the
  * 10K-entity ceiling at 20 iterations, the inner loop is O(N + E). On
@@ -93,9 +94,6 @@ hu_error_t hu_memory_pagerank_seeds(hu_memory_facade_t *m, hu_allocator_t *alloc
     if (iterations == 0) iterations = HU_PAGERANK_DEFAULT_ITERATIONS;
     if (iterations > 1000) iterations = 1000;  /* sanity cap */
 
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    if (!g) return HU_ERR_NOT_SUPPORTED;
-
     hu_graph_entity_t *ents = NULL;
     size_t n = 0;
     hu_error_t err = hu_memory_facade_list_entities(m, alloc, contact_id,
@@ -121,14 +119,24 @@ hu_error_t hu_memory_pagerank_seeds(hu_memory_facade_t *m, hu_allocator_t *alloc
     for (size_t i = 0; i < n; i++) ids[i] = ents[i].id;
     hu_graph_entities_free(alloc, ents, n);
 
-    /* Pull relations and project to (src_idx, dst_idx) edges. The list cap
-     * matches the entity cap squared, but real graphs are sparse — we trust
-     * list_relations to honour the limit. */
-    hu_graph_relation_t *rels = NULL;
-    size_t rn = 0;
-    size_t rel_cap = n * 16; /* expect average degree <= 16 */
+    /* Pull relations through the facade open-window query and project to
+     * (src_idx, dst_idx) edges. Real graphs are sparse so we cap the
+     * expected scan at degree=16 * |entities|. */
+    size_t rel_cap = n * 16;
     if (rel_cap > 200000) rel_cap = 200000;
-    err = hu_graph_list_relations(g, alloc, contact_id, cid_len, rel_cap, &rels, &rn);
+
+    hu_memory_query_t rel_q;
+    memset(&rel_q, 0, sizeof(rel_q));
+    rel_q.kind = HU_MEM_RELATION;
+    rel_q.contact_id = contact_id;
+    rel_q.contact_id_len = cid_len;
+    rel_q.as.window.from_ts = 0;
+    rel_q.as.window.to_ts = INT64_MAX;
+    rel_q.as.window.limit = rel_cap;
+
+    hu_memory_record_t *rel_recs = NULL;
+    size_t rn = 0;
+    err = hu_memory_facade_read(m, &rel_q, alloc, &rel_recs, &rn);
     if (err != HU_OK && err != HU_ERR_NOT_FOUND) {
         xfree(alloc, ids, n * sizeof(*ids));
         return err;
@@ -139,20 +147,23 @@ hu_error_t hu_memory_pagerank_seeds(hu_memory_facade_t *m, hu_allocator_t *alloc
     if (rn > 0) {
         edges = xalloc(alloc, rn * sizeof(*edges));
         if (!edges) {
-            hu_graph_relations_free(alloc, rels, rn);
+            hu_memory_facade_records_free(m, alloc, rel_recs, rn);
             xfree(alloc, ids, n * sizeof(*ids));
             return HU_ERR_OUT_OF_MEMORY;
         }
         for (size_t i = 0; i < rn; i++) {
-            int32_t s = find_idx(ids, n, rels[i].source_id);
-            int32_t d = find_idx(ids, n, rels[i].target_id);
+            const hu_graph_relation_t *rel =
+                (const hu_graph_relation_t *)rel_recs[i].payload;
+            if (!rel) continue;
+            int32_t s = find_idx(ids, n, rel->source_id);
+            int32_t d = find_idx(ids, n, rel->target_id);
             if (s < 0 || d < 0) continue; /* dangling edge — skip */
             edges[edges_count].src_idx = s;
             edges[edges_count].dst_idx = d;
             edges_count++;
         }
     }
-    if (rels) hu_graph_relations_free(alloc, rels, rn);
+    if (rel_recs) hu_memory_facade_records_free(m, alloc, rel_recs, rn);
 
     /* Per-node out-degree (treating each relation as a directed edge — and
      * also counting the reverse direction so undirected social links aren't

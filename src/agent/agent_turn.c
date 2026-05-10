@@ -30,6 +30,7 @@
 #include "human/agent/response_verifier.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
+#include "human/memory/neural_memory.h"
 #include "human/memory/personal_model.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/persona/delta_observer.h"
@@ -5381,6 +5382,25 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                          hu_error_string(exp_err));
                     }
                     hu_experience_store_deinit(&exp_store);
+                }
+            }
+            /* W10: Record reasoning trace when the turn involved memory retrieval */
+            if (agent->w7_facade && memory_ctx_len > 0 && msg_len > 0) {
+                hu_memory_facade_t *nf = hu_w7_facade_memory_handle(agent->w7_facade);
+                if (nf) {
+                    hu_reasoning_trace_t rt;
+                    memset(&rt, 0, sizeof(rt));
+                    size_t vlen = msg_len < sizeof(rt.goal_verb) - 1
+                                      ? msg_len
+                                      : sizeof(rt.goal_verb) - 1;
+                    memcpy(rt.goal_verb, msg, vlen);
+                    rt.goal_verb[vlen] = '\0';
+                    const char *rt_cid =
+                        agent->memory_session_id ? agent->memory_session_id : "";
+                    size_t rt_cid_len =
+                        agent->memory_session_id ? agent->memory_session_id_len : 0;
+                    int64_t trace_id = 0;
+                    (void)hu_reasoning_trace_record(nf, rt_cid, rt_cid_len, &rt, &trace_id);
                 }
             }
             /* Value learning: detect approval, correction, re-asks, content-specific signals */

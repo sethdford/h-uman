@@ -6,16 +6,14 @@
  * achieved by destroying the master key — even a backup restore cannot decrypt
  * data encrypted under a destroyed key.
  *
- * IMPLEMENTATION STATUS (first commit):
- *   - Deterministic placeholder AEAD: ChaCha20 + HMAC-SHA256 (no libsodium).
- *   - KDF: SHA-256(passphrase || user_id) — NOT secure; argon2id follow-up.
- *   - Nonce: fixed zeros (deterministic for testing). Real nonce in follow-up.
- *   See TODO(W15-secure) markers in src/security/keystore.c.
+ * IMPLEMENTATION STATUS:
+ *   - KDF: PBKDF2-HMAC-SHA256 with OWASP-recommended iteration count
+ *     (fallback when libsodium unavailable).
+ *   - AEAD: XChaCha20-Poly1305 + Argon2id KDF when libsodium is available.
+ *   - Nonce: random nonces (crypto_aead_xchacha20poly1305_ietf_NPUBBYTES).
  *
- * NOT in first commit (follow-up PRs within W15):
+ * NOT yet implemented:
  *   - hu_keystore_unlock_from_keychain (OS-keychain integration).
- *   - libsodium XChaCha20-Poly1305 AEAD.
- *   - argon2id passphrase derivation.
  *   - Encrypted memory decorator wrapping hu_memory_t.
  */
 #ifndef HU_KEYSTORE_H

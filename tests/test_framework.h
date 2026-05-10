@@ -78,6 +78,20 @@ static inline const char *hu__strcasestr(const char *haystack, const char *needl
             HU_FAIL("expected %lld < %lld (%s < %s)", _a, _b, #a, #b); \
     } while (0)
 
+#define HU_ASSERT_GE(a, b)                                              \
+    do {                                                                \
+        long long _a = (long long)(a), _b = (long long)(b);             \
+        if (_a < _b)                                                    \
+            HU_FAIL("expected %lld >= %lld (%s >= %s)", _a, _b, #a, #b);\
+    } while (0)
+
+#define HU_ASSERT_LE(a, b)                                              \
+    do {                                                                \
+        long long _a = (long long)(a), _b = (long long)(b);             \
+        if (_a > _b)                                                    \
+            HU_FAIL("expected %lld <= %lld (%s <= %s)", _a, _b, #a, #b);\
+    } while (0)
+
 #define HU_ASSERT_STR_EQ(a, b)                                                            \
     do {                                                                                  \
         const char *_a = (a), *_b = (b);                                                  \

@@ -18,6 +18,7 @@
 #include "human/memory/tiers.h"
 #include "human/webhook.h"
 #ifdef HU_ENABLE_SQLITE
+#include "human/agent/scheduler.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/cognition/db.h"
 #include "human/intelligence/meta_learning.h"
@@ -1058,9 +1059,14 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
     if (agent->w7_facade && !agent->w14_scheduler) {
         hu_w14_scheduler_t *sched = NULL;
         hu_error_t se = hu_w14_scheduler_open(agent->w7_facade, alloc, &sched);
-        if (se == HU_OK)
+        if (se == HU_OK) {
             agent->w14_scheduler = sched;
-        else
+            if (agent->persona) {
+                hu_scheduler_t *inner = hu_w14_scheduler_inner(sched);
+                if (inner)
+                    hu_scheduler_set_persona(inner, agent->persona);
+            }
+        } else
             hu_log_warn("agent", NULL, "W14 scheduler open failed: %s", hu_error_string(se));
     }
     return err;

@@ -101,6 +101,43 @@ static void test_w8_adversarial_belief_poisoning_grows_variance(void) {
     HU_ASSERT(b.variance > 0.05f);
 }
 
+/* ---- semantic conflict tests (no SQLite required) ---------------------- */
+
+static void test_w8_semantic_conflict_identical_strings_no_conflict(void) {
+    hu_belief_conflict_t c = hu_belief_semantic_conflict(
+        "I like cats", 11, "I like cats", 11);
+    HU_ASSERT(c == HU_BELIEF_CONFLICT_PARAPHRASE || c == HU_BELIEF_CONFLICT_NONE);
+    HU_ASSERT(c != HU_BELIEF_CONFLICT_CONTRADICT);
+}
+
+static void test_w8_semantic_conflict_negation_detected(void) {
+    hu_belief_conflict_t c = hu_belief_semantic_conflict(
+        "I like cats", 11, "I do not like cats", 18);
+    HU_ASSERT_EQ((int)c, (int)HU_BELIEF_CONFLICT_CONTRADICT);
+}
+
+static void test_w8_semantic_conflict_different_subjects_no_conflict(void) {
+    hu_belief_conflict_t c = hu_belief_semantic_conflict(
+        "I like cats", 11, "I like dogs", 11);
+    HU_ASSERT(c != HU_BELIEF_CONFLICT_CONTRADICT);
+}
+
+static void test_w8_semantic_conflict_null_inputs_safe(void) {
+    HU_ASSERT_EQ((int)hu_belief_semantic_conflict(NULL, 0, "hello", 5),
+                 (int)HU_BELIEF_CONFLICT_NONE);
+    HU_ASSERT_EQ((int)hu_belief_semantic_conflict("hello", 5, NULL, 0),
+                 (int)HU_BELIEF_CONFLICT_NONE);
+    HU_ASSERT_EQ((int)hu_belief_semantic_conflict(NULL, 0, NULL, 0),
+                 (int)HU_BELIEF_CONFLICT_NONE);
+}
+
+static void test_w8_semantic_conflict_empty_strings_no_conflict(void) {
+    HU_ASSERT_EQ((int)hu_belief_semantic_conflict("", 0, "", 0),
+                 (int)HU_BELIEF_CONFLICT_NONE);
+    HU_ASSERT_EQ((int)hu_belief_semantic_conflict("hello", 5, "", 0),
+                 (int)HU_BELIEF_CONFLICT_NONE);
+}
+
 /* ---- hyperedge tests (SQLite required) --------------------------------- */
 
 #ifdef HU_ENABLE_SQLITE
@@ -252,6 +289,13 @@ void run_w8_belief_layer_tests(void) {
     HU_RUN_TEST(test_w8_belief_significantly_disagrees_detects);
     HU_RUN_TEST(test_w8_belief_significantly_disagrees_agrees);
     HU_RUN_TEST(test_w8_adversarial_belief_poisoning_grows_variance);
+
+    /* Semantic conflict tests. */
+    HU_RUN_TEST(test_w8_semantic_conflict_identical_strings_no_conflict);
+    HU_RUN_TEST(test_w8_semantic_conflict_negation_detected);
+    HU_RUN_TEST(test_w8_semantic_conflict_different_subjects_no_conflict);
+    HU_RUN_TEST(test_w8_semantic_conflict_null_inputs_safe);
+    HU_RUN_TEST(test_w8_semantic_conflict_empty_strings_no_conflict);
 
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w8_hyperedge_zero_members_rejected);

@@ -13,6 +13,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -511,6 +512,173 @@ static void test_w7_case_write_last_rowid_matches_hu_case_record_out_id(void) {
     close_facade(g, m);
 }
 
+/* --- list_entities through facade ------------------------------------ */
+
+static void test_w7_list_entities_returns_inserted_entity(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    insert_entity(g, "Alice");
+
+    hu_graph_entity_t *ents = NULL;
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_memory_facade_list_entities(m, A(), "u1", 2, 64, &ents, &count), HU_OK);
+    HU_ASSERT_GE((int)count, 1);
+
+    bool found = false;
+    for (size_t i = 0; i < count; i++) {
+        if (ents[i].name && strstr(ents[i].name, "Alice"))
+            found = true;
+    }
+    HU_ASSERT(found);
+
+    hu_graph_entities_free(A(), ents, count);
+    close_facade(g, m);
+}
+
+static void test_w7_list_entities_null_args_rejected(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    hu_graph_entity_t *ents = NULL;
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_memory_facade_list_entities(NULL, A(), "u1", 2, 64, &ents, &count),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_list_entities(m, NULL, "u1", 2, 64, &ents, &count),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_list_entities(m, A(), NULL, 0, 64, &ents, &count),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    close_facade(g, m);
+}
+
+/* --- export_json through facade -------------------------------------- */
+
+static void test_w7_export_json_creates_file(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    int64_t alice = insert_entity(g, "Alice");
+    int64_t acme = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION,
+                                         NULL, &acme),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                           NULL, 0),
+                 HU_OK);
+
+    const char *path = "/tmp/hu_test_export.jsonl";
+    HU_ASSERT_EQ(hu_memory_facade_export_json(m, A(), path), HU_OK);
+
+    FILE *fp = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(fp);
+    char buf[4096];
+    memset(buf, 0, sizeof(buf));
+    size_t nread = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    remove(path);
+
+    if (nread > 0) {
+        HU_ASSERT_NOT_NULL(strstr(buf, "\"kind\""));
+        HU_ASSERT_NOT_NULL(strstr(buf, "\"id\""));
+    }
+
+    close_facade(g, m);
+}
+
+static void test_w7_export_json_null_args_rejected(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    HU_ASSERT_EQ(hu_memory_facade_export_json(NULL, A(), "/tmp/x.jsonl"),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_export_json(m, NULL, "/tmp/x.jsonl"),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_export_json(m, A(), NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_export_json(m, A(), ""),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    close_facade(g, m);
+}
+
+/* --- P3 adversarial: variant tag prevents union-aliasing crash ---
+ *
+ * Without the variant tag, a neighbors query with `entity_id = 42, hops = 1`
+ * aliases as `{name = (char*)42, name_len = 1}` in the by_name branch.
+ * The pre-fix code dereferenced 0x2A and segfaulted. With the tag, the
+ * backend uses the explicit variant and never reaches the bogus
+ * dereference. */
+
+static void test_w7_p3_neighbors_query_with_variant_tag_safe(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    int64_t alice = insert_entity(g, "Alice");
+    int64_t bob = insert_entity(g, "Bob");
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, bob, HU_REL_KNOWS, 1.0f,
+                                              1735000000000LL, 0, 1.0f, NULL, 0, "rel", 3),
+                 HU_OK);
+
+    /* Build a neighbors query that would have crashed without the variant
+     * tag (entity_id = small int, hops = 1). */
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_NEIGHBORS;
+    q.contact_id = "u1";
+    q.contact_id_len = 2;
+    q.as.neighbors.entity_id = alice;
+    q.as.neighbors.hops = 1;
+    q.as.neighbors.limit = 8;
+
+    hu_memory_record_t *out = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_memory_facade_read(m, &q, A(), &out, &n), HU_OK);
+    HU_ASSERT_GE((int)n, 1);
+
+    hu_memory_facade_records_free(m, A(), out, n);
+    close_facade(g, m);
+}
+
+static void test_w7_p3_auto_variant_falls_back_to_neighbors_safely(void) {
+    /* AUTO with low-address-looking name pointer must NOT dereference. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    int64_t alice = insert_entity(g, "Alice");
+    int64_t bob = insert_entity(g, "Bob");
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, bob, HU_REL_KNOWS, 1.0f,
+                                              1735000000000LL, 0, 1.0f, NULL, 0, "rel", 3),
+                 HU_OK);
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_AUTO;
+    q.contact_id = "u1";
+    q.contact_id_len = 2;
+    /* This aliases as `by_name.name = (char*)alice`. AUTO must reject
+     * the low-address pointer and fall back to neighbors. */
+    q.as.neighbors.entity_id = alice;
+    q.as.neighbors.hops = 1;
+    q.as.neighbors.limit = 8;
+
+    hu_memory_record_t *out = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_memory_facade_read(m, &q, A(), &out, &n), HU_OK);
+    HU_ASSERT_GE((int)n, 1);
+
+    hu_memory_facade_records_free(m, A(), out, n);
+    close_facade(g, m);
+}
+
 /* --- adversarial: replacing entity backend doesn't crash on close --- */
 
 static void test_w7_replace_then_close_cleans_up(void) {
@@ -550,6 +718,12 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_p2g_null_provenance_uses_default_variance);
     HU_RUN_TEST(test_w7_anticipatory_analyze_memory_matches_graph);
     HU_RUN_TEST(test_w7_case_write_last_rowid_matches_hu_case_record_out_id);
+    HU_RUN_TEST(test_w7_list_entities_returns_inserted_entity);
+    HU_RUN_TEST(test_w7_list_entities_null_args_rejected);
+    HU_RUN_TEST(test_w7_export_json_creates_file);
+    HU_RUN_TEST(test_w7_export_json_null_args_rejected);
+    HU_RUN_TEST(test_w7_p3_neighbors_query_with_variant_tag_safe);
+    HU_RUN_TEST(test_w7_p3_auto_variant_falls_back_to_neighbors_safely);
     HU_RUN_TEST(test_w7_replace_then_close_cleans_up);
 #endif
 }

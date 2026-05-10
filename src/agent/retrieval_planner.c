@@ -633,6 +633,7 @@ hu_error_t hu_planner_multi_hop(hu_memory_facade_t *m, hu_allocator_t *alloc,
             hu_memory_query_t nq;
             memset(&nq, 0, sizeof(nq));
             nq.kind = HU_MEM_ENTITY;
+            nq.variant = HU_MEMORY_QUERY_NEIGHBORS;
             nq.contact_id = initial_query->contact_id;
             nq.contact_id_len = initial_query->contact_id_len;
             nq.as.neighbors.entity_id = pr_ids[k];

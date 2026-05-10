@@ -5,9 +5,9 @@
  *
  * Every consumer that wants a memory entry goes through `hu_memory_facade_t`.
  * Backends are vtables registered per `hu_memory_kind_t`. The default open()
- * registers a v1 backend that wraps existing graph/persona/cross_edges/case/
- * quarantine APIs, so callers can migrate one site at a time without behavior
- * drift.
+ * registers a v1 backend for entity, relation, hyperedge, and (when SQLite is
+ * enabled) case kinds, so callers can migrate one site at a time without
+ * behavior drift.
  *
  * Layer contract: this is layer 1 of the v2 stack (see
  * docs/plans/2026-05-10-memory-v2-roadmap-overview.md). It dispatches; it does
@@ -65,10 +65,28 @@ typedef enum hu_memory_kind {
     HU_MEM_KIND_MAX
 } hu_memory_kind_t;
 
+/* Sub-discriminator for the `as` union below. Entity queries can ask for
+ * neighbors (graph traversal) or by_name (canonical lookup); the two share
+ * union storage so we need an explicit tag to tell them apart — the union
+ * members alias (e.g. neighbors.entity_id and by_name.name both occupy
+ * bytes 0..7). Default is HU_MEMORY_QUERY_AUTO for backward compat: the
+ * backend infers the variant from non-zero fields, which is risky but
+ * matches pre-tag behavior. New callers should set this explicitly. */
+typedef enum hu_memory_query_variant {
+    HU_MEMORY_QUERY_AUTO      = 0, /* legacy heuristic; backend infers */
+    HU_MEMORY_QUERY_BY_NAME   = 1,
+    HU_MEMORY_QUERY_NEIGHBORS = 2,
+    HU_MEMORY_QUERY_WINDOW    = 3,
+    HU_MEMORY_QUERY_BY_ID     = 4,
+    HU_MEMORY_QUERY_KV        = 5,
+    HU_MEMORY_QUERY_CASE      = 6,
+} hu_memory_query_variant_t;
+
 /* Kind-specific query payloads (tagged-union; caller must set `kind` then
  * fill the matching struct). Keep this <= 64 bytes to discourage drift. */
 typedef struct hu_memory_query {
     hu_memory_kind_t kind;
+    hu_memory_query_variant_t variant; /* picks the union variant below */
     const char *contact_id;
     size_t contact_id_len;
     union {
@@ -155,6 +173,21 @@ typedef struct hu_memory_facade hu_memory_facade_t;
 hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_memory_facade_t **out);
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
 
+/* W15 — generic audit hook for write/erase ops. The facade invokes this
+ * callback after a successful backend write or erase so that upper layers
+ * (e.g. security/audit_log) can record the event without introducing a
+ * cross-layer dependency from memory (L1) into security (L6). */
+typedef enum hu_memory_audit_op {
+    HU_MEMORY_AUDIT_WRITE = 0,
+    HU_MEMORY_AUDIT_ERASE = 1,
+} hu_memory_audit_op_t;
+
+typedef void (*hu_memory_audit_fn)(void *ctx, hu_memory_audit_op_t op,
+                                   hu_memory_kind_t kind, int64_t id);
+
+void hu_memory_facade_set_audit_hook(hu_memory_facade_t *m,
+                                     hu_memory_audit_fn fn, void *ctx);
+
 /* Backend registration. Replaces an existing backend for `kind` if present.
  * The previous backend's deinit() is called. Caller retains ownership of `vt`
  * (must outlive the facade); facade owns `ctx` after registration and calls
@@ -202,6 +235,14 @@ char *hu_memory_facade_route_lookup(hu_memory_facade_t *m, hu_memory_kind_t kind
  * migrate incrementally without losing access to graph-only APIs (community
  * detection, Leiden, etc). New code should prefer the facade. */
 hu_graph_t *hu_memory_facade_graph_handle(hu_memory_facade_t *m);
+
+#ifdef HU_ENABLE_SQLITE
+/* Shared SQLite connection backing the v1 graph (scheduler DDL, counterfactual
+ * replays, etc.). Returns NULL if the facade has no graph or SQLite is
+ * unavailable. Prefer `hu_memory_facade_read` / `write` for memory rows. */
+struct sqlite3;
+struct sqlite3 *hu_memory_facade_sqlite_db(hu_memory_facade_t *m);
+#endif
 
 /* List all entities for a contact through the facade. Convenience wrapper
  * that delegates to the underlying graph handle. Callers should prefer this

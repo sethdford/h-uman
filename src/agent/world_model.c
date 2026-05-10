@@ -243,7 +243,13 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
     memcpy(wm->contact_id, contact_id, copy_len);
     wm->contact_id[copy_len] = '\0';
     wm->built_at = now_ms;
-    wm->valid_until = now_ms + 60 * 1000; /* 60s default TTL */
+    int64_t ttl_ms = 60000;
+    const char *ttl_env = getenv("HU_WORLD_MODEL_TTL_MS");
+    if (ttl_env) {
+        long v = strtol(ttl_env, NULL, 10);
+        if (v > 0) ttl_ms = v;
+    }
+    wm->valid_until = now_ms + ttl_ms;
 
     /* Top-K entities via graph helper (list_entities). */
     hu_graph_t *g = hu_memory_facade_graph_handle(m);

@@ -289,6 +289,24 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
             break;
         }
     }
+    if (resp.outcome == HU_SELF_RAG_ABSTAINED && contact_id && contact_id_len > 0) {
+        hu_graph_t *g = hu_memory_facade_graph_handle(facade->m);
+        if (g) {
+            hu_negative_memory_t nm;
+            memset(&nm, 0, sizeof(nm));
+            size_t draft_cap = sizeof(nm.text) - 10;
+            if (draft_len > draft_cap) draft_len = draft_cap;
+            snprintf(nm.text, sizeof(nm.text), "Refused: %.*s",
+                     (int)draft_len, draft);
+            snprintf(nm.scope, sizeof(nm.scope), "topic");
+            snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
+            nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
+            nm.created_at = now_ms;
+            int64_t nm_id = 0;
+            hu_negative_memory_add(g, contact_id, contact_id_len, &nm, &nm_id);
+        }
+    }
+
     if (out_claims_total)
         *out_claims_total = resp.claims_count;
     if (out_claims_flagged) {
@@ -351,9 +369,11 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
 
 /* ── W12 goal-conditioned planner recall bridge ───────────────────────────
  *
- * Runs the heuristic planner, executes each step via facade_read (preserving
- * payloads unlike hu_planner_execute which strips them), and formats results
- * into a markdown text block for prompt injection. */
+ * Loads the contact's world model, plans via the goal-conditioned (PageRank)
+ * backend, then executes through hu_planner_execute so verify_after flags
+ * are honored. The executor returns payload-stripped summaries; a second
+ * read pass re-fetches with payloads, filtering to the verified set, and
+ * formats results into a markdown text block for prompt injection. */
 
 hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                  const char *contact_id, size_t contact_id_len,
@@ -368,23 +388,72 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
     if (limit == 0) limit = 5;
     if (max_chars == 0) max_chars = 4000;
 
+    /* Load the world model so the goal-conditioned backend can run
+     * personalized PageRank over the contact's entity graph. */
+    int64_t now_ms = (int64_t)time(NULL) * 1000;
+    hu_world_model_t *wm = NULL;
+    if (contact_id && contact_id_len > 0)
+        (void)hu_world_model_load(facade->m, alloc, contact_id, contact_id_len, now_ms, &wm);
+
     hu_planner_t planner;
     memset(&planner, 0, sizeof(planner));
     hu_error_t err = hu_planner_goal_conditioned(facade->m, alloc, &planner);
     if (err != HU_OK) {
         err = hu_planner_heuristic(&planner);
-        if (err != HU_OK)
+        if (err != HU_OK) {
+            if (wm) hu_world_model_free(alloc, wm);
             return err;
+        }
     }
 
     hu_retrieval_plan_t plan;
     memset(&plan, 0, sizeof(plan));
-    err = hu_planner_plan(&planner, query, query_len, NULL, &plan);
+    err = hu_planner_plan(&planner, query, query_len, wm, &plan);
+
+    if (wm)
+        hu_world_model_free(alloc, wm);
+
     if (err != HU_OK) {
         hu_planner_close(&planner);
         return err;
     }
 
+    /* Stamp contact_id on each step for scoped reads. */
+    for (size_t i = 0; i < plan.steps_count; i++) {
+        if (contact_id && contact_id_len > 0) {
+            plan.steps[i].query.contact_id = contact_id;
+            plan.steps[i].query.contact_id_len = contact_id_len;
+        }
+    }
+
+    /* Route through hu_planner_execute so verify_after flags fire the W8
+     * confidence filter. The heuristic self-RAG handle enables the filter
+     * without requiring an embedder. Records come back without payloads;
+     * we re-fetch below. */
+    hu_self_rag_t rag;
+    memset(&rag, 0, sizeof(rag));
+    hu_self_rag_t *rag_ptr = NULL;
+    if (hu_self_rag_heuristic(facade->m, &rag) == HU_OK)
+        rag_ptr = &rag;
+
+    hu_memory_record_t *verified = NULL;
+    size_t verified_count = 0;
+    err = hu_planner_execute(facade->m, rag_ptr, &plan, alloc, &verified, &verified_count);
+
+    if (rag_ptr)
+        hu_self_rag_close(rag_ptr);
+    hu_planner_close(&planner);
+
+    if (err != HU_OK && verified_count == 0)
+        return err;
+    if (verified_count == 0) {
+        hu_planner_records_free(alloc, verified, 0);
+        return HU_OK;
+    }
+
+    /* Re-read plan steps with payloads, filtering to the verified set.
+     * hu_planner_execute strips payloads by design; we need entity names
+     * and relation context for prompt rendering. */
     char *buf = NULL;
     size_t buf_len = 0;
     size_t buf_cap = 0;
@@ -393,10 +462,6 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
 
     for (size_t i = 0; i < plan.steps_count && total_records < limit && buf_len < max_chars; i++) {
         hu_retrieval_step_t *step = &plan.steps[i];
-        if (contact_id && contact_id_len > 0) {
-            step->query.contact_id = contact_id;
-            step->query.contact_id_len = contact_id_len;
-        }
         hu_memory_record_t *recs = NULL;
         size_t n = 0;
         hu_error_t re = hu_memory_facade_read(facade->m, &step->query, alloc, &recs, &n);
@@ -404,6 +469,17 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
 
         for (size_t j = 0; j < n && total_records < limit && buf_len < max_chars; j++) {
             hu_memory_record_t *rec = &recs[j];
+
+            /* Only include records that passed verification. */
+            bool in_verified = false;
+            for (size_t k = 0; k < verified_count; k++) {
+                if (verified[k].id == rec->id && verified[k].kind == rec->kind) {
+                    in_verified = true;
+                    break;
+                }
+            }
+            if (!in_verified) continue;
+
             const char *name = NULL;
             size_t name_len = 0;
             const char *detail = NULL;
@@ -445,7 +521,7 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                 if (!p) {
                     hu_memory_facade_records_free(facade->m, alloc, recs, n);
                     if (buf) alloc->free(alloc->ctx, buf, buf_cap);
-                    hu_planner_close(&planner);
+                    hu_planner_records_free(alloc, verified, verified_count);
                     return HU_ERR_OUT_OF_MEMORY;
                 }
                 buf = p;
@@ -469,7 +545,7 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
         hu_memory_facade_records_free(facade->m, alloc, recs, n);
     }
 
-    hu_planner_close(&planner);
+    hu_planner_records_free(alloc, verified, verified_count);
 
     if (buf && buf_len > 0) {
         buf[buf_len] = '\0';
@@ -639,6 +715,21 @@ hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
     job.kind = HU_JOB_PERSONA_EVOLVER;
     job.priority = 0;
     job.budget_ms = budget_ms > 0 ? budget_ms : 120000;
+    job.requires_idle = true;
+    job.requires_ac_power = false;
+    job.earliest_at = now_ms;
+    return hu_scheduler_enqueue(s->s, &job);
+}
+
+hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
+                                         int budget_ms) {
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_job_spec_t job;
+    memset(&job, 0, sizeof(job));
+    job.kind = HU_JOB_LORA_TRAINING;
+    job.priority = 0;
+    job.budget_ms = budget_ms > 0 ? budget_ms : 300000;
     job.requires_idle = true;
     job.requires_ac_power = false;
     job.earliest_at = now_ms;

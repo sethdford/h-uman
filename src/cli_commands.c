@@ -22,6 +22,8 @@
 #include "human/evaluation/evaluation.h"
 #include "human/memory.h"
 #include "human/memory/factory.h"
+#include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include "human/providers/factory.h"
 #include "human/security.h"
 #include "human/security/audit.h"
@@ -499,8 +501,9 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         }
     } else if (strcmp(sub, "export") == 0) {
         /* W15 P1 #5 — full export of memory entries to JSON for GDPR
-         * data-portability via hu_memory_export_json. Accepts optional
-         * --json flag for forward-compat with future format switches. */
+         * data-portability. Prefers the v2 facade export (covers all
+         * registered backends) when a graph.db exists; falls back to
+         * the v1 hu_memory_export_json for legacy stores. */
         const char *path = argv[3];
         if (strcmp(path, "--json") == 0) {
             if (argc < 5) {
@@ -510,7 +513,29 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             }
             path = argv[4];
         }
-        err = hu_memory_export_json(&mem, alloc, path);
+        bool used_facade = false;
+        const char *home = getenv("HOME");
+        if (home) {
+            char graph_path[1024];
+            int np = snprintf(graph_path, sizeof(graph_path),
+                              "%s/.human/graph.db", home);
+            if (np > 0 && (size_t)np < sizeof(graph_path)) {
+                hu_graph_t *g = NULL;
+                hu_error_t ge = hu_graph_open(alloc, graph_path, (size_t)np, &g);
+                if (ge == HU_OK && g) {
+                    hu_memory_facade_t *facade = NULL;
+                    hu_error_t fe = hu_memory_facade_open(alloc, g, &facade);
+                    if (fe == HU_OK && facade) {
+                        err = hu_memory_facade_export_json(facade, alloc, path);
+                        used_facade = true;
+                        hu_memory_facade_close(facade, alloc);
+                    }
+                    hu_graph_close(g, alloc);
+                }
+            }
+        }
+        if (!used_facade)
+            err = hu_memory_export_json(&mem, alloc, path);
         if (err == HU_ERR_IO) {
             fprintf(stderr, "Failed to open '%s' for export: %s\n",
                     path, strerror(errno));
@@ -523,7 +548,9 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         size_t exported = 0;
         if (mem.vtable->count)
             mem.vtable->count(mem.ctx, &exported);
-        printf("Exported %zu entries to %s\n", exported, path);
+        printf("Exported %s to %s\n",
+               used_facade ? "all memory records (v2 facade)" : "entries",
+               path);
 
         if (cfg.security.audit.enabled) {
             hu_audit_config_t acfg = HU_AUDIT_CONFIG_DEFAULT;

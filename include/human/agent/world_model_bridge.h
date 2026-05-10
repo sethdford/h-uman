@@ -174,6 +174,12 @@ hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
                                                     int64_t now_ms,
                                                     int budget_ms);
 
+/* Enqueue a LoRA training job. Mirrors the persona-evolver / AutoDream
+ * enqueue helpers: callers pass timing + budget and the bridge hides the
+ * hu_job_spec_t shape. */
+hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
+                                         int budget_ms);
+
 /* W14 P0 #4 — runner registration helpers.
  *
  * The bridge cannot embed `hu_lora_runner_ctx_t` / `hu_kv_cache_manager_t` /

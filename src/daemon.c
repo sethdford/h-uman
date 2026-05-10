@@ -2291,6 +2291,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             w14_lora_ctx.scheduler = hu_w14_scheduler_inner(agent->w14_scheduler);
             w14_lora_ctx.alloc = alloc;
             w14_lora_ctx.kv_cache = agent->infra.kv_cache;
+            w14_lora_ctx.provider = &agent->provider;
+            w14_lora_ctx.adapter_id = "w14_learner";
             w14_lora_ctx.config_template = hu_learner_default_config();
             {
                 const char *hm = getenv("HOME");
@@ -2736,6 +2738,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     "human", agent->observer,
                                     "w13 outcome-bridge drain failed (%s); continuing",
                                     hu_error_string(be));
+                            }
+                        }
+                        /* W13/W14 — auto-enqueue LoRA training when enough
+                         * signals have accumulated. The runner is already
+                         * registered; we just need a job in the queue. */
+                        if (agent->learner) {
+                            size_t pending = hu_learner_pending_count(agent->learner);
+                            if (pending >= 10) {
+                                (void)hu_w14_scheduler_enqueue_lora(
+                                    agent->w14_scheduler, now_ms, 300000);
                             }
                         }
                         hu_error_t te = hu_w14_scheduler_tick(agent->w14_scheduler, now_ms);

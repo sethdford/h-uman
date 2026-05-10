@@ -741,6 +741,54 @@ static void test_w12_pagerank_default_damping_when_out_of_range(void) {
     close_facade_(g, m);
 }
 
+/* ── Multi-hop ──────────────────────────────────────────────────────────── */
+
+static void test_w12_multi_hop_returns_records_or_empty(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t alice = add_entity(g, "u1", "Alice", HU_ENTITY_PERSON);
+    int64_t acme  = add_entity(g, "u1", "Acme",  HU_ENTITY_ORGANIZATION);
+    add_relation(g, "u1", alice, acme, HU_REL_WORKS_AT);
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_RELATION;
+    q.contact_id = "u1";
+    q.contact_id_len = 2;
+
+    hu_memory_record_t *out = NULL;
+    size_t n = 0;
+    hu_error_t err = hu_planner_multi_hop(m, A(), &q, 2, &out, &n);
+    HU_ASSERT_EQ(err, HU_OK);
+    if (out) {
+        HU_ASSERT_GT((int)n, 0);
+        hu_planner_records_free(A(), out, n);
+    }
+
+    close_facade_(g, m);
+}
+
+static void test_w12_multi_hop_null_args_rejected(void) {
+    hu_memory_record_t *out = NULL;
+    size_t n = 0;
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_ENTITY;
+
+    HU_ASSERT_EQ(hu_planner_multi_hop(NULL, A(), &q, 2, &out, &n),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_planner_multi_hop((hu_memory_facade_t *)1, NULL, &q, 2, &out, &n),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_planner_multi_hop((hu_memory_facade_t *)1, A(), NULL, 2, &out, &n),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_planner_multi_hop((hu_memory_facade_t *)1, A(), &q, 2, NULL, &n),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_planner_multi_hop((hu_memory_facade_t *)1, A(), &q, 2, &out, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 /* ── Test runner ────────────────────────────────────────────────────────── */
@@ -774,5 +822,7 @@ void run_w12_planner_tests(void) {
     HU_RUN_TEST(test_w12_pagerank_invalid_args_rejected);
     HU_RUN_TEST(test_w12_pagerank_handles_empty_graph);
     HU_RUN_TEST(test_w12_pagerank_default_damping_when_out_of_range);
+    HU_RUN_TEST(test_w12_multi_hop_returns_records_or_empty);
+    HU_RUN_TEST(test_w12_multi_hop_null_args_rejected);
 #endif
 }

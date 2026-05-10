@@ -3,14 +3,10 @@
 
 #include "human/agent/autodream.h"
 #include "human/core/log.h"
-#include "human/memory/graph.h"
 #include "human/persona/persona_deltas.h"
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-/* Same internal handle the rest of the agent layer uses (cf. autodream.c,
- * neural_memory.c). The graph owns the SQLite connection; we share it. */
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <stdbool.h>
@@ -41,6 +37,7 @@ struct hu_scheduler {
     hu_allocator_t *alloc;
     hu_memory_facade_t *m;
     runner_slot_t runners[HU_JOB_KIND_MAX];
+    hu_persona_t *persona;
 };
 
 /* Wall clock (monotonic-ish) in milliseconds. */
@@ -226,8 +223,7 @@ static hu_error_t ensure_schema(struct sqlite3 *db) {
 }
 
 static struct sqlite3 *get_db(hu_memory_facade_t *m) {
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    return g ? hu_graph__db_handle(g) : NULL;
+    return hu_memory_facade_sqlite_db(m);
 }
 
 #endif /* HU_ENABLE_SQLITE */
@@ -278,6 +274,11 @@ hu_error_t hu_scheduler_register_runner(hu_scheduler_t *s, hu_job_kind_t kind,
     s->runners[kind].fn = fn ? fn : default_noop_runner;
     s->runners[kind].user_data = fn ? user_data : NULL;
     return HU_OK;
+}
+
+void hu_scheduler_set_persona(hu_scheduler_t *s, hu_persona_t *p) {
+    if (s)
+        s->persona = p;
 }
 
 /* ── Enqueue ─────────────────────────────────────────────────────────── */
@@ -437,7 +438,7 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
     int load_pct = hu_scheduler_probe_load_pct();
     int battery_pct = hu_scheduler_probe_battery_pct();
     bool on_ac = hu_scheduler_probe_on_ac_power();
-    bool quiet = hu_scheduler_probe_quiet_hours(now_ms, NULL);
+    bool quiet = hu_scheduler_probe_quiet_hours(now_ms, s->persona);
 
     /* Snapshot the eligible set first, then dispatch — keeping the SELECT
      * statement open across runner calls would block schema use by the
@@ -568,7 +569,7 @@ hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out) {
     out->system_load_pct = hu_scheduler_probe_load_pct();
     out->battery_pct = hu_scheduler_probe_battery_pct();
     out->on_ac_power = hu_scheduler_probe_on_ac_power();
-    out->quiet_hours_active = hu_scheduler_probe_quiet_hours((int64_t)time(NULL) * 1000, NULL);
+    out->quiet_hours_active = hu_scheduler_probe_quiet_hours((int64_t)time(NULL) * 1000, s->persona);
 
     struct sqlite3 *db = get_db(s->m);
     if (!db)

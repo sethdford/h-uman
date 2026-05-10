@@ -10,6 +10,7 @@
 #include "human/core/error.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 #ifdef HU_ENABLE_SQLITE
@@ -123,6 +124,8 @@ struct hu_memory_facade {
     void *v1_bundle_ctx; /* malloc'd v1 shared ctx; freed once in hu_memory_facade_close */
     struct hu_memory_facade_slot slots[HU_MEM_KIND_MAX];
     int64_t last_case_rowid; /* HU_MEM_CASE insert rowid; see hu_memory_facade_last_case_rowid */
+    hu_memory_audit_fn audit_fn; /* optional write/erase audit hook */
+    void *audit_ctx;
 };
 
 void hu_memory__v1_set_bundle_for_close(hu_memory_facade_t *m, void *ctx) {
@@ -199,6 +202,14 @@ void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, m, sizeof(*m));
 }
 
+void hu_memory_facade_set_audit_hook(hu_memory_facade_t *m,
+                                     hu_memory_audit_fn fn, void *ctx) {
+    if (m) {
+        m->audit_fn = fn;
+        m->audit_ctx = ctx;
+    }
+}
+
 hu_error_t hu_memory_facade_register_backend(hu_memory_facade_t *m, hu_memory_kind_t kind,
                                              hu_memory_facade_vtable_t *vt, void *ctx) {
     if (m == NULL || vt == NULL || (int)kind < 0 || kind >= HU_MEM_KIND_MAX) {
@@ -253,6 +264,8 @@ hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_
             m->last_case_rowid = sqlite3_last_insert_rowid(db);
     }
 #endif
+    if (e == HU_OK && m->audit_fn)
+        m->audit_fn(m->audit_ctx, HU_MEMORY_AUDIT_WRITE, rec->kind, rec->id);
     return e;
 }
 
@@ -264,7 +277,10 @@ hu_error_t hu_memory_facade_erase(hu_memory_facade_t *m, hu_memory_kind_t kind, 
     if (m == NULL) return HU_ERR_INVALID_ARGUMENT;
     struct hu_memory_facade_slot *s = slot_for(m, kind);
     if (s == NULL || s->vt->erase == NULL) return HU_ERR_NOT_SUPPORTED;
-    return s->vt->erase(s->ctx, kind, id);
+    hu_error_t e = s->vt->erase(s->ctx, kind, id);
+    if (e == HU_OK && m->audit_fn)
+        m->audit_fn(m->audit_ctx, HU_MEMORY_AUDIT_ERASE, kind, id);
+    return e;
 }
 
 hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const char *substring, size_t len) {
@@ -313,6 +329,13 @@ char *hu_memory_facade_route_lookup(hu_memory_facade_t *m, hu_memory_kind_t kind
 hu_graph_t *hu_memory_facade_graph_handle(hu_memory_facade_t *m) {
     return (m != NULL) ? m->graph : NULL;
 }
+
+#ifdef HU_ENABLE_SQLITE
+struct sqlite3 *hu_memory_facade_sqlite_db(hu_memory_facade_t *m) {
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
+    return g ? hu_graph__db_handle(g) : NULL;
+}
+#endif
 
 hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
                                           hu_allocator_t *alloc,
@@ -377,8 +400,98 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
         return HU_ERR_IO;
 
     size_t total_exported = 0;
+    /* Entity + relation rows are contact-scoped in v1 SQLite. A zeroed
+     * `hu_memory_query_t` is invalid for entities and misses relations when
+     * `contact_id` is unset, so enumerate DISTINCT contacts from the graph DB
+     * and export those kinds per contact when SQLite is available. */
+#ifdef HU_ENABLE_SQLITE
+    bool exported_entity_relation_per_contact = false;
+    struct sqlite3 *exdb = hu_memory_facade_sqlite_db(m);
+    if (exdb) {
+        static const char *const dist_sql =
+            "SELECT DISTINCT contact_id FROM ("
+            "SELECT contact_id FROM entities UNION SELECT contact_id FROM relations) "
+            "ORDER BY 1 LIMIT 500";
+        sqlite3_stmt *dst = NULL;
+        if (sqlite3_prepare_v2(exdb, dist_sql, -1, &dst, NULL) != SQLITE_OK) {
+            fclose(fp);
+            return HU_ERR_IO;
+        }
+        size_t contact_passes = 0;
+        while (sqlite3_step(dst) == SQLITE_ROW) {
+            contact_passes++;
+            const char *cid = (const char *)sqlite3_column_text(dst, 0);
+            size_t cid_len = (size_t)sqlite3_column_bytes(dst, 0);
+            if (cid == NULL) {
+                cid = "";
+                cid_len = 0;
+            }
+
+            struct hu_memory_facade_slot *se = slot_for(m, HU_MEM_ENTITY);
+            if (se != NULL) {
+                hu_graph_entity_t *ents = NULL;
+                size_t en = 0;
+                if (hu_memory_facade_list_entities(m, alloc, cid, cid_len, 10000, &ents, &en) ==
+                        HU_OK &&
+                    en > 0) {
+                    for (size_t i = 0; i < en; i++) {
+                        fprintf(fp, "{\"kind\":\"%s\",\"id\":%lld,\"confidence\":1.000",
+                                kind_name(HU_MEM_ENTITY), (long long)ents[i].id);
+                        fprintf(fp, ",\"event_start\":%lld,\"event_end\":0",
+                                (long long)ents[i].first_seen);
+                        fprintf(fp, ",\"payload_len\":%zu}\n", sizeof(hu_graph_entity_t));
+                        total_exported++;
+                    }
+                    hu_graph_entities_free(alloc, ents, en);
+                }
+            }
+
+            hu_memory_query_t rq;
+            memset(&rq, 0, sizeof(rq));
+            rq.kind = HU_MEM_RELATION;
+            rq.contact_id = cid;
+            rq.contact_id_len = cid_len;
+            rq.as.window.limit = 10000;
+            hu_memory_record_t *recs = NULL;
+            size_t rn = 0;
+            hu_error_t re = hu_memory_facade_read(m, &rq, alloc, &recs, &rn);
+            if (re == HU_OK && rn > 0) {
+                for (size_t i = 0; i < rn; i++) {
+                    const hu_memory_record_t *r = &recs[i];
+                    fprintf(fp, "{\"kind\":\"%s\",\"id\":%lld,\"confidence\":%.3f",
+                            kind_name(r->kind), (long long)r->id, (double)r->confidence);
+                    if (r->provenance && r->provenance_len > 0) {
+                        fputs(",\"provenance\":\"", fp);
+                        write_escaped(fp, r->provenance, r->provenance_len);
+                        fputc('"', fp);
+                    }
+                    fprintf(fp, ",\"event_start\":%lld,\"event_end\":%lld",
+                            (long long)r->event_start, (long long)r->event_end);
+                    fprintf(fp, ",\"payload_len\":%zu}\n", r->payload_len);
+                    total_exported++;
+                }
+                hu_memory_facade_records_free(m, alloc, recs, rn);
+            } else if (recs != NULL) {
+                hu_memory_facade_records_free(m, alloc, recs, rn);
+            }
+        }
+        sqlite3_finalize(dst);
+        /* Only skip the generic entity/relation pass when this path actually
+         * emitted rows. Otherwise (zero DISTINCT rows, step errors, empty
+         * reads) the flag must stay false or GDPR export becomes an empty file. */
+        exported_entity_relation_per_contact =
+            (contact_passes > 0 && total_exported > 0);
+    }
+#else
+    bool exported_entity_relation_per_contact = false;
+#endif
+
     for (int ki = 0; ki < HU_MEM_KIND_MAX; ki++) {
         hu_memory_kind_t kind = (hu_memory_kind_t)ki;
+        if (exported_entity_relation_per_contact &&
+            (kind == HU_MEM_ENTITY || kind == HU_MEM_RELATION)) {
+            continue;
+        }
         struct hu_memory_facade_slot *s = slot_for(m, kind);
         if (!s || !s->vt->read)
             continue;
