@@ -40,6 +40,28 @@ This document turns [`2026-05-10-memory-v2-roadmap-overview.md`](2026-05-10-memo
 | Eval JSON suites + offline red-team | `.github/workflows/eval.yml` | PRs touching `src/**`, `include/**`, `eval_suites/**`, `tests/**`, `scripts/redteam-eval-fleet.sh`, `data/eval/**`, `scripts/eval_*.py`; weekly schedule |
 | W16 bench + `--fail-on-regression` | `.github/workflows/evaluation.yml` | Nightly + `workflow_dispatch` |
 
+## As-built snapshot (why “the whole roadmap” is not one PR)
+
+The [overview](2026-05-10-memory-v2-roadmap-overview.md) spans **W7–W16** (facade → belief → world model → neural tier → inline Self-RAG → planner → learning loop → sleep compute → crypto → eval). Each phase has schema, public API, CI gates, and success metrics that require **sequenced PRs over weeks**, not a single merge.
+
+This section records **what is already in the tree** versus what remains spec-first work, so planning matches reality.
+
+| Phase / W | Overview intent | In-repo today (high level) | Typical “still roadmap” gap |
+|-----------|-----------------|----------------------------|-----------------------------|
+| **0** | Type collision fix | `hu_memory_facade_t` vs legacy `hu_memory_t` split; G2 collision script | None for Phase 0 exit |
+| **1 / W7** | Facade completion | `hu_memory_facade_*`, v1 backend, routes table, CLI/daemon/spawn wiring, `hu_memory_facade_sqlite_db`, export GDPR path | Direct `hu_graph_*` in `world_model.c`, `autodream.c`, persona deltas, etc.; run `bash scripts/w7-phase1-graph-bypass-inventory.sh` for counts |
+| **2 / W8** | Belief layer | `hu_belief_t`, graph `confidence_mean` / `confidence_variance`, hyperedge headers | “Replace float everywhere” + W8 adversarial gates per spec |
+| **3 / W9** | Unified world model | `hu_world_model_*`, bridge, cache invalidation | Single-load on every consumer path; p99 gate |
+| **4 / W10** | Neural memory | `HU_ENABLE_NEURAL_MEMORY` CMake option (default OFF), neural headers/tables in flight | Gated ON build + KV hit-rate benchmarks |
+| **5 / W11** | Inline Self-RAG | `hu_self_rag_*`, heuristic + atomic paths, facade integration | Provider-native control tokens + abstention metrics per overview |
+| **6 / W12** | Goal-conditioned retrieval | `hu_retrieval_planner_*`, HippoRAG / verifier loops in tree | Default planner everywhere; LoCoMo subset gate |
+| **7 / W13** | Learning loop | `hu_learner_t`, LoRA runner, learner bridge, DPO path (v1) | Chat-time frontier adapter (M3 closure) + A/B metric |
+| **8 / W14** | Sleep compute | `hu_scheduler_t`, AutoDream runners, belief reverify, counterfactual, KV prewarm | Idle budget proofs + full AutoDream → facade migration |
+| **9 / W15** | Crypto / privacy | Keystore, audit hooks, encrypted store workstreams | Formal “key destroyed → unrecoverable” + DP-SGD per spec |
+| **10 / W16** | Eval suite | Eval harness, CLI, adversarial v2 E2E suite | Nightly frontier bench + regression policy per spec |
+
+**Bottom line:** Treat the overview as the **north star** and this plan as **ordered delivery**. “Everything on the roadmap” means executing the phases above to their **exit rows**, with G0–G2 on every slice and G3 when release-affecting—not collapsing them into one changeset.
+
 ## Phase 0 — Unblock the type system (hard prerequisite) — **DONE (2026-05-10)**
 
 **Problem:** Legacy `human/memory.h` and W7 `human/memory/memory.h` both used the name `hu_memory_t` for different types.
@@ -125,7 +147,7 @@ This document turns [`2026-05-10-memory-v2-roadmap-overview.md`](2026-05-10-memo
 
 **Spec:** [`2026-05-10-w16-evaluation-suite.md`](2026-05-10-w16-evaluation-suite.md)
 
-- `hu_eval_t` backends + nightly workflow (offline + optional live frontier).
+- `hu_evaluation_t` backends + nightly workflow (offline + optional live frontier).
 - **Exit:** documented API budget; CI fails on regression where suites are non-flaky.
 
 ## Parallel tracks (safe)
@@ -140,7 +162,7 @@ This document turns [`2026-05-10-memory-v2-roadmap-overview.md`](2026-05-10-memo
 These are **already landed or landing with the plan PR** so “plan + fix” is not empty:
 
 1. **W7 shared v1 ctx** — `hu_memory_register_backend` / `hu_memory_close` must not free the bundle while sibling slots reference it; bundle freed once via `v1_bundle_ctx`.
-2. **`HU_ENABLE_NEURAL_MEMORY`** — CMake option reserved for W10 (default OFF).
+2. **`HU_ENABLE_NEURAL_MEMORY`** — CMake option for W10 (default OFF; defined in root `CMakeLists.txt`).
 3. **`scripts/check-memory-v2-header-collision.sh`** — fails CI if `src/**/*.c` includes **both** `human/memory.h` and `human/memory/memory.h` (allowlist for intentional bridge TUs).
 4. **Include hygiene** — remove redundant W7 includes where headers already pull them.
 

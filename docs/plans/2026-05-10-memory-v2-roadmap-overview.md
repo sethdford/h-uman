@@ -1,7 +1,7 @@
 ---
 title: "Memory v2 Roadmap — Overview"
 created: 2026-05-10
-status: proposed
+status: in_progress
 parent: 2026-05-10-memory-roadmap-overview.md
 related:
   - 2026-05-10-memory-v2-execution-plan.md
@@ -47,7 +47,7 @@ v2 is a 7-layer stack. Every workstream extends exactly one layer through exactl
 
 ```
    ┌──────────────────────────────────────────────────────────────────────┐
-   │  Layer 7 — Evaluation             [W16]  hu_eval_t                   │
+   │  Layer 7 — Evaluation             [W16]  hu_evaluation_t             │
    ├──────────────────────────────────────────────────────────────────────┤
    │  Layer 6 — Privacy & Governance   [W15]  hu_keystore_t, hu_audit_t   │
    ├──────────────────────────────────────────────────────────────────────┤
@@ -78,17 +78,18 @@ v2 is a 7-layer stack. Every workstream extends exactly one layer through exactl
 
 ## Shared infrastructure (the "no duplication" contract)
 
-Five concrete artifacts are owned by Layer 1–3 and consumed by every layer above. These are written **once** and never duplicated:
+Six concrete artifacts span Layers 1–3, 5, and 7; each is owned by one workstream and consumed above. They are written **once** and never duplicated:
 
 | Artifact | Owner | Consumers | Purpose |
 |----------|-------|-----------|---------|
 | `hu_memory_facade_t` (W7 dispatch facade) | W7 | W11, W12, W13, W14, W16 | One read/write/erase surface over kinds (graph, cases, deltas, …). Legacy chat/vector store remains `hu_memory_t` in `human/memory.h` (Phase 0 rename; see type-collision cleanup doc). |
 | `hu_belief_t` (posterior + provenance) | W8 | W7, W11, W14 | Replaces `float confidence` everywhere; carries (mean, variance, prov) |
 | `hu_world_model_t` (per-contact snapshot) | W9 | W11, W12, W13, W14 | Single struct: entities + beliefs + persona + emotion + goals + ToM + negatives |
+| `hu_planner_t` (goal-conditioned retrieval) | W12 | W11, agent turn | Heuristic + LLM-backed plans; executes retrieve/verify loops via the facade (`retrieval_planner.h`) |
 | `hu_self_rag_t` (verifier vtable) | W11 | response-path, W14 | Heuristic backend (W4-existing) + inline-LLM backend + future model-native |
-| `hu_eval_t` (benchmark vtable) | W16 | CI, every prior W | LoCoMo / LongMemEval / DMR / MINJA / MemoryAgentBench / frontier compare |
+| `hu_evaluation_t` (benchmark vtable; see `include/human/evaluation/evaluation.h`) | W16 | CI, every prior W | LoCoMo / LongMemEval / DMR / MINJA / MemoryAgentBench / frontier compare |
 
-Every other type already exists in v1 and is reused. Nothing in v2 introduces a new vtable that competes with one of these.
+Every other type already exists in v1 and is reused. Nothing in v2 introduces a second implementation of the **same** responsibility (e.g. no parallel memory facades).
 
 ## The 10 workstreams
 
@@ -115,7 +116,7 @@ Every other type already exists in v1 and is reused. Nothing in v2 introduces a 
 
 **W10 — Neural memory tier.** Extends the W7 facade (`hu_memory_facade_t`) with two new entry kinds: **KV-cache memory** (compressed activations for past prompts, retrievable by prompt-prefix hash) and **reasoning-trace memory** (chain-of-thought for past plans, retrievable by goal+anchor). Adds joined storage of (entity, embedding, KV-blob) co-resident in SQLite via a separate `neural_memory` table. Multimodal entries (image / voice / video bytes) get a generic `hu_memory_blob_t` cell. Cleanup falls under W14's sleep scheduler. KV-blobs are model-version-tagged so a model upgrade invalidates the right rows automatically.
 
-**W11 — Inline Self-RAG with abstention.** The big one for trust. New `hu_self_rag_t` vtable replaces v1's heuristic verifier (which becomes the fallback backend). New backends: an **inline backend** that interleaves `<retrieve>`/`<critique>`/`<refuse>` control tokens during generation; an **atomic-claim decomposition backend** that splits a draft sentence into noun-phrase atomic claims and verifies each. Adds an explicit **refusal head**: when no claim crosses the threshold, the model returns `HU_VERIFY_ABSTAIN` and the channel layer renders "I don't have enough memory to say." The provider layer learns one new chat call: `hu_provider_chat_with_self_rag`.
+**W11 — Inline Self-RAG with abstention.** The big one for trust. New `hu_self_rag_t` vtable replaces v1's heuristic verifier (which becomes the fallback backend). New backends: an **inline backend** that interleaves `<retrieve>`/`<critique>`/`<refuse>` control tokens during generation; an **atomic-claim decomposition backend** that splits a draft sentence into noun-phrase atomic claims and verifies each. Adds an explicit **refusal head**: when no claim crosses the threshold, the model returns `HU_VERIFY_ABSTAIN` and the channel layer renders "I don't have enough memory to say." There is **no** separate public `hu_provider_chat_with_self_rag` API in-tree today; Self-RAG uses `hu_self_rag_*` plus the existing provider chat surface. A dedicated provider entry point remains optional if a backend needs native control-token streaming.
 
 **W12 — Goal-conditioned retrieval + multi-hop reasoning.** New `hu_planner_t` interface (vtable) that takes a goal + world-model snapshot and emits a retrieval plan. Implements **HippoRAG-style PageRank** over the entity graph for soft retrieval. Implements **3-hop traversal with verifier loops**: plan → retrieve → score → expand → re-verify, capped at 5 hops with a budget. Replaces ad-hoc memory queries scattered across `agent/context.c` with one planner call. Also unlocks complex queries like "when did Alice and Bob last collaborate on funding?" that v1 cannot answer in one round-trip.
 
@@ -125,7 +126,7 @@ Every other type already exists in v1 and is reused. Nothing in v2 introduces a 
 
 **W15 — Cryptographic privacy + DP.** Per-user envelope encryption: a master key derived from user passphrase / OS keychain wraps per-table data keys. Deleting the user's master key cryptographically revokes all data — even backups. Adds DP-SGD support to W13's training jobs (gradient clipping + Gaussian noise; `epsilon` budget tracked per epoch). Adds user-readable audit log (`human memory audit`) showing every read/write/erase with timestamps and source. Adds **GDPR Article 20 export** (`human memory export --json`) — the inverse of erasure.
 
-**W16 — Continuous evaluation.** New `hu_eval_t` vtable. Backends: LoCoMo (long-conversation recall), LongMemEval (5 task categories), Deep Memory Retrieval, MINJA poisoning red-team, MemoryAgentBench (multi-agent coordination), Frontier-Compare (us vs GPT-5/Gemini-3.1-pro/Claude-Opus-5 with no memory on identical conversations). **CI:** nightly benchmark + regression gate lives in `.github/workflows/evaluation.yml`; PR-scoped eval JSON suites + offline red-team fleet live in `.github/workflows/eval.yml`; every PR still runs `human eval validate` / `check-regression` from `.github/workflows/ci.yml`. Replaces specced-but-never-built v1 W6 LoCoMo skeleton.
+**W16 — Continuous evaluation.** New `hu_evaluation_t` vtable (`evaluation.h`). JSON task harnesses remain `hu_eval_*` in `human/eval.h` — different surface. Backends: LoCoMo (long-conversation recall), LongMemEval (5 task categories), Deep Memory Retrieval, MINJA poisoning red-team, MemoryAgentBench (multi-agent coordination), Frontier-Compare (us vs frontier models with no memory on identical conversations). **CI:** nightly benchmark + regression gate lives in `.github/workflows/evaluation.yml`; PR-scoped eval JSON suites + offline red-team fleet live in `.github/workflows/eval.yml`; every PR still runs `human eval validate` / `human eval check-regression` from `.github/workflows/ci.yml`. Replaces specced-but-never-built v1 W6 LoCoMo skeleton.
 
 ## Sequencing
 
@@ -153,15 +154,15 @@ Every other type already exists in v1 and is reused. Nothing in v2 introduces a 
 Inherited from v1's roadmap, with two additions:
 
 - **One concern per branch.** No mixed feature + refactor + infra. (`AGENTS.md` §6)
-- **Vtable discipline.** v2 introduces exactly five new vtables (memory facade, learner, scheduler, self-RAG, eval). Every other addition extends an existing struct.
+- **Vtable discipline.** v2 introduces **six** planner-facing vtables: memory facade, belief-backed retrieval planner (`hu_planner_t` in `retrieval_planner.h`), learner, scheduler, self-RAG, and evaluation (`hu_evaluation_t`). JSON eval harness types (`hu_eval_suite_t`, etc. in `eval.h`) predate W16 and are not the W16 benchmark vtable. Every other addition extends an existing struct.
 - **HU_IS_TEST guards on side effects.** Subagents must be scriptable in tests without spawning real processes.
-- **Binary size budget.** v1 added ~430 KB (1.75 MB → 2.18 MB). v2 budget is +500 KB (target ≤ 2.7 MB MinSizeRel+LTO). W13 LoRA is gated behind the existing `HU_ENABLE_LEARNING` CMake option. W10 KV-cache will be gated behind `HU_ENABLE_NEURAL_MEMORY` *(planned — not yet defined as a CMake option since W10 implementation has not landed)*.
+- **Binary size budget.** v1 added ~430 KB (1.75 MB → 2.18 MB). v2 budget is +500 KB (target ≤ 2.7 MB MinSizeRel+LTO). W13 LoRA is gated behind the existing `HU_ENABLE_LEARNING` CMake option (see root `CMakeLists.txt`). W10 neural memory is gated behind `HU_ENABLE_NEURAL_MEMORY` (**defined**, default **OFF**; turn ON for W10 schema/tests per `w10-neural-memory` spec).
 - **Zero ASan errors.** Every allocation freed; `SQLITE_STATIC` only.
 - **Conventional commits.** Pre-commit hooks already enforce.
 - **Test discipline.** Each workstream lands ≥1 boundary/failure-mode test per new public function. The W6-style E2E adversarial suite gets one new scenario per workstream (W17 of the existing eval suite, not a new file).
 - **GDPR / EU AI Act.** W15 makes erasure cryptographic; W16 makes audits queryable. Aug 2026 EU AI Act applicability is a hard deadline.
 - **(NEW) Layer-direction rule.** A workstream may never depend on a layer above its own. Violations are a build error (CMake topology check).
-- **(NEW) Single-artifact rule.** The five shared artifacts in the table above are produced by exactly one workstream and consumed via vtable everywhere else. PRs that introduce a parallel implementation are rejected.
+- **(NEW) Single-artifact rule.** The shared artifacts in the table above (plus `hu_planner_t` for W12) are each owned by one workstream and consumed via their public APIs everywhere else. PRs that introduce a parallel implementation are rejected.
 
 ## Schema migration policy
 
@@ -169,7 +170,7 @@ v2 introduces three schema changes:
 
 - **W7** — adds a `memory_facade_routes` table that maps logical entry kinds to backend names. Pure metadata; old DBs auto-populated with `v1_backend` for every kind.
 - **W8** — promotes every `confidence REAL` column to a paired `(confidence_mean REAL, confidence_variance REAL)`; old rows get variance = 0 (deterministic). Hyperedges live in a new `hyperedges` + `hyperedge_members` pair.
-- **W10** — adds `neural_memory(blob, kind, model_version, prompt_hash, created_at)` and `kv_cache(prompt_hash, model_version, blob)`. Both will be gated behind `HU_ENABLE_NEURAL_MEMORY` once the option is added (W10 implementation has not landed; macro is reserved naming, not yet defined).
+- **W10** — adds `neural_memory(blob, kind, model_version, prompt_hash, created_at)` and `kv_cache(prompt_hash, model_version, blob)` (per W10 spec). Both are gated behind `HU_ENABLE_NEURAL_MEMORY` in CMake (option exists; full schema coverage tracked in `test_w10_neural_memory.c` and the W10 spec).
 
 All three follow v1's pattern: idempotent ALTERs, schema-version bump, refuse-to-open on mismatch, round-trip test per migration.
 
@@ -215,7 +216,7 @@ All three follow v1's pattern: idempotent ALTERs, schema-version bump, refuse-to
 - `docs/plans/2026-05-10-memory-roadmap-overview.md` — v1 roadmap (predecessor)
 - `docs/plans/2026-05-10-w1-bitemporal-foundation.md` … `w6-…` — v1 specs
 - `include/human/memory/graph.h` — current graph API (entities, relations, communities, temporal, causal, conflict, retention)
-- `src/memory/graph.c` — SQLite-backed implementation (~2100 lines after v1)
+- `src/memory/graph.c` — SQLite-backed implementation (~2460 lines after v1; run `wc -l` for current)
 - `src/agent/response_verifier.c` — v1 heuristic verifier (becomes `hu_self_rag_t` heuristic backend)
 - `src/agent/autodream.c` — v1 background consolidator (gets folded into W14 scheduler)
 - `src/persona/persona_deltas.c` — v1 evolver (becomes a learning-signal source for W13)
