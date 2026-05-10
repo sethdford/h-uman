@@ -62,7 +62,21 @@ hu_error_t hu_keystore_decrypt(hu_keystore_t *ks, const char *table_name,
 hu_error_t hu_keystore_destroy_master_key(const char *user_id);
 ```
 
-Backed by libsodium (already a dependency option). XChaCha20-Poly1305 for AEAD. Argon2id for passphrase derivation.
+### Crypto status (2026-05-10, FIX 21)
+
+Pre-libsodium hardening landed. The keystore now uses:
+
+- **AEAD**: ChaCha20 (in-tree) + HMAC-SHA256 with a **per-call cryptographically-random 12-byte nonce** sourced from `arc4random_buf` / `getrandom()` / `/dev/urandom` in that order. If the OS RNG is unavailable, encrypt fails with `HU_ERR_CRYPTO_ENCRYPT` rather than fall back to a deterministic value (no same-key/same-nonce reuse, ever).
+- **KDF**: PBKDF2-HMAC-SHA256 with a **per-user 16-byte random salt** persisted at `<key_dir>/<user_id>.salt` (mode 0600) and **600,000 iterations** (OWASP 2023 recommendation for PBKDF2-HMAC-SHA256). In test builds the iteration count is dropped to 1,000 to keep the suite fast.
+- **Cryptographic forgetting**: `hu_keystore_destroy_master_key` writes the tombstone *and* unlinks the salt. Even if the tombstone is later deleted, the original master key cannot be re-derived because the salt is gone.
+
+Adversarial coverage:
+
+- `test_w15_random_nonce_makes_ciphertext_unique`: encrypting the same plaintext twice produces different ciphertexts including different nonces.
+- `test_w15_per_user_salt_separates_keys`: two users with the same passphrase derive different master keys; user-A ciphertext does not decrypt under user-B's keystore.
+- `test_w15_destruction_removes_salt_makes_recovery_impossible`: even with the tombstone deleted by an attacker, the same passphrase produces a fresh master key (ciphertext under the original key is unrecoverable).
+
+Future libsodium upgrade still planned: XChaCha20-Poly1305 for AEAD (eliminates the HMAC step) and Argon2id for KDF (memory-hard against ASIC attacks). Track that work in this doc when it lands.
 
 ### Memory facade decorator
 

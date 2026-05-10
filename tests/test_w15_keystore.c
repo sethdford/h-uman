@@ -44,6 +44,15 @@ static void remove_tombstone(const char *user_id) {
     (void)remove(path);
 }
 
+/* Remove a salt file for `user_id` (cleanup between tests). */
+static void remove_salt(const char *user_id) {
+    char path[256];
+    const char *dir = getenv("HU_KEYSTORE_DIR");
+    if (!dir) dir = "/tmp";
+    snprintf(path, sizeof(path), "%s/%s.salt", dir, user_id);
+    (void)remove(path);
+}
+
 /* ── keystore tests ─────────────────────────────────────────────────────── */
 
 static void test_w15_keystore_open_and_lock(void) {
@@ -207,6 +216,130 @@ static void test_w15_locked_keystore_encrypt_fails(void) {
     HU_ASSERT_NULL(ct);
 
     hu_keystore_close(ks, A());
+}
+
+/* W15 production crypto — encrypting the same plaintext twice MUST yield
+ * different ciphertexts because the per-call nonce is now cryptographically
+ * random. Both ciphertexts must still decrypt to the same plaintext. */
+static void test_w15_random_nonce_makes_ciphertext_unique(void) {
+    set_ks_dir();
+    remove_tombstone("user_nonce");
+    remove_salt("user_nonce");
+
+    hu_keystore_t *ks = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_nonce", &ks), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks, "passphrase", 10), HU_OK);
+
+    const char *pt = "same plaintext, different ciphertexts";
+    size_t pt_len = strlen(pt);
+
+    void *ct1 = NULL, *ct2 = NULL;
+    size_t ct1_len = 0, ct2_len = 0;
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, pt_len, &ct1, &ct1_len), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, pt_len, &ct2, &ct2_len), HU_OK);
+
+    HU_ASSERT_EQ(ct1_len, ct2_len);
+    /* The full blob must differ — the nonce alone is enough. The probability
+     * of two 12-byte random values colliding in a single test run is
+     * vanishingly small (negligible over the lifetime of CI). */
+    HU_ASSERT(memcmp(ct1, ct2, ct1_len) != 0);
+    /* The first 12 bytes (nonce) MUST also differ. */
+    HU_ASSERT(memcmp(ct1, ct2, 12) != 0);
+
+    /* Both must still decrypt to the same plaintext. */
+    void *p1 = NULL, *p2 = NULL;
+    size_t p1_len = 0, p2_len = 0;
+    HU_ASSERT_EQ(hu_keystore_decrypt(ks, "entities", ct1, ct1_len, &p1, &p1_len), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_decrypt(ks, "entities", ct2, ct2_len, &p2, &p2_len), HU_OK);
+    HU_ASSERT_EQ(p1_len, pt_len);
+    HU_ASSERT_EQ(p2_len, pt_len);
+    HU_ASSERT_EQ(memcmp(p1, pt, pt_len), 0);
+    HU_ASSERT_EQ(memcmp(p2, pt, pt_len), 0);
+
+    A()->free(A()->ctx, p1, p1_len + 1);
+    A()->free(A()->ctx, p2, p2_len + 1);
+    A()->free(A()->ctx, ct1, ct1_len);
+    A()->free(A()->ctx, ct2, ct2_len);
+    hu_keystore_close(ks, A());
+    remove_salt("user_nonce");
+}
+
+/* W15 production crypto — different users with the same passphrase MUST
+ * derive different master keys (per-user salt defeats rainbow tables). */
+static void test_w15_per_user_salt_separates_keys(void) {
+    set_ks_dir();
+    remove_tombstone("user_alpha");
+    remove_tombstone("user_beta");
+    remove_salt("user_alpha");
+    remove_salt("user_beta");
+
+    /* Alpha encrypts under shared passphrase. */
+    hu_keystore_t *ks_a = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_alpha", &ks_a), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks_a, "shared-pp", 9), HU_OK);
+    const char *pt = "alpha-only secret";
+    void *ct = NULL;
+    size_t ct_len = 0;
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks_a, "entities", pt, strlen(pt), &ct, &ct_len), HU_OK);
+    hu_keystore_close(ks_a, A());
+
+    /* Beta unlocks the SAME passphrase. The salt is per-user so the
+     * master key MUST differ; the alpha-encrypted blob MUST NOT decrypt. */
+    hu_keystore_t *ks_b = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_beta", &ks_b), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks_b, "shared-pp", 9), HU_OK);
+
+    void *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_keystore_decrypt(ks_b, "entities", ct, ct_len, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_ERR_CRYPTO_DECRYPT);
+    HU_ASSERT_NULL(out);
+
+    A()->free(A()->ctx, ct, ct_len);
+    hu_keystore_close(ks_b, A());
+    remove_salt("user_alpha");
+    remove_salt("user_beta");
+}
+
+/* W15 production crypto — destroying the master key removes the salt;
+ * even after manually deleting the tombstone, the same passphrase
+ * produces a fresh, different master key (ciphertext is unrecoverable). */
+static void test_w15_destruction_removes_salt_makes_recovery_impossible(void) {
+    set_ks_dir();
+    remove_tombstone("user_destruct");
+    remove_salt("user_destruct");
+
+    /* Encrypt under v1 of the master key. */
+    hu_keystore_t *ks = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_destruct", &ks), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks, "irrecoverable", 13), HU_OK);
+    const char *pt = "data tied to v1 salt";
+    void *ct = NULL;
+    size_t ct_len = 0;
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, strlen(pt), &ct, &ct_len), HU_OK);
+    hu_keystore_close(ks, A());
+
+    /* Destroy: writes tombstone AND removes the salt. */
+    HU_ASSERT_EQ(hu_keystore_destroy_master_key("user_destruct"), HU_OK);
+
+    /* Adversary deletes the tombstone but cannot recover the salt. */
+    remove_tombstone("user_destruct");
+
+    /* Re-unlock with the same passphrase succeeds (no tombstone), but a
+     * fresh salt is generated → master key v2 ≠ v1 → ct does not decrypt. */
+    hu_keystore_t *ks2 = NULL;
+    HU_ASSERT_EQ(hu_keystore_open(A(), "user_destruct", &ks2), HU_OK);
+    HU_ASSERT_EQ(hu_keystore_unlock_with_passphrase(ks2, "irrecoverable", 13), HU_OK);
+
+    void *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_keystore_decrypt(ks2, "entities", ct, ct_len, &out, &out_len),
+                 HU_ERR_CRYPTO_DECRYPT);
+    HU_ASSERT_NULL(out);
+
+    A()->free(A()->ctx, ct, ct_len);
+    hu_keystore_close(ks2, A());
+    remove_salt("user_destruct");
 }
 
 static void test_w15_invalid_args_rejected(void) {
@@ -398,6 +531,9 @@ void run_w15_keystore_tests(void) {
     HU_RUN_TEST(test_w15_decrypt_with_wrong_key_fails);
     HU_RUN_TEST(test_w15_cryptographic_forgetting_unrecoverable);
     HU_RUN_TEST(test_w15_locked_keystore_encrypt_fails);
+    HU_RUN_TEST(test_w15_random_nonce_makes_ciphertext_unique);
+    HU_RUN_TEST(test_w15_per_user_salt_separates_keys);
+    HU_RUN_TEST(test_w15_destruction_removes_salt_makes_recovery_impossible);
     HU_RUN_TEST(test_w15_invalid_args_rejected);
     HU_RUN_TEST(test_w15_audit_log_round_trip);
     HU_RUN_TEST(test_w15_audit_log_filter_by_actor);
