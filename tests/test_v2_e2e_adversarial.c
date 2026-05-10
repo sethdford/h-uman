@@ -362,16 +362,21 @@ static void test_v2_e2e_persona_deltas_to_learner_signals(void) {
                                   "user-explicit", 1735689600000LL + i * 1000LL, NULL);
     }
 
-    hu_training_signal_t *signals = NULL;
-    size_t count = 0;
-    HU_ASSERT_EQ(hu_learner_signals_from_persona_deltas(m, A(), "u1", 2, &signals, &count),
-                 HU_OK);
-    HU_ASSERT(count >= 0); /* idempotent: builder may return 0 if status filter excludes */
+    /* The builder is contracted to filter on applied status: pending
+     * proposals (no evolver run) yield zero signals. Then we run twice and
+     * assert idempotency — same count both times — which is the guarantee
+     * the W13 doc string makes ("calling twice returns the same set"). */
+    hu_training_signal_t *s1 = NULL;
+    size_t n1 = 0;
+    HU_ASSERT_EQ(hu_learner_signals_from_persona_deltas(m, A(), "u1", 2, &s1, &n1), HU_OK);
+    HU_ASSERT_EQ(n1, 0u);
+    HU_ASSERT(s1 == NULL);
 
-    /* Free the array (always safe even when count == 0). */
-    if (signals) {
-        A()->free(A()->ctx, signals, sizeof(*signals) * count);
-    }
+    hu_training_signal_t *s2 = NULL;
+    size_t n2 = 999; /* non-zero sentinel; builder must overwrite */
+    HU_ASSERT_EQ(hu_learner_signals_from_persona_deltas(m, A(), "u1", 2, &s2, &n2), HU_OK);
+    HU_ASSERT_EQ(n2, n1);
+    HU_ASSERT(s2 == NULL);
 
     close_facade(m, g);
 }
