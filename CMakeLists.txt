@@ -796,6 +796,7 @@ set(HU_CORE_SOURCES
     src/migration.c
     src/version.c
     src/cli_commands.c
+    src/cli_evaluation.c
     src/cost.c
     src/usage.c
     src/oauth.c

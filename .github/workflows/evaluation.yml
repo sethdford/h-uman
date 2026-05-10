@@ -1,0 +1,124 @@
+name: W16 Evaluation Suite
+
+# Continuous benchmark coverage for the v2 memory roadmap (W16).
+#
+# Runs the six `human evaluation` backends nightly and on demand, captures
+# per-suite JSON reports as artifacts, and gates regression against
+# docs/evaluation/baseline.json. The schedule deliberately sits outside the
+# main `eval.yml` workflow so a flaky benchmark never blocks PR CI.
+#
+# Spec: docs/plans/2026-05-10-w16-evaluation-suite.md
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      write_baseline:
+        description: "Update docs/evaluation/baseline.json with this run's scores"
+        type: boolean
+        default: false
+      frontier_live:
+        description: "Run frontier-compare with live API calls (requires secrets)"
+        type: boolean
+        default: false
+
+jobs:
+  bench:
+    name: Run W16 evaluation bench
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: Debug
+          enable-curl: "true"
+
+      - name: Sanity check the binary built
+        run: ./build/human evaluation list
+
+      - name: Bench against committed baseline
+        id: bench
+        run: |
+          set -o pipefail
+          mkdir -p build/evaluation-reports
+          BASELINE_ARG=""
+          if [ -f docs/evaluation/baseline.json ]; then
+            BASELINE_ARG="--baseline docs/evaluation/baseline.json"
+          fi
+          ./build/human evaluation bench $BASELINE_ARG \
+              --write-baseline build/evaluation-reports/fresh_baseline.json \
+              --fail-on-regression \
+              | tee build/evaluation-reports/bench.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: w16-evaluation-reports
+          path: build/evaluation-reports/
+
+      - name: Open baseline-update PR
+        if: |
+          github.event_name == 'workflow_dispatch'
+          && github.event.inputs.write_baseline == 'true'
+          && success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p docs/evaluation
+          cp build/evaluation-reports/fresh_baseline.json docs/evaluation/baseline.json
+          BRANCH="evaluation/baseline-$(date -u +%Y%m%d-%H%M)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add docs/evaluation/baseline.json
+          git commit -m "chore(evaluation): refresh W16 baseline ($(date -u +%Y-%m-%d))"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "chore(evaluation): refresh W16 baseline" \
+            --body "Automated baseline refresh from W16 evaluation workflow." \
+            --base main --head "$BRANCH"
+
+  unit-tests:
+    name: W16 evaluation unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: Debug
+          enable-curl: "true"
+
+      - name: Run W16 evaluation unit tests
+        run: ./build/human_tests --suite="W16 evaluation"
+
+  frontier-live:
+    name: Frontier-compare (live, gated)
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch'
+      && github.event.inputs.frontier_live == 'true'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: Debug
+          enable-curl: "true"
+
+      - name: Run frontier-compare with live providers
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GCP_ADC_JSON: ${{ secrets.GCP_ADC_JSON }}
+        run: ./build/human evaluation run frontier

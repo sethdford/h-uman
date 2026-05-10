@@ -469,6 +469,8 @@ static const hu_command_t commands[] = {
     {"models", "List available models", cmd_models},
     {"auth", "Authentication management", cmd_auth},
     {"eval", "Run eval suites and compare runs", cmd_eval},
+    {"evaluation", "W16 continuous benchmarks (locomo/longmem/dmr/minja/mab/frontier)",
+     cmd_evaluation},
     {"hula", "HuLa program engine (parse, compile, execute, trace, replay)", cmd_hula},
     {"update", "Check for updates", cmd_update},
 #ifdef HU_ENABLE_CURL
