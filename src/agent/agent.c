@@ -18,9 +18,9 @@
 #include "human/memory/promotion.h"
 #include "human/memory/tiers.h"
 #include "human/webhook.h"
+#include "human/agent/world_model_bridge.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/scheduler.h"
-#include "human/agent/world_model_bridge.h"
 #include "human/cognition/db.h"
 #include "human/intelligence/meta_learning.h"
 #endif
@@ -1010,6 +1010,13 @@ void hu_agent_deinit(hu_agent_t *agent) {
     if (agent->auto_save && hu_personal_model_has_content(&agent->personal_model)) {
         char pm_path[1024];
         if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+            /* Final decay pass before persisting — same opportunistic
+             * call agent_turn makes on every user message. Catches the
+             * case of a long-running daemon that ingested signal hours
+             * ago and is shutting down without another turn to trigger
+             * the per-turn decay. Keeps the on-disk model bounded. */
+            (void)hu_personal_model_apply_decay(&agent->personal_model,
+                                                (int64_t)time(NULL));
             (void)hu_personal_model_save(&agent->personal_model, pm_path);
         }
     }

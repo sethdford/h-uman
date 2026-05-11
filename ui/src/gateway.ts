@@ -210,11 +210,16 @@ export class GatewayClient extends EventTarget {
     if (this.#ws?.readyState !== WebSocket.OPEN) {
       throw new Error("WebSocket not connected");
     }
-    const payload =
-      data instanceof ArrayBuffer
-        ? data
-        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-    this.#ws.send(payload);
+    if (data instanceof ArrayBuffer) {
+      this.#ws.send(data);
+      return;
+    }
+    // ArrayBufferView (including Uint8Array): copy into a fresh ArrayBuffer
+    // so the type matches WebSocket.send (BufferSource) regardless of the
+    // underlying buffer type (ArrayBuffer vs SharedArrayBuffer).
+    const copy = new Uint8Array(data.byteLength);
+    copy.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+    this.#ws.send(copy.buffer);
   }
 
   voiceSessionStart(params?: Record<string, unknown>): Promise<{

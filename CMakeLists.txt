@@ -1856,13 +1856,17 @@ if(NOT WIN32)
         VERBATIM)
     # Memory v2 local proof bundle (G2 collision + v2 E2E suite); see
     # docs/plans/2026-05-10-memory-v2-execution-plan.md gate G1.5.
-    add_custom_target(memory_v2_local_proof
-        COMMAND ${CMAKE_COMMAND} -E env HUMAN_TESTS=$<TARGET_FILE:human_tests>
-            bash ${CMAKE_SOURCE_DIR}/scripts/memory-v2-local-proof.sh
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        DEPENDS human_tests
-        COMMENT "Memory v2 local proof (collision guard + v2 E2E suite)"
-        VERBATIM)
+    # Only available when tests are built — generator expression below
+    # otherwise fails configure when HU_BUILD_TESTS=OFF (release/docker).
+    if(HU_BUILD_TESTS)
+        add_custom_target(memory_v2_local_proof
+            COMMAND ${CMAKE_COMMAND} -E env HUMAN_TESTS=$<TARGET_FILE:human_tests>
+                bash ${CMAKE_SOURCE_DIR}/scripts/memory-v2-local-proof.sh
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            DEPENDS human_tests
+            COMMENT "Memory v2 local proof (collision guard + v2 E2E suite)"
+            VERBATIM)
+    endif()
 endif()
 if(HU_ENABLE_TOPOLOGY_CHECK AND NOT WIN32)
     add_custom_target(human_topology_check
