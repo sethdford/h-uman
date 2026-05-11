@@ -180,3 +180,31 @@ Tests (`tests/test_w11_self_rag.c::W11 inline self-RAG with abstention`):
 
 - Calibrate `abstain_threshold` against the 200-prompt annotated suite so the success metric ("≥30 % abstention on weak-evidence prompts") is measurable — bridge already wires `claims_total/flagged` so a smoke harness can read them via `hu_agent_self_rag_telemetry`.
 - Inline backend control-token wiring for additional providers (currently only the placeholder protocol parser is exercised end-to-end).
+
+---
+
+## P2 — Inline backend memory-backed scoring (landed 2026-05-10)
+
+The inline backend previously initialized every claim's `support` belief to a hardcoded `hu_belief_init(0.0f, kind, now)`, which meant the abstention path (and any consumer that read `claim.support.mean`) was acting on a value that always lied about what memory said. P2 replaces that placeholder with real per-claim scoring:
+
+- **`<critique>` claims** flow through `hu_response_verify` configured with `max_claims=1`, mirroring the atomic backend's `score_atomic_claim`. The token-overlap score against the contact's relations becomes `support.mean`; sub-floor scores set `claim.fabricated`.
+- **`<retrieve>` claims** issue a single `hu_memory_facade_read` for the contact's relations and use record count (saturated at 5) as the support proxy. A future revision can grade each record against the query string with `hu_crag_grade_document`.
+- **W9 single-load lift**: when the request supplies a `hu_world_model_t` snapshot AND its loaded entities cover the claim text (case-insensitive substring), weak SQL scores are lifted to a 0.5 floor. This is the W9 promise threaded through W11 — the verifier consumes the unified world-model artifact rather than always re-querying for entity discovery. The lift is monotone: it never lowers a strong SQL score.
+- **STRICT-mode score-based abstention**: when `req->mode == HU_VERIFY_STRICT` and `abstain_threshold > 0`, the inline backend now abstains with the deterministic `HU_REFUSAL_LOW_CONFIDENCE` template once the fabricated-claim ratio crosses the threshold. Existing INLINE/SOFT callers fall through to the prior tag-stripping outcome — no behavioral change for the existing test surface.
+- **Provenance preserved**: `claim.prov.source` still carries the **tag kind** (`"critique"` / `"retrieve"`) so downstream routing keeps working; the receipt source is appended as a secondary provenance atom on the belief itself, and `claim.prov.weight` now equals `claim.support.mean` instead of always being 0.
+
+Tests added in `tests/test_w11_self_rag.c`:
+
+- `test_w11_inline_critique_supported_when_memory_matches` — seeded relation, claim aligns → `support.mean ≥ 0.6`, not fabricated, prov.weight ≥ 0.6.
+- `test_w11_inline_critique_fabricated_when_memory_empty` — empty memory → fabricated, but INLINE-mode does NOT auto-abstain (preserves prior contract).
+- `test_w11_inline_retrieve_score_reflects_record_count` — seeded memory → score > 0, belief carries `inline-probe` source.
+- `test_w11_inline_strict_abstains_on_score` — STRICT + 0 evidence → ABSTAINED + LOW_CONFIDENCE template.
+- `test_w11_inline_strict_supported_when_evidence_present` — STRICT + seeded memory → no abstention.
+- `test_w11_inline_wm_entity_match_lifts_weak_score` — entity present in WM but no relation → SQL score below floor → WM lift bumps to 0.5 with `inline-wm-lift` provenance source.
+- `test_w11_inline_wm_no_match_leaves_score_unchanged` — claim mentions an entity NOT in WM → no lift → primary source remains `inline-graph`.
+
+### Remaining scope (after P2)
+
+- True streaming control-token integration with each frontier provider (Anthropic, Gemini, OpenAI). The deterministic protocol parser still drives the in-process tests; live provider wiring is independent of the scoring path landed in P2.
+- Per-record CRAG grading inside `inline_score_retrieve` so retrieve-claim scoring reflects relevance, not just record count.
+- Calibration of `abstain_threshold` against the 200-prompt annotated suite (carried over from P1).

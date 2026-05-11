@@ -115,6 +115,35 @@ static void capture_claim_text(hu_atomic_claim_t *c, const char *src,
     c->span_end = base_off + (int64_t)len;
 }
 
+/* W9 single-load helper — does the world-model snapshot carry an entity
+ * whose name appears in the claim text?
+ *
+ * Case-insensitive substring match. Cheap (O(N * M) where N is wm
+ * entities and M is claim length, both bounded). Used as a *supplementary*
+ * support signal — it can only LIFT a weak SQL score, never lower it. The
+ * W9 promise is "every consumer reads from the unified world model"; this
+ * threads that read through the inline verifier without removing the SQL
+ * fallback (which still owns relation-level grounding the WM doesn't
+ * carry — see `world_model.c` where context/provenance is stripped). */
+static bool inline_wm_entity_in_claim(const hu_world_model_t *wm,
+                                       const char *claim, size_t claim_len) {
+    if (!wm || !claim || claim_len == 0)
+        return false;
+    for (size_t i = 0; i < wm->entities_count; i++) {
+        const hu_graph_entity_t *e = &wm->entities[i];
+        if (!e->name)
+            continue;
+        size_t nl = strlen(e->name);
+        if (nl < 2 || nl > claim_len)
+            continue;
+        for (size_t j = 0; j + nl <= claim_len; j++) {
+            if (strncasecmp(claim + j, e->name, nl) == 0)
+                return true;
+        }
+    }
+    return false;
+}
+
 /* Real scoring for `<critique>` claims.
  *
  * Wraps the claim into a single-sentence "draft" and runs it through the v1
@@ -122,6 +151,13 @@ static void capture_claim_text(hu_atomic_claim_t *c, const char *src,
  * the same pattern the atomic backend uses. The resulting token-overlap
  * score becomes the support belief mean; sub-threshold scores flip
  * `c->fabricated` so a downstream caller can hedge or abstain.
+ *
+ * When the request supplies a W9 world-model snapshot AND the claim text
+ * mentions one of the loaded entities, we bump weak scores to a soft floor
+ * of 0.5. This is the "single-load" win: the verifier consumes the
+ * already-loaded WM artifact instead of issuing a second round-trip for
+ * entity discovery. The bump is monotone — never lowers the SQL score —
+ * so existing supported claims remain supported.
  *
  * Side note on `c->prov.source`: callers downstream (the channel renderer,
  * routing tests) rely on `prov.source` carrying the **tag kind** so they
@@ -131,7 +167,9 @@ static void capture_claim_text(hu_atomic_claim_t *c, const char *src,
  * "where did the score come from"). */
 static void inline_score_critique(hu_allocator_t *alloc, hu_memory_facade_t *m,
                                    const char *contact_id, size_t cid_len,
-                                   int64_t now, hu_atomic_claim_t *c) {
+                                   int64_t now,
+                                   const hu_world_model_t *wm,
+                                   hu_atomic_claim_t *c) {
     if (!alloc || !m || !c || !c->text[0]) {
         c->support = hu_belief_init(0.0f, "inline-no-memory", now);
         c->fabricated = true;
@@ -162,11 +200,22 @@ static void inline_score_critique(hu_allocator_t *alloc, hu_memory_facade_t *m,
     }
 
     float score = report.claims[0].score;
-    c->support = hu_belief_init(score, "inline-graph", now);
+
+    /* W9 single-load: when the unified world model is supplied AND its
+     * loaded entity set covers the claim, lift weak scores to a 0.5
+     * floor. Strong SQL scores are preserved. */
+    bool wm_lifted = false;
+    if (wm && score < 0.5f && inline_wm_entity_in_claim(wm, c->text, strlen(c->text))) {
+        score = 0.5f;
+        wm_lifted = true;
+    }
+
+    c->support = hu_belief_init(score, wm_lifted ? "inline-wm-lift" : "inline-graph", now);
     c->fabricated = score < cfg.confidence_threshold;
 
     /* Add the receipt source as a second provenance atom on the belief
-     * (capacity is 4; init populated atom 0 with "inline-graph"). */
+     * (capacity is 4; init populated atom 0 with "inline-graph" or
+     * "inline-wm-lift"). */
     if (report.claims[0].receipt.source[0] && c->support.prov_count < 4) {
         hu_provenance_atom_t *p = &c->support.prov[c->support.prov_count++];
         snprintf(p->source, sizeof(p->source), "%s",
@@ -318,7 +367,8 @@ static hu_error_t inline_verify(void *vctx, hu_allocator_t *alloc,
              * evidence rather than always reading "no support." */
             if (strcmp(kind, "critique") == 0) {
                 inline_score_critique(alloc, ctx->m, req->contact_id,
-                                       req->contact_id_len, now, c);
+                                       req->contact_id_len, now,
+                                       req->wm, c);
             } else if (strcmp(kind, "retrieve") == 0) {
                 inline_score_retrieve(alloc, ctx->m, req->contact_id,
                                        req->contact_id_len, c->text, now, c);

@@ -911,6 +911,107 @@ static void test_w11_inline_strict_abstains_on_score(void) {
     close_facade(g, m);
 }
 
+/* W9 single-load: when the world model carries an entity that appears in
+ * the claim, weak SQL scores are lifted to a 0.5 floor. Demonstrates the
+ * verifier consuming the unified W9 snapshot rather than only issuing a
+ * fresh SQL roundtrip for the same data. */
+static void test_w11_inline_wm_entity_match_lifts_weak_score(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    /* Seed an entity (Alice) but NO matching relation. The SQL verifier
+     * will return a score below the per-claim floor (0.6) because no
+     * relation supports the specific claim text — but the world model
+     * carries Alice as a loaded entity. */
+    int64_t alice = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL,
+                                &alice),
+        HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(
+        hu_world_model_build(m, A(), "u1", 2, 1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_NOT_NULL(wm);
+    HU_ASSERT(wm->entities_count >= 1);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    /* Build the request explicitly so we can attach the wm snapshot. */
+    hu_self_rag_request_t req;
+    memset(&req, 0, sizeof(req));
+    const char *draft = "Yes, <critique>Alice prefers vim over emacs</critique>.";
+    req.draft = draft;
+    req.draft_len = strlen(draft);
+    req.mode = HU_VERIFY_INLINE;
+    req.contact_id = "u1";
+    req.contact_id_len = 2;
+    req.abstain_threshold = 0.5f;
+    req.now_ms = 1735690000000LL;
+    req.wm = wm;
+
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.claims_count, 1);
+
+    /* Without the WM lift, score would be < 0.5 (no relation evidence).
+     * With the lift, score >= 0.5 because Alice is a loaded entity. */
+    HU_ASSERT(resp.claims[0].support.mean >= 0.5f);
+    /* The belief's primary source records that this came from the WM
+     * lift path, so downstream introspection can tell apart "verified
+     * by relations" vs "lifted by entity match". */
+    HU_ASSERT(resp.claims[0].support.prov_count >= 1);
+    HU_ASSERT_STR_EQ(resp.claims[0].support.prov[0].source, "inline-wm-lift");
+
+    hu_self_rag_close(&r);
+    hu_world_model_free(A(), wm);
+    close_facade(g, m);
+}
+
+static void test_w11_inline_wm_no_match_leaves_score_unchanged(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(
+        hu_world_model_build(m, A(), "u1", 2, 1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_NOT_NULL(wm);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req;
+    memset(&req, 0, sizeof(req));
+    /* The claim mentions an entity NOT in the world model. The lift
+     * should not trigger, and the score should reflect the SQL path only. */
+    const char *draft = "Yes, <critique>Zara orbits Saturn</critique>.";
+    req.draft = draft;
+    req.draft_len = strlen(draft);
+    req.mode = HU_VERIFY_INLINE;
+    req.contact_id = "u1";
+    req.contact_id_len = 2;
+    req.abstain_threshold = 0.5f;
+    req.now_ms = 1735690000000LL;
+    req.wm = wm;
+
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.claims_count, 1);
+    HU_ASSERT(resp.claims[0].support.mean < 0.5f);
+    HU_ASSERT(resp.claims[0].fabricated);
+    /* The primary belief source is "inline-graph" (no lift). */
+    HU_ASSERT(resp.claims[0].support.prov_count >= 1);
+    HU_ASSERT_STR_EQ(resp.claims[0].support.prov[0].source, "inline-graph");
+
+    hu_self_rag_close(&r);
+    hu_world_model_free(A(), wm);
+    close_facade(g, m);
+}
+
 static void test_w11_inline_strict_supported_when_evidence_present(void) {
     hu_graph_t *g = NULL;
     hu_memory_facade_t *m = NULL;
@@ -1139,6 +1240,129 @@ static void test_w11_stream_multiple_tags_in_one_stream(void) {
     HU_ASSERT(ctx.critique_triggered);
 }
 
+/* ── W11 abstention floor — aggregate regression detector ──────────────
+ *
+ * The W11 exit row in `2026-05-10-memory-v2-roadmap-overview.md` calls for
+ * "≥30% abstention rate on weak-evidence prompts." That is aspirational
+ * today; this test pins the **measured baseline** as a floor, with a
+ * diagnostic failure message, so any regression is caught immediately.
+ *
+ * Methodology:
+ *   1. Open a fresh facade backed by an empty graph (no evidence for
+ *      anything).
+ *   2. Run a small fixed pack of factual-claim drafts through the
+ *      heuristic and atomic backends in STRICT mode.
+ *   3. Count drafts whose outcome is HU_SELF_RAG_ABSTAINED or HEDGED
+ *      (any non-SUPPORTED outcome means the verifier did NOT silently
+ *      let the unsupported claim through).
+ *   4. Assert the rate is at least the floor; print the rate when it
+ *      regresses.
+ *
+ * Tighten the floor as the verifier improves. The 30% target lives in
+ * the roadmap; the floor moves up over time. KISS: no JSON file, no
+ * scenario harness — just an inline corpus.
+ * ────────────────────────────────────────────────────────────────────── */
+
+#ifdef HU_ENABLE_SQLITE
+typedef struct w11_floor_result {
+    unsigned drafts;       /* total prompts evaluated */
+    unsigned non_supported; /* abstained + hedged + rewritten */
+    unsigned abstained;
+} w11_floor_result_t;
+
+static void w11_floor_run_backend(hu_self_rag_t *r, const char *const *drafts,
+                                  size_t n_drafts, hu_verify_mode_t mode,
+                                  w11_floor_result_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->drafts = (unsigned)n_drafts;
+    for (size_t i = 0; i < n_drafts; i++) {
+        hu_self_rag_request_t req = make_request(drafts[i], mode);
+        hu_self_rag_response_t resp;
+        memset(&resp, 0, sizeof(resp));
+        hu_error_t e = hu_self_rag_verify(r, A(), &req, &resp);
+        /* Ignore verifier errors — the floor measures the *guarded* rate
+         * against the prompts the verifier could process. */
+        if (e != HU_OK)
+            continue;
+        if (resp.outcome != HU_SELF_RAG_SUPPORTED)
+            out->non_supported++;
+        if (resp.outcome == HU_SELF_RAG_ABSTAINED)
+            out->abstained++;
+    }
+}
+
+static void test_w11_abstention_floor_under_empty_evidence(void) {
+    /* Weak-evidence prompts: each draft asserts a specific factual claim
+     * the empty graph cannot support. Mix of person/org claims, dates,
+     * and quantitative statements so a single keyword shortcut can't
+     * pass. */
+    static const char *const k_drafts[] = {
+        "Alice works at Acme.",
+        "Bob is the CTO of Globex.",
+        "Charlie graduated from MIT in 2019.",
+        "Dana lives in San Francisco.",
+        "Erin married Frank last summer.",
+        "George owns three properties in Brooklyn.",
+        "Hannah speaks French and Mandarin fluently.",
+        "Ivan founded Initech in 2003.",
+        "Julia released two albums this year.",
+        "Kevin runs ten miles every morning.",
+    };
+    const size_t n = sizeof(k_drafts) / sizeof(k_drafts[0]);
+
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m); /* empty graph — no supporting evidence */
+
+    /* Heuristic backend in STRICT mode. */
+    {
+        hu_self_rag_t r;
+        memset(&r, 0, sizeof(r));
+        HU_ASSERT_EQ(hu_self_rag_heuristic(m, &r), HU_OK);
+        w11_floor_result_t res;
+        w11_floor_run_backend(&r, k_drafts, n, HU_VERIFY_STRICT, &res);
+        hu_self_rag_close(&r);
+
+        unsigned floor_pct = 30; /* see roadmap "abstention rate" target */
+        unsigned non_supp_pct = (res.non_supported * 100u) / res.drafts;
+        if (non_supp_pct < floor_pct) {
+            HU_FAIL(
+                "W11 heuristic STRICT regressed: %u/%u drafts non-supported "
+                "(%u%%, abstained=%u); floor %u%%, target 80%% (see W11 row "
+                "in docs/plans/2026-05-10-memory-v2-roadmap-overview.md). "
+                "Loosen only with explicit re-baseline + ADR.",
+                res.non_supported, res.drafts, non_supp_pct, res.abstained,
+                floor_pct);
+        }
+    }
+
+    /* Atomic backend in STRICT mode. The atomic decomposer is the
+     * primary path for chat-time verification; its floor matters more
+     * than the heuristic. */
+    {
+        hu_self_rag_t r;
+        memset(&r, 0, sizeof(r));
+        HU_ASSERT_EQ(hu_self_rag_atomic(m, NULL, &r), HU_OK);
+        w11_floor_result_t res;
+        w11_floor_run_backend(&r, k_drafts, n, HU_VERIFY_STRICT, &res);
+        hu_self_rag_close(&r);
+
+        unsigned floor_pct = 30;
+        unsigned non_supp_pct = (res.non_supported * 100u) / res.drafts;
+        if (non_supp_pct < floor_pct) {
+            HU_FAIL(
+                "W11 atomic STRICT regressed: %u/%u drafts non-supported "
+                "(%u%%, abstained=%u); floor %u%%, target 80%%. See W11 row "
+                "in docs/plans/2026-05-10-memory-v2-roadmap-overview.md.",
+                res.non_supported, res.drafts, non_supp_pct, res.abstained,
+                floor_pct);
+        }
+    }
+
+    close_facade(g, m);
+}
+#endif /* HU_ENABLE_SQLITE */
+
 /* ── Test runner ──────────────────────────────────────────────────────── */
 
 void run_w11_self_rag_tests(void) {
@@ -1170,11 +1394,14 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_inline_retrieve_score_reflects_record_count);
     HU_RUN_TEST(test_w11_inline_strict_abstains_on_score);
     HU_RUN_TEST(test_w11_inline_strict_supported_when_evidence_present);
+    HU_RUN_TEST(test_w11_inline_wm_entity_match_lifts_weak_score);
+    HU_RUN_TEST(test_w11_inline_wm_no_match_leaves_score_unchanged);
     HU_RUN_TEST(test_w11_agent_self_rag_apply_swaps_under_soft_and_bumps_counters);
     HU_RUN_TEST(test_w11_agent_self_rag_apply_telemetry_does_not_swap);
     HU_RUN_TEST(test_w11_agent_self_rag_apply_off_short_circuits);
     HU_RUN_TEST(test_w11_agent_self_rag_apply_rejects_unbound_agent);
     HU_RUN_TEST(test_w11_agent_self_rag_telemetry_handles_null_agent);
+    HU_RUN_TEST(test_w11_abstention_floor_under_empty_evidence);
 #endif
     /* Streaming self-RAG tests don't require SQLite. */
     HU_RUN_TEST(test_w11_stream_normal_tokens_pass_through);
