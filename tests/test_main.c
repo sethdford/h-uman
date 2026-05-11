@@ -258,6 +258,7 @@ void run_v2_e2e_adversarial_tests(void);
 void run_v2_wiring_e2e_tests(void);
 void run_b11_pressure_history_e2e_tests(void);
 void run_b9_user_sim_agent_turn_e2e_tests(void);
+void run_personal_model_contradicts_tests(void);
 void run_fast_capture_tests(void);
 void run_promotion_tests(void);
 void run_consolidation_tests(void);
@@ -791,6 +792,7 @@ int main(int argc, char **argv) {
     run_v2_wiring_e2e_tests();
     run_b11_pressure_history_e2e_tests();
     run_b9_user_sim_agent_turn_e2e_tests();
+    run_personal_model_contradicts_tests();
     run_fast_capture_tests();
     run_promotion_tests();
     run_consolidation_tests();

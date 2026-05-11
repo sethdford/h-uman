@@ -3891,7 +3891,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         bin.memory_has_relevant =
             behavior_memory_ctx_nonempty || hu_personal_model_has_content(&agent->personal_model) ||
             behavior_opinion_kb_hit;
-        bin.memory_contradicts_user = behavior_contrarian_hint;
+
+        /* B11 — personal-model contradiction signal. The opinion-KB
+         * `behavior_contrarian_hint` only fires on the SQLite-backed
+         * opinion table. The personal model carries higher-precision
+         * per-user facts (e.g. "I work at Acme", "I love coffee") that
+         * the opinion KB never sees. Feeding both into trust calibration
+         * means a user reasserting a memory-contradicting claim still
+         * flips `user_reasserted_after_pushback` regardless of which
+         * memory layer holds the disagreement. */
+        bool pm_contradicts = false;
+        (void)hu_personal_model_contradicts_user(&agent->personal_model, msg, msg_len,
+                                                 &pm_contradicts);
+        bin.memory_contradicts_user = behavior_contrarian_hint || pm_contradicts;
         {
             hu_behavior_safety_input_t sin;
             memset(&sin, 0, sizeof(sin));

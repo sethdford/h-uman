@@ -108,6 +108,39 @@ hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
 const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_model_t *model,
                                                               const char *topic, size_t topic_len);
 
+/* B11 — Cross-turn contradiction detection from the personal-model layer.
+ *
+ * Extracts heuristic facts from the user's *current* message, compares
+ * each against `model->facts[]`, and flips `*out_contradicts` to true
+ * when a contradiction is detected. Used by agent_turn.c to feed the
+ * trust calibrator's `memory_contradicts_user` signal so reassertions
+ * against memory escalate push-back rather than agreeing.
+ *
+ * Two contradiction shapes are detected:
+ *
+ *   (1) Same subject + same predicate + DIFFERENT object. Catches
+ *       "I work at Acme" → "I work at Initech" and similar identity /
+ *       affiliation flips. Object compare is case-insensitive.
+ *
+ *   (2) Same subject + ANTONYM predicate pair + SAME object. Catches
+ *       "I like coffee" → "I hate coffee" and similar valence flips.
+ *       The antonym pairs are a small fixed table inside the
+ *       implementation (i like ↔ i don't like / i hate / i dislike,
+ *       i love ↔ i hate / i don't like, i'm interested in ↔ i'm not
+ *       interested in, i always ↔ i never, …).
+ *
+ * Stored facts must satisfy `confidence >= 0.6` to count — low-confidence
+ * extractions cannot trigger push-back, since the alternative is the
+ * model gaslighting the user with a half-remembered guess.
+ *
+ * Returns HU_OK on success (with `*out_contradicts` set), or
+ * HU_ERR_INVALID_ARGUMENT when any pointer is NULL. Pure CPU; no I/O.
+ * Safe to call on every turn — work is bounded by HU_FACT_EXTRACT_MAX
+ * (32) × HU_PM_MAX_FACTS (64) = 2048 string compares max. */
+hu_error_t hu_personal_model_contradicts_user(const hu_personal_model_t *model,
+                                              const char *message, size_t message_len,
+                                              bool *out_contradicts);
+
 /* M2 P1 — Persistence. The personal model is the only piece of agent
  * state that genuinely accumulates value over time (facts, observed
  * style, topics, temporal patterns). Until now it lived only in RAM, so

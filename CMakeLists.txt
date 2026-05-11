@@ -631,6 +631,7 @@ set(HU_CORE_SOURCES
     src/memory/deep_extract.c
     src/memory/fact_extract.c
     src/memory/personal_model.c
+    src/memory/personal_model_contradicts.c
     src/memory/hallucination_guard.c
     # W7: graph.h is the internal graph API. Direct includes from outside
     # src/memory/ and tests/ are deprecated — callers should migrate to
@@ -2566,6 +2567,7 @@ set(HU_TEST_SOURCES
     tests/test_v2_wiring_e2e.c
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
+    tests/test_personal_model_contradicts.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
