@@ -431,78 +431,245 @@ docs/audits/2026-05-11-rl-loop-baseline-audit.md."
 
 ---
 
-## Task 4: Fix `hu_ml_cli_train` (cli.c:190) and `hu_ml_cli_train_feed_predictor` (cli.c:2016)
+## Task 4: Fix `hu_ml_cli_train` (cli.c:190) and `hu_ml_cli_train_feed_predictor` (cli.c:2495)
 
 **Files:**
-- Modify: `src/ml/cli.c` lines ~187-200 (`hu_ml_cli_train`)
-- Modify: `src/ml/cli.c` lines ~2010-2020 (`hu_ml_cli_train_feed_predictor`)
+- Modify: `src/ml/cli.c` lines ~85-201 (`hu_ml_cli_train`)
+- Modify: `src/ml/cli.c` lines ~2267-2510 (`hu_ml_cli_train_feed_predictor`)
 
-- [ ] **Step 1: Read the surrounding context for both call sites**
+> **Reality check (May 11 2026):**
+>
+> - `hu_ml_cli_train` (cli.c:85) does NOT have a tokenizer in scope. The original plan assumed it did. The fix must load (or create) a tokenizer.
+> - `hu_ml_cli_train_feed_predictor` (cli.c:2267) DOES have a tokenizer in scope (created at cli.c:2338).
+> - The `hu_ml_train` C signature is `(..., const int32_t *token_bytes, size_t vocab_size, ...)` — `int32_t*`, NOT `uint8_t*`. No cast needed.
+> - `hu_experiment_config_t` fields are `cfg.gpt`, `cfg.training`, `cfg.optimizer`, `cfg.backend` — there is NO `cfg.model`.
+> - Tokenizer convention in the codebase (per `src/daemon.c:3311-3312`) is `~/.human/models/tokenizer.vocab`. We extend with a `data_dir/tokenizer.vocab` first-look.
+> - `hu_ml_prepare_token_bytes` is already public in `include/human/ml/prepare.h:20`. No header change needed.
 
-```bash
-# Context for cli_train
-sed -n '170,200p' src/ml/cli.c
-# Context for cli_train_feed_predictor
-sed -n '1990,2020p' src/ml/cli.c
+- [ ] **Step 1: Add a static helper for tokenizer load + token_bytes derivation**
+
+In `src/ml/cli.c`, near the top of the file (after the existing static helpers), add:
+
+```c
+/* Phase 0 helper — load a BPE tokenizer using the project convention
+ * (data_dir/tokenizer.vocab → ~/.human/models/tokenizer.vocab → default
+ * 256-byte byte-level BPE) and derive the token_bytes table for BPB.
+ *
+ * On success, *out_tok and *out_token_bytes are owned by the caller and
+ * must be freed with hu_bpe_tokenizer_deinit and alloc->free. *out_count
+ * is the tokenizer's vocab_size — callers should align cfg.gpt.vocab_size
+ * to this value before creating the GPT model so the model's vocab matches
+ * the tokenizer's. */
+static hu_error_t derive_token_bytes_for_data_dir(
+    hu_allocator_t *alloc, const char *data_dir,
+    hu_bpe_tokenizer_t **out_tok, int32_t **out_token_bytes, size_t *out_count) {
+    if (!alloc || !out_tok || !out_token_bytes || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_tok = NULL;
+    *out_token_bytes = NULL;
+    *out_count = 0;
+
+    hu_bpe_tokenizer_t *tok = NULL;
+    hu_error_t err = hu_bpe_tokenizer_create(alloc, &tok);
+    if (err != HU_OK)
+        return err;
+
+    char path[1024];
+    int loaded = 0;
+    if (data_dir && data_dir[0]) {
+        int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
+        if (n > 0 && (size_t)n < sizeof(path) &&
+            hu_bpe_tokenizer_load(tok, path) == HU_OK) {
+            loaded = 1;
+        }
+    }
+    if (!loaded) {
+        const char *home = getenv("HOME");
+        if (home && home[0]) {
+            int n = snprintf(path, sizeof(path),
+                             "%s/.human/models/tokenizer.vocab", home);
+            if (n > 0 && (size_t)n < sizeof(path))
+                (void)hu_bpe_tokenizer_load(tok, path);
+        }
+        /* On both failures, tok keeps its default 256-byte byte-level vocab
+         * — every token is one byte, BPB is well-defined. */
+    }
+
+    int32_t *token_bytes = NULL;
+    size_t count = 0;
+    err = hu_ml_prepare_token_bytes(alloc, tok, &token_bytes, &count);
+    if (err != HU_OK) {
+        hu_bpe_tokenizer_deinit(tok);
+        return err;
+    }
+
+    *out_tok = tok;
+    *out_token_bytes = token_bytes;
+    *out_count = count;
+    return HU_OK;
+}
 ```
 
-- [ ] **Step 2: Locate the `token_bytes` primitive**
+- [ ] **Step 2: Fix `hu_ml_cli_train` (cli.c:140-200)**
 
-```bash
-rg "token_bytes" src/ml/ include/human/ml/ --no-heading | head -20
+Add the tokenizer load BETWEEN the `hu_experiment_config_default()` call (line 140) and the `hu_gpt_create` call (line 159), so cfg.gpt.vocab_size can be aligned:
+
+```c
+    /* Phase 0 fix — load tokenizer first so we can align cfg.gpt.vocab_size
+     * to the tokenizer's actual vocab and pass real token_bytes to hu_ml_train. */
+    hu_bpe_tokenizer_t *tok = NULL;
+    int32_t *token_bytes = NULL;
+    size_t token_bytes_count = 0;
+    err = derive_token_bytes_for_data_dir(alloc, data_dir, &tok, &token_bytes,
+                                          &token_bytes_count);
+    if (err != HU_OK) {
+        hu_json_free(alloc, root);
+        hu_log_error("ml", NULL, "tokenizer load failed: %d", err);
+        return err;
+    }
+    cfg.gpt.vocab_size = token_bytes_count;
 ```
 
-Expected key hit: `src/ml/prepare.c:132` defines `hu_ml_prepare_token_bytes(alloc, tokenizer, &table, &count)` — derives a token_bytes table from a BPE tokenizer (signature returns `int32_t **token_bytes_out`, `size_t *count`). Confirm the public header:
+(Note: `err` is declared later in the original code at line 159; it must be moved up to the top of the function or the new block must declare its own `hu_error_t err`.)
 
-```bash
-rg "hu_ml_prepare_token_bytes" include/human/ml/
-```
-
-If the function isn't in `include/human/ml/prepare.h`, this Task 4 grows by one sub-step to declare it there. (As of May 11 2026 it is internal; declare it public.)
-
-- [ ] **Step 3: Fix `hu_ml_cli_train` (cli.c:~190)**
-
-The cli_train handler already loads a BPE tokenizer; reuse it. Replace:
+Then change line 191 (`hu_ml_train` call) from:
 
 ```c
     err =
         hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training, NULL, 0, &result);
 ```
 
-With:
+to:
 
 ```c
-    /* Phase 0 fix — derive token_bytes from the loaded BPE tokenizer
-     * and forward vocab_size from the parsed config so the CE objective
-     * has the lookup it needs. Without these the bits-per-byte metric
-     * is zero and the gradient computation is degenerate. */
+    err = hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training,
+                      token_bytes, token_bytes_count, &result);
+```
+
+And add cleanup before the existing cleanup block:
+
+```c
+    alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
+    hu_bpe_tokenizer_deinit(tok);
+```
+
+(If any earlier cleanup path can be reached after the tokenizer load, the cleanup must happen there too — be careful with the existing error-path returns at lines 161-184.)
+
+- [ ] **Step 3: Fix `hu_ml_cli_train_feed_predictor` (cli.c:2495)**
+
+This handler ALREADY creates a tokenizer at line 2338-2344. Reuse it directly:
+
+After the `tok` is created (line 2344) and BEFORE `hu_gpt_create` (line 2468), add:
+
+```c
+    /* Phase 0 fix — derive token_bytes from the in-scope tokenizer and align
+     * cfg.gpt.vocab_size so the model matches the tokenizer's actual vocab. */
     int32_t *token_bytes = NULL;
     size_t token_bytes_count = 0;
-    err = hu_ml_prepare_token_bytes(alloc, tokenizer, &token_bytes, &token_bytes_count);
+    err = hu_ml_prepare_token_bytes(alloc, tok, &token_bytes, &token_bytes_count);
     if (err != HU_OK) {
-        hu_log_error("ml", NULL, "hu_ml_prepare_token_bytes failed: %d", err);
-        goto cleanup;
+        alloc->free(alloc->ctx, all_tokens, seq_cap * sizeof(int32_t));
+        hu_bpe_tokenizer_deinit(tok);
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        return err;
     }
+    cfg.gpt.vocab_size = token_bytes_count;
+```
 
+Then change line 2495-2496 from:
+
+```c
+    err =
+        hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training, NULL, 0, &result);
+```
+
+to:
+
+```c
     err = hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training,
-                      (uint8_t *)token_bytes, cfg.model.vocab_size, &result);
+                      token_bytes, token_bytes_count, &result);
+```
+
+And add cleanup of `token_bytes` before the existing cleanup block at line 2502+:
+
+```c
     alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
 ```
 
-(If the existing handler doesn't already have a `tokenizer` local, locate where it's loaded — search the function for `hu_bpe_tokenizer_load` — and reuse that local. If the handler doesn't load a tokenizer at all, load it from `<data_dir>/tokenizer.bin` before this fix.)
-
-- [ ] **Step 4: Apply the same fix at cli.c:~2016 (`hu_ml_cli_train_feed_predictor`)**
-
-The feed-predictor path uses a tokenizer too; reuse it the same way. If it doesn't load one, load it.
-
-- [ ] **Step 5: Build and run — confirm test now PASSES**
+- [ ] **Step 4: Build and run — confirm pinning test still passes (the contract is unchanged)**
 
 ```bash
 cmake --build --preset dev -j
 ./build/human_tests --suite=ml-cli-actually-trains
 ```
 
-Expected: both tests pass (the buggy-shape test still passes — it asserts the bug behavior is broken; the fix doesn't change `hu_ml_train` semantics, only the CLI path callers).
+Expected: 2/2 pass. The test characterizes hu_ml_train's contract; the cli.c fix changes only the call shape, not the contract.
+
+- [ ] **Step 5: End-to-end smoke test for the CLI itself**
+
+> **Plan amendment (May 11 2026 — discovered while running this step):**
+>
+> Two additional changes to cli.c are required for the smoke test to actually show a positive BPB:
+>
+> 1. **Pass a val_loader to `hu_ml_train`.** The original code at cli.c:191 passed `NULL` as val_loader. Even with token_bytes provided, `hu_ml_train` only computes BPB when `val_loader && token_bytes && config->eval_tokens > 0` (train.c:235). The fix creates a `val_loader = hu_ml_dataloader_create(..., "val", ...)` and passes it.
+> 2. **Extend the JSON config parser to accept GPT model dim overrides AND `eval_tokens`.** The defaults (`hu_experiment_config_default()`) produce an 8-layer 512-embd model with `eval_tokens = 20971520` (20M) — too heavy for any meaningful smoke test. The plan now exposes `n_layer`, `n_head`, `n_kv_head`, `n_embd`, `head_dim`, `sequence_len`, and `eval_tokens` as JSON config keys.
+>
+> These are scope-adjacent to Task 4's "make the CLI actually train" intent. They are the minimum required to demonstrate the fix end-to-end.
+
+Build a tiny config + data dir and invoke the CLI binary:
+
+```bash
+TMP=$(mktemp -d)
+mkdir -p "$TMP/data"
+# Write 200 random byte tokens as two shards (matches dataloader convention)
+python3 -c "
+import struct, random
+random.seed(0)
+for shard in (0, 1):
+    with open(f'$TMP/data/shard_{shard:05d}.bin', 'wb') as f:
+        for _ in range(200):
+            f.write(struct.pack('<i', random.randint(0, 127)))
+"
+
+cat > "$TMP/cfg.json" <<EOF
+{
+  "data_dir": "$TMP/data",
+  "batch_size": 2,
+  "max_steps": 8,
+  "time_budget_secs": 10,
+  "eval_tokens": 32,
+  "n_layer": 1,
+  "n_head": 2,
+  "n_kv_head": 2,
+  "n_embd": 64,
+  "head_dim": 32,
+  "sequence_len": 16
+}
+EOF
+
+./build/human ml train --config "$TMP/cfg.json" 2>&1 | tee "$TMP/output.txt"
+
+# Assert the CLI no longer prints "Training failed" or "0.00 bpb".
+if grep -qE "Training failed|0\.00 bpb" "$TMP/output.txt"; then
+  echo "REGRESSION: CLI still reports failure or zero BPB"
+  exit 1
+fi
+echo "Smoke test PASS: CLI training reports a real BPB."
+
+rm -rf "$TMP"
+```
+
+**Expected output (May 11 2026 verified):**
+```
+Training: batch_size=2, max_steps=8, vocab_size=256, data=/tmp/.../data
+Training complete: 8 steps, 8.00 bpb, 0.0s
+Smoke test PASS: CLI training reports a real BPB.
+```
+
+(`8.00 bpb` is `log2(256)` — the BPB of an untrained byte-level model evaluated against random data. After actual learning, this would drop. The point is that BPB is now non-zero, proving CE evaluation actually ran.)
+
+(If `python3` is unavailable, write the same shard files in a small C oneshot or `dd if=/dev/urandom bs=4 count=200`.)
 
 - [ ] **Step 6: Run full ML suite to catch regressions**
 
@@ -515,16 +682,34 @@ Expected: 0 failures.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/ml/cli.c
-# include prepare.h / prepare.c if a sub-task expanded the loader API
-git commit -m "fix(ml): supply real vocab_size + token_bytes to hu_ml_train CLI paths
+git add src/ml/cli.c docs/plans/2026-05-11-rl-loop-phase-0-honesty.md
+git commit -m "$(cat <<'EOF'
+fix(ml): supply real vocab_size + token_bytes to hu_ml_train CLI paths
 
-hu_ml_cli_train (cli.c:190) and hu_ml_cli_train_feed_predictor (cli.c:2016)
-both passed NULL token_bytes + 0 vocab_size, defeating the CE objective.
-The fix loads the token_bytes lookup written by the prepare step and
-forwards a real vocab_size from the prepared config.
+hu_ml_cli_train (cli.c:190) and hu_ml_cli_train_feed_predictor (cli.c:2495)
+both passed NULL token_bytes + 0 vocab_size, defeating the CE objective
+and causing hu_ml_train to hard-fail at gpt_backward (src/ml/gpt.c:567)
+on the first batch. The CLI then printed "Training failed: 0 steps,
+0.00 bpb" with no useful diagnostic.
 
-Refs spec §1.5.2 issue #1, #2; pinned by tests/test_ml_cli_actually_trains.c."
+Adds a static helper derive_token_bytes_for_data_dir() in cli.c that
+loads a BPE tokenizer using the project convention
+(data_dir/tokenizer.vocab → ~/.human/models/tokenizer.vocab → default
+256-byte byte-level BPE) and derives the token_bytes lookup. Both CLI
+handlers now align cfg.gpt.vocab_size to the tokenizer's actual vocab
+and pass real token_bytes to hu_ml_train. The feed-predictor handler
+reuses its existing in-scope tokenizer.
+
+Plan amendments:
+- Original plan referenced cfg.model.vocab_size (no such field — actually
+  cfg.gpt.vocab_size).
+- Original plan cast token_bytes to (uint8_t*) (signature is const int32_t*).
+- Original plan claimed both CLI handlers had a tokenizer in scope (only
+  the feed-predictor does; cli_train needed the load helper).
+
+Refs spec §1.5.2 issues #1, #2; pinned by tests/test_ml_cli_actually_trains.c.
+EOF
+)"
 ```
 
 ---

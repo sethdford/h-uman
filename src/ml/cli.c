@@ -79,6 +79,64 @@ static const char *get_opt(const char **argv, int argc, int i, const char *opt) 
     return NULL;
 }
 
+/* Phase 0 helper — load a BPE tokenizer using the project convention
+ * (data_dir/tokenizer.vocab → ~/.human/models/tokenizer.vocab → default
+ * 256-byte byte-level BPE) and derive the token_bytes table for BPB.
+ *
+ * On success, *out_tok and *out_token_bytes are owned by the caller and
+ * must be freed with hu_bpe_tokenizer_deinit and alloc->free. *out_count
+ * is the tokenizer's vocab_size — callers should align cfg.gpt.vocab_size
+ * to this value before creating the GPT model so the model's vocab matches
+ * the tokenizer's. See spec §1.5.2 issues #1, #2. */
+static hu_error_t derive_token_bytes_for_data_dir(
+    hu_allocator_t *alloc, const char *data_dir, hu_bpe_tokenizer_t **out_tok,
+    int32_t **out_token_bytes, size_t *out_count) {
+    if (!alloc || !out_tok || !out_token_bytes || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_tok = NULL;
+    *out_token_bytes = NULL;
+    *out_count = 0;
+
+    hu_bpe_tokenizer_t *tok = NULL;
+    hu_error_t err = hu_bpe_tokenizer_create(alloc, &tok);
+    if (err != HU_OK)
+        return err;
+
+    char path[1024];
+    int loaded = 0;
+    if (data_dir && data_dir[0]) {
+        int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
+        if (n > 0 && (size_t)n < sizeof(path) &&
+            hu_bpe_tokenizer_load(tok, path) == HU_OK) {
+            loaded = 1;
+        }
+    }
+    if (!loaded) {
+        const char *home = getenv("HOME");
+        if (home && home[0]) {
+            int n = snprintf(path, sizeof(path),
+                             "%s/.human/models/tokenizer.vocab", home);
+            if (n > 0 && (size_t)n < sizeof(path))
+                (void)hu_bpe_tokenizer_load(tok, path);
+        }
+        /* On both failures, tok keeps its default 256-byte byte-level vocab
+         * — every token is one byte, BPB is well-defined. */
+    }
+
+    int32_t *token_bytes = NULL;
+    size_t count = 0;
+    err = hu_ml_prepare_token_bytes(alloc, tok, &token_bytes, &count);
+    if (err != HU_OK) {
+        hu_bpe_tokenizer_deinit(tok);
+        return err;
+    }
+
+    *out_tok = tok;
+    *out_token_bytes = token_bytes;
+    *out_count = count;
+    return HU_OK;
+}
+
 hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
     (void)alloc;
     const char *config_path = NULL;
@@ -147,14 +205,50 @@ hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
         cfg.training.max_steps = (size_t)dv;
     if ((dv = hu_json_get_number(root, "time_budget_secs", 0.0)) > 0)
         cfg.training.time_budget_secs = (int)dv;
+    if ((dv = hu_json_get_number(root, "eval_tokens", 0.0)) > 0)
+        cfg.training.eval_tokens = (size_t)dv;
+    /* GPT model dimensions — useful for tiny CPU smoke tests. Defaults
+     * (from hu_experiment_config_default) produce an 8-layer 512-embd model
+     * that is too slow on CPU for a quick smoke. */
+    if ((dv = hu_json_get_number(root, "n_layer", 0.0)) > 0)
+        cfg.gpt.n_layer = (size_t)dv;
+    if ((dv = hu_json_get_number(root, "n_head", 0.0)) > 0)
+        cfg.gpt.n_head = (size_t)dv;
+    if ((dv = hu_json_get_number(root, "n_kv_head", 0.0)) > 0)
+        cfg.gpt.n_kv_head = (size_t)dv;
+    if ((dv = hu_json_get_number(root, "n_embd", 0.0)) > 0)
+        cfg.gpt.n_embd = (size_t)dv;
+    if ((dv = hu_json_get_number(root, "head_dim", 0.0)) > 0)
+        cfg.gpt.head_dim = (size_t)dv;
+    if ((dv = hu_json_get_number(root, "sequence_len", 0.0)) > 0)
+        cfg.gpt.sequence_len = (size_t)dv;
 
     v = hu_json_get_string(root, "checkpoint_path");
     if (v)
         cfg.training.checkpoint_path = v;
 
-    hu_model_t model = {0};
-    hu_error_t err = hu_gpt_create(alloc, &cfg.gpt, &model);
+    /* Phase 0 fix — load tokenizer first so we can align cfg.gpt.vocab_size
+     * to the tokenizer's actual vocab and pass real token_bytes to
+     * hu_ml_train. Without this both args are NULL/0 and the CE objective
+     * is degenerate (gpt_backward at src/ml/gpt.c:567 hard-fails on the
+     * zero-shape grad tensor). See spec §1.5.2 issues #1, #2. */
+    hu_bpe_tokenizer_t *tok = NULL;
+    int32_t *token_bytes = NULL;
+    size_t token_bytes_count = 0;
+    hu_error_t err = derive_token_bytes_for_data_dir(alloc, data_dir, &tok,
+                                                     &token_bytes, &token_bytes_count);
     if (err != HU_OK) {
+        hu_json_free(alloc, root);
+        hu_log_error("ml", NULL, "tokenizer load failed: %d", (int)err);
+        return err;
+    }
+    cfg.gpt.vocab_size = token_bytes_count;
+
+    hu_model_t model = {0};
+    err = hu_gpt_create(alloc, &cfg.gpt, &model);
+    if (err != HU_OK) {
+        alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
+        hu_bpe_tokenizer_deinit(tok);
         hu_json_free(alloc, root);
         hu_log_error("ml", NULL, "Model creation failed");
         return err;
@@ -164,6 +258,8 @@ hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
     err = hu_muon_adamw_create(alloc, &cfg.optimizer, &optimizer);
     if (err != HU_OK) {
         model.vtable->deinit(model.ctx, alloc);
+        alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
+        hu_bpe_tokenizer_deinit(tok);
         hu_json_free(alloc, root);
         hu_log_error("ml", NULL, "Optimizer creation failed");
         return err;
@@ -175,24 +271,46 @@ hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
     if (err != HU_OK) {
         optimizer.vtable->deinit(optimizer.ctx, alloc);
         model.vtable->deinit(model.ctx, alloc);
+        alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
+        hu_bpe_tokenizer_deinit(tok);
         hu_json_free(alloc, root);
         hu_log_error("ml", NULL, "Dataloader creation failed for %s", data_dir);
         return err;
     }
 
-    printf("Training: batch_size=%zu, max_steps=%zu, data=%s\n", cfg.training.device_batch_size,
-           cfg.training.max_steps, data_dir);
+    /* Phase 0 fix continued — also build a val_loader so hu_ml_train can
+     * actually compute BPB at the end of the run. Without this val_bpb
+     * stays 0.0 even when training succeeds (train.c:235 requires
+     * val_loader && token_bytes). Falls back to NULL on missing val split. */
+    hu_ml_dataloader_t *val_loader = NULL;
+    if (cfg.training.eval_tokens > 0) {
+        hu_error_t verr = hu_ml_dataloader_create(alloc, data_dir,
+                                                  cfg.training.device_batch_size,
+                                                  cfg.gpt.sequence_len, "val", &val_loader);
+        if (verr != HU_OK) {
+            hu_log_warn("ml", NULL,
+                        "Val dataloader unavailable (%d) — BPB will be 0", (int)verr);
+            val_loader = NULL;
+        }
+    }
+
+    printf("Training: batch_size=%zu, max_steps=%zu, vocab_size=%zu, data=%s\n",
+           cfg.training.device_batch_size, cfg.training.max_steps, cfg.gpt.vocab_size, data_dir);
 
     hu_ml_train_result_t result = {0};
-    err =
-        hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training, NULL, 0, &result);
+    err = hu_ml_train(alloc, &model, &optimizer, train_loader, val_loader, &cfg.training,
+                      token_bytes, token_bytes_count, &result);
 
     printf("Training %s: %zu steps, %.2f bpb, %.1fs\n", err == HU_OK ? "complete" : "failed",
            result.num_steps, result.val_bpb, result.training_seconds);
 
+    if (val_loader)
+        hu_ml_dataloader_deinit(val_loader);
     hu_ml_dataloader_deinit(train_loader);
     optimizer.vtable->deinit(optimizer.ctx, alloc);
     model.vtable->deinit(model.ctx, alloc);
+    alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
+    hu_bpe_tokenizer_deinit(tok);
     hu_json_free(alloc, root);
     return err;
 #endif
@@ -1477,9 +1595,22 @@ done_collect:
     cfg.training.max_steps = (size_t)max_steps;
     cfg.training.checkpoint_path = output_path ? output_path : "feed-predictor.huml";
 
+    /* Phase 0 fix — derive token_bytes from the in-scope tokenizer and align
+     * cfg.gpt.vocab_size to the tokenizer's actual vocab so the model matches
+     * the data and BPB is well-defined. See spec §1.5.2 issue #2. */
+    int32_t *token_bytes = NULL;
+    size_t token_bytes_count = 0;
+    err = hu_ml_prepare_token_bytes(alloc, tok, &token_bytes, &token_bytes_count);
+    if (err != HU_OK) {
+        hu_bpe_tokenizer_deinit(tok);
+        return err;
+    }
+    cfg.gpt.vocab_size = token_bytes_count;
+
     hu_model_t model = {0};
     err = hu_gpt_create(alloc, &cfg.gpt, &model);
     if (err != HU_OK) {
+        alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
         hu_bpe_tokenizer_deinit(tok);
         return err;
     }
@@ -1488,6 +1619,7 @@ done_collect:
     err = hu_muon_adamw_create(alloc, &cfg.optimizer, &optimizer);
     if (err != HU_OK) {
         model.vtable->deinit(model.ctx, alloc);
+        alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
         hu_bpe_tokenizer_deinit(tok);
         return err;
     }
@@ -1498,15 +1630,17 @@ done_collect:
     if (err != HU_OK) {
         optimizer.vtable->deinit(optimizer.ctx, alloc);
         model.vtable->deinit(model.ctx, alloc);
+        alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
         hu_bpe_tokenizer_deinit(tok);
         return err;
     }
 
-    printf("[train-feed-predictor] Training topic predictor (steps=%d)\n", max_steps);
+    printf("[train-feed-predictor] Training topic predictor (steps=%d, vocab=%zu)\n",
+           max_steps, cfg.gpt.vocab_size);
 
     hu_ml_train_result_t result = {0};
-    err =
-        hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training, NULL, 0, &result);
+    err = hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training,
+                      token_bytes, token_bytes_count, &result);
 
     printf("[train-feed-predictor] %s: %zu steps, %.2f bpb, %.1fs\n",
            err == HU_OK ? "Done" : "Failed", result.num_steps, result.val_bpb,
@@ -1515,6 +1649,7 @@ done_collect:
     hu_ml_dataloader_deinit(train_loader);
     optimizer.vtable->deinit(optimizer.ctx, alloc);
     model.vtable->deinit(model.ctx, alloc);
+    alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
     hu_bpe_tokenizer_deinit(tok);
 
     /* Cleanup temp files */
