@@ -1088,6 +1088,14 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
     }
     sqlite3_finalize(stmt);
     alloc->free(alloc->ctx, like_pattern, query_len + 3);
+    if (count == 0) {
+        /* No matches. Free the pre-allocated entries buffer so callers
+         * can rely on count==0 meaning nothing to free. */
+        alloc->free(alloc->ctx, entries, limit * sizeof(hu_memory_entry_t));
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
+    }
     *out = entries;
     *out_count = count;
     return HU_OK;
@@ -1311,7 +1319,13 @@ static hu_error_t impl_session_load_messages(void *ctx, hu_allocator_t *alloc,
         count++;
     }
     sqlite3_finalize(stmt);
-    if (count < cap && count > 0) {
+    if (count == 0) {
+        alloc->free(alloc->ctx, entries, cap * sizeof(hu_message_entry_t));
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
+    }
+    if (count < cap) {
         hu_message_entry_t *shrunk = (hu_message_entry_t *)alloc->realloc(
             alloc->ctx, entries, cap * sizeof(hu_message_entry_t),
             count * sizeof(hu_message_entry_t));
