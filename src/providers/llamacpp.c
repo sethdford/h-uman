@@ -519,6 +519,41 @@ static void llamacpp_deinit(void *ctx, hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, c, sizeof(llamacpp_ctx_t));
 }
 
+/* Phase 1 (RL SOTA) — vtable.warmup hook.
+ *
+ * The big cost of llamacpp inference on Apple Silicon is the FIRST
+ * request: Metal compiles ~150 GPU kernels (visible in stderr as
+ * `ggml_metal_library_compile_pipeline: ...`) lazily on the first
+ * llama_decode call. That bursts ~700 ms onto the request that
+ * happens to land first.
+ *
+ * Pre-touching memory + the empty-batch decode path forces those
+ * kernels to load now, while the user is still inside their setup
+ * step. Subsequent chat calls then pay only the actual decode cost.
+ *
+ * This is a no-op when the model isn't loaded (stub build, missing
+ * model_path, or _provider_create failure path). */
+static void llamacpp_warmup(void *vctx) {
+#if HU_LLAMACPP_LINKED
+    llamacpp_ctx_t *c = (llamacpp_ctx_t *)vctx;
+    if (!c || !c->ctx || !c->model) return;
+    const struct llama_vocab *vocab = llama_model_get_vocab(c->model);
+    if (!vocab) return;
+    llama_token bos = llama_vocab_bos(vocab);
+    if (bos < 0) return;
+    /* Decode a single BOS token — this triggers Metal kernel
+     * compilation without committing any conversational state. */
+    struct llama_batch batch = llama_batch_get_one(&bos, 1);
+    (void)llama_decode(c->ctx, batch);
+    /* Clear the KV slot we just used so the warmup doesn't leak
+     * into subsequent chat calls' system-prompt cache. */
+    llama_memory_clear(llama_get_memory(c->ctx), true);
+    hu_llamacpp_kvcache_reset(&c->kv_cache);
+#else
+    (void)vctx;
+#endif
+}
+
 static const hu_provider_vtable_t llamacpp_vtable = {
     .chat_with_system = llamacpp_chat_with_system,
     .chat = llamacpp_chat,
@@ -529,6 +564,7 @@ static const hu_provider_vtable_t llamacpp_vtable = {
     .unload_adapter = llamacpp_unload_adapter,
     .active_adapter = llamacpp_active_adapter,
     .deinit = llamacpp_deinit,
+    .warmup = llamacpp_warmup,
 };
 
 /* ── factory ──────────────────────────────────────────────────────────── */

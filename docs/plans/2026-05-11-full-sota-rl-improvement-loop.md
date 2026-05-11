@@ -21,7 +21,7 @@
 | # | Phase | Detailed plan path (created at phase start) | Dependencies | Estimated calendar |
 |---|---|---|---|---|
 | 0 | Honesty pass | `docs/plans/2026-05-11-rl-loop-phase-0-honesty.md` (✅ authored alongside this umbrella) | None | 2–3 days |
-| 1 | llama.cpp Metal inference | [`docs/plans/2026-05-11-rl-loop-phase-1-llamacpp.md`](2026-05-11-rl-loop-phase-1-llamacpp.md) (✅ authored 2026-05-11) | Phase 0 | 5–7 days |
+| 1 | llama.cpp Metal inference | [`docs/plans/2026-05-11-rl-loop-phase-1-llamacpp.md`](2026-05-11-rl-loop-phase-1-llamacpp.md) (✅ complete 2026-05-11; tag `rl-sota-phase-1-complete`) | Phase 0 | 5–7 days |
 | 2 | Real DPO + reaction wiring | `docs/plans/2026-05-11-rl-loop-phase-2-dpo-reactions.md` (TBA) | Phase 1 | 7–10 days |
 | 3 | KTO + reward model | `docs/plans/2026-05-11-rl-loop-phase-3-kto-rm.md` (TBA) | Phases 0, 1 | 5–7 days |
 | 4 | GRPO + multi-rollout | `docs/plans/2026-05-11-rl-loop-phase-4-grpo.md` (TBA) | Phases 1, 3 | 10–14 days (50% timeline padding per spec risk #5) |
@@ -156,7 +156,7 @@ bash scripts/check-lora-baseline.sh                        # Track D Phase 1 4-a
 | Phase | Plan authored | Started | Complete | sprint-auditor verdict |
 |---|---|---|---|---|
 | 0 | ✅ 2026-05-11 | ✅ 2026-05-11 | ✅ 2026-05-11 (tag `rl-sota-phase-0-complete`) | ✅ PASS (all 9 items, file:line evidence; dead-code-finder also PASS) |
-| 1 | ✅ 2026-05-11 ([phase-1 plan](2026-05-11-rl-loop-phase-1-llamacpp.md)) | — | — | — |
+| 1 | ✅ 2026-05-11 ([phase-1 plan](2026-05-11-rl-loop-phase-1-llamacpp.md)) | ✅ 2026-05-11 | ✅ 2026-05-11 (tag `rl-sota-phase-1-complete`) | ✅ PASS (sanity gate 20/20 with real Gemma-3-4B-it Metal; dev 9739/9739 + rl_sota 10140/10140 tests pass under ASan; dead-code-finder PASS; sprint-auditor PASS_WITH_NOTES on first pass — link-mirror test, `vtable.warmup` hook, and umbrella verdict accuracy all addressed in follow-up commit before tag) |
 | 2 | ⏸ TBA at phase start | — | — | — |
 | 3 | ⏸ TBA at phase start | — | — | — |
 | 4 | ⏸ TBA at phase start | — | — | — |
