@@ -57,11 +57,10 @@ If spec-verifier reports gaps, amend this plan inline before any code change.
 
 - [ ] **Step 1: Add the private directory pattern**
 
-Append to `.gitignore`:
+Append to `.gitignore` (note: do NOT include `~/.human/private/` literally — git treats `~` as a literal character, not home-directory expansion, so it would not match. The `**/.human/private/` pattern is the git-effective form):
 
 ```
 # Private corpus + derivatives (per spec §13)
-~/.human/private/
 .human/private/
 **/.human/private/
 ```
@@ -96,9 +95,18 @@ mkdir -p docs/audits
 
 - [ ] **Step 2: Write the audit document**
 
-Write `docs/audits/2026-05-11-rl-loop-baseline-audit.md` with this content (the audit baseline this entire RL effort was designed against):
+Write `docs/audits/2026-05-11-rl-loop-baseline-audit.md` with this content (the audit baseline this entire RL effort was designed against). Note the YAML frontmatter is required by `scripts/check-docs-frontmatter.sh` (which enforces `---` on line 1 of every `docs/*.md` outside `docs/plans/`):
 
 ````markdown
+---
+title: "RL & Neural Improvement Loop — Baseline Audit"
+created: 2026-05-11
+status: archived
+scope: src/ml, src/agent, src/memory, src/eval, src/persona, src/providers, src/daemon
+audit_method: 5-explorer concurrent review of committed main + Track D Phase 1 in-flight tree
+authored_for: docs/plans/2026-05-11-full-sota-rl-improvement-loop-design.md
+---
+
 # RL & Neural Improvement Loop — Baseline Audit, May 11 2026
 
 **Status:** Historical record. This audit was the baseline against which `docs/plans/2026-05-11-full-sota-rl-improvement-loop-design.md` was authored.
@@ -153,7 +161,13 @@ Issues 7-11 are deferred to subsequent phases per the spec. Phase 0 covers issue
 
 ```bash
 git add docs/audits/2026-05-11-rl-loop-baseline-audit.md
-git commit -m "docs(audit): archive May 11 2026 RL-loop baseline audit"
+git commit -m "docs(audit): archive May 11 2026 RL-loop baseline audit
+
+Snapshot of the 5-explorer audit baseline this entire RL effort
+was designed against. Archived as historical record so subsequent
+phases have a frozen reference for what was true on May 11 2026.
+
+Refs spec §4.1, §1.5.2, §2."
 ```
 
 ---
@@ -769,6 +783,7 @@ Create `tests/test_dpo_judge_naming.c`:
 
 #include "test_framework.h"
 #include "human/ml/dpo.h"
+#include <string.h>
 
 #ifdef HU_ENABLE_ML
 
@@ -787,12 +802,58 @@ static void test_dpo_judge_step_new_name_exists(void) {
 static void test_dpo_train_step_deprecated_shim_still_works(void) {
     /* The old name must still compile (deprecated shim) so existing
      * callers aren't broken in this commit. The deprecation warning
-     * surfaces at compile time, not runtime. */
+     * surfaces at compile time, not runtime. We suppress the warning
+     * here because exercising the shim is the entire point of the test. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     hu_dpo_train_result_t old_result = {0};
     hu_error_t err = hu_dpo_train_step(/*alloc*/ NULL, /*pairs*/ NULL,
                                         /*n_pairs*/ 0, /*judge_provider*/ NULL,
                                         &old_result);
     (void)err;
+#pragma GCC diagnostic pop
+}
+
+/* Spec deliverable #9 (per design.md §1.5.2 issue #5 + §4.1) explicitly
+ * requires runtime proof that the deprecation shim returns IDENTICAL
+ * values to the new name for identical inputs. The shim in dpo.h is
+ * `return hu_dpo_judge_step(...)`, so by construction they are
+ * trivially equivalent — but trivially-equivalent-by-construction
+ * is NOT the same as pinned-by-test. This test pins it.
+ *
+ * Approach: call both functions on the same well-defined invalid
+ * input (NULL allocator + non-NULL pair pointer with n_pairs=1) and
+ * assert both return the same hu_error_t and leave the same result
+ * struct state. Using an invalid-arg path keeps the test hermetic
+ * (no network, no provider, no synthetic LLM mock). The shim's
+ * forwarding contract is what we're proving, not the function's
+ * happy-path semantics — those are covered by separate dpo tests. */
+static void test_dpo_judge_step_and_shim_return_identical_values(void) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    /* Same invalid-arg shape passed to both — judge_step rejects
+     * NULL alloc + non-zero n_pairs uniformly. */
+    hu_dpo_pair_t fake_pair;
+    memset(&fake_pair, 0, sizeof(fake_pair));
+
+    hu_dpo_judge_result_t new_result;
+    hu_dpo_judge_result_t shim_result;
+    memset(&new_result, 0, sizeof(new_result));
+    memset(&shim_result, 0, sizeof(shim_result));
+
+    hu_error_t err_new =
+        hu_dpo_judge_step(/*alloc*/ NULL, &fake_pair, /*n_pairs*/ 1,
+                          /*judge_provider*/ NULL, &new_result);
+    hu_error_t err_shim =
+        hu_dpo_train_step(/*alloc*/ NULL, &fake_pair, /*n_pairs*/ 1,
+                          /*judge_provider*/ NULL, &shim_result);
+
+    /* Identical-return contract: same error code AND same result
+     * struct contents. memcmp is appropriate because both structs
+     * were zero-initialized and both are POD. */
+    HU_ASSERT_EQ(err_new, err_shim);
+    HU_ASSERT_EQ(memcmp(&new_result, &shim_result, sizeof(new_result)), 0);
+#pragma GCC diagnostic pop
 }
 
 #endif /* HU_ENABLE_ML */
@@ -802,6 +863,7 @@ void run_dpo_judge_naming_tests(void) {
 #ifdef HU_ENABLE_ML
     HU_RUN_TEST(test_dpo_judge_step_new_name_exists);
     HU_RUN_TEST(test_dpo_train_step_deprecated_shim_still_works);
+    HU_RUN_TEST(test_dpo_judge_step_and_shim_return_identical_values);
 #endif
 }
 ```
