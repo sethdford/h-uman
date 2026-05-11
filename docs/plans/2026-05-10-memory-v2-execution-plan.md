@@ -83,7 +83,7 @@ This section records **what is already in the tree** versus what remains spec-fi
 | 1.2 | Migrate read/write hot paths to `hu_memory_facade_read` / `hu_memory_facade_write` | Per-subsystem tests + existing W7 suite |
 | 1.3 | Trend script (optional CMake target `human_w7_phase1_inventory`) | **Done:** POSIX `cmake --build build --target human_w7_phase1_inventory` (or `bash scripts/w7-phase1-graph-bypass-inventory.sh`); no default CI hard fail yet |
 | 1.3b | Local proof bundle (G1.5) | **Done:** `cmake --build build --target memory_v2_local_proof` wraps `scripts/memory-v2-local-proof.sh` with the correct `human_tests` binary path (depends on `human_tests` target). Windows: run the bash script manually after building tests. |
-| 1.4 | Shared ctx lifetime + register semantics | `test_w7_*` + adversarial replace tests |
+| 1.4 | Shared ctx lifetime + register semantics | `test_w7_*` + adversarial replace tests — **partial:** `test_w7_p14_multi_replace_cycle_deinits_each_evictee_once`, `test_w7_p14_reregister_same_ctx_no_double_deinit`, `test_w7_p14_audit_hook_survives_register_replace`, `test_w7_p14_records_free_before_replace_is_safe` (2026-05-11). Pin the multi-cycle / audit-hook / safe-free invariants under ASan. **Outstanding:** records_free-after-replace **routes to the currently registered backend** (`src/memory/memory.c:309-318`) — that's a use-after-replace trap; the new test documents the safe ordering and the inline comment flags the contract gap. Hardening (record→origin tracking) is its own slice. |
 
 **Exit:** Roadmap metric “>80% lines deleted from direct-graph callers” *or* documented exception list with owner + removal date (inventory doc §Exception policy satisfies the latter until migrations land).
 
@@ -117,7 +117,7 @@ This section records **what is already in the tree** versus what remains spec-fi
 **Spec:** [`2026-05-10-w11-inline-self-rag.md`](2026-05-10-w11-inline-self-rag.md)
 
 - `hu_self_rag_t` vtable: heuristic + atomic + inline backends aligned with provider capability matrix.
-- **Exit:** abstention / telemetry metrics from overview; no crash on unsupported providers.
+- **Exit:** abstention / telemetry metrics from overview; no crash on unsupported providers. **In progress:** `test_w11_abstention_floor_under_empty_evidence` (2026-05-11) pins ≥30% non-supported rate on a 10-prompt weak-evidence pack for both heuristic and atomic backends; both meet the aspirational floor today. Tighten the floor as the verifier improves.
 
 ## Phase 6 — W12 planner + retrieval
 

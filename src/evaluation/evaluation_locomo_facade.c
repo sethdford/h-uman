@@ -395,6 +395,22 @@ static hu_error_t lf_run(void *ctx, hu_allocator_t *alloc,
     lf_item_link_t *links = NULL;
     lf_name_index_t name_ix; memset(&name_ix, 0, sizeof(name_ix));
 
+    /* World-model entity cap defaults to 64 — far below LoCoMo's ~200
+     * unique named characters. Raise it for the duration of the run so
+     * the planner's named-anchor heuristic can find every character
+     * mentioned in the corpus, not just the top 64. The env-var override
+     * is the production code path (`src/agent/world_model.c` W12 P9); we
+     * set it here rather than mutate the default so production behaviour
+     * is unchanged. */
+    char prior_wm_cap[64] = {0};
+    {
+        const char *cur = getenv("HU_WORLD_MODEL_ENTITY_LIMIT");
+        if (cur) {
+            snprintf(prior_wm_cap, sizeof(prior_wm_cap), "%s", cur);
+        }
+        setenv("HU_WORLD_MODEL_ENTITY_LIMIT", "4096", 1);
+    }
+
     err = hu_graph_open(alloc, NULL, 0, &g);
     if (err != HU_OK) goto cleanup;
     err = hu_memory_facade_open(alloc, g, &m);
@@ -484,10 +500,10 @@ static hu_error_t lf_run(void *ctx, hu_allocator_t *alloc,
         if (rank > 0 && rank <= 5) hit_at_5++;
         if (rank > 0 && rank <= 10) hit_at_10++;
 
-        if (trace && trace[0] == '1' && i < 20) {
+        if (trace && trace[0] == '1' && i < 30) {
             fprintf(stderr,
-                    "[locomo-facade] i=%-4zu rank=%zu steps=%zu q=%.60s\n",
-                    i, rank, steps, it->query);
+                    "[locomo-facade] i=%-4zu rank=%zu steps=%zu expect=%lld q=%.70s\n",
+                    i, rank, steps, (long long)links[i].answer_id, it->query);
         }
     }
 
@@ -526,6 +542,13 @@ static hu_error_t lf_run(void *ctx, hu_allocator_t *alloc,
 done:
     out->finished_at_ms = now_ms();
 cleanup:
+    /* Restore the world-model env override so a downstream backend run
+     * isn't accidentally polluted by our bump. */
+    if (prior_wm_cap[0])
+        setenv("HU_WORLD_MODEL_ENTITY_LIMIT", prior_wm_cap, 1);
+    else
+        unsetenv("HU_WORLD_MODEL_ENTITY_LIMIT");
+
     if (links) alloc->free(alloc->ctx, links, n_items * sizeof(*links));
     lf_index_free(&name_ix, alloc);
     if (m) hu_memory_facade_close(m, alloc);

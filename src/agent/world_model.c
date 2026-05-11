@@ -344,7 +344,20 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
          * (~3KB even with full row payloads) while comfortably covering
          * realistic per-contact graphs. The W9 mention-count sort still
          * applies, so the top entities are first. */
-        if (hu_memory_facade_list_entities(m, alloc, contact_id, cid_len, 64,
+        /* W12 P9 — entity cap is now env-overridable. The default 64
+         * keeps production snapshots small; benchmarks that seed many
+         * named characters under one contact (locomo-facade with 1.5k
+         * prompts touching ~200 unique people) need a larger window
+         * because the planner's named-anchor heuristic can only see
+         * entities that made the cut. Override with
+         * HU_WORLD_MODEL_ENTITY_LIMIT (range [16, 8192]). */
+        size_t wm_entity_limit = 64;
+        const char *wm_limit_env = getenv("HU_WORLD_MODEL_ENTITY_LIMIT");
+        if (wm_limit_env && *wm_limit_env) {
+            long v = strtol(wm_limit_env, NULL, 10);
+            if (v >= 16 && v <= 8192) wm_entity_limit = (size_t)v;
+        }
+        if (hu_memory_facade_list_entities(m, alloc, contact_id, cid_len, wm_entity_limit,
                                            &ents, &n) == HU_OK && n > 0) {
             hu_memory_entity_row_t *cloned = NULL;
             hu_error_t err = copy_entities(alloc, ents, n, &cloned);

@@ -144,7 +144,23 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
         return HU_OK;
     }
 
-    /* Neighbors traversal. */
+    /* Neighbors traversal.
+     *
+     * Returns BOTH the neighbour entities AND the relation rows that
+     * connect them to the anchor. The executor's W12 P6 re-ranker
+     * needs relation context (the human-readable string attached to
+     * each edge) to score how well each fact matches the user goal;
+     * without relation records the executor only sees entity-name
+     * overlap, which is near-useless at scale (the answer entity's
+     * name rarely contains the question keywords). Surfacing both
+     * lets `hu_planner_execute` propagate the matching relation's
+     * score onto its endpoints and select the right answer entity.
+     *
+     * Layout: relations first (so a downstream linear scan finds
+     * them and pre-populates the agg before entity dedupe runs),
+     * then entities. Ordering within each group preserves the
+     * underlying `hu_graph_neighbors` sequence so callers that
+     * care about insertion order still get a stable view. */
     if (v == HU_MEMORY_QUERY_NEIGHBORS && q->as.neighbors.entity_id != 0) {
         hu_graph_entity_t *ents = NULL;
         hu_graph_relation_t *rels = NULL;
@@ -167,19 +183,20 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
             *out_count = 0;
             return HU_OK;
         }
-        hu_memory_record_t *recs = xalloc(alloc, sizeof(*recs) * count);
+
+        size_t total = count * 2;  /* entities + relations, parallel arrays */
+        hu_memory_record_t *recs = xalloc(alloc, sizeof(*recs) * total);
         if (recs == NULL) {
             hu_graph_entities_free(alloc, ents, count);
             hu_graph_relations_free(alloc, rels, count);
             return HU_ERR_OUT_OF_MEMORY;
         }
-        memset(recs, 0, sizeof(*recs) * count);
-        /* Fold entities and relations into a paired ENTITY+RELATION view. The
-         * caller iterates the array; payload type is hu_graph_entity_t for
-         * even indices in the array order. We attach relation data via the
-         * provenance string ("rel:<id>") so it can be re-fetched if needed.
-         * This keeps the simple case clean; sophisticated callers should query
-         * RELATION directly. */
+        memset(recs, 0, sizeof(*recs) * total);
+
+        /* Entities first — so `recs[0].kind = HU_MEM_ENTITY` makes
+         * `hu_memory_facade_records_free` route to `v1_entity_records_free`.
+         * That free function is now kind-aware: it inspects each record's
+         * kind and dispatches to the appropriate per-payload free. */
         for (size_t i = 0; i < count; i++) {
             recs[i].kind = HU_MEM_ENTITY;
             recs[i].id = ents[i].id;
@@ -187,10 +204,9 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
             recs[i].confidence = 1.0f;
             hu_graph_entity_t *p = xalloc(alloc, sizeof(*p));
             if (p == NULL) {
-                /* Free what we built, then bail. Caller must not see partial. */
                 for (size_t j = 0; j < i; j++) {
                     hu_graph_entity_t *prev = (hu_graph_entity_t *)recs[j].payload;
-                    hu_graph_entities_free(alloc, prev, 1);
+                    if (prev) xfree(alloc, prev, sizeof(*prev));
                 }
                 hu_graph_entities_free(alloc, ents, count);
                 hu_graph_relations_free(alloc, rels, count);
@@ -201,19 +217,55 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
             recs[i].payload = p;
             recs[i].payload_len = sizeof(*p);
         }
-        /* The graph_neighbors call returned arrays we now own; the entity
-         * memory is moved into the records' payloads (each owns one entity
-         * struct). Free only the arrays themselves, not the strings (those
-         * are now owned by the cloned-into-payload entities — but in fact
-         * the assignment `*p = ents[i]` shallow-copies, including string
-         * pointers, so to keep ownership simple we must NOT free the
-         * underlying strings yet. hu_graph_entities_free does free strings,
-         * so we cannot call it. Free the array backing only. */
+
+        /* Relations second. Each relation payload is a
+         * hu_memory_relation_row_t (the public surface struct), shallow-
+         * copying the underlying graph relation's string pointers. The
+         * strings' lifetime moves into the records; downstream
+         * records_free reclaims them. */
+        for (size_t i = 0; i < count; i++) {
+            size_t k = count + i;
+            hu_memory_relation_row_t *rp = xalloc(alloc, sizeof(*rp));
+            if (rp == NULL) {
+                /* Roll back entity payloads (just heap-alloc structs at
+                 * this point; strings are still owned by `ents[]`). */
+                for (size_t j = 0; j < count; j++) {
+                    hu_graph_entity_t *prev = (hu_graph_entity_t *)recs[j].payload;
+                    if (prev) xfree(alloc, prev, sizeof(*prev));
+                }
+                for (size_t j = count; j < k; j++) {
+                    hu_memory_relation_row_t *prev =
+                        (hu_memory_relation_row_t *)recs[j].payload;
+                    if (prev) xfree(alloc, prev, sizeof(*prev));
+                }
+                hu_graph_entities_free(alloc, ents, count);
+                hu_graph_relations_free(alloc, rels, count);
+                xfree(alloc, recs, 0);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            /* hu_memory_relation_row_t is hu_graph_relation_t — shallow-
+             * copy the whole row so we claim every string field
+             * (context, provenance, source_name, target_name). Missing
+             * even one leaks. The strings' lifetime is now owned by the
+             * record payload; records_free reclaims them. */
+            *rp = rels[i];
+
+            recs[k].kind = HU_MEM_RELATION;
+            recs[k].id = rels[i].id;
+            recs[k].event_start = rels[i].first_seen;
+            recs[k].confidence = 1.0f;
+            recs[k].payload = rp;
+            recs[k].payload_len = sizeof(*rp);
+        }
+        /* Ownership: payload string pointers are shallow-copied; the
+         * graph entity/relation array backings are no longer owners.
+         * Free the array backings only — strings travel with the
+         * records and are released by the kind-aware records_free
+         * downstream. */
         xfree(alloc, ents, 0);
-        /* Relations array fully released — payload doesn't carry them. */
-        hu_graph_relations_free(alloc, rels, count);
+        xfree(alloc, rels, 0);
         *out = recs;
-        *out_count = count;
+        *out_count = total;
         return HU_OK;
     }
 
@@ -249,13 +301,49 @@ static void v1_entity_records_free(void *vctx, hu_allocator_t *alloc,
                                     hu_memory_record_t *r, size_t n) {
     (void)vctx;
     if (r == NULL || n == 0) return;
+    /* Kind-aware free. Most paths return pure-entity arrays, but the
+     * NEIGHBORS query returns a mixed entity+relation response so
+     * the W12 P6 re-ranker can score relation contexts. We dispatch
+     * by per-record kind: entity payloads via hu_graph_entities_free
+     * (frees the entity struct AND its strings); relation payloads
+     * are heap-allocated hu_memory_relation_row_t whose context /
+     * provenance string pointers came from the underlying graph
+     * relation array — free them with hu_graph_relations_free using
+     * the embedded ids. Since hu_memory_relation_row_t is a flatter
+     * row shape than hu_graph_relation_t, we replay the few fields
+     * into a stack hu_graph_relation_t and call relations_free with
+     * count=1. That lets us reuse the same xfree-of-strings logic. */
     for (size_t i = 0; i < n; i++) {
-        hu_graph_entity_t *e = (hu_graph_entity_t *)r[i].payload;
-        /* hu_graph_entities_free frees the strings AND the struct itself
-         * (since each payload was allocated as a 1-element array). Do NOT
-         * xfree the payload pointer afterward — that would double-free. */
-        if (e != NULL) {
-            hu_graph_entities_free(alloc, e, 1);
+        if (r[i].kind == HU_MEM_ENTITY) {
+            hu_graph_entity_t *e = (hu_graph_entity_t *)r[i].payload;
+            if (e != NULL) {
+                /* hu_graph_entities_free walks the strings AND xfrees
+                 * the struct itself. Do NOT xfree the payload pointer
+                 * afterward — double-free. */
+                hu_graph_entities_free(alloc, e, 1);
+            }
+        } else if (r[i].kind == HU_MEM_RELATION) {
+            hu_memory_relation_row_t *rp = (hu_memory_relation_row_t *)r[i].payload;
+            if (rp != NULL) {
+                /* hu_memory_relation_row_t aliases hu_graph_relation_t.
+                 * Free every string field that hu_graph_relations_free
+                 * would free, then the struct itself. Matches the
+                 * shallow-copy claim in `v1_entity_read`'s NEIGHBORS
+                 * branch. */
+                if (rp->context) {
+                    xfree(alloc, (void *)rp->context, rp->context_len + 1);
+                }
+                if (rp->provenance) {
+                    xfree(alloc, (void *)rp->provenance, rp->provenance_len + 1);
+                }
+                if (rp->source_name) {
+                    xfree(alloc, (void *)rp->source_name, rp->source_name_len + 1);
+                }
+                if (rp->target_name) {
+                    xfree(alloc, (void *)rp->target_name, rp->target_name_len + 1);
+                }
+                xfree(alloc, rp, sizeof(*rp));
+            }
         }
         if (r[i].provenance) {
             xfree(alloc, r[i].provenance, r[i].provenance_len + 1);

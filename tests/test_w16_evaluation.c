@@ -37,6 +37,7 @@ static backend_factory_fn make_minja = hu_evaluation_minja;
 static backend_factory_fn make_mab = hu_evaluation_memoryagentbench;
 static backend_factory_fn make_frontier = hu_evaluation_frontier_compare;
 static backend_factory_fn make_facade_recall = hu_evaluation_facade_recall;
+static backend_factory_fn make_locomo_facade = hu_evaluation_locomo_facade;
 
 static const hu_evaluation_metric_t *find_metric(const hu_evaluation_run_report_t *r,
                                                  const char *name) {
@@ -724,14 +725,20 @@ static void test_w16_facade_recall_runs_v2_stack(void) {
 #ifdef HU_ENABLE_SQLITE
 static void test_w16_facade_recall_regression_floor(void) {
     /* The facade-recall benchmark exercises the real v2 stack (W7 facade +
-     * W9 world model + W12 heuristic planner). Locking in a precision_at_1
-     * floor keeps planner regressions out: the W12 P5 query-anchor change
-     * pushed precision_at_1 from 0.083 to 0.667 on this corpus; any drop
-     * below 0.5 means a meaningful planner regression and should block.
+     * W9 world model + W12 heuristic planner). Floors here block planner
+     * regressions on the 12-fact synthetic corpus.
      *
-     * We assert a *floor*, not an exact match. The corpus is small (12
-     * facts) so each query is worth 0.083 — the threshold leaves room for
-     * one query to legitimately move category without flipping the gate. */
+     * History of the floor:
+     *   - 0.083  → W12 anchor selection used mention-count only (early baseline)
+     *   - 0.667  → W12 P5 query-anchor introduced (preferred named entities)
+     *   - 1.000  → W12 P6 multi-anchor + relation-context re-rank
+     *   - 1.000  → W12 P7 conditional anchor demotion (no regression)
+     *   - 1.000  → v1 neighbors now emit relations (locomo-facade fix; no regression)
+     *
+     * Floor is set to 0.95 to lock the W12 P6+ gains. 0.95 = 11/12 queries
+     * passing — leaves room for one query to legitimately move category
+     * without flipping the gate. Anything below means a planner change
+     * lost retrieval quality on data we hand-curated for the planner. */
     hu_evaluation_t e = {0};
     HU_ASSERT_EQ(make_facade_recall(A(), &e), HU_OK);
     hu_evaluation_run_report_t r = {0};
@@ -739,19 +746,19 @@ static void test_w16_facade_recall_regression_floor(void) {
 
     const hu_evaluation_metric_t *p1 = find_metric(&r, "precision_at_1");
     HU_ASSERT_NOT_NULL(p1);
-    if (p1->score < 0.5) {
+    if (p1->score < 0.95) {
         fprintf(stderr,
                 "facade-recall regression: precision_at_1 = %.3f, "
-                "floor = 0.500. Planner change reduced retrieval quality.\n",
+                "floor = 0.950. Planner change reduced retrieval quality.\n",
                 p1->score);
     }
-    HU_ASSERT(p1->score >= 0.5);
+    HU_ASSERT(p1->score >= 0.95);
 
-    /* Recall@5 should be even higher — the heuristic planner emits up to 3
-     * steps so the executor sees more candidates. Floor at 0.66 (8/12). */
+    /* Recall@5 ratcheted to 0.95 — same rationale: the W12 P6+ stack puts
+     * 12/12 in top-5 today, so 11/12 is the floor. */
     const hu_evaluation_metric_t *r5 = find_metric(&r, "recall_at_5");
     HU_ASSERT_NOT_NULL(r5);
-    HU_ASSERT(r5->score >= 0.66);
+    HU_ASSERT(r5->score >= 0.95);
 
     /* Sanity: planner_steps_norm bounded. Avg / 8 (HU_PLANNER_MAX_STEPS).
      * Greater than 0.5 would mean plans are 4+ steps on average — a sign of
@@ -760,6 +767,82 @@ static void test_w16_facade_recall_regression_floor(void) {
     HU_ASSERT_NOT_NULL(steps);
     HU_ASSERT(steps->score > 0.0);
     HU_ASSERT(steps->score <= 0.5);
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+}
+
+static void test_w16_locomo_facade_regression_floor(void) {
+    /* locomo-facade runs the same production stack as facade-recall, but
+     * against the real 1542-prompt LoCoMo corpus instead of the 12-fact
+     * synthetic set. This is the *credibility-defining* number: it
+     * answers "how does our memory subsystem perform on data we did not
+     * write for it?".
+     *
+     * History of the floor:
+     *   - 0.037  → first wiring through W7+W12; v1 neighbor query
+     *              returned only entities, so the W12 P6 re-ranker
+     *              never saw relation contexts.
+     *   - 0.054  → W12 P9 env-overridable world-model entity cap.
+     *   - 0.731  → v1 neighbor query now surfaces relation records,
+     *              giving the W12 P6 re-ranker the context it needs.
+     *              Up from 5.77 % on the word-overlap baseline — a
+     *              12.7× lift on identical data.
+     *
+     * Floor = 0.65. Leaves room for retry-flakiness (the synthetic NER
+     * heuristic + SQL iteration order can shift ~1 % between runs) but
+     * any drop below means a real regression in the production stack
+     * worth investigating.
+     *
+     * This test is the load-bearing CI gate for the locomo-facade
+     * benchmark — if you change the planner, the world model, or the
+     * neighbor query path and this floor breaks, treat it as a P0:
+     * something measurably regressed retrieval quality on real data.
+     *
+     * Skipped when the real corpus is missing on disk; the backend
+     * records a structured error_summary in that case and we treat the
+     * missing corpus as "not a regression". */
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_locomo_facade(A(), &e), HU_OK);
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+
+    if (r.error_summary != NULL) {
+        /* Corpus missing or backend skipped — not a regression. */
+        hu_evaluation_report_free(A(), &r);
+        hu_evaluation_close(&e);
+        return;
+    }
+
+    const hu_evaluation_metric_t *p1 = find_metric(&r, "precision_at_1");
+    HU_ASSERT_NOT_NULL(p1);
+    if (p1->score < 0.65) {
+        fprintf(stderr,
+                "locomo-facade regression: precision_at_1 = %.3f, "
+                "floor = 0.650. Production stack lost retrieval "
+                "quality on the real corpus.\n",
+                p1->score);
+    }
+    HU_ASSERT(p1->score >= 0.65);
+
+    /* Recall@5 should track precision_at_1 closely on this corpus
+     * (most queries have only one matching relation). 0.65 floor. */
+    const hu_evaluation_metric_t *r5 = find_metric(&r, "recall_at_5");
+    HU_ASSERT_NOT_NULL(r5);
+    HU_ASSERT(r5->score >= 0.65);
+
+    /* Sample-size sanity. The backend declares no_anchor_rate so any
+     * NER regression that fails to extract anchors shows up here. */
+    const hu_evaluation_metric_t *no_anchor = find_metric(&r, "no_anchor_rate");
+    HU_ASSERT_NOT_NULL(no_anchor);
+    HU_ASSERT(no_anchor->score <= 0.05);
+
+    /* Real-corpus marker must be 1.0; if the loader silently fell back
+     * to a synthetic corpus the score is meaningless and we want loud
+     * failure. */
+    const hu_evaluation_metric_t *real = find_metric(&r, "real_corpus");
+    HU_ASSERT_NOT_NULL(real);
+    HU_ASSERT(real->score == 1.0);
 
     hu_evaluation_report_free(A(), &r);
     hu_evaluation_close(&e);
@@ -791,5 +874,6 @@ void run_w16_evaluation_tests(void) {
     HU_RUN_TEST(test_w16_facade_recall_runs_v2_stack);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w16_facade_recall_regression_floor);
+    HU_RUN_TEST(test_w16_locomo_facade_regression_floor);
 #endif
 }
