@@ -28,10 +28,10 @@ jobs:
         working-directory: ui
         run: |
           npm ci
-          license-checker --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;CC-BY-4.0;Unlicense;BlueOak-1.0.0;MPL-2.0;OFL-1.1" --excludePrivatePackages
+          license-checker --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;CC-BY-4.0;Unlicense;BlueOak-1.0.0;MPL-2.0;OFL-1.1;LGPL-3.0-or-later" --excludePrivatePackages
 
       - name: Check website licenses
         working-directory: website
         run: |
           npm ci
-          license-checker --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;CC-BY-4.0;Unlicense;BlueOak-1.0.0;MPL-2.0;OFL-1.1" --excludePrivatePackages
+          license-checker --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;CC-BY-4.0;Unlicense;BlueOak-1.0.0;MPL-2.0;OFL-1.1;LGPL-3.0-or-later" --excludePrivatePackages

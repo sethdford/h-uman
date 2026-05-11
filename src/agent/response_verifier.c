@@ -208,12 +208,17 @@ static float verify_claim_against_facade(hu_memory_facade_t *memory, hu_allocato
         out_receipt->event_start_ms = best_es;
         out_receipt->event_end_ms = best_ee;
         out_receipt->confidence = best_conf;
-        snprintf(out_receipt->source, sizeof(out_receipt->source), "%s",
+        /* best_prov is 80 bytes; out_receipt->source is 64. Width-bound
+         * so GCC -Wformat-truncation=2 is quiet under -Werror. */
+        snprintf(out_receipt->source, sizeof(out_receipt->source), "%.*s",
+                 (int)(sizeof(out_receipt->source) - 1),
                  best_prov[0] ? best_prov : "memory");
         out_receipt->observed_at_ms = best_es;
         char ts[32];
         render_timestamp(best_es, ts, sizeof(ts));
-        snprintf(out_receipt->rendered, sizeof(out_receipt->rendered), "[from %s, %s]",
+        /* Width-bound best_prov; ts is already 32 bytes which fits. */
+        snprintf(out_receipt->rendered, sizeof(out_receipt->rendered),
+                 "[from %.60s, %s]",
                  best_prov[0] ? best_prov : "memory", ts);
     }
     return best_score;
