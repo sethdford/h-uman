@@ -85,7 +85,11 @@ typedef struct hu_self_rag_request {
     const char *draft;
     size_t draft_len;
     hu_verify_mode_t mode;        /* OFF/SOFT/STRICT/INLINE */
-    float abstain_threshold;      /* default 0.3 — below this, refuse */
+    float abstain_threshold;      /* fabricated/total claims ratio that
+                                   * triggers ABSTAIN. Default 0.5 (set 0
+                                   * to use default). 0.3 is the
+                                   * world-model bridge default; calibration
+                                   * pinned by tests/test_w11_abstain_calibration.c. */
     int64_t now_ms;               /* 0 = use OS clock */
 } hu_self_rag_request_t;
 

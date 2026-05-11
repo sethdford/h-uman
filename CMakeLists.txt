@@ -2568,6 +2568,7 @@ set(HU_TEST_SOURCES
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_personal_model_contradicts.c
+    tests/test_w11_abstain_calibration.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c

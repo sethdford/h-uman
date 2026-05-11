@@ -178,7 +178,7 @@ Tests (`tests/test_w11_self_rag.c::W11 inline self-RAG with abstention`):
 
 ### Remaining scope
 
-- Calibrate `abstain_threshold` against the 200-prompt annotated suite so the success metric ("≥30 % abstention on weak-evidence prompts") is measurable — bridge already wires `claims_total/flagged` so a smoke harness can read them via `hu_agent_self_rag_telemetry`.
+- ~~Calibrate `abstain_threshold` against the 200-prompt annotated suite~~ **Closed (2026-05-11)** — see "Closed" row below for the in-tree calibration test that pins the W11 success-metric floor. External 200-prompt corpus can supersede the in-tree pack when it lands; gate shape is unchanged.
 - Inline backend control-token wiring for additional providers (currently only the placeholder protocol parser is exercised end-to-end).
 
 ---
@@ -207,7 +207,11 @@ Tests added in `tests/test_w11_self_rag.c`:
 ### Remaining scope (after P2)
 
 - ~~True streaming control-token integration with each frontier provider~~ **Closed (2026-05-11).** `hu_self_rag_stream_directive_append` (in `src/agent/self_rag_inline.c`, declared in `include/human/agent/self_rag.h`) extends the system prompt with a brief description of `<retrieve>`/`<critique>`/`<refuse>` whenever `HU_SELF_RAG_STREAMING` is enabled (env var or `config.agent.self_rag_streaming`). The directive is appended once, outside the streaming tool loop in `agent_stream.c`, so every iteration's `all_msgs[0].content` points at the same extended prompt. Pinned by `test_w11_stream_directive_append_extends_system_prompt`, `test_w11_stream_directive_append_null_args_rejected`, and `test_w11_stream_directive_compliant_emission_triggers_parser`. The parser is now live for any frontier provider that streams via `hu_stream_callback_t` (Anthropic, Gemini, OpenAI, Ollama, etc.).
-- Calibration of `abstain_threshold` against the 200-prompt annotated suite (carried over from P1).
+- ~~Calibration of `abstain_threshold` against the 200-prompt annotated suite~~ **In-tree gate landed (2026-05-11).** `tests/test_w11_abstain_calibration.c` runs the heuristic backend against a graded 16-prompt pack (12 weak-evidence + 4 safe) on an empty memory facade and pins three measured floors at the canonical default threshold (0.5):
+  - global abstention rate ≥ 30 % (the W11 success-metric floor)
+  - recall on weak-evidence prompts ≥ 50 %
+  - precision ≥ 75 % (false abstentions on safe prompts must stay rare; a noisy refuser is itself a sycophancy-class regression)
+  Plus monotonicity (lowering threshold cannot decrease recall) and a regression guard that zero `abstain_threshold` resolves to the default 0.5 so callers leaving the field zero-init don't silently get an agreeable verifier. The 200-prompt external corpus can supersede this in-tree floor when it lands; the gate shape is the same.
 
 ---
 
