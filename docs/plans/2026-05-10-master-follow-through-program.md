@@ -256,6 +256,7 @@ Interpretation: **Track C** helps **Track B** (documentation of what “correct�
 | Track | Phase | Status | Last proof (link or commit) |
 |-------|-------|--------|----------------------------|
 | A | A0 | `done` | ADR [`adr/2026-05-10-w10-kv-replay-deferred.md`](adr/2026-05-10-w10-kv-replay-deferred.md) — replay deferred |
+| A | A2.1–A2.3 | `done` | `agent_turn.c` log lines say `"W10 KV prior row (no provider skip)"` (no misleading hit naming); `include/human/memory/neural_memory.h:13` links to ADR; no user-facing CLI strings claim KV replay |
 | B | B0–B2 | `done` | B2: `scripts/check-memory-query-variant.sh` + verify-all + agent-preflight; suite 9771/9771 (CI `BASELINE` in `ci.yml`) |
 | C | C0 | `done` | Evidence index file (same commit family) |
 | D | D0.3–D1.1 | `in_progress` | Stub API + `personalization.m3_adapter_probe_path` (parse/serialize + daemon probe when `HU_ENABLE_ML`); tests in `test_ml.c` + `test_config_parse.c` |
