@@ -1,0 +1,50 @@
+
+=== daemon_proactive ===
+  PASS  test_channel_list_has_name_null
+  PASS  test_channel_list_has_name_empty_name
+  PASS  test_channel_list_has_name_found
+  PASS  test_channel_list_has_name_not_found
+
+=== daemon_trust ===
+
+=== CpTasks ===
+
+=== cp_canvas ===
+
+=== VectorRetrievalRemote ===
+
+=== BackgroundRegistry2 ===
+
+=== consistency ===
+
+=== fact_extract ===
+
+=== PersonalModel ===
+
+=== personal-model-atomic-save ===
+
+=== hallucination_guard ===
+
+=== humor_fw ===
+
+=== Self Improvement ===
+
+=== sycophancy_guard ===
+
+=== trust_calibration ===
+
+=== vision_ocr ===
+
+=== markdown_loader ===
+
+=== Inner Thoughts (Anticipatory State) ===
+
+=== CanvasTool ===
+
+=== canvas_e2e ===
+
+=== CanvasPersist ===
+
+=== CanvasRender ===
+
+--- Results: 207/207 passed, 9893 skipped ---

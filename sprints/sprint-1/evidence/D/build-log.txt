@@ -1,0 +1,88 @@
+-- Sonata voice pipeline: disabled
+-- Cartesia TTS: disabled
+-- Embedded model provider: disabled
+-- llama.cpp Metal: enabled
+-- The CXX compiler identification is AppleClang 21.0.0.21000099
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+CMAKE_BUILD_TYPE=Release
+-- Found Git: /usr/bin/git (found version "2.50.1 (Apple Git-155)")
+-- Warning: ccache not found - consider installing it for faster compilation or disable this warning with GGML_CCACHE=OFF
+-- CMAKE_SYSTEM_PROCESSOR: arm64
+-- GGML_SYSTEM_ARCH: ARM
+-- Including CPU backend
+-- Accelerate framework found
+-- Could NOT find OpenMP_C (missing: OpenMP_C_FLAGS OpenMP_C_LIB_NAMES) 
+-- Could NOT find OpenMP_CXX (missing: OpenMP_CXX_FLAGS OpenMP_CXX_LIB_NAMES) 
+-- Could NOT find OpenMP (missing: OpenMP_C_FOUND OpenMP_CXX_FOUND) 
+CMake Warning at third_party/llama.cpp/ggml/src/ggml-cpu/CMakeLists.txt:84 (message):
+  OpenMP not found
+Call Stack (most recent call first):
+  third_party/llama.cpp/ggml/src/CMakeLists.txt:446 (ggml_add_cpu_backend_variant_impl)
+
+
+-- ARM detected
+-- Performing Test GGML_COMPILER_SUPPORTS_FP16_FORMAT_I3E
+-- Performing Test GGML_COMPILER_SUPPORTS_FP16_FORMAT_I3E - Failed
+CMake Warning at third_party/llama.cpp/ggml/src/ggml-cpu/CMakeLists.txt:146 (message):
+  ARM -march/-mcpu not found, -mcpu=native will be used
+Call Stack (most recent call first):
+  third_party/llama.cpp/ggml/src/CMakeLists.txt:446 (ggml_add_cpu_backend_variant_impl)
+
+
+-- Performing Test GGML_MACHINE_SUPPORTS_dotprod
+-- Performing Test GGML_MACHINE_SUPPORTS_dotprod - Success
+-- Performing Test GGML_MACHINE_SUPPORTS_i8mm
+-- Performing Test GGML_MACHINE_SUPPORTS_i8mm - Success
+-- Performing Test GGML_MACHINE_SUPPORTS_sve
+-- Performing Test GGML_MACHINE_SUPPORTS_sve - Failed
+-- Performing Test GGML_MACHINE_SUPPORTS_nosve
+-- Performing Test GGML_MACHINE_SUPPORTS_nosve - Success
+-- Performing Test GGML_MACHINE_SUPPORTS_sme
+-- Performing Test GGML_MACHINE_SUPPORTS_sme - Success
+-- Checking for ARM features using flags:
+--   -U__ARM_FEATURE_SVE
+--   -mcpu=native+dotprod+i8mm+nosve+sme
+-- Performing Test HAVE_DOTPROD
+-- Performing Test HAVE_DOTPROD - Success
+-- Performing Test HAVE_SVE
+-- Performing Test HAVE_SVE - Failed
+-- Performing Test HAVE_MATMUL_INT8
+-- Performing Test HAVE_MATMUL_INT8 - Success
+-- Performing Test HAVE_FMA
+-- Performing Test HAVE_FMA - Success
+-- Performing Test HAVE_FP16_VECTOR_ARITHMETIC
+-- Performing Test HAVE_FP16_VECTOR_ARITHMETIC - Success
+-- Performing Test HAVE_SME
+-- Performing Test HAVE_SME - Success
+-- Adding CPU backend variant ggml-cpu: -U__ARM_FEATURE_SVE;-mcpu=native+dotprod+i8mm+nosve+sme 
+-- Looking for dgemm_
+-- Looking for dgemm_ - found
+-- Found BLAS: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Accelerate.framework
+-- BLAS found, Libraries: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Accelerate.framework
+-- BLAS found, Includes: 
+-- Including BLAS backend
+-- Metal framework found
+-- Including METAL backend
+-- ggml version: 0.11.0
+-- ggml commit:  8e52631d5
+-- llama.cpp provider: enabled (vendored)
+-- libsodium: disabled (using PBKDF2 + ChaCha20+HMAC)
+-- Apple Intelligence provider: enabled (on-device)
+-- CoreML/MLX provider: disabled
+-- HTTP client: libcurl enabled
+-- TLS: OpenSSL enabled
+-- Line editing: OFF (basic getchar fallback)
+-- TUI: OFF (ANSI spinner mode)
+-- Human v0.5.0
+-- Build type: Release
+-- Channels: src/channels/cli.c;src/channels/imessage.c;src/channels/pwa.c
+-- Engines: none=ON markdown=ON sqlite=ON postgres=OFF
+-- ASan: OFF
+-- ASan: OFF
+-- Configuring done (2.8s)
+-- Generating done (0.2s)
+-- Build files have been written to: /Users/sethford/Documents/h-uman/build-llamacpp-probe

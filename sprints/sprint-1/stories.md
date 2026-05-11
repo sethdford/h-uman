@@ -1,7 +1,7 @@
 ---
 title: "Sprint 1 — SOTA persona-fidelity follow-through"
 created: 2026-05-11
-status: ready
+status: done
 sprint: 1
 program: docs/plans/2026-05-10-master-follow-through-program.md
 ---
@@ -22,13 +22,13 @@ Close four half-open loops left after shipping the live `metrics.fidelity` gatew
 
 **Acceptance Criteria** (every AC must be a single PASS/FAIL evidence claim):
 
-- [ ] AC-A.1: `ui/src/components/hu-directive-telemetry-tile.ts` exists, exports a `@customElement("hu-directive-telemetry-tile")` LitElement, and `npm run build` completes with zero TypeScript errors.
-- [ ] AC-A.2: The component fetches `metrics.directive_telemetry` from the gateway (or demo-gateway), renders one labelled segment per variant key (`null_overlay`, `default`, `formal_terse`, `casual_emoji`, `casual_or_short`, `adaptive_emoji`), and exposes a `total` count — verified by running `npm run test` against the component's vitest spec and observing all assertions green.
-- [ ] AC-A.3: When the gateway call is in-flight the component renders a `<hu-skeleton>` loading state; when the call rejects with an error it renders an inline error banner (not a blank div) — verified by vitest using a stub gateway that resolves on a timer then rejects.
-- [ ] AC-A.4: `ui/src/views/metrics-view.ts` imports and renders `<hu-directive-telemetry-tile>` in at least one non-stub view path — verified by `rg "hu-directive-telemetry-tile" ui/src/views/metrics-view.ts` returning at least one match.
-- [ ] AC-A.5: `ui/src/demo-gateway.ts` contains a `metrics.directive_telemetry` mock whose `variants` object has all six variant keys and whose `total` equals their sum — verified by `rg "directive_telemetry" ui/src/demo-gateway.ts` returning a match and `npm run test` passing.
-- [ ] AC-A.6: `npm run check` (which includes `npm run lint:tokens`) exits 0 with no raw hex, `rgba()`, hardcoded durations, or missing `--hu-*` token violations in the new component file.
-- [ ] AC-A.7: At least 4 vitest test cases exist in the component's test file covering: render with populated data, render with all-zero variants, loading skeleton state, and error state — verified by `rg "describe\|it\(" ui/src/components/hu-directive-telemetry-tile.test.ts | wc -l` printing ≥ 4.
+- [x] AC-A.1: `ui/src/components/hu-directive-telemetry-tile.ts` exists, exports a `@customElement("hu-directive-telemetry-tile")` LitElement, and `npm run build` completes with zero TypeScript errors.
+- [x] AC-A.2: The component fetches `metrics.directive_telemetry` from the gateway (or demo-gateway), renders one labelled segment per variant key (`null_overlay`, `default`, `formal_terse`, `casual_emoji`, `casual_or_short`, `adaptive_emoji`), and exposes a `total` count — verified by running `npm run test` against the component's vitest spec and observing all assertions green.
+- [x] AC-A.3: When the gateway call is in-flight the component renders a `<hu-skeleton>` loading state; when the call rejects with an error it renders an inline error banner (not a blank div) — verified by vitest using a stub gateway that resolves on a timer then rejects.
+- [x] AC-A.4: `ui/src/views/metrics-view.ts` imports and renders `<hu-directive-telemetry-tile>` in at least one non-stub view path — verified by `rg "hu-directive-telemetry-tile" ui/src/views/metrics-view.ts` returning at least one match.
+- [x] AC-A.5: `ui/src/demo-gateway.ts` contains a `metrics.directive_telemetry` mock whose `variants` object has all six variant keys and whose `total` equals their sum — verified by `rg "directive_telemetry" ui/src/demo-gateway.ts` returning a match and `npm run test` passing.
+- [x] AC-A.6: `npm run check` (which includes `npm run lint:tokens`) exits 0 with no raw hex, `rgba()`, hardcoded durations, or missing `--hu-*` token violations in the new component file.
+- [x] AC-A.7: At least 4 vitest test cases exist in the component's test file covering: render with populated data, render with all-zero variants, loading skeleton state, and error state — verified by `rg "describe\|it\(" ui/src/components/hu-directive-telemetry-tile.test.ts | wc -l` printing ≥ 4.
 
 **Out of scope:**
 - Historical time-series of variant distribution (no chart over time, just current snapshot)
@@ -49,12 +49,12 @@ Close four half-open loops left after shipping the live `metrics.fidelity` gatew
 
 **Acceptance Criteria** (every AC must be a single PASS/FAIL evidence claim):
 
-- [ ] AC-B.1: After a successful invocation of `scripts/lora-runner-ab.sh` (or its no-provider stub path that exits 0), `~/.human/last_fidelity_ab.json` exists and its contents equal the `status.json` produced in `--output-dir` — verified by `diff ~/.human/last_fidelity_ab.json <output-dir>/status.json` printing nothing.
-- [ ] AC-B.2: The write is atomic (tmp-file + rename): at no point does a partial write appear at the canonical path — verified by `grep -n "mv\s" scripts/lora-runner-ab.sh` showing the rename command rather than a direct redirect to `~/.human/last_fidelity_ab.json`.
-- [ ] AC-B.3: When `--no-publish` is passed, `~/.human/last_fidelity_ab.json` is NOT created or modified — verified by running the script with `--no-publish` in a clean tempdir and then `test ! -f ~/.human/last_fidelity_ab.json` (or diff confirms no change if file pre-existed).
-- [ ] AC-B.4: When `HUMAN_FIDELITY_AB_PATH=/tmp/test-ab.json` is exported, the script writes to `/tmp/test-ab.json` instead of `~/.human/last_fidelity_ab.json` — verified by `test -f /tmp/test-ab.json && test ! -newer ~/.human/last_fidelity_ab.json /tmp/test-ab.json` (or by checking only `/tmp/test-ab.json` was written).
-- [ ] AC-B.5: A run that exits non-zero (e.g., the no-provider path that exits 2) does NOT write or overwrite the canonical file — verified by running the no-provider stub path and confirming `~/.human/last_fidelity_ab.json` is unchanged (or absent).
-- [ ] AC-B.6: `shellcheck scripts/lora-runner-ab.sh` exits 0 with no warnings or errors (SC2034, SC2086, etc. all clean).
+- [x] AC-B.1: After a successful invocation of `scripts/lora-runner-ab.sh` (or its no-provider stub path that exits 0), `~/.human/last_fidelity_ab.json` exists and its contents equal the `status.json` produced in `--output-dir` — verified by `diff ~/.human/last_fidelity_ab.json <output-dir>/status.json` printing nothing.
+- [x] AC-B.2: The write is atomic (tmp-file + rename): at no point does a partial write appear at the canonical path — verified by `grep -n "mv\s" scripts/lora-runner-ab.sh` showing the rename command rather than a direct redirect to `~/.human/last_fidelity_ab.json`.
+- [x] AC-B.3: When `--no-publish` is passed, `~/.human/last_fidelity_ab.json` is NOT created or modified — verified by running the script with `--no-publish` in a clean tempdir and then `test ! -f ~/.human/last_fidelity_ab.json` (or diff confirms no change if file pre-existed).
+- [x] AC-B.4: When `HUMAN_FIDELITY_AB_PATH=/tmp/test-ab.json` is exported, the script writes to `/tmp/test-ab.json` instead of `~/.human/last_fidelity_ab.json` — verified by `test -f /tmp/test-ab.json && test ! -newer ~/.human/last_fidelity_ab.json /tmp/test-ab.json` (or by checking only `/tmp/test-ab.json` was written).
+- [x] AC-B.5: A run that exits non-zero (e.g., the no-provider path that exits 2) does NOT write or overwrite the canonical file — verified by running the no-provider stub path and confirming `~/.human/last_fidelity_ab.json` is unchanged (or absent).
+- [x] AC-B.6: `shellcheck scripts/lora-runner-ab.sh` exits 0 with no warnings or errors (SC2034, SC2086, etc. all clean).
 
 **Out of scope:**
 - Changing the JSON schema of `status.json` / `last_fidelity_ab.json`
@@ -75,12 +75,12 @@ Close four half-open loops left after shipping the live `metrics.fidelity` gatew
 
 **Acceptance Criteria** (every AC must be a single PASS/FAIL evidence claim):
 
-- [ ] AC-C.1: Each of the four Tier-1 channels has a non-empty overlay entry reachable via `hu_persona_find_overlay(persona, "<channel_id>")` — verified by a C test that constructs or loads the starter persona and asserts `overlay != NULL` for `"telegram"`, `"discord"`, `"imessage"`, and `"slack"`.
-- [ ] AC-C.2: `directive_variant_for_overlay` (or `acknowledgment_directive_for_overlay`) returns `CASUAL_EMOJI` for the Discord overlay and `CASUAL_EMOJI` (or `CASUAL_OR_SHORT`) for the iMessage overlay — verified by a C test with hard assertions on the return value.
-- [ ] AC-C.3: `directive_variant_for_overlay` returns `FORMAL_TERSE` or `ADAPTIVE_EMOJI` for the Slack overlay (professional + minimal-emoji → terse or adaptive path) — verified by a C test with hard assertion on the return value.
-- [ ] AC-C.4: `directive_variant_for_overlay` returns `CASUAL_OR_SHORT` or `CASUAL_EMOJI` for the Telegram overlay — verified by a C test with hard assertion on the return value.
-- [ ] AC-C.5: A synthetic test (`tests/test_persona_directive_channels.c` or equivalent) that runs `acknowledgment_directive_for_overlay` for all four Tier-1 channels in a loop passes with `cmake --build build && ./build/human_tests --suite=persona_directive` showing 0 failures, 0 ASan errors.
-- [ ] AC-C.6: After `./build/human_tests --suite=persona_directive`, calling `directive_telemetry_snapshot()` (or equivalent telemetry accumulator) returns a snapshot where the `null_overlay` count is 0 for those four channels and the variant-specific counts are non-zero — verified by a test assertion or by inspecting the snapshot struct in the test.
+- [x] AC-C.1: Each of the four Tier-1 channels has a non-empty overlay entry reachable via `hu_persona_find_overlay(persona, "<channel_id>")` — verified by a C test that constructs or loads the starter persona and asserts `overlay != NULL` for `"telegram"`, `"discord"`, `"imessage"`, and `"slack"`.
+- [x] AC-C.2: `directive_variant_for_overlay` (or `acknowledgment_directive_for_overlay`) returns `CASUAL_EMOJI` for the Discord overlay and `CASUAL_EMOJI` (or `CASUAL_OR_SHORT`) for the iMessage overlay — verified by a C test with hard assertions on the return value.
+- [x] AC-C.3: `directive_variant_for_overlay` returns `FORMAL_TERSE` or `ADAPTIVE_EMOJI` for the Slack overlay (professional + minimal-emoji → terse or adaptive path) — verified by a C test with hard assertion on the return value.
+- [x] AC-C.4: `directive_variant_for_overlay` returns `CASUAL_OR_SHORT` or `CASUAL_EMOJI` for the Telegram overlay — verified by a C test with hard assertion on the return value.
+- [x] AC-C.5: A synthetic test (`tests/test_persona_directive_channels.c` or equivalent) that runs `acknowledgment_directive_for_overlay` for all four Tier-1 channels in a loop passes with `cmake --build build && ./build/human_tests --suite=persona_directive` showing 0 failures, 0 ASan errors.
+- [x] AC-C.6: After `./build/human_tests --suite=persona_directive`, calling `directive_telemetry_snapshot()` (or equivalent telemetry accumulator) returns a snapshot where the `null_overlay` count is 0 for those four channels and the variant-specific counts are non-zero — verified by a test assertion or by inspecting the snapshot struct in the test.
 
 **Out of scope:**
 - Overlays for any channel outside the four Tier-1 channels (Tier-2/3 channels are untouched this sprint)
@@ -105,12 +105,12 @@ Close four half-open loops left after shipping the live `metrics.fidelity` gatew
   **OR**
 - [ ] AC-D.1 *(path b — synthetic GGUF)*: `tests/fixtures/synthetic_lora.gguf` exists (≥ 1 byte, deterministic synthetic content), `scripts/lora-runner-ab.sh` runs to completion against it, and `sprints/sprint-1/evidence/D/status.json` contains `"delta": <value> > 0` — verified by `jq '.delta > 0' sprints/sprint-1/evidence/D/status.json` printing `true`.
   **OR**
-- [ ] AC-D.1 *(DESCOPE_OK)*: `sprints/sprint-1/evidence/D/descope-rationale.md` exists and contains: (1) the precise error or missing prerequisite that blocks a local run, (2) the exact command that was attempted, (3) the exit code and first 20 lines of stderr, and (4) a recommended follow-up action — verified by `test -f sprints/sprint-1/evidence/D/descope-rationale.md && wc -l sprints/sprint-1/evidence/D/descope-rationale.md | awk '$1 >= 10'` printing the line count (≥ 10 lines).
+- [x] AC-D.1 *(DESCOPE_OK)*: `sprints/sprint-1/evidence/D/descope-rationale.md` exists and contains: (1) the precise error or missing prerequisite that blocks a local run, (2) the exact command that was attempted, (3) the exit code and first 20 lines of stderr, and (4) a recommended follow-up action — verified by `test -f sprints/sprint-1/evidence/D/descope-rationale.md && wc -l sprints/sprint-1/evidence/D/descope-rationale.md | awk '$1 >= 10'` printing the line count (≥ 10 lines).
 
-- [ ] AC-D.2: Whichever path is taken, a `sprints/sprint-1/evidence/D/` directory exists with at least one evidence file (`run-log.txt`, `status.json`, or `descope-rationale.md`) committed to the repo — verified by `ls sprints/sprint-1/evidence/D/` listing at least one file.
+- [x] AC-D.2: Whichever path is taken, a `sprints/sprint-1/evidence/D/` directory exists with at least one evidence file (`run-log.txt`, `status.json`, or `descope-rationale.md`) committed to the repo — verified by `ls sprints/sprint-1/evidence/D/` listing at least one file.
 - [ ] AC-D.3: If path (a) or (b) is taken, `cmake --build build -DHU_ENABLE_LLAMACPP=ON` compiles cleanly (zero errors) and `./build/human_tests --suite=ml` shows 0 failures — verified by the CI log or a local run log in `sprints/sprint-1/evidence/D/build-log.txt`.
 - [ ] AC-D.4: The `status.json` produced (paths a or b) conforms to the schema expected by `cp_admin_metrics_fidelity` — specifically it contains at minimum the keys `delta`, `baseline_score`, `candidate_score`, and `run_id` — verified by `jq 'has("delta") and has("baseline_score") and has("candidate_score") and has("run_id")' sprints/sprint-1/evidence/D/status.json` printing `true`.
-- [ ] AC-D.5 *(DESCOPE_OK only)*: The descope rationale explicitly states which of the three blocker categories applies: (A) no GGUF model available locally and download is blocked by network/licence policy, (B) `HU_ENABLE_LLAMACPP` CMake flag is not yet wired to a real llama.cpp backend, or (C) the `lora-runner-ab.sh` script does not yet exist — verified by `grep -E "blocker category|Category [A-C]" sprints/sprint-1/evidence/D/descope-rationale.md` returning a match.
+- [x] AC-D.5 *(DESCOPE_OK only)*: The descope rationale explicitly states which of the three blocker categories applies: (A) no GGUF model available locally and download is blocked by network/licence policy, (B) `HU_ENABLE_LLAMACPP` CMake flag is not yet wired to a real llama.cpp backend, or (C) the `lora-runner-ab.sh` script does not yet exist — verified by `grep -E "blocker category|Category [A-C]" sprints/sprint-1/evidence/D/descope-rationale.md` returning a match.
 
 **Out of scope:**
 - Training a new LoRA adapter from scratch (the story consumes an existing or synthetic adapter, it does not train one)

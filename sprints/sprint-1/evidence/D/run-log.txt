@@ -1,0 +1,62 @@
+[lora-runner-ab] --adapter is required
+lora-runner-ab.sh — End-to-end LoRA A/B evaluation orchestrator.
+
+Closes the canonical four-step LoRA fidelity workflow into a single
+command:
+
+  1. Run the persona's example bank through the BASE provider →
+     `before.json` (no adapter loaded).
+  2. Re-run the same prompts with the LoRA adapter loaded →
+     `after.json`.
+  3. Score both response sets against the persona's communication-
+     style fingerprint (synthetic or learned from
+     `personal_model.bin`) and report the delta.
+  4. Optionally enforce a CI gate via `--floor-delta` /
+     `--require-positive`.
+
+This is the operational counterpart to `scripts/check-lora-ab.sh`,
+which runs the comparator against pre-canned fixtures. THIS script
+generates the response sets live by calling a real provider, then
+invokes the same comparator.
+
+REQUIRED:
+  --persona <name>      Persona name (must exist in HU_PERSONA_DIR
+                        or ~/.human/personas/).
+  --adapter <path>      Path to the LoRA adapter to evaluate.
+
+OPTIONAL:
+  --output-dir <dir>    Where to write before.json/after.json/
+                        status.json. Defaults to a tempdir; set
+                        to a stable path to keep artifacts.
+  --provider <name>     Override the provider (default: from
+                        config; must support load_adapter — the
+                        huml provider does, cloud providers don't).
+  --model <id>          Provider model id (default: provider
+                        default).
+  --max-examples N      Cap responses per side.
+  --floor-delta F       CI gate: fail when delta < F.
+                        (default: no gate).
+  --require-positive    CI gate: fail when delta <= 0.
+  --keep                Don't delete the output dir on exit (only
+                        meaningful when --output-dir is the default
+                        tempdir).
+  --no-publish          Skip the post-success publish to
+                        $HUMAN_FIDELITY_AB_PATH (or
+                        ~/.human/last_fidelity_ab.json). Useful for
+                        test harnesses that want the run's
+                        status.json but must not touch the user's
+                        canonical state.
+
+DEPENDENCIES:
+  - `human` binary built from this repo (auto-built when missing).
+  - A provider configured to actually answer chat() calls. The
+    local huml provider works without API keys but requires
+    HU_ENABLE_LLAMACPP plus a downloaded GGUF; cloud providers
+    need an API key and don't support load_adapter.
+
+EXIT CODES:
+  0  — A/B run completed AND all gates passed.
+  1  — Bad arguments / setup failure.
+  2  — Either side of the runner returned errors for ALL examples
+       (no usable data).
+Exit code: 1

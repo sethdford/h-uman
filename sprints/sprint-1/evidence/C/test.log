@@ -1,0 +1,23 @@
+Human Test Suite
+==================
+Suite filter: persona_directive
+  SKIP  wasm WASI syscall tests (build with wasm32-wasi to run)
+
+=== persona_directive_channels ===
+  PASS  persona_directive_starter_persona_loads_four_tier1_overlays
+  PASS  persona_directive_discord_overlay_fires_casual_emoji
+  PASS  persona_directive_imessage_overlay_fires_casual_emoji
+  PASS  persona_directive_slack_overlay_fires_formal_terse
+  PASS  persona_directive_telegram_overlay_fires_casual_or_short
+  PASS  persona_directive_tier1_batch_yields_zero_null_overlay
+
+=== INTELLIGENCE SUBSYSTEM PROOF ===
+=== ALL INTELLIGENCE + STREAMING LOOPS PROVEN ===
+
+  channel_monitor: 12/12 passed
+  doctor_fix: 10/10 passed
+  skill_scaffold: 12/12 passed
+  plugin_discovery: 7/7 passed
+  context_engine_rag: 10/10 passed
+
+--- Results: 6/6 passed, 10079 skipped ---

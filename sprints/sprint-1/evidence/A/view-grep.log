@@ -1,0 +1,4 @@
+import "../components/hu-directive-telemetry-tile.js";
+import type { DirectiveTelemetry } from "../components/hu-directive-telemetry-tile.js";
+        <hu-directive-telemetry-tile
+        ></hu-directive-telemetry-tile>

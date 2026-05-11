@@ -76,8 +76,11 @@ static const char *const HU_IDENTITY_TEMPLATE =
     "description: Autonomous AI assistant running locally\n"
     "personality: Helpful, concise, security-conscious\n";
 
-/* Same starter persona as cmd_init (HU_INIT_DEFAULT_PERSONA in cli_commands.c). */
-static const char HU_ONBOARD_DEFAULT_PERSONA[] =
+/* Single source of truth — declared in include/human/onboard.h and
+ * referenced by both `human init` (src/cli_commands.c) and
+ * `human onboard` (this file). See header comment for the bug
+ * history that prompted the centralization. */
+const char hu_starter_persona_json[] =
     "{\n"
     "  \"version\": 1,\n"
     "  \"name\": \"default\",\n"
@@ -91,46 +94,41 @@ static const char HU_ONBOARD_DEFAULT_PERSONA[] =
     "      \"Remember context from previous conversations\"\n"
     "    ]\n"
     "  },\n"
-    "  \"channel_overlays\": [\n"
-    "    {\n"
-    "      \"channel\": \"imessage\",\n"
-    "      \"formality\": 0.2,\n"
-    "      \"avg_length\": 40,\n"
-    "      \"emoji_usage\": 0.3,\n"
+    "  \"channel_overlays\": {\n"
+    "    \"imessage\": {\n"
+    "      \"formality\": \"casual\",\n"
+    "      \"avg_length\": \"short\",\n"
+    "      \"emoji_usage\": \"moderate\",\n"
     "      \"style_notes\": \"Casual texting style. Short messages. "
     "Use tapbacks when appropriate.\"\n"
     "    },\n"
-    "    {\n"
-    "      \"channel\": \"telegram\",\n"
-    "      \"formality\": 0.3,\n"
-    "      \"avg_length\": 80,\n"
-    "      \"emoji_usage\": 0.2,\n"
+    "    \"telegram\": {\n"
+    "      \"formality\": \"casual\",\n"
+    "      \"avg_length\": \"medium\",\n"
+    "      \"emoji_usage\": \"low\",\n"
     "      \"style_notes\": \"Conversational but slightly more detailed than texting.\"\n"
     "    },\n"
-    "    {\n"
-    "      \"channel\": \"discord\",\n"
-    "      \"formality\": 0.2,\n"
-    "      \"avg_length\": 60,\n"
-    "      \"emoji_usage\": 0.4,\n"
+    "    \"discord\": {\n"
+    "      \"formality\": \"casual\",\n"
+    "      \"avg_length\": \"medium\",\n"
+    "      \"emoji_usage\": \"high\",\n"
     "      \"style_notes\": \"Relaxed community tone. React with emoji when fitting.\"\n"
     "    },\n"
-    "    {\n"
-    "      \"channel\": \"slack\",\n"
-    "      \"formality\": 0.5,\n"
-    "      \"avg_length\": 100,\n"
-    "      \"emoji_usage\": 0.1,\n"
+    "    \"slack\": {\n"
+    "      \"formality\": \"professional\",\n"
+    "      \"avg_length\": \"medium\",\n"
+    "      \"emoji_usage\": \"minimal\",\n"
     "      \"style_notes\": \"Professional but approachable. Use threads. "
     "Be concise.\"\n"
     "    },\n"
-    "    {\n"
-    "      \"channel\": \"cli\",\n"
-    "      \"formality\": 0.4,\n"
-    "      \"avg_length\": 200,\n"
-    "      \"emoji_usage\": 0.0,\n"
+    "    \"cli\": {\n"
+    "      \"formality\": \"neutral\",\n"
+    "      \"avg_length\": \"long\",\n"
+    "      \"emoji_usage\": \"none\",\n"
     "      \"style_notes\": \"Technical, precise. No emoji. "
     "Format code blocks when showing code.\"\n"
     "    }\n"
-    "  ],\n"
+    "  },\n"
     "  \"example_banks\": [\n"
     "    {\n"
     "      \"channel\": \"cli\",\n"
@@ -382,8 +380,8 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
                 {
                     FILE *pf = fopen(persona_path, "w");
                     if (pf) {
-                        size_t plen = sizeof(HU_ONBOARD_DEFAULT_PERSONA) - 1;
-                        if (fwrite(HU_ONBOARD_DEFAULT_PERSONA, 1, plen, pf) == plen)
+                        size_t plen = strlen(hu_starter_persona_json);
+                        if (fwrite(hu_starter_persona_json, 1, plen, pf) == plen)
                             printf("Starter persona created at %s\n", persona_path);
                         fclose(pf);
                     }
