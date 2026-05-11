@@ -323,6 +323,72 @@ static void personal_model_default_path_round_trip(void) {
     unsetenv("HUMAN_PERSONAL_MODEL_PATH");
 }
 
+/* M2 P1 crash-safety: simulates a daemon killed mid-turn and verifies the
+ * personal model on disk is durable and complete.
+ *
+ * "Mid-turn crash" semantics in unit-test land: we ingest signal into a
+ * struct, save it via the same call path the agent uses after every user
+ * message (see agent_turn.c / agent_stream.c), then zero the struct bytes
+ * WITHOUT calling any deinit / cleanup. That is functionally equivalent
+ * to the process being killed by SIGKILL: no destructors run, no flush
+ * callbacks fire, the in-memory state is gone.
+ *
+ * Then a *fresh* struct loads from the same default path the agent
+ * resolver would have produced after restart. If the load recovers every
+ * fact and the interaction counter, the on-disk format is crash-safe
+ * across process boundaries.
+ *
+ * What this proves: hu_personal_model_save is atomic enough that a crash
+ * the instant after it returns HU_OK leaves a file the next process can
+ * fully reload. What it does NOT prove: that a crash *during* the save
+ * (between write/rename) is safe; that case is the responsibility of the
+ * save implementation and is covered by the existing atomic-rename test
+ * if it exists. */
+static void personal_model_survives_simulated_crash(void) {
+    char override[64];
+    snprintf(override, sizeof(override), "/tmp/hu_pm_crash_%d.bin", (int)getpid());
+    setenv("HUMAN_PERSONAL_MODEL_PATH", override, 1);
+
+    char path[256];
+    HU_ASSERT_NOT_NULL(hu_personal_model_resolve_default_path(path, sizeof(path)));
+
+    /* Process A: ingest several signals, save after each (mirrors the
+     * per-turn save now wired into agent_turn.c / agent_stream.c). */
+    hu_personal_model_t a;
+    hu_personal_model_init(&a);
+    hu_personal_model_ingest(&a, "i never drink coffee after 2pm", 30, true, 1700000100LL);
+    HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
+    hu_personal_model_ingest(&a, "i love long walks at sunset", 27, true, 1700000200LL);
+    HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
+    hu_personal_model_ingest(&a, "my favorite color is teal", 25, true, 1700000300LL);
+    HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
+
+    size_t expected_fact_count = a.fact_count;
+    size_t expected_interactions = a.interaction_count;
+    HU_ASSERT_TRUE(expected_fact_count >= 1);
+    HU_ASSERT_TRUE(expected_interactions >= 3);
+
+    /* CRASH: zero the in-memory struct WITHOUT calling deinit. No cleanup
+     * runs. This is what kill -9 looks like to the rest of the program. */
+    memset(&a, 0, sizeof(a));
+
+    /* Process B: fresh struct, fresh resolver, no shared state. */
+    char path2[256];
+    HU_ASSERT_NOT_NULL(hu_personal_model_resolve_default_path(path2, sizeof(path2)));
+    HU_ASSERT_STR_EQ(path, path2);
+
+    hu_personal_model_t b;
+    hu_personal_model_init(&b);
+    HU_ASSERT_EQ(hu_personal_model_load(&b, path2), HU_OK);
+
+    HU_ASSERT_EQ(b.fact_count, expected_fact_count);
+    HU_ASSERT_EQ(b.interaction_count, expected_interactions);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&b));
+
+    remove(override);
+    unsetenv("HUMAN_PERSONAL_MODEL_PATH");
+}
+
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -344,4 +410,5 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_resolve_default_path_no_home_returns_null);
     HU_RUN_TEST(personal_model_save_creates_parent_directory);
     HU_RUN_TEST(personal_model_default_path_round_trip);
+    HU_RUN_TEST(personal_model_survives_simulated_crash);
 }

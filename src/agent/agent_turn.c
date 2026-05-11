@@ -951,6 +951,20 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
 #ifndef HU_IS_TEST
     (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+    /* M2 P1 crash-safety: save the personal model immediately after
+     * ingesting the user message. The single save at hu_agent_deinit is
+     * not enough — a daemon killed mid-turn loses every fact, style hint,
+     * and topic that was ingested in this turn and any prior turn since
+     * the last clean shutdown. Saving here costs ~6 KB of disk write and
+     * makes the model durable at the granularity of one user message.
+     *
+     * Guarded by auto_save so unit tests with auto_save=false stay in
+     * memory and never touch disk. */
+    if (agent->auto_save && hu_personal_model_has_content(&agent->personal_model)) {
+        char pm_path[1024];
+        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path)))
+            (void)hu_personal_model_save(&agent->personal_model, pm_path);
+    }
 #endif
 
     /* Context engine: ingest the user message for RAG/graph indexing */

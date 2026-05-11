@@ -321,6 +321,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
 
 #ifndef HU_IS_TEST
     (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+    /* M2 P1 crash-safety: see agent_turn.c — save the personal model
+     * after ingesting the user message so a daemon killed mid-stream
+     * keeps the signal captured in this turn. */
+    if (agent->auto_save && hu_personal_model_has_content(&agent->personal_model)) {
+        char pm_path[1024];
+        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path)))
+            (void)hu_personal_model_save(&agent->personal_model, pm_path);
+    }
 #endif
 
     /* Build system prompt (memory, persona, awareness, outcomes) */
