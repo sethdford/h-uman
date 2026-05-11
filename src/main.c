@@ -2189,7 +2189,7 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
     if (err != HU_OK) {
         fprintf(
             stderr,
-            "Usage: human persona <create|update|show|list|delete|validate|export|merge|import> "
+            "Usage: human persona <create|update|show|list|delete|validate|eval|export|merge|import> "
             "[name] [options]\n");
         fprintf(
             stderr,
@@ -2199,6 +2199,7 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "  list\n");
         fprintf(stderr, "  delete <name>\n");
         fprintf(stderr, "  validate <name>\n");
+        fprintf(stderr, "  eval <name>  (offline persona consistency harness)\n");
         fprintf(stderr, "  export <name>\n");
         fprintf(stderr, "  merge <output_name> <name1> <name2> [name3...]\n");
         fprintf(stderr, "  import <name> [--from-stdin | --from-file <path>]\n");

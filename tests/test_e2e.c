@@ -108,6 +108,63 @@ static hu_provider_t mock_provider_create(hu_allocator_t *alloc, mock_provider_t
     return (hu_provider_t){.ctx = ctx, .vtable = &mock_provider_vtable};
 }
 
+typedef struct {
+    const char *name;
+    char system_buf[16384];
+} stance_capture_ctx_t;
+
+static hu_error_t stance_capture_chat(void *ctx, hu_allocator_t *alloc,
+                                      const hu_chat_request_t *request, const char *model,
+                                      size_t model_len, double temperature, hu_chat_response_t *out) {
+    stance_capture_ctx_t *c = (stance_capture_ctx_t *)ctx;
+    memset(c->system_buf, 0, sizeof(c->system_buf));
+    if (request && request->messages) {
+        for (size_t i = 0; i < request->messages_count; i++) {
+            if (request->messages[i].role == HU_ROLE_SYSTEM && request->messages[i].content &&
+                request->messages[i].content_len > 0) {
+                size_t n = request->messages[i].content_len;
+                if (n >= sizeof(c->system_buf))
+                    n = sizeof(c->system_buf) - 1;
+                memcpy(c->system_buf, request->messages[i].content, n);
+                c->system_buf[n] = '\0';
+                break;
+            }
+        }
+    }
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    const char *resp = "mock response";
+    out->content = hu_strndup(alloc, resp, strlen(resp));
+    out->content_len = out->content ? strlen(resp) : 0;
+    out->tool_calls = NULL;
+    out->tool_calls_count = 0;
+    out->usage.prompt_tokens = 1;
+    out->usage.completion_tokens = 2;
+    out->usage.total_tokens = 3;
+    out->model = NULL;
+    out->model_len = 0;
+    out->reasoning_content = NULL;
+    out->reasoning_content_len = 0;
+    return out->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+}
+
+static const hu_provider_vtable_t stance_capture_vtable = {
+    .chat_with_system = mock_chat_with_system,
+    .chat = stance_capture_chat,
+    .supports_native_tools = mock_supports_native_tools,
+    .get_name = mock_get_name,
+    .deinit = mock_deinit,
+};
+
+static hu_provider_t stance_capture_provider_create(hu_allocator_t *alloc,
+                                                    stance_capture_ctx_t *ctx) {
+    (void)alloc;
+    ctx->name = "mock";
+    memset(ctx->system_buf, 0, sizeof(ctx->system_buf));
+    return (hu_provider_t){.ctx = ctx, .vtable = &stance_capture_vtable};
+}
+
 #ifdef HU_HAS_SKILLS
 typedef struct capture_mock_ctx {
     const char *name;
@@ -614,6 +671,30 @@ static void test_agent_turn_simple(void) {
 #ifdef HU_ENABLE_SQLITE
     HU_ASSERT_EQ((unsigned long)agent.verifier_runs, 1UL);
 #endif
+
+    if (response)
+        alloc.free(alloc.ctx, response, response_len + 1);
+    hu_agent_deinit(&agent);
+}
+
+static void test_agent_turn_injects_behavior_stance(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    stance_capture_ctx_t cap = {0};
+    hu_provider_t prov = stance_capture_provider_create(&alloc, &cap);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_error_t err =
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn(&agent, "What is 2+2?", 12, &response, &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(cap.system_buf, "[Behavior:"));
+    HU_ASSERT_NOT_NULL(strstr(cap.system_buf, "Evidence:"));
 
     if (response)
         alloc.free(alloc.ctx, response, response_len + 1);
@@ -1915,6 +1996,7 @@ void run_e2e_tests(void) {
     HU_RUN_TEST(test_agent_from_config_null_alloc);
     HU_RUN_TEST(test_agent_from_config_null_provider);
     HU_RUN_TEST(test_agent_turn_simple);
+    HU_RUN_TEST(test_agent_turn_injects_behavior_stance);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_agent_turn_runs_response_verifier_telemetry);
     HU_RUN_TEST(test_agent_turn_response_verifier_with_graph);

@@ -997,6 +997,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             return err;
         }
 
+        hu_agent_m3_on_provider_success(agent);
+
         agent->total_tokens += sresp.usage.total_tokens;
         hu_agent_internal_record_cost(agent, &sresp.usage);
 
@@ -1027,6 +1029,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         turn_model_len, msg, msg_len, &safe_content, &safe_content_len,
                         &retry_report);
                     if (retry_err == HU_OK && safe_content && safe_content_len > 0) {
+                        hu_agent_m3_on_provider_success(agent);
                         safe_owned = true;
                         hu_log_warn(
                             "agent_stream", agent->observer,
@@ -1216,6 +1219,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             hu_error_t gvr_err = hu_gvr_pipeline(
                 agent->alloc, &agent->provider, &agent->sota.gvr_config, agent->model_name,
                 agent->model_name_len, msg, msg_len, final_content, final_content_len, &gvr_result);
+            if (gvr_err == HU_OK)
+                hu_agent_m3_on_provider_success(agent);
             if (gvr_err == HU_OK && gvr_result.final_content &&
                 gvr_result.revisions_performed > 0) {
                 if (content_owned)
@@ -1283,6 +1288,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     agent->provider.ctx, agent->alloc, rethink_sys, sizeof(rethink_sys) - 1,
                     rethink_user, (size_t)rn, agent->model_name, agent->model_name_len, 0.9,
                     &revised, &revised_len);
+                if (re_err == HU_OK)
+                    hu_agent_m3_on_provider_success(agent);
                 if (re_err == HU_OK && revised && revised_len > final_content_len) {
                     hu_log_info("human", NULL, "[quality] persona rethink: %zu → %zu chars",
                                 final_content_len, revised_len);
@@ -1307,6 +1314,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             if (hu_constitutional_critique(agent->alloc, &agent->provider, agent->model_name,
                                            agent->model_name_len, msg, msg_len, final_content,
                                            final_content_len, &const_cfg, &critique) == HU_OK) {
+                hu_agent_m3_on_provider_success(agent);
                 if (critique.verdict == HU_CRITIQUE_REWRITE && critique.revised_response &&
                     critique.revised_response_len > 0) {
                     if (content_owned)
@@ -1617,6 +1625,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                             agent->alloc, agent->observer, agent->config, &agent->provider, tm, tml,
                             msg, msg_len, &retry_txt, &retry_txt_len, &rr);
                         if (rre == HU_OK && retry_txt && retry_txt_len > 0) {
+                            hu_agent_m3_on_provider_success(agent);
                             final_content = retry_txt;
                             final_content_len = retry_txt_len;
                             hu_log_warn("agent_stream", agent->observer,

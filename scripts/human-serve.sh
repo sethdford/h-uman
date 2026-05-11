@@ -28,6 +28,18 @@ GEMMA_RT_PATHS=(
     "$HOME/gemma-realtime/scripts/mlx-server.py"
 )
 
+# Prefer Python 3.13 venv (Python 3.14 has loky semaphore crash bug)
+VENV_PYTHON="$HOME/Documents/gemma-realtime-1/.venv313/bin/python3.13"
+if [[ -x "$VENV_PYTHON" ]]; then
+    PYTHON="$VENV_PYTHON"
+else
+    PYTHON="python3"
+fi
+
+# Enable self-RAG verification and streaming by default
+export HU_SELF_RAG_MODE=soft
+export HU_SELF_RAG_STREAMING=1
+
 read_config() {
     if [[ -f "$CONFIG" ]] && command -v python3 &>/dev/null; then
         eval "$(python3 -c "
@@ -106,7 +118,7 @@ do_start() {
     local cmd=""
     local server_script
     if server_script=$(find_server_script); then
-        cmd="python3 $server_script --model $MODEL --port $PORT"
+        cmd="$PYTHON $server_script --model $MODEL --port $PORT"
         echo "  Engine:  gemma-realtime mlx-server.py"
 
         if [[ "$REALTIME" == "true" ]]; then
@@ -129,7 +141,7 @@ do_start() {
             cmd="$cmd --speculative-draft-adapter $SPECULATIVE_DRAFT_ADAPTER"
         fi
     else
-        cmd="python3 -m mlx_lm.server --model $MODEL --port $PORT"
+        cmd="$PYTHON -m mlx_lm.server --model $MODEL --port $PORT"
         echo "  Engine:  mlx_lm.server (fallback — install gemma-realtime for TurboQuant+)"
     fi
 

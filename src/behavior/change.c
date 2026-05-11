@@ -40,6 +40,13 @@ static bool bct_is_late_night(uint8_t hour) {
     return hour >= 23 || hour < 6;
 }
 
+static bool bct_outside_jitai_hours(const hu_behavior_change_input_t *in) {
+    if (in->jitai_chronotype != HU_CHRONO_UNKNOWN) {
+        return hu_chronotype_is_active_hour(in->jitai_chronotype, in->hour) ? false : true;
+    }
+    return bct_is_late_night(in->hour);
+}
+
 hu_error_t hu_behavior_change_select(const hu_behavior_change_input_t *in,
                                      hu_behavior_change_decision_t *out) {
     if (!in || !out) {
@@ -61,7 +68,7 @@ hu_error_t hu_behavior_change_select(const hu_behavior_change_input_t *in,
     }
 
     /* 2. JITAI gating: no late-night prompts unless explicitly opted in. */
-    if (bct_is_late_night(in->hour) && !in->late_night_opt_in) {
+    if (bct_outside_jitai_hours(in) && !in->late_night_opt_in) {
         out->technique = HU_BCT_NONE;
         out->defer = true;
         bct_set_rationale(out, "outside opted-in hours; deferring");

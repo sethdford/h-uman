@@ -576,6 +576,51 @@ static void test_w16_longmemeval_falls_back_when_corpus_malformed(void) {
     (void)rmdir(dir);
 }
 
+/* ── 10d. Repo-shipped LongMemEval example JSON loads end-to-end ───────── */
+
+static void test_w16_longmemeval_repo_example_pack_loads(void) {
+    char src[768];
+    snprintf(src, sizeof(src), "%s/longmemeval/longmemeval.json", HU_EVAL_SUITES_DIR);
+    FILE *sf = fopen(src, "rb");
+    HU_ASSERT_NOT_NULL(sf);
+    HU_ASSERT_EQ(fseek(sf, 0, SEEK_END), 0);
+    long sz = ftell(sf);
+    HU_ASSERT_TRUE(sz > 0);
+    rewind(sf);
+    char *buf = (char *)malloc((size_t)sz + 1);
+    HU_ASSERT_NOT_NULL(buf);
+    HU_ASSERT_EQ(fread(buf, 1, (size_t)sz, sf), (size_t)sz);
+    fclose(sf);
+    buf[sz] = '\0';
+
+    char dir_template[] = "/tmp/hu_w16_lme_repo_XXXXXX";
+    char *dir = mkdtemp(dir_template);
+    HU_ASSERT_NOT_NULL(dir);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/longmemeval.json", dir);
+    FILE *df = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(df);
+    HU_ASSERT_EQ(fwrite(buf, 1, (size_t)sz, df), (size_t)sz);
+    fclose(df);
+    free(buf);
+
+    setenv("HU_EVAL_DATA_DIR", dir, 1);
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_lme(A(), &e), HU_OK);
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+    HU_ASSERT_EQ((int)r.prompts_total, 5);
+    const hu_evaluation_metric_t *rc = find_metric(&r, "real_corpus");
+    HU_ASSERT_NOT_NULL(rc);
+    HU_ASSERT_FLOAT_EQ(rc->score, 1.0, 1e-9);
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+    unsetenv("HU_EVAL_DATA_DIR");
+    (void)remove(path);
+    (void)rmdir(dir);
+}
+
 /* ── 11. DMR recall@K is correct on the known synthetic index ──────────── */
 
 static void test_w16_dmr_recall_at_k_correct_on_known_index(void) {
@@ -740,6 +785,7 @@ void run_w16_evaluation_tests(void) {
     HU_RUN_TEST(test_w16_longmemeval_returns_five_categories);
     HU_RUN_TEST(test_w16_longmemeval_loads_real_corpus_from_disk);
     HU_RUN_TEST(test_w16_longmemeval_falls_back_when_corpus_malformed);
+    HU_RUN_TEST(test_w16_longmemeval_repo_example_pack_loads);
     HU_RUN_TEST(test_w16_dmr_recall_at_k_correct_on_known_index);
     HU_RUN_TEST(test_w16_memoryagentbench_stub_runs_deterministically);
     HU_RUN_TEST(test_w16_facade_recall_runs_v2_stack);

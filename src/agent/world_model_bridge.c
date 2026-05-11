@@ -9,6 +9,7 @@
 #include "human/agent/belief_reverify_runner.h"
 #include "human/agent/kv_prewarm_runner.h"
 #include "human/agent/lora_runner.h"
+#include "human/agent/training_data_runner.h"
 #include "human/agent/retrieval_planner.h"
 #include "human/agent/scheduler.h"
 #include "human/agent/self_rag.h"
@@ -134,6 +135,14 @@ static bool buf_appendf(hu_allocator_t *alloc, char **buf, size_t *len, size_t *
     return buf_append(alloc, buf, len, cap, tmp, (size_t)n);
 }
 
+static const char *wm_entity_name_by_id(const hu_world_model_t *wm, int64_t id) {
+    for (size_t i = 0; i < wm->entities_count; i++) {
+        if (wm->entities[i].id == id && wm->entities[i].name)
+            return wm->entities[i].name;
+    }
+    return NULL;
+}
+
 hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                     const char *contact_id, size_t contact_id_len,
                                     int64_t now_ms, char **out_text, size_t *out_len) {
@@ -182,6 +191,27 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
 
     ok = ok && buf_append(alloc, &buf, &blen, &bcap, "## What I know about this conversation\n",
                           strlen("## What I know about this conversation\n"));
+
+    if (wm->entities_count > 0) {
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Known entities:\n", 16);
+        size_t ent_cap = wm->entities_count > 8 ? 8 : wm->entities_count;
+        for (size_t i = 0; i < ent_cap; i++) {
+            const char *name = wm->entities[i].name ? wm->entities[i].name : "?";
+            const char *etype = hu_entity_type_to_string(wm->entities[i].type);
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s (%s)\n", name, etype);
+        }
+    }
+    if (wm->relations_count > 0 && wm->entities_count > 0) {
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Key relationships:\n", 19);
+        size_t rel_cap = wm->relations_count > 6 ? 6 : wm->relations_count;
+        for (size_t i = 0; i < rel_cap; i++) {
+            const char *src = wm_entity_name_by_id(wm, wm->relations[i].source_id);
+            const char *tgt = wm_entity_name_by_id(wm, wm->relations[i].target_id);
+            const char *rtype = hu_relation_type_to_string(wm->relations[i].type);
+            if (src && tgt)
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s %s\n", src, rtype, tgt);
+        }
+    }
 
     if (wm->goals_count > 0) {
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Active goals:\n", 14);
@@ -911,6 +941,30 @@ hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
     job.kind = HU_JOB_LORA_TRAINING;
     job.priority = 0;
     job.budget_ms = budget_ms > 0 ? budget_ms : 300000;
+    job.requires_idle = true;
+    job.requires_ac_power = false;
+    job.earliest_at = now_ms;
+    return hu_scheduler_enqueue(s->s, &job);
+}
+
+hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
+                                                          hu_training_data_runner_ctx_t *ctx) {
+    if (!s || !s->s || !ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    return hu_scheduler_register_runner(s->s, HU_JOB_TRAINING_DATA_EXTRACT,
+                                        hu_training_data_runner, ctx);
+}
+
+hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,
+                                                          int64_t now_ms,
+                                                          int budget_ms) {
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_job_spec_t job;
+    memset(&job, 0, sizeof(job));
+    job.kind = HU_JOB_TRAINING_DATA_EXTRACT;
+    job.priority = 0;
+    job.budget_ms = budget_ms > 0 ? budget_ms : 120000;
     job.requires_idle = true;
     job.requires_ac_power = false;
     job.earliest_at = now_ms;

@@ -1,6 +1,6 @@
 # Eval Suites Manifest
 
-Version: **2026-05-10b** (bump on any task add/remove/reword or judge profile change)
+Version: **2026-05-10d** (bump on any task add/remove/reword or judge profile change)
 
 ## Suites
 
@@ -85,8 +85,27 @@ If `mlx_local` is unreachable the run will fail with `curl POST failed: code=7`
 in the daemon logs; switching `default_provider` to a Vertex/Gemini ADC entry
 is the no-op fallback (already configured in `~/.human/config.json`).
 
+## W16 LongMemEval corpus (separate from task JSON above)
+
+The harness in `src/evaluation/evaluation_longmemeval.c` loads keyword-scored
+multi-item packs from `$HU_EVAL_DATA_DIR/longmemeval.json`. A committed
+**example** pack (five rows, one per category) lives at
+`longmemeval/longmemeval.json` under this directory — see
+`longmemeval/README.md` for install/copy instructions.
+
+## B8 / B13 corpus packs (not `human eval run` JSON)
+
+- **`tom/tom_synthetic.json`** — synthetic theory-of-mind smoke items (false
+  belief, second-order, pragmatic stubs). See `tom/README.md`.
+- **`repair/repair_scenarios.json`** — other-initiated repair utterances with
+  gold `hu_dialog_act` labels for heuristic regression. See `repair/README.md`.
+
 ## Changelog
 
+- **2026-05-10d**: Added committed B8 ToM smoke JSON (`tom/`) and B13 repair
+  pack (`repair/`) with READMEs; not top-level `human eval run` suites.
+- **2026-05-10c**: Documented W16 LongMemEval example corpus path
+  (`longmemeval/longmemeval.json` + README); not a new `human eval run` task suite.
 - **2026-05-10a**: Added `tier1_naturalness.json` (12 tasks, 3 per Tier-1 channel — Telegram DM/supergroup/link-grounding, Discord server/thread/DM, Slack thread/DM/`@channel` etiquette, iMessage tapback/family-group/no-vision honesty). Judge: `human_likeness`. Anchors the M6 mission's "Tier 1 score 8/10+ on naturalness eval" so that channel-aware register switching is exercised, not only iMessage-style DMs.
 - **2026-04-18a**: Added `imessage_humanness.json` (8 tasks — friend ping, group brevity, link ack, logistics, thanks, direct yes/no, no false shared memory, vent empathy). Judge: `human_likeness`.
 - **2026-04-03b**: Added 4 Phase 2 feature eval suites: `humor_engine.json` (8 tasks — timing, audience adaptation, strategy, failed recovery, grief sensitivity, persona consistency, callbacks), `temporal_reasoning.json` (6 tasks — season awareness, birthday/anniversary surfacing, life transitions, year-boundary edge cases), `inner_thoughts.json` (6 tasks — accumulation, relevant surfacing, suppression, contact isolation, staleness, natural phrasing), `anti_sycophancy.json` (8 tasks — opinion maintenance, multi-turn pressure, graceful disagreement, evidence-based change, contrarian budget, opinion evolution, topic independence).

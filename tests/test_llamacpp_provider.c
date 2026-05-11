@@ -76,6 +76,42 @@ static void test_llamacpp_chat_returns_not_supported_until_linked(void) {
     prov.vtable->deinit(prov.ctx, &a);
 }
 
+static void test_llamacpp_chat_multimessage_returns_not_supported(void) {
+    hu_allocator_t a = alloc();
+    hu_llamacpp_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_llamacpp_provider_create(&a, &cfg, &prov), HU_OK);
+    HU_ASSERT_NOT_NULL(prov.vtable->chat);
+    hu_chat_message_t msgs[2];
+    memset(msgs, 0, sizeof(msgs));
+    msgs[0].role = HU_ROLE_SYSTEM;
+    msgs[0].content = "sys";
+    msgs[0].content_len = 3;
+    msgs[1].role = HU_ROLE_USER;
+    msgs[1].content = "hi";
+    msgs[1].content_len = 2;
+    hu_chat_request_t req = {.messages = msgs,
+                            .messages_count = 2,
+                            .model = "m",
+                            .model_len = 1,
+                            .temperature = 0.5};
+    hu_chat_response_t resp;
+    memset(&resp, 0, sizeof(resp));
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &a, &req, "m", 1, 0.5, &resp), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(resp.content);
+    prov.vtable->deinit(prov.ctx, &a);
+}
+
+static void test_llamacpp_supports_streaming_is_false(void) {
+    hu_allocator_t a = alloc();
+    hu_llamacpp_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_llamacpp_provider_create(&a, &cfg, &prov), HU_OK);
+    HU_ASSERT_NOT_NULL(prov.vtable->supports_streaming);
+    HU_ASSERT_FALSE(prov.vtable->supports_streaming(prov.ctx));
+    prov.vtable->deinit(prov.ctx, &a);
+}
+
 static void test_llamacpp_load_adapter_returns_not_supported_until_linked(void) {
     hu_allocator_t a = alloc();
     hu_llamacpp_config_t cfg = {0};
@@ -116,6 +152,8 @@ void run_llamacpp_provider_tests(void) {
     HU_RUN_TEST(test_llamacpp_factory_owns_model_path_copy);
     HU_RUN_TEST(test_llamacpp_factory_rejects_null_args);
     HU_RUN_TEST(test_llamacpp_chat_returns_not_supported_until_linked);
+    HU_RUN_TEST(test_llamacpp_chat_multimessage_returns_not_supported);
+    HU_RUN_TEST(test_llamacpp_supports_streaming_is_false);
     HU_RUN_TEST(test_llamacpp_load_adapter_returns_not_supported_until_linked);
     HU_RUN_TEST(test_llamacpp_load_adapter_rejects_null_args);
 }

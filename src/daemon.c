@@ -21,6 +21,7 @@
 #include "human/agent/verifier_metrics.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
+#include "human/agent/training_data_runner.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
@@ -2328,6 +2329,41 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 else
                     hu_log_info("human", agent->observer, "W14: KV prewarm runner registered");
             }
+            /* Training data extraction runner — continuous learning loop.
+             * Extracts new conversations into JSONL, generates auto-DPO
+             * pairs, and enqueues LoRA retraining when threshold is met. */
+            {
+                static hu_training_data_runner_ctx_t w14_td_ctx;
+                memset(&w14_td_ctx, 0, sizeof(w14_td_ctx));
+                w14_td_ctx.alloc = alloc;
+                w14_td_ctx.scheduler = agent->w14_scheduler;
+                const char *hm = getenv("HOME");
+                static char td_db_path[512];
+                static char td_out_dir[512];
+                if (hm && hm[0]) {
+                    (void)snprintf(td_db_path, sizeof(td_db_path),
+                                   "%s/.human/memory.db", hm);
+                    (void)snprintf(td_out_dir, sizeof(td_out_dir),
+                                   "%s/.human/ml/training_data", hm);
+                } else {
+                    (void)snprintf(td_db_path, sizeof(td_db_path),
+                                   "/tmp/human_memory.db");
+                    (void)snprintf(td_out_dir, sizeof(td_out_dir),
+                                   "/tmp/human_training_data");
+                }
+                w14_td_ctx.memory_db_path = td_db_path;
+                w14_td_ctx.output_dir = td_out_dir;
+                hu_error_t tde = hu_w14_scheduler_register_training_data_runner(
+                    agent->w14_scheduler, &w14_td_ctx);
+                if (tde == HU_OK)
+                    hu_log_info("human", agent->observer,
+                                "W14: training data runner registered (out=%s)",
+                                td_out_dir);
+                else
+                    hu_log_warn("human", agent->observer,
+                                "W14: training data runner registration failed: %d",
+                                (int)tde);
+            }
         }
     }
     /* W13 Phase 4.1 — auto-load the configured LoRA adapter into the live
@@ -2772,6 +2808,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (pending >= 10) {
                                 (void)hu_w14_scheduler_enqueue_lora(
                                     agent->w14_scheduler, now_ms, 300000);
+                            }
+                        }
+                        /* Continuous learning loop: enqueue training data
+                         * extraction every 100 scheduler ticks (~100 min)
+                         * or every 6 hours, whichever comes first. The
+                         * runner extracts new conversations and auto-DPO
+                         * pairs, and enqueues LoRA retraining when enough
+                         * examples have accumulated. */
+                        {
+                            static int64_t last_td_extract_ms = 0;
+                            bool td_due = (agent->scheduler_ticks % 100 == 0)
+                                || (last_td_extract_ms == 0)
+                                || (now_ms - last_td_extract_ms >= 21600000LL);
+                            if (td_due) {
+                                hu_error_t tde =
+                                    hu_w14_scheduler_enqueue_training_data_extract(
+                                        agent->w14_scheduler, now_ms, 120000);
+                                if (tde == HU_OK)
+                                    last_td_extract_ms = now_ms;
                             }
                         }
                         hu_error_t te = hu_w14_scheduler_tick(agent->w14_scheduler, now_ms);
@@ -7000,8 +7055,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (hu_daemon_get_trust_state(batch_key, key_len, &ts) == HU_OK) {
                         char *trust_dir = NULL;
                         size_t trust_dir_len = 0;
-                        if (hu_trust_build_directive(alloc, &ts, &trust_dir, &trust_dir_len) ==
-                                HU_OK &&
+                        if (hu_trust_state_build_directive(alloc, &ts, &trust_dir,
+                                                           &trust_dir_len) == HU_OK &&
                             trust_dir && trust_dir_len > 0) {
                             if (convo_ctx) {
                                 size_t total = convo_ctx_len + trust_dir_len + 2;

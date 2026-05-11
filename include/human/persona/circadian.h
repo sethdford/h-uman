@@ -42,4 +42,30 @@ hu_error_t hu_circadian_build_persona_prompt(hu_allocator_t *alloc, uint8_t hour
  * Returns the persona's time overlay string for the phase, or NULL if none set. */
 const char *hu_circadian_persona_overlay(const struct hu_persona *persona, hu_time_phase_t phase);
 
+/* B16: Chronotype helpers.
+ *
+ * Tiny coarse-grained chronotype model for JITAI gating. Override the
+ * default "no prompts 23:00-05:59" band with a chronotype-aware band.
+ *
+ * Bands (inclusive, in local hours):
+ *   MORNING_LARK  : active 06–21
+ *   INTERMEDIATE  : active 07–22
+ *   EVENING_OWL   : active 09–23 (and tolerant of 00–01 when opted in)
+ *
+ * UNKNOWN falls back to the conservative INTERMEDIATE band.
+ */
+typedef enum hu_chronotype {
+    HU_CHRONO_UNKNOWN = 0,
+    HU_CHRONO_MORNING_LARK,
+    HU_CHRONO_INTERMEDIATE,
+    HU_CHRONO_EVENING_OWL,
+    HU_CHRONO_COUNT
+} hu_chronotype_t;
+
+const char *hu_chronotype_name(hu_chronotype_t c);
+
+/* True iff the hour (0..23) is within the chronotype's active band.
+ * Out-of-range hours are clamped to 0..23. */
+int hu_chronotype_is_active_hour(hu_chronotype_t c, uint8_t hour);
+
 #endif

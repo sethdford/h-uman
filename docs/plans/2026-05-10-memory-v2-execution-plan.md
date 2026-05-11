@@ -30,7 +30,7 @@ This document turns [`2026-05-10-memory-v2-roadmap-overview.md`](2026-05-10-memo
 |------|-------------------|----------------|
 | **G0 — compile** | `cmake --build build` (dev preset) | Zero errors, `-Werror` clean on touched TUs |
 | **G1 — unit** | `./build/human_tests` | Zero failures, zero ASan errors |
-| **G1.5 — v2 layered smoke** | `bash scripts/memory-v2-local-proof.sh` | G2 clean + `--suite="v2 E2E"` green (13-stack scenarios + `test_v2_wiring_e2e.c` tail); optional `FULL_V2_SUITES=1` |
+| **G1.5 — v2 layered smoke** | `bash scripts/memory-v2-local-proof.sh` **or** `cmake --build build --target memory_v2_local_proof` (POSIX; passes `$<TARGET_FILE:human_tests>` as `HUMAN_TESTS`) | G2 clean + `--suite="v2 E2E"` green (13-stack scenarios + `test_v2_wiring_e2e.c` tail); optional `FULL_V2_SUITES=1` |
 | **G2 — collision** | `scripts/check-memory-v2-header-collision.sh` | No forbidden dual-include in `src/` (see script allowlist) |
 | **G3 — release size** | `cmake --preset release && cmake --build --preset release` + benchmark workflow | Within +500 KB v2 budget when W10/W13 flags enabled |
 | **G4 — product e2e** | Manual / optional `VERIFY_NATIVE=1`, live channels | Out of scope for CI; tracked per release |
@@ -82,6 +82,7 @@ This section records **what is already in the tree** versus what remains spec-fi
 | 1.1 | Inventory direct `hu_graph_*` / SQLite memory bypasses in `src/agent/`, `src/persona/`, `src/feeds/` | **Done:** [`2026-05-10-w7-phase1-bypass-inventory.md`](2026-05-10-w7-phase1-bypass-inventory.md) + `bash scripts/w7-phase1-graph-bypass-inventory.sh` |
 | 1.2 | Migrate read/write hot paths to `hu_memory_facade_read` / `hu_memory_facade_write` | Per-subsystem tests + existing W7 suite |
 | 1.3 | Trend script (optional CMake target `human_w7_phase1_inventory`) | **Done:** POSIX `cmake --build build --target human_w7_phase1_inventory` (or `bash scripts/w7-phase1-graph-bypass-inventory.sh`); no default CI hard fail yet |
+| 1.3b | Local proof bundle (G1.5) | **Done:** `cmake --build build --target memory_v2_local_proof` wraps `scripts/memory-v2-local-proof.sh` with the correct `human_tests` binary path (depends on `human_tests` target). Windows: run the bash script manually after building tests. |
 | 1.4 | Shared ctx lifetime + register semantics | `test_w7_*` + adversarial replace tests |
 
 **Exit:** Roadmap metric “>80% lines deleted from direct-graph callers” *or* documented exception list with owner + removal date (inventory doc §Exception policy satisfies the latter until migrations land).

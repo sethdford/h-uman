@@ -3,6 +3,7 @@
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/persona.h"
+#include "human/persona/eval.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -178,9 +179,47 @@ hu_error_t hu_persona_cli_parse(int argc, const char **argv, hu_persona_cli_args
                 i++;
             }
         }
+    } else if (strcmp(action, "eval") == 0) {
+        out->action = HU_PERSONA_ACTION_EVAL;
+        if (argc < 4)
+            return HU_ERR_INVALID_ARGUMENT;
+        out->name = argv[3];
     } else {
         return HU_ERR_INVALID_ARGUMENT;
     }
+    return HU_OK;
+}
+
+/* Deterministic responder for `human persona eval`: echoes persona fields so
+ * baseline substring checks pass offline without a provider. */
+static hu_error_t persona_eval_cli_responder(const char *prompt, char *out, size_t out_cap,
+                                             void *ud) {
+    hu_persona_t *p = (hu_persona_t *)ud;
+    if (!prompt || !out || out_cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (strcmp(prompt, "What is your name?") == 0) {
+        const char *n = (p && p->name && p->name[0]) ? p->name : "unknown";
+        (void)snprintf(out, out_cap, "I'm %s, nice to meet you.", n);
+        return HU_OK;
+    }
+    if (strcmp(prompt, "What do you value most?") == 0) {
+        const char *v = (p && p->values_count > 0 && p->values && p->values[0] && p->values[0][0])
+                            ? p->values[0]
+                            : "kindness";
+        (void)snprintf(out, out_cap, "I deeply value %s.", v);
+        return HU_OK;
+    }
+    if (strcmp(prompt, "How do you make hard decisions?") == 0) {
+        const char *d =
+            (p && p->decision_style && p->decision_style[0]) ? p->decision_style : "I deliberate.";
+        (void)snprintf(out, out_cap, "%s", d);
+        return HU_OK;
+    }
+    if (strcmp(prompt, "Tell me a phrase that's distinctly you.") == 0) {
+        (void)snprintf(out, out_cap, "cli-eval-stable-phrase");
+        return HU_OK;
+    }
+    (void)snprintf(out, out_cap, "ok");
     return HU_OK;
 }
 
@@ -747,6 +786,36 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         fprintf(stderr, "Persona import requires POSIX\n");
         return HU_ERR_NOT_SUPPORTED;
 #endif
+    }
+    case HU_PERSONA_ACTION_EVAL: {
+        if (!args->name || !args->name[0]) {
+            fprintf(stderr, "Persona name required for eval\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        hu_persona_t persona = {0};
+        hu_error_t err = hu_persona_load(alloc, args->name, strlen(args->name), &persona);
+        if (err != HU_OK) {
+            fprintf(stderr, "Persona not found: %s\n", args->name);
+            return err;
+        }
+        hu_persona_eval_question_t qs[16];
+        size_t qn = 0;
+        err = hu_persona_eval_generate_baseline(alloc, &persona, qs, sizeof(qs) / sizeof(qs[0]),
+                                                &qn);
+        if (err != HU_OK || qn == 0) {
+            fprintf(stderr, "eval: could not build baseline questions\n");
+            hu_persona_deinit(alloc, &persona);
+            return err != HU_OK ? err : HU_ERR_NOT_FOUND;
+        }
+        hu_persona_eval_result_t res = {0};
+        err = hu_persona_eval_run(&persona, qs, qn, persona_eval_cli_responder, &persona, &res);
+        hu_persona_deinit(alloc, &persona);
+        fprintf(stdout,
+                "persona eval: total=%d passed=%d failed=%d contradictions=%d retest_drifts=%d\n",
+                res.total, res.passed, res.failed, res.contradictions, res.retest_drifts);
+        if (res.first_failure[0] != '\0')
+            fprintf(stdout, "first failure: %s\n", res.first_failure);
+        return err;
     }
     case HU_PERSONA_ACTION_CREATE:
     case HU_PERSONA_ACTION_UPDATE: {

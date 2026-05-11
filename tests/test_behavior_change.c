@@ -1,4 +1,5 @@
 #include "human/behavior/change.h"
+#include "human/persona/circadian.h"
 #include "test_framework.h"
 
 #include <string.h>
@@ -104,6 +105,28 @@ static void bc_aligned_state_picks_goal_setting(void) {
     HU_ASSERT_TRUE(out.act_now);
 }
 
+static void bc_evening_owl_active_hour_23_not_treated_as_late_night(void) {
+    hu_behavior_change_input_t in = bc_baseline();
+    in.jitai_chronotype = HU_CHRONO_EVENING_OWL;
+    in.hour = 23;
+    in.late_night_opt_in = false;
+    hu_behavior_change_decision_t out = {0};
+    HU_ASSERT_EQ(hu_behavior_change_select(&in, &out), HU_OK);
+    HU_ASSERT_NEQ(out.technique, HU_BCT_NONE);
+    HU_ASSERT_FALSE(out.defer);
+}
+
+static void bc_evening_owl_inactive_hour_4_defers_without_optin(void) {
+    hu_behavior_change_input_t in = bc_baseline();
+    in.jitai_chronotype = HU_CHRONO_EVENING_OWL;
+    in.hour = 4;
+    in.late_night_opt_in = false;
+    hu_behavior_change_decision_t out = {0};
+    HU_ASSERT_EQ(hu_behavior_change_select(&in, &out), HU_OK);
+    HU_ASSERT_EQ(out.technique, HU_BCT_NONE);
+    HU_ASSERT_TRUE(out.defer);
+}
+
 static void bc_null_input_returns_invalid(void) {
     hu_behavior_change_decision_t out = {0};
     HU_ASSERT_EQ(hu_behavior_change_select(NULL, &out), HU_ERR_INVALID_ARGUMENT);
@@ -128,6 +151,8 @@ void run_behavior_change_tests(void) {
     HU_RUN_TEST(bc_low_motivation_with_consent_uses_reframing_or_persuasion);
     HU_RUN_TEST(bc_low_ability_uses_reduce_friction);
     HU_RUN_TEST(bc_high_burden_defers);
+    HU_RUN_TEST(bc_evening_owl_active_hour_23_not_treated_as_late_night);
+    HU_RUN_TEST(bc_evening_owl_inactive_hour_4_defers_without_optin);
     HU_RUN_TEST(bc_aligned_state_picks_goal_setting);
     HU_RUN_TEST(bc_null_input_returns_invalid);
     HU_RUN_TEST(bc_name_returns_known);

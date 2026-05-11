@@ -45,6 +45,7 @@
 #include "human/core/error.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -286,6 +287,10 @@ static hu_error_t fr_run(void *ctx, hu_allocator_t *alloc,
     size_t hit_at_1 = 0, hit_at_5 = 0, hit_at_10 = 0;
     size_t step_total = 0;
     size_t scored = 0;
+    /* HU_FACADE_RECALL_TRACE=1 prints one line per query: rank, plan size,
+     * pass/fail. Used during planner-quality iteration to see which queries
+     * the heuristic misses without re-running with a debugger attached. */
+    const char *trace = getenv("HU_FACADE_RECALL_TRACE");
 
     for (size_t i = 0; i < FACADE_N; i++) {
         int64_t target_id = resolve_id(name_to_id, map_n, FACADE_ITEMS[i].expect_name);
@@ -299,6 +304,12 @@ static hu_error_t fr_run(void *ctx, hu_allocator_t *alloc,
         if (rank == 1) hit_at_1++;
         if (rank > 0 && rank <= 5) hit_at_5++;
         if (rank > 0 && rank <= 10) hit_at_10++;
+        if (trace && trace[0] == '1') {
+            fprintf(stderr,
+                    "[facade-recall] q=%-50s expect=%-12s rank=%zu steps=%zu %s\n",
+                    FACADE_ITEMS[i].query, FACADE_ITEMS[i].expect_name, rank,
+                    step_count, rank == 1 ? "HIT@1" : (rank > 0 ? "MISS@1" : "MISS"));
+        }
     }
 
     hu_memory_facade_close(m, alloc); m = NULL;

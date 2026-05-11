@@ -93,12 +93,53 @@ static bool contains_word(const char *hay, size_t hay_len, const char *needle) {
     return false;
 }
 
-/* Scan `goal` for a whole-word case-insensitive match of any entity name in
- * the world model. Returns the first matched entity's id, or 0 if none. The
- * heuristic walks `wm->entities` in order, so the top-mentioned matching
- * entity wins on ties (matching the spirit of `primary_anchor` for unspecific
- * goals). Used by `primary_anchor` so question text drives anchor choice
- * before mention-count ranking. */
+/* Case-insensitive substring match without word-boundary enforcement.
+ * Used for the "compact entity name in a multi-word query" case: an entity
+ * called "PineNuts" should still match the user typing "pine nuts" because
+ * the alphanumeric tokens overlap completely. We strip non-alnum from both
+ * sides before comparing, so "PineNuts" ⊆ "pinenuts" ⊆ "pine nuts" with
+ * spaces folded out. */
+static bool contains_compact(const char *hay, size_t hay_len, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || hay_len == 0) return false;
+    /* Build a compacted lowercase copy of the haystack: alphanumeric only.
+     * Caps at 256 bytes — anything longer is goal text we don't care about. */
+    char compact[256];
+    size_t ci = 0;
+    for (size_t i = 0; i < hay_len && ci + 1 < sizeof(compact); i++) {
+        unsigned char c = (unsigned char)hay[i];
+        if (isalnum(c)) compact[ci++] = (char)tolower(c);
+    }
+    compact[ci] = '\0';
+    /* And the needle. */
+    char ncompact[128];
+    size_t nci = 0;
+    for (size_t i = 0; i < nlen && nci + 1 < sizeof(ncompact); i++) {
+        unsigned char c = (unsigned char)needle[i];
+        if (isalnum(c)) ncompact[nci++] = (char)tolower(c);
+    }
+    ncompact[nci] = '\0';
+    if (nci == 0 || ci < nci) return false;
+    for (size_t i = 0; i + nci <= ci; i++) {
+        if (memcmp(compact + i, ncompact, nci) == 0) return true;
+    }
+    return false;
+}
+
+/* Scan `goal` for any entity name in the world model. Returns the first
+ * matched entity's id, or 0 if none. Walks `wm->entities` in W9 mention
+ * order so the top-mentioned matching entity wins on ties.
+ *
+ * Match strategy (two passes, broadest first):
+ *   1. `contains_word` — strict whole-word case-insensitive. Catches
+ *      "alice" inside "where does alice work?" without crossing word
+ *      boundaries (so "lisa" doesn't match "alice").
+ *   2. `contains_compact` — alphanumeric-only fold on both sides. Catches
+ *      compound entity names like "PineNuts" when the user types
+ *      "pine nuts", or "FundingRound" against "funding round".
+ *
+ * The W16 facade-recall benchmark surfaced both modes (Alice→whole-word,
+ * PineNuts→compact). */
 static int64_t query_anchor(const char *goal, size_t goal_len,
                             const hu_world_model_t *wm) {
     if (!goal || goal_len == 0 || !wm || wm->entities_count == 0) return 0;
@@ -106,6 +147,18 @@ static int64_t query_anchor(const char *goal, size_t goal_len,
         const hu_graph_entity_t *e = &wm->entities[i];
         if (!e->name || e->name_len == 0) continue;
         if (contains_word(goal, goal_len, e->name)) return e->id;
+    }
+    /* Second pass: compact match for multi-word user queries against
+     * compound entity names (e.g. "pine nuts" ↔ "PineNuts"). */
+    for (size_t i = 0; i < wm->entities_count; i++) {
+        const hu_graph_entity_t *e = &wm->entities[i];
+        if (!e->name || e->name_len == 0) continue;
+        /* Require the entity to be reasonably compound (>=6 chars) before
+         * accepting a compact match; otherwise short entity names like
+         * "Vim" would match every query containing 'v' 'i' 'm' adjacently
+         * (e.g. "vivid memory"). */
+        if (e->name_len >= 6 && contains_compact(goal, goal_len, e->name))
+            return e->id;
     }
     return 0;
 }
@@ -128,7 +181,10 @@ static int64_t primary_anchor_with_goal(const char *goal, size_t goal_len,
 }
 
 /* Pick a secondary anchor. Same priority as primary: query-named entity
- * other than `primary_id`, else mention-count fallback. */
+ * other than `primary_id`, else mention-count fallback. Both strict-word
+ * and compact passes mirror `query_anchor` so a query that names two
+ * compound entities ("between PineNuts and Genmaicha") still resolves
+ * both anchors. */
 static int64_t secondary_anchor_with_goal(const char *goal, size_t goal_len,
                                           const hu_world_model_t *wm,
                                           int64_t primary_id) {
@@ -139,6 +195,13 @@ static int64_t secondary_anchor_with_goal(const char *goal, size_t goal_len,
             if (e->id == primary_id) continue;
             if (!e->name || e->name_len == 0) continue;
             if (contains_word(goal, goal_len, e->name)) return e->id;
+        }
+        for (size_t i = 0; i < wm->entities_count; i++) {
+            const hu_graph_entity_t *e = &wm->entities[i];
+            if (e->id == primary_id) continue;
+            if (!e->name || e->name_len == 0) continue;
+            if (e->name_len >= 6 && contains_compact(goal, goal_len, e->name))
+                return e->id;
         }
     }
     /* Mention-count fallback: first entity that isn't the primary. */
@@ -210,6 +273,23 @@ static void default_plan(const hu_world_model_t *wm, hu_retrieval_plan_t *out) {
     out->total_budget_ms = 200;
 }
 
+/* Copy `goal` into `plan->goal` (lowercased, ASCII-truncated). Used by
+ * `hu_planner_execute` to re-rank entity records by relation-context
+ * overlap against the user query. Idempotent: safe to call from any
+ * planner backend. */
+static void plan_capture_goal(hu_retrieval_plan_t *plan, const char *goal,
+                              size_t goal_len) {
+    if (!plan || !goal || goal_len == 0) return;
+    size_t copy = goal_len < HU_PLANNER_GOAL_BUF_MAX - 1
+                      ? goal_len : HU_PLANNER_GOAL_BUF_MAX - 1;
+    for (size_t i = 0; i < copy; i++) {
+        unsigned char c = (unsigned char)goal[i];
+        plan->goal[i] = (char)tolower(c);
+    }
+    plan->goal[copy] = '\0';
+    plan->goal_len = copy;
+}
+
 static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
                                  const hu_world_model_t *wm,
                                  hu_retrieval_plan_t *out) {
@@ -223,6 +303,8 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
         default_plan(wm, out);
         return HU_OK;
     }
+
+    plan_capture_goal(out, goal, goal_len);
 
     bool has_when    = contains_word(goal, goal_len, "when")
                     || contains_word(goal, goal_len, "last");
@@ -242,14 +324,30 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
      * given us a strong signal about which entity to expand; we should not
      * fall through to a generic window query for them. */
     bool a_is_named = (a != 0 && query_anchor(goal, goal_len, wm) == a);
+    /* Both anchors named: the user mentioned two specific entities. The
+     * relationship-query branch's multi-anchor plan is the right shape
+     * even without "between"/"with" prepositions ("when did alice and bob
+     * collaborate?" should expand BOTH anchors). */
+    bool b_is_named = false;
+    if (a_is_named && b != 0) {
+        for (size_t i = 0; i < wm->entities_count; i++) {
+            const hu_graph_entity_t *e = &wm->entities[i];
+            if (e->id != b || !e->name || e->name_len == 0) continue;
+            if (contains_word(goal, goal_len, e->name) ||
+                (e->name_len >= 6 && contains_compact(goal, goal_len, e->name)))
+                b_is_named = true;
+            break;
+        }
+    }
 
-    /* Relationship query (multi-hop): "between X and Y" or "with X". A 3-hop
-     * shape: anchor entity -> 1-hop neighbours -> 1-hop intersect -> time-
-     * filtered relations. Requires at least one anchor entity; without one,
+    /* Relationship query (multi-hop): "between X and Y", "with X", or any
+     * goal that names two world-model entities. A 3-hop shape: anchor
+     * entity -> 1-hop neighbours -> 1-hop intersect -> time-filtered
+     * relations. Requires at least one anchor entity; without one,
      * neighbour expansion is meaningless and the backend rejects
      * entity_id=0. Fall through to the temporal/default branches if no
      * anchor is available. */
-    if ((has_between || has_with) && a != 0) {
+    if ((has_between || has_with || b_is_named) && a != 0) {
         size_t i = 0;
         out->steps[i++] = step_neighbors(wm, a, 1, 16, true);
         if (b != 0)
@@ -530,6 +628,7 @@ static hu_error_t gc_plan(void *raw_ctx, const char *goal, size_t goal_len,
     gc_ctx_t *ctx = (gc_ctx_t *)raw_ctx;
     if (!out) return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
+    plan_capture_goal(out, goal, goal_len);
 
     /* No world model or no entities: delegate to heuristic plan. */
     if (!wm || wm->entities_count == 0 || !ctx || !ctx->m) {

@@ -1,0 +1,16 @@
+{
+  "name": "tom_synthetic_smoke",
+  "version": 1,
+  "items": [
+    {"id": "tom-fb-01", "category": "false_belief", "premise": "Anne moves the ball while Max is away; Max did not see the move.", "question": "Where will Max look for the ball first?", "gold_answer": "original_basket"},
+    {"id": "tom-fb-02", "category": "false_belief", "premise": "Sam puts cookies in the jar; then Lee moves them to the drawer unseen by Sam.", "question": "Where does Sam think the cookies are?", "gold_answer": "jar"},
+    {"id": "tom-fb-03", "category": "false_belief", "premise": "A message was edited after the recipient read the first version.", "question": "Which wording does the recipient still believe they saw?", "gold_answer": "first_version"},
+    {"id": "tom-so-01", "category": "second_order", "premise": "Alex thinks Blake believes the meeting is at 3pm; Carla told Blake it moved to 4pm privately.", "question": "What time does Alex think Blake will arrive?", "gold_answer": "3pm"},
+    {"id": "tom-so-02", "category": "second_order", "premise": "Dana knows Evan is unaware the file was deleted.", "question": "Does Dana expect Evan to search the shared folder?", "gold_answer": "yes"},
+    {"id": "tom-pr-01", "category": "pragmatic_implicature", "premise": "User: 'It's a bit chilly in here.'", "question": "Most likely indirect request?", "gold_answer": "close_window_or_raise_heat"},
+    {"id": "tom-pr-02", "category": "pragmatic_implicature", "premise": "User: 'Do you have a minute after this?'", "question": "Primary intent?", "gold_answer": "schedule_follow_up"},
+    {"id": "tom-ml-01", "category": "multilingual_stub", "premise": "Spanish: 'No entiendo la mitad.'", "question": "User state?", "gold_answer": "confusion_repair_needed"},
+    {"id": "tom-ml-02", "category": "multilingual_stub", "premise": "French: 'Peux-tu reformuler?'", "question": "Dialog act?", "gold_answer": "clarify_question"},
+    {"id": "tom-ck-01", "category": "common_knowledge", "premise": "Two participants share a nickname mapping unknown to a third.", "question": "Who will misunderstand the reference?", "gold_answer": "third_party"}
+  ]
+}

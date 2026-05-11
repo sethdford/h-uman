@@ -64,10 +64,13 @@ hu_uncertainty_level_t hu_trust_calibrate_language(const hu_trust_state_t *state
  * Returns a static string like "I think " or "I'm fairly sure ". */
 const char *hu_uncertainty_prefix(hu_uncertainty_level_t level);
 
-/* Build a trust-aware context directive string.
+/* Build a trust-aware context directive string from per-contact trust state.
  * When trust is low, adds hedging instructions.
- * Allocates *out. Caller frees with alloc. */
-hu_error_t hu_trust_build_directive(hu_allocator_t *alloc, const hu_trust_state_t *state,
-                                     char **out, size_t *out_len);
+ * Allocates *out. Caller frees with alloc.
+ *
+ * Named `hu_trust_state_*` to avoid a C linker collision with
+ * `human/behavior/trust.h` (`hu_trust_build_directive` for decisions). */
+hu_error_t hu_trust_state_build_directive(hu_allocator_t *alloc, const hu_trust_state_t *state,
+                                          char **out, size_t *out_len);
 
 #endif /* HU_INTELLIGENCE_TRUST_H */

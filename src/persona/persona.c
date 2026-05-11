@@ -3,6 +3,7 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
+#include "human/persona/circadian.h"
 #include "human/persona/persona_fuse.h"
 #include "human/persona/relationship.h"
 #include <stdio.h>
@@ -83,6 +84,22 @@ static void free_overlay(hu_allocator_t *alloc, hu_persona_overlay_t *ov) {
     if (ov->emoji_usage) {
         size_t len = strlen(ov->emoji_usage);
         alloc->free(alloc->ctx, ov->emoji_usage, len + 1);
+    }
+    if (ov->directness) {
+        size_t len = strlen(ov->directness);
+        alloc->free(alloc->ctx, ov->directness, len + 1);
+    }
+    if (ov->face_saving) {
+        size_t len = strlen(ov->face_saving);
+        alloc->free(alloc->ctx, ov->face_saving, len + 1);
+    }
+    if (ov->disagreement_style) {
+        size_t len = strlen(ov->disagreement_style);
+        alloc->free(alloc->ctx, ov->disagreement_style, len + 1);
+    }
+    if (ov->silence_tolerance) {
+        size_t len = strlen(ov->silence_tolerance);
+        alloc->free(alloc->ctx, ov->silence_tolerance, len + 1);
     }
     free_string_array(alloc, ov->style_notes, ov->style_notes_count);
     free_string_array(alloc, ov->typing_quirks, ov->typing_quirks_count);
@@ -905,6 +922,30 @@ static hu_error_t parse_overlay(hu_allocator_t *a, const char *channel_name,
         if (!ov->emoji_usage)
             goto ov_oom;
     }
+    s = hu_json_get_string(obj, "directness");
+    if (s) {
+        ov->directness = hu_strdup(a, s);
+        if (!ov->directness)
+            goto ov_oom;
+    }
+    s = hu_json_get_string(obj, "face_saving");
+    if (s) {
+        ov->face_saving = hu_strdup(a, s);
+        if (!ov->face_saving)
+            goto ov_oom;
+    }
+    s = hu_json_get_string(obj, "disagreement_style");
+    if (s) {
+        ov->disagreement_style = hu_strdup(a, s);
+        if (!ov->disagreement_style)
+            goto ov_oom;
+    }
+    s = hu_json_get_string(obj, "silence_tolerance");
+    if (s) {
+        ov->silence_tolerance = hu_strdup(a, s);
+        if (!ov->silence_tolerance)
+            goto ov_oom;
+    }
     hu_json_value_t *notes = hu_json_object_get(obj, "style_notes");
     if (notes)
         parse_string_array(a, notes, &ov->style_notes, &ov->style_notes_count);
@@ -1631,6 +1672,20 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
         s = hu_json_get_string(root, "proactive_rules");
         if (s)
             PERSONA_STRDUP_OPT(out->proactive_rules, s);
+        s = hu_json_get_string(root, "chronotype");
+        if (s) {
+            if (strcmp(s, "morning_lark") == 0) {
+                out->chronotype = HU_CHRONO_MORNING_LARK;
+            } else if (strcmp(s, "intermediate") == 0) {
+                out->chronotype = HU_CHRONO_INTERMEDIATE;
+            } else if (strcmp(s, "evening_owl") == 0) {
+                out->chronotype = HU_CHRONO_EVENING_OWL;
+            } else if (strcmp(s, "unknown") == 0) {
+                out->chronotype = HU_CHRONO_UNKNOWN;
+            } else {
+                out->chronotype = HU_CHRONO_UNKNOWN;
+            }
+        }
         hu_json_value_t *to = hu_json_object_get(root, "time_overlays");
         if (to && to->type == HU_JSON_OBJECT) {
             s = hu_json_get_string(to, "late_night");
@@ -4108,6 +4163,41 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                     err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
                 if (err != HU_OK)
                     goto fail;
+            }
+            if (ov->directness && ov->directness[0]) {
+                n = snprintf(header, sizeof(header), "- Directness (stated preference): %s\n",
+                             ov->directness);
+                if (n > 0) {
+                    err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
+                    if (err != HU_OK)
+                        goto fail;
+                }
+            }
+            if (ov->face_saving && ov->face_saving[0]) {
+                n = snprintf(header, sizeof(header), "- Face-saving preference: %s\n", ov->face_saving);
+                if (n > 0) {
+                    err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
+                    if (err != HU_OK)
+                        goto fail;
+                }
+            }
+            if (ov->disagreement_style && ov->disagreement_style[0]) {
+                n = snprintf(header, sizeof(header), "- Disagreement style: %s\n",
+                             ov->disagreement_style);
+                if (n > 0) {
+                    err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
+                    if (err != HU_OK)
+                        goto fail;
+                }
+            }
+            if (ov->silence_tolerance && ov->silence_tolerance[0]) {
+                n = snprintf(header, sizeof(header), "- Silence tolerance: %s\n",
+                             ov->silence_tolerance);
+                if (n > 0) {
+                    err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
+                    if (err != HU_OK)
+                        goto fail;
+                }
             }
 
             {

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdint.h>
 #include <strings.h>
 
 /* Tiny lexicon — designed for transparency, not scale. Production callers
@@ -203,6 +204,21 @@ hu_error_t hu_affect_estimate_text(const char *text, size_t len, hu_affect_state
         out->dominance = aff_clamp(out->dominance - 0.05f * (float)q, 0.f, 1.f);
     }
 
+    return HU_OK;
+}
+
+hu_error_t hu_affect_estimate_audio(const int16_t *samples, size_t sample_count,
+                                    uint32_t sample_rate_hz, hu_affect_state_t *out) {
+    (void)samples;
+    (void)sample_count;
+    (void)sample_rate_hz;
+    if (!out) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_affect_init(out);
+    out->modality = HU_AFFECT_AUDIO;
+    /* Neutral centroid; high uncertainty until a real prosody estimator lands (B12). */
+    out->uncertainty = 0.95f;
     return HU_OK;
 }
 

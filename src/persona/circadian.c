@@ -386,3 +386,34 @@ hu_error_t hu_circadian_build_persona_prompt(hu_allocator_t *alloc, uint8_t hour
 #undef HU_CIRCADIAN_OVERLAY_BUF_CAP
     return HU_OK;
 }
+
+/* B16: chronotype helpers — coarse JITAI gating bands. */
+
+static const char *const HU_CHRONO_NAMES[HU_CHRONO_COUNT] = {
+    "unknown",
+    "morning_lark",
+    "intermediate",
+    "evening_owl",
+};
+
+const char *hu_chronotype_name(hu_chronotype_t c) {
+    if (c < 0 || c >= HU_CHRONO_COUNT) {
+        return "unknown";
+    }
+    return HU_CHRONO_NAMES[c];
+}
+
+int hu_chronotype_is_active_hour(hu_chronotype_t c, uint8_t hour) {
+    uint8_t h = hour > 23 ? 23 : hour;
+    switch (c) {
+    case HU_CHRONO_MORNING_LARK:
+        return (h >= 6 && h <= 21) ? 1 : 0;
+    case HU_CHRONO_EVENING_OWL:
+        /* 09–23 active band; tolerant of 00–01 to support late owls. */
+        return ((h >= 9 && h <= 23) || h <= 1) ? 1 : 0;
+    case HU_CHRONO_INTERMEDIATE:
+    case HU_CHRONO_UNKNOWN:
+    default:
+        return (h >= 7 && h <= 22) ? 1 : 0;
+    }
+}

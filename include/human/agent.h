@@ -358,6 +358,15 @@ struct hu_agent {
      * open — agent code must guard with `agent->learner != NULL`. */
     struct hu_learner *learner;
 
+#ifdef HU_ENABLE_ML
+    /* M3 frontier adapter stub (optional). Opened from
+     * `personalization.m3_adapter_probe_path` at bootstrap when set;
+     * `hu_agent_m3_on_provider_success` runs after each successful provider
+     * LLM interaction (chat, stream_chat, GVR, constitutional, metacog regen,
+     * guard retry, streaming rethink). Owned; closed in `hu_agent_deinit`. */
+    struct hu_m3_frontier_adapter *m3_adapter;
+#endif
+
     bool chain_of_thought;    /* inject reasoning instructions into prompt */
     bool on_device_available; /* true if on-device inference server was detected at startup */
     char *persona_prompt;     /* custom identity override; owned */
@@ -505,6 +514,14 @@ void hu_agent_set_outcomes(hu_agent_t *agent, struct hu_outcome_tracker *tracker
  * later. Pass NULL to detach. */
 struct hu_learner;
 void hu_agent_set_learner(hu_agent_t *agent, struct hu_learner *learner);
+
+/* M3 frontier adapter (stub): attach is a no-op when HU_ENABLE_ML is off.
+ * `hu_agent_m3_on_provider_success` is safe to call always (no-op when ML off
+ * or no adapter); call after each successful frontier LLM interaction
+ * (primary chat/stream_chat, GVR, constitutional, metacog regen, guard retry,
+ * streaming rethink). */
+void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path);
+void hu_agent_m3_on_provider_success(hu_agent_t *agent);
 
 /* Point the agent at a hu_voice_config_t (e.g. from hu_voice_config_from_settings).
  * Borrowed pointers inside that struct must outlive the agent. Pass NULL to disable TTS. */

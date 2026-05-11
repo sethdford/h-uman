@@ -38,18 +38,33 @@ The 17 items from the gap analysis map onto 17 workstreams. P0 lands in this PR;
 | B5 | Companion safety integration (anti-dependency) | `src/behavior/safety.c`, `include/human/behavior/safety.h` | P0 | landed |
 | B6 | Persona consistency evaluation harness | `src/persona/eval.c`, `include/human/persona/eval.h` | P0 | landed |
 | B7 | LongMemEval scaffold for W16 | tests/eval scaffold (planned) | P0 | scoped |
+| Bp | Prompt directive helper (B-prompt) | `src/behavior/prompt.c`, `include/human/behavior/prompt.h` | P0 | landed |
+| Bw | Wire B1 into agent_turn (read-only) | `src/agent/agent_turn.c` | P0 | landed |
 | B8 | Theory-of-mind benchmark suite | extends `src/agent/theory_of_mind.c` (planned) | P1 | scoped |
 | B9 | User simulator (`hu_user_sim_t`) | new vtable (planned) | P1 | scoped |
-| B10 | Empathy / support-strategy labeling | extends behavior policy (planned) | P1 | scoped |
-| B11 | Trust calibration policy | extends behavior policy (planned) | P1 | scoped |
+| B10 | Empathy / support-strategy labeling | `src/behavior/support_strategy.c`, `include/human/behavior/support_strategy.h` | P1 | landed (enum + classifier) |
+| B11 | Trust calibration policy | `src/behavior/behavior_trust.c`, `src/behavior/pressure.c`, `src/behavior/trust_prompt.c` | P1 | landed (heuristic + agent_turn wiring) |
 | B12 | Multimodal affect (voice prosody hooks) | extends `hu_affect_t` (planned) | P1 | scoped |
 | B13 | Other-initiated repair eval pack | extends B2 + voice (planned) | P1 | scoped |
 | B14 | Learned persona control (DPO/LoRA loop) | extends `src/ml/`, depends on M3 | P1 | depends-m3 |
 | B15 | Cultural pragmatics overlay | extends `hu_persona_overlay_t` (planned) | P2 | scoped |
-| B16 | Chronotype-aligned JITAI | extends `hu_circadian_*` and B4 (planned) | P2 | scoped |
+| B16 | Chronotype-aligned JITAI | extends `hu_circadian_*` and B4 | P2 | landed (helper); JITAI gating planned |
 | B17 | On-device frontier bridge for behavior | folds into M3 frontier plan | P2 | depends-m3 |
 
 "landed" = code + tests in this PR. "scoped" = covered by extension points + design notes below. "depends-m3" = waiting on `2026-05-10-m3-frontier-model-bridge.md`.
+
+### Phase 2 (this PR) — incremental promotions
+
+The first PR landed the P0 foundations (B1-B6). This PR adds:
+
+- **B-prompt** — `hu_behavior_build_directive()` turns a `hu_behavior_decision_t` into a short `[Behavior: <act> — <directive>]` snippet. Returns `(NULL, 0)` for low-confidence or default `ANSWER` decisions so callers can append unconditionally without a special case.
+- **Bw — agent_turn integration** — the existing B1 stub in `src/agent/agent_turn.c` now uses `hu_behavior_build_directive`, plumbs `channel_class` from `agent->active_channel` (voice / email / text), and frees its directive cleanly. Read-only: the policy never blocks the turn, only appends ≤200 bytes to `system_prompt`.
+- **B10 (subset)** — `hu_support_strategy_t` enum + `hu_support_strategy_from_decision()` classifier. Eight strategies (validate, normalize, reframe, question, plan, ground, refer, boundary). Pure function. Full empathy-labelled eval pack still scoped.
+- **B11 (heuristic + wiring)** — `hu_trust_calibrate()` pure function. Hard rule encoded: each user reassertion **increases** push-back firmness; never reduces it. `tool_output_contradicts_user` is the highest-trust source. Authority invocations and emotional pressure surface uncertainty rather than collapse.
+- **B-pressure** — `hu_pressure_detect()` heuristic over a single user message. Detects authority cues, exclamation/caps shouting, reassertion phrasing, and hedging dampeners. Pure function. Output plugs into `hu_trust_input_t` via `hu_pressure_apply_to_trust_input()`.
+- **B-trust-prompt** — `hu_trust_build_directive()` emits a `[Trust: <action> — <directive>]` snippet for every non-default action.
+- **B11 wiring** — `src/agent/agent_turn.c` composes the trust input from `hu_pressure_detect` plus the affect-derived emotional fallback, then appends the trust directive to `system_prompt` for non-default actions. The previous inline `at_trust_authority_cues()` 3-phrase detector is removed.
+- **B16 (helper)** — `hu_chronotype_t` (lark / intermediate / owl / unknown) + `hu_chronotype_is_active_hour()` for JITAI gating. Replaces the hard-coded 23–05 quiet-hours band with a chronotype-aware band when persona has the field. Wiring into `hu_behavior_change_t` JITAI gate stays scoped.
 
 ## Architecture
 

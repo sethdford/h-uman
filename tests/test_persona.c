@@ -4199,6 +4199,30 @@ static void test_persona_contact_nested_comm_patterns_take_precedence(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+static void test_persona_chronotype_and_pragmatics_overlay_prompt(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    const char *json = "{\"version\":1,\"name\":\"ct\",\"chronotype\":\"evening_owl\","
+                       "\"core\":{\"identity\":\"id\",\"traits\":[\"a\"],\"communication_rules\":[]},"
+                       "\"channel_overlays\":{\"cli\":{\"directness\":\"low\",\"face_saving\":\"high\","
+                       "\"disagreement_style\":\"indirect\",\"silence_tolerance\":\"high\"}}}";
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    HU_ASSERT_EQ((int)p.chronotype, (int)HU_CHRONO_EVENING_OWL);
+    HU_ASSERT_EQ(p.overlays_count, 1u);
+    HU_ASSERT_STR_EQ(p.overlays[0].directness, "low");
+    HU_ASSERT_STR_EQ(p.overlays[0].face_saving, "high");
+    HU_ASSERT_STR_EQ(p.overlays[0].disagreement_style, "indirect");
+    HU_ASSERT_STR_EQ(p.overlays[0].silence_tolerance, "high");
+    char *prompt = NULL;
+    size_t plen = 0;
+    HU_ASSERT_EQ(hu_persona_build_prompt(&alloc, &p, "cli", 3, NULL, 0, &prompt, &plen), HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(prompt, "Directness (stated preference): low"));
+    HU_ASSERT_NOT_NULL(strstr(prompt, "Face-saving preference: high"));
+    alloc.free(alloc.ctx, prompt, plen + 1);
+    hu_persona_deinit(&alloc, &p);
+}
+
 void run_persona_tests(void) {
     HU_TEST_SUITE("Persona");
 
@@ -4228,6 +4252,7 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_persona_build_prompt_with_overlay);
     HU_RUN_TEST(test_persona_overlay_vulnerability_tier);
     HU_RUN_TEST(test_persona_overlay_vulnerability_tier_parsed);
+    HU_RUN_TEST(test_persona_chronotype_and_pragmatics_overlay_prompt);
     HU_RUN_TEST(test_persona_examples_load_json);
     HU_RUN_TEST(test_persona_prompt_overrides_default);
     HU_RUN_TEST(test_spawn_config_persona_field);

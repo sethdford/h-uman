@@ -256,7 +256,7 @@ Interpretation: **Track C** helps **Track B** (documentation of what “correct�
 | Track | Phase | Status | Last proof (link or commit) |
 |-------|-------|--------|----------------------------|
 | A | A0 | `done` | ADR [`adr/2026-05-10-w10-kv-replay-deferred.md`](adr/2026-05-10-w10-kv-replay-deferred.md) — replay deferred |
-| B | B0–B2 | `done` | B2: `scripts/check-memory-query-variant.sh` + verify-all + agent-preflight; suite 9689/9689 (CI `BASELINE` in `ci.yml`) |
+| B | B0–B2 | `done` | B2: `scripts/check-memory-query-variant.sh` + verify-all + agent-preflight; suite 9721/9721 (CI `BASELINE` in `ci.yml`) |
 | C | C0 | `done` | Evidence index file (same commit family) |
 | D | D0.3–D1.1 | `in_progress` | Stub API + `personalization.m3_adapter_probe_path` (parse/serialize + daemon probe when `HU_ENABLE_ML`); tests in `test_ml.c` + `test_config_parse.c` |
 | E | E0 | `in_progress` | `scripts/security-sensitive-api-scan.sh` (+ optional `VERIFY_SECURITY_SCAN=1` in verify-all) |

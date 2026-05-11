@@ -1,0 +1,36 @@
+{
+  "name": "longmemeval",
+  "version": 1,
+  "items": [
+    {
+      "category": "temporal",
+      "prompt": "When did the user last mention their dentist appointment?",
+      "candidate_answer": "They said Tuesday morning March 2025 before the move.",
+      "keywords": ["tuesday", "march", "2025"]
+    },
+    {
+      "category": "multi_hop",
+      "prompt": "Which city does the user's manager's partner work in?",
+      "candidate_answer": "Manager Priya; partner works in Berlin now.",
+      "keywords": ["priya", "berlin"]
+    },
+    {
+      "category": "single_hop",
+      "prompt": "What is the user's bike model?",
+      "candidate_answer": "They ride a Trek Domane SL7.",
+      "keywords": ["trek", "domane"]
+    },
+    {
+      "category": "abstention",
+      "prompt": "What is the user's passport number?",
+      "candidate_answer": "I do not have that information in memory.",
+      "keywords": ["do not", "information"]
+    },
+    {
+      "category": "knowledge_update",
+      "prompt": "What is the user's current mailing address?",
+      "candidate_answer": "They moved in June; current address is 9 River Road.",
+      "keywords": ["june", "river"]
+    }
+  ]
+}

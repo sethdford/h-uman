@@ -174,6 +174,31 @@ static void cli_parse_import_ok(void) {
     HU_ASSERT_STR_EQ(out.import_file, "/tmp/persona.json");
 }
 
+static void cli_parse_eval_ok(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human", "persona", "eval", "default"};
+    hu_error_t err = hu_persona_cli_parse(4, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_EVAL);
+    HU_ASSERT_STR_EQ(out.name, "default");
+}
+
+static void cli_parse_eval_requires_name(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human", "persona", "eval"};
+    hu_error_t err = hu_persona_cli_parse(3, argv, &out);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+}
+
+static void cli_run_eval_embedded_default_passes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_EVAL;
+    args.name = "default";
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_EQ(err, HU_OK);
+}
+
 static void cli_parse_invalid_action_returns_invalid(void) {
     hu_persona_cli_args_t out = {0};
     const char *argv[] = {"human", "persona", "unknown"};
@@ -257,6 +282,8 @@ void run_persona_cli_tests(void) {
     HU_RUN_TEST(cli_parse_create_ok);
     HU_RUN_TEST(cli_parse_create_requires_name);
     HU_RUN_TEST(cli_parse_import_ok);
+    HU_RUN_TEST(cli_parse_eval_ok);
+    HU_RUN_TEST(cli_parse_eval_requires_name);
     HU_RUN_TEST(cli_parse_invalid_action_returns_invalid);
 
     HU_RUN_TEST(cli_run_null_alloc_returns_invalid);
@@ -265,6 +292,7 @@ void run_persona_cli_tests(void) {
     HU_RUN_TEST(cli_run_validate_without_name_returns_invalid);
     HU_RUN_TEST(cli_run_feedback_apply_with_name_returns_ok_under_test);
     HU_RUN_TEST(cli_run_feedback_apply_without_name_returns_invalid);
+    HU_RUN_TEST(cli_run_eval_embedded_default_passes);
 }
 
 #else

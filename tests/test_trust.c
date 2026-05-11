@@ -138,7 +138,7 @@ static void trust_directive_low_trust_emits(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_trust_build_directive(&alloc, &state, &out, &out_len);
+    hu_error_t err = hu_trust_state_build_directive(&alloc, &state, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(out_len > 0);
@@ -155,7 +155,7 @@ static void trust_directive_high_trust_empty(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_trust_build_directive(&alloc, &state, &out, &out_len);
+    hu_error_t err = hu_trust_state_build_directive(&alloc, &state, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     /* High trust: no directive needed */
     HU_ASSERT_TRUE(out == NULL);
@@ -163,7 +163,7 @@ static void trust_directive_high_trust_empty(void) {
 }
 
 static void trust_directive_null_returns_error(void) {
-    hu_error_t err = hu_trust_build_directive(NULL, NULL, NULL, NULL);
+    hu_error_t err = hu_trust_state_build_directive(NULL, NULL, NULL, NULL);
     HU_ASSERT_NEQ(err, HU_OK);
 }
 

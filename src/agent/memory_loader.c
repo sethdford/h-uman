@@ -261,7 +261,7 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         return HU_OK;
     }
     if (!entries || count == 0)
-        return HU_OK;
+        goto supplement;
 
     hu_json_buf_t buf;
     err = hu_json_buf_init(&buf, loader->alloc);
@@ -332,5 +332,44 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
 cleanup:
     hu_json_buf_free(&buf);
     free_recall_entries(loader->alloc, entries, count);
+
+supplement:
+    /* Supplementary graph context: always inject the world model summary for
+     * this contact so entity/relation knowledge is available on every turn,
+     * not just when the strategy learner selects HU_RSTRAT_GRAPH. Planner
+     * paths return early above and already use the graph internally. */
+    if (err == HU_OK && loader->facade && session_id && session_id_len > 0) {
+        char *graph_text = NULL;
+        size_t graph_len = 0;
+        hu_error_t ge = hu_w7_render_world_model(
+            loader->facade, loader->alloc,
+            session_id, session_id_len, 0,
+            &graph_text, &graph_len);
+        if (ge == HU_OK && graph_text && graph_len > 0) {
+            const size_t graph_cap = 500;
+            if (graph_len > graph_cap)
+                graph_len = graph_cap;
+            if (*out_context) {
+                size_t old_len = out_context_len ? *out_context_len : strlen(*out_context);
+                size_t total = old_len + 1 + graph_len;
+                char *combined = (char *)loader->alloc->alloc(loader->alloc->ctx, total + 1);
+                if (combined) {
+                    memcpy(combined, *out_context, old_len);
+                    combined[old_len] = '\n';
+                    memcpy(combined + old_len + 1, graph_text, graph_len);
+                    combined[total] = '\0';
+                    loader->alloc->free(loader->alloc->ctx, *out_context, old_len + 1);
+                    *out_context = combined;
+                    if (out_context_len)
+                        *out_context_len = total;
+                }
+            } else {
+                *out_context = hu_strndup(loader->alloc, graph_text, graph_len);
+                if (*out_context && out_context_len)
+                    *out_context_len = graph_len;
+            }
+            loader->alloc->free(loader->alloc->ctx, graph_text, graph_len + 1);
+        }
+    }
     return err;
 }

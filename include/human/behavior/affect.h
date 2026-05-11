@@ -40,6 +40,12 @@ void hu_affect_init(hu_affect_state_t *s);
  */
 hu_error_t hu_affect_estimate_text(const char *text, size_t len, hu_affect_state_t *out);
 
+/* B12 stub: PCM16 prosody path not wired — neutral VAD with high uncertainty.
+ * `samples` may be NULL or `sample_count == 0`. `sample_rate_hz` reserved.
+ */
+hu_error_t hu_affect_estimate_audio(const int16_t *samples, size_t sample_count,
+                                    uint32_t sample_rate_hz, hu_affect_state_t *out);
+
 /* Decay arousal and absolute valence toward zero with the given half life. */
 hu_error_t hu_affect_decay(hu_affect_state_t *s, uint64_t now_ts, float half_life_s);
 

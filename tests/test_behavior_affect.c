@@ -1,7 +1,16 @@
 #include "human/behavior/affect.h"
 #include "test_framework.h"
 
+#include <stdint.h>
 #include <string.h>
+
+static void affect_estimate_audio_stub_is_neutral_audio_modality(void) {
+    int16_t samples[4] = {100, -100, 50, -50};
+    hu_affect_state_t s;
+    HU_ASSERT_EQ(hu_affect_estimate_audio(samples, 4, 16000, &s), HU_OK);
+    HU_ASSERT_EQ((int)s.modality, (int)HU_AFFECT_AUDIO);
+    HU_ASSERT_TRUE(s.uncertainty >= 0.9f);
+}
 
 static void affect_init_neutral_with_high_uncertainty(void) {
     hu_affect_state_t s;
@@ -123,6 +132,7 @@ void run_behavior_affect_tests(void);
 
 void run_behavior_affect_tests(void) {
     HU_TEST_SUITE("behavior_affect");
+    HU_RUN_TEST(affect_estimate_audio_stub_is_neutral_audio_modality);
     HU_RUN_TEST(affect_init_neutral_with_high_uncertainty);
     HU_RUN_TEST(affect_estimate_positive_text_pushes_valence_positive);
     HU_RUN_TEST(affect_estimate_negative_text_pushes_valence_negative);

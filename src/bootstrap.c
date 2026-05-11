@@ -935,6 +935,11 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                             hu_error_string(le));
             }
         }
+#ifdef HU_ENABLE_ML
+        if (bi->cfg.personalization.m3_adapter_probe_path &&
+            bi->cfg.personalization.m3_adapter_probe_path[0])
+            hu_agent_m3_adapter_attach(&bi->agent, bi->cfg.personalization.m3_adapter_probe_path);
+#endif
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
         if (bi->cfg.agent.mr_on_device_enabled) {
             bi->agent.on_device_available = hu_apple_probe(alloc, NULL, 0);

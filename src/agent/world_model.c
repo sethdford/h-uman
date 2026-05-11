@@ -334,7 +334,15 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
     {
         hu_memory_entity_row_t *ents = NULL;
         size_t n = 0;
-        if (hu_memory_facade_list_entities(m, alloc, contact_id, cid_len, 16,
+        /* Entity ceiling: 64. Empirically the W12 P5 planner anchor-matching
+         * needs every named entity in the conversation reachable; 16 was too
+         * tight and silently dropped the long-tail of mentions (the W16
+         * facade-recall benchmark exposed this — "who prefers vim?" failed
+         * because Vim fell off the cutoff). 64 keeps the WM snapshot small
+         * (~3KB even with full row payloads) while comfortably covering
+         * realistic per-contact graphs. The W9 mention-count sort still
+         * applies, so the top entities are first. */
+        if (hu_memory_facade_list_entities(m, alloc, contact_id, cid_len, 64,
                                            &ents, &n) == HU_OK && n > 0) {
             hu_memory_entity_row_t *cloned = NULL;
             hu_error_t err = copy_entities(alloc, ents, n, &cloned);

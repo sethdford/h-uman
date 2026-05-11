@@ -720,7 +720,7 @@ config.c Config loading/merging (~/.human/config.json)
 ...
 
 include/human/ Public C headers
-tests/ 414 test files, 8,400+ tests
+tests/ 495 test files, 9,700+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ui/ Web UI (LitElement + Vite)

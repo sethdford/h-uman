@@ -1,0 +1,21 @@
+{
+  "name": "repair_scenarios_smoke",
+  "version": 1,
+  "items": [
+    {"id": "rep-01", "user_utterance": "What did you mean by that?", "expected_dialog_act": "clarify", "expected_relational_act": "ask_clarify"},
+    {"id": "rep-02", "user_utterance": "Huh?", "expected_dialog_act": "repair_initiate", "expected_relational_act": "repair"},
+    {"id": "rep-03", "user_utterance": "Wait, you mean the earlier file?", "expected_dialog_act": "repair_initiate", "expected_relational_act": "repair"},
+    {"id": "rep-04", "user_utterance": "I don't follow — can you clarify?", "expected_dialog_act": "repair_initiate", "expected_relational_act": "repair"},
+    {"id": "rep-05", "user_utterance": "Was that Tuesday or Thursday?", "expected_dialog_act": "question", "expected_relational_act": "ask_clarify"},
+    {"id": "rep-06", "user_utterance": "That's not right — you skipped a step.", "expected_dialog_act": "disagreement", "expected_relational_act": "push_back"},
+    {"id": "rep-07", "user_utterance": "Actually, that conflicts with what you said earlier.", "expected_dialog_act": "disagreement", "expected_relational_act": "push_back"},
+    {"id": "rep-08", "user_utterance": "Could you clarify the second step?", "expected_dialog_act": "question", "expected_relational_act": "ask_clarify"},
+    {"id": "rep-09", "user_utterance": "Say that again?", "expected_dialog_act": "repair_initiate", "expected_relational_act": "repair"},
+    {"id": "rep-10", "user_utterance": "Which 'it' are you referring to?", "expected_dialog_act": "question", "expected_relational_act": "ask_clarify"},
+    {"id": "rep-11", "user_utterance": "Can you clarify without the jargon?", "expected_dialog_act": "clarify", "expected_relational_act": "ask_clarify"},
+    {"id": "rep-12", "user_utterance": "Good night", "expected_dialog_act": "farewell", "expected_relational_act": "answer"},
+    {"id": "rep-13", "user_utterance": "Wait, you mean the budget line, not the timeline?", "expected_dialog_act": "repair_initiate", "expected_relational_act": "repair"},
+    {"id": "rep-14", "user_utterance": "What do you mean by 'done'?", "expected_dialog_act": "clarify", "expected_relational_act": "ask_clarify"},
+    {"id": "rep-15", "user_utterance": "I disagree with that conclusion.", "expected_dialog_act": "disagreement", "expected_relational_act": "answer"}
+  ]
+}

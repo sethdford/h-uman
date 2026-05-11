@@ -65,6 +65,9 @@
 #include "human/provider.h"
 #include "human/security/arg_inspector.h"
 #include "human/voice.h"
+#ifdef HU_ENABLE_ML
+#include "human/ml/m3_frontier_adapter.h"
+#endif
 
 #include <stdint.h>
 #include <stdio.h>
@@ -831,6 +834,39 @@ void hu_agent_set_learner(hu_agent_t *agent, struct hu_learner *learner) {
     agent->learner = learner;
 }
 
+#ifdef HU_ENABLE_ML
+void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
+    if (!agent || !agent->alloc)
+        return;
+    if (agent->m3_adapter) {
+        hu_m3_frontier_adapter_close(agent->alloc, agent->m3_adapter);
+        agent->m3_adapter = NULL;
+    }
+    if (!path || path[0] == '\0')
+        return;
+    size_t path_len = strlen(path);
+    hu_m3_frontier_adapter_t *opened = NULL;
+    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK &&
+        opened)
+        agent->m3_adapter = opened;
+}
+
+void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
+    if (!agent || !agent->m3_adapter)
+        return;
+    (void)hu_m3_frontier_adapter_noop_infer(agent->m3_adapter);
+}
+#else
+void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
+    (void)agent;
+    (void)path;
+}
+
+void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
+    (void)agent;
+}
+#endif
+
 void hu_agent_set_voice_config(hu_agent_t *agent, hu_voice_config_t *voice_cfg) {
     if (!agent)
         return;
@@ -993,6 +1029,12 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_webhook_manager_destroy(agent->alloc, agent->infra.webhook_manager);
         agent->infra.webhook_manager = NULL;
     }
+#ifdef HU_ENABLE_ML
+    if (agent->m3_adapter) {
+        hu_m3_frontier_adapter_close(agent->alloc, agent->m3_adapter);
+        agent->m3_adapter = NULL;
+    }
+#endif
 #ifdef HU_ENABLE_SQLITE
     if (agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, agent->alloc);

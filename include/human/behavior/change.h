@@ -2,6 +2,7 @@
 #define HU_BEHAVIOR_CHANGE_H
 
 #include "human/core/error.h"
+#include "human/persona/circadian.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -51,6 +52,9 @@ typedef struct hu_behavior_change_input {
     float distress_escalation;      /* 0..1 — high = pause interventions */
     uint8_t hour;                   /* 0..23 (local) for JITAI gating */
     bool late_night_opt_in;         /* user explicitly allows late prompts */
+    /* B16: when not HU_CHRONO_UNKNOWN, `hour` outside chronotype active band defers
+     * (unless late_night_opt_in). UNKNOWN preserves legacy 23:00–05:59 gate only. */
+    hu_chronotype_t jitai_chronotype;
 } hu_behavior_change_input_t;
 
 typedef struct hu_behavior_change_decision {

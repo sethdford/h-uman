@@ -38,7 +38,7 @@ multi-month plan to close the gap honestly.
 | GPU acceleration (Metal / CUDA / MLX) | ❌ CPU only | ✅ on Apple Silicon |
 | HuggingFace / GGUF checkpoint loader | ❌ | ✅ |
 | Adapter inference at chat time (apply LoRA to chat provider) | ❌ | ✅ |
-| **D0.3 seam in-tree** — `hu_m3_frontier_adapter_*` fixture load + noop infer (tests) | ✅ `human/ml/m3_frontier_adapter.h` | ✅ (chat wiring still future) |
+| **D0.3 seam in-tree** — `hu_m3_frontier_adapter_*` fixture load + noop infer (tests) | ✅ `human/ml/m3_frontier_adapter.h` | ✅ **Chat wiring:** `hu_agent_m3_on_provider_success` after every successful frontier provider round in `agent_turn.c` + `agent_stream.c` (primary `chat` / `stream_chat`, GVR, constitutional, metacog regen `chat`, response-guard slim retries, streaming persona rethink) |
 
 # Why this matters
 
@@ -232,6 +232,22 @@ Landed via FIX 24 (`feat(daemon): config-driven LoRA adapter auto-load`):
 - Same vtable triple, but the implementation maps onto the underlying
   framework's adapter API.
 
+### 4.3 Chat-path stub hooks (`hu_agent_m3_on_provider_success`)
+
+When `HU_ENABLE_ML` is on and `personalization.m3_adapter_probe_path` opens a
+fixture adapter at bootstrap (`hu_agent_m3_adapter_attach`), the runtime
+invokes `hu_m3_frontier_adapter_noop_infer` after each **successful** provider
+LLM interaction listed below (stub today; tensor path replaces noop later).
+
+| Site | File |
+|------|------|
+| Primary `chat` + on-device→cloud fallback `chat` | `src/agent/agent_turn.c` |
+| Metacognition regeneration `chat` | `src/agent/agent_turn.c` |
+| GVR `hu_gvr_pipeline` (verify/revise internals) | `src/agent/agent_turn.c`, `src/agent/agent_stream.c` |
+| Constitutional `hu_constitutional_critique` | `src/agent/agent_turn.c`, `src/agent/agent_stream.c` |
+| Response-guard `hu_response_guard_retry_slim` | `src/agent/agent_turn.c`, `src/agent/agent_stream.c` |
+| `stream_chat` loop + persona rethink `chat_with_system` | `src/agent/agent_stream.c` |
+
 # What an honest CLAUDE.md M3 row looks like (Phase 2)
 
 > **M3 Private Learning** — On-device ML personalization
@@ -261,3 +277,5 @@ Pick this up when ANY of these become true:
 |------|------|-------|
 | 2026-05-10 | 0 | FIX 15: `--checkpoint` honest, caveat printed, plan doc landed |
 | 2026-05-10 | 4.0 | FIX 20: huml chat-time LoRA merge — `hu_gpt_attach_lora` wired into provider load/unload; e2e disk-roundtrip test asserts forward-pass bias |
+| 2026-05-11 | D0.3 | `hu_agent_m3_on_provider_success` wired across turn + stream paths (GVR, constitutional, metacog regen, guard retry, stream_chat, rethink) |
+| 2026-05-11 | Bridge A | `llamacpp` vtable: non-NULL `chat` (delegates to `chat_with_system` like `huml_chat`) + `supports_streaming` → false so `hu_agent_turn_stream` never derefs NULL |

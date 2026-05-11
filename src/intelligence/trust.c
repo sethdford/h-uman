@@ -127,8 +127,8 @@ const char *hu_uncertainty_prefix(hu_uncertainty_level_t level) {
     }
 }
 
-hu_error_t hu_trust_build_directive(hu_allocator_t *alloc, const hu_trust_state_t *state,
-                                     char **out, size_t *out_len) {
+hu_error_t hu_trust_state_build_directive(hu_allocator_t *alloc, const hu_trust_state_t *state,
+                                          char **out, size_t *out_len) {
     if (!alloc || !state || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
 

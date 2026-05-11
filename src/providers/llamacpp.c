@@ -125,6 +125,45 @@ static hu_error_t llamacpp_chat_with_system(void *ctx, hu_allocator_t *alloc,
 #endif
 }
 
+/* Multi-message entry point used by `hu_agent_turn` / constitutional /
+ * degradation. Delegates to `chat_with_system` using the last system and
+ * last user message in the request (same contract as `huml_chat`). */
+static hu_error_t llamacpp_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *request,
+                                const char *model, size_t model_len, double temperature,
+                                hu_chat_response_t *out) {
+    if (!ctx || !alloc || !request || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+
+    const char *sys = NULL;
+    size_t sys_len = 0;
+    const char *msg = NULL;
+    size_t msg_len = 0;
+
+    for (size_t i = 0; i < request->messages_count; i++) {
+        if (request->messages[i].role == HU_ROLE_SYSTEM) {
+            sys = request->messages[i].content;
+            sys_len = request->messages[i].content_len;
+        } else if (request->messages[i].role == HU_ROLE_USER) {
+            msg = request->messages[i].content;
+            msg_len = request->messages[i].content_len;
+        }
+    }
+
+    char *content = NULL;
+    size_t content_len = 0;
+    hu_error_t err = llamacpp_chat_with_system(ctx, alloc, sys, sys_len, msg, msg_len, model,
+                                               model_len, temperature, &content, &content_len);
+    out->content = content;
+    out->content_len = content_len;
+    return err;
+}
+
+static bool llamacpp_supports_streaming(void *ctx) {
+    (void)ctx;
+    return false;
+}
+
 /* ── vtable: identity / capability hooks ──────────────────────────────── */
 
 static const char *llamacpp_get_name(void *ctx) {
@@ -239,9 +278,10 @@ static void llamacpp_deinit(void *ctx, hu_allocator_t *alloc) {
 
 static const hu_provider_vtable_t llamacpp_vtable = {
     .chat_with_system = llamacpp_chat_with_system,
-    .chat = NULL,
+    .chat = llamacpp_chat,
     .get_name = llamacpp_get_name,
     .supports_native_tools = llamacpp_supports_native_tools,
+    .supports_streaming = llamacpp_supports_streaming,
     .load_adapter = llamacpp_load_adapter,
     .unload_adapter = llamacpp_unload_adapter,
     .active_adapter = llamacpp_active_adapter,

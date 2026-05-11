@@ -23,6 +23,7 @@
 #include "human/agent/conv_goals.h"
 #include "human/agent/model_router.h"
 #include "human/cognition/trust.h"
+#include "human/context/contact_style_overlay.h"
 #include "human/context/humor.h"
 #include "human/eval/consistency.h"
 #include "human/agent/response_guard.h"
@@ -36,6 +37,14 @@
 #include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
 #include "human/security/sycophancy_guard.h"
+#include "human/behavior/policy.h"
+#include "human/behavior/pressure.h"
+#include "human/behavior/prompt.h"
+#include "human/behavior/safety.h"
+#include "human/behavior/trust_prompt.h"
+#ifdef HU_ENABLE_ML
+#include "human/ml/m3_frontier_adapter.h"
+#endif
 
 /* Default fallback arrays (NULL-terminated) */
 static const char *DEFAULT_MULTISTEP_NEEDLES[] = {" first ", " then ", " finally", " step ",
@@ -250,6 +259,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/agent/prompt_cache.h"
 #include "human/context.h"
 #include "human/context/conversation.h"
+#include "human/context/emotional_state.h"
 #include "human/context_engine.h"
 #include "human/context_tokens.h"
 #include "human/core/json.h"
@@ -304,6 +314,101 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* Map active channel name to hu_behavior_input_t.channel_class (policy.h). */
+static int at_behavior_channel_class(const char *cn, size_t cl) {
+    if (!cn || cl == 0) {
+        return 0;
+    }
+    if (cl >= 5 && memcmp(cn, "voice", 5) == 0) {
+        return 1;
+    }
+    if ((cl == 5 && memcmp(cn, "email", 5) == 0) || (cl == 4 && memcmp(cn, "imap", 4) == 0) ||
+        (cl >= 5 && memcmp(cn, "gmail", 5) == 0)) {
+        return 3;
+    }
+    if ((cl >= 8 && memcmp(cn, "telegram", 8) == 0) ||
+        (cl >= 7 && memcmp(cn, "discord", 7) == 0) ||
+        (cl >= 5 && memcmp(cn, "slack", 5) == 0) ||
+        (cl >= 10 && memcmp(cn, "mattermost", 10) == 0) ||
+        (cl >= 6 && memcmp(cn, "matrix", 6) == 0) ||
+        (cl >= 3 && memcmp(cn, "irc", 3) == 0) ||
+        (cl >= 4 && memcmp(cn, "line", 4) == 0) ||
+        (cl >= 4 && memcmp(cn, "lark", 4) == 0) ||
+        (cl >= 9 && memcmp(cn, "messenger", 9) == 0) ||
+        (cl >= 8 && memcmp(cn, "whatsapp", 8) == 0) ||
+        (cl >= 8 && memcmp(cn, "imessage", 8) == 0) ||
+        (cl >= 3 && memcmp(cn, "sms", 3) == 0)) {
+        return 2;
+    }
+    return 0;
+}
+
+static hu_error_t at_append_trust_directive(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                            const hu_behavior_input_t *bin, bool memory_contradicts,
+                                            bool contrarian_thread, char **system_prompt,
+                                            size_t *system_prompt_len) {
+    if (!agent || !bin || !system_prompt || !system_prompt_len || !*system_prompt) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_trust_input_t tin;
+    memset(&tin, 0, sizeof(tin));
+    tin.memory_contradicts_user = memory_contradicts;
+    tin.trust_score = bin->trust_score;
+    tin.source_is_user_assertion = !bin->memory_has_relevant;
+
+    /* Heuristic affect-derived emotional pressure (kept as a fallback when the
+     * pressure module misses): high arousal + negative valence + low
+     * uncertainty looks like the user is angry and certain. */
+    tin.user_emotional_pressure =
+        bin->affect.uncertainty < 0.75f && bin->affect.valence < -0.25f && bin->affect.arousal > 0.45f;
+
+    /* B-pressure: enrich with text-level pressure detection. Authority cues,
+     * exclamation/caps shouting, and reassertion language all flow into the
+     * trust input. The pressure module never lowers a signal that another
+     * source already raised. */
+    hu_pressure_signals_t psig;
+    if (hu_pressure_detect(msg, msg_len, &psig) == HU_OK) {
+        hu_pressure_apply_to_trust_input(&psig, &tin);
+    }
+
+    if (memory_contradicts) {
+        if (tin.user_invoked_authority || tin.user_emotional_pressure ||
+            tin.user_pressure_count > 0u) {
+            if (tin.user_pressure_count < 2u) {
+                tin.user_pressure_count = 2u;
+            }
+        } else if (msg && strstr(msg, "!!!") != NULL) {
+            tin.user_pressure_count = 2u;
+        }
+    }
+    tin.user_reasserted_after_pushback = contrarian_thread && agent->history_count >= 2u;
+
+    hu_trust_decision_t td;
+    memset(&td, 0, sizeof(td));
+    (void)hu_trust_calibrate(&tin, &td);
+    char *tline = NULL;
+    size_t tlen = 0;
+    if (hu_trust_build_directive(agent->alloc, &td, &tline, &tlen) != HU_OK || !tline || tlen == 0) {
+        if (tline) {
+            agent->alloc->free(agent->alloc->ctx, tline, tlen + 1);
+        }
+        return HU_OK;
+    }
+    size_t cur = *system_prompt_len;
+    size_t new_len = cur + tlen;
+    char *new_sp = (char *)agent->alloc->realloc(agent->alloc->ctx, *system_prompt, cur + 1, new_len + 1);
+    if (!new_sp) {
+        agent->alloc->free(agent->alloc->ctx, tline, tlen + 1);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(new_sp + cur, tline, tlen);
+    new_sp[new_len] = '\0';
+    *system_prompt = new_sp;
+    *system_prompt_len = new_len;
+    agent->alloc->free(agent->alloc->ctx, tline, tlen + 1);
+    return HU_OK;
+}
 
 #if (defined(__unix__) || defined(__APPLE__)) && !defined(HU_IS_TEST)
 #include <pthread.h>
@@ -1214,6 +1319,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
     }
+    const bool behavior_memory_ctx_nonempty =
+        (memory_ctx != NULL && memory_ctx_len > 0);
+    bool behavior_opinion_kb_hit = false;
+    bool behavior_contrarian_hint = false;
 
     /* Check freshness of cached instruction discovery and re-discover if stale */
     if (agent->instruction_discovery &&
@@ -1744,7 +1853,95 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
     }
 
-    /* Build situational awareness context */
+    /* Append temporal mood to adaptive context */
+    {
+        char temporal_buf[256];
+        time_t tnow = time(NULL);
+        struct tm lt_buf2;
+        struct tm *lt2 = localtime_r(&tnow, &lt_buf2);
+        size_t temporal_len = hu_temporal_mood_build(
+            lt2 ? (uint8_t)(lt2->tm_hour & 0xFF) : 12, temporal_buf, sizeof(temporal_buf));
+        if (temporal_len > 0) {
+            if (adaptive_ctx) {
+                size_t new_total = adaptive_ctx_len + temporal_len;
+                char *merged = (char *)agent->alloc->alloc(agent->alloc->ctx, new_total + 1);
+                if (merged) {
+                    memcpy(merged, adaptive_ctx, adaptive_ctx_len);
+                    memcpy(merged + adaptive_ctx_len, temporal_buf, temporal_len);
+                    merged[new_total] = '\0';
+                    agent->alloc->free(agent->alloc->ctx, adaptive_ctx, adaptive_ctx_len + 1);
+                    adaptive_ctx = merged;
+                    adaptive_ctx_len = new_total;
+                }
+            } else {
+                adaptive_ctx = (char *)agent->alloc->alloc(agent->alloc->ctx, temporal_len + 1);
+                if (adaptive_ctx) {
+                    memcpy(adaptive_ctx, temporal_buf, temporal_len);
+                    adaptive_ctx[temporal_len] = '\0';
+                    adaptive_ctx_len = temporal_len;
+                }
+            }
+        }
+    }
+
+    /* Append cross-conversation emotional carry-over to adaptive context */
+#ifdef HU_ENABLE_SQLITE
+    if (agent->memory && agent->memory_session_id && agent->memory_session_id_len > 0) {
+        char *emo_carryover = NULL;
+        size_t emo_carryover_len = 0;
+        if (hu_emotional_state_get_recent(agent->alloc, agent->memory,
+                                          agent->memory_session_id, agent->memory_session_id_len,
+                                          &emo_carryover, &emo_carryover_len) == HU_OK &&
+            emo_carryover && emo_carryover_len > 0) {
+            if (adaptive_ctx) {
+                size_t new_total = adaptive_ctx_len + emo_carryover_len;
+                char *merged = (char *)agent->alloc->alloc(agent->alloc->ctx, new_total + 1);
+                if (merged) {
+                    memcpy(merged, adaptive_ctx, adaptive_ctx_len);
+                    memcpy(merged + adaptive_ctx_len, emo_carryover, emo_carryover_len);
+                    merged[new_total] = '\0';
+                    agent->alloc->free(agent->alloc->ctx, adaptive_ctx, adaptive_ctx_len + 1);
+                    adaptive_ctx = merged;
+                    adaptive_ctx_len = new_total;
+                }
+            } else {
+                adaptive_ctx = emo_carryover;
+                adaptive_ctx_len = emo_carryover_len;
+                emo_carryover = NULL;
+            }
+            if (emo_carryover)
+                agent->alloc->free(agent->alloc->ctx, emo_carryover, emo_carryover_len + 1);
+        }
+
+        /* Append Seth's aggregate mood baseline */
+        char *seth_mood = NULL;
+        size_t seth_mood_len = 0;
+        if (hu_emotional_state_get_seth_mood(agent->alloc, agent->memory,
+                                             &seth_mood, &seth_mood_len) == HU_OK &&
+            seth_mood && seth_mood_len > 0) {
+            if (adaptive_ctx) {
+                size_t new_total = adaptive_ctx_len + seth_mood_len;
+                char *merged = (char *)agent->alloc->alloc(agent->alloc->ctx, new_total + 1);
+                if (merged) {
+                    memcpy(merged, adaptive_ctx, adaptive_ctx_len);
+                    memcpy(merged + adaptive_ctx_len, seth_mood, seth_mood_len);
+                    merged[new_total] = '\0';
+                    agent->alloc->free(agent->alloc->ctx, adaptive_ctx, adaptive_ctx_len + 1);
+                    adaptive_ctx = merged;
+                    adaptive_ctx_len = new_total;
+                }
+            } else {
+                adaptive_ctx = seth_mood;
+                adaptive_ctx_len = seth_mood_len;
+                seth_mood = NULL;
+            }
+            if (seth_mood)
+                agent->alloc->free(agent->alloc->ctx, seth_mood, seth_mood_len + 1);
+        }
+    }
+#endif
+
+        /* Build situational awareness context */
     char *awareness_ctx = NULL;
     size_t awareness_ctx_len = 0;
     if (agent->awareness)
@@ -3202,6 +3399,56 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 agent->world_model_loads++;
         }
 
+        /* Contact style overlay + emotional context from memory */
+        char *style_overlay = NULL;
+        size_t style_overlay_len = 0;
+        char *contact_emotional_ctx = NULL;
+        size_t contact_emotional_ctx_len = 0;
+        if (agent->memory && agent->memory_session_id && agent->memory_session_id_len > 0) {
+            hu_contact_style_overlay_build(agent->alloc, agent->memory,
+                                           agent->memory_session_id,
+                                           agent->memory_session_id_len,
+                                           &style_overlay, &style_overlay_len);
+            hu_contact_emotional_context_build(agent->alloc, agent->memory,
+                                              agent->memory_session_id,
+                                              agent->memory_session_id_len,
+                                              5, &contact_emotional_ctx,
+                                              &contact_emotional_ctx_len);
+        }
+
+        /* Merge contact_context + style_overlay + contact_emotional_ctx */
+        char *enriched_contact = NULL;
+        size_t enriched_contact_len = 0;
+        {
+            size_t total = (agent->contact_context_len ? agent->contact_context_len : 0) +
+                           (style_overlay_len ? style_overlay_len + 1 : 0) +
+                           (contact_emotional_ctx_len ? contact_emotional_ctx_len + 1 : 0);
+            if (total > 0) {
+                enriched_contact = (char *)agent->alloc->alloc(agent->alloc->ctx, total + 1);
+                if (enriched_contact) {
+                    size_t off = 0;
+                    if (agent->contact_context && agent->contact_context_len > 0) {
+                        memcpy(enriched_contact + off, agent->contact_context,
+                               agent->contact_context_len);
+                        off += agent->contact_context_len;
+                    }
+                    if (style_overlay && style_overlay_len > 0) {
+                        enriched_contact[off++] = '\n';
+                        memcpy(enriched_contact + off, style_overlay, style_overlay_len);
+                        off += style_overlay_len;
+                    }
+                    if (contact_emotional_ctx && contact_emotional_ctx_len > 0) {
+                        enriched_contact[off++] = '\n';
+                        memcpy(enriched_contact + off, contact_emotional_ctx,
+                               contact_emotional_ctx_len);
+                        off += contact_emotional_ctx_len;
+                    }
+                    enriched_contact[off] = '\0';
+                    enriched_contact_len = off;
+                }
+            }
+        }
+
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,
@@ -3243,8 +3490,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .outcome_context_len = outcome_ctx_len,
             .persona_immersive = (persona_prompt && persona_prompt_len > 0),
             .persona = agent->persona,
-            .contact_context = agent->contact_context,
-            .contact_context_len = agent->contact_context_len,
+            .contact_context = enriched_contact ? enriched_contact : agent->contact_context,
+            .contact_context_len = enriched_contact ? enriched_contact_len : agent->contact_context_len,
             .conversation_context = agent->conversation_context,
             .conversation_context_len = agent->conversation_context_len,
             .max_response_chars = agent->max_response_chars,
@@ -3308,6 +3555,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
             world_model_ctx = NULL;
             world_model_ctx_len = 0;
+        }
+        if (enriched_contact) {
+            agent->alloc->free(agent->alloc->ctx, enriched_contact, enriched_contact_len + 1);
+            enriched_contact = NULL;
+        }
+        if (style_overlay) {
+            agent->alloc->free(agent->alloc->ctx, style_overlay, style_overlay_len + 1);
+            style_overlay = NULL;
+        }
+        if (contact_emotional_ctx) {
+            agent->alloc->free(agent->alloc->ctx, contact_emotional_ctx,
+                               contact_emotional_ctx_len + 1);
+            contact_emotional_ctx = NULL;
         }
         if (persona_prompt)
             agent->alloc->free(agent->alloc->ctx, persona_prompt, persona_prompt_len + 1);
@@ -3490,6 +3750,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 new_sp[new_len] = '\0';
                 system_prompt = new_sp;
                 system_prompt_len = new_len;
+                behavior_opinion_kb_hit = true;
             }
             agent->alloc->free(agent->alloc->ctx, syc_directive, syc_len + 1);
         }
@@ -3505,11 +3766,70 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 new_sp[new_len] = '\0';
                 system_prompt = new_sp;
                 system_prompt_len = new_len;
+                behavior_contrarian_hint = true;
             }
             agent->alloc->free(agent->alloc->ctx, contr_directive, contr_len + 1);
         }
     }
 #endif
+
+    /* B1: inject behavior-policy directive derived from the latest user
+     * message. Read-only integration: the policy never blocks the turn, only
+     * appends a short prompt directive. Caller frees nothing extra; we either
+     * grow `system_prompt` in place (realloc) or leave it untouched. */
+    if (system_prompt && msg && msg_len > 0) {
+        int chclass = 0;
+        if (agent->active_channel && agent->active_channel_len > 0) {
+            chclass = at_behavior_channel_class(agent->active_channel, agent->active_channel_len);
+        }
+        hu_behavior_input_t bin;
+        hu_behavior_input_from_user_message(&bin, msg, msg_len, chclass);
+        bin.trust_score = 0.5f;
+        if (agent->frontiers.initialized) {
+            bin.trust_score = agent->frontiers.trust.composite;
+        }
+        bin.memory_has_relevant =
+            behavior_memory_ctx_nonempty || hu_personal_model_has_content(&agent->personal_model) ||
+            behavior_opinion_kb_hit;
+        bin.memory_contradicts_user = behavior_contrarian_hint;
+        {
+            hu_behavior_safety_input_t sin;
+            memset(&sin, 0, sizeof(sin));
+            hu_companion_safety_result_t cs = {0};
+            (void)hu_companion_safety_check(agent->alloc, msg, msg_len, NULL, 0, &cs);
+            sin.companion = cs;
+            hu_vulnerability_input_t vin = {0};
+            vin.companion_total_risk = cs.total_risk;
+            vin.companion_flagged = cs.flagged;
+            hu_vulnerability_result_t vres;
+            memset(&vres, 0, sizeof(vres));
+            (void)hu_vulnerability_assess(&vin, &vres);
+            sin.vulnerability = vres;
+            (void)hu_behavior_safety_assess(&sin, &bin.safety);
+        }
+        hu_behavior_decision_t bdec;
+        memset(&bdec, 0, sizeof(bdec));
+        if (hu_behavior_decide(&bin, &bdec) == HU_OK) {
+            char *directive = NULL;
+            size_t directive_len = 0;
+            if (hu_behavior_build_directive(agent->alloc, &bdec, &directive, &directive_len) ==
+                    HU_OK &&
+                directive && directive_len > 0) {
+                size_t new_len = system_prompt_len + directive_len;
+                char *new_sp = (char *)agent->alloc->realloc(agent->alloc->ctx, system_prompt,
+                                                             system_prompt_len + 1, new_len + 1);
+                if (new_sp) {
+                    memcpy(new_sp + system_prompt_len, directive, directive_len);
+                    new_sp[new_len] = '\0';
+                    system_prompt = new_sp;
+                    system_prompt_len = new_len;
+                }
+                agent->alloc->free(agent->alloc->ctx, directive, directive_len + 1);
+            }
+            (void)at_append_trust_directive(agent, msg, msg_len, &bin, bin.memory_contradicts_user,
+                                            behavior_contrarian_hint, &system_prompt, &system_prompt_len);
+        }
+    }
 
     /* Prompt cache: hash system prompt for provider-level deduplication.
      * On first occurrence of a prompt hash, generate a stable cache ID from the hash
@@ -4298,6 +4618,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (llm_span)
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
+        if (err == HU_OK)
+            hu_agent_m3_on_provider_success(agent);
+
         /* W10: persist prompt-token metadata after successful provider call (see probe
          * comment above: no response replay yet). */
 #ifdef HU_ENABLE_SQLITE
@@ -4442,6 +4765,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_error_t gvr_err = hu_gvr_pipeline(
                 agent->alloc, &agent->provider, &agent->sota.gvr_config, turn_model, turn_model_len,
                 user_prompt, user_prompt_len, resp.content, resp.content_len, &gvr_result);
+            if (gvr_err == HU_OK)
+                hu_agent_m3_on_provider_success(agent);
             if (gvr_err == HU_OK && gvr_result.final_content) {
                 if (gvr_result.revisions_performed > 0) {
                     hu_chat_response_free(agent->alloc, &resp);
@@ -4865,6 +5190,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                    agent->model_name, agent->model_name_len, msg,
                                                    msg_len, final_content, final_len, &const_cfg,
                                                    &critique) == HU_OK) {
+                        hu_agent_m3_on_provider_success(agent);
                         if (critique.verdict == HU_CRITIQUE_REWRITE && critique.revised_response &&
                             critique.revised_response_len > 0) {
                             if (ab_owned)
@@ -4992,6 +5318,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             break;
                         }
 
+                        hu_agent_m3_on_provider_success(agent);
+
                         agent->total_tokens += mc_resp.usage.total_tokens;
                         hu_agent_internal_record_cost(agent, &mc_resp.usage);
                         turn_tokens += mc_resp.usage.total_tokens;
@@ -5086,6 +5414,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 turn_model, turn_model_len, msg, msg_len, &retry_content,
                                 &retry_len, &retry_report);
                             if (retry_err == HU_OK && retry_content && retry_len > 0) {
+                                hu_agent_m3_on_provider_success(agent);
                                 hu_log_warn(
                                     "agent_turn", agent->observer,
                                     "response_guard RECOVERED: retry passed (len=%zu, stripped=%zu)",
@@ -6326,6 +6655,21 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         fp_db, agent->memory_session_id, agent->memory_session_id_len,
                         (int)agent->relationship.stage, (int)agent->relationship.session_count,
                         (int)agent->relationship.total_turns);
+                }
+            }
+
+            /* Record emotional state at end of turn for cross-session carry-over */
+            if (agent->memory && agent->memory_session_id &&
+                agent->memory_session_id_len > 0 && msg && msg_len > 0) {
+                hu_emotional_state_record(agent->alloc, agent->memory,
+                                          agent->memory_session_id,
+                                          agent->memory_session_id_len,
+                                          msg, msg_len);
+                if (*response_out && *response_len_out > 0) {
+                    hu_emotional_state_record(agent->alloc, agent->memory,
+                                              agent->memory_session_id,
+                                              agent->memory_session_id_len,
+                                              *response_out, *response_len_out);
                 }
             }
 #endif

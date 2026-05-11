@@ -92,11 +92,22 @@ typedef struct hu_retrieval_step {
     char               entity_name_buf[HU_PLANNER_ENTITY_NAME_MAX]; /* BY_NAME storage */
 } hu_retrieval_step_t;
 
+/* Compact copy of the goal text. The planner populates this when it
+ * recognizes any entity-shaped lookup so the executor can re-rank by
+ * relation-context similarity. 256 bytes is enough for any user query
+ * we'd realistically route through the v2 stack; longer goals get
+ * truncated (still useful for ranking — first tokens dominate). The
+ * field is optional: if `goal_len == 0` the executor skips re-ranking
+ * and returns insertion order, identical to the pre-W12-P6 behaviour. */
+#define HU_PLANNER_GOAL_BUF_MAX 256
+
 /* A complete plan. Steps run in array order. */
 typedef struct hu_retrieval_plan {
     hu_retrieval_step_t steps[HU_PLANNER_MAX_STEPS];
     size_t              steps_count;
     int                 total_budget_ms; /* 0 = unlimited (within step caps) */
+    char                goal[HU_PLANNER_GOAL_BUF_MAX]; /* truncated user query, ASCII-lower */
+    size_t              goal_len;        /* 0 = no re-ranking */
 } hu_retrieval_plan_t;
 
 /* Backend vtable. */

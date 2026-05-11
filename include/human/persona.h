@@ -6,6 +6,7 @@
 #define HU_PERSONA_PROMPT_MAX_BYTES (24 * 1024) /* 24 KB cap for research-rich personas */
 
 #include "human/core/error.h"
+#include "human/persona/circadian.h"
 #include "human/persona/relationship.h"
 
 #include <stdbool.h>
@@ -25,6 +26,11 @@ typedef struct hu_persona_overlay {
     uint32_t max_segment_chars;
     char **typing_quirks;
     size_t typing_quirks_count;
+    /* B15: explicit user-stated pragmatics only (never inferred). */
+    char *directness;
+    char *face_saving;
+    char *disagreement_style;
+    char *silence_tolerance;
     char *vulnerability_tier;
     float affect_mirror_ceiling; /* 0.0-1.0; caps emotional intensity mirroring. 0 = use default */
     uint8_t leave_on_read_pct;   /* 0-100; probability of leave-on-read. 0 = use default (10%) */
@@ -430,6 +436,8 @@ typedef struct hu_persona {
     char **signature_phrases;
     size_t signature_phrases_count;
     bool calibrated;
+    /* B16: optional chronotype for JITAI / quiet-hours alignment (JSON `chronotype`). */
+    hu_chronotype_t chronotype;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).
@@ -598,7 +606,8 @@ typedef enum {
     HU_PERSONA_ACTION_DIFF,
     HU_PERSONA_ACTION_EXPORT,
     HU_PERSONA_ACTION_MERGE,
-    HU_PERSONA_ACTION_IMPORT
+    HU_PERSONA_ACTION_IMPORT,
+    HU_PERSONA_ACTION_EVAL
 } hu_persona_action_t;
 
 typedef struct hu_persona_cli_args {

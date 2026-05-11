@@ -502,6 +502,7 @@ set(HU_CORE_SOURCES
     src/context/style_tracker.c
     src/context/theory_of_mind.c
     src/context/mood.c
+    src/context/emotional_state.c
     src/context/event_extract.c
     src/context/temporal_events.c
     src/context/vision.c
@@ -516,6 +517,12 @@ set(HU_CORE_SOURCES
     src/behavior/change.c
     src/behavior/safety.c
     src/behavior/policy.c
+    src/behavior/prompt.c
+    src/behavior/support_strategy.c
+    src/behavior/pressure.c
+    src/behavior/behavior_trust.c
+    src/behavior/trust_prompt.c
+    src/behavior/user_sim.c
     src/context/repair.c
     src/calibration/timing_analyzer.c
     src/calibration/style_analyzer.c
@@ -659,6 +666,7 @@ set(HU_CORE_SOURCES
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
     src/agent/lora_training_runner.c
+    src/agent/training_data_runner.c
     src/agent/kv_prewarm_runner.c
     src/agent/belief_reverify_runner.c
     src/persona/persona_deltas.c
@@ -697,7 +705,7 @@ set(HU_CORE_SOURCES
     src/memory/relational_episode.c
     src/memory/vector/circuit_breaker.c
     src/cognition/db.c
-    src/cognition/trust.c
+    src/cognition/cognition_trust.c
     src/cognition/emotional.c
     src/cognition/evolving.c
     src/cognition/metacognition.c
@@ -1171,7 +1179,9 @@ if(HU_ENABLE_ML)
         src/providers/huml.c
     )
     if(HU_ENABLE_SQLITE)
-        list(APPEND HU_CORE_SOURCES src/ml/training_data.c)
+        list(APPEND HU_CORE_SOURCES
+            src/ml/training_data.c
+            src/ml/training_data_extractor.c)
     endif()
 endif()
 
@@ -1770,6 +1780,15 @@ if(NOT WIN32)
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "W7 Phase 1 graph bypass inventory (informational)"
         VERBATIM)
+    # Memory v2 local proof bundle (G2 collision + v2 E2E suite); see
+    # docs/plans/2026-05-10-memory-v2-execution-plan.md gate G1.5.
+    add_custom_target(memory_v2_local_proof
+        COMMAND ${CMAKE_COMMAND} -E env HUMAN_TESTS=$<TARGET_FILE:human_tests>
+            bash ${CMAKE_SOURCE_DIR}/scripts/memory-v2-local-proof.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        DEPENDS human_tests
+        COMMENT "Memory v2 local proof (collision guard + v2 E2E suite)"
+        VERBATIM)
 endif()
 if(HU_ENABLE_TOPOLOGY_CHECK AND NOT WIN32)
     add_custom_target(human_topology_check
@@ -2019,7 +2038,8 @@ if(NOT HU_ENABLE_ML)
         src/ml/tokenizer_bpe.c src/ml/dataloader.c src/ml/prepare.c
         src/ml/evaluator.c src/ml/experiment.c src/ml/experiment_store.c src/ml/gpt.c
         src/ml/muon_adamw.c src/ml/train.c src/ml/checkpoint.c src/ml/cli.c
-        src/ml/lora.c src/ml/agent_trainer.c src/ml/training_data.c
+        src/ml/lora.c src/ml/agent_trainer.c src/ml/m3_frontier_adapter.c
+        src/ml/training_data.c src/ml/training_data_extractor.c
         src/providers/huml.c)
 endif()
 if(NOT HU_ENABLE_LEARNING)
@@ -2581,7 +2601,7 @@ if(HU_ENABLE_FEEDS)
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
 list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
