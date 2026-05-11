@@ -41,13 +41,17 @@ struct hu_scheduler {
     hu_persona_t *persona;
 };
 
-/* Wall clock (monotonic-ish) in milliseconds. */
+#ifdef HU_ENABLE_SQLITE
+/* Wall clock (monotonic-ish) in milliseconds. Only referenced from the
+ * SQLite-enabled scheduler paths below; gate the definition so the
+ * no-sqlite / minimal build doesn't trip -Werror=unused-function. */
 static int64_t scheduler_now_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
         return (int64_t)time(NULL) * 1000;
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
+#endif
 
 /* ── Default runners ─────────────────────────────────────────────────── */
 
@@ -612,6 +616,7 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
     return HU_ERR_NOT_SUPPORTED;
 }
 hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out) {
+    (void)s;
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));

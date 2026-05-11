@@ -416,6 +416,11 @@ typedef struct hu_bootstrap_internal {
 
     hu_plugin_hook_ctx_t plugin_hook_ctx;
 
+    /* Webhook manager: created during bootstrap to back the webhook_register /
+     * webhook_poll / webhook_list tools. Owned + destroyed by hu_app_teardown.
+     * NULL when webhook tools failed to register (bootstrap continues). */
+    hu_webhook_manager_t *webhook_mgr;
+
     bool provider_ok;
     bool agent_ok;
 } hu_bootstrap_internal_t;
@@ -768,11 +773,13 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         }
     }
 
-    /* Webhook tools: create manager and append webhook tools */
+    /* Webhook tools: create manager and append webhook tools.
+     * Manager pointer is stashed on bi so hu_app_teardown can free it. */
     {
         hu_webhook_manager_t *webhook_mgr = NULL;
         hu_error_t webhook_err = hu_webhook_manager_create(alloc, &webhook_mgr);
         if (webhook_err == HU_OK && webhook_mgr) {
+            bi->webhook_mgr = webhook_mgr;
             /* Merge webhook tools with existing tools */
             hu_tool_t webhook_tools[3] = {0};
             size_t webhook_count = 0;
@@ -1896,6 +1903,8 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         hu_agent_pool_destroy(bi->agent_pool);
     if (bi->mailbox)
         hu_mailbox_destroy(bi->mailbox);
+    if (bi->webhook_mgr)
+        hu_webhook_manager_destroy(alloc, bi->webhook_mgr);
     hu_config_deinit(&bi->cfg);
     alloc->free(alloc->ctx, bi, sizeof(hu_bootstrap_internal_t));
     ctx->channel_instances = NULL;

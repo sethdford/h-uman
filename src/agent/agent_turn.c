@@ -4261,6 +4261,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     agent->alloc->free(agent->alloc->ctx, outcome_ctx, outcome_ctx_len + 1);
                 if (acp_context)
                     agent->alloc->free(agent->alloc->ctx, acp_context, acp_context_len + 1);
+                if (turn_cache)
+                    hu_tool_cache_destroy(agent->alloc, turn_cache);
                 hu_agent_clear_current_for_tools();
                 return HU_OK;
             }
