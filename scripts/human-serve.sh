@@ -40,6 +40,11 @@ fi
 export HU_SELF_RAG_MODE=soft
 export HU_SELF_RAG_STREAMING=1
 
+# Skip Gemma 4's +512 thinking-token budget on non-stream calls (20-40% faster).
+# Set GEMMA_DISABLE_THINKING=0 in your shell before `human-serve.sh start` if you want
+# the model to use its <|channel>thought ... <channel|> reasoning blocks.
+export GEMMA_DISABLE_THINKING="${GEMMA_DISABLE_THINKING:-1}"
+
 read_config() {
     if [[ -f "$CONFIG" ]] && command -v python3 &>/dev/null; then
         eval "$(python3 -c "

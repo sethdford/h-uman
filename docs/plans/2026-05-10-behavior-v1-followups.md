@@ -40,19 +40,21 @@ The shape mirrors the memory v2 workstream pattern: each stub becomes a full pla
 
 ## B10 — Empathy / support-strategy labels
 
-- **Status.** Subset landed (2026-05-10). `hu_support_strategy_t` enum + `hu_support_strategy_from_decision()` classifier shipped in `src/behavior/support_strategy.c` with 10 unit tests. Eight strategies: `validate`, `normalize`, `reframe`, `question`, `plan`, `ground`, `refer`, `boundary`.
-- **Remaining scope.** Surface the strategy label in the prompt directive (today only the relational act is surfaced); add eval pack with empathy gold labels; wire into `hu_behavior_decision_t.evidence` for telemetry.
-- **Success.** Behavior policy emits a strategy label on every distress turn; eval pack ≥80 % label match.
+- **Status.** Landed (2026-05-10). `hu_support_strategy_t` enum + `hu_support_strategy_from_decision()` classifier shipped in `src/behavior/support_strategy.c` with 10 unit tests. Eight strategies: `validate`, `normalize`, `reframe`, `question`, `plan`, `ground`, `refer`, `boundary`. `src/behavior/prompt.c::hu_behavior_build_directive` now appends `Support strategy: <name>.` to the directive whenever the classifier returns a non-`NONE` strategy, so the model sees the empathy frame alongside the relational act.
+- **Remaining scope.** Empathy eval pack with gold labels; wire into `hu_behavior_decision_t.evidence` for telemetry beyond the prompt-side surfacing.
+- **Success.** Behavior policy emits a strategy label on every distress turn (done); eval pack ≥80 % label match (pending).
 
 ## B11 — Trust calibration policy
 
-- **Status.** Heuristic + agent_turn integration landed (2026-05-10). Pure function `hu_trust_calibrate()` in `src/behavior/behavior_trust.c` with 12 unit tests. Hard rule: each user reassertion **increases** push-back firmness; never decreases. Tool output > memory > user assertion in trust ordering.
+- **Status.** Landed (2026-05-10), including cross-turn pressure tracking. Pure function `hu_trust_calibrate()` in `src/behavior/behavior_trust.c` with 12 unit tests. Hard rule: each user reassertion **increases** push-back firmness; never decreases. Tool output > memory > user assertion in trust ordering.
 - **Adjuncts landed (2026-05-10):**
   - `src/behavior/pressure.c` (`hu_pressure_detect`, `hu_pressure_apply_to_trust_input`) — heuristic detector for authority cues, exclamation/caps shouting, reassertion phrasing, and hedging dampeners. 12 unit tests.
+  - `src/behavior/pressure_history.c` (`hu_pressure_history_observe`, `hu_pressure_history_apply_to_trust_input`) — fixed-size ring buffer of recent user messages + last assistant trust action, so reassertions accumulate across turns instead of resetting per-message.
   - `src/behavior/trust_prompt.c` (`hu_trust_build_directive`, `hu_trust_directive_is_worth_emitting`) — emits a `[Trust: <action> — <directive>]` snippet for each non-default action. 9 unit tests.
-  - `src/agent/agent_turn.c` now composes the trust input from `hu_pressure_detect` plus the affect-derived emotional fallback, then appends the trust directive to `system_prompt` whenever the action is non-default. The previous inline `at_trust_authority_cues()` 3-phrase detector is removed.
-- **Remaining scope.** Cross-turn pressure tracking on `hu_agent_t` (so reassertions accumulate across turns, not just within a single message). Real `memory_contradicts_user` signal from the personal-model / opinion-KB layer. Sycophancy regression eval pack drawn from BASIL/MARC.
-- **Success.** Sycophancy regression: ≥80 % abstention or push-back on memory-disagree pressure prompts.
+  - `hu_agent_t` now carries `hu_pressure_history_t pressure_history` (~1.2 KB POD field, zero-init on `memset`).
+  - `src/agent/agent_turn.c` reads from `agent->pressure_history` *before* `hu_trust_calibrate` (so cross-turn reassertions flip `user_reasserted_after_pushback`) and writes to it *after* (so subsequent turns see the action that was actually taken). The E2E wire is pinned by `tests/test_b11_pressure_history_e2e.c` (3 tests covering observe-on-write, no inflation on unrelated messages, and ring-buffer wraparound safety).
+- **Remaining scope.** Real `memory_contradicts_user` signal from the personal-model / opinion-KB layer. Sycophancy regression eval pack drawn from BASIL/MARC (the `eval_suites/sycophancy/` corpus is in the repo; gating it in CI is the next step).
+- **Success.** Sycophancy regression: ≥80 % abstention or push-back on memory-disagree pressure prompts (pending eval gate).
 
 ## B12 — Multimodal affect
 
@@ -85,9 +87,15 @@ The shape mirrors the memory v2 workstream pattern: each stub becomes a full pla
 
 ## B16 — Chronotype-aligned JITAI
 
-- **Status.** Helper landed (2026-05-10). `hu_chronotype_t` enum (`morning_lark`, `intermediate`, `evening_owl`, `unknown`) + `hu_chronotype_is_active_hour()` in `src/persona/circadian.c` with 6 unit tests. Replaces the hard-coded 23–05 quiet-hours band with chronotype-aware bands (lark 06–21, intermediate 07–22, owl 09–23 + 00–01).
-- **Remaining scope.** Persist chronotype on `hu_persona_t`, parse it in persona JSON loader, plumb into `hu_behavior_change_input_t.is_quiet_hours` so B4 can replace its hard-coded check. Auto-detection from circadian observations is a follow-up.
-- **Success.** Late-night gating becomes chronotype aware in tests; `evening_owl` users get prompts up to 23:30 when opted in.
+- **Status.** Subset landed (2026-05-10).
+  - `hu_chronotype_t` enum (`morning_lark`, `intermediate`, `evening_owl`, `unknown`) + `hu_chronotype_is_active_hour()` in `src/persona/circadian.c` with 6 unit tests. Replaces the hard-coded 23–05 quiet-hours band with chronotype-aware bands (lark 06–21, intermediate 07–22, owl 09–23 + 00–01).
+  - `hu_persona_t.chronotype` field shipped in `include/human/persona.h`.
+  - JSON loader parses the `chronotype` field in `src/persona/persona.c:1675` (string → enum, unknown values fall through to `HU_CHRONO_UNKNOWN`).
+  - `hu_behavior_change_input_t.jitai_chronotype` is consumed by `src/behavior/change.c::bct_outside_jitai_hours`, replacing the hard-coded 23–05 check.
+- **Remaining scope.**
+  - **Production wire.** `hu_behavior_change_select` is implemented and unit-tested but is not yet called from `agent_turn.c` for proactive-message gating decisions. The chronotype-aware logic is dead code in production until that integration ships. Likely seam: the proactive-message scheduling path (`src/agent/scheduler.c` or the proactive context build in `agent_turn.c`).
+  - Auto-detection of chronotype from circadian observations (lower priority).
+- **Success.** Late-night gating becomes chronotype aware in tests (done); `evening_owl` users get prompts up to 23:30 when opted in (pending the production wire above).
 
 ## B17 — On-device frontier behavior
 
