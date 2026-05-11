@@ -861,6 +861,26 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         }
     }
 
+    /* W11 live-provider wiring: when streaming self-RAG is enabled, append
+     * the control-token directive to the system prompt so the model
+     * actually knows the protocol exists. The parser in
+     * hu_self_rag_stream_callback was previously dead-loaded — frontier
+     * models never emit <retrieve>/<critique>/<refuse> without being
+     * told they can. We do this once, outside the streaming tool loop,
+     * so each tool-loop iteration sees the same (extended) system_prompt
+     * and the all_msgs[0].content pointer stays valid for the duration
+     * of the request. OOM here is non-fatal: the parser still runs;
+     * the model just won't emit control tokens. */
+    if (system_prompt && agent->w7_facade) {
+        bool srag_stream_enabled_check =
+            (agent->config && agent->config->agent.self_rag_streaming) ||
+            getenv("HU_SELF_RAG_STREAMING");
+        if (srag_stream_enabled_check) {
+            (void)hu_self_rag_stream_directive_append(agent->alloc, &system_prompt,
+                                                       &system_prompt_len);
+        }
+    }
+
     /* ── Streaming tool loop ─────────────────────────────────────────────── */
     char *final_content = NULL;
     size_t final_content_len = 0;

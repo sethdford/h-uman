@@ -700,9 +700,14 @@ hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
      * event_end = 0 is treated as "still true". A relation that ended *exactly*
      * at from_ts no longer overlaps (the cutover instant belongs to the next
      * window) — hence event_end > ?, not >=. */
+    /* W8 P2 — `confidence_variance` is the Bayesian companion to
+     * `confidence` (= mean). Append at column 13 so existing column
+     * indices (0..12) stay stable and the v1 backend's record-population
+     * loop can copy it in without renumbering anything. */
     const char *sql =
         "SELECT id, source_id, target_id, relation_type, weight, first_seen, last_seen, context,"
-        " event_start, event_end, confidence, supersedes_id, provenance "
+        " event_start, event_end, confidence, supersedes_id, provenance,"
+        " confidence_variance "
         "FROM relations WHERE contact_id = ? "
         "AND event_start <= ? "
         "AND (event_end = 0 OR event_end > ?) "
@@ -762,6 +767,7 @@ hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
             r->provenance_len = (size_t)sqlite3_column_bytes(stmt, 12);
             r->provenance = hu_strndup(alloc, prov, r->provenance_len);
         }
+        r->confidence_variance = (float)sqlite3_column_double(stmt, 13);
         count++;
     }
     sqlite3_finalize(stmt);
@@ -1470,9 +1476,10 @@ hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const c
     const char *cid = contact_id ? contact_id : "";
     int cid_len = contact_id ? (int)contact_id_len : 0;
 
+    /* W8 P2 — see hu_graph_relations_in_window for the column-13 rationale. */
     const char *sql = "SELECT r.id, r.source_id, r.target_id, r.relation_type, r.weight, "
                       "r.first_seen, r.last_seen, r.context, r.event_start, r.event_end, "
-                      "r.confidence, r.supersedes_id, r.provenance "
+                      "r.confidence, r.supersedes_id, r.provenance, r.confidence_variance "
                       "FROM relations r WHERE r.contact_id = ? ORDER BY r.weight DESC LIMIT ?";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
@@ -1523,6 +1530,7 @@ hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const c
         const char *prov = (const char *)sqlite3_column_text(stmt, 12);
         r->provenance_len = prov ? strlen(prov) : 0;
         r->provenance = r->provenance_len ? hu_strndup(alloc, prov, r->provenance_len) : NULL;
+        r->confidence_variance = (float)sqlite3_column_double(stmt, 13);
         count++;
     }
     sqlite3_finalize(stmt);
@@ -1551,10 +1559,14 @@ hu_error_t hu_graph_list_relations_verifier_scan(hu_graph_t *g, hu_allocator_t *
     const char *cid = contact_id ? contact_id : "";
     int cid_len = contact_id ? (int)contact_id_len : 0;
 
+    /* W8 P2 — extra columns for endpoint names sit at indices 13/14;
+     * `confidence_variance` is appended at column 15 so the existing
+     * column-13/14 reads for source_name/target_name don't shift. */
     const char *sql =
         "SELECT r.id, r.source_id, r.target_id, r.relation_type, r.weight, "
         "r.first_seen, r.last_seen, r.context, r.event_start, r.event_end, "
-        "r.confidence, r.supersedes_id, r.provenance, es.name, et.name "
+        "r.confidence, r.supersedes_id, r.provenance, es.name, et.name, "
+        "r.confidence_variance "
         "FROM relations r "
         "JOIN entities es ON r.source_id = es.id AND r.contact_id = es.contact_id "
         "JOIN entities et ON r.target_id = et.id AND r.contact_id = et.contact_id "
@@ -1614,6 +1626,7 @@ hu_error_t hu_graph_list_relations_verifier_scan(hu_graph_t *g, hu_allocator_t *
         const char *tn = (const char *)sqlite3_column_text(stmt, 14);
         r->target_name_len = tn ? strlen(tn) : 0;
         r->target_name = r->target_name_len ? hu_strndup(alloc, tn, r->target_name_len) : NULL;
+        r->confidence_variance = (float)sqlite3_column_double(stmt, 15);
         count++;
     }
     sqlite3_finalize(stmt);

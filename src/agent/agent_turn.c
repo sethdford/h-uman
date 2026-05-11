@@ -3777,6 +3777,63 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
     }
 
+    /* W10: Recall prior reasoning traces for similar queries and inject as context.
+     * Uses the same goal_verb extraction as the write path (first 63 chars of msg). */
+#ifdef HU_ENABLE_SQLITE
+    if (system_prompt && agent->w7_facade && msg && msg_len > 0) {
+        hu_memory_facade_t *rt_mf = hu_w7_facade_memory_handle(agent->w7_facade);
+        if (rt_mf) {
+            char rt_goal[64];
+            size_t rt_glen = msg_len < sizeof(rt_goal) - 1
+                                 ? msg_len : sizeof(rt_goal) - 1;
+            memcpy(rt_goal, msg, rt_glen);
+            rt_goal[rt_glen] = '\0';
+
+            const char *rt_cid =
+                agent->memory_session_id ? agent->memory_session_id : "";
+            size_t rt_cid_len =
+                agent->memory_session_id ? agent->memory_session_id_len : 0;
+
+            hu_reasoning_trace_t *recalled = NULL;
+            size_t recalled_count = 0;
+            hu_error_t rt_err = hu_reasoning_trace_recall(
+                rt_mf, agent->alloc, rt_cid, rt_cid_len,
+                rt_goal, rt_glen, NULL, 0, 3,
+                &recalled, &recalled_count);
+
+            if (rt_err == HU_OK && recalled && recalled_count > 0) {
+                for (size_t ri = 0; ri < recalled_count; ri++) {
+                    if (!recalled[ri].cot_text || recalled[ri].cot_len == 0)
+                        continue;
+                    const char *prefix =
+                        "\n[Previous reasoning for a similar query: ";
+                    const char *suffix = "]\n";
+                    size_t pfx_len = strlen(prefix);
+                    size_t sfx_len = strlen(suffix);
+                    size_t cot_use = recalled[ri].cot_len < 512
+                                         ? recalled[ri].cot_len : 512;
+                    size_t chunk = pfx_len + cot_use + sfx_len;
+                    size_t new_len = system_prompt_len + chunk;
+                    char *new_sp = (char *)agent->alloc->realloc(
+                        agent->alloc->ctx, system_prompt,
+                        system_prompt_len + 1, new_len + 1);
+                    if (new_sp) {
+                        memcpy(new_sp + system_prompt_len, prefix, pfx_len);
+                        memcpy(new_sp + system_prompt_len + pfx_len,
+                               recalled[ri].cot_text, cot_use);
+                        memcpy(new_sp + system_prompt_len + pfx_len + cot_use,
+                               suffix, sfx_len);
+                        new_sp[new_len] = '\0';
+                        system_prompt = new_sp;
+                        system_prompt_len = new_len;
+                    }
+                }
+                hu_reasoning_traces_free(agent->alloc, recalled, recalled_count);
+            }
+        }
+    }
+#endif
+
     /* Anti-sycophancy: inject directive when we hold a strong opinion on the topic */
 #ifdef HU_ENABLE_SQLITE
     if (system_prompt && agent->memory && msg && msg_len > 0) {
@@ -4615,6 +4672,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 kv_prompt_hash, (long long)cached->prompt_token_count);
                     hu_kv_cache_entry_free(agent->alloc, cached);
                 }
+
+                /* W10: invalidate stale KV entries when model version changes. */
+                if (agent->infra.kv_last_model[0] &&
+                    strcmp(agent->infra.kv_last_model, kv_model_ver) != 0) {
+                    hu_log_info("agent_turn", agent->observer,
+                                "W10 model changed %s -> %s, invalidating stale KV",
+                                agent->infra.kv_last_model, kv_model_ver);
+                    hu_kv_cache_invalidate_for_model(kv_mf, agent->infra.kv_last_model);
+                }
+                strncpy(agent->infra.kv_last_model, kv_model_ver,
+                        sizeof(agent->infra.kv_last_model) - 1);
+                agent->infra.kv_last_model[sizeof(agent->infra.kv_last_model) - 1] = '\0';
             }
         }
 #endif
@@ -5862,6 +5931,21 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             int64_t blob_id = 0;
                             (void)hu_memory_blob_put(blob_mf, blob_cid, blob_cid_len,
                                                      &blob, &blob_id);
+                            /* W10: verify persisted blob and extract caption if available */
+                            if (blob_id > 0) {
+                                hu_memory_blob_t *got_blob = NULL;
+                                if (hu_memory_blob_get(blob_mf, agent->alloc, blob_id,
+                                                       &got_blob) == HU_OK && got_blob) {
+                                    if (got_blob->caption && got_blob->caption_len > 0)
+                                        hu_log_info("agent_turn", agent->observer,
+                                                    "W10 blob %lld caption: %.*s",
+                                                    (long long)blob_id,
+                                                    (int)(got_blob->caption_len < 80
+                                                              ? got_blob->caption_len : 80),
+                                                    got_blob->caption);
+                                    hu_memory_blob_free(agent->alloc, got_blob);
+                                }
+                            }
                         }
                         break;
                     }

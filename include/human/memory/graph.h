@@ -56,7 +56,16 @@ typedef struct hu_graph_relation {
      * confidence = 1.0, supersedes_id = 0, provenance = NULL on first read. */
     int64_t event_start;      /* EVENT: when the relation became true in the world; 0 = unknown */
     int64_t event_end;        /* EVENT: when it ceased; 0 = still true */
-    float confidence;         /* 0.0-1.0; default 1.0 */
+    float confidence;         /* 0.0-1.0; default 1.0. W8 belief MEAN. */
+    /* W8 P2 — Bayesian variance over `confidence`. 0.0 = fully certain, max
+     * 0.25 (uniform prior). Populated from the `confidence_variance`
+     * column on every relation read so consumers can distinguish "0.8
+     * with low variance" from "0.8 with high variance". Legacy rows
+     * default to 0.0 (treated as scalar). Honor on write via
+     * `hu_graph_upsert_relation_with_belief`; the legacy
+     * `hu_graph_upsert_relation_ex` derives a default from provenance
+     * via `hu_belief_initial_variance_for_provenance`. */
+    float confidence_variance;
     int64_t supersedes_id;    /* prior relation this replaces; 0 = none */
     char *provenance;         /* source URI / channel / turn-id; nullable */
     size_t provenance_len;

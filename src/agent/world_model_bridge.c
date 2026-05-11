@@ -855,8 +855,17 @@ hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s,
                                                  hu_lora_runner_ctx_t *ctx) {
     if (!s || !s->s || !ctx)
         return HU_ERR_INVALID_ARGUMENT;
+#if defined(HU_ENABLE_LEARNING)
     return hu_scheduler_register_runner(s->s, HU_JOB_LORA_TRAINING,
                                         hu_lora_training_runner, ctx);
+#else
+    /* Learning loop not built — return NOT_SUPPORTED so the daemon's
+     * wiring code can keep its current shape without a #ifdef. The
+     * scheduler simply has no runner for HU_JOB_LORA_TRAINING; any
+     * job of that kind will be rejected by the scheduler at enqueue
+     * time. */
+    return HU_ERR_NOT_SUPPORTED;
+#endif
 }
 
 hu_error_t hu_w14_scheduler_register_kv_prewarm_runner(hu_w14_scheduler_t *s,
@@ -972,8 +981,15 @@ hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
                                                           hu_training_data_runner_ctx_t *ctx) {
     if (!s || !s->s || !ctx)
         return HU_ERR_INVALID_ARGUMENT;
+#if defined(HU_ENABLE_LEARNING)
     return hu_scheduler_register_runner(s->s, HU_JOB_TRAINING_DATA_EXTRACT,
                                         hu_training_data_runner, ctx);
+#else
+    /* Same rationale as register_lora_runner — without HU_ENABLE_LEARNING
+     * we have no `hu_training_data_runner` symbol to register. Daemon
+     * keeps its branch; tick is a no-op. */
+    return HU_ERR_NOT_SUPPORTED;
+#endif
 }
 
 hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,

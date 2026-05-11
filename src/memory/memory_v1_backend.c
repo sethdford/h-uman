@@ -410,6 +410,10 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
             recs[i].event_start = rels[i].event_start;
             recs[i].event_end = rels[i].event_end;
             recs[i].confidence = rels[i].confidence;
+            /* W8 P2 — propagate Bayesian variance alongside the mean so
+             * the facade record carries both halves of the belief. The
+             * field is zeroed for legacy rows (treated as scalar). */
+            recs[i].confidence_variance = rels[i].confidence_variance;
             hu_graph_relation_t *p = xalloc(alloc, sizeof(*p));
             if (p == NULL) {
                 for (size_t j = 0; j < i; j++) {
@@ -470,6 +474,7 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
             recs[i].event_start = rels[i].event_start;
             recs[i].event_end = rels[i].event_end;
             recs[i].confidence = rels[i].confidence;
+            recs[i].confidence_variance = rels[i].confidence_variance; /* W8 P2 */
             hu_graph_relation_t *p = xalloc(alloc, sizeof(*p));
             if (p == NULL) {
                 /* Roll back. */
@@ -521,6 +526,7 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
         recs[i].event_start = rels[i].event_start;
         recs[i].event_end = rels[i].event_end;
         recs[i].confidence = rels[i].confidence;
+        recs[i].confidence_variance = rels[i].confidence_variance; /* W8 P2 */
         hu_graph_relation_t *p = xalloc(alloc, sizeof(*p));
         if (p == NULL) {
             for (size_t j = 0; j < i; j++) {

@@ -2,6 +2,7 @@
 #include "human/core/log.h"
 #include "human/memory/belief.h"
 #include "human/memory/conflict_resolver.h"
+#include "human/memory/hyperedge.h"
 
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/memory.h"
@@ -451,9 +452,14 @@ static hu_error_t phase_edge_reweight(struct sqlite3 *db, const hu_autodream_con
     return HU_OK;
 }
 
-/* Phase 2: Community summaries — for every distinct community_id in the live
- * entities table for each contact, generate-or-refresh the summary. */
+/* Minimum entity count per contact before Leiden community detection runs.
+ * Below this threshold only manually-assigned community_ids are summarized. */
+#define LEIDEN_ENTITY_THRESHOLD 50
+
+/* Phase 2: Community summaries — detect communities via Leiden label propagation
+ * when enough entities exist, then generate-or-refresh summaries. */
 static hu_error_t phase_community_summaries(hu_allocator_t *alloc, struct sqlite3 *db,
+                                            struct hu_graph *graph,
                                             const hu_autodream_config_t *cfg,
                                             hu_autodream_report_t *r, int64_t deadline_ms) {
     if (!db)
@@ -461,6 +467,34 @@ static hu_error_t phase_community_summaries(hu_allocator_t *alloc, struct sqlite
     if (ensure_autodream_schema(db) != HU_OK)
         return HU_ERR_IO;
     int64_t now = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
+
+    /* Run Leiden community detection for each contact with enough entities.
+     * This assigns community_id on the entities table so the summary loop
+     * below has communities to summarize. */
+    if (graph) {
+        sqlite3_stmt *cid_st = NULL;
+        if (sqlite3_prepare_v2(db,
+                               "SELECT contact_id, COUNT(*) FROM entities "
+                               "GROUP BY contact_id HAVING COUNT(*) >= ?",
+                               -1, &cid_st, NULL) == SQLITE_OK) {
+            sqlite3_bind_int(cid_st, 1, LEIDEN_ENTITY_THRESHOLD);
+            while (sqlite3_step(cid_st) == SQLITE_ROW) {
+                if (cfg->max_runtime_ms > 0 && wall_now_ms() > deadline_ms) {
+                    r->budget_exceeded = true;
+                    break;
+                }
+                const char *cid = (const char *)sqlite3_column_text(cid_st, 0);
+                size_t cid_len = cid ? (size_t)sqlite3_column_bytes(cid_st, 0) : 0;
+                char *leiden_out = NULL;
+                size_t leiden_len = 0;
+                hu_error_t le = hu_graph_leiden_communities(
+                    graph, alloc, cid, cid_len, 20, 10, &leiden_out, &leiden_len);
+                if (le == HU_OK && leiden_out)
+                    alloc->free(alloc->ctx, leiden_out, leiden_len + 1);
+            }
+            sqlite3_finalize(cid_st);
+        }
+    }
 
     sqlite3_stmt *sel = NULL;
     if (sqlite3_prepare_v2(db,
@@ -488,6 +522,124 @@ static hu_error_t phase_community_summaries(hu_allocator_t *alloc, struct sqlite
     return HU_OK;
 }
 
+/* Phase 4: Hyperedge consolidation — find relations that share a context string
+ * binding 3+ distinct entities and create a hyperedge capturing the n-ary fact.
+ * Schema is created lazily by hu_hyperedge_upsert; tables only appear when the
+ * first hyperedge is written. Capped at 100 contexts per run. */
+static hu_error_t phase_hyperedge_consolidation(struct sqlite3 *db, hu_memory_facade_t *facade,
+                                                hu_allocator_t *alloc,
+                                                const hu_autodream_config_t *cfg,
+                                                hu_autodream_report_t *r, int64_t deadline_ms) {
+    /* `alloc` is reserved for future hyperedge synthesis work that will
+     * need to materialise summary strings. The current implementation
+     * only writes integer keys into hyperedges, so the allocator is
+     * unused this version — `(void)` suppresses the -Werror warning
+     * without changing the public callsite shape. */
+    (void)alloc;
+    if (!db || !facade)
+        return HU_OK;
+
+    /* CTE collects unique entity IDs per (contact, context) via UNION,
+     * then counts. Only contexts binding 3+ entities qualify. */
+    const char *ctx_sql =
+        "WITH ectx AS ("
+        " SELECT contact_id, context, source_id AS eid FROM relations"
+        "  WHERE context IS NOT NULL AND context != '' AND event_end = 0"
+        " UNION"
+        " SELECT contact_id, context, target_id AS eid FROM relations"
+        "  WHERE context IS NOT NULL AND context != '' AND event_end = 0"
+        ") SELECT contact_id, context, COUNT(DISTINCT eid) AS n"
+        " FROM ectx GROUP BY contact_id, context HAVING n >= 3 LIMIT 100";
+    sqlite3_stmt *ctx_st = NULL;
+    if (sqlite3_prepare_v2(db, ctx_sql, -1, &ctx_st, NULL) != SQLITE_OK)
+        return HU_OK;
+
+    while (sqlite3_step(ctx_st) == SQLITE_ROW) {
+        if (cfg->max_runtime_ms > 0 && wall_now_ms() > deadline_ms) {
+            r->budget_exceeded = true;
+            break;
+        }
+        const char *cid = (const char *)sqlite3_column_text(ctx_st, 0);
+        size_t cid_len = cid ? (size_t)sqlite3_column_bytes(ctx_st, 0) : 0;
+        const char *context = (const char *)sqlite3_column_text(ctx_st, 1);
+        size_t ctx_len = context ? (size_t)sqlite3_column_bytes(ctx_st, 1) : 0;
+        if (!context || ctx_len == 0)
+            continue;
+
+        /* Check whether a hyperedge already exists for this context. */
+        {
+            sqlite3_stmt *chk = NULL;
+            const char *chk_sql =
+                "SELECT 1 FROM hyperedges WHERE contact_id = ? AND relation_label = ? LIMIT 1";
+            if (sqlite3_prepare_v2(db, chk_sql, -1, &chk, NULL) == SQLITE_OK) {
+                char label[64];
+                size_t llen = ctx_len < sizeof(label) - 1 ? ctx_len : sizeof(label) - 1;
+                memcpy(label, context, llen);
+                label[llen] = '\0';
+                sqlite3_bind_text(chk, 1, cid ? cid : "", (int)cid_len, SQLITE_STATIC);
+                sqlite3_bind_text(chk, 2, label, (int)llen, SQLITE_STATIC);
+                int exists = (sqlite3_step(chk) == SQLITE_ROW);
+                sqlite3_finalize(chk);
+                if (exists)
+                    continue;
+            }
+        }
+
+        /* Collect unique entity IDs for this context. */
+        int64_t eids[32];
+        size_t eid_count = 0;
+        {
+            sqlite3_stmt *eid_st = NULL;
+            const char *eid_sql =
+                "SELECT DISTINCT source_id FROM relations"
+                " WHERE contact_id = ? AND context = ? AND event_end = 0"
+                " UNION"
+                " SELECT DISTINCT target_id FROM relations"
+                " WHERE contact_id = ? AND context = ? AND event_end = 0";
+            if (sqlite3_prepare_v2(db, eid_sql, -1, &eid_st, NULL) != SQLITE_OK)
+                continue;
+            sqlite3_bind_text(eid_st, 1, cid ? cid : "", (int)cid_len, SQLITE_STATIC);
+            sqlite3_bind_text(eid_st, 2, context, (int)ctx_len, SQLITE_STATIC);
+            sqlite3_bind_text(eid_st, 3, cid ? cid : "", (int)cid_len, SQLITE_STATIC);
+            sqlite3_bind_text(eid_st, 4, context, (int)ctx_len, SQLITE_STATIC);
+            while (sqlite3_step(eid_st) == SQLITE_ROW && eid_count < 32)
+                eids[eid_count++] = sqlite3_column_int64(eid_st, 0);
+            sqlite3_finalize(eid_st);
+        }
+        if (eid_count < 3)
+            continue;
+
+        hu_hyperedge_member_t members[32];
+        memset(members, 0, sizeof(members));
+        for (size_t i = 0; i < eid_count; i++) {
+            members[i].entity_id = eids[i];
+            snprintf(members[i].role, sizeof(members[i].role), "participant");
+        }
+
+        hu_hyperedge_t he;
+        memset(&he, 0, sizeof(he));
+        size_t llen = ctx_len < sizeof(he.relation_label) - 1
+                          ? ctx_len
+                          : sizeof(he.relation_label) - 1;
+        memcpy(he.relation_label, context, llen);
+        he.relation_label[llen] = '\0';
+        he.members = members;
+        he.members_count = eid_count;
+        he.belief = hu_belief_init(0.8f, "autodream", cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms());
+        he.event_start = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
+
+        int64_t he_id = 0;
+        if (!cfg->dry_run) {
+            if (hu_hyperedge_upsert(facade, cid, cid_len, &he, &he_id) == HU_OK)
+                r->derived_facts_added++;
+        } else {
+            r->derived_facts_added++;
+        }
+    }
+    sqlite3_finalize(ctx_st);
+    return HU_OK;
+}
+
 static hu_error_t autodream_run_impl(hu_allocator_t *alloc, struct hu_graph *graph,
                                      hu_memory_facade_t *facade_opt,
                                      const hu_autodream_config_t *cfg,
@@ -508,11 +660,14 @@ static hu_error_t autodream_run_impl(hu_allocator_t *alloc, struct hu_graph *gra
     if (cfg->enable_quarantine_review)
         phase_quarantine_review(db, graph, facade_opt, cfg, out_report, deadline);
     if (!out_report->budget_exceeded && cfg->enable_community_summaries)
-        phase_community_summaries(alloc, db, cfg, out_report, deadline);
+        phase_community_summaries(alloc, db, graph, cfg, out_report, deadline);
     if (!out_report->budget_exceeded && cfg->enable_edge_reweight)
         phase_edge_reweight(db, cfg, out_report, deadline);
-    /* Phase 4 (derived facts) uses cross-graph traversal helpers landing in
-     * W3; leave the counter at 0 here. */
+    /* Phase 4: Derived facts — consolidate multi-entity relations into
+     * hyperedges. Runs only when a facade is available (the hyperedge API
+     * requires the W7 surface). */
+    if (!out_report->budget_exceeded && cfg->enable_derived_facts && facade_opt)
+        phase_hyperedge_consolidation(db, facade_opt, alloc, cfg, out_report, deadline);
 
     out_report->finished_at_ms = wall_now_ms();
 

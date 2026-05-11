@@ -189,6 +189,30 @@ bool hu_self_rag_stream_callback(void *ctx, const hu_stream_chunk_t *chunk);
  * after the stream completes to ensure no partial text is lost. */
 void hu_self_rag_stream_flush(hu_self_rag_stream_ctx_t *ctx);
 
+/* Append the W11 control-token directive to a system prompt. The
+ * directive tells the model that during streaming it may emit:
+ *
+ *   <retrieve>QUERY</retrieve>   — request a mid-stream memory probe
+ *                                  for QUERY (caller side scores
+ *                                  support; if low and STRICT, the
+ *                                  abstention path runs).
+ *   <critique>CLAIM</critique>   — flag a factual claim for self-RAG
+ *                                  verification.
+ *   <refuse>REASON</refuse>      — abort generation; the agent
+ *                                  swaps the response for a policy-
+ *                                  appropriate refusal template.
+ *
+ * On success, `*system_prompt` is reallocated to include the directive
+ * and `*system_prompt_len` is updated. On failure (OOM) the inputs are
+ * left unchanged and HU_ERR_OUT_OF_MEMORY is returned.
+ *
+ * The directive is intentionally short (one paragraph) to keep the
+ * system-prompt cost low; the parser handles tag boundaries even if
+ * the model wraps the tokens in code fences or mid-sentence. */
+hu_error_t hu_self_rag_stream_directive_append(hu_allocator_t *alloc,
+                                                char **system_prompt,
+                                                size_t *system_prompt_len);
+
 #ifdef __cplusplus
 }
 #endif

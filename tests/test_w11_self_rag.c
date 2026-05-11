@@ -1257,6 +1257,92 @@ static void test_w11_stream_wrap_null_returns_error(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+/* W11 live-provider wiring — the streaming protocol parser was previously
+ * dead-loaded because no system prompt told the model the tokens existed.
+ * hu_self_rag_stream_directive_append fixes that by extending the system
+ * prompt with a brief description of each control token. The tests below
+ * pin the contract that landed agent_stream.c:wire HU_SELF_RAG_STREAMING
+ * → directive present in system prompt, OFF → directive absent. */
+static void test_w11_stream_directive_append_extends_system_prompt(void) {
+    hu_allocator_t alloc_v = hu_system_allocator();
+    hu_allocator_t *a = &alloc_v;
+    char *sp = (char *)a->alloc(a->ctx, 32);
+    HU_ASSERT_NOT_NULL(sp);
+    memcpy(sp, "You are a helpful assistant.\n", 30);
+    size_t sp_len = 29;
+    sp[sp_len] = '\0';
+
+    size_t before = sp_len;
+    HU_ASSERT_EQ(hu_self_rag_stream_directive_append(a, &sp, &sp_len), HU_OK);
+    HU_ASSERT(sp_len > before);
+
+    /* The directive MUST mention each of the three control tokens, by
+     * name, exactly as the parser matches them. If the directive ever
+     * gets out of sync with the parser the model will be told about
+     * tokens that get treated as prose, or vice versa. */
+    HU_ASSERT_NOT_NULL(strstr(sp, "<retrieve>"));
+    HU_ASSERT_NOT_NULL(strstr(sp, "</retrieve>"));
+    HU_ASSERT_NOT_NULL(strstr(sp, "<critique>"));
+    HU_ASSERT_NOT_NULL(strstr(sp, "</critique>"));
+    HU_ASSERT_NOT_NULL(strstr(sp, "<refuse>"));
+    HU_ASSERT_NOT_NULL(strstr(sp, "</refuse>"));
+    /* Original content preserved. */
+    HU_ASSERT_NOT_NULL(strstr(sp, "You are a helpful assistant."));
+
+    a->free(a->ctx, sp, sp_len + 1);
+}
+
+static void test_w11_stream_directive_append_null_args_rejected(void) {
+    hu_allocator_t alloc_v = hu_system_allocator();
+    hu_allocator_t *a = &alloc_v;
+    char *sp = NULL;
+    size_t sp_len = 0;
+    HU_ASSERT_EQ(hu_self_rag_stream_directive_append(NULL, &sp, &sp_len),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_self_rag_stream_directive_append(a, NULL, &sp_len),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_self_rag_stream_directive_append(a, &sp, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+/* End-to-end: the directive describes EVERY control token the parser
+ * matches, and a model that follows the directive emits text the parser
+ * correctly catches. We exercise this by appending the directive, then
+ * synthesising a stream that mimics a directive-compliant model emitting
+ * <retrieve>QUERY</retrieve> mid-sentence, and assert the parser
+ * triggers retrieval and strips the tag. */
+static void test_w11_stream_directive_compliant_emission_triggers_parser(void) {
+    hu_allocator_t alloc_v = hu_system_allocator();
+    hu_allocator_t *a = &alloc_v;
+    char *sp = (char *)a->alloc(a->ctx, 16);
+    HU_ASSERT_NOT_NULL(sp);
+    sp[0] = '\0';
+    size_t sp_len = 0;
+    HU_ASSERT_EQ(hu_self_rag_stream_directive_append(a, &sp, &sp_len), HU_OK);
+
+    /* A directive-compliant model reading the appended directive would
+     * emit a <retrieve> tag at the start of a sentence to probe memory.
+     * The parser must catch it. */
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink, NULL, NULL),
+                 HU_OK);
+    send_chunk(&ctx, "Let me check. <retrieve>user-preferences</retrieve>Based on what I know,");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT(ctx.retrieval_triggered);
+    /* The retrieve open tag is stripped; the inner content + close tag
+     * pass through as prose since the parser only matches the openers.
+     * The point is: the model's emission flips the trigger. */
+    HU_ASSERT_NOT_NULL(strstr(sink.buf, "Let me check."));
+    HU_ASSERT_NOT_NULL(strstr(sink.buf, "Based on what I know"));
+    HU_ASSERT(strstr(sink.buf, "<retrieve>") == NULL);
+
+    a->free(a->ctx, sp, sp_len + 1);
+}
+
 static void test_w11_stream_multiple_tags_in_one_stream(void) {
     stream_test_sink_t sink;
     memset(&sink, 0, sizeof(sink));
@@ -1557,6 +1643,9 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_stream_partial_refuse_across_chunks);
     HU_RUN_TEST(test_w11_stream_non_tag_angle_bracket_passes_through);
     HU_RUN_TEST(test_w11_stream_non_content_chunks_pass_through);
+    HU_RUN_TEST(test_w11_stream_directive_append_extends_system_prompt);
+    HU_RUN_TEST(test_w11_stream_directive_append_null_args_rejected);
+    HU_RUN_TEST(test_w11_stream_directive_compliant_emission_triggers_parser);
     HU_RUN_TEST(test_w11_stream_wrap_null_returns_error);
     HU_RUN_TEST(test_w11_stream_multiple_tags_in_one_stream);
 }

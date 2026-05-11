@@ -919,7 +919,15 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
          * sleep-time training cycles. The deterministic CPU backend is
          * always available, so the learner pointer should be non-NULL on
          * any sane host. The W14 sleep scheduler is responsible for
-         * draining and training; we just open + attach + close here. */
+         * draining and training; we just open + attach + close here.
+         *
+         * When HU_ENABLE_LEARNING is off the learner symbols don't exist,
+         * so we leave the agent's `learner` pointer NULL. Every downstream
+         * caller (delta_observer, outcome_tracker bridge, daemon scheduler
+         * tick) NULL-checks before dispatching, so the rest of the agent
+         * still functions; on-device personalisation training simply does
+         * not run this session. */
+#if defined(HU_ENABLE_LEARNING)
         {
             hu_error_t le = hu_learner_open_default(alloc, &bi->learner);
             if (le == HU_OK && bi->learner) {
@@ -935,6 +943,12 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                             hu_error_string(le));
             }
         }
+#else
+        bi->learner = NULL;
+        hu_log_info("bootstrap", obs,
+                    "w13: learner subsystem not built (HU_ENABLE_LEARNING=OFF); "
+                    "persona deltas persist as usual, on-device training disabled");
+#endif
 #ifdef HU_ENABLE_ML
         if (bi->cfg.personalization.m3_adapter_probe_path &&
             bi->cfg.personalization.m3_adapter_probe_path[0])
@@ -1799,11 +1813,16 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         hu_agent_deinit(&bi->agent);
         /* W13 learner is owned here. Close after agent_deinit so any
          * final signal flush still has a live learner. The agent holds a
-         * non-owning pointer; no double-close risk. */
+         * non-owning pointer; no double-close risk. When
+         * HU_ENABLE_LEARNING is off `bi->learner` is always NULL (set
+         * that way in bootstrap above), so the close call is gated to
+         * keep the symbol reference out of the link. */
+#if defined(HU_ENABLE_LEARNING)
         if (bi->learner) {
             hu_learner_close(bi->learner);
             bi->learner = NULL;
         }
+#endif
         bi->provider.vtable = NULL;
         bi->provider.ctx = NULL;
     }

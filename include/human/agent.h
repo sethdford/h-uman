@@ -161,6 +161,9 @@ typedef struct hu_agent_infra {
     struct hu_speculative_cache *speculative_cache;
     struct hu_semantic_cache *response_cache; /* optional; embedding-based response cache */
 
+    /* W10: last model version seen — triggers KV cache invalidation on change */
+    char kv_last_model[64];
+
     /* Workflow infrastructure */
     struct hu_idempotency_registry *idempotency_registry; /* optional; NULL = no dedup */
     hu_workflow_event_log_t *workflow_log;                /* optional; NULL = no event logging */

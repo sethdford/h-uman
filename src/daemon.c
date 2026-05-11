@@ -58,6 +58,7 @@
 /* Security */
 #include "human/security/adversarial.h"
 #include "human/security/companion_safety.h"
+#include "human/security/keystore.h"
 #include "human/security/moderation.h"
 
 /* Music preview integration */
@@ -2263,6 +2264,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                            HU_BUS_EVENT_COUNT);
 
     hu_graph_t *graph = NULL;
+    hu_keystore_t *daemon_keystore = NULL;
 #ifdef HU_ENABLE_SQLITE
     {
         const char *home = getenv("HOME");
@@ -2284,8 +2286,73 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         if (be != HU_OK)
             hu_log_warn("human", agent->observer, "agent graph bind: %s", hu_error_string(be));
     }
+    /* W15: probe for an existing keystore and initialize if the user has
+     * set one up via `human keystore init`. Does NOT auto-create the
+     * keystore directory — that requires user interaction (passphrase).
+     * If the directory exists and HU_KEYSTORE_PASSPHRASE is set, open
+     * and unlock. Otherwise log a warning and continue in plaintext. */
+    {
+        const char *home = getenv("HOME");
+        if (home && *home) {
+            char ks_dir[HU_MAX_PATH];
+            int kn = snprintf(ks_dir, sizeof(ks_dir), "%s/.human/keys", home);
+            if (kn > 0 && (size_t)kn < sizeof(ks_dir)) {
+                struct stat ks_st;
+                if (stat(ks_dir, &ks_st) == 0 && S_ISDIR(ks_st.st_mode)) {
+                    const char *uid = getenv("USER");
+                    if (!uid || !*uid)
+                        uid = "default";
+                    hu_error_t ks_err = hu_keystore_open(alloc, uid, &daemon_keystore);
+                    if (ks_err == HU_OK && daemon_keystore) {
+                        const char *pp = getenv("HU_KEYSTORE_PASSPHRASE");
+                        if (pp && *pp) {
+                            ks_err = hu_keystore_unlock_with_passphrase(
+                                daemon_keystore, pp, strlen(pp));
+                            if (ks_err == HU_OK) {
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "W15: keystore unlocked for user=%s", uid);
+                            } else {
+                                hu_log_warn("human", agent ? agent->observer : NULL,
+                                            "W15: keystore unlock failed (%s); "
+                                            "encryption inactive this session",
+                                            hu_error_string(ks_err));
+                                hu_keystore_close(daemon_keystore, alloc);
+                                daemon_keystore = NULL;
+                            }
+                        } else {
+                            hu_log_warn("human", agent ? agent->observer : NULL,
+                                        "W15: keystore directory exists but "
+                                        "HU_KEYSTORE_PASSPHRASE unset; "
+                                        "encryption inactive this session");
+                            hu_keystore_close(daemon_keystore, alloc);
+                            daemon_keystore = NULL;
+                        }
+                    } else {
+                        hu_log_warn("human", agent ? agent->observer : NULL,
+                                    "W15: keystore open failed (%s)",
+                                    hu_error_string(ks_err));
+                        daemon_keystore = NULL;
+                    }
+                } else {
+                    hu_log_info("human", agent ? agent->observer : NULL,
+                                "W15: no keystore at %s; "
+                                "memory encryption not active "
+                                "(run `human keystore init` to enable)", ks_dir);
+                }
+            }
+        }
+    }
     /* W14 — register LoRA + KV runners (context-dependent) so sleep-time
-     * ticks can drain the W13 learner and prune the KV cache. */
+     * ticks can drain the W13 learner and prune the KV cache.
+     *
+     * Entire block is gated on HU_ENABLE_LEARNING because the LoRA wiring
+     * uses `hu_learner_default_config()` and the runner symbols
+     * (hu_lora_training_runner, hu_training_data_runner) only exist when
+     * the W13 learning loop is built. The KV-cache wiring inside is also
+     * skipped here when learning is off — that's fine because the daemon
+     * doesn't ship a frontier model on a learning-off build, so KV
+     * pre-warming has no chat path to feed. */
+#if defined(HU_ENABLE_LEARNING)
     if (agent && agent->w14_scheduler && agent->learner && config && alloc) {
         static bool w14_lora_wired;
         static hu_lora_runner_ctx_t w14_lora_ctx;
@@ -2366,6 +2433,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             }
         }
     }
+#endif /* HU_ENABLE_LEARNING — W14 LoRA + training data runner wiring */
     /* W13 Phase 4.1 — auto-load the configured LoRA adapter into the live
      * provider. Closes the on-device personalization loop without a
      * separate `human ml apply-adapter` invocation. Failures log a warning
@@ -2786,7 +2854,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * visible to the same training pass that the tick
                          * may dispatch. The bridge is a no-op when learner
                          * is NULL (ML build disabled) or when no new
-                         * outcomes have arrived since the last drain. */
+                         * outcomes have arrived since the last drain.
+                         *
+                         * Both this drain and the LoRA auto-enqueue below
+                         * call into the W13 learning loop — they're
+                         * compile-gated together with the runner-source
+                         * gating in CMakeLists.txt. When learning is off
+                         * `agent->learner` is also always NULL, so even
+                         * if a future caller forgot the gate the runtime
+                         * NULL check would prevent a crash. */
+#if defined(HU_ENABLE_LEARNING)
                         if (agent->learner && agent->outcomes) {
                             hu_error_t be =
                                 hu_learner_bridge_emit_outcomes(agent->learner, agent->outcomes);
@@ -2810,6 +2887,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     agent->w14_scheduler, now_ms, 300000);
                             }
                         }
+#endif /* HU_ENABLE_LEARNING — outcome drain + LoRA auto-enqueue */
                         /* Continuous learning loop: enqueue training data
                          * extraction every 100 scheduler ticks (~100 min)
                          * or every 6 hours, whichever comes first. The
@@ -12090,6 +12168,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     }
     if (agent && agent->verifier_graph == graph)
         agent->verifier_graph = NULL;
+    if (daemon_keystore) {
+        hu_keystore_close(daemon_keystore, alloc);
+        daemon_keystore = NULL;
+    }
     if (graph)
         hu_graph_close(graph, alloc);
     if (agent && agent->outcomes == &daemon_outcomes)

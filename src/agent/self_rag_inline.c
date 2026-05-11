@@ -683,6 +683,46 @@ void hu_self_rag_stream_flush(hu_self_rag_stream_ctx_t *ctx) {
     ctx->token_buf_len = 0;
 }
 
+/* W11 streaming control-token directive — kept terse to minimise the
+ * system-prompt budget impact (~430 bytes). The exact tag spellings
+ * match the parser in hu_self_rag_stream_callback; do not edit one
+ * without the other. */
+static const char *const SELF_RAG_STREAM_DIRECTIVE =
+    "\n[Self-RAG streaming protocol]\n"
+    "During this response you MAY emit any of these control tokens at "
+    "the start of a sentence to request runtime help. They are stripped "
+    "from the user-visible output and do not count toward length budgets.\n"
+    "  <retrieve>QUERY</retrieve>   — probe memory for QUERY before continuing.\n"
+    "  <critique>CLAIM</critique>   — flag CLAIM for support scoring; the\n"
+    "                                  runtime may abstain if support is low.\n"
+    "  <refuse>REASON</refuse>      — abort this response; the runtime will\n"
+    "                                  substitute a policy refusal.\n"
+    "Use them sparingly. Omit them entirely for well-grounded answers.\n";
+
+hu_error_t hu_self_rag_stream_directive_append(hu_allocator_t *alloc,
+                                                char **system_prompt,
+                                                size_t *system_prompt_len) {
+    if (!alloc || !system_prompt || !system_prompt_len)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    size_t add_len = strlen(SELF_RAG_STREAM_DIRECTIVE);
+    size_t old_len = *system_prompt_len;
+    size_t new_len = old_len + add_len;
+
+    /* realloc grows in place if possible. Old buffer is +1 for the
+     * trailing NUL; new buffer is +1 for the same. */
+    char *new_buf = (char *)alloc->realloc(alloc->ctx, *system_prompt,
+                                            old_len + 1, new_len + 1);
+    if (!new_buf)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    memcpy(new_buf + old_len, SELF_RAG_STREAM_DIRECTIVE, add_len);
+    new_buf[new_len] = '\0';
+    *system_prompt = new_buf;
+    *system_prompt_len = new_len;
+    return HU_OK;
+}
+
 hu_error_t hu_self_rag_inline(hu_memory_facade_t *m, hu_provider_t *chat,
                                hu_self_rag_t *out) {
     if (!out)

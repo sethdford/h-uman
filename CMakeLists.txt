@@ -668,8 +668,14 @@ set(HU_CORE_SOURCES
     src/agent/response_guard_retry.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
-    src/agent/lora_training_runner.c
-    src/agent/training_data_runner.c
+    # NOTE: src/agent/lora_training_runner.c and training_data_runner.c
+    # are W13 learning-loop callers — they reference symbols defined only
+    # when HU_ENABLE_LEARNING is on (hu_learner_pending_drain,
+    # hu_learner_train, hu_training_data_extract*). Their sources are
+    # appended below under the HU_ENABLE_LEARNING block. Their public
+    # registration shims in world_model_bridge.c return
+    # HU_ERR_NOT_SUPPORTED when learning is disabled, so the daemon's
+    # wiring is a clean no-op rather than a link error.
     src/agent/kv_prewarm_runner.c
     src/agent/belief_reverify_runner.c
     src/persona/persona_deltas.c
@@ -1199,6 +1205,11 @@ if(HU_ENABLE_LEARNING)
         src/ml/learner_mlx.c
         src/ml/learner_ggml.c
         src/ml/learner_bridge.c
+        # W14 sleep-time runners that drain the W13 learner. These reference
+        # hu_learner_* and hu_training_data_extract* symbols, so they must
+        # be link-gated together with the learner backends.
+        src/agent/lora_training_runner.c
+        src/agent/training_data_runner.c
     )
 endif()
 
@@ -2104,7 +2115,8 @@ endif()
 if(NOT HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/ml/learner.c src/ml/learner_cpu.c src/ml/learner_mlx.c src/ml/learner_ggml.c
-        src/ml/learner_bridge.c)
+        src/ml/learner_bridge.c
+        src/agent/lora_training_runner.c src/agent/training_data_runner.c)
 endif()
 # Phase 7 modules (experience, forgetting, weakness) — tests need them when SQLite is OFF (minimal build)
 if(NOT HU_ENABLE_SQLITE)
@@ -2553,6 +2565,7 @@ set(HU_TEST_SOURCES
     tests/test_v2_e2e_adversarial.c
     tests/test_v2_wiring_e2e.c
     tests/test_b11_pressure_history_e2e.c
+    tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c

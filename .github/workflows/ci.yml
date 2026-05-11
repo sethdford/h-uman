@@ -132,16 +132,19 @@ jobs:
             flags: "-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SKILLS=ON"
           # M3 / Bridge A — exercises the CMake libllama discovery chain in
           # `CMakeLists.txt` (find_package(Llama) → pkg-config → manual probe)
-          # and the Bridge A vtable. Built alongside HU_ENABLE_ML so the
-          # learner subsystem the bridge feeds is also linked (Bridge A's
-          # raison d'être is on-device LoRA training of the frontier model).
+          # and the Bridge A vtable. Deliberately a *minimal* Bridge-A
+          # reproducer: HU_ENABLE_ML and HU_ENABLE_LEARNING are both off,
+          # which proves the llama.cpp provider compiles and links without
+          # piggybacking on the learning loop. The W14 runner sources and
+          # the bootstrap/daemon learner wiring are gated on
+          # HU_ENABLE_LEARNING so the public binary still links cleanly.
           # On runners without libllama installed, the discovery chain falls
           # through to the HU_ERR_NOT_SUPPORTED stub and the build still
           # succeeds. On runners with libllama installed (Homebrew on macOS,
           # apt `llama-cpp` on recent Linux) the real link path is exercised.
           # See docs/plans/2026-05-10-m3-frontier-model-bridge.md.
           - name: llamacpp-on
-            flags: "-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_ML=ON -DHU_ENABLE_LLAMACPP=ON"
+            flags: "-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_LLAMACPP=ON"
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
