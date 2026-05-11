@@ -531,7 +531,25 @@ static void print_usage(const char *prog) {
     printf("  %s --suite=security --filter=vault  # combine both\n", prog);
 }
 
+/* Phase 1 (RL SOTA) — declared in src/providers/llamacpp.c when
+ * HU_LLAMACPP_LINKED is set; provides a one-shot CLI that loads a
+ * GGUF, decodes one chat turn, and prints the response. Used by
+ * scripts/run-gemma-sanity-gate.sh to score the 20-prompt fixture. */
+#ifdef HU_ENABLE_LLAMACPP
+int hu_llamacpp_sanity_gate_main(int argc, char **argv);
+#endif
+
 int main(int argc, char **argv) {
+    if (argc >= 2 && strcmp(argv[1], "--sanity-gate") == 0) {
+#ifdef HU_ENABLE_LLAMACPP
+        return hu_llamacpp_sanity_gate_main(argc, argv);
+#else
+        fprintf(stderr,
+                "[sanity-gate] HU_ENABLE_LLAMACPP not set; rebuild with --preset rl_sota\n");
+        return 1;
+#endif
+    }
+
     for (int i = 1; i < argc; i++) {
         if (strncmp(argv[i], "--suite=", 8) == 0) {
             hu__suite_filter = argv[i] + 8;

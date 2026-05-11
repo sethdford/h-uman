@@ -584,3 +584,58 @@ hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc,
     out->vtable = &llamacpp_vtable;
     return HU_OK;
 }
+
+/* Phase 1 (RL SOTA) — sanity-gate one-shot CLI.
+ *
+ * Wired from tests/test_main.c when the binary is launched as
+ * `human_tests --sanity-gate <gguf-path> <system> <user>`. Loads the
+ * GGUF, decodes one chat turn at temperature 0.0, prints the response
+ * to stdout, exits.
+ *
+ * Used by scripts/run-gemma-sanity-gate.sh to score the 20-prompt
+ * fixture at tests/fixtures/gemma_sanity_gate_prompts.json.
+ */
+#if HU_LLAMACPP_LINKED
+int hu_llamacpp_sanity_gate_main(int argc, char **argv) {
+    if (argc < 5) {
+        fprintf(stderr,
+                "usage: %s --sanity-gate <gguf-path> <system> <user>\n",
+                argv[0]);
+        return 2;
+    }
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_llamacpp_config_t cfg = {
+        .model_path = argv[2],
+        .context_size = 2048,
+        .threads = 4,
+        .use_gpu = true,
+        .n_gpu_layers = -1,
+    };
+    hu_provider_t provider = {0};
+    if (hu_llamacpp_provider_create(&alloc, &cfg, &provider) != HU_OK) {
+        fprintf(stderr, "[sanity-gate] failed to create provider for %s\n", argv[2]);
+        return 3;
+    }
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = provider.vtable->chat_with_system(
+        provider.ctx, &alloc, argv[3], strlen(argv[3]), argv[4], strlen(argv[4]),
+        "gemma-3-4b-it", strlen("gemma-3-4b-it"), 0.0, &out, &out_len);
+    if (err == HU_OK && out) {
+        fwrite(out, 1, out_len, stdout);
+        fputc('\n', stdout);
+        free(out);
+    } else {
+        fprintf(stderr, "[sanity-gate] chat_with_system returned %d\n", (int)err);
+    }
+    if (provider.vtable->deinit) provider.vtable->deinit(provider.ctx, &alloc);
+    return (err == HU_OK) ? 0 : 4;
+}
+#else
+int hu_llamacpp_sanity_gate_main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    fprintf(stderr, "[sanity-gate] llama.cpp not linked into this build\n");
+    return 1;
+}
+#endif
