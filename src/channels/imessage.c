@@ -1555,18 +1555,19 @@ static const char *imessage_name(void *ctx) {
     return "imessage";
 }
 static bool imessage_health_check(void *ctx) {
-#if !defined(__APPLE__) || !defined(__MACH__)
-    (void)ctx;
-    return false;
-#elif HU_IS_TEST
-    /* Honor a tripped breaker even in tests so unit tests can exercise the
-     * unhealthy path; otherwise tests stay healthy by default. */
+#if HU_IS_TEST
+    /* Test mode mocks the platform — applies on Linux too, so unit tests
+     * (run on both macOS and Ubuntu CI) get consistent breaker behavior.
+     * Tripped breaker → unhealthy; otherwise healthy. */
     if (ctx) {
         const hu_imessage_ctx_t *c = (const hu_imessage_ctx_t *)ctx;
         if (c->circuit_breaker_tripped)
             return false;
     }
     return true;
+#elif !defined(__APPLE__) || !defined(__MACH__)
+    (void)ctx;
+    return false;
 #else
     if (ctx) {
         const hu_imessage_ctx_t *c = (const hu_imessage_ctx_t *)ctx;
