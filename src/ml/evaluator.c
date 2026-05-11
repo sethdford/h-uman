@@ -65,8 +65,10 @@ hu_error_t hu_ml_evaluate_bpb(hu_allocator_t *alloc, hu_model_t *model,
         hu_error_t err = hu_ml_dataloader_next(val_loader, &batch);
         if (err != HU_OK)
             break;
-        if (!batch.input_ids || !batch.target_ids || batch.batch_size == 0 || batch.seq_len == 0)
+        if (!batch.input_ids || !batch.target_ids || batch.batch_size == 0 || batch.seq_len == 0) {
+            hu_ml_batch_free(alloc, &batch);
             break;
+        }
 
         size_t full_batch_tokens = batch.batch_size * batch.seq_len;
         size_t batch_tokens = full_batch_tokens;

@@ -1,5 +1,6 @@
 /* Tests for ML subsystem: BPE tokenizer, dataloader, prepare, experiment. */
 
+#include "human/agent.h"
 #include "human/agent/speculative.h"
 #include "human/context/anticipatory.h"
 #include "human/core/allocator.h"
@@ -4258,6 +4259,12 @@ static void test_agent_apply_kv_nembd(void) {
 
 static void test_evaluator_zero_bytes(void) {
     hu_allocator_t alloc = hu_system_allocator();
+    char td[] = "/tmp/hu_eval_zero_XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(td));
+
+    char shard_path[384];
+    snprintf(shard_path, sizeof(shard_path), "%s/hu_eval_zero_val.bin", td);
+
     hu_gpt_config_t gcfg = {0};
     gcfg.sequence_len = 4;
     gcfg.vocab_size = 8;
@@ -4272,19 +4279,20 @@ static void test_evaluator_zero_bytes(void) {
 
     /* All token_bytes = 0: every token has zero byte length */
     int32_t token_bytes[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    const char *shard = "/tmp/hu_eval_zero_shard.bin";
-    FILE *f = fopen(shard, "wb");
+    FILE *f = fopen(shard_path, "wb");
     HU_ASSERT_NOT_NULL(f);
     int32_t data[8] = {1, 2, 3, 0, 1, 2, 3, 0};
     fwrite(data, sizeof(int32_t), 8, f);
     fclose(f);
 
     hu_ml_dataloader_t *dl = NULL;
-    hu_error_t err = hu_ml_dataloader_create(&alloc, "/tmp", 2, 4, "val", &dl);
+    /* Isolated dir: scanning global /tmp can pick up huge unrelated *.bin shards. */
+    hu_error_t err = hu_ml_dataloader_create(&alloc, td, 2, 4, "val", &dl);
     if (err != HU_OK) {
         /* If shard naming doesn't match, skip gracefully */
         model.vtable->deinit(model.ctx, &alloc);
-        remove(shard);
+        remove(shard_path);
+        rmdir(td);
         return;
     }
 
@@ -4297,7 +4305,8 @@ static void test_evaluator_zero_bytes(void) {
 
     hu_ml_dataloader_deinit(dl);
     model.vtable->deinit(model.ctx, &alloc);
-    remove(shard);
+    remove(shard_path);
+    rmdir(td);
 }
 
 /* ─── Optimizer state mismatch detection ─────────────────────────────── */
@@ -4734,6 +4743,44 @@ static void test_m3_frontier_adapter_fixture_roundtrip(void) {
     hu_m3_frontier_adapter_close(&alloc, a);
 }
 
+static void test_agent_m3_adapter_attach_bad_path(void) {
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    hu_agent_m3_adapter_attach(&agent, "/tmp/hu_m3_nonexistent_agent_attach.bin");
+    HU_ASSERT_NULL(agent.m3_adapter);
+    hu_agent_m3_adapter_attach(&agent, NULL);
+    HU_ASSERT_NULL(agent.m3_adapter);
+}
+
+static void test_agent_m3_adapter_attach_fixture_replace(void) {
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_fixture_agent_attach.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 7;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+    hu_agent_m3_adapter_attach(&agent, path);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(agent.m3_adapter), HU_OK);
+    hu_agent_m3_adapter_attach(&agent, "");
+    HU_ASSERT_NULL(agent.m3_adapter);
+    hu_agent_m3_adapter_attach(&agent, path);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+}
+
 void run_ml_tests(void) {
     HU_TEST_SUITE("ml");
     /* BPE tokenizer */
@@ -4900,4 +4947,6 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_frontier_adapter_null_args);
     HU_RUN_TEST(test_m3_frontier_adapter_bad_file);
     HU_RUN_TEST(test_m3_frontier_adapter_fixture_roundtrip);
+    HU_RUN_TEST(test_agent_m3_adapter_attach_bad_path);
+    HU_RUN_TEST(test_agent_m3_adapter_attach_fixture_replace);
 }

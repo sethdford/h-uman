@@ -306,8 +306,13 @@ hu_error_t hu_ml_dataloader_next(hu_ml_dataloader_t *dl_ptr, hu_ml_batch_t *batc
                 break;
         }
 
-        if (dl->current_offset + row_tokens > dl->shard_tokens)
+        if (dl->current_offset + row_tokens > dl->shard_tokens) {
+            /* Tail shorter than one packed row: mark shard exhausted so the next
+             * iteration takes the shard-advance path (bare `continue` here loops
+             * forever with a stuck offset). */
+            dl->current_offset = dl->shard_tokens;
             continue;
+        }
 
         int32_t *row = &dl->shard_data[dl->current_offset];
         for (size_t i = 0; i < input_per_row; i++)
