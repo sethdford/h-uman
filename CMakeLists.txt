@@ -2350,6 +2350,7 @@ set(HU_TEST_SOURCES
     tests/test_consistency.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
+    tests/test_personal_model_atomic_save.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c

@@ -505,6 +505,7 @@ void run_background_registry_tests(void);
 void run_consistency_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
+void run_personal_model_atomic_save_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
 void run_self_improve_tests(void);
@@ -1036,6 +1037,7 @@ int main(int argc, char **argv) {
     run_consistency_tests();
     run_fact_extract_tests();
     run_personal_model_tests();
+    run_personal_model_atomic_save_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();
     run_self_improve_tests();

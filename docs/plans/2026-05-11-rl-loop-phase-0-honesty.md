@@ -850,16 +850,16 @@ Commit message captures the extraction + fallback decision; see the actual commi
 - Modify: `tests/test_main.c` (declare + call `run_personal_model_atomic_save_tests`)
 - Modify: `CMakeLists.txt` (add to test target)
 
-- [ ] **Step 1: Write the failing test**
+> **Plan amendment (May 11 2026):** the original test design used `fork()` + `raise(SIGKILL)` after `hu_personal_model_save` returned. That doesn't actually test crash atomicity — by the time `raise(SIGKILL)` runs, save has already returned and the file at `<path>` is the fully-written new file regardless of whether the implementation is atomic. The redesigned test below uses a deterministic FIX-SHAPE PROBE: pre-create `<path>.tmp` as a directory before calling save. The atomic implementation must `fopen("wb")` on `<path>.tmp`, which fails with `EISDIR` and leaves `<path>` untouched; the non-atomic implementation calls `fopen(<path>, "wb")` directly and truncates `<path>` before any error is detected. Same contract being tested ("if writing the new state fails for any reason, the prior state is preserved"), but deterministic and CI-stable.
 
-Create `tests/test_personal_model_atomic_save.c`:
+- [x] **Step 1: Write the failing test**
+
+Created `tests/test_personal_model_atomic_save.c`:
 
 ```c
-/* Phase 0 Task 6 — proves that hu_personal_model_save, when interrupted
- * mid-write (SIGKILL between fwrite and rename), leaves the on-disk file
- * either fully intact at the prior state OR fully intact at the new
- * state — never partial. The current implementation (direct fopen+fwrite)
- * fails this; the fix (write-tmp + fsync + rename) passes it. */
+/* Phase 0 Task 6 — proves that hu_personal_model_save uses an atomic
+ * tmp+rename pattern, so a crash mid-save can never leave the on-disk
+ * file in a partially-written state. */
 
 #include "test_framework.h"
 #include "human/memory/personal_model.h"
@@ -870,104 +870,82 @@ Create `tests/test_personal_model_atomic_save.c`:
 #include <unistd.h>
 #include <stdlib.h>
 
-static void test_personal_model_save_is_atomic_under_kill(void) {
-    /* Create a temp dir for this test */
+static void test_personal_model_save_preserves_prior_state_when_tmp_blocked(void) {
     char tmpl[] = "/tmp/hu_pm_atomic_XXXXXX";
     char *dir = mkdtemp(tmpl);
     HU_ASSERT_NOT_NULL(dir);
-    char path[256];
-    snprintf(path, sizeof(path), "%s/personal_model.bin", dir);
 
-    /* Step 1: write a known-good v4 model to <path> via the public save */
+    char path[256], tmp_path[260];
+    snprintf(path, sizeof(path), "%s/personal_model.bin", dir);
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+
+    /* Step 1 — known-good model with fact_count=1 and a recognizable subject. */
     hu_personal_model_t known_good;
-    memset(&known_good, 0, sizeof(known_good));
-    known_good.version = HU_PM_VERSION;
+    hu_personal_model_init(&known_good);
     known_good.fact_count = 1;
-    strncpy(known_good.facts[0].text, "known-good fact",
-            sizeof(known_good.facts[0].text) - 1);
+    known_good.facts[0].confidence = 1.0f;
+    snprintf(known_good.facts[0].subject, sizeof(known_good.facts[0].subject),
+             "known-good-state");
     HU_ASSERT_EQ(hu_personal_model_save(&known_good, path), HU_OK);
 
-    /* Step 2: fork. Child opens the file for writing via the public save
-     * with a DIFFERENT model, but a USR1 mid-save handler kills it
-     * between fwrite and rename via internal probe (or via repeated
-     * write attempts under signal pressure). */
-    pid_t pid = fork();
-    HU_ASSERT_TRUE(pid >= 0);
-    if (pid == 0) {
-        /* Child: launch a save and immediately abort itself so the
-         * post-fwrite-but-pre-rename window is entered. We approximate
-         * the race by repeatedly saving a large model in a loop and
-         * killing ourselves at a random point. */
-        hu_personal_model_t big = {0};
-        big.version = HU_PM_VERSION;
-        big.fact_count = HU_PM_MAX_FACTS;
-        for (size_t i = 0; i < big.fact_count; i++) {
-            snprintf(big.facts[i].text, sizeof(big.facts[i].text),
-                     "fact-%zu-padded-to-force-multi-block-write", i);
-        }
-        /* Save and kill ourselves. The atomic implementation MUST
-         * have completed the rename or not started it; either way the
-         * file at <path> is intact. */
-        hu_personal_model_save(&big, path);
-        raise(SIGKILL);
-        _exit(0);
+    /* Step 2 — block the atomic tmp slot by creating a directory there.
+     * fopen("wb") on a directory always fails with EISDIR (POSIX). */
+    HU_ASSERT_EQ(mkdir(tmp_path, 0755), 0);
+
+    /* Step 3 — try to overwrite with HU_PM_MAX_FACTS facts. Atomic save
+     * fails fopen(<path>.tmp, "wb"), returns IO error, leaves <path>
+     * untouched. Non-atomic save calls fopen(<path>, "wb") directly
+     * and truncates <path> immediately. */
+    hu_personal_model_t big;
+    hu_personal_model_init(&big);
+    big.fact_count = HU_PM_MAX_FACTS;
+    for (size_t i = 0; i < big.fact_count; i++) {
+        big.facts[i].confidence = 1.0f;
+        snprintf(big.facts[i].subject, sizeof(big.facts[i].subject), "fact-%zu", i);
     }
+    (void)hu_personal_model_save(&big, path);
 
-    /* Parent: wait for child, then verify the file is loadable AND
-     * the content is either the known-good or the big model, never
-     * a mix. */
-    int status = 0;
-    waitpid(pid, &status, 0);
-
-    /* Verify file is non-empty and loads cleanly */
-    struct stat st;
-    HU_ASSERT_EQ(stat(path, &st), 0);
-    HU_ASSERT_TRUE(st.st_size > 0);
-
-    hu_personal_model_t loaded = {0};
+    /* Step 4 — load <path>: must still be the known-good. */
+    hu_personal_model_t loaded;
+    memset(&loaded, 0, sizeof(loaded));
     HU_ASSERT_EQ(hu_personal_model_load(&loaded, path), HU_OK);
+    HU_ASSERT_EQ(loaded.fact_count, (size_t)1);
+    HU_ASSERT(strcmp(loaded.facts[0].subject, "known-good-state") == 0);
 
-    /* Either we see the known-good (fact_count == 1) OR the big
-     * (fact_count == HU_PM_MAX_FACTS). NEVER something in between. */
-    HU_ASSERT_TRUE(loaded.fact_count == 1 ||
-                   loaded.fact_count == HU_PM_MAX_FACTS);
-
-    /* Cleanup */
-    unlink(path);
-    rmdir(dir);
+    (void)rmdir(tmp_path);
+    (void)unlink(path);
+    (void)rmdir(dir);
 }
 
 void run_personal_model_atomic_save_tests(void) {
     HU_TEST_SUITE("personal-model-atomic-save");
-    HU_RUN_TEST(test_personal_model_save_is_atomic_under_kill);
+    HU_RUN_TEST(test_personal_model_save_preserves_prior_state_when_tmp_blocked);
 }
 ```
 
-- [ ] **Step 2: Wire into `tests/test_main.c` and `CMakeLists.txt`**
+- [x] **Step 2: Wire into `tests/test_main.c` and `CMakeLists.txt`**
 
-Add `void run_personal_model_atomic_save_tests(void);` declaration and call. Add `tests/test_personal_model_atomic_save.c` to CMakeLists test sources around the existing `tests/test_personal_model.c` line ~2352.
+Added `void run_personal_model_atomic_save_tests(void);` declaration and call. Added `tests/test_personal_model_atomic_save.c` to `HU_TEST_SOURCES` next to `tests/test_personal_model.c`.
 
-- [ ] **Step 3: Build and run — confirm FAIL**
+- [x] **Step 3: Build and run — confirm FAIL**
 
-```bash
-cmake --build --preset dev -j
-./build/human_tests --suite=personal-model-atomic-save
+```
+$ ./build/human_tests --suite=personal-model-atomic-save
+=== personal-model-atomic-save ===
+  FAIL  (tests/test_personal_model_atomic_save.c:92) expected 64 == 1 (loaded.fact_count == (size_t)1)
+--- Results: 0/1 passed, 1 FAILED, 10063 skipped ---
 ```
 
-Expected: FAIL with the "loaded.fact_count == 1 || loaded.fact_count == HU_PM_MAX_FACTS" assertion failing (the file may be truncated or partially written under SIGKILL).
+The pre-fix `hu_personal_model_save` opens `<path>` directly via `fopen("wb")`, truncates the prior known-good (fact_count=1), and writes the big model (fact_count=64). The directory blocker on `<path>.tmp` doesn't trip the bug because the bug doesn't use `<path>.tmp`. After Task 7's fix the test passes.
 
-- [ ] **Step 4: Commit (failing test)**
+- [x] **Step 4: Commit (failing test)**
 
 ```bash
-git add tests/test_personal_model_atomic_save.c tests/test_main.c CMakeLists.txt
-git commit -m "test(memory): add failing test pinning non-atomic personal_model_save
-
-The save path is direct fopen+fwrite at personal_model.c:1851. A SIGKILL
-between fwrite and intended rename leaves the file partial. Fix lands
-in the next commit.
-
-Refs spec §1.5.2 issue #4."
+git add tests/test_personal_model_atomic_save.c tests/test_main.c CMakeLists.txt \
+        docs/plans/2026-05-11-rl-loop-phase-0-honesty.md
 ```
+
+The Task 6 commit lands a deliberately failing test pinning the contract Task 7 will satisfy. CI red-flag is acceptable because Task 7 follows in the next commit.
 
 ---
 
