@@ -206,7 +206,7 @@ Tests added in `tests/test_w11_self_rag.c`:
 
 ### Remaining scope (after P2)
 
-- True streaming control-token integration with each frontier provider (Anthropic, Gemini, OpenAI). The deterministic protocol parser still drives the in-process tests; live provider wiring is independent of the scoring path landed in P2.
+- ~~True streaming control-token integration with each frontier provider~~ **Closed (2026-05-11).** `hu_self_rag_stream_directive_append` (in `src/agent/self_rag_inline.c`, declared in `include/human/agent/self_rag.h`) extends the system prompt with a brief description of `<retrieve>`/`<critique>`/`<refuse>` whenever `HU_SELF_RAG_STREAMING` is enabled (env var or `config.agent.self_rag_streaming`). The directive is appended once, outside the streaming tool loop in `agent_stream.c`, so every iteration's `all_msgs[0].content` points at the same extended prompt. Pinned by `test_w11_stream_directive_append_extends_system_prompt`, `test_w11_stream_directive_append_null_args_rejected`, and `test_w11_stream_directive_compliant_emission_triggers_parser`. The parser is now live for any frontier provider that streams via `hu_stream_callback_t` (Anthropic, Gemini, OpenAI, Ollama, etc.).
 - Calibration of `abstain_threshold` against the 200-prompt annotated suite (carried over from P1).
 
 ---
