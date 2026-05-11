@@ -1,4 +1,6 @@
 #include "human/agent/scheduler.h"
+#include "human/persona.h"
+#include "human/persona/circadian.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -318,26 +320,60 @@ bool hu_scheduler_probe_quiet_hours(int64_t now_ms, const hu_persona_t *persona)
             return false;
     }
 #endif
-    /* Production fallback: when a persona is in scope, use a fixed
-     * 01:00–06:00 quiet window — the sleep-compute sweet spot where
-     * most personal devices are idle and on AC power. The persona
-     * overlay strings will eventually provide per-user overrides; for
-     * now a sane default beats "always available". A NULL persona
-     * means "no quiet-hours opinion" → false. */
-    (void)persona;
-    if (now_ms <= 0)
-        return false;
+    /* B16 production wire — chronotype-aware quiet hours.
+     *
+     * Resolution order:
+     *   1. NULL persona / now_ms <= 0  → no opinion (false).
+     *   2. persona->chronotype set     → invert hu_chronotype_is_active_hour
+     *                                    (active hour = NOT quiet).
+     *   3. Unknown chronotype          → fall back to 01:00–06:00,
+     *                                    the sleep-compute sweet spot.
+     *
+     * Chronotype helper bands (from src/persona/circadian.c):
+     *   - HU_CHRONO_MORNING_LARK  active 06–21 → quiet 21–06
+     *   - HU_CHRONO_INTERMEDIATE  active 07–22 → quiet 22–07
+     *   - HU_CHRONO_EVENING_OWL   active 09–23 + 00–01 → quiet 02–08
+     *
+     * Without this wire, the chronotype field on `hu_persona_t` was
+     * dead code — parsed from JSON, persisted across sessions, but never
+     * consulted by the proactive-message scheduler. */
     if (!persona)
         return false;
-    time_t t = (time_t)(now_ms / 1000);
-    struct tm tm_local;
-#if defined(_WIN32)
-    if (localtime_s(&tm_local, &t) != 0)
-        return false;
-#else
-    if (!localtime_r(&t, &tm_local))
-        return false;
+
+    int hour = -1;
+#ifdef HU_IS_TEST
+    {
+        const char *hv = getenv("HU_TEST_HOUR");
+        if (hv && *hv) {
+            char *end = NULL;
+            long n = strtol(hv, &end, 10);
+            if (end != hv && n >= 0 && n <= 23) {
+                hour = (int)n;
+            }
+        }
+    }
 #endif
-    int hour = tm_local.tm_hour;
+    if (hour < 0) {
+        if (now_ms <= 0)
+            return false;
+        time_t t = (time_t)(now_ms / 1000);
+        struct tm tm_local;
+#if defined(_WIN32)
+        if (localtime_s(&tm_local, &t) != 0)
+            return false;
+#else
+        if (!localtime_r(&t, &tm_local))
+            return false;
+#endif
+        hour = tm_local.tm_hour;
+    }
+    if (hour < 0 || hour > 23)
+        return false;
+
+    if (persona->chronotype != HU_CHRONO_UNKNOWN) {
+        /* Active hour → not quiet; inactive hour → quiet. */
+        return !hu_chronotype_is_active_hour(persona->chronotype,
+                                              (uint8_t)hour);
+    }
     return (hour >= 1 && hour < 6);
 }

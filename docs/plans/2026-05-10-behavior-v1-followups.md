@@ -87,15 +87,16 @@ The shape mirrors the memory v2 workstream pattern: each stub becomes a full pla
 
 ## B16 — Chronotype-aligned JITAI
 
-- **Status.** Subset landed (2026-05-10).
+- **Status.** Production-wired (2026-05-10).
   - `hu_chronotype_t` enum (`morning_lark`, `intermediate`, `evening_owl`, `unknown`) + `hu_chronotype_is_active_hour()` in `src/persona/circadian.c` with 6 unit tests. Replaces the hard-coded 23–05 quiet-hours band with chronotype-aware bands (lark 06–21, intermediate 07–22, owl 09–23 + 00–01).
   - `hu_persona_t.chronotype` field shipped in `include/human/persona.h`.
   - JSON loader parses the `chronotype` field in `src/persona/persona.c:1675` (string → enum, unknown values fall through to `HU_CHRONO_UNKNOWN`).
   - `hu_behavior_change_input_t.jitai_chronotype` is consumed by `src/behavior/change.c::bct_outside_jitai_hours`, replacing the hard-coded 23–05 check.
+  - **Production wire.** `hu_scheduler_probe_quiet_hours` (`src/agent/scheduler_probes.c:310`) — the function that actually gates proactive messages from `src/agent/scheduler.c:442` and `:573` — now consults `persona->chronotype` first, falling back to the legacy 01–06 band when the field is `HU_CHRONO_UNKNOWN`. A new `HU_TEST_HOUR` env override drives a portable hour for tests so the wire is provable without TZ flakiness. 7 new tests in `tests/test_w14_scheduler.c::run_w14_scheduler_tests` (`test_b16_quiet_hours_*`) pin lark/intermediate/owl/unknown bands and the NULL-persona case.
 - **Remaining scope.**
-  - **Production wire.** `hu_behavior_change_select` is implemented and unit-tested but is not yet called from `agent_turn.c` for proactive-message gating decisions. The chronotype-aware logic is dead code in production until that integration ships. Likely seam: the proactive-message scheduling path (`src/agent/scheduler.c` or the proactive context build in `agent_turn.c`).
-  - Auto-detection of chronotype from circadian observations (lower priority).
-- **Success.** Late-night gating becomes chronotype aware in tests (done); `evening_owl` users get prompts up to 23:30 when opted in (pending the production wire above).
+  - Auto-detection of chronotype from circadian observations (lower priority — the persona-overlay path now works end-to-end).
+  - `hu_behavior_change_select` (BCT recommender) is still not called from `agent_turn.c`; that's a separate B14/B5 surface, not the B16 quiet-hours gate.
+- **Success.** Late-night gating is chronotype aware end-to-end. Larks see proactive messages suppressed at 22:00; owls see them up to 23:00 + 00:00–01:00 (`test_b16_quiet_hours_owl_at_23_is_active`).
 
 ## B17 — On-device frontier behavior
 

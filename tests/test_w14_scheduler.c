@@ -11,6 +11,7 @@
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
 #include "human/memory/neural_memory.h"
+#include "human/persona.h"
 #include "test_framework.h"
 
 #ifdef HU_ENABLE_SQLITE
@@ -38,6 +39,7 @@ static void clear_w14_env(void) {
     unsetenv("HU_TEST_BATTERY_PCT");
     unsetenv("HU_TEST_ON_AC");
     unsetenv("HU_TEST_QUIET_HOURS");
+    unsetenv("HU_TEST_HOUR");
 }
 
 static void open_stack_(hu_graph_t **g, hu_memory_facade_t **m, hu_scheduler_t **s) {
@@ -604,6 +606,92 @@ static void test_w14_probe_quiet_hours_honors_test_override(void) {
     clear_w14_env();
 }
 
+/* B16 production wire: chronotype-aware quiet hours.
+ *
+ * `hu_scheduler_probe_quiet_hours` historically ignored the persona's
+ * chronotype and used a hardcoded 01:00–06:00 quiet band, leaving the
+ * `chronotype` field on `hu_persona_t` as dead weight. These tests pin
+ * the wire in: a lark gets quiet hours at 22:00 (her bedtime); an owl
+ * does not; an unknown-chronotype persona falls back to 01–06.
+ *
+ * Hours are driven by HU_TEST_HOUR to bypass the OS clock for portable
+ * deterministic testing across timezones. */
+static void test_b16_quiet_hours_lark_at_22_is_quiet(void) {
+    clear_w14_env();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.chronotype = HU_CHRONO_MORNING_LARK;
+    setenv("HU_TEST_HOUR", "22", 1);
+    /* Lark active band 06–21 → 22 is outside → quiet. */
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, &persona), true);
+    clear_w14_env();
+}
+
+static void test_b16_quiet_hours_lark_at_10_is_active(void) {
+    clear_w14_env();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.chronotype = HU_CHRONO_MORNING_LARK;
+    setenv("HU_TEST_HOUR", "10", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, &persona), false);
+    clear_w14_env();
+}
+
+static void test_b16_quiet_hours_owl_at_23_is_active(void) {
+    clear_w14_env();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.chronotype = HU_CHRONO_EVENING_OWL;
+    setenv("HU_TEST_HOUR", "23", 1);
+    /* Owl active 09–23 + 00–01 → 23 is active → not quiet. */
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, &persona), false);
+    clear_w14_env();
+}
+
+static void test_b16_quiet_hours_owl_at_05_is_quiet(void) {
+    clear_w14_env();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.chronotype = HU_CHRONO_EVENING_OWL;
+    setenv("HU_TEST_HOUR", "5", 1);
+    /* Owl quiet band: hour 2–8 → quiet. */
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, &persona), true);
+    clear_w14_env();
+}
+
+static void test_b16_quiet_hours_unknown_chronotype_uses_01_06_band(void) {
+    clear_w14_env();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.chronotype = HU_CHRONO_UNKNOWN;
+    setenv("HU_TEST_HOUR", "3", 1);
+    /* Fallback band 01–06 → 3 is quiet. */
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, &persona), true);
+    setenv("HU_TEST_HOUR", "12", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, &persona), false);
+    clear_w14_env();
+}
+
+static void test_b16_quiet_hours_intermediate_at_23_is_quiet(void) {
+    clear_w14_env();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.chronotype = HU_CHRONO_INTERMEDIATE;
+    setenv("HU_TEST_HOUR", "23", 1);
+    /* Intermediate active 07–22 → 23 is quiet. */
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, &persona), true);
+    setenv("HU_TEST_HOUR", "14", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, &persona), false);
+    clear_w14_env();
+}
+
+static void test_b16_quiet_hours_null_persona_returns_false(void) {
+    clear_w14_env();
+    setenv("HU_TEST_HOUR", "3", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(1, NULL), false);
+    clear_w14_env();
+}
+
 static void test_w14_probe_load_returns_in_range_or_unknown(void) {
     /* With test override unset the probe falls through to OS-level
      * paths.  All we can prove portably is that the value is either
@@ -645,4 +733,11 @@ void run_w14_scheduler_tests(void) {
     HU_RUN_TEST(test_w14_probe_quiet_hours_honors_test_override);
     HU_RUN_TEST(test_w14_probe_load_returns_in_range_or_unknown);
     HU_RUN_TEST(test_w14_probe_battery_returns_in_range_or_unknown);
+    HU_RUN_TEST(test_b16_quiet_hours_lark_at_22_is_quiet);
+    HU_RUN_TEST(test_b16_quiet_hours_lark_at_10_is_active);
+    HU_RUN_TEST(test_b16_quiet_hours_owl_at_23_is_active);
+    HU_RUN_TEST(test_b16_quiet_hours_owl_at_05_is_quiet);
+    HU_RUN_TEST(test_b16_quiet_hours_unknown_chronotype_uses_01_06_band);
+    HU_RUN_TEST(test_b16_quiet_hours_intermediate_at_23_is_quiet);
+    HU_RUN_TEST(test_b16_quiet_hours_null_persona_returns_false);
 }
