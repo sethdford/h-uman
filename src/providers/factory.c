@@ -1,4 +1,5 @@
 #include "human/providers/factory.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/string.h"
@@ -288,4 +289,98 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
     }
 
     return HU_ERR_NOT_SUPPORTED;
+}
+
+/* Phase 1 (RL SOTA) — entry-aware factory.
+ *
+ * The legacy hu_provider_create above only forwards (name, api_key,
+ * base_url) — fine for cloud providers, but llamacpp also needs
+ * context_size / threads / use_gpu / n_gpu_layers from the JSON config
+ * to actually use Metal and tune the context window. This helper reads
+ * those four fields off hu_provider_entry_t and forwards them.
+ *
+ * For non-llamacpp providers it falls through to the legacy path so
+ * the existing call sites don't need to change.
+ *
+ * Test-only state: the most recent llamacpp config the factory built
+ * is captured into s_last_llamacpp_* so test_llamacpp_factory_config.c
+ * can verify the wiring without spinning up a real model. The
+ * model_path is deep-copied because the factory frees the source after
+ * hu_llamacpp_provider_create returns.
+ */
+
+#ifdef HU_IS_TEST
+#include <stdlib.h>
+static hu_llamacpp_config_t s_last_llamacpp_config;
+static char *s_last_llamacpp_model_path_copy;
+static bool s_last_llamacpp_config_set = false;
+
+static void hu_llamacpp_factory_capture_for_test(const hu_llamacpp_config_t *cfg) {
+    if (s_last_llamacpp_model_path_copy) {
+        free(s_last_llamacpp_model_path_copy);
+        s_last_llamacpp_model_path_copy = NULL;
+    }
+    s_last_llamacpp_config = *cfg;
+    if (cfg->model_path) {
+        size_t n = strlen(cfg->model_path);
+        s_last_llamacpp_model_path_copy = (char *)malloc(n + 1);
+        if (s_last_llamacpp_model_path_copy) {
+            memcpy(s_last_llamacpp_model_path_copy, cfg->model_path, n + 1);
+            s_last_llamacpp_config.model_path = s_last_llamacpp_model_path_copy;
+        } else {
+            s_last_llamacpp_config.model_path = NULL;
+        }
+    }
+    s_last_llamacpp_config_set = true;
+}
+
+const hu_llamacpp_config_t *hu_llamacpp_factory_last_config(void) {
+    return s_last_llamacpp_config_set ? &s_last_llamacpp_config : NULL;
+}
+
+void hu_llamacpp_factory_reset_for_test(void) {
+    if (s_last_llamacpp_model_path_copy) {
+        free(s_last_llamacpp_model_path_copy);
+        s_last_llamacpp_model_path_copy = NULL;
+    }
+    s_last_llamacpp_config_set = false;
+    memset(&s_last_llamacpp_config, 0, sizeof(s_last_llamacpp_config));
+}
+#endif
+
+hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc,
+                                         const hu_provider_entry_t *entry,
+                                         hu_provider_t *out) {
+    if (!alloc || !entry || !entry->name || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    size_t name_len = strlen(entry->name);
+    bool is_llamacpp =
+        (name_len == 8 && memcmp(entry->name, "llamacpp", 8) == 0) ||
+        (name_len == 9 && memcmp(entry->name, "llama.cpp", 9) == 0);
+    if (is_llamacpp) {
+        hu_llamacpp_config_t lc = {0};
+        if (entry->base_url && entry->base_url[0]) {
+            char *path = hu_strdup(alloc, entry->base_url);
+            if (!path) return HU_ERR_OUT_OF_MEMORY;
+            lc.model_path = path;
+        }
+        lc.context_size = entry->context_size;
+        lc.threads      = entry->threads;
+        lc.use_gpu      = entry->use_gpu;
+        lc.n_gpu_layers = entry->n_gpu_layers;
+#ifdef HU_IS_TEST
+        hu_llamacpp_factory_capture_for_test(&lc);
+#endif
+        hu_error_t r = hu_llamacpp_provider_create(alloc, &lc, out);
+        if (lc.model_path)
+            alloc->free(alloc->ctx, lc.model_path, strlen(lc.model_path) + 1);
+        return r;
+    }
+    /* Non-llamacpp: defer to the legacy by-name path. */
+    return hu_provider_create(alloc, entry->name, name_len,
+                              entry->api_key,
+                              entry->api_key ? strlen(entry->api_key) : 0,
+                              entry->base_url,
+                              entry->base_url ? strlen(entry->base_url) : 0,
+                              out);
 }

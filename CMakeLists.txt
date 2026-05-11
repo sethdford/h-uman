@@ -2835,6 +2835,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_webrtc.c
     tests/test_embedded_provider.c
     tests/test_llamacpp_provider.c
+    tests/test_llamacpp_factory_config.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c

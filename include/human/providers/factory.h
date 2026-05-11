@@ -14,6 +14,33 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
                               const char *api_key, size_t api_key_len, const char *base_url,
                               size_t base_url_len, hu_provider_t *out);
 
+/** Phase 1 (RL SOTA) — entry-aware factory.
+ *
+ *  Constructs a provider from a hu_provider_entry_t, forwarding all
+ *  fields (including llamacpp-specific tuning: context_size / threads /
+ *  use_gpu / n_gpu_layers). For non-llamacpp providers this falls
+ *  through to hu_provider_create with (name, api_key, base_url).
+ *
+ *  Use this when you have a parsed config entry; use hu_provider_create
+ *  directly when you only have name + creds (e.g. CLI flag overrides).
+ */
+struct hu_provider_entry;
+hu_error_t hu_provider_create_from_entry(hu_allocator_t *alloc,
+                                         const struct hu_provider_entry *entry,
+                                         hu_provider_t *out);
+
+#ifdef HU_IS_TEST
+/* Test-only hook: returns the most recent llamacpp config that
+ * hu_provider_create_from_entry built (for tests/test_llamacpp_factory_config.c).
+ * Returns NULL if no llamacpp entry has been processed yet. The
+ * returned pointer is valid until the next entry is processed or
+ * hu_llamacpp_factory_reset_for_test() is called. The model_path is
+ * deep-copied so it remains valid after the factory frees the source. */
+struct hu_llamacpp_config;
+const struct hu_llamacpp_config *hu_llamacpp_factory_last_config(void);
+void hu_llamacpp_factory_reset_for_test(void);
+#endif
+
 /** Construct the agent's default provider from `cfg->default_provider`, automatically
  *  wrapping it with `cfg->reliability.fallback_providers[]` (if any) so a single
  *  failing provider transparently fails over to the next.
