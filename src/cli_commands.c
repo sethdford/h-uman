@@ -31,6 +31,7 @@ hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_me
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
 hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                         const char *output_path);
+#include "human/onboard.h"
 #include "human/providers/factory.h"
 #include "human/security.h"
 #include "human/security/audit.h"
@@ -82,20 +83,14 @@ static const char HU_INIT_DEFAULT_JSON[] =
     "  }\n"
     "}\n";
 
-static const char HU_INIT_DEFAULT_PERSONA[] =
+/* Starter persona literal centralized in src/onboard.c as
+ * `hu_starter_persona_json` (declared in include/human/onboard.h).
+ * The previous duplicate had a JSON-array overlay shape with numeric
+ * values that were silently dropped by the parser. See the onboard
+ * header for the full bug history and the canonical replacement. */
+#if 0  /* removed — see hu_starter_persona_json */
+static const char HU_INIT_DEFAULT_PERSONA_REMOVED[] =
     "{\n"
-    "  \"version\": 1,\n"
-    "  \"name\": \"default\",\n"
-    "  \"core\": {\n"
-    "    \"identity\": \"A helpful, thoughtful personal assistant that adapts to your "
-    "style over time.\",\n"
-    "    \"traits\": [\"attentive\", \"concise\", \"warm\"],\n"
-    "    \"communication_rules\": [\n"
-    "      \"Match the user's energy and formality level\",\n"
-    "      \"Be direct but not curt\",\n"
-    "      \"Remember context from previous conversations\"\n"
-    "    ]\n"
-    "  },\n"
     "  \"channel_overlays\": [\n"
     "    {\n"
     "      \"channel\": \"imessage\",\n"
@@ -164,7 +159,8 @@ static const char HU_INIT_DEFAULT_PERSONA[] =
     "    }\n"
     "  ]\n"
     "}\n";
-#endif
+#endif /* removed */
+#endif /* HU_IS_TEST */
 
 /* ── init ────────────────────────────────────────────────────────────────── */
 hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
@@ -228,8 +224,8 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
             if (n > 0 && (size_t)n < sizeof(persona_path) && access(persona_path, F_OK) != 0) {
                 FILE *pf = fopen(persona_path, "w");
                 if (pf) {
-                    size_t plen = sizeof(HU_INIT_DEFAULT_PERSONA) - 1;
-                    (void)fwrite(HU_INIT_DEFAULT_PERSONA, 1, plen, pf);
+                    size_t plen = strlen(hu_starter_persona_json);
+                    (void)fwrite(hu_starter_persona_json, 1, plen, pf);
                     fclose(pf);
                 }
             }

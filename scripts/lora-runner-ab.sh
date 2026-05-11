@@ -154,13 +154,20 @@ extra_args=()
 # AFTER each side rather than after both, so a broken setup fails
 # fast on step 1 instead of paying for step 2.
 empty_response_set() {
-    # True iff the file exists, parses, and contains no character
-    # outside the empty-array boilerplate `[" ,"]`. The character
-    # class deliberately omits backslash so escaped characters
-    # ("\\n", "\\\"") trigger the non-empty path.
+    # True iff the file exists and contains no character outside the
+    # empty-array boilerplate `[]" ,\n`. We strip those chars with
+    # `tr -d` (portable across GNU + BSD; no regex bracket-class
+    # escaping pitfalls) and check whether anything remains. The
+    # original BRE form `[^"\[\] ,]` was BSD-grep-broken on macOS
+    # (the parser saw the class as `[^"\[]` followed by literal
+    # `\] ,]`, causing valid response arrays like `["ok"]` to be
+    # falsely flagged as empty). Real escaped chars in responses
+    # (e.g. `\n`, `\"`) leave a `\` in the residue and trigger the
+    # non-empty path — same intent the original regex had, but
+    # reliably this time.
     local f="$1"
     [[ -s "$f" ]] || return 0
-    ! grep -q '[^"\[\] ,]' "$f" 2>/dev/null
+    [[ -z "$(tr -d '[]" ,\n' < "$f")" ]]
 }
 
 echo "[lora-runner-ab] step 1/3: BASE responses → $BEFORE_JSON"
