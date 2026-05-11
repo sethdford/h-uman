@@ -4348,10 +4348,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifndef HU_IS_TEST
                 if (!llm_decides && action != HU_RESPONSE_SKIP &&
                     hu_daemon_is_tapback_worthy(combined, combined_len)) {
+                    uint32_t tb_pct = config ? config->behavior.tapback_skip_pct : 20u;
                     uint32_t r = (uint32_t)time(NULL);
                     r = r * 1103515245u + 12345u + (uint32_t)(uintptr_t)combined;
                     r = (r >> 16u) & 0x7fffu;
-                    if ((r % 100u) < 70u)
+                    if ((r % 100u) < tb_pct)
                         tapback_skip = true;
                 }
 #endif
@@ -7427,12 +7428,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     char *graph_ctx = NULL;
                     size_t graph_ctx_len = 0;
                     hu_error_t gerr = HU_ERR_NOT_SUPPORTED;
-                    if (agent && agent->w7_facade)
+                    if (agent && agent->w7_facade) {
+                        /* P1.1-P1.3: imessage batch path uses agent's persona
+                         * + the iMessage channel name. */
+                        hu_persona_context_t batch_pctx;
+                        batch_pctx.persona = agent->persona;
+                        batch_pctx.channel = "imessage";
+                        batch_pctx.channel_len = 8;
+                        batch_pctx.delta_limit = 8;
                         gerr = hu_w7_render_world_model(agent->w7_facade, alloc,
                                                         batch_key, key_len, 0,
                                                         &graph_ctx, &graph_ctx_len,
                                                         NULL, 0, NULL, 0, NULL, 0,
-                                                        &agent->personal_model);
+                                                        &agent->personal_model,
+                                                        agent->persona ? &batch_pctx : NULL);
+                    }
                     if (gerr != HU_OK && graph) {
                         gerr = hu_graph_build_contact_context(
                             graph, alloc, combined, combined_len, batch_key, key_len,
