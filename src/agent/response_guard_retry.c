@@ -135,7 +135,9 @@ hu_error_t hu_response_guard_retry_slim(hu_allocator_t *alloc, hu_observer_t *ob
     if (err == HU_OK && *out && *out_len > 0)
         return HU_OK;
 
-#ifdef HU_ENABLE_CURL
+#ifndef HU_ENABLE_CURL
+    (void)cfg;
+#else
     if (!cfg)
         return err;
 

@@ -20,13 +20,16 @@ hu_persona_evolver_config_t hu_persona_evolver_default_config(void) {
     return c;
 }
 
+#ifdef HU_ENABLE_SQLITE
+/* Only referenced from the SQLite-enabled paths below; gate the
+ * definition so the no-sqlite / minimal build doesn't trip
+ * -Werror=unused-function. */
 static int64_t now_ms_or(int64_t given) {
     if (given > 0)
         return given;
     return (int64_t)time(NULL) * 1000;
 }
 
-#ifdef HU_ENABLE_SQLITE
 
 static hu_error_t ensure_schema(struct sqlite3 *db) {
     static const char *const ddl[] = {

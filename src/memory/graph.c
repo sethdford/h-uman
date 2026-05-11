@@ -777,6 +777,12 @@ hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
         *out_count = 0;
         return HU_ERR_OUT_OF_MEMORY;
     }
+    if (count == 0) {
+        alloc->free(alloc->ctx, arr, cap * sizeof(hu_graph_relation_t));
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
+    }
     *out = arr;
     *out_count = count;
     return HU_OK;
@@ -1476,6 +1482,16 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
         *out_count = 0;
         return HU_ERR_OUT_OF_MEMORY;
     }
+    if (count == 0) {
+        /* No matching entities. Free the pre-allocated buffer so callers
+         * can rely on the contract that *out_count==0 means nothing to
+         * free (see also the matching fix in src/memory/engines/sqlite.c
+         * for impl_list — same anti-pattern, same fix). */
+        alloc->free(alloc->ctx, arr, cap * sizeof(hu_graph_entity_t));
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
+    }
     *out = arr;
     *out_count = count;
     return HU_OK;
@@ -1557,6 +1573,12 @@ hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const c
         *out = NULL;
         *out_count = 0;
         return HU_ERR_OUT_OF_MEMORY;
+    }
+    if (count == 0) {
+        alloc->free(alloc->ctx, arr, cap * sizeof(hu_graph_relation_t));
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
     }
     *out = arr;
     *out_count = count;
@@ -1653,6 +1675,12 @@ hu_error_t hu_graph_list_relations_verifier_scan(hu_graph_t *g, hu_allocator_t *
         *out = NULL;
         *out_count = 0;
         return HU_ERR_OUT_OF_MEMORY;
+    }
+    if (count == 0) {
+        alloc->free(alloc->ctx, arr, cap * sizeof(hu_graph_relation_t));
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
     }
     *out = arr;
     *out_count = count;

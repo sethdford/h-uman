@@ -327,6 +327,17 @@ hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
         return HU_ERR_IO;
     }
 
+    if (count == 0) {
+        /* No matching events. Free the pre-allocated buffer so callers
+         * can rely on count==0 meaning nothing to free (matches the
+         * fix pattern in src/memory/engines/sqlite.c::impl_list and
+         * src/memory/graph.c). */
+        alloc->free(alloc->ctx, events, capacity * sizeof(*events));
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
+    }
+
     *out       = events;
     *out_count = count;
     return HU_OK;
