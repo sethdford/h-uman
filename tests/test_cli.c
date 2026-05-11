@@ -319,6 +319,145 @@ static void test_agent_cli_prompt_without_once(void) {
     HU_ASSERT_STR_EQ(args.prompt, "System prompt text"); HU_ASSERT_EQ(args.once, 0);
 }
 
+#if defined(__unix__) || defined(__APPLE__)
+/* B8 — `human eval tom` subcommand. Three sub-modes: smoke, gold, run.
+ * The smoke + gold modes are pure data-pack rubric checks (no provider);
+ * run scores caller-supplied JSONL responses. We only test the JSON
+ * envelope and the JSONL parser here — the underlying scoring is
+ * exhaustively covered in tests/test_tom_scenario_b8.c. */
+static char *tom_capture_stdout(int argc, char **argv, hu_error_t *err_out) {
+    char tmpl[] = "/tmp/hu_eval_tom_XXXXXX";
+    int tfd = mkstemp(tmpl);
+    if (tfd < 0)
+        return NULL;
+    if (close(tfd) != 0) {
+        unlink(tmpl);
+        return NULL;
+    }
+    int save_out = dup(STDOUT_FILENO);
+    if (save_out < 0) {
+        unlink(tmpl);
+        return NULL;
+    }
+    if (!freopen(tmpl, "w", stdout)) {
+        dup2(save_out, STDOUT_FILENO);
+        close(save_out);
+        unlink(tmpl);
+        return NULL;
+    }
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = cmd_eval(&alloc, argc, argv);
+    fflush(stdout);
+    dup2(save_out, STDOUT_FILENO);
+    close(save_out);
+    if (err_out)
+        *err_out = err;
+
+    FILE *rf = fopen(tmpl, "r");
+    if (!rf) {
+        unlink(tmpl);
+        return NULL;
+    }
+    char *buf = (char *)malloc(8192);
+    if (!buf) {
+        fclose(rf);
+        unlink(tmpl);
+        return NULL;
+    }
+    size_t n = fread(buf, 1, 8192 - 1, rf);
+    buf[n] = '\0';
+    fclose(rf);
+    unlink(tmpl);
+    return buf;
+}
+
+static void test_cmd_tom_smoke_emits_pct_100_on_pack(void) {
+    char *argv[] = {"human", "eval", "tom", "smoke",
+                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    hu_error_t err = HU_OK;
+    char *out = tom_capture_stdout(5, argv, &err);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"mode\":\"smoke\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"pct\":100") != NULL);
+    free(out);
+}
+
+static void test_cmd_tom_gold_emits_envelope(void) {
+    char *argv[] = {"human", "eval", "tom", "gold",
+                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    hu_error_t err = HU_OK;
+    char *out = tom_capture_stdout(5, argv, &err);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"mode\":\"gold\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"total\":10") != NULL);
+    free(out);
+}
+
+static void test_cmd_tom_run_scores_jsonl_responses(void) {
+    char tmpl[] = "/tmp/hu_eval_tom_resps_XXXXXX";
+    int tfd = mkstemp(tmpl);
+    HU_ASSERT(tfd >= 0);
+    const char *resps =
+        "{\"id\":\"tom-fb-01\",\"response\":\"Max will check the original basket first.\"}\n"
+        "{\"id\":\"tom-fb-02\",\"response\":\"Sam still thinks the cookies are in the jar.\"}\n"
+        "{\"id\":\"tom-pr-01\",\"response\":\"Likely they want me to close the window or raise heat.\"}\n";
+    HU_ASSERT_EQ(write(tfd, resps, strlen(resps)), (ssize_t)strlen(resps));
+    close(tfd);
+
+    char *argv[] = {"human",     "eval",         "tom",
+                    "run",       "--pack",       HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
+                    "--responses", tmpl};
+    hu_error_t err = HU_OK;
+    char *out = tom_capture_stdout(8, argv, &err);
+    unlink(tmpl);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"mode\":\"run\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"responses_loaded\":3") != NULL);
+    /* Default: skip-unanswered → total == loaded == 3. */
+    HU_ASSERT_TRUE(strstr(out, "\"total\":3") != NULL);
+    free(out);
+}
+
+static void test_cmd_tom_run_no_skip_unanswered_inflates_total(void) {
+    char tmpl[] = "/tmp/hu_eval_tom_resps2_XXXXXX";
+    int tfd = mkstemp(tmpl);
+    HU_ASSERT(tfd >= 0);
+    const char *resps =
+        "{\"id\":\"tom-fb-01\",\"response\":\"original basket\"}\n";
+    HU_ASSERT_EQ(write(tfd, resps, strlen(resps)), (ssize_t)strlen(resps));
+    close(tfd);
+
+    char *argv[] = {"human",     "eval",         "tom",
+                    "run",       "--pack",       HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
+                    "--responses", tmpl,         "--no-skip-unanswered"};
+    hu_error_t err = HU_OK;
+    char *out = tom_capture_stdout(9, argv, &err);
+    unlink(tmpl);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"responses_loaded\":1") != NULL);
+    /* Pack has 10 items; --no-skip-unanswered counts them all. */
+    HU_ASSERT_TRUE(strstr(out, "\"total\":10") != NULL);
+    free(out);
+}
+
+static void test_cmd_tom_unknown_subcommand_fails(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *argv[] = {"human", "eval", "tom", "bogus"};
+    HU_ASSERT_NEQ(cmd_eval(&alloc, 4, argv), HU_OK);
+}
+
+static void test_cmd_tom_run_missing_flag_fails(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *argv[] = {"human", "eval", "tom", "run", "--pack",
+                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    HU_ASSERT_NEQ(cmd_eval(&alloc, 6, argv), HU_OK);
+}
+#endif
+
 void run_cli_tests(void) {
     HU_TEST_SUITE("CLI Commands");
     HU_RUN_TEST(test_cmd_channel_list);
@@ -336,6 +475,12 @@ void run_cli_tests(void) {
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(test_cmd_eval_baseline_outputs_score_table);
     HU_RUN_TEST(test_cmd_eval_check_regression_is_test_emits_pass_line);
+    HU_RUN_TEST(test_cmd_tom_smoke_emits_pct_100_on_pack);
+    HU_RUN_TEST(test_cmd_tom_gold_emits_envelope);
+    HU_RUN_TEST(test_cmd_tom_run_scores_jsonl_responses);
+    HU_RUN_TEST(test_cmd_tom_run_no_skip_unanswered_inflates_total);
+    HU_RUN_TEST(test_cmd_tom_unknown_subcommand_fails);
+    HU_RUN_TEST(test_cmd_tom_run_missing_flag_fails);
 #endif
     HU_RUN_TEST(test_cmd_setup_local_model_ok);
     HU_RUN_TEST(test_cmd_setup_unknown_subcommand_fails);
