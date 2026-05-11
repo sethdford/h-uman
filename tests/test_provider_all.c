@@ -3053,6 +3053,57 @@ static void test_active_adapter_dispatcher_returns_null_on_openai(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+/* M3 Bridge A — daemon-pattern integration. The daemon's startup path
+ * (`src/daemon.c`, immediately after the W14 scheduler open) does this:
+ *
+ *     hu_provider_create("openai", ...)         // user's chosen provider
+ *     hu_provider_load_adapter(&prov, alloc, lora_path, ..., id, ...)
+ *     // returns HU_ERR_NOT_SUPPORTED on cloud → log info, fall through
+ *     ... continues to chat normally with the base model ...
+ *
+ * This test pins that exact contract. The user-visible promise is "if
+ * you set personalization on a cloud provider, the daemon does not crash
+ * — it logs that adapters aren't supported and falls back to the base
+ * model." A future refactor that makes load_adapter destructive (e.g.
+ * frees the provider on error) would silently break that fallback;
+ * this test catches it. */
+#if HU_IS_TEST
+static void test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_provider_create(&alloc, "openai", 6, "test-key", 8, NULL, 0, &prov), HU_OK);
+
+    /* Daemon's basename-extraction fallback on empty adapter_id: when
+     * config doesn't set lora_adapter_id, daemon strips the basename
+     * from the path. We exercise the same shape the daemon uses. */
+    const char *adapter_path = "/tmp/persona-default.lora";
+    const char *adapter_id = "persona-default";
+    hu_error_t le = hu_provider_load_adapter(&prov, &alloc, adapter_path, strlen(adapter_path),
+                                              adapter_id, strlen(adapter_id));
+    HU_ASSERT_EQ(le, HU_ERR_NOT_SUPPORTED);
+
+    /* Critical: the provider must remain usable for chat afterward.
+     * The daemon relies on this — a NOT_SUPPORTED return on
+     * load_adapter is silent fallback, not an error path. */
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(prov.vtable->chat_with_system(prov.ctx, &alloc, "sys", 3, "hello", 5,
+                                                "gpt-4o", 6, 0.5, &out, &out_len),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_GT(out_len, (size_t)0);
+    if (out)
+        alloc.free(alloc.ctx, out, out_len + 1);
+
+    /* And the active_adapter accessor must still report NULL — no
+     * adapter ever attached, so no leftover state. */
+    HU_ASSERT_NULL((void *)hu_provider_active_adapter(&prov));
+
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+#endif
+
 void run_provider_all_tests(void) {
     HU_TEST_SUITE("Provider All");
     HU_RUN_TEST(test_openai_create_succeeds);
@@ -3314,4 +3365,7 @@ void run_provider_all_tests(void) {
     HU_RUN_TEST(test_load_adapter_dispatcher_invalid_args);
     HU_RUN_TEST(test_unload_adapter_dispatcher_not_supported_on_openai);
     HU_RUN_TEST(test_active_adapter_dispatcher_returns_null_on_openai);
+#if HU_IS_TEST
+    HU_RUN_TEST(test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat);
+#endif
 }
