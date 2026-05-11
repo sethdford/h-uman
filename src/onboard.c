@@ -39,47 +39,11 @@ bool hu_onboard_check_first_run(void) {
     return true;
 }
 
-#ifdef HU_IS_TEST
-hu_error_t hu_onboard_run(hu_allocator_t *alloc) {
-    (void)alloc;
-    return HU_OK;
-}
-hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provider,
-                                    const char *cli_api_key, bool apple_shortcut) {
-    (void)alloc;
-    (void)cli_provider;
-    (void)cli_api_key;
-    (void)apple_shortcut;
-    return HU_OK;
-}
-#else
-
-static const char *const HU_AGENTS_TEMPLATE = "# AGENTS.md — Project Agent Protocol\n"
-                                              "## Build & Test\n"
-                                              "- Build: `make` or `cmake .. && make`\n"
-                                              "- Test: `make test`\n"
-                                              "## Conventions\n"
-                                              "- Follow existing code style\n"
-                                              "- Write tests for new features\n"
-                                              "- Keep commits focused\n";
-
-static const char *const HU_USER_TEMPLATE = "# User Preferences\n"
-                                            "## Communication\n"
-                                            "- Be concise and direct\n"
-                                            "- Show code examples when helpful\n"
-                                            "## Expertise\n"
-                                            "- Assume intermediate programming knowledge\n";
-
-static const char *const HU_IDENTITY_TEMPLATE =
-    "# Agent Identity\n"
-    "name: Human\n"
-    "description: Autonomous AI assistant running locally\n"
-    "personality: Helpful, concise, security-conscious\n";
-
 /* Single source of truth — declared in include/human/onboard.h and
  * referenced by both `human init` (src/cli_commands.c) and
- * `human onboard` (this file). See header comment for the bug
- * history that prompted the centralization. */
+ * `human onboard` (this file). Defined outside the HU_IS_TEST guard
+ * so unit tests (which set HU_IS_TEST) can still link against this
+ * symbol — the literal is bytes-on-disk-equivalent in both builds. */
 const char hu_starter_persona_json[] =
     "{\n"
     "  \"version\": 1,\n"
@@ -128,35 +92,49 @@ const char hu_starter_persona_json[] =
     "      \"style_notes\": \"Technical, precise. No emoji. "
     "Format code blocks when showing code.\"\n"
     "    }\n"
-    "  },\n"
-    "  \"example_banks\": [\n"
-    "    {\n"
-    "      \"channel\": \"cli\",\n"
-    "      \"examples\": [\n"
-    "        {\n"
-    "          \"context\": \"user asks about their schedule\",\n"
-    "          \"incoming\": \"What do I have going on today?\",\n"
-    "          \"response\": \"Let me check your calendar. You have a team standup at "
-    "10am and a dentist appointment at 3pm. Want me to set a reminder for the dentist?\"\n"
-    "        },\n"
-    "        {\n"
-    "          \"context\": \"user shares something personal\",\n"
-    "          \"incoming\": \"I got the promotion!\",\n"
-    "          \"response\": \"That's amazing, congratulations! All that hard work paid off. "
-    "How are you planning to celebrate?\"\n"
-    "        },\n"
-    "        {\n"
-    "          \"context\": \"user needs help with a task\",\n"
-    "          \"incoming\": \"Can you help me draft an email to my team about the new "
-    "project timeline?\",\n"
-    "          \"response\": \"Of course. What's the key message — are timelines moving "
-    "up or getting pushed back? And what tone do you want — casual update or more formal "
-    "announcement?\"\n"
-    "        }\n"
-    "      ]\n"
-    "    }\n"
-    "  ]\n"
+    "  }\n"
     "}\n";
+
+#ifdef HU_IS_TEST
+hu_error_t hu_onboard_run(hu_allocator_t *alloc) {
+    (void)alloc;
+    return HU_OK;
+}
+hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provider,
+                                    const char *cli_api_key, bool apple_shortcut) {
+    (void)alloc;
+    (void)cli_provider;
+    (void)cli_api_key;
+    (void)apple_shortcut;
+    return HU_OK;
+}
+#else
+
+static const char *const HU_AGENTS_TEMPLATE = "# AGENTS.md — Project Agent Protocol\n"
+                                              "## Build & Test\n"
+                                              "- Build: `make` or `cmake .. && make`\n"
+                                              "- Test: `make test`\n"
+                                              "## Conventions\n"
+                                              "- Follow existing code style\n"
+                                              "- Write tests for new features\n"
+                                              "- Keep commits focused\n";
+
+static const char *const HU_USER_TEMPLATE = "# User Preferences\n"
+                                            "## Communication\n"
+                                            "- Be concise and direct\n"
+                                            "- Show code examples when helpful\n"
+                                            "## Expertise\n"
+                                            "- Assume intermediate programming knowledge\n";
+
+static const char *const HU_IDENTITY_TEMPLATE =
+    "# Agent Identity\n"
+    "name: Human\n"
+    "description: Autonomous AI assistant running locally\n"
+    "personality: Helpful, concise, security-conscious\n";
+
+/* Duplicate definition removed — `hu_starter_persona_json` is the
+ * single source of truth, defined above the HU_IS_TEST guard so
+ * unit tests can link against it. */
 
 static bool write_template_if_missing(const char *path, const char *content) {
     FILE *check = fopen(path, "rb");

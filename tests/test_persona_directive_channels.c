@@ -46,7 +46,7 @@ static void seed_model_with_recent_goal(hu_personal_model_t *m) {
     m->goals[0].active = false;
     m->goals[0].progress = 1.0f;
     m->goals[0].last_referenced = 1000;
-    snprintf(m->goals[0].title, sizeof(m->goals[0].title), "ship the sprint");
+    snprintf(m->goals[0].description, sizeof(m->goals[0].description), "ship the sprint");
     m->updated_at = 1000 + 86400; /* < 7 days since completion */
 }
 
@@ -176,10 +176,10 @@ static void persona_directive_tier1_batch_yields_zero_null_overlay(void) {
 
 void run_persona_directive_channels_tests(void) {
     HU_TEST_SUITE("persona_directive_channels");
-    HU_TEST_RUN(persona_directive_starter_persona_loads_four_tier1_overlays);
-    HU_TEST_RUN(persona_directive_discord_overlay_fires_casual_emoji);
-    HU_TEST_RUN(persona_directive_imessage_overlay_fires_casual_emoji);
-    HU_TEST_RUN(persona_directive_slack_overlay_fires_formal_terse);
-    HU_TEST_RUN(persona_directive_telegram_overlay_fires_casual_or_short);
-    HU_TEST_RUN(persona_directive_tier1_batch_yields_zero_null_overlay);
+    HU_RUN_TEST(persona_directive_starter_persona_loads_four_tier1_overlays);
+    HU_RUN_TEST(persona_directive_discord_overlay_fires_casual_emoji);
+    HU_RUN_TEST(persona_directive_imessage_overlay_fires_casual_emoji);
+    HU_RUN_TEST(persona_directive_slack_overlay_fires_formal_terse);
+    HU_RUN_TEST(persona_directive_telegram_overlay_fires_casual_or_short);
+    HU_RUN_TEST(persona_directive_tier1_batch_yields_zero_null_overlay);
 }
