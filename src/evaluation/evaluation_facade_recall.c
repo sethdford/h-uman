@@ -73,7 +73,12 @@ typedef struct facade_item {
  * heuristic planner (when/last/where/who/between/with/default). The expected
  * answer is always an entity name from the same triple — so retrieving the
  * relation is enough to pass (we score by entity-id presence in the
- * returned records). */
+ * returned records).
+ *
+ * Only consumed by `fr_run`, which is itself gated on HU_ENABLE_SQLITE; in
+ * the minimal build (no sqlite) the dataset is dead-code and clang's
+ * -Wunneeded-internal-declaration / -Wunused-const-variable fire. */
+#ifdef HU_ENABLE_SQLITE
 static const facade_item_t FACADE_ITEMS[] = {
     {"Alice",   HU_ENTITY_PERSON,       "Acme",      HU_ENTITY_ORGANIZATION,
      "works at since 2020",
@@ -113,6 +118,7 @@ static const facade_item_t FACADE_ITEMS[] = {
      "what does alice drink in the morning?",                    "Genmaicha"},
 };
 static const size_t FACADE_N = sizeof(FACADE_ITEMS) / sizeof(FACADE_ITEMS[0]);
+#endif /* HU_ENABLE_SQLITE */
 
 /* ── Backend ctx ───────────────────────────────────────────────────────── */
 

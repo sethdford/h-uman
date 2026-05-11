@@ -702,6 +702,10 @@ static void imsg_watch_start(hu_imessage_ctx_t *c) {
     imessage_save_poll_status(c);
 }
 
+/* Only called from the SQLite/Apple poll path below; without those flags
+ * the function is dead code and -Werror=unused-function fires on minimal
+ * Linux builds (HU_ENABLE_SQLITE=OFF + non-Apple host). */
+__attribute__((unused))
 static bool imsg_watch_has_data(hu_imessage_ctx_t *c) {
     if (!c->imsg_watch_running || c->imsg_watch_fd < 0)
         return false;

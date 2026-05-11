@@ -802,8 +802,16 @@ hu_error_t cp_admin_nodes_action(hu_allocator_t *alloc, hu_app_context_t *app, h
         strcmp(action, "status") != 0)
         return HU_ERR_INVALID_ARGUMENT;
 
-    if (!cp_admin_node_object_for_id(alloc, app, node_id))
-        return HU_ERR_INVALID_ARGUMENT;
+    {
+        /* Existence check only — the returned JSON value must be freed
+         * (was leaking ~130 bytes per call across multiple test scenarios,
+         * accumulating to 32KB+ over the gateway_extended test run that
+         * tripped CI's ASan job). */
+        hu_json_value_t *probe = cp_admin_node_object_for_id(alloc, app, node_id);
+        if (!probe)
+            return HU_ERR_INVALID_ARGUMENT;
+        hu_json_free(alloc, probe);
+    }
 
     if (strcmp(action, "status") == 0) {
         hu_json_value_t *obj = hu_json_object_new(alloc);

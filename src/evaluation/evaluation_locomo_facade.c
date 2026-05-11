@@ -95,8 +95,12 @@
  * non-alphanumeric. The stopword list catches interrogative pronouns at
  * the start of LoCoMo queries ("When did Caroline...") so they don't
  * pollute the entity set with a "When" pseudo-entity that 800+ queries
- * would then anchor on. */
-
+ * would then anchor on.
+ *
+ * Only consumed by `lf_run_one`, which is gated on HU_ENABLE_SQLITE. In
+ * the minimal build the NER helpers are dead code, so -Werror=unused-function
+ * trips unless we gate them the same way. */
+#ifdef HU_ENABLE_SQLITE
 static const char *NER_STOPWORDS[] = {
     "What", "When", "Where", "Why", "Who", "Which", "How",
     "Would", "Could", "Should", "Did", "Does", "Is", "Are",
@@ -159,6 +163,7 @@ static size_t ner_extract(const char *query, size_t qlen,
     }
     return found;
 }
+#endif /* HU_ENABLE_SQLITE — NER helpers */
 
 /* ── Backend ctx ───────────────────────────────────────────────────────── */
 

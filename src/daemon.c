@@ -4074,12 +4074,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * outreach can resume after silence. */
                 (void)hu_governor_record_response(&gov_budget);
 
-                /* Reciprocity tracking: record their initiation for balanced outreach */
+                /* Reciprocity tracking: record their initiation for balanced outreach.
+                 * Gated on HU_ENABLE_SQLITE because the helper's declaration lives
+                 * inside that guard in include/human/context/self_awareness.h.
+                 * The other three call sites are already gated; this one was
+                 * missed when reciprocity was wired in, so the no-sqlite /
+                 * cross-arm64 / minimal builds tripped
+                 * -Werror=implicit-function-declaration. */
+#ifdef HU_ENABLE_SQLITE
                 if (agent->memory) {
                     bool they_asked = (memchr(combined, '?', combined_len) != NULL);
                     (void)hu_self_awareness_record_their_reciprocity(
                         alloc, agent->memory, batch_key, key_len, true, they_asked, false);
                 }
+#endif
                 /* Only respond to contacts explicitly listed in persona_contacts.
                  * When a persona is loaded, ALL inbound messages from contacts not in
                  * the allowlist are silently dropped — even if the list is empty. */
