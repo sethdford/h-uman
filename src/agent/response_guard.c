@@ -352,24 +352,107 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, 
         return HU_OK;
     }
 
+    /* Phase 0 — Gemma-4 untagged reasoning strip.
+     *
+     * Gemma-4 (and some other thinking models served via mlx_lm) emit their
+     * chain-of-thought as plain-text bullet analysis at the START of the
+     * response, without <think> tags.  The pattern looks like:
+     *
+     *   \n*   User: "Hey you!"
+     *       *   Persona: Seth Douglas Ford (51, Chief Architect, t…
+     *       *   Context: Annie (sister) is teasing Seth. This…
+     *   <blank line>
+     *   Actual reply text here
+     *
+     * We detect this by checking if the (whitespace-trimmed) response opens
+     * with "* " (asterisk + space).  If it does, we scan forward for the
+     * first line that does NOT start with whitespace or "*"; that is the
+     * start of the real reply.  If no such line exists the entire response
+     * is reasoning — reject it so the daemon retries. */
+    const char *effective = response;
+    size_t effective_len = response_len;
+
+    /* Skip leading whitespace. */
+    size_t skip_ws = 0;
+    while (skip_ws < response_len &&
+           (response[skip_ws] == ' ' || response[skip_ws] == '\t' ||
+            response[skip_ws] == '\n' || response[skip_ws] == '\r'))
+        skip_ws++;
+
+    bool stripped_reasoning_prefix = false;
+
+    if (skip_ws < response_len && response[skip_ws] == '*' &&
+        skip_ws + 1 < response_len && response[skip_ws + 1] == ' ') {
+        /* Looks like untagged reasoning.  Walk line-by-line to find where
+         * the actual reply begins. A "reasoning line" either starts with
+         * `*` or is indented (leading spaces/tabs).  The first
+         * non-blank line that starts with an alphanumeric or common
+         * punctuation (anything except * or whitespace) is the reply. */
+        size_t reply_start = response_len;
+        size_t i = skip_ws;
+        while (i < response_len) {
+            /* Find start of next line (skip current line). */
+            while (i < response_len && response[i] != '\n')
+                i++;
+            if (i < response_len)
+                i++; /* skip the newline */
+            /* Skip blank lines. */
+            size_t line_start = i;
+            while (line_start < response_len &&
+                   (response[line_start] == ' ' || response[line_start] == '\t'))
+                line_start++;
+            if (line_start >= response_len)
+                break;
+            if (response[line_start] == '\n' || response[line_start] == '\r') {
+                i = line_start;
+                continue;
+            }
+            /* If this line starts with `*` it's still reasoning. */
+            if (response[line_start] == '*') {
+                i = line_start;
+                continue;
+            }
+            /* This line is the start of the actual reply. */
+            reply_start = line_start;
+            break;
+        }
+
+        if (reply_start < response_len) {
+            effective = response + reply_start;
+            effective_len = response_len - reply_start;
+            stripped_reasoning_prefix = true;
+        } else {
+            /* Entire response is reasoning — no reply text. Reject. */
+            *out_response = NULL;
+            *out_len = 0;
+            *out_outcome = HU_GUARD_REJECT;
+            if (report) {
+                memset(report, 0, sizeof(*report));
+                report->stripped_thinking_block = true;
+                report->bytes_stripped = response_len;
+            }
+            return HU_OK;
+        }
+    }
+
     /* Phase 1 — special-token strip. Always run; cheap. */
-    bool needs_strip = hu_response_guard_has_special_token(response, response_len);
+    bool needs_strip = hu_response_guard_has_special_token(effective, effective_len);
 
     char *cleaned = NULL;
-    size_t cleaned_len = response_len;
+    size_t cleaned_len = effective_len;
     bool stripped_harmony = false;
     bool stripped_thinking = false;
 
     if (needs_strip) {
-        cleaned = (char *)alloc->alloc(alloc->ctx, response_len + 1);
+        cleaned = (char *)alloc->alloc(alloc->ctx, effective_len + 1);
         if (!cleaned)
             return HU_ERR_OUT_OF_MEMORY;
-        strip_special_into(response, response_len, cleaned, &cleaned_len, &stripped_harmony,
+        strip_special_into(effective, effective_len, cleaned, &cleaned_len, &stripped_harmony,
                            &stripped_thinking);
     }
 
-    const char *for_repetition_check = needs_strip ? cleaned : response;
-    size_t check_len = needs_strip ? cleaned_len : response_len;
+    const char *for_repetition_check = needs_strip ? cleaned : effective;
+    size_t check_len = needs_strip ? cleaned_len : effective_len;
 
     /* Phase 2 — degenerate repetition detection. */
     size_t char_run = hu_response_guard_longest_char_run(for_repetition_check, check_len);
@@ -378,10 +461,12 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, 
 
     if (report) {
         report->stripped_harmony_tokens = stripped_harmony;
-        report->stripped_thinking_block = stripped_thinking;
+        report->stripped_thinking_block = stripped_thinking || stripped_reasoning_prefix;
         report->detected_degenerate_repetition = degenerate;
         report->max_repetition_run = char_run > tok_run ? char_run : tok_run;
-        report->bytes_stripped = needs_strip ? (response_len - cleaned_len) : 0;
+        size_t prefix_bytes = stripped_reasoning_prefix ? (response_len - effective_len) : 0;
+        report->bytes_stripped =
+            prefix_bytes + (needs_strip ? (effective_len - cleaned_len) : 0);
     }
 
     if (degenerate) {
@@ -397,7 +482,7 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, 
         /* If everything was stripped away, treat as reject — the model
          * sent ONLY tokens, no real content. */
         if (cleaned_len == 0) {
-            alloc->free(alloc->ctx, cleaned, response_len + 1);
+            alloc->free(alloc->ctx, cleaned, effective_len + 1);
             *out_response = NULL;
             *out_len = 0;
             *out_outcome = HU_GUARD_REJECT;
@@ -407,6 +492,20 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, 
         }
         *out_response = cleaned;
         *out_len = cleaned_len;
+        *out_outcome = HU_GUARD_REWROTE;
+        return HU_OK;
+    }
+
+    if (stripped_reasoning_prefix) {
+        /* Reasoning prefix was stripped — need to return a copy since
+         * effective points into the middle of the original response. */
+        char *copy = (char *)alloc->alloc(alloc->ctx, effective_len + 1);
+        if (!copy)
+            return HU_ERR_OUT_OF_MEMORY;
+        memcpy(copy, effective, effective_len);
+        copy[effective_len] = '\0';
+        *out_response = copy;
+        *out_len = effective_len;
         *out_outcome = HU_GUARD_REWROTE;
         return HU_OK;
     }

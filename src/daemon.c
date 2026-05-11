@@ -907,6 +907,12 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     if (!alloc || !agent || !agent->persona)
         return;
 
+    /* HU_PROACTIVE_ENABLED=0 disables proactive check-ins entirely.
+     * Default: enabled (any value other than "0"). */
+    const char *proactive_env = getenv("HU_PROACTIVE_ENABLED");
+    if (proactive_env && proactive_env[0] == '0' && proactive_env[1] == '\0')
+        return;
+
     time_t now = time(NULL);
     struct tm tm_now;
     localtime_r(&now, &tm_now);

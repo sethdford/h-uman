@@ -352,6 +352,60 @@ static void helper_longest_token_run_counts(void) {
     HU_ASSERT(hu_response_guard_longest_token_run("the quick brown fox", 19) <= 1u);
 }
 
+static void guard_strips_gemma4_untagged_reasoning(void) {
+    const char *raw =
+        "\n*   User: \"Hey you!\"\n"
+        "    *   Persona: Seth Douglas Ford (51, Chief Architect)\n"
+        "    *   Context: Annie is teasing Seth.\n"
+        "\n"
+        "hey! what's up";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome;
+    hu_guard_report_t report;
+    hu_error_t err =
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REWROTE);
+    HU_ASSERT(report.stripped_thinking_block);
+    HU_ASSERT(out != NULL);
+    HU_ASSERT(out_len > 0);
+    HU_ASSERT(strncmp(out, "hey! what's up", 14) == 0);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void guard_rejects_gemma4_reasoning_only(void) {
+    const char *raw =
+        "\n*   User (Annie Ford, Seth's sister) is asking about Doug\n"
+        "    *   Persona: Seth Douglas Ford\n"
+        "    *   Options: 1) Ask more 2) Redirect\n";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome;
+    hu_guard_report_t report;
+    hu_error_t err =
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(out == NULL);
+    HU_ASSERT_EQ(out_len, 0u);
+}
+
+static void guard_passes_normal_asterisk_text(void) {
+    const char *raw = "I think we should *definitely* go for it!";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome;
+    hu_error_t err =
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+    HU_ASSERT(out == raw);
+}
+
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 void run_response_guard_tests(void) {
@@ -373,4 +427,7 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(helper_has_special_token_detects_harmony);
     HU_RUN_TEST(helper_longest_char_run_counts);
     HU_RUN_TEST(helper_longest_token_run_counts);
+    HU_RUN_TEST(guard_strips_gemma4_untagged_reasoning);
+    HU_RUN_TEST(guard_rejects_gemma4_reasoning_only);
+    HU_RUN_TEST(guard_passes_normal_asterisk_text);
 }
