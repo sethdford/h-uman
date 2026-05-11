@@ -31,6 +31,9 @@
 #endif
 #include "human/runtime.h"
 #include "human/ml/learner.h"
+#ifdef HU_ENABLE_ML
+#include "human/ml/m3_frontier_adapter.h"
+#endif
 #include "human/security/audit.h"
 #include "human/security/keystore.h"
 #include "human/security/sandbox.h"
@@ -612,8 +615,12 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             if (ks_err == HU_OK && bi->keystore) {
                 ks_err = hu_keystore_unlock_with_passphrase(bi->keystore, pp, strlen(pp));
                 if (ks_err == HU_OK) {
+#ifdef HU_ENABLE_SQLITE
                     hu_error_t at_err = hu_sqlite_memory_attach_keystore(
                         &bi->memory, bi->keystore, true);
+#else
+                    hu_error_t at_err = HU_ERR_NOT_SUPPORTED;
+#endif
                     if (at_err == HU_OK) {
                         hu_log_info("bootstrap", &bi->observer,
                                     "memory encrypt_at_rest=ON (keystore for user=%s)", uid);
@@ -950,9 +957,23 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                     "persona deltas persist as usual, on-device training disabled");
 #endif
 #ifdef HU_ENABLE_ML
-        if (bi->cfg.personalization.m3_adapter_probe_path &&
-            bi->cfg.personalization.m3_adapter_probe_path[0])
-            hu_agent_m3_adapter_attach(&bi->agent, bi->cfg.personalization.m3_adapter_probe_path);
+        /* Track D D1.3 — rollback flag. `hu_m3_adapter_should_disable`
+         * encapsulates the precedence:
+         *   1. config `personalization.m3_adapter_disabled` true → disable
+         *   2. env `HUMAN_M3_ADAPTER_DISABLE=1` → force-disable
+         * Disable causes us to skip the attach entirely; the chat-loop
+         * hooks (`hu_agent_m3_on_provider_success`) become no-ops via
+         * the agent->m3_adapter == NULL branch — zero runtime cost
+         * along the hot path. The env var is the operational kill
+         * switch: `HUMAN_M3_ADAPTER_DISABLE=1 human` overrides config
+         * without redeploying. */
+        if (hu_m3_adapter_should_disable(bi->cfg.personalization.m3_adapter_disabled)) {
+            hu_log_info("bootstrap", obs, "m3 bridge disabled by rollback flag");
+        } else if (bi->cfg.personalization.m3_adapter_probe_path &&
+                   bi->cfg.personalization.m3_adapter_probe_path[0]) {
+            hu_agent_m3_adapter_attach(&bi->agent,
+                                       bi->cfg.personalization.m3_adapter_probe_path);
+        }
 #endif
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
         if (bi->cfg.agent.mr_on_device_enabled) {

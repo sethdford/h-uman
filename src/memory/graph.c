@@ -870,6 +870,24 @@ hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64
     return HU_ERR_NOT_SUPPORTED;
 }
 
+hu_error_t hu_graph_upsert_relation_with_belief(
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+    int64_t source_id, int64_t target_id, hu_relation_type_t type,
+    float weight, int64_t event_start, int64_t event_end,
+    float belief_mean, float belief_variance,
+    const char *context, size_t context_len,
+    const char *provenance, size_t provenance_len,
+    int64_t *out_id) {
+    (void)g; (void)contact_id; (void)contact_id_len;
+    (void)source_id; (void)target_id; (void)type; (void)weight;
+    (void)event_start; (void)event_end;
+    (void)belief_mean; (void)belief_variance;
+    (void)context; (void)context_len;
+    (void)provenance; (void)provenance_len;
+    if (out_id) *out_id = 0;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
 #endif
 
 #ifdef HU_ENABLE_SQLITE
@@ -1714,6 +1732,7 @@ void hu_graph_relations_free(hu_allocator_t *alloc, hu_graph_relation_t *relatio
     alloc->free(alloc->ctx, relations, count * sizeof(hu_graph_relation_t));
 }
 
+#ifdef HU_ENABLE_SQLITE
 hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
                                             float confidence, int64_t last_seen_now_ms) {
     if (!g || !g->db)
@@ -1808,6 +1827,24 @@ hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id,
     sqlite3_finalize(stmt);
     return rc == SQLITE_DONE ? HU_ERR_NOT_FOUND : HU_ERR_IO;
 }
+#else  /* !HU_ENABLE_SQLITE: graph belief setters are no-ops without SQLite */
+hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id,
+                                            float confidence, int64_t last_seen_now_ms) {
+    (void)g; (void)relation_id; (void)confidence; (void)last_seen_now_ms;
+    return HU_ERR_NOT_SUPPORTED;
+}
+hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id,
+                                        float mean, float variance,
+                                        int64_t last_seen_now_ms) {
+    (void)g; (void)relation_id; (void)mean; (void)variance; (void)last_seen_now_ms;
+    return HU_ERR_NOT_SUPPORTED;
+}
+hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id,
+                                        float *out_mean, float *out_variance) {
+    (void)g; (void)relation_id; (void)out_mean; (void)out_variance;
+    return HU_ERR_NOT_SUPPORTED;
+}
+#endif /* HU_ENABLE_SQLITE */
 
 hu_entity_type_t hu_entity_type_from_string(const char *s, size_t len) {
     if (!s || len == 0)

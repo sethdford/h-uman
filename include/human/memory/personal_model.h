@@ -40,6 +40,13 @@ typedef struct hu_personal_goal {
     char description[512];
     bool active;
     int64_t created_at;
+    /* Unix timestamp of the most recent reference to this goal in
+     * conversation. Drives `hu_personal_goal_effective_priority`:
+     * a goal not touched for >= one half-life is presumed stale and
+     * earns less prompt space (see HU_PM_GOAL_RELEVANCE_HALF_LIFE_SEC).
+     * Defaults to created_at when the goal is inserted; callers that
+     * detect a re-mention should bump this to the new wall-clock time. */
+    int64_t last_referenced;
     int64_t deadline; /* 0 = no deadline */
     float progress;   /* 0.0-1.0 estimated progress */
 } hu_personal_goal_t;
@@ -61,6 +68,14 @@ typedef struct hu_communication_style {
     float abbreviation_ratio;
     uint32_t avg_message_length; /* in characters */
     uint32_t sample_count;       /* messages analyzed */
+    /* Unix timestamp of the most recent style observation. Drives
+     * `hu_personal_communication_style_freshness` so a year-old style
+     * sample doesn't shape the directive on a fresh conversation;
+     * after one half-life the freshness multiplier is 0.5 and the
+     * "Mirror their style" directive is dropped from the prompt
+     * (HU_PM_STYLE_OBSERVATION_HALF_LIFE_SEC). 0 means "never
+     * observed" — callers should treat freshness as 0 in that case. */
+    int64_t last_observed_at;
 } hu_communication_style_t;
 
 typedef struct hu_personal_model {
@@ -217,5 +232,333 @@ hu_chronotype_t hu_personal_model_infer_chronotype(const hu_personal_model_t *mo
  * path would overflow `cap`. The caller owns `buf`. Pure path resolution —
  * no I/O, no allocation. */
 const char *hu_personal_model_resolve_default_path(char *buf, size_t cap);
+
+/* ── Symmetric signal aging — topics, goals, style ─────────────────────
+ *
+ * Facts have `last_seen_at` + exponential-decay confidence via
+ * `hu_heuristic_fact_effective_confidence` (see fact_extract.h). The
+ * three blocks below extend the same pattern to topics, goals, and
+ * communication style so the personal model ages out stale signal
+ * uniformly — no asymmetry between "facts that decay" and "topics
+ * that dominate forever." Same lookup-table approximation, same
+ * "raw value × 0.5^(age / half_life)" decay shape, no math.h.
+ *
+ * Half-lives are tuned per signal:
+ *   - Topics: 60 days. Conversation interests rotate fastest —
+ *     a topic mentioned heavily 6 months ago is rarely current.
+ *   - Goals: 120 days. Active commitments age slower than
+ *     interests; a project pursued for a season has lasting
+ *     relevance even after a few weeks of silence.
+ *   - Style: 180 days. Communication style is the slowest-moving
+ *     signal — formality and verbosity drift, but a year-old
+ *     observation still carries useful prior. */
+
+/* Topic interest decays from `last_mentioned`. After 60 days the
+ * effective interest score is half the raw value; after 120 days
+ * a quarter. Returns `topic->interest_score` unchanged when
+ * `last_mentioned` is 0 (no decay data) or `now <= last_mentioned`.
+ * Values are floored at 0 beyond ~10 half-lives. NULL-safe. */
+#define HU_PM_TOPIC_INTEREST_HALF_LIFE_SEC ((int64_t)(60LL * 24 * 60 * 60))
+float hu_personal_topic_effective_score(const hu_personal_topic_t *topic, int64_t now);
+
+/* Active goals carry an implicit priority of 1.0 right after a
+ * reference, decaying with `last_referenced`. Inactive goals
+ * always return 0. Returns 0 when last_referenced is 0 AND
+ * created_at is also 0 (genuinely-empty slot) — a freshly-created
+ * goal whose `last_referenced` is still at `created_at` is treated
+ * as just-touched and returns 1.0. Floored at 0 beyond ~10
+ * half-lives. NULL-safe. */
+#define HU_PM_GOAL_RELEVANCE_HALF_LIFE_SEC ((int64_t)(120LL * 24 * 60 * 60))
+float hu_personal_goal_effective_priority(const hu_personal_goal_t *goal, int64_t now);
+
+/* Recently-completed goals — once a goal is resolved (active=false +
+ * last_referenced bumped to the resolution time) we keep the slot
+ * alive for `HU_PM_COMPLETED_GOAL_RETAIN_SEC` so the prompt builder
+ * can surface a "Recently completed: …" line. After the retention
+ * window the goal is pruned by apply_decay like any other stale
+ * entry. 7 days is long enough to catch follow-up conversations
+ * about the just-finished goal but short enough that the slot
+ * doesn't dominate the array forever. */
+#define HU_PM_COMPLETED_GOAL_RETAIN_SEC ((int64_t)(7LL * 24 * 60 * 60))
+
+/* True when the goal is inactive but `last_referenced` is within
+ * `HU_PM_COMPLETED_GOAL_RETAIN_SEC` of `now`. Active goals always
+ * return false. NULL-safe. */
+bool hu_personal_goal_is_recently_completed(const hu_personal_goal_t *goal, int64_t now);
+
+/* Bulk getter — fill `out_buf` with pointers to every goal in the
+ * model that satisfies `hu_personal_goal_is_recently_completed(now)`,
+ * up to `out_cap` entries. Returns the number of pointers written.
+ *
+ * The pointers alias into `model->goals` and remain valid only
+ * until the next mutation of the model (ingest, decay, save/load).
+ * Callers that need to retain values across mutations should copy
+ * the relevant fields before triggering further work. The order
+ * of returned pointers matches the array order in `model->goals`,
+ * which the loader/writer preserves byte-for-byte.
+ *
+ * NULL-safe on every argument: NULL `model` or NULL `out_buf` or
+ * `out_cap == 0` returns 0 with no writes. The function never
+ * exceeds `out_cap` even if more goals qualify — callers can
+ * detect truncation by comparing the return value to `out_cap`
+ * and re-running with a larger buffer (or by walking the model
+ * directly).
+ *
+ * Used by downstream surfaces that need the same "Recently
+ * completed: …" signal the prompt builder uses, but in a form
+ * they can iterate (planner follow-up suggestions, channel-
+ * specific congratulation messages, observability hooks). The
+ * prompt builder still walks `model->goals` directly — there's
+ * no inversion of control problem because it doesn't need the
+ * pointer array, just a single pass. */
+size_t hu_personal_model_get_recently_completed_goals(const hu_personal_model_t *model,
+                                                       int64_t now,
+                                                       const hu_personal_goal_t **out_buf,
+                                                       size_t out_cap);
+
+/* Render a short comma-separated list of recently-completed goal
+ * descriptions into `buf`, sized to fit within `cap` bytes
+ * (NUL-terminator included). Returns the number of bytes written
+ * (excluding the NUL), or 0 when no goals match or `buf`/`cap` is
+ * invalid. The result is always NUL-terminated when `cap > 0`.
+ *
+ * The output is suitable for one-line observability events
+ * ("goals completed: ship feature, finish report"), status output,
+ * and channel-specific follow-up message prompts. When the list
+ * doesn't fit, the function truncates at the last full description
+ * + ellipsis ("ship feature, …") rather than mid-word — keeps
+ * downstream log parsers from seeing partial UTF-8.
+ *
+ * NULL-safe on `model` and `buf`. */
+size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *model,
+                                                      int64_t now, char *buf, size_t cap);
+
+/* Style freshness — how recent the observed-style aggregate is.
+ * Returns 1.0 right after the latest observation, decaying to 0.5
+ * after one half-life (180 days), 0.25 after two. Returns 0 when
+ * `last_observed_at` is 0 (style was never observed). The prompt
+ * builder gates the "Mirror their style" directive on freshness
+ * crossing 0.3 so a year-old style fingerprint doesn't shape a
+ * fresh conversation when the user has been quiet for months and
+ * may have shifted tone. NULL-safe. */
+#define HU_PM_STYLE_OBSERVATION_HALF_LIFE_SEC ((int64_t)(180LL * 24 * 60 * 60))
+float hu_personal_communication_style_freshness(const hu_communication_style_t *style,
+                                                int64_t now);
+
+/* Drift toward neutral as freshness fades — returns a copy of `style`
+ * with each percentage axis (formality, verbosity, emoji_frequency,
+ * humor_receptivity, lowercase_ratio, abbreviation_ratio) blended
+ * with the neutral midpoint (0.5) proportionally to (1 - freshness):
+ *
+ *     blended_axis = raw_axis * freshness + 0.5 * (1 - freshness)
+ *
+ * At freshness=1.0 (just-observed) we keep the raw EWMA value; at
+ * freshness=0.0 (one half-life × log(0)) we'd be fully neutral.
+ * Used by the prompt builder so the "Mirror their style" directive
+ * smoothly fades toward neutral instead of hitting a hard cliff at
+ * the existing 0.3 freshness gate. The `avg_message_length` and
+ * `sample_count` fields pass through unchanged because they aren't
+ * 0..1 axes — message-length neutrality is meaningless and the
+ * sample count is a tally of observations, not an estimate of a
+ * value. NULL-safe; returns a zero-initialized style on NULL input. */
+hu_communication_style_t hu_personal_communication_style_blend_with_freshness(
+    const hu_communication_style_t *style, int64_t now);
+
+/* Track D D2.2 — offline persona-fidelity scorer.
+ *
+ * Given a `target` communication style (typically the personal
+ * model's EWMA-tracked style fingerprint) and a `response` text,
+ * compute a deterministic [0,1] fidelity score where 1.0 means the
+ * response perfectly matches the target's style axes and 0.0 means
+ * maximally different. The score is the mean of three axis matches:
+ *
+ *   1. lowercase_ratio  — observed letter case in `response` vs target
+ *   2. abbreviation use — "u", "rn", "btw", "ty", "lmk", "yw" frequency
+ *   3. length match     — bytes(response) vs target->avg_message_length
+ *
+ * Used as the floor for an offline LoRA A/B comparison: score the
+ * frontier model's pre-LoRA responses, then re-score with LoRA, and
+ * the delta tells you whether the adapter is actually personalizing
+ * (D2.2 of the master follow-through plan). The scorer is fully
+ * deterministic and never calls a provider — it's a feature-match
+ * heuristic, not a quality judgment.
+ *
+ * Returns:
+ *   - [0.0, 1.0] on success.
+ *   - -1.0f on NULL `target` or NULL `response` or `response_len == 0`,
+ *     or when `target->sample_count == 0` (no fingerprint to score
+ *     against). Callers should treat -1.0 as "no comparison possible". */
+float hu_communication_style_fidelity_score(const hu_communication_style_t *target,
+                                            const char *response, size_t response_len);
+
+/* Per-set summary of fidelity scores produced by
+ * `hu_communication_style_compare_response_sets`. */
+typedef struct hu_communication_style_set_summary {
+    size_t scored;     /* number of responses that yielded a valid (>=0) score */
+    size_t skipped;    /* NULL / empty / score=-1 responses skipped */
+    float mean;        /* mean fidelity across `scored` responses; 0.f when scored == 0 */
+    float min_score;   /* min fidelity across `scored` responses; 1.f when scored == 0 */
+    float max_score;   /* max fidelity across `scored` responses; 0.f when scored == 0 */
+} hu_communication_style_set_summary_t;
+
+/* Track D D2.2 — A/B comparator for two response sets.
+ *
+ * Score every response in `set_a[]` and `set_b[]` against `target`,
+ * accumulate into per-set summaries, and return the mean delta
+ * `b.mean - a.mean` via `*out_delta`. The intended use is offline
+ * LoRA evaluation: pass the frontier model's pre-LoRA outputs as
+ * `set_a` and the post-LoRA outputs as `set_b`. A positive delta
+ * indicates the adapter is pulling the model toward persona
+ * fidelity; near-zero or negative means the LoRA isn't doing much
+ * (or is hurting).
+ *
+ * Both sets are simple `const char *[]` arrays with explicit length
+ * arrays so the caller controls binary safety (the JSON loader
+ * doesn't need to NUL-terminate every response). NULL `set_*` is
+ * allowed when the corresponding `n_*` is 0.
+ *
+ * Returns HU_OK and writes both summaries + delta on success, even
+ * when one or both sets contain only un-scoreable responses (the
+ * summary's `scored=0` signals the caller to ignore the mean).
+ * Returns HU_ERR_INVALID_ARGUMENT on NULL `target`, `out_a`,
+ * `out_b`, or `out_delta`, or when `target->sample_count == 0`. */
+hu_error_t hu_communication_style_compare_response_sets(
+    const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
+    size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
+    hu_communication_style_set_summary_t *out_a,
+    hu_communication_style_set_summary_t *out_b, float *out_delta);
+
+/* Goal completion detection — walk every active goal and deactivate
+ * the ones the user's message indicates they've finished. The signal
+ * is intentionally conservative: a goal is deactivated only when the
+ * message contains BOTH a completion verb (e.g. "shipped",
+ * "finished", "done", "wrapped up", "completed") AND a 5+ char
+ * content word from the goal description, with no negation
+ * ("not", "n't", "without") in the 12 chars before the completion
+ * verb. False positives mark a goal inactive and silently drop its
+ * prompt influence, so we'd rather miss legitimate completions than
+ * fabricate them.
+ *
+ * On match: sets `active = false`, `progress = 1.0f`. The goal is
+ * NOT removed from the array — `apply_decay` will eventually prune
+ * inactive goals on a future tick. Keeping the slot occupied for one
+ * decay cycle lets the prompt builder optionally surface "Recently
+ * completed" entries (a future enhancement).
+ *
+ * Returns the number of goals deactivated. NULL-safe; messages of
+ * length 0 are no-ops. */
+size_t hu_personal_model_resolve_goals_in_message(hu_personal_model_t *model, const char *msg,
+                                                  size_t msg_len, int64_t now);
+
+/* Goal mention detection — walk every active goal and bump
+ * `last_referenced` to `now` when the user's message contains a
+ * content word from the goal description. Content words are 5+
+ * characters and case-folded; stopwords are NOT excluded
+ * (the length filter is heuristic enough for most goals like
+ * "ship the new feature" or "learn esperanto"). The first
+ * matching word per goal triggers the bump and we move on —
+ * no ranking, no scoring, just a freshness signal so the
+ * effective-priority decay restarts.
+ *
+ * Returns the number of goals whose `last_referenced` was bumped.
+ * NULL-safe on every argument; messages of length 0 are no-ops. */
+size_t hu_personal_model_touch_goals_in_message(hu_personal_model_t *model,
+                                                const char *msg, size_t msg_len,
+                                                int64_t now);
+
+/* Bundle of per-turn personal-model maintenance counters returned
+ * by `hu_personal_model_per_turn_tick`. Reports what each phase did
+ * so callers can log or test the integration without re-running the
+ * helpers. All counts default to 0 on early-return paths. */
+typedef struct hu_personal_model_turn_tick_result {
+    hu_error_t ingest_error;     /* result of hu_personal_model_ingest */
+    size_t goals_touched;        /* count from touch_goals_in_message */
+    size_t goals_resolved;       /* count from resolve_goals_in_message */
+    size_t entries_pruned;       /* count from apply_decay */
+} hu_personal_model_turn_tick_result_t;
+
+/* Run the canonical per-turn maintenance sequence on a personal
+ * model: ingest → touch_goals → resolve_goals → apply_decay.
+ *
+ * The `agent_turn.c` production path runs this exact sequence;
+ * exposing it as a single helper has three benefits:
+ *
+ *   1. The order is testable. The unit-test path can call this
+ *      helper directly (no HU_IS_TEST guard, no daemon plumbing)
+ *      and assert that touch happens before resolve happens before
+ *      decay — the order matters because a freshly-touched goal
+ *      shouldn't be pruned in the same turn it was just touched,
+ *      and a freshly-resolved goal becomes inactive before decay
+ *      sees it.
+ *
+ *   2. New maintenance phases (e.g. style cleanup, contradiction
+ *      detection) get one place to land instead of scattering
+ *      through agent_turn.c.
+ *
+ *   3. Other call sites (agent shutdown, daemon idle tick) can
+ *      reuse the same sequence without copy-paste.
+ *
+ * Pure CPU. NULL-safe on every argument; messages of length 0
+ * still ingest (some callers want the temporal-bump side effect).
+ *
+ * Returns the per-phase counter struct. The aggregate is non-fatal:
+ * if `ingest_error != HU_OK` the helper still runs the goal/decay
+ * phases on whatever state ingest produced (empty model is fine). */
+hu_personal_model_turn_tick_result_t
+hu_personal_model_per_turn_tick(hu_personal_model_t *model, const char *msg, size_t msg_len,
+                                bool from_user, int64_t now);
+
+/* Periodic decay tick — sweep every fact, topic, and goal, and
+ * remove entries whose effective_* score has fallen below the
+ * forgetting floor (0.05). Compacts arrays in place; the model's
+ * fact_count / topic_count / goal_count are updated to reflect
+ * the survivors.
+ *
+ * Style aggregates are NOT pruned (there's only one slot, and
+ * the prompt builder already gates the directive on freshness).
+ *
+ * Idempotent: calling twice in a row at the same `now` is a no-op,
+ * because the entries that survived the first pass also survive
+ * the second. Running it once per day keeps the in-memory model
+ * from accumulating dead slots and freeing room for fresh signal
+ * — without it, the eviction policy can only run when the array
+ * is full, which lets stale entries crowd out new ones for months.
+ *
+ * Returns the total number of entries pruned across all categories
+ * (facts + topics + goals). Pure CPU; no I/O. */
+size_t hu_personal_model_apply_decay(hu_personal_model_t *model, int64_t now);
+
+/* Rate-limit helper for periodic maintenance ticks (decay, autosave,
+ * etc.). Returns true when `now - last >= interval`, OR when `last == 0`
+ * (first-call semantics: always run once at startup). When the function
+ * returns true, the caller is expected to perform the maintenance work
+ * AND update `*last_inout` to `now` so the next call sees the new
+ * baseline. When the function returns false, `*last_inout` is left
+ * untouched.
+ *
+ * Pulled out as a single-purpose helper so the daemon's hourly
+ * personal-model decay path (`src/daemon.c`) can be unit-tested
+ * without booting the whole daemon. The function has zero
+ * dependencies on the personal model itself — it's a pure
+ * is-it-time-yet predicate over (last, now, interval) — but lives
+ * here because every current caller is a personal-model maintenance
+ * site and the alternative (a `core/scheduling.h`) would be one
+ * symbol with no other tenants.
+ *
+ * Returns false when:
+ *   - `last_inout` is NULL
+ *   - `now` is non-positive (defensive: a clock returning 0 or a
+ *     negative `time_t` shouldn't license maintenance work)
+ *   - `interval` is non-positive (a zero or negative interval is
+ *     a programmer error; refusing to run avoids tight loops on it)
+ *   - `now - *last_inout < interval` (and `*last_inout > 0`)
+ */
+bool hu_personal_model_idle_due(int64_t *last_inout, int64_t now, int64_t interval);
+
+/* Forgetting floor — the effective-score threshold below which a
+ * fact / topic / goal is removed by `hu_personal_model_apply_decay`.
+ * Exposed for tests so the behavior under specific decay fixtures
+ * is verifiable without copying the constant. */
+#define HU_PM_FORGET_FLOOR 0.05f
 
 #endif /* HU_MEMORY_PERSONAL_MODEL_H */

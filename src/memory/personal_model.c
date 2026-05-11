@@ -11,11 +11,16 @@
 #include <sys/stat.h>
 #include <time.h>
 
+/* Schema version — kept near the top so `hu_personal_model_init` can
+ * stamp freshly-initialized models at the current version. The
+ * persistence section re-uses this constant for the on-disk header. */
+#define HU_PM_VERSION  4u
+
 void hu_personal_model_init(hu_personal_model_t *model) {
     if (!model)
         return;
     memset(model, 0, sizeof(*model));
-    model->version = 1U;
+    model->version = HU_PM_VERSION;
     model->created_at = 0;
 }
 
@@ -269,44 +274,119 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
     /* SOTA personalization wire — convert style observations into an
      * explicit output-shaping directive. The model already sees the
      * observation block above; this line tells it what to *do* with
-     * those observations. Gated on sample_count to avoid steering on
-     * EWMA priors during warm-up. */
-    if (model->style.sample_count >= HU_PM_DIRECTIVE_MIN_SAMPLES) {
+     * those observations. Gated on:
+     *   - sample_count >= warm-up minimum (avoid steering on EWMA prior)
+     *   - freshness >= 0.3 (avoid steering on a year-old style fingerprint
+     *     when the user has been quiet for months and may have shifted
+     *     register; same `now = updated_at` clock used elsewhere). */
+    const int64_t pm_now = model->updated_at > 0 ? model->updated_at : 0;
+    float style_freshness = hu_personal_communication_style_freshness(&model->style, pm_now);
+    if (model->style.sample_count >= HU_PM_DIRECTIVE_MIN_SAMPLES &&
+        style_freshness >= 0.3f) {
+        /* Blend toward neutral as freshness fades — this softens the
+         * cliff at the 0.3 gate. At freshness=1.0 the blended struct
+         * is identical to the raw EWMA; at freshness=0.3 the directive
+         * has already drifted ~70% of the way to neutral, so it
+         * surfaces a much weaker steering signal right before it
+         * disappears entirely on the next turn. */
+        hu_communication_style_t eff =
+            hu_personal_communication_style_blend_with_freshness(&model->style, pm_now);
         char length_buf[64];
         const char *len_dir =
-            length_directive(model->style.avg_message_length, length_buf, sizeof(length_buf));
+            length_directive(eff.avg_message_length, length_buf, sizeof(length_buf));
         append_fmt(buf, cap, &n, "Mirror their style: %s, %s, %s, %s",
                    len_dir,
-                   register_directive(model->style.formality),
-                   emoji_directive(model->style.emoji_frequency),
-                   humor_directive(model->style.humor_receptivity));
-        /* Punctuation/case axes — only emit when the EWMA-tracked ratio
+                   register_directive(eff.formality),
+                   emoji_directive(eff.emoji_frequency),
+                   humor_directive(eff.humor_receptivity));
+        /* Punctuation/case axes — only emit when the BLENDED ratio
          * crosses ~half so a single capitalized message in a casual
-         * thread doesn't bounce the directive off, and a single shorthand
-         * use in a formal thread doesn't license "u" everywhere. */
-        if (model->style.lowercase_ratio >= 0.5f) {
+         * thread doesn't bounce the directive off, AND a stale style
+         * fingerprint that's drifted toward neutral no longer trips
+         * the threshold (the raw 0.7 lowercase from a year ago blends
+         * to ~0.55 at one half-life, still above 0.5; at two half-lives
+         * it's ~0.525, still above; at three it's ~0.51, still above —
+         * so the threshold is essentially as before for the lifetime of
+         * the directive, just lightly softened). */
+        if (eff.lowercase_ratio >= 0.5f) {
             append_fmt(buf, cap, &n, ", type lowercase");
         }
-        if (model->style.abbreviation_ratio >= 0.4f) {
+        if (eff.abbreviation_ratio >= 0.4f) {
             append_fmt(buf, cap, &n, ", ok to use 'u'/'rn'/'btw'");
         }
         append_fmt(buf, cap, &n, ".\n");
         detail = true;
     }
 
+    /* Goals — gated on `hu_personal_goal_effective_priority` so a
+     * goal not referenced for more than ~4 half-lives (480 days)
+     * silently drops out of the prompt instead of dominating
+     * forever. Inactive goals always fail this gate. */
     bool any_goal = false;
     for (size_t g = 0; g < model->goal_count; g++) {
-        if (model->goals[g].active && model->goals[g].description[0] != '\0') {
-            if (!any_goal) {
-                append_fmt(buf, cap, &n, "Active goals: ");
-                any_goal = true;
-            } else {
-                append_fmt(buf, cap, &n, ", ");
+        if (!model->goals[g].active || model->goals[g].description[0] == '\0')
+            continue;
+        if (hu_personal_goal_effective_priority(&model->goals[g], pm_now) <
+            HU_PM_FORGET_FLOOR)
+            continue;
+        if (!any_goal) {
+            append_fmt(buf, cap, &n, "Active goals: ");
+            any_goal = true;
+        } else {
+            append_fmt(buf, cap, &n, ", ");
+        }
+        append_fmt(buf, cap, &n, "%s", model->goals[g].description);
+        const hu_personal_goal_t *gl = &model->goals[g];
+        if (gl->deadline != 0 || gl->progress > 0.0f) {
+            append_fmt(buf, cap, &n, " (");
+            bool need_sep = false;
+            if (gl->deadline != 0) {
+                time_t dt = (time_t)gl->deadline;
+                struct tm tm_buf;
+                struct tm *tm = hu_platform_localtime_r(&dt, &tm_buf);
+                if (tm) {
+                    char ds[16];
+                    strftime(ds, sizeof(ds), "%Y-%m-%d", tm);
+                    append_fmt(buf, cap, &n, "deadline: %s", ds);
+                    need_sep = true;
+                }
             }
-            append_fmt(buf, cap, &n, "%s", model->goals[g].description);
+            if (gl->progress > 0.0f) {
+                if (need_sep)
+                    append_fmt(buf, cap, &n, ", ");
+                append_fmt(buf, cap, &n, "%d%% done", (int)(gl->progress * 100.0f));
+            }
+            append_fmt(buf, cap, &n, ")");
         }
     }
     if (any_goal) {
+        append_fmt(buf, cap, &n, "\n");
+        detail = true;
+    }
+
+    /* Recently-completed goals scratchpad — surface goals deactivated
+     * within `HU_PM_COMPLETED_GOAL_RETAIN_SEC` so the model has
+     * context that a previously-active goal is now done. Useful for
+     * tone matching ("congratulations on shipping X" instead of
+     * "let me know how X is going") and for the model to ask
+     * follow-up questions. The retention window matches the goal-
+     * pruning path in apply_decay so what the prompt sees and what
+     * the model stores stay in sync. */
+    bool any_completed = false;
+    for (size_t g = 0; g < model->goal_count; g++) {
+        if (model->goals[g].description[0] == '\0')
+            continue;
+        if (!hu_personal_goal_is_recently_completed(&model->goals[g], pm_now))
+            continue;
+        if (!any_completed) {
+            append_fmt(buf, cap, &n, "Recently completed: ");
+            any_completed = true;
+        } else {
+            append_fmt(buf, cap, &n, ", ");
+        }
+        append_fmt(buf, cap, &n, "%s", model->goals[g].description);
+    }
+    if (any_completed) {
         append_fmt(buf, cap, &n, "\n");
         detail = true;
     }
@@ -317,7 +397,7 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
      * the prompt window is tight. `now` is the model's own
      * `updated_at` (set on every ingest) — close enough to wall time
      * for this filter and avoids passing a clock through the API. */
-    const int64_t now = model->updated_at > 0 ? model->updated_at : 0;
+    const int64_t now = pm_now;
 
     if (model->fact_count > 0) {
         bool any_fact = false;
@@ -379,16 +459,33 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
     if (model->topic_count > 0) {
         size_t order[HU_PM_MAX_TOPICS];
         sort_topic_order(model, order);
-        append_fmt(buf, cap, &n, "Top interests: ");
         size_t max_t = model->topic_count > 6U ? 6U : model->topic_count;
+        /* Topics — gated on `hu_personal_topic_effective_score`. A topic
+         * mentioned 200× two years ago shouldn't dominate over a topic
+         * mentioned 5× last week; the effective score combines raw
+         * interest with `last_mentioned`-driven exponential decay. */
+        bool any_topic = false;
         for (size_t i = 0; i < max_t; i++) {
             const hu_personal_topic_t *t = &model->topics[order[i]];
-            if (i > 0)
+            float eff = hu_personal_topic_effective_score(t, pm_now);
+            if (eff < HU_PM_FORGET_FLOOR)
+                continue;
+            if (!any_topic) {
+                append_fmt(buf, cap, &n, "Top interests: ");
+                any_topic = true;
+            } else {
                 append_fmt(buf, cap, &n, ", ");
-            append_fmt(buf, cap, &n, "%s (%.2f)", t->name, (double)t->interest_score);
+            }
+            append_fmt(buf, cap, &n, "%s (%.2f)", t->name, (double)eff);
         }
-        append_fmt(buf, cap, &n, "\n");
-        detail = true;
+        if (any_topic) {
+            append_fmt(buf, cap, &n, "\n");
+            detail = true;
+        } else {
+            /* No topic survived the freshness gate — skip the directive
+             * loop below too, since it depends on the same data. */
+            goto skip_topic_directive;
+        }
 
         /* SOTA personalization wire — convert observed-topic frequency
          * into an actionable engagement directive. The "Top interests:"
@@ -407,7 +504,10 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
             const hu_personal_topic_t *t = &model->topics[order[i]];
             if (t->mention_count < HU_PM_TOPIC_DIRECTIVE_MIN_MENTIONS)
                 continue;
-            if (t->interest_score < 0.5f)
+            /* Match the observation line: gate on effective decayed
+             * score, not just raw interest_score, so a stale 0.95
+             * topic doesn't license the directive. */
+            if (hu_personal_topic_effective_score(t, pm_now) < 0.5f)
                 continue;
             if (t->name[0] == '\0')
                 continue;
@@ -421,6 +521,7 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
         }
         if (engage_count > 0)
             append_fmt(buf, cap, &n, ".\n");
+    skip_topic_directive: ;
     }
 
     /* Surface day-of-week activity pattern when enough data is present. */
@@ -444,6 +545,30 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
             if (model->active_days[peak_day] > model->active_days[quiet_day] + 2U) {
                 append_fmt(buf, cap, &n, "Most active day: %s. Least active: %s.\n",
                            day_names[peak_day], day_names[quiet_day]);
+                detail = true;
+            }
+        }
+    }
+
+    {
+        hu_chronotype_t chrono = hu_personal_model_infer_chronotype(model);
+        if (chrono != HU_CHRONO_UNKNOWN) {
+            const char *label = NULL;
+            switch (chrono) {
+            case HU_CHRONO_MORNING_LARK:
+                label = "Morning person (most active early)";
+                break;
+            case HU_CHRONO_EVENING_OWL:
+                label = "Night owl (most active late)";
+                break;
+            case HU_CHRONO_INTERMEDIATE:
+                label = "Flexible schedule";
+                break;
+            default:
+                break;
+            }
+            if (label) {
+                append_fmt(buf, cap, &n, "Chronotype: %s\n", label);
                 detail = true;
             }
         }
@@ -555,12 +680,19 @@ static bool message_has_abbreviation(const char *m, size_t len) {
 }
 
 static void update_style_from_message(hu_communication_style_t *style, const char *message,
-                                      size_t message_len) {
+                                      size_t message_len, int64_t timestamp) {
     if (!style || !message || message_len == 0)
         return;
 
     uint32_t prev_n = style->sample_count;
     style->sample_count++;
+    /* Stamp freshness — drives `hu_personal_communication_style_freshness`
+     * so a year-old style fingerprint stops shaping the prompt when the
+     * user has been quiet for months. Caller passes 0 when they don't
+     * have a wall clock available; we leave the previous stamp alone in
+     * that case so a clock-less ingest doesn't reset freshness to "old". */
+    if (timestamp > 0)
+        style->last_observed_at = timestamp;
 
     uint32_t len = (uint32_t)message_len;
     if (prev_n == 0U) {
@@ -647,7 +779,7 @@ hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *mess
         return HU_OK;
 
     bump_temporal(model, timestamp);
-    update_style_from_message(&model->style, message, message_len);
+    update_style_from_message(&model->style, message, message_len, timestamp);
 
     hu_fact_extract_result_t extracted;
     hu_error_t err = hu_fact_extract(message, message_len, &extracted);
@@ -725,6 +857,759 @@ const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_
     return NULL;
 }
 
+/* ── Symmetric signal aging — topics, goals, style ─────────────────────
+ *
+ * Same shape as `hu_heuristic_fact_effective_confidence` (see
+ * fact_extract.c) — exponential 0.5^(age/half_life) decay computed
+ * via a tiny pre-computed lookup table with linear interpolation,
+ * no math.h dependency at the call site. The table is intentionally
+ * duplicated here so the personal-model API has zero
+ * cross-translation-unit dependency on fact_extract internals. */
+
+static float hu_pm_pow_half_lookup(float k) {
+    /* Powers of 0.5, 0..10 — same slope as the fact decay table. */
+    static const float pow_half[] = {
+        1.000000f, 0.500000f, 0.250000f, 0.125000f, 0.062500f,
+        0.031250f, 0.015625f, 0.007812f, 0.003906f, 0.001953f,
+        0.000977f,
+    };
+    if (k <= 0.f)
+        return 1.f;
+    if (k >= 10.f)
+        return 0.f;
+    int idx = (int)k;
+    float frac = k - (float)idx;
+    float lo = pow_half[idx];
+    float hi = pow_half[idx + 1];
+    return lo + (hi - lo) * frac;
+}
+
+float hu_personal_topic_effective_score(const hu_personal_topic_t *topic, int64_t now) {
+    if (!topic)
+        return 0.f;
+    /* No-decay-data: callers that haven't stamped last_mentioned yet
+     * (synthetic test fixtures, freshly-loaded model) get the raw
+     * score back. Same convention as fact decay. */
+    if (topic->last_mentioned <= 0 || now <= topic->last_mentioned)
+        return topic->interest_score;
+    int64_t age = now - topic->last_mentioned;
+    float k = (float)age / (float)HU_PM_TOPIC_INTEREST_HALF_LIFE_SEC;
+    return topic->interest_score * hu_pm_pow_half_lookup(k);
+}
+
+float hu_personal_goal_effective_priority(const hu_personal_goal_t *goal, int64_t now) {
+    if (!goal)
+        return 0.f;
+    /* Inactive goals never claim prompt space. */
+    if (!goal->active)
+        return 0.f;
+    /* Empty slot — neither created nor referenced. */
+    if (goal->last_referenced <= 0 && goal->created_at <= 0)
+        return 0.f;
+    /* Anchor: if last_referenced is unset, fall back to created_at so
+     * a freshly-inserted goal is treated as just-touched (priority
+     * 1.0) rather than infinitely old. */
+    int64_t anchor = goal->last_referenced > 0 ? goal->last_referenced : goal->created_at;
+    if (now <= anchor)
+        return 1.0f; /* implicit max priority right after a reference */
+    int64_t age = now - anchor;
+    float k = (float)age / (float)HU_PM_GOAL_RELEVANCE_HALF_LIFE_SEC;
+    return hu_pm_pow_half_lookup(k);
+}
+
+size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *model,
+                                                      int64_t now, char *buf, size_t cap) {
+    if (!buf || cap == 0)
+        return 0;
+    buf[0] = '\0';
+    if (!model)
+        return 0;
+
+    /* Walk goals once, appending description-by-description with
+     * truncation guard. We keep this in a single pass (no two-stage
+     * allocate-then-format) because the goal array is small (≤ 8)
+     * and the description field is fixed-size. */
+    size_t written = 0;
+    bool any = false;
+    bool truncated = false;
+    /* Reserve a few bytes at the end for ", …" so we never write
+     * past `cap - 1` (the NUL slot). The ellipsis is ASCII "..."
+     * to keep us out of the multi-byte UTF-8 truncation mess. */
+    const char *ellipsis = ", ...";
+    const size_t ellipsis_len = 5;
+    for (size_t i = 0; i < model->goal_count; i++) {
+        if (model->goals[i].description[0] == '\0')
+            continue;
+        if (!hu_personal_goal_is_recently_completed(&model->goals[i], now))
+            continue;
+        const char *sep = any ? ", " : "";
+        size_t sep_len = any ? 2 : 0;
+        size_t desc_len = strlen(model->goals[i].description);
+        /* Need: written + sep_len + desc_len + 1 (NUL) <= cap.
+         * If not, try to fit ellipsis instead — but only when we
+         * already wrote at least one description. */
+        if (written + sep_len + desc_len + 1 > cap) {
+            if (any && written + ellipsis_len + 1 <= cap) {
+                memcpy(buf + written, ellipsis, ellipsis_len);
+                written += ellipsis_len;
+                truncated = true;
+            }
+            break;
+        }
+        if (sep_len) {
+            memcpy(buf + written, sep, sep_len);
+            written += sep_len;
+        }
+        memcpy(buf + written, model->goals[i].description, desc_len);
+        written += desc_len;
+        any = true;
+    }
+    (void)truncated;
+    buf[written] = '\0';
+    return written;
+}
+
+size_t hu_personal_model_get_recently_completed_goals(const hu_personal_model_t *model,
+                                                       int64_t now,
+                                                       const hu_personal_goal_t **out_buf,
+                                                       size_t out_cap) {
+    if (!model || !out_buf || out_cap == 0)
+        return 0;
+    size_t written = 0;
+    for (size_t i = 0; i < model->goal_count && written < out_cap; i++) {
+        if (model->goals[i].description[0] == '\0')
+            continue;
+        if (!hu_personal_goal_is_recently_completed(&model->goals[i], now))
+            continue;
+        out_buf[written++] = &model->goals[i];
+    }
+    return written;
+}
+
+bool hu_personal_goal_is_recently_completed(const hu_personal_goal_t *goal, int64_t now) {
+    if (!goal)
+        return false;
+    /* Active goals are not "recently completed" — by definition.
+     * We surface them via the existing "Active goals" line. */
+    if (goal->active)
+        return false;
+    /* An inactive goal with no resolution timestamp has no signal
+     * to say *when* it was completed; safer to skip than to misreport. */
+    if (goal->last_referenced <= 0)
+        return false;
+    /* Inside the retention window? */
+    int64_t age = now - goal->last_referenced;
+    if (age < 0)
+        return true; /* clock skew: treat as just-completed */
+    return age <= HU_PM_COMPLETED_GOAL_RETAIN_SEC;
+}
+
+float hu_personal_communication_style_freshness(const hu_communication_style_t *style,
+                                                int64_t now) {
+    if (!style)
+        return 0.f;
+    /* Style aggregates are EWMA-tracked; sample_count == 0 means the
+     * aggregate is meaningless regardless of timestamp, so the
+     * directive should never fire. */
+    if (style->sample_count == 0U)
+        return 0.f;
+    /* No-decay-data: pre-migration models that have samples but no
+     * last_observed_at should fall back to "fresh" so we don't
+     * silently drop their directive. The migration path on load
+     * stamps last_observed_at to the model's updated_at, so this
+     * branch is mainly for synthetic fixtures. */
+    if (style->last_observed_at <= 0 || now <= style->last_observed_at)
+        return 1.0f;
+    int64_t age = now - style->last_observed_at;
+    float k = (float)age / (float)HU_PM_STYLE_OBSERVATION_HALF_LIFE_SEC;
+    return hu_pm_pow_half_lookup(k);
+}
+
+hu_communication_style_t hu_personal_communication_style_blend_with_freshness(
+    const hu_communication_style_t *style, int64_t now) {
+    hu_communication_style_t out;
+    memset(&out, 0, sizeof(out));
+    if (!style)
+        return out;
+
+    out = *style;
+    /* Only the 0..1 axes are blended. Pass-through fields (sample_count,
+     * avg_message_length, last_observed_at) are already copied by the
+     * full struct copy above. */
+    float fr = hu_personal_communication_style_freshness(style, now);
+    /* Clamp defensively — freshness is in [0,1] mathematically but a
+     * future change to the lookup table or a buggy fixture could land
+     * outside the range. We don't want clamp surprises propagating
+     * into the prompt. */
+    if (fr < 0.f) fr = 0.f;
+    if (fr > 1.f) fr = 1.f;
+    const float drift_to_neutral = 1.f - fr;
+    const float NEUTRAL = 0.5f;
+
+#define HU_PM_BLEND(field) \
+    out.field = style->field * fr + NEUTRAL * drift_to_neutral
+    HU_PM_BLEND(formality);
+    HU_PM_BLEND(verbosity);
+    HU_PM_BLEND(emoji_frequency);
+    HU_PM_BLEND(humor_receptivity);
+    HU_PM_BLEND(lowercase_ratio);
+    HU_PM_BLEND(abbreviation_ratio);
+#undef HU_PM_BLEND
+    return out;
+}
+
+/* Track D D2.2 — persona-fidelity scorer feature extraction.
+ *
+ * Walks the response once, populates three observed-feature ratios
+ * that mirror the EWMA-tracked fields on `hu_communication_style_t`.
+ * Pulled out of the public scorer so test fixtures can poke at the
+ * intermediate numbers without depending on the score-aggregation
+ * formula. */
+typedef struct hu_pm_response_features {
+    float lowercase_ratio;    /* of letters in the response */
+    float abbreviation_ratio; /* of words that match the shorthand list */
+    size_t byte_len;
+} hu_pm_response_features_t;
+
+/* Same shorthand vocabulary as `update_style_from_message`. Keeping
+ * the two in sync matters: the scorer's "abbreviation_ratio" must
+ * mean the same thing as the EWMA's "abbreviation_ratio" or the
+ * scoring delta is meaningless. */
+static const char *HU_PM_FIDELITY_ABBREVS[] = {"u", "rn", "btw", "ty", "lmk", "yw"};
+#define HU_PM_FIDELITY_ABBREV_COUNT \
+    (sizeof(HU_PM_FIDELITY_ABBREVS) / sizeof(HU_PM_FIDELITY_ABBREVS[0]))
+
+static bool fidelity_word_is_abbrev(const char *w, size_t wl) {
+    for (size_t i = 0; i < HU_PM_FIDELITY_ABBREV_COUNT; i++) {
+        const char *a = HU_PM_FIDELITY_ABBREVS[i];
+        size_t al = strlen(a);
+        if (al != wl) continue;
+        size_t k = 0;
+        while (k < wl) {
+            unsigned char x = (unsigned char)w[k];
+            unsigned char y = (unsigned char)a[k];
+            if (x >= 'A' && x <= 'Z') x = (unsigned char)(x + 32);
+            if (y >= 'A' && y <= 'Z') y = (unsigned char)(y + 32);
+            if (x != y) break;
+            k++;
+        }
+        if (k == wl) return true;
+    }
+    return false;
+}
+
+static void hu_pm_extract_response_features(const char *response, size_t response_len,
+                                            hu_pm_response_features_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->byte_len = response_len;
+    if (!response || response_len == 0)
+        return;
+
+    size_t total_letters = 0, lower_letters = 0;
+    size_t total_words = 0, abbrev_words = 0;
+    size_t i = 0;
+    while (i < response_len) {
+        unsigned char c = (unsigned char)response[i];
+        bool is_alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        if (!is_alpha) {
+            i++;
+            continue;
+        }
+        size_t start = i;
+        while (i < response_len) {
+            unsigned char d = (unsigned char)response[i];
+            if (!((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')))
+                break;
+            total_letters++;
+            if (d >= 'a' && d <= 'z') lower_letters++;
+            i++;
+        }
+        size_t wl = i - start;
+        total_words++;
+        if (fidelity_word_is_abbrev(response + start, wl))
+            abbrev_words++;
+    }
+
+    if (total_letters > 0)
+        out->lowercase_ratio = (float)lower_letters / (float)total_letters;
+    if (total_words > 0)
+        out->abbreviation_ratio = (float)abbrev_words / (float)total_words;
+}
+
+/* Triangular axis match: 1.0 when observed == target, drops linearly
+ * to 0.0 when the gap is >= 1.0 (the full range of a [0,1] axis).
+ * Cheaper and more interpretable than gaussian-based matching, and
+ * easier to test. */
+static float hu_pm_axis_match(float observed, float target) {
+    float diff = observed - target;
+    if (diff < 0.f) diff = -diff;
+    if (diff >= 1.f) return 0.f;
+    return 1.f - diff;
+}
+
+/* Length axis: triangular match over a relative-error window. Match
+ * is 1.0 when observed length == target length, drops to 0.0 when
+ * the relative error is >= 1.0 (e.g. observed is 2× the target or
+ * 0× the target). For target == 0 we return 1.0 (no length signal
+ * to match against). */
+static float hu_pm_length_match(size_t observed, uint32_t target) {
+    if (target == 0)
+        return 1.f;
+    float t = (float)target;
+    float o = (float)observed;
+    float diff = o - t;
+    if (diff < 0.f) diff = -diff;
+    float rel = diff / t;
+    if (rel >= 1.f) return 0.f;
+    return 1.f - rel;
+}
+
+float hu_communication_style_fidelity_score(const hu_communication_style_t *target,
+                                            const char *response, size_t response_len) {
+    if (!target || !response || response_len == 0)
+        return -1.f;
+    if (target->sample_count == 0U)
+        return -1.f;
+
+    hu_pm_response_features_t f;
+    hu_pm_extract_response_features(response, response_len, &f);
+
+    /* Three axis scores → mean. We don't weight: each axis contributes
+     * equally to the overall fidelity. Future improvement: weight
+     * axes by sample_count's confidence in each EWMA, so a freshly-
+     * observed style has more influence than a barely-warmed one. */
+    float lower_match = hu_pm_axis_match(f.lowercase_ratio, target->lowercase_ratio);
+    float abbrev_match = hu_pm_axis_match(f.abbreviation_ratio, target->abbreviation_ratio);
+    float length_match = hu_pm_length_match(f.byte_len, target->avg_message_length);
+    return (lower_match + abbrev_match + length_match) / 3.f;
+}
+
+/* Internal: score one response set, accumulating into `out`. */
+static void hu_pm_score_response_set(const hu_communication_style_t *target,
+                                     const char *const *set, const size_t *lens, size_t n,
+                                     hu_communication_style_set_summary_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->min_score = 1.f;
+    out->max_score = 0.f;
+    if (!set || n == 0)
+        return;
+    float sum = 0.f;
+    for (size_t i = 0; i < n; i++) {
+        const char *resp = set[i];
+        size_t resp_len = lens ? lens[i] : (resp ? strlen(resp) : 0);
+        if (!resp || resp_len == 0) {
+            out->skipped++;
+            continue;
+        }
+        float s = hu_communication_style_fidelity_score(target, resp, resp_len);
+        if (s < 0.f) {
+            out->skipped++;
+            continue;
+        }
+        sum += s;
+        if (s < out->min_score) out->min_score = s;
+        if (s > out->max_score) out->max_score = s;
+        out->scored++;
+    }
+    if (out->scored == 0) {
+        /* No comparable scores — leave mean at 0. min stays 1.f
+         * (the upper bound) so callers can safely detect the
+         * "no signal" case without a separate flag. */
+        out->mean = 0.f;
+        return;
+    }
+    out->mean = sum / (float)out->scored;
+}
+
+hu_error_t hu_communication_style_compare_response_sets(
+    const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
+    size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
+    hu_communication_style_set_summary_t *out_a,
+    hu_communication_style_set_summary_t *out_b, float *out_delta) {
+    if (!target || !out_a || !out_b || !out_delta)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Refuse on a fingerprintless target — the fidelity scorer
+     * itself returns -1.0 in this case, which would give us a
+     * useless 0/0 summary. Cleaner to fail the whole compare. */
+    if (target->sample_count == 0U)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Sets are allowed to be empty individually; the summaries
+     * report `scored=0` and the delta is whatever the other side
+     * reports (or 0 when both are empty). */
+    hu_pm_score_response_set(target, set_a, lens_a, n_a, out_a);
+    hu_pm_score_response_set(target, set_b, lens_b, n_b, out_b);
+    *out_delta = out_b->mean - out_a->mean;
+    return HU_OK;
+}
+
+/* Case-insensitive whole-word search: does `msg` contain `word`
+ * as a substring with non-letter bounds on either side? Used by
+ * `hu_personal_model_touch_goals_in_message`. The bounds check
+ * keeps "feature" from matching inside "features" only when it
+ * really matters, but for length-5+ word fragments inside other
+ * words ("learn" inside "learning") we still bump — that's the
+ * intended heuristic: a related word shows engagement. */
+static bool message_contains_word_ci(const char *msg, size_t msg_len, const char *word,
+                                     size_t word_len) {
+    if (msg_len < word_len || word_len < 5)
+        return false;
+    for (size_t i = 0; i + word_len <= msg_len; i++) {
+        size_t k = 0;
+        while (k < word_len) {
+            unsigned char a = (unsigned char)msg[i + k];
+            unsigned char b = (unsigned char)word[k];
+            if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + 32);
+            if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + 32);
+            if (a != b)
+                break;
+            k++;
+        }
+        if (k == word_len)
+            return true;
+    }
+    return false;
+}
+
+/* Completion-verb table — kept tight on purpose. Adding a verb here
+ * trades recall for precision (more goals get auto-deactivated, but
+ * also more false positives). Each entry has the verb literal and
+ * its length so the linear scan stays branch-light.
+ *
+ * Verbs are matched case-insensitively as bare substrings; the
+ * negation guard below filters out "not done", "haven't shipped",
+ * "without finishing". Single-word verbs only — "wrapped up" would
+ * need bigram matching, so we list only "wrapped" and let the
+ * content-word co-occurrence rule decide. */
+typedef struct hu_pm_completion_verb {
+    const char *verb;
+    size_t len;
+} hu_pm_completion_verb_t;
+
+static const hu_pm_completion_verb_t HU_PM_COMPLETION_VERBS[] = {
+    {"shipped", 7}, {"finished", 8}, {"completed", 9}, {"wrapped", 7},
+    {"done", 4},    {"resolved", 8}, {"closed", 6},
+};
+
+#define HU_PM_COMPLETION_VERB_COUNT \
+    (sizeof(HU_PM_COMPLETION_VERBS) / sizeof(HU_PM_COMPLETION_VERBS[0]))
+
+/* Returns the offset of the first occurrence of `needle` in `hay`
+ * (case-insensitive substring match), or SIZE_MAX if absent. The
+ * boundary semantics match `message_contains_word_ci` but the
+ * search returns the offset so the caller can run the negation
+ * scan from there.
+ *
+ * Unlike message_contains_word_ci, this DOES require word
+ * boundaries on both sides (an alpha char before or after kills the
+ * match) so "doneness" doesn't match "done" — important since
+ * substring matches on completion verbs are higher-stakes than
+ * substring matches on goal content words. */
+static size_t find_word_ci_with_boundary(const char *hay, size_t hay_len, const char *needle,
+                                         size_t needle_len) {
+    if (hay_len < needle_len || needle_len == 0)
+        return (size_t)-1;
+    for (size_t i = 0; i + needle_len <= hay_len; i++) {
+        if (i > 0) {
+            unsigned char prev = (unsigned char)hay[i - 1];
+            if ((prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z'))
+                continue;
+        }
+        size_t k = 0;
+        while (k < needle_len) {
+            unsigned char a = (unsigned char)hay[i + k];
+            unsigned char b = (unsigned char)needle[k];
+            if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + 32);
+            if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + 32);
+            if (a != b)
+                break;
+            k++;
+        }
+        if (k != needle_len)
+            continue;
+        if (i + needle_len < hay_len) {
+            unsigned char next = (unsigned char)hay[i + needle_len];
+            if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z'))
+                continue;
+        }
+        return i;
+    }
+    return (size_t)-1;
+}
+
+/* Negation scan — does the 12-char window before `pos` in `msg`
+ * contain "not", "n't", or "without"? Used as the precision lever
+ * for completion detection: "I haven't shipped" should NOT count as
+ * a completion of a "ship X" goal. Window is generous enough to
+ * catch "I have not yet shipped" but tight enough that an unrelated
+ * "not" 30 chars earlier doesn't bleed in. */
+static bool has_negation_before(const char *msg, size_t msg_len, size_t pos) {
+    (void)msg_len;
+    size_t start = pos > 12 ? pos - 12 : 0;
+    size_t window = pos - start;
+    const char *w = msg + start;
+    /* "not" — 3 chars */
+    if (find_word_ci_with_boundary(w, window, "not", 3) != (size_t)-1)
+        return true;
+    /* "n't" — 3 chars; appears at end of contractions like haven't, didn't.
+     * No word boundary required on the LEFT here ("haven't" → "n't" follows
+     * an alpha), so a literal substring search is correct. */
+    for (size_t i = 0; i + 3 <= window; i++) {
+        unsigned char a = (unsigned char)w[i];
+        unsigned char b = (unsigned char)w[i + 1];
+        unsigned char c = (unsigned char)w[i + 2];
+        if (a == 'n' && b == '\'' && c == 't')
+            return true;
+        if (a == 'N' && b == '\'' && (c == 't' || c == 'T'))
+            return true;
+    }
+    if (find_word_ci_with_boundary(w, window, "without", 7) != (size_t)-1)
+        return true;
+    return false;
+}
+
+size_t hu_personal_model_resolve_goals_in_message(hu_personal_model_t *model, const char *msg,
+                                                  size_t msg_len, int64_t now) {
+    if (!model || !msg || msg_len == 0)
+        return 0;
+    (void)now; /* timestamp not currently stored; reserved for future
+                * "completed_at" field if we add one. */
+
+    /* Pre-scan: where does each completion verb sit in the message?
+     * One pass, store the earliest offset per verb. SIZE_MAX = absent.
+     * The full-message scan is shared across all goals so we don't
+     * re-walk the message text once per goal. */
+    size_t verb_pos[HU_PM_COMPLETION_VERB_COUNT];
+    bool any_verb = false;
+    for (size_t v = 0; v < HU_PM_COMPLETION_VERB_COUNT; v++) {
+        verb_pos[v] = find_word_ci_with_boundary(msg, msg_len, HU_PM_COMPLETION_VERBS[v].verb,
+                                                 HU_PM_COMPLETION_VERBS[v].len);
+        if (verb_pos[v] != (size_t)-1)
+            any_verb = true;
+    }
+    if (!any_verb)
+        return 0;
+
+    size_t resolved = 0;
+    for (size_t g = 0; g < model->goal_count; g++) {
+        hu_personal_goal_t *goal = &model->goals[g];
+        if (!goal->active || goal->description[0] == '\0')
+            continue;
+
+        /* Walk content words in the description (5+ chars, alpha-only).
+         * For each, check whether any completion verb co-occurs in the
+         * message AND no negation precedes the verb. First match wins. */
+        const char *p = goal->description;
+        const char *end = p + strnlen(goal->description, sizeof(goal->description));
+        bool resolved_this_goal = false;
+        while (p < end && !resolved_this_goal) {
+            while (p < end && !((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')))
+                p++;
+            const char *w = p;
+            while (p < end && ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')))
+                p++;
+            size_t wl = (size_t)(p - w);
+            if (wl < 5)
+                continue;
+            if (find_word_ci_with_boundary(msg, msg_len, w, wl) == (size_t)-1)
+                continue;
+            /* Goal content word is in the message. Now check that some
+             * completion verb is also there AND not negated. */
+            for (size_t v = 0; v < HU_PM_COMPLETION_VERB_COUNT; v++) {
+                if (verb_pos[v] == (size_t)-1)
+                    continue;
+                if (has_negation_before(msg, msg_len, verb_pos[v]))
+                    continue;
+                goal->active = false;
+                goal->progress = 1.0f;
+                /* Stamp last_referenced to the completion time so
+                 * `hu_personal_goal_is_recently_completed` can find
+                 * this goal in its retention window even if the
+                 * caller didn't run `touch_goals_in_message` first
+                 * (the production per_turn_tick helper does, but
+                 * unit tests and future call sites might call
+                 * resolve directly). */
+                if (now > goal->last_referenced)
+                    goal->last_referenced = now;
+                resolved++;
+                resolved_this_goal = true;
+                break;
+            }
+        }
+    }
+    return resolved;
+}
+
+size_t hu_personal_model_touch_goals_in_message(hu_personal_model_t *model, const char *msg,
+                                                size_t msg_len, int64_t now) {
+    if (!model || !msg || msg_len == 0)
+        return 0;
+    size_t bumped = 0;
+    for (size_t g = 0; g < model->goal_count; g++) {
+        hu_personal_goal_t *goal = &model->goals[g];
+        if (!goal->active || goal->description[0] == '\0')
+            continue;
+        /* Walk content words in the description. A "word" is a
+         * maximal alpha-only run; we only check words >= 5 chars
+         * to filter out particles ("the", "and", "of"). The first
+         * match triggers the bump and we skip the rest of the goal. */
+        const char *p = goal->description;
+        const char *end = p + strnlen(goal->description, sizeof(goal->description));
+        bool matched = false;
+        while (p < end && !matched) {
+            while (p < end && !((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')))
+                p++;
+            const char *w = p;
+            while (p < end && ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')))
+                p++;
+            size_t wl = (size_t)(p - w);
+            if (wl >= 5 && message_contains_word_ci(msg, msg_len, w, wl)) {
+                if (now > goal->last_referenced)
+                    goal->last_referenced = now;
+                bumped++;
+                matched = true;
+            }
+        }
+    }
+    return bumped;
+}
+
+hu_personal_model_turn_tick_result_t
+hu_personal_model_per_turn_tick(hu_personal_model_t *model, const char *msg, size_t msg_len,
+                                bool from_user, int64_t now) {
+    hu_personal_model_turn_tick_result_t r;
+    memset(&r, 0, sizeof(r));
+    if (!model) {
+        r.ingest_error = HU_ERR_INVALID_ARGUMENT;
+        return r;
+    }
+    /* Phase 1: ingest. Errors are reported back to the caller but
+     * don't abort the rest of the tick — a partially-failed ingest
+     * still benefits from goal-mention bumping and decay pruning of
+     * pre-existing entries. */
+    r.ingest_error = hu_personal_model_ingest(model, msg, msg_len, from_user, now);
+
+    /* Phase 2: bump last_referenced on any active goal whose
+     * description shares a content-word with the message. Runs
+     * BEFORE resolve so the same goal can be touched then resolved
+     * (the resolve phase honors the touch by reading active=true
+     * before flipping it to false; the freshness stamp is a
+     * downstream concern that future "recently completed" surfaces
+     * can pick up). */
+    r.goals_touched = hu_personal_model_touch_goals_in_message(model, msg, msg_len, now);
+
+    /* Phase 3: deactivate goals the message indicates are complete.
+     * Runs AFTER touch so a touch-then-resolve in the same turn
+     * leaves the goal with both an updated last_referenced AND
+     * active=false. */
+    r.goals_resolved = hu_personal_model_resolve_goals_in_message(model, msg, msg_len, now);
+
+    /* Phase 4: prune anything below the forget floor. Runs LAST so
+     * a goal resolved in this turn (now active=false → effective
+     * priority drops to 0) gets pruned in the same tick instead of
+     * lingering for an idle-decay cycle. Idempotent at fixed `now`,
+     * sub-microsecond cost (88 elements × float-multiply). */
+    r.entries_pruned = hu_personal_model_apply_decay(model, now);
+
+    return r;
+}
+
+bool hu_personal_model_idle_due(int64_t *last_inout, int64_t now, int64_t interval) {
+    if (!last_inout || now <= 0 || interval <= 0)
+        return false;
+    /* First-call semantics: any non-positive sentinel ("never run")
+     * forces a fire on the next call. We treat "first call" as
+     * `*last_inout <= 0` rather than `== 0` so callers that
+     * deliberately seed with -1 also get the run-immediately
+     * behaviour. */
+    if (*last_inout <= 0) {
+        *last_inout = now;
+        return true;
+    }
+    /* Normal interval check. We compare the difference rather than
+     * the sum to avoid overflow on near-INT64_MAX timestamps. */
+    if (now - *last_inout < interval)
+        return false;
+    *last_inout = now;
+    return true;
+}
+
+size_t hu_personal_model_apply_decay(hu_personal_model_t *model, int64_t now) {
+    if (!model)
+        return 0;
+    size_t pruned = 0;
+
+    /* Facts — re-use the canonical decay function from fact_extract. */
+    {
+        size_t kept = 0;
+        for (size_t i = 0; i < model->fact_count; i++) {
+            float eff = hu_heuristic_fact_effective_confidence(&model->facts[i], now);
+            if (eff < HU_PM_FORGET_FLOOR) {
+                pruned++;
+                continue;
+            }
+            if (kept != i)
+                model->facts[kept] = model->facts[i];
+            kept++;
+        }
+        if (kept < model->fact_count) {
+            /* Zero out the now-vacant tails so save/load round-trips
+             * don't carry ghost data in unused slots. */
+            memset(&model->facts[kept], 0,
+                   (model->fact_count - kept) * sizeof(model->facts[0]));
+            model->fact_count = kept;
+        }
+    }
+
+    /* Topics — same compaction shape. */
+    {
+        size_t kept = 0;
+        for (size_t i = 0; i < model->topic_count; i++) {
+            float eff = hu_personal_topic_effective_score(&model->topics[i], now);
+            if (eff < HU_PM_FORGET_FLOOR) {
+                pruned++;
+                continue;
+            }
+            if (kept != i)
+                model->topics[kept] = model->topics[i];
+            kept++;
+        }
+        if (kept < model->topic_count) {
+            memset(&model->topics[kept], 0,
+                   (model->topic_count - kept) * sizeof(model->topics[0]));
+            model->topic_count = kept;
+        }
+    }
+
+    /* Goals — keep when either (a) effective priority is above the
+     * forget floor (active + still relevant), OR (b) the goal is in
+     * the recently-completed retention window. The retention path
+     * lets the prompt builder surface "Recently completed: …" lines
+     * for ~7 days post-resolution; after that, the goal joins the
+     * regular pruning fate. */
+    {
+        size_t kept = 0;
+        for (size_t i = 0; i < model->goal_count; i++) {
+            float eff = hu_personal_goal_effective_priority(&model->goals[i], now);
+            bool keep = (eff >= HU_PM_FORGET_FLOOR) ||
+                        hu_personal_goal_is_recently_completed(&model->goals[i], now);
+            if (!keep) {
+                pruned++;
+                continue;
+            }
+            if (kept != i)
+                model->goals[kept] = model->goals[i];
+            kept++;
+        }
+        if (kept < model->goal_count) {
+            memset(&model->goals[kept], 0,
+                   (model->goal_count - kept) * sizeof(model->goals[0]));
+            model->goal_count = kept;
+        }
+    }
+
+    return pruned;
+}
+
 /* ── M2 P1: Persistence ─────────────────────────────────────────────────
  *
  * Binary format:
@@ -747,10 +1632,15 @@ const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_
 /* v1 → v2: hu_communication_style_t gained `lowercase_ratio` and
  *          `abbreviation_ratio` fields.
  * v2 → v3: hu_heuristic_fact_t gained `last_seen_at` for freshness
- *          tracking and exponential confidence decay. Old saves fail
- *          magic+version check and the caller falls back to a fresh-
- *          default model. */
-#define HU_PM_VERSION  3u
+ *          tracking and exponential confidence decay.
+ * v3 → v4: hu_personal_goal_t gained `last_referenced` and
+ *          hu_communication_style_t gained `last_observed_at` —
+ *          symmetric signal-aging machinery for topics/goals/style.
+ *          Old saves fail magic+version check and the caller falls
+ *          back to a fresh-default model. Forward-compatible
+ *          progressive migration is tracked separately under the
+ *          schema-migration slice (Track #7 in the SOTA program).
+ * HU_PM_VERSION is defined at the top of this file. */
 
 typedef struct hu_pm_header {
     uint32_t magic;
@@ -819,6 +1709,125 @@ const char *hu_personal_model_resolve_default_path(char *buf, size_t cap) {
     return buf;
 }
 
+/* ── v3 → v4 progressive migration ─────────────────────────────────────
+ *
+ * v3 differs from v4 only in two struct layouts:
+ *   - `hu_personal_goal_t` gained `last_referenced` (one int64 per goal).
+ *   - `hu_communication_style_t` gained `last_observed_at` (one int64).
+ *
+ * These shifts cascade through every field after them, so the v3 file
+ * cannot be `fread`-ed directly into the live `hu_personal_model_t`.
+ * Instead we mirror the v3 layout in two private POD structs, read the
+ * v3 model whole, and field-copy it into the v4 in-memory model with
+ * the new fields zero-filled. Facts are unchanged across v3↔v4 (they
+ * already had `last_seen_at` since v2→v3) so the entire fact array
+ * survives the migration cleanly. Topics never changed; only goals
+ * and style need handling.
+ *
+ * The v3 structs and assembled `hu_pm_v3_model_t` are file-static —
+ * tests that need a v3 fixture must mirror these layouts themselves
+ * (see `tests/test_personal_model.c::personal_model_loads_v3_save`)
+ * so they stay locked to whatever the previous binary release shipped. */
+
+typedef struct hu_pm_v3_goal {
+    char description[512];
+    bool active;
+    int64_t created_at;
+    /* v3 had no `last_referenced` here — that's the migration delta. */
+    int64_t deadline;
+    float progress;
+} hu_pm_v3_goal_t;
+
+typedef struct hu_pm_v3_style {
+    float formality;
+    float verbosity;
+    float emoji_frequency;
+    float humor_receptivity;
+    float lowercase_ratio;
+    float abbreviation_ratio;
+    uint32_t avg_message_length;
+    uint32_t sample_count;
+    /* v3 had no `last_observed_at` here. */
+} hu_pm_v3_style_t;
+
+typedef struct hu_pm_v3_model {
+    hu_core_memory_t core;
+    hu_heuristic_fact_t facts[HU_PM_MAX_FACTS];
+    size_t fact_count;
+    hu_pm_v3_style_t style;
+    hu_personal_topic_t topics[HU_PM_MAX_TOPICS];
+    size_t topic_count;
+    hu_pm_v3_goal_t goals[HU_PM_MAX_GOALS];
+    size_t goal_count;
+    uint8_t active_hours[24];
+    uint8_t active_days[7];
+    int64_t created_at;
+    int64_t updated_at;
+    uint32_t interaction_count;
+    uint32_t version;
+} hu_pm_v3_model_t;
+
+/* On-disk version constant — kept distinct from `HU_PM_VERSION` so the
+ * loader path can recognize a legacy save without trusting the field
+ * value inside the body (defense in depth). */
+#define HU_PM_VERSION_V3 3u
+
+static void hu_pm_migrate_v3_to_v4(const hu_pm_v3_model_t *v3, hu_personal_model_t *out) {
+    hu_personal_model_init(out);
+    out->core = v3->core;
+
+    /* Facts — byte-identical layout, copy whole. */
+    size_t nf = v3->fact_count > HU_PM_MAX_FACTS ? HU_PM_MAX_FACTS : v3->fact_count;
+    for (size_t i = 0; i < nf; i++)
+        out->facts[i] = v3->facts[i];
+    out->fact_count = nf;
+
+    /* Style — copy known fields, zero the new `last_observed_at`. The
+     * freshness function falls back to "fully fresh" when sample_count
+     * is non-zero and last_observed_at is 0, so migrated models keep
+     * their style directive instead of silently dropping it. */
+    out->style.formality = v3->style.formality;
+    out->style.verbosity = v3->style.verbosity;
+    out->style.emoji_frequency = v3->style.emoji_frequency;
+    out->style.humor_receptivity = v3->style.humor_receptivity;
+    out->style.lowercase_ratio = v3->style.lowercase_ratio;
+    out->style.abbreviation_ratio = v3->style.abbreviation_ratio;
+    out->style.avg_message_length = v3->style.avg_message_length;
+    out->style.sample_count = v3->style.sample_count;
+    out->style.last_observed_at = 0;
+
+    /* Topics — byte-identical layout, copy whole. */
+    size_t nt = v3->topic_count > HU_PM_MAX_TOPICS ? HU_PM_MAX_TOPICS : v3->topic_count;
+    for (size_t i = 0; i < nt; i++)
+        out->topics[i] = v3->topics[i];
+    out->topic_count = nt;
+
+    /* Goals — copy known fields, zero the new `last_referenced`.
+     * The effective-priority function uses `created_at` as a fallback
+     * when `last_referenced` is 0, so migrated goals don't suddenly
+     * decay to nothing. */
+    size_t ng = v3->goal_count > HU_PM_MAX_GOALS ? HU_PM_MAX_GOALS : v3->goal_count;
+    for (size_t i = 0; i < ng; i++) {
+        memcpy(out->goals[i].description, v3->goals[i].description,
+               sizeof(out->goals[i].description));
+        out->goals[i].active = v3->goals[i].active;
+        out->goals[i].created_at = v3->goals[i].created_at;
+        out->goals[i].last_referenced = 0;
+        out->goals[i].deadline = v3->goals[i].deadline;
+        out->goals[i].progress = v3->goals[i].progress;
+    }
+    out->goal_count = ng;
+
+    memcpy(out->active_hours, v3->active_hours, sizeof(out->active_hours));
+    memcpy(out->active_days, v3->active_days, sizeof(out->active_days));
+    out->created_at = v3->created_at;
+    out->updated_at = v3->updated_at;
+    out->interaction_count = v3->interaction_count;
+    /* Stamp current schema — the in-memory model is now v4 even though
+     * the on-disk file was v3. Re-saving will write a v4 file. */
+    out->version = HU_PM_VERSION;
+}
+
 hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path) {
     if (!model || !path || !*path) return HU_ERR_INVALID_ARGUMENT;
     hu_pm_ensure_parent_dir(path);
@@ -852,23 +1861,50 @@ hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
         fclose(fp);
         return HU_ERR_PARSE;
     }
-    if (hdr.magic != HU_PM_MAGIC || hdr.version != HU_PM_VERSION) {
+    if (hdr.magic != HU_PM_MAGIC) {
         fclose(fp);
-        /* Out is already re-initialized to defaults so the caller can
-         * keep walking on a schema mismatch. */
         return HU_ERR_PARSE;
     }
-    hu_personal_model_t tmp;
-    if (fread(&tmp, sizeof(tmp), 1, fp) != 1) {
+
+    /* Progressive migration — when the on-disk version is the previous
+     * schema (v3) we read the v3 layout and field-copy into the live
+     * v4 model. Any other non-current version is a hard parse error
+     * (defaults preserved). Future migrations should add another arm
+     * to this switch rather than touching the v3 path. */
+    if (hdr.version == HU_PM_VERSION) {
+        hu_personal_model_t tmp;
+        if (fread(&tmp, sizeof(tmp), 1, fp) != 1) {
+            fclose(fp);
+            hu_personal_model_init(out);
+            return HU_ERR_PARSE;
+        }
         fclose(fp);
-        hu_personal_model_init(out);
-        return HU_ERR_PARSE;
+        /* Defensive: clamp counts that could overflow on a corrupted file. */
+        if (tmp.fact_count > HU_PM_MAX_FACTS) tmp.fact_count = HU_PM_MAX_FACTS;
+        if (tmp.topic_count > HU_PM_MAX_TOPICS) tmp.topic_count = HU_PM_MAX_TOPICS;
+        if (tmp.goal_count > HU_PM_MAX_GOALS) tmp.goal_count = HU_PM_MAX_GOALS;
+        *out = tmp;
+        return HU_OK;
     }
+
+    if (hdr.version == HU_PM_VERSION_V3) {
+        hu_pm_v3_model_t v3;
+        if (fread(&v3, sizeof(v3), 1, fp) != 1) {
+            fclose(fp);
+            hu_personal_model_init(out);
+            return HU_ERR_PARSE;
+        }
+        fclose(fp);
+        /* Same defensive clamps the v4 path applies. */
+        if (v3.fact_count > HU_PM_MAX_FACTS) v3.fact_count = HU_PM_MAX_FACTS;
+        if (v3.topic_count > HU_PM_MAX_TOPICS) v3.topic_count = HU_PM_MAX_TOPICS;
+        if (v3.goal_count > HU_PM_MAX_GOALS) v3.goal_count = HU_PM_MAX_GOALS;
+        hu_pm_migrate_v3_to_v4(&v3, out);
+        return HU_OK;
+    }
+
     fclose(fp);
-    /* Defensive: clamp counts that could overflow on a corrupted file. */
-    if (tmp.fact_count > HU_PM_MAX_FACTS) tmp.fact_count = HU_PM_MAX_FACTS;
-    if (tmp.topic_count > HU_PM_MAX_TOPICS) tmp.topic_count = HU_PM_MAX_TOPICS;
-    if (tmp.goal_count > HU_PM_MAX_GOALS) tmp.goal_count = HU_PM_MAX_GOALS;
-    *out = tmp;
-    return HU_OK;
+    /* Out is already re-initialized to defaults so the caller can
+     * keep walking on a schema mismatch beyond N-1. */
+    return HU_ERR_PARSE;
 }

@@ -50,10 +50,10 @@
 #include <string.h>
 #include <time.h>
 
+#include "human/memory/graph.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/retrieval_planner.h"
 #include "human/agent/world_model.h"
-#include "human/memory/graph.h"
 #include "human/memory/memory.h"
 #endif
 

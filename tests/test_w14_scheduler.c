@@ -30,10 +30,10 @@ static hu_allocator_t *A(void) {
     return &g_alloc;
 }
 
-#ifdef HU_ENABLE_SQLITE
-
 /* ── Shared test fixtures ─────────────────────────────────────────────── */
-
+/* `clear_w14_env` is used by the probe tests below (which run without
+ * SQLite) and by the SQLite-gated scheduler tests, so it lives outside
+ * the HU_ENABLE_SQLITE guard. */
 static void clear_w14_env(void) {
     unsetenv("HU_TEST_LOAD_PCT");
     unsetenv("HU_TEST_BATTERY_PCT");
@@ -41,6 +41,8 @@ static void clear_w14_env(void) {
     unsetenv("HU_TEST_QUIET_HOURS");
     unsetenv("HU_TEST_HOUR");
 }
+
+#ifdef HU_ENABLE_SQLITE
 
 static void open_stack_(hu_graph_t **g, hu_memory_facade_t **m, hu_scheduler_t **s) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
