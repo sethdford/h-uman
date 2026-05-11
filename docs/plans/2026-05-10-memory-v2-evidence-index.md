@@ -80,6 +80,8 @@ rg -c 'hu_memory_query_t' src --glob '*.c' | sort -t: -k2 -n
 
 **Track B1 (2026-05-10):** Line-by-line pass completed for `src/**/*.c` call sites plus GDPR export generic loop in `src/memory/memory.c` (`HU_MEMORY_QUERY_WINDOW` for full-range window reads). Representative tests now set **`variant`** explicitly in `tests/test_w7_memory_facade.c` and `tests/test_w12_planner.c`. `src/persona/`, `src/feeds/`, and `src/channels/` contain **no** `hu_memory_query_t` references (B1.c N/A).
 
+**W7 inventory (related):** `scripts/w7-phase1-graph-bypass-inventory.sh` counts **`hu_graph_<public-api>(`** call sites under `src/agent|persona|feeds` only — not typedefs like `hu_graph_entity_t`. Re-run after graph-touching migrations; see [`2026-05-10-w7-phase1-bypass-inventory.md`](2026-05-10-w7-phase1-bypass-inventory.md).
+
 **Track B2:** `scripts/check-memory-query-variant.sh` (python3) enforces explicit `.variant =` after stack `memset` of `hu_memory_query_t` in `src/**` and `tests/**`. Wired into `scripts/verify-all.sh` and `scripts/agent-preflight.sh` (C path). Negative coverage for union aliasing remains `test_v2_e2e_facade_query_aliasing_is_safe` in `tests/test_v2_e2e_adversarial.c`.
 
 ---

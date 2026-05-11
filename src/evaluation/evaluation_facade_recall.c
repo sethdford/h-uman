@@ -17,7 +17,7 @@
  *     triples seeded into an in-memory SQLite facade.
  *   - 12 paired queries — a mix of "what / where / when / who / between"
  *     patterns that exercise each branch of the heuristic planner.
- *   - For each query: build world model → plan → execute → score.
+ *   - For each query: load world model (W9 cache) → plan → execute → score.
  *
  * Metrics:
  *   - precision_at_1   — top-1 record is the expected entity (id-match)
@@ -191,8 +191,8 @@ static hu_error_t run_one_query(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                 int64_t expect_entity_id,
                                 size_t *out_rank, size_t *out_step_count) {
     hu_world_model_t *wm = NULL;
-    hu_error_t err = hu_world_model_build(m, alloc, cid, strlen(cid),
-                                          (int64_t)time(NULL) * 1000LL, &wm);
+    hu_error_t err = hu_world_model_load(m, alloc, cid, strlen(cid),
+                                         (int64_t)time(NULL) * 1000LL, &wm);
     if (err != HU_OK || !wm) {
         *out_rank = 0;
         *out_step_count = 0;

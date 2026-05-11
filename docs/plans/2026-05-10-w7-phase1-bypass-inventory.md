@@ -10,7 +10,7 @@ related:
 
 # W7 Phase 1 — Direct `hu_graph_*` bypass inventory
 
-**Purpose (execution plan §Phase 1 step 1.1):** enumerate remaining `hu_graph_*` touchpoints under `src/agent/`, `src/persona/`, and `src/feeds/` so migrations to `hu_memory_facade_read` / `hu_memory_facade_write` can be sequenced without guesswork.
+**Purpose (execution plan §Phase 1 step 1.1):** enumerate remaining **v1 graph API call sites** (`hu_graph_<api>(` from `include/human/memory/graph.h`) under `src/agent/`, `src/persona/`, and `src/feeds/` so migrations to `hu_memory_facade_read` / `hu_memory_facade_write` can be sequenced without guesswork. The inventory script **does not** count typedef spellings such as `hu_graph_entity_t` / `hu_graph_relation_t` (those are not bypasses).
 
 **Regenerate counts:** from repo root,
 
@@ -18,13 +18,13 @@ related:
 bash scripts/w7-phase1-graph-bypass-inventory.sh
 ```
 
-## Snapshot (2026-05-10, zero matches under agent/persona/feeds)
+## Snapshot (2026-05-10, zero API call matches under agent/persona/feeds)
 
-Per-file match counts for the substring **`hu_graph_`** in `src/agent/**/*.c`, `src/agent/**/*.h`, `src/persona/**/*.c`, `src/persona/**/*.h`, `src/feeds/**/*.c`, `src/feeds/**/*.h`.
+Per-file counts from **`bash scripts/w7-phase1-graph-bypass-inventory.sh`** (graph public API call pattern, not raw substring `hu_graph_`).
 
 | Count | Path |
 |------:|------|
-| **0** | *(no files in this scan contain `hu_graph_`)* |
+| **0** | *(no call sites in this scan)* |
 | **0** | **total** |
 
 **How this is possible without deleting the v1 graph:** the graph module and **`hu_graph_*`** APIs remain in `include/human/memory/graph.h`, `src/memory/graph.c`, and other trees **outside** this ripgrep scope. Agent/persona/feeds code now uses:
