@@ -497,7 +497,6 @@ set(HU_CORE_SOURCES
     src/agent/outcomes.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
-    src/agent/frontier_prompt.c
     src/context/conversation.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
