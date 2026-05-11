@@ -497,6 +497,7 @@ set(HU_CORE_SOURCES
     src/agent/outcomes.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
+    src/agent/frontier_prompt.c
     src/context/conversation.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
@@ -2651,6 +2652,7 @@ set(HU_TEST_SOURCES
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
     tests/test_ml.c
+    tests/test_ml_cli_actually_trains.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c

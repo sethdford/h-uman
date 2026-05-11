@@ -181,12 +181,28 @@ Refs spec §4.1, §1.5.2, §2."
 
 - [ ] **Step 1: Write the failing test**
 
+> **API verification (May 11 2026):** Reading `include/human/ml/ml.h`, `model.h`, `optimizer.h`, `dataloader.h`, `train.h` and the existing test patterns in `tests/test_ml.c` (`test_train_pipeline` lines 583-653, `test_grad_accumulation_runs` lines 870-911), the *real* C surface is:
+>
+> - `hu_allocator_t hu_system_allocator(void)` returns by value, not pointer
+> - `hu_experiment_config_t hu_experiment_config_default(void)` (no `hu_ml_default_config`); fields are `cfg.gpt`, `cfg.optimizer`, `cfg.training`, `cfg.backend`
+> - `hu_gpt_create(&alloc, &cfg.gpt, &model)` — second arg is `&cfg.gpt`, not `&cfg.model`
+> - `hu_muon_adamw_create(&alloc, &cfg.optimizer, &opt)` — only 3 args, no `&model`
+> - `hu_gpt_register_params(&model, &opt)` — required to wire params after creation
+> - `hu_ml_dataloader_create(&alloc, dir, batch, seq_len, "train"|"val", &out)` — only loader factory, reads `shard_NNNNN.bin` files from `dir`. There is no in-memory loader; tests write tokens to `/tmp/...`.
+> - `hu_ml_train(&alloc, &model, &opt, train_dl, val_dl, &cfg, const int32_t *token_bytes, size_t vocab_size, &result)` — `token_bytes` is `const int32_t*`, not `uint8_t*`.
+> - `src/ml/train.c:46` early-returns `HU_ERR_INVALID_ARGUMENT` only when `token_bytes != NULL && vocab_size == 0`. With both NULL/0 the call returns `HU_OK`, the outer step loop runs, but every per-token grad iteration short-circuits at line 113 (`target >= vocab_size` is true for every target since vocab_size==0), and BPB is never computed (line 235 requires `token_bytes != NULL`). So `result.num_steps > 0` and `result.val_bpb == 0.0`.
+
 Create `tests/test_ml_cli_actually_trains.c`:
 
 ```c
 /* Phase 0 Task 3 — proves that hu_ml_train with vocab_size=0 + token_bytes=NULL
- * does not actually train, and that the patched cli paths supply a non-zero
- * vocab_size and a non-NULL token_bytes lookup so loss reduction is real. */
+ * (the pre-fix call shape used in src/ml/cli.c:190 and src/ml/cli.c:2016)
+ * silently no-ops: training reports OK and num_steps>0 but no per-token grad
+ * is ever computed and val_bpb is never recorded. The patched cli paths must
+ * pass a non-zero vocab_size and a non-NULL token_bytes table so the CE
+ * objective actually runs and BPB is reported.
+ *
+ * See spec §1.5.2 issues #1, #2 and the May 11 2026 audit baseline. */
 
 #include "test_framework.h"
 #include "human/core/allocator.h"
@@ -195,83 +211,144 @@ Create `tests/test_ml_cli_actually_trains.c`:
 #include "human/ml/optimizer.h"
 #include "human/ml/dataloader.h"
 #include "human/ml/train.h"
+
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #ifdef HU_ENABLE_ML
 
-/* Synthetic data: vocab_size=128, token_bytes is a 128-entry table where
- * every byte maps to itself. Train for 32 steps; expect val_bpb to drop. */
-static void test_ml_cli_train_with_zero_vocab_does_nothing(void) {
-    hu_allocator_t *alloc = hu_system_allocator();
-    hu_ml_config_t cfg = hu_ml_default_config();
-    cfg.training.max_steps = 8;
-    cfg.training.device_batch_size = 4;
-    cfg.model.vocab_size = 128;
-
-    hu_model_t model = {0};
-    hu_ml_optimizer_t optimizer = {0};
-    HU_ASSERT_EQ(hu_gpt_create(alloc, &cfg.model, &model), HU_OK);
-    HU_ASSERT_EQ(hu_muon_adamw_create(alloc, &cfg.optimizer, &model, &optimizer), HU_OK);
-
-    /* Build a tiny synthetic dataset of 256 tokens, all in [0, 128). */
-    int32_t toks[256];
-    for (int i = 0; i < 256; i++) toks[i] = i & 127;
-
-    hu_ml_dataloader_t *loader = NULL;
-    HU_ASSERT_EQ(hu_ml_dataloader_create_from_buffer(alloc, toks, 256, &cfg.training, &loader),
-                 HU_OK);
-
-    /* Pass NULL token_bytes + 0 vocab_size — this is the bug */
-    hu_ml_train_result_t result_buggy = {0};
-    hu_error_t err = hu_ml_train(alloc, &model, &optimizer, loader, NULL,
-                                 &cfg.training, NULL, 0, &result_buggy);
-    HU_ASSERT_EQ(err, HU_OK);
-    /* The buggy path either skips training entirely (val_bpb == 0)
-     * or the BPB metric is meaningless without token_bytes. The
-     * invariant we lock down: the bug case CANNOT report a finite,
-     * positive, decreasing BPB curve. */
-    HU_ASSERT_TRUE(result_buggy.val_bpb == 0.0 || result_buggy.val_bpb < 0.0);
-
-    hu_ml_dataloader_deinit(loader);
-    optimizer.vtable->deinit(optimizer.ctx, alloc);
-    model.vtable->deinit(model.ctx, alloc);
+/* Helpers (mirroring tests/test_ml.c style). */
+static void mkdir_p_local(const char *path) {
+#ifndef _WIN32
+    mkdir(path, 0755);
+#endif
 }
 
+static void write_bin_file_local(const char *path, const int32_t *tokens, size_t count) {
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        fwrite(tokens, sizeof(int32_t), count, f);
+        fclose(f);
+    }
+}
+
+/* Build a tiny GPT + MuonAdamW + 2-shard dataloader pair backed by /tmp.
+ * Returns ownership to the caller (must call cleanup_pipeline). */
+typedef struct pipeline {
+    hu_model_t model;
+    hu_ml_optimizer_t opt;
+    hu_ml_dataloader_t *train_dl;
+    hu_ml_dataloader_t *val_dl;
+    char dir[256];
+    char path1[320];
+    char path2[320];
+} pipeline_t;
+
+static void build_pipeline(hu_allocator_t *alloc, const char *dirname, pipeline_t *p) {
+    snprintf(p->dir, sizeof(p->dir), "/tmp/%s", dirname);
+    mkdir_p_local(p->dir);
+
+    int32_t tokens[200];
+    for (int i = 0; i < 200; i++)
+        tokens[i] = i % 128;
+    snprintf(p->path1, sizeof(p->path1), "%s/shard_00000.bin", p->dir);
+    snprintf(p->path2, sizeof(p->path2), "%s/shard_00001.bin", p->dir);
+    write_bin_file_local(p->path1, tokens, 200);
+    write_bin_file_local(p->path2, tokens, 200);
+
+    HU_ASSERT_EQ(hu_ml_dataloader_create(alloc, p->dir, 2, 8, "train", &p->train_dl), HU_OK);
+    HU_ASSERT_EQ(hu_ml_dataloader_create(alloc, p->dir, 2, 8, "val", &p->val_dl), HU_OK);
+
+    hu_gpt_config_t gpt_cfg = {0};
+    gpt_cfg.sequence_len = 16;
+    gpt_cfg.vocab_size = 128;
+    gpt_cfg.n_layer = 1;
+    gpt_cfg.n_head = 2;
+    gpt_cfg.n_kv_head = 2;
+    gpt_cfg.n_embd = 64;
+    gpt_cfg.head_dim = 32;
+    gpt_cfg.activation = HU_ML_ACT_RELU_SQ;
+
+    memset(&p->model, 0, sizeof(p->model));
+    HU_ASSERT_EQ(hu_gpt_create(alloc, &gpt_cfg, &p->model), HU_OK);
+
+    hu_optimizer_config_t opt_cfg = hu_experiment_config_default().optimizer;
+    memset(&p->opt, 0, sizeof(p->opt));
+    HU_ASSERT_EQ(hu_muon_adamw_create(alloc, &opt_cfg, &p->opt), HU_OK);
+    HU_ASSERT_EQ(hu_gpt_register_params(&p->model, &p->opt), HU_OK);
+}
+
+static void cleanup_pipeline(hu_allocator_t *alloc, pipeline_t *p) {
+    p->opt.vtable->deinit(p->opt.ctx, alloc);
+    p->model.vtable->deinit(p->model.ctx, alloc);
+    hu_ml_dataloader_deinit(p->val_dl);
+    hu_ml_dataloader_deinit(p->train_dl);
+    remove(p->path1);
+    remove(p->path2);
+    rmdir(p->dir);
+}
+
+/* The bug. With token_bytes=NULL and vocab_size=0 (the call shape in cli.c:190
+ * and cli.c:2016 today), hu_ml_train returns HU_OK, num_steps>0 — but BPB is
+ * never recorded (val_bpb stays 0.0) and the per-token CE branch is never
+ * entered (every target>=vocab_size==0 is true so the loop short-circuits at
+ * src/ml/train.c:113). The training is a silent no-op. */
+static void test_ml_cli_train_with_zero_vocab_does_nothing(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    pipeline_t p;
+    build_pipeline(&alloc, "test_ml_cli_zero_vocab", &p);
+
+    hu_training_config_t train_cfg = {0};
+    train_cfg.device_batch_size = 2;
+    train_cfg.time_budget_secs = 1;
+    train_cfg.eval_tokens = 32;
+
+    hu_ml_train_result_t result_buggy = {0};
+    hu_error_t err = hu_ml_train(&alloc, &p.model, &p.opt, p.train_dl, p.val_dl, &train_cfg,
+                                 /*token_bytes=*/NULL, /*vocab_size=*/0, &result_buggy);
+
+    HU_ASSERT_EQ(err, HU_OK);
+    /* Outer loop runs (num_steps>0) but BPB is never computed. Lock that down. */
+    HU_ASSERT_GT(result_buggy.num_steps, 0);
+    HU_ASSERT_EQ(result_buggy.val_bpb, 0.0);
+
+    cleanup_pipeline(&alloc, &p);
+}
+
+/* The fix shape. With a real vocab_size and an int32_t[vocab] token_bytes
+ * lookup, the CE branch is entered (per-token grad is computed) and BPB is
+ * recorded by hu_ml_evaluate_bpb at the end of the run. */
 static void test_ml_cli_train_with_real_vocab_actually_trains(void) {
-    hu_allocator_t *alloc = hu_system_allocator();
-    hu_ml_config_t cfg = hu_ml_default_config();
-    cfg.training.max_steps = 32;
-    cfg.training.device_batch_size = 4;
-    cfg.model.vocab_size = 128;
+    hu_allocator_t alloc = hu_system_allocator();
+    pipeline_t p;
+    build_pipeline(&alloc, "test_ml_cli_real_vocab", &p);
 
-    hu_model_t model = {0};
-    hu_ml_optimizer_t optimizer = {0};
-    HU_ASSERT_EQ(hu_gpt_create(alloc, &cfg.model, &model), HU_OK);
-    HU_ASSERT_EQ(hu_muon_adamw_create(alloc, &cfg.optimizer, &model, &optimizer), HU_OK);
+    hu_training_config_t train_cfg = {0};
+    train_cfg.device_batch_size = 2;
+    train_cfg.time_budget_secs = 1;
+    train_cfg.eval_tokens = 32;
 
-    int32_t toks[256];
-    for (int i = 0; i < 256; i++) toks[i] = i & 127;
-
-    /* Token-bytes lookup: identity for vocab 128 */
-    uint8_t token_bytes[128];
-    for (int i = 0; i < 128; i++) token_bytes[i] = 1; /* 1 byte per token */
-
-    hu_ml_dataloader_t *loader = NULL;
-    HU_ASSERT_EQ(hu_ml_dataloader_create_from_buffer(alloc, toks, 256, &cfg.training, &loader),
-                 HU_OK);
+    /* int32_t per spec — token_bytes[t] = #bytes that token t encodes.
+     * For a synthetic byte-vocab of 128, every token is 1 byte. */
+    int32_t token_bytes[128];
+    for (int i = 0; i < 128; i++)
+        token_bytes[i] = 1;
 
     hu_ml_train_result_t result = {0};
-    hu_error_t err = hu_ml_train(alloc, &model, &optimizer, loader, NULL,
-                                 &cfg.training, token_bytes, 128, &result);
-    HU_ASSERT_EQ(err, HU_OK);
-    /* With real vocab + token_bytes, val_bpb should be a finite positive
-     * number and num_steps should equal max_steps. */
-    HU_ASSERT_TRUE(result.val_bpb > 0.0);
-    HU_ASSERT_EQ(result.num_steps, (size_t)cfg.training.max_steps);
+    hu_error_t err = hu_ml_train(&alloc, &p.model, &p.opt, p.train_dl, p.val_dl, &train_cfg,
+                                 token_bytes, 128, &result);
 
-    hu_ml_dataloader_deinit(loader);
-    optimizer.vtable->deinit(optimizer.ctx, alloc);
-    model.vtable->deinit(model.ctx, alloc);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_GT(result.num_steps, 0);
+    HU_ASSERT_GT(result.total_tokens, 0);
+    /* BPB is in bits-per-byte, finite and strictly positive when CE actually
+     * ran. This is the assertion the bug shape cannot satisfy. */
+    HU_ASSERT_GT(result.val_bpb, 0.0);
+
+    cleanup_pipeline(&alloc, &p);
 }
 
 #endif /* HU_ENABLE_ML */
@@ -307,7 +384,7 @@ Find line ~2653 (`tests/test_ml.c` entry in the test sources block) and add:
     tests/test_ml_cli_actually_trains.c
 ```
 
-- [ ] **Step 4: Build and run — confirm it FAILS as expected on the bug**
+- [ ] **Step 4: Build and run — confirm the test characterizes both shapes**
 
 ```bash
 cmake --preset dev
@@ -315,19 +392,41 @@ cmake --build --preset dev -j
 ./build/human_tests --suite=ml-cli-actually-trains
 ```
 
-Expected: `test_ml_cli_train_with_real_vocab_actually_trains` FAILS because the bug case in `hu_ml_train` may currently skip training entirely. (The first test, `_zero_vocab_does_nothing`, will pass — it documents the broken state.) If both pass, re-read the assertions; one MUST fail before Phase 0 fix.
+**Expected (May 11 2026 verified):** Both tests pass. This is intentional and reflects what was observed when the test was first run:
 
-- [ ] **Step 5: Commit (failing test for documentation)**
+- The bug shape (`vocab_size=0, token_bytes=NULL`) does NOT return `HU_OK` and silently no-op as the audit baseline initially claimed. Instead, `hu_ml_train` propagates the zero-shape grad tensor down to `gpt_backward` (`src/ml/gpt.c:567`), which returns `HU_ERR_INVALID_ARGUMENT` on the very first batch. The CLI then prints `"Training failed: 0 steps, 0.00 bpb"` with no useful diagnostic. Either failure mode (silent no-op OR hard fail with no diagnostic) is a bug; the test asserts the OR of both.
+- The fix shape (`vocab_size=128`, real `token_bytes`) returns `HU_OK` with `val_bpb > 0`.
+
+The test pins the behavioral contract that Task 4's `hu_ml_cli_train` and Task 5's `experiment.c` patches must satisfy — they MUST pass the fix shape, not the bug shape. End-to-end verification that the CLI itself (`hu_ml_cli_train`) reaches the fix shape is covered by the smoke test in Task 4 Step 3.
+
+- [ ] **Step 5: Commit (test pins the behavioral contract)**
 
 ```bash
-git add tests/test_ml_cli_actually_trains.c tests/test_main.c CMakeLists.txt
-git commit -m "test(ml): add failing test pinning vocab_size=0 silent-no-op bug
+git add tests/test_ml_cli_actually_trains.c tests/test_main.c CMakeLists.txt \
+        docs/plans/2026-05-11-rl-loop-phase-0-honesty.md
+git commit -m "test(ml): pin hu_ml_train behavior for cli vocab_size=0 bug
 
-Pins the bug at hu_ml_cli_train (cli.c:190) and hu_ml_cli_train_feed_predictor
-(cli.c:2016) — both pass NULL token_bytes + 0 vocab_size to hu_ml_train,
-defeating the CE objective. The fix lands in the next commit.
+Adds tests/test_ml_cli_actually_trains.c which characterizes both call
+shapes for hu_ml_train:
 
-Refs spec §1.5.2 issue #1, #2."
+- Bug shape (token_bytes=NULL, vocab_size=0, the call shape used today
+  by hu_ml_cli_train at src/ml/cli.c:190 and hu_ml_cli_train_feed_predictor
+  at src/ml/cli.c:2016): observed to hard-fail with HU_ERR_INVALID_ARGUMENT
+  because gpt_backward (src/ml/gpt.c:567) rejects the zero-shape grad
+  tensor on the first batch. The CLI then prints \"Training failed: 0 steps,
+  0.00 bpb\" with no useful diagnostic. Audit baseline initially called this
+  a \"silent no-op\" — actually a hard fail with uninformative reporting.
+
+- Fix shape (token_bytes=identity, vocab_size=128): returns HU_OK with
+  positive val_bpb, num_steps>0, total_tokens>0.
+
+The test passes from the start because it tests hu_ml_train directly with
+both shapes. It pins the behavioral contract that Task 4's cli.c patches
+must satisfy: pass the fix shape, not the bug shape. End-to-end
+verification of the CLI itself lands in Task 4's smoke test.
+
+Refs spec §1.5.2 issues #1, #2; audit baseline
+docs/audits/2026-05-11-rl-loop-baseline-audit.md."
 ```
 
 ---
