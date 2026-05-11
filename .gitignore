@@ -134,3 +134,10 @@ src/data/data_eval_results_json.c
 debug
 convo-training/
 lora-persona-seth.bin
+
+# Private corpus + derivatives (per RL-loop spec §13)
+# Note: git treats `~` as a literal char, not home-dir expansion.
+# `**/.human/private/` matches the per-user corpus wherever it appears
+# inside the working tree.
+.human/private/
+**/.human/private/
