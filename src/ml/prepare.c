@@ -149,6 +149,57 @@ hu_error_t hu_ml_prepare_token_bytes(hu_allocator_t *alloc, hu_bpe_tokenizer_t *
     return HU_OK;
 }
 
+/* ─── hu_ml_prepare_load_default_tokenizer ────────────────────────────────── */
+
+hu_error_t hu_ml_prepare_load_default_tokenizer(hu_allocator_t *alloc, const char *data_dir,
+                                                hu_bpe_tokenizer_t **out_tok,
+                                                int32_t **out_token_bytes, size_t *out_count) {
+    if (!alloc || !out_tok || !out_token_bytes || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_tok = NULL;
+    *out_token_bytes = NULL;
+    *out_count = 0;
+
+    hu_bpe_tokenizer_t *tok = NULL;
+    hu_error_t err = hu_bpe_tokenizer_create(alloc, &tok);
+    if (err != HU_OK)
+        return err;
+
+    /* Try data_dir first so per-experiment vocab can shadow the global one. */
+    char path[1024];
+    int loaded = 0;
+    if (data_dir && data_dir[0]) {
+        int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
+        if (n > 0 && (size_t)n < sizeof(path) &&
+            hu_bpe_tokenizer_load(tok, path) == HU_OK) {
+            loaded = 1;
+        }
+    }
+    if (!loaded) {
+        const char *home = getenv("HOME");
+        if (home && home[0]) {
+            int n = snprintf(path, sizeof(path), "%s/.human/models/tokenizer.vocab", home);
+            if (n > 0 && (size_t)n < sizeof(path))
+                (void)hu_bpe_tokenizer_load(tok, path);
+        }
+        /* On both failures, tok keeps its default 256-byte byte-level vocab —
+         * every token is one byte, BPB is well-defined. */
+    }
+
+    int32_t *bytes = NULL;
+    size_t n = 0;
+    err = hu_ml_prepare_token_bytes(alloc, tok, &bytes, &n);
+    if (err != HU_OK) {
+        hu_bpe_tokenizer_deinit(tok);
+        return err;
+    }
+
+    *out_tok = tok;
+    *out_token_bytes = bytes;
+    *out_count = n;
+    return HU_OK;
+}
+
 /* ─── hu_ml_prepare_conversations ─────────────────────────────────────────── */
 
 #ifdef HU_ENABLE_SQLITE

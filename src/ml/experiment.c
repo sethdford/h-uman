@@ -297,9 +297,48 @@ static hu_error_t run_single_experiment(hu_allocator_t *alloc, const hu_experime
                         cfg->training.checkpoint_path);
     }
 
+    /* Phase 0 fix — derive a real token_bytes table so hu_ml_train's CE
+     * objective actually runs and val_bpb is meaningful. Without this the
+     * autonomous keep/discard decision compares zero against zero across
+     * iterations and is effectively random. We try to load a real tokenizer
+     * from data_dir → ~/.human/models → default byte-level. If its vocab
+     * mismatches the model's vocab (which the loop shouldn't mutate but
+     * could), fall back to a 1-byte-per-token table sized to the model so
+     * hu_ml_train's bounds checks never trip and BPB stays well-defined.
+     * See spec §1.5.2 issue #3. */
+    hu_bpe_tokenizer_t *tok = NULL;
+    int32_t *token_bytes = NULL;
+    size_t token_bytes_count = 0;
+    {
+        int32_t *derived = NULL;
+        size_t derived_count = 0;
+        hu_error_t terr =
+            hu_ml_prepare_load_default_tokenizer(alloc, data_dir, &tok, &derived, &derived_count);
+        if (terr == HU_OK && derived_count == cfg->gpt.vocab_size) {
+            token_bytes = derived;
+            token_bytes_count = derived_count;
+        } else {
+            if (derived)
+                alloc->free(alloc->ctx, derived, derived_count * sizeof(int32_t));
+            if (tok) {
+                hu_bpe_tokenizer_deinit(tok);
+                tok = NULL;
+            }
+            if (cfg->gpt.vocab_size > 0) {
+                token_bytes = (int32_t *)alloc->alloc(
+                    alloc->ctx, cfg->gpt.vocab_size * sizeof(int32_t));
+                if (token_bytes) {
+                    for (size_t i = 0; i < cfg->gpt.vocab_size; i++)
+                        token_bytes[i] = 1;
+                    token_bytes_count = cfg->gpt.vocab_size;
+                }
+            }
+        }
+    }
+
     hu_ml_train_result_t train_result = {0};
-    err = hu_ml_train(alloc, &model, &optimizer, train_dl, val_dl, &cfg->training, NULL,
-                      cfg->gpt.vocab_size, &train_result);
+    err = hu_ml_train(alloc, &model, &optimizer, train_dl, val_dl, &cfg->training, token_bytes,
+                      token_bytes_count, &train_result);
 
     result->val_bpb = train_result.val_bpb;
     result->peak_memory_mb = train_result.peak_memory_mb;
@@ -310,6 +349,10 @@ static hu_error_t run_single_experiment(hu_allocator_t *alloc, const hu_experime
                  "training failed: %d (params=%zuM)", (int)err, num_params / 1000000);
     }
 
+    if (token_bytes)
+        alloc->free(alloc->ctx, token_bytes, token_bytes_count * sizeof(int32_t));
+    if (tok)
+        hu_bpe_tokenizer_deinit(tok);
     hu_ml_dataloader_deinit(val_dl);
     hu_ml_dataloader_deinit(train_dl);
     optimizer.vtable->deinit(optimizer.ctx, alloc);

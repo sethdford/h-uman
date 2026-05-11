@@ -10,6 +10,7 @@
 #include "test_framework.h"
 #include "human/core/allocator.h"
 #include "human/ml/dataloader.h"
+#include "human/ml/experiment.h"
 #include "human/ml/ml.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
@@ -163,6 +164,68 @@ static void test_ml_cli_train_with_real_vocab_actually_trains(void) {
     cleanup_pipeline(&alloc, &p);
 }
 
+/* ── Phase 0 Task 5 — experiment loop must pass real token_bytes too ────── */
+
+/* run_single_experiment in src/ml/experiment.c (called from
+ * hu_experiment_loop) was passing NULL token_bytes to hu_ml_train, mirroring
+ * the cli.c bug fixed in Task 4. The keep/discard logic that compares
+ * val_bpb across iterations was therefore comparing zero against zero, and
+ * the autonomous experiment loop was effectively random. This test pins the
+ * fix shape: with a real data dir, max_iterations=1 must produce a finite,
+ * strictly-positive val_bpb. See spec §1.5.2 issue #3. */
+static double g_experiment_callback_bpb = -1.0;
+static hu_experiment_status_t g_experiment_callback_status = HU_EXPERIMENT_CRASH;
+
+static void capture_experiment_result(const hu_experiment_result_t *r, void *user_data) {
+    (void)user_data;
+    g_experiment_callback_bpb = r->val_bpb;
+    g_experiment_callback_status = r->status;
+}
+
+static void test_experiment_loop_passes_token_bytes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    /* Reuse build_pipeline's data layout to get train+val shards on disk. */
+    pipeline_t p;
+    build_pipeline(&alloc, "test_experiment_token_bytes", &p);
+
+    hu_experiment_loop_config_t loop_cfg = {0};
+    loop_cfg.max_iterations = 1;
+    loop_cfg.data_dir = p.dir;
+    loop_cfg.convergence_threshold = 0.0;
+
+    /* Tiny CPU-friendly model that matches the byte-level vocab the dataloader
+     * shards above use. Default config produces an 8-layer 512-embd model
+     * which would time out on CI. */
+    loop_cfg.base_config = hu_experiment_config_default();
+    loop_cfg.base_config.gpt.sequence_len = 16;
+    loop_cfg.base_config.gpt.vocab_size = 256; /* default byte-level BPE */
+    loop_cfg.base_config.gpt.n_layer = 1;
+    loop_cfg.base_config.gpt.n_head = 2;
+    loop_cfg.base_config.gpt.n_kv_head = 2;
+    loop_cfg.base_config.gpt.n_embd = 64;
+    loop_cfg.base_config.gpt.head_dim = 32;
+    loop_cfg.base_config.training.device_batch_size = 2;
+    loop_cfg.base_config.training.max_steps = 8;
+    loop_cfg.base_config.training.time_budget_secs = 10;
+    loop_cfg.base_config.training.eval_tokens = 32;
+
+    g_experiment_callback_bpb = -1.0;
+    g_experiment_callback_status = HU_EXPERIMENT_CRASH;
+
+    hu_error_t err = hu_experiment_loop(&alloc, &loop_cfg, capture_experiment_result, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* The fix shape: callback fired with a real, finite, positive BPB.
+     * Pre-fix: val_bpb stays 0.0 because hu_ml_train hard-fails on the
+     * zero-shape grad tensor in gpt_backward (token_bytes=NULL).
+     * We assert on the bug shape we want to *eliminate*. */
+    HU_ASSERT(g_experiment_callback_bpb > 0.0);
+    HU_ASSERT(g_experiment_callback_status != HU_EXPERIMENT_CRASH);
+
+    cleanup_pipeline(&alloc, &p);
+}
+
 #endif /* HU_ENABLE_ML */
 
 void run_ml_cli_actually_trains_tests(void) {
@@ -170,5 +233,6 @@ void run_ml_cli_actually_trains_tests(void) {
 #ifdef HU_ENABLE_ML
     HU_RUN_TEST(test_ml_cli_train_with_zero_vocab_does_nothing);
     HU_RUN_TEST(test_ml_cli_train_with_real_vocab_actually_trains);
+    HU_RUN_TEST(test_experiment_loop_passes_token_bytes);
 #endif
 }

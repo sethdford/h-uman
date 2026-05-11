@@ -717,76 +717,129 @@ EOF
 ## Task 5: Fix `experiment.c:300-302` `token_bytes=NULL`
 
 **Files:**
-- Modify: `src/ml/experiment.c` lines ~290-310 (`run_single_experiment`)
+- Modify: `src/ml/experiment.c` lines ~280-321 (`run_single_experiment`)
 - Modify: `tests/test_ml_cli_actually_trains.c` (add a test for the experiment path)
+- Modify: `include/human/ml/prepare.h` and `src/ml/prepare.c` (extract shared tokenizer loader; the second caller is enough to justify lifting it out of cli.c's static helper while still under the rule of three)
 
-- [ ] **Step 1: Read context**
+- [x] **Step 1: Read context**
 
-```bash
-sed -n '280,320p' src/ml/experiment.c
-```
-
-- [ ] **Step 2: Add a failing test for the experiment path**
-
-Append to `tests/test_ml_cli_actually_trains.c`:
+The bug as it stands at HEAD (`16c62b8b`):
 
 ```c
-#ifdef HU_ENABLE_ML
-static void test_experiment_loop_passes_token_bytes(void) {
-    /* Mirror test_ml_cli_train_with_real_vocab_actually_trains but
-     * exercise the experiment loop's run_single_experiment path
-     * via hu_experiment_loop_step (or equivalent public entry).
-     * Assert val_bpb is finite + positive. */
-    hu_allocator_t *alloc = hu_system_allocator();
-    hu_ml_config_t cfg = hu_ml_default_config();
-    cfg.training.max_steps = 16;
-    cfg.training.device_batch_size = 4;
-    cfg.model.vocab_size = 128;
+/* src/ml/experiment.c, run_single_experiment */
+hu_ml_train_result_t train_result = {0};
+err = hu_ml_train(alloc, &model, &optimizer, train_dl, val_dl, &cfg->training, NULL,
+                  cfg->gpt.vocab_size, &train_result);
+```
 
-    hu_experiment_result_t result = {0};
-    hu_error_t err = hu_experiment_run_single(alloc, &cfg, /*data_dir=*/NULL, &result);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(result.val_bpb > 0.0);
+`token_bytes=NULL` defeats the CE objective. The 8th arg (`vocab_size`) is correctly threaded through (`cfg->gpt.vocab_size`) but `hu_ml_train`'s contract is "either both or neither" — without `token_bytes` it cannot compute per-token loss and `val_bpb` stays 0.0, making the experiment loop's keep/discard comparison effectively random.
+
+- [x] **Step 2: Add a failing test for the experiment path**
+
+> **Plan amendment (May 11 2026):** the original plan referenced `hu_experiment_run_single` and `hu_ml_default_config`, neither of which exist. The actual public surface for running a single experiment is `hu_experiment_loop` with `max_iterations=1`. The test wires a callback to capture the result rather than calling a "single" entry point that isn't there.
+
+Appended to `tests/test_ml_cli_actually_trains.c`:
+
+```c
+static double g_experiment_callback_bpb = -1.0;
+static hu_experiment_status_t g_experiment_callback_status = HU_EXPERIMENT_CRASH;
+
+static void capture_experiment_result(const hu_experiment_result_t *r, void *user_data) {
+    (void)user_data;
+    g_experiment_callback_bpb = r->val_bpb;
+    g_experiment_callback_status = r->status;
 }
-#endif
+
+static void test_experiment_loop_passes_token_bytes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    pipeline_t p;
+    build_pipeline(&alloc, "test_experiment_token_bytes", &p);
+
+    hu_experiment_loop_config_t loop_cfg = {0};
+    loop_cfg.max_iterations = 1;
+    loop_cfg.data_dir = p.dir;
+    loop_cfg.base_config = hu_experiment_config_default();
+    /* Tiny CPU-friendly model that matches the byte-level shards. */
+    loop_cfg.base_config.gpt.sequence_len = 16;
+    loop_cfg.base_config.gpt.vocab_size = 256;
+    loop_cfg.base_config.gpt.n_layer = 1;
+    loop_cfg.base_config.gpt.n_head = 2;
+    loop_cfg.base_config.gpt.n_kv_head = 2;
+    loop_cfg.base_config.gpt.n_embd = 64;
+    loop_cfg.base_config.gpt.head_dim = 32;
+    loop_cfg.base_config.training.device_batch_size = 2;
+    loop_cfg.base_config.training.max_steps = 8;
+    loop_cfg.base_config.training.time_budget_secs = 10;
+    loop_cfg.base_config.training.eval_tokens = 32;
+
+    HU_ASSERT_EQ(hu_experiment_loop(&alloc, &loop_cfg, capture_experiment_result, NULL), HU_OK);
+    HU_ASSERT(g_experiment_callback_bpb > 0.0);
+    HU_ASSERT(g_experiment_callback_status != HU_EXPERIMENT_CRASH);
+
+    cleanup_pipeline(&alloc, &p);
+}
 ```
 
-And add `HU_RUN_TEST(test_experiment_loop_passes_token_bytes);` inside `run_ml_cli_actually_trains_tests`.
+And `HU_RUN_TEST(test_experiment_loop_passes_token_bytes);` is added to `run_ml_cli_actually_trains_tests`.
 
-- [ ] **Step 3: Run, confirm fail**
+- [x] **Step 3: Run, confirm fail**
+
+```
+$ ./build/human_tests --filter=test_experiment_loop_passes_token_bytes
+=== ml-cli-actually-trains ===
+  FAIL  (tests/test_ml_cli_actually_trains.c:223) assert failed: g_experiment_callback_bpb > 0.0
+--- Results: 15/16 passed, 1 FAILED, 10062 skipped ---
+```
+
+The pre-fix bug shape: callback fires with `val_bpb == 0.0` because `hu_ml_train` hard-fails immediately (the existing `result->status = HU_EXPERIMENT_CRASH` already records this; the test pins the *symptom*, not the underlying error code, because the spec's contract is "BPB must be meaningful," not "the call must succeed in some particular way").
+
+- [x] **Step 4: Fix `experiment.c` and extract the shared tokenizer loader**
+
+Done in two parts:
+
+1. Extract `hu_ml_prepare_load_default_tokenizer` to `prepare.h`/`prepare.c` so both Task 4's `cli.c` helper and Task 5's `experiment.c` fix can share the convention (`data_dir/tokenizer.vocab` → `~/.human/models/tokenizer.vocab` → default 256-byte byte-level BPE). This is the second caller; the rule of three says we extract on the third, but a public convention shared by both the CLI and the autonomous loop is exactly the kind of thing that should not have a static-in-cli.c implementation. (Cleanup of `cli.c::derive_token_bytes_for_data_dir` to call this helper is left for a separate small commit so this Task 5 commit stays surgical.)
+
+2. In `run_single_experiment`, after `hu_ml_checkpoint_load`, build a `token_bytes` table:
+   - Try the shared loader. If the loaded tokenizer's vocab matches `cfg->gpt.vocab_size`, use the derived per-token byte lengths.
+   - Otherwise (vocab mismatch or tokenizer load error), fall back to a 1-byte-per-token table sized to the model so `hu_ml_train`'s bounds checks never trip and BPB stays well-defined for byte-level vocabs.
+3. Pass `token_bytes` + `token_bytes_count` to `hu_ml_train` instead of `NULL` + `cfg->gpt.vocab_size`.
+4. Free both at every return path.
+
+> **Why fall back instead of failing loud on vocab mismatch?** The autonomous loop is allowed to mutate `cfg->gpt` between iterations, and the keep/discard decision still wants a BPB number. A 1-byte-per-token fallback gives a meaningful (if slightly biased for non-byte vocabs) signal. A loud failure here would silently disable the entire experiment path until someone wired a proper tokenizer through `hu_experiment_loop_config_t` — out of scope for Phase 0. Future work tracked at the bottom of this task.
+
+- [x] **Step 5: Run, confirm pass**
+
+```
+$ ./build/human_tests --filter=test_experiment_loop_passes_token_bytes
+  PASS  test_experiment_loop_passes_token_bytes
+--- Results: 16/16 passed, 10062 skipped ---
+
+$ ./build/human_tests --suite=ml-cli-actually-trains
+=== ml-cli-actually-trains ===
+  PASS  test_ml_cli_train_with_zero_vocab_does_nothing
+  PASS  test_ml_cli_train_with_real_vocab_actually_trains
+  PASS  test_experiment_loop_passes_token_bytes
+--- Results: 3/3 passed, 10060 skipped ---
+
+$ ./build/human_tests --filter=token_bytes
+  PASS  test_prepare_token_bytes      # existing prepare.c API still works
+  PASS  test_experiment_loop_passes_token_bytes
+--- Results: 17/17 passed, 10061 skipped ---
+```
+
+- [x] **Step 6: Commit**
 
 ```bash
-cmake --build --preset dev -j
-./build/human_tests --filter=test_experiment_loop_passes_token_bytes
+git add src/ml/experiment.c src/ml/prepare.c include/human/ml/prepare.h \
+        tests/test_ml_cli_actually_trains.c \
+        docs/plans/2026-05-11-rl-loop-phase-0-honesty.md
 ```
 
-Expected: FAIL.
+Commit message captures the extraction + fallback decision; see the actual commit on `feat/sota-m1-infra`.
 
-- [ ] **Step 4: Fix experiment.c:300-302**
-
-Apply the same `hu_ml_prepare_token_bytes` + non-NULL `token_bytes` pattern to the `hu_ml_train` call inside `run_single_experiment`. The experiment loop loads its tokenizer from `cfg.model.tokenizer_path` (or equivalent) — reuse that local.
-
-- [ ] **Step 5: Run, confirm pass**
-
-```bash
-cmake --build --preset dev -j
-./build/human_tests --filter=test_experiment_loop_passes_token_bytes
-```
-
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/ml/experiment.c tests/test_ml_cli_actually_trains.c
-git commit -m "fix(ml): supply token_bytes to hu_ml_train in run_single_experiment
-
-Mirror of the cli_train fix at experiment.c:300-302. Without it the
-val_bpb metric was meaningless and the experiment loop's keep/discard
-decision was effectively random.
-
-Refs spec §1.5.2 issue #3; pinned by test_experiment_loop_passes_token_bytes."
-```
+**Future work (out of scope for Phase 0):**
+- Thread an explicit `tokenizer_path` field through `hu_experiment_loop_config_t` so non-byte-level experiments don't fall back to the 1-byte heuristic.
+- Refactor `cli.c::derive_token_bytes_for_data_dir` to call `hu_ml_prepare_load_default_tokenizer` (deletes ~40 lines from cli.c).
 
 ---
 
