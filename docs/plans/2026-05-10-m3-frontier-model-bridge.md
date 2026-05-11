@@ -57,6 +57,56 @@ when the artifact we're learning into is not the artifact serving responses.
 
 # Three concrete bridges, in order of pragmatism
 
+## Bridge A.0 — Alpaca JSONL exporter (DONE 2026-05-11)
+
+The on-ramp that closes the loop end-to-end **today**, without vendoring
+llama.cpp in-tree. Users run:
+
+```bash
+human ml lora-persona --persona seth --export-jsonl seth.jsonl
+```
+
+and the persona's example banks are written to `seth.jsonl` in the
+de-facto-standard Alpaca shape:
+
+```json
+{"instruction":"On telegram: casual catch-up","input":"hey how was your day","output":"long. need a walk."}
+{"instruction":"On email: work","input":"can you review the doc?","output":"Sure -- by EOD."}
+```
+
+This is the format `llama.cpp/finetune`, `axolotl`, `unsloth`, and
+`mlx-lm.lora` all consume directly. The user then runs their preferred
+fine-tune toolchain externally and configures the resulting GGUF LoRA
+back into the daemon via `personalization.lora_adapter_path` — which
+already loads cleanly through the `llamacpp` provider (see Phase 4.1
+above).
+
+What this unlocks today:
+- **No new third-party dependency in-tree.** llama.cpp can stay
+  optional (`HU_ENABLE_LLAMACPP=OFF` default).
+- **Real personalization for users who care.** A user with the toolchain
+  installed can produce a real GGUF LoRA from their persona bank and
+  serve it locally through llama.cpp.
+- **Honest narrative.** "Train your own LoRA from your persona bank" is
+  now a true statement of the runtime, not just a roadmap item.
+
+What it doesn't unlock:
+- **One-command train.** Users still run the finetune toolchain
+  themselves; the daemon does not orchestrate llama.cpp/finetune.
+  Bridge A (Phase 1 → 2 below) is the slice that closes that gap.
+- **Cloud providers.** Adapters only apply to local inference. Cloud
+  providers (Anthropic, Gemini, OpenAI) silently skip
+  `personalization.lora_adapter_path` with NOT_SUPPORTED, as designed.
+
+Coverage:
+- `hu_persona_bank_export_jsonl` in `src/persona/examples.c` (declared
+  in `include/human/persona.h`).
+- `--export-jsonl <path>` flag in `human ml lora-persona`, short-circuits
+  before any training-loop setup. No HUML checkpoint required.
+- Tests: `test_persona_bank_export_jsonl_writes_alpaca_shape`,
+  `test_persona_bank_export_jsonl_null_args_rejected`,
+  `test_persona_bank_export_jsonl_escapes_special_chars`.
+
 ## Bridge A — llama.cpp / GGUF inference + LoRA loader (target: 4-6 weeks)
 
 The smallest honest step. Pull `llama.cpp` as a **conditionally-compiled**

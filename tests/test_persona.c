@@ -4223,10 +4223,149 @@ static void test_persona_chronotype_and_pragmatics_overlay_prompt(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+/* M3 Bridge A.0 — hu_persona_bank_export_jsonl writes the persona's
+ * example banks to disk in Alpaca JSONL. We synthesise a persona with
+ * two banks (one with context, one without), one example missing a
+ * response (must be skipped), and assert the file matches the expected
+ * shape exactly. The format is the contract — downstream tooling
+ * (llama.cpp/finetune, axolotl, unsloth, mlx-lm.lora) parses it. */
+static void test_persona_bank_export_jsonl_writes_alpaca_shape(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    (void)alloc;
+
+    hu_persona_t p = {0};
+    /* Bank 1: telegram, two examples, one with context one without. */
+    hu_persona_example_bank_t banks[2];
+    memset(banks, 0, sizeof(banks));
+
+    banks[0].channel = (char *)"telegram";
+    hu_persona_example_t tg[2];
+    memset(tg, 0, sizeof(tg));
+    tg[0].context = (char *)"casual catch-up";
+    tg[0].incoming = (char *)"hey how was your day";
+    tg[0].response = (char *)"long. need a walk.";
+    tg[1].context = NULL;
+    tg[1].incoming = (char *)"u up?";
+    tg[1].response = (char *)"yeah whats up";
+    banks[0].examples = tg;
+    banks[0].examples_count = 2;
+
+    /* Bank 2: email, one valid + one with empty response (must skip). */
+    banks[1].channel = (char *)"email";
+    hu_persona_example_t em[2];
+    memset(em, 0, sizeof(em));
+    em[0].context = (char *)"work";
+    em[0].incoming = (char *)"can you review the doc?";
+    em[0].response = (char *)"Sure -- by EOD.";
+    em[1].context = (char *)"work";
+    em[1].incoming = (char *)"empty response example";
+    em[1].response = NULL;
+    banks[1].examples = em;
+    banks[1].examples_count = 2;
+
+    p.example_banks = banks;
+    p.example_banks_count = 2;
+
+    char path[64];
+    snprintf(path, sizeof(path), "/tmp/hu_persona_export_%d.jsonl", (int)getpid());
+
+    size_t exported = 0;
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, path, strlen(path), &exported), HU_OK);
+    /* 2 telegram + 1 email valid = 3 rows; the missing-response email is skipped. */
+    HU_ASSERT_EQ(exported, 3u);
+
+    FILE *f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[4096];
+    size_t total = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[total] = '\0';
+    fclose(f);
+
+    /* Three rows, separated by newlines, in the order written. */
+    size_t lines = 0;
+    for (size_t i = 0; i < total; i++) {
+        if (buf[i] == '\n')
+            lines++;
+    }
+    HU_ASSERT_EQ(lines, 3u);
+
+    /* Row 1: telegram with context. */
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"instruction\":\"On telegram: casual catch-up\""));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"input\":\"hey how was your day\""));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"output\":\"long. need a walk.\""));
+    /* Row 2: telegram, no context, instruction ends with bare colon. */
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"instruction\":\"On telegram:\""));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"input\":\"u up?\""));
+    /* Row 3: email. */
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"instruction\":\"On email: work\""));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"output\":\"Sure -- by EOD.\""));
+
+    remove(path);
+}
+
+static void test_persona_bank_export_jsonl_null_args_rejected(void) {
+    hu_persona_t p = {0};
+    size_t exported = 999;
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(NULL, "x", 1, &exported),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, NULL, 0, &exported),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 0, &exported),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 1, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(exported, 999u); /* unchanged on rejection */
+}
+
+static void test_persona_bank_export_jsonl_escapes_special_chars(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    (void)alloc;
+
+    hu_persona_t p = {0};
+    hu_persona_example_bank_t bank = {0};
+    bank.channel = (char *)"cli";
+    hu_persona_example_t ex = {0};
+    /* Newline, tab, backslash, double-quote — every byte the JSON
+     * emitter must escape. If any survives unescaped the JSONL is
+     * unparseable and downstream tools crash on load. */
+    ex.context = (char *)"line1\nline2\t\\\"end";
+    ex.incoming = (char *)"a\"b";
+    ex.response = (char *)"c\\d";
+    bank.examples = &ex;
+    bank.examples_count = 1;
+    p.example_banks = &bank;
+    p.example_banks_count = 1;
+
+    char path[64];
+    snprintf(path, sizeof(path), "/tmp/hu_persona_export_esc_%d.jsonl", (int)getpid());
+    size_t exported = 0;
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, path, strlen(path), &exported), HU_OK);
+    HU_ASSERT_EQ(exported, 1u);
+
+    FILE *f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[1024];
+    size_t total = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[total] = '\0';
+    fclose(f);
+
+    /* The literal characters MUST appear escaped. The pre-escape
+     * substring tells us the emitter saw the bytes correctly. */
+    HU_ASSERT_NOT_NULL(strstr(buf, "\\n"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\\t"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\\\\"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "\\\""));
+
+    remove(path);
+}
+
 void run_persona_tests(void) {
     HU_TEST_SUITE("Persona");
 
     HU_RUN_TEST(test_persona_types_exist);
+    HU_RUN_TEST(test_persona_bank_export_jsonl_writes_alpaca_shape);
+    HU_RUN_TEST(test_persona_bank_export_jsonl_null_args_rejected);
+    HU_RUN_TEST(test_persona_bank_export_jsonl_escapes_special_chars);
     HU_RUN_TEST(test_persona_find_overlay_found);
     HU_RUN_TEST(test_persona_find_overlay_not_found);
     HU_RUN_TEST(test_persona_deinit_null_safe);

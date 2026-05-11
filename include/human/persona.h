@@ -475,6 +475,30 @@ hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *c
                                       const hu_persona_example_t **out, size_t *out_count,
                                       size_t max_examples);
 
+/* M3 Bridge A.0 — export the persona's example banks to JSONL in the
+ * Alpaca shape ({"instruction": ..., "input": ..., "output": ...}).
+ *
+ * Compatible with llama.cpp/finetune, axolotl, unsloth, mlx-lm.lora,
+ * and most open-weight fine-tuning toolchains. The instruction string
+ * carries the channel and optional context: "On <channel>: <context>".
+ * Examples missing either incoming or response are skipped.
+ *
+ * On success, *exported_count is the number of rows actually written.
+ * The file at `path` is truncated and rewritten; the parent directory
+ * must already exist. Returns HU_ERR_IO on file-system failure,
+ * HU_ERR_INVALID_ARGUMENT on NULL inputs.
+ *
+ * This is the "export side" of the frontier-model fine-tune bridge —
+ * users run the exporter, feed the JSONL to their preferred finetune
+ * toolchain, and configure the resulting adapter back into the daemon
+ * via `personalization.lora_adapter_path`. Closes the loop end-to-end
+ * without requiring llama.cpp to be vendored in-tree. See
+ * docs/plans/2026-05-10-m3-frontier-model-bridge.md for the full
+ * Bridge A plan. */
+hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
+                                         const char *path, size_t path_len,
+                                         size_t *exported_count);
+
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
                                                     const char *channel, size_t channel_len);
 

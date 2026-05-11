@@ -521,6 +521,13 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     const char *persona_name = NULL;
     const char *checkpoint_path = NULL;
     const char *output_path = NULL;
+    /* M3 Bridge A.0 — when set, skip training entirely and just export
+     * the persona example bank as Alpaca JSONL. This is the on-ramp
+     * users need to feed the bank into llama.cpp/finetune (or any
+     * compatible toolchain) and produce a real GGUF LoRA adapter the
+     * daemon's personalization block can load. No model is loaded;
+     * the path is the only side effect. */
+    const char *export_jsonl_path = NULL;
     /* P0 #3 — signal-builder wiring. When --from-deltas is set, we
      * read applied persona deltas from a memory DB and treat them as
      * additional training examples. The previously-dead
@@ -573,11 +580,18 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             i++;
             continue;
         }
+        v = get_opt(argv, argc, i, "--export-jsonl");
+        if (v) {
+            export_jsonl_path = v;
+            i++;
+            continue;
+        }
         if (strcmp(argv[i], "--help") == 0) {
             printf("Usage: human ml lora-persona --persona <name> "
                    "[--checkpoint <path>] [--output <path>] "
                    "[--from-deltas <memory.db> --contact <id>] "
-                   "[--rank <N>] [--max-steps <N>] [--help]\n");
+                   "[--rank <N>] [--max-steps <N>] "
+                   "[--export-jsonl <path>] [--help]\n");
             printf("\n  --checkpoint   Optional HUML base GPT checkpoint to warm-start "
                    "before LoRA attaches.\n");
             printf("                 Must match the reference GPT dims (see "
@@ -589,6 +603,13 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             printf("\n  --from-deltas  Augment the persona example bank with applied\n");
             printf("                 persona deltas read from a memory database.\n");
             printf("                 Requires --contact to scope the read.\n");
+            printf("\n  --export-jsonl Skip training entirely; export the persona's\n");
+            printf("                 example banks to <path> as Alpaca JSONL\n");
+            printf("                 ({\"instruction\":..,\"input\":..,\"output\":..}).\n");
+            printf("                 Use this to feed the bank into llama.cpp/finetune,\n");
+            printf("                 axolotl, unsloth, or mlx-lm.lora and produce a\n");
+            printf("                 GGUF LoRA the daemon can load via\n");
+            printf("                 personalization.lora_adapter_path.\n");
             return HU_OK;
         }
     }
@@ -599,6 +620,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     (void)output_path;
     (void)rank;
     (void)max_steps;
+    (void)export_jsonl_path;
     printf("[lora-persona] test mode: skipped\n");
     printf("[lora-persona] honest-gap doc: docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
     return HU_OK;
@@ -613,6 +635,31 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     if (err != HU_OK) {
         fprintf(stderr, "Failed to load persona '%s': %d\n", persona_name, err);
         return err;
+    }
+
+    /* M3 Bridge A.0 — export-only path. No model is loaded, no training
+     * runs; we just write the bank as Alpaca JSONL and exit. This is
+     * deliberately kept upstream of the training-loop setup so users
+     * can pull a JSONL on any machine without a HUML checkpoint or ML
+     * link dependencies surfacing. */
+    if (export_jsonl_path && export_jsonl_path[0]) {
+        size_t exported = 0;
+        hu_error_t exp_err = hu_persona_bank_export_jsonl(&persona, export_jsonl_path,
+                                                           strlen(export_jsonl_path),
+                                                           &exported);
+        if (exp_err != HU_OK) {
+            fprintf(stderr, "[lora-persona] export failed (%d): %s\n", exp_err,
+                    hu_error_string(exp_err));
+            hu_persona_deinit(alloc, &persona);
+            return exp_err;
+        }
+        printf("[lora-persona] exported %zu example(s) to %s (Alpaca JSONL)\n",
+               exported, export_jsonl_path);
+        printf("[lora-persona] feed into llama.cpp/finetune, axolotl, unsloth,\n");
+        printf("               or mlx-lm.lora to produce a GGUF LoRA the daemon\n");
+        printf("               can load via personalization.lora_adapter_path.\n");
+        hu_persona_deinit(alloc, &persona);
+        return HU_OK;
     }
 
     /* P0 #3 — pull applied persona deltas as additional training pairs.

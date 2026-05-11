@@ -1,6 +1,7 @@
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/persona.h"
+#include <stdio.h>
 #include <string.h>
 #include <strings.h>
 
@@ -241,5 +242,102 @@ hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *c
     for (size_t i = 0; i < take; i++)
         out[i] = &bank->examples[scores[i].idx];
     *out_count = take;
+    return HU_OK;
+}
+
+/* M3 Bridge A.0 — persona example bank → Alpaca JSONL exporter.
+ *
+ * Writes one JSON object per line in the de-facto-standard "Alpaca"
+ * shape that llama.cpp/finetune, axolotl, unsloth, mlx-lm.lora, and
+ * most open-weight fine-tuning toolchains consume directly:
+ *
+ *   {"instruction":"<channel + context>","input":"<incoming>",
+ *    "output":"<response>"}
+ *
+ * The instruction string is composed as "On <channel>: <context>" when
+ * a context is present, or just "On <channel>:" otherwise. This carries
+ * the channel-specific frame that the persona example was authored for
+ * (Telegram-casual vs. email-formal vs. CLI-terse, etc.) without
+ * requiring a separate `system` field that not every toolchain accepts.
+ *
+ * Examples missing either `incoming` or `response` are skipped (they
+ * can't form a valid training pair). On success, `*exported_count` is
+ * the number of rows actually written; the file is truncated and the
+ * caller-supplied path's parent must exist (we don't mkdir).
+ *
+ * This function is the "export side" of M3 Bridge A: a user runs
+ *   human ml lora-persona --persona seth --export-jsonl seth.jsonl
+ * to materialise the bank, then feeds seth.jsonl to llama.cpp/finetune
+ * (or any compatible toolchain) to produce a real GGUF LoRA adapter
+ * that the daemon's personalization block can then load via
+ * hu_provider_load_adapter. Closes the loop end-to-end without
+ * requiring llama.cpp to be vendored in-tree. */
+hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
+                                         const char *path, size_t path_len,
+                                         size_t *exported_count) {
+    if (!persona || !path || path_len == 0 || !exported_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *exported_count = 0;
+
+    /* Bound the path on the stack; 1023 chars is well above any
+     * reasonable filesystem limit and saves a heap allocation. */
+    char filepath[1024];
+    size_t flen = path_len < sizeof(filepath) - 1 ? path_len : sizeof(filepath) - 1;
+    memcpy(filepath, path, flen);
+    filepath[flen] = '\0';
+
+    FILE *f = fopen(filepath, "w");
+    if (!f)
+        return HU_ERR_IO;
+
+    /* Inline JSON-string emitter — same escape set as the DPO exporter
+     * (matches RFC 8259 for the characters tooling will actually choke
+     * on). Walks the input byte-by-byte; no allocation. */
+    #define WRITE_JSON_STRING(s) do {                                   \
+        const char *_p = (s) ? (s) : "";                                \
+        for (; *_p; _p++) {                                             \
+            switch (*_p) {                                              \
+            case '"':  fputs("\\\"", f); break;                         \
+            case '\\': fputs("\\\\", f); break;                         \
+            case '\n': fputs("\\n", f);  break;                         \
+            case '\r': fputs("\\r", f);  break;                         \
+            case '\t': fputs("\\t", f);  break;                         \
+            default:   fputc(*_p, f);    break;                         \
+            }                                                           \
+        }                                                               \
+    } while (0)
+
+    size_t total = 0;
+    for (size_t bi = 0; bi < persona->example_banks_count; bi++) {
+        const hu_persona_example_bank_t *bank = &persona->example_banks[bi];
+        const char *channel = bank->channel ? bank->channel : "default";
+        for (size_t ei = 0; ei < bank->examples_count; ei++) {
+            const hu_persona_example_t *ex = &bank->examples[ei];
+            if (!ex->incoming || !ex->incoming[0] || !ex->response || !ex->response[0])
+                continue;
+
+            fputs("{\"instruction\":\"On ", f);
+            WRITE_JSON_STRING(channel);
+            if (ex->context && ex->context[0]) {
+                fputs(": ", f);
+                WRITE_JSON_STRING(ex->context);
+            } else {
+                fputc(':', f);
+            }
+            fputs("\",\"input\":\"", f);
+            WRITE_JSON_STRING(ex->incoming);
+            fputs("\",\"output\":\"", f);
+            WRITE_JSON_STRING(ex->response);
+            fputs("\"}\n", f);
+            total++;
+        }
+    }
+    #undef WRITE_JSON_STRING
+
+    int close_err = fclose(f);
+    if (close_err != 0)
+        return HU_ERR_IO;
+
+    *exported_count = total;
     return HU_OK;
 }
