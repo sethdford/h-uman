@@ -4,6 +4,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include <stddef.h>
+#include <stdint.h>
 
 /*
  * PlugMem-style propositional fact extraction.
@@ -31,7 +32,35 @@ typedef struct hu_heuristic_fact {
     char object[HU_FACT_MAX_FIELD];
     float confidence;                 /* 0.0–1.0 extraction confidence */
     char source_hint[HU_FACT_MAX_FIELD]; /* conversation context hint */
+    /* Unix timestamp (seconds) of the most recent observation that
+     * supports this fact. 0 means the fact has never been refreshed
+     * — typically true at extraction time, set by the personal model
+     * on insert/duplicate-update. Older observations earn less prompt
+     * space via `hu_heuristic_fact_effective_confidence`. */
+    int64_t last_seen_at;
 } hu_heuristic_fact_t;
+
+/* Default exponential half-life for fact-confidence decay. After
+ * 90 days a fact's effective confidence is half of its raw value;
+ * after 180 days it's a quarter; after a year it's ~6%. Tuned for
+ * chat data where facts about the user (job, location, taste) are
+ * relevant for a season but eventually drift. */
+#define HU_FACT_CONFIDENCE_HALF_LIFE_SEC ((int64_t)(90LL * 24 * 60 * 60))
+
+/* Effective confidence at `now` (Unix seconds). Returns
+ * `fact->confidence` unchanged when `last_seen_at` is 0 (no decay
+ * data) or when `now <= last_seen_at`. Otherwise applies exponential
+ * decay with the half-life above. Pure, allocator-free, no math.h
+ * dependency at the call site (pow2 approximation via bit shifts).
+ *
+ * The approximation: effective = confidence * 0.5^(age / half_life).
+ * For age = 0          → 1.00 * confidence
+ * For age = half_life  → 0.50 * confidence
+ * For age = 2x         → 0.25 * confidence
+ * For age = 4x         → 0.0625 * confidence
+ * Beyond ~10 half-lives we floor at 0. */
+float hu_heuristic_fact_effective_confidence(const hu_heuristic_fact_t *fact,
+                                             int64_t now);
 
 typedef struct hu_fact_extract_result {
     hu_heuristic_fact_t facts[HU_FACT_EXTRACT_MAX];

@@ -954,6 +954,168 @@ static void personal_model_infer_chronotype_does_not_overcommit_on_thin_lead(voi
     HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(&m) == HU_CHRONO_INTERMEDIATE);
 }
 
+/* ── Fact decay + freshness tests ─────────────────────────────────── */
+
+static void fact_effective_confidence_no_decay_when_last_seen_zero(void) {
+    hu_heuristic_fact_t f;
+    memset(&f, 0, sizeof(f));
+    f.confidence = 0.8f;
+    f.last_seen_at = 0;
+    /* now is non-zero, but last_seen_at == 0 means we have no decay
+     * data — return the raw confidence unchanged. */
+    HU_ASSERT_TRUE(hu_heuristic_fact_effective_confidence(&f, 1000000) > 0.79f);
+}
+
+static void fact_effective_confidence_no_decay_when_now_at_or_before_last_seen(void) {
+    hu_heuristic_fact_t f;
+    memset(&f, 0, sizeof(f));
+    f.confidence = 0.8f;
+    f.last_seen_at = 1000;
+    HU_ASSERT_TRUE(hu_heuristic_fact_effective_confidence(&f, 1000) > 0.79f);
+    HU_ASSERT_TRUE(hu_heuristic_fact_effective_confidence(&f, 500) > 0.79f);
+}
+
+static void fact_effective_confidence_halves_at_one_half_life(void) {
+    hu_heuristic_fact_t f;
+    memset(&f, 0, sizeof(f));
+    f.confidence = 0.8f;
+    f.last_seen_at = 1000;
+    int64_t now = f.last_seen_at + HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    float eff = hu_heuristic_fact_effective_confidence(&f, now);
+    /* 0.8 * 0.5 = 0.4. Allow ±0.02 for table interpolation. */
+    HU_ASSERT_TRUE(eff > 0.38f && eff < 0.42f);
+}
+
+static void fact_effective_confidence_quarters_at_two_half_lives(void) {
+    hu_heuristic_fact_t f;
+    memset(&f, 0, sizeof(f));
+    f.confidence = 0.8f;
+    f.last_seen_at = 1000;
+    int64_t now = f.last_seen_at + 2 * HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    float eff = hu_heuristic_fact_effective_confidence(&f, now);
+    HU_ASSERT_TRUE(eff > 0.18f && eff < 0.22f); /* 0.2 ± 0.02 */
+}
+
+static void fact_effective_confidence_floors_to_zero_far_future(void) {
+    hu_heuristic_fact_t f;
+    memset(&f, 0, sizeof(f));
+    f.confidence = 0.8f;
+    f.last_seen_at = 1000;
+    int64_t now = f.last_seen_at + 20 * HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    HU_ASSERT_TRUE(hu_heuristic_fact_effective_confidence(&f, now) < 0.01f);
+}
+
+static void fact_effective_confidence_handles_null(void) {
+    HU_ASSERT_TRUE(hu_heuristic_fact_effective_confidence(NULL, 1000) < 0.01f);
+}
+
+static void fact_extract_zeroes_last_seen_at(void) {
+    /* The extractor sees raw text; it doesn't know wall time, so
+     * `last_seen_at` must always be zero on the way out. */
+    hu_fact_extract_result_t r;
+    memset(&r, 0xff, sizeof(r));
+    HU_ASSERT_EQ(hu_fact_extract("I work at Acme.", 15, &r), HU_OK);
+    HU_ASSERT_TRUE(r.fact_count > 0);
+    for (size_t i = 0; i < r.fact_count; i++)
+        HU_ASSERT_EQ((long long)r.facts[i].last_seen_at, 0LL);
+}
+
+static void personal_model_merge_facts_stamps_last_seen_on_insert(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    m.updated_at = 5000;
+    hu_fact_extract_result_t r;
+    memset(&r, 0, sizeof(r));
+    r.fact_count = 1;
+    r.facts[0].type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(r.facts[0].subject, sizeof(r.facts[0].subject), "user");
+    snprintf(r.facts[0].predicate, sizeof(r.facts[0].predicate), "works at");
+    snprintf(r.facts[0].object, sizeof(r.facts[0].object), "Acme");
+    r.facts[0].confidence = 0.9f;
+    HU_ASSERT_EQ(hu_personal_model_merge_facts(&m, &r), HU_OK);
+    HU_ASSERT_EQ((long)m.fact_count, 1L);
+    HU_ASSERT_EQ((long long)m.facts[0].last_seen_at, 5000LL);
+}
+
+static void personal_model_merge_facts_refreshes_duplicate(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    m.updated_at = 5000;
+    hu_fact_extract_result_t r;
+    memset(&r, 0, sizeof(r));
+    r.fact_count = 1;
+    r.facts[0].type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(r.facts[0].subject, sizeof(r.facts[0].subject), "user");
+    snprintf(r.facts[0].predicate, sizeof(r.facts[0].predicate), "works at");
+    snprintf(r.facts[0].object, sizeof(r.facts[0].object), "Acme");
+    r.facts[0].confidence = 0.9f;
+    HU_ASSERT_EQ(hu_personal_model_merge_facts(&m, &r), HU_OK);
+
+    /* Same fact restated months later — should refresh, not duplicate. */
+    m.updated_at = 5000 + HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    r.facts[0].confidence = 0.95f;
+    HU_ASSERT_EQ(hu_personal_model_merge_facts(&m, &r), HU_OK);
+    HU_ASSERT_EQ((long)m.fact_count, 1L);
+    HU_ASSERT_EQ((long long)m.facts[0].last_seen_at,
+                 (long long)(5000 + HU_FACT_CONFIDENCE_HALF_LIFE_SEC));
+    /* Confidence ticks up via EWMA: 0.9 + 0.1 * (0.95 - 0.9) = 0.905. */
+    HU_ASSERT_TRUE(m.facts[0].confidence > 0.90f && m.facts[0].confidence < 0.92f);
+}
+
+static void personal_model_build_prompt_drops_stale_facts(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    /* Use a real-ish timestamp so 10 half-lives back is still positive. */
+    m.updated_at = (int64_t)(40LL * HU_FACT_CONFIDENCE_HALF_LIFE_SEC);
+
+    /* Fresh fact (now) — should appear. */
+    m.facts[0].type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(m.facts[0].subject, sizeof(m.facts[0].subject), "user");
+    snprintf(m.facts[0].predicate, sizeof(m.facts[0].predicate), "works at");
+    snprintf(m.facts[0].object, sizeof(m.facts[0].object), "Initech");
+    m.facts[0].confidence = 0.9f;
+    m.facts[0].last_seen_at = m.updated_at;
+
+    /* Very stale fact (10 half-lives ago at 0.9 confidence → eff < 0.001) */
+    m.facts[1].type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(m.facts[1].subject, sizeof(m.facts[1].subject), "user");
+    snprintf(m.facts[1].predicate, sizeof(m.facts[1].predicate), "works at");
+    snprintf(m.facts[1].object, sizeof(m.facts[1].object), "Acme");
+    m.facts[1].confidence = 0.9f;
+    m.facts[1].last_seen_at = m.updated_at - 10 * HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+
+    m.fact_count = 2;
+
+    char buf[1024];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "Initech"));
+    HU_ASSERT_NULL(strstr(buf, "Acme"));
+}
+
+static void personal_model_build_prompt_drops_stale_avoid_lines(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    m.updated_at = (int64_t)(40LL * HU_FACT_CONFIDENCE_HALF_LIFE_SEC);
+
+    m.facts[0].type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(m.facts[0].subject, sizeof(m.facts[0].subject), "user");
+    snprintf(m.facts[0].predicate, sizeof(m.facts[0].predicate), "i don't like");
+    snprintf(m.facts[0].object, sizeof(m.facts[0].object), "ancient_topic");
+    m.facts[0].confidence = 0.9f;
+    /* 10 half-lives ago → effectively zero confidence. */
+    m.facts[0].last_seen_at = m.updated_at - 10 * HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    m.fact_count = 1;
+
+    char buf[1024];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    /* No "Avoid:" line should appear because the only negative fact
+     * is too stale to surface. */
+    HU_ASSERT_NULL(strstr(buf, "Avoid:"));
+    HU_ASSERT_NULL(strstr(buf, "ancient_topic"));
+    (void)n;
+}
+
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -1001,6 +1163,17 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_infer_chronotype_classifies_intermediate_when_flat);
     HU_RUN_TEST(personal_model_infer_chronotype_classifies_intermediate_for_middle_dominant);
     HU_RUN_TEST(personal_model_infer_chronotype_does_not_overcommit_on_thin_lead);
+    HU_RUN_TEST(fact_effective_confidence_no_decay_when_last_seen_zero);
+    HU_RUN_TEST(fact_effective_confidence_no_decay_when_now_at_or_before_last_seen);
+    HU_RUN_TEST(fact_effective_confidence_halves_at_one_half_life);
+    HU_RUN_TEST(fact_effective_confidence_quarters_at_two_half_lives);
+    HU_RUN_TEST(fact_effective_confidence_floors_to_zero_far_future);
+    HU_RUN_TEST(fact_effective_confidence_handles_null);
+    HU_RUN_TEST(fact_extract_zeroes_last_seen_at);
+    HU_RUN_TEST(personal_model_merge_facts_stamps_last_seen_on_insert);
+    HU_RUN_TEST(personal_model_merge_facts_refreshes_duplicate);
+    HU_RUN_TEST(personal_model_build_prompt_drops_stale_facts);
+    HU_RUN_TEST(personal_model_build_prompt_drops_stale_avoid_lines);
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(personal_model_survives_real_sigkill);
 #endif

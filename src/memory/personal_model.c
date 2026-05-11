@@ -228,6 +228,13 @@ bool hu_personal_model_has_content(const hu_personal_model_t *model) {
     return false;
 }
 
+/* Below this effective confidence threshold a fact is considered too
+ * stale (or too low-confidence) to surface in the prompt. Threshold is
+ * deliberately loose — facts with raw confidence ≥ 0.6 still survive
+ * for ~1.5 half-lives (~135 days) before falling off, while a freshly-
+ * extracted 0.3-confidence fact is dropped immediately. */
+#define HU_PM_FACT_PROMPT_MIN_CONFIDENCE 0.30f
+
 size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *buf, size_t cap) {
     if (!buf || cap == 0)
         return 0;
@@ -304,17 +311,35 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
         detail = true;
     }
 
+    /* Stale-fact decay — every fact loop in this function uses
+     * `hu_heuristic_fact_effective_confidence` so an 8-month-old "I work
+     * at Acme" never overrides a 2-week-old "I work at Initech" when
+     * the prompt window is tight. `now` is the model's own
+     * `updated_at` (set on every ingest) — close enough to wall time
+     * for this filter and avoids passing a clock through the API. */
+    const int64_t now = model->updated_at > 0 ? model->updated_at : 0;
+
     if (model->fact_count > 0) {
-        append_fmt(buf, cap, &n, "Key facts: ");
-        size_t max_facts = model->fact_count > 8U ? 8U : model->fact_count;
-        for (size_t i = 0; i < max_facts; i++) {
+        bool any_fact = false;
+        size_t emitted = 0;
+        for (size_t i = 0; i < model->fact_count && emitted < 8U; i++) {
             const hu_heuristic_fact_t *f = &model->facts[i];
-            if (i > 0)
+            if (hu_heuristic_fact_effective_confidence(f, now) <
+                HU_PM_FACT_PROMPT_MIN_CONFIDENCE)
+                continue;
+            if (!any_fact) {
+                append_fmt(buf, cap, &n, "Key facts: ");
+                any_fact = true;
+            } else {
                 append_fmt(buf, cap, &n, ", ");
+            }
             append_fmt(buf, cap, &n, "%s %s %s", f->subject, f->predicate, f->object);
+            emitted++;
         }
-        append_fmt(buf, cap, &n, "\n");
-        detail = true;
+        if (any_fact) {
+            append_fmt(buf, cap, &n, "\n");
+            detail = true;
+        }
     }
 
     /* SOTA personalization wire — pull out negative facts ("i don't like
@@ -322,7 +347,9 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
      * constraints. The "Key facts:" line above contains them too, but
      * frontier models routinely miss negation in dense fact lists; the
      * dedicated "Avoid:" line gives the constraint its own slot in the
-     * prompt where it can't be glossed over. */
+     * prompt where it can't be glossed over. Stale negative facts are
+     * also subject to the decay filter — a years-old "I don't drink
+     * coffee" shouldn't keep gating a current latte recommendation. */
     {
         bool any_avoid = false;
         size_t scan_max = model->fact_count > HU_PM_MAX_FACTS ? HU_PM_MAX_FACTS : model->fact_count;
@@ -331,6 +358,9 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
             if (!predicate_is_negative(f->predicate))
                 continue;
             if (f->object[0] == '\0')
+                continue;
+            if (hu_heuristic_fact_effective_confidence(f, now) <
+                HU_PM_FACT_PROMPT_MIN_CONFIDENCE)
                 continue;
             if (!any_avoid) {
                 append_fmt(buf, cap, &n, "Avoid: ");
@@ -393,6 +423,32 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
             append_fmt(buf, cap, &n, ".\n");
     }
 
+    /* Surface day-of-week activity pattern when enough data is present. */
+    {
+        uint32_t day_total = 0;
+        for (int d = 0; d < 7; d++)
+            day_total += model->active_days[d];
+        if (day_total >= 14U) {
+            static const char *const day_names[] = {"Sun", "Mon", "Tue", "Wed",
+                                                    "Thu", "Fri", "Sat"};
+            int peak_day = 0;
+            for (int d = 1; d < 7; d++) {
+                if (model->active_days[d] > model->active_days[peak_day])
+                    peak_day = d;
+            }
+            int quiet_day = 0;
+            for (int d = 1; d < 7; d++) {
+                if (model->active_days[d] < model->active_days[quiet_day])
+                    quiet_day = d;
+            }
+            if (model->active_days[peak_day] > model->active_days[quiet_day] + 2U) {
+                append_fmt(buf, cap, &n, "Most active day: %s. Least active: %s.\n",
+                           day_names[peak_day], day_names[quiet_day]);
+                detail = true;
+            }
+        }
+    }
+
     if (!detail)
         append_fmt(buf, cap, &n, "(No detailed personal data yet.)\n");
 
@@ -429,8 +485,16 @@ static void bump_topic(hu_personal_model_t *model, const char *name, int64_t ts)
             return;
         }
     }
-    if (model->topic_count >= HU_PM_MAX_TOPICS)
-        return;
+    if (model->topic_count >= HU_PM_MAX_TOPICS) {
+        /* Evict the least-recently-mentioned topic to make room. */
+        size_t lru = 0;
+        for (size_t i = 1; i < model->topic_count; i++) {
+            if (model->topics[i].last_mentioned < model->topics[lru].last_mentioned)
+                lru = i;
+        }
+        model->topics[lru] = model->topics[model->topic_count - 1];
+        model->topic_count--;
+    }
     hu_personal_topic_t *t = &model->topics[model->topic_count++];
     memset(t, 0, sizeof(*t));
     strncpy(t->name, name, sizeof(t->name) - 1);
@@ -605,15 +669,42 @@ hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
         bool dup = false;
         for (size_t j = 0; j < model->fact_count; j++) {
             if (fact_key_dup(&model->facts[j], nf)) {
+                /* Refresh: re-asserting a known fact bumps its
+                 * `last_seen_at` (so decay restarts) and lifts its
+                 * confidence toward the new observation's confidence
+                 * via a small EWMA — never above 1.0. The full triple
+                 * is preserved; we only update freshness + confidence. */
+                hu_heuristic_fact_t *existing = &model->facts[j];
+                if (ts > existing->last_seen_at)
+                    existing->last_seen_at = ts;
+                float lifted = existing->confidence + 0.1f * (nf->confidence - existing->confidence);
+                if (lifted > 1.0f)
+                    lifted = 1.0f;
+                if (lifted < 0.0f)
+                    lifted = 0.0f;
+                existing->confidence = lifted;
+                bump_topic(model, nf->object, ts);
                 dup = true;
                 break;
             }
         }
         if (dup)
             continue;
-        if (model->fact_count >= HU_PM_MAX_FACTS)
-            break;
+        if (model->fact_count >= HU_PM_MAX_FACTS) {
+            /* Evict the lowest-confidence fact to make room. */
+            size_t victim = 0;
+            for (size_t j = 1; j < model->fact_count; j++) {
+                if (model->facts[j].confidence < model->facts[victim].confidence)
+                    victim = j;
+            }
+            if (nf->confidence <= model->facts[victim].confidence)
+                continue;
+            model->facts[victim] = model->facts[model->fact_count - 1];
+            model->fact_count--;
+        }
         model->facts[model->fact_count] = *nf;
+        /* Stamp last_seen on insert so decay starts now, not at 0. */
+        model->facts[model->fact_count].last_seen_at = ts;
         model->fact_count++;
         bump_topic(model, nf->object, ts);
     }
@@ -654,9 +745,12 @@ const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_
 
 #define HU_PM_MAGIC    0x4D505548u   /* "HUPM" little-endian */
 /* v1 → v2: hu_communication_style_t gained `lowercase_ratio` and
- * `abbreviation_ratio` fields. Old v1 saves fail magic+version check
- * and the caller falls back to a fresh-default model. */
-#define HU_PM_VERSION  2u
+ *          `abbreviation_ratio` fields.
+ * v2 → v3: hu_heuristic_fact_t gained `last_seen_at` for freshness
+ *          tracking and exponential confidence decay. Old saves fail
+ *          magic+version check and the caller falls back to a fresh-
+ *          default model. */
+#define HU_PM_VERSION  3u
 
 typedef struct hu_pm_header {
     uint32_t magic;

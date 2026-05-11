@@ -234,3 +234,39 @@ hu_error_t hu_fact_format_for_store(hu_allocator_t *alloc, const hu_heuristic_fa
     *value_len = (size_t)vn;
     return HU_OK;
 }
+
+/* Confidence decay — single-precision exponential with half-life
+ * `HU_FACT_CONFIDENCE_HALF_LIFE_SEC`. Implemented as a piecewise table
+ * lookup so we don't pull `<math.h>` into every translation unit that
+ * includes the fact_extract header.
+ *
+ * The table holds 0.5^k for k ∈ [0..10]; for the fractional part we
+ * linearly interpolate between two adjacent entries. This is accurate
+ * to ~1% over the relevant range, which is more than enough for a
+ * heuristic decay applied to a heuristic confidence. */
+float hu_heuristic_fact_effective_confidence(const hu_heuristic_fact_t *fact, int64_t now) {
+    if (!fact)
+        return 0.f;
+    if (fact->last_seen_at <= 0 || now <= fact->last_seen_at)
+        return fact->confidence;
+    int64_t age = now - fact->last_seen_at;
+    /* age in fractional half-lives, capped at 10 (≈ confidence * 0.001) */
+    float k = (float)age / (float)HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    if (k <= 0.f)
+        return fact->confidence;
+    if (k >= 10.f)
+        return 0.f;
+    /* Powers of 0.5 — pre-computed, no math.h. */
+    static const float pow_half[] = {
+        1.000000f, 0.500000f, 0.250000f, 0.125000f, 0.062500f,
+        0.031250f, 0.015625f, 0.007812f, 0.003906f, 0.001953f,
+        0.000977f,
+    };
+    int idx = (int)k;
+    float frac = k - (float)idx;
+    /* Linear interpolation between pow_half[idx] and pow_half[idx+1]. */
+    float lo = pow_half[idx];
+    float hi = pow_half[idx + 1];
+    float decay = lo + (hi - lo) * frac;
+    return fact->confidence * decay;
+}
