@@ -1225,6 +1225,25 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 if (cs_err != HU_OK)
                     hu_log_error("agent", NULL, "commitment save failed: %s",
                                  hu_error_string(cs_err));
+                /* Mirror goal-type commitments into the personal model so
+                 * build_prompt can surface "Active goals" in context. */
+                if ((commit_result.commitments[i].type == HU_COMMITMENT_GOAL ||
+                     commit_result.commitments[i].type == HU_COMMITMENT_INTENTION) &&
+                    commit_result.commitments[i].summary &&
+                    commit_result.commitments[i].summary_len > 0 &&
+                    agent->personal_model.goal_count < HU_PM_MAX_GOALS) {
+                    hu_personal_goal_t *g =
+                        &agent->personal_model.goals[agent->personal_model.goal_count];
+                    memset(g, 0, sizeof(*g));
+                    size_t sn = commit_result.commitments[i].summary_len;
+                    if (sn > sizeof(g->description) - 1)
+                        sn = sizeof(g->description) - 1;
+                    memcpy(g->description, commit_result.commitments[i].summary, sn);
+                    g->description[sn] = '\0';
+                    g->active = true;
+                    g->created_at = (int64_t)time(NULL);
+                    agent->personal_model.goal_count++;
+                }
             }
         }
         hu_commitment_detect_result_deinit(&commit_result, agent->alloc);
@@ -1357,6 +1376,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                               cognition_budget.max_memory_entries,
                               cognition_budget.max_memory_chars);
         hu_memory_loader_set_facade(&loader, agent->w7_facade);
+        hu_memory_loader_set_personal_model(&loader, &agent->personal_model);
         hu_error_t load_err = hu_memory_loader_load(
             &loader, msg, msg_len, agent->memory_session_id ? agent->memory_session_id : "",
             agent->memory_session_id ? agent->memory_session_id_len : 0, &memory_ctx,
@@ -3352,7 +3372,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         !presence_ctx && !micro_expr_ctx && !novelty_ctx && !attachment_ctx && !rupture_ctx &&
         !narrative_self_ctx && !creative_voice_ctx && !growth_ctx && !boundary_ctx &&
         !rel_episode_ctx && !trust_ctx && !humor_dir && !syc_friction_ctx && !conv_goals_ctx &&
-        !outcome_ctx && !intelligence_ctx && !acp_context && !plan_ctx && !instruction_ctx) {
+        !outcome_ctx && !intelligence_ctx && !acp_context && !plan_ctx && !instruction_ctx &&
+        !hu_personal_model_has_content(&agent->personal_model) &&
+        !(agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0)) {
         err = hu_prompt_build_with_cache(agent->alloc, agent->cached_static_prompt,
                                          agent->cached_static_prompt_len, memory_ctx,
                                          memory_ctx_len, &system_prompt, &system_prompt_len);

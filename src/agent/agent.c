@@ -446,6 +446,27 @@ hu_error_t hu_agent_from_config(
         }
     }
 
+    /* M2 — hydrate core identity fields from the loaded persona so
+     * build_prompt can emit the name/bio section without separate
+     * population. Only fills empty fields to avoid overwriting any
+     * values that may have been persisted in the binary blob. */
+    if (out->persona && out->persona->name && out->persona->name_len > 0 &&
+        out->personal_model.core.user_name[0] == '\0') {
+        size_t n = out->persona->name_len < sizeof(out->personal_model.core.user_name) - 1
+                       ? out->persona->name_len
+                       : sizeof(out->personal_model.core.user_name) - 1;
+        memcpy(out->personal_model.core.user_name, out->persona->name, n);
+        out->personal_model.core.user_name[n] = '\0';
+    }
+    if (out->persona && out->persona->identity &&
+        out->personal_model.core.user_bio[0] == '\0') {
+        size_t n = strlen(out->persona->identity);
+        if (n > sizeof(out->personal_model.core.user_bio) - 1)
+            n = sizeof(out->personal_model.core.user_bio) - 1;
+        memcpy(out->personal_model.core.user_bio, out->persona->identity, n);
+        out->personal_model.core.user_bio[n] = '\0';
+    }
+
     out->turn_arena = hu_arena_create(*alloc);
 
     out->audit_logger = NULL;

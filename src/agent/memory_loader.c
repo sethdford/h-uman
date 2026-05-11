@@ -1,5 +1,6 @@
 #include "human/agent/memory_loader.h"
 #include "human/agent/world_model_bridge.h"
+#include "human/memory/personal_model.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
@@ -43,6 +44,7 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
     loader->max_entries = max_entries ? max_entries : 10;
     loader->max_context_chars = max_context_chars ? max_context_chars : 4000;
     loader->facade = NULL;
+    loader->personal_model = NULL;
     return HU_OK;
 }
 
@@ -50,6 +52,13 @@ void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade
     if (!loader)
         return;
     loader->facade = facade;
+}
+
+void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader,
+                                         struct hu_personal_model *pm) {
+    if (!loader)
+        return;
+    loader->personal_model = pm;
 }
 
 hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, size_t query_len,
@@ -344,7 +353,8 @@ supplement:
         hu_error_t ge = hu_w7_render_world_model(
             loader->facade, loader->alloc,
             session_id, session_id_len, 0,
-            &graph_text, &graph_len, NULL, 0, NULL, 0, NULL, 0, NULL);
+            &graph_text, &graph_len, NULL, 0, NULL, 0, NULL, 0,
+            (hu_personal_model_t *)loader->personal_model);
         if (ge == HU_OK && graph_text && graph_len > 0) {
             const size_t graph_cap = 500;
             if (graph_len > graph_cap)
