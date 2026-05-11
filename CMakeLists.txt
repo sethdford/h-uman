@@ -1997,10 +1997,15 @@ endif()
 # but tests need them — add to test lib only.
 set(HU_TEST_EXTRA_CHANNELS)
 if(NOT HU_ENABLE_ALL_CHANNELS)
+    # Orphan channels referenced by tests/test_orphan_channel_audit.c.
+    # mattermost + web were missing here — the benchmark/MinSizeRel build
+    # turns HU_ENABLE_ALL_CHANNELS off and the test binary failed to link
+    # with undefined references to hu_{mattermost,web}_{create,destroy}.
     list(APPEND HU_TEST_EXTRA_CHANNELS
         src/channels/signal.c src/channels/nostr.c src/channels/qq.c
         src/channels/maixcam.c src/channels/dispatch.c
-        src/channels/gmail_base64.c src/channels/gmail.c)
+        src/channels/gmail_base64.c src/channels/gmail.c
+        src/channels/mattermost.c src/channels/web.c)
 endif()
 if(NOT HU_ENABLE_MQTT)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/mqtt.c)

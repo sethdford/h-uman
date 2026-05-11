@@ -197,8 +197,11 @@ static size_t decompose_sentence(const char *sentence, size_t len,
 
         hu_atomic_claim_t *c = &out[out_n];
         memset(c, 0, sizeof(*c));
-        snprintf(c->text, sizeof(c->text), "%s %s %s", stem, prep_trim,
-                 segment);
+        /* Intentional truncation: stem/prep_trim/segment can sum past 160.
+         * Width-bounded per-arg so GCC -Wformat-truncation=2 doesn't trip
+         * under -Werror. Trades clipped tail for a clean build. */
+        snprintf(c->text, sizeof(c->text), "%.50s %.50s %.55s",
+                 stem, prep_trim, segment);
         c->span_start = (int64_t)base_offset;
         c->span_end = (int64_t)(base_offset + len);
         out_n++;
@@ -327,7 +330,11 @@ static void score_atomic_claim(hu_allocator_t *alloc, hu_memory_facade_t *m,
     memset(out_receipt, 0, sizeof(*out_receipt));
     /* Wrap the claim text into a sentence so v1 extracts it as 1 claim. */
     char sentence[200];
-    snprintf(sentence, sizeof(sentence), "%s.", claim->text);
+    /* claim->text is 160 bytes max, sentence is 200, plus the trailing dot.
+     * Precision-bounded so GCC -Wformat-truncation=2 stays quiet under
+     * -Werror. */
+    snprintf(sentence, sizeof(sentence), "%.*s.",
+             (int)(sizeof(sentence) - 2), claim->text);
 
     hu_verifier_config_t cfg = hu_verifier_default_config();
     cfg.mode = HU_VERIFY_SOFT;
