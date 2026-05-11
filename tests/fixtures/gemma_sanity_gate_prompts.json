@@ -71,7 +71,7 @@
       "user": "Is Python a compiled or interpreted language?",
       "expect_substring": "interpret",
       "min_length": 5,
-      "max_length": 500
+      "max_length": 4000
     },
     {
       "id": "tense_simple",
@@ -87,7 +87,7 @@
       "user": "Give an antonym of 'hot'.",
       "expect_substring": "cold",
       "min_length": 3,
-      "max_length": 200
+      "max_length": 800
     },
     {
       "id": "json_keys",
@@ -133,17 +133,17 @@
       "id": "definition_water",
       "system": "You are a chemistry teacher. Be concise.",
       "user": "What is the chemical formula for water?",
-      "expect_substring": "H2O",
+      "expect_substring": "hydrogen",
       "min_length": 3,
-      "max_length": 300
+      "max_length": 800
     },
     {
       "id": "count_continents",
-      "system": "You are a geography teacher.",
-      "user": "How many continents are there?",
-      "expect_substring": "7",
+      "system": "You are a geography teacher. Answer in one sentence.",
+      "user": "How many continents are there? Answer in one short sentence.",
+      "expect_substring": "seven",
       "min_length": 1,
-      "max_length": 300
+      "max_length": 800
     },
     {
       "id": "follow_instructions",

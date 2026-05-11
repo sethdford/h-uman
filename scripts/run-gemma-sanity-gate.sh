@@ -17,7 +17,7 @@
 set -euo pipefail
 
 FIXTURE="${HU_FIXTURE:-tests/fixtures/gemma_sanity_gate_prompts.json}"
-GGUF="${HU_GGUF_PATH:-${HOME}/.human/models/gemma-3-it-4B-Q4_K_M.gguf}"
+GGUF="${HU_GGUF_PATH:-${HOME}/.human/models/gemma-3-4b-it-Q4_K_M.gguf}"
 BIN="${HU_TEST_BIN:-./build-rl-sota/human_tests}"
 PASS_BAR="${HU_SANITY_PASS_BAR:-18}"
 
