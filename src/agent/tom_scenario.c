@@ -3,7 +3,6 @@
 #include "human/core/json.h"
 #include "human/memory/belief.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 static void tom_copy_trunc(char *dest, size_t cap, const char *src, size_t slen) {
@@ -48,17 +47,17 @@ void hu_tom_scenario_synthesize(const char *premise, size_t premise_len, const c
     if (!out) {
         return;
     }
+    (void)category_len;
     memset(out, 0, sizeof(*out));
     tom_copy_trunc(out->user_thinks_we_are, sizeof(out->user_thinks_we_are), premise, premise_len);
     tom_copy_trunc(out->user_expects_we_can, sizeof(out->user_expects_we_can), question,
                    question_len);
-    const char *tag = tom_tag_for_category(category, category_len);
+    const char *tag = tom_tag_for_category(category);
     (void)snprintf(out->user_expects_we_cannot, sizeof(out->user_expects_we_cannot), "%s", tag);
     out->confidence = hu_belief_init(0.55f, "tom-scenario", now_ms);
 }
 
-static int tom_item_has_expected_tag(const char *category, size_t category_len,
-                                     const hu_theory_of_mind_t *t) {
+static int tom_item_has_expected_tag(const char *category, const hu_theory_of_mind_t *t) {
     if (!t) {
         return 0;
     }
@@ -66,26 +65,25 @@ static int tom_item_has_expected_tag(const char *category, size_t category_len,
     if (!c || !c[0]) {
         return 0;
     }
-    if (category_len >= 12 && memcmp(category, "false_belief", 12) == 0) {
+    if (strcmp(category, "false_belief") == 0) {
         return strstr(c, "[ToM:fb]") != NULL;
     }
-    if (category_len >= 13 && memcmp(category, "second_order", 13) == 0) {
+    if (strcmp(category, "second_order") == 0) {
         return strstr(c, "[ToM:so]") != NULL;
     }
-    if (category_len >= 21 && memcmp(category, "pragmatic_implicature", 21) == 0) {
+    if (strcmp(category, "pragmatic_implicature") == 0) {
         return strstr(c, "[ToM:pr]") != NULL;
     }
-    if (category_len >= 18 && memcmp(category, "multilingual_stub", 18) == 0) {
+    if (strcmp(category, "multilingual_stub") == 0) {
         return strstr(c, "[ToM:ml]") != NULL;
     }
-    if (category_len >= 15 && memcmp(category, "common_knowledge", 15) == 0) {
+    if (strcmp(category, "common_knowledge") == 0) {
         return strstr(c, "[ToM:ck]") != NULL;
     }
     return 0;
 }
 
 static char *read_file_all(hu_allocator_t *alloc, const char *path, size_t *out_len) {
-    (void)alloc;
     FILE *f = fopen(path, "rb");
     if (!f) {
         return NULL;
@@ -100,7 +98,7 @@ static char *read_file_all(hu_allocator_t *alloc, const char *path, size_t *out_
         return NULL;
     }
     rewind(f);
-    char *buf = (char *)malloc((size_t)sz + 1);
+    char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
     if (!buf) {
         fclose(f);
         return NULL;
@@ -128,7 +126,7 @@ hu_error_t hu_tom_b8_synthetic_pack_run_smoke(hu_allocator_t *alloc, const char 
     }
     hu_json_value_t *root = NULL;
     hu_error_t err = hu_json_parse(alloc, json, json_len, &root);
-    free(json);
+    alloc->free(alloc->ctx, json, json_len + 1);
     if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
         if (root) {
             hu_json_free(alloc, root);
@@ -158,7 +156,7 @@ hu_error_t hu_tom_b8_synthetic_pack_run_smoke(hu_allocator_t *alloc, const char 
         hu_tom_scenario_synthesize(premise, strlen(premise), question, strlen(question), category,
                                    strlen(category), 1735689600000LL, &tom);
         if (tom.user_thinks_we_are[0] != '\0' && tom.user_expects_we_can[0] != '\0' &&
-            tom_item_has_expected_tag(category, strlen(category), &tom)) {
+            tom_item_has_expected_tag(category, &tom)) {
             pass++;
         }
     }
