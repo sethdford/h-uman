@@ -204,8 +204,12 @@ static hu_error_t ggml_train(void *ctx, const hu_learner_config_t *cfg,
         uint64_t sh = ggml_fnv1a(&signals[i], sizeof(signals[i]));
         data_hash ^= sh;
     }
+    /* Intentional truncation: cfg->model_version can hold up to 64 bytes
+     * and out_report->model_version is also 64; the "-%016llx" suffix
+     * eats 17 bytes. Bound the prefix so GCC -Wformat-truncation=2 is
+     * quiet under -Werror. */
     snprintf(out_report->model_version, sizeof(out_report->model_version),
-             "%s-%016llx", cfg->model_version, (unsigned long long)data_hash);
+             "%.46s-%016llx", cfg->model_version, (unsigned long long)data_hash);
 
     if (cfg->budget_ms == 0) {
         out_report->steps_completed = 0;
@@ -222,8 +226,11 @@ static hu_error_t ggml_train(void *ctx, const hu_learner_config_t *cfg,
     hu_error_t e = write_fake_adapter(cfg->adapter_output_path, out_report->model_version,
                                       cfg->rank, &bytes);
     if (e != HU_OK) {
+        /* cfg->adapter_output_path is up to 256 bytes; last_error is 128.
+         * Width-bound to fit. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
-                 "failed to write test adapter at %s", cfg->adapter_output_path);
+                 "failed to write test adapter at %.90s",
+                 cfg->adapter_output_path);
         return e;
     }
     out_report->adapter_bytes = bytes;

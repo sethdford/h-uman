@@ -214,8 +214,10 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
         uint64_t sh = mlx_fnv1a(&signals[i], sizeof(signals[i]));
         data_hash ^= sh;
     }
+    /* Same truncation pattern as learner_ggml.c — width-bound the prefix
+     * so GCC -Wformat-truncation=2 stays quiet under -Werror. */
     snprintf(out_report->model_version, sizeof(out_report->model_version),
-             "%s-%016llx", cfg->model_version, (unsigned long long)data_hash);
+             "%.46s-%016llx", cfg->model_version, (unsigned long long)data_hash);
 
     if (cfg->budget_ms == 0) {
         out_report->steps_completed = 0;
