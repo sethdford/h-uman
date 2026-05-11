@@ -28,6 +28,8 @@ is_allowed() {
 bad=0
 while IFS= read -r f; do
     [ -n "$f" ] || continue
+    # Sparse checkouts or index drift: skip missing paths (grep would error).
+    [ -f "$f" ] || continue
     is_allowed "$f" && continue
     if grep -Eq '#include[[:space:]]+"human/memory.h"' "$f" &&
         grep -Eq '#include[[:space:]]+"human/memory/memory.h"' "$f"; then

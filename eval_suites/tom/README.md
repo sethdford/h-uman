@@ -9,5 +9,7 @@ pragmatic / multilingual stubs. **Not** a `human eval run` task suite (no
 - `tom_synthetic.json` — versioned object with `items[]` (`id`, `category`,
   `premise`, `question`, `gold_answer`).
 
-Future wiring: score against `hu_world_model_t` ToM fields once the synthesizer
-lands (see `docs/plans/2026-05-10-w9-world-model.md`).
+Runtime wiring: `hu_tom_scenario_synthesize` + `hu_tom_b8_synthetic_pack_run_smoke` in
+`src/agent/tom_scenario.c` / `include/human/agent/tom_scenario.h` load this JSON and
+verify category-tagged ToM stubs (CI smoke). `hu_world_model_build` still owns the
+graph-backed ToM path; the scenario API is for eval packs only.

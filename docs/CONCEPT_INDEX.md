@@ -278,7 +278,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Fact extraction**         | `src/memory/fact_extract.c`, `include/human/memory/fact_extract.h`                                       | `test_fact_extract.c`    |
 | **Hallucination guard**     | `src/memory/hallucination_guard.c`, `include/human/memory/hallucination_guard.h`                         | `test_hallucination_guard.c` |
 | **Sycophancy guard**        | `src/security/sycophancy_guard.c`, `include/human/security/sycophancy_guard.h`                           | `test_sycophancy_guard.c` |
-| **Trust calibration**       | `src/cognition/trust.c`, `include/human/cognition/trust.h`                                               | `test_trust_calibration.c` |
+| **Trust calibration**       | `src/cognition/cognition_trust.c`, `include/human/cognition/trust.h`                                     | `test_trust_calibration.c` |
 | **Consistency eval**        | `src/eval/consistency.c`, `include/human/eval/consistency.h`                                             | `test_consistency.c`     |
 | **Humor framework**         | `src/persona/humor.c`, `include/human/persona/humor.h`                                                   | `test_humor_fw.c`        |
 | **Markdown persona loader** | `src/persona/markdown_loader.c`, `include/human/persona/markdown_loader.h`                               | `test_markdown_loader.c` |

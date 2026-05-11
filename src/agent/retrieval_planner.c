@@ -376,17 +376,22 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
      * entity-shaped lookup. The W12 P5 fix also routes "what" queries to
      * neighbor expansion when the user named an entity ("what does alice
      * drink?" → expand Alice's neighbors), which was previously falling
-     * through to the default window. */
-    if ((has_where || has_who) && a != 0) {
+     * through to the default window.
+     *
+     * P6 follow-up: we ALWAYS pair the neighbor expansion with a
+     * relations-window step. The relations carry `context` payloads
+     * ("drinks every morning", "works at since 2020") which the executor
+     * re-ranks against the user goal; high-scoring relation contexts
+     * promote their connected entities to the top of the result list.
+     * Without the relations step, the executor only sees entity records
+     * and falls back to SQL insertion order — which misses the answer
+     * ("what does alice drink?" returns Acme/Bob/Genmaicha in insertion
+     * order and Genmaicha lands at rank 3). */
+    if (((has_where || has_who) && a != 0) || a_is_named) {
         out->steps[0] = step_neighbors(wm, a, 1, 16, true);
-        out->steps_count = 1;
-        out->total_budget_ms = 200;
-        return HU_OK;
-    }
-    if (a_is_named) {
-        out->steps[0] = step_neighbors(wm, a, 1, 16, true);
-        out->steps_count = 1;
-        out->total_budget_ms = 200;
+        out->steps[1] = step_relations_window(wm, 0, INT64_MAX, 32, true);
+        out->steps_count = 2;
+        out->total_budget_ms = 250;
         return HU_OK;
     }
 
@@ -416,28 +421,139 @@ static int64_t mono_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
 }
 
-/* Compact aggregator: array of summary records keyed by (kind, id). */
+/* Compact aggregator with parallel score / relation-endpoint arrays.
+ *
+ * `items[]`     — record summaries (kind, id only after strip).
+ * `scores[]`    — goal-context overlap. 0 by default; populated by the
+ *                 W12 P6 re-ranker (see `hu_planner_execute`). Higher is
+ *                 more relevant to the user goal.
+ * `rel_src[]`/`rel_tgt[]` — for HU_MEM_RELATION rows, the connecting
+ *                 entity ids captured from `payload` *before* agg_push
+ *                 strips it. Used by the propagation pass to bump entity
+ *                 scores by the best relation that touches them.
+ *
+ * All four arrays are parallel and reallocated together. They are freed
+ * by `hu_planner_records_free` (the score / endpoint side-tables stay
+ * local to the executor; only `items` flows out). */
 typedef struct agg {
     hu_memory_record_t *items;
+    float    *scores;
+    int64_t  *rel_src;
+    int64_t  *rel_tgt;
     size_t count;
     size_t cap;
     hu_allocator_t *alloc;
 } agg_t;
 
-static hu_error_t agg_push(agg_t *a, const hu_memory_record_t *src) {
-    /* Dedupe scan — O(n) but n is bounded by step result caps. */
-    for (size_t i = 0; i < a->count; i++) {
-        if (a->items[i].kind == src->kind && a->items[i].id == src->id)
-            return HU_OK;
+/* Stopword cache for the token scorer. Short common English words
+ * dominate goal text without adding meaning; folding them out raises
+ * the signal-to-noise ratio of overlap scoring. Sorted alphabetically
+ * for the binary-search check; tweaking this list is the easiest
+ * lever on retrieval quality. */
+static const char *const HU_PLANNER_STOPWORDS[] = {
+    "a", "all", "am", "an", "and", "any", "are", "as", "at", "be", "been",
+    "but", "by", "can", "did", "do", "does", "for", "from", "got", "had",
+    "has", "have", "he", "her", "him", "his", "how", "i", "if", "in", "is",
+    "it", "me", "my", "no", "not", "of", "on", "or", "our", "out", "she",
+    "so", "the", "their", "them", "they", "this", "to", "was", "we", "were",
+    "what", "when", "where", "which", "who", "why", "will", "with", "you",
+    "your"
+};
+static const size_t HU_PLANNER_STOPWORDS_N =
+    sizeof(HU_PLANNER_STOPWORDS) / sizeof(HU_PLANNER_STOPWORDS[0]);
+
+static bool is_stopword(const char *tok, size_t tlen) {
+    for (size_t i = 0; i < HU_PLANNER_STOPWORDS_N; i++) {
+        size_t slen = strlen(HU_PLANNER_STOPWORDS[i]);
+        if (slen == tlen && memcmp(HU_PLANNER_STOPWORDS[i], tok, tlen) == 0)
+            return true;
     }
-    if (a->count == a->cap) {
-        size_t new_cap = a->cap == 0 ? 16 : a->cap * 2;
-        size_t old_bytes = a->cap * sizeof(*a->items);
-        size_t new_bytes = new_cap * sizeof(*a->items);
-        void *p = a->alloc->realloc(a->alloc->ctx, a->items, old_bytes, new_bytes);
-        if (!p) return HU_ERR_OUT_OF_MEMORY;
-        a->items = p;
-        a->cap = new_cap;
+    return false;
+}
+
+/* Count goal tokens (>=3 chars, non-stopword, lowercase) that appear
+ * inside `text`. Comparison is case-insensitive substring with an
+ * alnum-prefix trim — "drink" matches "drinks every morning" because
+ * "drink" is a prefix of "drinks". This is poor man's stemming and is
+ * sufficient for the W16 facade-recall corpus; a real implementation
+ * would use a tokenizer + Porter stemmer + IDF weights. */
+static int goal_overlap_score(const char *goal, size_t goal_len,
+                              const char *text, size_t text_len) {
+    if (!goal || goal_len == 0 || !text || text_len == 0) return 0;
+    int hits = 0;
+    size_t i = 0;
+    while (i < goal_len) {
+        while (i < goal_len && !isalnum((unsigned char)goal[i])) i++;
+        size_t start = i;
+        while (i < goal_len && isalnum((unsigned char)goal[i])) i++;
+        size_t tlen = i - start;
+        if (tlen < 3 || tlen > 64) continue;
+        if (is_stopword(goal + start, tlen)) continue;
+        /* Substring scan over text; alnum-folded comparison. We accept
+         * a hit when the goal token is a prefix of any alnum run in
+         * text (so "drink" ↔ "drinks"). */
+        for (size_t j = 0; j + tlen <= text_len; j++) {
+            /* Anchor on word start (j==0 or non-alnum left). */
+            if (j > 0 && isalnum((unsigned char)text[j - 1])) continue;
+            size_t k = 0;
+            for (; k < tlen; k++) {
+                unsigned char gc = (unsigned char)goal[start + k];
+                unsigned char tc = (unsigned char)text[j + k];
+                if (tolower(gc) != tolower(tc)) break;
+            }
+            if (k == tlen) { hits++; break; }
+        }
+    }
+    return hits;
+}
+
+static hu_error_t agg_grow(agg_t *a) {
+    if (a->count != a->cap) return HU_OK;
+    size_t new_cap = a->cap == 0 ? 16 : a->cap * 2;
+    size_t old_b_items   = a->cap * sizeof(*a->items);
+    size_t new_b_items   = new_cap * sizeof(*a->items);
+    size_t old_b_scores  = a->cap * sizeof(*a->scores);
+    size_t new_b_scores  = new_cap * sizeof(*a->scores);
+    size_t old_b_rel     = a->cap * sizeof(*a->rel_src);
+    size_t new_b_rel     = new_cap * sizeof(*a->rel_src);
+    void *p1 = a->alloc->realloc(a->alloc->ctx, a->items,   old_b_items,  new_b_items);
+    if (!p1) return HU_ERR_OUT_OF_MEMORY;
+    a->items = p1;
+    void *p2 = a->alloc->realloc(a->alloc->ctx, a->scores,  old_b_scores, new_b_scores);
+    if (!p2) return HU_ERR_OUT_OF_MEMORY;
+    a->scores = p2;
+    void *p3 = a->alloc->realloc(a->alloc->ctx, a->rel_src, old_b_rel,    new_b_rel);
+    if (!p3) return HU_ERR_OUT_OF_MEMORY;
+    a->rel_src = p3;
+    void *p4 = a->alloc->realloc(a->alloc->ctx, a->rel_tgt, old_b_rel,    new_b_rel);
+    if (!p4) return HU_ERR_OUT_OF_MEMORY;
+    a->rel_tgt = p4;
+    a->cap = new_cap;
+    return HU_OK;
+}
+
+static hu_error_t agg_push(agg_t *a, const hu_memory_record_t *src, float score) {
+    /* Dedupe scan — O(n) but n is bounded by step result caps. On a
+     * duplicate we keep the MAX score so the latest, strongest signal
+     * wins (mirrors a "max" combine over the plan's multiple steps). */
+    for (size_t i = 0; i < a->count; i++) {
+        if (a->items[i].kind == src->kind && a->items[i].id == src->id) {
+            if (score > a->scores[i]) a->scores[i] = score;
+            return HU_OK;
+        }
+    }
+    hu_error_t err = agg_grow(a);
+    if (err != HU_OK) return err;
+    /* Capture relation endpoints BEFORE the payload-strip below, so the
+     * propagation pass can find the entities a relation touches without
+     * keeping the payload alive. Stack copy is fine — the payload's
+     * lifetime ends with the caller's records_free a few lines later. */
+    int64_t rs = 0, rt = 0;
+    if (src->kind == HU_MEM_RELATION && src->payload != NULL) {
+        const hu_memory_relation_row_t *r =
+            (const hu_memory_relation_row_t *)src->payload;
+        rs = r->source_id;
+        rt = r->target_id;
     }
     /* Strip non-portable owned fields — the planner output is metadata-only. */
     hu_memory_record_t r = *src;
@@ -445,7 +561,11 @@ static hu_error_t agg_push(agg_t *a, const hu_memory_record_t *src) {
     r.payload_len = 0;
     r.provenance = NULL;
     r.provenance_len = 0;
-    a->items[a->count++] = r;
+    a->items[a->count]   = r;
+    a->scores[a->count]  = score;
+    a->rel_src[a->count] = rs;
+    a->rel_tgt[a->count] = rt;
+    a->count++;
     return HU_OK;
 }
 
@@ -590,12 +710,40 @@ hu_error_t hu_planner_execute(hu_memory_facade_t *m, hu_self_rag_t *self_rag,
 
         for (size_t j = 0; j < n; j++) {
             if (keep_mask && !keep_mask[j]) continue;
-            hu_error_t e = agg_push(&a, &recs[j]);
+            /* W12 P6 scoring: relations carry user-visible context that
+             * predicts answer relevance much better than insertion
+             * order. Score each record's payload against the plan goal
+             * BEFORE agg_push strips the payload. For entity rows we
+             * score the entity name (catches "Genmaicha" when goal
+             * mentions it); for relations the context string.
+             * Entities also get propagated relation scores in the post
+             * pass — see below. */
+            float score = 0.0f;
+            if (plan->goal_len > 0 && recs[j].payload != NULL) {
+                if (recs[j].kind == HU_MEM_ENTITY) {
+                    const hu_graph_entity_t *e =
+                        (const hu_graph_entity_t *)recs[j].payload;
+                    if (e->name && e->name_len > 0)
+                        score = (float)goal_overlap_score(
+                            plan->goal, plan->goal_len, e->name, e->name_len);
+                } else if (recs[j].kind == HU_MEM_RELATION) {
+                    const hu_memory_relation_row_t *r =
+                        (const hu_memory_relation_row_t *)recs[j].payload;
+                    if (r->context && r->context_len > 0)
+                        score = (float)goal_overlap_score(
+                            plan->goal, plan->goal_len, r->context, r->context_len);
+                }
+            }
+            hu_error_t e = agg_push(&a, &recs[j], score);
             if (e != HU_OK) {
                 if (keep_mask)
                     alloc->free(alloc->ctx, keep_mask, n * sizeof(*keep_mask));
                 hu_memory_facade_records_free(m, alloc, recs, n);
                 hu_planner_records_free(alloc, a.items, a.count);
+                /* Side tables freed by the failure block below. */
+                if (a.scores)  alloc->free(alloc->ctx, a.scores,  a.cap * sizeof(*a.scores));
+                if (a.rel_src) alloc->free(alloc->ctx, a.rel_src, a.cap * sizeof(*a.rel_src));
+                if (a.rel_tgt) alloc->free(alloc->ctx, a.rel_tgt, a.cap * sizeof(*a.rel_tgt));
                 return e;
             }
         }
@@ -606,6 +754,58 @@ hu_error_t hu_planner_execute(hu_memory_facade_t *m, hu_self_rag_t *self_rag,
 
         if (abort_plan) break;
     }
+
+    /* W12 P6 score propagation: for each scored relation, lift the score
+     * of any entity it connects (source or target) up to 0.9 * relation
+     * score. The 0.9 discount preserves the relation's primacy when
+     * relations and entities are present together (matches "answer is
+     * about a fact", not "answer is the entity itself"), but is large
+     * enough that an entity touching the best-scoring relation beats an
+     * entity touching no scoring relation at all. We take MAX rather
+     * than SUM to avoid summing duplicate signals — an entity in two
+     * relations should rank by its single best connection, not by
+     * count. */
+    if (plan->goal_len > 0 && a.count > 0) {
+        for (size_t i = 0; i < a.count; i++) {
+            if (a.items[i].kind != HU_MEM_RELATION) continue;
+            float s = a.scores[i];
+            if (s <= 0.0f) continue;
+            float bumped = s * 0.9f;
+            int64_t rs = a.rel_src[i], rt = a.rel_tgt[i];
+            for (size_t j = 0; j < a.count; j++) {
+                if (a.items[j].kind != HU_MEM_ENTITY) continue;
+                if (a.items[j].id != rs && a.items[j].id != rt) continue;
+                if (bumped > a.scores[j]) a.scores[j] = bumped;
+            }
+        }
+
+        /* Stable selection-sort by score desc. Counts here are bounded
+         * by HU_PLANNER_MAX_STEPS * step caps (<=128 typical, <=256
+         * worst case), so O(n^2) is fine and a stable sort preserves
+         * insertion order on ties — which matches how the executor
+         * already orders within a single step. */
+        for (size_t i = 0; i + 1 < a.count; i++) {
+            size_t best = i;
+            for (size_t j = i + 1; j < a.count; j++) {
+                if (a.scores[j] > a.scores[best]) best = j;
+            }
+            if (best != i) {
+                /* Swap items[i] ↔ items[best] AND scores AND endpoints. */
+                hu_memory_record_t tr = a.items[i];
+                a.items[i] = a.items[best]; a.items[best] = tr;
+                float ts = a.scores[i];
+                a.scores[i] = a.scores[best]; a.scores[best] = ts;
+                int64_t trs = a.rel_src[i], trt = a.rel_tgt[i];
+                a.rel_src[i] = a.rel_src[best]; a.rel_tgt[i] = a.rel_tgt[best];
+                a.rel_src[best] = trs; a.rel_tgt[best] = trt;
+            }
+        }
+    }
+
+    /* Free side tables (only `items` flows out). */
+    if (a.scores)  alloc->free(alloc->ctx, a.scores,  a.cap * sizeof(*a.scores));
+    if (a.rel_src) alloc->free(alloc->ctx, a.rel_src, a.cap * sizeof(*a.rel_src));
+    if (a.rel_tgt) alloc->free(alloc->ctx, a.rel_tgt, a.cap * sizeof(*a.rel_tgt));
 
     *out = a.items;
     *out_count = a.count;
@@ -742,7 +942,8 @@ hu_error_t hu_planner_multi_hop(hu_memory_facade_t *m, hu_allocator_t *alloc,
     }
 
     for (size_t i = 0; i < n; i++) {
-        hu_error_t e = agg_push(&a, &recs[i]);
+        /* Hop-0: no goal overlap here; use unit weight so dedupe/max still works. */
+        hu_error_t e = agg_push(&a, &recs[i], 1.0f);
         if (e != HU_OK) {
             hu_memory_facade_records_free(m, alloc, recs, n);
             hu_planner_records_free(alloc, a.items, a.count);
@@ -814,8 +1015,9 @@ hu_error_t hu_planner_multi_hop(hu_memory_facade_t *m, hu_allocator_t *alloc,
             size_t hop_n = 0;
             hu_error_t he = hu_memory_facade_read(m, &nq, alloc, &hop_recs, &hop_n);
             if (he == HU_OK) {
+                float seed_score = (pr_scores && k < pr_count) ? pr_scores[k] : 1.0f;
                 for (size_t j = 0; j < hop_n; j++) {
-                    hu_error_t pe = agg_push(&a, &hop_recs[j]);
+                    hu_error_t pe = agg_push(&a, &hop_recs[j], seed_score);
                     if (pe != HU_OK) {
                         hu_memory_facade_records_free(m, alloc, hop_recs, hop_n);
                         xfree(alloc, pr_ids, pr_count * sizeof(*pr_ids));

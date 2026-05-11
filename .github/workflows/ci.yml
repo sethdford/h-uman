@@ -55,7 +55,7 @@ jobs:
             echo "::error::Could not parse test count from human_tests output (expected 'N/M passed')"
             exit 1
           fi
-          BASELINE=9721
+          BASELINE=9723
           if [ "$COUNT" -lt "$BASELINE" ]; then
             echo "::error::Test count regression: $COUNT < $BASELINE baseline"
             exit 1
