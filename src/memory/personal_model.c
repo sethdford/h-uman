@@ -10,6 +10,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Schema version — kept near the top so `hu_personal_model_init` can
  * stamp freshly-initialized models at the current version. The
@@ -1831,23 +1832,56 @@ static void hu_pm_migrate_v3_to_v4(const hu_pm_v3_model_t *v3, hu_personal_model
 hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path) {
     if (!model || !path || !*path) return HU_ERR_INVALID_ARGUMENT;
     hu_pm_ensure_parent_dir(path);
-    FILE *fp = fopen(path, "wb");
+
+    /* Phase 0 Task 7 — atomic write via tmp + fsync + rename. Crash safety:
+     *   - Crash before fclose: <path>.tmp is partial, <path> is untouched,
+     *     load returns the prior state.
+     *   - Crash after rename: <path> is the new file, intact.
+     *   - No in-between window: rename(2) is atomic on POSIX with respect
+     *     to the destination path. */
+    char tmp[1024];
+    int tn = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    if (tn < 0 || (size_t)tn >= sizeof(tmp)) return HU_ERR_INVALID_ARGUMENT;
+
+    FILE *fp = fopen(tmp, "wb");
     if (!fp) return HU_ERR_IO;
+
     hu_pm_header_t hdr;
     memset(&hdr, 0, sizeof(hdr));
     hdr.magic = HU_PM_MAGIC;
     hdr.version = HU_PM_VERSION;
     hdr.reserved = 0;
+
     if (fwrite(&hdr, sizeof(hdr), 1, fp) != 1 ||
         fwrite(model, sizeof(*model), 1, fp) != 1) {
         fclose(fp);
+        (void)unlink(tmp);
         return HU_ERR_IO;
     }
+
+    /* fflush drains stdio buffers; fsync forces the kernel page cache
+     * to disk so a power loss between rename and writeback can't leave
+     * the renamed file with stale or zero contents. */
     if (fflush(fp) != 0) {
         fclose(fp);
+        (void)unlink(tmp);
         return HU_ERR_IO;
     }
-    fclose(fp);
+    int fd = fileno(fp);
+    if (fd >= 0 && fsync(fd) != 0) {
+        fclose(fp);
+        (void)unlink(tmp);
+        return HU_ERR_IO;
+    }
+    if (fclose(fp) != 0) {
+        (void)unlink(tmp);
+        return HU_ERR_IO;
+    }
+
+    if (rename(tmp, path) != 0) {
+        (void)unlink(tmp);
+        return HU_ERR_IO;
+    }
     return HU_OK;
 }
 
