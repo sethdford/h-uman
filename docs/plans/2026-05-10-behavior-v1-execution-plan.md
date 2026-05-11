@@ -154,6 +154,7 @@ All run inside `human_tests` and inherit ASan from the dev preset.
 ## Out of scope for this PR
 
 - Wiring `hu_behavior_policy_t` into `agent_turn.c` and `daemon.c`. The wiring lands in a follow-up that swaps prompt-side heuristics for the policy; this PR delivers the building blocks, headers, and tests behind them.
+- **Bridge helper (2026-05-10):** `hu_behavior_input_from_user_message()` in `policy.h` / `policy.c` fills `hu_behavior_input_t` from the latest user text (dialog act + affect + distress + `user_asked_question`) so the agent loop can call `hu_behavior_decide` in one shot when wiring lands.
 - Real ML in B3 affect estimation. The lexicon baseline is intentionally small.
 - Cultural pragmatic content libraries — only the schema lands later.
 

@@ -50,6 +50,8 @@ for f in "${files[@]}"; do
             suites+=("Agent") suites+=("agent") ;;
         src/persona/*.c|include/human/persona/*.h)
             suites+=("persona") suites+=("Persona") ;;
+        src/behavior/*.c|include/human/behavior/*.h)
+            suites+=("behavior") suites+=("Behavior") ;;
         src/runtime/*.c|include/human/runtime/*.h)
             suites+=("runtime") ;;
         src/sse/*.c|include/human/sse*.h)

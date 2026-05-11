@@ -674,6 +674,53 @@ static void test_w16_facade_recall_runs_v2_stack(void) {
     hu_evaluation_close(&e);
 }
 
+/* ── 14. Facade-recall regression floor: lock in the production score ──── */
+
+#ifdef HU_ENABLE_SQLITE
+static void test_w16_facade_recall_regression_floor(void) {
+    /* The facade-recall benchmark exercises the real v2 stack (W7 facade +
+     * W9 world model + W12 heuristic planner). Locking in a precision_at_1
+     * floor keeps planner regressions out: the W12 P5 query-anchor change
+     * pushed precision_at_1 from 0.083 to 0.667 on this corpus; any drop
+     * below 0.5 means a meaningful planner regression and should block.
+     *
+     * We assert a *floor*, not an exact match. The corpus is small (12
+     * facts) so each query is worth 0.083 — the threshold leaves room for
+     * one query to legitimately move category without flipping the gate. */
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_facade_recall(A(), &e), HU_OK);
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+
+    const hu_evaluation_metric_t *p1 = find_metric(&r, "precision_at_1");
+    HU_ASSERT_NOT_NULL(p1);
+    if (p1->score < 0.5) {
+        fprintf(stderr,
+                "facade-recall regression: precision_at_1 = %.3f, "
+                "floor = 0.500. Planner change reduced retrieval quality.\n",
+                p1->score);
+    }
+    HU_ASSERT(p1->score >= 0.5);
+
+    /* Recall@5 should be even higher — the heuristic planner emits up to 3
+     * steps so the executor sees more candidates. Floor at 0.66 (8/12). */
+    const hu_evaluation_metric_t *r5 = find_metric(&r, "recall_at_5");
+    HU_ASSERT_NOT_NULL(r5);
+    HU_ASSERT(r5->score >= 0.66);
+
+    /* Sanity: planner_steps_norm bounded. Avg / 8 (HU_PLANNER_MAX_STEPS).
+     * Greater than 0.5 would mean plans are 4+ steps on average — a sign of
+     * over-emission. */
+    const hu_evaluation_metric_t *steps = find_metric(&r, "planner_steps_norm");
+    HU_ASSERT_NOT_NULL(steps);
+    HU_ASSERT(steps->score > 0.0);
+    HU_ASSERT(steps->score <= 0.5);
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+}
+#endif
+
 /* ── runner ────────────────────────────────────────────────────────────── */
 
 void run_w16_evaluation_tests(void) {
@@ -696,4 +743,7 @@ void run_w16_evaluation_tests(void) {
     HU_RUN_TEST(test_w16_dmr_recall_at_k_correct_on_known_index);
     HU_RUN_TEST(test_w16_memoryagentbench_stub_runs_deterministically);
     HU_RUN_TEST(test_w16_facade_recall_runs_v2_stack);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_w16_facade_recall_regression_floor);
+#endif
 }

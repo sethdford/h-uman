@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static const char *const HU_RELACT_NAMES[HU_RELACT_COUNT] = {
     "answer",      "acknowledge",          "backchannel",     "ask_clarify",
@@ -203,4 +204,31 @@ hu_behavior_policy_t hu_behavior_default_policy(void) {
 
 hu_error_t hu_behavior_decide(const hu_behavior_input_t *in, hu_behavior_decision_t *out) {
     return bp_decide(NULL, in, out);
+}
+
+void hu_behavior_input_from_user_message(hu_behavior_input_t *in, const char *user_message,
+                                        size_t user_message_len, int channel_class) {
+    if (!in) {
+        return;
+    }
+    memset(in, 0, sizeof(*in));
+    in->user_message = user_message;
+    in->user_message_len = (user_message && user_message_len > 0) ? user_message_len : 0;
+    in->last_user_act = HU_DACT_UNKNOWN;
+    in->last_assistant_act = HU_DACT_UNKNOWN;
+    in->trust_score = 0.5f;
+    in->dependency_risk = 0.f;
+    in->channel_class = channel_class;
+
+    if (!user_message || user_message_len == 0) {
+        hu_affect_init(&in->affect);
+        return;
+    }
+
+    in->last_user_act = hu_dialog_act_classify(user_message, user_message_len);
+    (void)hu_affect_estimate_text(user_message, user_message_len, &in->affect);
+    in->affect.ts = (uint64_t)time(NULL);
+    in->user_in_distress = hu_affect_is_distress(&in->affect);
+    in->user_asked_question =
+        (in->last_user_act == HU_DACT_QUESTION || in->last_user_act == HU_DACT_CLARIFY_QUESTION);
 }

@@ -123,4 +123,14 @@ hu_behavior_policy_t hu_behavior_default_policy(void);
 /* Convenience: invoke the default policy without owning a struct. */
 hu_error_t hu_behavior_decide(const hu_behavior_input_t *in, hu_behavior_decision_t *out);
 
+/* Populate `in` from the latest user utterance for `hu_behavior_decide`:
+ * sets user_message, last_user_act (classify), affect (text estimate), distress,
+ * and user_asked_question. Zeros safety, memory flags, awaiting_user, and
+ * last_assistant_act; sets trust_score 0.5 and dependency_risk 0.
+ *
+ * `channel_class`: 0=text, 1=voice, 2=async, 3=email (same as hu_behavior_input_t).
+ * NULL or empty `user_message` → UNKNOWN act, neutral affect. */
+void hu_behavior_input_from_user_message(hu_behavior_input_t *in, const char *user_message,
+                                         size_t user_message_len, int channel_class);
+
 #endif /* HU_BEHAVIOR_POLICY_H */

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include <strings.h>
 
 /* Tiny lexicon — designed for transparency, not scale. Production callers
  * should fuse multimodal evidence (B12) before relying on this baseline.

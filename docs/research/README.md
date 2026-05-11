@@ -23,8 +23,11 @@ All research synthesis documents for h-uman. These are living documents — upda
 | [Companion Safety Frameworks](2026-04-03-companion-safety-frameworks.md) | 2026-04-03 | 6 | SHIELD, EmoAgent, manipulation detection, dependency, mental health |
 | [Conversation Repair & Trust](2026-04-03-conversation-repair-trust.md) | 2026-04-03 | 7 | Trust calibration, error recovery, invisible failures, repair taxonomy |
 | [Proactive Behavior & Humor](2026-04-03-proactive-behavior-humor.md) | 2026-04-03 | 6 | Anticipatory agents, inner thoughts, humor generation, timing |
+| [Human Behavior + AI SOTA Gap Analysis](2026-05-10-human-behavior-ai-sota-gap-analysis.md) | 2026-05-10 | 40+ | Personas, backchanneling, behavioral science, affect, memory, identity, companion safety |
 | [Human Fidelity arXiv Assessment](2026-03-23-human-fidelity-arxiv-assessment.md) | 2026-03-23 | 10 | 13 Turing dimensions mapped to arXiv papers |
 | [SOTA Agents, Skills, Companions](2026-03-20-sota-agents-skills-companion.md) | 2026-03-20 | 15+ | Lab research synthesis (Anthropic, OpenAI, DeepMind, MemGPT, etc.) |
+
+> Implementation lives in [`../plans/2026-05-10-behavior-v1-execution-plan.md`](../plans/2026-05-10-behavior-v1-execution-plan.md). P1/P2 stubs live in [`../plans/2026-05-10-behavior-v1-followups.md`](../plans/2026-05-10-behavior-v1-followups.md).
 
 ## Key Papers by Topic
 
@@ -101,11 +104,14 @@ All research synthesis documents for h-uman. These are living documents — upda
 
 ## Still Not Researched (Known Unknowns)
 
-These topics have zero research coverage and should be investigated next:
+These topics have minimal research coverage and should be investigated next:
 
-1. **Voice/Speech/Prosody/Paralinguistics** — real-time speech generation for companions
-2. **Cultural Adaptation** — conversation style by cultural background
-3. **Group Conversation Dynamics** — multi-party interaction
-4. **Real-Time Streaming Conversation** — latency, interruption, backchanneling
-5. **Relationship Development Stages** — acquaintance → friend → close friend progression model
-6. **Privacy/Secrets Management** — what to remember vs what to forget when told in confidence
+1. **Group Conversation Dynamics** — multi-party interaction (turn-taking with 3+ participants, addressee selection, side-channel attention)
+2. **Privacy/Secrets Management** — what to remember vs forget when told in confidence; selective memory revocation
+3. **Relationship Development Stages** — acquaintance → friend → close friend progression model with measurable transitions
+
+Items previously listed are now covered:
+
+- _Voice / prosody / paralinguistics_ → covered partially by Behavior v1 B3 + B12 plans and existing `src/voice/duplex.c` turn FSM.
+- _Cultural Adaptation_ → covered as Behavior v1 B15 (`hu_persona_overlay_t` extension).
+- _Real-Time Streaming Conversation_ → covered by existing voice duplex pipeline + Behavior v1 B2 dialog acts.
