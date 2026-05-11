@@ -5,6 +5,7 @@
 #include "human/core/error.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/tiers.h"
+#include "human/persona/circadian.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -172,6 +173,37 @@ hu_error_t hu_personal_model_contradicts_user(const hu_personal_model_t *model,
  * users (correct: old facts may be incompatible with new code). */
 hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path);
 hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path);
+
+/* Infer the user's chronotype from observed `active_hours` distribution.
+ *
+ * The personal model accumulates a coarse hour-of-day histogram on every
+ * ingest (`active_hours[24]`, capped at 255 per bucket). Once enough
+ * samples have been observed, this function classifies the histogram into
+ * one of four chronotype buckets — closing the loop with the B16
+ * chronotype-aware quiet-hours scheduler so proactive messaging respects
+ * a learned schedule, not just a manually-configured persona field.
+ *
+ * Decision rule (kept deliberately simple to avoid overfitting on
+ * sparse data):
+ *   - early    = sum(active_hours[5..9])    — the morning-lark window
+ *   - late     = sum(active_hours[21..23])  + active_hours[0]
+ *                                           — the evening-owl window
+ *   - middle   = sum(active_hours[10..20])  — the intermediate window
+ *   - total    = sum across all 24 hours
+ *
+ *   if total < HU_PM_CHRONOTYPE_MIN_SAMPLES (30):  HU_CHRONO_UNKNOWN
+ *   else if early >= 1.5 * late and early >= 0.4 * total:
+ *                                                  HU_CHRONO_MORNING_LARK
+ *   else if late  >= 1.5 * early and late  >= 0.4 * total:
+ *                                                  HU_CHRONO_EVENING_OWL
+ *   else:                                          HU_CHRONO_INTERMEDIATE
+ *
+ * The 1.5× ratio + 40% concentration thresholds keep the classifier
+ * conservative — a flat or near-flat distribution returns
+ * HU_CHRONO_INTERMEDIATE rather than picking a side on noise.
+ *
+ * Pure observation; no I/O. Safe to call on every turn — work is O(24). */
+hu_chronotype_t hu_personal_model_infer_chronotype(const hu_personal_model_t *model);
 
 /* Resolve the default on-disk location for the personal model.
  *

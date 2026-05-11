@@ -860,6 +860,100 @@ static void personal_model_topic_directive_absent_when_no_topics(void) {
     HU_ASSERT_TRUE(strstr(buf, "Top interests:") == NULL);
 }
 
+/* ── Chronotype inference from active_hours ─────────────────────────── */
+
+static void personal_model_infer_chronotype_returns_unknown_for_empty(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(&m) == HU_CHRONO_UNKNOWN);
+}
+
+static void personal_model_infer_chronotype_returns_unknown_for_null(void) {
+    HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(NULL) == HU_CHRONO_UNKNOWN);
+}
+
+static void personal_model_infer_chronotype_returns_unknown_below_min_samples(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    /* 20 messages all morning — under the 30-sample floor, classifier
+     * abstains regardless of how concentrated the signal is. */
+    for (int h = 5; h <= 9; h++)
+        m.active_hours[h] = 4;
+    HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(&m) == HU_CHRONO_UNKNOWN);
+}
+
+static void personal_model_infer_chronotype_classifies_morning_lark(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    /* Heavy early-window concentration. */
+    m.active_hours[6] = 12;
+    m.active_hours[7] = 14;
+    m.active_hours[8] = 12;
+    m.active_hours[9] = 8;
+    /* Light middle / late presence. */
+    m.active_hours[14] = 2;
+    m.active_hours[22] = 2;
+    HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(&m) == HU_CHRONO_MORNING_LARK);
+}
+
+static void personal_model_infer_chronotype_classifies_evening_owl(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    /* Heavy evening-window concentration; hour 0 (midnight) bucketed
+     * with the late window. */
+    m.active_hours[21] = 10;
+    m.active_hours[22] = 12;
+    m.active_hours[23] = 14;
+    m.active_hours[0] = 4;
+    m.active_hours[12] = 2;
+    m.active_hours[15] = 2;
+    HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(&m) == HU_CHRONO_EVENING_OWL);
+}
+
+static void personal_model_infer_chronotype_classifies_intermediate_when_flat(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    /* Near-uniform distribution — should land in INTERMEDIATE
+     * regardless of which side wins the tie. */
+    for (int h = 0; h < 24; h++)
+        m.active_hours[h] = 3;
+    HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(&m) == HU_CHRONO_INTERMEDIATE);
+}
+
+static void personal_model_infer_chronotype_classifies_intermediate_for_middle_dominant(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    /* Workday-shape pattern: heavy mid-day, light edges. Neither early
+     * nor late dominates ⇒ INTERMEDIATE. */
+    m.active_hours[10] = 6;
+    m.active_hours[11] = 8;
+    m.active_hours[12] = 8;
+    m.active_hours[13] = 8;
+    m.active_hours[14] = 8;
+    m.active_hours[15] = 6;
+    m.active_hours[7] = 2;
+    m.active_hours[22] = 2;
+    HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(&m) == HU_CHRONO_INTERMEDIATE);
+}
+
+static void personal_model_infer_chronotype_does_not_overcommit_on_thin_lead(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    /* Early=11, late=10, middle=20 — early "leads" by one but does NOT
+     * meet the 1.5× ratio threshold and falls below 40% of total.
+     * Classifier should land in INTERMEDIATE rather than calling
+     * MORNING_LARK on noise. */
+    m.active_hours[7] = 5;
+    m.active_hours[8] = 6;
+    m.active_hours[12] = 5;
+    m.active_hours[13] = 5;
+    m.active_hours[14] = 5;
+    m.active_hours[15] = 5;
+    m.active_hours[22] = 5;
+    m.active_hours[23] = 5;
+    HU_ASSERT_TRUE(hu_personal_model_infer_chronotype(&m) == HU_CHRONO_INTERMEDIATE);
+}
+
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -899,6 +993,14 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_topic_directive_caps_at_three);
     HU_RUN_TEST(personal_model_topic_directive_filters_mixed_topics);
     HU_RUN_TEST(personal_model_topic_directive_absent_when_no_topics);
+    HU_RUN_TEST(personal_model_infer_chronotype_returns_unknown_for_empty);
+    HU_RUN_TEST(personal_model_infer_chronotype_returns_unknown_for_null);
+    HU_RUN_TEST(personal_model_infer_chronotype_returns_unknown_below_min_samples);
+    HU_RUN_TEST(personal_model_infer_chronotype_classifies_morning_lark);
+    HU_RUN_TEST(personal_model_infer_chronotype_classifies_evening_owl);
+    HU_RUN_TEST(personal_model_infer_chronotype_classifies_intermediate_when_flat);
+    HU_RUN_TEST(personal_model_infer_chronotype_classifies_intermediate_for_middle_dominant);
+    HU_RUN_TEST(personal_model_infer_chronotype_does_not_overcommit_on_thin_lead);
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(personal_model_survives_real_sigkill);
 #endif

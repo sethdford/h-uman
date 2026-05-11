@@ -116,6 +116,13 @@ static const char *humor_directive(float receptivity) {
  * have entered the conversation enough times to be a real signal. */
 #define HU_PM_TOPIC_DIRECTIVE_MIN_MENTIONS 3U
 
+/* Chronotype inference — minimum total hourly observations before we
+ * classify. Below this, the histogram is too sparse to call (a single
+ * insomnia-driven 03:00 burst would otherwise look like an evening-owl
+ * pattern). 30 puts us in the right order of magnitude — roughly two
+ * weeks of daily use at 2-3 messages/day. */
+#define HU_PM_CHRONOTYPE_MIN_SAMPLES 30U
+
 /* Negative-fact predicates — markers that "user <pred> <obj>" expresses
  * something to actively avoid recommending or doing. The fact extractor
  * preserves the predicate verbatim, so substring matching here pulls out
@@ -163,6 +170,49 @@ static void sort_topic_order(const hu_personal_model_t *model, size_t *order) {
             }
         }
     }
+}
+
+hu_chronotype_t hu_personal_model_infer_chronotype(const hu_personal_model_t *model) {
+    if (!model)
+        return HU_CHRONO_UNKNOWN;
+
+    /* Sum the early and late windows; total is computed separately
+     * so the concentration test compares against the full
+     * distribution. Hour 0 (midnight) is bucketed with the evening-owl
+     * window: someone messaging through the night belongs with the late
+     * group, not the early group. The middle window (10..20) is
+     * implicit — early + late + middle == total — so we don't track it. */
+    uint32_t early = 0;
+    uint32_t late = 0;
+    uint32_t total = 0;
+
+    for (int h = 0; h < 24; h++) {
+        uint32_t bucket = model->active_hours[h];
+        total += bucket;
+        if (h == 0 || h >= 21)
+            late += bucket;
+        else if (h >= 5 && h <= 9)
+            early += bucket;
+    }
+
+    if (total < HU_PM_CHRONOTYPE_MIN_SAMPLES)
+        return HU_CHRONO_UNKNOWN;
+
+    /* Concentration threshold: the dominant window must hold at least
+     * 40% of total mass to count. Without this gate, a near-flat
+     * distribution where early=11 / late=10 / middle=20 would tip into
+     * MORNING_LARK on a single message tie-break — exactly the kind of
+     * spurious classification the inference wants to avoid. */
+    const float concentration_floor = 0.4f * (float)total;
+    const float ratio = 1.5f;
+
+    if ((float)early >= ratio * (float)late &&
+        (float)early >= concentration_floor)
+        return HU_CHRONO_MORNING_LARK;
+    if ((float)late >= ratio * (float)early &&
+        (float)late >= concentration_floor)
+        return HU_CHRONO_EVENING_OWL;
+    return HU_CHRONO_INTERMEDIATE;
 }
 
 bool hu_personal_model_has_content(const hu_personal_model_t *model) {
