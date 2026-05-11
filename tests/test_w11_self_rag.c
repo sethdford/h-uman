@@ -860,26 +860,59 @@ static void test_w11_inline_critique_fabricated_when_memory_empty(void) {
     close_facade(g, m);
 }
 
-static void test_w11_inline_retrieve_score_reflects_record_count(void) {
+static void test_w11_inline_retrieve_score_reflects_grade_relevance(void) {
     hu_graph_t *g = NULL;
     hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
-    seed_alice_works_at_acme(g);
+    seed_alice_works_at_acme(g); /* relation context = "context" */
 
     hu_self_rag_t r = {0};
     HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
 
+    /* Query word `context` overlaps with the seeded relation's
+     * `context` field → CRAG grader returns RELEVANT (score 1.0) →
+     * support.mean saturates and the belief source flips to
+     * `inline-probe-graded` to mark the grade-aware path. */
     hu_self_rag_request_t req = make_request(
-        "Looking up <retrieve>alice.work</retrieve> now.", HU_VERIFY_INLINE);
+        "Looking up <retrieve>context</retrieve> now.", HU_VERIFY_INLINE);
     hu_self_rag_response_t resp;
     HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
     HU_ASSERT_EQ((int)resp.claims_count, 1);
-    /* Memory has at least 1 relation, so score > 0 (was hardcoded 0). */
     HU_ASSERT(resp.claims[0].support.mean > 0.0f);
     HU_ASSERT_STR_EQ(resp.claims[0].prov.source, "retrieve");
-    /* Belief carries the inline-probe source tag so consumers can tell
-     * a retrieve-probe score from a critique-graph score. */
     HU_ASSERT_EQ(resp.claims[0].support.prov_count, 1);
+    HU_ASSERT_STR_EQ(resp.claims[0].support.prov[0].source,
+                      "inline-probe-graded");
+
+    hu_self_rag_close(&r);
+    close_facade(g, m);
+}
+
+static void test_w11_inline_retrieve_irrelevant_query_scores_low(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g); /* relation context = "context" */
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    /* The seeded relation has 1 record, but the query mentions terms
+     * that don't appear in any context. Under the prior count-only
+     * contract this scored 0.2 (1/5). Under grade-aware scoring it
+     * scores 0 because no relation grades RELEVANT or AMBIGUOUS. The
+     * fabricated flag flips when score < 0.2 — the abstention path
+     * can now distinguish "memory has stuff but none of it matches"
+     * from "memory is empty." */
+    hu_self_rag_request_t req = make_request(
+        "Looking up <retrieve>quantum tea recipes</retrieve> now.",
+        HU_VERIFY_INLINE);
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.claims_count, 1);
+    HU_ASSERT(resp.claims[0].support.mean < 0.2f);
+    HU_ASSERT(resp.claims[0].fabricated);
+    /* Source is still `inline-probe` (no graded record contributed). */
     HU_ASSERT_STR_EQ(resp.claims[0].support.prov[0].source, "inline-probe");
 
     hu_self_rag_close(&r);
@@ -1361,6 +1394,116 @@ static void test_w11_abstention_floor_under_empty_evidence(void) {
 
     close_facade(g, m);
 }
+
+/* ── W11 P1 — agent-level abstention floor on the production wire ────────
+ *
+ * `test_w11_abstention_floor_under_empty_evidence` (above) pins the
+ * *backend* floor by calling `hu_self_rag_verify` directly. This test
+ * pins the *agent wire* floor by calling `hu_agent_self_rag_apply` —
+ * the same entrypoint `agent_turn.c` and `agent_stream.c` use in
+ * production — and asserts `refusals_rendered / runs >= 0.30`.
+ *
+ * Why both: the backend floor proves the verifier *would* abstain on
+ * weak evidence. The agent floor proves the verifier *actually causes
+ * the user-visible response to be swapped*. The W11 P1 wire introduced
+ * `self_rag_refusals_rendered` to surface the gap between "verifier
+ * abstained" and "user saw a refusal" — this test pins that gap closed.
+ *
+ * Methodology:
+ *   1. Open a fresh facade backed by an empty graph (no evidence).
+ *   2. For each weak-evidence draft, call `hu_agent_self_rag_apply` in
+ *      SOFT mode so swaps actually flow through to `*swapped`.
+ *   3. After the loop, snapshot via `hu_agent_self_rag_telemetry` and
+ *      assert `refusals_rendered * 100 / runs >= 30`.
+ *
+ * On regression the failure message prints both numbers so the next
+ * triage pass doesn't have to re-run with diagnostics.
+ * ────────────────────────────────────────────────────────────────────── */
+static void test_w11_agent_apply_floor_under_empty_evidence(void) {
+    static const char *const k_drafts[] = {
+        "Alice works at Acme.",
+        "Bob is the CTO of Globex.",
+        "Charlie graduated from MIT in 2019.",
+        "Dana lives in San Francisco.",
+        "Erin married Frank last summer.",
+        "George owns three properties in Brooklyn.",
+        "Hannah speaks French and Mandarin fluently.",
+        "Ivan founded Initech in 2003.",
+        "Julia released two albums this year.",
+        "Kevin runs ten miles every morning.",
+        "Liam was promoted to Director last month.",
+        "Maya competed at the world championships in Berlin.",
+        "Noah's restaurant earned a Michelin star in 2024.",
+        "Olivia is fluent in seven programming languages.",
+        "Paul's startup raised forty million in Series B.",
+        "Quinn served as ambassador to France for three years.",
+        "Riley swam the English Channel last August.",
+        "Sam works as a cardiologist at Mass General.",
+        "Tina won the Nobel Prize in chemistry in 2021.",
+        "Uma trains professional eSports teams in Seoul.",
+    };
+    const size_t n = sizeof(k_drafts) / sizeof(k_drafts[0]);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_world_model_invalidate(NULL, 0);
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, NULL, 0, &g), HU_OK);
+    hu_w7_facade_t *wf = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(g, &alloc, &wf), HU_OK);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.w7_facade = wf;
+    agent.memory_session_id = "u_w11_floor";
+    agent.memory_session_id_len = 11;
+
+    for (size_t i = 0; i < n; i++) {
+        char *swapped = NULL;
+        size_t swapped_len = 0;
+        hu_error_t e = hu_agent_self_rag_apply(&agent, k_drafts[i], strlen(k_drafts[i]),
+                                                HU_VERIFY_SOFT, &swapped, &swapped_len);
+        if (e == HU_OK && swapped) {
+            alloc.free(alloc.ctx, swapped, swapped_len + 1);
+        }
+    }
+
+    uint64_t runs = 0, abstentions = 0, refusals = 0;
+    hu_agent_self_rag_telemetry(&agent, &runs, &abstentions, &refusals, NULL, NULL);
+    HU_ASSERT_EQ(runs, (uint64_t)n);
+
+    /* Floor: at least 30 % of weak-evidence drafts must produce a
+     * user-visible refusal under SOFT. Today the rate sits much higher
+     * (every fact-shaped draft on an empty graph abstains AND swaps);
+     * the 30 % floor is the published W11 success metric. Tighten only
+     * with an explicit re-baseline + ADR. */
+    unsigned ref_pct = (unsigned)((refusals * 100ULL) / runs);
+    if (ref_pct < 30u) {
+        HU_FAIL(
+            "W11 agent-wire abstention regressed: %llu/%llu runs swapped to "
+            "refusal (%u%%, abstentions=%llu); floor 30%%, target 80%%. The "
+            "P1 wire (hu_agent_self_rag_apply) is supposed to keep "
+            "self_rag_refusals_rendered ≈ self_rag_abstentions under SOFT. A "
+            "drop here means the verifier abstained but the response was not "
+            "swapped — see W11 row in docs/plans/2026-05-10-w11-inline-self-rag.md",
+            (unsigned long long)refusals, (unsigned long long)runs, ref_pct,
+            (unsigned long long)abstentions);
+    }
+
+    /* The two counters should track each other under SOFT — every
+     * abstention should render. Allow a small slack (e.g. an outcome
+     * that abstains but produces an empty modified buffer) but flag
+     * any large divergence. */
+    if (abstentions > refusals + abstentions / 10ULL) {
+        HU_FAIL("W11 abstentions (%llu) significantly exceeded refusals_rendered "
+                "(%llu) — the SOFT swap path is dropping refusals.",
+                (unsigned long long)abstentions, (unsigned long long)refusals);
+    }
+
+    hu_world_model_invalidate(NULL, 0);
+    hu_w7_facade_close(wf, &alloc);
+    hu_graph_close(g, &alloc);
+}
 #endif /* HU_ENABLE_SQLITE */
 
 /* ── Test runner ──────────────────────────────────────────────────────── */
@@ -1391,7 +1534,8 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_e2e_inline_with_world_model_and_memory);
     HU_RUN_TEST(test_w11_inline_critique_supported_when_memory_matches);
     HU_RUN_TEST(test_w11_inline_critique_fabricated_when_memory_empty);
-    HU_RUN_TEST(test_w11_inline_retrieve_score_reflects_record_count);
+    HU_RUN_TEST(test_w11_inline_retrieve_score_reflects_grade_relevance);
+    HU_RUN_TEST(test_w11_inline_retrieve_irrelevant_query_scores_low);
     HU_RUN_TEST(test_w11_inline_strict_abstains_on_score);
     HU_RUN_TEST(test_w11_inline_strict_supported_when_evidence_present);
     HU_RUN_TEST(test_w11_inline_wm_entity_match_lifts_weak_score);
@@ -1402,6 +1546,7 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_agent_self_rag_apply_rejects_unbound_agent);
     HU_RUN_TEST(test_w11_agent_self_rag_telemetry_handles_null_agent);
     HU_RUN_TEST(test_w11_abstention_floor_under_empty_evidence);
+    HU_RUN_TEST(test_w11_agent_apply_floor_under_empty_evidence);
 #endif
     /* Streaming self-RAG tests don't require SQLite. */
     HU_RUN_TEST(test_w11_stream_normal_tokens_pass_through);
