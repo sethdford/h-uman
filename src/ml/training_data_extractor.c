@@ -10,6 +10,7 @@
 #include "human/ml/training_data_extractor.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/ml/training_data_quality.h"
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -248,16 +249,39 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
             }
         }
 
-        /* Write one JSONL line: {"messages":[{system},{user},{assistant},...]} */
+        /* Write one JSONL line: {"messages":[{system},{user},{assistant},...]}
+         *
+         * Phase A1.2 — every content payload is run through the PII
+         * redactor before being JSON-escaped. The redactor is
+         * conservative (anchored matchers, no false positives on
+         * version strings or @-mentions) so this is safe to apply
+         * unconditionally. System prompts can carry persona-derived
+         * PII too — redact them on the same pass. */
+        char redacted_buf[4400];
+        size_t redacted_len = 0;
+        hu_pii_stats_t pii_stats;
+
         fputs("{\"messages\":[{\"role\":\"system\",\"content\":\"", out_file);
-        write_json_escaped(out_file, system_prompt);
+        if (hu_pii_redact(system_prompt, strlen(system_prompt),
+                          redacted_buf, sizeof(redacted_buf),
+                          &redacted_len, &pii_stats) == HU_OK) {
+            write_json_escaped(out_file, redacted_buf);
+        } else {
+            write_json_escaped(out_file, system_prompt);
+        }
         fputs("\"}", out_file);
 
         for (size_t i = 0; i < entry_count; i++) {
             fputs(",{\"role\":\"", out_file);
             fputs(entries[i].role, out_file);
             fputs("\",\"content\":\"", out_file);
-            write_json_escaped(out_file, entries[i].content);
+            if (hu_pii_redact(entries[i].content, strlen(entries[i].content),
+                              redacted_buf, sizeof(redacted_buf),
+                              &redacted_len, &pii_stats) == HU_OK) {
+                write_json_escaped(out_file, redacted_buf);
+            } else {
+                write_json_escaped(out_file, entries[i].content);
+            }
             fputs("\"}", out_file);
         }
         fputs("]}\n", out_file);
@@ -359,7 +383,7 @@ hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc,
         "AND (julianday(u2.created_at) - julianday(a.created_at)) * 86400 <= ? "
         "AND (julianday(u2.created_at) - julianday(a.created_at)) * 86400 > 0 "
         "ORDER BY a.id ASC "
-        "LIMIT 100";
+        "LIMIT 1000";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
