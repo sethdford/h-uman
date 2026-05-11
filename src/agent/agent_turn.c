@@ -5601,6 +5601,26 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     }
                 }
 
+                /* Strip AI phrases and formal structure so the model's
+                 * history matches the wire text the user actually sees. */
+                if (final_content && final_len > 0) {
+                    if (!ab_owned) {
+                        char *copy =
+                            hu_strndup(agent->alloc, final_content, final_len);
+                        if (copy) {
+                            final_content = copy;
+                            ab_owned = true;
+                        }
+                    }
+                    if (ab_owned) {
+                        final_len = hu_conversation_strip_channel_tags(
+                            (char *)final_content, final_len);
+                        final_len = hu_conversation_strip_ai_phrases(
+                            (char *)final_content, final_len);
+                        final_len = hu_conversation_strip_formal_structure(
+                            (char *)final_content, final_len);
+                    }
+                }
                 hu_error_t hist_err = hu_agent_internal_append_history(
                     agent, HU_ROLE_ASSISTANT, final_content ? final_content : "",
                     final_len, NULL, 0, NULL, 0);

@@ -89,6 +89,106 @@ static inline uint32_t hu_pii_total(const hu_pii_stats_t *s) {
     return s->emails + s->phones + s->ssns + s->credit_cards + s->ips + s->secrets;
 }
 
+/* ── Quality filter ────────────────────────────────────────────────────── */
+/* Phase A1.2 (continued): once PII is scrubbed, the next quality lever
+ * is reject-low-signal-examples-before-they-poison-the-adapter. Three
+ * cheap signals catch ~all of the common offenders without a model:
+ *
+ *   1. Length      — too short or pathologically long examples.
+ *   2. Entropy     — keyboard mashing, repeated chars, "lorem ipsum"
+ *                    placeholder text.
+ *   3. Uniqueness  — within-corpus near-duplicates (the same boilerplate
+ *                    conversation appearing N times in a session log).
+ *
+ * Each gate is independent and pure-CPU; callers compose them in
+ * whatever order makes sense for their pipeline. */
+
+typedef enum hu_quality_verdict {
+    HU_QUALITY_OK = 0,
+    HU_QUALITY_REJECT_TOO_SHORT,
+    HU_QUALITY_REJECT_TOO_LONG,
+    HU_QUALITY_REJECT_LOW_ENTROPY,
+    HU_QUALITY_REJECT_LOW_UNIQUE_RATIO,
+} hu_quality_verdict_t;
+
+typedef struct hu_quality_thresholds {
+    /* Below this many bytes the example is rejected as too short.
+     * Default 8 — empty / "ok" / single-emoji turns are skipped. */
+    size_t min_chars;
+    /* Above this many bytes the example is rejected as too long.
+     * Default 16384 — typical chat turn is < 2 KB; a 16 KB blob is
+     * either a dump or an artifact and rarely useful for adapter
+     * training. */
+    size_t max_chars;
+    /* Below this many bits of Shannon byte-entropy the example is
+     * rejected as low-information. Only applied to texts with at
+     * least 32 bytes — short messages legitimately have low entropy.
+     * Default 2.5 — "aaaaaaaaaaaaa" (≈0 bits) and "ababab..." (1 bit)
+     * are caught, real prose (4-5 bits) sails through. */
+    float min_entropy_bits;
+    /* Below this fraction of unique bytes / total bytes the example
+     * is rejected as repetitive. Default 0.10 — "yyyyyyy" (1/N) is
+     * caught, normal prose (~0.20-0.40) is fine. Only applied to
+     * texts with at least 32 bytes. */
+    float min_unique_ratio;
+} hu_quality_thresholds_t;
+
+/* Initialize `out` with conservative defaults that pass typical chat
+ * training data and reject obvious garbage. Callers that want stricter
+ * gates can adjust individual fields after this call. */
+void hu_quality_thresholds_default(hu_quality_thresholds_t *out);
+
+/* Evaluate `text` against `thresholds`. NULL `thresholds` means
+ * "use defaults". Returns the first failing verdict, or HU_QUALITY_OK
+ * when the text passes every gate. Pure CPU, allocator-free, O(n). */
+hu_quality_verdict_t hu_quality_check(const char *text, size_t text_len,
+                                      const hu_quality_thresholds_t *thresholds);
+
+/* Stable string for telemetry / logging. Returns "ok" / "too_short" /
+ * "too_long" / "low_entropy" / "low_unique_ratio" / "unknown". */
+const char *hu_quality_verdict_name(hu_quality_verdict_t v);
+
+/* ── Near-duplicate detector ───────────────────────────────────────────── */
+/* Within-run dedup. Stores 64-bit FNV-1a hashes of *normalized* text
+ * (lowercased, whitespace-collapsed) in a dynamically-grown sorted
+ * array. Lookup is O(log n); insert is O(n) amortized via doubling.
+ * Intended scale: 10K–100K conversations per extraction run.
+ *
+ * Normalization is intentionally aggressive — two conversations that
+ * differ only in capitalization or whitespace are treated as the
+ * same. SimHash-style fuzzy near-dup (e.g. "hi vs hi!") is a future
+ * extension; this module catches the 80% case where copy/paste or
+ * automated logging produces byte-identical-after-normalize text. */
+
+typedef struct hu_dedup_set {
+    uint64_t *hashes;
+    size_t count;
+    size_t capacity;
+} hu_dedup_set_t;
+
+/* Initialize an empty dedup set. `initial_capacity` is a hint; pass 0
+ * to defer allocation until first insert. Returns HU_OK on success. */
+hu_error_t hu_dedup_set_init(hu_dedup_set_t *set, size_t initial_capacity);
+
+/* Free internal storage. Safe to call on a zero-initialized set. */
+void hu_dedup_set_free(hu_dedup_set_t *set);
+
+/* Single-pass query + insert. Computes the canonical hash of `text`,
+ * checks it against the set, and records it if absent.
+ *
+ * Returns true when `text` is a duplicate of a previously-seen entry
+ * (caller should skip it), false otherwise (caller should keep it).
+ * On allocation failure the call returns false and the entry is not
+ * recorded — the caller still gets to write the example, which is the
+ * conservative failure mode. */
+bool hu_dedup_set_check_and_add(hu_dedup_set_t *set,
+                                const char *text, size_t text_len);
+
+/* Number of distinct entries recorded so far. Useful for telemetry. */
+static inline size_t hu_dedup_set_size(const hu_dedup_set_t *set) {
+    return set ? set->count : 0;
+}
+
 #ifdef __cplusplus
 }
 #endif

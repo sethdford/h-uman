@@ -1,4 +1,5 @@
-/* Training-data PII redaction — Phase A1.2 of the SOTA roadmap.
+/* Training-data PII redaction + quality filter — Phase A1.2 of the
+ * SOTA roadmap.
  *
  * Single-pass scanner over UTF-8 text. Each pattern attempts to match
  * starting at the current offset. A match writes the replacement token
@@ -12,13 +13,19 @@
  * butts up against a letter without space) where the redactor backs
  * off rather than risk redacting non-PII. For training-data hygiene
  * this is the right trade-off — the eval criterion is "< 0.1% PII
- * leak rate", not "< 0.1% false-redaction rate". */
+ * leak rate", not "< 0.1% false-redaction rate".
+ *
+ * The second half of this file implements the quality gates
+ * (length / entropy / unique ratio) and the within-run dedup set. */
 
 #include "human/ml/training_data_quality.h"
+#include "human/core/allocator.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
@@ -447,4 +454,209 @@ hu_error_t hu_pii_redact(const char *text, size_t text_len,
     if (stats)
         *stats = local;
     return HU_OK;
+}
+
+/* ── Quality gates ─────────────────────────────────────────────────────── */
+
+/* Below this many bytes we skip entropy + unique-ratio checks because
+ * short messages (e.g. "yo", "lol") are legitimately low-information.
+ * We still apply the min/max length thresholds. */
+#define HU_QUALITY_ENTROPY_FLOOR_BYTES ((size_t)32)
+
+void hu_quality_thresholds_default(hu_quality_thresholds_t *out) {
+    if (!out)
+        return;
+    out->min_chars = 8;
+    out->max_chars = 16384;
+    out->min_entropy_bits = 2.5f;
+    out->min_unique_ratio = 0.10f;
+}
+
+/* Shannon byte entropy in bits/symbol. Pure scan, allocator-free. */
+static float quality_byte_entropy_bits(const char *text, size_t len) {
+    if (!text || len == 0)
+        return 0.f;
+    uint32_t counts[256];
+    memset(counts, 0, sizeof(counts));
+    for (size_t i = 0; i < len; i++)
+        counts[(unsigned char)text[i]]++;
+    float h = 0.f;
+    const float n = (float)len;
+    for (int i = 0; i < 256; i++) {
+        if (counts[i] == 0)
+            continue;
+        float p = (float)counts[i] / n;
+        h -= p * log2f(p);
+    }
+    return h;
+}
+
+static float quality_unique_ratio(const char *text, size_t len) {
+    if (!text || len == 0)
+        return 0.f;
+    bool seen[256];
+    memset(seen, 0, sizeof(seen));
+    size_t distinct = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)text[i];
+        if (!seen[c]) {
+            seen[c] = true;
+            distinct++;
+        }
+    }
+    return (float)distinct / (float)len;
+}
+
+hu_quality_verdict_t hu_quality_check(const char *text, size_t text_len,
+                                      const hu_quality_thresholds_t *thresholds) {
+    hu_quality_thresholds_t defaults;
+    if (!thresholds) {
+        hu_quality_thresholds_default(&defaults);
+        thresholds = &defaults;
+    }
+    if (!text || text_len < thresholds->min_chars)
+        return HU_QUALITY_REJECT_TOO_SHORT;
+    if (text_len > thresholds->max_chars)
+        return HU_QUALITY_REJECT_TOO_LONG;
+    if (text_len < HU_QUALITY_ENTROPY_FLOOR_BYTES)
+        return HU_QUALITY_OK;
+    float h = quality_byte_entropy_bits(text, text_len);
+    if (h < thresholds->min_entropy_bits)
+        return HU_QUALITY_REJECT_LOW_ENTROPY;
+    float r = quality_unique_ratio(text, text_len);
+    if (r < thresholds->min_unique_ratio)
+        return HU_QUALITY_REJECT_LOW_UNIQUE_RATIO;
+    return HU_QUALITY_OK;
+}
+
+const char *hu_quality_verdict_name(hu_quality_verdict_t v) {
+    switch (v) {
+    case HU_QUALITY_OK:
+        return "ok";
+    case HU_QUALITY_REJECT_TOO_SHORT:
+        return "too_short";
+    case HU_QUALITY_REJECT_TOO_LONG:
+        return "too_long";
+    case HU_QUALITY_REJECT_LOW_ENTROPY:
+        return "low_entropy";
+    case HU_QUALITY_REJECT_LOW_UNIQUE_RATIO:
+        return "low_unique_ratio";
+    default:
+        return "unknown";
+    }
+}
+
+/* ── Dedup set ─────────────────────────────────────────────────────────── */
+
+/* FNV-1a 64-bit over normalized text:
+ *   - lowercase ASCII letters
+ *   - collapse whitespace runs to a single space
+ *   - strip leading AND trailing whitespace
+ * Two messages that differ only in case or whitespace produce the same
+ * hash. Single-pass, branch-light, no allocation.
+ *
+ * Trailing-whitespace trim uses a "pending space" trick: when we see
+ * whitespace after at least one non-space byte, we don't emit yet —
+ * we set a flag. The next non-space byte flushes the pending space
+ * before being hashed. End-of-input with the flag still set means the
+ * trailing space gets dropped. */
+static uint64_t dedup_normalized_hash(const char *text, size_t len) {
+    const uint64_t FNV_OFFSET = 0xcbf29ce484222325ULL;
+    const uint64_t FNV_PRIME = 0x100000001b3ULL;
+    uint64_t h = FNV_OFFSET;
+    bool seen_non_space = false;
+    bool space_pending = false;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)text[i];
+        if (c == '\0')
+            break;
+        if (c <= ' ') {
+            if (seen_non_space)
+                space_pending = true; /* may be trailing — defer */
+            continue;
+        }
+        if (space_pending) {
+            h ^= (uint64_t)' ';
+            h *= FNV_PRIME;
+            space_pending = false;
+        }
+        if (c >= 'A' && c <= 'Z')
+            c = (unsigned char)(c - 'A' + 'a');
+        h ^= (uint64_t)c;
+        h *= FNV_PRIME;
+        seen_non_space = true;
+    }
+    return h;
+}
+
+hu_error_t hu_dedup_set_init(hu_dedup_set_t *set, size_t initial_capacity) {
+    if (!set)
+        return HU_ERR_INVALID_ARGUMENT;
+    set->hashes = NULL;
+    set->count = 0;
+    set->capacity = 0;
+    if (initial_capacity == 0)
+        return HU_OK;
+    set->hashes = (uint64_t *)calloc(initial_capacity, sizeof(uint64_t));
+    if (!set->hashes)
+        return HU_ERR_OUT_OF_MEMORY;
+    set->capacity = initial_capacity;
+    return HU_OK;
+}
+
+void hu_dedup_set_free(hu_dedup_set_t *set) {
+    if (!set)
+        return;
+    if (set->hashes)
+        free(set->hashes);
+    set->hashes = NULL;
+    set->count = 0;
+    set->capacity = 0;
+}
+
+/* Binary search for `h` in `set->hashes` (sorted ascending). Returns
+ * the leftmost index `i` such that `hashes[i] >= h`, or `count` if `h`
+ * is larger than all entries. */
+static size_t dedup_lower_bound(const hu_dedup_set_t *set, uint64_t h) {
+    size_t lo = 0;
+    size_t hi = set->count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (set->hashes[mid] < h)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
+}
+
+bool hu_dedup_set_check_and_add(hu_dedup_set_t *set,
+                                const char *text, size_t text_len) {
+    if (!set || !text || text_len == 0)
+        return false;
+    uint64_t h = dedup_normalized_hash(text, text_len);
+
+    size_t idx = dedup_lower_bound(set, h);
+    if (idx < set->count && set->hashes[idx] == h)
+        return true; /* duplicate */
+
+    /* Need to insert at idx. Grow if necessary. */
+    if (set->count == set->capacity) {
+        size_t new_cap = set->capacity == 0 ? 32 : set->capacity * 2;
+        uint64_t *grown = (uint64_t *)realloc(set->hashes, new_cap * sizeof(uint64_t));
+        if (!grown) {
+            /* Conservative failure: keep the example, don't poison the
+             * set. The next call will retry the realloc. */
+            return false;
+        }
+        set->hashes = grown;
+        set->capacity = new_cap;
+    }
+    if (idx < set->count) {
+        memmove(&set->hashes[idx + 1], &set->hashes[idx],
+                (set->count - idx) * sizeof(uint64_t));
+    }
+    set->hashes[idx] = h;
+    set->count++;
+    return false;
 }

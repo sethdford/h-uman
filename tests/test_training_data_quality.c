@@ -14,6 +14,7 @@
 #include "human/ml/training_data_quality.h"
 #include "test_framework.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* ── Per-pattern positive ──────────────────────────────────────────── */
@@ -344,6 +345,192 @@ static void pii_corpus_leaves_clean_lines_untouched(void) {
     }
 }
 
+/* ── Quality gate tests ─────────────────────────────────────────────── */
+
+static void quality_defaults_populated(void) {
+    hu_quality_thresholds_t t;
+    memset(&t, 0xff, sizeof(t));
+    hu_quality_thresholds_default(&t);
+    HU_ASSERT_TRUE(t.min_chars > 0 && t.min_chars < 32);
+    HU_ASSERT_TRUE(t.max_chars >= 4096);
+    HU_ASSERT_TRUE(t.min_entropy_bits > 0.f && t.min_entropy_bits < 8.f);
+    HU_ASSERT_TRUE(t.min_unique_ratio > 0.f && t.min_unique_ratio < 1.f);
+}
+
+static void quality_accepts_normal_prose(void) {
+    const char *text =
+        "I had a long day at work and I'm feeling pretty tired now. Want to grab dinner?";
+    HU_ASSERT_EQ(hu_quality_check(text, strlen(text), NULL), HU_QUALITY_OK);
+}
+
+static void quality_rejects_too_short(void) {
+    HU_ASSERT_EQ(hu_quality_check("yo", 2, NULL), HU_QUALITY_REJECT_TOO_SHORT);
+    HU_ASSERT_EQ(hu_quality_check("", 0, NULL), HU_QUALITY_REJECT_TOO_SHORT);
+}
+
+static void quality_rejects_too_long(void) {
+    char big[20000];
+    memset(big, 'a', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    HU_ASSERT_EQ(hu_quality_check(big, sizeof(big) - 1, NULL),
+                 HU_QUALITY_REJECT_TOO_LONG);
+}
+
+static void quality_rejects_low_entropy(void) {
+    /* 64 of the same byte → entropy = 0, fails the 2.5-bit floor. */
+    char garbage[65];
+    memset(garbage, 'a', 64);
+    garbage[64] = '\0';
+    HU_ASSERT_EQ(hu_quality_check(garbage, 64, NULL),
+                 HU_QUALITY_REJECT_LOW_ENTROPY);
+}
+
+static void quality_rejects_low_unique_ratio(void) {
+    /* 64 bytes, alternating 2 chars → entropy = 1.0 bit (caught by
+     * entropy floor first). To exercise the unique-ratio gate we need
+     * something with high entropy but low unique count — hard to
+     * construct. Loosen thresholds to isolate. */
+    hu_quality_thresholds_t t;
+    hu_quality_thresholds_default(&t);
+    t.min_entropy_bits = 0.5f;     /* allow alternating-2-char text */
+    t.min_unique_ratio = 0.10f;    /* require ≥ 10% unique bytes */
+    /* 64 bytes, 2 distinct chars → ratio = 2/64 = 0.031 < 0.10. */
+    char abab[65];
+    for (int i = 0; i < 64; i++)
+        abab[i] = (i & 1) ? 'b' : 'a';
+    abab[64] = '\0';
+    HU_ASSERT_EQ(hu_quality_check(abab, 64, &t),
+                 HU_QUALITY_REJECT_LOW_UNIQUE_RATIO);
+}
+
+static void quality_skips_entropy_check_on_short_text(void) {
+    /* 16 bytes of "a" — under the 32-byte entropy floor, so length is
+     * the only gate. Custom thresholds let it past min_chars=8. */
+    const char *short_repeat = "aaaaaaaaaaaaaaaa"; /* 16 bytes */
+    HU_ASSERT_EQ(hu_quality_check(short_repeat, 16, NULL), HU_QUALITY_OK);
+}
+
+static void quality_verdict_names_are_stable(void) {
+    HU_ASSERT_TRUE(strcmp(hu_quality_verdict_name(HU_QUALITY_OK), "ok") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_quality_verdict_name(HU_QUALITY_REJECT_TOO_SHORT), "too_short") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_quality_verdict_name(HU_QUALITY_REJECT_TOO_LONG), "too_long") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_quality_verdict_name(HU_QUALITY_REJECT_LOW_ENTROPY), "low_entropy") ==
+                   0);
+    HU_ASSERT_TRUE(strcmp(hu_quality_verdict_name(HU_QUALITY_REJECT_LOW_UNIQUE_RATIO),
+                          "low_unique_ratio") == 0);
+}
+
+static void quality_handles_null_text(void) {
+    HU_ASSERT_EQ(hu_quality_check(NULL, 0, NULL), HU_QUALITY_REJECT_TOO_SHORT);
+}
+
+static void quality_custom_thresholds_strict(void) {
+    hu_quality_thresholds_t t;
+    hu_quality_thresholds_default(&t);
+    t.min_chars = 100;
+    /* "Hi there friend, how are you doing today?" is 41 chars → too short. */
+    const char *msg = "Hi there friend, how are you doing today?";
+    HU_ASSERT_EQ(hu_quality_check(msg, strlen(msg), &t), HU_QUALITY_REJECT_TOO_SHORT);
+}
+
+/* ── Dedup set tests ────────────────────────────────────────────────── */
+
+static void dedup_init_zero_capacity_succeeds(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 0), HU_OK);
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 0LL);
+    hu_dedup_set_free(&set);
+}
+
+static void dedup_init_with_capacity_succeeds(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 64), HU_OK);
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 0LL);
+    HU_ASSERT_TRUE(set.capacity >= 64);
+    hu_dedup_set_free(&set);
+}
+
+static void dedup_first_insert_returns_false(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 0), HU_OK);
+    const char *t = "hello world";
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, t, strlen(t)));
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 1LL);
+    hu_dedup_set_free(&set);
+}
+
+static void dedup_second_identical_insert_returns_true(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 0), HU_OK);
+    const char *t = "hello world";
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, t, strlen(t)));
+    HU_ASSERT_TRUE(hu_dedup_set_check_and_add(&set, t, strlen(t)));
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 1LL);
+    hu_dedup_set_free(&set);
+}
+
+static void dedup_normalizes_case(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 0), HU_OK);
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, "Hello World", 11));
+    HU_ASSERT_TRUE(hu_dedup_set_check_and_add(&set, "hello world", 11));
+    HU_ASSERT_TRUE(hu_dedup_set_check_and_add(&set, "HELLO WORLD", 11));
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 1LL);
+    hu_dedup_set_free(&set);
+}
+
+static void dedup_normalizes_whitespace(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 0), HU_OK);
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, "hi   there", 10));
+    HU_ASSERT_TRUE(hu_dedup_set_check_and_add(&set, "hi there", 8));
+    HU_ASSERT_TRUE(hu_dedup_set_check_and_add(&set, "  hi there  ", 12));
+    HU_ASSERT_TRUE(hu_dedup_set_check_and_add(&set, "hi\tthere", 8));
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 1LL);
+    hu_dedup_set_free(&set);
+}
+
+static void dedup_distinguishes_different_content(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 0), HU_OK);
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, "first message", 13));
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, "second message", 14));
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, "third message", 13));
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 3LL);
+    hu_dedup_set_free(&set);
+}
+
+static void dedup_grows_past_initial_capacity(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 4), HU_OK);
+    char buf[64];
+    for (int i = 0; i < 100; i++) {
+        snprintf(buf, sizeof(buf), "training conversation number %d", i);
+        HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, buf, strlen(buf)));
+    }
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 100LL);
+    HU_ASSERT_TRUE(set.capacity >= 100);
+    /* Re-inserting any of them now reports duplicate. */
+    snprintf(buf, sizeof(buf), "training conversation number %d", 42);
+    HU_ASSERT_TRUE(hu_dedup_set_check_and_add(&set, buf, strlen(buf)));
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 100LL);
+    hu_dedup_set_free(&set);
+}
+
+static void dedup_handles_null_args(void) {
+    hu_dedup_set_t set;
+    HU_ASSERT_EQ(hu_dedup_set_init(&set, 0), HU_OK);
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(NULL, "x", 1));
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, NULL, 0));
+    HU_ASSERT_FALSE(hu_dedup_set_check_and_add(&set, "x", 0));
+    HU_ASSERT_EQ((long long)hu_dedup_set_size(&set), 0LL);
+    hu_dedup_set_free(&set);
+    /* Free on a zero-init set is safe. */
+    hu_dedup_set_t empty;
+    memset(&empty, 0, sizeof(empty));
+    hu_dedup_set_free(&empty);
+}
+
 void run_training_data_quality_tests(void);
 void run_training_data_quality_tests(void) {
     HU_TEST_SUITE("training_data_quality");
@@ -369,4 +556,25 @@ void run_training_data_quality_tests(void) {
     HU_RUN_TEST(pii_contains_pii_returns_true_for_email);
     HU_RUN_TEST(pii_corpus_redacts_all_pii_lines);
     HU_RUN_TEST(pii_corpus_leaves_clean_lines_untouched);
+
+    HU_RUN_TEST(quality_defaults_populated);
+    HU_RUN_TEST(quality_accepts_normal_prose);
+    HU_RUN_TEST(quality_rejects_too_short);
+    HU_RUN_TEST(quality_rejects_too_long);
+    HU_RUN_TEST(quality_rejects_low_entropy);
+    HU_RUN_TEST(quality_rejects_low_unique_ratio);
+    HU_RUN_TEST(quality_skips_entropy_check_on_short_text);
+    HU_RUN_TEST(quality_verdict_names_are_stable);
+    HU_RUN_TEST(quality_handles_null_text);
+    HU_RUN_TEST(quality_custom_thresholds_strict);
+
+    HU_RUN_TEST(dedup_init_zero_capacity_succeeds);
+    HU_RUN_TEST(dedup_init_with_capacity_succeeds);
+    HU_RUN_TEST(dedup_first_insert_returns_false);
+    HU_RUN_TEST(dedup_second_identical_insert_returns_true);
+    HU_RUN_TEST(dedup_normalizes_case);
+    HU_RUN_TEST(dedup_normalizes_whitespace);
+    HU_RUN_TEST(dedup_distinguishes_different_content);
+    HU_RUN_TEST(dedup_grows_past_initial_capacity);
+    HU_RUN_TEST(dedup_handles_null_args);
 }

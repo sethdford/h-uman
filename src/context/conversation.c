@@ -6547,13 +6547,12 @@ size_t hu_conversation_strip_ai_phrases(char *buf, size_t len) {
                         len - (i + replacements[r].from_len));
                 len -= diff;
                 buf[len] = '\0';
+                i += replacements[r].to_len;
+                if (i > 0)
+                    i--;
             }
-            break;
         }
     }
-
-    if (len > 0 && buf[0] >= 'a' && buf[0] <= 'z')
-        buf[0] -= 32;
 
     return len;
 }

@@ -329,15 +329,14 @@ static void test_sanitize_preserves_normal_text(void) {
     size_t orig_len = strlen(buf);
     size_t len = imessage_sanitize_output(buf, orig_len);
     HU_ASSERT_EQ(len, orig_len);
-    /* strip_ai_phrases capitalizes first letter */
-    HU_ASSERT_STR_EQ(buf, "Haha yeah that's wild");
+    HU_ASSERT_STR_EQ(buf, "haha yeah that's wild");
 }
 
 static void test_sanitize_collapses_double_spaces(void) {
     char buf[256];
     strcpy(buf, "hello  world");
     size_t len = imessage_sanitize_output(buf, strlen(buf));
-    HU_ASSERT_STR_EQ(buf, "Hello world");
+    HU_ASSERT_STR_EQ(buf, "hello world");
     HU_ASSERT_EQ(len, 11u);
 }
 

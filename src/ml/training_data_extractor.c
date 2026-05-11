@@ -154,6 +154,21 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
     FILE *out_file = NULL;
     size_t count = 0;
 
+    /* Phase A1.2 — quality + dedup gates. Defaults are conservative:
+     * a session whose fingerprint (user+assistant content concatenated)
+     * is too short, low entropy, or a near-dup of a prior session in
+     * this run is dropped before writing. The session is still marked
+     * as extracted so we don't re-evaluate it on the next run. */
+    hu_quality_thresholds_t qthresh;
+    hu_quality_thresholds_default(&qthresh);
+    hu_dedup_set_t dedup;
+    (void)hu_dedup_set_init(&dedup, 256);
+
+    /* Working buffer for fingerprint construction — sized for the
+     * maximum reasonable conversation (msg_entry_t::content is 4 KB,
+     * 16 entries gives 64 KB worst case). */
+    static char fingerprint_buf[65536];
+
     while (sqlite3_step(sess_stmt) == SQLITE_ROW) {
         const char *session_id = (const char *)sqlite3_column_text(sess_stmt, 0);
         if (!session_id || !session_id[0])
@@ -199,6 +214,7 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
                     if (out_file)
                         fclose(out_file);
                     sqlite3_finalize(sess_stmt);
+                    hu_dedup_set_free(&dedup);
                     sqlite3_close(db);
                     return HU_ERR_OUT_OF_MEMORY;
                 }
@@ -238,12 +254,50 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
             continue;
         }
 
+        /* Phase A1.2 — quality + dedup gate. Build a fingerprint from
+         * user+assistant content, then run it through length/entropy
+         * checks and the within-run dedup set. We DON'T include the
+         * system prompt (it's identical across all sessions for the
+         * same persona, so it would mask real content differences). */
+        size_t fp_len = 0;
+        for (size_t i = 0; i < entry_count; i++) {
+            size_t clen = strlen(entries[i].content);
+            if (fp_len + clen + 2 > sizeof(fingerprint_buf))
+                break;
+            memcpy(&fingerprint_buf[fp_len], entries[i].content, clen);
+            fp_len += clen;
+            fingerprint_buf[fp_len++] = '\n';
+        }
+        fingerprint_buf[fp_len] = '\0';
+
+        hu_quality_verdict_t qv = hu_quality_check(fingerprint_buf, fp_len, &qthresh);
+        bool is_dup = false;
+        if (qv == HU_QUALITY_OK)
+            is_dup = hu_dedup_set_check_and_add(&dedup, fingerprint_buf, fp_len);
+
+        if (qv != HU_QUALITY_OK || is_dup) {
+            /* Mark as extracted so we don't keep re-evaluating it. */
+            sqlite3_stmt *skip_mark = NULL;
+            const char *skip_sql =
+                "INSERT OR IGNORE INTO training_data_extractions"
+                "(session_id, extracted_at, example_count) VALUES(?, ?, 0)";
+            if (sqlite3_prepare_v2(db, skip_sql, -1, &skip_mark, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(skip_mark, 1, session_id, -1, SQLITE_STATIC);
+                sqlite3_bind_int64(skip_mark, 2, (int64_t)time(NULL));
+                sqlite3_step(skip_mark);
+                sqlite3_finalize(skip_mark);
+            }
+            alloc->free(alloc->ctx, entries, entry_cap * sizeof(msg_entry_t));
+            continue;
+        }
+
         /* Lazily open the output file. */
         if (!out_file) {
             out_file = fopen(out_path, "w");
             if (!out_file) {
                 alloc->free(alloc->ctx, entries, entry_cap * sizeof(msg_entry_t));
                 sqlite3_finalize(sess_stmt);
+                hu_dedup_set_free(&dedup);
                 sqlite3_close(db);
                 return HU_ERR_IO;
             }
@@ -308,6 +362,7 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
     if (out_file)
         fclose(out_file);
 
+    hu_dedup_set_free(&dedup);
     sqlite3_close(db);
     *extracted_count = count;
     return HU_OK;

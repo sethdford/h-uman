@@ -16,6 +16,7 @@
 #include "human/cognition/metacognition.h"
 #include "human/cognition/trust.h"
 #include "human/context.h"
+#include "human/context/conversation.h"
 #include "human/context/humor.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
@@ -1093,6 +1094,25 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             }
 
             if (safe_content && safe_content_len > 0) {
+                /* Strip AI phrases and formal structure before appending to
+                 * history so that the model's memory matches what the user
+                 * actually sees (the daemon applies the same strips after
+                 * the agent returns, but by then history is already set). */
+                if (!safe_owned) {
+                    char *copy = hu_strndup(agent->alloc, safe_content, safe_content_len);
+                    if (copy) {
+                        safe_content = copy;
+                        safe_owned = true;
+                    }
+                }
+                if (safe_owned) {
+                    safe_content_len =
+                        hu_conversation_strip_channel_tags(safe_content, safe_content_len);
+                    safe_content_len =
+                        hu_conversation_strip_ai_phrases(safe_content, safe_content_len);
+                    safe_content_len =
+                        hu_conversation_strip_formal_structure(safe_content, safe_content_len);
+                }
                 hu_error_t hist_err = hu_agent_internal_append_history(
                     agent, HU_ROLE_ASSISTANT, safe_content, safe_content_len, NULL, 0, NULL, 0);
                 if (hist_err != HU_OK)

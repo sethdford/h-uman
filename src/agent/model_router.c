@@ -186,13 +186,13 @@ static void apply_tier_to_selection(hu_model_selection_t *sel, const hu_model_ro
             sel->model_len = cfg->reflexive_model_len;
         }
         sel->thinking_budget = 0;
-        sel->temperature = 0.9;
+        sel->temperature = 0.6;
     } else if (score <= 3) {
         sel->tier = HU_TIER_CONVERSATIONAL;
         sel->model = cfg->conversational_model;
         sel->model_len = cfg->conversational_model_len;
         sel->thinking_budget = 1024;
-        sel->temperature = 0.8;
+        sel->temperature = 0.7;
     } else if (score <= 6) {
         sel->tier = HU_TIER_ANALYTICAL;
         sel->model = cfg->analytical_model;

@@ -2942,6 +2942,17 @@ static void strip_double_exclamation(void) {
     HU_ASSERT_NULL(strstr(buf, "!!"));
 }
 
+static void strip_ai_phrases_multi_pass(void) {
+    char buf[512];
+    const char *input = "I'd be happy to help! I'd be happy to help!";
+    size_t input_len = strlen(input);
+    memcpy(buf, input, input_len);
+    buf[input_len] = '\0';
+    size_t len = hu_conversation_strip_ai_phrases(buf, input_len);
+    HU_ASSERT_NULL(strstr(buf, "happy to"));
+    HU_ASSERT_TRUE(len < input_len);
+}
+
 /* ── Hallucinated channel tag stripping ────────────────────────────── */
 
 static void strip_channel_tag_paired(void) {
@@ -4168,6 +4179,7 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(strip_dont_hesitate);
     HU_RUN_TEST(strip_happy_to);
     HU_RUN_TEST(strip_double_exclamation);
+    HU_RUN_TEST(strip_ai_phrases_multi_pass);
 
     /* Hallucinated channel tag stripping */
     HU_RUN_TEST(strip_channel_tag_paired);
