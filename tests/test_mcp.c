@@ -6,32 +6,32 @@
 #include "test_framework.h"
 #include <string.h>
 
-static void test_mcp_server_create_destroy(void) {
+static void test_mcp_client_create_destroy(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
     HU_ASSERT_NOT_NULL(srv);
-    hu_mcp_server_destroy(srv);
+    hu_mcp_client_destroy(srv);
 }
 
-static void test_mcp_server_connect_test_mode(void) {
+static void test_mcp_client_connect_test_mode(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
     HU_ASSERT_NOT_NULL(srv);
-    hu_error_t err = hu_mcp_server_connect(srv);
+    hu_error_t err = hu_mcp_client_connect(srv);
     HU_ASSERT_EQ(err, HU_OK);
-    hu_mcp_server_destroy(srv);
+    hu_mcp_client_destroy(srv);
 }
 
-static void test_mcp_server_list_tools_mock(void) {
+static void test_mcp_client_list_tools_mock(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
-    hu_mcp_server_connect(srv);
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
+    hu_mcp_client_connect(srv);
     char **names = NULL, **descs = NULL, **params = NULL;
     size_t count = 0;
-    hu_error_t err = hu_mcp_server_list_tools(srv, &alloc, &names, &descs, &params, &count);
+    hu_error_t err = hu_mcp_client_list_tools(srv, &alloc, &names, &descs, &params, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 1u);
     HU_ASSERT_STR_EQ(names[0], "mock_tool");
@@ -46,26 +46,26 @@ static void test_mcp_server_list_tools_mock(void) {
     alloc.free(alloc.ctx, names, count * sizeof(char *));
     alloc.free(alloc.ctx, descs, count * sizeof(char *));
     alloc.free(alloc.ctx, params, count * sizeof(char *));
-    hu_mcp_server_destroy(srv);
+    hu_mcp_client_destroy(srv);
 }
 
-static void test_mcp_server_call_tool_mock(void) {
+static void test_mcp_client_call_tool_mock(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
-    hu_mcp_server_connect(srv);
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
+    hu_mcp_client_connect(srv);
     char *result = NULL;
     size_t result_len = 0;
-    hu_error_t err = hu_mcp_server_call_tool(srv, &alloc, "mock_tool", "{}", &result, &result_len);
+    hu_error_t err = hu_mcp_client_call_tool(srv, &alloc, "mock_tool", "{}", &result, &result_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(result);
     alloc.free(alloc.ctx, result, result_len + 1);
-    hu_mcp_server_destroy(srv);
+    hu_mcp_client_destroy(srv);
 }
 
 static void test_mcp_init_tools_mock(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
     hu_tool_t *tools = NULL;
     size_t count = 0;
     hu_error_t err = hu_mcp_init_tools(&alloc, &cfg, 1, &tools, &count);
@@ -74,7 +74,7 @@ static void test_mcp_init_tools_mock(void) {
     hu_mcp_free_tools(&alloc, tools, count);
 }
 
-/* ── MCP Host (server mode) tests ────────────────────────────────────────── */
+/* ── MCP Engine (server mode) tests ──────────────────────────────────────── */
 
 static hu_error_t mock_tool_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
                                     hu_tool_result_t *out) {
@@ -102,7 +102,7 @@ static const char *mock_tool_params(void *ctx) {
     return "{\"type\":\"object\",\"properties\":{}}";
 }
 
-static const hu_tool_vtable_t mock_host_vtable = {
+static const hu_tool_vtable_t mock_engine_vtable = {
     .execute = mock_tool_execute,
     .name = mock_tool_name,
     .description = mock_tool_desc,
@@ -110,97 +110,97 @@ static const hu_tool_vtable_t mock_host_vtable = {
     .deinit = NULL,
 };
 
-static void test_mcp_host_create_destroy(void) {
+static void test_mcp_engine_create_destroy(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t tools[1];
     tools[0].ctx = NULL;
-    tools[0].vtable = &mock_host_vtable;
+    tools[0].vtable = &mock_engine_vtable;
 
-    hu_mcp_host_t *host = NULL;
-    hu_error_t err = hu_mcp_host_create(&alloc, tools, 1, NULL, &host);
+    hu_mcp_engine_t *engine = NULL;
+    hu_error_t err = hu_mcp_engine_create(&alloc, tools, 1, NULL, &engine);
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(host);
-    hu_mcp_host_destroy(host);
+    HU_ASSERT_NOT_NULL(engine);
+    hu_mcp_engine_destroy(engine);
 }
 
-static void test_mcp_host_create_null_alloc(void) {
-    hu_mcp_host_t *host = NULL;
-    hu_error_t err = hu_mcp_host_create(NULL, NULL, 0, NULL, &host);
+static void test_mcp_engine_create_null_alloc(void) {
+    hu_mcp_engine_t *engine = NULL;
+    hu_error_t err = hu_mcp_engine_create(NULL, NULL, 0, NULL, &engine);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
-static void test_mcp_host_create_null_out(void) {
+static void test_mcp_engine_create_null_out(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_error_t err = hu_mcp_host_create(&alloc, NULL, 0, NULL, NULL);
+    hu_error_t err = hu_mcp_engine_create(&alloc, NULL, 0, NULL, NULL);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
-static void test_mcp_host_create_zero_tools(void) {
+static void test_mcp_engine_create_zero_tools(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_host_t *host = NULL;
-    hu_error_t err = hu_mcp_host_create(&alloc, NULL, 0, NULL, &host);
+    hu_mcp_engine_t *engine = NULL;
+    hu_error_t err = hu_mcp_engine_create(&alloc, NULL, 0, NULL, &engine);
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(host);
-    hu_mcp_host_destroy(host);
+    HU_ASSERT_NOT_NULL(engine);
+    hu_mcp_engine_destroy(engine);
 }
 
-static void test_mcp_host_run_null(void) {
-    hu_error_t err = hu_mcp_host_run(NULL);
+static void test_mcp_engine_run_null(void) {
+    hu_error_t err = hu_mcp_engine_run(NULL);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
-static void test_mcp_host_destroy_null(void) {
-    hu_mcp_host_destroy(NULL); /* should not crash */
+static void test_mcp_engine_destroy_null(void) {
+    hu_mcp_engine_destroy(NULL); /* should not crash */
 }
 
-static void test_mcp_host_create_with_memory(void) {
+static void test_mcp_engine_create_with_memory(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_none_memory_create(&alloc);
     HU_ASSERT_NOT_NULL(mem.vtable);
     hu_tool_t tools[1];
     tools[0].ctx = NULL;
-    tools[0].vtable = &mock_host_vtable;
-    hu_mcp_host_t *host = NULL;
-    hu_error_t err = hu_mcp_host_create(&alloc, tools, 1, &mem, &host);
+    tools[0].vtable = &mock_engine_vtable;
+    hu_mcp_engine_t *engine = NULL;
+    hu_error_t err = hu_mcp_engine_create(&alloc, tools, 1, &mem, &engine);
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(host);
-    hu_mcp_host_destroy(host);
+    HU_ASSERT_NOT_NULL(engine);
+    hu_mcp_engine_destroy(engine);
     if (mem.vtable && mem.vtable->deinit)
         mem.vtable->deinit(mem.ctx);
 }
 
-static void test_mcp_server_null_config_fails(void) {
+static void test_mcp_client_null_config_fails(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, NULL);
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, NULL);
     HU_ASSERT_NULL(srv);
 }
 
-static void test_mcp_server_call_tool_nonexistent(void) {
+static void test_mcp_client_call_tool_nonexistent(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
     HU_ASSERT_NOT_NULL(srv);
-    hu_mcp_server_connect(srv);
+    hu_mcp_client_connect(srv);
     char *result = NULL;
     size_t result_len = 0;
     hu_error_t err =
-        hu_mcp_server_call_tool(srv, &alloc, "nonexistent_tool", "{}", &result, &result_len);
+        hu_mcp_client_call_tool(srv, &alloc, "nonexistent_tool", "{}", &result, &result_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(result);
     alloc.free(alloc.ctx, result, result_len + 1);
-    hu_mcp_server_destroy(srv);
+    hu_mcp_client_destroy(srv);
 }
 
-static void test_mcp_server_double_connect(void) {
+static void test_mcp_client_double_connect(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
     HU_ASSERT_NOT_NULL(srv);
-    hu_error_t err1 = hu_mcp_server_connect(srv);
-    hu_error_t err2 = hu_mcp_server_connect(srv);
+    hu_error_t err1 = hu_mcp_client_connect(srv);
+    hu_error_t err2 = hu_mcp_client_connect(srv);
     HU_ASSERT_EQ(err1, HU_OK);
     HU_ASSERT_EQ(err2, HU_OK);
-    hu_mcp_server_destroy(srv);
+    hu_mcp_client_destroy(srv);
 }
 
 static void test_mcp_init_tools_null_alloc(void) {
@@ -220,7 +220,7 @@ static void test_mcp_init_tools_zero_configs(void) {
     HU_ASSERT_EQ(count, 0u);
 }
 
-static void test_mcp_host_create_many_tools(void) {
+static void test_mcp_engine_create_many_tools(void) {
     hu_allocator_t alloc = hu_system_allocator();
     static const hu_tool_vtable_t vt = {
         .execute = mock_tool_execute,
@@ -234,21 +234,21 @@ static void test_mcp_host_create_many_tools(void) {
         tools[i].ctx = NULL;
         tools[i].vtable = &vt;
     }
-    hu_mcp_host_t *host = NULL;
-    hu_error_t err = hu_mcp_host_create(&alloc, tools, 6, NULL, &host);
+    hu_mcp_engine_t *engine = NULL;
+    hu_error_t err = hu_mcp_engine_create(&alloc, tools, 6, NULL, &engine);
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(host);
-    hu_mcp_host_destroy(host);
+    HU_ASSERT_NOT_NULL(engine);
+    hu_mcp_engine_destroy(engine);
 }
 
-static void test_mcp_server_list_tools_not_connected(void) {
+static void test_mcp_client_list_tools_not_connected(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
     HU_ASSERT_NOT_NULL(srv);
     char **names = NULL, **descs = NULL, **params = NULL;
     size_t count = 0;
-    hu_error_t err = hu_mcp_server_list_tools(srv, &alloc, &names, &descs, &params, &count);
+    hu_error_t err = hu_mcp_client_list_tools(srv, &alloc, &names, &descs, &params, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count >= 1);
     for (size_t i = 0; i < count; i++) {
@@ -261,12 +261,12 @@ static void test_mcp_server_list_tools_not_connected(void) {
     alloc.free(alloc.ctx, descs, count * sizeof(char *));
     if (params)
         alloc.free(alloc.ctx, params, count * sizeof(char *));
-    hu_mcp_server_destroy(srv);
+    hu_mcp_client_destroy(srv);
 }
 
 static void test_mcp_init_tools_null_out_rejected(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
     hu_tool_t *tools = NULL;
     size_t count = 0;
     hu_error_t err = hu_mcp_init_tools(&alloc, &cfg, 1, NULL, &count);
@@ -275,23 +275,23 @@ static void test_mcp_init_tools_null_out_rejected(void) {
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
-static void test_mcp_host_create_null_alloc_rejected(void) {
-    hu_tool_t tools[1] = {{.ctx = NULL, .vtable = &mock_host_vtable}};
-    hu_mcp_host_t *host = NULL;
-    hu_error_t err = hu_mcp_host_create(NULL, tools, 1, NULL, &host);
+static void test_mcp_engine_create_null_alloc_rejected(void) {
+    hu_tool_t tools[1] = {{.ctx = NULL, .vtable = &mock_engine_vtable}};
+    hu_mcp_engine_t *engine = NULL;
+    hu_error_t err = hu_mcp_engine_create(NULL, tools, 1, NULL, &engine);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
-static void test_mcp_server_create_null_command_fails(void) {
+static void test_mcp_client_create_null_command_fails(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = NULL, .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
+    hu_mcp_client_config_t cfg = {.command = NULL, .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
     HU_ASSERT_NULL(srv);
 }
 
-static void test_mcp_server_create_null_alloc_fails(void) {
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(NULL, &cfg);
+static void test_mcp_client_create_null_alloc_fails(void) {
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(NULL, &cfg);
     HU_ASSERT_NULL(srv);
 }
 
@@ -302,28 +302,28 @@ static void test_mcp_free_tools_null_safe(void) {
 
 void run_mcp_tests(void) {
     HU_TEST_SUITE("MCP Client");
-    HU_RUN_TEST(test_mcp_server_create_destroy);
-    HU_RUN_TEST(test_mcp_server_connect_test_mode);
-    HU_RUN_TEST(test_mcp_server_list_tools_mock);
-    HU_RUN_TEST(test_mcp_server_call_tool_mock);
+    HU_RUN_TEST(test_mcp_client_create_destroy);
+    HU_RUN_TEST(test_mcp_client_connect_test_mode);
+    HU_RUN_TEST(test_mcp_client_list_tools_mock);
+    HU_RUN_TEST(test_mcp_client_call_tool_mock);
     HU_RUN_TEST(test_mcp_init_tools_mock);
 
-    HU_TEST_SUITE("MCP Host (Server)");
-    HU_RUN_TEST(test_mcp_host_create_destroy);
-    HU_RUN_TEST(test_mcp_host_create_null_alloc);
-    HU_RUN_TEST(test_mcp_host_create_null_out);
-    HU_RUN_TEST(test_mcp_host_create_zero_tools);
-    HU_RUN_TEST(test_mcp_host_run_null);
-    HU_RUN_TEST(test_mcp_host_destroy_null);
-    HU_RUN_TEST(test_mcp_host_create_with_memory);
-    HU_RUN_TEST(test_mcp_host_create_many_tools);
-    HU_RUN_TEST(test_mcp_host_create_null_alloc_rejected);
-    HU_RUN_TEST(test_mcp_server_null_config_fails);
-    HU_RUN_TEST(test_mcp_server_create_null_command_fails);
-    HU_RUN_TEST(test_mcp_server_create_null_alloc_fails);
-    HU_RUN_TEST(test_mcp_server_call_tool_nonexistent);
-    HU_RUN_TEST(test_mcp_server_double_connect);
-    HU_RUN_TEST(test_mcp_server_list_tools_not_connected);
+    HU_TEST_SUITE("MCP Engine (Server)");
+    HU_RUN_TEST(test_mcp_engine_create_destroy);
+    HU_RUN_TEST(test_mcp_engine_create_null_alloc);
+    HU_RUN_TEST(test_mcp_engine_create_null_out);
+    HU_RUN_TEST(test_mcp_engine_create_zero_tools);
+    HU_RUN_TEST(test_mcp_engine_run_null);
+    HU_RUN_TEST(test_mcp_engine_destroy_null);
+    HU_RUN_TEST(test_mcp_engine_create_with_memory);
+    HU_RUN_TEST(test_mcp_engine_create_many_tools);
+    HU_RUN_TEST(test_mcp_engine_create_null_alloc_rejected);
+    HU_RUN_TEST(test_mcp_client_null_config_fails);
+    HU_RUN_TEST(test_mcp_client_create_null_command_fails);
+    HU_RUN_TEST(test_mcp_client_create_null_alloc_fails);
+    HU_RUN_TEST(test_mcp_client_call_tool_nonexistent);
+    HU_RUN_TEST(test_mcp_client_double_connect);
+    HU_RUN_TEST(test_mcp_client_list_tools_not_connected);
     HU_RUN_TEST(test_mcp_init_tools_null_alloc);
     HU_RUN_TEST(test_mcp_init_tools_zero_configs);
     HU_RUN_TEST(test_mcp_init_tools_null_out_rejected);

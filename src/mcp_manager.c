@@ -20,8 +20,8 @@
 
 typedef struct hu_mcp_mgr_slot {
     char *name;
-    hu_mcp_server_t *server;
-    hu_mcp_server_config_t config;
+    hu_mcp_client_t *server;
+    hu_mcp_client_config_t config;
     hu_mcp_transport_t transport;  /* For HTTP/SSE transports */
     char *transport_type;          /* "stdio", "http", or "sse" */
     char *url;                     /* For HTTP/SSE transports */
@@ -64,7 +64,7 @@ static void free_str(hu_allocator_t *alloc, char *s) {
 
 static void slot_destroy(hu_allocator_t *alloc, hu_mcp_mgr_slot_t *slot) {
     if (slot->server)
-        hu_mcp_server_destroy(slot->server);
+        hu_mcp_client_destroy(slot->server);
     if (slot->transport.ctx || slot->transport.send || slot->transport.recv || slot->transport.close)
         hu_mcp_transport_destroy(&slot->transport, alloc);
     free_str(alloc, slot->name);
@@ -137,7 +137,7 @@ hu_error_t hu_mcp_manager_create(hu_allocator_t *alloc,
         }
 
         if (is_stdio) {
-            hu_mcp_server_config_t cfg = {
+            hu_mcp_client_config_t cfg = {
                 .command = e->command,
                 .args = (const char **)e->args,
                 .args_count = e->args_count,
@@ -248,13 +248,13 @@ static hu_error_t connect_slot(hu_allocator_t *alloc, hu_mcp_mgr_slot_t *slot) {
         if (slot->server)
             return HU_OK;
 
-        hu_mcp_server_t *srv = hu_mcp_server_create(alloc, &slot->config);
+        hu_mcp_client_t *srv = hu_mcp_client_create(alloc, &slot->config);
         if (!srv)
             return HU_ERR_IO;
 
-        hu_error_t err = hu_mcp_server_connect(srv);
+        hu_error_t err = hu_mcp_client_connect(srv);
         if (err != HU_OK) {
-            hu_mcp_server_destroy(srv);
+            hu_mcp_client_destroy(srv);
             return err;
         }
 
@@ -473,7 +473,7 @@ static hu_error_t mgr_tool_execute(void *ctx, hu_allocator_t *alloc, const hu_js
 
     char *result = NULL;
     size_t result_len = 0;
-    hu_error_t err = hu_mcp_server_call_tool(slot->server, alloc, w->original_name, args_json,
+    hu_error_t err = hu_mcp_client_call_tool(slot->server, alloc, w->original_name, args_json,
                                              &result, &result_len);
     if (args_allocated && args_json)
         alloc->free(alloc->ctx, args_json, args_len + 1);
@@ -564,7 +564,7 @@ hu_error_t hu_mcp_manager_load_tools(hu_mcp_manager_t *mgr, hu_allocator_t *allo
 
         if (slot->server) {
             /* stdio-based server: use native MCP protocol */
-            err = hu_mcp_server_list_tools(slot->server, alloc, &names, &descs, &params, &n);
+            err = hu_mcp_client_list_tools(slot->server, alloc, &names, &descs, &params, &n);
 #if HU_ENABLE_CURL
         } else if (slot->url) {
             /* HTTP/SSE-based server: use JSON-RPC tools/list over HTTP */
@@ -824,7 +824,7 @@ hu_error_t hu_mcp_manager_call_tool(hu_mcp_manager_t *mgr, hu_allocator_t *alloc
 
         /* stdio-based server */
         if (mgr->slots[i].server) {
-            return hu_mcp_server_call_tool(mgr->slots[i].server, alloc, tool_name, args_json,
+            return hu_mcp_client_call_tool(mgr->slots[i].server, alloc, tool_name, args_json,
                                            out_result, out_result_len);
         }
 

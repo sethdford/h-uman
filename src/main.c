@@ -2404,8 +2404,8 @@ static hu_error_t cmd_mcp(hu_allocator_t *alloc, int argc, char **argv) {
         hu_mcp_resource_register(&mcp_res, uri, tn, td, "application/json");
     }
 
-    hu_mcp_host_t *srv = NULL;
-    err = hu_mcp_host_create(alloc, tools, tool_count, NULL, &srv);
+    hu_mcp_engine_t *srv = NULL;
+    err = hu_mcp_engine_create(alloc, tools, tool_count, NULL, &srv);
     if (err != HU_OK) {
         hu_tools_destroy_default(alloc, tools, tool_count);
         if (mcp_pool)
@@ -2413,12 +2413,12 @@ static hu_error_t cmd_mcp(hu_allocator_t *alloc, int argc, char **argv) {
         hu_config_deinit(&cfg);
         return err;
     }
-    hu_mcp_host_set_resources(srv, &mcp_res);
-    hu_mcp_host_set_prompts(srv, &mcp_pr);
+    hu_mcp_engine_set_resources(srv, &mcp_res);
+    hu_mcp_engine_set_prompts(srv, &mcp_pr);
 
-    err = hu_mcp_host_run(srv);
+    err = hu_mcp_engine_run(srv);
 
-    hu_mcp_host_destroy(srv);
+    hu_mcp_engine_destroy(srv);
     hu_tools_destroy_default(alloc, tools, tool_count);
     if (mcp_pool)
         hu_agent_pool_destroy(mcp_pool);

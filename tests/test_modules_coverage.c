@@ -20,17 +20,17 @@
 
 /* ─── MCP tests ─────────────────────────────────────────────────────────── */
 
-static void test_mcp_server_create_destroy_valid(void) {
+static void test_mcp_client_create_destroy_valid(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, &cfg);
+    hu_mcp_client_config_t cfg = {.command = "echo", .args = NULL, .args_count = 0};
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, &cfg);
     HU_ASSERT_NOT_NULL(srv);
-    hu_mcp_server_destroy(srv);
+    hu_mcp_client_destroy(srv);
 }
 
-static void test_mcp_server_create_null_config_returns_null(void) {
+static void test_mcp_client_create_null_config_returns_null(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_mcp_server_t *srv = hu_mcp_server_create(&alloc, NULL);
+    hu_mcp_client_t *srv = hu_mcp_client_create(&alloc, NULL);
     HU_ASSERT_NULL(srv);
 }
 
@@ -473,8 +473,8 @@ static void test_dispatch_send_test_mode(void) {
 
 void run_modules_coverage_tests(void) {
     HU_TEST_SUITE("Modules coverage: MCP");
-    HU_RUN_TEST(test_mcp_server_create_destroy_valid);
-    HU_RUN_TEST(test_mcp_server_create_null_config_returns_null);
+    HU_RUN_TEST(test_mcp_client_create_destroy_valid);
+    HU_RUN_TEST(test_mcp_client_create_null_config_returns_null);
     HU_RUN_TEST(test_mcp_init_tools_empty_configs_returns_ok);
 
     HU_TEST_SUITE("Modules coverage: Tunnel");

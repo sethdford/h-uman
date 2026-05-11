@@ -22,9 +22,9 @@
 #define MCP_LINE_BUF_INIT    256
 #define MCP_REQUEST_BUF_INIT 512
 
-struct hu_mcp_server {
+struct hu_mcp_client {
     hu_allocator_t *alloc;
-    hu_mcp_server_config_t config;
+    hu_mcp_client_config_t config;
 #if !defined(HU_IS_TEST) || HU_IS_TEST == 0
     pid_t child_pid;
 #endif
@@ -38,7 +38,7 @@ struct hu_mcp_server {
 
 #if !defined(HU_IS_TEST) || HU_IS_TEST == 0
 
-static hu_error_t read_line(hu_mcp_server_t *srv, hu_allocator_t *alloc, char **out_line,
+static hu_error_t read_line(hu_mcp_client_t *srv, hu_allocator_t *alloc, char **out_line,
                             size_t *out_len) {
     size_t cap = MCP_LINE_BUF_INIT;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
@@ -76,7 +76,7 @@ static hu_error_t read_line(hu_mcp_server_t *srv, hu_allocator_t *alloc, char **
     return HU_OK;
 }
 
-static hu_error_t send_request(hu_mcp_server_t *srv, hu_allocator_t *alloc, const char *method,
+static hu_error_t send_request(hu_mcp_client_t *srv, hu_allocator_t *alloc, const char *method,
                                const char *params_json, bool is_notification,
                                hu_json_value_t **out_result) {
     hu_json_buf_t req_buf;
@@ -159,10 +159,10 @@ fail:
 
 /* ── Public API ───────────────────────────────────────────────────────────── */
 
-hu_mcp_server_t *hu_mcp_server_create(hu_allocator_t *alloc, const hu_mcp_server_config_t *config) {
+hu_mcp_client_t *hu_mcp_client_create(hu_allocator_t *alloc, const hu_mcp_client_config_t *config) {
     if (!alloc || !config || !config->command)
         return NULL;
-    hu_mcp_server_t *srv = (hu_mcp_server_t *)alloc->alloc(alloc->ctx, sizeof(*srv));
+    hu_mcp_client_t *srv = (hu_mcp_client_t *)alloc->alloc(alloc->ctx, sizeof(*srv));
     if (!srv)
         return NULL;
     memset(srv, 0, sizeof(*srv));
@@ -178,7 +178,7 @@ hu_mcp_server_t *hu_mcp_server_create(hu_allocator_t *alloc, const hu_mcp_server
     return srv;
 }
 
-hu_error_t hu_mcp_server_connect(hu_mcp_server_t *srv) {
+hu_error_t hu_mcp_client_connect(hu_mcp_client_t *srv) {
     if (!srv)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -236,23 +236,23 @@ hu_error_t hu_mcp_server_connect(hu_mcp_server_t *srv) {
     hu_json_value_t *init_resp = NULL;
     hu_error_t err = send_request(srv, srv->alloc, "initialize", init_params, false, &init_resp);
     if (err != HU_OK) {
-        hu_mcp_server_destroy(srv);
+        hu_mcp_client_destroy(srv);
         return err;
     }
 
     if (!init_resp) {
-        hu_mcp_server_destroy(srv);
+        hu_mcp_client_destroy(srv);
         return HU_ERR_IO;
     }
     hu_json_value_t *result = hu_json_object_get(init_resp, "result");
     if (!result || result->type != HU_JSON_OBJECT) {
         hu_json_free(srv->alloc, init_resp);
-        hu_mcp_server_destroy(srv);
+        hu_mcp_client_destroy(srv);
         return HU_ERR_IO;
     }
     if (!hu_json_object_get(result, "protocolVersion")) {
         hu_json_free(srv->alloc, init_resp);
-        hu_mcp_server_destroy(srv);
+        hu_mcp_client_destroy(srv);
         return HU_ERR_IO;
     }
     hu_json_free(srv->alloc, init_resp);
@@ -260,7 +260,7 @@ hu_error_t hu_mcp_server_connect(hu_mcp_server_t *srv) {
     /* Send initialized notification */
     err = send_request(srv, srv->alloc, "notifications/initialized", "{}", true, NULL);
     if (err != HU_OK) {
-        hu_mcp_server_destroy(srv);
+        hu_mcp_client_destroy(srv);
         return err;
     }
 
@@ -269,7 +269,7 @@ hu_error_t hu_mcp_server_connect(hu_mcp_server_t *srv) {
 #endif
 }
 
-hu_error_t hu_mcp_server_list_tools(hu_mcp_server_t *srv, hu_allocator_t *alloc, char ***out_names,
+hu_error_t hu_mcp_client_list_tools(hu_mcp_client_t *srv, hu_allocator_t *alloc, char ***out_names,
                                     char ***out_descriptions, char ***out_params,
                                     size_t *out_count) {
     if (!srv || !alloc || !out_names || !out_descriptions || !out_params || !out_count)
@@ -413,7 +413,7 @@ hu_error_t hu_mcp_server_list_tools(hu_mcp_server_t *srv, hu_allocator_t *alloc,
 #endif
 }
 
-hu_error_t hu_mcp_server_call_tool(hu_mcp_server_t *srv, hu_allocator_t *alloc,
+hu_error_t hu_mcp_client_call_tool(hu_mcp_client_t *srv, hu_allocator_t *alloc,
                                    const char *tool_name, const char *args_json, char **out_result,
                                    size_t *out_result_len) {
     if (!srv || !alloc || !tool_name || !out_result || !out_result_len)
@@ -516,7 +516,7 @@ call_tool_fail:
 #endif
 }
 
-hu_error_t hu_mcp_server_reconnect(hu_mcp_server_t *srv) {
+hu_error_t hu_mcp_client_reconnect(hu_mcp_client_t *srv) {
     if (!srv)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -538,10 +538,10 @@ hu_error_t hu_mcp_server_reconnect(hu_mcp_server_t *srv) {
 #endif
     srv->connected = false;
     srv->next_id = 1;
-    return hu_mcp_server_connect(srv);
+    return hu_mcp_client_connect(srv);
 }
 
-hu_error_t hu_mcp_server_refresh_tools(hu_mcp_server_t *srv, hu_allocator_t *alloc,
+hu_error_t hu_mcp_client_refresh_tools(hu_mcp_client_t *srv, hu_allocator_t *alloc,
                                        hu_tool_t **out_tools, size_t *out_count) {
     if (!srv || !alloc || !out_tools || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -550,7 +550,7 @@ hu_error_t hu_mcp_server_refresh_tools(hu_mcp_server_t *srv, hu_allocator_t *all
 
     char **names = NULL, **descs = NULL, **params = NULL;
     size_t tool_count = 0;
-    hu_error_t err = hu_mcp_server_list_tools(srv, alloc, &names, &descs, &params, &tool_count);
+    hu_error_t err = hu_mcp_client_list_tools(srv, alloc, &names, &descs, &params, &tool_count);
     if (err != HU_OK)
         return err;
 
@@ -586,11 +586,11 @@ hu_error_t hu_mcp_server_refresh_tools(hu_mcp_server_t *srv, hu_allocator_t *all
     alloc->free(alloc->ctx, tools, tool_count * sizeof(hu_tool_t));
 
     /* For a proper refresh, use hu_mcp_init_tools with a single-server config */
-    hu_mcp_server_config_t cfg = srv->config;
+    hu_mcp_client_config_t cfg = srv->config;
     return hu_mcp_init_tools(alloc, &cfg, 1, out_tools, out_count);
 }
 
-void hu_mcp_server_destroy(hu_mcp_server_t *srv) {
+void hu_mcp_client_destroy(hu_mcp_client_t *srv) {
     if (!srv)
         return;
 
@@ -617,7 +617,7 @@ void hu_mcp_server_destroy(hu_mcp_server_t *srv) {
 
 typedef struct hu_mcp_tool_wrapper {
     hu_allocator_t *alloc;
-    hu_mcp_server_t *server;
+    hu_mcp_client_t *server;
     bool owns_server;
     char *original_name;
     char *prefixed_name;
@@ -645,7 +645,7 @@ static hu_error_t mcp_tool_execute(void *ctx, hu_allocator_t *alloc, const hu_js
 
     char *result = NULL;
     size_t result_len = 0;
-    hu_error_t err = hu_mcp_server_call_tool(w->server, alloc, w->original_name, args_json, &result,
+    hu_error_t err = hu_mcp_client_call_tool(w->server, alloc, w->original_name, args_json, &result,
                                              &result_len);
     if (args_allocated && args_json)
         alloc->free(alloc->ctx, args_json, args_len + 1);
@@ -692,7 +692,7 @@ static void mcp_tool_deinit(void *ctx, hu_allocator_t *alloc) {
     if (w->params_json)
         alloc->free(alloc->ctx, w->params_json, strlen(w->params_json) + 1);
     if (w->owns_server)
-        hu_mcp_server_destroy(w->server);
+        hu_mcp_client_destroy(w->server);
     alloc->free(alloc->ctx, w, sizeof(*w));
 }
 
@@ -706,7 +706,7 @@ static const hu_tool_vtable_t mcp_tool_vtable = {
 
 /* ── hu_mcp_init_tools / hu_mcp_free_tools ─────────────────────────────────── */
 
-hu_error_t hu_mcp_init_tools(hu_allocator_t *alloc, const hu_mcp_server_config_t *server_configs,
+hu_error_t hu_mcp_init_tools(hu_allocator_t *alloc, const hu_mcp_client_config_t *server_configs,
                              size_t config_count, hu_tool_t **out_tools, size_t *out_count) {
     if (!alloc || !out_tools || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -718,37 +718,37 @@ hu_error_t hu_mcp_init_tools(hu_allocator_t *alloc, const hu_mcp_server_config_t
 
     size_t total = 0;
     hu_tool_t *all = NULL;
-    hu_mcp_server_t **servers = NULL;
+    hu_mcp_client_t **servers = NULL;
     size_t *counts = NULL;
 
     servers =
-        (hu_mcp_server_t **)alloc->alloc(alloc->ctx, config_count * sizeof(hu_mcp_server_t *));
+        (hu_mcp_client_t **)alloc->alloc(alloc->ctx, config_count * sizeof(hu_mcp_client_t *));
     counts = (size_t *)alloc->alloc(alloc->ctx, config_count * sizeof(size_t));
     if (!servers || !counts) {
         if (servers)
-            alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_server_t *));
+            alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_client_t *));
         if (counts)
             alloc->free(alloc->ctx, counts, config_count * sizeof(size_t));
         return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(servers, 0, config_count * sizeof(hu_mcp_server_t *));
+    memset(servers, 0, config_count * sizeof(hu_mcp_client_t *));
     memset(counts, 0, config_count * sizeof(size_t));
 
     for (size_t i = 0; i < config_count; i++) {
-        hu_mcp_server_t *srv = hu_mcp_server_create(alloc, &server_configs[i]);
+        hu_mcp_client_t *srv = hu_mcp_client_create(alloc, &server_configs[i]);
         if (!srv)
             continue;
-        hu_error_t err = hu_mcp_server_connect(srv);
+        hu_error_t err = hu_mcp_client_connect(srv);
         if (err != HU_OK) {
-            hu_mcp_server_destroy(srv);
+            hu_mcp_client_destroy(srv);
             continue;
         }
 
         char **names = NULL, **descs = NULL, **tool_params = NULL;
         size_t n = 0;
-        err = hu_mcp_server_list_tools(srv, alloc, &names, &descs, &tool_params, &n);
+        err = hu_mcp_client_list_tools(srv, alloc, &names, &descs, &tool_params, &n);
         if (err != HU_OK || n == 0) {
-            hu_mcp_server_destroy(srv);
+            hu_mcp_client_destroy(srv);
             continue;
         }
 
@@ -773,7 +773,7 @@ hu_error_t hu_mcp_init_tools(hu_allocator_t *alloc, const hu_mcp_server_config_t
                 if (tool_params)
                     alloc->free(alloc->ctx, tool_params, n * sizeof(char *));
                 if (j == 0)
-                    hu_mcp_server_destroy(srv);
+                    hu_mcp_client_destroy(srv);
                 servers[i] = NULL;
                 goto fail;
             }
@@ -794,7 +794,7 @@ hu_error_t hu_mcp_init_tools(hu_allocator_t *alloc, const hu_mcp_server_config_t
                 if (tool_params)
                     alloc->free(alloc->ctx, tool_params, n * sizeof(char *));
                 if (j == 0)
-                    hu_mcp_server_destroy(srv);
+                    hu_mcp_client_destroy(srv);
                 servers[i] = NULL;
                 goto fail;
             }
@@ -841,7 +841,7 @@ hu_error_t hu_mcp_init_tools(hu_allocator_t *alloc, const hu_mcp_server_config_t
             alloc->free(alloc->ctx, tool_params, n * sizeof(char *));
     }
 
-    alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_server_t *));
+    alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_client_t *));
     alloc->free(alloc->ctx, counts, config_count * sizeof(size_t));
     *out_tools = all;
     *out_count = total;
@@ -857,10 +857,10 @@ fail:
     }
     for (size_t i = 0; i < config_count; i++) {
         if (servers && servers[i])
-            hu_mcp_server_destroy(servers[i]);
+            hu_mcp_client_destroy(servers[i]);
     }
     if (servers)
-        alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_server_t *));
+        alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_client_t *));
     if (counts)
         alloc->free(alloc->ctx, counts, config_count * sizeof(size_t));
     return HU_ERR_OUT_OF_MEMORY;

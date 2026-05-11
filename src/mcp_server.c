@@ -15,7 +15,7 @@
 #define MCP_PROTOCOL_VERSION "2024-11-05"
 #define MCP_LINE_BUF_INIT    4096
 
-struct hu_mcp_host {
+struct hu_mcp_engine {
     hu_allocator_t *alloc;
     hu_tool_t *tools;
     size_t tool_count;
@@ -25,11 +25,11 @@ struct hu_mcp_host {
     bool initialized;
 };
 
-hu_error_t hu_mcp_host_create(hu_allocator_t *alloc, hu_tool_t *tools, size_t tool_count,
-                              hu_memory_t *memory, hu_mcp_host_t **out) {
+hu_error_t hu_mcp_engine_create(hu_allocator_t *alloc, hu_tool_t *tools, size_t tool_count,
+                              hu_memory_t *memory, hu_mcp_engine_t **out) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_mcp_host_t *srv = (hu_mcp_host_t *)alloc->alloc(alloc->ctx, sizeof(*srv));
+    hu_mcp_engine_t *srv = (hu_mcp_engine_t *)alloc->alloc(alloc->ctx, sizeof(*srv));
     if (!srv)
         return HU_ERR_OUT_OF_MEMORY;
     srv->alloc = alloc;
@@ -43,12 +43,12 @@ hu_error_t hu_mcp_host_create(hu_allocator_t *alloc, hu_tool_t *tools, size_t to
     return HU_OK;
 }
 
-void hu_mcp_host_set_resources(hu_mcp_host_t *srv, hu_mcp_resource_registry_t *resources) {
+void hu_mcp_engine_set_resources(hu_mcp_engine_t *srv, hu_mcp_resource_registry_t *resources) {
     if (srv)
         srv->resources = resources;
 }
 
-void hu_mcp_host_set_prompts(hu_mcp_host_t *srv, hu_mcp_prompt_registry_t *prompts) {
+void hu_mcp_engine_set_prompts(hu_mcp_engine_t *srv, hu_mcp_prompt_registry_t *prompts) {
     if (srv)
         srv->prompts = prompts;
 }
@@ -118,7 +118,7 @@ static hu_error_t write_error(hu_allocator_t *alloc, const char *id_raw, int cod
 
 /* ── Handler: initialize ───────────────────────────────────────────────── */
 
-static hu_error_t handle_initialize(hu_mcp_host_t *srv, const char *id_raw) {
+static hu_error_t handle_initialize(hu_mcp_engine_t *srv, const char *id_raw) {
     srv->initialized = true;
     const char *result = "{\"protocolVersion\":\"" MCP_PROTOCOL_VERSION "\","
                          "\"capabilities\":{\"tools\":{},\"resources\":{},\"prompts\":{}},"
@@ -129,7 +129,7 @@ static hu_error_t handle_initialize(hu_mcp_host_t *srv, const char *id_raw) {
 
 /* ── Handler: tools/list ───────────────────────────────────────────────── */
 
-static hu_error_t handle_tools_list(hu_mcp_host_t *srv, const char *id_raw) {
+static hu_error_t handle_tools_list(hu_mcp_engine_t *srv, const char *id_raw) {
     hu_allocator_t *alloc = srv->alloc;
     hu_json_buf_t buf;
     if (hu_json_buf_init(&buf, alloc) != HU_OK)
@@ -191,7 +191,7 @@ static hu_error_t handle_tools_list(hu_mcp_host_t *srv, const char *id_raw) {
 
 /* ── Handler: tools/call ───────────────────────────────────────────────── */
 
-static hu_error_t handle_tools_call(hu_mcp_host_t *srv, const char *id_raw,
+static hu_error_t handle_tools_call(hu_mcp_engine_t *srv, const char *id_raw,
                                     hu_json_value_t *params) {
     hu_allocator_t *alloc = srv->alloc;
 
@@ -265,7 +265,7 @@ static hu_error_t handle_tools_call(hu_mcp_host_t *srv, const char *id_raw,
 
 /* ── Handler: resources/list ─────────────────────────────────────────────── */
 
-static hu_error_t handle_resources_list(hu_mcp_host_t *srv, const char *id_raw) {
+static hu_error_t handle_resources_list(hu_mcp_engine_t *srv, const char *id_raw) {
     hu_allocator_t *alloc = srv->alloc;
     hu_json_buf_t buf;
     if (hu_json_buf_init(&buf, alloc) != HU_OK)
@@ -341,7 +341,7 @@ static hu_error_t handle_resources_list(hu_mcp_host_t *srv, const char *id_raw) 
 
 /* ── Handler: resources/read ─────────────────────────────────────────────── */
 
-static hu_error_t handle_resources_read(hu_mcp_host_t *srv, const char *id_raw,
+static hu_error_t handle_resources_read(hu_mcp_engine_t *srv, const char *id_raw,
                                         hu_json_value_t *params) {
     hu_allocator_t *alloc = srv->alloc;
     const char *uri = hu_json_get_string(params, "uri");
@@ -419,7 +419,7 @@ static hu_error_t handle_resources_read(hu_mcp_host_t *srv, const char *id_raw,
 
 /* ── Handler: prompts/list ──────────────────────────────────────────────── */
 
-static hu_error_t handle_prompts_list(hu_mcp_host_t *srv, const char *id_raw) {
+static hu_error_t handle_prompts_list(hu_mcp_engine_t *srv, const char *id_raw) {
     hu_allocator_t *alloc = srv->alloc;
 
     if (!srv->prompts || srv->prompts->prompt_count == 0)
@@ -438,7 +438,7 @@ static hu_error_t handle_prompts_list(hu_mcp_host_t *srv, const char *id_raw) {
 
 /* ── Handler: prompts/get ──────────────────────────────────────────────── */
 
-static hu_error_t handle_prompts_get(hu_mcp_host_t *srv, const char *id_raw,
+static hu_error_t handle_prompts_get(hu_mcp_engine_t *srv, const char *id_raw,
                                      hu_json_value_t *params) {
     hu_allocator_t *alloc = srv->alloc;
     const char *name = hu_json_get_string(params, "name");
@@ -562,7 +562,7 @@ static hu_error_t read_stdin_line(hu_allocator_t *alloc, char **out, size_t *out
     return HU_OK;
 }
 
-hu_error_t hu_mcp_host_run(hu_mcp_host_t *srv) {
+hu_error_t hu_mcp_engine_run(hu_mcp_engine_t *srv) {
     if (!srv)
         return HU_ERR_INVALID_ARGUMENT;
     hu_allocator_t *alloc = srv->alloc;
@@ -648,7 +648,7 @@ hu_error_t hu_mcp_host_run(hu_mcp_host_t *srv) {
     }
 }
 
-void hu_mcp_host_destroy(hu_mcp_host_t *srv) {
+void hu_mcp_engine_destroy(hu_mcp_engine_t *srv) {
     if (!srv)
         return;
     hu_allocator_t *alloc = srv->alloc;
