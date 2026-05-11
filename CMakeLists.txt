@@ -1188,6 +1188,9 @@ if(HU_ENABLE_ML)
         src/ml/lora.c
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
+        # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
+        # continuous-learning training-data pipeline. Pure C, no SQLite.
+        src/ml/training_data_quality.c
         src/providers/huml.c
     )
     if(HU_ENABLE_SQLITE)
@@ -2111,6 +2114,7 @@ if(NOT HU_ENABLE_ML)
         src/ml/muon_adamw.c src/ml/train.c src/ml/checkpoint.c src/ml/cli.c
         src/ml/lora.c src/ml/agent_trainer.c src/ml/m3_frontier_adapter.c
         src/ml/training_data.c src/ml/training_data_extractor.c
+        src/ml/training_data_quality.c
         src/providers/huml.c)
 endif()
 if(NOT HU_ENABLE_LEARNING)
@@ -2641,6 +2645,7 @@ set(HU_TEST_SOURCES
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
+    tests/test_training_data_quality.c
     tests/test_agent_trainer.c
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
