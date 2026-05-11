@@ -2842,6 +2842,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_llamacpp_sampling.c
     tests/test_llamacpp_kvcache.c
     tests/test_llamacpp_decode.c
+    tests/test_llamacpp_lora_hotswap.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c
