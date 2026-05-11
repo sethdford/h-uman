@@ -1164,7 +1164,16 @@ static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_ca
         count++;
     }
     sqlite3_finalize(stmt);
-    if (count < cap && count > 0) {
+    if (count == 0) {
+        /* All rows filtered out (e.g. by session_id). Free the empty
+         * entries buffer so callers can rely on the contract that
+         * count==0 means there is nothing to free. */
+        alloc->free(alloc->ctx, entries, cap * sizeof(hu_memory_entry_t));
+        *out = NULL;
+        *out_count = 0;
+        return HU_OK;
+    }
+    if (count < cap) {
         hu_memory_entry_t *shrunk = (hu_memory_entry_t *)alloc->realloc(
             alloc->ctx, entries, cap * sizeof(hu_memory_entry_t),
             count * sizeof(hu_memory_entry_t));
