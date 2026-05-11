@@ -57,12 +57,21 @@ typedef struct hu_scheduler_config {
  * `m3_adapter_probe_path` (optional): when set, the daemon probes the M3
  * frontier-adapter stub (`hu_m3_frontier_adapter_try_open`) at startup and
  * logs success or failure — validates the seam without loading LoRA.
+ *
+ * `m3_adapter_disabled` (Track D D1.3 rollback flag): when true, the
+ * bootstrap path skips `hu_agent_m3_adapter_attach` entirely even if
+ * `m3_adapter_probe_path` is set. The env var
+ * `HUMAN_M3_ADAPTER_DISABLE=1` overrides the config and forces-disable
+ * at runtime — the operator's kill switch when the bridge regresses
+ * in production. Default false; the bridge stays opt-in via the
+ * probe path config but kill-switchable independently.
  */
 typedef struct hu_personalization_config {
     bool enabled;
     char *lora_adapter_path;
     char *lora_adapter_id;
     char *m3_adapter_probe_path;
+    bool m3_adapter_disabled;
 } hu_personalization_config_t;
 
 typedef struct hu_behavior_config {

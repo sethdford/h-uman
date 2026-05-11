@@ -15,7 +15,11 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef HU_ENABLE_SQLITE
+/* Only referenced from the SQLite paths below — gate to silence
+ * -Werror=unused-function in no-sqlite / minimal builds. */
 static int64_t wall_now_ms(void) { return (int64_t)time(NULL) * 1000; }
+#endif
 
 hu_autodream_config_t hu_autodream_default_config(void) {
     hu_autodream_config_t c = {0};

@@ -3,12 +3,49 @@
 #include "human/ml/m3_frontier_adapter.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 struct hu_m3_frontier_adapter {
     hu_allocator_t *alloc;
     uint32_t schema_version;
 };
+
+bool hu_m3_adapter_should_disable(bool cfg_disabled) {
+    if (cfg_disabled)
+        return true;
+    /* Env override: any non-empty value other than "0" disables. The
+     * "0" exception lets operators explicitly re-enable in scripts
+     * that always set the env var (mirrors the convention used for
+     * other HUMAN_* boolean envs in the codebase). */
+    const char *env = getenv("HUMAN_M3_ADAPTER_DISABLE");
+    if (!env || env[0] == '\0')
+        return false;
+    if (env[0] == '0' && env[1] == '\0')
+        return false;
+    return true;
+}
+
+/* Track D D2.1 — honest-gap caveat strings.
+ *
+ * Single source of truth for the user-facing disclaimer printed by
+ * `human ml lora-persona`. The block is intentionally unambiguous —
+ * tests pin specific substrings (the "NOT" disclaimer, the model name,
+ * the doc-path) so a refactor that softens the language fails CI. */
+
+#define HU_ML_LORA_PERSONA_CAVEAT_DOC_PATH \
+    "docs/plans/2026-05-10-m3-frontier-model-bridge.md"
+
+const char *hu_ml_lora_persona_caveat_doc_path(void) {
+    return HU_ML_LORA_PERSONA_CAVEAT_DOC_PATH;
+}
+
+const char *hu_ml_lora_persona_caveat_block(void) {
+    return "[lora-persona] NOTE: trains LoRA on the reference HUML GPT.\n"
+           "[lora-persona]       This is not a frontier model fine-tune.\n"
+           "[lora-persona]       For Llama/Qwen/Mistral fine-tuning, see\n"
+           "[lora-persona]       " HU_ML_LORA_PERSONA_CAVEAT_DOC_PATH "\n";
+}
 
 hu_error_t hu_m3_frontier_adapter_try_open(hu_allocator_t *alloc, const char *path, size_t path_len,
                                           hu_m3_frontier_adapter_t **out) {

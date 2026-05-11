@@ -197,6 +197,13 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
                     strlen(cfg->personalization.m3_adapter_probe_path) + 1);
         cfg->personalization.m3_adapter_probe_path = hu_strdup(a, m3p);
     }
+    /* Track D D1.3 rollback flag — when present in JSON, override
+     * the default (false). The env var
+     * `HUMAN_M3_ADAPTER_DISABLE=1` is consulted at attach time
+     * and wins over this config value. */
+    cfg->personalization.m3_adapter_disabled =
+        hu_json_get_bool(obj, "m3_adapter_disabled",
+                         cfg->personalization.m3_adapter_disabled);
     return HU_OK;
 }
 

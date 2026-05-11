@@ -11,12 +11,27 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Track D D1.3 — single source of truth for the rollback decision.
+ * Returns true when the M3 frontier-bridge attach should be skipped:
+ *   1. `cfg_disabled` matches the parsed value of
+ *      `personalization.m3_adapter_disabled`. Pass `false` when no
+ *      config is available.
+ *   2. The `HUMAN_M3_ADAPTER_DISABLE` env var, when set to anything
+ *      other than empty / "0", forces-disable regardless of config —
+ *      the operational kill switch.
+ *
+ * Pure: no side effects beyond reading the env var. Safe to call
+ * before bootstrap, in tests, and from anywhere a caller wants to
+ * decide whether to attach the bridge. */
+bool hu_m3_adapter_should_disable(bool cfg_disabled);
 
 typedef struct hu_m3_frontier_adapter hu_m3_frontier_adapter_t;
 
@@ -37,6 +52,30 @@ void hu_m3_frontier_adapter_close(hu_allocator_t *alloc, hu_m3_frontier_adapter_
 
 /* Read-only: schema version from the opened file (0 if NULL). */
 uint32_t hu_m3_frontier_adapter_schema_version(const hu_m3_frontier_adapter_t *adapter);
+
+/* Track D D2.1 — user-facing honest-gap caveat strings.
+ *
+ * The `human ml lora-persona` command emits these strings at training
+ * start (and from `--help`). They make explicit that the LoRA path
+ * trains a reference HUML GPT, NOT the frontier model the user
+ * actually chats with. Centralizing them here (rather than embedding
+ * literal printfs in cli.c) means:
+ *
+ *   - Tests can pin the substrings that matter (no silent drift to
+ *     overclaiming language during refactors).
+ *   - The caveat doc path is a single constant, so when the path
+ *     changes (rare) only one place updates.
+ *
+ * Thread-safe and allocator-free — both functions return pointers
+ * to static storage. */
+
+/* Path to the honest-gap planning doc, relative to repo root. */
+const char *hu_ml_lora_persona_caveat_doc_path(void);
+
+/* Multi-line caveat block printed before training starts. Lines are
+ * `\n`-terminated and each is prefixed with `[lora-persona]` so the
+ * block aligns visually with the rest of the CLI output. */
+const char *hu_ml_lora_persona_caveat_block(void);
 
 #ifdef __cplusplus
 }
