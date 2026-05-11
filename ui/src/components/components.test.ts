@@ -900,3 +900,28 @@ describe("hu-date-picker", () => {
     document.body.removeChild(el);
   });
 });
+
+describe("hu-persona-selector", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./hu-persona-selector.js");
+    expect(customElements.get("hu-persona-selector")).toBeDefined();
+  });
+
+  it("should accept personas array property", async () => {
+    const { HuPersonaSelector } = await import("./hu-persona-selector.js");
+    const el = new HuPersonaSelector();
+    el.personas = [
+      { id: "p1", name: "Default" },
+      { id: "p2", name: "Work", description: "Work persona" },
+    ];
+    expect(el.personas.length).toBe(2);
+    expect(el.personas[1].description).toBe("Work persona");
+  });
+
+  it("should reflect value property", async () => {
+    const { HuPersonaSelector } = await import("./hu-persona-selector.js");
+    const el = new HuPersonaSelector();
+    el.value = "p2";
+    expect(el.value).toBe("p2");
+  });
+});
