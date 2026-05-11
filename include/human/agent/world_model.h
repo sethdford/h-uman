@@ -19,6 +19,7 @@
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
 #include "human/memory/personal_model.h"
+#include "human/memory/write_trust.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -26,6 +27,12 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* P1.1-P1.3 forward decls — kept opaque so the world-model header doesn't
+ * pull in persona.h (which transitively drags in a large dependency graph).
+ * Definitions live in `human/persona.h` and `human/persona/persona_deltas.h`. */
+struct hu_persona;
+struct hu_persona_delta;
 
 /* An active goal the agent should keep in mind on every turn. */
 typedef struct hu_active_goal {
@@ -52,6 +59,12 @@ typedef struct hu_theory_of_mind {
     char user_thinks_we_are[160];
     char user_expects_we_can[200];
     char user_expects_we_cannot[200];
+    /* P1.2 — channel-aware pragmatics digest from `hu_persona_overlay_t`
+     * (formality, directness, face-saving, vulnerability tier, …). Distinct
+     * from `style_summary` (which is the personal-model communication-style
+     * string about the *user*). This is about how the user expects *us* to
+     * interact on this channel. Empty when no persona overlay was merged. */
+    char interaction_style[256];
     hu_belief_t confidence;
 } hu_theory_of_mind_t;
 
@@ -138,6 +151,27 @@ hu_error_t hu_negative_memory_add_facade(hu_memory_facade_t *m, const char *cont
                                          size_t cid_len, const hu_negative_memory_t *nm,
                                          int64_t *out_id);
 
+/* P3.1 — Adversarially-gated negative-memory insert. Routes the proposed
+ * insert through W1 `hu_write_trust_score` before persisting. The W9 spec's
+ * risk row says negatives must not be plantable by an attacker on an open
+ * channel ("do not warn user about X" silences the agent).
+ *
+ * Outcomes:
+ *   LIVE       — insert as-is, return HU_OK with `*out_id` set
+ *   QUARANTINE — insert with `nm.belief.mean` clamped to ≤ 0.5 so the
+ *                planner sees the rule as soft. Return HU_OK with `*out_id`.
+ *   DROP       — refuse the insert. Return HU_ERR_PERMISSION_DENIED.
+ *                `*out_id` left zero.
+ *
+ * `source` should reflect where the proposed negative came from
+ * (HU_WRITE_SOURCE_USER for direct user statements, HU_WRITE_SOURCE_AGENT
+ * for self-RAG abstention, HU_WRITE_SOURCE_CHANNEL_OPEN for unverified
+ * webhook input, etc.). `now_ms == 0` uses OS clock for recency scoring. */
+hu_error_t hu_negative_memory_add_facade_gated(hu_memory_facade_t *m, const char *contact_id,
+                                                size_t cid_len, const hu_negative_memory_t *nm,
+                                                hu_write_source_t source, int64_t now_ms,
+                                                int64_t *out_id);
+
 hu_error_t hu_negative_memory_list(struct hu_graph *g, hu_allocator_t *alloc,
                                     const char *contact_id, size_t cid_len,
                                     size_t limit, hu_negative_memory_t **out,
@@ -158,6 +192,38 @@ void hu_negative_memory_free(hu_allocator_t *alloc, hu_negative_memory_t *nm,
  * (no-op). Idempotent: repeated calls overwrite the same fields. */
 void hu_world_model_merge_personal(hu_world_model_t *wm,
                                    const hu_personal_model_t *pm);
+
+/* P1.1 + P1.2 + P1.3 — Persona-grounded ToM synthesis.
+ *
+ * Closes the W9 spec's "deferred" item (file header of `world_model.c` and
+ * spec line 127). Three things happen, in order:
+ *
+ *   1. `tom.user_thinks_we_are` is set from `persona->identity` (or
+ *      `persona->name` as fallback). Replaces the previous wrong-by-design
+ *      heuristic that put the most-mentioned entity name there.
+ *   2. The per-channel `hu_persona_overlay_t` (looked up via
+ *      `hu_persona_find_overlay(persona, channel, channel_len)`) is folded
+ *      into `tom.user_expects_we_cannot` (face-saving / vulnerability
+ *      tolerance / disagreement style) and `tom.interaction_style`
+ *      (formality / directness / typing quirks digest).
+ *   3. Recent `hu_persona_delta_t` rows for this contact (status APPLIED,
+ *      confidence ≥ 0.6) are appended to the appropriate ToM string by
+ *      kind: BOUNDARY / VOCAB_AVOID → `user_expects_we_cannot`;
+ *      FORMALITY / TONE / LENGTH → `interaction_style`.
+ *
+ * Safe with NULL persona (no-op) and NULL/empty channel (skips overlay step).
+ * Safe with NULL deltas / deltas_count == 0 (skips delta step). Idempotent:
+ * repeated calls overwrite the same fields and may concatenate the same
+ * delta text (callers should pass de-duplicated lists; the W5 evolver
+ * already dedupes by kind+key).
+ *
+ * Confidence: each merged source bumps `tom.confidence.mean` by 0.05, capped
+ * at 0.85 — we never claim certainty here. */
+void hu_world_model_merge_persona(hu_world_model_t *wm,
+                                  const struct hu_persona *persona,
+                                  const char *channel, size_t channel_len,
+                                  const struct hu_persona_delta *deltas,
+                                  size_t deltas_count);
 
 #ifdef __cplusplus
 }

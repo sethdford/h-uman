@@ -75,7 +75,7 @@ static void bridge_render_empty_world_model_returns_null(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_empty", 8, 1700000000000LL, &txt, &tlen,
-                                            NULL, 0, NULL, 0, NULL, 0, NULL),
+                                            NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     /* Empty world model -> NULL/0 so callers skip injection. */
     HU_ASSERT(txt == NULL);
@@ -97,7 +97,7 @@ static void bridge_render_optional_tom_scenario_merges_into_output(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_tom_sc", 9, 1700000000000LL, &txt, &tlen, p,
-                                            strlen(p), q, strlen(q), c, strlen(c), NULL),
+                                            strlen(p), q, strlen(q), c, strlen(c), NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT_GT(tlen, (size_t)0);
@@ -135,7 +135,7 @@ static void bridge_render_with_negative_memory_includes_avoid_section(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_neg", 6, 1700000000000LL + 1000, &txt, &tlen,
-                                            NULL, 0, NULL, 0, NULL, 0, NULL),
+                                            NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -160,19 +160,19 @@ static void bridge_render_rejects_invalid_args(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(NULL, A(), "ut_inv", 6, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0, NULL),
+                                            NULL, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, NULL, "ut_inv", 6, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0, NULL),
+                                            NULL, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), NULL, 0, 0, &txt, &tlen, NULL, 0, NULL, 0, NULL,
-                                            0, NULL),
+                                            0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_inv", 0, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0, NULL),
+                                            NULL, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_inv", 6, 0, NULL, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0, NULL),
+                                            NULL, 0, NULL, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     cleanup(g, f);
 }
@@ -198,7 +198,7 @@ static void bridge_render_uses_cache_within_ttl(void) {
     char *txt1 = NULL;
     size_t tlen1 = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_cache", 8, 1700000000000LL + 1000, &txt1,
-                                          &tlen1, NULL, 0, NULL, 0, NULL, 0, NULL),
+                                          &tlen1, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt1);
 
@@ -206,7 +206,7 @@ static void bridge_render_uses_cache_within_ttl(void) {
     size_t tlen2 = 0;
     /* Within the 60s default TTL -- should still produce content (cache or rebuild). */
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_cache", 8, 1700000000000LL + 5000, &txt2,
-                                          &tlen2, NULL, 0, NULL, 0, NULL, 0, NULL),
+                                          &tlen2, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt2);
     HU_ASSERT_EQ(tlen1, tlen2);
@@ -242,7 +242,7 @@ static void bridge_render_with_personal_model_includes_style(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_pm", 5, 1700000000000LL, &txt, &tlen,
-                                            NULL, 0, NULL, 0, NULL, 0, &pm),
+                                            NULL, 0, NULL, 0, NULL, 0, &pm, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT_GT(tlen, (size_t)0);

@@ -16,6 +16,8 @@
 #include "human/agent/tom_scenario.h"
 #include "human/agent/world_model.h"
 #include "human/memory/memory.h"
+#include "human/persona.h"
+#include "human/persona/persona_deltas.h"
 #include "human/provider.h"
 #include "human/memory/belief.h"
 #include "human/security/audit_log.h"
@@ -150,7 +152,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                     size_t tom_premise_len, const char *tom_question,
                                     size_t tom_question_len, const char *tom_category,
                                     size_t tom_category_len,
-                                    const hu_personal_model_t *pm) {
+                                    const hu_personal_model_t *pm,
+                                    const hu_persona_context_t *persona_ctx) {
     if (out_text)
         *out_text = NULL;
     if (out_len)
@@ -178,6 +181,23 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
     if (pm)
         hu_world_model_merge_personal(wm, pm);
 
+    /* P1.1-P1.3 — persona-grounded ToM merge. Loads recent applied
+     * persona deltas via the facade (cheap; bounded by delta_limit) and
+     * folds persona identity + channel overlay + deltas into ToM. */
+    if (persona_ctx && persona_ctx->persona) {
+        hu_persona_delta_t *deltas = NULL;
+        size_t deltas_count = 0;
+        if (persona_ctx->delta_limit > 0) {
+            (void)hu_persona_delta_list_facade(facade->m, alloc, contact_id, contact_id_len,
+                                               HU_DELTA_STATUS_APPLIED,
+                                               persona_ctx->delta_limit, &deltas, &deltas_count);
+        }
+        hu_world_model_merge_persona(wm, persona_ctx->persona, persona_ctx->channel,
+                                     persona_ctx->channel_len, deltas, deltas_count);
+        if (deltas)
+            hu_persona_delta_free(alloc, deltas, deltas_count);
+    }
+
     /* If everything is empty, return NULL/0 -- callers skip injection.
      *
      * As of P2D the W9 builder synthesizes `dominant_emotion`, `valence`, and
@@ -192,7 +212,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                       (wm->tom.user_expects_we_can[0] &&
                        strcmp(wm->tom.user_expects_we_can, "unknown") != 0) ||
                       (wm->tom.user_expects_we_cannot[0] &&
-                       strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0);
+                       strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0) ||
+                      wm->tom.interaction_style[0] != '\0';
     bool style_signal = wm->style_summary[0] != '\0';
     bool any = wm->entities_count > 0 || wm->relations_count > 0 || wm->goals_count > 0 ||
                wm->negatives_count > 0 || wm->recent_topics_count > 0 || emo_signal ||
@@ -260,6 +281,9 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
             strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0)
             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They expect I cannot: %s\n",
                                    wm->tom.user_expects_we_cannot);
+        if (wm->tom.interaction_style[0])
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- Interaction style: %s\n",
+                                   wm->tom.interaction_style);
     }
     if (wm->recent_topics_count > 0) {
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Recent topics: ", 15);
@@ -398,7 +422,12 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
         nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
         nm.created_at = now_ms;
         int64_t nm_id = 0;
-        (void)hu_negative_memory_add_facade(facade->m, contact_id, contact_id_len, &nm, &nm_id);
+        /* P3.1 — gate self-rag abstention writes through W1 write_trust.
+         * Source is the agent itself, so trust is high; the gate guards the
+         * shared code path against quarantine/drop edge cases (e.g., bursty
+         * abstentions get clamped instead of raw inserted). */
+        (void)hu_negative_memory_add_facade_gated(facade->m, contact_id, contact_id_len, &nm,
+                                                  HU_WRITE_SOURCE_AGENT, now_ms, &nm_id);
     }
 
     if (out_claims_total)

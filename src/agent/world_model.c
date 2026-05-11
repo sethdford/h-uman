@@ -7,10 +7,11 @@
  * targets a contact_id calls hu_world_model_invalidate so the next load
  * rebuilds.
  *
- * Persona integration (full ToM synthesis from persona traits + deltas) is
- * deliberately deferred to a follow-up commit within W9 — the persona-
- * synthesizer is best added once the per-contact persona overlay loader is
- * exposed in a more uniform shape (see docs/plans/.../w9-world-model.md).
+ * Persona integration: the build path stays persona-blind so the cache can
+ * stay keyed on `(contact_id)` without persona-version churn. Persona is
+ * folded in on top of the cached snapshot via `hu_world_model_merge_persona`
+ * (P1.1-P1.3). The bridge in `world_model_bridge.c` calls it after load so
+ * every consumer sees a persona-grounded ToM block.
  */
 
 #include "human/agent/world_model.h"
@@ -19,11 +20,14 @@
 #include "human/core/error.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
+#include "human/persona.h"
+#include "human/persona/persona_deltas.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/emotional_residue.h"
@@ -182,7 +186,16 @@ hu_error_t hu_negative_memory_add(struct hu_graph *g, const char *contact_id, si
     struct sqlite3 *db = hu_memory_sqlite_from_graph(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
-    return negative_memory_add_sqlite(db, contact_id, cid_len, nm, out_id);
+    hu_error_t e = negative_memory_add_sqlite(db, contact_id, cid_len, nm, out_id);
+    /* P2.1 — invalidate the world-model cache so a freshly inserted
+     * "do not say X" lands on the next read instead of waiting up to
+     * 60s for the TTL. Negative-memory writes don't go through the W7
+     * facade write hook (which is what graph entity/relation writes use
+     * via `hu_world_model_invalidate` in `src/memory/graph.c`), so the
+     * invalidate has to happen here at the point of write. */
+    if (e == HU_OK && contact_id && cid_len > 0)
+        hu_world_model_invalidate(contact_id, cid_len);
+    return e;
 #endif
 }
 
@@ -202,7 +215,85 @@ hu_error_t hu_negative_memory_add_facade(hu_memory_facade_t *m, const char *cont
     struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
-    return negative_memory_add_sqlite(db, contact_id, cid_len, nm, out_id);
+    hu_error_t e = negative_memory_add_sqlite(db, contact_id, cid_len, nm, out_id);
+    /* P2.1 — same invalidation contract as the graph variant above. */
+    if (e == HU_OK && contact_id && cid_len > 0)
+        hu_world_model_invalidate(contact_id, cid_len);
+    return e;
+#endif
+}
+
+hu_error_t hu_negative_memory_add_facade_gated(hu_memory_facade_t *m, const char *contact_id,
+                                                size_t cid_len, const hu_negative_memory_t *nm,
+                                                hu_write_source_t source, int64_t now_ms,
+                                                int64_t *out_id) {
+#ifndef HU_ENABLE_SQLITE
+    (void)m; (void)contact_id; (void)cid_len; (void)nm;
+    (void)source; (void)now_ms; (void)out_id;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    if (out_id) *out_id = 0;
+    if (!m || !nm) return HU_ERR_INVALID_ARGUMENT;
+    if (nm->text[0] == '\0') return HU_ERR_INVALID_ARGUMENT;
+
+    /* Score the proposed insert. We don't have a contradiction signal at
+     * this layer (the conflict_resolver runs over relations, not over
+     * negative-memory text), so contradiction_flag/supersession stay false.
+     * recent_writes is also unavailable here without threading the W1 ring
+     * through the facade; pass 0 so anomaly score stays 1.0 — the source
+     * weight does the heavy lifting. The point of the gate is to reject
+     * untrusted-channel writes, which the source-score band alone catches. */
+    int64_t now = now_ms > 0 ? now_ms : (int64_t)time(NULL) * 1000;
+    hu_write_trust_input_t in = {
+        .source = source,
+        .observed_at = nm->created_at > 0 ? nm->created_at : now,
+        .now = now,
+        .contradiction_flag = false,
+        .supersession = false,
+        .recent_writes = 0,
+        .rate_limit = 10,
+    };
+    hu_write_trust_decision_t dec = hu_write_trust_score(&in);
+    hu_write_outcome_t outcome = dec.outcome;
+
+    /* P3.1 hardening (source-allowlist on top of write_trust band) — the
+     * spec risk row makes this asymmetric: a false-positive lets a noisy
+     * but benign open-channel hint into the negatives table at low belief;
+     * a false-negative lets an attacker silence the agent on a safety
+     * topic. The generic write_trust band can score CHANNEL_OPEN as LIVE
+     * (source 0.55 × 0.40 + clean cs/as ≈ 0.72), so we layer a per-source
+     * allowlist on top: only USER, AGENT (self-rag), and CHANNEL_TRUSTED
+     * (paired/authenticated) sources may insert negative memory at LIVE
+     * belief. Anything else demotes to QUARANTINE so the planner reads it
+     * as a hint, not a hard rule. DROP stays DROP. */
+    bool source_trusted_for_negmem = (source == HU_WRITE_SOURCE_USER ||
+                                      source == HU_WRITE_SOURCE_AGENT ||
+                                      source == HU_WRITE_SOURCE_CHANNEL_TRUSTED);
+    if (!source_trusted_for_negmem && outcome == HU_WRITE_OUTCOME_LIVE)
+        outcome = HU_WRITE_OUTCOME_QUARANTINE;
+
+    if (outcome == HU_WRITE_OUTCOME_DROP) {
+        /* Adversarial source — refuse silently. The caller (channel /
+         * bridge) decides whether to log; we don't surface attacker
+         * details on the data path. */
+        return HU_ERR_PERMISSION_DENIED;
+    }
+
+    /* QUARANTINE band: insert but clamp belief.mean so the planner reads
+     * this as a soft hint, not a hard rule. We mutate a local copy — the
+     * caller's nm stays unchanged. */
+    hu_negative_memory_t to_insert = *nm;
+    if (outcome == HU_WRITE_OUTCOME_QUARANTINE) {
+        if (to_insert.belief.mean > 0.5f) to_insert.belief.mean = 0.5f;
+        if (to_insert.belief.variance < 0.25f) to_insert.belief.variance = 0.25f;
+    }
+
+    struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
+    if (!db) return HU_ERR_INVALID_ARGUMENT;
+    hu_error_t e = negative_memory_add_sqlite(db, contact_id, cid_len, &to_insert, out_id);
+    if (e == HU_OK && contact_id && cid_len > 0)
+        hu_world_model_invalidate(contact_id, cid_len);
+    return e;
 #endif
 }
 
@@ -547,18 +638,16 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
         }
         wm->tom.user_expects_we_cannot[off < cap ? off : cap] = '\0';
     }
+    /* P1.1 fix: user_thinks_we_are stays empty in the build path. The
+     * pre-P1.1 heuristic put the most-mentioned entity name here, which
+     * was wrong-by-design (that's the most-mentioned third party, not
+     * the user's mental model of *us*). Persona-grounded fill happens
+     * in `hu_world_model_merge_persona` so the cache stays persona-
+     * version-agnostic. Same for user_expects_we_can and the new
+     * interaction_style field. */
     wm->tom.user_thinks_we_are[0] = '\0';
-    if (wm->entities_count > 0) {
-        const hu_memory_entity_row_t *top = &wm->entities[0];
-        if (top->name && top->name_len > 0) {
-            size_t cap = sizeof(wm->tom.user_thinks_we_are) - 1;
-            size_t copy = top->name_len < cap ? top->name_len : cap;
-            memcpy(wm->tom.user_thinks_we_are, top->name, copy);
-            wm->tom.user_thinks_we_are[copy] = '\0';
-            signals++;
-        }
-    }
     wm->tom.user_expects_we_can[0] = '\0';
+    wm->tom.interaction_style[0] = '\0';
 
     float tom_mean = 0.4f + 0.1f * (float)(signals < 3 ? signals : 3);
     if (tom_mean > 0.7f) tom_mean = 0.7f;
@@ -646,6 +735,185 @@ void hu_world_model_merge_personal(hu_world_model_t *wm,
     if (strcmp(wm->dominant_emotion, "neutral") == 0) {
         if (pm->style.humor_receptivity > 0.6f)
             snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "playful");
+    }
+}
+
+/* ---- P1.1 + P1.2 + P1.3 — persona-grounded ToM synthesis ---------- */
+
+/* Append `s` (length `n`) to `dst` with a "; " separator if `dst` is
+ * non-empty. Truncates silently — never overflows. */
+static size_t tom_append_(char *dst, size_t cap, const char *s, size_t n) {
+    if (cap == 0 || !s || n == 0) return strlen(dst);
+    size_t off = strlen(dst);
+    if (off + 1 >= cap) return off;
+    if (off > 0 && off + 2 < cap) {
+        dst[off++] = ';';
+        dst[off++] = ' ';
+    }
+    size_t copy = (cap - off - 1) < n ? (cap - off - 1) : n;
+    if (copy > 0) {
+        memcpy(dst + off, s, copy);
+        off += copy;
+    }
+    dst[off] = '\0';
+    return off;
+}
+
+static size_t tom_append_str_(char *dst, size_t cap, const char *s) {
+    if (!s || !s[0]) return strlen(dst);
+    return tom_append_(dst, cap, s, strlen(s));
+}
+
+/* Map an overlay axis to a "they expect I cannot ..." clause when the
+ * axis indicates a low-tolerance posture. NULL when neutral. */
+static const char *overlay_cannot_clause_(const char *axis, const char *value) {
+    if (!axis || !value || !value[0]) return NULL;
+    if (strcasecmp(axis, "face_saving") == 0) {
+        if (strcasecmp(value, "high") == 0) return "challenge them in front of others";
+    } else if (strcasecmp(axis, "disagreement_style") == 0) {
+        if (strcasecmp(value, "indirect") == 0) return "disagree bluntly";
+        if (strcasecmp(value, "avoidant") == 0) return "force the disagreement to a head";
+    } else if (strcasecmp(axis, "silence_tolerance") == 0) {
+        if (strcasecmp(value, "low") == 0) return "leave long silences without checking in";
+    } else if (strcasecmp(axis, "vulnerability_tier") == 0) {
+        if (strcasecmp(value, "low") == 0)  return "open with heavy emotional content";
+        if (strcasecmp(value, "none") == 0) return "share vulnerable material at all";
+    }
+    return NULL;
+}
+
+static const char *overlay_can_clause_(const char *axis, const char *value) {
+    if (!axis || !value || !value[0]) return NULL;
+    if (strcasecmp(axis, "directness") == 0) {
+        if (strcasecmp(value, "direct") == 0) return "give direct, unhedged answers";
+        if (strcasecmp(value, "blunt") == 0)  return "be blunt without softening";
+    } else if (strcasecmp(axis, "vulnerability_tier") == 0) {
+        if (strcasecmp(value, "high") == 0) return "engage with vulnerable material";
+        if (strcasecmp(value, "deep") == 0) return "hold space for deep emotional content";
+    } else if (strcasecmp(axis, "disagreement_style") == 0) {
+        if (strcasecmp(value, "direct") == 0) return "push back when I see it differently";
+    }
+    return NULL;
+}
+
+void hu_world_model_merge_persona(hu_world_model_t *wm,
+                                  const struct hu_persona *persona,
+                                  const char *channel, size_t channel_len,
+                                  const struct hu_persona_delta *deltas,
+                                  size_t deltas_count) {
+    if (!wm || !persona) return;
+
+    int new_signals = 0;
+
+    /* Step 1 — user_thinks_we_are from persona identity (P1.1). */
+    const char *identity = (persona->identity && persona->identity[0])
+                               ? persona->identity
+                               : (persona->name && persona->name[0] ? persona->name : NULL);
+    if (identity) {
+        size_t cap = sizeof(wm->tom.user_thinks_we_are);
+        size_t ilen = strlen(identity);
+        if (ilen >= cap) ilen = cap - 1;
+        memcpy(wm->tom.user_thinks_we_are, identity, ilen);
+        wm->tom.user_thinks_we_are[ilen] = '\0';
+        new_signals++;
+    }
+
+    /* Step 2 — channel overlay (P1.2). */
+    const hu_persona_overlay_t *ov = NULL;
+    if (channel && channel_len > 0)
+        ov = hu_persona_find_overlay(persona, channel, channel_len);
+    if (ov) {
+        char buf[256];
+        size_t off = 0;
+        size_t cap = sizeof(buf) - 1;
+        if (ov->channel) {
+            int n = snprintf(buf + off, cap - off, "%s", ov->channel);
+            if (n > 0 && (size_t)n < cap - off) off += (size_t)n;
+        }
+        if (ov->formality && ov->formality[0]) {
+            int n = snprintf(buf + off, cap - off, "%s%s", off ? ": " : "", ov->formality);
+            if (n > 0 && (size_t)n < cap - off) off += (size_t)n;
+        }
+        if (ov->avg_length && ov->avg_length[0]) {
+            int n = snprintf(buf + off, cap - off, "%s%s length", off ? ", " : "", ov->avg_length);
+            if (n > 0 && (size_t)n < cap - off) off += (size_t)n;
+        }
+        if (ov->emoji_usage && ov->emoji_usage[0]) {
+            int n = snprintf(buf + off, cap - off, "%semoji: %s", off ? ", " : "", ov->emoji_usage);
+            if (n > 0 && (size_t)n < cap - off) off += (size_t)n;
+        }
+        if (ov->typing_quirks_count > 0 && ov->typing_quirks && ov->typing_quirks[0]) {
+            int n = snprintf(buf + off, cap - off, "%squirk: %s", off ? ", " : "",
+                             ov->typing_quirks[0]);
+            if (n > 0 && (size_t)n < cap - off) off += (size_t)n;
+        }
+        buf[off] = '\0';
+        if (off > 0) {
+            size_t istyle_cap = sizeof(wm->tom.interaction_style);
+            size_t copy = off < istyle_cap - 1 ? off : istyle_cap - 1;
+            memcpy(wm->tom.interaction_style, buf, copy);
+            wm->tom.interaction_style[copy] = '\0';
+            new_signals++;
+        }
+
+        const char *cn1 = overlay_cannot_clause_("face_saving", ov->face_saving);
+        const char *cn2 = overlay_cannot_clause_("disagreement_style", ov->disagreement_style);
+        const char *cn3 = overlay_cannot_clause_("silence_tolerance", ov->silence_tolerance);
+        const char *cn4 = overlay_cannot_clause_("vulnerability_tier", ov->vulnerability_tier);
+        if (cn1) tom_append_str_(wm->tom.user_expects_we_cannot,
+                                 sizeof(wm->tom.user_expects_we_cannot), cn1);
+        if (cn2) tom_append_str_(wm->tom.user_expects_we_cannot,
+                                 sizeof(wm->tom.user_expects_we_cannot), cn2);
+        if (cn3) tom_append_str_(wm->tom.user_expects_we_cannot,
+                                 sizeof(wm->tom.user_expects_we_cannot), cn3);
+        if (cn4) tom_append_str_(wm->tom.user_expects_we_cannot,
+                                 sizeof(wm->tom.user_expects_we_cannot), cn4);
+        if (cn1 || cn2 || cn3 || cn4) new_signals++;
+
+        const char *cp1 = overlay_can_clause_("directness", ov->directness);
+        const char *cp2 = overlay_can_clause_("vulnerability_tier", ov->vulnerability_tier);
+        const char *cp3 = overlay_can_clause_("disagreement_style", ov->disagreement_style);
+        if (cp1) tom_append_str_(wm->tom.user_expects_we_can,
+                                 sizeof(wm->tom.user_expects_we_can), cp1);
+        if (cp2) tom_append_str_(wm->tom.user_expects_we_can,
+                                 sizeof(wm->tom.user_expects_we_can), cp2);
+        if (cp3) tom_append_str_(wm->tom.user_expects_we_can,
+                                 sizeof(wm->tom.user_expects_we_can), cp3);
+        if (cp1 || cp2 || cp3) new_signals++;
+    }
+
+    /* Step 3 — recent persona deltas (P1.3). Only APPLIED deltas with
+     * confidence >= 0.6 are folded; pending/dropped/quarantined deltas
+     * carry too little signal to drive ToM. */
+    for (size_t i = 0; i < deltas_count; i++) {
+        const hu_persona_delta_t *d = &deltas[i];
+        if (d->status != HU_DELTA_STATUS_APPLIED) continue;
+        if (d->confidence < 0.6f) continue;
+        if (!d->value[0]) continue;
+        switch (d->kind) {
+        case HU_PERSONA_DELTA_BOUNDARY:
+        case HU_PERSONA_DELTA_VOCAB_AVOID:
+            tom_append_str_(wm->tom.user_expects_we_cannot,
+                            sizeof(wm->tom.user_expects_we_cannot), d->value);
+            new_signals++;
+            break;
+        case HU_PERSONA_DELTA_FORMALITY:
+        case HU_PERSONA_DELTA_TONE:
+        case HU_PERSONA_DELTA_LENGTH:
+            tom_append_str_(wm->tom.interaction_style,
+                            sizeof(wm->tom.interaction_style), d->value);
+            new_signals++;
+            break;
+        default:
+            break;
+        }
+    }
+
+    /* Confidence — bump by 0.05 per new signal source, cap 0.85. */
+    if (new_signals > 0) {
+        float bumped = wm->tom.confidence.mean + 0.05f * (float)new_signals;
+        if (bumped > 0.85f) bumped = 0.85f;
+        wm->tom.confidence.mean = bumped;
     }
 }
 

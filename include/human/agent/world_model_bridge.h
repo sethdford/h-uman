@@ -33,6 +33,23 @@ extern "C" {
 struct hu_w7_facade;
 typedef struct hu_w7_facade hu_w7_facade_t;
 
+/* Optional persona context (P1.1-P1.3) threaded into hu_w7_render_world_model
+ * for persona-grounded ToM synthesis. All fields are optional:
+ *   - `persona == NULL` : no persona merge happens (back-compat)
+ *   - `channel == NULL` or `channel_len == 0` : persona merged but channel
+ *     overlay skipped
+ *   - `delta_limit == 0` : no persona-delta SQL read; pass e.g. 8 to fold
+ *     the most recent applied deltas in.
+ *
+ * Wrapped in a struct because the bridge function already has 14 params. */
+struct hu_persona;
+typedef struct hu_persona_context {
+    const struct hu_persona *persona;
+    const char *channel;
+    size_t channel_len;
+    size_t delta_limit;
+} hu_persona_context_t;
+
 /* Forward-declare provider type at file scope so all `_with_provider`
  * entrypoints below agree on `struct hu_provider *` regardless of whether
  * the caller has already included `human/provider.h`. Without this, each
@@ -70,14 +87,20 @@ hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade);
  *
  * M2 ↔ W9 bridge: when `pm` is non-NULL, personal model signal (goals,
  * topics, style, emotion) is merged into the world model before rendering.
- * Pass NULL to skip (backward-compatible). */
+ * Pass NULL to skip (backward-compatible).
+ *
+ * P1.1-P1.3 persona-grounded ToM: when `persona_ctx` is non-NULL with a
+ * non-NULL `persona`, the bridge calls `hu_world_model_merge_persona` after
+ * load (and after the personal-model / ToM-scenario merges). Pass NULL to
+ * skip (backward-compatible). */
 hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                     const char *contact_id, size_t contact_id_len, int64_t now_ms,
                                     char **out_text, size_t *out_len, const char *tom_premise,
                                     size_t tom_premise_len, const char *tom_question,
                                     size_t tom_question_len, const char *tom_category,
                                     size_t tom_category_len,
-                                    const hu_personal_model_t *pm);
+                                    const hu_personal_model_t *pm,
+                                    const hu_persona_context_t *persona_ctx);
 
 /* W11 self-RAG outcome enum, mirrored at the bridge layer so callers don't
  * have to include `human/agent/self_rag.h` (which pulls in W7). */

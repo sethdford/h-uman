@@ -356,7 +356,7 @@ supplement:
             loader->facade, loader->alloc,
             session_id, session_id_len, 0,
             &graph_text, &graph_len, NULL, 0, NULL, 0, NULL, 0,
-            (hu_personal_model_t *)loader->personal_model);
+            (hu_personal_model_t *)loader->personal_model, NULL);
         if (ge == HU_OK && graph_text && graph_len > 0) {
             const size_t graph_cap = 500;
             if (graph_len > graph_cap)
