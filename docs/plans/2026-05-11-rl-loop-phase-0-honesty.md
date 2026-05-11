@@ -1357,51 +1357,56 @@ Refs spec §1.5.2 issue #6."
 
 **Files:** none (subagent dispatch + tag)
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 ```bash
 cmake --build --preset dev -j
 ./build/human_tests
 ```
 
-Expected: 0 failures, 0 ASan errors. Note total test count (should be `<previous count> + 4` from the new test functions: `_zero_vocab_does_nothing`, `_with_real_vocab_actually_trains`, `_passes_token_bytes`, `_save_is_atomic_under_kill`, plus the dpo-judge-naming pair = 6 new).
+**Observed (2026-05-11):**
 
-- [ ] **Step 2: Run scripts/agent-preflight.sh for change-aware validation**
+```
+--- Results: 10042/10042 passed ---
+EXIT_CODE=0
+```
+
+- `grep -c "^  FAIL"` → 0
+- `grep -ciE "AddressSanitizer|leak detected|ERROR: "` → 0
+- 7 new tests vs baseline (1 over the ≥6 target): `test_ml_cli_train_with_zero_vocab_does_nothing`, `test_ml_cli_train_with_real_vocab_actually_trains`, `test_experiment_loop_passes_token_bytes`, `test_personal_model_save_preserves_prior_state_when_tmp_blocked`, `test_dpo_judge_step_new_name_exists`, `test_dpo_train_step_deprecated_shim_still_works`, `test_dpo_judge_step_and_shim_return_identical_values`.
+
+> **Plan amendment (May 11 2026):** the original Step 1 expected count was off-by-one — the deterministic atomic-save test is named `test_personal_model_save_preserves_prior_state_when_tmp_blocked` (Task 6 amendment) rather than `_save_is_atomic_under_kill`. The DPO suite shipped 3 tests rather than 2 (added `test_dpo_judge_step_and_shim_return_identical_values` per the Task 8/9 spec-verifier amendment). Net: 7 new tests, exceeding the ≥6 target. Step 1 also surfaced one Phase 0-induced regression in `tests/test_ml.c` (`test_experiment_loop_runs` and `test_experiment_loop_keep_discard` inherited 20M default `eval_tokens` and now hung once Task 5 made BPB eval actually run); fixed in a follow-up commit per the Task 5 "Phase 0 follow-up" amendment.
+
+- [x] **Step 2: Run scripts/agent-preflight.sh for change-aware validation**
 
 ```bash
 bash scripts/agent-preflight.sh
 ```
 
-Expected: clean.
+**Observed (2026-05-11):** `All checks passed.` C build green, memory-v2 header collision check PASS, memory query variant scan PASS, targeted tests 352/352, clang-format clean.
 
-- [ ] **Step 3: Dispatch `dead-code-finder` subagent**
+- [x] **Step 3: Dispatch `dead-code-finder` subagent**
 
-```
-Task: dead-code-finder
-Prompt: Review the Phase 0 commits (range: <first-phase-0-commit>..HEAD).
-        Specifically check src/ml/cli.c, src/ml/experiment.c, src/ml/dpo.c,
-        src/memory/personal_model.c for any unused exports, unreachable
-        branches, or dead variables introduced by the fixes. Report findings
-        with confidence level.
-```
+**Observed (2026-05-11):** `RESULT_dead-code-finder=PASS`. Verbatim subagent verdict: *"No high-confidence dead code introduced by Phase 0."* Five low-confidence items flagged, all intentional (deprecation shim, leak fixes, conditional fuzz gate); no remediation required. Phase 0 commit range scanned: `c7d679f8..HEAD` covering `src/ml/cli.c`, `src/ml/experiment.c`, `src/ml/dpo.c`, `src/memory/personal_model.c`, `src/ml/prepare.c`, `include/human/ml/dpo.h`, `src/daemon.c` (DPO blocks only).
 
-Address any high-confidence dead code before the next step.
+- [x] **Step 4: Dispatch `sprint-auditor` subagent**
 
-- [ ] **Step 4: Dispatch `sprint-auditor` subagent**
+**Observed (2026-05-11):** `RESULT_sprint-auditor=PASS`. All 9 audit-target items (1-8 and 10) PASS with file:line evidence. Per-item verdicts:
 
-```
-Task: sprint-auditor
-Prompt: Read docs/plans/2026-05-11-full-sota-rl-improvement-loop-design.md §4.1
-        (Phase 0 file map) and the actual diff between <phase-0-base-commit>
-        and HEAD. For EACH item in the §4.1 table (10 items), answer:
-        "did Phase 0 deliver this?" Cite file:line evidence. Do not trust
-        commit messages — verify against actual code. Report per-item
-        PASS/FAIL plus an overall verdict.
-```
+| Item | What | Verdict | Key evidence |
+|---|---|---|---|
+| 1 | `~/.human/private/` git-ignored | PASS | `.gitignore:140-143` (both bare + `**/`-prefixed patterns) |
+| 2 | Audit baseline doc committed | PASS | Commit `4909aa80`, file 4777 bytes |
+| 3 | `hu_ml_cli_train` + `_train_feed_predictor` pass real vocab + token_bytes | PASS | `cli.c:242-249,304-306` and `cli.c:2599-2609,2642-2644` |
+| 4 | `run_single_experiment` passes non-NULL token_bytes | PASS | `experiment.c:309-341` (two paths, both populate; cleanup at 352-355) |
+| 5 | `hu_personal_model_save` uses tmp+fsync+rename | PASS | `personal_model.c:1935-1988` (all 5 elements ordered correctly; every failure unlinks tmp) |
+| 6 | DPO rename with proper shim | PASS | `dpo.c:379-383` canonical, `dpo.h:120-134` shim forwards 8 args verbatim |
+| 7 | CLAUDE.md M2 row honest about atomic save | PASS | `CLAUDE.md:53` credits `3ee98ef9` for call site, Phase 0 for atomicity |
+| 8 | Full suite PASS, ≥6 new tests | PASS | 10042/10042, 0 failures, 0 ASan; 7 new tests wired in `test_main.c:398-1042` |
 
-Phase 0 is marked complete only on overall PASS. If FAIL, address gaps and re-dispatch.
+The auditor specifically adversarially checked: (a) item 3 traced the call chain `derive_token_bytes_for_data_dir → hu_ml_prepare_token_bytes → alloc + populate` to confirm no path reaches `hu_ml_train` with `token_bytes == NULL`; (b) item 5 confirmed `fopen(tmp, "wb")` not `fopen(path, "wb")`; (c) item 6 confirmed the shim body is a literal `return hu_dpo_judge_step(...)` with no sneaky wrapping. No adversarial findings.
 
-- [ ] **Step 5: Tag the phase**
+- [x] **Step 5: Tag the phase**
 
 ```bash
 git tag -a rl-sota-phase-0-complete -m "RL SOTA Phase 0: honesty pass complete
@@ -1417,24 +1422,19 @@ git tag -a rl-sota-phase-0-complete -m "RL SOTA Phase 0: honesty pass complete
 Refs spec §4.1, plan docs/plans/2026-05-11-rl-loop-phase-0-honesty.md."
 ```
 
-- [ ] **Step 6: Update umbrella plan status**
+- [x] **Step 6: Update umbrella plan status**
 
-Edit `docs/plans/2026-05-11-full-sota-rl-improvement-loop.md` Status table:
+Edit `docs/plans/2026-05-11-full-sota-rl-improvement-loop.md` Status table → row 0 updated to:
 
 ```
-| 0 | ✅ 2026-05-11 | ✅ <date> | ✅ <date> | ✅ PASS |
+| 0 | ✅ 2026-05-11 | ✅ 2026-05-11 | ✅ 2026-05-11 (tag `rl-sota-phase-0-complete`) | ✅ PASS (all 9 items, file:line evidence; dead-code-finder also PASS) |
 ```
 
-Commit the umbrella update:
-
-```bash
-git add docs/plans/2026-05-11-full-sota-rl-improvement-loop.md
-git commit -m "docs(plan): mark RL SOTA Phase 0 complete in umbrella status table"
-```
+Committed as `docs(plan): mark RL SOTA Phase 0 complete in umbrella status table` alongside the tag.
 
 - [ ] **Step 7: Author the Phase 1 detailed plan**
 
-Following the just-in-time plan-authoring cadence, run the writing-plans skill against spec §4.2 to create `docs/plans/2026-05-11-rl-loop-phase-1-llamacpp.md`. Then return here to confirm Phase 0 is complete and Phase 1 is ready to start.
+Deferred to a separate user-initiated session per the just-in-time plan-authoring cadence (writing-plans skill against spec §4.2 → `docs/plans/2026-05-11-rl-loop-phase-1-llamacpp.md`). Phase 0 is shipped and tagged; Phase 1 plan authoring is a fresh task that doesn't block the Phase 0 closeout.
 
 ---
 

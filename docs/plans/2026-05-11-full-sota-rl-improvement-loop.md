@@ -155,7 +155,7 @@ bash scripts/check-lora-baseline.sh                        # Track D Phase 1 4-a
 
 | Phase | Plan authored | Started | Complete | sprint-auditor verdict |
 |---|---|---|---|---|
-| 0 | ✅ 2026-05-11 | ⏸ pending user kickoff | — | — |
+| 0 | ✅ 2026-05-11 | ✅ 2026-05-11 | ✅ 2026-05-11 (tag `rl-sota-phase-0-complete`) | ✅ PASS (all 9 items, file:line evidence; dead-code-finder also PASS) |
 | 1 | ⏸ TBA at phase start | — | — | — |
 | 2 | ⏸ TBA at phase start | — | — | — |
 | 3 | ⏸ TBA at phase start | — | — | — |
