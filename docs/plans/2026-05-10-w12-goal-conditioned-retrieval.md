@@ -1,7 +1,7 @@
 ---
 title: "W12 — Goal-Conditioned Retrieval + Multi-Hop Reasoning"
 created: 2026-05-10
-status: proposed
+status: shipped (P7/P8 anchor demotion + hub scaling, default planner in agent_turn)
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: medium
 scope: include/human/agent/, src/agent/, src/memory/
@@ -102,12 +102,12 @@ Each step has its own budget; the planner enforces the total budget by truncatin
 
 ## Phases
 
-1. Author `planner.h` + heuristic backend (template-based plans for common goal verbs).
-2. Author HippoRAG PageRank in `src/memory/pagerank.c`.
-3. Author `hu_planner_execute` + integration with W11 verifier.
-4. Migrate `src/agent/context.c` retrieval calls to use the planner.
-5. Author LLM backend (model emits a JSON plan).
-6. Adversarial tests.
+1. ~~Author `planner.h` + heuristic backend~~ **Done.** `include/human/agent/retrieval_planner.h` + `src/agent/retrieval_planner.c` ship the heuristic backend with template plans for when/where/who/last/between/with goal verbs.
+2. ~~Author HippoRAG PageRank~~ **Done.** `hu_planner_goal_conditioned` runs personalized PageRank seeded by world-model entities (see `src/agent/retrieval_planner.c` and `src/memory/pagerank.c`).
+3. ~~Author `hu_planner_execute` + integration with W11 verifier~~ **Done.** Executor walks the plan, runs `hu_self_rag_t` between hops when supplied, and aggregates deduplicated records.
+4. ~~Migrate `src/agent/context.c` retrieval calls to use the planner~~ **Done (clarification).** `src/agent/context.c` is prompt building only — it never carried memory retrieval calls. The intended migration was the primary agent_turn recall path: `src/agent/agent_turn.c` (SQLite-gated W12 block, ~line 1411–1440) now routes through `hu_w12_planner_recall_with_provider` and only falls back to v1 `hu_memory_recall_for_contact` when the W7 facade isn't wired or the planner returns no records. Other `hu_memory_facade_read` call sites in `src/agent/` (case_based, anticipatory, response_verifier, self_rag_*, belief_reverify_runner, world_model_bridge internals) serve purposes other than primary goal-conditioned retrieval and intentionally bypass the planner.
+5. ~~Author LLM backend~~ **Done.** `hu_planner_llm` emits a JSON-schema-locked plan; deterministic single-step fallback when the provider is NULL, the call fails, the JSON is malformed, or `HU_IS_TEST` is set.
+6. ~~Adversarial tests~~ **In tree.** `tests/test_w12_planner.c` covers core surface; `tests/test_v2_e2e_adversarial.c` exercises the agent_turn → LLM-planner → goal-conditioned → heuristic degradation chain when the provider's `chat_with_system` slot is unset.
 
 ## Test plan
 

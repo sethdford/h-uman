@@ -37,8 +37,17 @@
  * included one.
  *
  * Layer 4 of the v2 stack (see docs/plans/2026-05-10-memory-v2-roadmap-
- * overview.md). Reads layers 1-3 (facade, beliefs, world model); will
- * replace the ad-hoc retrieval calls in src/agent/context.c in a follow-up.
+ * overview.md). Reads layers 1-3 (facade, beliefs, world model). The
+ * primary agent_turn recall path is wired through this planner via
+ * `hu_w12_planner_recall_with_provider` (src/agent/world_model_bridge.c
+ * and src/agent/agent_turn.c around the SQLite-gated W12 block); the
+ * v1 `hu_memory_recall_for_contact` only runs as a graceful fallback
+ * when the W7 facade isn't wired or the planner returns no records.
+ *
+ * Other `hu_memory_facade_read` call sites under src/agent/ serve
+ * purposes other than primary goal-conditioned retrieval (case lookup,
+ * verifier evidence fetch, anticipatory probing, world-model load,
+ * sleep-time belief reverify) and intentionally bypass the planner.
  */
 #ifndef HU_AGENT_RETRIEVAL_PLANNER_H
 #define HU_AGENT_RETRIEVAL_PLANNER_H
