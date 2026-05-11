@@ -22,7 +22,7 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~1750 KB binary · <30 ms startup · 8,400+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
+~1750 KB binary · <30 ms startup · 10,000+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
 ```
 
 ### Features
@@ -62,7 +62,7 @@ Human's verified numbers (measured on macOS arm64, March 2026):
 Binary size:   ~1750 KB (MinSizeRel + LTO, all channels)
 Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
 Startup:       6–27 ms avg (Apple Silicon M4 Max)
-Tests:         8,400+ passing, 0 ASan errors
+Tests:         10,000+ passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?
@@ -641,7 +641,7 @@ Build and tests require a C11 compiler and CMake 3.20+. One-time setup:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./human_tests                             # 8,400+ tests
+./human_tests                             # 10,000+ tests
 cd ..
 ```
 

@@ -147,7 +147,12 @@ static hu_error_t heuristic_verify(void *vctx, hu_allocator_t *alloc,
         const hu_verifier_claim_t *v = &report.claims[i];
         hu_atomic_claim_t *c = &resp->claims[i];
         memset(c, 0, sizeof(*c));
-        snprintf(c->text, sizeof(c->text), "%s", v->text);
+        /* Intentional truncation: c->text is 160 bytes, v->text may be up
+         * to 256. The precision spec bounds the source so GCC's
+         * -Wformat-truncation=2 doesn't trip on the always-truncatable
+         * widths under -Werror builds. */
+        snprintf(c->text, sizeof(c->text), "%.*s",
+                 (int)(sizeof(c->text) - 1), v->text);
         c->span_start = 0;
         c->span_end = 0;
         c->support = belief_from_score(v->score, "heuristic", now);

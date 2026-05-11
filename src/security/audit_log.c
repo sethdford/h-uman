@@ -227,6 +227,8 @@ hu_error_t hu_audit_log_query(hu_audit_log_t *log, const hu_audit_query_t *q,
     *out_count = 0;
 
 #ifndef HU_ENABLE_SQLITE
+    (void)q;
+    (void)alloc;
     return HU_ERR_NOT_SUPPORTED;
 #else
     /* Build a dynamic SQL query based on which filters are active. */

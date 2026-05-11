@@ -316,7 +316,11 @@ static uint8_t ks_kdf_version_for(const char *user_id) {
     if (!f)
         return KS_KDF_V0_PBKDF2;
     uint8_t v = KS_KDF_V0_PBKDF2;
-    (void)fread(&v, 1, 1, f);
+    /* Best-effort: if read fails we keep the v0 default. The (void) cast
+     * is insufficient under GCC's __attribute__((warn_unused_result));
+     * assign to a discard variable so -Werror=unused-result doesn't trip. */
+    size_t nread = fread(&v, 1, 1, f);
+    (void)nread;
     fclose(f);
     return v;
 }
@@ -336,7 +340,10 @@ static void ks_kdf_version_persist(const char *user_id, uint8_t version) {
     int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
     if (fd < 0)
         return;
-    (void)write(fd, &version, 1);
+    /* Best-effort write: if it fails we either left the placeholder bytes
+     * or wrote partial — either way the next read picks v0 default. */
+    ssize_t nwritten = write(fd, &version, 1);
+    (void)nwritten;
     close(fd);
 #else
     FILE *f = fopen(path, "wb");

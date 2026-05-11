@@ -323,6 +323,12 @@ static void imessage_record_poll_success(hu_imessage_ctx_t *c, int64_t now) {
  * any subsequent heartbeat. This helper centralizes the policy: every
  * healthy idle poll IS a heartbeat. The disk write is ~170 bytes, well
  * within the daemon's 1Hz cadence budget. */
+/* Marked unused at the language level because both callsites are inside
+ * compile-time guards (#if HU_IS_TEST and the macOS+SQLite production
+ * branch). On Linux or no-SQLite builds neither caller is compiled in,
+ * which would otherwise trip -Werror=unused-function. */
+static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c,
+                                           int64_t now) __attribute__((unused));
 static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now) {
     if (!c)
         return;
