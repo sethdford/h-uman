@@ -217,6 +217,7 @@ Use this to find the right files for a given task without searching the full cod
 | Concept                         | Primary Source Files                                         | Test Files                               |
 | ------------------------------- | ------------------------------------------------------------ | ---------------------------------------- |
 | **Turing score (S2S, 18-dim)**  | `src/eval/turing_score.c`, `include/human/eval/turing_score.h` | `test_turing_score.c`, `test_sota_research.c` |
+| **W16 continuous evaluation (vtable)** | `src/evaluation/evaluation.c`, `evaluation_locomo.c`, `evaluation_longmemeval.c`, `evaluation_dmr.c`, `evaluation_minja.c`, `evaluation_memoryagentbench.c`, `evaluation_frontier_compare.c`, `evaluation_legacy_bridge.c`, `evaluation_facade_recall.c`, `include/human/evaluation/evaluation.h`, `src/cli_evaluation.c` | `test_w16_evaluation.c`, `test_w16_eval_cli.c` |
 
 ## Other Subsystems
 

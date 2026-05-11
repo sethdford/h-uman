@@ -10,7 +10,7 @@
  * Eviction (W14) and **provider short-circuit** (skip LLM when `blob` holds a
  * replayable assistant payload) are not implemented yet. `agent_turn.c` only
  * probes prior rows and stores `prompt_token_count` metadata after a successful
- * chat — see comments there.
+ * chat — see comments there. Formal deferral: `docs/plans/adr/2026-05-10-w10-kv-replay-deferred.md`.
  *
  * Gate: functions compile unconditionally; schema creation and SQL execution are
  * guarded by HU_ENABLE_SQLITE inside neural_memory.c.

@@ -170,6 +170,7 @@ When uncertain, classify as higher risk.
    - Use `scripts/what-to-test.sh <changed-files>` to find relevant suites.
    - Use `scripts/agent-preflight.sh` for change-aware validation before committing (runs `doc-fleet` when `docs/`, `human-skills/`, `skill-registry/`, or any `.md` changes).
    - Run full suite (`./build/human_tests` with no args) before final commit.
+   - Optional Memory v2 layered smoke (G1.5 / execution plan): `bash scripts/memory-v2-local-proof.sh` (G2 header check + `--suite="v2 E2E"`; set `FULL_V2_SUITES=1` to fan out per W7–W16 suite substrings).
 5. **Document impact** — update comments/docs for behavior changes, risk, and side effects.
 
 ### 6.1 Code Naming Contract (Required)
