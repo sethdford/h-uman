@@ -458,6 +458,7 @@ void run_webrtc_tests(void);
 void run_embedded_provider_tests(void);
 void run_llamacpp_provider_tests(void);
 void run_llamacpp_factory_config_tests(void);
+void run_llamacpp_sampling_tests(void);
 void run_coreml_provider_tests(void);
 void run_forgetting_tests(void);
 void run_bootstrap_tests(void);
@@ -991,6 +992,7 @@ int main(int argc, char **argv) {
     run_embedded_provider_tests();
     run_llamacpp_provider_tests();
     run_llamacpp_factory_config_tests();
+    run_llamacpp_sampling_tests();
     run_coreml_provider_tests();
     run_forgetting_tests();
     run_bootstrap_tests();

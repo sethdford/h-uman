@@ -984,6 +984,7 @@ list(APPEND HU_CORE_SOURCES
     src/voice/semantic_eot.c
     src/providers/embedded.c
     src/providers/llamacpp.c
+    src/providers/llamacpp_sampling.c
 )
 
 if(HU_ENABLE_COREML)
@@ -2836,6 +2837,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_embedded_provider.c
     tests/test_llamacpp_provider.c
     tests/test_llamacpp_factory_config.c
+    tests/test_llamacpp_sampling.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c
