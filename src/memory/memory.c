@@ -117,6 +117,27 @@ struct hu_memory_facade_slot {
     void *ctx;
 };
 
+/* W7 P14 — outstanding-read origin tracking. When a backend's `read` hook
+ * returns records to a caller, we stash the (vt, ctx) pair that produced
+ * them, keyed by the records pointer. `records_free` looks up this entry
+ * and dispatches to the captured origin instead of the *currently bound*
+ * slot. This closes a use-after-replace trap: previously a caller could
+ * read from backend A, get records pointing into A's payloads, watch
+ * backend B replace slot A, then call records_free — which would dispatch
+ * to B's free hook and misinterpret A's payload layout.
+ *
+ * Lifetime contract: every successful facade_read pushes a node; every
+ * facade_records_free pops the matching node by records pointer. A
+ * facade_close with non-empty outstanding_reads is a programming error
+ * (records leaked); we free the bookkeeping nodes and log a warning. */
+struct hu_memory_facade_read_origin {
+    hu_memory_record_t *records;      /* the array pointer the caller holds */
+    size_t count;                     /* size of the records array */
+    hu_memory_facade_vtable_t *vt;    /* backend vt that owned the array */
+    void *ctx;                        /* backend ctx that owned the array */
+    struct hu_memory_facade_read_origin *next;
+};
+
 struct hu_memory_facade {
     hu_allocator_t *alloc;
     hu_graph_t *graph; /* not owned; provided at open() */
@@ -125,6 +146,9 @@ struct hu_memory_facade {
     int64_t last_case_rowid; /* HU_MEM_CASE insert rowid; see hu_memory_facade_last_case_rowid */
     hu_memory_audit_fn audit_fn; /* optional write/erase audit hook */
     void *audit_ctx;
+    /* W7 P14: head of the outstanding-read origin list. NULL when no
+     * caller currently holds records from any backend. */
+    struct hu_memory_facade_read_origin *outstanding_reads;
 };
 
 void hu_memory__v1_set_bundle_for_close(hu_memory_facade_t *m, void *ctx) {
@@ -185,6 +209,17 @@ hu_error_t hu_memory_facade_open_on_graph(hu_allocator_t *alloc, struct hu_graph
 
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc) {
     if (m == NULL) return;
+    /* W7 P14: drain the outstanding-reads bookkeeping. Each leftover
+     * node means a caller held records past the facade lifetime — that's
+     * a programming bug on the caller (records would dangle anyway once
+     * the backend ctxes are deinit'd below). We free only the tracking
+     * nodes here, not the records themselves; the caller's records
+     * pointer is now garbage but freeing it is its own concern. */
+    while (m->outstanding_reads != NULL) {
+        struct hu_memory_facade_read_origin *o = m->outstanding_reads;
+        m->outstanding_reads = o->next;
+        m->alloc->free(m->alloc->ctx, o, sizeof(*o));
+    }
     hu_memory__v1_backend_unregister_all(m);
     for (int i = 0; i < HU_MEM_KIND_MAX; i++) {
         struct hu_memory_facade_slot *s = &m->slots[i];
@@ -214,12 +249,78 @@ void hu_memory_facade_set_audit_hook(hu_memory_facade_t *m,
     }
 }
 
+/* W7 P14 helpers — outstanding-read origin bookkeeping. All three are
+ * called only with `m != NULL`. They are deliberately allocation-light:
+ * the node count is bounded by "callers holding live records right now",
+ * which in practice is small (1-3 simultaneous reads). */
+static bool facade_outstanding_for_ctx(const hu_memory_facade_t *m,
+                                       const hu_memory_facade_vtable_t *vt,
+                                       const void *ctx) {
+    for (const struct hu_memory_facade_read_origin *o = m->outstanding_reads;
+         o != NULL; o = o->next) {
+        if (o->vt == vt && o->ctx == ctx) return true;
+    }
+    return false;
+}
+
+static void facade_push_outstanding(hu_memory_facade_t *m, hu_memory_record_t *records,
+                                    size_t count, hu_memory_facade_vtable_t *vt, void *ctx) {
+    if (records == NULL || count == 0) return; /* nothing to track */
+    struct hu_memory_facade_read_origin *node =
+        m->alloc->alloc(m->alloc->ctx, sizeof(*node));
+    if (node == NULL) {
+        /* Out-of-memory on the bookkeeping node is non-fatal: fall back
+         * to the legacy "route by current slot" behavior. records_free
+         * will just not find an origin entry and use slot_for(). */
+        return;
+    }
+    node->records = records;
+    node->count = count;
+    node->vt = vt;
+    node->ctx = ctx;
+    node->next = m->outstanding_reads;
+    m->outstanding_reads = node;
+}
+
+/* Pop the origin matching `records`. Returns true and fills out_vt/out_ctx
+ * if found; returns false if the records pointer is not tracked (caller
+ * obtained records via a path that bypassed facade_read, e.g. directly
+ * from a v1 helper before W7 wiring). */
+static bool facade_pop_outstanding(hu_memory_facade_t *m, hu_memory_record_t *records,
+                                   hu_memory_facade_vtable_t **out_vt, void **out_ctx) {
+    struct hu_memory_facade_read_origin **prev = &m->outstanding_reads;
+    for (struct hu_memory_facade_read_origin *o = *prev; o != NULL;
+         prev = &o->next, o = o->next) {
+        if (o->records == records) {
+            if (out_vt) *out_vt = o->vt;
+            if (out_ctx) *out_ctx = o->ctx;
+            *prev = o->next;
+            m->alloc->free(m->alloc->ctx, o, sizeof(*o));
+            return true;
+        }
+    }
+    return false;
+}
+
 hu_error_t hu_memory_facade_register_backend(hu_memory_facade_t *m, hu_memory_kind_t kind,
                                              hu_memory_facade_vtable_t *vt, void *ctx) {
     if (m == NULL || vt == NULL || (int)kind < 0 || kind >= HU_MEM_KIND_MAX) {
         return HU_ERR_INVALID_ARGUMENT;
     }
     struct hu_memory_facade_slot *s = &m->slots[kind];
+    /* W7 P14: refuse to replace a backend that has outstanding reads —
+     * deinit'ing its ctx would dangle the (vt, ctx) pair captured in
+     * outstanding_reads, and records_free would then call into freed
+     * memory. The caller must drain its reads (via records_free) first.
+     *
+     * We check by (vt, ctx) rather than by kind because a single ctx
+     * can be bound to multiple kinds (the v1 entity/relation/hyperedge
+     * triple-bind), and reads on any of those kinds count against the
+     * replacement. */
+    if (s->vt != NULL && s->ctx != NULL &&
+        facade_outstanding_for_ctx(m, s->vt, s->ctx)) {
+        return HU_ERR_MEMORY_BACKEND;
+    }
     if (s->vt && s->vt->deinit && s->ctx) {
         if (!(memory_slot_ctx_shared_elsewhere(m, kind, s->ctx) &&
               memory_vt_is_v1_entity_owner(s->vt))) {
@@ -252,7 +353,16 @@ hu_error_t hu_memory_facade_read(hu_memory_facade_t *m, const hu_memory_query_t 
     }
     struct hu_memory_facade_slot *s = slot_for(m, q->kind);
     if (s == NULL || s->vt->read == NULL) return HU_ERR_NOT_SUPPORTED;
-    return s->vt->read(s->ctx, q, alloc, out, out_count);
+    hu_error_t e = s->vt->read(s->ctx, q, alloc, out, out_count);
+    if (e == HU_OK && *out != NULL && *out_count > 0) {
+        /* W7 P14: capture the (vt, ctx) that produced these records so
+         * records_free routes back to the same backend even if the slot
+         * is later replaced. push_outstanding is allocation-light and
+         * silently no-ops on OOM (fallback path in records_free still
+         * works for untracked records). */
+        facade_push_outstanding(m, *out, *out_count, s->vt, s->ctx);
+    }
+    return e;
 }
 
 hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_t *rec) {
@@ -309,9 +419,21 @@ hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const cha
 void hu_memory_facade_records_free(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                    hu_memory_record_t *r, size_t n) {
     if (m == NULL || r == NULL || n == 0) return;
-    /* All records in a single response come from the same backend, identified
-     * by the kind of the first record. Mixing kinds in one read is not
-     * permitted (the API only routes a single kind per call). */
+    /* W7 P14: prefer the captured origin from facade_read. This routes
+     * the free back to the backend that actually allocated these records,
+     * even if a different backend now occupies the slot. Tracked records
+     * (the common path) always hit this branch. */
+    hu_memory_facade_vtable_t *origin_vt = NULL;
+    void *origin_ctx = NULL;
+    if (facade_pop_outstanding(m, r, &origin_vt, &origin_ctx) && origin_vt != NULL &&
+        origin_vt->records_free != NULL) {
+        origin_vt->records_free(origin_ctx, alloc, r, n);
+        return;
+    }
+    /* Untracked records (legacy callers that allocate records without
+     * going through facade_read, or OOM during origin-push): fall back
+     * to the kind-based dispatch. Mixing kinds in one read is not
+     * permitted, so r[0].kind identifies the backend. */
     struct hu_memory_facade_slot *s = slot_for(m, r[0].kind);
     if (s == NULL || s->vt->records_free == NULL) return;
     s->vt->records_free(s->ctx, alloc, r, n);

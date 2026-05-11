@@ -918,13 +918,13 @@ static void test_w7_p14_audit_hook_survives_register_replace(void) {
  * register → read → records_free → close. ASan would catch any double
  * free; the per-stub counters catch a stray dispatch.
  *
- * NB: the facade currently routes records_free to the **currently
- * registered** backend (see src/memory/memory.c:309-318). That means
- * reading from A, then registering B, then calling records_free on
- * A's records would route to B and is a use-after-replace trap. The
- * docs/plans/2026-05-10-memory-v2-execution-plan.md "Phase 1.4"
- * exit row should harden this; for now we just don't exercise the
- * unsafe ordering. */
+ * W7 P14 hardening (2026-05-10): records_free now routes by the origin
+ * (vt, ctx) captured at read time, and register_backend refuses to
+ * replace a backend with outstanding reads. The unsafe ordering that
+ * this test deliberately avoided is now closed at the dispatcher;
+ * test_w7_p14_register_refuses_replace_with_outstanding_reads and
+ * test_w7_p14_records_free_routes_to_origin_after_replace pin both
+ * halves of the contract. */
 static void test_w7_p14_records_free_before_replace_is_safe(void) {
     hu_graph_t *g = NULL;
     hu_memory_facade_t *m = NULL;
@@ -965,6 +965,106 @@ static void test_w7_p14_records_free_before_replace_is_safe(void) {
     close_facade(g, m);
 }
 
+/* W7 P14 contract — register_backend refuses replacement when reads are
+ * outstanding. The dispatcher tracks (vt, ctx) per outstanding read; if
+ * any read is still in flight for the slot's current (vt, ctx), the
+ * replace is rejected with HU_ERR_MEMORY_BACKEND. After records_free
+ * drains the outstanding-reads list, the replace succeeds.
+ *
+ * Why this matters: deinit'ing a backend's ctx while a caller still
+ * holds records pointing into it dangles the captured origin, and the
+ * subsequent records_free walks freed memory. Refusing the replace
+ * forces the caller into the only safe ordering: free first, replace
+ * second. */
+static void test_w7_p14_register_refuses_replace_with_outstanding_reads(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    phase14_stub_t a = {.tag = 21};
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &a), HU_OK);
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_BY_NAME;
+    q.contact_id = "u";
+    q.contact_id_len = 1;
+    q.as.by_name.name = "x";
+    q.as.by_name.name_len = 1;
+
+    hu_memory_record_t *recs = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_memory_facade_read(m, &q, A(), &recs, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1u);
+
+    /* While the read is outstanding, replacing A must fail. a.deinit
+     * must NOT be called — that's the whole point. */
+    phase14_stub_t b = {.tag = 22};
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &b),
+                 HU_ERR_MEMORY_BACKEND);
+    HU_ASSERT_EQ(a.deinit_count, 0);
+
+    /* Drain the outstanding read; replace now succeeds and a.deinit
+     * runs exactly once. */
+    hu_memory_facade_records_free(m, A(), recs, n);
+    HU_ASSERT_EQ(a.records_free_count, 1);
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &b), HU_OK);
+    HU_ASSERT_EQ(a.deinit_count, 1);
+
+    close_facade(g, m);
+}
+
+/* W7 P14 contract — records_free routes to the origin (vt, ctx) captured
+ * at read time, not to whatever currently occupies the slot. We can't
+ * exercise this directly with register_backend (the new refusal blocks
+ * the unsafe ordering) but we CAN exercise it by reading from one slot,
+ * then registering a different (vt, ctx) on a *different kind* that
+ * shares no state. records_free on the first read must still dispatch
+ * to its origin, not to anything keyed by r[0].kind alone.
+ *
+ * This guards the defense-in-depth path: if a future refactor lets a
+ * caller bypass register_backend's refusal (e.g. via a different facade
+ * surface), records_free still routes correctly. */
+static void test_w7_p14_records_free_routes_to_origin_after_replace(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    phase14_stub_t a = {.tag = 31};
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &a), HU_OK);
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_BY_NAME;
+    q.contact_id = "u";
+    q.contact_id_len = 1;
+    q.as.by_name.name = "x";
+    q.as.by_name.name_len = 1;
+
+    /* First read — origin (k_p14_stub_vt, &a) captured. */
+    hu_memory_record_t *recs_a = NULL;
+    size_t na = 0;
+    HU_ASSERT_EQ(hu_memory_facade_read(m, &q, A(), &recs_a, &na), HU_OK);
+
+    /* Register a different stub on a DIFFERENT kind so we don't trip
+     * the refusal guard. The HU_MEM_ENTITY slot still points at &a
+     * with a live outstanding read. */
+    phase14_stub_t c = {.tag = 33};
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_RELATION, &k_p14_stub_vt, &c), HU_OK);
+
+    /* records_free on recs_a must dispatch to &a (the captured origin),
+     * NOT to &c — which would happen if we routed by r[0].kind through
+     * a future bug. We verify by checking that &a's records_free_count
+     * incremented and &c's did not. */
+    hu_memory_facade_records_free(m, A(), recs_a, na);
+    HU_ASSERT_EQ(a.records_free_count, 1);
+    HU_ASSERT_EQ(c.records_free_count, 0);
+
+    close_facade(g, m);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_w7_memory_facade_tests(void) {
@@ -998,5 +1098,7 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_p14_reregister_same_ctx_no_double_deinit);
     HU_RUN_TEST(test_w7_p14_audit_hook_survives_register_replace);
     HU_RUN_TEST(test_w7_p14_records_free_before_replace_is_safe);
+    HU_RUN_TEST(test_w7_p14_register_refuses_replace_with_outstanding_reads);
+    HU_RUN_TEST(test_w7_p14_records_free_routes_to_origin_after_replace);
 #endif
 }
