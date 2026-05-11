@@ -701,6 +701,92 @@ static void test_agent_turn_injects_behavior_stance(void) {
     hu_agent_deinit(&agent);
 }
 
+/* B16 follow-up: the agent loop infers chronotype from observed
+ * active_hours and back-fills persona->chronotype when it's UNKNOWN.
+ * This proves the wire fires end-to-end — the inferencer itself is
+ * pinned by tests/test_personal_model.c; here we just verify that
+ * agent_turn calls it and stores the result. */
+static void test_agent_turn_back_fills_chronotype_when_unknown(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    stance_capture_ctx_t cap = {0};
+    hu_provider_t prov = stance_capture_provider_create(&alloc, &cap);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_error_t err =
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Pre-populate active_hours with a morning-lark histogram (matches
+     * tests/test_personal_model.c::personal_model_infer_chronotype_classifies_morning_lark
+     * thresholds: heavy 6..9, light elsewhere). */
+    agent.personal_model.active_hours[6] = 12;
+    agent.personal_model.active_hours[7] = 14;
+    agent.personal_model.active_hours[8] = 12;
+    agent.personal_model.active_hours[9] = 8;
+    agent.personal_model.active_hours[14] = 2;
+    agent.personal_model.active_hours[22] = 2;
+
+    /* Stack persona with chronotype = UNKNOWN (the back-fill condition). */
+    hu_persona_t persona = {0};
+    persona.chronotype = HU_CHRONO_UNKNOWN;
+    hu_persona_t *prev_persona = agent.persona;
+    agent.persona = &persona;
+
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn(&agent, "What is 2+2?", 12, &response, &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    /* The wire should have fired: persona.chronotype is now MORNING_LARK. */
+    HU_ASSERT_TRUE(persona.chronotype == HU_CHRONO_MORNING_LARK);
+
+    if (response)
+        alloc.free(alloc.ctx, response, response_len + 1);
+    agent.persona = prev_persona;
+    hu_agent_deinit(&agent);
+}
+
+/* The back-fill must NOT clobber an explicit chronotype from the
+ * persona JSON. If the user wrote chronotype = EVENING_OWL but their
+ * observed active_hours look like a morning lark (perhaps they're
+ * in a temporary phase), the explicit setting wins. */
+static void test_agent_turn_respects_explicit_chronotype(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    stance_capture_ctx_t cap = {0};
+    hu_provider_t prov = stance_capture_provider_create(&alloc, &cap);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_error_t err =
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Same morning-lark histogram as the prior test. */
+    agent.personal_model.active_hours[6] = 12;
+    agent.personal_model.active_hours[7] = 14;
+    agent.personal_model.active_hours[8] = 12;
+    agent.personal_model.active_hours[9] = 8;
+
+    hu_persona_t persona = {0};
+    persona.chronotype = HU_CHRONO_EVENING_OWL;
+    hu_persona_t *prev_persona = agent.persona;
+    agent.persona = &persona;
+
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn(&agent, "hi", 2, &response, &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    /* Explicit setting preserved, NOT overwritten by inference. */
+    HU_ASSERT_TRUE(persona.chronotype == HU_CHRONO_EVENING_OWL);
+
+    if (response)
+        alloc.free(alloc.ctx, response, response_len + 1);
+    agent.persona = prev_persona;
+    hu_agent_deinit(&agent);
+}
+
 #ifdef HU_ENABLE_SQLITE
 /* W4 wire proof: every turn runs the response verifier even with NULL graph
  * (TELEMETRY mode still extracts claims; supported-vs-flagged is meaningful
@@ -1997,6 +2083,8 @@ void run_e2e_tests(void) {
     HU_RUN_TEST(test_agent_from_config_null_provider);
     HU_RUN_TEST(test_agent_turn_simple);
     HU_RUN_TEST(test_agent_turn_injects_behavior_stance);
+    HU_RUN_TEST(test_agent_turn_back_fills_chronotype_when_unknown);
+    HU_RUN_TEST(test_agent_turn_respects_explicit_chronotype);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_agent_turn_runs_response_verifier_telemetry);
     HU_RUN_TEST(test_agent_turn_response_verifier_with_graph);

@@ -951,6 +951,29 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
 #ifndef HU_IS_TEST
     (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+#endif
+
+    /* B16 follow-up — close the chronotype loop. Whatever populated the
+     * personal model's active_hours histogram (the production ingest
+     * above, or test-side direct fill of `agent->personal_model`), once
+     * ≥ HU_PM_CHRONOTYPE_MIN_SAMPLES (~30) hourly observations have
+     * accumulated, infer the chronotype and back-fill the persona
+     * field. We only update when the persona's own field is
+     * HU_CHRONO_UNKNOWN — respecting an explicit setting in the persona
+     * JSON — so the auto-detector fills in blanks but never fights an
+     * intentional configuration. The downstream consumer is
+     * `hu_scheduler_probe_quiet_hours`: an inferred chronotype starts
+     * gating proactive messages on the very next scheduler tick. Pure
+     * CPU; runs in tests too so agent-level harnesses can prove the
+     * wire fires without depending on the production ingest path. */
+    if (agent->persona && agent->persona->chronotype == HU_CHRONO_UNKNOWN) {
+        hu_chronotype_t inferred =
+            hu_personal_model_infer_chronotype(&agent->personal_model);
+        if (inferred != HU_CHRONO_UNKNOWN)
+            agent->persona->chronotype = inferred;
+    }
+
+#ifndef HU_IS_TEST
     /* M2 P1 crash-safety: save the personal model immediately after
      * ingesting the user message. The single save at hu_agent_deinit is
      * not enough — a daemon killed mid-turn loses every fact, style hint,
