@@ -13,6 +13,7 @@
 #include "human/agent/retrieval_planner.h"
 #include "human/agent/scheduler.h"
 #include "human/agent/self_rag.h"
+#include "human/agent/tom_scenario.h"
 #include "human/agent/world_model.h"
 #include "human/memory/memory.h"
 #include "human/provider.h"
@@ -144,8 +145,11 @@ static const char *wm_entity_name_by_id(const hu_world_model_t *wm, int64_t id) 
 }
 
 hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                    const char *contact_id, size_t contact_id_len,
-                                    int64_t now_ms, char **out_text, size_t *out_len) {
+                                    const char *contact_id, size_t contact_id_len, int64_t now_ms,
+                                    char **out_text, size_t *out_len, const char *tom_premise,
+                                    size_t tom_premise_len, const char *tom_question,
+                                    size_t tom_question_len, const char *tom_category,
+                                    size_t tom_category_len) {
     if (out_text)
         *out_text = NULL;
     if (out_len)
@@ -161,6 +165,13 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         hu_world_model_load(facade->m, alloc, contact_id, contact_id_len, now_ms, &wm);
     if (e != HU_OK || !wm)
         return e == HU_OK ? HU_OK : e;
+
+    if (tom_premise && tom_premise_len > 0 && tom_question && tom_question_len > 0 &&
+        tom_category && tom_category_len > 0) {
+        hu_world_model_merge_tom_scenario(wm, tom_premise, tom_premise_len, tom_question,
+                                          tom_question_len, tom_category, tom_category_len,
+                                          now_ms);
+    }
 
     /* If everything is empty, return NULL/0 -- callers skip injection.
      *

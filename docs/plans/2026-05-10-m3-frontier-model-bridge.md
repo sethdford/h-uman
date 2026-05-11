@@ -215,8 +215,13 @@ Landed via FIX 24 (`feat(daemon): config-driven LoRA adapter auto-load`):
 - The provider exists at `src/providers/llamacpp.c` with the full
   vtable wired (chat, load_adapter, unload_adapter, active_adapter,
   deinit). All hooks return `HU_ERR_NOT_SUPPORTED` until the
-  CMake option `HU_ENABLE_LLAMACPP=ON` is set AND `third_party/llama.cpp/`
-  is vendored (or libllama is reachable via the system include path).
+  CMake option `HU_ENABLE_LLAMACPP=ON` is set AND libllama is
+  reachable. Resolution order in `CMakeLists.txt` (W13 Bridge A block):
+  1. **vendored** — `third_party/llama.cpp/CMakeLists.txt`,
+  2. **`find_package(Llama)`** — upstream's CMake export (~b3000+),
+  3. **`pkg_check_modules(LLAMA llama)`** — Linux distro `llama.pc`,
+  4. **manual prefix probe** — Homebrew (Apple Silicon + Intel), `/usr/local`, `/usr`.
+  When none match, the build keeps the `HU_ERR_NOT_SUPPORTED` stub.
 - Factory dispatch (`src/providers/factory.c`): selecting `provider:
   "llamacpp"` in config now succeeds; the daemon will tolerate the
   NOT_SUPPORTED return from chat by falling back to whatever real
@@ -279,3 +284,4 @@ Pick this up when ANY of these become true:
 | 2026-05-10 | 4.0 | FIX 20: huml chat-time LoRA merge — `hu_gpt_attach_lora` wired into provider load/unload; e2e disk-roundtrip test asserts forward-pass bias |
 | 2026-05-11 | D0.3 | `hu_agent_m3_on_provider_success` wired across turn + stream paths (GVR, constitutional, metacog regen, guard retry, stream_chat, rethink) |
 | 2026-05-11 | Bridge A | `llamacpp` vtable: non-NULL `chat` (delegates to `chat_with_system` like `huml_chat`) + `supports_streaming` → false so `hu_agent_turn_stream` never derefs NULL |
+| 2026-05-11 | Bridge A | CMake: system libllama resolution — `find_package(Llama)` → pkg-config → Homebrew/Linux prefix probe; vendored `third_party/llama.cpp/` still preferred. Test build mirrors include-only (link rides on `human_core` PUBLIC). Coverage: `test_llamacpp_chat_rejects_null_args`. |

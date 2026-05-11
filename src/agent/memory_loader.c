@@ -344,7 +344,7 @@ supplement:
         hu_error_t ge = hu_w7_render_world_model(
             loader->facade, loader->alloc,
             session_id, session_id_len, 0,
-            &graph_text, &graph_len);
+            &graph_text, &graph_len, NULL, 0, NULL, 0, NULL, 0);
         if (ge == HU_OK && graph_text && graph_len > 0) {
             const size_t graph_cap = 500;
             if (graph_len > graph_cap)

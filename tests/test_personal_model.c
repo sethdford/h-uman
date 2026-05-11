@@ -4,8 +4,10 @@
 #include "human/memory/fact_extract.h"
 #include "human/memory/personal_model.h"
 #include "test_framework.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void personal_model_init_sets_defaults(void) {
     hu_personal_model_t m;
@@ -157,6 +159,71 @@ static void personal_model_absent_does_not_leak_into_prompt(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* M2 P1 — save/load round trip. The model is the only place we
+ * accumulate user-specific signal across daemon restarts; without
+ * persistence M2 is functionally still RAM-only. This test proves the
+ * binary format survives a full round trip: ingest signals → save →
+ * fresh struct → load → equality on the fields that carry value. */
+static void personal_model_save_load_round_trips(void) {
+    hu_personal_model_t a;
+    hu_personal_model_init(&a);
+    /* Seed signal: a couple of fact-shaped utterances + style observations. */
+    hu_personal_model_ingest(&a, "i love climbing in the morning", 30, true,
+                             1700000000LL);
+    hu_personal_model_ingest(&a, "i never drink coffee", 21, true, 1700000100LL);
+    hu_personal_model_ingest(&a, "lol that's cool 😎", 18, true, 1700000200LL);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&a));
+
+    /* Round-trip through a unique tmp path. */
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_pm_test_%d.bin", (int)getpid());
+    HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
+
+    hu_personal_model_t b;
+    HU_ASSERT_EQ(hu_personal_model_load(&b, path), HU_OK);
+
+    /* Key invariants: facts and interaction count survived. We don't
+     * memcmp the whole struct because the build prompt's style metrics
+     * are floats and a strict byte-equality would be brittle on platforms
+     * with different float representations. Instead we assert the
+     * meaningful fields. */
+    HU_ASSERT_EQ(b.fact_count, a.fact_count);
+    HU_ASSERT_EQ(b.interaction_count, a.interaction_count);
+    HU_ASSERT_EQ(b.version, a.version);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&b));
+
+    /* Cleanup. */
+    remove(path);
+}
+
+/* Bad magic must fail closed and leave `out` initialized to defaults so
+ * the daemon can keep going without crashing. */
+static void personal_model_load_rejects_bad_magic(void) {
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_pm_bad_%d.bin", (int)getpid());
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    const char garbage[64] = "not a personal model file at all";
+    fwrite(garbage, sizeof(garbage), 1, fp);
+    fclose(fp);
+
+    hu_personal_model_t out;
+    HU_ASSERT_EQ(hu_personal_model_load(&out, path), HU_ERR_PARSE);
+    /* Initialized to defaults — version is the only field set by init. */
+    HU_ASSERT_EQ(out.version, 1U);
+    HU_ASSERT_EQ(out.fact_count, (size_t)0);
+    HU_ASSERT_FALSE(hu_personal_model_has_content(&out));
+
+    remove(path);
+}
+
+/* Missing file is a benign HU_ERR_NOT_FOUND. */
+static void personal_model_load_missing_file_returns_not_found(void) {
+    hu_personal_model_t out;
+    HU_ASSERT_EQ(hu_personal_model_load(&out, "/tmp/no_such_pm_file_xyz_123.bin"),
+                 HU_ERR_NOT_FOUND);
+}
+
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -170,4 +237,7 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_has_content_true_after_style_observation);
     HU_RUN_TEST(personal_model_reaches_system_prompt_via_config);
     HU_RUN_TEST(personal_model_absent_does_not_leak_into_prompt);
+    HU_RUN_TEST(personal_model_save_load_round_trips);
+    HU_RUN_TEST(personal_model_load_rejects_bad_magic);
+    HU_RUN_TEST(personal_model_load_missing_file_returns_not_found);
 }

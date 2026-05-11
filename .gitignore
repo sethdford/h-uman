@@ -3,6 +3,7 @@ build/
 build-*/
 
 # Build output logs
+build.log
 build-*-output.txt
 test-output.txt
 *.o

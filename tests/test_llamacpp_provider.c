@@ -102,6 +102,31 @@ static void test_llamacpp_chat_multimessage_returns_not_supported(void) {
     prov.vtable->deinit(prov.ctx, &a);
 }
 
+static void test_llamacpp_chat_rejects_null_args(void) {
+    /* The multi-message dispatcher must be NULL-arg safe so the agent
+     * loop surfaces HU_ERR_INVALID_ARGUMENT instead of segfaulting on
+     * a malformed request from a misconfigured caller. */
+    hu_allocator_t a = alloc();
+    hu_llamacpp_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_llamacpp_provider_create(&a, &cfg, &prov), HU_OK);
+    HU_ASSERT_NOT_NULL(prov.vtable->chat);
+
+    hu_chat_message_t msg = {.role = HU_ROLE_USER, .content = "hi", .content_len = 2};
+    hu_chat_request_t req = {.messages = &msg, .messages_count = 1};
+    hu_chat_response_t resp;
+    memset(&resp, 0, sizeof(resp));
+
+    HU_ASSERT_EQ(prov.vtable->chat(NULL, &a, &req, "m", 1, 0.5, &resp), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, NULL, &req, "m", 1, 0.5, &resp),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &a, NULL, "m", 1, 0.5, &resp),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &a, &req, "m", 1, 0.5, NULL), HU_ERR_INVALID_ARGUMENT);
+
+    prov.vtable->deinit(prov.ctx, &a);
+}
+
 static void test_llamacpp_supports_streaming_is_false(void) {
     hu_allocator_t a = alloc();
     hu_llamacpp_config_t cfg = {0};
@@ -153,6 +178,7 @@ void run_llamacpp_provider_tests(void) {
     HU_RUN_TEST(test_llamacpp_factory_rejects_null_args);
     HU_RUN_TEST(test_llamacpp_chat_returns_not_supported_until_linked);
     HU_RUN_TEST(test_llamacpp_chat_multimessage_returns_not_supported);
+    HU_RUN_TEST(test_llamacpp_chat_rejects_null_args);
     HU_RUN_TEST(test_llamacpp_supports_streaming_is_false);
     HU_RUN_TEST(test_llamacpp_load_adapter_returns_not_supported_until_linked);
     HU_RUN_TEST(test_llamacpp_load_adapter_rejects_null_args);

@@ -3394,7 +3394,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0) {
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                      agent->memory_session_id_len, 0, &world_model_ctx,
-                                     &world_model_ctx_len);
+                                     &world_model_ctx_len, NULL, 0, NULL, 0, NULL, 0);
             if (world_model_ctx_len > 0)
                 agent->world_model_loads++;
         }
@@ -5567,13 +5567,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     if (agent->w7_facade && agent->memory_session_id &&
                         agent->memory_session_id_len > 0) {
                         int srag_mode = HU_VERIFY_TELEMETRY;
-                        const char *srag_env = getenv("HU_SELF_RAG_MODE");
-                        if (srag_env) {
-                            if (strcmp(srag_env, "off") == 0)
+                        const char *srag_src =
+                            (agent->config && agent->config->agent.self_rag_mode)
+                                ? agent->config->agent.self_rag_mode
+                                : getenv("HU_SELF_RAG_MODE");
+                        if (srag_src) {
+                            if (strcmp(srag_src, "off") == 0)
                                 srag_mode = HU_VERIFY_OFF;
-                            else if (strcmp(srag_env, "soft") == 0)
+                            else if (strcmp(srag_src, "soft") == 0)
                                 srag_mode = HU_VERIFY_SOFT;
-                            else if (strcmp(srag_env, "strict") == 0)
+                            else if (strcmp(srag_src, "strict") == 0)
                                 srag_mode = HU_VERIFY_STRICT;
                         }
                         if (srag_mode != HU_VERIFY_OFF) {

@@ -90,6 +90,15 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
     if (cct > 0.0 && cct <= 1.0)
         cfg->agent.context_compact_target = (float)cct;
 
+    const char *srm = hu_json_get_string(obj, "self_rag_mode");
+    if (srm) {
+        if (cfg->agent.self_rag_mode)
+            a->free(a->ctx, cfg->agent.self_rag_mode, strlen(cfg->agent.self_rag_mode) + 1);
+        cfg->agent.self_rag_mode = hu_strdup(a, srm);
+    }
+    cfg->agent.self_rag_streaming =
+        hu_json_get_bool(obj, "self_rag_streaming", cfg->agent.self_rag_streaming);
+
     hu_json_value_t *mc_obj = hu_json_object_get(obj, "metacognition");
     if (mc_obj && mc_obj->type == HU_JSON_OBJECT) {
         hu_metacog_settings_t *m = &cfg->agent.metacognition;

@@ -2,6 +2,7 @@
 
 #include "human/core/json.h"
 #include "human/memory/belief.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -157,6 +158,189 @@ hu_error_t hu_tom_b8_synthetic_pack_run_smoke(hu_allocator_t *alloc, const char 
                                    strlen(category), 1735689600000LL, &tom);
         if (tom.user_thinks_we_are[0] != '\0' && tom.user_expects_we_can[0] != '\0' &&
             tom_item_has_expected_tag(category, &tom)) {
+            pass++;
+        }
+    }
+    hu_json_free(alloc, root);
+    *pass_out = pass;
+    *total_out = total;
+    return HU_OK;
+}
+
+static unsigned char tom_ascii_tolower(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + 32u) : c;
+}
+
+static bool tom_substr_ci_bounded(const char *s, size_t slen, const char *needle) {
+    if (!s || !needle || !needle[0]) {
+        return false;
+    }
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || nlen > slen) {
+        return false;
+    }
+    for (size_t i = 0; i + nlen <= slen; i++) {
+        bool match = true;
+        for (size_t j = 0; j < nlen; j++) {
+            if (tom_ascii_tolower((unsigned char)s[i + j]) !=
+                tom_ascii_tolower((unsigned char)needle[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void wm_tom_merge_field(char *field, size_t cap, const char *incoming) {
+    if (!field || cap == 0 || !incoming || !incoming[0]) {
+        return;
+    }
+    if (field[0] == '\0' || strcmp(field, "unknown") == 0) {
+        tom_copy_trunc(field, cap, incoming, strlen(incoming));
+        return;
+    }
+    size_t lo = strlen(field);
+    const char *sep = " | ";
+    size_t sep_len = strlen(sep);
+    if (lo + sep_len >= cap) {
+        return;
+    }
+    memcpy(field + lo, sep, sep_len);
+    lo += sep_len;
+    field[lo] = '\0';
+    size_t room = cap - lo - 1;
+    size_t inlen = strlen(incoming);
+    if (inlen > room) {
+        inlen = room;
+    }
+    memcpy(field + lo, incoming, inlen);
+    field[lo + inlen] = '\0';
+}
+
+void hu_world_model_merge_tom_scenario(hu_world_model_t *wm, const char *premise, size_t premise_len,
+                                       const char *question, size_t question_len,
+                                       const char *category, size_t category_len, int64_t now_ms) {
+    if (!wm || !premise || premise_len == 0 || !question || question_len == 0 || !category ||
+        category_len == 0) {
+        return;
+    }
+    hu_theory_of_mind_t sc;
+    hu_tom_scenario_synthesize(premise, premise_len, question, question_len, category, category_len,
+                               now_ms, &sc);
+    wm_tom_merge_field(wm->tom.user_thinks_we_are, sizeof(wm->tom.user_thinks_we_are),
+                       sc.user_thinks_we_are);
+    wm_tom_merge_field(wm->tom.user_expects_we_can, sizeof(wm->tom.user_expects_we_can),
+                       sc.user_expects_we_can);
+    wm_tom_merge_field(wm->tom.user_expects_we_cannot, sizeof(wm->tom.user_expects_we_cannot),
+                       sc.user_expects_we_cannot);
+    wm->tom.confidence = sc.confidence;
+}
+
+bool hu_tom_scenario_gold_matches_response(const char *gold_answer, const char *response,
+                                           size_t response_len, size_t min_token_len) {
+    if (!gold_answer || gold_answer[0] == '\0' || !response) {
+        return false;
+    }
+    if (min_token_len < 1) {
+        min_token_len = 1;
+    }
+    if (min_token_len > 64) {
+        min_token_len = 64;
+    }
+
+    size_t long_segments = 0;
+    size_t matched_long = 0;
+    const char *p = gold_answer;
+    while (*p) {
+        const char *seg_start = p;
+        while (*p && *p != '_') {
+            p++;
+        }
+        size_t seglen = (size_t)(p - seg_start);
+        if (seglen >= min_token_len) {
+            long_segments++;
+            char seg[96];
+            if (seglen >= sizeof(seg)) {
+                seglen = sizeof(seg) - 1;
+            }
+            memcpy(seg, seg_start, seglen);
+            seg[seglen] = '\0';
+            if (tom_substr_ci_bounded(response, response_len, seg)) {
+                matched_long++;
+            }
+        }
+        if (*p == '_') {
+            p++;
+        }
+    }
+
+    if (long_segments > 0) {
+        return matched_long == long_segments;
+    }
+
+    return tom_substr_ci_bounded(response, response_len, gold_answer);
+}
+
+static int tom_json_pack_score_gold_one(const char *premise, const char *question, const char *category,
+                                        const char *gold) {
+    hu_theory_of_mind_t tom;
+    hu_tom_scenario_synthesize(premise, strlen(premise), question, strlen(question), category,
+                               strlen(category), 1735689600000LL, &tom);
+    char hay[640];
+    int n = snprintf(hay, sizeof(hay), "%s %s %s %s %s", premise, question, tom.user_thinks_we_are,
+                     tom.user_expects_we_can, tom.user_expects_we_cannot);
+    if (n <= 0 || (size_t)n >= sizeof(hay)) {
+        return 0;
+    }
+    return hu_tom_scenario_gold_matches_response(gold, hay, (size_t)n, 3) ? 1 : 0;
+}
+
+hu_error_t hu_tom_b8_synthetic_pack_score_gold(hu_allocator_t *alloc, const char *json_path,
+                                               unsigned *pass_out, unsigned *total_out) {
+    if (!alloc || !json_path || !pass_out || !total_out) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    *pass_out = 0;
+    *total_out = 0;
+    size_t json_len = 0;
+    char *json = read_file_all(alloc, json_path, &json_len);
+    if (!json) {
+        return HU_ERR_NOT_FOUND;
+    }
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, json, json_len, &root);
+    alloc->free(alloc->ctx, json, json_len + 1);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
+        if (root) {
+            hu_json_free(alloc, root);
+        }
+        return err != HU_OK ? err : HU_ERR_JSON_PARSE;
+    }
+    hu_json_value_t *items = hu_json_object_get(root, "items");
+    if (!items || items->type != HU_JSON_ARRAY || !items->data.array.items) {
+        hu_json_free(alloc, root);
+        return HU_ERR_JSON_PARSE;
+    }
+    unsigned pass = 0;
+    unsigned total = 0;
+    for (size_t i = 0; i < items->data.array.len; i++) {
+        hu_json_value_t *it = items->data.array.items[i];
+        if (!it || it->type != HU_JSON_OBJECT) {
+            continue;
+        }
+        const char *premise = hu_json_get_string(it, "premise");
+        const char *question = hu_json_get_string(it, "question");
+        const char *category = hu_json_get_string(it, "category");
+        const char *gold = hu_json_get_string(it, "gold_answer");
+        if (!premise || !question || !category || !gold) {
+            continue;
+        }
+        total++;
+        if (tom_json_pack_score_gold_one(premise, question, category, gold)) {
             pass++;
         }
     }

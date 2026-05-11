@@ -37,18 +37,18 @@ The 17 items from the gap analysis map onto 17 workstreams. P0 lands in this PR;
 | B4 | Behavior-change engine (BCT + Fogg + JITAI) | `src/behavior/change.c`, `include/human/behavior/change.h` | P0 | landed |
 | B5 | Companion safety integration (anti-dependency) | `src/behavior/safety.c`, `include/human/behavior/safety.h` | P0 | landed |
 | B6 | Persona consistency evaluation harness | `src/persona/eval.c`, `include/human/persona/eval.h` | P0 | landed |
-| B7 | LongMemEval scaffold for W16 | tests/eval scaffold (planned) | P0 | scoped |
+| B7 | LongMemEval scaffold for W16 | `eval_suites/longmemeval/`, `src/eval/longmemeval.c`, `tests/test_longmemeval.c` | P0 | landed |
 | Bp | Prompt directive helper (B-prompt) | `src/behavior/prompt.c`, `include/human/behavior/prompt.h` | P0 | landed |
 | Bw | Wire B1 into agent_turn (read-only) | `src/agent/agent_turn.c` | P0 | landed |
-| B8 | Theory-of-mind benchmark suite | extends `src/agent/theory_of_mind.c` (planned) | P1 | scoped |
-| B9 | User simulator (`hu_user_sim_t`) | new vtable (planned) | P1 | scoped |
-| B10 | Empathy / support-strategy labeling | `src/behavior/support_strategy.c`, `include/human/behavior/support_strategy.h` | P1 | landed (enum + classifier) |
-| B11 | Trust calibration policy | `src/behavior/behavior_trust.c`, `src/behavior/pressure.c`, `src/behavior/trust_prompt.c` | P1 | landed (heuristic + agent_turn wiring) |
-| B12 | Multimodal affect (voice prosody hooks) | extends `hu_affect_t` (planned) | P1 | scoped |
-| B13 | Other-initiated repair eval pack | extends B2 + voice (planned) | P1 | scoped |
+| B8 | Theory-of-mind benchmark suite | `eval_suites/tom/`, `src/agent/tom_scenario.c`, `tests/test_tom_scenario_b8.c` | P1 | landed |
+| B9 | User simulator (`hu_user_sim_t`) + scenario runner | `src/behavior/user_sim.c`, `src/behavior/user_sim_scenario.c`, `tests/test_user_sim*.c` | P1 | landed |
+| B10 | Empathy / support-strategy labeling + directive surfacing | `src/behavior/support_strategy.c`, `src/behavior/prompt.c` | P1 | landed |
+| B11 | Trust calibration + cross-turn pressure tracking | `src/behavior/behavior_trust.c`, `src/behavior/pressure.c`, `src/behavior/pressure_history.c`, `src/behavior/trust_prompt.c`, `eval_suites/sycophancy/` | P1 | landed |
+| B12 | Multimodal affect (voice prosody stub) | `src/behavior/affect.c::hu_affect_estimate_audio` | P1 | landed (stub; high uncertainty) |
+| B13 | Other-initiated repair eval pack | `eval_suites/repair/`, `tests/test_behavior_corpora.c` | P1 | landed |
 | B14 | Learned persona control (DPO/LoRA loop) | extends `src/ml/`, depends on M3 | P1 | depends-m3 |
-| B15 | Cultural pragmatics overlay | extends `hu_persona_overlay_t` (planned) | P2 | scoped |
-| B16 | Chronotype-aligned JITAI | extends `hu_circadian_*` and B4 | P2 | landed (helper); JITAI gating planned |
+| B15 | Cultural pragmatics overlay | `include/human/persona.h` (`directness`, `face_saving`, `disagreement_style`, `silence_tolerance`), `src/persona/persona.c` | P2 | landed (explicit user-stated only; never inferred) |
+| B16 | Chronotype-aligned JITAI | `include/human/persona/circadian.h`, `src/behavior/change.c`, persona JSON `chronotype` field | P2 | landed |
 | B17 | On-device frontier bridge for behavior | folds into M3 frontier plan | P2 | depends-m3 |
 
 "landed" = code + tests in this PR. "scoped" = covered by extension points + design notes below. "depends-m3" = waiting on `2026-05-10-m3-frontier-model-bridge.md`.
@@ -65,6 +65,14 @@ The first PR landed the P0 foundations (B1-B6). This PR adds:
 - **B-trust-prompt** — `hu_trust_build_directive()` emits a `[Trust: <action> — <directive>]` snippet for every non-default action.
 - **B11 wiring** — `src/agent/agent_turn.c` composes the trust input from `hu_pressure_detect` plus the affect-derived emotional fallback, then appends the trust directive to `system_prompt` for non-default actions. The previous inline `at_trust_authority_cues()` 3-phrase detector is removed.
 - **B16 (helper)** — `hu_chronotype_t` (lark / intermediate / owl / unknown) + `hu_chronotype_is_active_hour()` for JITAI gating. Replaces the hard-coded 23–05 quiet-hours band with a chronotype-aware band when persona has the field. Wiring into `hu_behavior_change_t` JITAI gate stays scoped.
+
+### Phase 3 (this PR) — final landings
+
+- **B7 LongMemEval** — `eval_suites/longmemeval/longmemeval.json` (5 categories: temporal, single_hop, multi_hop, abstention, semantic) plus `hu_longmemeval_score_item()` and `hu_longmemeval_run_pack_self_test()` in `src/eval/longmemeval.c`. The runner scores by category-aware keyword recall, with a deliberate-abstention path for the `abstention` category (refusing to speculate scores 100). Self-test on the golden answers must hit ≥ 80 % mean. Acceptance gate: ≥ 75 % per-item passes.
+- **B9 scenario runner** — `hu_user_sim_scenario_run()` drives any `hu_user_sim_t` through up to N turns and runs each user message through `hu_behavior_decide`, recording the resulting `hu_relational_act_t` per turn. Optional comparison against an expected sequence. Pure decision-pipeline exercise — no LLM, no flakiness. Smoke tests cover scripted-sim completion, distress→validate routing, repair message routing, and max-turn capping.
+- **B11 cross-turn pressure tracking** — `hu_pressure_history_t` ring buffer (cap 6, 192-byte normalized message slots) records `(turn_index, normalized_message, last_trust_action)` triples. `hu_pressure_history_inspect()` runs trigram similarity (max of Jaccard and overlap coefficient) between the candidate next message and recent entries; when a similar entry's last action was `PUSH_BACK` / `REFUSE_TO_AGREE`, callers bump `hu_trust_input_t.user_reasserted_after_pushback` and increment `user_pressure_count`. Sycophancy regression eval pack at `eval_suites/sycophancy/sycophancy_regression.json` (8 scenarios, 14 turns) drives the pressure history + trust calibration pipeline and asserts ≥ 75 % per-turn match against expected actions.
+- **B-prompt support-strategy surfacing (B10)** — `hu_behavior_build_directive` now appends `Support strategy: <name>.` when the support classifier returns a non-`NONE` strategy. Visible in the system prompt without an additional injection seam.
+- **B12 prosody stub** — `hu_affect_estimate_audio(int16_t *samples, …, hu_affect_state_t *out)` returns a neutral VAD with high uncertainty (`HU_AFFECT_AUDIO` modality). Real prosody pipeline planned in `docs/plans/2026-05-10-m3-frontier-model-bridge.md` (Bridge B). Fusion with text-affect already supported by `hu_affect_fuse`.
 
 ## Architecture
 

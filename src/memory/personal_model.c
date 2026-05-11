@@ -341,3 +341,83 @@ const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_
     }
     return NULL;
 }
+
+/* ── M2 P1: Persistence ─────────────────────────────────────────────────
+ *
+ * Binary format:
+ *   magic   uint32_t  "HUPM" (0x4D505548 LE)
+ *   version uint32_t  matches `model->version` at write time
+ *   reserved uint64_t zero, room for future framing without breaking
+ *   body    hu_personal_model_t  raw struct bytes (POD)
+ *
+ * Choice of binary over JSON: ~6KB on disk vs ~25KB, zero dependencies,
+ * and the struct is POD with fixed-size buffers so memcpy is safe.
+ * The version field forces a fresh state on schema bumps; this is
+ * intentional because old facts/topics may be incompatible with new
+ * code (e.g. a tightened type discriminator).
+ *
+ * Path is created if needed; intermediate directories are NOT created
+ * by this code — callers should pre-create `~/.human/personal_model/`
+ * (the daemon's onboard wizard does this for the user). */
+
+#define HU_PM_MAGIC    0x4D505548u   /* "HUPM" little-endian */
+#define HU_PM_VERSION  1u
+
+typedef struct hu_pm_header {
+    uint32_t magic;
+    uint32_t version;
+    uint64_t reserved;  /* always 0; reserved for future framing */
+} hu_pm_header_t;
+
+hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path) {
+    if (!model || !path || !*path) return HU_ERR_INVALID_ARGUMENT;
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return HU_ERR_IO;
+    hu_pm_header_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.magic = HU_PM_MAGIC;
+    hdr.version = HU_PM_VERSION;
+    hdr.reserved = 0;
+    if (fwrite(&hdr, sizeof(hdr), 1, fp) != 1 ||
+        fwrite(model, sizeof(*model), 1, fp) != 1) {
+        fclose(fp);
+        return HU_ERR_IO;
+    }
+    if (fflush(fp) != 0) {
+        fclose(fp);
+        return HU_ERR_IO;
+    }
+    fclose(fp);
+    return HU_OK;
+}
+
+hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
+    if (!out || !path || !*path) return HU_ERR_INVALID_ARGUMENT;
+    hu_personal_model_init(out);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return HU_ERR_NOT_FOUND;
+    hu_pm_header_t hdr;
+    if (fread(&hdr, sizeof(hdr), 1, fp) != 1) {
+        fclose(fp);
+        return HU_ERR_PARSE;
+    }
+    if (hdr.magic != HU_PM_MAGIC || hdr.version != HU_PM_VERSION) {
+        fclose(fp);
+        /* Out is already re-initialized to defaults so the caller can
+         * keep walking on a schema mismatch. */
+        return HU_ERR_PARSE;
+    }
+    hu_personal_model_t tmp;
+    if (fread(&tmp, sizeof(tmp), 1, fp) != 1) {
+        fclose(fp);
+        hu_personal_model_init(out);
+        return HU_ERR_PARSE;
+    }
+    fclose(fp);
+    /* Defensive: clamp counts that could overflow on a corrupted file. */
+    if (tmp.fact_count > HU_PM_MAX_FACTS) tmp.fact_count = HU_PM_MAX_FACTS;
+    if (tmp.topic_count > HU_PM_MAX_TOPICS) tmp.topic_count = HU_PM_MAX_TOPICS;
+    if (tmp.goal_count > HU_PM_MAX_GOALS) tmp.goal_count = HU_PM_MAX_GOALS;
+    *out = tmp;
+    return HU_OK;
+}

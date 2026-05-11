@@ -267,6 +267,9 @@ Use this to find the right files for a given task without searching the full cod
 | **Self-improvement**        | `src/intelligence/self_improve.c`                                                                        | `test_agi_frontiers.c`   |
 | **Value learning**          | `src/intelligence/value_learning.c`                                                                      | `test_value_learning.c`  |
 | **World model**             | `src/intelligence/world_model.c`                                                                         | `test_agi_frontiers.c`   |
+| **W9 contact world model**  | `src/agent/world_model.c`, `include/human/agent/world_model.h`                                           | `test_w9_world_model.c`, `test_world_model_bridge.c` |
+| **W7↔W9 world-model bridge** | `src/agent/world_model_bridge.c`, `include/human/agent/world_model_bridge.h`                            | `test_world_model_bridge.c` |
+| **B8 ToM scenario + gold (eval)** | `src/agent/tom_scenario.c`, `include/human/agent/tom_scenario.h`, `eval_suites/tom/tom_synthetic.json` | `test_tom_scenario_b8.c` |
 | **Strategy learner**        | `src/memory/retrieval/strategy_learner.c`                                                                | `test_agi_frontiers.c`   |
 | **Peripheral control tool** | `src/tools/peripheral_ctrl.c`                                                                            | `test_peripheral_ctrl.c` |
 | **Skill runner tool**       | `src/tools/skill_run.c`                                                                                  | `test_agent_registry.c`  |

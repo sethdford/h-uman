@@ -523,6 +523,8 @@ set(HU_CORE_SOURCES
     src/behavior/behavior_trust.c
     src/behavior/trust_prompt.c
     src/behavior/user_sim.c
+    src/behavior/pressure_history.c
+    src/behavior/user_sim_scenario.c
     src/context/repair.c
     src/calibration/timing_analyzer.c
     src/calibration/style_analyzer.c
@@ -925,6 +927,7 @@ list(APPEND HU_CORE_SOURCES
     src/evaluation/evaluation_regression.c
     src/eval/turing_score.c
     src/eval/turing_adversarial.c
+    src/eval/longmemeval.c
     src/eval_judge.c
     src/eval_benchmarks.c
     src/mcp_resources.c
@@ -1564,6 +1567,8 @@ endif()
 # them up without re-running detection.
 set(HU_LLAMACPP_FOUND OFF CACHE INTERNAL "Whether llama.cpp was located")
 set(HU_LLAMACPP_INCLUDE_DIRS "" CACHE INTERNAL "")
+set(HU_LLAMACPP_LIBRARIES "" CACHE INTERNAL "")
+set(HU_LLAMACPP_LIBRARY_DIRS "" CACHE INTERNAL "")
 if(HU_ENABLE_LLAMACPP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_LLAMACPP=1)
     set(HU_LLAMACPP_FOUND ON CACHE INTERNAL "")
@@ -1579,7 +1584,59 @@ if(HU_ENABLE_LLAMACPP)
         target_link_libraries(human_core PRIVATE llama)
         message(STATUS "llama.cpp provider: enabled (vendored)")
     else()
-        message(STATUS "llama.cpp provider: enabled (no vendored upstream; vtable will return NOT_SUPPORTED until libllama is linked)")
+        # Resolve a pre-installed libllama. Try in order:
+        #   1. find_package(Llama)  — upstream ships a CMake export ~b3000+
+        #   2. pkg-config           — Linux distros ship a `llama.pc`
+        #   3. Manual prefix probe  — Homebrew + /usr/local + /usr
+        # On success we stash includes+libs into HU_LLAMACPP_* cache vars so
+        # the test target wiring (later in this file) can mirror it without
+        # re-running discovery.
+        find_package(Llama QUIET)
+        if(TARGET llama)
+            target_link_libraries(human_core PUBLIC llama)
+            message(STATUS "llama.cpp provider: enabled (find_package Llama)")
+        else()
+            find_package(PkgConfig QUIET)
+            set(_hu_llama_pkgconfig_found OFF)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(LLAMA QUIET llama)
+                if(LLAMA_FOUND)
+                    set(HU_LLAMACPP_INCLUDE_DIRS ${LLAMA_INCLUDE_DIRS} CACHE INTERNAL "")
+                    set(HU_LLAMACPP_LIBRARIES ${LLAMA_LIBRARIES} CACHE INTERNAL "")
+                    set(HU_LLAMACPP_LIBRARY_DIRS ${LLAMA_LIBRARY_DIRS} CACHE INTERNAL "")
+                    set(_hu_llama_pkgconfig_found ON)
+                endif()
+            endif()
+            if(NOT _hu_llama_pkgconfig_found)
+                find_path(LLAMA_INCLUDE_DIR llama.h
+                    PATHS /opt/homebrew/include /usr/local/include /usr/include)
+                find_library(LLAMA_LIB llama
+                    PATHS /opt/homebrew/lib /usr/local/lib /usr/lib)
+                if(LLAMA_INCLUDE_DIR AND LLAMA_LIB)
+                    set(HU_LLAMACPP_INCLUDE_DIRS ${LLAMA_INCLUDE_DIR} CACHE INTERNAL "")
+                    set(HU_LLAMACPP_LIBRARIES ${LLAMA_LIB} CACHE INTERNAL "")
+                    message(STATUS "llama.cpp provider: found manually at ${LLAMA_LIB}")
+                endif()
+            endif()
+            if(HU_LLAMACPP_INCLUDE_DIRS OR HU_LLAMACPP_LIBRARIES)
+                if(HU_LLAMACPP_INCLUDE_DIRS)
+                    target_include_directories(human_core PRIVATE ${HU_LLAMACPP_INCLUDE_DIRS})
+                endif()
+                if(HU_LLAMACPP_LIBRARIES)
+                    # PUBLIC for the same reason as libsodium below: the
+                    # production `human` executable links human_core as a
+                    # static lib and would otherwise drop the libllama
+                    # search-path resolution.
+                    target_link_libraries(human_core PUBLIC ${HU_LLAMACPP_LIBRARIES})
+                endif()
+                if(HU_LLAMACPP_LIBRARY_DIRS)
+                    target_link_directories(human_core PUBLIC ${HU_LLAMACPP_LIBRARY_DIRS})
+                endif()
+                message(STATUS "llama.cpp provider: enabled (system libllama)")
+            else()
+                message(STATUS "llama.cpp provider: enabled (no vendored upstream and libllama not found; vtable will return NOT_SUPPORTED until libllama is linked)")
+            endif()
+        endif()
     endif()
 else()
     message(STATUS "llama.cpp provider: disabled (compiles as NOT_SUPPORTED stub)")
@@ -2602,7 +2659,7 @@ if(HU_ENABLE_FEEDS)
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
 list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)

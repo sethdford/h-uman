@@ -60,10 +60,18 @@ hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade);
  * negatives, theory-of-mind, and recent topics. Caller owns the returned
  * pointer and must free with `alloc->free`.
  *
- * `now_ms == 0` means "use OS clock". */
+ * `now_ms == 0` means "use OS clock".
+ *
+ * Optional ToM scenario (B8): when `tom_premise`, `tom_question`, and
+ * `tom_category` are all non-NULL with positive lengths, their synthesized ToM
+ * is merged into the loaded world model before formatting. Pass NULL / 0 for
+ * each to skip (normal agent turns). */
 hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                    const char *contact_id, size_t contact_id_len,
-                                    int64_t now_ms, char **out_text, size_t *out_len);
+                                    const char *contact_id, size_t contact_id_len, int64_t now_ms,
+                                    char **out_text, size_t *out_len, const char *tom_premise,
+                                    size_t tom_premise_len, const char *tom_question,
+                                    size_t tom_question_len, const char *tom_category,
+                                    size_t tom_category_len);
 
 /* W11 self-RAG outcome enum, mirrored at the bridge layer so callers don't
  * have to include `human/agent/self_rag.h` (which pulls in W7). */

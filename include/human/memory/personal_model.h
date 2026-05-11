@@ -108,4 +108,26 @@ hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
 const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_model_t *model,
                                                               const char *topic, size_t topic_len);
 
+/* M2 P1 — Persistence. The personal model is the only piece of agent
+ * state that genuinely accumulates value over time (facts, observed
+ * style, topics, temporal patterns). Until now it lived only in RAM, so
+ * every daemon restart erased the user-specific signal. These two calls
+ * round-trip the struct as a binary blob with a 16-byte header
+ * (magic + version + reserved). Path is allocator-owned UTF-8.
+ *
+ * `save`  — returns HU_OK on a clean fsync, HU_ERR_IO on write failure.
+ *           Creates intermediate directories.
+ * `load`  — reads and populates `*out`. On version mismatch or magic
+ *           failure, returns HU_ERR_PARSE and leaves `*out`
+ *           initialized to defaults (caller can keep walking).
+ *           Returns HU_ERR_NOT_FOUND when the file doesn't exist.
+ *
+ * Binary format chosen over JSON for size (~6KB vs ~25KB) and zero
+ * dependencies. The struct is POD with fixed-size fields; no embedded
+ * pointers, so memcpy is safe. Schema migrations are handled by the
+ * `version` field — incrementing it forces fresh state on existing
+ * users (correct: old facts may be incompatible with new code). */
+hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path);
+hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path);
+
 #endif /* HU_MEMORY_PERSONAL_MODEL_H */

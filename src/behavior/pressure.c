@@ -55,6 +55,8 @@ static const char *const PR_AUTHORITY[] = {
 
 static const char *const PR_REASSERT[] = {
     "i told you",
+    "i'm telling you",
+    "never told you",
     "i said",
     "again,",
     "again.",

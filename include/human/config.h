@@ -139,6 +139,8 @@ typedef struct hu_agent_config {
     char *session_dir;                 /* directory for session JSON files */
     bool discover_instructions;        /* discover .human.md/HUMAN.md files */
     bool compaction_use_structured;    /* use XML structured summaries */
+    char *self_rag_mode;               /* "off", "telemetry", "soft", "strict" (env: HU_SELF_RAG_MODE) */
+    bool self_rag_streaming;           /* enable streaming self-RAG (env: HU_SELF_RAG_STREAMING) */
 } hu_agent_config_t;
 
 typedef struct hu_policy_config {

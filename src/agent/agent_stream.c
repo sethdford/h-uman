@@ -745,7 +745,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     if (agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0) {
         hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                  agent->memory_session_id_len, 0, &world_model_ctx,
-                                 &world_model_ctx_len);
+                                 &world_model_ctx_len, NULL, 0, NULL, 0, NULL, 0);
         if (world_model_ctx_len > 0)
             agent->world_model_loads++;
     }
@@ -957,7 +957,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         bool srag_streaming_active = false;
         hu_stream_callback_t effective_cb = stream_chunk_to_event_cb;
         void *effective_ctx = &wrap;
-        if (getenv("HU_SELF_RAG_STREAMING") && agent->w7_facade) {
+        bool srag_stream_enabled =
+            (agent->config && agent->config->agent.self_rag_streaming) ||
+            getenv("HU_SELF_RAG_STREAMING");
+        if (srag_stream_enabled && agent->w7_facade) {
             hu_memory_facade_t *srag_facade = hu_w7_facade_memory_handle(agent->w7_facade);
             if (hu_self_rag_stream_wrap(&srag_stream_ctx, stream_chunk_to_event_cb,
                                          &wrap, srag_facade, agent->alloc) == HU_OK) {
