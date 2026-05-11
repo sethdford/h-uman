@@ -3283,13 +3283,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         sqlite3 *dpo_db = hu_sqlite_memory_get_db(agent->memory);
                         if (dpo_db) {
                             last_dpo_train = (int64_t)t;
-                            hu_dpo_train_result_t dpo_result = {0};
-                            hu_error_t dpo_err = hu_dpo_train_step(
+                            hu_dpo_judge_result_t dpo_result = {0};
+                            hu_error_t dpo_err = hu_dpo_judge_step(
                                 &agent->sota.dpo_collector, alloc, &agent->provider,
                                 agent->model_name, agent->model_name_len, 0.1, 32, &dpo_result);
                             if (dpo_err == HU_OK && dpo_result.pairs_evaluated > 0)
                                 hu_log_info("human", agent ? agent->observer : NULL,
-                                            "DPO training: loss=%.4f, alignment=%.2f, "
+                                            "DPO judge step: loss=%.4f, alignment=%.2f, "
                                             "pairs=%zu",
                                             dpo_result.loss, dpo_result.alignment_score,
                                             dpo_result.pairs_evaluated);
@@ -3311,8 +3311,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         rlaif_nightly_done_today = true;
                         sqlite3 *rlaif_db = hu_sqlite_memory_get_db(agent->memory);
                         if (rlaif_db) {
-                            hu_dpo_train_result_t rlaif_result = {0};
-                            hu_dpo_train_step(&agent->sota.dpo_collector, alloc, &agent->provider,
+                            hu_dpo_judge_result_t rlaif_result = {0};
+                            hu_dpo_judge_step(&agent->sota.dpo_collector, alloc, &agent->provider,
                                               agent->model_name, agent->model_name_len, 0.1, 16,
                                               &rlaif_result);
                             char *best_frag = NULL;

@@ -376,10 +376,14 @@ void hu_dpo_export_free(hu_allocator_t *alloc, hu_dpo_export_t *export_data) {
     export_data->count = 0;
 }
 
-hu_error_t hu_dpo_train_step(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
+/* Phase 0 — renamed from `hu_dpo_train_step` to keep the M3 narrative
+ * honest. The legacy name is preserved as an inline forwarding shim in
+ * include/human/ml/dpo.h. See test_dpo_judge_naming.c for the
+ * identical-return contract. */
+hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
                              hu_provider_t *provider, const char *model, size_t model_len,
                              double beta, size_t batch_size,
-                             hu_dpo_train_result_t *out) {
+                             hu_dpo_judge_result_t *out) {
     if (!collector || !alloc || !provider || !out)
         return HU_ERR_INVALID_ARGUMENT;
 

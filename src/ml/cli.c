@@ -557,21 +557,21 @@ hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **arg
     }
 
     size_t model_len = model ? strlen(model) : 0;
-    hu_dpo_train_result_t result = {0};
-    printf("[dpo] Running DPO training step (provider=%s, batch=%d)...\n", provider_name,
+    hu_dpo_judge_result_t result = {0};
+    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name,
            batch_size);
 
-    err = hu_dpo_train_step(&collector, alloc, &provider, model, model_len, 0.1, (size_t)batch_size,
+    err = hu_dpo_judge_step(&collector, alloc, &provider, model, model_len, 0.1, (size_t)batch_size,
                             &result);
 
     if (err == HU_OK) {
-        printf("[dpo] Training complete:\n");
+        printf("[dpo] Judge step complete:\n");
         printf("  Pairs evaluated: %zu\n", result.pairs_evaluated);
         printf("  Pairs aligned:   %zu\n", result.pairs_aligned);
         printf("  Alignment score: %.2f%%\n", result.alignment_score * 100.0);
         printf("  Loss:            %.4f\n", result.loss);
     } else {
-        fprintf(stderr, "[dpo] Training failed: %d\n", err);
+        fprintf(stderr, "[dpo] Judge step failed: %d\n", err);
     }
 
     if (provider.vtable && provider.vtable->deinit)
