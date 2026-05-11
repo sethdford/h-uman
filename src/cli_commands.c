@@ -3,6 +3,7 @@
 #include "human/agent/hula.h"
 #include "human/agent/hula_analytics.h"
 #include "human/agent/hula_compiler.h"
+#include "human/agent/tom_scenario.h"
 #include "human/agent/hula_emergence.h"
 #include "human/agent/hula_lite.h"
 #include "human/agent/spawn.h"
@@ -1225,7 +1226,7 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
         printf("Usage: human eval "
                "<run|baseline|validate|check-regression|list|compare|dashboard|history|trend|"
-               "benchmark|turing-adversarial|--w16> [args]\n");
+               "benchmark|turing-adversarial|tom|--w16> [args]\n");
         printf("  run <suite.json>     Load and run an eval suite, print report JSON\n");
         printf("  baseline [dir]       Run all *.json suites in dir (default: eval_suites/), print "
                "score table\n");
@@ -1239,6 +1240,7 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
         printf("  history [--last N] [--benchmark X]  Show eval history from SQLite\n");
         printf("  trend                Compare eval scores over time (requires prior baselines)\n");
         printf("  benchmark <gaia|swebench|tooluse> <suite.json>  Load and run a benchmark\n");
+        printf("  tom <smoke|gold|run> ...  Score B8 ToM synthetic packs (see `eval tom`)\n");
         printf("  --w16 <suite> [--offline]  Run a W16 vtable backend (locomo, longmemeval,\n");
         printf("                              dmr, minja, memoryagentbench, frontier,\n");
         printf("                              legacy-bridge); --offline pins synthetic data.\n");
@@ -2311,6 +2313,202 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
         if (scenarios)
             alloc->free(alloc->ctx, scenarios, sc_count * sizeof(hu_turing_scenario_t));
         return HU_OK;
+    }
+
+    /* B8 — Theory-of-mind synthetic pack scoring CLI.
+     *
+     *   human eval tom smoke <pack.json>
+     *       Run the deterministic synthesizer over each item in the pack,
+     *       assert each produces the expected category tag. Pure CI smoke
+     *       — no model required. Mirrors `hu_tom_b8_synthetic_pack_run_smoke`.
+     *
+     *   human eval tom gold <pack.json>
+     *       Score the pack's gold-answer field against each item's
+     *       synthesized ToM block. Used to verify the rubric + JSON pack
+     *       stay in sync. Mirrors `hu_tom_b8_synthetic_pack_score_gold`.
+     *
+     *   human eval tom run --pack <pack.json> --responses <responses.jsonl>
+     *                      [--no-skip-unanswered]
+     *       Score model responses against the pack. Responses are JSONL
+     *       (one object per line) with `id` + `response` fields. Default
+     *       behaviour is to *skip* items the responses file did not
+     *       answer (only count answered items). Pass --no-skip-unanswered
+     *       to count missing answers as failures. Output is one JSON line
+     *       with `pass`, `total`, and `pct` fields so callers can pipe
+     *       through jq. */
+    if (strcmp(sub, "tom") == 0) {
+        if (argc < 4) {
+            fprintf(stderr,
+                    "Usage: human eval tom <smoke|gold|run> ...\n"
+                    "  smoke <pack.json>                        — run synthesizer smoke\n"
+                    "  gold <pack.json>                         — score gold answers vs ToM\n"
+                    "  run --pack <p.json> --responses <r.jsonl> [--no-skip-unanswered]\n"
+                    "                                            — score model responses\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        const char *tom_sub = argv[3];
+
+        if (strcmp(tom_sub, "smoke") == 0 || strcmp(tom_sub, "gold") == 0) {
+            if (argc < 5) {
+                fprintf(stderr, "Usage: human eval tom %s <pack.json>\n", tom_sub);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            unsigned pass = 0, total = 0;
+            hu_error_t err = strcmp(tom_sub, "smoke") == 0
+                                  ? hu_tom_b8_synthetic_pack_run_smoke(alloc, argv[4], &pass, &total)
+                                  : hu_tom_b8_synthetic_pack_score_gold(alloc, argv[4], &pass,
+                                                                         &total);
+            if (err != HU_OK) {
+                hu_log_error("eval", NULL, "tom %s: %s", tom_sub, hu_error_string(err));
+                return err;
+            }
+            unsigned pct = total > 0 ? (pass * 100u) / total : 0u;
+            printf("{\"mode\":\"%s\",\"pack\":\"%s\",\"pass\":%u,\"total\":%u,\"pct\":%u}\n",
+                   tom_sub, argv[4], pass, total, pct);
+            return HU_OK;
+        }
+
+        if (strcmp(tom_sub, "run") == 0) {
+            const char *pack_path = NULL;
+            const char *resp_path = NULL;
+            int count_unanswered_as_failed = 0;
+            for (int i = 4; i < argc; i++) {
+                if (strcmp(argv[i], "--pack") == 0 && i + 1 < argc) {
+                    pack_path = argv[++i];
+                } else if (strcmp(argv[i], "--responses") == 0 && i + 1 < argc) {
+                    resp_path = argv[++i];
+                } else if (strcmp(argv[i], "--no-skip-unanswered") == 0) {
+                    count_unanswered_as_failed = 1;
+                } else {
+                    fprintf(stderr, "Unknown flag: %s\n", argv[i]);
+                    return HU_ERR_INVALID_ARGUMENT;
+                }
+            }
+            if (!pack_path || !resp_path) {
+                fprintf(stderr, "Usage: human eval tom run --pack <pack.json> "
+                                "--responses <responses.jsonl> [--no-skip-unanswered]\n");
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+
+            FILE *f = fopen(resp_path, "rb");
+            if (!f) {
+                hu_log_error("eval", NULL, "open %s: %s", resp_path, strerror(errno));
+                return HU_ERR_IO;
+            }
+            if (fseek(f, 0, SEEK_END) != 0) {
+                fclose(f);
+                return HU_ERR_IO;
+            }
+            long sz = ftell(f);
+            if (sz < 0 || sz > (long)(8 << 20)) { /* cap at 8 MB */
+                fclose(f);
+                fprintf(stderr, "responses file too large or unreadable: %ld bytes\n", sz);
+                return HU_ERR_IO;
+            }
+            rewind(f);
+            char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
+            if (!buf) {
+                fclose(f);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            size_t rd = fread(buf, 1, (size_t)sz, f);
+            fclose(f);
+            buf[rd] = '\0';
+
+            /* Pass 1: count newlines to size the response array. JSONL is
+             * one object per line; trailing newline optional. */
+            size_t cap = 1;
+            for (size_t i = 0; i < rd; i++) {
+                if (buf[i] == '\n')
+                    cap++;
+            }
+            hu_tom_b8_response_t *resps =
+                (hu_tom_b8_response_t *)alloc->alloc(alloc->ctx, cap * sizeof(*resps));
+            if (!resps) {
+                alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memset(resps, 0, cap * sizeof(*resps));
+
+            /* Pass 2: parse each non-empty line as JSON, extract id +
+             * response. We keep a parallel array of parsed roots so the
+             * pointers `resps[i].id / .response` stay valid for the
+             * scoring call. The roots are freed after scoring. */
+            hu_json_value_t **roots =
+                (hu_json_value_t **)alloc->alloc(alloc->ctx, cap * sizeof(*roots));
+            if (!roots) {
+                alloc->free(alloc->ctx, resps, cap * sizeof(*resps));
+                alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memset(roots, 0, cap * sizeof(*roots));
+
+            size_t r_count = 0;
+            size_t line_start = 0;
+            for (size_t i = 0; i <= rd; i++) {
+                if (i != rd && buf[i] != '\n')
+                    continue;
+                size_t line_len = i - line_start;
+                while (line_len > 0 &&
+                       (buf[line_start] == ' ' || buf[line_start] == '\t' ||
+                        buf[line_start] == '\r')) {
+                    line_start++;
+                    line_len--;
+                }
+                while (line_len > 0 && (buf[line_start + line_len - 1] == ' ' ||
+                                         buf[line_start + line_len - 1] == '\t' ||
+                                         buf[line_start + line_len - 1] == '\r')) {
+                    line_len--;
+                }
+                if (line_len > 0 && r_count < cap) {
+                    hu_json_value_t *root = NULL;
+                    if (hu_json_parse(alloc, buf + line_start, line_len, &root) == HU_OK && root &&
+                        root->type == HU_JSON_OBJECT) {
+                        const char *id = hu_json_get_string(root, "id");
+                        const char *response = hu_json_get_string(root, "response");
+                        if (!response)
+                            response = hu_json_get_string(root, "answer");
+                        if (id && response) {
+                            roots[r_count] = root;
+                            resps[r_count].id = id;
+                            resps[r_count].response = response;
+                            resps[r_count].response_len = strlen(response);
+                            r_count++;
+                        } else if (root) {
+                            hu_json_free(alloc, root);
+                        }
+                    } else if (root) {
+                        hu_json_free(alloc, root);
+                    }
+                }
+                line_start = i + 1;
+            }
+
+            unsigned pass = 0, total = 0;
+            hu_error_t err = hu_tom_b8_synthetic_pack_score_responses(
+                alloc, pack_path, resps, r_count, count_unanswered_as_failed, &pass, &total);
+
+            for (size_t i = 0; i < r_count; i++) {
+                if (roots[i])
+                    hu_json_free(alloc, roots[i]);
+            }
+            alloc->free(alloc->ctx, roots, cap * sizeof(*roots));
+            alloc->free(alloc->ctx, resps, cap * sizeof(*resps));
+            alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+
+            if (err != HU_OK) {
+                hu_log_error("eval", NULL, "tom run: %s", hu_error_string(err));
+                return err;
+            }
+            unsigned pct = total > 0 ? (pass * 100u) / total : 0u;
+            printf("{\"mode\":\"run\",\"pack\":\"%s\",\"responses\":\"%s\","
+                   "\"pass\":%u,\"total\":%u,\"pct\":%u,\"responses_loaded\":%zu}\n",
+                   pack_path, resp_path, pass, total, pct, r_count);
+            return HU_OK;
+        }
+
+        fprintf(stderr, "Unknown tom subcommand: %s\n", tom_sub);
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     fprintf(stderr, "Unknown eval subcommand: %s\n", sub);
