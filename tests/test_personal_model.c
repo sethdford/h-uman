@@ -489,6 +489,114 @@ static void personal_model_survives_real_sigkill(void) {
 }
 #endif /* POSIX */
 
+/* Style-mirror directive tests.
+ *
+ * The personal model has historically dumped style observations
+ * ("Communication style: casual, terse, avg 50 chars") into the system
+ * prompt without telling the frontier model what to *do* with them.
+ * Without an explicit "Mirror their style: …" directive, models default
+ * to their training-distribution register regardless of who they're
+ * talking to — formal, medium-length, sparing emoji, neutral humor.
+ *
+ * These tests pin the directive's content for archetypal user profiles
+ * and the warm-up gate that suppresses it before the EWMA stabilizes. */
+static void personal_model_style_directive_emerges_after_three_samples(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "yo", 2, true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol", 3, true, 1700000002), HU_OK);
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    /* Two samples — directive should still be suppressed (warm-up). */
+    HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") == NULL);
+
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "hey there", 9, true, 1700000003), HU_OK);
+    n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    /* Three samples — directive activates. */
+    HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") != NULL);
+}
+
+static void personal_model_style_directive_casual_terse_humorous(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    /* Three short, casual, humor-heavy messages move the EWMA toward
+     * casual + terse + humor. */
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol same", 8, true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "haha yep", 8, true, 1700000002), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol btw", 7, true, 1700000003), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+
+    HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "casual register") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "keep replies ~50 chars") != NULL);
+    /* Humor receptivity rose from "lol"/"haha" — should welcome humor. */
+    HU_ASSERT_TRUE(strstr(buf, "humor") != NULL);
+}
+
+static void personal_model_style_directive_formal_verbose(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    /* Long polite messages. The formality cue list (please / thank you /
+     * would you) pulls formality up; length pulls verbosity up. */
+    const char *long1 =
+        "Please could you walk me through this carefully? Thank you, I would "
+        "appreciate the additional context, especially around the "
+        "implementation details and any trade-offs you considered when "
+        "selecting the data structure backing the cache.";
+    const char *long2 =
+        "Would you mind also expanding on the failure-mode analysis? Please "
+        "include latency numbers if available; thank you for being thorough "
+        "in your previous responses.";
+    const char *long3 =
+        "Please share the benchmark methodology. Thank you. Would you "
+        "specifically clarify how you measured tail latency and what "
+        "percentiles you reported across runs?";
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long1, strlen(long1), true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long2, strlen(long2), true, 1700000002), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long3, strlen(long3), true, 1700000003), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+
+    HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") != NULL);
+    /* No emojis in the input — directive should suppress emoji. */
+    HU_ASSERT_TRUE(strstr(buf, "no emoji") != NULL);
+    /* No humor cues — should stay serious. */
+    HU_ASSERT_TRUE(strstr(buf, "stay serious") != NULL);
+    /* Avg message length is in the 200-bucket band. */
+    HU_ASSERT_TRUE(strstr(buf, "keep replies ~200 chars") != NULL ||
+                   strstr(buf, "keep replies ~300 chars") != NULL);
+}
+
+static void personal_model_style_directive_absent_when_no_samples(void) {
+    /* A model populated only via merge_facts (no ingest, sample_count == 0)
+     * must not produce a directive — there's no observed style to mirror. */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    hu_fact_extract_result_t fx = {0};
+    fx.fact_count = 1;
+    strncpy(fx.facts[0].subject, "user", sizeof(fx.facts[0].subject) - 1);
+    strncpy(fx.facts[0].predicate, "likes", sizeof(fx.facts[0].predicate) - 1);
+    strncpy(fx.facts[0].object, "tea", sizeof(fx.facts[0].object) - 1);
+    fx.facts[0].confidence = 0.9f;
+    HU_ASSERT_EQ(hu_personal_model_merge_facts(&m, &fx), HU_OK);
+
+    char buf[2048];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") == NULL);
+}
+
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -511,6 +619,10 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_save_creates_parent_directory);
     HU_RUN_TEST(personal_model_default_path_round_trip);
     HU_RUN_TEST(personal_model_survives_simulated_crash);
+    HU_RUN_TEST(personal_model_style_directive_emerges_after_three_samples);
+    HU_RUN_TEST(personal_model_style_directive_casual_terse_humorous);
+    HU_RUN_TEST(personal_model_style_directive_formal_verbose);
+    HU_RUN_TEST(personal_model_style_directive_absent_when_no_samples);
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(personal_model_survives_real_sigkill);
 #endif

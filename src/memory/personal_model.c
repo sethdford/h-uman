@@ -54,6 +54,61 @@ static const char *verbosity_desc(float v) {
     return "verbose";
 }
 
+/* Output-shaping helpers — convert observed style metrics into concise
+ * directive language. The frontier model receives both the observation
+ * (Communication style: …) and an explicit instruction to mirror it.
+ * Without this, models default to their training-distribution register
+ * regardless of who they're talking to. */
+static const char *register_directive(float formality) {
+    if (formality < 0.33f)
+        return "casual register";
+    if (formality < 0.66f)
+        return "balanced register";
+    return "formal register";
+}
+
+static const char *length_directive(uint32_t avg_chars, char *buf, size_t cap) {
+    /* Round to a friendly bucket so the model isn't told to hit "73.0
+     * chars" exactly — the EWMA average is noisy. */
+    unsigned bucket;
+    if (avg_chars < 60U)
+        bucket = 50U;
+    else if (avg_chars < 120U)
+        bucket = 100U;
+    else if (avg_chars < 220U)
+        bucket = 200U;
+    else if (avg_chars < 400U)
+        bucket = 300U;
+    else
+        bucket = 500U;
+    snprintf(buf, cap, "keep replies ~%u chars", bucket);
+    return buf;
+}
+
+static const char *emoji_directive(float freq) {
+    if (freq < 0.05f)
+        return "no emoji";
+    if (freq < 0.20f)
+        return "rare emoji";
+    return "mirror their emoji use";
+}
+
+static const char *humor_directive(float receptivity) {
+    if (receptivity < 0.20f)
+        return "stay serious";
+    if (receptivity < 0.50f)
+        return "light humor ok";
+    return "playful tone welcome";
+}
+
+/* Minimum observation count before the directive is trustworthy.
+ * Below this, the EWMA-smoothed metrics are dominated by their
+ * priors (0.5 formality, 0.0 verbosity, …) and would push the model
+ * toward "balanced register, terse, no emoji" regardless of the user.
+ * Three samples is enough for the EWMA to lean toward the user's
+ * actual signal while still being a tight bound on warm-up cost. */
+#define HU_PM_DIRECTIVE_MIN_SAMPLES 3U
+
 static void sort_topic_order(const hu_personal_model_t *model, size_t *order) {
     for (size_t i = 0; i < model->topic_count; i++)
         order[i] = i;
@@ -111,6 +166,23 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
         append_fmt(buf, cap, &n, "Communication style: %s, %s, avg %u chars\n",
                    formality_desc(model->style.formality), verbosity_desc(model->style.verbosity),
                    (unsigned)model->style.avg_message_length);
+        detail = true;
+    }
+
+    /* SOTA personalization wire — convert style observations into an
+     * explicit output-shaping directive. The model already sees the
+     * observation block above; this line tells it what to *do* with
+     * those observations. Gated on sample_count to avoid steering on
+     * EWMA priors during warm-up. */
+    if (model->style.sample_count >= HU_PM_DIRECTIVE_MIN_SAMPLES) {
+        char length_buf[64];
+        const char *len_dir =
+            length_directive(model->style.avg_message_length, length_buf, sizeof(length_buf));
+        append_fmt(buf, cap, &n, "Mirror their style: %s, %s, %s, %s.\n",
+                   len_dir,
+                   register_directive(model->style.formality),
+                   emoji_directive(model->style.emoji_frequency),
+                   humor_directive(model->style.humor_receptivity));
         detail = true;
     }
 
