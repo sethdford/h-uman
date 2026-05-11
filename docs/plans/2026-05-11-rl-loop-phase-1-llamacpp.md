@@ -98,8 +98,8 @@ Per spec §1.5.3, this RL loop spec is **Track D Phase 2** and consumes Track D 
 | `scripts/fetch-gemma-gguf.sh` | ~80 | Idempotent SHA-verified fetch of `gemma-3-it-4B-Q4_K_M.gguf` into `~/.human/models/`. |
 | `include/human/providers/llamacpp_sampling.h` | ~50 | Sampling API (temp + top-k + top-p + min-p, deterministic-with-seed). |
 | `src/providers/llamacpp_sampling.c` | ~220 | Sampling implementation. |
-| `include/human/providers/llamacpp_kvcache.h` | ~60 | KV cache API (init, get/put, reset, system-prompt-prefix reuse). |
-| `src/providers/llamacpp_kvcache.c` | ~320 | KV cache implementation. |
+| `include/human/providers/llamacpp_kvcache.h` | ~60 | KV-cache index API: `(system_prompt_hash, n_past_system)` slot with record/lookup/reset. The actual KV cache lives inside `llama_context`; this module is the bookkeeping that lets `chat_with_system` skip re-decoding the system prefix on a hit. |
+| `src/providers/llamacpp_kvcache.c` | ~120 | KV-cache index implementation (FNV-1a + single slot). |
 | `include/human/providers/llamacpp_decode.h` | ~50 | Decode loop API (one-shot decode of a token batch with sampling). |
 | `src/providers/llamacpp_decode.c` | ~270 | Decode loop implementation. |
 | `tests/test_llamacpp_sampling.c` | ~180 | Sampling tests (deterministic-with-seed, edge cases). |
@@ -116,7 +116,7 @@ Per spec §1.5.3, this RL loop spec is **Track D Phase 2** and consumes Track D 
 |------|--------------|
 | `CMakeLists.txt` | Add `HU_LLAMACPP_METAL` option; wire `GGML_METAL=ON` to vendored build on Apple; mirror `target_link_libraries(human_core_test PRIVATE llama)` (close the gap at lines 2160-2166); add `tests/test_llamacpp_*.c` to `HU_TEST_SOURCES`. |
 | `CMakePresets.json` | Add `rl_sota` preset = `dev` + `HU_ENABLE_LLAMACPP=ON` + `HU_LLAMACPP_METAL=ON` (Apple) / `OFF` (Linux). |
-| `src/providers/llamacpp.c` | Replace `HU_ERR_NOT_SUPPORTED` stub at lines 125-138 with real chat path that orchestrates `llamacpp_sampling.c` + `_kvcache.c` + `_decode.c`. Set `vtable.warmup` (currently NULL) to a real warmup. Set `n_gpu_layers = -1` at context init when `__APPLE__`. |
+| `src/providers/llamacpp.c` | Replace `HU_ERR_NOT_SUPPORTED` stub at lines 125-138 with real chat path that orchestrates `llamacpp_sampling.c` + `_kvcache.c` + `_decode.c` (with the decode advance callback bound to `llama_decode`). Set `vtable.warmup` (currently NULL) to a real warmup. Set `n_gpu_layers = -1` at context init when `__APPLE__`. **Extend** `load_adapter` / `unload_adapter` (already implemented at lines 194-264) with `llama_kv_self_clear(ctx) + hu_llamacpp_kvcache_reset(&c->kv_cache)` calls because adapter swap invalidates per-token KV. |
 | `src/providers/factory.c` | Wire the factory's `"llamacpp"` branch (lines 232-248) to pass `context_size`, `threads`, `use_gpu`, `n_gpu_layers` from JSON config (currently only `model_path` is passed). |
 | `tests/test_main.c` | Register `run_llamacpp_sampling_tests()`, `run_llamacpp_kvcache_tests()`, `run_llamacpp_decode_tests()`, `run_llamacpp_chat_metal_tests()`, `run_llamacpp_lora_hotswap_tests()` under `#ifdef HU_ENABLE_LLAMACPP`. |
 | `tests/test_llamacpp_provider.c` | Update the existing 9 "until linked" stub tests at lines 174-185: 3 of them assume `HU_ERR_NOT_SUPPORTED` from `chat_with_system` — now wrap with `#ifndef HU_ENABLE_LLAMACPP` so they only run in stub builds (the new `test_llamacpp_chat_metal.c` covers the linked path). |
