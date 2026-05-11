@@ -113,6 +113,15 @@
         "HU_ENABLE_CLI": "ON",
         "HU_ENABLE_IMAP": "ON"
       }
+    },
+    {
+      "name": "rl_sota",
+      "displayName": "RL SOTA (Phase 1+: dev + vendored llama.cpp + Metal on Apple)",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build-rl-sota",
+      "cacheVariables": {
+        "HU_ENABLE_LLAMACPP": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -150,6 +159,11 @@
       "name": "integration",
       "configurePreset": "integration",
       "jobs": 0
+    },
+    {
+      "name": "rl_sota",
+      "configurePreset": "rl_sota",
+      "jobs": 0
     }
   ],
   "testPresets": [
@@ -166,6 +180,11 @@
     {
       "name": "integration",
       "configurePreset": "integration",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "rl_sota",
+      "configurePreset": "rl_sota",
       "output": { "outputOnFailure": true }
     }
   ]
