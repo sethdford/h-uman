@@ -22,6 +22,7 @@
 #include "human/agent/superhuman_silence.h"
 #include "human/agent/task_list.h"
 #include "human/agent/team.h"
+#include "human/behavior/pressure_history.h"
 #include "human/agent/timing.h"
 #include "human/agent/token_budget.h"
 #include "human/agent/workflow_event.h"
@@ -315,6 +316,18 @@ struct hu_agent {
      * mode increments it without rendering). The delta between the two
      * is the rate at which we silently shipped unverified drafts. */
     uint64_t self_rag_refusals_rendered;
+
+    /* B11 P1 — Cross-turn pressure history. The single-message detector
+     * (`hu_pressure_detect`) catches authority cues / shouting / reassertion
+     * phrasing within one turn. Sycophancy attacks are usually *cumulative*:
+     * the user reasserts the same wrong claim three or four turns in a row.
+     * `pressure_history` records a small fixed-size window of recent user
+     * messages + the assistant's last trust action, so `agent_turn` can ask
+     * "is this a reassertion of a recent claim I already pushed back on?"
+     * before calling `hu_trust_calibrate`. Init via `memset(&agent, 0,
+     * sizeof(agent))` (the struct is POD with no embedded pointers).
+     * Footprint: ~1.2 KB. */
+    hu_pressure_history_t pressure_history;
 
     /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
      * trick as w7_facade above. Opened by hu_agent_bind_sqlite_graph after

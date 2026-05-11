@@ -2552,6 +2552,7 @@ set(HU_TEST_SOURCES
     tests/test_w16_eval_cli.c
     tests/test_v2_e2e_adversarial.c
     tests/test_v2_wiring_e2e.c
+    tests/test_b11_pressure_history_e2e.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c

@@ -372,6 +372,16 @@ static hu_error_t at_append_trust_directive(hu_agent_t *agent, const char *msg, 
         hu_pressure_apply_to_trust_input(&psig, &tin);
     }
 
+    /* B11 P1 — cross-turn pressure history. The single-message pressure
+     * detector above only sees the *current* turn. The history module
+     * records the last few user messages + the assistant's last trust
+     * action and detects "user is reasserting a claim I already pushed
+     * back on" across turns. Bumps `user_pressure_count` and sets
+     * `user_reasserted_after_pushback` when the current message is
+     * similar (trigram-Jaccard / overlap ≥ 0.5) to a recent entry. Adds
+     * only — never lowers existing signals. */
+    hu_pressure_history_apply_to_trust_input(&agent->pressure_history, msg, msg_len, &tin);
+
     if (memory_contradicts) {
         if (tin.user_invoked_authority || tin.user_emotional_pressure ||
             tin.user_pressure_count > 0u) {
@@ -382,11 +392,23 @@ static hu_error_t at_append_trust_directive(hu_agent_t *agent, const char *msg, 
             tin.user_pressure_count = 2u;
         }
     }
-    tin.user_reasserted_after_pushback = contrarian_thread && agent->history_count >= 2u;
+    /* contrarian_thread covers the in-process pushback chain; the history
+     * module covers prior sessions / older turns out of the immediate
+     * window. We keep the OR so neither path can mask the other. */
+    if (contrarian_thread && agent->history_count >= 2u) {
+        tin.user_reasserted_after_pushback = true;
+    }
 
     hu_trust_decision_t td;
     memset(&td, 0, sizeof(td));
     (void)hu_trust_calibrate(&tin, &td);
+
+    /* B11 P1 — record this turn into the pressure history *after*
+     * calibration so future turns can see the action we just took. The
+     * observe call is allocation-free and bounded to a small ring
+     * buffer; the message is normalized + truncated to fit. */
+    hu_pressure_history_observe(&agent->pressure_history, (uint32_t)agent->history_count,
+                                msg, msg_len, td.action);
     char *tline = NULL;
     size_t tlen = 0;
     if (hu_trust_build_directive(agent->alloc, &td, &tline, &tlen) != HU_OK || !tline || tlen == 0) {
