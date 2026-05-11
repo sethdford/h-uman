@@ -24,9 +24,12 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/provider.h"
+#include "human/providers/factory.h"
 
 #include <ctype.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -86,6 +89,11 @@ typedef struct {
     locomo_view_t *items;
     size_t count;
     hu_eval_locomo_dataset_t owned;
+    /* LLM judge: when HU_EVAL_LLM_JUDGE=1 is set, uses a local provider
+     * to semantically compare retrieved answers vs expected answers instead
+     * of relying on exact fact_id match. */
+    int judge_active;
+    hu_provider_t judge_provider;
 } locomo_ctx_t;
 
 /* ── word-overlap retriever ─────────────────────────────────────────────── */
@@ -148,6 +156,108 @@ static const char *retrieve_top1(const locomo_view_t *items, size_t n, const cha
         }
     }
     return best > 0 ? items[best_idx].fact_id : NULL;
+}
+
+/* ── LLM judge ──────────────────────────────────────────────────────────── */
+
+static const char *const LOCOMO_JUDGE_SYSTEM =
+    "You are an answer equivalence judge. You will be given a reference "
+    "answer and a candidate answer. Determine whether the candidate conveys "
+    "the same information as the reference. Reply with ONLY 'YES' or 'NO'.";
+
+/* Try to initialise a local LLM judge provider. Returns true on success.
+ * Skipped under HU_IS_TEST to avoid real network calls. */
+static bool locomo_judge_init(locomo_ctx_t *c, hu_allocator_t *alloc) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    (void)c; (void)alloc;
+    return false;
+#else
+    const char *env = getenv("HU_EVAL_LLM_JUDGE");
+    if (!env || env[0] != '1')
+        return false;
+
+    const char *provider_name = getenv("HU_EVAL_LLM_JUDGE_PROVIDER");
+    if (!provider_name || !provider_name[0])
+        provider_name = "openai-compatible";
+
+    const char *base_url = getenv("HU_EVAL_LLM_JUDGE_URL");
+    if (!base_url || !base_url[0])
+        base_url = "http://localhost:8741/v1";
+
+    hu_error_t err = hu_provider_create(
+        alloc, provider_name, strlen(provider_name),
+        "none", 4,
+        base_url, strlen(base_url),
+        &c->judge_provider);
+    if (err != HU_OK || !c->judge_provider.vtable ||
+        !c->judge_provider.vtable->chat_with_system)
+        return false;
+
+    c->judge_active = 1;
+    return true;
+#endif
+}
+
+/* Ask the LLM judge whether candidate conveys the same information as
+ * reference. Returns true for YES, false for NO or any failure. */
+static bool locomo_judge_equivalent(locomo_ctx_t *c, hu_allocator_t *alloc,
+                                    const char *reference, const char *candidate) {
+    if (!c->judge_active || !reference || !candidate)
+        return false;
+
+    const char *model = getenv("HU_EVAL_LLM_JUDGE_MODEL");
+    if (!model || !model[0])
+        model = "";
+
+    char prompt[2048];
+    int n = snprintf(prompt, sizeof(prompt),
+                     "Reference answer: %.*s\n\n"
+                     "Candidate answer: %.*s\n\n"
+                     "Does the candidate convey the same information? "
+                     "Answer YES or NO.",
+                     (int)(strlen(reference) < 800 ? strlen(reference) : 800),
+                     reference,
+                     (int)(strlen(candidate) < 800 ? strlen(candidate) : 800),
+                     candidate);
+    if (n <= 0 || (size_t)n >= sizeof(prompt))
+        return false;
+
+    char *resp = NULL;
+    size_t resp_len = 0;
+    hu_error_t err = c->judge_provider.vtable->chat_with_system(
+        c->judge_provider.ctx, alloc,
+        LOCOMO_JUDGE_SYSTEM, strlen(LOCOMO_JUDGE_SYSTEM),
+        prompt, (size_t)n,
+        model, strlen(model),
+        0.0, &resp, &resp_len);
+
+    if (err != HU_OK || !resp)
+        return false;
+
+    /* Parse: look for YES (case-insensitive) in the first 10 chars. */
+    bool yes = false;
+    for (size_t i = 0; i + 2 < resp_len && i < 10; i++) {
+        char a = resp[i], b = resp[i + 1], c2 = resp[i + 2];
+        if ((a == 'Y' || a == 'y') &&
+            (b == 'E' || b == 'e') &&
+            (c2 == 'S' || c2 == 's')) {
+            yes = true;
+            break;
+        }
+    }
+
+    alloc->free(alloc->ctx, resp, resp_len + 1);
+    return yes;
+}
+
+/* Find the fact text for a given fact_id in the working set. */
+static const char *locomo_find_fact_text(const locomo_view_t *items, size_t n,
+                                         const char *fact_id) {
+    for (size_t i = 0; i < n; i++) {
+        if (items[i].fact_id && strcmp(items[i].fact_id, fact_id) == 0)
+            return items[i].fact;
+    }
+    return NULL;
 }
 
 /* ── vtable ─────────────────────────────────────────────────────────────── */
@@ -221,11 +331,32 @@ static hu_error_t locomo_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run
         return err;
     out->started_at_ms = now_ms();
 
+    bool use_judge = locomo_judge_init(c, alloc);
+
     size_t correct = 0;
+    size_t judge_used = 0;
     for (size_t i = 0; i < c->count; i++) {
         const char *pick = retrieve_top1(c->items, c->count, c->items[i].query);
-        if (pick && strcmp(pick, c->items[i].expected_id) == 0)
+        if (!pick)
+            continue;
+
+        if (strcmp(pick, c->items[i].expected_id) == 0) {
             correct++;
+            continue;
+        }
+
+        /* Exact ID didn't match — try LLM judge on the answer texts. */
+        if (use_judge) {
+            const char *picked_text = locomo_find_fact_text(
+                c->items, c->count, pick);
+            const char *expected_text = locomo_find_fact_text(
+                c->items, c->count, c->items[i].expected_id);
+            if (picked_text && expected_text &&
+                locomo_judge_equivalent(c, alloc, expected_text, picked_text)) {
+                correct++;
+                judge_used++;
+            }
+        }
     }
 
     out->prompts_total = c->count;
@@ -246,6 +377,15 @@ static hu_error_t locomo_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run
         hu_evaluation_report_free(alloc, out);
         return err;
     }
+    /* Annotate whether the LLM judge contributed any additional matches
+     * beyond exact fact_id comparison. */
+    err = hu_evaluation_report_add_metric(alloc, out, "llm_judge_matches",
+                                          c->count > 0 ? (double)judge_used / (double)c->count : 0.0,
+                                          c->count);
+    if (err != HU_OK) {
+        hu_evaluation_report_free(alloc, out);
+        return err;
+    }
     out->finished_at_ms = now_ms();
     return HU_OK;
 }
@@ -254,6 +394,9 @@ static void locomo_deinit(void *ctx, hu_allocator_t *alloc) {
     if (!ctx || !alloc)
         return;
     locomo_ctx_t *c = (locomo_ctx_t *)ctx;
+    if (c->judge_active && c->judge_provider.vtable &&
+        c->judge_provider.vtable->deinit)
+        c->judge_provider.vtable->deinit(c->judge_provider.ctx, alloc);
     if (c->items) {
         alloc->free(alloc->ctx, c->items, c->count * sizeof(locomo_view_t));
         c->items = NULL;

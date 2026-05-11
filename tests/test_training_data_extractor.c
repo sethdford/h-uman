@@ -147,8 +147,8 @@ static void tde_retrain_threshold_constant_is_50(void) {
     HU_ASSERT_EQ(HU_TRAINING_DATA_RETRAIN_THRESHOLD, 50);
 }
 
-static void tde_dpo_correction_window_constant_is_120(void) {
-    HU_ASSERT_EQ(HU_DPO_CORRECTION_WINDOW_SEC, 120);
+static void tde_dpo_correction_window_constant_is_300(void) {
+    HU_ASSERT_EQ(HU_DPO_CORRECTION_WINDOW_SEC, 300);
 }
 
 void run_training_data_extractor_tests(void);
@@ -170,5 +170,5 @@ void run_training_data_extractor_tests(void) {
     HU_RUN_TEST(tde_runner_null_user_data_returns_invalid);
     HU_RUN_TEST(tde_runner_missing_paths_returns_invalid);
     HU_RUN_TEST(tde_retrain_threshold_constant_is_50);
-    HU_RUN_TEST(tde_dpo_correction_window_constant_is_120);
+    HU_RUN_TEST(tde_dpo_correction_window_constant_is_300);
 }

@@ -95,6 +95,16 @@ typedef struct hu_learner_config {
                                     * dp_enabled is true. */
     int64_t budget_ms;            /* total wall budget; 0 = short-circuit */
     uint64_t seed;                /* seeds the backend PRNG; 0 → default */
+
+    /* Frontier LoRA fields (Bridge B — MLX backend). When data_dir is set,
+     * the MLX backend uses it directly as `--data <dir>` and ignores the
+     * signal array. This lets callers point at pre-existing JSONL data
+     * (e.g. ~/.human/training-data/finetune/) instead of synthesizing
+     * signals. */
+    char data_dir[256];           /* pre-existing JSONL data directory */
+    int num_layers;               /* LoRA layers to fine-tune; 0 = backend default */
+    int max_seq_length;           /* max sequence length; 0 = backend default */
+    int save_every;               /* checkpoint save frequency; 0 = don't pass */
 } hu_learner_config_t;
 
 hu_learner_config_t hu_learner_default_config(void);

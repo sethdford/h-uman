@@ -66,10 +66,12 @@ hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc,
                                         int correction_window_sec,
                                         size_t *pairs_created);
 
-/* Default correction window: 120 seconds. If a user sends a follow-up
+/* Default correction window: 300 seconds. If a user sends a follow-up
  * within this window after an assistant response, it is treated as a
- * potential correction for DPO pair generation. */
-#define HU_DPO_CORRECTION_WINDOW_SEC 120
+ * potential correction for DPO pair generation. Widened from the
+ * original 120s to capture corrections where the user pauses to read
+ * or think before correcting. */
+#define HU_DPO_CORRECTION_WINDOW_SEC 300
 
 #ifdef __cplusplus
 }

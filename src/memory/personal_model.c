@@ -109,6 +109,13 @@ static const char *humor_directive(float receptivity) {
  * actual signal while still being a tight bound on warm-up cost. */
 #define HU_PM_DIRECTIVE_MIN_SAMPLES 3U
 
+/* Topic-engagement directive — only fires when a topic has been
+ * mentioned at least this many times (≥3 distinct facts whose object
+ * matches). Keeps fly-by mentions from licensing the model to act on
+ * topics the user only glanced at, while still firing on topics that
+ * have entered the conversation enough times to be a real signal. */
+#define HU_PM_TOPIC_DIRECTIVE_MIN_MENTIONS 3U
+
 /* Negative-fact predicates — markers that "user <pred> <obj>" expresses
  * something to actively avoid recommending or doing. The fact extractor
  * preserves the predicate verbatim, so substring matching here pulls out
@@ -302,6 +309,38 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
         }
         append_fmt(buf, cap, &n, "\n");
         detail = true;
+
+        /* SOTA personalization wire — convert observed-topic frequency
+         * into an actionable engagement directive. The "Top interests:"
+         * line above is a passive observation; this line tells the
+         * frontier model what to *do* when those topics appear. Gating:
+         *   - mention_count >= HU_PM_TOPIC_DIRECTIVE_MIN_MENTIONS (3)
+         *     keeps fly-by mentions from licensing substantive
+         *     follow-ups before sustained interest is established.
+         *   - interest_score >= 0.5 mirrors the observation block —
+         *     the same threshold the user would expect to see hit.
+         *   - cap at 3 named topics so the directive stays tight and
+         *     decodable; the broader interest list is still in the
+         *     observation line above. */
+        size_t engage_count = 0;
+        for (size_t i = 0; i < max_t && engage_count < 3U; i++) {
+            const hu_personal_topic_t *t = &model->topics[order[i]];
+            if (t->mention_count < HU_PM_TOPIC_DIRECTIVE_MIN_MENTIONS)
+                continue;
+            if (t->interest_score < 0.5f)
+                continue;
+            if (t->name[0] == '\0')
+                continue;
+            if (engage_count == 0) {
+                append_fmt(buf, cap, &n, "Engage substantively when these come up: ");
+            } else {
+                append_fmt(buf, cap, &n, ", ");
+            }
+            append_fmt(buf, cap, &n, "%s", t->name);
+            engage_count++;
+        }
+        if (engage_count > 0)
+            append_fmt(buf, cap, &n, ".\n");
     }
 
     if (!detail)

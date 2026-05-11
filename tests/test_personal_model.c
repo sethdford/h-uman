@@ -728,6 +728,138 @@ static void personal_model_style_directive_absent_when_no_samples(void) {
     HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") == NULL);
 }
 
+/* ── Topic-engagement directive ─────────────────────────────────────── */
+
+/* Directive must emerge for a topic with sustained mention_count + score. */
+static void personal_model_topic_directive_emerges_for_sustained_interest(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    /* Seed a single high-engagement topic directly — bump_topic only
+     * increments mention_count once per distinct fact, but tests want
+     * to assert directive emission, not the bump path. */
+    m.topic_count = 1;
+    strncpy(m.topics[0].name, "hiking", sizeof(m.topics[0].name) - 1);
+    m.topics[0].interest_score = 0.85f;
+    m.topics[0].mention_count = 5U;
+
+    char buf[2048];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Engage substantively when these come up: hiking.") != NULL);
+}
+
+/* Directive must NOT emerge when the topic has only one or two mentions. */
+static void personal_model_topic_directive_skips_low_mention_count(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    m.topic_count = 1;
+    strncpy(m.topics[0].name, "fly fishing", sizeof(m.topics[0].name) - 1);
+    m.topics[0].interest_score = 0.85f;
+    m.topics[0].mention_count = 2U;
+
+    char buf[2048];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Engage substantively") == NULL);
+    /* Observation line still present. */
+    HU_ASSERT_TRUE(strstr(buf, "Top interests:") != NULL);
+}
+
+/* Low interest_score must NOT emit directive even when mention_count is high. */
+static void personal_model_topic_directive_skips_low_interest_score(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    m.topic_count = 1;
+    strncpy(m.topics[0].name, "small talk", sizeof(m.topics[0].name) - 1);
+    m.topics[0].interest_score = 0.3f;
+    m.topics[0].mention_count = 7U;
+
+    char buf[2048];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Engage substantively") == NULL);
+}
+
+/* Multiple sustained topics — directive lists up to 3, in interest order. */
+static void personal_model_topic_directive_caps_at_three(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    m.topic_count = 5;
+    struct {
+        const char *name;
+        float score;
+    } seed[] = {
+        {"hiking",      0.95f},
+        {"woodworking", 0.85f},
+        {"jazz",        0.75f},
+        {"climbing",    0.65f},
+        {"sourdough",   0.55f},
+    };
+    for (size_t i = 0; i < 5; i++) {
+        strncpy(m.topics[i].name, seed[i].name, sizeof(m.topics[i].name) - 1);
+        m.topics[i].interest_score = seed[i].score;
+        m.topics[i].mention_count = 4U;
+    }
+
+    char buf[2048];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    const char *eng = strstr(buf, "Engage substantively when these come up:");
+    HU_ASSERT_NOT_NULL(eng);
+    /* Top three by score should appear; #4 and #5 should not. */
+    HU_ASSERT_TRUE(strstr(eng, "hiking") != NULL);
+    HU_ASSERT_TRUE(strstr(eng, "woodworking") != NULL);
+    HU_ASSERT_TRUE(strstr(eng, "jazz") != NULL);
+    /* Bound the search to the directive line itself. */
+    const char *eol = strchr(eng, '\n');
+    HU_ASSERT_NOT_NULL(eol);
+    size_t line_len = (size_t)(eol - eng);
+    HU_ASSERT_TRUE(memmem(eng, line_len, "climbing", 8) == NULL);
+    HU_ASSERT_TRUE(memmem(eng, line_len, "sourdough", 9) == NULL);
+}
+
+/* Mixed: one sustained, one fly-by — only the sustained one shows up. */
+static void personal_model_topic_directive_filters_mixed_topics(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    m.topic_count = 2;
+    strncpy(m.topics[0].name, "ml research", sizeof(m.topics[0].name) - 1);
+    m.topics[0].interest_score = 0.9f;
+    m.topics[0].mention_count = 6U;
+
+    strncpy(m.topics[1].name, "the weather", sizeof(m.topics[1].name) - 1);
+    m.topics[1].interest_score = 0.7f;
+    m.topics[1].mention_count = 1U;
+
+    char buf[2048];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    const char *eng = strstr(buf, "Engage substantively when these come up: ml research.");
+    HU_ASSERT_NOT_NULL(eng);
+    /* "the weather" must not appear on the directive line. */
+    const char *eol = strchr(eng, '\n');
+    HU_ASSERT_NOT_NULL(eol);
+    size_t line_len = (size_t)(eol - eng);
+    HU_ASSERT_TRUE(memmem(eng, line_len, "weather", 7) == NULL);
+}
+
+/* No topics at all → no directive line at all. */
+static void personal_model_topic_directive_absent_when_no_topics(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    char buf[1024];
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Engage substantively") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Top interests:") == NULL);
+}
+
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -761,6 +893,12 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_avoid_line_handles_hate);
     HU_RUN_TEST(personal_model_avoid_line_skips_when_only_positive_facts);
     HU_RUN_TEST(personal_model_avoid_line_collects_multiple_dislikes);
+    HU_RUN_TEST(personal_model_topic_directive_emerges_for_sustained_interest);
+    HU_RUN_TEST(personal_model_topic_directive_skips_low_mention_count);
+    HU_RUN_TEST(personal_model_topic_directive_skips_low_interest_score);
+    HU_RUN_TEST(personal_model_topic_directive_caps_at_three);
+    HU_RUN_TEST(personal_model_topic_directive_filters_mixed_topics);
+    HU_RUN_TEST(personal_model_topic_directive_absent_when_no_topics);
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(personal_model_survives_real_sigkill);
 #endif

@@ -20,6 +20,7 @@
 #include "human/ml/prepare.h"
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
+#include "human/ml/training_data_extractor.h"
 #include "human/agent/scheduler_status_json.h"
 #include "human/persona.h"
 #include "human/provider.h"
@@ -58,6 +59,17 @@ static int parse_int_arg(const char *val, int *out) {
     if (end == val || *end != '\0' || n < 0)
         return -1;
     *out = (int)n;
+    return 0;
+}
+
+static int parse_float_arg(const char *val, float *out) {
+    if (!val || !out)
+        return -1;
+    char *end = NULL;
+    double d = strtod(val, &end);
+    if (end == val || *end != '\0')
+        return -1;
+    *out = (float)d;
     return 0;
 }
 
@@ -465,6 +477,7 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
     const char *chat_db = NULL;
     const char *memory_db = NULL;
     const char *output_dir = NULL;
+    int correction_window = 0;
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--chat-db");
         if (v) {
@@ -484,9 +497,16 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
             i++;
             continue;
         }
+        v = get_opt(argv, argc, i, "--correction-window");
+        if (v) {
+            parse_int_arg(v, &correction_window);
+            i++;
+            continue;
+        }
         if (strcmp(argv[i], "--help") == 0) {
             printf("Usage: human ml prepare-conversations [--chat-db <path>] "
-                   "[--memory-db <path>] --output <dir> [--help]\n");
+                   "[--memory-db <path>] --output <dir> "
+                   "[--correction-window <secs>] [--help]\n");
             return HU_OK;
         }
     }
@@ -495,6 +515,7 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
     (void)chat_db;
     (void)memory_db;
     (void)output_dir;
+    (void)correction_window;
     printf("[prepare-conversations] test mode: skipped\n");
     return HU_OK;
 #else
@@ -513,6 +534,32 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
         printf("[prepare-conversations] Done: %zu messages processed\n", processed);
     else
         fprintf(stderr, "[prepare-conversations] Failed: %d\n", err);
+
+    /* Also run DPO pair extraction from user corrections. */
+    {
+        const char *db_path = memory_db ? memory_db : chat_db;
+        if (!db_path) {
+            char default_db[512];
+            const char *home = getenv("HOME");
+            if (home) {
+                snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
+                db_path = default_db;
+            }
+        }
+        if (db_path) {
+            size_t dpo_count = 0;
+            hu_error_t dpo_err = hu_training_data_extract_dpo(
+                alloc, db_path, correction_window, &dpo_count);
+            if (dpo_err == HU_OK && dpo_count > 0)
+                printf("[prepare-conversations] Extracted %zu DPO pairs from corrections\n",
+                       dpo_count);
+            else if (dpo_err == HU_OK)
+                printf("[prepare-conversations] No new DPO pairs found\n");
+            else if (dpo_err != HU_ERR_NOT_SUPPORTED)
+                fprintf(stderr, "[prepare-conversations] DPO extraction warning: %d\n", dpo_err);
+        }
+    }
+
     return err;
 #endif
 }
@@ -535,6 +582,16 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
      * data source for LoRA. */
     const char *from_deltas_db = NULL;
     const char *signal_contact = NULL;
+    /* Bridge B — MLX frontier LoRA. When --backend mlx is set, we skip
+     * in-process HUML training and shell out to mlx_lm.lora for real
+     * Gemma fine-tuning on Apple Silicon. */
+    const char *backend = NULL;
+    const char *mlx_model = NULL;
+    const char *data_dir = NULL;
+    int num_layers = 8;
+    int max_seq_length = 2048;
+    int save_every = 100;
+    float learning_rate = 0.0f;
     int rank = 8;
     int max_steps = 200;
     for (int i = 1; i < argc; i++) {
@@ -586,12 +643,57 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             i++;
             continue;
         }
+        v = get_opt(argv, argc, i, "--backend");
+        if (v) {
+            backend = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--model");
+        if (v) {
+            mlx_model = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--data-dir");
+        if (v) {
+            data_dir = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--num-layers");
+        if (v) {
+            parse_int_arg(v, &num_layers);
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--max-seq-length");
+        if (v) {
+            parse_int_arg(v, &max_seq_length);
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--save-every");
+        if (v) {
+            parse_int_arg(v, &save_every);
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--learning-rate");
+        if (v) {
+            parse_float_arg(v, &learning_rate);
+            i++;
+            continue;
+        }
         if (strcmp(argv[i], "--help") == 0) {
             printf("Usage: human ml lora-persona --persona <name> "
                    "[--checkpoint <path>] [--output <path>] "
                    "[--from-deltas <memory.db> --contact <id>] "
                    "[--rank <N>] [--max-steps <N>] "
-                   "[--export-jsonl <path>] [--help]\n");
+                   "[--export-jsonl <path>] "
+                   "[--backend mlx] [--model <hf-id>] [--data-dir <path>] "
+                   "[--num-layers <N>] [--max-seq-length <N>] "
+                   "[--save-every <N>] [--learning-rate <f>] [--help]\n");
             printf("\n  --checkpoint   Optional HUML base GPT checkpoint to warm-start "
                    "before LoRA attaches.\n");
             printf("                 Must match the reference GPT dims (see "
@@ -610,6 +712,18 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             printf("                 axolotl, unsloth, or mlx-lm.lora and produce a\n");
             printf("                 GGUF LoRA the daemon can load via\n");
             printf("                 personalization.lora_adapter_path.\n");
+            printf("\n  --backend mlx  Use the MLX backend for frontier Gemma LoRA\n");
+            printf("                 fine-tuning on Apple Silicon. Shells out to\n");
+            printf("                 python3 -m mlx_lm.lora.\n");
+            printf("  --model <id>   HF model ID or local path for --backend mlx.\n");
+            printf("                 Default: mlx-community/gemma-4-31b-it-4bit\n");
+            printf("  --data-dir     Pre-existing JSONL data directory with\n");
+            printf("                 train.jsonl/valid.jsonl. If omitted, persona\n");
+            printf("                 example bank is exported automatically.\n");
+            printf("  --num-layers   Number of model layers to fine-tune (default 8).\n");
+            printf("  --max-seq-length  Max sequence length (default 2048).\n");
+            printf("  --save-every   Checkpoint save frequency (default 100).\n");
+            printf("  --learning-rate  Learning rate (default 1e-5 for mlx).\n");
             return HU_OK;
         }
     }
@@ -621,6 +735,13 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     (void)rank;
     (void)max_steps;
     (void)export_jsonl_path;
+    (void)backend;
+    (void)mlx_model;
+    (void)data_dir;
+    (void)num_layers;
+    (void)max_seq_length;
+    (void)save_every;
+    (void)learning_rate;
     printf("[lora-persona] test mode: skipped\n");
     printf("[lora-persona] honest-gap doc: docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
     return HU_OK;
@@ -660,6 +781,127 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         printf("               can load via personalization.lora_adapter_path.\n");
         hu_persona_deinit(alloc, &persona);
         return HU_OK;
+    }
+
+    /* ── Bridge B — MLX frontier LoRA training ─────────────────────────
+     * When --backend mlx is set, we bypass the in-process HUML training
+     * loop entirely and use the MLX learner backend to shell out to
+     * `python3 -m mlx_lm.lora` for real Gemma fine-tuning. */
+    if (backend && strcmp(backend, "mlx") == 0) {
+#ifdef HU_ENABLE_LEARNING
+        hu_learner_t *learner = NULL;
+        hu_error_t lerr = hu_learner_open_named(alloc, "mlx", &learner);
+        if (lerr != HU_OK) {
+            fprintf(stderr, "[lora-persona] MLX backend not available on this platform.\n");
+            if (lerr == HU_ERR_NOT_SUPPORTED)
+                fprintf(stderr, "              Requires macOS on Apple Silicon with "
+                                "mlx_lm installed.\n"
+                                "              Install: pip install mlx-lm\n");
+            hu_persona_deinit(alloc, &persona);
+            return lerr;
+        }
+
+        hu_learner_config_t lcfg = hu_learner_default_config();
+        snprintf(lcfg.base_model_path, sizeof(lcfg.base_model_path), "%s",
+                 mlx_model ? mlx_model : "mlx-community/gemma-4-31b-it-4bit");
+        lcfg.rank = rank;
+        lcfg.max_steps = max_steps;
+        lcfg.learning_rate = learning_rate > 0.0f ? learning_rate : 1e-5f;
+        lcfg.batch_size = 1;
+        lcfg.num_layers = num_layers;
+        lcfg.max_seq_length = max_seq_length;
+        lcfg.save_every = save_every;
+        lcfg.budget_ms = -1;
+
+        char default_adapter[512];
+        if (output_path) {
+            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
+                     "%s", output_path);
+        } else {
+            const char *home = getenv("HOME");
+            snprintf(default_adapter, sizeof(default_adapter),
+                     "%s/.human/training-data/adapters/lora-persona-%s",
+                     home ? home : ".", persona_name);
+            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
+                     "%s", default_adapter);
+        }
+
+        if (data_dir) {
+            snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", data_dir);
+        } else {
+            char tmp_dir[256];
+            snprintf(tmp_dir, sizeof(tmp_dir), "/tmp/hu-lora-frontier-%d", (int)getpid());
+            mkdir(tmp_dir, 0755);
+            char train_path[512];
+            snprintf(train_path, sizeof(train_path), "%s/train.jsonl", tmp_dir);
+            size_t exported = 0;
+            hu_error_t exp_err = hu_persona_bank_export_jsonl(
+                &persona, train_path, strlen(train_path), &exported);
+            if (exp_err != HU_OK || exported == 0) {
+                fprintf(stderr, "[lora-persona] failed to export persona bank "
+                                "for frontier training: %s\n",
+                        hu_error_string(exp_err != HU_OK ? exp_err
+                                                         : HU_ERR_INVALID_ARGUMENT));
+                hu_learner_close(learner);
+                hu_persona_deinit(alloc, &persona);
+                return exp_err != HU_OK ? exp_err : HU_ERR_INVALID_ARGUMENT;
+            }
+            snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", tmp_dir);
+            printf("[lora-persona] exported %zu persona example(s) to %s\n",
+                   exported, train_path);
+        }
+
+        printf("[lora-persona] MLX frontier LoRA training:\n"
+               "  model:          %s\n"
+               "  data:           %s\n"
+               "  adapter:        %s\n"
+               "  rank:           %d\n"
+               "  iters:          %d\n"
+               "  num-layers:     %d\n"
+               "  max-seq-length: %d\n"
+               "  learning-rate:  %g\n"
+               "  batch-size:     %d\n",
+               lcfg.base_model_path, lcfg.data_dir, lcfg.adapter_output_path,
+               lcfg.rank, lcfg.max_steps, lcfg.num_layers, lcfg.max_seq_length,
+               (double)lcfg.learning_rate, lcfg.batch_size);
+
+        hu_learner_report_t report;
+        memset(&report, 0, sizeof(report));
+        err = hu_learner_train(learner, &lcfg, NULL, 0, &report);
+        if (err == HU_OK) {
+            printf("[lora-persona] frontier training complete:\n"
+                   "  steps:     %zu\n"
+                   "  loss:      %.4f\n"
+                   "  adapter:   %s\n"
+                   "  size:      %lld bytes\n",
+                   report.steps_completed, (double)report.final_loss,
+                   report.adapter_path, (long long)report.adapter_bytes);
+        } else {
+            fprintf(stderr, "[lora-persona] frontier training failed: %s\n",
+                    report.last_error[0] ? report.last_error : hu_error_string(err));
+        }
+
+        if (!data_dir) {
+            char rm_path[512];
+            snprintf(rm_path, sizeof(rm_path), "%s/train.jsonl", lcfg.data_dir);
+            unlink(rm_path);
+            rmdir(lcfg.data_dir);
+        }
+
+        hu_learner_close(learner);
+        hu_persona_deinit(alloc, &persona);
+        return err;
+#else
+        (void)mlx_model;
+        (void)data_dir;
+        (void)num_layers;
+        (void)max_seq_length;
+        (void)save_every;
+        (void)learning_rate;
+        fprintf(stderr, "[lora-persona] --backend mlx requires HU_ENABLE_LEARNING=ON\n");
+        hu_persona_deinit(alloc, &persona);
+        return HU_ERR_NOT_SUPPORTED;
+#endif
     }
 
     /* P0 #3 — pull applied persona deltas as additional training pairs.

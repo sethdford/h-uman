@@ -176,6 +176,26 @@ static void test_w16_locomo_falls_back_when_corpus_malformed(void) {
     (void)rmdir(dir);
 }
 
+/* ── 1d. LoCoMo emits llm_judge_matches metric (0.0 offline) ─────────────── */
+
+static void test_w16_locomo_reports_llm_judge_matches_metric(void) {
+    setenv("HU_EVAL_DATA_DIR", "/tmp/hu_w16_no_corpus_dir", 1);
+    unsetenv("HU_EVAL_LLM_JUDGE");
+
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_locomo(A(), &e), HU_OK);
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+
+    const hu_evaluation_metric_t *jm = find_metric(&r, "llm_judge_matches");
+    HU_ASSERT_NOT_NULL(jm);
+    HU_ASSERT_FLOAT_EQ(jm->score, 0.0, 1e-9);
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+    unsetenv("HU_EVAL_DATA_DIR");
+}
+
 /* ── 2. MINJA: W1 trust scorer blocks adversarial inputs ────────────────── */
 
 static void test_w16_minja_attack_blocked_by_w1_write_trust(void) {
@@ -857,6 +877,7 @@ void run_w16_evaluation_tests(void) {
     HU_RUN_TEST(test_w16_locomo_runs_on_synthetic_dataset);
     HU_RUN_TEST(test_w16_locomo_loads_real_corpus_from_disk);
     HU_RUN_TEST(test_w16_locomo_falls_back_when_corpus_malformed);
+    HU_RUN_TEST(test_w16_locomo_reports_llm_judge_matches_metric);
     HU_RUN_TEST(test_w16_minja_attack_blocked_by_w1_write_trust);
     HU_RUN_TEST(test_w16_frontier_compare_pairs_match);
     HU_RUN_TEST(test_w16_regression_gate_fails_on_synthetic_drop);

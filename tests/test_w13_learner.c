@@ -417,6 +417,49 @@ static void test_w13_mlx_budget_zero_short_circuits(void) {
     HU_ASSERT_EQ(rep.adapter_bytes, 0);
     hu_learner_close(l);
 }
+
+static void test_w13_mlx_frontier_data_dir_trains_adapter(void) {
+    char path[256];
+    scratch_path(path, sizeof(path), "mlx-frontier");
+
+    hu_learner_t *l = NULL;
+    HU_ASSERT_EQ(hu_learner_open_named(A(), "mlx", &l), HU_OK);
+    HU_ASSERT_STR_EQ(l->vt->name, "mlx");
+
+    hu_learner_config_t cfg = hu_learner_default_config();
+    snprintf(cfg.adapter_output_path, sizeof(cfg.adapter_output_path), "%s", path);
+    snprintf(cfg.base_model_path, sizeof(cfg.base_model_path),
+             "mlx-community/gemma-4-31b-it-4bit");
+    snprintf(cfg.data_dir, sizeof(cfg.data_dir), "/tmp/fake-data");
+    cfg.rank = 8;
+    cfg.max_steps = 100;
+    cfg.learning_rate = 1e-5f;
+    cfg.batch_size = 1;
+    cfg.num_layers = 8;
+    cfg.max_seq_length = 2048;
+    cfg.save_every = 100;
+    snprintf(cfg.model_version, sizeof(cfg.model_version), "frontier-test");
+
+    hu_learner_report_t rep;
+    HU_ASSERT_EQ(hu_learner_train(l, &cfg, NULL, 0, &rep), HU_OK);
+    HU_ASSERT(rep.adapter_bytes > 0);
+    HU_ASSERT(rep.steps_completed > 0);
+    HU_ASSERT(strlen(rep.adapter_path) > 0);
+    HU_ASSERT_STR_EQ(rep.adapter_path, path);
+
+    hu_learner_close(l);
+    unlink(path);
+}
+
+static void test_w13_mlx_frontier_config_defaults_correct(void) {
+    hu_learner_config_t cfg = hu_learner_default_config();
+    HU_ASSERT_EQ(cfg.data_dir[0], '\0');
+    HU_ASSERT_EQ(cfg.num_layers, 0);
+    HU_ASSERT_EQ(cfg.max_seq_length, 0);
+    HU_ASSERT_EQ(cfg.save_every, 0);
+    HU_ASSERT_EQ(cfg.rank, 8);
+    HU_ASSERT(cfg.learning_rate > 0.0f);
+}
 #endif /* __APPLE__ && __aarch64__ */
 
 /* ── ggml backend (test mode) ────────────────────────────────────────── */
@@ -735,6 +778,8 @@ void run_w13_learner_tests(void) {
 #if defined(__APPLE__) && defined(__aarch64__)
     HU_RUN_TEST(test_w13_mlx_backend_trains_fake_adapter);
     HU_RUN_TEST(test_w13_mlx_budget_zero_short_circuits);
+    HU_RUN_TEST(test_w13_mlx_frontier_data_dir_trains_adapter);
+    HU_RUN_TEST(test_w13_mlx_frontier_config_defaults_correct);
 #endif
 
     /* ggml backend (test mode — always available under HU_IS_TEST). */

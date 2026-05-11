@@ -96,6 +96,21 @@ This section records **what is already in the tree** versus what remains spec-fi
 
 **Exit:** W8 adversarial tests + no regression on W7 facade reads.
 
+**P2 schema-migration row (2026-05-11).** `hu_graph_relation_t` now carries
+`float confidence_variance` alongside `confidence`. The three relation
+SELECT paths in `src/memory/graph.c` (`hu_graph_relations_in_window`,
+`hu_graph_list_relations`, `hu_graph_list_relations_verifier_scan`) all
+read the column; the v1 backend's three record-population loops in
+`src/memory/memory_v1_backend.c` propagate it into
+`hu_memory_record_t.confidence_variance`. Pinned by
+`test_w8_p2_relation_belief_variance_round_trips_through_facade` (explicit
+0.7 ± 0.04 round-trip via WINDOW *and* default top-N read) and
+`test_w8_p2_legacy_scalar_write_derives_variance_on_readback` (legacy
+scalar write derives the imessage-bucket low variance ≈ 0.02 instead of
+the bogus 0.0 the previous code path surfaced). Existing P2G writes
+(`test_w7_p2g_facade_write_seeds_variance_from_provenance`) continue to
+pass — the read side of the migration was the gap, not the write side.
+
 ## Phase 3 — W9 world model
 
 **Spec:** [`2026-05-10-w9-world-model.md`](2026-05-10-w9-world-model.md)
