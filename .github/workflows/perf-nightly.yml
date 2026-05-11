@@ -1,0 +1,229 @@
+name: Perf Nightly (MLX inference bench)
+
+# Runs the local MLX inference benchmark nightly on the dedicated M4 Max
+# self-hosted runner. Persists JSON artifacts and posts a regression alert
+# if any condition exceeds the documented thresholds.
+#
+# Governing ADR: docs/plans/adr/2026-05-11-ci-bench-hardware.md
+# Plan reference: docs/plans/2026-05-10-sota-roadmap-6mo.md § Phase E1.2 / B2.3
+# Runner label:   perf-m4-max
+#
+# Manual trigger:
+#   gh workflow run perf-nightly.yml
+# Nightly trigger:
+#   03:00 America/New_York (07:00 UTC during EST, 08:00 UTC during EDT)
+#
+# Security note: all workflow_dispatch inputs flow through env: only.
+# Untrusted strings are validated by regex before they touch the shell
+# or actions/github-script script bodies.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Bench tag (alphanumeric + dash + underscore + dot only)"
+        required: false
+        default: ""
+      iterations:
+        description: "Iterations per condition (1-99)"
+        required: false
+        default: "7"
+      max_tokens:
+        description: "Max tokens per response (1-9999)"
+        required: false
+        default: "200"
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  bench:
+    runs-on: [self-hosted, macOS, perf-m4-max]
+    timeout-minutes: 90
+    env:
+      MLX_VENV: /Users/sethford/Documents/gemma-realtime-1/.venv313
+      INPUT_TAG: ${{ github.event.inputs.tag }}
+      INPUT_ITERATIONS: ${{ github.event.inputs.iterations }}
+      INPUT_MAX_TOKENS: ${{ github.event.inputs.max_tokens }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate workflow inputs
+        id: validate
+        env:
+          RAW_TAG: ${{ env.INPUT_TAG }}
+          RAW_N: ${{ env.INPUT_ITERATIONS }}
+          RAW_MAX: ${{ env.INPUT_MAX_TOKENS }}
+        run: |
+          set -euo pipefail
+          # Tag: empty OK; otherwise [A-Za-z0-9._-]{1,80}
+          TAG="${RAW_TAG:-}"
+          if [ -n "$TAG" ] && ! echo "$TAG" | grep -Eq '^[A-Za-z0-9._-]{1,80}$'; then
+            echo "::error::Invalid tag (allowed: [A-Za-z0-9._-]{1,80})"
+            exit 1
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="nightly-$(date -u +%Y%m%d-%H%M)"
+          fi
+          # Iterations: 1-99
+          N="${RAW_N:-7}"
+          if ! echo "$N" | grep -Eq '^[1-9][0-9]?$'; then
+            echo "::error::Invalid iterations (allowed: 1-99)"
+            exit 1
+          fi
+          # Max tokens: 1-9999
+          MAX="${RAW_MAX:-200}"
+          if ! echo "$MAX" | grep -Eq '^[1-9][0-9]{0,3}$'; then
+            echo "::error::Invalid max_tokens (allowed: 1-9999)"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "iterations=${N}" >> "$GITHUB_OUTPUT"
+          echo "max_tokens=${MAX}" >> "$GITHUB_OUTPUT"
+          echo "out=/tmp/bench-${TAG}.json" >> "$GITHUB_OUTPUT"
+
+      - name: Thermal guardrail (abort if package temp > 80 C)
+        run: |
+          set -euo pipefail
+          if ! command -v powermetrics >/dev/null 2>&1; then
+            echo "::warning::powermetrics not on PATH; skipping thermal guard"
+            exit 0
+          fi
+          TEMP_C=$(sudo -n powermetrics --samplers smc -n 1 -i 200 2>/dev/null | \
+                   awk -F'[: ]+' '/CPU die temperature/ {print int($4); exit}' || echo "")
+          if [ -z "$TEMP_C" ]; then
+            echo "::warning::Could not read CPU die temperature; continuing"
+            exit 0
+          fi
+          echo "CPU die temperature: ${TEMP_C} C"
+          if [ "$TEMP_C" -gt 80 ]; then
+            echo "::error::Thermal guardrail tripped (${TEMP_C} C > 80 C). Aborting bench."
+            exit 1
+          fi
+
+      - name: Verify MLX server is up
+        run: |
+          set -euo pipefail
+          if ! curl -fsS http://127.0.0.1:8741/health >/dev/null; then
+            echo "MLX server not running; attempting restart"
+            bash scripts/human-serve.sh restart || true
+            sleep 8
+            curl -fsS http://127.0.0.1:8741/health
+          fi
+          echo "MLX server health:"
+          curl -fsS http://127.0.0.1:8741/health | python3 -m json.tool
+
+      - name: Run bench
+        env:
+          BENCH_TAG: ${{ steps.validate.outputs.tag }}
+          BENCH_N: ${{ steps.validate.outputs.iterations }}
+          BENCH_MAX_TOKENS: ${{ steps.validate.outputs.max_tokens }}
+          BENCH_OUT: ${{ steps.validate.outputs.out }}
+        run: |
+          set -euo pipefail
+          "${MLX_VENV}/bin/python3.13" scripts/bench-gemma-perf.py \
+            --tag "${BENCH_TAG}" \
+            --n "${BENCH_N}" \
+            --max-tokens "${BENCH_MAX_TOKENS}" \
+            --out "${BENCH_OUT}"
+          python3 -m json.tool "${BENCH_OUT}" | head -80
+
+      - name: Compare against locked baseline
+        id: compare
+        env:
+          BENCH_OUT: ${{ steps.validate.outputs.out }}
+        run: |
+          set -euo pipefail
+          BASELINE=docs/perf/baseline.json
+          if [ ! -f "$BASELINE" ]; then
+            echo "::warning::No baseline at $BASELINE; skipping comparison"
+            echo "regressed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 - "$BASELINE" "$BENCH_OUT" > /tmp/bench-compare.txt <<'PY'
+          import json, sys
+          before = json.load(open(sys.argv[1]))
+          after  = json.load(open(sys.argv[2]))
+          tripped = []
+          for cond, a in after.get("conditions", {}).items():
+              b = before.get("conditions", {}).get(cond, {})
+              for stat, max_drop in [("tps", -0.05), ("ttft", 0.10)]:
+                  bm = b.get(stat, {}).get("median", 0)
+                  am = a.get(stat, {}).get("median", 0)
+                  if bm <= 0: continue
+                  delta = (am - bm) / bm
+                  if (stat == "tps" and delta < max_drop) or (stat == "ttft" and delta > max_drop):
+                      tripped.append((cond, stat, f"{delta*100:+.1f}%", bm, am))
+          if tripped:
+              print("REGRESSED")
+              for cond, stat, pct, bm, am in tripped:
+                  print(f"  {cond} {stat}: {pct} (baseline {bm:.3f} -> now {am:.3f})")
+              sys.exit(0)
+          print("OK: no regressions")
+          PY
+          cat /tmp/bench-compare.txt
+          if head -1 /tmp/bench-compare.txt | grep -q '^REGRESSED'; then
+            echo "regressed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "regressed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ steps.validate.outputs.tag }}
+          path: ${{ steps.validate.outputs.out }}
+          retention-days: 30
+
+      - name: Upload compare report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-compare-${{ steps.validate.outputs.tag }}
+          path: /tmp/bench-compare.txt
+          retention-days: 30
+
+      - name: Open regression issue
+        if: steps.compare.outputs.regressed == 'true'
+        env:
+          BENCH_TAG: ${{ steps.validate.outputs.tag }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const tag = process.env.BENCH_TAG;
+            if (!/^[A-Za-z0-9._-]{1,80}$/.test(tag)) {
+              core.setFailed(`Refusing to use unsafe tag: ${tag}`);
+              return;
+            }
+            let report = '';
+            try { report = fs.readFileSync('/tmp/bench-compare.txt', 'utf8'); } catch (_) {}
+            const title = `Perf regression detected: nightly bench ${tag}`;
+            const body = [
+              '## Perf-nightly regression detected',
+              '',
+              `Bench tag: \`${tag}\``,
+              'Runner: `perf-m4-max`',
+              '',
+              'Thresholds (per `docs/plans/adr/2026-05-11-ci-bench-hardware.md`):',
+              '- TPS regression > 5% -> trip',
+              '- TTFT regression > 10% -> trip',
+              '',
+              '### Comparison report',
+              '```',
+              report || '(no report captured)',
+              '```',
+              '',
+              'See SOTA roadmap E1.2 / B2.3 for the gate this protects.'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['perf-regression', 'sota-roadmap']
+            });

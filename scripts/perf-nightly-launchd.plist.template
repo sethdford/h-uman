@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template for the perf-m4-max self-hosted runner.
+  Governing ADR: docs/plans/adr/2026-05-11-ci-bench-hardware.md
+  Plan reference: docs/plans/2026-05-10-sota-roadmap-6mo.md § Phase E1.2
+
+  This plist keeps the GitHub Actions runner alive and restarts it on
+  failure. It does NOT run the bench itself — the bench runs as a workflow
+  triggered by the cron in .github/workflows/perf-nightly.yml.
+
+  Why launchd + not the official `svc.sh install`:
+    - svc.sh on macOS uses LaunchAgents (per-user) and works fine for most
+      cases. We use it here too — but pin the working directory, capture
+      stdout/stderr to a known file, and disable Spotlight on the runner
+      directory so indexing doesn't blow our IO budget mid-bench.
+
+  Install:
+    1. Register the runner first:
+         cd ~/Documents/actions-runner-perf-m4-max
+         ./config.sh --url https://github.com/sethford/h-uman \
+                     --token <TOKEN_FROM_GH_SETTINGS> \
+                     --name perf-m4-max --labels self-hosted,macOS,perf-m4-max \
+                     --work _work --unattended
+    2. Render this template (replace HOME and runner path):
+         sed -e "s|@HOME@|$HOME|g" \
+             -e "s|@RUNNER_DIR@|$HOME/Documents/actions-runner-perf-m4-max|g" \
+             scripts/perf-nightly-launchd.plist.template \
+           > ~/Library/LaunchAgents/com.github.actions.runner.perf-m4-max.plist
+    3. Load:
+         launchctl load -w ~/Library/LaunchAgents/com.github.actions.runner.perf-m4-max.plist
+    4. Verify:
+         launchctl list | grep com.github.actions.runner.perf-m4-max
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.github.actions.runner.perf-m4-max</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@RUNNER_DIR@/run.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@RUNNER_DIR@</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>@HOME@/Library/Logs/perf-runner/runner.out</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/Library/Logs/perf-runner/runner.err</string>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>Nice</key>
+  <integer>-5</integer>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>16384</integer>
+  </dict>
+</dict>
+</plist>

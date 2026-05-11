@@ -3,11 +3,15 @@ title: M3 Frontier Model Bridge — Honest Gap and Migration Plan
 status: planned (multi-month)
 owner: ML subsystem
 created: 2026-05-10
+parent: 2026-05-10-sota-roadmap-6mo.md
 related:
   - CLAUDE.md (M3 row in Strategic Missions)
   - AGENTS.md
   - src/ml/CLAUDE.md
   - docs/ml-subsystem-audit-2026-03.md
+  - 2026-05-10-sota-roadmap-6mo.md
+  - adr/2026-05-11-adapter-rollback-signal.md
+  - adr/2026-05-11-persona-eval-judge.md
 ---
 
 # M3 status, honestly
@@ -135,18 +139,90 @@ and adds another build dependency.
 ## Bridge B — MLX / Apple Silicon native LoRA (target: 6-10 weeks)
 
 For the macOS/iOS story specifically. MLX has a clean LoRA fine-tune path
-proven on 1B-7B models at usable speeds on M-series.
+proven on 1B-7B models at usable speeds on M-series. The SOTA roadmap
+(see [`2026-05-10-sota-roadmap-6mo.md`](2026-05-10-sota-roadmap-6mo.md)
+Phase A2 / A3) elevates Bridge B from "Apple-only nice-to-have" to **the
+primary personalization path for the M-series target market** — because
+this is where the chat model the user actually talks to runs, and where
+spec-decode-via-aligned-draft (Phase A3) wins decode TPS.
 
-- New provider: `src/providers/mlx.c` (Apple Silicon only).
-- Uses `mlx-lm` from MLX team for inference.
-- `lora-persona --mlx-base <model-id>` shells out to `mlx_lm.lora` for
-  training (initial integration).
-- Phase 2: link `libmlx` directly for in-process training.
+### Phase B.1 — Inference scaffold (target: 2 weeks)
 
-**Honest deliverable**: same as Bridge A but with native Metal speed and
-no llama.cpp dependency on Apple platforms.
+- New provider: `src/providers/mlx.c` (Apple Silicon only, gated on
+  `HU_ENABLE_MLX=ON`).
+- Inference backend: invoke the running `mlx-server.sh` HTTP front
+  (re-uses today's optimized server with the `RotatingKVCache.to_quantized`
+  and `speculative_generate_step` patches plus the `StreamThoughtFilter`
+  fix). The C provider is a thin HTTP client to `127.0.0.1:8741`.
+- Health probe: provider startup pings `/health`, returns
+  `HU_ERR_NOT_SUPPORTED` if the MLX server isn't reachable (graceful
+  fallback to cloud providers, no daemon crash).
+- Tests: `tests/test_mlx_provider.c` covering factory ownership, NULL-arg
+  rejection, health-probe failure, basic chat round-trip against a
+  fixture server. Pattern mirrors `test_llamacpp_provider.c`.
+
+**Exit:** `provider: "mlx"` in config makes the chat path hit local MLX;
+NOT_SUPPORTED fall-through stays bulletproof.
+
+### Phase B.2 — LoRA training via `mlx_lm.lora` (target: 2 weeks)
+
+- `human ml lora-persona --mlx-base <hf-id-or-path> --persona <id>`
+  - Generates an Alpaca JSONL via the existing exporter (Bridge A.0 work).
+  - Invokes `mlx_lm.lora` as a subprocess (initial integration) with a
+    deterministic command line derived from training config.
+  - Captures the resulting adapter under `~/.human/adapters/<persona-id>/`.
+  - Saves training metadata (`<adapter>.metadata.json`) per the
+    adapter-rollback ADR ([`adr/2026-05-11-adapter-rollback-signal.md`](adr/2026-05-11-adapter-rollback-signal.md)).
+- Quality preservation eval: after each training run, the harness runs
+  MT-Bench-short and the persona-eval anchor. Refuses to promote the
+  adapter if either regresses beyond the SOTA-roadmap N7 gate
+  (≤ 1% drop vs base).
+
+**Exit:** one command produces a measurable persona-aligned adapter on
+Gemma-4-31B (or any MLX-compatible base) and stamps it with eval scores.
+This is the Phase A2 deliverable in the SOTA roadmap.
+
+### Phase B.3 — Persona-aligned draft adapter for spec decode (target: 2 weeks; SHARED WITH SOTA roadmap A3 / B2)
+
+- Same training pipeline as B.2 but targeting a smaller MLX base
+  (Gemma-4 E4B or E2B). Aligns the draft's persona+style with the
+  fine-tuned 31B target.
+- Acceptance-rate eval: post-training run measures speculative-decode
+  acceptance against the persona conversation set. Phase A3 gate
+  requires ≥ 50% acceptance (vs ~0% with unaligned drafts demonstrated
+  in the 2026-05-10 bench session).
+- Auto-wires into `mlx-server.sh` as the `speculative_draft` model when
+  acceptance gate passes.
+
+**Exit:** decode TPS lifts ≥ 1.5× on `stream_long_reply` in the
+nightly bench versus the no-draft baseline, with no persona-eval
+regression. Hits the SOTA roadmap N5 metric (≥ 35 tok/s analytical tier).
+
+### Phase B.4 — In-process MLX (stretch, target: +4 weeks)
+
+- Link `libmlx` directly into the daemon (`HU_ENABLE_MLX_INPROC=ON`,
+  Apple Silicon only). Eliminates the subprocess + HTTP hop, shaves
+  Python overhead, brings TTFT closer to the SOTA roadmap N6 target
+  (≤ 200 ms cached).
+- Risk: MLX C++ ABI churn; mitigated by the same fall-through pattern as
+  Bridge A — in-proc path is opt-in, the HTTP-front path stays as the
+  default until the in-proc path proves stable over a release cycle.
+
+**Exit:** TTFT median for cached prompts drops below 250 ms in the
+nightly bench (best-effort gate; full N6 ≤ 200 ms may need the
+prompt-cache extension from SOTA roadmap Phase B3.1).
+
+### Phase B.5 — Continuous-learning integration (target: +2 weeks; matches SOTA roadmap A5)
+
+- Wires the Phase B.2 training pipeline into the nightly retraining
+  cron defined in SOTA roadmap Phase A5.1.
+- A/B harness (A5.2) consumes adapter metadata from B.2.
+- Auto-rollback signal hooks (A5.4) follow the adapter-rollback ADR.
 
 **Risk**: MLX is younger, ABI less stable, Apple-only. Less portable.
+Mitigated by keeping Bridge A (llama.cpp) as the cross-platform path
+and treating Bridge B as the Apple-Silicon-first delivery vector for
+M3.
 
 ## Bridge C — Open-weight frontier inference + adapter (target: 3+ months)
 

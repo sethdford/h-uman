@@ -1,0 +1,493 @@
+{
+  "tag": "baseline-2026-05-11",
+  "url": "http://127.0.0.1:8741/v1/chat/completions",
+  "iterations": 11,
+  "started": 1778509894,
+  "health": {
+    "status": "ok",
+    "model": "gemma-4-31b-seth-v3-fused",
+    "engine": "mlx_lm",
+    "kv_bits": 4.0,
+    "kv_quant_scheme": "uniform",
+    "turboquant_plus": false,
+    "lm_prompt_cache_active": true,
+    "cached_system_tokens": 1611,
+    "prompt_cache": "active",
+    "hardware": {
+      "chip": "Apple M4 Max",
+      "gpu_cores": 40,
+      "neural_engine": true,
+      "metal_version": "unknown",
+      "unified_memory_gb": 128,
+      "has_tensor_ops": false,
+      "has_neural_accelerators": false
+    },
+    "avg_tok_per_sec": 17.2,
+    "total_requests": 1,
+    "inference_tuning": {
+      "realtime_voice_mode": true,
+      "speculative_draft_tokens": 4,
+      "speculative_active": false,
+      "kv_bits": 4.0,
+      "kv_scheme": "uniform",
+      "turboquant_active": false
+    },
+    "iosurface": {
+      "iosurface_dylib_path": "/Users/sethford/Documents/gemma-realtime-1/secret-apis/build/libgemma_hw.dylib",
+      "iosurface_lib_loaded": true,
+      "iosurface_create_ok": true
+    }
+  },
+  "conditions": {
+    "nstream_short_ack": {
+      "prompt": "Reply with a single 'OK'.",
+      "ttft": {
+        "n": 11,
+        "mean": 5.249232617291537,
+        "median": 5.408461093902588,
+        "stdev": 2.3109622749433827,
+        "min": 2.634850025177002,
+        "max": 9.5086350440979
+      },
+      "total": {
+        "n": 11,
+        "mean": 5.249232899058949,
+        "median": 5.408461093902588,
+        "stdev": 2.310962454146928,
+        "min": 2.634850025177002,
+        "max": 9.508635997772217
+      },
+      "tps": {
+        "n": 11,
+        "mean": 20.43382383101851,
+        "median": 20.55830687411286,
+        "stdev": 1.093832809533958,
+        "min": 18.596883895396786,
+        "max": 21.95102119753717
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 109.27272727272727,
+        "median": 108,
+        "stdev": 52.813049351634504,
+        "min": 49,
+        "max": 204
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 42.0,
+        "median": 42,
+        "stdev": 0.0,
+        "min": 42,
+        "max": 42
+      },
+      "errors": [],
+      "sample": "OK"
+    },
+    "nstream_short_reply": {
+      "prompt": "Reply in one sentence: what is the meaning of life?",
+      "ttft": {
+        "n": 11,
+        "mean": 15.59474481235851,
+        "median": 11.733762979507446,
+        "stdev": 13.21118528149471,
+        "min": 9.861909627914429,
+        "max": 55.258273124694824
+      },
+      "total": {
+        "n": 11,
+        "mean": 15.594745202498002,
+        "median": 11.733763933181763,
+        "stdev": 13.211185175994547,
+        "min": 9.861909627914429,
+        "max": 55.258273124694824
+      },
+      "tps": {
+        "n": 11,
+        "mean": 20.50313899525322,
+        "median": 22.01395960875906,
+        "stdev": 5.4969663951651775,
+        "min": 3.9451106173380612,
+        "max": 22.510853209567284
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 254.0,
+        "median": 258,
+        "stdev": 28.92749557082327,
+        "min": 216,
+        "max": 301
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 47.0,
+        "median": 47,
+        "stdev": 0.0,
+        "min": 47,
+        "max": 47
+      },
+      "errors": [],
+      "sample": "I believe the meaning of life is to find joy in the journey and create your own "
+    },
+    "nstream_mid_factual": {
+      "prompt": "Summarize quantum entanglement in 2 sentences.",
+      "ttft": {
+        "n": 11,
+        "mean": 10.258822484449906,
+        "median": 10.716131925582886,
+        "stdev": 1.8878930545014891,
+        "min": 5.334174394607544,
+        "max": 12.090341091156006
+      },
+      "total": {
+        "n": 11,
+        "mean": 10.258822744542902,
+        "median": 10.716132879257202,
+        "stdev": 1.8878930052956138,
+        "min": 5.334174394607544,
+        "max": 12.090341091156006
+      },
+      "tps": {
+        "n": 11,
+        "mean": 21.651463629728468,
+        "median": 21.775395189988753,
+        "stdev": 0.5003242811342293,
+        "min": 20.24680709899174,
+        "max": 22.047226214217904
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 222.8181818181818,
+        "median": 235,
+        "stdev": 43.3862148194981,
+        "min": 108,
+        "max": 263
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 44.0,
+        "median": 44,
+        "stdev": 0.0,
+        "min": 44,
+        "max": 44
+      },
+      "errors": [],
+      "sample": "Quantum entanglement occurs when particles become so deeply linked that the stat"
+    },
+    "nstream_mid_creative": {
+      "prompt": "Write a 50-word poem about Apple Silicon.",
+      "ttft": {
+        "n": 11,
+        "mean": 30.362300807779487,
+        "median": 24.648191928863525,
+        "stdev": 18.60897967195067,
+        "min": 16.8833270072937,
+        "max": 81.67596316337585
+      },
+      "total": {
+        "n": 11,
+        "mean": 30.36230117624456,
+        "median": 24.64819312095642,
+        "stdev": 18.608979762181274,
+        "min": 16.8833270072937,
+        "max": 81.67596411705017
+      },
+      "tps": {
+        "n": 11,
+        "mean": 19.778849361931865,
+        "median": 21.724995680203776,
+        "stdev": 4.162545875725722,
+        "min": 8.717374905787825,
+        "max": 22.50713894070423
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 539.7272727272727,
+        "median": 542,
+        "stdev": 160.44880236953526,
+        "min": 368,
+        "max": 712
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 47.0,
+        "median": 47,
+        "stdev": 0.0,
+        "min": 47,
+        "max": 47
+      },
+      "errors": [],
+      "sample": "A chip carved from vision,\nUnified and bold,\nBreaking every limit,\nAs the story "
+    },
+    "nstream_long_reply": {
+      "prompt": "Reply in one paragraph (~80 words) about your favorite kind of music.",
+      "ttft": {
+        "n": 11,
+        "mean": 27.93931542743336,
+        "median": 24.08402109146118,
+        "stdev": 13.046591445913492,
+        "min": 18.916838884353638,
+        "max": 65.99127697944641
+      },
+      "total": {
+        "n": 11,
+        "mean": 27.9393158825961,
+        "median": 24.084022045135498,
+        "stdev": 13.046591548258197,
+        "min": 18.916840076446533,
+        "max": 65.99127793312073
+      },
+      "tps": {
+        "n": 11,
+        "mean": 16.64948756587639,
+        "median": 18.32473699035825,
+        "stdev": 4.091949813795598,
+        "min": 5.66741562997208,
+        "max": 20.333011506624338
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 424.3636363636364,
+        "median": 378,
+        "stdev": 85.14725213096747,
+        "min": 349,
+        "max": 601
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 51.0,
+        "median": 51,
+        "stdev": 0.0,
+        "min": 51,
+        "max": 51
+      },
+      "errors": [],
+      "sample": "While I don't have ears to listen, I'm partial to lo-fi beats. There is somethin"
+    },
+    "stream_short_ack": {
+      "prompt": "Reply with a single 'OK'.",
+      "ttft": {
+        "n": 11,
+        "mean": 7.734902880408547,
+        "median": 7.843574047088623,
+        "stdev": 1.1077499895511955,
+        "min": 5.23857307434082,
+        "max": 9.70650577545166
+      },
+      "total": {
+        "n": 11,
+        "mean": 12.617328448729081,
+        "median": 12.64974594116211,
+        "stdev": 1.893758888118728,
+        "min": 9.631680011749268,
+        "max": 15.459819078445435
+      },
+      "tps": {
+        "n": 11,
+        "mean": 8.797358492512144,
+        "median": 9.348916314488864,
+        "stdev": 2.895587422208652,
+        "min": 4.879730217642898,
+        "max": 12.936762001234948
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 114.45454545454545,
+        "median": 125,
+        "stdev": 49.435541134620216,
+        "min": 47,
+        "max": 200
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 42.0,
+        "median": 42,
+        "stdev": 0.0,
+        "min": 42,
+        "max": 42
+      },
+      "errors": [],
+      "sample": "\n*   User wants a single word response: 'OK'.\n    *   System persona: Seth's ass"
+    },
+    "stream_short_reply": {
+      "prompt": "Reply in one sentence: what is the meaning of life?",
+      "ttft": {
+        "n": 11,
+        "mean": 12.065699512308294,
+        "median": 6.9099907875061035,
+        "stdev": 13.998464718550721,
+        "min": 4.6565539836883545,
+        "max": 52.8890061378479
+      },
+      "total": {
+        "n": 11,
+        "mean": 20.66036454114047,
+        "median": 15.610070943832397,
+        "stdev": 14.019933159092298,
+        "min": 13.268115043640137,
+        "max": 61.56444692611694
+      },
+      "tps": {
+        "n": 11,
+        "mean": 11.624257235934543,
+        "median": 12.81224157914675,
+        "stdev": 3.349727952283492,
+        "min": 3.248628225963251,
+        "max": 15.07373122272307
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 200.0,
+        "median": 200,
+        "stdev": 0.0,
+        "min": 200,
+        "max": 200
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 47.0,
+        "median": 47,
+        "stdev": 0.0,
+        "min": 47,
+        "max": 47
+      },
+      "errors": [],
+      "sample": "\n*   User asks: \"what is the meaning of life?\"\n    *   Constraint 1: Reply in on"
+    },
+    "stream_mid_factual": {
+      "prompt": "Summarize quantum entanglement in 2 sentences.",
+      "ttft": {
+        "n": 11,
+        "mean": 6.480498595671221,
+        "median": 5.695414066314697,
+        "stdev": 2.8664244058608093,
+        "min": 3.686239004135132,
+        "max": 13.498934030532837
+      },
+      "total": {
+        "n": 11,
+        "mean": 15.000097664919766,
+        "median": 14.27659273147583,
+        "stdev": 2.856569078513177,
+        "min": 12.081825733184814,
+        "max": 21.968147039413452
+      },
+      "tps": {
+        "n": 11,
+        "mean": 13.702280535908756,
+        "median": 13.93890011033666,
+        "stdev": 2.209323999590488,
+        "min": 9.104090556257493,
+        "max": 16.55378950307697
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 199.9090909090909,
+        "median": 200,
+        "stdev": 0.30151134457776363,
+        "min": 199,
+        "max": 200
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 44.0,
+        "median": 44,
+        "stdev": 0.0,
+        "min": 44,
+        "max": 44
+      },
+      "errors": [],
+      "sample": "\n*   Topic: Quantum entanglement.\n    *   Constraint 1: Summarize in 2 sentences"
+    },
+    "stream_mid_creative": {
+      "prompt": "Write a 50-word poem about Apple Silicon.",
+      "ttft": {
+        "n": 11,
+        "mean": 10.086930318312211,
+        "median": 6.83094596862793,
+        "stdev": 11.74562156059503,
+        "min": 3.4366989135742188,
+        "max": 45.194287061691284
+      },
+      "total": {
+        "n": 11,
+        "mean": 18.470801873640582,
+        "median": 15.220579862594604,
+        "stdev": 11.745431438533918,
+        "min": 11.809056997299194,
+        "max": 53.56700015068054
+      },
+      "tps": {
+        "n": 11,
+        "mean": 12.633414631366906,
+        "median": 13.140103846602505,
+        "stdev": 3.3098246363830977,
+        "min": 3.7336419705679393,
+        "max": 16.93615333093415
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 200.0,
+        "median": 200,
+        "stdev": 0.0,
+        "min": 200,
+        "max": 200
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 47.0,
+        "median": 47,
+        "stdev": 0.0,
+        "min": 47,
+        "max": 47
+      },
+      "errors": [],
+      "sample": "\n*   Topic: Apple Silicon.\n    *   Format: Poem.\n    *   Length: Approximately 5"
+    },
+    "stream_long_reply": {
+      "prompt": "Reply in one paragraph (~80 words) about your favorite kind of music.",
+      "ttft": {
+        "n": 11,
+        "mean": 5.913204669952393,
+        "median": 5.401185035705566,
+        "stdev": 2.102396307118732,
+        "min": 3.6155011653900146,
+        "max": 9.42081880569458
+      },
+      "total": {
+        "n": 11,
+        "mean": 14.148690982298417,
+        "median": 13.585708141326904,
+        "stdev": 2.0820921138958,
+        "min": 11.825031995773315,
+        "max": 17.607837915420532
+      },
+      "tps": {
+        "n": 11,
+        "mean": 14.402301147559921,
+        "median": 14.721352609630415,
+        "stdev": 2.0049843250751245,
+        "min": 11.358577978778683,
+        "max": 16.913273475411067
+      },
+      "completion_tokens": {
+        "n": 11,
+        "mean": 200.0,
+        "median": 200,
+        "stdev": 0.0,
+        "min": 200,
+        "max": 200
+      },
+      "prompt_tokens": {
+        "n": 11,
+        "mean": 51.0,
+        "median": 51,
+        "stdev": 0.0,
+        "min": 51,
+        "max": 51
+      },
+      "errors": [],
+      "sample": "\n*   Role: Seth's assistant.\n    *   Tone: Concise but warm.\n    *   Constraint "
+    }
+  }
+}
