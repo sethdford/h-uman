@@ -133,3 +133,4 @@ src/data/data_eval_results_json.c
 .lighthouseci/
 debug
 convo-training/
+lora-persona-seth.bin
