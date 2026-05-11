@@ -197,7 +197,8 @@ Tests added in `tests/test_w11_self_rag.c`:
 
 - `test_w11_inline_critique_supported_when_memory_matches` — seeded relation, claim aligns → `support.mean ≥ 0.6`, not fabricated, prov.weight ≥ 0.6.
 - `test_w11_inline_critique_fabricated_when_memory_empty` — empty memory → fabricated, but INLINE-mode does NOT auto-abstain (preserves prior contract).
-- `test_w11_inline_retrieve_score_reflects_record_count` — seeded memory → score > 0, belief carries `inline-probe` source.
+- `test_w11_inline_retrieve_score_reflects_grade_relevance` — seeded memory + matching query → score > 0, belief carries `inline-probe-graded` source (was previously `inline-probe` when scoring was count-only).
+- `test_w11_inline_retrieve_irrelevant_query_scores_low` — seeded memory + non-matching query → score < 0.2, fabricated, belief carries `inline-probe` source. Demonstrates the grader distinguishes "memory is empty" from "memory has stuff but none of it matches."
 - `test_w11_inline_strict_abstains_on_score` — STRICT + 0 evidence → ABSTAINED + LOW_CONFIDENCE template.
 - `test_w11_inline_strict_supported_when_evidence_present` — STRICT + seeded memory → no abstention.
 - `test_w11_inline_wm_entity_match_lifts_weak_score` — entity present in WM but no relation → SQL score below floor → WM lift bumps to 0.5 with `inline-wm-lift` provenance source.
@@ -206,5 +207,20 @@ Tests added in `tests/test_w11_self_rag.c`:
 ### Remaining scope (after P2)
 
 - True streaming control-token integration with each frontier provider (Anthropic, Gemini, OpenAI). The deterministic protocol parser still drives the in-process tests; live provider wiring is independent of the scoring path landed in P2.
-- Per-record CRAG grading inside `inline_score_retrieve` so retrieve-claim scoring reflects relevance, not just record count.
 - Calibration of `abstain_threshold` against the 200-prompt annotated suite (carried over from P1).
+
+---
+
+## P3 — Grade-aware retrieve scoring (landed 2026-05-10)
+
+`inline_score_retrieve` previously scored on record count alone (saturated at 5 → 1.0), so a contact with 16 unrelated relations would have read as "fully supported" for any retrieve query. P3 replaces that with per-record grading via `hu_crag_grade_document` (the same token-overlap grader the atomic backend's STRICT-mode corrective-RAG path already uses):
+
+- Each loaded relation's `context` text is graded against the retrieve query.
+- `HU_RAG_RELEVANT` records contribute their full `score` to the support sum.
+- `HU_RAG_AMBIGUOUS` records contribute half.
+- `HU_RAG_IRRELEVANT` records contribute zero.
+- Sum saturates at 1.0; `c->fabricated` flips when the final score is below 0.2 (the same threshold the grader uses to separate AMBIGUOUS from IRRELEVANT).
+- When the query is empty (e.g. `<retrieve></retrieve>`), the prior count-only fallback still applies so empty-tag retrieves don't auto-fabricate.
+- Belief source flips to `inline-probe-graded` when at least one record graded RELEVANT, otherwise stays `inline-probe`. Consumers can introspect to tell apart "graded matches" vs "presence-only fallback."
+
+Cost: O(N) grading calls for N ≤ 16, each is bounded token-overlap scoring (no SQL, no allocation per grade). Empirically ~50–200 µs for the full sweep on typical contacts.

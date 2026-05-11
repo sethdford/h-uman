@@ -31,6 +31,7 @@
 #include "human/agent/response_verifier.h"
 #include "human/core/error.h"
 #include "human/memory/belief.h"
+#include "human/memory/corrective_rag.h"
 #include "human/memory/memory.h"
 
 #include <stdio.h>
@@ -230,18 +231,29 @@ static void inline_score_critique(hu_allocator_t *alloc, hu_memory_facade_t *m,
  * `<retrieve>QUERY</retrieve>` represents the model's request "memory,
  * tell me about QUERY." Unlike a `<critique>` (factual claim being
  * verified), this is a probe: the support score reflects "does memory
- * have anything for this contact at all," saturating at 1.0 when ≥ 5
- * relations exist.
+ * have anything actually relevant to QUERY for this contact."
  *
- * A future refinement can grade each returned record against `query`
- * with `hu_crag_grade_document` and weight only the RELEVANT ones; for
- * now, presence is the signal — same pattern the heuristic verifier
- * uses for "graph reachable." */
+ * Implementation is grade-aware. We pull up to 16 relations for the
+ * contact, then run each relation's `context` text through
+ * `hu_crag_grade_document` (the same token-overlap grader the atomic
+ * backend's STRICT-mode corrective-RAG path uses). Records grading
+ * RELEVANT contribute their full `score` to the support sum; AMBIGUOUS
+ * records contribute half; IRRELEVANT records contribute zero. The sum
+ * is saturated at 1.0.
+ *
+ * Why grade-aware rather than the prior count-only heuristic: a contact
+ * with 16 unrelated relations would have scored ~1.0 under the old code
+ * even when the QUERY had nothing in memory. Now an unrelated retrieve
+ * scores 0.0 (claim fabricated → STRICT mode can abstain) while a
+ * specific retrieve with a single matching relation can score >= 0.5.
+ *
+ * Cost: O(N) grading calls for N <= 16, each is bounded token-overlap
+ * scoring (no SQL, no allocation per grade). Empirically ~50-200 µs
+ * for the full sweep on typical contacts. */
 static void inline_score_retrieve(hu_allocator_t *alloc, hu_memory_facade_t *m,
                                    const char *contact_id, size_t cid_len,
                                    const char *query, int64_t now,
                                    hu_atomic_claim_t *c) {
-    (void)query; /* reserved for grade-aware scoring */
     if (!alloc || !m || !contact_id || cid_len == 0) {
         c->support = hu_belief_init(0.0f, "inline-no-memory", now);
         c->fabricated = true;
@@ -267,10 +279,47 @@ static void inline_score_retrieve(hu_allocator_t *alloc, hu_memory_facade_t *m,
         return;
     }
 
-    /* Saturate at 5 records → 1.0. Empty memory → 0.0 → fabricated. */
-    float score = n >= 5 ? 1.0f : (float)n / 5.0f;
-    c->support = hu_belief_init(score, "inline-probe", now);
-    c->fabricated = (n == 0);
+    float score = 0.0f;
+    size_t relevant_count = 0;
+    if (query && query[0] && n > 0) {
+        size_t query_len = strlen(query);
+        for (size_t i = 0; i < n; i++) {
+            const hu_memory_relation_row_t *r =
+                (const hu_memory_relation_row_t *)recs[i].payload;
+            if (!r || !r->context || r->context_len == 0)
+                continue;
+            hu_rag_graded_doc_t grade = {0};
+            if (hu_crag_grade_document(alloc, query, query_len,
+                                        r->context, r->context_len,
+                                        &grade) != HU_OK)
+                continue;
+            /* RELEVANT carries full weight, AMBIGUOUS half, IRRELEVANT zero.
+             * The grader's `score` is already in [0, 1], so a single strong
+             * relevant match can saturate. */
+            float contrib = 0.0f;
+            if (grade.relevance == HU_RAG_RELEVANT) {
+                contrib = (float)grade.score;
+                relevant_count++;
+            } else if (grade.relevance == HU_RAG_AMBIGUOUS) {
+                contrib = (float)grade.score * 0.5f;
+            }
+            score += contrib;
+            if (score >= 1.0f) {
+                score = 1.0f;
+                break;
+            }
+        }
+    } else if (n > 0) {
+        /* Query was empty (e.g. `<retrieve></retrieve>`) — fall back to
+         * the prior presence signal so empty-tag retrieves don't
+         * immediately abstain. Saturates at 5 records → 1.0. */
+        score = n >= 5 ? 1.0f : (float)n / 5.0f;
+    }
+
+    c->support = hu_belief_init(score,
+                                 relevant_count > 0 ? "inline-probe-graded"
+                                                    : "inline-probe", now);
+    c->fabricated = (score < 0.2f);
 
     if (recs)
         hu_memory_facade_records_free(m, alloc, recs, n);
