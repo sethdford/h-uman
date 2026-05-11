@@ -208,7 +208,11 @@ static void probe_power_linux(int *out_battery_pct, bool *out_on_ac) {
     while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.')
             continue;
-        char type_path[256];
+        /* dirent.d_name can be up to 255 bytes (NAME_MAX on Linux); the
+         * "/sys/class/power_supply/.../type" envelope adds ~30. Use
+         * PATH_MAX-style buffer so GCC -Wformat-truncation=2 doesn't trip
+         * under -Werror. */
+        char type_path[1024];
         snprintf(type_path, sizeof(type_path), "/sys/class/power_supply/%s/type", e->d_name);
         FILE *f = fopen(type_path, "r");
         if (!f)
@@ -224,7 +228,7 @@ static void probe_power_linux(int *out_battery_pct, bool *out_on_ac) {
             n--;
         }
         if (strcmp(type_buf, "Battery") == 0) {
-            char cap_path[256];
+            char cap_path[1024];
             snprintf(cap_path, sizeof(cap_path),
                      "/sys/class/power_supply/%s/capacity", e->d_name);
             int cap = read_int_file(cap_path);
@@ -233,7 +237,7 @@ static void probe_power_linux(int *out_battery_pct, bool *out_on_ac) {
         } else if (strcmp(type_buf, "Mains") == 0 || strcmp(type_buf, "USB") == 0 ||
                    strcmp(type_buf, "ACA") == 0) {
             any_ac = true;
-            char online_path[256];
+            char online_path[1024];
             snprintf(online_path, sizeof(online_path),
                      "/sys/class/power_supply/%s/online", e->d_name);
             if (read_string_file_eq(online_path, "1"))
