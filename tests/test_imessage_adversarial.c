@@ -1912,8 +1912,12 @@ static void imessage_breaker_resets_on_success(void) {
     HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), 0u);
     HU_ASSERT_EQ(hu_imessage_last_error_class(&ch), HU_IMESSAGE_ERR_NONE);
     HU_ASSERT_EQ(hu_imessage_last_success_epoch(&ch), 6000);
-    /* health_check happy again. */
+    /* health_check happy again. On non-Apple platforms health_check
+     * returns false unconditionally (no chat.db); the test asserts the
+     * breaker-cleared path on Apple only. */
+#if defined(__APPLE__) && defined(__MACH__)
     HU_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+#endif
     hu_imessage_destroy(&ch);
 }
 
