@@ -7,8 +7,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* --- F70 Episodic Memory --- */
-typedef struct hu_episode {
+/* --- F70 Episodic Memory ---
+ * Deep-memory consolidated episode (multi-day distilled memories with
+ * emotional arc, impact, participants). Renamed from hu_episode_t to avoid
+ * ODR conflict with the session-level episode struct in agent/episodic.h
+ * (which now uses hu_session_episode_t). */
+typedef struct hu_deep_episode {
     int64_t id;
     char *summary;
     size_t summary_len;
@@ -20,10 +24,11 @@ typedef struct hu_episode {
     uint64_t occurred_at;
     char *source_tag;
     size_t source_tag_len; /* "conversation", "event", "memory" */
-} hu_episode_t;
+} hu_deep_episode_t;
 
 hu_error_t hu_episodic_create_table_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_episodic_insert_sql(const hu_episode_t *ep, char *buf, size_t cap, size_t *out_len);
+hu_error_t hu_episodic_insert_sql(const hu_deep_episode_t *ep, char *buf, size_t cap,
+                                  size_t *out_len);
 hu_error_t hu_episodic_query_by_contact_sql(const char *contact_id, size_t len, uint32_t limit,
                                             char *buf, size_t cap, size_t *out_len);
 hu_error_t hu_episodic_query_high_impact_sql(double min_impact, uint32_t limit, char *buf,
@@ -45,7 +50,7 @@ hu_error_t hu_consolidation_merge_sql(int64_t keep_id, int64_t remove_id, char *
                                       size_t *out_len);
 
 /* --- F74 Source Tagging --- */
-/* Handled by source_tag in hu_episode_t */
+/* Handled by source_tag in hu_deep_episode_t */
 
 /* --- F75 Prospective Memory --- */
 typedef struct hu_prospective_item {
@@ -91,7 +96,7 @@ hu_error_t hu_residue_build_prompt(hu_allocator_t *alloc,
                                   const hu_emotional_residue_t *residues, size_t count,
                                   double hours_elapsed, char **out, size_t *out_len);
 
-void hu_episode_deinit(hu_allocator_t *alloc, hu_episode_t *ep);
+void hu_episode_deinit(hu_allocator_t *alloc, hu_deep_episode_t *ep);
 void hu_prospective_item_deinit(hu_allocator_t *alloc, hu_prospective_item_t *item);
 void hu_emotional_residue_deinit(hu_allocator_t *alloc, hu_emotional_residue_t *r);
 

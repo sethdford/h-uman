@@ -8,8 +8,11 @@
 
 /* Episode: a summarized interaction/conversation with a contact.
  * Used for associative recall and salience reinforcement.
- * NOTE: hu_episode_t may also be defined in agent/episodic.h or memory/deep_memory.h;
- * use the _SQLITE variant for this module. */
+ *
+ * This module uses hu_episode_sqlite_t (the on-disk SQLite row layout). The
+ * agent-loop session episode is hu_session_episode_t (agent/episodic.h) and
+ * the deep-memory consolidated episode is hu_deep_episode_t (deep_memory.h).
+ * The bare name hu_episode_t is intentionally reserved and unused after W0a. */
 
 typedef struct hu_episode_sqlite {
     int64_t id;
