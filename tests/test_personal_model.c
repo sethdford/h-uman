@@ -632,6 +632,82 @@ static void personal_model_style_directive_proper_case_no_lowercase_clause(void)
     HU_ASSERT_TRUE(strstr(buf, "'u'/'rn'/'btw'") == NULL);
 }
 
+/* SOTA negative-fact surfacing.
+ *
+ * The "Key facts:" line concatenates "user i don't like X, user works at Y"
+ * which frontier models can read but routinely gloss past — the negation is
+ * one tiny token in a dense list. A dedicated "Avoid:" line gives each
+ * disliked thing its own slot in the prompt where the model is far less
+ * likely to miss it. */
+static void personal_model_avoid_line_emerges_for_dislikes(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    const char msg[] = "i don't like coffee or small talk early in the morning";
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg, strlen(msg), true, 1700000001), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Avoid:") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "coffee") != NULL);
+}
+
+static void personal_model_avoid_line_handles_hate(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    const char msg[] = "i hate flaky meetings";
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg, strlen(msg), true, 1700000001), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Avoid:") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "flaky meetings") != NULL);
+}
+
+static void personal_model_avoid_line_skips_when_only_positive_facts(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    const char msg1[] = "i love hiking on weekends";
+    const char msg2[] = "i work at acme";
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg1, strlen(msg1), true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg2, strlen(msg2), true, 1700000002), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Avoid:") == NULL);
+}
+
+static void personal_model_avoid_line_collects_multiple_dislikes(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    const char msg1[] = "i'm allergic to peanuts";
+    const char msg2[] = "i dislike loud music";
+    const char msg3[] = "i love jazz";
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg1, strlen(msg1), true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg2, strlen(msg2), true, 1700000002), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg3, strlen(msg3), true, 1700000003), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Avoid:") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "peanuts") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "loud music") != NULL);
+    /* Positive fact must not appear on the Avoid line. */
+    const char *avoid_line = strstr(buf, "Avoid:");
+    HU_ASSERT_NOT_NULL(avoid_line);
+    const char *eol = strchr(avoid_line, '\n');
+    HU_ASSERT_NOT_NULL(eol);
+    size_t avoid_len = (size_t)(eol - avoid_line);
+    HU_ASSERT_TRUE(memmem(avoid_line, avoid_len, "jazz", 4) == NULL);
+}
+
 static void personal_model_style_directive_absent_when_no_samples(void) {
     /* A model populated only via merge_facts (no ingest, sample_count == 0)
      * must not produce a directive — there's no observed style to mirror. */
@@ -681,6 +757,10 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_style_directive_abbreviation_user);
     HU_RUN_TEST(personal_model_style_directive_proper_case_no_lowercase_clause);
     HU_RUN_TEST(personal_model_style_directive_absent_when_no_samples);
+    HU_RUN_TEST(personal_model_avoid_line_emerges_for_dislikes);
+    HU_RUN_TEST(personal_model_avoid_line_handles_hate);
+    HU_RUN_TEST(personal_model_avoid_line_skips_when_only_positive_facts);
+    HU_RUN_TEST(personal_model_avoid_line_collects_multiple_dislikes);
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(personal_model_survives_real_sigkill);
 #endif

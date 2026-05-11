@@ -109,6 +109,39 @@ static const char *humor_directive(float receptivity) {
  * actual signal while still being a tight bound on warm-up cost. */
 #define HU_PM_DIRECTIVE_MIN_SAMPLES 3U
 
+/* Negative-fact predicates — markers that "user <pred> <obj>" expresses
+ * something to actively avoid recommending or doing. The fact extractor
+ * preserves the predicate verbatim, so substring matching here pulls out
+ * the same set the extractor already classifies as negation. Order is
+ * intentionally specific-first ("i don't want") so a fact carrying
+ * "i don't" doesn't get classified as the more general "don't". */
+static const char *kNegativeFactMarkers[] = {
+    "don't like", "don't want", "do not like",
+    "dislike", "hate", "can't stand",
+    "never", "please don't",
+    "not interested in", "allergic to",
+};
+
+static bool predicate_is_negative(const char *predicate) {
+    if (!predicate || !*predicate)
+        return false;
+    /* Predicates start with "i " from the extractor (e.g. "i don't like"); strip
+     * that prefix before matching so the markers above stay readable. */
+    const char *p = predicate;
+    if (strncasecmp(p, "i ", 2) == 0)
+        p += 2;
+    /* "please don't" is the one form that doesn't start with "i" — match the
+     * raw predicate too. */
+    for (size_t i = 0; i < sizeof(kNegativeFactMarkers) / sizeof(kNegativeFactMarkers[0]); i++) {
+        const char *marker = kNegativeFactMarkers[i];
+        if (strcasecmp(p, marker) == 0)
+            return true;
+        if (strcasecmp(predicate, marker) == 0)
+            return true;
+    }
+    return false;
+}
+
 static void sort_topic_order(const hu_personal_model_t *model, size_t *order) {
     for (size_t i = 0; i < model->topic_count; i++)
         order[i] = i;
@@ -225,6 +258,35 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
         }
         append_fmt(buf, cap, &n, "\n");
         detail = true;
+    }
+
+    /* SOTA personalization wire — pull out negative facts ("i don't like
+     * X", "i hate Y", "i'm allergic to Z") and surface them as explicit
+     * constraints. The "Key facts:" line above contains them too, but
+     * frontier models routinely miss negation in dense fact lists; the
+     * dedicated "Avoid:" line gives the constraint its own slot in the
+     * prompt where it can't be glossed over. */
+    {
+        bool any_avoid = false;
+        size_t scan_max = model->fact_count > HU_PM_MAX_FACTS ? HU_PM_MAX_FACTS : model->fact_count;
+        for (size_t i = 0; i < scan_max; i++) {
+            const hu_heuristic_fact_t *f = &model->facts[i];
+            if (!predicate_is_negative(f->predicate))
+                continue;
+            if (f->object[0] == '\0')
+                continue;
+            if (!any_avoid) {
+                append_fmt(buf, cap, &n, "Avoid: ");
+                any_avoid = true;
+            } else {
+                append_fmt(buf, cap, &n, ", ");
+            }
+            append_fmt(buf, cap, &n, "%s", f->object);
+        }
+        if (any_avoid) {
+            append_fmt(buf, cap, &n, ".\n");
+            detail = true;
+        }
     }
 
     if (model->topic_count > 0) {
