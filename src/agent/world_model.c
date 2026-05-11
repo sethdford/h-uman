@@ -21,7 +21,9 @@
 #include "human/memory/memory.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/emotional_residue.h"
@@ -546,6 +548,87 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
 
     *out = wm;
     return HU_OK;
+}
+
+/* ---- M2 ↔ W9 bridge: personal model merge ----------------------- */
+
+static const char *pm_formality_label(float f) {
+    if (f < 0.33f) return "casual";
+    if (f < 0.66f) return "balanced";
+    return "formal";
+}
+
+static const char *pm_verbosity_label(float v) {
+    if (v < 0.33f) return "terse";
+    if (v < 0.66f) return "moderate";
+    return "verbose";
+}
+
+void hu_world_model_merge_personal(hu_world_model_t *wm,
+                                   const hu_personal_model_t *pm) {
+    if (!wm || !pm) return;
+    if (!hu_personal_model_has_content(pm)) return;
+
+    /* Style summary — always overwrite from the PM since it's the
+     * authoritative source for communication style. */
+    if (pm->style.sample_count > 0) {
+        snprintf(wm->style_summary, sizeof(wm->style_summary),
+                 "%s, %s, %s emoji, avg %u chars/msg",
+                 pm_formality_label(pm->style.formality),
+                 pm_verbosity_label(pm->style.verbosity),
+                 pm->style.emoji_frequency > 0.3f ? "uses" : "rare",
+                 (unsigned)pm->style.avg_message_length);
+    }
+
+    /* Goals — append PM goals the world model doesn't already have.
+     * Simple substring match avoids exact duplicates. */
+    for (size_t i = 0; i < pm->goal_count && wm->goals_count < 8; i++) {
+        if (!pm->goals[i].active || pm->goals[i].description[0] == '\0')
+            continue;
+        bool dup = false;
+        for (size_t j = 0; j < wm->goals_count; j++) {
+            if (strstr(wm->goals[j].text, pm->goals[i].description) ||
+                strstr(pm->goals[i].description, wm->goals[j].text)) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+        hu_active_goal_t *ag = &wm->goals[wm->goals_count];
+        size_t dlen = strlen(pm->goals[i].description);
+        if (dlen >= sizeof(ag->text)) dlen = sizeof(ag->text) - 1;
+        memcpy(ag->text, pm->goals[i].description, dlen);
+        ag->text[dlen] = '\0';
+        ag->salience = pm->goals[i].progress > 0.0f ? pm->goals[i].progress : 0.5f;
+        ag->expressed_at = pm->goals[i].created_at;
+        ag->expires_at = pm->goals[i].deadline;
+        wm->goals_count++;
+    }
+
+    /* Topics — merge PM topics into recent_topics (skip duplicates). */
+    for (size_t i = 0; i < pm->topic_count && wm->recent_topics_count < 10; i++) {
+        if (pm->topics[i].name[0] == '\0') continue;
+        bool dup = false;
+        for (size_t j = 0; j < wm->recent_topics_count; j++) {
+            if (strcasecmp(wm->recent_topics[j], pm->topics[i].name) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+        size_t nlen = strlen(pm->topics[i].name);
+        if (nlen >= sizeof(wm->recent_topics[0]))
+            nlen = sizeof(wm->recent_topics[0]) - 1;
+        memcpy(wm->recent_topics[wm->recent_topics_count], pm->topics[i].name, nlen);
+        wm->recent_topics[wm->recent_topics_count][nlen] = '\0';
+        wm->recent_topics_count++;
+    }
+
+    /* Dominant emotion — only fill when the graph left the default "neutral". */
+    if (strcmp(wm->dominant_emotion, "neutral") == 0) {
+        if (pm->style.humor_receptivity > 0.6f)
+            strcpy(wm->dominant_emotion, "playful");
+    }
 }
 
 void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm) {

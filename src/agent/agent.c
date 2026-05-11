@@ -1,5 +1,6 @@
 #include "human/agent.h"
 #include "human/agent/approval_gate.h"
+#include "human/agent/response_verifier.h"
 #include "human/agent/awareness.h"
 #include "human/agent/commitment_store.h"
 #include "human/agent/humanness.h"
@@ -216,6 +217,19 @@ hu_error_t hu_agent_from_config(
     }
     memset(out, 0, sizeof(*out));
     hu_personal_model_init(&out->personal_model);
+
+    /* M2 — restore the user-specific model from disk so daemon restarts no
+     * longer wipe accumulated facts/topics/style. Best-effort: NOT_FOUND on
+     * first run is normal and PARSE on a schema bump leaves the model fresh
+     * (the loader re-initialises `out->personal_model` on mismatch). Gated on
+     * `auto_save` so unit tests that pass `auto_save=false` get a clean
+     * in-memory model and never touch disk. */
+    if (auto_save) {
+        char pm_path[1024];
+        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+            (void)hu_personal_model_load(&out->personal_model, pm_path);
+        }
+    }
 
     out->alloc = alloc;
     out->provider = provider;
@@ -874,9 +888,110 @@ void hu_agent_set_voice_config(hu_agent_t *agent, hu_voice_config_t *voice_cfg) 
     agent->tts_enabled = (voice_cfg != NULL);
 }
 
+static void hu_agent_tom_scenario_copy_field(char *dst, size_t cap, const char *src) {
+    if (!dst || cap == 0)
+        return;
+    if (!src || src[0] == '\0') {
+        dst[0] = '\0';
+        return;
+    }
+    size_t n = strnlen(src, cap - 1);
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+void hu_agent_set_tom_scenario(hu_agent_t *agent, const char *premise, const char *question,
+                               const char *category) {
+    if (!agent)
+        return;
+    hu_agent_tom_scenario_copy_field(agent->tom_scenario_premise,
+                                     sizeof(agent->tom_scenario_premise), premise);
+    hu_agent_tom_scenario_copy_field(agent->tom_scenario_question,
+                                     sizeof(agent->tom_scenario_question), question);
+    hu_agent_tom_scenario_copy_field(agent->tom_scenario_category,
+                                     sizeof(agent->tom_scenario_category), category);
+}
+
+hu_error_t hu_agent_self_rag_apply(hu_agent_t *agent, const char *draft, size_t draft_len,
+                                   int mode, char **swapped_out, size_t *swapped_len_out) {
+    if (!agent || !draft || draft_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!agent->w7_facade || !agent->memory_session_id || agent->memory_session_id_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (swapped_out)
+        *swapped_out = NULL;
+    if (swapped_len_out)
+        *swapped_len_out = 0;
+    if (mode == HU_VERIFY_OFF)
+        return HU_OK;
+
+    bool can_swap = (mode == HU_VERIFY_SOFT || mode == HU_VERIFY_STRICT) && swapped_out;
+    hu_w11_outcome_t outcome = HU_W11_OUTCOME_SUPPORTED;
+    size_t total = 0, flagged = 0;
+    char *modified = NULL;
+    size_t modified_len = 0;
+    char **mod_ptr = can_swap ? &modified : NULL;
+    size_t *mod_len_ptr = can_swap ? &modified_len : NULL;
+
+    hu_error_t err = hu_w11_self_rag_verify_with_provider(
+        agent->w7_facade, agent->alloc, &agent->provider, agent->memory_session_id,
+        agent->memory_session_id_len, draft, draft_len, mode, 0, &outcome, &total, &flagged,
+        mod_ptr, mod_len_ptr);
+    if (err != HU_OK) {
+        if (modified)
+            agent->alloc->free(agent->alloc->ctx, modified, modified_len + 1);
+        return err;
+    }
+
+    agent->self_rag_runs++;
+    agent->self_rag_claims_total += total;
+    agent->self_rag_claims_flagged += flagged;
+    if (outcome == HU_W11_OUTCOME_ABSTAINED)
+        agent->self_rag_abstentions++;
+
+    if (can_swap && modified && modified_len > 0) {
+        if (outcome == HU_W11_OUTCOME_ABSTAINED)
+            agent->self_rag_refusals_rendered++;
+        *swapped_out = modified;
+        if (swapped_len_out)
+            *swapped_len_out = modified_len;
+    } else if (modified) {
+        agent->alloc->free(agent->alloc->ctx, modified, modified_len + 1);
+    }
+    return HU_OK;
+}
+
+void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64_t *abstentions,
+                                 uint64_t *refusals_rendered, uint64_t *claims_total,
+                                 uint64_t *claims_flagged) {
+    if (runs)
+        *runs = agent ? agent->self_rag_runs : 0;
+    if (abstentions)
+        *abstentions = agent ? agent->self_rag_abstentions : 0;
+    if (refusals_rendered)
+        *refusals_rendered = agent ? agent->self_rag_refusals_rendered : 0;
+    if (claims_total)
+        *claims_total = agent ? agent->self_rag_claims_total : 0;
+    if (claims_flagged)
+        *claims_flagged = agent ? agent->self_rag_claims_flagged : 0;
+}
+
 void hu_agent_deinit(hu_agent_t *agent) {
     if (!agent)
         return;
+    /* M2 — persist the user-specific model so the next process start can
+     * resume with the accumulated facts/topics/style. Best-effort: any IO
+     * failure is silently swallowed (the in-memory model still got the
+     * benefit of this session). Skip the save when there's nothing worth
+     * writing so first-run users don't get an empty 6 KB blob on disk.
+     * Runs FIRST in deinit because the personal model is value-typed inside
+     * `hu_agent_t` — it stays valid until the struct itself is freed. */
+    if (agent->auto_save && hu_personal_model_has_content(&agent->personal_model)) {
+        char pm_path[1024];
+        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+            (void)hu_personal_model_save(&agent->personal_model, pm_path);
+        }
+    }
     hu_agent_free_turn_context(agent);
     if (agent->mailbox) {
         uint64_t id = agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;

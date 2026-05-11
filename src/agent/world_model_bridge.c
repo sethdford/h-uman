@@ -149,7 +149,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                     char **out_text, size_t *out_len, const char *tom_premise,
                                     size_t tom_premise_len, const char *tom_question,
                                     size_t tom_question_len, const char *tom_category,
-                                    size_t tom_category_len) {
+                                    size_t tom_category_len,
+                                    const hu_personal_model_t *pm) {
     if (out_text)
         *out_text = NULL;
     if (out_len)
@@ -173,6 +174,10 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                           now_ms);
     }
 
+    /* M2 ↔ W9 bridge: merge personal model signal into the world model. */
+    if (pm)
+        hu_world_model_merge_personal(wm, pm);
+
     /* If everything is empty, return NULL/0 -- callers skip injection.
      *
      * As of P2D the W9 builder synthesizes `dominant_emotion`, `valence`, and
@@ -188,9 +193,10 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                        strcmp(wm->tom.user_expects_we_can, "unknown") != 0) ||
                       (wm->tom.user_expects_we_cannot[0] &&
                        strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0);
+    bool style_signal = wm->style_summary[0] != '\0';
     bool any = wm->entities_count > 0 || wm->relations_count > 0 || wm->goals_count > 0 ||
                wm->negatives_count > 0 || wm->recent_topics_count > 0 || emo_signal ||
-               tom_signal;
+               tom_signal || style_signal;
     if (!any) {
         hu_world_model_free(alloc, wm);
         return HU_OK;
@@ -262,6 +268,10 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                    wm->recent_topics[i]);
         }
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+    }
+    if (style_signal) {
+        ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                               "Communication style: %s\n", wm->style_summary);
     }
     if (emo_signal) {
         ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,

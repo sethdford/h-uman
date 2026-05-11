@@ -119,7 +119,7 @@ src/
 
 include/human/       public C headers
 
-tests/                 423 test files, 9,500+ tests
+tests/                 504 test files, 9,800+ tests
 
 apps/                  iOS, macOS, Android, shared (4 app directories)
 

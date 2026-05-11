@@ -292,6 +292,15 @@ struct hu_agent {
     struct hu_audit_log *w15_audit_log; /* W15 audit log for facade write/erase ops */
     uint64_t world_model_loads; /* telemetry: per-turn world_model render count */
 
+    /* B8 — Optional theory-of-mind scenario merged into the rendered world
+     * model on the next turn (eval / benchmark hook). Empty strings disable
+     * the merge. Set via `hu_agent_set_tom_scenario`; consumed by
+     * `hu_w7_render_world_model` in agent_turn / agent_stream. NEVER
+     * populated on production turns. */
+    char tom_scenario_premise[256];
+    char tom_scenario_question[256];
+    char tom_scenario_category[64];
+
     /* W11 self-RAG telemetry (FIX 12b). Sibling to verifier_* counters --
      * self-RAG runs alongside hu_response_verify on the response path, with
      * a richer atomic-claim model and an explicit abstention outcome. */
@@ -593,6 +602,45 @@ hu_error_t hu_agent_execute_plan(hu_agent_t *agent, const char *plan_json, size_
 /* Switch persona mid-conversation. name=NULL or name_len=0 clears the persona.
  * Requires HU_ENABLE_PERSONA to be compiled in; returns HU_ERR_NOT_SUPPORTED otherwise. */
 hu_error_t hu_agent_set_persona(hu_agent_t *agent, const char *name, size_t name_len);
+
+/* B8 — Set / clear an optional theory-of-mind scenario merged into the world
+ * model on subsequent turns. Pass `NULL` or `""` for any field to clear; all
+ * three must be non-empty for the merge to fire. Truncates to the agent's
+ * fixed-size buffers. Test / benchmark hook only. */
+void hu_agent_set_tom_scenario(hu_agent_t *agent, const char *premise, const char *question,
+                               const char *category);
+
+/* W11 P1 — Apply self-RAG verification + (under SOFT/STRICT) the refusal /
+ * hedge swap to `draft` against the agent's W7 facade. Single canonical seam
+ * shared by `agent_turn` and `agent_stream`; tests can call it directly to
+ * exercise the bridge → swap → telemetry chain without needing a real
+ * provider draft.
+ *
+ * `mode` mirrors `hu_verify_mode_t` (OFF/TELEMETRY/SOFT/STRICT). Modes that
+ * cannot rewrite (OFF, TELEMETRY) leave `*swapped_out == NULL` even on
+ * ABSTAINED outcomes; SOFT/STRICT allocate a new buffer with the deterministic
+ * refusal template (or hedge / rewrite) and transfer ownership through
+ * `*swapped_out` / `*swapped_len_out`.
+ *
+ * Side effects on `agent`:
+ *   - `self_rag_runs++` on every successful verifier call
+ *   - `self_rag_claims_total/flagged += <claim totals>`
+ *   - `self_rag_abstentions++` on ABSTAINED outcome (any mode)
+ *   - `self_rag_refusals_rendered++` only when ABSTAINED AND a swap actually
+ *     happened (i.e. SOFT/STRICT path with a non-empty refusal template)
+ *
+ * Returns HU_OK with `*swapped_out == NULL` when no swap occurs. Returns
+ * HU_ERR_INVALID_ARGUMENT when `agent` lacks a W7 facade or memory session id
+ * (the verifier requires both). Tests passing `swapped_out == NULL` get the
+ * telemetry-only path even under SOFT/STRICT. */
+hu_error_t hu_agent_self_rag_apply(hu_agent_t *agent, const char *draft, size_t draft_len,
+                                   int mode, char **swapped_out, size_t *swapped_len_out);
+
+/* W11 P1 — Read-only snapshot of self-RAG telemetry. Any out pointer may be
+ * NULL. Safe with `agent == NULL` (writes 0 into every non-NULL out). */
+void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs,
+                                 uint64_t *abstentions, uint64_t *refusals_rendered,
+                                 uint64_t *claims_total, uint64_t *claims_flagged);
 
 /* Run memory consolidation (merge similar entries, decay old). */
 hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent);

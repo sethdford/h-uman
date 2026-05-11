@@ -1,11 +1,14 @@
 #include "human/memory/personal_model.h"
 #include "human/platform.h"
 #include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include <time.h>
 
 void hu_personal_model_init(hu_personal_model_t *model) {
@@ -369,8 +372,70 @@ typedef struct hu_pm_header {
     uint64_t reserved;  /* always 0; reserved for future framing */
 } hu_pm_header_t;
 
+/* Best-effort `mkdir -p` for the parent of `path`.
+ *
+ * Walks the path string from the front, calling `mkdir(0700)` at every '/'
+ * boundary so the personal model can land cleanly on first run even when
+ * `~/.human/` does not exist yet. 0700 mode is deliberate — the personal
+ * model is sensitive user data; only the owner should read it. We swallow
+ * EEXIST and ignore failures on intermediate components so a pre-existing
+ * directory tree (the common case) is a no-op. The final mkdir result is
+ * also ignored — the subsequent `fopen` will surface any real failure as
+ * HU_ERR_IO. */
+static void hu_pm_ensure_parent_dir(const char *path) {
+    if (!path || !*path) {
+        return;
+    }
+    const char *last_slash = strrchr(path, '/');
+    if (!last_slash || last_slash == path) {
+        return;
+    }
+    size_t parent_len = (size_t)(last_slash - path);
+    char buf[1024];
+    if (parent_len + 1 >= sizeof(buf)) {
+        return;
+    }
+    memcpy(buf, path, parent_len);
+    buf[parent_len] = '\0';
+    /* Walk from the start, creating each component. Skip leading '/'. */
+    for (size_t i = 1; i < parent_len; i++) {
+        if (buf[i] == '/') {
+            buf[i] = '\0';
+            (void)mkdir(buf, 0700);
+            buf[i] = '/';
+        }
+    }
+    (void)mkdir(buf, 0700);
+}
+
+const char *hu_personal_model_resolve_default_path(char *buf, size_t cap) {
+    if (!buf || cap == 0) {
+        return NULL;
+    }
+    buf[0] = '\0';
+    const char *override = getenv("HUMAN_PERSONAL_MODEL_PATH");
+    if (override && override[0]) {
+        size_t len = strlen(override);
+        if (len + 1 > cap) {
+            return NULL;
+        }
+        memcpy(buf, override, len + 1);
+        return buf;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) {
+        return NULL;
+    }
+    int n = snprintf(buf, cap, "%s/.human/personal_model.bin", home);
+    if (n <= 0 || (size_t)n >= cap) {
+        return NULL;
+    }
+    return buf;
+}
+
 hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path) {
     if (!model || !path || !*path) return HU_ERR_INVALID_ARGUMENT;
+    hu_pm_ensure_parent_dir(path);
     FILE *fp = fopen(path, "wb");
     if (!fp) return HU_ERR_IO;
     hu_pm_header_t hdr;

@@ -7,15 +7,26 @@
  * the W13 personalization auto-load path will see that, log a benign
  * info-level message, and fall through to the base provider.
  *
- * Once libllama is vendored under `third_party/llama.cpp/` and the
- * CMake option `HU_ENABLE_LLAMACPP=ON` is set, the body of each
- * `#ifdef HU_ENABLE_LLAMACPP` block flips on and the methods map onto:
+ * When the CMake option `HU_ENABLE_LLAMACPP=ON` is set AND `llama.h` is
+ * reachable (vendored or system), the body of each `#if HU_LLAMACPP_LINKED`
+ * block flips on. We target the **modern llama.cpp API (b3000+)**:
  *
- *   - `llama_load_model_from_file`  — model load
- *   - `llama_decode` / `llama_sampler_*` — chat
- *   - `llama_lora_adapter_init_from_file` + `llama_lora_adapter_set`
- *     — chat-time LoRA merge
- *   - `llama_free_model` — deinit
+ *   - `llama_model_load_from_file`  — model load (the deprecated
+ *     `llama_load_model_from_file` is a -Werror=deprecated trap).
+ *   - `llama_init_from_model` — context init (was
+ *     `llama_new_context_with_model`).
+ *   - `llama_decode` / `llama_sampler_*` — chat (still TODO; chat path is
+ *     a NOT_SUPPORTED stub on purpose so the linked build compiles cleanly
+ *     before the real tokenize/sample loop lands).
+ *   - `llama_adapter_lora_init` + `llama_set_adapters_lora` —
+ *     chat-time LoRA merge. Removing the active adapter is done by
+ *     calling `llama_set_adapters_lora(ctx, NULL, 0, NULL)` (the modern
+ *     API has no single per-adapter remove hook).
+ *   - `llama_model_free` — deinit (was `llama_free_model`).
+ *
+ * If you are linking against an older libllama and these names break the
+ * build, vendor a recent upstream under `third_party/llama.cpp/` instead
+ * of trying to dual-target the old pre-b3000 spelling.
  *
  * See `docs/plans/2026-05-10-m3-frontier-model-bridge.md` Bridge A.
  */
@@ -58,10 +69,10 @@ typedef struct llamacpp_ctx {
 
 #if HU_LLAMACPP_LINKED
     /* When we actually link libllama, the live model + context handles
-     * live here. Names mirror upstream. */
+     * live here. Names mirror upstream's modern (b3000+) API. */
     struct llama_model *model;
     struct llama_context *ctx;
-    struct llama_lora_adapter *active_adapter;
+    struct llama_adapter_lora *active_adapter;
 #endif
 } llamacpp_ctx_t;
 
@@ -82,8 +93,10 @@ static void clear_active_adapter(llamacpp_ctx_t *c, hu_allocator_t *alloc) {
     }
 #if HU_LLAMACPP_LINKED
     if (c->ctx && c->active_adapter) {
-        llama_lora_adapter_remove(c->ctx, c->active_adapter);
-        llama_lora_adapter_free(c->active_adapter);
+        /* Modern API has no per-adapter remove; clear by setting an empty
+         * adapter array on the context. Then free the heap object. */
+        (void)llama_set_adapters_lora(c->ctx, NULL, 0, NULL);
+        llama_adapter_lora_free(c->active_adapter);
         c->active_adapter = NULL;
     }
 #endif
@@ -198,14 +211,18 @@ static hu_error_t llamacpp_load_adapter(void *ctx, hu_allocator_t *alloc,
         return HU_ERR_OUT_OF_MEMORY;
     memcpy(path_buf, adapter_path, adapter_path_len);
     path_buf[adapter_path_len] = '\0';
-    struct llama_lora_adapter *adapter =
-        llama_lora_adapter_init_from_file(c->model, path_buf);
+    struct llama_adapter_lora *adapter =
+        llama_adapter_lora_init(c->model, path_buf);
     if (!adapter) {
         alloc->free(alloc->ctx, path_buf, adapter_path_len + 1);
         return HU_ERR_PROVIDER_RESPONSE;
     }
-    if (llama_lora_adapter_set(c->ctx, adapter, 1.0f) != 0) {
-        llama_lora_adapter_free(adapter);
+    /* Modern API: hand the context an array of (adapter, scale) pairs.
+     * One adapter at scale 1.0 matches the old per-adapter set call. */
+    float scale = 1.0f;
+    struct llama_adapter_lora *adapters[1] = {adapter};
+    if (llama_set_adapters_lora(c->ctx, adapters, 1, &scale) != 0) {
+        llama_adapter_lora_free(adapter);
         alloc->free(alloc->ctx, path_buf, adapter_path_len + 1);
         return HU_ERR_PROVIDER_RESPONSE;
     }
@@ -232,11 +249,12 @@ static hu_error_t llamacpp_unload_adapter(void *ctx, const char *adapter_id,
 #if HU_LLAMACPP_LINKED
     /* Without an allocator on this hook we cannot free the cached id,
      * so we just zero the live adapter. The next replace cycle in
-     * load_adapter() picks up the cleanup. */
+     * load_adapter() picks up the cleanup. Modern API uses an empty
+     * adapter array to clear instead of a per-adapter remove call. */
     llamacpp_ctx_t *c = (llamacpp_ctx_t *)ctx;
     if (c->ctx && c->active_adapter) {
-        llama_lora_adapter_remove(c->ctx, c->active_adapter);
-        llama_lora_adapter_free(c->active_adapter);
+        (void)llama_set_adapters_lora(c->ctx, NULL, 0, NULL);
+        llama_adapter_lora_free(c->active_adapter);
         c->active_adapter = NULL;
     }
     return HU_OK;
@@ -269,7 +287,7 @@ static void llamacpp_deinit(void *ctx, hu_allocator_t *alloc) {
         c->ctx = NULL;
     }
     if (c->model) {
-        llama_free_model(c->model);
+        llama_model_free(c->model);
         c->model = NULL;
     }
 #endif
@@ -312,19 +330,22 @@ hu_error_t hu_llamacpp_provider_create(hu_allocator_t *alloc,
 
 #if HU_LLAMACPP_LINKED
     /* Eagerly load the model so chat() doesn't pay startup cost on
-     * every turn. The init/free pair is symmetric with deinit. */
+     * every turn. The init/free pair is symmetric with deinit. Names
+     * use the modern (b3000+) llama.cpp API; the deprecated
+     * `llama_load_model_from_file` / `llama_new_context_with_model` are
+     * -Werror=deprecated traps under recent libllama. */
     if (c->model_path_owned) {
         struct llama_model_params mp = llama_model_default_params();
         if (config->use_gpu)
             mp.n_gpu_layers = config->n_gpu_layers > 0 ? config->n_gpu_layers : 999;
-        c->model = llama_load_model_from_file(c->model_path_owned, mp);
+        c->model = llama_model_load_from_file(c->model_path_owned, mp);
         if (c->model) {
             struct llama_context_params cp = llama_context_default_params();
             if (config->context_size > 0)
                 cp.n_ctx = (uint32_t)config->context_size;
             if (config->threads > 0)
                 cp.n_threads = (uint32_t)config->threads;
-            c->ctx = llama_new_context_with_model(c->model, cp);
+            c->ctx = llama_init_from_model(c->model, cp);
         }
     }
 #endif

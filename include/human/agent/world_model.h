@@ -18,6 +18,7 @@
 #include "human/memory/belief.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
+#include "human/memory/personal_model.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -87,6 +88,10 @@ typedef struct hu_world_model {
     char recent_topics[10][64];
     size_t recent_topics_count;
 
+    /* M2 ↔ W9 bridge: communication style summary from the personal model.
+     * Populated by hu_world_model_merge_personal(); empty when no PM data. */
+    char style_summary[256];
+
     /* Cache metadata. */
     int64_t built_at;
     int64_t valid_until;     /* unix ms; 0 = no TTL */
@@ -146,6 +151,13 @@ hu_error_t hu_negative_memory_list_facade(hu_memory_facade_t *m, hu_allocator_t 
 
 void hu_negative_memory_free(hu_allocator_t *alloc, hu_negative_memory_t *nm,
                               size_t count);
+
+/* M2 ↔ W9 bridge: merge personal model signal into an already-built world
+ * model. Copies goals, topics, style summary, and dominant emotion from the
+ * personal model when the world model lacks that data. Safe with NULL pm
+ * (no-op). Idempotent: repeated calls overwrite the same fields. */
+void hu_world_model_merge_personal(hu_world_model_t *wm,
+                                   const hu_personal_model_t *pm);
 
 #ifdef __cplusplus
 }

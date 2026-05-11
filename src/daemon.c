@@ -7271,7 +7271,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         gerr = hu_w7_render_world_model(agent->w7_facade, alloc,
                                                         batch_key, key_len, 0,
                                                         &graph_ctx, &graph_ctx_len,
-                                                        NULL, 0, NULL, 0, NULL, 0);
+                                                        NULL, 0, NULL, 0, NULL, 0,
+                                                        &agent->personal_model);
                     if (gerr != HU_OK && graph) {
                         gerr = hu_graph_build_contact_context(
                             graph, alloc, combined, combined_len, batch_key, key_len,

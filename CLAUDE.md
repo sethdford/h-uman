@@ -178,7 +178,7 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 | --------------------------------- | --------------------------------------------------------------------- |
 | `src/`                            | All C source (~710 files, ~270K lines)                                |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 423 test files, 9,500+ tests                                          |
+| `tests/`                          | 504 test files, 9,800+ tests                                          |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |

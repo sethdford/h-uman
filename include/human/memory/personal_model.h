@@ -130,4 +130,17 @@ const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_
 hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path);
 hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path);
 
+/* Resolve the default on-disk location for the personal model.
+ *
+ * Resolution order:
+ *   1. `HUMAN_PERSONAL_MODEL_PATH` environment variable (full path, overrides
+ *      everything; intended for tests and explicit operator overrides).
+ *   2. `$HOME/.human/personal_model.bin`.
+ *
+ * Writes the resolved path into `buf` and returns it (NUL-terminated). Returns
+ * NULL when neither override nor `HOME` is available, or when the resolved
+ * path would overflow `cap`. The caller owns `buf`. Pure path resolution —
+ * no I/O, no allocation. */
+const char *hu_personal_model_resolve_default_path(char *buf, size_t cap);
+
 #endif /* HU_MEMORY_PERSONAL_MODEL_H */

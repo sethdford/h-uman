@@ -744,9 +744,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     char *world_model_ctx = NULL;
     size_t world_model_ctx_len = 0;
     if (agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0) {
+        const char *tom_p = agent->tom_scenario_premise;
+        const char *tom_q = agent->tom_scenario_question;
+        const char *tom_c = agent->tom_scenario_category;
+        size_t tom_p_len = tom_p[0] ? strlen(tom_p) : 0;
+        size_t tom_q_len = tom_q[0] ? strlen(tom_q) : 0;
+        size_t tom_c_len = tom_c[0] ? strlen(tom_c) : 0;
         hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                  agent->memory_session_id_len, 0, &world_model_ctx,
-                                 &world_model_ctx_len, NULL, 0, NULL, 0, NULL, 0);
+                                 &world_model_ctx_len, tom_p, tom_p_len, tom_q, tom_q_len, tom_c,
+                                 tom_c_len, &agent->personal_model);
         if (world_model_ctx_len > 0)
             agent->world_model_loads++;
     }

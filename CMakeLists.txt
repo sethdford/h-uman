@@ -2622,6 +2622,7 @@ set(HU_TEST_SOURCES
     tests/test_ml.c
     tests/test_lora.c
     tests/test_training_data.c
+    tests/test_training_data_extractor.c
     tests/test_agent_trainer.c
     tests/test_otel_traces.c
     tests/test_mcp_transport.c

@@ -394,6 +394,7 @@ void run_ml_tests(void);
 void run_lora_tests(void);
 void run_agent_trainer_tests(void);
 void run_training_data_tests(void);
+void run_training_data_extractor_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -918,6 +919,7 @@ int main(int argc, char **argv) {
     run_lora_tests();
     run_agent_trainer_tests();
     run_training_data_tests();
+    run_training_data_extractor_tests();
 #endif
 
     run_experience_tests();

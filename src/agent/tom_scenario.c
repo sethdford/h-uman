@@ -349,3 +349,78 @@ hu_error_t hu_tom_b8_synthetic_pack_score_gold(hu_allocator_t *alloc, const char
     *total_out = total;
     return HU_OK;
 }
+
+static const hu_tom_b8_response_t *tom_response_find(const hu_tom_b8_response_t *responses,
+                                                     size_t responses_count, const char *id) {
+    if (!responses || responses_count == 0 || !id) {
+        return NULL;
+    }
+    for (size_t i = 0; i < responses_count; i++) {
+        if (responses[i].id && strcmp(responses[i].id, id) == 0) {
+            return &responses[i];
+        }
+    }
+    return NULL;
+}
+
+hu_error_t hu_tom_b8_synthetic_pack_score_responses(hu_allocator_t *alloc, const char *json_path,
+                                                    const hu_tom_b8_response_t *responses,
+                                                    size_t responses_count,
+                                                    int count_unanswered_as_failed,
+                                                    unsigned *pass_out, unsigned *total_out) {
+    if (!alloc || !json_path || !pass_out || !total_out) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    if (!responses && responses_count > 0) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    *pass_out = 0;
+    *total_out = 0;
+    size_t json_len = 0;
+    char *json = read_file_all(alloc, json_path, &json_len);
+    if (!json) {
+        return HU_ERR_NOT_FOUND;
+    }
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, json, json_len, &root);
+    alloc->free(alloc->ctx, json, json_len + 1);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
+        if (root) {
+            hu_json_free(alloc, root);
+        }
+        return err != HU_OK ? err : HU_ERR_JSON_PARSE;
+    }
+    hu_json_value_t *items = hu_json_object_get(root, "items");
+    if (!items || items->type != HU_JSON_ARRAY || !items->data.array.items) {
+        hu_json_free(alloc, root);
+        return HU_ERR_JSON_PARSE;
+    }
+    unsigned pass = 0;
+    unsigned total = 0;
+    for (size_t i = 0; i < items->data.array.len; i++) {
+        hu_json_value_t *it = items->data.array.items[i];
+        if (!it || it->type != HU_JSON_OBJECT) {
+            continue;
+        }
+        const char *id = hu_json_get_string(it, "id");
+        const char *gold = hu_json_get_string(it, "gold_answer");
+        if (!id || !gold) {
+            continue;
+        }
+        const hu_tom_b8_response_t *r = tom_response_find(responses, responses_count, id);
+        if (!r || !r->response || r->response_len == 0) {
+            if (count_unanswered_as_failed) {
+                total++;
+            }
+            continue;
+        }
+        total++;
+        if (hu_tom_scenario_gold_matches_response(gold, r->response, r->response_len, 3)) {
+            pass++;
+        }
+    }
+    hu_json_free(alloc, root);
+    *pass_out = pass;
+    *total_out = total;
+    return HU_OK;
+}

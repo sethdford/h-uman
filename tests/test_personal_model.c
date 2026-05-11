@@ -224,6 +224,105 @@ static void personal_model_load_missing_file_returns_not_found(void) {
                  HU_ERR_NOT_FOUND);
 }
 
+/* Resolution favours the env override when set. */
+static void personal_model_resolve_default_path_honors_env_override(void) {
+    char buf[128];
+    char override[64];
+    snprintf(override, sizeof(override), "/tmp/hu_pm_override_%d.bin", (int)getpid());
+    setenv("HUMAN_PERSONAL_MODEL_PATH", override, 1);
+    const char *got = hu_personal_model_resolve_default_path(buf, sizeof(buf));
+    HU_ASSERT_NOT_NULL(got);
+    HU_ASSERT_STR_EQ(got, override);
+    unsetenv("HUMAN_PERSONAL_MODEL_PATH");
+}
+
+/* Without the override, the path lives under $HOME/.human/. */
+static void personal_model_resolve_default_path_uses_home(void) {
+    char tmp_home[64];
+    snprintf(tmp_home, sizeof(tmp_home), "/tmp/hu_pm_home_%d", (int)getpid());
+    unsetenv("HUMAN_PERSONAL_MODEL_PATH");
+    setenv("HOME", tmp_home, 1);
+
+    char buf[256];
+    const char *got = hu_personal_model_resolve_default_path(buf, sizeof(buf));
+    HU_ASSERT_NOT_NULL(got);
+    char expected[256];
+    snprintf(expected, sizeof(expected), "%s/.human/personal_model.bin", tmp_home);
+    HU_ASSERT_STR_EQ(got, expected);
+}
+
+/* Without HOME or override, resolution returns NULL (no crash). */
+static void personal_model_resolve_default_path_no_home_returns_null(void) {
+    unsetenv("HUMAN_PERSONAL_MODEL_PATH");
+    const char *prior_home = getenv("HOME");
+    char saved_home[1024] = {0};
+    if (prior_home) {
+        size_t n = strlen(prior_home);
+        if (n < sizeof(saved_home)) {
+            memcpy(saved_home, prior_home, n + 1);
+        }
+    }
+    unsetenv("HOME");
+    char buf[64];
+    HU_ASSERT_NULL(hu_personal_model_resolve_default_path(buf, sizeof(buf)));
+    if (saved_home[0]) {
+        setenv("HOME", saved_home, 1);
+    }
+}
+
+/* Save creates the parent directory tree on first run so users don't have
+ * to pre-create `~/.human/`. */
+static void personal_model_save_creates_parent_directory(void) {
+    char tmp_dir[128];
+    snprintf(tmp_dir, sizeof(tmp_dir), "/tmp/hu_pm_mkdir_%d/nested/leaf", (int)getpid());
+    char path[256];
+    snprintf(path, sizeof(path), "%s/personal_model.bin", tmp_dir);
+
+    /* Make sure the directory does NOT exist yet — fresh-state assertion. */
+    char rm_cmd[512];
+    snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf /tmp/hu_pm_mkdir_%d 2>/dev/null", (int)getpid());
+    (void)system(rm_cmd);
+
+    hu_personal_model_t a;
+    hu_personal_model_init(&a);
+    hu_personal_model_ingest(&a, "i prefer dark mode", 18, true, 1700000300LL);
+    HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
+
+    hu_personal_model_t b;
+    HU_ASSERT_EQ(hu_personal_model_load(&b, path), HU_OK);
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&b));
+
+    (void)system(rm_cmd);
+}
+
+/* Round-trip via the resolver: save then load using the same default path
+ * (driven by the env override) round-trips fact data. Documents the agent
+ * lifecycle wiring contract. */
+static void personal_model_default_path_round_trip(void) {
+    char override[64];
+    snprintf(override, sizeof(override), "/tmp/hu_pm_resolver_%d.bin", (int)getpid());
+    setenv("HUMAN_PERSONAL_MODEL_PATH", override, 1);
+
+    char path[256];
+    HU_ASSERT_NOT_NULL(hu_personal_model_resolve_default_path(path, sizeof(path)));
+
+    hu_personal_model_t a;
+    hu_personal_model_init(&a);
+    hu_personal_model_ingest(&a, "i never drink coffee", 21, true, 1700000400LL);
+    HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
+
+    char path2[256];
+    HU_ASSERT_NOT_NULL(hu_personal_model_resolve_default_path(path2, sizeof(path2)));
+    HU_ASSERT_STR_EQ(path, path2);
+    hu_personal_model_t b;
+    HU_ASSERT_EQ(hu_personal_model_load(&b, path2), HU_OK);
+    HU_ASSERT_EQ(b.fact_count, a.fact_count);
+    HU_ASSERT_EQ(b.interaction_count, a.interaction_count);
+
+    remove(override);
+    unsetenv("HUMAN_PERSONAL_MODEL_PATH");
+}
+
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -240,4 +339,9 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_save_load_round_trips);
     HU_RUN_TEST(personal_model_load_rejects_bad_magic);
     HU_RUN_TEST(personal_model_load_missing_file_returns_not_found);
+    HU_RUN_TEST(personal_model_resolve_default_path_honors_env_override);
+    HU_RUN_TEST(personal_model_resolve_default_path_uses_home);
+    HU_RUN_TEST(personal_model_resolve_default_path_no_home_returns_null);
+    HU_RUN_TEST(personal_model_save_creates_parent_directory);
+    HU_RUN_TEST(personal_model_default_path_round_trip);
 }

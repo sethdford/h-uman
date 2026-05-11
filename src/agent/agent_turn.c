@@ -3392,9 +3392,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         char *world_model_ctx = NULL;
         size_t world_model_ctx_len = 0;
         if (agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0) {
+            const char *tom_p = agent->tom_scenario_premise;
+            const char *tom_q = agent->tom_scenario_question;
+            const char *tom_c = agent->tom_scenario_category;
+            size_t tom_p_len = tom_p[0] ? strlen(tom_p) : 0;
+            size_t tom_q_len = tom_q[0] ? strlen(tom_q) : 0;
+            size_t tom_c_len = tom_c[0] ? strlen(tom_c) : 0;
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                      agent->memory_session_id_len, 0, &world_model_ctx,
-                                     &world_model_ctx_len, NULL, 0, NULL, 0, NULL, 0);
+                                     &world_model_ctx_len, tom_p, tom_p_len, tom_q, tom_q_len,
+                                     tom_c, tom_c_len);
             if (world_model_ctx_len > 0)
                 agent->world_model_loads++;
         }
@@ -5562,8 +5569,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                      * verifier above, surfacing structured atomic claims +
                      * an explicit ABSTAINED outcome. Telemetry-only by
                      * default; opt-in to soft/strict via HU_SELF_RAG_MODE
-                     * (mirrors HU_VERIFY_MODE). Skipped when the W7 facade
-                     * isn't open (no production memory backend). */
+                     * (mirrors HU_VERIFY_MODE). All swap + telemetry logic
+                     * lives in `hu_agent_self_rag_apply` so streaming and
+                     * non-streaming paths share one source of truth. */
                     if (agent->w7_facade && agent->memory_session_id &&
                         agent->memory_session_id_len > 0) {
                         int srag_mode = HU_VERIFY_TELEMETRY;
@@ -5579,53 +5587,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             else if (strcmp(srag_src, "strict") == 0)
                                 srag_mode = HU_VERIFY_STRICT;
                         }
-                        if (srag_mode != HU_VERIFY_OFF) {
-                            hu_w11_outcome_t s_outcome = HU_W11_OUTCOME_SUPPORTED;
-                            size_t s_total = 0, s_flagged = 0;
-                            char *s_modified = NULL;
-                            size_t s_modified_len = 0;
-                            char **mod_ptr = (srag_mode == HU_VERIFY_SOFT ||
-                                              srag_mode == HU_VERIFY_STRICT)
-                                                 ? &s_modified
-                                                 : NULL;
-                            size_t *mod_len_ptr = mod_ptr ? &s_modified_len : NULL;
-                            hu_error_t serr = hu_w11_self_rag_verify_with_provider(
-                                agent->w7_facade, agent->alloc,
-                                &agent->provider,
-                                agent->memory_session_id,
-                                agent->memory_session_id_len, *response_out,
-                                response_effective_len, srag_mode, 0, &s_outcome, &s_total,
-                                &s_flagged, mod_ptr, mod_len_ptr);
-                            if (serr == HU_OK) {
-                                agent->self_rag_runs++;
-                                agent->self_rag_claims_total += s_total;
-                                agent->self_rag_claims_flagged += s_flagged;
-                                if (s_outcome == HU_W11_OUTCOME_ABSTAINED)
-                                    agent->self_rag_abstentions++;
-                                /* Replace the user-visible response when
-                                 * the verifier produced one. Covers
-                                 * HEDGED / REWRITTEN drafts AND ABSTAIN
-                                 * refusals (bridge writes the refusal
-                                 * template into s_modified when outcome
-                                 * is ABSTAINED). */
-                                if (s_modified && s_modified_len > 0 &&
-                                    (srag_mode == HU_VERIFY_SOFT ||
-                                     srag_mode == HU_VERIFY_STRICT)) {
-                                    agent->alloc->free(agent->alloc->ctx, *response_out,
-                                                       response_effective_len + 1);
-                                    *response_out = s_modified;
-                                    if (response_len_out)
-                                        *response_len_out = s_modified_len;
-                                    response_effective_len = s_modified_len;
-                                    s_modified = NULL; /* ownership transferred */
-                                    if (s_outcome == HU_W11_OUTCOME_ABSTAINED)
-                                        agent->self_rag_refusals_rendered++;
-                                }
-                                if (s_modified) {
-                                    agent->alloc->free(agent->alloc->ctx, s_modified,
-                                                       s_modified_len + 1);
-                                }
-                            }
+                        char *s_modified = NULL;
+                        size_t s_modified_len = 0;
+                        if (hu_agent_self_rag_apply(agent, *response_out,
+                                                    response_effective_len, srag_mode,
+                                                    &s_modified, &s_modified_len) == HU_OK &&
+                            s_modified && s_modified_len > 0) {
+                            agent->alloc->free(agent->alloc->ctx, *response_out,
+                                               response_effective_len + 1);
+                            *response_out = s_modified;
+                            if (response_len_out)
+                                *response_len_out = s_modified_len;
+                            response_effective_len = s_modified_len;
                         }
                     }
                 }

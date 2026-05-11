@@ -18,10 +18,17 @@ The shape mirrors the memory v2 workstream pattern: each stub becomes a full pla
 
 ## B8 — Theory-of-mind benchmark suite
 
-- **Scope.** Extend `tests/test_theory_of_mind.c` and add `eval_suites/tom/` with synthetic false-belief, second-order belief, and multilingual-pragmatic scenarios. Wire to `hu_world_model_t` ToM synthesis.
-- **First commit.** 20 false-belief items + JSON loader + scoring helper.
-- **Success.** ≥70 % first-order, ≥55 % second-order accuracy on synthetic pack.
-- **Risk.** Synthetic items may not transfer; mark as smoke not gate until corpus stabilises.
+- **Status.** Landed (2026-05-10).
+  - `eval_suites/tom/tom_synthetic.json` — 10 items spanning false-belief, second-order, pragmatic implicature, multilingual stub, and common-knowledge categories with `gold_answer` rubric strings.
+  - `src/agent/tom_scenario.c` + `include/human/agent/tom_scenario.h` ship `hu_tom_scenario_synthesize` (premise/question/category → `hu_theory_of_mind_t` with `[ToM:<tag>]` planner hints), `hu_world_model_merge_tom_scenario` (merges synthesized ToM into a loaded `hu_world_model_t`), `hu_tom_scenario_gold_matches_response` (case-insensitive, underscore-tokenised rubric matcher), `hu_tom_b8_synthetic_pack_run_smoke` (category-tag self-test), `hu_tom_b8_synthetic_pack_score_gold` (CI smoke against premise+question+stub overlap), and **`hu_tom_b8_synthetic_pack_score_responses`** (CLI / model-eval hook that scores an `hu_tom_b8_response_t[]` array against the JSON pack, with a `count_unanswered_as_failed` policy flag).
+  - `hu_w7_render_world_model` now accepts optional trailing `tom_premise` / `tom_question` / `tom_category` parameters; when all three are non-empty the bridge calls `hu_world_model_merge_tom_scenario` after `hu_world_model_load` and before formatting.
+  - `hu_agent_t` carries `tom_scenario_premise/question/category` fixed buffers; **`hu_agent_set_tom_scenario`** copies (or clears) those, and `agent_turn.c` / `agent_stream.c` thread them into the bridge call. Production turns leave the fields empty (no behavior change); eval / benchmark drivers call the setter before `hu_agent_turn`.
+  - Tests in `tests/test_tom_scenario_b8.c` + the `bridge_render_optional_tom_scenario_merges_into_output` case in `tests/test_world_model_bridge.c` cover synthesis, gold matching (synthetic + response-array), unanswered-policy semantics, agent setter truncation/clearing, and the bridge merge path.
+- **Remaining scope.**
+  - First-order ≥70 % / second-order ≥55 % gates against an external model run (today the pack passes smoke + ≥3/10 partial coverage; gates will land once we point a frontier provider at the response-array CLI).
+  - Optional eval CLI subcommand (`human eval tom run …`) that pulls model responses through `hu_tom_b8_synthetic_pack_score_responses` and prints pass/total.
+- **Success.** ≥70 % first-order, ≥55 % second-order accuracy on synthetic pack (gate, blocked on the eval CLI hook above).
+- **Risk.** Synthetic items may not transfer; pack stays smoke until the gated metric is stable across at least two frontier model versions.
 - **Depends on.** B1 (decision integration).
 
 ## B9 — User simulator (`hu_user_sim_t`)

@@ -178,11 +178,19 @@ static hu_error_t upsert_entity_tracked(hu_graph_t *g, const char *cid,
  * benchmark dependency-light, we just check entity kind matches. Relations
  * count if the executor expanded them into entity records (which the
  * neighbors-style steps do; window steps do not). */
+/* Returns the 1-indexed position of the target entity among ENTITY records
+ * in the result list, or 0 if absent. Counts only entity kind: relations
+ * and other record kinds are skipped so a precision_at_1 = "the top entity
+ * answer is correct" semantic holds. Without this filter, a high-scoring
+ * relation rank-1 would push every correct entity to rank ≥ 2 once the
+ * W12 P6 re-ranker promotes relations with strong context overlap. */
 static size_t rank_of_entity(const hu_memory_record_t *recs, size_t n,
                              int64_t target_id) {
+    size_t entity_rank = 0;
     for (size_t i = 0; i < n; i++) {
-        if (recs[i].kind == HU_MEM_ENTITY && recs[i].id == target_id)
-            return i + 1;
+        if (recs[i].kind != HU_MEM_ENTITY) continue;
+        entity_rank++;
+        if (recs[i].id == target_id) return entity_rank;
     }
     return 0;
 }
