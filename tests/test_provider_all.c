@@ -2968,6 +2968,91 @@ static void test_provider_all_factory_aliases_create_and_deinit(void) {
     }
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * W13 / Bridge A — load_adapter dispatcher safety on cloud providers.
+ *
+ * `hu_provider_load_adapter` (src/providers/helpers.c) returns
+ * HU_ERR_NOT_SUPPORTED whenever the provider's vtable does not implement
+ * `load_adapter`. Cloud providers (openai, anthropic, gemini, ollama,
+ * openrouter) never implement it — the only providers that do are
+ * `huml` and `llamacpp`. These tests pin the contract so a future
+ * refactor of helpers.c can't quietly turn a NOT_SUPPORTED into a NULL
+ * deref. Mirrors the M3 frontier-model bridge plan, "Bridge A vtable
+ * coverage" follow-up row.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+static void load_adapter_check_not_supported(const char *kind, size_t kind_len,
+                                             const char *key, size_t key_len) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_provider_create(&alloc, kind, kind_len, key, key_len, NULL, 0, &prov), HU_OK);
+    /* Dispatcher must reject without crashing even though the provider
+     * has no `load_adapter` hook. */
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, "/tmp/x.lora", 11, "id", 2),
+                 HU_ERR_NOT_SUPPORTED);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_load_adapter_dispatcher_not_supported_on_openai(void) {
+    load_adapter_check_not_supported("openai", 6, "key", 3);
+}
+
+static void test_load_adapter_dispatcher_not_supported_on_anthropic(void) {
+    load_adapter_check_not_supported("anthropic", 9, "key", 3);
+}
+
+static void test_load_adapter_dispatcher_not_supported_on_gemini(void) {
+    load_adapter_check_not_supported("gemini", 6, "key", 3);
+}
+
+static void test_load_adapter_dispatcher_not_supported_on_ollama(void) {
+    /* Ollama doesn't take an API key; pass empty. */
+    load_adapter_check_not_supported("ollama", 6, NULL, 0);
+}
+
+static void test_load_adapter_dispatcher_not_supported_on_openrouter(void) {
+    load_adapter_check_not_supported("openrouter", 10, "key", 3);
+}
+
+static void test_load_adapter_dispatcher_invalid_args(void) {
+    /* The dispatcher must reject malformed calls without ever touching
+     * the provider's vtable. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_provider_create(&alloc, "openai", 6, "key", 3, NULL, 0, &prov), HU_OK);
+
+    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, &alloc, "/x", 2, "id", 2), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, NULL, "/x", 2, "id", 2), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, NULL, 2, "id", 2), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, "/x", 0, "id", 2), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, "/x", 2, NULL, 2), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, "/x", 2, "id", 0), HU_ERR_INVALID_ARGUMENT);
+
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_unload_adapter_dispatcher_not_supported_on_openai(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_provider_create(&alloc, "openai", 6, "key", 3, NULL, 0, &prov), HU_OK);
+    HU_ASSERT_EQ(hu_provider_unload_adapter(&prov, "id", 2), HU_ERR_NOT_SUPPORTED);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_active_adapter_dispatcher_returns_null_on_openai(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_provider_create(&alloc, "openai", 6, "key", 3, NULL, 0, &prov), HU_OK);
+    /* The accessor returns NULL (rather than a sentinel string) when the
+     * provider doesn't implement it. */
+    HU_ASSERT_NULL((void *)hu_provider_active_adapter(&prov));
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 void run_provider_all_tests(void) {
     HU_TEST_SUITE("Provider All");
     HU_RUN_TEST(test_openai_create_succeeds);
@@ -3217,4 +3302,16 @@ void run_provider_all_tests(void) {
 
     HU_RUN_TEST(test_sse_parse_line_delta_tool_call);
     HU_RUN_TEST(test_sse_extract_delta_null_content);
+
+    /* W13 / Bridge A — load_adapter dispatcher returns NOT_SUPPORTED on
+     * cloud providers (regression guard against accidental NULL deref
+     * if `helpers.c::hu_provider_load_adapter` loses its NULL check). */
+    HU_RUN_TEST(test_load_adapter_dispatcher_not_supported_on_openai);
+    HU_RUN_TEST(test_load_adapter_dispatcher_not_supported_on_anthropic);
+    HU_RUN_TEST(test_load_adapter_dispatcher_not_supported_on_gemini);
+    HU_RUN_TEST(test_load_adapter_dispatcher_not_supported_on_ollama);
+    HU_RUN_TEST(test_load_adapter_dispatcher_not_supported_on_openrouter);
+    HU_RUN_TEST(test_load_adapter_dispatcher_invalid_args);
+    HU_RUN_TEST(test_unload_adapter_dispatcher_not_supported_on_openai);
+    HU_RUN_TEST(test_active_adapter_dispatcher_returns_null_on_openai);
 }
