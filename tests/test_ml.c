@@ -1303,6 +1303,11 @@ static void test_experiment_loop_keep_discard(void) {
     loop_cfg.base_config.gpt.sequence_len = 16;
     loop_cfg.base_config.training.device_batch_size = 2;
     loop_cfg.base_config.training.time_budget_secs = 1;
+    /* See test_experiment_loop_runs above for why this cap is required
+     * post-Phase-0. tl;dr: a real token_bytes table now flows into BPB
+     * eval, and the default 20M eval_tokens would spin the dataloader
+     * forever on this 400-token shard. */
+    loop_cfg.base_config.training.eval_tokens = 64;
     loop_cfg.data_dir = dir;
     loop_cfg.convergence_threshold = 0.0;
 
@@ -1405,6 +1410,12 @@ static void test_experiment_loop_runs(void) {
     loop_cfg.base_config.gpt.sequence_len = 16;
     loop_cfg.base_config.training.device_batch_size = 2;
     loop_cfg.base_config.training.time_budget_secs = 1;
+    /* Cap BPB eval to a tiny budget. Phase 0 gave run_single_experiment a
+     * real token_bytes table so the BPB loop now actually runs; without
+     * this override we'd inherit hu_experiment_config_default()'s 20M
+     * eval_tokens and spend hours cycling the dataloader on a 400-token
+     * shard. See docs/plans/2026-05-11-rl-loop-phase-0-honesty.md Task 5. */
+    loop_cfg.base_config.training.eval_tokens = 64;
     loop_cfg.data_dir = dir;
     loop_cfg.convergence_threshold = 0.0;
 

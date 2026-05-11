@@ -841,6 +841,8 @@ Commit message captures the extraction + fallback decision; see the actual commi
 - Thread an explicit `tokenizer_path` field through `hu_experiment_loop_config_t` so non-byte-level experiments don't fall back to the 1-byte heuristic.
 - Refactor `cli.c::derive_token_bytes_for_data_dir` to call `hu_ml_prepare_load_default_tokenizer` (deletes ~40 lines from cli.c).
 
+> **Phase 0 follow-up (May 11 2026, found by Task 11 end-gate full test sweep):** This Task 5 fix surfaced a latent test-design bug in `tests/test_ml.c`. Three existing experiment-loop tests (`test_experiment_loop_runs`, `test_experiment_loop_keep_discard`, `test_experiment_loop_convergence`) call `hu_experiment_config_default()` and then override only a handful of fields — but NOT `eval_tokens`, which defaults to `20971520` (20M tokens). Pre-Phase-0, `token_bytes=NULL` short-circuited the BPB eval loop in `hu_ml_train` so the 20M default was harmless. Post-Phase-0 the eval loop actually runs, and on a 400-token shard the dataloader cycles forever trying to evaluate 20M tokens. `test_experiment_loop_convergence` is unaffected because it points at a nonexistent data dir (training crashes before the eval loop is ever reached); `test_experiment_loop_runs` and `_keep_discard` were both fixed by adding `loop_cfg.base_config.training.eval_tokens = 64;` with a comment explaining the why and pointing back at this task. The fix landed in a separate `test(ml): cap eval_tokens in experiment-loop tests` commit so the regression-fix story is bisectable and the `_runs` / `_keep_discard` line-number deltas stay isolated from Task 5's source-code commit.
+
 ---
 
 ## Task 6: Add `tests/test_personal_model_atomic_save.c` — failing test for non-atomic save
