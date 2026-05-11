@@ -240,6 +240,7 @@ struct hu_agent {
     double turn_temperature;  /* 0.0 = use agent default */
     int turn_thinking_budget; /* 0 = no thinking config */
     int turn_tier;            /* hu_cognitive_tier_t from model router, -1 = unset */
+    bool proactive_turn;      /* true = proactive check-in; skip storing prompt as memory */
     hu_timing_model_t *timing_model;
 
     /* Per-turn A/B evaluation: channel history for quality scoring (set by daemon, not owned) */
@@ -281,6 +282,7 @@ struct hu_agent {
     uint64_t verifier_runs;           /* total invocations across the agent's lifetime */
     uint64_t verifier_claims_total;   /* total claims extracted */
     uint64_t verifier_claims_flagged; /* total claims scoring below threshold */
+    uint64_t injection_blocks;        /* input guard: high-risk injection detections */
 
     /* W5 producer telemetry (FIX 9). Counts persona deltas the agent proposed
      * to its evolver during inbound user-message processing. The 3 AM evolver

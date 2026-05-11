@@ -1188,6 +1188,10 @@ if(HU_ENABLE_ML)
         src/ml/lora.c
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
+        # Track D D2.2: persona-fidelity compute primitives shared by
+        # `human ml fidelity-status` (CLI) and `metrics.fidelity`
+        # (gateway) so both surfaces produce identical numbers.
+        src/ml/fidelity.c
         # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
@@ -2122,6 +2126,7 @@ if(NOT HU_ENABLE_ML)
         src/ml/evaluator.c src/ml/experiment.c src/ml/experiment_store.c src/ml/gpt.c
         src/ml/muon_adamw.c src/ml/train.c src/ml/checkpoint.c src/ml/cli.c
         src/ml/lora.c src/ml/agent_trainer.c src/ml/m3_frontier_adapter.c
+        src/ml/fidelity.c
         src/ml/training_data.c src/ml/training_data_extractor.c
         src/ml/training_data_quality.c
         src/providers/huml.c)

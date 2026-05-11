@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 hu_error_t hu_goal_engine_create(hu_allocator_t *alloc, sqlite3 *db,
                                  hu_goal_engine_t *out) {
@@ -431,6 +432,23 @@ void hu_goal_free(hu_allocator_t *alloc, hu_goal_t *goals, size_t count) {
     if (!alloc || !goals || count == 0)
         return;
     alloc->free(alloc->ctx, goals, count * sizeof(hu_goal_t));
+}
+
+void hu_goal_engine_record_turn_progress(hu_goal_engine_t *engine,
+                                         size_t tool_results_count) {
+    if (!engine || !engine->db)
+        return;
+    hu_goal_t active_goal;
+    bool found = false;
+    if (hu_goal_select_next(engine, &active_goal, &found) != HU_OK || !found)
+        return;
+    double pdelta =
+        (tool_results_count > 0) ? 0.15 + 0.05 * (double)tool_results_count : 0.1;
+    double nprog = active_goal.progress + pdelta;
+    if (nprog > 1.0)
+        nprog = 1.0;
+    (void)hu_goal_update_progress(engine, active_goal.id, nprog,
+                                  (int64_t)time(NULL));
 }
 
 #endif /* HU_ENABLE_SQLITE */

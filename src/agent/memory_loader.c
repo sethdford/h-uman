@@ -161,9 +161,11 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         err =
             loader->retrieval_engine->vtable->retrieve(loader->retrieval_engine->ctx, loader->alloc,
                                                        query ? query : "", query_len, &opts, &res);
-        if (err == HU_ERR_JSON_PARSE) {
+        if (err == HU_ERR_JSON_PARSE || err == HU_ERR_PROVIDER_RATE_LIMITED ||
+            err == HU_ERR_PROVIDER_AUTH || err == HU_ERR_IO) {
             hu_log_warn("memory_loader", NULL,
-                        "retrieval engine returned JSON parse error; falling back to v1 recall");
+                        "retrieval engine error (%s); falling back to v1 recall",
+                        hu_error_string(err));
             memset(&res, 0, sizeof(res));
             err = HU_OK;
         } else if (err != HU_OK) {

@@ -1,4 +1,5 @@
 #include "human/memory/personal_model.h"
+#include "human/persona.h"
 #include "human/platform.h"
 #include <ctype.h>
 #include <errno.h>
@@ -241,7 +242,170 @@ bool hu_personal_model_has_content(const hu_personal_model_t *model) {
  * extracted 0.3-confidence fact is dropped immediately. */
 #define HU_PM_FACT_PROMPT_MIN_CONFIDENCE 0.30f
 
+/* Choose the wording for the recently-completed acknowledgment
+ * directive based on the active channel's overlay. Returns a
+ * pointer to a static const string — the caller never frees it.
+ *
+ * The directive's *intent* is constant ("when something they
+ * recently finished comes up, acknowledge it before moving on,
+ * but don't let the ack dominate the reply"). What changes per
+ * overlay is the *register*: tone, brevity, emoji license. We
+ * keep the variants short and prescriptive — long directive
+ * lines bloat the system prompt and (per several internal evals)
+ * actively degrade adherence vs short ones.
+ *
+ * Three families of variants:
+ *   1. formal → strict register, no emoji, demand brevity.
+ *   2. casual + permissive avg_length / emoji → loose register,
+ *      mild emoji license.
+ *   3. neutral fallback (overlay missing or unrecognized) →
+ *      the existing "warmly acknowledge" wording, preserved
+ *      exactly so the legacy `_build_prompt` callers see no
+ *      visible drift. */
+/* ── Directive variant telemetry (Track D D2.2) ───────────────────────
+ *
+ * Static counters incremented every time the prompt builder fires
+ * a directive variant. Read via
+ * `hu_personal_model_directive_telemetry_snapshot`. The atomic
+ * builtins keep this thread-safe under the multi-threaded agent
+ * loop without pulling in <stdatomic.h> on platforms where it's
+ * stricter (and without a mutex — the operation is just an
+ * increment). On compilers without `__atomic_*` (rare on the
+ * supported toolchains: clang ≥ 3.3, gcc ≥ 4.7), the fallback
+ * is a non-atomic increment which is acceptable for telemetry —
+ * a missed count under contention is preferable to a lock on
+ * every agent turn. */
+#if defined(__GNUC__) || defined(__clang__)
+#define HU_DIRECTIVE_INC(ptr) __atomic_fetch_add((ptr), 1, __ATOMIC_RELAXED)
+#define HU_DIRECTIVE_LOAD(ptr) __atomic_load_n((ptr), __ATOMIC_RELAXED)
+#define HU_DIRECTIVE_STORE(ptr, val) __atomic_store_n((ptr), (val), __ATOMIC_RELAXED)
+#else
+#define HU_DIRECTIVE_INC(ptr) ((*(ptr))++)
+#define HU_DIRECTIVE_LOAD(ptr) (*(ptr))
+#define HU_DIRECTIVE_STORE(ptr, val) (*(ptr) = (val))
+#endif
+
+static uint64_t s_directive_counts[HU_DIRECTIVE_VARIANT__COUNT];
+
+void hu_personal_model_directive_telemetry_snapshot(hu_directive_telemetry_t *out) {
+    if (!out)
+        return;
+    uint64_t total = 0;
+    for (size_t i = 0; i < HU_DIRECTIVE_VARIANT__COUNT; i++) {
+        out->counts[i] = HU_DIRECTIVE_LOAD(&s_directive_counts[i]);
+        total += out->counts[i];
+    }
+    out->total = total;
+}
+
+void hu_personal_model_directive_telemetry_reset(void) {
+    for (size_t i = 0; i < HU_DIRECTIVE_VARIANT__COUNT; i++) {
+        HU_DIRECTIVE_STORE(&s_directive_counts[i], 0U);
+    }
+}
+
+const char *hu_personal_model_directive_variant_label(hu_directive_variant_t v) {
+    switch (v) {
+    case HU_DIRECTIVE_VARIANT_NULL_OVERLAY:    return "null_overlay";
+    case HU_DIRECTIVE_VARIANT_DEFAULT:         return "default";
+    case HU_DIRECTIVE_VARIANT_FORMAL_TERSE:    return "formal_terse";
+    case HU_DIRECTIVE_VARIANT_CASUAL_EMOJI:    return "casual_emoji";
+    case HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT: return "casual_or_short";
+    case HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI:  return "adaptive_emoji";
+    case HU_DIRECTIVE_VARIANT__COUNT:
+    default:
+        return "unknown";
+    }
+}
+
+/* Decision logic broken out from `acknowledgment_directive_for_overlay`
+ * so the variant tag is computed in one place — both the wording
+ * and the telemetry counter agree on which branch fired. */
+static hu_directive_variant_t directive_variant_for_overlay(const struct hu_persona_overlay *overlay) {
+    if (!overlay)
+        return HU_DIRECTIVE_VARIANT_NULL_OVERLAY;
+    const char *form = overlay->formality && overlay->formality[0] ? overlay->formality : NULL;
+    const char *length = overlay->avg_length && overlay->avg_length[0] ? overlay->avg_length : NULL;
+    const char *emoji = overlay->emoji_usage && overlay->emoji_usage[0] ? overlay->emoji_usage : NULL;
+
+    bool short_length = false;
+    if (length) {
+        if (strcmp(length, "short") == 0)
+            short_length = true;
+        else {
+            int n = atoi(length);
+            if (n > 0 && n <= 30)
+                short_length = true;
+        }
+    }
+    bool formal = form && (strcmp(form, "formal") == 0 || strcmp(form, "professional") == 0);
+    bool casual = form && (strcmp(form, "casual") == 0 || strcmp(form, "playful") == 0);
+    bool emoji_ok = emoji && (strcmp(emoji, "moderate") == 0 || strcmp(emoji, "high") == 0 ||
+                              strcmp(emoji, "frequent") == 0);
+
+    /* Formal trumps everything else — never permit emoji or playful wording. */
+    if (formal)
+        return HU_DIRECTIVE_VARIANT_FORMAL_TERSE;
+    if (casual && emoji_ok)
+        return HU_DIRECTIVE_VARIANT_CASUAL_EMOJI;
+    if (casual || short_length)
+        return HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT;
+    if (emoji_ok)
+        return HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI;
+    /* Final fallback — overlay present but no useful signal. */
+    return HU_DIRECTIVE_VARIANT_DEFAULT;
+}
+
+static const char *acknowledgment_directive_for_overlay(const struct hu_persona_overlay *overlay) {
+    hu_directive_variant_t v = directive_variant_for_overlay(overlay);
+    /* Telemetry — increment the counter for the variant that
+     * fired. Done before returning the wording so even if the
+     * caller never inspects the string, the fire is still
+     * observed. */
+    if ((size_t)v < HU_DIRECTIVE_VARIANT__COUNT)
+        HU_DIRECTIVE_INC(&s_directive_counts[v]);
+    switch (v) {
+    case HU_DIRECTIVE_VARIANT_NULL_OVERLAY:
+    case HU_DIRECTIVE_VARIANT_DEFAULT:
+        return "Note: when a recently-completed item comes up in the "
+               "conversation, acknowledge it warmly (a brief congrats or "
+               "check-in) before moving on. Don't let the acknowledgment "
+               "dominate the reply.\n";
+    case HU_DIRECTIVE_VARIANT_FORMAL_TERSE:
+        return "Note: when a recently-completed item comes up in the "
+               "conversation, briefly acknowledge it (a respectful one-liner, "
+               "no emoji) before moving on. Keep the acknowledgment to a "
+               "single sentence.\n";
+    case HU_DIRECTIVE_VARIANT_CASUAL_EMOJI:
+        return "Style note: when something they recently finished comes up, "
+               "give them a quick congrats first (an emoji is fine if it "
+               "fits) before moving on. Stay natural — don't make a big "
+               "deal of it.\n";
+    case HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT:
+        return "Note: when something they recently finished comes up, "
+               "lead with a quick congrats or check-in (one sentence) "
+               "before moving on. Don't let it dominate the reply.\n";
+    case HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI:
+        return "Note: when a recently-completed item comes up, acknowledge "
+               "it warmly (a brief congrats — emoji okay if it fits) "
+               "before moving on. Don't let the acknowledgment dominate "
+               "the reply.\n";
+    case HU_DIRECTIVE_VARIANT__COUNT:
+    default:
+        /* Unreachable — directive_variant_for_overlay only returns the
+         * 6 named values. Keep a safe fallback string anyway. */
+        return "Note: when a recently-completed item comes up in the "
+               "conversation, acknowledge it warmly before moving on.\n";
+    }
+}
+
 size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *buf, size_t cap) {
+    return hu_personal_model_build_prompt_with_overlay(model, NULL, buf, cap);
+}
+
+size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *model,
+                                                   const struct hu_persona_overlay *overlay,
+                                                   char *buf, size_t cap) {
     if (!buf || cap == 0)
         return 0;
     buf[0] = '\0';
@@ -389,6 +553,14 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
     }
     if (any_completed) {
         append_fmt(buf, cap, &n, "\n");
+        /* Behavioral directive — pair the structural "Recently
+         * completed: …" list with an explicit instruction to
+         * acknowledge it. The wording is overlay-tuned (formal
+         * → terse one-liner, casual → permit emoji, etc.) so
+         * the directive's register matches the channel. The
+         * NULL-overlay path preserves the original wording
+         * verbatim — legacy callers see no visible drift. */
+        append_fmt(buf, cap, &n, "%s", acknowledgment_directive_for_overlay(overlay));
         detail = true;
     }
 

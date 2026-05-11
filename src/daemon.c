@@ -49,11 +49,6 @@
 
 /* Plan 2: Background observer registry */
 #include "human/background_observer.h"
-/* Core utilities */
-#include "human/core/error.h"
-#include "human/core/log.h"
-#include "human/core/process_util.h"
-#include "human/core/string.h"
 
 /* Security */
 #include "human/security/adversarial.h"
@@ -1689,9 +1684,22 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 agent->active_channel = ch_part;
                 agent->active_channel_len = strlen(ch_part);
 
+                /* Scope memory to this contact so facts/memories are
+                 * stored with the correct session_id rather than empty.
+                 * Mark as proactive turn to suppress storing the prompt
+                 * itself as a memory (prevents feedback loops). */
+                agent->memory_session_id = cp->contact_id;
+                agent->memory_session_id_len = strlen(cp->contact_id);
+                if (agent->memory && agent->memory->vtable) {
+                    agent->memory->current_session_id = cp->contact_id;
+                    agent->memory->current_session_id_len = agent->memory_session_id_len;
+                }
+                agent->proactive_turn = true;
+
                 char *response = NULL;
                 size_t response_len = 0;
                 hu_error_t err = hu_agent_turn(agent, prompt, prompt_len, &response, &response_len);
+                agent->proactive_turn = false;
 
                 if (err == HU_OK && response && response_len > 0) {
                     bool skip = (response_len == 4 && memcmp(response, "SKIP", 4) == 0);
@@ -1749,6 +1757,15 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
                 alloc->free(alloc->ctx, prompt, prompt_len + 1);
                 hu_agent_clear_history(agent);
+
+                /* Clear proactive session scope so the next inbound message
+                 * doesn't inherit a stale contact_id. */
+                agent->memory_session_id = NULL;
+                agent->memory_session_id_len = 0;
+                if (agent->memory && agent->memory->vtable) {
+                    agent->memory->current_session_id = NULL;
+                    agent->memory->current_session_id_len = 0;
+                }
             }
 
             /* Proactive "good morning" scheduler: per-contact, once per day
@@ -1801,10 +1818,12 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                 "it fits your personality. Examples: 'morning!', "
                                 "'hey good morning', 'rise and shine :)'";
                             hu_agent_clear_history(agent);
+                            agent->proactive_turn = true;
                             char *gm_out = NULL;
                             size_t gm_out_len = 0;
                             hu_error_t gm_err = hu_agent_turn(agent, gm_prompt, strlen(gm_prompt),
                                                               &gm_out, &gm_out_len);
+                            agent->proactive_turn = false;
                             if (gm_err == HU_OK && gm_out && gm_out_len > 0 &&
                                 gm_out_len < sizeof(gm_resp)) {
                                 memcpy(gm_resp, gm_out, gm_out_len);
@@ -2924,6 +2943,55 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * and the doctor command. Best-effort: silent on
                          * failure (matches the imessage poll-status pattern). */
                         (void)hu_w14_scheduler_status_save(agent->w14_scheduler);
+
+                        /* Personal-model idle decay — covers the long-idle
+                         * daemon gap that the per-turn decay in agent_turn
+                         * can't fill. A daemon that goes hours / days
+                         * between user messages still ages signal in place
+                         * (decay state is purely derived from per-element
+                         * timestamps), but eager pruning makes room before
+                         * the next ingest's eviction policy sees a full
+                         * array of stale-but-high-raw-confidence facts.
+                         *
+                         * Rate-limited to once per hour via the
+                         * `hu_personal_model_idle_due` helper (extracted
+                         * for unit-testability — the whole daemon path
+                         * isn't reachable from the test binary, but the
+                         * is-it-time-yet predicate now is). apply_decay
+                         * is idempotent at fixed `now`, so calling more
+                         * often than the rate limit would be free
+                         * correctness-wise but wasteful (88 elements ×
+                         * float-multiply re-evaluated per tick). */
+                        {
+                            static int64_t last_pm_decay_secs = 0;
+                            const int64_t now_secs = (int64_t)t;
+                            if (hu_personal_model_idle_due(&last_pm_decay_secs, now_secs,
+                                                           3600)) {
+                                size_t pruned = hu_personal_model_apply_decay(
+                                    &agent->personal_model, now_secs);
+                                if (pruned > 0) {
+                                    hu_log_info("human", agent->observer,
+                                                "personal model idle decay: pruned "
+                                                "%zu stale entries",
+                                                pruned);
+                                    /* Persist the pruned state — same
+                                     * crash-safety reasoning as the
+                                     * post-ingest save in agent_turn.
+                                     * Skip when the model has no content
+                                     * (first-run users). */
+                                    if (agent->auto_save &&
+                                        hu_personal_model_has_content(
+                                            &agent->personal_model)) {
+                                        char pm_path[1024];
+                                        if (hu_personal_model_resolve_default_path(
+                                                pm_path, sizeof(pm_path))) {
+                                            (void)hu_personal_model_save(
+                                                &agent->personal_model, pm_path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 /* W2 AutoDream + W5 persona evolver — daily housekeeping.
@@ -9407,8 +9475,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             char *cand = NULL;
                             size_t cand_len = 0;
                             hu_agent_clear_history(agent);
+                            agent->proactive_turn = true;
                             hu_error_t cerr =
                                 hu_agent_turn(agent, combined, combined_len, &cand, &cand_len);
+                            agent->proactive_turn = false;
                             if (cerr != HU_OK || !cand || cand_len == 0) {
                                 if (cand)
                                     alloc->free(alloc->ctx, cand, cand_len + 1);
@@ -10176,10 +10246,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (hu_deep_extract_build_prompt(alloc, convo_buf, (size_t)cb_w, &de_prompt,
                                                          &de_prompt_len) == HU_OK &&
                             de_prompt && de_prompt_len > 0) {
+                            agent->proactive_turn = true;
                             char *de_response = NULL;
                             size_t de_response_len = 0;
                             hu_error_t de_err = hu_agent_turn(agent, de_prompt, de_prompt_len,
                                                               &de_response, &de_response_len);
+                            agent->proactive_turn = false;
                             if (de_err == HU_OK && de_response && de_response_len > 0) {
                                 hu_deep_extract_result_t de_result;
                                 memset(&de_result, 0, sizeof(de_result));

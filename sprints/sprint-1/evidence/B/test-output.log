@@ -1,0 +1,11 @@
+
+=== AC-B.2: mv-based atomic rename present in script ===
+210:    mv "$tmpfile" "$dest"
+[verify-B] PASS: AC-B.2
+
+=== AC-B.5: exit-2 path leaves canonical file untouched ===
+  exit code: 2
+  stderr tail: [lora-runner-ab] FAIL: /var/folders/57/0gs_mdl104q8vk054nz3wp3h0000gn/T//lora-ab-verifyB.IZjbkB/out-b5.nEo7aE/before.json has no non-empty responses — provider unreachable?
+[verify-B] PASS: AC-B.5
+
+=== AC-B.1: success publishes status.json to canonical path ===

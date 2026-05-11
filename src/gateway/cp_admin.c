@@ -12,8 +12,10 @@
 #include "human/cost.h"
 #include "human/gateway/oauth.h"
 #include "human/health.h"
+#include "human/ml/fidelity.h"
 #include "human/observability/bth_metrics.h"
 #include "human/observability/metrics_observer.h"
+#include "human/persona.h"
 #include "human/security.h"
 #include "human/session.h"
 #include "human/tool.h"
@@ -1103,6 +1105,278 @@ hu_error_t cp_admin_metrics_snapshot(hu_allocator_t *alloc, hu_app_context_t *ap
                                hu_json_bool_new(alloc, app->agent->multi_agent_enabled));
             hu_json_object_set(alloc, obj, "intelligence", intel_obj);
         }
+    }
+
+    hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
+    hu_json_free(alloc, obj);
+    return err;
+}
+
+/* ── metrics.fidelity ────────────────────────────────────────────────── *
+ *
+ * Track D D2.2 — emits the same JSON shape as
+ * `human ml fidelity-status` so the dashboard tile drops the
+ * demo-gateway mock in favor of live data. Both surfaces share
+ * `src/ml/fidelity.c`'s compute primitives — the only thing that
+ * differs here is (a) where the persona name comes from
+ * (`params.persona` falls back to the agent's active persona)
+ * and (b) where the optional A/B section comes from (the canonical
+ * `~/.human/last_fidelity_ab.json`, or `$HUMAN_FIDELITY_AB_PATH`
+ * for tests).
+ *
+ * Threat notes: read-only operation. The handler reads two files
+ * under the user's `~/.human/` (the personal-model fingerprint and
+ * the optional A/B status). Path is resolved via
+ * `hu_personal_model_resolve_default_path`'s sibling logic; we
+ * never accept caller-supplied paths. Persona names are sanitized
+ * by `hu_persona_load` (rejects path traversal). No secrets touched.
+ * No body logged. Handler returns valid JSON even on every failure
+ * mode — UI tiles always render. */
+
+static bool cp_fidelity_resolve_ab_status_path(char *buf, size_t cap) {
+    if (!buf || cap == 0)
+        return false;
+    buf[0] = '\0';
+    /* Test-only override — keeps `verify-all.sh` and unit tests
+     * deterministic without touching the user's real `~/.human`. */
+    const char *override = getenv("HUMAN_FIDELITY_AB_PATH");
+    if (override && override[0]) {
+        size_t n = strlen(override);
+        if (n + 1 > cap)
+            return false;
+        memcpy(buf, override, n + 1);
+        return true;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return false;
+    int written = snprintf(buf, cap, "%s/.human/last_fidelity_ab.json", home);
+    return written > 0 && (size_t)written < cap;
+}
+
+static hu_json_value_t *cp_fidelity_load_ab_object(hu_allocator_t *alloc) {
+    char path[1024];
+    if (!cp_fidelity_resolve_ab_status_path(path, sizeof(path)))
+        return NULL;
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return NULL;
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return NULL;
+    }
+    long sz = ftell(fp);
+    if (sz <= 0 || sz > (1 << 20)) { /* 1 MiB cap — status JSON is < 1 KiB */
+        fclose(fp);
+        return NULL;
+    }
+    rewind(fp);
+    char *body = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
+    if (!body) {
+        fclose(fp);
+        return NULL;
+    }
+    size_t got = fread(body, 1, (size_t)sz, fp);
+    fclose(fp);
+    if (got != (size_t)sz) {
+        alloc->free(alloc->ctx, body, (size_t)sz + 1);
+        return NULL;
+    }
+    body[sz] = '\0';
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, body, (size_t)sz, &root);
+    alloc->free(alloc->ctx, body, (size_t)sz + 1);
+    if (err != HU_OK || !root)
+        return NULL;
+    /* Caller wants just the `ab` sub-object. Steal it; free the
+     * rest. The clone-instead-of-steal pattern keeps memory safe
+     * even though the parse buffer is already gone. */
+    hu_json_value_t *ab = hu_json_object_get(root, "ab");
+    if (!ab) {
+        hu_json_free(alloc, root);
+        return NULL;
+    }
+    char *ab_str = NULL;
+    size_t ab_len = 0;
+    if (hu_json_stringify(alloc, ab, &ab_str, &ab_len) != HU_OK) {
+        hu_json_free(alloc, root);
+        return NULL;
+    }
+    hu_json_free(alloc, root);
+    hu_json_value_t *ab_clone = NULL;
+    hu_error_t parse_err = hu_json_parse(alloc, ab_str, ab_len, &ab_clone);
+    alloc->free(alloc->ctx, ab_str, ab_len + 1);
+    if (parse_err != HU_OK)
+        return NULL;
+    return ab_clone;
+}
+
+static hu_json_value_t *cp_fidelity_empty_ab(hu_allocator_t *alloc) {
+    hu_json_value_t *ab = hu_json_object_new(alloc);
+    if (!ab)
+        return NULL;
+    hu_json_object_set(alloc, ab, "available", hu_json_bool_new(alloc, false));
+    return ab;
+}
+
+hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *app,
+                                     hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                     const hu_json_value_t *root, char **out, size_t *out_len) {
+    (void)conn;
+    (void)proto;
+
+    hu_json_value_t *obj = hu_json_object_new(alloc);
+    if (!obj)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    /* Resolve persona name. Priority: explicit `params.persona`
+     * over the agent's active persona. When neither exists, return
+     * a zero-state response (same shape, all zeros) so the tile
+     * still renders without an error banner. */
+    const char *persona_name = NULL;
+    size_t persona_name_len = 0;
+    if (root) {
+        hu_json_value_t *params = hu_json_object_get(root, "params");
+        hu_json_value_t *p = params ? hu_json_object_get(params, "persona") : NULL;
+        if (p && p->type == HU_JSON_STRING && p->data.string.len > 0U) {
+            persona_name = p->data.string.ptr;
+            persona_name_len = p->data.string.len;
+        }
+    }
+    if (!persona_name && app && app->agent && app->agent->persona &&
+        app->agent->persona->name && app->agent->persona->name_len > 0U) {
+        persona_name = app->agent->persona->name;
+        persona_name_len = app->agent->persona->name_len;
+    }
+
+    if (!persona_name) {
+        cp_json_set_str(alloc, obj, "persona", "");
+        cp_json_set_str(alloc, obj, "fingerprint_source", "synthetic");
+        hu_json_value_t *baseline = hu_json_object_new(alloc);
+        if (baseline) {
+            hu_json_object_set(alloc, baseline, "scored", hu_json_number_new(alloc, 0));
+            hu_json_object_set(alloc, baseline, "mean", hu_json_number_new(alloc, 0));
+            hu_json_object_set(alloc, baseline, "min", hu_json_number_new(alloc, 0));
+            hu_json_object_set(alloc, baseline, "max", hu_json_number_new(alloc, 0));
+            hu_json_object_set(alloc, obj, "baseline", baseline);
+        }
+        hu_json_value_t *ab = cp_fidelity_empty_ab(alloc);
+        if (ab)
+            hu_json_object_set(alloc, obj, "ab", ab);
+        cp_json_set_str(alloc, obj, "error", "no persona configured");
+        hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
+        hu_json_free(alloc, obj);
+        return err;
+    }
+
+    /* Load persona — bail with same-shape error response on failure. */
+    hu_persona_t persona = {0};
+    hu_error_t load_err = hu_persona_load(alloc, persona_name, persona_name_len, &persona);
+    if (load_err != HU_OK) {
+        hu_json_object_set(alloc, obj, "persona",
+                           hu_json_string_new(alloc, persona_name, persona_name_len));
+        cp_json_set_str(alloc, obj, "fingerprint_source", "synthetic");
+        hu_json_value_t *baseline = hu_json_object_new(alloc);
+        if (baseline) {
+            hu_json_object_set(alloc, baseline, "scored", hu_json_number_new(alloc, 0));
+            hu_json_object_set(alloc, baseline, "mean", hu_json_number_new(alloc, 0));
+            hu_json_object_set(alloc, baseline, "min", hu_json_number_new(alloc, 0));
+            hu_json_object_set(alloc, baseline, "max", hu_json_number_new(alloc, 0));
+            hu_json_object_set(alloc, obj, "baseline", baseline);
+        }
+        hu_json_value_t *ab = cp_fidelity_empty_ab(alloc);
+        if (ab)
+            hu_json_object_set(alloc, obj, "ab", ab);
+        cp_json_set_str(alloc, obj, "error", "persona load failed");
+        hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
+        hu_json_free(alloc, obj);
+        return err;
+    }
+
+    /* Compute baseline via the shared helper — same numbers the
+     * CLI emits. Synthetic fallback fires whenever the user has no
+     * `personal_model.bin` yet. */
+    hu_communication_style_t target;
+    bool synthetic;
+    (void)hu_ml_fidelity_resolve_target(alloc, &target, &synthetic);
+    hu_communication_style_set_summary_t baseline_summary = {0};
+    (void)hu_ml_fidelity_score_baseline(&persona, &target, &baseline_summary);
+
+    hu_json_object_set(alloc, obj, "persona",
+                       hu_json_string_new(alloc, persona_name, persona_name_len));
+    hu_json_object_set(alloc, obj, "fingerprint_source",
+                       hu_json_string_new(alloc, synthetic ? "synthetic" : "personal_model",
+                                          synthetic ? 9 : 14));
+
+    hu_json_value_t *baseline = hu_json_object_new(alloc);
+    if (baseline) {
+        hu_json_object_set(alloc, baseline, "scored",
+                           hu_json_number_new(alloc, (double)baseline_summary.scored));
+        hu_json_object_set(alloc, baseline, "mean",
+                           hu_json_number_new(alloc, baseline_summary.mean));
+        hu_json_object_set(alloc, baseline, "min",
+                           hu_json_number_new(alloc, baseline_summary.min_score));
+        hu_json_object_set(alloc, baseline, "max",
+                           hu_json_number_new(alloc, baseline_summary.max_score));
+        hu_json_object_set(alloc, obj, "baseline", baseline);
+    }
+
+    /* A/B section — opportunistic. If the orchestrator has written
+     * a fresh `last_fidelity_ab.json`, surface it; otherwise emit
+     * `available:false`. The tile expects both shapes. */
+    hu_json_value_t *ab = cp_fidelity_load_ab_object(alloc);
+    if (!ab)
+        ab = cp_fidelity_empty_ab(alloc);
+    if (ab)
+        hu_json_object_set(alloc, obj, "ab", ab);
+
+    hu_persona_deinit(alloc, &persona);
+    hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
+    hu_json_free(alloc, obj);
+    return err;
+}
+
+/* ── metrics.directive_telemetry ─────────────────────────────────────── *
+ *
+ * Track D D2.2 — emits the per-variant directive fire counts so a
+ * dashboard can answer "are channels actually receiving the
+ * overlay-tuned directive?". Read-only, no params, no side effects.
+ *
+ * Threat notes: handler reads in-memory atomic counters only. No
+ * filesystem access, no privileged data, no PII. Safe to expose
+ * unauthenticated if the gateway operator chooses (the counts say
+ * nothing about content — just which branch fired). */
+
+hu_error_t cp_admin_metrics_directive_telemetry(hu_allocator_t *alloc, hu_app_context_t *app,
+                                                hu_ws_conn_t *conn,
+                                                const hu_control_protocol_t *proto,
+                                                const hu_json_value_t *root, char **out,
+                                                size_t *out_len) {
+    (void)app;
+    (void)conn;
+    (void)proto;
+    (void)root;
+
+    hu_directive_telemetry_t snap;
+    hu_personal_model_directive_telemetry_snapshot(&snap);
+
+    hu_json_value_t *obj = hu_json_object_new(alloc);
+    if (!obj)
+        return HU_ERR_OUT_OF_MEMORY;
+    hu_json_object_set(alloc, obj, "total", hu_json_number_new(alloc, (double)snap.total));
+
+    /* Variants live in their own sub-object so the contract is
+     * forward-compatible: appending a new variant to the enum
+     * adds a new key here without breaking existing consumers. */
+    hu_json_value_t *variants = hu_json_object_new(alloc);
+    if (variants) {
+        for (size_t i = 0; i < HU_DIRECTIVE_VARIANT__COUNT; i++) {
+            const char *label =
+                hu_personal_model_directive_variant_label((hu_directive_variant_t)i);
+            hu_json_object_set(alloc, variants, label,
+                               hu_json_number_new(alloc, (double)snap.counts[i]));
+        }
+        hu_json_object_set(alloc, obj, "variants", variants);
     }
 
     hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);

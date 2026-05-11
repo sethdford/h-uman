@@ -78,6 +78,25 @@ if [ -f "scripts/check-memory-query-variant.sh" ]; then
   run_check "Memory query variant scan" bash scripts/check-memory-query-variant.sh
 fi
 
+# 2d. Track D D2.2 — lora-baseline fidelity gate (cheap, deterministic).
+# Runs the offline persona-fidelity scorer on a fixture persona and
+# fails when the mean drifts below the floor. Catches regressions in
+# the scorer (always-zero, NaN), the synthetic fingerprint defaults,
+# and the abbreviation list. Skipped when the human binary isn't built.
+if [ -f "scripts/check-lora-baseline.sh" ] && [ -x "build/human" ]; then
+  run_check "lora-baseline gate" bash scripts/check-lora-baseline.sh
+fi
+
+# 2e. Track D D2.2 — lora-ab fidelity-delta gate (the actual A/B
+# evaluation harness). Runs the comparator on the paired fixtures
+# (formal pre-LoRA / casual post-LoRA) and fails when the mean
+# delta drops below LORA_AB_FLOOR_DELTA (0.10 default). Pinned
+# alongside the baseline gate so a regression in either the scorer
+# or the comparator is caught before merge.
+if [ -f "scripts/check-lora-ab.sh" ] && [ -x "build/human" ]; then
+  run_check "lora-ab gate" bash scripts/check-lora-ab.sh
+fi
+
 # 2c. Optional security surface scan (Track E; informational unless VERIFY_SECURITY_SCAN=strict)
 if [ "${VERIFY_SECURITY_SCAN:-0}" = "1" ] || [ "${VERIFY_SECURITY_SCAN:-}" = "strict" ]; then
   if [ -f "scripts/security-sensitive-api-scan.sh" ]; then

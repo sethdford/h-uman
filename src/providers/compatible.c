@@ -141,11 +141,13 @@ static hu_error_t compatible_build_chat_json(hu_allocator_t *alloc,
                     } else if (cp->tag == HU_CONTENT_PART_IMAGE_BASE64) {
                         hu_json_object_set(alloc, part, "type",
                                            hu_json_string_new(alloc, "image_url", 9));
-                        char url_buf[32];
+                        char url_buf[64];
                         int ulen = snprintf(url_buf, sizeof(url_buf), "data:%.*s;base64,",
                             (int)cp->data.image_base64.media_type_len,
                             cp->data.image_base64.media_type);
-                        size_t total = (ulen > 0 ? (size_t)ulen : 0) + cp->data.image_base64.data_len;
+                        if (ulen < 0) ulen = 0;
+                        if ((size_t)ulen > sizeof(url_buf)) ulen = (int)sizeof(url_buf);
+                        size_t total = (size_t)ulen + cp->data.image_base64.data_len;
                         char *data_url = (char *)alloc->alloc(alloc->ctx, total + 1);
                         if (data_url) {
                             memcpy(data_url, url_buf, (size_t)ulen);

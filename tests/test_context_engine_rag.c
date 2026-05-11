@@ -88,6 +88,7 @@ static void test_rag_ingest_and_assemble(void) {
     assert(assembled.messages_count == 2);
     assert(assembled.total_tokens > 0);
 
+    hu_assembled_context_free(&s_alloc, &assembled);
     engine.vtable->deinit(engine.ctx, &s_alloc);
 }
 
@@ -115,6 +116,7 @@ static void test_rag_recency_limit(void) {
     hu_assembled_context_t assembled;
     engine.vtable->assemble(engine.ctx, &s_alloc, &budget, &assembled);
     assert(assembled.messages_count <= 2);
+    hu_assembled_context_free(&s_alloc, &assembled);
 
     engine.vtable->deinit(engine.ctx, &s_alloc);
 }
@@ -145,6 +147,7 @@ static void test_rag_compact(void) {
     engine.vtable->assemble(engine.ctx, &s_alloc, &budget, &assembled);
     assert(assembled.messages_count < 10);
 
+    hu_assembled_context_free(&s_alloc, &assembled);
     engine.vtable->deinit(engine.ctx, &s_alloc);
 }
 
@@ -175,6 +178,7 @@ static void test_rag_after_turn(void) {
     engine.vtable->assemble(engine.ctx, &s_alloc, &budget, &assembled);
     assert(assembled.messages_count == 2);
 
+    hu_assembled_context_free(&s_alloc, &assembled);
     engine.vtable->deinit(engine.ctx, &s_alloc);
 }
 
@@ -217,6 +221,7 @@ static void test_rag_budget_respects_token_limit(void) {
     engine.vtable->assemble(engine.ctx, &s_alloc, &budget, &assembled);
     assert(assembled.total_tokens <= 10 || assembled.messages_count <= 1);
 
+    hu_assembled_context_free(&s_alloc, &assembled);
     engine.vtable->deinit(engine.ctx, &s_alloc);
 }
 

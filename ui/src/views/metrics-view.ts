@@ -11,6 +11,8 @@ import "../components/hu-card.js";
 import "../components/hu-skeleton.js";
 import "../components/hu-empty-state.js";
 import "../components/hu-button.js";
+import "../components/hu-fidelity-tile.js";
+import type { FidelityStatus } from "../components/hu-fidelity-tile.js";
 import { icons } from "../icons.js";
 import { friendlyError } from "../utils/friendly-error.js";
 
@@ -238,6 +240,12 @@ export class ScMetricsView extends GatewayAwareLitElement {
   @state() private snapshot: MetricsSnapshot = {};
   @state() private loading = false;
   @state() private error = "";
+  /* Persona fidelity is a separate gateway call so a slow or
+   * failing fidelity backend never blocks the main `metrics.snapshot`
+   * paint. Both load in parallel; each renders its own loading
+   * + error state independently. */
+  @state() private fidelity: FidelityStatus | null = null;
+  @state() private fidelityError = "";
 
   protected override async load(): Promise<void> {
     const gw = this.gateway;
@@ -260,6 +268,29 @@ export class ScMetricsView extends GatewayAwareLitElement {
       this.snapshot = {};
     } finally {
       this.loading = false;
+    }
+    void this._loadFidelity();
+  }
+
+  private async _loadFidelity(): Promise<void> {
+    const gw = this.gateway;
+    if (!gw) return;
+    this.fidelity = null;
+    this.fidelityError = "";
+    try {
+      const res = (await gw.request<FidelityStatus>("metrics.fidelity", {})) as
+        | FidelityStatus
+        | { result?: FidelityStatus };
+      const data =
+        (res && "result" in res && (res as { result?: FidelityStatus }).result) ||
+        (res && "baseline" in res ? (res as FidelityStatus) : null);
+      if (data && data.persona !== undefined) {
+        this.fidelity = data;
+      } else {
+        this.fidelityError = "no fidelity data";
+      }
+    } catch (e) {
+      this.fidelityError = friendlyError(e);
     }
   }
 
@@ -540,10 +571,32 @@ export class ScMetricsView extends GatewayAwareLitElement {
       ${this.loading
         ? this._renderSkeleton()
         : html`
-            ${this._renderIntelligenceStats()} ${this._renderEvalCalibration()}
-            ${this._renderHulaObservability()} ${this._renderSystemHealth()}
-            ${this._renderIntelligencePipeline()}
+            ${this._renderFidelity()} ${this._renderIntelligenceStats()}
+            ${this._renderEvalCalibration()} ${this._renderHulaObservability()}
+            ${this._renderSystemHealth()} ${this._renderIntelligencePipeline()}
           `}
+    `;
+  }
+
+  private _renderFidelity() {
+    /* The fidelity tile is its own component — it owns its loading
+     * skeleton and error banner, so we just hand it the data and
+     * an optional `errorMessage`. When `metrics.fidelity` returned
+     * a payload but the field surface is empty (e.g. the agent
+     * has no persona configured), the C handler emits an
+     * `error: "no persona configured"` field which we surface here. */
+    const errMsg =
+      this.fidelityError ||
+      (this.fidelity && (this.fidelity as FidelityStatus & { error?: string }).error) ||
+      "";
+    return html`
+      <div class="section hu-scroll-reveal" role="region" aria-label="Persona fidelity">
+        <hu-section-header
+          heading="Persona Fidelity"
+          description="LoRA-adapter delta against the active persona's example bank"
+        ></hu-section-header>
+        <hu-fidelity-tile .data=${this.fidelity} .errorMessage=${errMsg}></hu-fidelity-tile>
+      </div>
     `;
   }
 }

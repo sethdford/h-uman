@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -4792,6 +4793,362 @@ static void test_agent_m3_adapter_attach_fixture_replace(void) {
     agent.m3_adapter = NULL;
 }
 
+/* ─── Track D D1.3 — rollback flag ──────────────────────────────────── */
+
+static void test_m3_adapter_should_disable_default_false(void) {
+    /* Make sure no env var contaminates the result. */
+    unsetenv("HUMAN_M3_ADAPTER_DISABLE");
+    HU_ASSERT_FALSE(hu_m3_adapter_should_disable(false));
+}
+
+static void test_m3_adapter_should_disable_true_when_cfg_set(void) {
+    unsetenv("HUMAN_M3_ADAPTER_DISABLE");
+    HU_ASSERT_TRUE(hu_m3_adapter_should_disable(true));
+}
+
+static void test_m3_adapter_should_disable_env_overrides_cfg_false(void) {
+    setenv("HUMAN_M3_ADAPTER_DISABLE", "1", 1);
+    HU_ASSERT_TRUE(hu_m3_adapter_should_disable(false));
+    unsetenv("HUMAN_M3_ADAPTER_DISABLE");
+}
+
+static void test_m3_adapter_should_disable_env_zero_does_not_force(void) {
+    /* "0" is the explicit re-enable signal — config still wins when
+     * config says disable, but a config-default operator setting
+     * `HUMAN_M3_ADAPTER_DISABLE=0` shouldn't disable. */
+    setenv("HUMAN_M3_ADAPTER_DISABLE", "0", 1);
+    HU_ASSERT_FALSE(hu_m3_adapter_should_disable(false));
+    HU_ASSERT_TRUE(hu_m3_adapter_should_disable(true));
+    unsetenv("HUMAN_M3_ADAPTER_DISABLE");
+}
+
+static void test_m3_adapter_should_disable_env_empty_does_not_force(void) {
+    setenv("HUMAN_M3_ADAPTER_DISABLE", "", 1);
+    HU_ASSERT_FALSE(hu_m3_adapter_should_disable(false));
+    unsetenv("HUMAN_M3_ADAPTER_DISABLE");
+}
+
+static void test_m3_adapter_should_disable_env_nonzero_force(void) {
+    /* Any non-empty value other than literal "0" forces-disable so
+     * `=true`, `=yes`, `=on` all work. */
+    setenv("HUMAN_M3_ADAPTER_DISABLE", "true", 1);
+    HU_ASSERT_TRUE(hu_m3_adapter_should_disable(false));
+    setenv("HUMAN_M3_ADAPTER_DISABLE", "yes", 1);
+    HU_ASSERT_TRUE(hu_m3_adapter_should_disable(false));
+    setenv("HUMAN_M3_ADAPTER_DISABLE", "on", 1);
+    HU_ASSERT_TRUE(hu_m3_adapter_should_disable(false));
+    unsetenv("HUMAN_M3_ADAPTER_DISABLE");
+}
+
+/* When the rollback flag is active, the chat-loop hook should remain
+ * a no-op even if a stray `agent->m3_adapter` had somehow been left
+ * attached (defensive): the no-op-when-NULL contract on
+ * `hu_agent_m3_on_provider_success` is what turns this into a true
+ * compile-time-eliminable rollback. This test pins that NULL
+ * adapter → no-op contract. */
+static void test_m3_on_provider_success_noop_when_unattached(void) {
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    /* m3_adapter is NULL; hook must not crash and must be safe. */
+    hu_agent_m3_on_provider_success(&agent);
+    /* And NULL agent must also be safe — the hook is on the hot path
+     * for every provider success. */
+    hu_agent_m3_on_provider_success(NULL);
+    HU_ASSERT_NULL(agent.m3_adapter);
+}
+
+/* ── Track D D2.1 — honest-gap caveat snapshot tests ──────────────────
+ *
+ * These tests pin the user-facing caveat strings that `human ml
+ * lora-persona` emits. They are a guard against silent drift toward
+ * overclaiming: if a future refactor softens "NOT a frontier" or
+ * drops the doc-path link, these tests fail and the change has to
+ * be made explicitly. */
+
+static void test_lora_persona_caveat_doc_path_is_stable(void) {
+    const char *p = hu_ml_lora_persona_caveat_doc_path();
+    HU_ASSERT_NOT_NULL(p);
+    /* Snapshot — pin the exact path the docs/plans tree expects. */
+    HU_ASSERT_STR_EQ(p, "docs/plans/2026-05-10-m3-frontier-model-bridge.md");
+}
+
+static void test_lora_persona_caveat_block_disclaims_frontier(void) {
+    const char *block = hu_ml_lora_persona_caveat_block();
+    HU_ASSERT_NOT_NULL(block);
+    /* Three required substrings: the explicit "NOT", the model name
+     * we're actually training, and a reference to the bridge doc. */
+    HU_ASSERT_TRUE(strstr(block, "NOT a frontier") != NULL ||
+                   strstr(block, "not a frontier") != NULL);
+    HU_ASSERT_TRUE(strstr(block, "HUML GPT") != NULL);
+    HU_ASSERT_TRUE(strstr(block, hu_ml_lora_persona_caveat_doc_path()) != NULL);
+}
+
+static void test_lora_persona_caveat_block_uses_consistent_prefix(void) {
+    const char *block = hu_ml_lora_persona_caveat_block();
+    HU_ASSERT_NOT_NULL(block);
+    /* Every line must start with `[lora-persona]` so the block aligns
+     * with the rest of the CLI output. Walk newlines and check. */
+    HU_ASSERT_TRUE(strncmp(block, "[lora-persona]", 14) == 0);
+    const char *p = block;
+    while ((p = strchr(p, '\n')) != NULL) {
+        p++;
+        if (*p == '\0')
+            break;
+        HU_ASSERT_TRUE(strncmp(p, "[lora-persona]", 14) == 0);
+    }
+}
+
+static void test_lora_persona_caveat_block_has_bridge_doc_reference(void) {
+    /* Cross-reference: the block must point users to the bridge doc.
+     * If someone changes the doc path constant, this test forces the
+     * block to be regenerated to match. */
+    const char *block = hu_ml_lora_persona_caveat_block();
+    HU_ASSERT_TRUE(strstr(block, "Llama") != NULL);
+    HU_ASSERT_TRUE(strstr(block, "Qwen") != NULL);
+    HU_ASSERT_TRUE(strstr(block, "Mistral") != NULL);
+    /* The block ends with a newline so callers can `fputs` it
+     * without adding their own. */
+    size_t n = strlen(block);
+    HU_ASSERT_TRUE(n > 0 && block[n - 1] == '\n');
+}
+
+/* ── lora-runner / fidelity-status CLI integration ─────────────────── */
+
+/* Drops a minimal persona JSON into a tmp dir and returns the dir
+ * path. Caller passes the dir to HU_PERSONA_DIR. */
+static bool runner_test_setup_persona(char *tmpdir_out, size_t tmpdir_cap, const char *name) {
+    char tmpl[] = "/tmp/human_lora_runner_test_XXXXXX";
+    if (!mkdtemp(tmpl))
+        return false;
+    if (strlen(tmpl) + 1 > tmpdir_cap)
+        return false;
+    memcpy(tmpdir_out, tmpl, strlen(tmpl) + 1);
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/%s.json", tmpdir_out, name);
+    FILE *fp = fopen(path, "wb");
+    if (!fp)
+        return false;
+    /* Two banks, three examples total — exercises the multi-bank
+     * walk and produces 3 JSON entries in the runner's output. */
+    fprintf(fp,
+            "{\n"
+            "  \"version\": 1,\n"
+            "  \"name\": \"%s\",\n"
+            "  \"core\": {\"identity\": \"test runner persona\", \"traits\": [\"casual\"]},\n"
+            "  \"example_banks\": [\n"
+            "    {\"channel\": \"cli\", \"examples\": [\n"
+            "      {\"context\": \"a\", \"incoming\": \"hi there\", \"response\": \"hey\"},\n"
+            "      {\"context\": \"b\", \"incoming\": \"how are you\", \"response\": \"good u\"}\n"
+            "    ]},\n"
+            "    {\"channel\": \"telegram\", \"examples\": [\n"
+            "      {\"context\": \"c\", \"incoming\": \"yo\", \"response\": \"ayy lmk\"}\n"
+            "    ]}\n"
+            "  ]\n"
+            "}\n",
+            name);
+    fclose(fp);
+    return true;
+}
+
+static void runner_test_cleanup(const char *tmpdir) {
+    /* Walk the tmpdir and unlink anything inside, then rmdir. */
+    if (!tmpdir || !tmpdir[0])
+        return;
+    DIR *d = opendir(tmpdir);
+    if (d) {
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+                continue;
+            char p[1024];
+            snprintf(p, sizeof(p), "%s/%s", tmpdir, de->d_name);
+            unlink(p);
+        }
+        closedir(d);
+    }
+    rmdir(tmpdir);
+}
+
+static void test_lora_runner_writes_response_array_in_test_mode(void) {
+    /* Under HU_IS_TEST the runner echoes each example's `response`
+     * field into the output JSON. End-to-end: the persona loads, the
+     * runner walks both banks, and the output file contains a 3-
+     * element JSON array with the canned strings. */
+    char tmpdir[256];
+    if (!runner_test_setup_persona(tmpdir, sizeof(tmpdir), "runner_test"))
+        return; /* skip silently when /tmp is unwriteable */
+
+    setenv("HU_PERSONA_DIR", tmpdir, 1);
+
+    char output[1024];
+    snprintf(output, sizeof(output), "%s/responses.json", tmpdir);
+
+    const char *argv[] = {"lora-runner", "--persona", "runner_test", "--output", output};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_ml_cli_lora_runner(&alloc, 5, argv);
+    unsetenv("HU_PERSONA_DIR");
+
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Read the file back and check it's a JSON array with 3
+     * non-empty strings. */
+    FILE *fp = fopen(output, "rb");
+    HU_ASSERT_NOT_NULL(fp);
+    char buf[1024] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(buf[0] == '[');
+    /* Each canned response from the fixture should appear in the
+     * JSON output. */
+    HU_ASSERT_TRUE(strstr(buf, "hey") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "good u") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "ayy lmk") != NULL);
+
+    runner_test_cleanup(tmpdir);
+}
+
+static void test_lora_runner_rejects_missing_args(void) {
+    /* Without --persona or --output, the CLI must reject and not
+     * try to write a partial file. */
+    hu_allocator_t alloc = hu_system_allocator();
+    {
+        const char *argv[] = {"lora-runner"};
+        HU_ASSERT_EQ(hu_ml_cli_lora_runner(&alloc, 1, argv), HU_ERR_INVALID_ARGUMENT);
+    }
+    {
+        const char *argv[] = {"lora-runner", "--persona", "x"};
+        HU_ASSERT_EQ(hu_ml_cli_lora_runner(&alloc, 3, argv), HU_ERR_INVALID_ARGUMENT);
+    }
+    {
+        const char *argv[] = {"lora-runner", "--output", "/tmp/x"};
+        HU_ASSERT_EQ(hu_ml_cli_lora_runner(&alloc, 3, argv), HU_ERR_INVALID_ARGUMENT);
+    }
+}
+
+static void test_lora_runner_respects_max_examples(void) {
+    /* --max-examples 1 must produce a 1-element array even though
+     * the persona has 3 examples across two banks. */
+    char tmpdir[256];
+    if (!runner_test_setup_persona(tmpdir, sizeof(tmpdir), "runner_max"))
+        return;
+    setenv("HU_PERSONA_DIR", tmpdir, 1);
+
+    char output[1024];
+    snprintf(output, sizeof(output), "%s/responses.json", tmpdir);
+
+    const char *argv[] = {"lora-runner",      "--persona",      "runner_max",
+                          "--output",         output,           "--max-examples", "1"};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_ml_cli_lora_runner(&alloc, 7, argv);
+    unsetenv("HU_PERSONA_DIR");
+
+    HU_ASSERT_EQ(err, HU_OK);
+
+    FILE *fp = fopen(output, "rb");
+    HU_ASSERT_NOT_NULL(fp);
+    char buf[1024] = {0};
+    fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    /* Only the first example's response (canned: "hey") should
+     * appear; "good u" and "ayy lmk" must be absent. */
+    HU_ASSERT_TRUE(strstr(buf, "hey") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "good u") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "ayy lmk") == NULL);
+
+    runner_test_cleanup(tmpdir);
+}
+
+static void test_fidelity_status_emits_json_with_baseline(void) {
+    /* fidelity-status without --before/--after must still emit a
+     * valid JSON object containing baseline metrics and ab.available
+     * = false. */
+    char tmpdir[256];
+    if (!runner_test_setup_persona(tmpdir, sizeof(tmpdir), "fidelity_test"))
+        return;
+    setenv("HU_PERSONA_DIR", tmpdir, 1);
+    setenv("HOME", tmpdir, 1); /* keep personal_model.bin lookup in tmp */
+
+    char output[1024];
+    snprintf(output, sizeof(output), "%s/status.json", tmpdir);
+
+    const char *argv[] = {"fidelity-status", "--persona", "fidelity_test", "--output", output};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_ml_cli_fidelity_status(&alloc, 5, argv);
+    unsetenv("HU_PERSONA_DIR");
+    unsetenv("HOME");
+
+    HU_ASSERT_EQ(err, HU_OK);
+
+    FILE *fp = fopen(output, "rb");
+    HU_ASSERT_NOT_NULL(fp);
+    char buf[2048] = {0};
+    fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    HU_ASSERT_TRUE(strstr(buf, "\"persona\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"baseline\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"mean\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"ab\"") != NULL);
+    /* No --before/--after → ab.available must be false. */
+    HU_ASSERT_TRUE(strstr(buf, "\"available\":false") != NULL ||
+                   strstr(buf, "\"available\": false") != NULL);
+
+    runner_test_cleanup(tmpdir);
+}
+
+static void test_fidelity_status_includes_ab_when_files_provided(void) {
+    /* When --before and --after are both provided AND parse
+     * successfully, ab.available must be true and the delta key
+     * must be present. */
+    char tmpdir[256];
+    if (!runner_test_setup_persona(tmpdir, sizeof(tmpdir), "fidelity_ab"))
+        return;
+    setenv("HU_PERSONA_DIR", tmpdir, 1);
+    setenv("HOME", tmpdir, 1);
+
+    /* Drop two minimal response sets in the tmp dir. */
+    char before_path[1024], after_path[1024];
+    snprintf(before_path, sizeof(before_path), "%s/before.json", tmpdir);
+    snprintf(after_path, sizeof(after_path), "%s/after.json", tmpdir);
+
+    FILE *fp = fopen(before_path, "wb");
+    if (fp) {
+        fputs("[\"FORMAL FORMAL FORMAL DECLARATION OF INTENT.\"]\n", fp);
+        fclose(fp);
+    }
+    fp = fopen(after_path, "wb");
+    if (fp) {
+        fputs("[\"hey lmk if u want anything else today\"]\n", fp);
+        fclose(fp);
+    }
+
+    char output[1024];
+    snprintf(output, sizeof(output), "%s/status.json", tmpdir);
+
+    const char *argv[] = {"fidelity-status", "--persona", "fidelity_ab",
+                          "--before",        before_path, "--after",
+                          after_path,        "--output",  output};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_ml_cli_fidelity_status(&alloc, 9, argv);
+    unsetenv("HU_PERSONA_DIR");
+    unsetenv("HOME");
+
+    HU_ASSERT_EQ(err, HU_OK);
+
+    fp = fopen(output, "rb");
+    HU_ASSERT_NOT_NULL(fp);
+    char buf[2048] = {0};
+    fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    HU_ASSERT_TRUE(strstr(buf, "\"available\":true") != NULL ||
+                   strstr(buf, "\"available\": true") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"delta\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"before_mean\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"after_mean\"") != NULL);
+
+    runner_test_cleanup(tmpdir);
+}
+
 void run_ml_tests(void) {
     HU_TEST_SUITE("ml");
     /* BPE tokenizer */
@@ -4960,4 +5317,22 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_frontier_adapter_fixture_roundtrip);
     HU_RUN_TEST(test_agent_m3_adapter_attach_bad_path);
     HU_RUN_TEST(test_agent_m3_adapter_attach_fixture_replace);
+    /* Track D D1.3 — rollback flag */
+    HU_RUN_TEST(test_m3_adapter_should_disable_default_false);
+    HU_RUN_TEST(test_m3_adapter_should_disable_true_when_cfg_set);
+    HU_RUN_TEST(test_m3_adapter_should_disable_env_overrides_cfg_false);
+    HU_RUN_TEST(test_m3_adapter_should_disable_env_zero_does_not_force);
+    HU_RUN_TEST(test_m3_adapter_should_disable_env_empty_does_not_force);
+    HU_RUN_TEST(test_m3_adapter_should_disable_env_nonzero_force);
+    HU_RUN_TEST(test_m3_on_provider_success_noop_when_unattached);
+    /* Track D D2.1 — honest-gap caveat snapshot tests */
+    HU_RUN_TEST(test_lora_persona_caveat_doc_path_is_stable);
+    HU_RUN_TEST(test_lora_runner_writes_response_array_in_test_mode);
+    HU_RUN_TEST(test_lora_runner_rejects_missing_args);
+    HU_RUN_TEST(test_lora_runner_respects_max_examples);
+    HU_RUN_TEST(test_fidelity_status_emits_json_with_baseline);
+    HU_RUN_TEST(test_fidelity_status_includes_ab_when_files_provided);
+    HU_RUN_TEST(test_lora_persona_caveat_block_disclaims_frontier);
+    HU_RUN_TEST(test_lora_persona_caveat_block_uses_consistent_prefix);
+    HU_RUN_TEST(test_lora_persona_caveat_block_has_bridge_doc_reference);
 }

@@ -114,6 +114,88 @@ void hu_personal_model_init(hu_personal_model_t *model);
  * Writes a human-readable summary into buf. Returns bytes written. */
 size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *buf, size_t cap);
 
+/* Same as `_build_prompt`, but tunes the channel-affected directive
+ * lines (notably the recently-completed acknowledgment directive) to
+ * the active channel's persona overlay.
+ *
+ * Honored overlay fields, when present:
+ *   - `formality`     "casual" → permit warmer/punchier wording;
+ *                     "formal" → demand brevity, no emoji.
+ *   - `avg_length`    "short" or numeric ≤30 → directive emphasizes
+ *                     "a single sentence" instead of "warmly".
+ *   - `emoji_usage`   "moderate" / "high" → directive may suggest
+ *                     "an emoji is fine if it fits"; "minimal" or
+ *                     unspecified → no emoji guidance.
+ *
+ * `overlay = NULL` is equivalent to `hu_personal_model_build_prompt`
+ * (the legacy wrapper) — emits the channel-neutral default
+ * directive. The overlay is consulted for the directive line only;
+ * everything else (facts, topics, goals, recently-completed list,
+ * style summary) is identical to the legacy call. */
+struct hu_persona_overlay; /* fwd decl — keeps personal_model.h
+                            * out of the persona dependency tree;
+                            * the typedef in persona.h is
+                            * compatible with this anonymous tag. */
+size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *model,
+                                                   const struct hu_persona_overlay *overlay,
+                                                   char *buf, size_t cap);
+
+/* Track D D2.2 — acknowledgment-directive variant telemetry.
+ *
+ * Every time the prompt builder fires the recently-completed
+ * acknowledgment directive (see `acknowledgment_directive_for_overlay`
+ * in personal_model.c), it picks one of a small fixed set of
+ * variants based on the active channel's persona overlay. The
+ * counters below let dashboards and tests measure which variants
+ * actually fire in production — answering "do casual+emoji
+ * channels really see the casual+emoji wording, or is the gate
+ * cliffing somewhere?" without sprinkling log lines on every
+ * agent turn.
+ *
+ * Counters are pure in-memory atomics — no I/O, no log line per
+ * fire (volume on a chatty channel would be overkill). Read with
+ * `hu_personal_model_directive_telemetry_snapshot`; reset with
+ * `_reset` (intended for tests; production code should leave the
+ * counters monotonically increasing).
+ *
+ * IMPORTANT: the enum order matches the static counter array in
+ * personal_model.c — never reorder, only append. */
+typedef enum {
+    HU_DIRECTIVE_VARIANT_NULL_OVERLAY = 0, /* legacy `_build_prompt`: NULL overlay */
+    HU_DIRECTIVE_VARIANT_DEFAULT,          /* overlay present but no useful signal */
+    HU_DIRECTIVE_VARIANT_FORMAL_TERSE,     /* formal/professional channels */
+    HU_DIRECTIVE_VARIANT_CASUAL_EMOJI,     /* casual + moderate/high emoji */
+    HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT,  /* casual w/o emoji license, or short channels */
+    HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI,   /* unspecified formality + emoji license */
+    HU_DIRECTIVE_VARIANT__COUNT
+} hu_directive_variant_t;
+
+typedef struct {
+    /* Per-variant fire counts. Indexed by `hu_directive_variant_t`. */
+    uint64_t counts[HU_DIRECTIVE_VARIANT__COUNT];
+    /* Total directive fires across all variants. Equals the sum
+     * of `counts[]` — exposed separately so callers can compute
+     * variant share without a loop. */
+    uint64_t total;
+} hu_directive_telemetry_t;
+
+/* Snapshot the current counters. Thread-safe; reads atomic
+ * locations without taking a lock. The returned struct is a
+ * value-type copy — callers may persist or display it freely. */
+void hu_personal_model_directive_telemetry_snapshot(hu_directive_telemetry_t *out);
+
+/* Zero out all counters. Pure for-tests helper — production
+ * surfaces should never call this (it loses observability data).
+ * Tests use it to isolate their own variant counts from any
+ * residual fires from earlier suites in the same process. */
+void hu_personal_model_directive_telemetry_reset(void);
+
+/* Returns a human-readable label for the variant ("null_overlay",
+ * "casual_emoji", etc.). Stable across builds — safe for log lines,
+ * dashboard JSON, and metric labels. Returns "unknown" for
+ * out-of-range values. */
+const char *hu_personal_model_directive_variant_label(hu_directive_variant_t v);
+
 /* True when the model carries any concrete signal worth injecting into a
  * system prompt (facts, topics, goals, named identity, or observed style).
  * Lets callers skip prompt-block injection on a fresh / unused model so we

@@ -90,6 +90,31 @@ hu_error_t cp_admin_usage_summary(hu_allocator_t *alloc, hu_app_context_t *app, 
 hu_error_t cp_admin_metrics_snapshot(hu_allocator_t *alloc, hu_app_context_t *app,
                                      hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
                                      const hu_json_value_t *root, char **out, size_t *out_len);
+/* Track D D2.2 — `metrics.fidelity` returns the same JSON shape as
+ * `human ml fidelity-status` so the dashboard tile can drop the
+ * demo-gateway mock and render live data. Both surfaces call the
+ * shared `src/ml/fidelity.c` primitives — the only difference is
+ * how the persona name is resolved (CLI: `--persona`; gateway:
+ * `params.persona` or, when omitted, the agent's active persona).
+ * The A/B section reads from the canonical
+ * `~/.human/last_fidelity_ab.json` (written by
+ * `scripts/lora-runner-ab.sh`) when present; otherwise
+ * `ab.available` is false. */
+hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *app,
+                                     hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                     const hu_json_value_t *root, char **out, size_t *out_len);
+/* Track D D2.2 — `metrics.directive_telemetry` exposes the
+ * per-variant fire counters maintained by
+ * `acknowledgment_directive_for_overlay`. The dashboard uses this
+ * to verify that channels with overlay-tuned directives actually
+ * see the tuned variant fire (e.g. iMessage with casual+emoji
+ * really does increment the casual_emoji counter, not the
+ * default fallback). Read-only; no parameters. */
+hu_error_t cp_admin_metrics_directive_telemetry(hu_allocator_t *alloc, hu_app_context_t *app,
+                                                hu_ws_conn_t *conn,
+                                                const hu_control_protocol_t *proto,
+                                                const hu_json_value_t *root, char **out,
+                                                size_t *out_len);
 hu_error_t cp_admin_activity_recent(hu_allocator_t *alloc, hu_app_context_t *app,
                                     hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
                                     const hu_json_value_t *root, char **out, size_t *out_len);

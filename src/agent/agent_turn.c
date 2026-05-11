@@ -262,8 +262,6 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/context/emotional_state.h"
 #include "human/context_engine.h"
 #include "human/context_tokens.h"
-#include "human/core/json.h"
-#include "human/core/string.h"
 #include "human/cost.h"
 #include "human/eval/turing_score.h"
 #include "human/hook.h"
@@ -3919,10 +3917,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 #endif
 
     /* B1: inject behavior-policy directive derived from the latest user
-     * message. Read-only integration: the policy never blocks the turn, only
-     * appends a short prompt directive. Caller frees nothing extra; we either
-     * grow `system_prompt` in place (realloc) or leave it untouched. */
-    if (system_prompt && msg && msg_len > 0) {
+     * message. Skipped for proactive turns — msg is system-generated,
+     * and running pressure detection on it corrupts pressure_history. */
+    if (system_prompt && msg && msg_len > 0 && !agent->proactive_turn) {
         int chclass = 0;
         if (agent->active_channel && agent->active_channel_len > 0) {
             chclass = at_behavior_channel_class(agent->active_channel, agent->active_channel_len);
@@ -5856,7 +5853,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 agent->alloc->free(agent->alloc->ctx, acp_context, acp_context_len + 1);
 
             /* Deep extraction: lightweight pattern-based fact extraction from user message */
-            if (agent->memory && agent->memory->vtable && agent->memory->vtable->store) {
+            if (!agent->proactive_turn && agent->memory && agent->memory->vtable && agent->memory->vtable->store) {
                 hu_deep_extract_result_t de_result;
                 memset(&de_result, 0, sizeof(de_result));
                 if (hu_deep_extract_lightweight(agent->alloc, msg, msg_len, &de_result) == HU_OK &&
@@ -7724,12 +7721,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                           &hook_res);
                                 if (hook_res.decision == HU_HOOK_DENY) {
                                     hu_tool_result_free(agent->alloc, result);
-                                    const char *deny_msg =
+                                    const char *deny_src =
                                         hook_res.message ? hook_res.message : "denied by hook";
                                     size_t deny_len = hook_res.message ? hook_res.message_len : 14;
-                                    *result = hu_tool_result_fail(deny_msg, deny_len);
-                                    result->error_msg_owned = false;
+                                    char *deny_copy = hu_strndup(agent->alloc, deny_src, deny_len);
                                     hu_hook_result_free(agent->alloc, &hook_res);
+                                    *result = hu_tool_result_fail(deny_copy ? deny_copy : "denied by hook",
+                                                                  deny_copy ? deny_len : 14);
+                                    result->error_msg_owned = true;
                                     goto dispatch_tool_done;
                                 }
                             }

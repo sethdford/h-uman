@@ -7,13 +7,16 @@
 #include "human/core/log.h"
 #include "human/ml/checkpoint.h"
 #include "human/ml/dataloader.h"
+#include "human/ml/fidelity.h"
 #include "human/core/string.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
+#include "human/memory/personal_model.h"
 #include "human/ml/dpo.h"
 #include "human/ml/experiment.h"
 #include "human/ml/learner.h"
 #include "human/ml/lora.h"
+#include "human/ml/m3_frontier_adapter.h"
 #include "human/ml/ml.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
@@ -22,6 +25,7 @@
 #include "human/ml/train.h"
 #include "human/ml/training_data_extractor.h"
 #include "human/agent/scheduler_status_json.h"
+#include "human/config.h"
 #include "human/persona.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
@@ -207,9 +211,9 @@ hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
         cfg.training.time_budget_secs = (int)dv;
     if ((dv = hu_json_get_number(root, "eval_tokens", 0.0)) > 0)
         cfg.training.eval_tokens = (size_t)dv;
-    /* GPT model dimensions — useful for tiny CPU smoke tests. Defaults
-     * (from hu_experiment_config_default) produce an 8-layer 512-embd model
-     * that is too slow on CPU for a quick smoke. */
+    /* GPT model dimensions — useful for tiny CPU smoke tests.
+     * Defaults (from hu_experiment_config_default) produce an 8-layer
+     * 512-embd model that is too slow on CPU for a quick smoke. */
     if ((dv = hu_json_get_number(root, "n_layer", 0.0)) > 0)
         cfg.gpt.n_layer = (size_t)dv;
     if ((dv = hu_json_get_number(root, "n_head", 0.0)) > 0)
@@ -693,6 +697,23 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
      * daemon's personalization block can load. No model is loaded;
      * the path is the only side effect. */
     const char *export_jsonl_path = NULL;
+    /* Phase A1.3 — when set, derive per-channel example banks from
+     * the user's conversation history before any export/training step.
+     * Combined with --export-jsonl, this is the one-command path:
+     *   history db → quality-filtered banks → Alpaca JSONL
+     * with no hand-authored bank required. The derived banks REPLACE
+     * any existing banks on the loaded persona for the duration of
+     * this CLI invocation; the persona file on disk is not touched. */
+    const char *from_history_db = NULL;
+    /* Per-channel cap for --from-history. 0 means use the default
+     * (HU_PERSONA_BANKS_FROM_HIST_DEFAULT_MAX_PER_CHANNEL = 32). */
+    int from_history_max_per_channel = 0;
+    /* Phase A1.4 — when true and --from-history derived new banks,
+     * write the modified persona back to disk via
+     * hu_persona_creator_write. Without --persist the derived banks
+     * exist only for the duration of this invocation; with it they
+     * survive into the next daemon start and the next prompt build. */
+    bool persist_persona = false;
     /* P0 #3 — signal-builder wiring. When --from-deltas is set, we
      * read applied persona deltas from a memory DB and treat them as
      * additional training examples. The previously-dead
@@ -761,6 +782,23 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             i++;
             continue;
         }
+        v = get_opt(argv, argc, i, "--from-history");
+        if (v) {
+            from_history_db = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--from-history-max");
+        if (v) {
+            parse_int_arg(v, &from_history_max_per_channel);
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--persist") == 0) {
+            persist_persona = true;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--backend");
         if (v) {
             backend = v;
@@ -807,6 +845,9 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             printf("Usage: human ml lora-persona --persona <name> "
                    "[--checkpoint <path>] [--output <path>] "
                    "[--from-deltas <memory.db> --contact <id>] "
+                   "[--from-history <memory.db>] "
+                   "[--from-history-max <N>] "
+                   "[--persist] "
                    "[--rank <N>] [--max-steps <N>] "
                    "[--export-jsonl <path>] "
                    "[--backend mlx] [--model <hf-id>] [--data-dir <path>] "
@@ -819,7 +860,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             printf("                 NOTE: this is the reference HUML GPT, NOT a "
                    "frontier model.\n");
             printf("                 Frontier model fine-tuning is tracked in\n");
-            printf("                 docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
+            printf("                 %s\n", hu_ml_lora_persona_caveat_doc_path());
             printf("\n  --from-deltas  Augment the persona example bank with applied\n");
             printf("                 persona deltas read from a memory database.\n");
             printf("                 Requires --contact to scope the read.\n");
@@ -830,6 +871,20 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             printf("                 axolotl, unsloth, or mlx-lm.lora and produce a\n");
             printf("                 GGUF LoRA the daemon can load via\n");
             printf("                 personalization.lora_adapter_path.\n");
+            printf("\n  --from-history Derive per-channel example banks from the\n");
+            printf("                 user's conversation history (the messages\n");
+            printf("                 table in <memory.db>). Pairs are PII-redacted,\n");
+            printf("                 quality-filtered (length / Shannon entropy /\n");
+            printf("                 unique-byte ratio), and within-run deduplicated\n");
+            printf("                 before they enter the bank. Replaces the\n");
+            printf("                 persona's loaded banks for this run only;\n");
+            printf("                 the persona JSON on disk is not modified.\n");
+            printf("  --from-history-max  Per-channel example cap (default 32).\n");
+            printf("\n  --persist      Write the modified persona (with --from-history-\n");
+            printf("                 derived banks) back to ~/.human/personas/<name>.json\n");
+            printf("                 so it survives this CLI invocation. Without\n");
+            printf("                 --persist the derived banks are scratch state\n");
+            printf("                 and the persona JSON on disk is not touched.\n");
             printf("\n  --backend mlx  Use the MLX backend for frontier Gemma LoRA\n");
             printf("                 fine-tuning on Apple Silicon. Shells out to\n");
             printf("                 python3 -m mlx_lm.lora.\n");
@@ -853,6 +908,9 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     (void)rank;
     (void)max_steps;
     (void)export_jsonl_path;
+    (void)from_history_db;
+    (void)from_history_max_per_channel;
+    (void)persist_persona;
     (void)backend;
     (void)mlx_model;
     (void)data_dir;
@@ -861,7 +919,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     (void)save_every;
     (void)learning_rate;
     printf("[lora-persona] test mode: skipped\n");
-    printf("[lora-persona] honest-gap doc: docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
+    printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
     return HU_OK;
 #else
     if (!persona_name) {
@@ -874,6 +932,66 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     if (err != HU_OK) {
         fprintf(stderr, "Failed to load persona '%s': %d\n", persona_name, err);
         return err;
+    }
+
+    /* Phase A1.3 — derive banks from conversation history. Runs upstream
+     * of every other path (--export-jsonl, --backend mlx, in-process
+     * training) so a single invocation can go history → JSONL with no
+     * hand-authored persona bank. The derived banks REPLACE whatever
+     * was loaded from the persona JSON for this run only; the on-disk
+     * persona file is untouched. */
+    if (from_history_db && from_history_db[0]) {
+        hu_persona_example_bank_t *new_banks = NULL;
+        size_t new_count = 0;
+        hu_error_t hist_err = hu_persona_banks_extract_from_history(
+            alloc, from_history_db,
+            (size_t)from_history_max_per_channel,
+            &new_banks, &new_count);
+        if (hist_err != HU_OK) {
+            fprintf(stderr, "[lora-persona] --from-history failed (%d): %s\n",
+                    hist_err, hu_error_string(hist_err));
+            hu_persona_deinit(alloc, &persona);
+            return hist_err;
+        }
+
+        /* Drop the previously-loaded banks (allocator-owned by `alloc`,
+         * same as the new ones we're about to install). The free
+         * function is null-safe; an empty persona is fine here. */
+        hu_persona_example_banks_free(alloc, persona.example_banks,
+                                      persona.example_banks_count);
+        persona.example_banks = new_banks;
+        persona.example_banks_count = new_count;
+
+        size_t total_examples = 0;
+        for (size_t i = 0; i < new_count; i++)
+            total_examples += new_banks[i].examples_count;
+        printf("[lora-persona] --from-history: derived %zu example(s) across "
+               "%zu channel(s) from %s\n",
+               total_examples, new_count, from_history_db);
+
+        /* Phase A1.4 — persist derived banks to disk so they survive
+         * the next daemon start. Without --persist these are scratch
+         * state and disappear at process exit. We only call the
+         * writer when --persist is set AND banks were actually derived
+         * (new_count > 0) so the user's hand-authored persona JSON is
+         * never overwritten with an empty banks array. */
+        if (persist_persona && new_count > 0) {
+            hu_error_t save_err = hu_persona_creator_write(alloc, &persona);
+            if (save_err != HU_OK) {
+                fprintf(stderr,
+                        "[lora-persona] --persist write failed (%d): %s\n",
+                        save_err, hu_error_string(save_err));
+                hu_persona_deinit(alloc, &persona);
+                return save_err;
+            }
+            printf("[lora-persona] --persist: wrote %zu bank(s) to "
+                   "~/.human/personas/%s.json\n",
+                   new_count, persona_name);
+        } else if (persist_persona) {
+            printf("[lora-persona] --persist: no banks derived "
+                   "(history empty after quality gates); persona JSON "
+                   "left untouched.\n");
+        }
     }
 
     /* M3 Bridge A.0 — export-only path. No model is loaded, no training
@@ -1133,12 +1251,9 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     }
 
     /* Honest caveat — this trains a LoRA adapter on the reference HUML GPT,
-     * NOT on a frontier model. Tracked in
-     * docs/plans/2026-05-10-m3-frontier-model-bridge.md (M3 honest gap). */
-    printf("[lora-persona] NOTE: trains LoRA on the reference HUML GPT.\n"
-           "[lora-persona]       This is not a frontier model fine-tune.\n"
-           "[lora-persona]       For Llama/Qwen/Mistral fine-tuning, see\n"
-           "[lora-persona]       docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
+     * NOT on a frontier model. Source of truth in
+     * src/ml/m3_frontier_adapter.c, pinned by tests in test_ml.c. */
+    fputs(hu_ml_lora_persona_caveat_block(), stdout);
 
     /* Optional warm-start: load a HUML reference-GPT checkpoint as the base
      * before attaching LoRA. We use a throwaway optimizer to satisfy the
@@ -1393,6 +1508,892 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     hu_persona_deinit(alloc, &persona);
     return err;
 #endif
+}
+
+/* Track D D2.2 — offline persona-fidelity baseline.
+ *
+ * Builds a synthetic communication-style fingerprint from the
+ * persona's overlay hints (when present) or falls back to the
+ * personal model on disk, then scores every response in the
+ * persona's example_banks against the fingerprint. Reports per-
+ * example and aggregate fidelity in [0,1].
+ *
+ * The point of this command is NOT to grade the persona — it's to
+ * establish a baseline number that future LoRA-vs-baseline runs can
+ * compare against. The number reported here is the upper bound a
+ * frontier model can plausibly achieve without any personalization
+ * (the responses in the bank were authored to match the persona),
+ * so a post-LoRA score above this baseline means the adapter is
+ * actively pulling the model toward persona fidelity. */
+hu_error_t hu_ml_cli_lora_baseline(hu_allocator_t *alloc, int argc, const char **argv) {
+    const char *persona_name = NULL;
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--persona");
+        if (v) {
+            persona_name = v;
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: human ml lora-baseline --persona <name>\n\n"
+                   "Score a persona's example bank against its communication-\n"
+                   "style fingerprint. Pure CPU, no provider call. Reports\n"
+                   "mean / min / max fidelity in [0,1] as a baseline for\n"
+                   "future LoRA A/B comparisons.\n\n"
+                   "  --persona <name>  Persona name in ~/.human/personas/\n");
+            printf("\nDoc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+            return HU_OK;
+        }
+    }
+    if (!persona_name) {
+        fprintf(stderr, "lora-baseline requires --persona <name>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    hu_persona_t persona = {0};
+    hu_error_t err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+    if (err != HU_OK) {
+        fprintf(stderr, "[lora-baseline] failed to load persona '%s': %d\n", persona_name, err);
+        return err;
+    }
+
+    /* Synthesize a communication-style fingerprint. We try the
+     * personal_model on disk first (real EWMA from observed user
+     * messages); if that's unavailable, fall back to a permissive
+     * default that matches "casual lowercase chat" — enough to
+     * exercise the scorer end-to-end without claiming the score
+     * means the user's actual register. */
+    hu_communication_style_t target;
+    memset(&target, 0, sizeof(target));
+    bool synthetic_fingerprint = true;
+    {
+        char pm_path[1024];
+        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+            hu_personal_model_t loaded;
+            if (hu_personal_model_load(&loaded, pm_path) == HU_OK &&
+                loaded.style.sample_count > 0U) {
+                target = loaded.style;
+                synthetic_fingerprint = false;
+            }
+        }
+    }
+    if (synthetic_fingerprint) {
+        target.formality = 0.3f;
+        target.verbosity = 0.5f;
+        target.emoji_frequency = 0.2f;
+        target.humor_receptivity = 0.6f;
+        target.lowercase_ratio = 0.85f;
+        target.abbreviation_ratio = 0.2f;
+        target.avg_message_length = 60;
+        target.sample_count = 1; /* tip the "no fingerprint" guard. */
+        printf("[lora-baseline] no personal_model.bin found — using synthetic fingerprint.\n");
+    } else {
+        printf("[lora-baseline] fingerprint loaded from personal model "
+               "(samples=%u, avg_len=%u).\n",
+               (unsigned)target.sample_count, (unsigned)target.avg_message_length);
+    }
+
+    /* Walk every example response in every bank, score each, and
+     * accumulate. Empty / NULL responses are skipped so they don't
+     * drag the mean toward 0. */
+    size_t scored = 0;
+    float sum = 0.f;
+    float min_score = 1.0f, max_score = 0.0f;
+    for (size_t b = 0; b < persona.example_banks_count; b++) {
+        const hu_persona_example_bank_t *bank = &persona.example_banks[b];
+        for (size_t i = 0; i < bank->examples_count; i++) {
+            const hu_persona_example_t *ex = &bank->examples[i];
+            if (!ex->response || ex->response[0] == '\0') continue;
+            float s = hu_communication_style_fidelity_score(&target, ex->response,
+                                                            strlen(ex->response));
+            if (s < 0.f) continue;
+            sum += s;
+            if (s < min_score) min_score = s;
+            if (s > max_score) max_score = s;
+            scored++;
+        }
+    }
+
+    if (scored == 0) {
+        printf("[lora-baseline] persona '%s' has no scoreable example responses.\n",
+               persona_name);
+        hu_persona_deinit(alloc, &persona);
+        return HU_OK;
+    }
+
+    float mean = sum / (float)scored;
+    printf("[lora-baseline] persona '%s' baseline fidelity:\n"
+           "[lora-baseline]   examples scored: %zu\n"
+           "[lora-baseline]   mean:            %.3f\n"
+           "[lora-baseline]   min:             %.3f\n"
+           "[lora-baseline]   max:             %.3f\n",
+           persona_name, scored, mean, min_score, max_score);
+    printf("[lora-baseline] interpretation: scores in [0,1]; the mean is the\n"
+           "[lora-baseline]   upper bound a frontier model can plausibly hit\n"
+           "[lora-baseline]   without LoRA, since the bank's responses were\n"
+           "[lora-baseline]   authored to match the persona. A post-LoRA mean\n"
+           "[lora-baseline]   above this number indicates the adapter is\n"
+           "[lora-baseline]   actively personalizing.\n");
+    printf("[lora-baseline] doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+
+    hu_persona_deinit(alloc, &persona);
+    return HU_OK;
+}
+
+/* Track D D2.2 — A/B comparator helpers + CLI. */
+
+/* Read an entire file into a freshly-allocated buffer. Caller frees
+ * with `alloc->free`. Caps file size at 16 MiB to avoid runaway
+ * loads from a typo'd path pointing at /dev/zero or similar. */
+static hu_error_t hu_ml_lora_ab_read_file(hu_allocator_t *alloc, const char *path, char **out_buf,
+                                          size_t *out_len) {
+    *out_buf = NULL;
+    *out_len = 0;
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return HU_ERR_NOT_FOUND;
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return HU_ERR_IO;
+    }
+    long sz = ftell(fp);
+    if (sz < 0 || sz > (long)(16L * 1024L * 1024L)) {
+        fclose(fp);
+        return sz < 0 ? HU_ERR_IO : HU_ERR_INVALID_ARGUMENT;
+    }
+    rewind(fp);
+    char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
+    if (!buf) {
+        fclose(fp);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    size_t read = fread(buf, 1, (size_t)sz, fp);
+    fclose(fp);
+    if (read != (size_t)sz) {
+        alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+        return HU_ERR_IO;
+    }
+    buf[sz] = '\0';
+    *out_buf = buf;
+    *out_len = (size_t)sz;
+    return HU_OK;
+}
+
+/* Parse a JSON file containing a top-level array of strings into
+ * three parallel allocations: `*out_strings` (pointer array),
+ * `*out_lens` (length array), `*out_count`. The strings alias
+ * into the parsed JSON tree, which the caller must keep alive
+ * via `*out_json` until the comparator is done. Caller frees
+ * `*out_strings` and `*out_lens` with `alloc->free`, and
+ * `*out_json` with `hu_json_free`. */
+static hu_error_t hu_ml_lora_ab_load_response_set(hu_allocator_t *alloc, const char *path,
+                                                  hu_json_value_t **out_json,
+                                                  const char ***out_strings, size_t **out_lens,
+                                                  size_t *out_count) {
+    *out_json = NULL;
+    *out_strings = NULL;
+    *out_lens = NULL;
+    *out_count = 0;
+
+    char *raw = NULL;
+    size_t raw_len = 0;
+    hu_error_t err = hu_ml_lora_ab_read_file(alloc, path, &raw, &raw_len);
+    if (err != HU_OK)
+        return err;
+
+    hu_json_value_t *root = NULL;
+    err = hu_json_parse(alloc, raw, raw_len, &root);
+    /* Free the raw buffer regardless — the JSON parser copies
+     * string contents into its own allocations. */
+    alloc->free(alloc->ctx, raw, raw_len + 1);
+    if (err != HU_OK)
+        return err;
+    if (!root || root->type != HU_JSON_ARRAY) {
+        hu_json_free(alloc, root);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    size_t n = root->data.array.len;
+    if (n == 0) {
+        /* Empty array is technically valid; report count=0 and
+         * keep the JSON tree so the caller can still call deinit. */
+        *out_json = root;
+        return HU_OK;
+    }
+
+    const char **strings = (const char **)alloc->alloc(alloc->ctx, n * sizeof(const char *));
+    size_t *lens = (size_t *)alloc->alloc(alloc->ctx, n * sizeof(size_t));
+    if (!strings || !lens) {
+        if (strings) alloc->free(alloc->ctx, strings, n * sizeof(const char *));
+        if (lens) alloc->free(alloc->ctx, lens, n * sizeof(size_t));
+        hu_json_free(alloc, root);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < n; i++) {
+        const hu_json_value_t *item = root->data.array.items[i];
+        if (!item || item->type != HU_JSON_STRING) {
+            /* Non-string entries are kept as NULL/0; the
+             * comparator will count them as `skipped`. */
+            strings[i] = NULL;
+            lens[i] = 0;
+            continue;
+        }
+        strings[i] = item->data.string.ptr;
+        lens[i] = item->data.string.len;
+    }
+    *out_json = root;
+    *out_strings = strings;
+    *out_lens = lens;
+    *out_count = n;
+    return HU_OK;
+}
+
+hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv) {
+    const char *persona_name = NULL;
+    const char *before_path = NULL;
+    const char *after_path = NULL;
+    float floor_delta = 0.f;
+    bool require_positive = false;
+
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--persona");
+        if (v) { persona_name = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--before");
+        if (v) { before_path = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--after");
+        if (v) { after_path = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--floor-delta");
+        if (v) { floor_delta = (float)strtod(v, NULL); i++; continue; }
+        if (strcmp(argv[i], "--require-positive") == 0) {
+            require_positive = true;
+            continue;
+        }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: human ml lora-ab --persona <name> --before <pre.json> --after <post.json>\n"
+                   "                       [--floor-delta F] [--require-positive]\n\n"
+                   "Score two response sets against a persona's communication-\n"
+                   "style fingerprint and report the mean fidelity delta\n"
+                   "(after - before). A positive delta indicates the LoRA\n"
+                   "adapter is pulling the model toward persona fidelity.\n\n"
+                   "Inputs are JSON files containing a top-level array of\n"
+                   "response strings, e.g.\n"
+                   "  [\"hey, sounds good\", \"yeah totally lmk\", ...]\n\n"
+                   "Options:\n"
+                   "  --persona <name>      Persona name in ~/.human/personas/\n"
+                   "  --before <path>       JSON array of pre-LoRA responses\n"
+                   "  --after <path>        JSON array of post-LoRA responses\n"
+                   "  --floor-delta F       Exit non-zero when delta < F\n"
+                   "  --require-positive    Exit non-zero when delta <= 0\n");
+            printf("\nDoc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+            return HU_OK;
+        }
+    }
+    if (!persona_name || !before_path || !after_path) {
+        fprintf(stderr,
+                "lora-ab requires --persona <name> --before <path> --after <path>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Load the persona to confirm it exists (and so future tooling
+     * can use the example bank as a default fingerprint source).
+     * The fingerprint itself comes from personal_model.bin or the
+     * synthetic fallback, same as `lora-baseline`. */
+    hu_persona_t persona = {0};
+    hu_error_t err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+    if (err != HU_OK) {
+        fprintf(stderr, "[lora-ab] failed to load persona '%s': %d\n", persona_name, err);
+        return err;
+    }
+
+    hu_communication_style_t target;
+    memset(&target, 0, sizeof(target));
+    bool synthetic = true;
+    {
+        char pm_path[1024];
+        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+            hu_personal_model_t loaded;
+            if (hu_personal_model_load(&loaded, pm_path) == HU_OK &&
+                loaded.style.sample_count > 0U) {
+                target = loaded.style;
+                synthetic = false;
+            }
+        }
+    }
+    if (synthetic) {
+        /* Same defaults as `lora-baseline` so the two tools are
+         * comparable when the user has no personal model. */
+        target.formality = 0.3f;
+        target.verbosity = 0.5f;
+        target.emoji_frequency = 0.2f;
+        target.humor_receptivity = 0.6f;
+        target.lowercase_ratio = 0.85f;
+        target.abbreviation_ratio = 0.2f;
+        target.avg_message_length = 60;
+        target.sample_count = 1;
+        printf("[lora-ab] no personal_model.bin found — using synthetic fingerprint.\n");
+    } else {
+        printf("[lora-ab] fingerprint loaded from personal model "
+               "(samples=%u, avg_len=%u).\n",
+               (unsigned)target.sample_count, (unsigned)target.avg_message_length);
+    }
+
+    hu_json_value_t *json_before = NULL, *json_after = NULL;
+    const char **strs_before = NULL, **strs_after = NULL;
+    size_t *lens_before = NULL, *lens_after = NULL;
+    size_t n_before = 0, n_after = 0;
+
+    err = hu_ml_lora_ab_load_response_set(alloc, before_path, &json_before, &strs_before,
+                                          &lens_before, &n_before);
+    if (err != HU_OK) {
+        fprintf(stderr, "[lora-ab] failed to load --before %s: %d\n", before_path, err);
+        hu_persona_deinit(alloc, &persona);
+        return err;
+    }
+    err = hu_ml_lora_ab_load_response_set(alloc, after_path, &json_after, &strs_after,
+                                          &lens_after, &n_after);
+    if (err != HU_OK) {
+        fprintf(stderr, "[lora-ab] failed to load --after %s: %d\n", after_path, err);
+        if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+        if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+        hu_json_free(alloc, json_before);
+        hu_persona_deinit(alloc, &persona);
+        return err;
+    }
+
+    hu_communication_style_set_summary_t sum_before, sum_after;
+    float delta = 0.f;
+    err = hu_communication_style_compare_response_sets(&target, strs_before, lens_before, n_before,
+                                                       strs_after, lens_after, n_after,
+                                                       &sum_before, &sum_after, &delta);
+    /* Free loaders before reporting so a fail-fast exit doesn't
+     * leak. The summaries are stack values and don't alias into
+     * the JSON tree. */
+    if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+    if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+    if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+    if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+    hu_json_free(alloc, json_before);
+    hu_json_free(alloc, json_after);
+    hu_persona_deinit(alloc, &persona);
+
+    if (err != HU_OK) {
+        fprintf(stderr, "[lora-ab] compare failed: %d\n", err);
+        return err;
+    }
+
+    printf("[lora-ab] persona '%s' A/B fidelity:\n"
+           "[lora-ab]   before: scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"
+           "[lora-ab]   after:  scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"
+           "[lora-ab]   delta:  %+.3f (after - before)\n",
+           persona_name, sum_before.scored, sum_before.skipped, sum_before.mean,
+           sum_before.min_score, sum_before.max_score, sum_after.scored, sum_after.skipped,
+           sum_after.mean, sum_after.min_score, sum_after.max_score, delta);
+    if (require_positive && delta <= 0.f) {
+        fprintf(stderr, "[lora-ab] FAIL: delta=%+.3f <= 0 (require-positive set)\n", delta);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    if (delta < floor_delta) {
+        fprintf(stderr, "[lora-ab] FAIL: delta=%+.3f < floor=%+.3f\n", delta, floor_delta);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    if (sum_after.scored == 0 || sum_before.scored == 0) {
+        printf("[lora-ab] note: at least one set had 0 scored responses — "
+               "delta may not be meaningful.\n");
+    }
+    printf("[lora-ab] doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+    return HU_OK;
+}
+
+/* ── lora-runner ──────────────────────────────────────────────────────
+ *
+ * Walk a persona's example bank, send every `incoming` through a
+ * provider's chat() call, capture each response, and write them as
+ * a JSON array to disk for a downstream `lora-ab` invocation. The
+ * critical design decision is what gets sent as the "system" message:
+ * we use the persona's identity + traits so the model has the same
+ * grounding it would in production. The user message is the
+ * example's `incoming` — verbatim, no preprocessing.
+ *
+ * Errors during a single chat call don't abort the run — we
+ * substitute an empty string for that index and keep going. The
+ * comparator counts empty responses as `skipped`, so a few provider
+ * hiccups don't poison the mean. */
+
+/* Build a minimal "system" prompt from the persona's identity and
+ * top traits, suitable for passing to a chat call. Returns 0 on
+ * success (string written into `out`), non-zero when the persona
+ * has no identity. */
+static size_t hu_ml_lora_runner_build_system_prompt(const hu_persona_t *persona, char *out,
+                                                    size_t cap) {
+    if (!persona || cap == 0)
+        return 0;
+    out[0] = '\0';
+    size_t n = 0;
+    if (persona->identity && persona->identity[0]) {
+        int w = snprintf(out + n, cap - n, "%s\n", persona->identity);
+        if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
+    }
+    if (persona->traits_count > 0 && persona->traits) {
+        int w = snprintf(out + n, cap - n, "Traits: ");
+        if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
+        for (size_t i = 0; i < persona->traits_count && n + 2 < cap; i++) {
+            const char *t = persona->traits[i];
+            if (!t || !t[0]) continue;
+            w = snprintf(out + n, cap - n, "%s%s", i == 0 ? "" : ", ", t);
+            if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
+        }
+        if (n + 1 < cap) {
+            out[n++] = '\n';
+            out[n] = '\0';
+        }
+    }
+    return n;
+}
+
+/* Write a `["resp1", "resp2", ...]` JSON array to `path`. JSON
+ * escaping uses `hu_json_string_new` + `hu_json_stringify` so the
+ * output is parser-round-trip compatible with `lora-ab`'s loader.
+ * Each NULL or empty response becomes a JSON empty string `""` so
+ * the array length matches the example count — easier to align
+ * with the bank when debugging. */
+static hu_error_t hu_ml_lora_runner_write_json_array(hu_allocator_t *alloc, const char *path,
+                                                     const char *const *responses,
+                                                     const size_t *lens, size_t count) {
+    hu_json_value_t *arr = hu_json_array_new(alloc);
+    if (!arr)
+        return HU_ERR_OUT_OF_MEMORY;
+    hu_error_t err = HU_OK;
+    for (size_t i = 0; i < count && err == HU_OK; i++) {
+        const char *s = responses[i] ? responses[i] : "";
+        size_t l = responses[i] ? lens[i] : 0;
+        hu_json_value_t *item = hu_json_string_new(alloc, s, l);
+        if (!item) {
+            err = HU_ERR_OUT_OF_MEMORY;
+            break;
+        }
+        err = hu_json_array_push(alloc, arr, item);
+        /* On failure `item` is leaked into nowhere — push owns
+         * the value on success but doesn't free on failure.
+         * `hu_json_free(arr)` will clean up everything we
+         * successfully pushed. */
+        if (err != HU_OK)
+            hu_json_free(alloc, item);
+    }
+    if (err != HU_OK) {
+        hu_json_free(alloc, arr);
+        return err;
+    }
+    char *out = NULL;
+    size_t out_len = 0;
+    err = hu_json_stringify(alloc, arr, &out, &out_len);
+    hu_json_free(alloc, arr);
+    if (err != HU_OK)
+        return err;
+    FILE *fp = fopen(path, "wb");
+    if (!fp) {
+        alloc->free(alloc->ctx, out, out_len + 1);
+        return HU_ERR_IO;
+    }
+    size_t wrote = fwrite(out, 1, out_len, fp);
+    /* Newline at EOF — POSIX text-file convention; downstream
+     * parsers (jq, hu_json_parse) tolerate either way. */
+    fputc('\n', fp);
+    fclose(fp);
+    alloc->free(alloc->ctx, out, out_len + 1);
+    if (wrote != out_len)
+        return HU_ERR_IO;
+    return HU_OK;
+}
+
+hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **argv) {
+    const char *persona_name = NULL;
+    const char *output_path = NULL;
+    const char *provider_name = NULL;
+    const char *model = NULL;
+    const char *adapter_path = NULL;
+    const char *adapter_id = NULL;
+    int max_examples = 0; /* 0 = all */
+
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--persona");
+        if (v) { persona_name = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--output");
+        if (v) { output_path = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--provider");
+        if (v) { provider_name = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--model");
+        if (v) { model = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--max-examples");
+        if (v) { max_examples = atoi(v); i++; continue; }
+        v = get_opt(argv, argc, i, "--adapter");
+        if (v) { adapter_path = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--adapter-id");
+        if (v) { adapter_id = v; i++; continue; }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: human ml lora-runner --persona <name> --output <path> "
+                   "[--provider <name>] [--model <id>] [--max-examples N] "
+                   "[--adapter <path>] [--adapter-id <id>]\n\n"
+                   "Run a persona's example bank prompts through a provider's\n"
+                   "chat() call and write the responses as a JSON array. The\n"
+                   "output is directly consumable by `human ml lora-ab` as\n"
+                   "either --before or --after. Run twice (with and without\n"
+                   "an adapter loaded) to produce both halves of an A/B run.\n\n"
+                   "  --persona <name>      Persona name in ~/.human/personas/\n"
+                   "  --output <path>       Where to write the JSON array\n"
+                   "  --provider <name>     Provider to invoke (default: from config)\n"
+                   "  --model <id>          Model id (default: provider default)\n"
+                   "  --max-examples N      Cap responses (default: all banks)\n"
+                   "  --adapter <path>      Optional LoRA adapter to load before chat;\n"
+                   "                        provider must support load_adapter (huml does)\n"
+                   "  --adapter-id <id>     Identifier for the loaded adapter\n"
+                   "                        (default: basename of --adapter)\n");
+            printf("\nDoc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+            return HU_OK;
+        }
+    }
+    if (!persona_name || !output_path) {
+        fprintf(stderr, "lora-runner requires --persona <name> --output <path>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    hu_persona_t persona = {0};
+    hu_error_t err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+    if (err != HU_OK) {
+        fprintf(stderr, "[lora-runner] failed to load persona '%s': %d\n", persona_name, err);
+        return err;
+    }
+
+    /* Count total examples across all banks. */
+    size_t total_examples = 0;
+    for (size_t b = 0; b < persona.example_banks_count; b++) {
+        const hu_persona_example_bank_t *bank = &persona.example_banks[b];
+        for (size_t i = 0; i < bank->examples_count; i++) {
+            if (bank->examples[i].incoming && bank->examples[i].incoming[0])
+                total_examples++;
+        }
+    }
+    if (max_examples > 0 && (size_t)max_examples < total_examples)
+        total_examples = (size_t)max_examples;
+    if (total_examples == 0) {
+        fprintf(stderr, "[lora-runner] persona '%s' has no example incoming messages\n",
+                persona_name);
+        hu_persona_deinit(alloc, &persona);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    char **responses = (char **)alloc->alloc(alloc->ctx, total_examples * sizeof(char *));
+    size_t *lens = (size_t *)alloc->alloc(alloc->ctx, total_examples * sizeof(size_t));
+    if (!responses || !lens) {
+        if (responses) alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
+        if (lens) alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
+        hu_persona_deinit(alloc, &persona);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < total_examples; i++) {
+        responses[i] = NULL;
+        lens[i] = 0;
+    }
+
+#ifndef HU_IS_TEST
+    /* Production path: create a provider and walk the example bank.
+     * Errors per-example don't abort the run; the comparator counts
+     * empty entries as `skipped`. */
+    hu_provider_t provider = {0};
+    if (provider_name && provider_name[0]) {
+        err = hu_provider_create(alloc, provider_name, strlen(provider_name), NULL, 0, NULL, 0,
+                                 &provider);
+    } else {
+        hu_config_t cfg = {0};
+        if (hu_config_load(alloc, &cfg) == HU_OK) {
+            err = hu_provider_create_default(alloc, &cfg, &provider);
+            hu_config_deinit(&cfg);
+        } else {
+            err = HU_ERR_NOT_SUPPORTED;
+        }
+    }
+    if (err != HU_OK || !provider.vtable || !provider.vtable->chat_with_system) {
+        fprintf(stderr, "[lora-runner] no usable provider (err=%d, vtable=%s)\n", err,
+                (provider.vtable && provider.vtable->chat_with_system) ? "ok" : "missing");
+        if (provider.vtable && provider.vtable->deinit)
+            provider.vtable->deinit(provider.ctx, alloc);
+        alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
+        alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
+        hu_persona_deinit(alloc, &persona);
+        return err == HU_OK ? HU_ERR_NOT_SUPPORTED : err;
+    }
+
+    /* Optional adapter pre-load. The runner's "after.json" half of
+     * the canonical A/B workflow happens in the same process as
+     * provider creation — the adapter loaded here applies to every
+     * subsequent chat call in this run. We deliberately fail-fast
+     * (early return) when the adapter can't load: producing
+     * "after.json" against the BASE model would silently corrupt
+     * the comparator's delta, and a delta-zero false positive is
+     * worse than no run at all. */
+    if (adapter_path && adapter_path[0]) {
+        const char *id = adapter_id;
+        char id_buf[64];
+        if (!id) {
+            const char *slash = strrchr(adapter_path, '/');
+            const char *base = slash ? slash + 1 : adapter_path;
+            size_t copy = strlen(base);
+            if (copy >= sizeof(id_buf))
+                copy = sizeof(id_buf) - 1;
+            memcpy(id_buf, base, copy);
+            id_buf[copy] = '\0';
+            id = id_buf;
+        }
+        hu_error_t lerr = hu_provider_load_adapter(&provider, alloc, adapter_path,
+                                                   strlen(adapter_path), id, strlen(id));
+        if (lerr != HU_OK) {
+            fprintf(stderr,
+                    "[lora-runner] adapter load failed (path=%s, id=%s, err=%d). "
+                    "Aborting to avoid producing a base-model 'after.json'.\n",
+                    adapter_path, id, lerr);
+            if (provider.vtable && provider.vtable->deinit)
+                provider.vtable->deinit(provider.ctx, alloc);
+            alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
+            alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
+            hu_persona_deinit(alloc, &persona);
+            return lerr;
+        }
+        printf("[lora-runner] adapter loaded: %s (id=%s)\n", adapter_path, id);
+    }
+
+    char system_buf[1024];
+    size_t system_len = hu_ml_lora_runner_build_system_prompt(&persona, system_buf,
+                                                              sizeof(system_buf));
+    size_t model_len = model ? strlen(model) : 0;
+
+    size_t produced = 0;
+    size_t errors = 0;
+    for (size_t b = 0; b < persona.example_banks_count && produced < total_examples; b++) {
+        const hu_persona_example_bank_t *bank = &persona.example_banks[b];
+        for (size_t i = 0; i < bank->examples_count && produced < total_examples; i++) {
+            const hu_persona_example_t *ex = &bank->examples[i];
+            if (!ex->incoming || !ex->incoming[0])
+                continue;
+            char *content = NULL;
+            size_t content_len = 0;
+            hu_error_t cerr = provider.vtable->chat_with_system(
+                provider.ctx, alloc, system_buf, system_len, ex->incoming, strlen(ex->incoming),
+                model, model_len, 0.7, &content, &content_len);
+            if (cerr == HU_OK && content && content_len > 0) {
+                responses[produced] = (char *)alloc->alloc(alloc->ctx, content_len + 1);
+                if (responses[produced]) {
+                    memcpy(responses[produced], content, content_len);
+                    responses[produced][content_len] = '\0';
+                    lens[produced] = content_len;
+                }
+            } else {
+                errors++;
+            }
+            if (content)
+                alloc->free(alloc->ctx, content, content_len + 1);
+            produced++;
+        }
+    }
+
+    if (errors > 0)
+        fprintf(stderr, "[lora-runner] %zu of %zu examples returned an error or empty content\n",
+                errors, total_examples);
+
+    if (provider.vtable->deinit)
+        provider.vtable->deinit(provider.ctx, alloc);
+#else
+    /* Test path: deterministic echo of the persona's existing
+     * `response` field. Lets unit tests exercise the full
+     * load → write → JSON round-trip without spinning up a
+     * provider, which is unavailable in tests anyway. */
+    size_t produced = 0;
+    for (size_t b = 0; b < persona.example_banks_count && produced < total_examples; b++) {
+        const hu_persona_example_bank_t *bank = &persona.example_banks[b];
+        for (size_t i = 0; i < bank->examples_count && produced < total_examples; i++) {
+            const hu_persona_example_t *ex = &bank->examples[i];
+            if (!ex->incoming || !ex->incoming[0])
+                continue;
+            const char *src = (ex->response && ex->response[0]) ? ex->response : "";
+            size_t srclen = strlen(src);
+            responses[produced] = (char *)alloc->alloc(alloc->ctx, srclen + 1);
+            if (responses[produced]) {
+                memcpy(responses[produced], src, srclen);
+                responses[produced][srclen] = '\0';
+                lens[produced] = srclen;
+            }
+            produced++;
+        }
+    }
+#endif
+
+    err = hu_ml_lora_runner_write_json_array(alloc, output_path,
+                                             (const char *const *)responses, lens, total_examples);
+    if (err == HU_OK) {
+        printf("[lora-runner] persona '%s' → %s (%zu responses)\n", persona_name, output_path,
+               total_examples);
+    } else {
+        fprintf(stderr, "[lora-runner] write failed: %d\n", err);
+    }
+
+    for (size_t i = 0; i < total_examples; i++) {
+        if (responses[i])
+            alloc->free(alloc->ctx, responses[i], lens[i] + 1);
+    }
+    alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
+    alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
+    hu_persona_deinit(alloc, &persona);
+    return err;
+}
+
+/* ── fidelity-status ──────────────────────────────────────────────────
+ *
+ * Emits a JSON status object that aggregates everything any
+ * dashboard or CLI status surface would want to display about a
+ * persona's LoRA-fidelity health: the baseline mean from the
+ * persona's example bank, and (when a `--before`/`--after` pair is
+ * provided) the A/B delta. The intent is "one command, one JSON
+ * object" so future UI/observability work doesn't have to scrape
+ * `lora-baseline` and `lora-ab` separately. */
+
+/* Track D D2.2 — the resolve-target + baseline-score primitives
+ * used to live as static helpers in this file; they moved to
+ * `src/ml/fidelity.c` so the gateway's `metrics.fidelity` method
+ * computes identical numbers. The CLI just orchestrates I/O. */
+
+hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char **argv) {
+    const char *persona_name = NULL;
+    const char *before_path = NULL;
+    const char *after_path = NULL;
+    const char *output_path = NULL;
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--persona");
+        if (v) { persona_name = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--before");
+        if (v) { before_path = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--after");
+        if (v) { after_path = v; i++; continue; }
+        v = get_opt(argv, argc, i, "--output");
+        if (v) { output_path = v; i++; continue; }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: human ml fidelity-status --persona <name> "
+                   "[--before <path>] [--after <path>] [--output <path>]\n\n"
+                   "Emit a single JSON object aggregating LoRA-fidelity\n"
+                   "health metrics for downstream dashboards & status\n"
+                   "surfaces. When --before and --after are both provided,\n"
+                   "the A/B delta is included.\n");
+            return HU_OK;
+        }
+    }
+    if (!persona_name) {
+        fprintf(stderr, "fidelity-status requires --persona <name>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    hu_persona_t persona = {0};
+    hu_error_t err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+    if (err != HU_OK) {
+        fprintf(stderr, "[fidelity-status] failed to load persona '%s': %d\n", persona_name, err);
+        return err;
+    }
+
+    hu_communication_style_t target;
+    bool synthetic;
+    (void)hu_ml_fidelity_resolve_target(alloc, &target, &synthetic);
+
+    /* Baseline: walk the persona's example bank scoring every
+     * non-empty response — same numbers `metrics.fidelity` returns
+     * because both surfaces call into the shared helper. */
+    hu_communication_style_set_summary_t baseline_summary = {0};
+    (void)hu_ml_fidelity_score_baseline(&persona, &target, &baseline_summary);
+    size_t b_scored = baseline_summary.scored;
+    float b_mean = baseline_summary.mean;
+    float b_min = baseline_summary.min_score;
+    float b_max = baseline_summary.max_score;
+
+    /* A/B (optional): only included when both files are provided. */
+    bool ab_available = false;
+    hu_communication_style_set_summary_t sum_a = {0}, sum_b = {0};
+    float delta = 0.f;
+    if (before_path && after_path) {
+        hu_json_value_t *json_b = NULL, *json_a = NULL;
+        const char **strs_b = NULL, **strs_a = NULL;
+        size_t *lens_b = NULL, *lens_a = NULL;
+        size_t n_b = 0, n_a = 0;
+        if (hu_ml_lora_ab_load_response_set(alloc, before_path, &json_b, &strs_b, &lens_b,
+                                            &n_b) == HU_OK &&
+            hu_ml_lora_ab_load_response_set(alloc, after_path, &json_a, &strs_a, &lens_a,
+                                            &n_a) == HU_OK) {
+            if (hu_communication_style_compare_response_sets(&target, strs_b, lens_b, n_b,
+                                                             strs_a, lens_a, n_a, &sum_a, &sum_b,
+                                                             &delta) == HU_OK) {
+                ab_available = true;
+            }
+        }
+        if (strs_b) alloc->free(alloc->ctx, strs_b, n_b * sizeof(const char *));
+        if (lens_b) alloc->free(alloc->ctx, lens_b, n_b * sizeof(size_t));
+        if (strs_a) alloc->free(alloc->ctx, strs_a, n_a * sizeof(const char *));
+        if (lens_a) alloc->free(alloc->ctx, lens_a, n_a * sizeof(size_t));
+        hu_json_free(alloc, json_b);
+        hu_json_free(alloc, json_a);
+    }
+
+    /* Build the JSON document via the canonical builder. */
+    hu_json_value_t *root = hu_json_object_new(alloc);
+    if (!root) {
+        hu_persona_deinit(alloc, &persona);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    hu_json_object_set(alloc, root, "persona",
+                       hu_json_string_new(alloc, persona_name, strlen(persona_name)));
+    hu_json_object_set(alloc, root, "fingerprint_source",
+                       hu_json_string_new(alloc, synthetic ? "synthetic" : "personal_model",
+                                          synthetic ? 9 : 14));
+
+    hu_json_value_t *baseline_obj = hu_json_object_new(alloc);
+    hu_json_object_set(alloc, baseline_obj, "scored",
+                       hu_json_number_new(alloc, (double)b_scored));
+    hu_json_object_set(alloc, baseline_obj, "mean", hu_json_number_new(alloc, b_mean));
+    hu_json_object_set(alloc, baseline_obj, "min", hu_json_number_new(alloc, b_min));
+    hu_json_object_set(alloc, baseline_obj, "max", hu_json_number_new(alloc, b_max));
+    hu_json_object_set(alloc, root, "baseline", baseline_obj);
+
+    hu_json_value_t *ab = hu_json_object_new(alloc);
+    hu_json_object_set(alloc, ab, "available", hu_json_bool_new(alloc, ab_available));
+    if (ab_available) {
+        hu_json_object_set(alloc, ab, "before_mean", hu_json_number_new(alloc, sum_a.mean));
+        hu_json_object_set(alloc, ab, "after_mean", hu_json_number_new(alloc, sum_b.mean));
+        hu_json_object_set(alloc, ab, "delta", hu_json_number_new(alloc, delta));
+        hu_json_object_set(alloc, ab, "scored_before",
+                           hu_json_number_new(alloc, (double)sum_a.scored));
+        hu_json_object_set(alloc, ab, "scored_after",
+                           hu_json_number_new(alloc, (double)sum_b.scored));
+    }
+    hu_json_object_set(alloc, root, "ab", ab);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    err = hu_json_stringify(alloc, root, &out, &out_len);
+    hu_json_free(alloc, root);
+    hu_persona_deinit(alloc, &persona);
+    if (err != HU_OK)
+        return err;
+
+    if (output_path && output_path[0]) {
+        FILE *fp = fopen(output_path, "wb");
+        if (!fp) {
+            alloc->free(alloc->ctx, out, out_len + 1);
+            fprintf(stderr, "[fidelity-status] failed to open %s for writing\n", output_path);
+            return HU_ERR_IO;
+        }
+        fwrite(out, 1, out_len, fp);
+        fputc('\n', fp);
+        fclose(fp);
+    } else {
+        /* stdout — single line of JSON terminated by newline. */
+        fwrite(out, 1, out_len, stdout);
+        fputc('\n', stdout);
+    }
+    alloc->free(alloc->ctx, out, out_len + 1);
+    return HU_OK;
 }
 
 hu_error_t hu_ml_cli_train_feed_predictor(hu_allocator_t *alloc, int argc, const char **argv) {

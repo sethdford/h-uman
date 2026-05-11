@@ -92,5 +92,11 @@ const char *hu_auto_goal_status_str(hu_auto_goal_status_t status);
 
 void hu_goal_free(hu_allocator_t *alloc, hu_goal_t *goals, size_t count);
 
+/* Advance the highest-priority active goal's progress based on tool usage.
+ * Selects the next active goal, computes a delta from tool_results_count,
+ * and persists the updated progress (clamped to 1.0). */
+void hu_goal_engine_record_turn_progress(hu_goal_engine_t *engine,
+                                         size_t tool_results_count);
+
 #endif /* HU_ENABLE_SQLITE */
 #endif /* HU_AGENT_GOALS_H */

@@ -66,6 +66,8 @@ void hu_stream_chat_result_free(hu_allocator_t *alloc, hu_stream_chat_result_t *
         return;
     if (result->content)
         alloc->free(alloc->ctx, (void *)result->content, result->content_len + 1);
+    if (result->reasoning_content)
+        alloc->free(alloc->ctx, (void *)result->reasoning_content, result->reasoning_content_len + 1);
     if (result->model)
         alloc->free(alloc->ctx, (void *)result->model, result->model_len + 1);
     if (result->tool_calls && result->tool_calls_count > 0) {

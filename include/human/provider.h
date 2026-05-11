@@ -151,6 +151,8 @@ typedef struct hu_stream_chat_result {
     /* Accumulated tool calls from streaming (NULL if none) */
     hu_tool_call_t *tool_calls;
     size_t tool_calls_count;
+    const char *reasoning_content; /* accumulated thinking deltas, NULL if none */
+    size_t reasoning_content_len;
 } hu_stream_chat_result_t;
 
 /* Free allocations in a stream chat result (content, model, tool_calls). */

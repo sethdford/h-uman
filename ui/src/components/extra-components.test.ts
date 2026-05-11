@@ -38,6 +38,8 @@ import "./hu-stat-card.js";
 import "./hu-stats-row.js";
 import "./hu-section-header.js";
 import "./hu-metric-row.js";
+import "./hu-fidelity-tile.js";
+import type { HuFidelityTile, FidelityStatus } from "./hu-fidelity-tile.js";
 import "./hu-timeline.js";
 import "./hu-sparkline-enhanced.js";
 import "./hu-forecast-chart.js";
@@ -3870,5 +3872,106 @@ describe("hu-web-search-result", () => {
   it("should be creatable", () => {
     const el = document.createElement("hu-web-search-result");
     expect(el).toBeInstanceOf(HTMLElement);
+  });
+});
+
+describe("hu-fidelity-tile", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("hu-fidelity-tile")).toBeDefined();
+  });
+
+  it("should render a loading skeleton when data is null", async () => {
+    const el = document.createElement("hu-fidelity-tile") as HuFidelityTile;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    /* aria-busy=true while data is null. */
+    const region = el.shadowRoot!.querySelector('[role="region"]');
+    expect(region?.getAttribute("aria-busy")).toBe("true");
+    /* Skeleton lanes present, no value formatting yet. */
+    expect(el.shadowRoot!.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
+    expect(el.shadowRoot!.querySelector(".lane-value")).toBeNull();
+    el.remove();
+  });
+
+  it("renders baseline percent + delta when ab.available", async () => {
+    const data: FidelityStatus = {
+      persona: "demo",
+      fingerprint_source: "synthetic",
+      baseline: { scored: 5, mean: 0.923, min: 0.91, max: 0.93 },
+      ab: {
+        available: true,
+        before_mean: 0.555,
+        after_mean: 0.923,
+        delta: 0.368,
+        scored_before: 5,
+        scored_after: 5,
+      },
+    };
+    const el = document.createElement("hu-fidelity-tile") as HuFidelityTile;
+    el.data = data;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const text = el.shadowRoot!.textContent ?? "";
+    /* Baseline mean rendered as 92.3%. */
+    expect(text).toContain("92.3%");
+    /* Delta rendered with sign and tinted as success (positive). */
+    expect(text).toContain("+36.8%");
+    const deltaEl = el.shadowRoot!.querySelectorAll(".lane-value")[1];
+    expect(deltaEl?.classList.contains("success")).toBe(true);
+    /* Sample counts visible. */
+    expect(text).toContain("A/B: 5 / 5");
+    /* aria-busy flipped to false once data is present. */
+    expect(el.shadowRoot!.querySelector('[role="region"]')?.getAttribute("aria-busy")).toBe(
+      "false",
+    );
+    el.remove();
+  });
+
+  it("uses error tint when delta is negative", async () => {
+    const el = document.createElement("hu-fidelity-tile") as HuFidelityTile;
+    el.data = {
+      persona: "demo",
+      fingerprint_source: "personal_model",
+      baseline: { scored: 5, mean: 0.7, min: 0.5, max: 0.9 },
+      ab: { available: true, before_mean: 0.6, after_mean: 0.5, delta: -0.1 },
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const deltaEl = el.shadowRoot!.querySelectorAll(".lane-value")[1];
+    expect(deltaEl?.classList.contains("error")).toBe(true);
+    expect(deltaEl?.textContent ?? "").toContain("-10.0%");
+    el.remove();
+  });
+
+  it("renders muted placeholder when ab.available is false", async () => {
+    const el = document.createElement("hu-fidelity-tile") as HuFidelityTile;
+    el.data = {
+      persona: "demo",
+      fingerprint_source: "synthetic",
+      baseline: { scored: 5, mean: 0.92, min: 0.91, max: 0.93 },
+      ab: { available: false },
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const deltaEl = el.shadowRoot!.querySelectorAll(".lane-value")[1];
+    expect(deltaEl?.classList.contains("muted")).toBe(true);
+    expect(deltaEl?.textContent?.trim()).toContain("no run");
+    /* Sub-label nudges the user toward the runner. */
+    expect(el.shadowRoot!.textContent ?? "").toContain("run lora-runner twice");
+    el.remove();
+  });
+
+  it("renders error banner when errorMessage is set", async () => {
+    const el = document.createElement("hu-fidelity-tile") as HuFidelityTile;
+    el.errorMessage = "Could not load fidelity data";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const banner = el.shadowRoot!.querySelector(".error-banner");
+    expect(banner).not.toBeNull();
+    expect(banner?.getAttribute("role")).toBe("alert");
+    expect(banner?.textContent).toContain("Could not load fidelity data");
+    /* Skeleton lanes hidden. */
+    expect(el.shadowRoot!.querySelectorAll(".skeleton").length).toBe(0);
+    el.remove();
   });
 });

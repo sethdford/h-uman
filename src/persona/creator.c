@@ -1112,18 +1112,26 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
         }
     }
 
-    /* Example banks */
+    /* Example banks — emitted in the canonical array-of-bank-objects
+     * shape that `hu_persona_load_json` parses (persona.c:2204):
+     *   "example_banks": [{"channel": "<name>", "examples": [...]}]
+     * The previous object-keyed-by-channel shape produced JSON the
+     * loader silently dropped — this writer now round-trips through
+     * load_json correctly so Phase A1.4 (banks-from-history → save
+     * → reload) actually persists. */
     if (persona->example_banks && persona->example_banks_count > 0) {
-        fputs(",\n  \"example_banks\": {\n", f);
+        fputs(",\n  \"example_banks\": [\n", f);
+        bool first_bank = true;
         for (size_t bi = 0; bi < persona->example_banks_count; bi++) {
             const hu_persona_example_bank_t *bank = &persona->example_banks[bi];
             if (!bank->channel)
                 continue;
-            if (bi > 0)
+            if (!first_bank)
                 fputs(",\n", f);
-            fputs("    ", f);
+            first_bank = false;
+            fputs("    {\"channel\": ", f);
             write_json_string(f, bank->channel);
-            fputs(": [\n", f);
+            fputs(", \"examples\": [\n", f);
             for (size_t ei = 0; ei < bank->examples_count; ei++) {
                 if (ei > 0)
                     fputs(",\n", f);
@@ -1135,9 +1143,9 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
                 write_json_string(f, bank->examples[ei].response);
                 fputc('}', f);
             }
-            fputs("\n    ]", f);
+            fputs("\n    ]}", f);
         }
-        fputs("\n  }", f);
+        fputs("\n  ]", f);
     }
 
     /* Contacts */

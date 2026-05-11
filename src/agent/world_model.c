@@ -426,7 +426,7 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
      * single intense distress signal out-shouts a string of mild
      * positives. dominant_emotion comes from valence-banding (same
      * buckets the prompt builder uses). */
-    strcpy(wm->dominant_emotion, "neutral");
+    snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "neutral");
     wm->arousal = 0.5f;
     wm->valence = 0.0f;
 #ifdef HU_ENABLE_SQLITE
@@ -452,11 +452,16 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
                 if (total_weight > 0.0)
                     wm->valence = (float)(weighted_valence / total_weight);
                 wm->arousal = (float)max_intensity;
-                if (wm->valence >= 0.5f)        strcpy(wm->dominant_emotion, "joy");
-                else if (wm->valence >= 0.15f)  strcpy(wm->dominant_emotion, "calm");
-                else if (wm->valence > -0.15f)  strcpy(wm->dominant_emotion, "neutral");
-                else if (wm->valence > -0.5f)   strcpy(wm->dominant_emotion, "concerned");
-                else                            strcpy(wm->dominant_emotion, "distressed");
+                if (wm->valence >= 0.5f)
+                    snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "joy");
+                else if (wm->valence >= 0.15f)
+                    snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "calm");
+                else if (wm->valence > -0.15f)
+                    snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "neutral");
+                else if (wm->valence > -0.5f)
+                    snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "concerned");
+                else
+                    snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "distressed");
                 alloc->free(alloc->ctx, residues, residue_n * sizeof(*residues));
             }
         }
@@ -640,7 +645,7 @@ void hu_world_model_merge_personal(hu_world_model_t *wm,
     /* Dominant emotion — only fill when the graph left the default "neutral". */
     if (strcmp(wm->dominant_emotion, "neutral") == 0) {
         if (pm->style.humor_receptivity > 0.6f)
-            strcpy(wm->dominant_emotion, "playful");
+            snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "playful");
     }
 }
 

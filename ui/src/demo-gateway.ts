@@ -2309,6 +2309,57 @@ export class DemoGatewayClient extends EventTarget {
           },
         };
 
+      // --- Acknowledgment-directive variant telemetry ---
+      // Read-only counters incremented by
+      // `acknowledgment_directive_for_overlay` in
+      // `src/memory/personal_model.c`. The dashboard surfaces
+      // these so we can verify each channel's overlay actually
+      // produces the expected directive variant in production.
+      // Live C handler: `cp_admin_metrics_directive_telemetry`
+      // in `src/gateway/cp_admin.c`. Demo distribution skewed
+      // toward `casual_emoji` to illustrate the iMessage path.
+      case "metrics.directive_telemetry":
+        return {
+          total: 184,
+          variants: {
+            null_overlay: 12,
+            default: 7,
+            formal_terse: 18,
+            casual_emoji: 113,
+            casual_or_short: 26,
+            adaptive_emoji: 8,
+          },
+        };
+
+      // --- Persona fidelity (mirrors `human ml fidelity-status`) ---
+      // Mock shape MUST match the live C gateway exactly. The
+      // `metrics.fidelity` handler in `src/gateway/cp_admin.c`
+      // returns the same fields, computed via `src/ml/fidelity.c`'s
+      // shared primitives, so this demo data and the live response
+      // are byte-compatible from the tile's perspective. The handler
+      // also merges in the `ab` section from
+      // `~/.human/last_fidelity_ab.json` (written by
+      // `scripts/lora-runner-ab.sh`) when present.
+      case "metrics.fidelity":
+        return {
+          persona: "demo",
+          fingerprint_source: "synthetic",
+          baseline: {
+            scored: 5,
+            mean: 0.923,
+            min: 0.911,
+            max: 0.933,
+          },
+          ab: {
+            available: true,
+            before_mean: 0.555,
+            after_mean: 0.923,
+            delta: 0.368,
+            scored_before: 5,
+            scored_after: 5,
+          },
+        };
+
       // --- Turing score API (mirrors REST /api/turing/*) ---
       case "turing.scores": {
         const baseTs = Math.floor(Date.now() / 1000);

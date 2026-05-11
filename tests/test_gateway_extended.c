@@ -11,10 +11,16 @@
 #include "human/gateway/rate_limit.h"
 #include "human/gateway/ws_server.h"
 #include "human/health.h"
+#include "human/memory/personal_model.h"
+#include "human/persona.h"
 #include "test_framework.h"
 #include "cp_internal.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 static void test_gateway_webhook_paths(void) {
     HU_ASSERT_EQ(HU_GATEWAY_MAX_BODY_SIZE, 65536u);
@@ -1241,6 +1247,257 @@ static void test_rpc_models_decisions_returns_valid_json(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* ── metrics.fidelity (Track D D2.2) ─────────────────────────────
+ *
+ * The handler must (a) return the canonical JSON shape on every
+ * exit path so the dashboard tile always renders, (b) honor
+ * `params.persona` over the active agent's persona, (c) merge in
+ * the canonical `last_fidelity_ab.json` when present and skip it
+ * cleanly when absent. */
+
+static void cp_fidelity_setup_persona_dir(char *out_dir, size_t cap) {
+    static int counter = 0;
+    counter++;
+    snprintf(out_dir, cap, "/tmp/hu_fidelity_test_%d_%d", (int)getpid(), counter);
+    mkdir(out_dir, 0700);
+    setenv("HU_PERSONA_DIR", out_dir, 1);
+    /* Force the synthetic-fingerprint path so the test result is
+     * deterministic across machines (no dependence on
+     * ~/.human/personal_model.bin). */
+    setenv("HUMAN_PERSONAL_MODEL_PATH", "/dev/null/__nonexistent__", 1);
+}
+
+static void cp_fidelity_write_fixture_persona(const char *dir, const char *name) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s.json", dir, name);
+    FILE *f = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"version\":1,\"name\":\"fidelity_gateway_fixture\","
+          "\"core\":{\"identity\":\"casual lowercase fixture\","
+          "\"traits\":[\"warm\"]},"
+          "\"example_banks\":[{\"channel\":\"cli\",\"examples\":["
+          "{\"context\":\"a\",\"incoming\":\"x\","
+          "\"response\":\"hey lmk if u want anything else from me today\"},"
+          "{\"context\":\"b\",\"incoming\":\"y\","
+          "\"response\":\"yeah sure btw the report is ready whenever u need it\"}"
+          "]}]}",
+          f);
+    fclose(f);
+}
+
+static void cp_fidelity_cleanup(const char *dir) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/fidelity_gateway_fixture.json", dir);
+    unlink(path);
+    rmdir(dir);
+    unsetenv("HU_PERSONA_DIR");
+    unsetenv("HUMAN_PERSONAL_MODEL_PATH");
+    unsetenv("HUMAN_FIDELITY_AB_PATH");
+}
+
+static void test_cp_admin_metrics_fidelity_returns_zero_state_without_persona(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app;
+    hu_config_t cfg;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    app.config = &cfg;
+    app.alloc = &alloc;
+    /* No agent → no active persona, no params → zero-state response. */
+
+    hu_json_value_t *root = NULL;
+    const char *json = "{\"type\":\"req\",\"id\":\"r1\",\"method\":\"metrics.fidelity\"}";
+    HU_ASSERT_EQ(hu_json_parse(&alloc, json, strlen(json), &root), HU_OK);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = cp_admin_metrics_fidelity(&alloc, &app, NULL, NULL, root, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* Same shape, all zeros, ab.available=false. */
+    HU_ASSERT_TRUE(strstr(out, "\"persona\":\"\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"baseline\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"available\":false") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"error\":\"no persona configured\"") != NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_json_free(&alloc, root);
+}
+
+static void test_cp_admin_metrics_fidelity_uses_params_persona(void) {
+    char dir[256];
+    cp_fidelity_setup_persona_dir(dir, sizeof(dir));
+    cp_fidelity_write_fixture_persona(dir, "fidelity_gateway_fixture");
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app;
+    hu_config_t cfg;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    app.config = &cfg;
+    app.alloc = &alloc;
+
+    hu_json_value_t *root = NULL;
+    const char *json = "{\"type\":\"req\",\"id\":\"r2\",\"method\":\"metrics.fidelity\","
+                       "\"params\":{\"persona\":\"fidelity_gateway_fixture\"}}";
+    HU_ASSERT_EQ(hu_json_parse(&alloc, json, strlen(json), &root), HU_OK);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = cp_admin_metrics_fidelity(&alloc, &app, NULL, NULL, root, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* Persona name is echoed; baseline.scored>0 because two
+     * non-empty fixture responses score against the synthetic
+     * target; fingerprint_source is synthetic by construction. */
+    HU_ASSERT_TRUE(strstr(out, "\"persona\":\"fidelity_gateway_fixture\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"fingerprint_source\":\"synthetic\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"baseline\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"scored\":2") != NULL);
+    /* No A/B file present → ab.available=false. */
+    HU_ASSERT_TRUE(strstr(out, "\"available\":false") != NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_json_free(&alloc, root);
+    cp_fidelity_cleanup(dir);
+}
+
+static void test_cp_admin_metrics_fidelity_merges_ab_status_file(void) {
+    char dir[256];
+    cp_fidelity_setup_persona_dir(dir, sizeof(dir));
+    cp_fidelity_write_fixture_persona(dir, "fidelity_gateway_fixture");
+
+    /* Drop a canonical status.json next to the persona fixture
+     * dir and point the override env at it. The handler should
+     * merge the `ab` sub-object verbatim into the response. */
+    char ab_path[512];
+    snprintf(ab_path, sizeof(ab_path), "%s/last_fidelity_ab.json", dir);
+    FILE *f = fopen(ab_path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"persona\":\"fidelity_gateway_fixture\","
+          "\"fingerprint_source\":\"synthetic\","
+          "\"baseline\":{\"scored\":3,\"mean\":0.71,\"min\":0.6,\"max\":0.82},"
+          "\"ab\":{\"available\":true,\"before_mean\":0.55,\"after_mean\":0.7,"
+          "\"delta\":0.15,\"scored_before\":4,\"scored_after\":4}}",
+          f);
+    fclose(f);
+    setenv("HUMAN_FIDELITY_AB_PATH", ab_path, 1);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app;
+    hu_config_t cfg;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    app.config = &cfg;
+    app.alloc = &alloc;
+
+    hu_json_value_t *root = NULL;
+    const char *json = "{\"type\":\"req\",\"id\":\"r3\",\"method\":\"metrics.fidelity\","
+                       "\"params\":{\"persona\":\"fidelity_gateway_fixture\"}}";
+    HU_ASSERT_EQ(hu_json_parse(&alloc, json, strlen(json), &root), HU_OK);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = cp_admin_metrics_fidelity(&alloc, &app, NULL, NULL, root, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* Baseline is computed live (not from the file). A/B is taken
+     * from the file. */
+    HU_ASSERT_TRUE(strstr(out, "\"persona\":\"fidelity_gateway_fixture\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"available\":true") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"before_mean\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"after_mean\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"scored_before\":4") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"scored_after\":4") != NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_json_free(&alloc, root);
+    unlink(ab_path);
+    cp_fidelity_cleanup(dir);
+}
+
+static void test_cp_admin_metrics_directive_telemetry_returns_counts(void) {
+    /* Drive one casual+emoji directive fire through
+     * `acknowledgment_directive_for_overlay`, then read it back
+     * via the gateway. The handler must serialize it as the JSON
+     * shape `{ total: N, variants: { ... } }`. */
+    hu_personal_model_directive_telemetry_reset();
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    /* Recently-completed goal — required to get the directive
+     * to fire at all. */
+    snprintf(m.goals[0].description, sizeof(m.goals[0].description),
+             "ship gateway telemetry");
+    m.goals[0].active = false;
+    m.goals[0].last_referenced = 1000;
+    m.goal_count = 1;
+    m.updated_at = 1000 + 86400;
+    hu_persona_overlay_t overlay = {0};
+    overlay.formality = (char *)"casual";
+    overlay.emoji_usage = (char *)"moderate";
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &overlay, buf, sizeof(buf));
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app;
+    hu_config_t cfg;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    app.config = &cfg;
+    app.alloc = &alloc;
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = cp_admin_metrics_directive_telemetry(&alloc, &app, NULL, NULL, NULL, &out,
+                                                          &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"total\":1") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"casual_emoji\":1") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"null_overlay\":0") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"formal_terse\":0") != NULL);
+    /* Forward-compatible shape: `variants` sub-object exists and
+     * carries every label we expect. */
+    HU_ASSERT_TRUE(strstr(out, "\"variants\"") != NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_personal_model_directive_telemetry_reset();
+}
+
+static void test_cp_admin_metrics_fidelity_returns_error_for_missing_persona(void) {
+    char dir[256];
+    cp_fidelity_setup_persona_dir(dir, sizeof(dir));
+    /* Note: NOT writing a fixture file — the persona load should fail. */
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app;
+    hu_config_t cfg;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    app.config = &cfg;
+    app.alloc = &alloc;
+
+    hu_json_value_t *root = NULL;
+    const char *json = "{\"type\":\"req\",\"id\":\"r4\",\"method\":\"metrics.fidelity\","
+                       "\"params\":{\"persona\":\"missing_persona\"}}";
+    HU_ASSERT_EQ(hu_json_parse(&alloc, json, strlen(json), &root), HU_OK);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = cp_admin_metrics_fidelity(&alloc, &app, NULL, NULL, root, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    /* Same shape, baseline zeroed, error explaining the failure. */
+    HU_ASSERT_TRUE(strstr(out, "\"persona\":\"missing_persona\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"baseline\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"available\":false") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"error\":\"persona load failed\"") != NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_json_free(&alloc, root);
+    cp_fidelity_cleanup(dir);
+}
+
 void run_gateway_extended_tests(void) {
     HU_TEST_SUITE("Gateway Extended");
     HU_RUN_TEST(test_gateway_webhook_paths);
@@ -1292,6 +1549,11 @@ void run_gateway_extended_tests(void) {
     HU_RUN_TEST(test_ws_server_is_upgrade_invalid);
     HU_RUN_TEST(test_ws_server_send_null_conn);
     HU_RUN_TEST(test_ws_server_broadcast_empty);
+    HU_RUN_TEST(test_cp_admin_metrics_fidelity_returns_zero_state_without_persona);
+    HU_RUN_TEST(test_cp_admin_metrics_fidelity_uses_params_persona);
+    HU_RUN_TEST(test_cp_admin_metrics_fidelity_merges_ab_status_file);
+    HU_RUN_TEST(test_cp_admin_metrics_fidelity_returns_error_for_missing_persona);
+    HU_RUN_TEST(test_cp_admin_metrics_directive_telemetry_returns_counts);
 
     HU_TEST_SUITE("Control Protocol");
     HU_RUN_TEST(test_control_protocol_init_deinit);

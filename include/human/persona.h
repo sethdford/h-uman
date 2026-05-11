@@ -499,6 +499,75 @@ hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
                                          const char *path, size_t path_len,
                                          size_t *exported_count);
 
+/* Phase A1.3 — derive per-channel persona example banks from
+ * conversation history.
+ *
+ * Reads the `messages` table in the SQLite database at `db_path`,
+ * walks adjacent user→assistant message pairs in id-ascending order
+ * within each session, and groups the surviving pairs into one
+ * example bank per detected channel.
+ *
+ * Channel detection: the per-message `session_id` follows the
+ * "<channel>:<contact-or-thread-id>" convention used everywhere in
+ * the codebase (e.g. "telegram:123", "imessage:thread-7"). The
+ * substring before the first ':' is the channel; sessions without
+ * a ':' fall under "default".
+ *
+ * Quality gates (applied to every candidate pair, in order):
+ *   1. Both halves must be non-empty after PII redaction
+ *      (hu_pii_redact — emails, phones, SSNs, CC, IPs, secrets).
+ *   2. Concatenated user+assistant text must pass
+ *      hu_quality_check with default thresholds (length / Shannon
+ *      entropy / unique-byte ratio).
+ *   3. The pair must not collide with a previously-emitted pair
+ *      under hu_dedup_set_check_and_add (lowercased,
+ *      whitespace-collapsed FNV-1a). Dedup is global across the
+ *      whole extraction, not per channel — the same exchange
+ *      crossed by both Telegram and iMessage shows up once.
+ *
+ * Per-channel bank cap: at most `max_per_channel` examples; the
+ * earliest qualifying pairs win (deterministic with id-asc ordering
+ * in the messages table). `max_per_channel == 0` uses the default
+ * (32). The number of channels is internally bounded at 32 — the
+ * 33rd novel channel encountered is dropped silently rather than
+ * crashing or growing without limit.
+ *
+ * Memory: on success, *out_banks is an allocator-owned array of
+ * populated banks (channels with ≥1 surviving example) and
+ * *out_count is its length. Free with hu_persona_example_banks_free.
+ * On failure, *out_banks is NULL and *out_count is 0.
+ *
+ * Returns:
+ *   HU_OK                    on success (0 banks is valid)
+ *   HU_ERR_INVALID_ARGUMENT  on NULL inputs
+ *   HU_ERR_NOT_SUPPORTED     when the build lacks SQLite
+ *   HU_ERR_IO                on database open / query failure
+ *   HU_ERR_OUT_OF_MEMORY     on allocation failure
+ *
+ * This is the missing input side of the LoRA personalization
+ * pipeline: the agent already records every conversation, but
+ * persona example banks were previously hand-authored. With this
+ * function the operator can run `human persona learn-banks` (or any
+ * equivalent) once on their existing message history, get a
+ * channel-segregated bank with the obvious garbage filtered out,
+ * and feed it straight to hu_persona_bank_export_jsonl for fine-
+ * tuning. Closes the M3 Bridge A loop end-to-end. */
+hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
+                                                 const char *db_path,
+                                                 size_t max_per_channel,
+                                                 hu_persona_example_bank_t **out_banks,
+                                                 size_t *out_count);
+
+/* Free an array of example banks allocated by
+ * hu_persona_banks_extract_from_history. Frees every channel string,
+ * every example field, every per-bank examples array, and finally
+ * the banks array itself. Safe to call with banks==NULL or count==0;
+ * a zero-initialized bank within the array is also safe (NULL fields
+ * are skipped). */
+void hu_persona_example_banks_free(hu_allocator_t *alloc,
+                                   hu_persona_example_bank_t *banks,
+                                   size_t banks_count);
+
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
                                                     const char *channel, size_t channel_len);
 

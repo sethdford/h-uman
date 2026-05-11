@@ -278,6 +278,22 @@ double hu_feeds_score_relevance(const char *content, size_t content_len, const c
     double score = (double)matches / (double)interest_words;
     if (score > 1.0)
         score = 1.0;
+
+    /* Single-word interests (e.g. "AI") are too broad — a single mention
+     * in a long article doesn't indicate strong relevance.  Cap score based
+     * on how specific the interest phrase is relative to the content. */
+    if (interest_words == 1) {
+        size_t content_words = count_words(content, content_len);
+        if (content_words > 10)
+            score *= 0.45;
+        else if (content_words > 3)
+            score *= 0.65;
+    } else if (interest_words == 2) {
+        size_t content_words = count_words(content, content_len);
+        if (content_words > 20)
+            score *= 0.7;
+    }
+
     return score;
 }
 

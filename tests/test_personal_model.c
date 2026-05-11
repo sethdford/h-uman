@@ -3,6 +3,7 @@
 #include "human/core/error.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/personal_model.h"
+#include "human/persona.h"
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -2023,6 +2024,288 @@ static void personal_model_build_prompt_omits_old_completed(void) {
     HU_ASSERT_TRUE(strstr(buf, "Recently completed:") == NULL);
 }
 
+static void personal_model_build_prompt_emits_acknowledgment_directive(void) {
+    /* When a recently-completed goal is surfaced, the prompt
+     * MUST also carry a behavioral directive telling the model
+     * to acknowledge the completion. Without this, the structural
+     * "Recently completed: …" list is just trivia — the model
+     * has no instruction to actually use it. */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    snprintf(m.goals[0].description, sizeof(m.goals[0].description), "ship the new feature");
+    m.goals[0].active = false;
+    m.goals[0].last_referenced = 1000;
+    m.goal_count = 1;
+    m.updated_at = 1000 + 86400;
+
+    char buf[2048];
+    (void)hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    /* The directive must appear AFTER the structural list (i.e.
+     * the directive references the listed items, not the other
+     * way around). */
+    const char *list = strstr(buf, "Recently completed:");
+    const char *directive = strstr(buf, "acknowledge it warmly");
+    HU_ASSERT_NOT_NULL(list);
+    HU_ASSERT_NOT_NULL(directive);
+    HU_ASSERT_TRUE(directive > list);
+    /* The directive should also include the dominate-the-reply
+     * guardrail so a future refactor can't quietly drop it. */
+    HU_ASSERT_TRUE(strstr(buf, "dominate the reply") != NULL);
+}
+
+/* Helper for overlay-tuned directive tests — populates a model
+ * with one freshly-completed goal so the directive line is
+ * always emitted. */
+static void overlay_directive_seed_model(hu_personal_model_t *m) {
+    hu_personal_model_init(m);
+    snprintf(m->goals[0].description, sizeof(m->goals[0].description), "ship the new feature");
+    m->goals[0].active = false;
+    m->goals[0].last_referenced = 1000;
+    m->goal_count = 1;
+    m->updated_at = 1000 + 86400;
+}
+
+static void personal_model_build_prompt_overlay_null_matches_legacy(void) {
+    /* The legacy `_build_prompt` MUST be byte-identical to
+     * `_build_prompt_with_overlay(model, NULL, ...)`. If they
+     * diverge, every existing caller silently changes behavior. */
+    hu_personal_model_t m;
+    overlay_directive_seed_model(&m);
+    char legacy[2048];
+    char with_null[2048];
+    size_t l = hu_personal_model_build_prompt(&m, legacy, sizeof(legacy));
+    size_t w = hu_personal_model_build_prompt_with_overlay(&m, NULL, with_null, sizeof(with_null));
+    HU_ASSERT_EQ(l, w);
+    HU_ASSERT_TRUE(strcmp(legacy, with_null) == 0);
+}
+
+static void personal_model_build_prompt_overlay_formal_emits_terse_directive(void) {
+    /* A formal-channel overlay must produce the strict-register
+     * variant: "respectful one-liner, no emoji". */
+    hu_persona_overlay_t ov = {.channel = "email", .formality = "formal"};
+    hu_personal_model_t m;
+    overlay_directive_seed_model(&m);
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &ov, buf, sizeof(buf));
+    HU_ASSERT_TRUE(strstr(buf, "respectful one-liner") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "no emoji") != NULL);
+    /* The casual variant's words must NOT appear. */
+    HU_ASSERT_TRUE(strstr(buf, "warmly") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "quick congrats") == NULL);
+}
+
+static void personal_model_build_prompt_overlay_casual_emoji_emits_permissive_variant(void) {
+    /* Casual + moderate emoji: the most permissive variant.
+     * "an emoji is fine if it fits" must appear. */
+    hu_persona_overlay_t ov = {.channel = "imessage",
+                               .formality = "casual",
+                               .emoji_usage = "moderate"};
+    hu_personal_model_t m;
+    overlay_directive_seed_model(&m);
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &ov, buf, sizeof(buf));
+    HU_ASSERT_TRUE(strstr(buf, "quick congrats") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "emoji is fine") != NULL);
+    /* Formal variant words must NOT appear. */
+    HU_ASSERT_TRUE(strstr(buf, "respectful one-liner") == NULL);
+}
+
+static void personal_model_build_prompt_overlay_short_length_emphasizes_brevity(void) {
+    /* avg_length="short" or numeric ≤30 must steer toward the
+     * brevity-focused variant: "one sentence". */
+    hu_persona_overlay_t ov = {.channel = "imessage", .avg_length = "short"};
+    hu_personal_model_t m;
+    overlay_directive_seed_model(&m);
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &ov, buf, sizeof(buf));
+    HU_ASSERT_TRUE(strstr(buf, "one sentence") != NULL);
+    /* Numeric lower bound (≤30) gates the same path. */
+    hu_persona_overlay_t ov2 = {.channel = "imessage", .avg_length = "20"};
+    char buf2[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &ov2, buf2, sizeof(buf2));
+    HU_ASSERT_TRUE(strstr(buf2, "one sentence") != NULL);
+}
+
+static void personal_model_build_prompt_overlay_formal_overrides_emoji(void) {
+    /* Formal trumps emoji license. Even with emoji_usage="high",
+     * a formal channel must emit the no-emoji variant. */
+    hu_persona_overlay_t ov = {.channel = "linkedin",
+                               .formality = "formal",
+                               .emoji_usage = "high"};
+    hu_personal_model_t m;
+    overlay_directive_seed_model(&m);
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &ov, buf, sizeof(buf));
+    HU_ASSERT_TRUE(strstr(buf, "no emoji") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "emoji is fine") == NULL);
+}
+
+static void personal_model_build_prompt_overlay_unknown_falls_through_to_default(void) {
+    /* An overlay with no recognized signal (channel only) must
+     * produce the same wording as NULL — no signal, no
+     * differentiation. */
+    hu_persona_overlay_t ov = {.channel = "novel-channel"};
+    hu_personal_model_t m;
+    overlay_directive_seed_model(&m);
+    char with_overlay[2048];
+    char with_null[2048];
+    size_t a = hu_personal_model_build_prompt_with_overlay(&m, &ov, with_overlay,
+                                                           sizeof(with_overlay));
+    size_t b = hu_personal_model_build_prompt_with_overlay(&m, NULL, with_null, sizeof(with_null));
+    HU_ASSERT_EQ(a, b);
+    HU_ASSERT_TRUE(strcmp(with_overlay, with_null) == 0);
+}
+
+/* ── Directive variant telemetry (Track D D2.2) ──────────────────
+ *
+ * Each test resets the global counters first so it's isolated
+ * from any earlier directive fires in the same process. */
+
+static void personal_model_directive_telemetry_reset_zeros_counts(void) {
+    hu_personal_model_directive_telemetry_reset();
+    hu_directive_telemetry_t s;
+    hu_personal_model_directive_telemetry_snapshot(&s);
+    HU_ASSERT_EQ((unsigned long long)s.total, 0ULL);
+    for (size_t i = 0; i < HU_DIRECTIVE_VARIANT__COUNT; i++) {
+        HU_ASSERT_EQ((unsigned long long)s.counts[i], 0ULL);
+    }
+}
+
+static void personal_model_directive_telemetry_null_overlay_increments_null(void) {
+    hu_personal_model_directive_telemetry_reset();
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    overlay_directive_seed_model(&m);
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, NULL, buf, sizeof(buf));
+    hu_directive_telemetry_t s;
+    hu_personal_model_directive_telemetry_snapshot(&s);
+    HU_ASSERT_EQ((unsigned long long)s.counts[HU_DIRECTIVE_VARIANT_NULL_OVERLAY], 1ULL);
+    HU_ASSERT_EQ((unsigned long long)s.total, 1ULL);
+}
+
+static void personal_model_directive_telemetry_formal_overlay_increments_formal(void) {
+    hu_personal_model_directive_telemetry_reset();
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    overlay_directive_seed_model(&m);
+    hu_persona_overlay_t overlay = {0};
+    overlay.formality = (char *)"formal";
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &overlay, buf, sizeof(buf));
+    hu_directive_telemetry_t s;
+    hu_personal_model_directive_telemetry_snapshot(&s);
+    HU_ASSERT_EQ((unsigned long long)s.counts[HU_DIRECTIVE_VARIANT_FORMAL_TERSE], 1ULL);
+    /* No spillover into other buckets. */
+    HU_ASSERT_EQ((unsigned long long)s.counts[HU_DIRECTIVE_VARIANT_NULL_OVERLAY], 0ULL);
+    HU_ASSERT_EQ((unsigned long long)s.counts[HU_DIRECTIVE_VARIANT_CASUAL_EMOJI], 0ULL);
+    HU_ASSERT_EQ((unsigned long long)s.total, 1ULL);
+}
+
+static void personal_model_directive_telemetry_casual_emoji_increments_casual_emoji(void) {
+    hu_personal_model_directive_telemetry_reset();
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    overlay_directive_seed_model(&m);
+    hu_persona_overlay_t overlay = {0};
+    overlay.formality = (char *)"casual";
+    overlay.emoji_usage = (char *)"moderate";
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &overlay, buf, sizeof(buf));
+    hu_directive_telemetry_t s;
+    hu_personal_model_directive_telemetry_snapshot(&s);
+    HU_ASSERT_EQ((unsigned long long)s.counts[HU_DIRECTIVE_VARIANT_CASUAL_EMOJI], 1ULL);
+    HU_ASSERT_EQ((unsigned long long)s.total, 1ULL);
+}
+
+static void personal_model_directive_telemetry_unspecified_overlay_increments_default(void) {
+    /* An overlay that's structurally present but carries no
+     * useful signal lands in DEFAULT, NOT NULL_OVERLAY — the
+     * distinction matters for dashboards: it tells the operator
+     * "the channel HAS an overlay but it's not steering the
+     * directive" vs "no overlay at all". */
+    hu_personal_model_directive_telemetry_reset();
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    overlay_directive_seed_model(&m);
+    hu_persona_overlay_t overlay = {0};
+    overlay.formality = (char *)"adaptive";
+    overlay.emoji_usage = (char *)"minimal";
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &overlay, buf, sizeof(buf));
+    hu_directive_telemetry_t s;
+    hu_personal_model_directive_telemetry_snapshot(&s);
+    HU_ASSERT_EQ((unsigned long long)s.counts[HU_DIRECTIVE_VARIANT_DEFAULT], 1ULL);
+    HU_ASSERT_EQ((unsigned long long)s.counts[HU_DIRECTIVE_VARIANT_NULL_OVERLAY], 0ULL);
+    HU_ASSERT_EQ((unsigned long long)s.total, 1ULL);
+}
+
+static void personal_model_directive_telemetry_repeated_calls_accumulate(void) {
+    /* The counter must accumulate across calls — that's the
+     * whole point of telemetry. Three casual+emoji calls means
+     * count=3, not count=1-with-stale-reset. */
+    hu_personal_model_directive_telemetry_reset();
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    overlay_directive_seed_model(&m);
+    hu_persona_overlay_t overlay = {0};
+    overlay.formality = (char *)"casual";
+    overlay.emoji_usage = (char *)"high";
+    char buf[2048];
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &overlay, buf, sizeof(buf));
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &overlay, buf, sizeof(buf));
+    (void)hu_personal_model_build_prompt_with_overlay(&m, &overlay, buf, sizeof(buf));
+    hu_directive_telemetry_t s;
+    hu_personal_model_directive_telemetry_snapshot(&s);
+    HU_ASSERT_EQ((unsigned long long)s.counts[HU_DIRECTIVE_VARIANT_CASUAL_EMOJI], 3ULL);
+    HU_ASSERT_EQ((unsigned long long)s.total, 3ULL);
+}
+
+static void personal_model_directive_variant_label_returns_known(void) {
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_NULL_OVERLAY),
+                          "null_overlay") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_DEFAULT),
+                          "default") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_FORMAL_TERSE),
+                          "formal_terse") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_CASUAL_EMOJI),
+                          "casual_emoji") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT),
+                          "casual_or_short") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI),
+                          "adaptive_emoji") == 0);
+    /* Out-of-range gets the safe placeholder. */
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              (hu_directive_variant_t)999),
+                          "unknown") == 0);
+}
+
+static void personal_model_build_prompt_omits_directive_when_no_completed(void) {
+    /* Inverted: a model with NO recently-completed goals must
+     * NOT emit the directive line. Tokens spent on dormant
+     * directives degrade the signal-to-noise ratio of the
+     * system prompt. */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    snprintf(m.goals[0].description, sizeof(m.goals[0].description), "active goal");
+    m.goals[0].active = true;
+    m.goals[0].created_at = 1000;
+    m.goals[0].last_referenced = 1000;
+    m.goal_count = 1;
+    m.updated_at = 1000 + 86400;
+
+    char buf[2048];
+    (void)hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_TRUE(strstr(buf, "acknowledge it warmly") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "dominate the reply") == NULL);
+}
+
 /* ── Goal completion detection ──────────────────────────────────────── */
 
 static void personal_model_resolve_goals_handles_null_args(void) {
@@ -2959,6 +3242,21 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_resolve_goals_stamps_last_referenced);
     HU_RUN_TEST(personal_model_build_prompt_surfaces_recently_completed);
     HU_RUN_TEST(personal_model_build_prompt_omits_old_completed);
+    HU_RUN_TEST(personal_model_build_prompt_emits_acknowledgment_directive);
+    HU_RUN_TEST(personal_model_build_prompt_omits_directive_when_no_completed);
+    HU_RUN_TEST(personal_model_build_prompt_overlay_null_matches_legacy);
+    HU_RUN_TEST(personal_model_build_prompt_overlay_formal_emits_terse_directive);
+    HU_RUN_TEST(personal_model_build_prompt_overlay_casual_emoji_emits_permissive_variant);
+    HU_RUN_TEST(personal_model_build_prompt_overlay_short_length_emphasizes_brevity);
+    HU_RUN_TEST(personal_model_build_prompt_overlay_formal_overrides_emoji);
+    HU_RUN_TEST(personal_model_build_prompt_overlay_unknown_falls_through_to_default);
+    HU_RUN_TEST(personal_model_directive_telemetry_reset_zeros_counts);
+    HU_RUN_TEST(personal_model_directive_telemetry_null_overlay_increments_null);
+    HU_RUN_TEST(personal_model_directive_telemetry_formal_overlay_increments_formal);
+    HU_RUN_TEST(personal_model_directive_telemetry_casual_emoji_increments_casual_emoji);
+    HU_RUN_TEST(personal_model_directive_telemetry_unspecified_overlay_increments_default);
+    HU_RUN_TEST(personal_model_directive_telemetry_repeated_calls_accumulate);
+    HU_RUN_TEST(personal_model_directive_variant_label_returns_known);
     HU_RUN_TEST(personal_model_resolve_goals_handles_null_args);
     HU_RUN_TEST(personal_model_resolve_goals_deactivates_on_completion_verb);
     HU_RUN_TEST(personal_model_resolve_goals_handles_done);

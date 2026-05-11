@@ -1,6 +1,7 @@
 #include "human/memory/vector/embeddings_gemini.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,8 +131,13 @@ static hu_error_t gemini_embed(void *ctx, hu_allocator_t *alloc, const char *tex
     if (err != HU_OK)
         return err;
     if (resp.status_code != 200 || !resp.body) {
+        hu_log_warn("embeddings_gemini", NULL, "embed failed: HTTP %d (body_len=%zu)",
+                    resp.status_code, resp.body_len);
+        int sc = resp.status_code;
         hu_http_response_free(alloc, &resp);
-        return HU_ERR_JSON_PARSE;
+        return (sc == 429) ? HU_ERR_PROVIDER_RATE_LIMITED
+             : (sc == 401 || sc == 403) ? HU_ERR_PROVIDER_AUTH
+             : HU_ERR_IO;
     }
 
     hu_error_t parse_err = parse_gemini_response(alloc, resp.body, resp.body_len, out);

@@ -292,7 +292,10 @@ bool hu_feed_awareness_should_share(const hu_awareness_topic_t *topic,
         return true;
     if (recent >= 0.15 && topic->relevance >= 0.45)
         return true;
-    if (topic->relevance >= 0.82)
+    /* High-relevance topics still require at least minimal contact interest
+     * match — otherwise persona-relevant items (e.g. tech news) leak into
+     * proactive messages to contacts who have no interest in those topics. */
+    if (topic->relevance >= 0.82 && (shared >= 0.08 || recent >= 0.08))
         return true;
     return false;
 }

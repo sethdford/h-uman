@@ -226,6 +226,10 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                         "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                         "  dpo-train               Run DPO preference training step\n"
                         "  lora-persona            Train LoRA adapter from persona examples\n"
+                        "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
+                        "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
+                        "  lora-runner             Generate response set from persona via provider (D2.2)\n"
+                        "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
                         "  train-feed-predictor    Train topic/trend predictor from feed data\n"
                         "  status                  Show experiment results\n");
         return HU_ERR_INVALID_ARGUMENT;
@@ -245,6 +249,14 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_prepare_conversations(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "lora-persona") == 0)
         return hu_ml_cli_lora_persona(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "lora-baseline") == 0)
+        return hu_ml_cli_lora_baseline(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "lora-ab") == 0)
+        return hu_ml_cli_lora_ab(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "lora-runner") == 0)
+        return hu_ml_cli_lora_runner(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "fidelity-status") == 0)
+        return hu_ml_cli_fidelity_status(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "train-feed-predictor") == 0)
         return hu_ml_cli_train_feed_predictor(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "apply-adapter") == 0)
@@ -258,6 +270,10 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                "  dpo-train               Run DPO preference training step\n"
                "  lora-persona            Train LoRA adapter from persona examples\n"
+               "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
+               "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
+               "  lora-runner             Generate response set from persona via provider (D2.2)\n"
+               "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
                "  apply-adapter           Load a trained adapter into the local provider (W13)\n"
                "  train-feed-predictor    Train topic/trend predictor from feed data\n"
                "  status                  Show experiment results\n");

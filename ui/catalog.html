@@ -104,6 +104,7 @@
       <a href="#hu-stats-row">hu-stats-row</a>
       <a href="#hu-section-header">hu-section-header</a>
       <a href="#hu-metric-row">hu-metric-row</a>
+      <a href="#hu-fidelity-tile">hu-fidelity-tile</a>
       <a href="#hu-timeline">hu-timeline</a>
       <a href="#hu-timeline-chart">hu-timeline-chart</a>
       <a href="#hu-sparkline-enhanced">hu-sparkline-enhanced</a>
@@ -1193,6 +1194,29 @@
           </div>
         </div>
         <div class="code-snippet"><code>&lt;hu-metric-row .items=\${[{label:"CPU",value:"23%"},{label:"RAM",value:"1.2GB"}]}&gt;&lt;/hu-metric-row&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="hu-fidelity-tile">
+        <h2>hu-fidelity-tile</h2>
+        <p>Persona-fidelity dashboard tile. Surfaces baseline mean, A/B delta, and sample counts from <code>human ml fidelity-status</code>.</p>
+        <div class="playground">
+          <div class="preview" style="width:100%" id="fidelity-tile-preview">
+            <hu-fidelity-tile id="fidelity-tile-demo"></hu-fidelity-tile>
+            <script type="module">
+              import "/src/components/hu-fidelity-tile.ts";
+              const t = document.getElementById("fidelity-tile-demo");
+              if (t) {
+                t.data = {
+                  persona: "demo",
+                  fingerprint_source: "synthetic",
+                  baseline: { scored: 5, mean: 0.923, min: 0.911, max: 0.933 },
+                  ab: { available: true, before_mean: 0.555, after_mean: 0.923, delta: 0.368, scored_before: 5, scored_after: 5 }
+                };
+              }
+            </script>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;hu-fidelity-tile .data=\${fidelityStatusJson}&gt;&lt;/hu-fidelity-tile&gt;</code></div>
       </section>
 
       <section class="component-section" id="hu-timeline">
