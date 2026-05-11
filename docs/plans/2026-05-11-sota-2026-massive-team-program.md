@@ -52,6 +52,58 @@ If a design doc fails D0–D7, it gets one revision round, then is parked.
 
 ---
 
+## Locked conventions (cross-initiative)
+
+The cross-initiative adversarial review (`adversarial-review-critic.md`, `adversarial-review-api-contracts.md`, `adversarial-review-security.md`, synthesized in `adversarial-review-synthesis.md`) identified two enums where independent design docs picked overlapping or inverted values. Both are now **locked** here as the single source of truth. Any initiative that consumes either enum must match exactly; deviations are a sprint-blocker.
+
+### Trust-tier ordinal convention (init-09 is the owner)
+
+Higher ordinal = more trust. Comparisons must use `>=` against a threshold, never `==` or `<` against a hardcoded numeric value.
+
+| Ordinal | Name | Meaning |
+|---------|------|---------|
+| `4` | `HU_TRUST_USER_DIRECT` | User typed it into a 1:1 CLI / DM channel session |
+| `3` | `HU_TRUST_PERSONA_DERIVED` | Computed from the user's own long-term outputs |
+| `2` | `HU_TRUST_FIRST_PARTY` | User-installed tool, 1st-party data source (`human` itself, self-email, calendar) |
+| `1` | `HU_TRUST_THIRD_PARTY` | Group chat, RSS, social feed, email from stranger |
+| `0` | `HU_TRUST_UNTRUSTED` | Unknown origin or quarantine-flagged |
+
+Initiatives consuming this enum: **#04** (gates LoRA training data), **#05** (TTT only on `>= USER_DIRECT`), **#08** (federated aggregation only on `>= FIRST_PARTY`), **#10** (consolidation only merges within same tier).
+
+### `hu_job_kind_t` enum allocation (init-10 is the owner; init-05 / #08 / #14 extend)
+
+The adversarial API review caught two independent designs (init-05 and init-10) each defining `HU_JOB_KIND_NREM = 1`. This allocation table prevents future collisions. New jobs claim the next free ordinal; deletions are forbidden (allocate a new ordinal instead).
+
+| Ordinal | Constant | Owner initiative | Purpose |
+|---------|----------|------------------|---------|
+| `0` | `HU_JOB_KIND_NONE` | scheduler core | Sentinel / uninitialized |
+| `1` | `HU_JOB_KIND_NREM` | **#10** | Episode consolidation (slow-wave summarization) |
+| `2` | `HU_JOB_KIND_REM` | **#10** | Cross-episode connection-finding |
+| `3` | `HU_JOB_KIND_TTT_STEP` | **#05** | One verifier-driven gradient step |
+| `4` | `HU_JOB_KIND_TTT_REVERT` | **#05** | Roll back a TTT step on dissent |
+| `5` | `HU_JOB_KIND_FED_ROUND` | **#08** | One federated aggregation round |
+| `6` | `HU_JOB_KIND_FED_KEYGEN` | **#08** | Noise pairwise key derivation |
+| `7` | `HU_JOB_KIND_BENCHMARK` | **#14** | Run a longitudinal eval batch |
+| `8` | `HU_JOB_KIND_PRM_TRAIN` | **#07** | Process-reward-model training pass |
+| `9` | `HU_JOB_KIND_KV_COMPACT` | **#13** | DeltaKV residual recoding |
+| `10` | `HU_JOB_KIND_QUARANTINE_REVIEW` | **#09** | Pending-fact promotion / expiry sweep |
+
+Ordinals `11–63` are reserved for future allocation; `64+` is forbidden (must extend `uint64_t` bitmask in `hu_scheduler_t`). Adding a new kind requires (a) appending here, (b) updating `include/human/scheduler.h`, (c) handling the kind in every scheduler backend that introspects `kind`.
+
+### `hu_provider_t.load_adapter` surface (init-04 owner; init-02 / #05 / #08 consume)
+
+`load_adapter` is the canonical entry point for swapping LoRA adapters at inference time. Initiatives #02 (MoLoRA experts), #05 (TTT step), and #08 (federated aggregation result) all need the *exact same* signature.
+
+```c
+hu_error_t (*load_adapter)(hu_provider_t *self,
+                           const hu_lora_adapter_t *adapter,  /* NULL = unload */
+                           hu_lora_apply_mode_t mode);        /* REPLACE / STACK */
+```
+
+Cloud providers (`openai`, `anthropic`, `gemini`, `vertex`, …) must implement this returning `HU_ERR_NOT_SUPPORTED` — the daemon's personalization auto-load falls through to base chat as proven by `tests/test_provider_all.c::test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat` (commit 028f4544). This is a **safety contract**: a cloud provider returning anything other than `HU_OK` or `HU_ERR_NOT_SUPPORTED` is a sprint-blocker.
+
+---
+
 ## Portfolio overview
 
 | # | Track theme | Slug | Primary outcome | Vtable touched | Risk tier |
@@ -227,41 +279,79 @@ After the fleet returns, this document gets a synthesis section choosing the top
 
 | # | Slug | Subagent | Status | Spec file |
 |---|------|----------|--------|-----------|
-| 01 | activation-steering | code-architect | dispatched | `2026-05-11-init-01-activation-steering.md` |
-| 02 | molora-channels | code-architect | dispatched | `2026-05-11-init-02-molora-channels.md` |
-| 03 | apple-fm-provider | code-architect | dispatched | `2026-05-11-init-03-apple-fm-provider.md` |
-| 04 | mlx-qwen3-provider | code-architect | dispatched | `2026-05-11-init-04-mlx-qwen3-provider.md` |
-| 05 | verifier-driven-ttt | code-architect | dispatched | `2026-05-11-init-05-verifier-driven-ttt.md` |
-| 06 | simpo-orpo-grpo2 | code-architect | dispatched | `2026-05-11-init-06-simpo-orpo-grpo2.md` |
-| 07 | thinkprm-verifier | code-architect | dispatched | `2026-05-11-init-07-thinkprm-verifier.md` |
-| 08 | federated-lora | code-architect | dispatched | `2026-05-11-init-08-federated-lora.md` |
-| 09 | memory-trust-tiers | security-reviewer | dispatched | `2026-05-11-init-09-memory-trust-tiers.md` |
-| 10 | episode-storage-sleep-consolidation | code-architect | dispatched | `2026-05-11-init-10-episode-storage-sleep-consolidation.md` |
-| 11 | proactivity-typing | code-architect | dispatched | `2026-05-11-init-11-proactivity-typing.md` |
-| 12 | mcp-server-mode | code-architect | dispatched | `2026-05-11-init-12-mcp-server-mode.md` |
-| 13 | kv-compression | code-architect | dispatched | `2026-05-11-init-13-kv-compression.md` |
-| 14 | public-benchmarks | code-architect | dispatched | `2026-05-11-init-14-public-benchmarks.md` |
+| 01 | activation-steering | code-architect | **design done** | `2026-05-11-init-01-activation-steering.md` |
+| 02 | molora-channels | code-architect | **design done** | `2026-05-11-init-02-molora-channels.md` |
+| 03 | apple-fm-provider | code-architect | **design done** | `2026-05-11-init-03-apple-fm-provider.md` |
+| 04 | mlx-qwen3-provider | code-architect | **design done — S1 ADOPTED** | `2026-05-11-init-04-mlx-qwen3-provider.md` |
+| 05 | verifier-driven-ttt | code-architect | **design done — DEFERRED (needs #09 + #07 land)** | `2026-05-11-init-05-verifier-driven-ttt.md` |
+| 06 | simpo-orpo-grpo2 | code-architect | **design done** | `2026-05-11-init-06-simpo-orpo-grpo2.md` |
+| 07 | thinkprm-verifier | code-architect | **design done** | `2026-05-11-init-07-thinkprm-verifier.md` |
+| 08 | federated-lora | code-architect | **design done — DEFERRED (SECAGG protocol revision required)** | `2026-05-11-init-08-federated-lora.md` |
+| 09 | memory-trust-tiers | security-reviewer | **design done — S1 ADOPTED (patched post-review)** | `2026-05-11-init-09-memory-trust-tiers.md` |
+| 10 | episode-storage-sleep-consolidation | code-architect | **design done — DEFERRED (job_kind collision now resolved here)** | `2026-05-11-init-10-episode-storage-sleep-consolidation.md` |
+| 11 | proactivity-typing | code-architect | **design done — S1 ADOPTED (typing half only)** | `2026-05-11-init-11-proactivity-typing.md` |
+| 12 | mcp-server-mode | code-architect | **design done — DEFERRED (adapter-replacement attack)** | `2026-05-11-init-12-mcp-server-mode.md` |
+| 13 | kv-compression | code-architect | **design done — DEFERRED (correctness budget)** | `2026-05-11-init-13-kv-compression.md` |
+| 14 | public-benchmarks | code-architect | **design done — S1 ADOPTED** | `2026-05-11-init-14-public-benchmarks.md` |
+| **W0a** | hu_episode_t ODR cleanup | code-simplifier | **done** (commit `1b9705ac`) | `2026-05-11-w0a-episode-rename-report.md` |
+| **W0b** | hu_mcp_server_t → hu_mcp_client_t rename | code-simplifier | **done** (commit `1e6746c7`) | `2026-05-11-w0b-mcp-rename-report.md` |
 
-Legend: `dispatched` → `design done` → `sprint open` → `done` (or `parked`).
+Legend: `dispatched` → `design done` → `sprint open` → `done` (or `parked` / `DEFERRED`).
 
-## Synthesis target (filled in after fleet returns)
+## Synthesis (post-adversarial-review)
 
-This section is intentionally empty until the fleet completes. The synthesis will:
+All 14 design docs landed (status table above). The cross-initiative adversarial review then ran three parallel passes — `critic`, `api-contract-watcher`, `security-reviewer` — producing a combined ledger of:
 
-1. List the 4–6 initiatives chosen for **Sprint SOTA-2026-01** with rationale.
-2. List the parked initiatives with a one-line "what would unblock this" note.
-3. Identify cross-initiative API conflicts (esp. between 02 / 04 / 05 / 06 on the `hu_provider_t.load_adapter` surface and between 09 / 10 on `hu_memory_t`).
-4. Update `2026-05-10-sota-roadmap-6mo.md` with the chosen initiatives slotted into Month-2 through Month-4 calendars.
-5. Open the first concrete Sprint stories in `sprints/sprint-2/stories.md` (sprint-1 currently has the directive-telemetry / A/B status / channel overlay / live-LoRA stories).
+- **4 BLOCKER findings** (B1–B4: type ODR violation, migration default upgrades poison, ingest call-site patching gap, MCP adapter-replacement attack)
+- **6 ABI-BREAKING surface deltas** with **37 name-collision call sites** to patch in lockstep
+- **4 CRITICAL security findings** (SECAGG over GF(2^8) is mathematically wrong, TTT poisonable without #09, MCP peer-driven adapter replacement, env-var override for code injection)
+- **10 MINJA bypass categories** the 10-pattern detector missed
+
+The full ledger is `adversarial-review-synthesis.md`, synthesizing `adversarial-review-critic.md`, `adversarial-review-api-contracts.md`, and `adversarial-review-security.md`.
+
+### Preconditions (executed as W0a + W0b — both `done`)
+
+| # | Slice | Purpose | Resolves | Status |
+|---|-------|---------|----------|--------|
+| **W0a** | `hu_episode_t` rename to `hu_session_episode_t` (agent/) + `hu_deep_episode_t` (deep_memory/) | Resolves B1 (triple-ODR violation); unblocks #10 episode storage | B1 | done — commit `1b9705ac` |
+| **W0b** | `hu_mcp_server_t` → `hu_mcp_client_t`; `hu_mcp_host_t` → `hu_mcp_engine_t` (with 1-release deprecation shims) | Frees the `hu_mcp_server_t` slot for init #12 (MCP server mode) | API-3 (name collision) | done — commit `1e6746c7` |
+
+### S1 selection — Sprint SOTA-2026-01
+
+Five initiatives chosen for S1 based on (a) cleared adversarial gate after precondition fixes, (b) leverage on the M1–M3 missions, (c) no remaining cross-initiative conflicts after the locked conventions above.
+
+| # | Initiative | Why S1 | Required design revisions baked in |
+|---|-----------|--------|--------------------------------------|
+| **#09** | Memory trust tiers | Security spine; precondition for #04, #05 personalization gating | B2 (migration default = THIRD_PARTY), B3/A1 (4-site `ingest` audit), MINJA broadening to ≥30 patterns + NFKC + leetspeak + locale-mismatch + pending-facts queue; ordinal convention locked |
+| **#04** | MLX Qwen3-4B provider | Closes M3 Bridge B — first real on-device frontier model with live LoRA | Consumes locked `load_adapter` surface; cloud providers return `HU_ERR_NOT_SUPPORTED` (pinned by `test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat`) |
+| **#14** | Public benchmark suite | Locks observable quality numbers before #04 / #05 ship; provides regression floor | No revisions — design clean |
+| **#01** (prompt half only) | Activation-steering on cloud providers | Persona steering on cloud chat without waiting on MLX integration | Implementation limited to prompt-side / SAE-feature weighting; MLX residual-stream patching deferred to S2 |
+| **#11** (typing half only) | Stephanie2 typing simulation | Highest user-perceptible quality gain at zero security risk | PRISM proactivity gate deferred to S2 (utility-model needs real training data) |
+
+### Deferred initiatives (with unblock condition)
+
+| # | Initiative | Why deferred | What would unblock |
+|---|-----------|--------------|---------------------|
+| **#05** | Verifier-driven TTT | Cannot land safely until #09 (trust gating) + #07 (trained verifier) are live | Both land in S1/S2 |
+| **#08** | Federated LoRA | SECAGG-over-GF(2^8) is mathematically wrong (Shamir over a prime field is required); attacker can reconstruct other devices' gradients | Protocol revision to Shamir over `GF(p)` with `p > 2^31` |
+| **#10** | Episode storage + sleep consolidation | `hu_job_kind_t` collision now resolved by locked enum table above; design still references old ordinals | Re-spec to consume `HU_JOB_KIND_NREM=1`, `HU_JOB_KIND_REM=2` from the locked allocation |
+| **#12** | MCP server mode | Peer-driven adapter replacement attack surface (a peer MCP client could request the daemon load an adversary's LoRA); needs explicit policy gate | Add adapter-load policy (signed-only, user-confirmation-required, or disabled) and matching test |
+| **#13** | KV compression | Correctness budget (< 1% quality loss) requires DeltaKV reference implementation; not yet in tree | Land reference implementation + bring-up tests; then re-evaluate |
+
+### Sprint 2+ inputs
+
+This synthesis updates `2026-05-10-sota-roadmap-6mo.md` Month-2 with the S1 plan above and slots #05/#10/#12 into Month-3 once the unblock conditions clear. Concrete S1 stories will be opened in `sprints/sprint-2/stories.md` after the planning gate commit lands.
 
 ## Adversarial review
 
-Before this program closes any sprint, the following adversarial gates run (re-using the patterns from `2026-05-11-full-sota-rl-improvement-loop-design.md`):
+The three reviewer passes have run. Their outputs:
 
-- **critic** subagent reads each design doc and reports half-fixes, missing edge cases, cross-initiative regressions.
-- **security-reviewer** re-reads 03, 04, 08, 09 specifically for new attack surface.
-- **api-contract-watcher** diffs the proposed vtable changes against current `include/human/` to ensure no breaking changes to existing callers.
-- **sprint-auditor** does an independent end-of-sprint pass: did we ship what the design doc claimed, or did we silently descope?
+- **critic** subagent → `adversarial-review-critic.md` (4 BLOCKERs B1–B4, plus half-fixes and cross-initiative regressions per design doc).
+- **api-contract-watcher** → `adversarial-review-api-contracts.md` (6 ABI-breaking findings + 37 name-collision call sites, with the locked conventions above as the resolution).
+- **security-reviewer** → `adversarial-review-security.md` (4 CRITICAL findings + 10 MINJA bypass categories; informs the #09 broadened detector and the #08 deferral).
+- **synthesis** → `adversarial-review-synthesis.md` (go/no-go matrix; precondition fixes for S1; design revisions required for deferred initiatives; S1 implementer prompt checklist additions).
+
+Before any S1 sprint closes, the **sprint-auditor** does an independent end-of-sprint pass: did we ship what the design doc claimed, or did we silently descope? That gate runs against this document and the corresponding `init-NN-*.md`s, not against the implementation alone.
 
 ## Anti-scope
 
