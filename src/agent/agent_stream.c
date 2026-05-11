@@ -1,5 +1,6 @@
 /* Streaming infrastructure: token callback wiring, hu_agent_turn_stream, hu_agent_turn_stream_v2 */
 #include "agent_internal.h"
+#include "human/config.h"
 #include "human/agent/awareness.h"
 #include "human/agent/commands.h"
 #include "human/agent/constitutional.h"
