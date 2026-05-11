@@ -178,11 +178,22 @@ size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *bu
         char length_buf[64];
         const char *len_dir =
             length_directive(model->style.avg_message_length, length_buf, sizeof(length_buf));
-        append_fmt(buf, cap, &n, "Mirror their style: %s, %s, %s, %s.\n",
+        append_fmt(buf, cap, &n, "Mirror their style: %s, %s, %s, %s",
                    len_dir,
                    register_directive(model->style.formality),
                    emoji_directive(model->style.emoji_frequency),
                    humor_directive(model->style.humor_receptivity));
+        /* Punctuation/case axes — only emit when the EWMA-tracked ratio
+         * crosses ~half so a single capitalized message in a casual
+         * thread doesn't bounce the directive off, and a single shorthand
+         * use in a formal thread doesn't license "u" everywhere. */
+        if (model->style.lowercase_ratio >= 0.5f) {
+            append_fmt(buf, cap, &n, ", type lowercase");
+        }
+        if (model->style.abbreviation_ratio >= 0.4f) {
+            append_fmt(buf, cap, &n, ", ok to use 'u'/'rn'/'btw'");
+        }
+        append_fmt(buf, cap, &n, ".\n");
         detail = true;
     }
 
@@ -281,6 +292,53 @@ static bool fact_key_dup(const hu_heuristic_fact_t *a, const hu_heuristic_fact_t
     return strcmp(a->subject, b->subject) == 0 && strcmp(a->predicate, b->predicate) == 0;
 }
 
+/* All-lowercase detection: a message is "lowercase-styled" when it has
+ * letters and zero of them are uppercase. Empty / number-only messages
+ * are excluded so they don't bias the ratio. Mirrors the rule used in
+ * src/context/behavioral.c::is_all_lowercase. */
+static bool message_is_all_lowercase(const char *m, size_t len) {
+    bool saw_letter = false;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)m[i];
+        if (c >= 'A' && c <= 'Z')
+            return false;
+        if ((c >= 'a' && c <= 'z'))
+            saw_letter = true;
+    }
+    return saw_letter;
+}
+
+/* Chat-shorthand detection — same vocabulary the linguistic-mirror module
+ * already trusts (`src/context/behavioral.c::contains_abbrev`). Single-
+ * pass, word-boundary aware. */
+static bool message_has_abbreviation(const char *m, size_t len) {
+    static const char *kAbbrevs[] = {"u", "ur", "rn", "btw", "ty", "yw", "lmk", "tbh", "imo"};
+    for (size_t i = 0; i < len; i++) {
+        bool at_start = (i == 0) || !isalpha((unsigned char)m[i - 1]);
+        if (!at_start)
+            continue;
+        for (size_t k = 0; k < sizeof(kAbbrevs) / sizeof(kAbbrevs[0]); k++) {
+            const char *abbr = kAbbrevs[k];
+            size_t alen = strlen(abbr);
+            if (i + alen > len)
+                continue;
+            bool match = true;
+            for (size_t j = 0; j < alen; j++) {
+                if (tolower((unsigned char)m[i + j]) != abbr[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (!match)
+                continue;
+            bool at_end = (i + alen == len) || !isalpha((unsigned char)m[i + alen]);
+            if (at_end)
+                return true;
+        }
+    }
+    return false;
+}
+
 static void update_style_from_message(hu_communication_style_t *style, const char *message,
                                       size_t message_len) {
     if (!style || !message || message_len == 0)
@@ -301,6 +359,14 @@ static void update_style_from_message(hu_communication_style_t *style, const cha
     /* Verbosity: map length to 0..1 (500+ chars treated as fully verbose). */
     float verb = fminf(1.0f, (float)len / 500.0f);
     style->verbosity = style->verbosity * 0.85f + verb * 0.15f;
+
+    /* Lowercase / abbreviation EWMA — same 0.85/0.15 mix as verbosity so
+     * the ratios converge at similar pace and a transient capitalized
+     * message doesn't flip a heavily-lowercase user's directive off. */
+    float lower_obs = message_is_all_lowercase(message, message_len) ? 1.0f : 0.0f;
+    style->lowercase_ratio = style->lowercase_ratio * 0.85f + lower_obs * 0.15f;
+    float abbr_obs = message_has_abbreviation(message, message_len) ? 1.0f : 0.0f;
+    style->abbreviation_ratio = style->abbreviation_ratio * 0.85f + abbr_obs * 0.15f;
 
     /* Rough emoji proxy: UTF-8 leading bytes 0xF0.. often start emoji sequences. */
     size_t emoji_hits = 0;
@@ -436,7 +502,10 @@ const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_
  * (the daemon's onboard wizard does this for the user). */
 
 #define HU_PM_MAGIC    0x4D505548u   /* "HUPM" little-endian */
-#define HU_PM_VERSION  1u
+/* v1 → v2: hu_communication_style_t gained `lowercase_ratio` and
+ * `abbreviation_ratio` fields. Old v1 saves fail magic+version check
+ * and the caller falls back to a fresh-default model. */
+#define HU_PM_VERSION  2u
 
 typedef struct hu_pm_header {
     uint32_t magic;

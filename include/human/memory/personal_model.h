@@ -48,6 +48,16 @@ typedef struct hu_communication_style {
     float verbosity;             /* 0.0 (terse) to 1.0 (verbose) */
     float emoji_frequency;       /* 0.0 (never) to 1.0 (heavy) */
     float humor_receptivity;     /* 0.0 (serious) to 1.0 (playful) */
+    /* Punctuation / case axes — complement the four quantitative axes
+     * above. EWMA-tracked over `sample_count`, ranging 0.0 to 1.0:
+     *   - lowercase_ratio:    proportion of msgs typed all-lowercase
+     *   - abbreviation_ratio: proportion of msgs with chat abbreviations
+     *                         ("u", "rn", "btw", "ty", "lmk", "yw")
+     * Surfaced in the personal-model directive so the frontier model
+     * matches casing and shorthand instead of defaulting to its
+     * training-distribution register. */
+    float lowercase_ratio;
+    float abbreviation_ratio;
     uint32_t avg_message_length; /* in characters */
     uint32_t sample_count;       /* messages analyzed */
 } hu_communication_style_t;

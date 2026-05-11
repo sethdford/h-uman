@@ -577,6 +577,61 @@ static void personal_model_style_directive_formal_verbose(void) {
                    strstr(buf, "keep replies ~300 chars") != NULL);
 }
 
+static void personal_model_style_directive_lowercase_typer(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    /* Five all-lowercase messages — ratio should clear the 0.5 threshold. */
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "yo whats up", 11, true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol same", 8, true, 1700000002), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "haha yeah", 9, true, 1700000003), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "i think so", 10, true, 1700000004), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ok cool", 7, true, 1700000005), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "type lowercase") != NULL);
+}
+
+static void personal_model_style_directive_abbreviation_user(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    /* Five messages, all carrying chat shorthand — ratio clears 0.4. */
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "u busy?", 7, true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "btw lmk", 7, true, 1700000002), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ty ty", 5, true, 1700000003), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "rn? or later?", 13, true, 1700000004), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ok ty btw", 9, true, 1700000005), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "'u'/'rn'/'btw'") != NULL);
+}
+
+static void personal_model_style_directive_proper_case_no_lowercase_clause(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[2048];
+
+    /* Three messages, all properly capitalized — lowercase_ratio stays
+     * near zero. The directive should appear (3 samples) but without the
+     * "type lowercase" clause. */
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "Hello there.", 12, true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "How are you today?", 18, true, 1700000002), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "What time works?", 16, true, 1700000003), HU_OK);
+
+    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "type lowercase") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "'u'/'rn'/'btw'") == NULL);
+}
+
 static void personal_model_style_directive_absent_when_no_samples(void) {
     /* A model populated only via merge_facts (no ingest, sample_count == 0)
      * must not produce a directive — there's no observed style to mirror. */
@@ -622,6 +677,9 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_style_directive_emerges_after_three_samples);
     HU_RUN_TEST(personal_model_style_directive_casual_terse_humorous);
     HU_RUN_TEST(personal_model_style_directive_formal_verbose);
+    HU_RUN_TEST(personal_model_style_directive_lowercase_typer);
+    HU_RUN_TEST(personal_model_style_directive_abbreviation_user);
+    HU_RUN_TEST(personal_model_style_directive_proper_case_no_lowercase_clause);
     HU_RUN_TEST(personal_model_style_directive_absent_when_no_samples);
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(personal_model_survives_real_sigkill);
