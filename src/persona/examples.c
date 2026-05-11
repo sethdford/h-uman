@@ -520,7 +520,14 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
     *out_banks = NULL;
     *out_count = 0;
 
-#ifndef HU_ENABLE_SQLITE
+#if !defined(HU_ENABLE_SQLITE) || !defined(HU_ENABLE_ML)
+    /* This extractor needs both: SQLite to read conversation history, and
+     * the ML training-data-quality helpers (dedup, PII redaction, quality
+     * gates) which live in src/ml/training_data_quality.c and only link
+     * when HU_ENABLE_ML is ON. The default macOS / Linux build keeps
+     * HU_ENABLE_ML=OFF (CMakeLists.txt line 35) to skip the ~150 KB ML
+     * subsystem; in those builds we surface HU_ERR_NOT_SUPPORTED rather
+     * than failing to link with undefined symbols. */
     (void)max_per_channel;
     return HU_ERR_NOT_SUPPORTED;
 #else

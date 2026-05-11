@@ -1295,12 +1295,21 @@ hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *ap
 
     /* Compute baseline via the shared helper — same numbers the
      * CLI emits. Synthetic fallback fires whenever the user has no
-     * `personal_model.bin` yet. */
-    hu_communication_style_t target;
-    bool synthetic;
-    (void)hu_ml_fidelity_resolve_target(alloc, &target, &synthetic);
+     * `personal_model.bin` yet.
+     *
+     * Gated on HU_ENABLE_ML because the fidelity helper lives in
+     * src/ml/fidelity.c, which only links when ML is enabled. Without
+     * the gate, default macOS / Linux builds (HU_ENABLE_ML=OFF) fail
+     * to link with "Undefined symbols for _hu_ml_fidelity_*". When ML
+     * is off, surface the synthetic-zeroed shape so the API contract
+     * is preserved. */
     hu_communication_style_set_summary_t baseline_summary = {0};
+    bool synthetic = true;
+#ifdef HU_ENABLE_ML
+    hu_communication_style_t target;
+    (void)hu_ml_fidelity_resolve_target(alloc, &target, &synthetic);
     (void)hu_ml_fidelity_score_baseline(&persona, &target, &baseline_summary);
+#endif
 
     hu_json_object_set(alloc, obj, "persona",
                        hu_json_string_new(alloc, persona_name, persona_name_len));
