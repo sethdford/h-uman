@@ -113,6 +113,9 @@ hu_error_t hu_workflow_event_log_create(hu_allocator_t *alloc, const char *path,
     hu_workflow_event_log_t *log =
         (hu_workflow_event_log_t *)alloc->alloc(alloc->ctx, sizeof(*log));
     if (!log) {
+#ifdef HU_IS_TEST
+        alloc->free(alloc->ctx, full_path, full_len);
+#endif
         return HU_ERR_OUT_OF_MEMORY;
     }
 
@@ -123,12 +126,22 @@ hu_error_t hu_workflow_event_log_create(hu_allocator_t *alloc, const char *path,
     log->path = (char *)alloc->alloc(alloc->ctx, path_len + 1);
     if (!log->path) {
         alloc->free(alloc->ctx, log, sizeof(*log));
+#ifdef HU_IS_TEST
+        alloc->free(alloc->ctx, full_path, full_len);
+#endif
         return HU_ERR_OUT_OF_MEMORY;
     }
 
     memcpy(log->path, path, path_len);
     log->path[path_len] = '\0';
     log->path_len = path_len;
+
+#ifdef HU_IS_TEST
+    /* In test builds `path` was retargeted to point at `full_path`, which is
+     * an allocation we own. log->path now holds its own copy, so free the
+     * temp-redirect buffer (was 51 B × ~60 test agents ≈ 3.2 KB ASan leak). */
+    alloc->free(alloc->ctx, full_path, full_len);
+#endif
 
     /* Count existing events in file (if it exists) */
     log->next_seq = 0;

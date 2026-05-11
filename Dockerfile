@@ -12,6 +12,11 @@ COPY include/ include/
 COPY asm/ asm/
 COPY vendor/ vendor/
 COPY cmake/ cmake/
+# scripts/ is required at build time: the human_topology_check custom CMake
+# target invokes scripts/check-layer-topology.sh during `make`. Without it
+# the Alpine build fails with "bash: scripts/check-layer-topology.sh: No
+# such file or directory" (Error 127).
+COPY scripts/ scripts/
 
 RUN mkdir build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_CURL=ON -DHU_BUILD_TESTS=OFF && \

@@ -39,15 +39,27 @@ static const char TELEGRAM_COMMANDS_HELP_DEFAULT[] = "/start - Start a conversat
                                                      "/restart - Restart current session\n"
                                                      "/compact - Compact context now";
 
-/* Loaded commands text */
+/* Loaded commands text.
+ *
+ * Ref-counted lazily-loaded global, lifetime-tied to live telegram channels.
+ * Without refcounting, every hu_telegram_create overwrote the global pointer
+ * and orphaned the previous allocation — ~334 B × 27 test channels ≈ 9 KB
+ * leak under ASan. Refcounting bumps on create, drops on destroy, and frees
+ * when the last channel goes away. The allocator pointer is captured at
+ * first init so deinit doesn't need to know which channel triggered it. */
 static char *g_telegram_commands_help = NULL;
 static size_t g_telegram_commands_help_len = 0;
+static hu_allocator_t *g_telegram_commands_alloc = NULL;
+static unsigned long g_telegram_init_refcount = 0;
 
 static hu_error_t hu_telegram_data_init(hu_allocator_t *alloc) {
     if (!alloc)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /* Load telegram commands help text */
+    g_telegram_init_refcount++;
+    if (g_telegram_commands_help)
+        return HU_OK;
+
     char *data = NULL;
     size_t data_len = 0;
     hu_error_t err = hu_data_load(alloc, "channels/telegram_commands.txt", &data, &data_len);
@@ -55,11 +67,27 @@ static hu_error_t hu_telegram_data_init(hu_allocator_t *alloc) {
         g_telegram_commands_help = hu_strndup(alloc, data, data_len);
         if (g_telegram_commands_help) {
             g_telegram_commands_help_len = data_len;
+            g_telegram_commands_alloc = alloc;
         }
         alloc->free(alloc->ctx, data, data_len);
     }
 
     return HU_OK;
+}
+
+static void hu_telegram_data_deinit(void) {
+    if (g_telegram_init_refcount == 0)
+        return;
+    g_telegram_init_refcount--;
+    if (g_telegram_init_refcount > 0)
+        return;
+    if (g_telegram_commands_help && g_telegram_commands_alloc) {
+        g_telegram_commands_alloc->free(g_telegram_commands_alloc->ctx, g_telegram_commands_help,
+                                        g_telegram_commands_help_len + 1);
+    }
+    g_telegram_commands_help = NULL;
+    g_telegram_commands_help_len = 0;
+    g_telegram_commands_alloc = NULL;
 }
 
 typedef struct hu_telegram_ctx {
@@ -1187,6 +1215,7 @@ void hu_telegram_destroy(hu_channel_t *ch) {
         a->free(a->ctx, c, sizeof(*c));
         ch->ctx = NULL;
         ch->vtable = NULL;
+        hu_telegram_data_deinit();
     }
 }
 
