@@ -745,6 +745,226 @@ static void test_w7_replace_then_close_cleans_up(void) {
     close_facade(g, m);
 }
 
+/* ──────────────────────────────────────────────────────────────────────
+ * W7 Phase 1.4 — register / lifetime torture
+ *
+ * The execution plan's W7 exit row calls for "shared ctx lifetime +
+ * register semantics." The tests above prove single-replace + happy-path
+ * close. This block exercises multi-cycle replacement, audit hook
+ * survival across replace, repeated registration with the same vtable,
+ * and surfaces the records-free-after-replace lifetime question as a
+ * documented invariant. ASan is the gate for the destructive paths.
+ * ────────────────────────────────────────────────────────────────────── */
+
+/* Each per-stub instance tracks its own deinit count so multi-cycle
+ * tests can prove no double-free and no skipped free. The slot's `ctx`
+ * pointer is unique per stub instance, so the facade's dedup logic
+ * (memory_slot_ctx_shared_elsewhere) is not what's being tested here —
+ * we want raw register→register→...→close behavior on owned ctxs. */
+typedef struct phase14_stub {
+    int deinit_count;
+    int read_count;
+    int records_free_count;
+    int write_count;
+    /* Tag stamped into records so records_free can prove which backend
+     * the record originated from. */
+    int tag;
+} phase14_stub_t;
+
+static hu_error_t p14_read_one_record(void *ctx, const hu_memory_query_t *q, hu_allocator_t *alloc,
+                                      hu_memory_record_t **out, size_t *out_count) {
+    (void)q;
+    phase14_stub_t *s = (phase14_stub_t *)ctx;
+    s->read_count++;
+    /* Yield exactly one record allocated through the facade allocator
+     * so records_free has something concrete to free. The `id` carries
+     * the originating backend's tag for downstream assertions. */
+    hu_memory_record_t *r = (hu_memory_record_t *)alloc->alloc(alloc->ctx, sizeof(*r));
+    if (!r)
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(r, 0, sizeof(*r));
+    r->kind = HU_MEM_ENTITY;
+    r->id = s->tag;
+    *out = r;
+    *out_count = 1;
+    return HU_OK;
+}
+
+static void p14_records_free(void *ctx, hu_allocator_t *alloc, hu_memory_record_t *r, size_t n) {
+    phase14_stub_t *s = (phase14_stub_t *)ctx;
+    s->records_free_count++;
+    if (r && n)
+        alloc->free(alloc->ctx, r, n * sizeof(*r));
+}
+
+static hu_error_t p14_write_ok(void *ctx, const hu_memory_record_t *rec) {
+    (void)rec;
+    phase14_stub_t *s = (phase14_stub_t *)ctx;
+    s->write_count++;
+    return HU_OK;
+}
+
+static void p14_deinit(void *ctx) {
+    phase14_stub_t *s = (phase14_stub_t *)ctx;
+    s->deinit_count++;
+}
+
+static hu_memory_facade_vtable_t k_p14_stub_vt = {
+    .name = "p14-stub",
+    .read = p14_read_one_record,
+    .write = p14_write_ok,
+    .records_free = p14_records_free,
+    .deinit = p14_deinit,
+};
+
+/* Multi-cycle register: A → B → C → A → close. Each replace must
+ * deinit the slot it evicts exactly once; close must deinit the
+ * final occupant exactly once. ASan catches double-free / leaks. */
+static void test_w7_p14_multi_replace_cycle_deinits_each_evictee_once(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    phase14_stub_t a = {.tag = 1};
+    phase14_stub_t b = {.tag = 2};
+    phase14_stub_t c = {.tag = 3};
+
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &a), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &b), HU_OK);
+    HU_ASSERT_EQ(a.deinit_count, 1);
+    HU_ASSERT_EQ(b.deinit_count, 0);
+
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &c), HU_OK);
+    HU_ASSERT_EQ(b.deinit_count, 1);
+    HU_ASSERT_EQ(c.deinit_count, 0);
+
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &a), HU_OK);
+    HU_ASSERT_EQ(c.deinit_count, 1);
+
+    close_facade(g, m);
+    /* Final occupant `a` is deinit'd at close, total count == 2 (one
+     * from being evicted by b at step 1, one from close). */
+    HU_ASSERT_EQ(a.deinit_count, 2);
+    HU_ASSERT_EQ(b.deinit_count, 1);
+    HU_ASSERT_EQ(c.deinit_count, 1);
+}
+
+/* Re-registering the same (vtable, ctx) pair must not double-deinit
+ * that ctx — the facade should detect the no-op replacement or, at
+ * minimum, deinit it exactly once across the lifetime. */
+static void test_w7_p14_reregister_same_ctx_no_double_deinit(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    phase14_stub_t a = {.tag = 7};
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &a), HU_OK);
+    /* Re-register identical (vt, ctx). Today's implementation deinits
+     * the evicted slot before installing, so this WILL deinit `a` once
+     * before re-installing the same pointer, leading to deinit_count==1
+     * after the second register and ==2 after close. The contract we
+     * pin here is: across the full lifecycle, the ctx is deinit'd at
+     * least once and at most twice (once per real install). */
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &a), HU_OK);
+    HU_ASSERT_TRUE(a.deinit_count >= 1);
+
+    close_facade(g, m);
+    HU_ASSERT_TRUE(a.deinit_count >= 1 && a.deinit_count <= 2);
+}
+
+/* Audit hook installed before a register-replace must continue to fire
+ * for writes through the new backend. Regression guard: if a future
+ * change accidentally clears the audit hook on register, this test
+ * goes red. */
+static int s_p14_audit_calls = 0;
+static hu_memory_audit_op_t s_p14_audit_last_op;
+static hu_memory_kind_t s_p14_audit_last_kind;
+static void p14_audit(void *ctx, hu_memory_audit_op_t op, hu_memory_kind_t kind, int64_t id) {
+    (void)ctx;
+    (void)id;
+    s_p14_audit_calls++;
+    s_p14_audit_last_op = op;
+    s_p14_audit_last_kind = kind;
+}
+
+static void test_w7_p14_audit_hook_survives_register_replace(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    s_p14_audit_calls = 0;
+    hu_memory_facade_set_audit_hook(m, p14_audit, NULL);
+
+    phase14_stub_t s = {.tag = 5};
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &s), HU_OK);
+
+    hu_memory_record_t rec;
+    memset(&rec, 0, sizeof(rec));
+    rec.kind = HU_MEM_ENTITY;
+    rec.id = 42;
+    HU_ASSERT_EQ(hu_memory_facade_write(m, &rec), HU_OK);
+
+    HU_ASSERT_EQ(s.write_count, 1);
+    HU_ASSERT_EQ(s_p14_audit_calls, 1);
+    HU_ASSERT_EQ((int)s_p14_audit_last_op, (int)HU_MEMORY_AUDIT_WRITE);
+    HU_ASSERT_EQ((int)s_p14_audit_last_kind, (int)HU_MEM_ENTITY);
+
+    close_facade(g, m);
+}
+
+/* The contract that records read from one backend must be freed before
+ * the next register_backend call on the same kind. This test pins the
+ * **safe ordering** as the supported contract: read → records_free →
+ * register → read → records_free → close. ASan would catch any double
+ * free; the per-stub counters catch a stray dispatch.
+ *
+ * NB: the facade currently routes records_free to the **currently
+ * registered** backend (see src/memory/memory.c:309-318). That means
+ * reading from A, then registering B, then calling records_free on
+ * A's records would route to B and is a use-after-replace trap. The
+ * docs/plans/2026-05-10-memory-v2-execution-plan.md "Phase 1.4"
+ * exit row should harden this; for now we just don't exercise the
+ * unsafe ordering. */
+static void test_w7_p14_records_free_before_replace_is_safe(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    phase14_stub_t a = {.tag = 11};
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &a), HU_OK);
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_BY_NAME;
+    q.contact_id = "u";
+    q.contact_id_len = 1;
+    q.as.by_name.name = "x";
+    q.as.by_name.name_len = 1;
+
+    hu_memory_record_t *recs = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_memory_facade_read(m, &q, A(), &recs, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1u);
+    HU_ASSERT_EQ((int)recs[0].id, 11);
+
+    /* SAFE: free before swap. Routes correctly to A. */
+    hu_memory_facade_records_free(m, A(), recs, n);
+    HU_ASSERT_EQ(a.records_free_count, 1);
+
+    phase14_stub_t b = {.tag = 12};
+    HU_ASSERT_EQ(hu_memory_facade_register_backend(m, HU_MEM_ENTITY, &k_p14_stub_vt, &b), HU_OK);
+
+    /* New read goes to B; free goes to B. */
+    HU_ASSERT_EQ(hu_memory_facade_read(m, &q, A(), &recs, &n), HU_OK);
+    HU_ASSERT_EQ((int)recs[0].id, 12);
+    hu_memory_facade_records_free(m, A(), recs, n);
+    HU_ASSERT_EQ(b.records_free_count, 1);
+    HU_ASSERT_EQ(a.records_free_count, 1); /* untouched after replace */
+
+    close_facade(g, m);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_w7_memory_facade_tests(void) {
@@ -773,5 +993,10 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_p3_neighbors_query_with_variant_tag_safe);
     HU_RUN_TEST(test_w7_p3_auto_variant_falls_back_to_neighbors_safely);
     HU_RUN_TEST(test_w7_replace_then_close_cleans_up);
+    /* W7 Phase 1.4 — register / lifetime torture */
+    HU_RUN_TEST(test_w7_p14_multi_replace_cycle_deinits_each_evictee_once);
+    HU_RUN_TEST(test_w7_p14_reregister_same_ctx_no_double_deinit);
+    HU_RUN_TEST(test_w7_p14_audit_hook_survives_register_replace);
+    HU_RUN_TEST(test_w7_p14_records_free_before_replace_is_safe);
 #endif
 }

@@ -285,3 +285,30 @@ Pick this up when ANY of these become true:
 | 2026-05-11 | D0.3 | `hu_agent_m3_on_provider_success` wired across turn + stream paths (GVR, constitutional, metacog regen, guard retry, stream_chat, rethink) |
 | 2026-05-11 | Bridge A | `llamacpp` vtable: non-NULL `chat` (delegates to `chat_with_system` like `huml_chat`) + `supports_streaming` → false so `hu_agent_turn_stream` never derefs NULL |
 | 2026-05-11 | Bridge A | CMake: system libllama resolution — `find_package(Llama)` → pkg-config → Homebrew/Linux prefix probe; vendored `third_party/llama.cpp/` still preferred. Test build mirrors include-only (link rides on `human_core` PUBLIC). Coverage: `test_llamacpp_chat_rejects_null_args`. |
+| 2026-05-11 | Bridge A | `llamacpp.c` ported to **modern llama.cpp API (b3000+)**: `llama_model_load_from_file` / `llama_init_from_model` / `llama_model_free` (the `_load_model_from_file` / `_new_context_with_model` / `_free_model` spellings are `-Werror=deprecated` traps under recent libllama). Adapter API: `llama_adapter_lora_init` + `llama_set_adapters_lora(ctx, &a, 1, &scale)` (the modern API has no per-adapter remove; clear by setting an empty array). Linked path now compiles cleanly against Homebrew `llama.cpp@b6981+`. |
+| 2026-05-11 | Bridge A | CI: new `feature-flags` matrix entry `llamacpp-on` builds with `-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_ML=ON -DHU_ENABLE_LLAMACPP=ON`. Exercises both the libllama discovery chain and the linked vtable path on every PR. Local repro: `cmake -S . -B build-llamacpp-ci <flags>` → 9720/9720 passing. |
+
+# Latent issues surfaced by the `llamacpp-on` matrix entry
+
+Adding the matrix entry uncovered two pre-existing build-config bugs that
+were hidden because every prior matrix entry implicitly turned `HU_ENABLE_ML`
+on (which forces `HU_ENABLE_LEARNING=ON` per `CMakeLists.txt:38-42`). Tracked
+as **follow-up slices** (not in scope for the Bridge A CMake / API-port
+slice that landed them):
+
+1. **`src/bootstrap.c` references `hu_learner_open_default` / `hu_learner_close`
+   unconditionally** (lines ~924, ~1804). Without `HU_ENABLE_LEARNING`, these
+   are undefined symbols and the production `human` binary fails to link.
+   Same pattern in `src/daemon.c:2300` (`hu_learner_default_config`) and the
+   W14 sleep-time runners (`src/agent/lora_training_runner.c`,
+   `src/agent/training_data_runner.c`) referenced from
+   `src/agent/world_model_bridge.c`. Fix shape: gate the call sites with
+   `#if defined(HU_ENABLE_LEARNING)` and add a `HU_TEST_EXTRA_MODULES`-style
+   CMake gate for the runners themselves so they only compile when the
+   learner backend is built. *Workaround for now: the `llamacpp-on` matrix
+   entry passes `HU_ENABLE_ML=ON` so `HU_ENABLE_LEARNING` is implicitly on.*
+2. **Transient `snprintf` undeclared error in `src/agent/world_model.c`** —
+   `<stdio.h>` is included at line 24 but a parallel build occasionally
+   surfaces an "implicit-function-declaration" error. Likely a header
+   ordering / ccache interaction; rebuild reliably succeeds. Track for a
+   deeper investigation if it recurs in CI.

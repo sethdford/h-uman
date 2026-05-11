@@ -14,12 +14,15 @@
  * allocation is freed explicitly; ASan is the final arbiter.
  */
 
+#include "human/agent.h"
 #include "human/agent/response_verifier.h"
 #include "human/agent/self_rag.h"
 #include "human/agent/world_model.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
+#include "human/provider.h"
 #include "test_framework.h"
 
 #include <stdint.h>
@@ -618,6 +621,155 @@ static void test_w11_adversarial_paraphrase_attack_low_support(void) {
     close_facade(g, m);
 }
 
+/* ── W11 P1 — agent-level apply + telemetry seam ──────────────────────── */
+
+/* The single seam shared by `agent_turn` and `agent_stream` for the W11
+ * SOFT-mode swap. Prove that:
+ *   - empty-graph + fact-shaped draft → ABSTAIN under SOFT
+ *   - swap allocates a refusal template into *swapped_out
+ *   - both `self_rag_abstentions` and `self_rag_refusals_rendered` increment
+ *   - telemetry snapshot reflects the bumps */
+static void test_w11_agent_self_rag_apply_swaps_under_soft_and_bumps_counters(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_world_model_invalidate(NULL, 0);
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, NULL, 0, &g), HU_OK);
+    hu_w7_facade_t *wf = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(g, &alloc, &wf), HU_OK);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.w7_facade = wf;
+    agent.memory_session_id = "u_w11_apply";
+    agent.memory_session_id_len = 11;
+
+    const char *draft = "Paris is the capital of France. The Earth orbits the Sun.";
+    char *swapped = NULL;
+    size_t swapped_len = 0;
+    HU_ASSERT_EQ(hu_agent_self_rag_apply(&agent, draft, strlen(draft), HU_VERIFY_SOFT, &swapped,
+                                          &swapped_len),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(swapped);
+    HU_ASSERT_GT(swapped_len, (size_t)0);
+
+    char expected[256];
+    hu_self_rag_render_refusal(HU_REFUSAL_UNKNOWN_FACT, expected, sizeof(expected));
+    HU_ASSERT_STR_EQ(swapped, expected);
+    HU_ASSERT(strstr(swapped, "Paris") == NULL);
+
+    uint64_t runs = 0, abst = 0, ref = 0, ct = 0, cf = 0;
+    hu_agent_self_rag_telemetry(&agent, &runs, &abst, &ref, &ct, &cf);
+    HU_ASSERT_EQ(runs, 1ULL);
+    HU_ASSERT_EQ(abst, 1ULL);
+    HU_ASSERT_EQ(ref, 1ULL);
+    HU_ASSERT_GT(ct, 0ULL);
+
+    alloc.free(alloc.ctx, swapped, swapped_len + 1);
+    hu_world_model_invalidate(NULL, 0);
+    hu_w7_facade_close(wf, &alloc);
+    hu_graph_close(g, &alloc);
+}
+
+/* TELEMETRY mode never swaps even when the verifier ABSTAINS, so
+ * `self_rag_refusals_rendered` MUST stay at zero while `self_rag_abstentions`
+ * increments. Guards the W11 telemetry-only contract — the agent loop runs
+ * the verifier for observability without touching the user-visible draft. */
+static void test_w11_agent_self_rag_apply_telemetry_does_not_swap(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_world_model_invalidate(NULL, 0);
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, NULL, 0, &g), HU_OK);
+    hu_w7_facade_t *wf = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(g, &alloc, &wf), HU_OK);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.w7_facade = wf;
+    agent.memory_session_id = "u_w11_tel";
+    agent.memory_session_id_len = 9;
+
+    const char *draft = "Paris is the capital of France. The Earth orbits the Sun.";
+    char *swapped = NULL;
+    size_t swapped_len = 99;
+    HU_ASSERT_EQ(hu_agent_self_rag_apply(&agent, draft, strlen(draft), HU_VERIFY_TELEMETRY,
+                                          &swapped, &swapped_len),
+                 HU_OK);
+    HU_ASSERT(swapped == NULL);
+    HU_ASSERT_EQ(swapped_len, (size_t)0);
+
+    uint64_t abst = 0, ref = 0;
+    hu_agent_self_rag_telemetry(&agent, NULL, &abst, &ref, NULL, NULL);
+    HU_ASSERT_EQ(abst, 1ULL);
+    HU_ASSERT_EQ(ref, 0ULL);
+
+    hu_world_model_invalidate(NULL, 0);
+    hu_w7_facade_close(wf, &alloc);
+    hu_graph_close(g, &alloc);
+}
+
+/* OFF mode short-circuits entirely; verifier never runs. */
+static void test_w11_agent_self_rag_apply_off_short_circuits(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_world_model_invalidate(NULL, 0);
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, NULL, 0, &g), HU_OK);
+    hu_w7_facade_t *wf = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(g, &alloc, &wf), HU_OK);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.w7_facade = wf;
+    agent.memory_session_id = "u_w11_off";
+    agent.memory_session_id_len = 9;
+
+    char *swapped = NULL;
+    size_t swapped_len = 0;
+    HU_ASSERT_EQ(hu_agent_self_rag_apply(&agent, "anything", 8, HU_VERIFY_OFF, &swapped,
+                                          &swapped_len),
+                 HU_OK);
+    HU_ASSERT(swapped == NULL);
+
+    uint64_t runs = 0;
+    hu_agent_self_rag_telemetry(&agent, &runs, NULL, NULL, NULL, NULL);
+    HU_ASSERT_EQ(runs, 0ULL);
+
+    hu_world_model_invalidate(NULL, 0);
+    hu_w7_facade_close(wf, &alloc);
+    hu_graph_close(g, &alloc);
+}
+
+/* Missing facade or session id is rejected with HU_ERR_INVALID_ARGUMENT —
+ * the verifier requires both. Tests the precondition guard so the agent
+ * loop's "skip when not bound" branch stays explicit. */
+static void test_w11_agent_self_rag_apply_rejects_unbound_agent(void) {
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    /* No w7_facade, no memory_session_id → invalid. */
+    HU_ASSERT_EQ(hu_agent_self_rag_apply(&agent, "x", 1, HU_VERIFY_SOFT, NULL, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_agent_self_rag_apply(NULL, "x", 1, HU_VERIFY_SOFT, NULL, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_agent_self_rag_apply(&agent, NULL, 0, HU_VERIFY_SOFT, NULL, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+/* Telemetry snapshot tolerates a NULL agent (returns zeros into every
+ * non-NULL out). Used by the daemon /status JSON path which queries
+ * before the agent is bound on cold start. */
+static void test_w11_agent_self_rag_telemetry_handles_null_agent(void) {
+    uint64_t runs = 7, abst = 7, ref = 7, ct = 7, cf = 7;
+    hu_agent_self_rag_telemetry(NULL, &runs, &abst, &ref, &ct, &cf);
+    HU_ASSERT_EQ(runs, 0ULL);
+    HU_ASSERT_EQ(abst, 0ULL);
+    HU_ASSERT_EQ(ref, 0ULL);
+    HU_ASSERT_EQ(ct, 0ULL);
+    HU_ASSERT_EQ(cf, 0ULL);
+    hu_agent_self_rag_telemetry(NULL, NULL, NULL, NULL, NULL, NULL);
+}
+
 /* ── End-to-end with world model + memory ─────────────────────────────── */
 
 static void test_w11_e2e_inline_with_world_model_and_memory(void) {
@@ -647,6 +799,138 @@ static void test_w11_e2e_inline_with_world_model_and_memory(void) {
 
     hu_self_rag_close(&r);
     hu_world_model_free(A(), wm);
+    close_facade(g, m);
+}
+
+/* ── Inline backend: real memory-backed scoring (replaces the prior
+ *    hardcoded 0.0f belief). Asserts that critique/retrieve claims now
+ *    carry meaningful support scores so the abstention path can act on
+ *    real evidence. ──────────────────────────────────────────────────── */
+
+static void test_w11_inline_critique_supported_when_memory_matches(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req = make_request(
+        "Sure, <critique>Alice works at Acme</critique>.", HU_VERIFY_INLINE);
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.claims_count, 1);
+    /* The critique claim must score above the per-claim floor (0.6) when
+     * memory carries the matching relation; the prior hardcoded 0.0
+     * score would fail this assertion. */
+    HU_ASSERT(resp.claims[0].support.mean >= 0.6f);
+    HU_ASSERT_FALSE(resp.claims[0].fabricated);
+    /* Tag-routing contract is preserved: prov.source carries the kind. */
+    HU_ASSERT_STR_EQ(resp.claims[0].prov.source, "critique");
+    /* prov.weight no longer hardcoded — mirrors the real support score. */
+    HU_ASSERT(resp.claims[0].prov.weight >= 0.6f);
+
+    hu_self_rag_close(&r);
+    close_facade(g, m);
+}
+
+static void test_w11_inline_critique_fabricated_when_memory_empty(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    /* Intentionally NOT seeding memory. */
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req = make_request(
+        "Yes, <critique>Bob runs marathons in Tokyo</critique>.",
+        HU_VERIFY_INLINE);
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.claims_count, 1);
+    HU_ASSERT(resp.claims[0].support.mean < 0.6f);
+    HU_ASSERT(resp.claims[0].fabricated);
+    /* INLINE mode preserves existing behavior — the backend records the
+     * fabricated flag but does not auto-abstain. */
+    HU_ASSERT_NEQ((int)resp.outcome, HU_SELF_RAG_ABSTAINED);
+
+    hu_self_rag_close(&r);
+    close_facade(g, m);
+}
+
+static void test_w11_inline_retrieve_score_reflects_record_count(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req = make_request(
+        "Looking up <retrieve>alice.work</retrieve> now.", HU_VERIFY_INLINE);
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.claims_count, 1);
+    /* Memory has at least 1 relation, so score > 0 (was hardcoded 0). */
+    HU_ASSERT(resp.claims[0].support.mean > 0.0f);
+    HU_ASSERT_STR_EQ(resp.claims[0].prov.source, "retrieve");
+    /* Belief carries the inline-probe source tag so consumers can tell
+     * a retrieve-probe score from a critique-graph score. */
+    HU_ASSERT_EQ(resp.claims[0].support.prov_count, 1);
+    HU_ASSERT_STR_EQ(resp.claims[0].support.prov[0].source, "inline-probe");
+
+    hu_self_rag_close(&r);
+    close_facade(g, m);
+}
+
+static void test_w11_inline_strict_abstains_on_score(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    /* No memory seeded → critique scores 0 → fabricated → abstain
+     * because mode == STRICT and abstain_threshold = 0.5. */
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req = make_request(
+        "Yes, <critique>Eve invented quantum tea in Mars</critique>.",
+        HU_VERIFY_STRICT);
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.outcome, HU_SELF_RAG_ABSTAINED);
+    HU_ASSERT(resp.refusal_text[0] != '\0');
+    /* The deterministic LOW_CONFIDENCE template is what STRICT-mode
+     * score-based abstention renders. */
+    HU_ASSERT(resp.draft_modified);
+
+    hu_self_rag_close(&r);
+    close_facade(g, m);
+}
+
+static void test_w11_inline_strict_supported_when_evidence_present(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req = make_request(
+        "Sure, <critique>Alice works at Acme</critique>.", HU_VERIFY_STRICT);
+    hu_self_rag_response_t resp;
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    /* STRICT with one supported critique claim → ratio fabricated < 0.5
+     * → no abstention; outcome is HEDGED because the draft was modified
+     * (tags stripped). */
+    HU_ASSERT_NEQ((int)resp.outcome, HU_SELF_RAG_ABSTAINED);
+    HU_ASSERT_STR_CONTAINS(resp.modified_draft, "Alice works at Acme");
+
+    hu_self_rag_close(&r);
     close_facade(g, m);
 }
 
@@ -881,6 +1165,16 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_adversarial_prompt_injection_to_avoid_refusal);
     HU_RUN_TEST(test_w11_adversarial_paraphrase_attack_low_support);
     HU_RUN_TEST(test_w11_e2e_inline_with_world_model_and_memory);
+    HU_RUN_TEST(test_w11_inline_critique_supported_when_memory_matches);
+    HU_RUN_TEST(test_w11_inline_critique_fabricated_when_memory_empty);
+    HU_RUN_TEST(test_w11_inline_retrieve_score_reflects_record_count);
+    HU_RUN_TEST(test_w11_inline_strict_abstains_on_score);
+    HU_RUN_TEST(test_w11_inline_strict_supported_when_evidence_present);
+    HU_RUN_TEST(test_w11_agent_self_rag_apply_swaps_under_soft_and_bumps_counters);
+    HU_RUN_TEST(test_w11_agent_self_rag_apply_telemetry_does_not_swap);
+    HU_RUN_TEST(test_w11_agent_self_rag_apply_off_short_circuits);
+    HU_RUN_TEST(test_w11_agent_self_rag_apply_rejects_unbound_agent);
+    HU_RUN_TEST(test_w11_agent_self_rag_telemetry_handles_null_agent);
 #endif
     /* Streaming self-RAG tests don't require SQLite. */
     HU_RUN_TEST(test_w11_stream_normal_tokens_pass_through);

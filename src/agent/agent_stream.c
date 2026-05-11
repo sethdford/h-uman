@@ -1200,8 +1200,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         char refusal[256];
         hu_self_rag_render_refusal(HU_REFUSAL_POLICY, refusal, sizeof(refusal));
         final_content = hu_strndup(agent->alloc, refusal, strlen(refusal));
-        if (final_content)
+        if (final_content) {
             final_content_len = strlen(refusal);
+            /* The user-visible response WAS swapped to the refusal template
+             * — keep `self_rag_refusals_rendered` in sync with the
+             * non-streaming path (agent_turn.c uses
+             * `hu_agent_self_rag_apply`). Without this bump the W11 P1
+             * metric ("≥30 % abstention rate on weak-evidence prompts")
+             * silently undercounts streaming refusals. */
+            agent->self_rag_refusals_rendered++;
+        }
     } else {
         if (srag_retrieval_seen) {
             hu_log_info("agent_stream", NULL, "self-RAG streaming: <retrieve> detected");

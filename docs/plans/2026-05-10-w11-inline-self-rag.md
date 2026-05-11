@@ -153,3 +153,30 @@ Deterministic templates per refusal category:
 - Multimodal verification (verify a generated image against memory).
 
 ## Binary size budget: +90 KB.
+
+---
+
+## P1 — Agent-level apply seam (landed 2026-05-10)
+
+The atomic + heuristic + inline backends and the bridge-level `hu_w11_self_rag_verify_with_provider` were already wired into `agent_turn`. P1 promotes the swap-and-bump logic into a single shared seam:
+
+- `hu_agent_self_rag_apply(agent, draft, len, mode, *swapped, *swapped_len)` — the canonical entrypoint. Runs the verifier, transfers ownership of the swapped buffer through `*swapped` when SOFT/STRICT actually rewrote the draft, and bumps `agent->self_rag_runs / claims_total / claims_flagged / abstentions / refusals_rendered` consistently. Returns `HU_OK` with `*swapped == NULL` when no swap occurred; returns `HU_ERR_INVALID_ARGUMENT` when the agent is not bound to a W7 facade + memory session.
+- `hu_agent_self_rag_telemetry(agent, *runs, *abstentions, *refusals_rendered, *claims_total, *claims_flagged)` — read-only snapshot. Tolerant of `NULL` agent (zeros every non-NULL out) so the daemon `/status` JSON can query before the agent is bound.
+
+`agent_turn.c` and `agent_stream.c` both call the same code path now:
+
+- `agent_turn` calls `hu_agent_self_rag_apply` and adopts the returned buffer when non-NULL.
+- `agent_stream`'s streaming `<refuse>` path swaps to the deterministic `HU_REFUSAL_POLICY` template AND bumps `self_rag_refusals_rendered` (previously only `self_rag_abstentions` was incremented, silently undercounting streaming refusals).
+
+Tests (`tests/test_w11_self_rag.c::W11 inline self-RAG with abstention`):
+
+- `test_w11_agent_self_rag_apply_swaps_under_soft_and_bumps_counters` — empty graph + fact-shaped draft → ABSTAINED → swapped buffer matches `HU_REFUSAL_UNKNOWN_FACT`; `runs == abstentions == refusals_rendered == 1`.
+- `test_w11_agent_self_rag_apply_telemetry_does_not_swap` — TELEMETRY mode increments `abstentions` but never `refusals_rendered`.
+- `test_w11_agent_self_rag_apply_off_short_circuits` — OFF mode never runs the verifier.
+- `test_w11_agent_self_rag_apply_rejects_unbound_agent` — guards the precondition contract.
+- `test_w11_agent_self_rag_telemetry_handles_null_agent` — zero-fills every out under NULL agent.
+
+### Remaining scope
+
+- Calibrate `abstain_threshold` against the 200-prompt annotated suite so the success metric ("≥30 % abstention on weak-evidence prompts") is measurable — bridge already wires `claims_total/flagged` so a smoke harness can read them via `hu_agent_self_rag_telemetry`.
+- Inline backend control-token wiring for additional providers (currently only the placeholder protocol parser is exercised end-to-end).

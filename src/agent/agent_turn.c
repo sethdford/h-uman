@@ -3401,7 +3401,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                      agent->memory_session_id_len, 0, &world_model_ctx,
                                      &world_model_ctx_len, tom_p, tom_p_len, tom_q, tom_q_len,
-                                     tom_c, tom_c_len);
+                                     tom_c, tom_c_len, &agent->personal_model);
             if (world_model_ctx_len > 0)
                 agent->world_model_loads++;
         }

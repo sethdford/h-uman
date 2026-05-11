@@ -243,6 +243,43 @@ static hu_error_t collect_memories(hu_allocator_t *alloc, const char *memory_db_
     sqlite3_close(db);
     return HU_OK;
 }
+
+static hu_error_t collect_conversations(hu_allocator_t *alloc, const char *memory_db_path,
+                                        char **buf, size_t *buf_len, size_t *buf_cap,
+                                        size_t *count) {
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(memory_db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK)
+        return HU_OK;
+
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT role, content FROM messages "
+                      "WHERE content IS NOT NULL AND content != '' "
+                      "ORDER BY id ASC";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return HU_OK;
+    }
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *role = (const char *)sqlite3_column_text(stmt, 0);
+        const char *content = (const char *)sqlite3_column_text(stmt, 1);
+        if (!role || !content || content[0] == '\0')
+            continue;
+        size_t clen = strlen(content);
+
+        const char *prefix = (strcmp(role, "user") == 0) ? "<|user|>" : "<|assistant|>";
+        size_t plen = strlen(prefix);
+        static const char suffix[] = "<|end|>\n";
+
+        append_text(alloc, buf, buf_len, buf_cap, prefix, plen);
+        append_text(alloc, buf, buf_len, buf_cap, content, clen);
+        append_text(alloc, buf, buf_len, buf_cap, suffix, sizeof(suffix) - 1);
+        (*count)++;
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return HU_OK;
+}
 #endif
 
 hu_error_t hu_ml_prepare_conversations(hu_allocator_t *alloc, hu_bpe_tokenizer_t *tok,
@@ -259,8 +296,10 @@ hu_error_t hu_ml_prepare_conversations(hu_allocator_t *alloc, hu_bpe_tokenizer_t
 
     if (chat_db_path)
         collect_imessage(alloc, chat_db_path, &buf, &buf_len, &buf_cap, messages_processed);
-    if (memory_db_path)
+    if (memory_db_path) {
         collect_memories(alloc, memory_db_path, &buf, &buf_len, &buf_cap, messages_processed);
+        collect_conversations(alloc, memory_db_path, &buf, &buf_len, &buf_cap, messages_processed);
+    }
 
     if (buf_len == 0) {
         if (buf)

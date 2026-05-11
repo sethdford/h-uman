@@ -53,6 +53,9 @@ static const evaluation_factory_entry_t kEvaluationFactories[] = {
     {"facade-recall", "Production v2 stack (facade + planner + executor) "
                      "scored against LoCoMo-style fact recall",
      hu_evaluation_facade_recall},
+    {"locomo-facade", "Production v2 stack scored against the real 1542-prompt "
+                     "LoCoMo corpus (requires real dataset on disk)",
+     hu_evaluation_locomo_facade},
 };
 
 static const size_t kEvaluationFactoriesCount =

@@ -185,6 +185,21 @@ hu_error_t hu_evaluation_frontier_compare(hu_allocator_t *alloc, hu_evaluation_t
  * corpus. Requires HU_ENABLE_SQLITE; otherwise returns HU_ERR_NOT_SUPPORTED. */
 hu_error_t hu_evaluation_facade_recall(hu_allocator_t *alloc, hu_evaluation_t *out);
 
+/* locomo-facade: same production stack as facade-recall, but scored against
+ * the *real* LoCoMo corpus (1542 prompts) instead of a 12-fact synthetic
+ * dataset. The mapping between LoCoMo's (query, short-answer) shape and our
+ * entity/relation graph is documented in evaluation_locomo_facade.c — in
+ * short, query named entities anchor on the graph and the answer entity is
+ * recovered through the planner's neighbour expansion + P6 re-rank. Honest
+ * scale test: precision_at_1 here is *not* expected to match the 12-fact
+ * synthetic; the two numbers together bound the credibility envelope.
+ *
+ * Requires HU_ENABLE_SQLITE *and* a real LoCoMo corpus on disk
+ * (`~/.human/eval-datasets/locomo.json` or HU_EVAL_DATA_DIR override). If
+ * the corpus is missing the backend records a structured error_summary and
+ * scored=0; the regression gate handles this as a skip, not a failure. */
+hu_error_t hu_evaluation_locomo_facade(hu_allocator_t *alloc, hu_evaluation_t *out);
+
 /* Adapter that wraps the legacy task-list framework (`include/human/eval.h`,
  * `src/eval.c`) behind the W16 vtable. Lets the `human eval --w16
  * legacy-bridge` CLI surface exercise the W16 dispatcher end-to-end. The

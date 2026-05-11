@@ -28,6 +28,7 @@
 
 #include "human/agent/self_rag.h"
 
+#include "human/agent/response_verifier.h"
 #include "human/core/error.h"
 #include "human/memory/belief.h"
 #include "human/memory/memory.h"
@@ -114,6 +115,118 @@ static void capture_claim_text(hu_atomic_claim_t *c, const char *src,
     c->span_end = base_off + (int64_t)len;
 }
 
+/* Real scoring for `<critique>` claims.
+ *
+ * Wraps the claim into a single-sentence "draft" and runs it through the v1
+ * verifier (`hu_response_verify`) configured with `max_claims=1`, which is
+ * the same pattern the atomic backend uses. The resulting token-overlap
+ * score becomes the support belief mean; sub-threshold scores flip
+ * `c->fabricated` so a downstream caller can hedge or abstain.
+ *
+ * Side note on `c->prov.source`: callers downstream (the channel renderer,
+ * routing tests) rely on `prov.source` carrying the **tag kind** so they
+ * can distinguish "this came from a <critique>" vs "this came from a
+ * <retrieve>". We preserve that contract and stash the receipt source in
+ * the belief's first provenance atom (the belief is the new home for
+ * "where did the score come from"). */
+static void inline_score_critique(hu_allocator_t *alloc, hu_memory_facade_t *m,
+                                   const char *contact_id, size_t cid_len,
+                                   int64_t now, hu_atomic_claim_t *c) {
+    if (!alloc || !m || !c || !c->text[0]) {
+        c->support = hu_belief_init(0.0f, "inline-no-memory", now);
+        c->fabricated = true;
+        return;
+    }
+
+    char sentence[200];
+    int n = snprintf(sentence, sizeof(sentence), "%s.", c->text);
+    if (n <= 0 || (size_t)n >= sizeof(sentence)) {
+        c->support = hu_belief_init(0.0f, "inline-no-claim", now);
+        c->fabricated = true;
+        return;
+    }
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_SOFT;
+    cfg.confidence_threshold = 0.6f;
+    cfg.max_claims = 1;
+
+    hu_verifier_report_t report;
+    memset(&report, 0, sizeof(report));
+    hu_error_t err = hu_response_verify(alloc, m, contact_id, cid_len,
+                                          sentence, (size_t)n, &cfg, &report);
+    if (err != HU_OK || report.claims_extracted == 0) {
+        c->support = hu_belief_init(0.0f, "inline-no-claim", now);
+        c->fabricated = true;
+        return;
+    }
+
+    float score = report.claims[0].score;
+    c->support = hu_belief_init(score, "inline-graph", now);
+    c->fabricated = score < cfg.confidence_threshold;
+
+    /* Add the receipt source as a second provenance atom on the belief
+     * (capacity is 4; init populated atom 0 with "inline-graph"). */
+    if (report.claims[0].receipt.source[0] && c->support.prov_count < 4) {
+        hu_provenance_atom_t *p = &c->support.prov[c->support.prov_count++];
+        snprintf(p->source, sizeof(p->source), "%s",
+                 report.claims[0].receipt.source);
+        p->observed_at = report.claims[0].receipt.observed_at_ms;
+        p->weight = report.claims[0].receipt.confidence;
+    }
+}
+
+/* Real scoring for `<retrieve>` claims.
+ *
+ * `<retrieve>QUERY</retrieve>` represents the model's request "memory,
+ * tell me about QUERY." Unlike a `<critique>` (factual claim being
+ * verified), this is a probe: the support score reflects "does memory
+ * have anything for this contact at all," saturating at 1.0 when ≥ 5
+ * relations exist.
+ *
+ * A future refinement can grade each returned record against `query`
+ * with `hu_crag_grade_document` and weight only the RELEVANT ones; for
+ * now, presence is the signal — same pattern the heuristic verifier
+ * uses for "graph reachable." */
+static void inline_score_retrieve(hu_allocator_t *alloc, hu_memory_facade_t *m,
+                                   const char *contact_id, size_t cid_len,
+                                   const char *query, int64_t now,
+                                   hu_atomic_claim_t *c) {
+    (void)query; /* reserved for grade-aware scoring */
+    if (!alloc || !m || !contact_id || cid_len == 0) {
+        c->support = hu_belief_init(0.0f, "inline-no-memory", now);
+        c->fabricated = true;
+        return;
+    }
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_RELATION;
+    q.variant = HU_MEMORY_QUERY_AUTO;
+    q.contact_id = contact_id;
+    q.contact_id_len = cid_len;
+    q.as.window.limit = 16;
+
+    hu_memory_record_t *recs = NULL;
+    size_t n = 0;
+    hu_error_t err = hu_memory_facade_read(m, &q, alloc, &recs, &n);
+    if (err != HU_OK) {
+        if (recs)
+            hu_memory_facade_records_free(m, alloc, recs, n);
+        c->support = hu_belief_init(0.0f, "inline-facade-err", now);
+        c->fabricated = true;
+        return;
+    }
+
+    /* Saturate at 5 records → 1.0. Empty memory → 0.0 → fabricated. */
+    float score = n >= 5 ? 1.0f : (float)n / 5.0f;
+    c->support = hu_belief_init(score, "inline-probe", now);
+    c->fabricated = (n == 0);
+
+    if (recs)
+        hu_memory_facade_records_free(m, alloc, recs, n);
+}
+
 static hu_error_t inline_verify(void *vctx, hu_allocator_t *alloc,
                                  const hu_self_rag_request_t *req,
                                  hu_self_rag_response_t *resp) {
@@ -191,16 +304,29 @@ static hu_error_t inline_verify(void *vctx, hu_allocator_t *alloc,
             hu_atomic_claim_t *c = &resp->claims[resp->claims_count++];
             capture_claim_text(c, content_start, content_len,
                                 (int64_t)open_at);
-            /* Both retrieve and critique start as unknown-support beliefs;
-             * a future provider integration replaces these with real
-             * scores from hu_memory_facade_read / atomic verifier calls. The
-             * primary provenance source is the control-token name itself
-             * so callers can route the claim downstream by tag. */
-            c->support = hu_belief_init(0.0f, kind, now);
+
+            /* `prov.source` carries the **tag kind** so downstream routing
+             * (channel renderer, tests) can distinguish critique vs
+             * retrieve provenance. The numeric weight is replaced below
+             * with the actual support score so it stops lying. */
             snprintf(c->prov.source, sizeof(c->prov.source), "%s", kind);
             c->prov.observed_at = now;
-            c->prov.weight = 0.0f;
-            c->fabricated = false;
+
+            /* Real memory-backed scoring per tag kind. Replaces the prior
+             * hardcoded `hu_belief_init(0.0f, kind, now)` placeholder so
+             * the abstention path (STRICT mode) can decide on real
+             * evidence rather than always reading "no support." */
+            if (strcmp(kind, "critique") == 0) {
+                inline_score_critique(alloc, ctx->m, req->contact_id,
+                                       req->contact_id_len, now, c);
+            } else if (strcmp(kind, "retrieve") == 0) {
+                inline_score_retrieve(alloc, ctx->m, req->contact_id,
+                                       req->contact_id_len, c->text, now, c);
+            } else {
+                c->support = hu_belief_init(0.0f, kind, now);
+                c->fabricated = false;
+            }
+            c->prov.weight = c->support.mean;
         }
 
         /* Critique tags: their content is the model's claim — emit it as
@@ -225,6 +351,37 @@ static hu_error_t inline_verify(void *vctx, hu_allocator_t *alloc,
                  resp->refusal_text);
         resp->draft_modified = true;
         return HU_OK;
+    }
+
+    /* STRICT-mode score-based abstention.
+     *
+     * Only triggers when the caller has explicitly asked for STRICT
+     * verification AND a `abstain_threshold` is set (>0). When the
+     * fabricated-claim ratio crosses the threshold, render the
+     * deterministic LOW_CONFIDENCE refusal template — same behavior
+     * the atomic backend uses, just here driven by inline-tagged
+     * claims rather than a noun-phrase decomposer.
+     *
+     * INLINE / SOFT / OFF callers fall through to the existing
+     * tag-stripping outcome below; existing tests that pass mode
+     * = HU_VERIFY_INLINE keep their semantics. */
+    if (req->mode == HU_VERIFY_STRICT && req->abstain_threshold > 0.0f &&
+        resp->claims_count > 0) {
+        size_t fabricated = 0;
+        for (size_t k = 0; k < resp->claims_count; k++) {
+            if (resp->claims[k].fabricated) fabricated++;
+        }
+        float ratio = (float)fabricated / (float)resp->claims_count;
+        if (ratio >= req->abstain_threshold) {
+            hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE,
+                                       resp->refusal_text,
+                                       sizeof(resp->refusal_text));
+            resp->outcome = HU_SELF_RAG_ABSTAINED;
+            snprintf(resp->modified_draft, sizeof(resp->modified_draft), "%s",
+                     resp->refusal_text);
+            resp->draft_modified = true;
+            return HU_OK;
+        }
     }
 
     /* The inline parser always populates `modified_draft` with the visible

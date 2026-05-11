@@ -9,6 +9,7 @@
 #include "human/agent/self_rag.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
+#include "human/memory/personal_model.h"
 #include "test_framework.h"
 #include <stdlib.h>
 
@@ -74,7 +75,7 @@ static void bridge_render_empty_world_model_returns_null(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_empty", 8, 1700000000000LL, &txt, &tlen,
-                                            NULL, 0, NULL, 0, NULL, 0),
+                                            NULL, 0, NULL, 0, NULL, 0, NULL),
                  HU_OK);
     /* Empty world model -> NULL/0 so callers skip injection. */
     HU_ASSERT(txt == NULL);
@@ -96,7 +97,7 @@ static void bridge_render_optional_tom_scenario_merges_into_output(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_tom_sc", 9, 1700000000000LL, &txt, &tlen, p,
-                                            strlen(p), q, strlen(q), c, strlen(c)),
+                                            strlen(p), q, strlen(q), c, strlen(c), NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT_GT(tlen, (size_t)0);
@@ -134,7 +135,7 @@ static void bridge_render_with_negative_memory_includes_avoid_section(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_neg", 6, 1700000000000LL + 1000, &txt, &tlen,
-                                            NULL, 0, NULL, 0, NULL, 0),
+                                            NULL, 0, NULL, 0, NULL, 0, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
@@ -159,18 +160,19 @@ static void bridge_render_rejects_invalid_args(void) {
     char *txt = NULL;
     size_t tlen = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(NULL, A(), "ut_inv", 6, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0),
+                                            NULL, 0, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, NULL, "ut_inv", 6, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0),
+                                            NULL, 0, NULL),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), NULL, 0, 0, &txt, &tlen, NULL, 0, NULL, 0, NULL, 0),
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), NULL, 0, 0, &txt, &tlen, NULL, 0, NULL, 0, NULL,
+                                            0, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_inv", 0, 0, &txt, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0),
+                                            NULL, 0, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_inv", 6, 0, NULL, &tlen, NULL, 0, NULL, 0,
-                                            NULL, 0),
+                                            NULL, 0, NULL),
                  HU_ERR_INVALID_ARGUMENT);
     cleanup(g, f);
 }
@@ -196,7 +198,7 @@ static void bridge_render_uses_cache_within_ttl(void) {
     char *txt1 = NULL;
     size_t tlen1 = 0;
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_cache", 8, 1700000000000LL + 1000, &txt1,
-                                          &tlen1, NULL, 0, NULL, 0, NULL, 0),
+                                          &tlen1, NULL, 0, NULL, 0, NULL, 0, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt1);
 
@@ -204,13 +206,52 @@ static void bridge_render_uses_cache_within_ttl(void) {
     size_t tlen2 = 0;
     /* Within the 60s default TTL -- should still produce content (cache or rebuild). */
     HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_cache", 8, 1700000000000LL + 5000, &txt2,
-                                          &tlen2, NULL, 0, NULL, 0, NULL, 0),
+                                          &tlen2, NULL, 0, NULL, 0, NULL, 0, NULL),
                  HU_OK);
     HU_ASSERT_NOT_NULL(txt2);
     HU_ASSERT_EQ(tlen1, tlen2);
 
     A()->free(A()->ctx, txt1, tlen1 + 1);
     A()->free(A()->ctx, txt2, tlen2 + 1);
+    cleanup(g, f);
+}
+
+/* --- M2 ↔ W9 personal model bridge --- */
+
+static void bridge_render_with_personal_model_includes_style(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    hu_personal_model_t pm;
+    hu_personal_model_init(&pm);
+    pm.style.formality = 0.2f;
+    pm.style.verbosity = 0.4f;
+    pm.style.emoji_frequency = 0.5f;
+    pm.style.avg_message_length = 120;
+    pm.style.sample_count = 10;
+
+    strncpy(pm.goals[0].description, "learn Rust", sizeof(pm.goals[0].description) - 1);
+    pm.goals[0].active = true;
+    pm.goal_count = 1;
+
+    strncpy(pm.topics[0].name, "programming", sizeof(pm.topics[0].name) - 1);
+    pm.topics[0].interest_score = 0.9f;
+    pm.topic_count = 1;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "ut_pm", 5, 1700000000000LL, &txt, &tlen,
+                                            NULL, 0, NULL, 0, NULL, 0, &pm),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_GT(tlen, (size_t)0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Communication style:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "casual"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "learn Rust"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "programming"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
     cleanup(g, f);
 }
 
@@ -453,6 +494,7 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(bridge_render_with_negative_memory_includes_avoid_section);
     HU_RUN_TEST(bridge_render_rejects_invalid_args);
     HU_RUN_TEST(bridge_render_uses_cache_within_ttl);
+    HU_RUN_TEST(bridge_render_with_personal_model_includes_style);
     HU_RUN_TEST(w11_off_mode_is_noop);
     HU_RUN_TEST(w11_telemetry_extracts_claims_without_modifying);
     HU_RUN_TEST(w11_abstain_emits_refusal_text_through_bridge);
