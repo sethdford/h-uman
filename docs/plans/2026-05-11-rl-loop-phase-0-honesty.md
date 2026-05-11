@@ -1316,38 +1316,25 @@ Refs spec §1.5.2 issue #5; pinned by tests/test_dpo_judge_naming.c."
 **Files:**
 - Modify: `CLAUDE.md` line ~53
 
-- [ ] **Step 1: Read the current CLAUDE.md:53 area**
+> **Plan amendment (May 11 2026, executed):** the original plan asserted CLAUDE.md had two drift sites — an M2 atomic-rename claim and an M3 `hu_dpo_train_step`-as-DPO claim. A `rg "hu_dpo|train_step|judge_step|hu_personal_model_save|atomic" CLAUDE.md` sweep at execution time found only the M2 atomic-rename drift (the audit's M3 reference appears to have been a misread of the M3 row's "LoRA adapter" success metric, which doesn't actually mention DPO). Only the M2 row needed editing. The replacement wording also keeps the historical context (commit 3ee98ef9 added the per-turn save *call site*; Phase 0 made the save *itself* atomic) instead of overwriting it, so future readers can trace the two-stage history.
 
-```bash
-sed -n '45,60p' CLAUDE.md
-```
+- [x] **Step 1: Read the current CLAUDE.md:53 area**
 
-- [ ] **Step 2: Edit the misleading claims**
+- [x] **Step 2: Edit the misleading claims**
 
-Find the M2 row in the Strategic Missions table that says "atomic-rename save lands in commit 3ee98ef9" and update to reflect the new truth:
+Replaced the single misleading sentence — "Per-turn atomic-rename save lands in commit 3ee98ef9 ... so no state is lost on crash" — with an honest two-clause split:
 
 ```markdown
-| **M2** | **Personal Model** — Unified model-of-the-person from memory | **Hard.** Single artifact (`hu_personal_model_t`, `src/memory/personal_model.c`); facts/topics/goals/style are accumulated per turn, summarized via `hu_personal_model_build_prompt`, and injected into every system prompt. Per-turn save with **atomic-rename via tmp+fsync+rename** (Phase 0 fix; pinned by `tests/test_personal_model_atomic_save.c`). Fact extraction is still heuristic pattern matching ("i like", "i never"); learned-style adaptation lives only in the prompt summary, not in a model checkpoint. | Measurable adaptation in tone/timing after 50 conversations |
+... Per-turn save call site landed in commit 3ee98ef9 (`feat(agent,memory): per-turn personal-model save for crash safety`); the underlying `hu_personal_model_save` was made **actually atomic** in Phase 0 (May 2026) via `tmp + fwrite + fflush + fsync + rename`, pinned by `tests/test_personal_model_atomic_save.c::test_personal_model_save_preserves_prior_state_when_tmp_blocked` — a deterministic adversary test that pre-blocks the `<path>.tmp` slot with a directory and confirms the prior file's contents survive a failed save. ...
 ```
 
-And update the M3 row's reference to `hu_dpo_train_step`:
+The M3 row was scanned for a `hu_dpo_train_step` claim; none exists, so no edit was required.
 
-Find the row that says `RLAIF nightly` or that references `hu_dpo_train_step` as DPO and replace with:
+- [x] **Step 3: Verify markdown still renders**
 
-```markdown
-... `hu_dpo_judge_step` (renamed in Phase 0 from `hu_dpo_train_step`; this is an LLM-judge metric harness, NOT policy-gradient DPO. Real DPO with frozen π_ref + policy log-probs lands in Phase 2 as `hu_dpo_real_step` per `docs/plans/2026-05-11-full-sota-rl-improvement-loop.md`).
-```
+`git diff CLAUDE.md` confirmed exactly one line modified, table structure preserved.
 
-(Exact insertion point depends on the row's current wording; read and patch the relevant cells without disturbing the surrounding table structure.)
-
-- [ ] **Step 3: Verify markdown still renders**
-
-```bash
-# Quick visual check that the table is well-formed
-sed -n '40,80p' CLAUDE.md
-```
-
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add CLAUDE.md
