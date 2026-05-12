@@ -49,6 +49,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/string.h"
+#include "human/lora.h"
 #include "human/platform.h"
 #include "human/provider.h"
 
@@ -117,6 +118,24 @@ typedef enum mlx_qwen3_state {
     MLX_QWEN3_STATE_FAILED,   /* sticky for the rest of the turn */
 } mlx_qwen3_state_t;
 
+/* SOTA-2026 init-02 (MoLoRA) — small stacked-expert pool.
+ *
+ * STACK mode (HU_LORA_APPLY_MODE_STACK) is the MoLoRA dispatcher's
+ * channel-expert push: after REPLACE installs the base/macro-mode
+ * adapter into the active slot, up to HU_MOLORA_MAX_ACTIVE additional
+ * experts may be stacked on top via repeated STACK calls. The chat
+ * mock formats the active id followed by `+<stacked>` for each stacked
+ * id so tests can pin "STACK actually changed the runtime composition"
+ * without depending on real Metal inference.
+ *
+ * Real Metal/MLX mixture wiring is deferred to init-04 P2/P4 — the
+ * design doc names this as a follow-up, and S1's `chat_with_system`
+ * already returns NOT_SUPPORTED in production until the framer lands. */
+typedef struct mlx_qwen3_stacked {
+    char *id;
+    char *path;
+} mlx_qwen3_stacked_t;
+
 typedef struct mlx_qwen3_ctx {
     hu_allocator_t *alloc;
     hu_mlx_qwen3_config_t config;
@@ -130,6 +149,12 @@ typedef struct mlx_qwen3_ctx {
     /* Active adapter — REPLACE semantics, single slot. */
     char *active_adapter_id;
     char *active_adapter_path;
+
+    /* MoLoRA STACK pool. `stacked_count` is the live count; entries
+     * 0..stacked_count-1 are populated. REPLACE wipes the pool; STACK
+     * appends and refuses (`HU_ERR_INVALID_ARGUMENT`) once full. */
+    mlx_qwen3_stacked_t stacked[HU_MOLORA_MAX_ACTIVE];
+    size_t              stacked_count;
 
     /* Subprocess lifecycle. In test/stub builds these stay zero. */
     mlx_qwen3_state_t state;
@@ -155,6 +180,23 @@ static char *dup_slice_nul(hu_allocator_t *alloc, const char *s, size_t len) {
     return hu_strndup(alloc, s, n);
 }
 
+static void clear_stacked_adapters(mlx_qwen3_ctx_t *c) {
+    if (!c || !c->alloc)
+        return;
+    for (size_t i = 0; i < c->stacked_count; i++) {
+        if (c->stacked[i].id) {
+            c->alloc->free(c->alloc->ctx, c->stacked[i].id, strlen(c->stacked[i].id) + 1);
+            c->stacked[i].id = NULL;
+        }
+        if (c->stacked[i].path) {
+            c->alloc->free(c->alloc->ctx, c->stacked[i].path,
+                           strlen(c->stacked[i].path) + 1);
+            c->stacked[i].path = NULL;
+        }
+    }
+    c->stacked_count = 0;
+}
+
 static void clear_active_adapter(mlx_qwen3_ctx_t *c) {
     if (!c || !c->alloc)
         return;
@@ -168,6 +210,11 @@ static void clear_active_adapter(mlx_qwen3_ctx_t *c) {
                        strlen(c->active_adapter_path) + 1);
         c->active_adapter_path = NULL;
     }
+    /* REPLACE semantics flow through here: the stacked pool is logically
+     * "on top of" the active adapter, so it MUST be cleared whenever the
+     * base is swapped. Without this, a STACK from a prior turn would
+     * leak past a REPLACE — a silent dirty-read for the MoLoRA dispatcher. */
+    clear_stacked_adapters(c);
 }
 
 #if HU_MLX_QWEN3_PRODUCTION
@@ -228,16 +275,33 @@ static hu_error_t mlx_qwen3_chat_test_mode(mlx_qwen3_ctx_t *c,
     c->state = MLX_QWEN3_STATE_READY;
 
     /* The test response intentionally references the active adapter id
-     * (or "base" when none is loaded) so the
-     * adapter-changes-output test can pin the contract without
-     * relying on real model inference. */
+     * (or "base" when none is loaded) so the adapter-changes-output
+     * contract (init-02 / init-05 fidelity scoring) is pinnable without
+     * real Metal inference. STACK mode appends each stacked id with a
+     * leading `+` so a test can distinguish "REPLACE seth" from
+     * "REPLACE seth + STACK telegram". */
     const char *adapter = c->active_adapter_id ? c->active_adapter_id : "base";
-    char buf[256];
-    int n = snprintf(buf, sizeof(buf), "[mlx_qwen3:%s] echo:%.*s", adapter,
-                     (int)(message_len > 64 ? 64 : message_len),
-                     message ? message : "");
-    if (n <= 0)
+    char buf[512];
+    int n = snprintf(buf, sizeof(buf), "[mlx_qwen3:%s", adapter);
+    if (n <= 0 || (size_t)n >= sizeof(buf))
         return HU_ERR_PROVIDER_RESPONSE;
+    for (size_t i = 0; i < c->stacked_count && (size_t)n < sizeof(buf); i++) {
+        const char *sid = c->stacked[i].id ? c->stacked[i].id : "?";
+        int extra = snprintf(buf + n, sizeof(buf) - (size_t)n, "+%s", sid);
+        if (extra <= 0)
+            break;
+        n += extra;
+        if ((size_t)n >= sizeof(buf)) {
+            n = (int)sizeof(buf) - 1;
+            break;
+        }
+    }
+    int trailing = snprintf(buf + n, sizeof(buf) - (size_t)n, "] echo:%.*s",
+                            (int)(message_len > 64 ? 64 : message_len),
+                            message ? message : "");
+    if (trailing <= 0)
+        return HU_ERR_PROVIDER_RESPONSE;
+    n += trailing;
     if ((size_t)n >= sizeof(buf))
         n = (int)sizeof(buf) - 1;
     *out = alloc->alloc(alloc->ctx, (size_t)n + 1);
@@ -345,10 +409,6 @@ static hu_error_t mlx_qwen3_load_adapter(void *ctx_ptr, const hu_lora_adapter_sp
      * direct-vtable callers (the helper guards this for indirect callers). */
     if (mode != HU_LORA_APPLY_MODE_REPLACE && mode != HU_LORA_APPLY_MODE_STACK)
         return HU_ERR_INVALID_ARGUMENT;
-    /* STACK is MoLoRA (init-02). The helper does not multiplex
-     * adapters today; signal honestly so the dispatcher knows. */
-    if (mode == HU_LORA_APPLY_MODE_STACK)
-        return HU_ERR_NOT_SUPPORTED;
     mlx_qwen3_ctx_t *c = (mlx_qwen3_ctx_t *)ctx_ptr;
     hu_allocator_t *alloc = spec->alloc;
 
@@ -381,14 +441,60 @@ static hu_error_t mlx_qwen3_load_adapter(void *ctx_ptr, const hu_lora_adapter_sp
             return HU_ERR_INVALID_ARGUMENT;
     }
 
-    /* S1.5 critic HF1: keep allocator state in sync. `clear_active_adapter`
-     * frees through `c->alloc`; the new strings are allocated through
-     * `spec->alloc`. With `hu_system_allocator()` these are both NULL-ctx
-     * malloc/free and equivalent, but the API permits the caller to pass
-     * a different allocator. We must store `spec->alloc` so the next
-     * `clear_active_adapter` frees through the allocator that actually
-     * owns the memory. The clear MUST run BEFORE the swap so any
-     * incumbent state is freed via its original allocator. */
+    /* SOTA-2026 init-02 — STACK appends to the resident pool instead of
+     * displacing the active slot. STACK requires an active base because
+     * stacking on top of nothing has no operational meaning (the
+     * MoLoRA dispatcher always REPLACEs the base before any STACK).
+     * The pool is capped at HU_MOLORA_MAX_ACTIVE; an overflow is a hard
+     * INVALID_ARGUMENT (the dispatcher must trim before retrying — failing
+     * silently here would mask a routing bug).
+     *
+     * Allocator note: pool entries are allocated via `alloc` (the spec's
+     * allocator). They will be freed by `clear_active_adapter` via
+     * `c->alloc`. The S1.5 HF1 sync below (in the REPLACE branch) keeps
+     * `c->alloc` in lockstep with the most recent REPLACE call; the
+     * MoLoRA dispatcher convention is to always REPLACE the base
+     * before any STACK and to use the same allocator across the
+     * REPLACE+STACK cluster for a given turn, so the STACK push here
+     * sees a `c->alloc` that matches its own `alloc`. Cross-allocator
+     * STACK is therefore not a supported pattern today and is an
+     * explicit S3 follow-up if it ever becomes one. */
+    if (mode == HU_LORA_APPLY_MODE_STACK) {
+        if (!c->active_adapter_id)
+            return HU_ERR_INVALID_ARGUMENT;
+        if (c->stacked_count >= HU_MOLORA_MAX_ACTIVE)
+            return HU_ERR_INVALID_ARGUMENT;
+        char *push_id = hu_strndup(alloc, spec->id, spec->id_len);
+        char *push_path = hu_strndup(alloc, spec->path, spec->path_len);
+        if (!push_id || !push_path) {
+            if (push_id)
+                alloc->free(alloc->ctx, push_id, spec->id_len + 1);
+            if (push_path)
+                alloc->free(alloc->ctx, push_path, spec->path_len + 1);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        c->stacked[c->stacked_count].id = push_id;
+        c->stacked[c->stacked_count].path = push_path;
+        c->stacked_count++;
+#if HU_IS_TEST
+        return HU_OK;
+#else
+        /* Production path: real mixture binding lands with init-04 P2/P4 —
+         * see design doc §5.3 (llamacpp mixture pattern). Until then the
+         * pool is cached so the dispatcher's contract is testable. */
+        return HU_OK;
+#endif
+    }
+
+    /* S1.5 critic HF1: keep allocator state in sync for REPLACE.
+     * `clear_active_adapter` frees through `c->alloc`; the new strings
+     * are allocated through `spec->alloc`. With `hu_system_allocator()`
+     * these are both NULL-ctx malloc/free and equivalent, but the API
+     * permits the caller to pass a different allocator. We must store
+     * `spec->alloc` so the next `clear_active_adapter` frees through
+     * the allocator that actually owns the memory. The clear MUST run
+     * BEFORE the swap so any incumbent state (including the MoLoRA
+     * pool from init-02) is freed via its original allocator. */
     clear_active_adapter(c);
     c->alloc = alloc;
 

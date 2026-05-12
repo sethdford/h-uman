@@ -24,11 +24,13 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/lora.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
 #include "human/providers/mlx_qwen3.h"
 #include "test_framework.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* ──────────────────────────────────────────────────────────────────
@@ -154,9 +156,6 @@ static void test_mlx_qwen3_load_adapter_rejects_invalid_args(void) {
     no_alloc.alloc = NULL;
     HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &no_alloc, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    /* STACK mode unsupported by mlx_qwen3 (MoLoRA arrives via init-02) */
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &good, HU_LORA_APPLY_MODE_STACK),
-                 HU_ERR_NOT_SUPPORTED);
     /* S1.5 critic PE2: bytes-only spec (no path) returns NOT_SUPPORTED,
      * not INVALID_ARGUMENT. mlx_qwen3 is path-based today; bytes-source
      * is reserved for init-08 federated LoRA over IPC. */
@@ -168,6 +167,11 @@ static void test_mlx_qwen3_load_adapter_rejects_invalid_args(void) {
     bytes_only.bytes_len = sizeof(fake_weights);
     HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &bytes_only, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_NOT_SUPPORTED);
+    /* Invalid mode enum is rejected before any state change.
+     * (STACK is now SUPPORTED on mlx_qwen3 per init-02 MoLoRA — see
+     * the dedicated STACK test cluster below for that contract.) */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &good, (hu_lora_apply_mode_t)99),
+                 HU_ERR_INVALID_ARGUMENT);
     prov.vtable->deinit(prov.ctx, &alloc);
 }
 
@@ -383,6 +387,175 @@ static void test_mlx_qwen3_load_adapter_rejects_path_traversal(void) {
     prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+/* SOTA-2026 init-02 (MoLoRA) — STACK mode on top of an active REPLACE
+ * base. The mlx_qwen3 helper is the only in-tree provider that honors
+ * STACK (huml/llamacpp continue to return NOT_SUPPORTED per their
+ * design); these tests pin the new contract. */
+
+static void test_mlx_qwen3_stack_without_base_is_rejected(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_qwen3_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
+
+    const hu_lora_adapter_spec_t spec = {
+        .path = "/tmp/expert", .path_len = 11,
+        .id = "ch", .id_len = 2,
+        .alloc = &alloc,
+    };
+    /* STACK with nothing active has no operational meaning. The
+     * MoLoRA dispatcher always REPLACEs first; a direct STACK call
+     * therefore signals a routing bug — we want it loud, not silent. */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &spec, HU_LORA_APPLY_MODE_STACK),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NULL((void *)prov.vtable->active_adapter(prov.ctx));
+    prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_mlx_qwen3_stack_appends_after_replace(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_qwen3_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
+
+    const hu_lora_adapter_spec_t base = {
+        .path = "/tmp/base.lora", .path_len = 14,
+        .id = "seth", .id_len = 4,
+        .alloc = &alloc,
+    };
+    const hu_lora_adapter_spec_t channel_expert = {
+        .path = "/tmp/telegram.lora", .path_len = 18,
+        .id = "telegram", .id_len = 8,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &base, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &channel_expert,
+                                            HU_LORA_APPLY_MODE_STACK),
+                 HU_OK);
+    /* active_adapter still reports the REPLACE base — the STACK pool is
+     * an additive mixture, not a replacement. */
+    HU_ASSERT_STR_EQ(prov.vtable->active_adapter(prov.ctx), "seth");
+    prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_mlx_qwen3_replace_clears_stack(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_qwen3_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
+
+    const hu_lora_adapter_spec_t base_a = {
+        .path = "/tmp/a.lora", .path_len = 11,
+        .id = "base_a", .id_len = 6,
+        .alloc = &alloc,
+    };
+    const hu_lora_adapter_spec_t ch = {
+        .path = "/tmp/ch.lora", .path_len = 12,
+        .id = "ch", .id_len = 2,
+        .alloc = &alloc,
+    };
+    const hu_lora_adapter_spec_t base_b = {
+        .path = "/tmp/b.lora", .path_len = 11,
+        .id = "base_b", .id_len = 6,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &base_a, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &ch, HU_LORA_APPLY_MODE_STACK),
+                 HU_OK);
+    /* Second REPLACE must wipe both the active slot AND the stacked
+     * pool — otherwise STACK from the prior turn leaks into the new
+     * base. ASan would catch the bigger version of this regression
+     * (free-size mismatch), but the contract is also semantic. */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &base_b, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    HU_ASSERT_STR_EQ(prov.vtable->active_adapter(prov.ctx), "base_b");
+    /* A subsequent STACK must succeed; if `replace_clears_stack` had
+     * silently kept the pool at HU_MOLORA_MAX_ACTIVE we'd see
+     * INVALID_ARGUMENT here. */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &ch, HU_LORA_APPLY_MODE_STACK),
+                 HU_OK);
+    prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_mlx_qwen3_stack_caps_at_max_active(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_qwen3_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
+
+    const hu_lora_adapter_spec_t base = {
+        .path = "/tmp/base.lora", .path_len = 14,
+        .id = "base", .id_len = 4,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &base, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    for (int i = 0; i < HU_MOLORA_MAX_ACTIVE; i++) {
+        char path_buf[32];
+        char id_buf[8];
+        snprintf(path_buf, sizeof(path_buf), "/tmp/e%d.lora", i);
+        snprintf(id_buf, sizeof(id_buf), "e%d", i);
+        const hu_lora_adapter_spec_t ext = {
+            .path = path_buf, .path_len = strlen(path_buf),
+            .id = id_buf, .id_len = strlen(id_buf),
+            .alloc = &alloc,
+        };
+        HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &ext, HU_LORA_APPLY_MODE_STACK),
+                     HU_OK);
+    }
+    /* One past the cap → INVALID_ARGUMENT. The dispatcher caller's
+     * recovery story is to call REPLACE again to drain the pool. */
+    const hu_lora_adapter_spec_t overflow = {
+        .path = "/tmp/over.lora", .path_len = 14,
+        .id = "over", .id_len = 4,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &overflow, HU_LORA_APPLY_MODE_STACK),
+                 HU_ERR_INVALID_ARGUMENT);
+    prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+#if HU_IS_TEST
+static void test_mlx_qwen3_chat_reflects_stacked_adapters(void) {
+    /* The deterministic mock formats the active id followed by `+<stacked>`
+     * for each STACK push. This is the only way the in-process fake can
+     * prove "STACK actually changed the runtime composition" without real
+     * Metal inference. Pins the contract that init-02 / init-05 fidelity
+     * scoring relies on. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_qwen3_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
+
+    const hu_lora_adapter_spec_t base = {
+        .path = "/tmp/base", .path_len = 9,
+        .id = "seth", .id_len = 4,
+        .alloc = &alloc,
+    };
+    const hu_lora_adapter_spec_t telegram = {
+        .path = "/tmp/tg", .path_len = 7,
+        .id = "telegram", .id_len = 8,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &base, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &telegram, HU_LORA_APPLY_MODE_STACK),
+                 HU_OK);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(prov.vtable->chat_with_system(prov.ctx, &alloc, NULL, 0, "hi", 2,
+                                                "qwen3-4b", 8, 0.0, &out, &out_len),
+                 HU_OK);
+    HU_ASSERT_STR_CONTAINS(out, "[mlx_qwen3:seth+telegram]");
+    if (out)
+        alloc.free(alloc.ctx, out, out_len + 1);
+    prov.vtable->deinit(prov.ctx, &alloc);
+}
+#endif
+
 #else /* !HU_ENABLE_MLX_QWEN3 — option OFF tests */
 
 static void test_mlx_qwen3_load_adapter_returns_not_supported_when_option_off(void) {
@@ -546,10 +719,15 @@ void run_mlx_qwen3_provider_tests(void) {
     HU_RUN_TEST(test_mlx_qwen3_load_adapter_replaces_incumbent);
     HU_RUN_TEST(test_mlx_qwen3_load_adapter_replace_keeps_allocator_in_sync);
     HU_RUN_TEST(test_mlx_qwen3_load_adapter_rejects_path_traversal);
+    HU_RUN_TEST(test_mlx_qwen3_stack_without_base_is_rejected);
+    HU_RUN_TEST(test_mlx_qwen3_stack_appends_after_replace);
+    HU_RUN_TEST(test_mlx_qwen3_replace_clears_stack);
+    HU_RUN_TEST(test_mlx_qwen3_stack_caps_at_max_active);
 #if HU_IS_TEST
     HU_RUN_TEST(test_mlx_qwen3_chat_returns_mock_response);
     HU_RUN_TEST(test_mlx_qwen3_chat_references_active_adapter_id);
     HU_RUN_TEST(test_mlx_qwen3_chat_rejects_empty_message);
+    HU_RUN_TEST(test_mlx_qwen3_chat_reflects_stacked_adapters);
 #endif
 #else
     HU_RUN_TEST(test_mlx_qwen3_load_adapter_returns_not_supported_when_option_off);

@@ -33,6 +33,13 @@
 #include <string.h>
 #include <unistd.h>
 
+/* HF5 closure (init-02 S2): the typing resolver now dereferences `persona`
+ * via `hu_persona_find_overlay`. CLI tests therefore pass a real
+ * (zero-initialized) `hu_persona_t` instead of an int sentinel. A
+ * zero-init persona has zero overlays so the resolver returns defaults —
+ * the same behavior the int-sentinel tests assumed, but no UB. */
+static hu_persona_t s_test_persona;
+
 /* ──────────────────────────────────────────────────────────────────
  * stdout capture helper
  *
@@ -229,14 +236,14 @@ static void test_cli_typing_default_profile_calls_typing_send_under_test(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t   ch;
     HU_ASSERT_EQ(hu_cli_create(&alloc, &ch), HU_OK);
-    /* S1.5 critic HF5: pass a real (zero-initialised) `hu_persona_t`,
-     * not a raw `int` sentinel. The current resolver ignores its
-     * persona argument, but init-02 will dereference it — keeping
-     * this test landmine-free here means init-02's wiring doesn't
-     * walk into a UAF / wild-pointer read on tests/CI. */
-    hu_persona_t cli_persona;
-    memset(&cli_persona, 0, sizeof(cli_persona));
-    hu_cli_set_persona(&ch, &cli_persona);
+    /* S1.5 critic HF5 + init-02 S2: the resolver now reads the
+     * persona's channel overlays. A zero-init persona has none, so
+     * defaults still apply — pinning the legacy direct-write behavior
+     * even after the resolver started dereferencing. Using a static
+     * (file-scope) handle keeps it landmine-free for the resolver's
+     * read path. */
+    memset(&s_test_persona, 0, sizeof(s_test_persona));
+    hu_cli_set_persona(&ch, &s_test_persona);
 
     prime_typing_buffer_to_known_state();
 
@@ -279,10 +286,8 @@ static void test_cli_typing_send_error_falls_back_to_direct_write(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t   ch;
     HU_ASSERT_EQ(hu_cli_create(&alloc, &ch), HU_OK);
-    /* S1.5 critic HF5: real persona, not a raw int sentinel. */
-    hu_persona_t cli_persona;
-    memset(&cli_persona, 0, sizeof(cli_persona));
-    hu_cli_set_persona(&ch, &cli_persona);
+    memset(&s_test_persona, 0, sizeof(s_test_persona));
+    hu_cli_set_persona(&ch, &s_test_persona);
 
     size_t out_len = 99u;
     char  *out     = capture_cli_send(&ch, "", 0, &out_len);
@@ -310,10 +315,8 @@ static void test_cli_send_is_deterministic_with_seeded_profile(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t   ch;
     HU_ASSERT_EQ(hu_cli_create(&alloc, &ch), HU_OK);
-    /* S1.5 critic HF5: real persona, not a raw int sentinel. */
-    hu_persona_t cli_persona;
-    memset(&cli_persona, 0, sizeof(cli_persona));
-    hu_cli_set_persona(&ch, &cli_persona);
+    memset(&s_test_persona, 0, sizeof(s_test_persona));
+    hu_cli_set_persona(&ch, &s_test_persona);
 
     size_t len_a = 0, len_b = 0;
     char  *a = capture_cli_send(&ch, "hello, world.", 13, &len_a);

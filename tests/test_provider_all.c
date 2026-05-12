@@ -2995,6 +2995,13 @@ static void load_adapter_check_not_supported(const char *kind, size_t kind_len,
     };
     HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &spec, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_NOT_SUPPORTED);
+    /* SOTA-2026 init-02 — STACK mode must also short-circuit on cloud
+     * providers. `m3_daemon_pattern_cloud_provider_falls_through_to_base_chat`
+     * pins the REPLACE branch; this is the equivalent pin for STACK so a
+     * future provider that decides to "softly support" mixture can't
+     * silently kill the cloud-safety fallthrough. */
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &spec, HU_LORA_APPLY_MODE_STACK),
+                 HU_ERR_NOT_SUPPORTED);
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
 }

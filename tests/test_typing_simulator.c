@@ -12,7 +12,9 @@
 
 #include "human/agent/typing_simulator.h"
 #include "human/channel.h"
+#include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/persona.h"
 #include "test_framework.h"
 
 #include <stdbool.h>
@@ -337,8 +339,9 @@ static void test_typing_send_is_deterministic(void) {
 }
 
 static void test_typing_profile_resolve_returns_defaults(void) {
-    /* Until init #02 ships the overlay→typing wiring, resolve must
-     * yield the canonical defaults regardless of channel name. */
+    /* NULL persona ⇒ canonical defaults regardless of channel name.
+     * Init-02 (HF5 closure) only swaps in overlay-derived values when
+     * a real persona is supplied; this is the legacy-call-site path. */
     hu_typing_profile_t p;
     memset(&p, 0xFF, sizeof(p));
     hu_typing_profile_resolve(NULL, "telegram", &p);
@@ -347,6 +350,81 @@ static void test_typing_profile_resolve_returns_defaults(void) {
     HU_ASSERT_EQ(p.pause_on_comma_ms, 180);
     HU_ASSERT_EQ(p.pause_on_period_ms, 420);
     HU_ASSERT_FALSE(p.instant);
+}
+
+/* SOTA-2026 init-02 / HF5 closure — `hu_typing_profile_resolve` now
+ * actually dereferences `persona`. These tests pin the contract that
+ * (a) NULL channel ⇒ defaults (used by legacy CLI tests that pass a
+ * persona but no channel), (b) a missing overlay ⇒ defaults, and
+ * (c) an overlay with formality / avg_length ⇒ a non-default profile. */
+
+static void test_typing_profile_resolve_null_channel_returns_defaults(void) {
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    hu_typing_profile_t p;
+    memset(&p, 0xFF, sizeof(p));
+    hu_typing_profile_resolve(&persona, NULL, &p);
+    HU_ASSERT_EQ(p.avg_wpm, 65);
+    HU_ASSERT_EQ(p.pause_on_period_ms, 420);
+}
+
+static void test_typing_profile_resolve_missing_overlay_returns_defaults(void) {
+    /* Persona with no overlays — the lookup falls through to defaults
+     * without dereferencing NULL anywhere. ASan catches a stray deref
+     * if the resolver regresses to ignoring the overlays-count guard. */
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    hu_typing_profile_t p;
+    memset(&p, 0xFF, sizeof(p));
+    hu_typing_profile_resolve(&persona, "telegram", &p);
+    HU_ASSERT_EQ(p.avg_wpm, 65);
+    HU_ASSERT_EQ(p.pause_on_comma_ms, 180);
+}
+
+static void test_typing_profile_resolve_formal_overlay_slows_typing(void) {
+    /* HF5 evidence: a "formal" overlay on the resolved channel must
+     * produce a strictly slower typing profile than defaults. This is
+     * the test that pins the resolver actually using its `persona`
+     * argument — the prior `(void)persona` version would silently
+     * return defaults and this assertion would fail. */
+    hu_persona_overlay_t overlays[1];
+    memset(&overlays[0], 0, sizeof(overlays[0]));
+    /* Cast away const for the storage; the resolver only reads. */
+    overlays[0].channel = (char *)"slack";
+    overlays[0].formality = (char *)"formal";
+
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.overlays = overlays;
+    persona.overlays_count = 1;
+
+    hu_typing_profile_t p;
+    memset(&p, 0xFF, sizeof(p));
+    hu_typing_profile_resolve(&persona, "slack", &p);
+    HU_ASSERT_LT((int)p.avg_wpm, 65);
+    HU_ASSERT_GT((int)p.pause_on_period_ms, 420);
+}
+
+static void test_typing_profile_resolve_casual_short_overlay_speeds_typing(void) {
+    /* Inverse of the formal case: casual + short bursts ⇒ faster than
+     * defaults. Combining both knobs proves the resolver composes
+     * overlay fields rather than treating one as exclusive. */
+    hu_persona_overlay_t overlays[1];
+    memset(&overlays[0], 0, sizeof(overlays[0]));
+    overlays[0].channel = (char *)"telegram";
+    overlays[0].formality = (char *)"casual";
+    overlays[0].avg_length = (char *)"short";
+
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.overlays = overlays;
+    persona.overlays_count = 1;
+
+    hu_typing_profile_t p;
+    memset(&p, 0xFF, sizeof(p));
+    hu_typing_profile_resolve(&persona, "telegram", &p);
+    HU_ASSERT_GT((int)p.avg_wpm, 65);
+    HU_ASSERT_LT((int)p.pause_on_period_ms, 420);
 }
 
 void run_typing_simulator_tests(void) {
@@ -369,4 +447,8 @@ void run_typing_simulator_tests(void) {
     HU_RUN_TEST(test_typing_send_ceiling_is_enforced);
     HU_RUN_TEST(test_typing_send_is_deterministic);
     HU_RUN_TEST(test_typing_profile_resolve_returns_defaults);
+    HU_RUN_TEST(test_typing_profile_resolve_null_channel_returns_defaults);
+    HU_RUN_TEST(test_typing_profile_resolve_missing_overlay_returns_defaults);
+    HU_RUN_TEST(test_typing_profile_resolve_formal_overlay_slows_typing);
+    HU_RUN_TEST(test_typing_profile_resolve_casual_short_overlay_speeds_typing);
 }

@@ -577,6 +577,7 @@ set(HU_CORE_SOURCES
     src/agent/workspace_context.c
     src/agent/timing.c
     src/agent/typing_simulator.c
+    src/agent/molora_dispatcher.c
     src/agent/governor.c
     src/agent/relationship_dynamics.c
     src/agent/arbitrator.c
@@ -2546,6 +2547,7 @@ set(HU_TEST_SOURCES
     tests/test_new_modules.c
     tests/test_provider_all.c
     tests/test_mlx_qwen3_provider.c
+    tests/test_molora_dispatcher.c
     tests/test_channel_all.c
     tests/test_meta_common.c
     tests/test_channel_integration.c

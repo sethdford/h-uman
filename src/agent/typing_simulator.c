@@ -9,6 +9,9 @@
 
 #include "human/channel.h"
 #include "human/core/error.h"
+#if HU_ENABLE_PERSONA
+#include "human/persona.h"
+#endif
 
 #include <stddef.h>
 #include <stdint.h>
@@ -181,11 +184,66 @@ void hu_typing_profile_resolve(const void *persona, const char *channel_name,
         return;
     static const hu_typing_profile_t kDefaults = HU_TYPING_PROFILE_DEFAULTS;
     *out = kDefaults;
+    if (!persona || !channel_name)
+        return;
+
+#if HU_ENABLE_PERSONA
+    /* HF5 closure (init-02 S2): the S1.5 audit warned that this resolver
+     * was advertised as "looks up the overlay" but actually ignored its
+     * persona argument. Channel call sites that passed an int sentinel
+     * happened to behave correctly by accident — until #02 wired the
+     * lookup, at which point the next dereference would be UB. The
+     * pre-req patch in this branch updates every CLI typing test to pass
+     * a real `hu_persona_t`; this dereference is now the actual lookup.
+     *
+     * Mapping (deliberately small — KISS): only existing overlay fields
+     * feed the typing profile. We do not invent new overlay knobs for
+     * the resolver; if an operator wants finer control they can extend
+     * the overlay JSON via init-02's `lora_adapter_*` fields and the
+     * persona system grows from there. The mapping is:
+     *
+     *   formality == "formal"   → slower WPM, longer pauses
+     *   formality == "casual"   → faster WPM, shorter pauses
+     *   avg_length == "short"   → faster WPM (rapid-fire texting)
+     *   avg_length == "long"    → slightly slower (more deliberate)
+     */
+    const hu_persona_t *p = (const hu_persona_t *)persona;
+    size_t channel_len = strlen(channel_name);
+    const hu_persona_overlay_t *ov = hu_persona_find_overlay(p, channel_name, channel_len);
+    if (!ov)
+        return;
+
+    if (ov->formality) {
+        if (strcmp(ov->formality, "formal") == 0) {
+            out->avg_wpm = 50u;
+            out->pause_on_comma_ms = 240u;
+            out->pause_on_period_ms = 600u;
+        } else if (strcmp(ov->formality, "casual") == 0 ||
+                   strcmp(ov->formality, "informal") == 0) {
+            out->avg_wpm = 80u;
+            out->pause_on_comma_ms = 120u;
+            out->pause_on_period_ms = 300u;
+        }
+    }
+    if (ov->avg_length) {
+        if (strcmp(ov->avg_length, "short") == 0) {
+            /* Short-burst senders type faster; boost WPM on top of any
+             * formality nudge above. Clamp at 200 to avoid overflowing
+             * the compute-budget jitter math. */
+            uint32_t bumped = (uint32_t)out->avg_wpm + 25u;
+            out->avg_wpm = (uint16_t)(bumped > 200u ? 200u : bumped);
+        } else if (strcmp(ov->avg_length, "long") == 0) {
+            /* Verbose senders pace themselves; trim WPM but keep above
+             * the 10 WPM floor enforced by `hu_typing_compute_budget_ms`. */
+            uint32_t trimmed = (uint32_t)out->avg_wpm;
+            trimmed = trimmed > 15u ? trimmed - 15u : 10u;
+            out->avg_wpm = (uint16_t)trimmed;
+        }
+    }
+#else
     (void)persona;
     (void)channel_name;
-    /* Init #02 wires per-channel overlay lookup here. For now the
-     * default profile applies everywhere — this is the documented S1
-     * scope. */
+#endif
 }
 
 /* ──────────────────────────────────────────────────────────────────

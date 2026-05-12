@@ -107,6 +107,15 @@ static void free_overlay(hu_allocator_t *alloc, hu_persona_overlay_t *ov) {
         size_t len = strlen(ov->vulnerability_tier);
         alloc->free(alloc->ctx, ov->vulnerability_tier, len + 1);
     }
+    /* SOTA-2026 init-02 — per-channel LoRA expert routing fields. */
+    if (ov->lora_adapter_path) {
+        size_t len = strlen(ov->lora_adapter_path);
+        alloc->free(alloc->ctx, ov->lora_adapter_path, len + 1);
+    }
+    if (ov->lora_adapter_id) {
+        size_t len = strlen(ov->lora_adapter_id);
+        alloc->free(alloc->ctx, ov->lora_adapter_id, len + 1);
+    }
 }
 
 static void free_example(hu_allocator_t *alloc, hu_persona_example_t *ex) {
@@ -973,6 +982,31 @@ static hu_error_t parse_overlay(hu_allocator_t *a, const char *channel_name,
             int v = (int)lor->data.number;
             ov->leave_on_read_pct = (uint8_t)(v > 100 ? 100 : (v < 0 ? 0 : v));
         }
+    }
+    /* SOTA-2026 init-02 — MoLoRA per-channel adapter routing. Both fields
+     * are optional; absence means "use the base adapter without stacking
+     * a channel expert". Reject embedded NULs / `..` segments at load
+     * time so a hostile persona JSON can't sneak path traversal past the
+     * provider's own guard. */
+    s = hu_json_get_string(obj, "lora_adapter_path");
+    if (s) {
+        size_t s_len = strlen(s);
+        bool bad = (s_len == 0);
+        for (size_t i = 0; !bad && i < s_len; i++) {
+            if (i + 1 < s_len && s[i] == '.' && s[i + 1] == '.')
+                bad = true;
+        }
+        if (!bad) {
+            ov->lora_adapter_path = hu_strdup(a, s);
+            if (!ov->lora_adapter_path)
+                goto ov_oom;
+        }
+    }
+    s = hu_json_get_string(obj, "lora_adapter_id");
+    if (s) {
+        ov->lora_adapter_id = hu_strdup(a, s);
+        if (!ov->lora_adapter_id)
+            goto ov_oom;
     }
     return HU_OK;
 

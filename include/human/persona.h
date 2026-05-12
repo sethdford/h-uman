@@ -34,6 +34,19 @@ typedef struct hu_persona_overlay {
     char *vulnerability_tier;
     float affect_mirror_ceiling; /* 0.0-1.0; caps emotional intensity mirroring. 0 = use default */
     uint8_t leave_on_read_pct;   /* 0-100; probability of leave-on-read. 0 = use default (10%) */
+    /* SOTA-2026 init-02 (MoLoRA) — per-channel LoRA expert routing. The
+     * MoLoRA dispatcher reads these on every turn to decide whether to
+     * stack a channel-specific expert on top of the base personalization
+     * adapter via HU_LORA_APPLY_MODE_STACK. Both fields are NULL by default
+     * (zero-init from `hu_persona_load_json`); absence means "no channel
+     * expert — base adapter alone governs this overlay's behaviour".
+     *
+     * `lora_adapter_path` MUST be a filesystem path (no path-traversal —
+     * the dispatcher reuses the provider's own `..` reject). `lora_adapter_id`
+     * is the opaque label echoed by `hu_provider_active_adapter`; when omitted
+     * the dispatcher falls back to the channel name. */
+    char *lora_adapter_path;
+    char *lora_adapter_id;
 } hu_persona_overlay_t;
 
 typedef struct hu_persona_example {

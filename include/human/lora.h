@@ -44,6 +44,18 @@ typedef enum hu_lora_apply_mode {
     HU_LORA_APPLY_MODE_STACK   = 1, /* additive composition; explicit opt-in */
 } hu_lora_apply_mode_t;
 
+/* MoLoRA stacking caps. The dispatcher in `src/agent/molora_dispatcher.c`
+ * caps the number of simultaneously-stacked channel experts at
+ * HU_MOLORA_MAX_ACTIVE; providers that implement STACK MUST also enforce
+ * this ceiling to avoid unbounded resident-adapter pools. The original
+ * design doc (docs/plans/2026-05-11-init-02-molora-channels.md §1.1)
+ * planned a separate `load_adapter_mixture` vtable hook with these
+ * constants in `provider.h`; S1.5 widened `load_adapter` instead, so the
+ * constants live here in `lora.h` next to the mode enum that exercises
+ * them. */
+#define HU_MOLORA_MAX_ACTIVE 3 /* max channel experts stacked on top of the REPLACE base */
+#define HU_MOLORA_MAX_SLOTS  8 /* reserved logical-slot id space (0..7) */
+
 /* Deployment spec passed to `hu_provider_t.load_adapter`.
  *
  * Either `path` or `bytes` MUST be set; setting both is rejected with
