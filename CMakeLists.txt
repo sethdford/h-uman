@@ -1620,8 +1620,6 @@ set(HU_LLAMACPP_INCLUDE_DIRS "" CACHE INTERNAL "")
 set(HU_LLAMACPP_LIBRARIES "" CACHE INTERNAL "")
 set(HU_LLAMACPP_LIBRARY_DIRS "" CACHE INTERNAL "")
 if(HU_ENABLE_LLAMACPP)
-    target_compile_definitions(human_core PRIVATE HU_ENABLE_LLAMACPP=1)
-    set(HU_LLAMACPP_FOUND ON CACHE INTERNAL "")
     if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt")
         # Vendored llama.cpp. Build it as a static lib without examples
         # (those drag in unrelated deps and fail under -Werror).
@@ -1645,6 +1643,7 @@ if(HU_ENABLE_LLAMACPP)
         target_include_directories(human_core PRIVATE third_party/llama.cpp/include)
         set(HU_LLAMACPP_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include" CACHE INTERNAL "")
         target_link_libraries(human_core PRIVATE llama)
+        set(HU_LLAMACPP_FOUND ON CACHE INTERNAL "")
         message(STATUS "llama.cpp provider: enabled (vendored)")
     else()
         # Resolve a pre-installed libllama. Try in order:
@@ -1657,6 +1656,7 @@ if(HU_ENABLE_LLAMACPP)
         find_package(Llama QUIET)
         if(TARGET llama)
             target_link_libraries(human_core PUBLIC llama)
+            set(HU_LLAMACPP_FOUND ON CACHE INTERNAL "")
             message(STATUS "llama.cpp provider: enabled (find_package Llama)")
         else()
             find_package(PkgConfig QUIET)
@@ -1695,14 +1695,27 @@ if(HU_ENABLE_LLAMACPP)
                 if(HU_LLAMACPP_LIBRARY_DIRS)
                     target_link_directories(human_core PUBLIC ${HU_LLAMACPP_LIBRARY_DIRS})
                 endif()
+                set(HU_LLAMACPP_FOUND ON CACHE INTERNAL "")
                 message(STATUS "llama.cpp provider: enabled (system libllama)")
             else()
-                message(STATUS "llama.cpp provider: enabled (no vendored upstream and libllama not found; vtable will return NOT_SUPPORTED until libllama is linked)")
+                message(STATUS "llama.cpp provider: requested but no vendored upstream and libllama not found; vtable will return NOT_SUPPORTED")
             endif()
         endif()
     endif()
 else()
     message(STATUS "llama.cpp provider: disabled (compiles as NOT_SUPPORTED stub)")
+endif()
+
+# Only define HU_ENABLE_LLAMACPP=1 when llama.cpp was actually located. Setting
+# this compile-flag merely because the user passed -DHU_ENABLE_LLAMACPP=ON
+# causes source files to try `#include "llama.h"` even when no headers are on
+# the include path (notably tests/test_llamacpp_chat_metal.c) — and CI hits
+# this every run because actions/checkout@v6 does NOT fetch submodules by
+# default and apt doesn't ship libllama in the feature-flags matrix step.
+# See HU_LLAMACPP_FOUND set ON only inside the four successful detection
+# branches above (vendored / find_package / pkg-config / manual probe).
+if(HU_LLAMACPP_FOUND)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_LLAMACPP=1)
 endif()
 
 # W15 — libsodium upgrade.
@@ -3051,8 +3064,10 @@ target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1 HU_ENABLE_LEARNING
 # .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).
 # The human_core target already has this define under HU_LLAMACPP_FOUND, but
 # its PRIVATE scope doesn't reach test object files compiled directly into
-# human_tests.
-if(HU_ENABLE_LLAMACPP)
+# human_tests. Gate on HU_LLAMACPP_FOUND (actual detection success), not on
+# HU_ENABLE_LLAMACPP (user intent): otherwise tests/test_llamacpp_chat_metal.c
+# enters its `#ifdef HU_ENABLE_LLAMACPP` block and hits a missing llama.h.
+if(HU_LLAMACPP_FOUND)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_LLAMACPP=1)
     if(HU_LLAMACPP_INCLUDE_DIRS)
         target_include_directories(human_tests PRIVATE ${HU_LLAMACPP_INCLUDE_DIRS})
