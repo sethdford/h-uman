@@ -3077,6 +3077,7 @@ endif()
 # activates the real Gemma DPO test path (Task 7).
 if(HU_HAVE_MLX_LM)
     target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM=1)
+    target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM=1)
     target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM=1)
 endif()
 
