@@ -44,6 +44,15 @@ option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
 option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time LoRA merging (W13 Bridge A)" OFF)
+# Phase 2 Task 6 (RL SOTA) — gate the mlx-lm-lora DPO subprocess
+# integration test. OFF by default keeps CI hermetic; flipping ON
+# locally activates the heavyweight Gemma download in
+# tests/test_dpo_real_mlx.c (Task 7 territory). The actual
+# target_compile_definitions wiring lives after both human_core and
+# human_tests targets are declared (alongside HU_ENABLE_LLAMACPP's
+# test wiring); CMake forbids defining symbols on a target before
+# the target exists.
+option(HU_HAVE_MLX_LM "Enable mlx-lm-lora DPO subprocess integration tests" OFF)
 # Phase 1 (RL SOTA) — Metal GPU offload for the vendored llama.cpp build.
 # Defaults ON only on Apple platforms (the only OS llama.cpp ships Metal
 # for). Linux and other non-Apple targets default OFF; setting it ON
@@ -2725,6 +2734,9 @@ set(HU_TEST_SOURCES
     tests/test_dpo_real_loss.c
     # Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs.
     tests/test_dpo_real_e2e.c
+    # Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper — JSONL export +
+    # dummy-adapter shortcut without HU_HAVE_MLX_LM; real Gemma DPO with it.
+    tests/test_dpo_real_mlx.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
@@ -3053,6 +3065,19 @@ if(HU_ENABLE_LLAMACPP)
     elseif(HU_LLAMACPP_LIBRARIES)
         target_link_libraries(human_tests ${HU_LLAMACPP_LIBRARIES})
     endif()
+endif()
+
+# Phase 2 Task 6 (RL SOTA) — propagate HU_HAVE_MLX_LM into human_core and
+# human_tests. Plan body (lines 1838–1844) shows a single block "near
+# HU_ENABLE_LLAMACPP option"; structurally that block has to live AFTER
+# both targets are declared (mirroring HU_ENABLE_LLAMACPP's own split:
+# option at line 46, target_compile_definitions on human_tests right
+# above this comment). The flag is OFF by default; flipping it ON
+# bypasses the dummy-adapter shortcut in src/ml/dpo_real_mlx.c and
+# activates the real Gemma DPO test path (Task 7).
+if(HU_HAVE_MLX_LM)
+    target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM=1)
+    target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM=1)
 endif()
 
 # Keep assert() active in tests even for Release/MinSizeRel builds (which define NDEBUG).
