@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-11T18:45:45.107Z",
+  "generated": "2026-05-12T18:34:46.653Z",
   "groups": {
     "color.neutral": [
       {
@@ -1790,6 +1790,11 @@
         "hex": "#8a847e"
       },
       {
+        "name": "text-tertiary",
+        "value": "#8a847e",
+        "hex": "#8a847e"
+      },
+      {
         "name": "text-faint",
         "value": "#56504a",
         "hex": "#56504a"
@@ -2129,6 +2134,11 @@
         "hex": "#6B655E"
       },
       {
+        "name": "text-tertiary",
+        "value": "#6B655E",
+        "hex": "#6B655E"
+      },
+      {
         "name": "text-faint",
         "value": "#9A9490",
         "hex": "#9A9490"
@@ -2423,6 +2433,11 @@
       },
       {
         "name": "text-muted",
+        "value": "#c8c2bc",
+        "hex": "#c8c2bc"
+      },
+      {
+        "name": "text-tertiary",
         "value": "#c8c2bc",
         "hex": "#c8c2bc"
       },

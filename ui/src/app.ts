@@ -62,6 +62,13 @@ const VALID_TABS: TabId[] = [
 
 const SIDEBAR_KEY = "hu-sidebar-collapsed";
 
+/** Tabs that follow the list-detail archetype and render a `.detail-panel` at
+ *  the wide breakpoint. Restored after b2ab0064 removed it for being "unused"
+ *  on top of 7105152f which had stubbed `_hasDetail` to `return false`,
+ *  silently disabling the dual-pane layout for sessions/channels/tools/nodes.
+ *  Drives `<aside class="detail-panel">` rendering in `_renderLayout`. */
+const LIST_DETAIL_TABS: TabId[] = ["sessions", "channels", "tools", "nodes", "canvas"];
+
 const VIEW_IMPORTS: Record<TabId, () => Promise<unknown>> = {
   overview: () => import("./views/overview-view.js"),
   chat: () => import("./views/chat-view.js"),
@@ -324,20 +331,21 @@ export class ScApp extends LitElement {
     }
     .disconnect-banner button,
     .demo-fallback-banner button {
-      background: color-mix(in srgb, var(--hu-on-accent) 20%, transparent);
-      border: 1px solid color-mix(in srgb, var(--hu-on-accent) 40%, transparent);
-      color: var(--hu-on-accent);
+      background: var(--hu-bg);
+      border: 1px solid var(--hu-on-accent);
+      color: var(--hu-text);
       padding: var(--hu-space-2xs) var(--hu-space-sm);
       border-radius: var(--hu-radius-sm);
       font-size: var(--hu-text-xs);
       font-family: var(--hu-font);
+      font-weight: var(--hu-weight-medium);
       cursor: pointer;
       transition: background var(--hu-duration-fast) var(--hu-ease-out);
       line-height: 1;
     }
     .disconnect-banner button:hover,
     .demo-fallback-banner button:hover {
-      background: color-mix(in srgb, var(--hu-on-accent) 35%, transparent);
+      background: var(--hu-bg-surface);
     }
     .banner-dismiss {
       background: transparent;
@@ -616,7 +624,7 @@ export class ScApp extends LitElement {
   }
 
   private get _hasDetail(): boolean {
-    return false;
+    return LIST_DETAIL_TABS.includes(this.tab);
   }
 
   private get prefersReducedMotion(): boolean {
@@ -634,8 +642,12 @@ export class ScApp extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
 
+    // First-time visitors get an EXPANDED sidebar so navigation is discoverable.
+    // The `?: true` default introduced in b7abafcc collapsed the sidebar by
+    // default, which broke `sidebar-transitions.spec.ts::sidebar starts expanded
+    // with correct width`. Only honor the stored value when it exists.
     const storedSidebar = localStorage.getItem(SIDEBAR_KEY);
-    this.sidebarCollapsed = storedSidebar === null ? true : storedSidebar === "true";
+    this.sidebarCollapsed = storedSidebar === "true";
     this._bannerDismissed = sessionStorage.getItem("hu-banner-dismissed") === "true";
     this._updateViewportBreakpoint();
     window.addEventListener("resize", this._resizeHandler);
@@ -1042,6 +1054,13 @@ export class ScApp extends LitElement {
           this._performViewSwitch(newTab);
           return this.updateComplete;
         });
+        /* `transition.ready` also rejects with "Transition was skipped" when a
+         * second navigation pre-empts the first. Without a catch handler the
+         * rejection surfaces as an uncaught error to pageerror listeners (see
+         * e2e/regression-errors.spec.ts). The await on .finished below is the
+         * primary control-flow path; .ready is observed only for the side
+         * effect of swallowing the rejection. */
+        transition.ready.catch(() => undefined);
         await transition.finished;
       } catch {
         this._performViewSwitch(newTab);

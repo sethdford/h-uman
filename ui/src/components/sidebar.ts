@@ -329,13 +329,15 @@ export class ScSidebar extends LitElement {
       font-weight: var(--hu-weight-medium);
       animation: hu-nav-enter var(--hu-duration-normal, 300ms) var(--hu-ease-out) both;
     }
+    /* Transform-only entrance: animating opacity causes axe to read mid-
+     * animation labels at partial opacity, blending them with the background
+     * and tripping color-contrast at WCAG 4.5:1. Visually identical (slide
+     * from the left). See e2e/accessibility.spec.ts color-contrast cases. */
     @keyframes hu-nav-enter {
       from {
-        opacity: 0;
         transform: translateX(calc(-1 * var(--hu-space-sm)));
       }
       to {
-        opacity: 1;
         transform: translateX(0);
       }
     }
@@ -353,6 +355,11 @@ export class ScSidebar extends LitElement {
     }
     .nav-section .nav-item:nth-child(5) {
       animation-delay: 250ms;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .nav-item {
+        animation: none;
+      }
     }
 
     .nav-item {
@@ -776,7 +783,13 @@ export class ScSidebar extends LitElement {
       typeof document.startViewTransition === "function" &&
       !window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      document.startViewTransition(apply);
+      const transition = document.startViewTransition(apply);
+      /* Both .ready and .finished reject with "Transition was skipped" if the
+       * theme toggle re-fires mid-transition. Attach noop catches so the
+       * rejections do not surface as unhandled pageerrors. See
+       * e2e/regression-errors.spec.ts. */
+      transition.ready.catch(() => undefined);
+      transition.finished.catch(() => undefined);
     } else {
       apply();
     }
