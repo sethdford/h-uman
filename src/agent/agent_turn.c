@@ -5120,24 +5120,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             if (resp.content && resp.content_len > 0) {
-                /* PRM: score response reasoning chain for quality */
-                if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
-                    resp.content_len > 100) {
-                    hu_prm_result_t prm_res;
-                    if (hu_prm_score_chain(agent->alloc, &agent->sota.prm_config, resp.content,
-                                           resp.content_len, &prm_res) == HU_OK) {
-                        prm_turn_score = prm_res.aggregate_score;
-                        hu_prm_result_free(agent->alloc, &prm_res);
-                    }
-                }
-
-                /* PRM per-step: score response quality as a reasoning step */
+                /* ThinkPRM verifier: score response reasoning steps */
+                hu_prm_verify_result_t prm_verify = {0};
+                bool prm_verified = false;
                 if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
                     resp.content_len > 50) {
-                    double step_score = 0.0;
-                    hu_prm_score_step(agent->alloc, &agent->sota.prm_config, resp.content,
-                                      resp.content_len, msg, msg_len, &step_score);
-                    prm_turn_score = step_score;
+                    if (hu_prm_verify_reasoning(agent->alloc, &agent->sota.prm_config,
+                                                resp.content, resp.content_len,
+                                                msg, msg_len, &prm_verify) == HU_OK) {
+                        prm_turn_score = prm_verify.aggregate_score;
+                        prm_verified = true;
+                    }
                 }
 
                 /* Reflection: evaluate response quality and retry if needed */
@@ -5151,12 +5144,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                    resp.content, resp.content_len, quality);
                 }
 
-                /* PRM quality gate: low step-level score triggers retry */
-                if (prm_turn_score > 0.0 && prm_turn_score < 0.3 &&
+                if (prm_verified && prm_turn_score < 1.0)
+                    hu_log_info("agent_turn", NULL, "PRM reasoning score: %.3f (threshold %.3f)",
+                                prm_turn_score, agent->sota.prm_config.retry_threshold);
+
+                /* PRM quality gate: verification failure triggers retry */
+                if (prm_verified && !prm_verify.passed &&
                     quality == HU_QUALITY_ACCEPTABLE && agent->reflection.enabled &&
                     reflection_retries_left > 0) {
                     quality = HU_QUALITY_NEEDS_RETRY;
                 }
+                if (prm_verified)
+                    hu_prm_verify_result_free(agent->alloc, &prm_verify);
+                (void)prm_turn_score;
 
                 if (quality == HU_QUALITY_NEEDS_RETRY && agent->reflection.enabled &&
                     reflection_retries_left > 0 && iter < agent->max_tool_iterations - 1) {

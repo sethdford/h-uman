@@ -622,6 +622,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
      * data source for LoRA. */
     const char *from_deltas_db = NULL;
     const char *signal_contact = NULL;
+    (void)signal_contact;
     /* Bridge B — MLX frontier LoRA. When --backend mlx is set, we skip
      * in-process HUML training and shell out to mlx_lm.lora for real
      * Gemma fine-tuning on Apple Silicon. */
