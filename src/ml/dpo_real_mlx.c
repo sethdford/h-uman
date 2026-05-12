@@ -37,6 +37,25 @@ typedef struct {
     size_t max_iters;
 } dpo_mlx_ctx_t;
 
+/* Phase 3 Task 0 (D6 fold-in): create-time availability probe.
+ *
+ * Mirrors src/ml/rl_trainer.c:27-35::mlx_dpo_available() exactly — same
+ * `python3 -c '...' 2>/dev/null` shape, same target symbol, so probe
+ * results stay byte-identical between the factory dispatcher and the
+ * backend create function. Returns 1 if the third-party mlx-lm-lora
+ * DPO trainer is importable from the ambient PATH's python3, 0 otherwise.
+ *
+ * Previously hu_dpo_real_mlx_create always succeeded on Apple and a
+ * missing mlx-lm-lora surfaced only at step() time via popen failure.
+ * The Phase 2 sprint-auditor PASS_WITH_NOTES verdict flagged that
+ * deferral — and the matching unavailability test in
+ * tests/test_rl_trainer.c had to skip whenever mlx-lm-lora WAS present.
+ * Now we fail clearly at create time so the test can drive a
+ * deterministic PATH override instead. */
+static int mlx_lm_lora_available(void) {
+    return system("python3 -c 'from mlx_lm_lora.trainer.dpo_trainer import train_dpo' 2>/dev/null") == 0;
+}
+
 /* Minimal JSON string escaper. RFC 8259 requires escaping " \ and U+0000-U+001F.
  * We escape \" \\ \n \r \t \b \f explicitly and use \uXXXX for the rest of the
  * control range. Output is appended to dst (writes nothing if dst lacks space). */
@@ -199,6 +218,9 @@ hu_error_t hu_dpo_real_mlx_create(hu_allocator_t *alloc,
 #if !defined(__APPLE__)
     return HU_ERR_NOT_SUPPORTED;
 #endif
+    /* Phase 3 Task 0 (D6): probe before allocation so a missing
+     * mlx-lm-lora is reported at create time, not at step time. */
+    if (!mlx_lm_lora_available()) return HU_ERR_NOT_SUPPORTED;
     dpo_mlx_ctx_t *c = (dpo_mlx_ctx_t *)alloc->alloc(alloc->ctx, sizeof(dpo_mlx_ctx_t));
     if (!c) return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
