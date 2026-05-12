@@ -254,13 +254,7 @@ hu_error_t hu_kto_huml_create(hu_allocator_t *alloc,
     return HU_OK;
 }
 
-/* MLX backend — stub until Task 7 */
-hu_error_t hu_kto_mlx_create(hu_allocator_t *alloc,
-                              const hu_rl_trainer_config_t *config,
-                              hu_rl_trainer_t *out) {
-    (void)alloc; (void)config; (void)out;
-    return HU_ERR_NOT_SUPPORTED;
-}
+/* MLX backend: real implementation in src/ml/kto_mlx.c (Phase 3 Task 7). */
 
 #if HU_IS_TEST
 hu_error_t kto_compute_loss_only_for_test(void *vctx,

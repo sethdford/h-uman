@@ -54,10 +54,10 @@ hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
     return HU_ERR_INVALID_ARGUMENT;
 }
 
-/* Probe: KTO trainer importable from mlx-lm-lora. Returns 0 for now —
- * Task 7 fills in the real symbol path. */
+/* Probe: KTO trainer importable from mlx-lm-lora. Mirrors the DPO
+ * probe above — checks for the mlx_lm_lora.train module. */
 static int mlx_lm_lora_kto_available(void) {
-    return 0;
+    return system("python3 -c 'import mlx_lm_lora.train' 2>/dev/null") == 0;
 }
 
 hu_error_t hu_rl_trainer_create_kto(hu_allocator_t *alloc,

@@ -12,7 +12,9 @@
 #include "human/ml/rl_trainer.h"
 #include "human/core/allocator.h"
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static void test_kto_rl_trainer_vtable_fields_all_populated(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -158,9 +160,156 @@ static void test_kto_loss_finite_diff_matches_analytical(void) {
     trainer.vtable->deinit(trainer.ctx, &alloc);
 }
 
+static void test_kto_huml_50_signal_e2e_chosen_delta_increases_over_iters(void) {
+    srand(42);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_rl_trainer_config_t cfg = {
+        .backend = HU_DPO_BACKEND_HUML, .beta = 0.1,
+        .learning_rate = 1e-3, .max_iters = 100,
+        .lambda_d = 1.0, .lambda_u = 1.0,
+    };
+    hu_rl_trainer_t trainer = {0};
+    HU_ASSERT_EQ(hu_rl_trainer_create_kto(&alloc, &cfg, &trainer), HU_OK);
+
+    /* Load Phase 2 fixture and split into one-sided KTO signals:
+     * even index -> desirable (chosen as response), odd -> undesirable */
+    hu_preference_pair_t signals[50];
+    memset(signals, 0, sizeof(signals));
+    size_t n = 0;
+
+    FILE *f = fopen("tests/fixtures/synthetic_preference_pairs_huml.jsonl", "r");
+    if (!f) {
+        trainer.vtable->deinit(trainer.ctx, &alloc);
+        HU_ASSERT_TRUE(0 && "fixture file not found");
+        return;
+    }
+    char line[4096];
+    while (fgets(line, sizeof(line), f) && n < 50) {
+        const char *pf = strstr(line, "\"prompt\"");
+        const char *cf = strstr(line, "\"chosen\"");
+        const char *rf = strstr(line, "\"rejected\"");
+        if (!pf) continue;
+
+        hu_preference_pair_t *s = &signals[n];
+        const char *ps = strchr(pf + 8, '"');
+        if (ps) { ps++; const char *pe = strchr(ps, '"');
+            if (pe) { size_t len = (size_t)(pe - ps);
+                if (len >= sizeof(s->prompt)) len = sizeof(s->prompt) - 1;
+                memcpy(s->prompt, ps, len); s->prompt_len = len; } }
+
+        if (n % 2 == 0 && cf) {
+            const char *cs = strchr(cf + 8, '"');
+            if (cs) { cs++; const char *ce = strchr(cs, '"');
+                if (ce) { size_t len = (size_t)(ce - cs);
+                    if (len >= sizeof(s->chosen)) len = sizeof(s->chosen) - 1;
+                    memcpy(s->chosen, cs, len); s->chosen_len = len; } }
+        } else if (n % 2 == 1 && rf) {
+            const char *rs = strchr(rf + 10, '"');
+            if (rs) { rs++; const char *re = strchr(rs, '"');
+                if (re) { size_t len = (size_t)(re - rs);
+                    if (len >= sizeof(s->rejected)) len = sizeof(s->rejected) - 1;
+                    memcpy(s->rejected, rs, len); s->rejected_len = len; } }
+        }
+        if (s->prompt_len > 0 && (s->chosen_len > 0 || s->rejected_len > 0))
+            n++;
+    }
+    fclose(f);
+
+    HU_ASSERT_TRUE(n >= 10);
+
+    hu_rl_trainer_metrics_t m = {0};
+    for (int iter = 0; iter < 50; iter++) {
+        memset(&m, 0, sizeof(m));
+        trainer.vtable->step(trainer.ctx, &alloc, signals, n, &m);
+    }
+    trainer.vtable->deinit(trainer.ctx, &alloc);
+
+    HU_ASSERT_TRUE(m.chosen_logprob_delta > 0);
+    HU_ASSERT_TRUE(m.rejected_logprob_delta < 0);
+}
+
+static void test_kto_mlx_subprocess_produces_safetensors(void) {
+#if !defined(HU_HAVE_MLX_LM_KTO) || HU_HAVE_MLX_LM_KTO == 0
+    fprintf(stderr, "[skip] HU_HAVE_MLX_LM_KTO not defined; KTO MLX subprocess test deferred to local run\n");
+    return;
+#else
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_rl_trainer_config_t cfg = {
+        .backend = HU_DPO_BACKEND_MLX,
+        .beta = 0.1,
+        .max_iters = 5,
+        .lambda_d = 1.0,
+        .lambda_u = 1.0,
+    };
+    hu_rl_trainer_t trainer = {0};
+    hu_error_t err = hu_kto_mlx_create(&alloc, &cfg, &trainer);
+    if (err == HU_ERR_NOT_SUPPORTED) {
+        fprintf(stderr, "[skip] mlx-lm-lora KTO not available on this platform\n");
+        return;
+    }
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(trainer.vtable);
+
+    hu_preference_pair_t pairs[2];
+    memset(pairs, 0, sizeof(pairs));
+    memcpy(pairs[0].prompt, "hello", 5);
+    pairs[0].prompt_len = 5;
+    memcpy(pairs[0].chosen, "world", 5);
+    pairs[0].chosen_len = 5;
+    memcpy(pairs[1].prompt, "hello", 5);
+    pairs[1].prompt_len = 5;
+    memcpy(pairs[1].rejected, "bad", 3);
+    pairs[1].rejected_len = 3;
+
+    hu_rl_trainer_metrics_t m = {0};
+    HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, pairs, 2, &m), HU_OK);
+    HU_ASSERT_TRUE(strlen(m.adapter_path) > 0);
+
+    struct stat st;
+    HU_ASSERT_EQ(stat(m.adapter_path, &st), 0);
+    HU_ASSERT_TRUE(st.st_size > 0);
+
+    trainer.vtable->deinit(trainer.ctx, &alloc);
+#endif
+}
+
+static void test_kto_mlx_dummy_adapter_in_test_mode(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_rl_trainer_config_t cfg = {
+        .backend = HU_DPO_BACKEND_MLX,
+        .beta = 0.1,
+        .max_iters = 1,
+        .lambda_d = 1.0,
+        .lambda_u = 1.0,
+    };
+    hu_rl_trainer_t trainer = {0};
+    hu_error_t err = hu_kto_mlx_create(&alloc, &cfg, &trainer);
+    if (err == HU_ERR_NOT_SUPPORTED) {
+        fprintf(stderr, "[skip] not Apple or mlx-lm-lora unavailable\n");
+        return;
+    }
+    HU_ASSERT_EQ(err, HU_OK);
+
+    hu_preference_pair_t pair = {0};
+    memcpy(pair.prompt, "test", 4);
+    pair.prompt_len = 4;
+    memcpy(pair.chosen, "good", 4);
+    pair.chosen_len = 4;
+
+    hu_rl_trainer_metrics_t m = {0};
+    HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, &pair, 1, &m), HU_OK);
+    HU_ASSERT_TRUE(strlen(m.adapter_path) > 0);
+    HU_ASSERT_TRUE(m.iters_completed > 0);
+
+    trainer.vtable->deinit(trainer.ctx, &alloc);
+}
+
 void run_kto_loss_tests(void) {
     HU_TEST_SUITE("kto");
     HU_RUN_TEST(test_kto_rl_trainer_vtable_fields_all_populated);
     HU_RUN_TEST(test_kto_loss_sign_of_gradient_increases_chosen_decreases_rejected);
     HU_RUN_TEST(test_kto_loss_finite_diff_matches_analytical);
+    HU_RUN_TEST(test_kto_huml_50_signal_e2e_chosen_delta_increases_over_iters);
+    HU_RUN_TEST(test_kto_mlx_subprocess_produces_safetensors);
+    HU_RUN_TEST(test_kto_mlx_dummy_adapter_in_test_mode);
 }

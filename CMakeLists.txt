@@ -53,6 +53,7 @@ option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time L
 # test wiring); CMake forbids defining symbols on a target before
 # the target exists.
 option(HU_HAVE_MLX_LM "Enable mlx-lm-lora DPO subprocess integration tests" OFF)
+option(HU_HAVE_MLX_LM_KTO "Enable mlx-lm-lora KTO subprocess integration tests" OFF)
 # Phase 1 (RL SOTA) — Metal GPU offload for the vendored llama.cpp build.
 # Defaults ON only on Apple platforms (the only OS llama.cpp ships Metal
 # for). Linux and other non-Apple targets default OFF; setting it ON
@@ -1251,6 +1252,8 @@ if(HU_ENABLE_ML)
         # Phase 3 Task 4 (RL SOTA): KTO (Kahneman-Tversky Optimization)
         # HUML backend + MLX stub. One-sided preference signals.
         src/ml/kto.c
+        # Phase 3 Task 7 (RL SOTA): KTO MLX subprocess backend.
+        src/ml/kto_mlx.c
         # Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection
         # (score = W . h + b) — trainable surface on top of frozen
         # backbones in the reward-model composition (Task 2) and
@@ -1277,6 +1280,10 @@ if(HU_ENABLE_ML)
         # reward_model_train.c can access the value head for the SGD
         # step without a HU_IS_TEST accessor.
         src/ml/reward_model.c
+        # Phase 3 Task 8 (RL SOTA): hu_reward_model_create_mlx — Apple-only
+        # MLX subprocess backend. Delegates inference to
+        # scripts/rm_mlx_train.py --infer via popen().
+        src/ml/reward_model_mlx.c
         # Phase 3 Task 3 (RL SOTA): hu_reward_model_train — Bradley-Terry
         # mini-batch SGD on the value head (W, b); backbone is frozen
         # (Christiano 2017 §2.2). One-sided KTO pairs are skipped + counted
@@ -2241,9 +2248,10 @@ if(NOT HU_ENABLE_ML)
         src/ml/training_data_quality.c
         src/providers/huml.c
         src/ml/rl_trainer.c src/ml/dpo_real_huml.c src/ml/dpo_real_mlx.c
-        src/ml/kto.c
+        src/ml/kto.c src/ml/kto_mlx.c
         src/ml/value_head.c src/ml/policy_logprobs.c src/ml/reference_model.c
-        src/ml/cli_dpo.c src/ml/reward_model.c src/ml/reward_model_train.c
+        src/ml/cli_dpo.c src/ml/reward_model.c src/ml/reward_model_mlx.c
+        src/ml/reward_model_train.c
         src/ml/cli_kto.c src/ml/cli_rm.c)
 endif()
 if(NOT HU_ENABLE_LEARNING)
@@ -2813,6 +2821,9 @@ set(HU_TEST_SOURCES
     # APPEND Bradley-Terry convergence + finite-diff grad-check tests to
     # tests/test_reward_model_train.c (same suite, same runner).
     tests/test_reward_model_train.c
+    # Phase 3 Task 8 (RL SOTA): RM inference latency tests — HUML
+    # (sub-50ms Release) + MLX (gated by HU_HAVE_MLX_LM + Qwen GGUF).
+    tests/test_reward_model_inference.c
     # Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
     # grad check + vtable contract.
     tests/test_kto_loss.c
@@ -3171,6 +3182,15 @@ if(HU_HAVE_MLX_LM)
     target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM=1)
     target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM=1)
     target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM=1)
+endif()
+
+# Phase 3 Task 7 (RL SOTA) — propagate HU_HAVE_MLX_LM_KTO into targets.
+# OFF by default; flipping ON bypasses the dummy-adapter shortcut in
+# src/ml/kto_mlx.c and activates the real MLX KTO subprocess path.
+if(HU_HAVE_MLX_LM_KTO)
+    target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM_KTO=1)
+    target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM_KTO=1)
+    target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM_KTO=1)
 endif()
 
 # Keep assert() active in tests even for Release/MinSizeRel builds (which define NDEBUG).

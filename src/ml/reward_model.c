@@ -325,14 +325,7 @@ hu_error_t hu_reward_model_create_huml(hu_allocator_t *alloc,
     return HU_OK;
 }
 
-hu_error_t hu_reward_model_create_mlx(hu_allocator_t *alloc,
-                                       const hu_reward_model_config_t *config,
-                                       hu_reward_model_t *out) {
-    (void)alloc; (void)config; (void)out;
-    /* Task 8 wires this to scripts/rm_mlx_train.py (matching the
-     * mlx-lm-lora subprocess pattern from Phase 2 Task 6). */
-    return HU_ERR_NOT_SUPPORTED;
-}
+/* hu_reward_model_create_mlx moved to src/ml/reward_model_mlx.c (Phase 3 Task 8). */
 
 hu_error_t hu_reward_model_save(const hu_reward_model_t *rm, const char *dir) {
     (void)rm; (void)dir;
