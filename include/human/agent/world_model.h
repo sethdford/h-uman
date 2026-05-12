@@ -146,6 +146,66 @@ typedef struct hu_theory_of_mind {
     size_t confidence_history_count;
 } hu_theory_of_mind_t;
 
+/* P5.2 — Self-model alongside ToM. Distinct from `hu_theory_of_mind_t`
+ * (which is what the user appears to believe about *us*); this struct
+ * is what *we* currently believe about ourselves: who we are right now,
+ * what we're optimizing for, and how our behavior has drifted recently.
+ *
+ * Unifies signals from `hu_personal_model_t`, the persona, the
+ * persona-deltas log, and recent goal salience into one snapshot cell
+ * so the planner doesn't have to look in four places. All fields are
+ * inline strings (no owned pointers) so the snapshot stays POD-safe
+ * at install/clone time.
+ *
+ *   name                  — the agent's working name (borrowed from
+ *                           persona.name; truncated). Empty when no
+ *                           persona was merged.
+ *   focused_topics        — top-3 topics the agent is currently
+ *                           tracking, ';'-joined. Empty when no topics
+ *                           have been observed.
+ *   recent_drift_kind     — most recent applied persona delta kind as
+ *                           a short string ("BOUNDARY", "TONE", …) or
+ *                           "" when no recent drift.
+ *   recent_drift_value    — truncated value text from the same delta
+ *                           (so the planner can echo "we agreed to be
+ *                           shorter on Slack").
+ *   confidence_in_self    — how sure we are about our own model
+ *                           [0, 1]; computed as min of the personal-
+ *                           model trust gradient and the persona's
+ *                           identity completeness. Defaults 0.0 when
+ *                           neither signal is present. */
+typedef struct hu_self_model {
+    char name[64];
+    char focused_topics[200];
+    char recent_drift_kind[32];
+    char recent_drift_value[160];
+    float confidence_in_self;
+} hu_self_model_t;
+
+/* P5.6 — multimodal context cells. Forward-looking seams that the
+ * planner can already reason against ("user attached a screenshot last
+ * turn — refer back to it") even before the channels populate them.
+ * All fields are inline / nullable; default-zeroed by the build path.
+ *
+ *   contact_photo_path      — absolute path to the contact's avatar on
+ *                             disk; empty when none. Populated by
+ *                             channel handlers that ingest avatars.
+ *   voice_fingerprint_hash  — 32-byte hex digest identifying the
+ *                             user's last voice sample (cross-session).
+ *                             Empty when voice channel is silent.
+ *   last_image_caption      — captioned text of the most recent image
+ *                             the user shared, truncated. Empty when
+ *                             no image has been shared in the active
+ *                             window.
+ *   last_image_at_ms        — when that image was shared (unix ms);
+ *                             0 when none. */
+typedef struct hu_media_context {
+    char contact_photo_path[256];
+    char voice_fingerprint_hash[65];
+    char last_image_caption[200];
+    int64_t last_image_at_ms;
+} hu_media_context_t;
+
 /* P5.1 — Russell VAD + Mehrabian PAD-extended stance vector for the
  * latest emotional snapshot. Distinct from the legacy (valence, arousal,
  * dominant_emotion) triple which the planner has had since W9 day-0:
@@ -281,6 +341,23 @@ typedef struct hu_world_model {
     /* M2 ↔ W9 bridge: communication style summary from the personal model.
      * Populated by hu_world_model_merge_personal(); empty when no PM data. */
     char style_summary[256];
+
+    /* P5.2 — agent's self-model (distinct from ToM). */
+    hu_self_model_t self_model;
+
+    /* P5.6 — multimodal context (photo / voice / image). */
+    hu_media_context_t media;
+
+    /* P6.2 — W10 (KV cache + reasoning trace) seams. NULL / 0 until
+     * the W10 layer lands; carried on the snapshot now so consumers
+     * can be wired before the implementation arrives.
+     *
+     * `kv_cache_handle` is an opaque pointer the caller MUST treat as
+     * borrowed; the world-model never owns it. `last_reasoning_trace_id`
+     * is a stable id (W10-assigned) of the most recent chain-of-thought
+     * step the agent emitted for this contact. */
+    void *kv_cache_handle;
+    int64_t last_reasoning_trace_id;
 
     /* Cache metadata. */
     int64_t built_at;
