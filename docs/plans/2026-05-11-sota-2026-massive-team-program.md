@@ -280,12 +280,12 @@ After the fleet returns, this document gets a synthesis section choosing the top
 | # | Slug | Subagent | Status | Spec file |
 |---|------|----------|--------|-----------|
 | 01 | activation-steering | code-architect | **S1 SHIPPED — prompt half + agent_turn retry wiring + critic H1 reset** (commits in `96968daf` + `383cba08`) | `2026-05-11-init-01-activation-steering.md` |
-| 02 | molora-channels | code-architect | **design done** | `2026-05-11-init-02-molora-channels.md` |
+| 02 | molora-channels | code-architect | **S2 SHIPPED — dispatcher + per-channel overlay routing + mlx_qwen3 STACK pool + HF5 typing-profile closure** (commit `88d322b1`; 10279/10279 pass, +416 B ASan, +0 B release) | `2026-05-11-init-02-molora-channels.md` |
 | 03 | apple-fm-provider | code-architect | **design done** | `2026-05-11-init-03-apple-fm-provider.md` |
 | 04 | mlx-qwen3-provider | code-architect | **S1 SHIPPED — provider scaffold + S1.5(a) `load_adapter` widening + path-traversal guards** (commits in `96968daf` + `383cba08`) | `2026-05-11-init-04-mlx-qwen3-provider.md` |
-| 05 | verifier-driven-ttt | code-architect | **design done — DEFERRED (needs #09 + #07 land)** | `2026-05-11-init-05-verifier-driven-ttt.md` |
+| 05 | verifier-driven-ttt | code-architect | **design done — UNBLOCKED (#07 + #09 both shipped; ready for S3)** | `2026-05-11-init-05-verifier-driven-ttt.md` |
 | 06 | simpo-orpo-grpo2 | code-architect | **design done** | `2026-05-11-init-06-simpo-orpo-grpo2.md` |
-| 07 | thinkprm-verifier | code-architect | **design done** | `2026-05-11-init-07-thinkprm-verifier.md` |
+| 07 | thinkprm-verifier | code-architect | **S2 SHIPPED — `hu_verifier_panel_t` runtime + `human ml train-verifier` driver + opt-in agent_turn hook (default OFF byte-identical)** (commit `2092d3d4`; 10293/10293 pass, +37.3 KB ASan) | `2026-05-11-init-07-thinkprm-verifier.md` |
 | 08 | federated-lora | code-architect | **design done — DEFERRED (SECAGG protocol revision required)** | `2026-05-11-init-08-federated-lora.md` |
 | 09 | memory-trust-tiers | security-reviewer | **S1 SHIPPED** (patched post-review; memory_poisoning + channel_trust suites green) | `2026-05-11-init-09-memory-trust-tiers.md` |
 | 10 | episode-storage-sleep-consolidation | code-architect | **design done — DEFERRED (job_kind collision now resolved here)** | `2026-05-11-init-10-episode-storage-sleep-consolidation.md` |
@@ -360,6 +360,27 @@ S1 implementer subagents identified four follow-ups required to close the contra
 - Critic (`RESULT_critic=HAS_FINDINGS_0_2`): 0 BLOCKERs. H1 (`apply_steering` state never reset between turns) fixed with entry-point reset call in `hu_agent_turn` + regression test. H2 (lora.h docstring lied about helper alloc-NULL enforcement) resolved by the MEDIUM-2 centralization. 5 half-fixes deferred with explicit ownership routed to init-01 / init-02 / init-04 / init-08 tickets.
 
 Full evidence-based verdict: `docs/plans/2026-05-12-s1.5-audit-verdict.md`.
+
+### S2 closure — MoLoRA + ThinkPRM landed (2026-05-13)
+
+Two S2 initiatives shipped in parallel after S1 closed. Both implementers ran on isolated `best-of-n-runner` worktrees off `sprint-2c-followups @ 0e2f2e39`; the parent agent integrated by cherry-picking onto the burn-down tip and re-running all S1.5 regression gates.
+
+| # | Initiative | Commit | Tests | Binary | Headline outcome |
+|---|-----------|--------|-------|--------|------------------|
+| 02 | MoLoRA per-channel routing | `88d322b1` | 10279/10279 | +416 B ASan (+0 B release) | Dispatcher + per-channel adapter overlays in `hu_persona_overlay_t` + mlx_qwen3 STACK pool capped at `HU_MOLORA_MAX_ACTIVE`; huml/llamacpp keep returning `NOT_SUPPORTED` and the dispatcher reports `channel_expert_skipped`. **Closed S1.5 critic HF5** — `hu_typing_profile_resolve` actually dereferences the persona now. |
+| 07 | ThinkPRM verifier panel | `2092d3d4` | 10293/10293 | +37.3 KB ASan | `hu_verifier_panel_t` runtime + opt-in agent_turn hook (default OFF byte-identical) + `human ml train-verifier` driver. Real Qwen-class GPT forward + real gradient training are explicitly deferred to S3 pending init-04's MLX bridge; the API surface (`hu_verifier_panel_score_chain`) does not change when the kernel is swapped. |
+
+**Audit-debt burn-down** also landed (commit `f78e041f`, before S2): HF1 (mlx allocator sync after REPLACE) + HF3 (turn-entry steering wall-clock snapshot) + HF4 (CoT-retry asymmetry comment) + HF5 (CLI typing tests use real `hu_persona_t`) + PE2 (bytes-only spec → `HU_ERR_NOT_SUPPORTED` for init-08 capability detection). Zero binary delta.
+
+**Conflict resolutions during integration (both auditable in commit messages):**
+
+- `mlx_qwen3.c`: init-02's STACK branch with `HU_MOLORA_MAX_ACTIVE`-capped pool runs FIRST (with early return); HF1's `clear_active_adapter` + `c->alloc = alloc` sync runs in the REPLACE path that follows. Cross-allocator STACK is documented as an explicit S3 follow-up — the MoLoRA dispatcher uses one allocator per turn-cluster, so the bug class HF1 fixed for REPLACE cannot manifest in STACK under any current caller.
+- `test_channel_cli.c`: init-02's static-scope `s_test_persona` pattern superseded the local-scope `hu_persona_t` I'd used in the HF5 burn-down — superior because the persona now persists across the resolver's read path and lets future tests populate channel overlays to exercise the resolver's branches.
+
+**Unblock state after S2:**
+
+- **init-05 (verifier-driven TTT)** is now fully unblocked. ThinkPRM's `hu_verifier_panel_score_chain` returns per-step reward signals exactly in the shape a TTT inner loop weights gradient steps with; the panel handle is reachable from `agent_turn.c`'s retry path so TTT can read the same scores the retry loop reads without re-running inference. init-09 (already shipped) provides the trust-tier filter for the training data source.
+- **init-04 (MLX provider)** still blocks ThinkPRM's S3 work (real Qwen-class GPT forward in the PRM kernel). Same blocker for the `train-verifier` driver's real gradient path.
 
 ## Adversarial review
 
