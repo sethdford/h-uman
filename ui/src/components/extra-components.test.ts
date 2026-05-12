@@ -30,6 +30,7 @@ import "./hu-reasoning-block.js";
 import "./hu-shortcut-overlay.js";
 import "./hu-context-menu.js";
 import "./hu-error-boundary.js";
+import "./hu-directive-telemetry-tile.js";
 import "./hu-welcome-card.js";
 import "./hu-message-actions.js";
 import "./hu-chat-sessions-panel.js";
@@ -1445,6 +1446,17 @@ describe("hu-shortcut-overlay", () => {
       ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(closed).toBe(true);
     el.remove();
+  });
+});
+
+describe("hu-directive-telemetry-tile", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("hu-directive-telemetry-tile")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("hu-directive-telemetry-tile");
+    expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
