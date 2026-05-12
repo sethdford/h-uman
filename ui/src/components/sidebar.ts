@@ -783,7 +783,13 @@ export class ScSidebar extends LitElement {
       typeof document.startViewTransition === "function" &&
       !window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      document.startViewTransition(apply);
+      const transition = document.startViewTransition(apply);
+      /* Both .ready and .finished reject with "Transition was skipped" if the
+       * theme toggle re-fires mid-transition. Attach noop catches so the
+       * rejections do not surface as unhandled pageerrors. See
+       * e2e/regression-errors.spec.ts. */
+      transition.ready.catch(() => undefined);
+      transition.finished.catch(() => undefined);
     } else {
       apply();
     }

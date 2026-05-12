@@ -1054,6 +1054,13 @@ export class ScApp extends LitElement {
           this._performViewSwitch(newTab);
           return this.updateComplete;
         });
+        /* `transition.ready` also rejects with "Transition was skipped" when a
+         * second navigation pre-empts the first. Without a catch handler the
+         * rejection surfaces as an uncaught error to pageerror listeners (see
+         * e2e/regression-errors.spec.ts). The await on .finished below is the
+         * primary control-flow path; .ready is observed only for the side
+         * effect of swallowing the rejection. */
+        transition.ready.catch(() => undefined);
         await transition.finished;
       } catch {
         this._performViewSwitch(newTab);
