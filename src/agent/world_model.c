@@ -1116,6 +1116,44 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
         new_signals++;
     }
 
+    /* P5.2 — populate self_model.name and seed confidence from
+     * identity completeness. Done early so the rest of the merge can
+     * keep reading wm->self_model unconditionally. */
+    if (persona->name && persona->name[0]) {
+        size_t cap = sizeof(wm->self_model.name);
+        size_t nlen = strlen(persona->name);
+        if (nlen >= cap) nlen = cap - 1;
+        memcpy(wm->self_model.name, persona->name, nlen);
+        wm->self_model.name[nlen] = '\0';
+    }
+    /* identity completeness: 0.0 if missing, 0.5 if only name, 0.85
+     * if a real identity string is present. */
+    float identity_completeness = 0.0f;
+    if (persona->name && persona->name[0]) identity_completeness = 0.5f;
+    if (persona->identity && persona->identity[0]) identity_completeness = 0.85f;
+    if (identity_completeness > wm->self_model.confidence_in_self)
+        wm->self_model.confidence_in_self = identity_completeness;
+    /* focused_topics from the snapshot's recent_topics — the planner
+     * loaded them earlier, so we can summarize without an extra
+     * facade lookup. ';' joins the first three. */
+    if (wm->recent_topics_count > 0 && wm->self_model.focused_topics[0] == '\0') {
+        size_t off = 0;
+        size_t cap = sizeof(wm->self_model.focused_topics) - 1;
+        for (size_t i = 0; i < wm->recent_topics_count && i < 3 && off < cap; i++) {
+            const char *t = wm->recent_topics[i];
+            if (!t[0]) continue;
+            if (off > 0 && off + 2 < cap) {
+                wm->self_model.focused_topics[off++] = ';';
+                wm->self_model.focused_topics[off++] = ' ';
+            }
+            size_t tlen = strlen(t);
+            size_t copy = tlen < cap - off ? tlen : cap - off;
+            memcpy(wm->self_model.focused_topics + off, t, copy);
+            off += copy;
+        }
+        wm->self_model.focused_topics[off] = '\0';
+    }
+
     /* Step 2 — channel overlay (P1.2). */
     const hu_persona_overlay_t *ov = NULL;
     if (channel && channel_len > 0)
@@ -1240,6 +1278,7 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
     /* Step 3 — recent persona deltas (P1.3). Only APPLIED deltas with
      * confidence >= 0.6 are folded; pending/dropped/quarantined deltas
      * carry too little signal to drive ToM. */
+    const hu_persona_delta_t *latest_drift = NULL;
     for (size_t i = 0; i < deltas_count; i++) {
         const hu_persona_delta_t *d = &deltas[i];
         if (d->status != HU_DELTA_STATUS_APPLIED) continue;
@@ -1262,6 +1301,32 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
         default:
             break;
         }
+        latest_drift = d; /* P5.2 — last applied delta wins */
+    }
+    /* P5.2 — surface the latest applied delta on self_model so the
+     * planner can echo "we agreed to be shorter on Slack" without
+     * re-reading the deltas table. */
+    if (latest_drift) {
+        const char *kind_str = "DELTA";
+        switch (latest_drift->kind) {
+        case HU_PERSONA_DELTA_BOUNDARY:    kind_str = "BOUNDARY"; break;
+        case HU_PERSONA_DELTA_VOCAB_AVOID: kind_str = "VOCAB_AVOID"; break;
+        case HU_PERSONA_DELTA_FORMALITY:   kind_str = "FORMALITY"; break;
+        case HU_PERSONA_DELTA_TONE:        kind_str = "TONE"; break;
+        case HU_PERSONA_DELTA_LENGTH:      kind_str = "LENGTH"; break;
+        default: break;
+        }
+        size_t kcap = sizeof(wm->self_model.recent_drift_kind);
+        size_t klen = strlen(kind_str);
+        if (klen >= kcap) klen = kcap - 1;
+        memcpy(wm->self_model.recent_drift_kind, kind_str, klen);
+        wm->self_model.recent_drift_kind[klen] = '\0';
+
+        size_t vcap = sizeof(wm->self_model.recent_drift_value);
+        size_t vlen = strlen(latest_drift->value);
+        if (vlen >= vcap) vlen = vcap - 1;
+        memcpy(wm->self_model.recent_drift_value, latest_drift->value, vlen);
+        wm->self_model.recent_drift_value[vlen] = '\0';
     }
 
     /* Confidence — bump by 0.05 per new signal source, cap 0.85. */

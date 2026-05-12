@@ -1048,6 +1048,526 @@ static void test_w9_cache_stats_tracks_loads_and_hits(void) {
     close_facade_(g, m);
 }
 
+/* --- P4.1 — provenance carry-through on relations --- */
+
+static void test_w9_relations_carry_provenance_into_snapshot(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t alice = 0, acme = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-prov", 6, "Alice", 5,
+                                          HU_ENTITY_PERSON, NULL, &alice), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-prov", 6, "Acme", 4,
+                                          HU_ENTITY_ORGANIZATION, NULL, &acme), HU_OK);
+
+    int64_t rid = 0;
+    const char *prov = "channel:slack:T123";
+    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(
+                     g, "u-prov", 6, alice, acme, HU_REL_WORKS_AT, 1.0f,
+                     /*event_start*/ 0, /*event_end*/ 0,
+                     /*belief_mean*/ 0.8f, /*belief_variance*/ 0.02f,
+                     /*context*/ NULL, 0, prov, strlen(prov), &rid), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-prov", 6, 1735700000000LL, &wm),
+                 HU_OK);
+    HU_ASSERT(wm->relations_count >= 1);
+
+    bool found = false;
+    for (size_t i = 0; i < wm->relations_count; i++) {
+        if (wm->relations[i].provenance
+            && strcmp(wm->relations[i].provenance, prov) == 0) {
+            found = true;
+            HU_ASSERT(wm->relations[i].confidence > 0.79f);
+            HU_ASSERT(wm->relations[i].confidence_variance > 0.0f);
+            break;
+        }
+    }
+    HU_ASSERT(found);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_relations_provenance_survives_cache_clone(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t a = 0, b = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-clone", 7, "Bob", 3,
+                                          HU_ENTITY_PERSON, NULL, &a), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-clone", 7, "Cafe", 4,
+                                          HU_ENTITY_PLACE, NULL, &b), HU_OK);
+    const char *prov = "import:contacts:vcard";
+    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(
+                     g, "u-clone", 7, a, b, HU_REL_RELATED_TO, 1.0f, 0, 0,
+                     0.6f, 0.05f, NULL, 0, prov, strlen(prov), NULL), HU_OK);
+
+    hu_world_model_t *wm1 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-clone", 7, 1000LL, &wm1), HU_OK);
+    hu_world_model_t *wm2 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-clone", 7, 1100LL, &wm2), HU_OK);
+
+    HU_ASSERT(wm1->relations_count >= 1);
+    HU_ASSERT(wm2->relations_count >= 1);
+    HU_ASSERT(wm1->relations[0].provenance != wm2->relations[0].provenance);
+    HU_ASSERT_NOT_NULL(wm2->relations[0].provenance);
+    HU_ASSERT_EQ(strcmp(wm2->relations[0].provenance, prov), 0);
+
+    hu_world_model_free(A(), wm1);
+    hu_world_model_free(A(), wm2);
+    close_facade_(g, m);
+}
+
+/* --- P4.3 — recent_changes derived from bitemporal relations --- */
+
+static void test_w9_recent_changes_surfaces_retracted_relation(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t a = 0, b = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-ret", 5, "Carol", 5,
+                                          HU_ENTITY_PERSON, NULL, &a), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-ret", 5, "Dawn", 4,
+                                          HU_ENTITY_ORGANIZATION, NULL, &b), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(
+                     g, "u-ret", 5, a, b, HU_REL_WORKS_AT, 1.0f,
+                     /*event_start*/ 1735000000000LL,
+                     /*event_end*/   1735500000000LL,
+                     0.9f, 0.01f, NULL, 0, NULL, 0, NULL), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-ret", 5, 1735700000000LL, &wm), HU_OK);
+
+    HU_ASSERT(wm->recent_changes_count >= 1);
+    bool found_retracted = false;
+    for (size_t i = 0; i < wm->recent_changes_count; i++) {
+        if (wm->recent_changes[i].kind == HU_WORLD_CHANGE_RETRACTED) {
+            found_retracted = true;
+            HU_ASSERT(wm->recent_changes[i].at_ms == 1735500000000LL);
+            HU_ASSERT_NOT_NULL(strstr(wm->recent_changes[i].summary, "retracted"));
+            break;
+        }
+    }
+    HU_ASSERT(found_retracted);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_recent_changes_empty_when_no_supersede_or_retract(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    seed_one_relation_(g, "u-clean");
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-clean", 7, 1735700000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(wm->recent_changes_count, 0u);
+    HU_ASSERT(wm->recent_changes == NULL);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+/* --- P1.5 — user_expects_we_can from persona affordances --- */
+
+static void test_w9_user_expects_we_can_from_situational_directions(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-aff", 5, 1735690000000LL, &wm), HU_OK);
+
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.identity = (char *)"a focused thinking partner";
+    persona.name = (char *)"Aria";
+    persona.name_len = 4;
+
+    hu_situational_direction_t dirs[2];
+    memset(dirs, 0, sizeof(dirs));
+    dirs[0].trigger = (char *)"on calendar question";
+    dirs[0].instruction = (char *)"offer to add an event to the calendar";
+    dirs[1].trigger = (char *)"on follow-up needed";
+    dirs[1].instruction = (char *)"send a proactive nudge tomorrow morning";
+    persona.situational_directions = dirs;
+    persona.situational_directions_count = 2;
+
+    hu_world_model_merge_persona(wm, &persona, NULL, 0, NULL, 0);
+
+    HU_ASSERT_NOT_NULL(strstr(wm->tom.user_expects_we_can, "calendar"));
+    HU_ASSERT_NOT_NULL(strstr(wm->tom.user_expects_we_can, "proactive"));
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_user_expects_we_can_from_contact_allowed_behaviors(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-allow", 7, 1735690000000LL, &wm), HU_OK);
+
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.identity = (char *)"close confidant";
+
+    hu_contact_profile_t contact;
+    memset(&contact, 0, sizeof(contact));
+    contact.contact_id = (char *)"u-allow";
+    char *allowed[2];
+    allowed[0] = (char *)"talk about therapy openly";
+    allowed[1] = (char *)"reference inside jokes from college";
+    contact.allowed_behaviors = allowed;
+    contact.allowed_behaviors_count = 2;
+    persona.contacts = &contact;
+    persona.contacts_count = 1;
+
+    hu_world_model_merge_persona(wm, &persona, NULL, 0, NULL, 0);
+
+    HU_ASSERT_NOT_NULL(strstr(wm->tom.user_expects_we_can, "therapy"));
+    HU_ASSERT_NOT_NULL(strstr(wm->tom.user_expects_we_can, "inside jokes"));
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+/* --- P5.1 — stance vector (V, A, D, C) --- */
+
+static void test_w9_stance_vector_dominance_low_when_overwhelmed(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    ensure_emotional_residue_table_(db);
+    int64_t id = 0;
+    /* Negative valence + high arousal → user feels overwhelmed →
+     * dominance should be < 0. */
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-vad", 5,
+                                          -0.8, 0.9, 0.05, &id), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-vad", 5,
+                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT(wm->stance.valence < -0.4f);
+    HU_ASSERT(wm->stance.arousal > 0.85f);
+    HU_ASSERT(wm->stance.dominance < 0.0f);
+    /* Single residue → high baseline certainty. */
+    HU_ASSERT(wm->stance.certainty > 0.7f);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_stance_vector_certainty_drops_when_residues_disagree(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    ensure_emotional_residue_table_(db);
+    int64_t id = 0;
+    /* Two residues with opposite valences → variance is max → certainty
+     * collapses. The mix is intentionally severe so the test is
+     * insensitive to the exact heuristic. */
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-mix", 5,
+                                           0.95, 0.8, 0.05, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-mix", 5,
+                                          -0.95, 0.8, 0.05, &id), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-mix", 5,
+                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT(wm->stance.certainty < 0.3f);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+/* --- P5.3 — conversational pressure --- */
+
+static void test_w9_pressure_recent_anger_count_picks_up_recent_residues(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    ensure_emotional_residue_table_(db);
+    /* Three high-intensity strongly-negative residues = three angry turns. */
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7,
+                                          -0.9, 0.85, 0.001, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7,
+                                          -0.85, 0.8, 0.001, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7,
+                                          -0.95, 0.9, 0.001, &id), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-anger", 7,
+                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT(wm->pressure.recent_anger_count >= 3);
+    HU_ASSERT(wm->pressure.urgency_score > 0.0f);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_pressure_neutral_when_no_residues(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-calm", 6,
+                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(wm->pressure.recent_anger_count, 0);
+    HU_ASSERT_EQ(wm->pressure.sustained_complaint_minutes, 0);
+    HU_ASSERT(wm->pressure.urgency_score == 0.0f);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+/* --- P5.4 — trust gradient sparkline --- */
+
+static void test_w9_confidence_history_appends_on_merge_persona(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-spark", 7,
+                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(wm->tom.confidence_history_count, 0u);
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    build_minimal_persona_(&persona, &overlay);
+
+    hu_world_model_merge_persona(wm, &persona, "slack", 5, NULL, 0);
+    HU_ASSERT_EQ(wm->tom.confidence_history_count, 1u);
+    float first = wm->tom.confidence_history[0];
+
+    hu_world_model_merge_persona(wm, &persona, "slack", 5, NULL, 0);
+    HU_ASSERT_EQ(wm->tom.confidence_history_count, 2u);
+    HU_ASSERT(wm->tom.confidence_history[0] == first);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_confidence_history_scrolls_when_full(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-scroll", 8,
+                                       1735690000000LL, &wm), HU_OK);
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    build_minimal_persona_(&persona, &overlay);
+
+    /* Fire HU_TOM_CONFIDENCE_HISTORY + 4 merges; the buffer should
+     * stay at HU_TOM_CONFIDENCE_HISTORY entries with the oldest scrolled
+     * out. We can't predict the exact mean values (cap at 0.85) but
+     * we can pin the structural invariant. */
+    for (size_t i = 0; i < HU_TOM_CONFIDENCE_HISTORY + 4; i++) {
+        hu_world_model_merge_persona(wm, &persona, "slack", 5, NULL, 0);
+    }
+    HU_ASSERT_EQ(wm->tom.confidence_history_count,
+                 (size_t)HU_TOM_CONFIDENCE_HISTORY);
+    /* Latest sample matches current mean. */
+    HU_ASSERT(wm->tom.confidence_history[HU_TOM_CONFIDENCE_HISTORY - 1]
+              == wm->tom.confidence.mean);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+/* --- P4.2 — hyperedges on snapshot --- */
+
+static void test_w9_hyperedges_appear_for_member_entity(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t alice = 0, bob = 0, acme = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-he", 4, "Alice", 5,
+                                          HU_ENTITY_PERSON, NULL, &alice), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-he", 4, "Bob", 3,
+                                          HU_ENTITY_PERSON, NULL, &bob), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-he", 4, "Acme", 4,
+                                          HU_ENTITY_ORGANIZATION, NULL, &acme), HU_OK);
+    /* Need at least one binary relation so the entity makes it into
+     * the top-K snapshot window. */
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-he", 4, alice, acme,
+                                            HU_REL_WORKS_AT, 1.0f, NULL, 0), HU_OK);
+
+    hu_hyperedge_t he;
+    memset(&he, 0, sizeof(he));
+    snprintf(he.relation_label, sizeof(he.relation_label), "met_at");
+    hu_hyperedge_member_t members[3];
+    memset(members, 0, sizeof(members));
+    members[0].entity_id = alice;
+    snprintf(members[0].role, sizeof(members[0].role), "subject");
+    members[1].entity_id = bob;
+    snprintf(members[1].role, sizeof(members[1].role), "object");
+    members[2].entity_id = acme;
+    snprintf(members[2].role, sizeof(members[2].role), "location");
+    he.members = members;
+    he.members_count = 3;
+    he.belief.mean = 0.8f;
+    he.event_start = 1735000000000LL;
+    int64_t he_id = 0;
+    HU_ASSERT_EQ(hu_hyperedge_upsert(m, "u-he", 4, &he, &he_id), HU_OK);
+    HU_ASSERT(he_id > 0);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-he", 4, 1735700000000LL, &wm), HU_OK);
+    HU_ASSERT(wm->hyperedges_count >= 1);
+    HU_ASSERT_NOT_NULL(wm->hyperedges);
+    HU_ASSERT(wm->hyperedges[0].members_count >= 2);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_hyperedges_survive_cache_clone(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t a = 0, b = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-hec", 5, "Alice", 5,
+                                          HU_ENTITY_PERSON, NULL, &a), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-hec", 5, "Acme", 4,
+                                          HU_ENTITY_ORGANIZATION, NULL, &b), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-hec", 5, a, b,
+                                            HU_REL_WORKS_AT, 1.0f, NULL, 0), HU_OK);
+
+    hu_hyperedge_t he;
+    memset(&he, 0, sizeof(he));
+    snprintf(he.relation_label, sizeof(he.relation_label), "discussed");
+    hu_hyperedge_member_t members[2];
+    memset(members, 0, sizeof(members));
+    members[0].entity_id = a;
+    snprintf(members[0].role, sizeof(members[0].role), "subject");
+    members[1].entity_id = b;
+    snprintf(members[1].role, sizeof(members[1].role), "object");
+    he.members = members;
+    he.members_count = 2;
+    he.belief.mean = 0.7f;
+    int64_t he_id = 0;
+    HU_ASSERT_EQ(hu_hyperedge_upsert(m, "u-hec", 5, &he, &he_id), HU_OK);
+
+    hu_world_model_t *wm1 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-hec", 5, 1000LL, &wm1), HU_OK);
+    hu_world_model_t *wm2 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-hec", 5, 1100LL, &wm2), HU_OK);
+    HU_ASSERT(wm1->hyperedges_count >= 1);
+    HU_ASSERT(wm2->hyperedges_count >= 1);
+    HU_ASSERT(wm1->hyperedges[0].members != wm2->hyperedges[0].members);
+
+    hu_world_model_free(A(), wm1);
+    hu_world_model_free(A(), wm2);
+    close_facade_(g, m);
+}
+
+/* --- P5.2 — self model --- */
+
+static void test_w9_self_model_populated_from_persona(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-self", 6,
+                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(wm->self_model.name[0], '\0');
+    HU_ASSERT(wm->self_model.confidence_in_self == 0.0f);
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    build_minimal_persona_(&persona, &overlay);
+    hu_world_model_merge_persona(wm, &persona, "slack", 5, NULL, 0);
+
+    HU_ASSERT_STR_EQ(wm->self_model.name, "Aria");
+    /* identity is "a thoughtful collaborator …" → completeness 0.85. */
+    HU_ASSERT(wm->self_model.confidence_in_self > 0.8f);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_self_model_recent_drift_from_latest_delta(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-drift", 7,
+                                       1735690000000LL, &wm), HU_OK);
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    build_minimal_persona_(&persona, &overlay);
+
+    hu_persona_delta_t deltas[2];
+    memset(deltas, 0, sizeof(deltas));
+    deltas[0].kind = HU_PERSONA_DELTA_TONE;
+    deltas[0].status = HU_DELTA_STATUS_APPLIED;
+    deltas[0].confidence = 0.8f;
+    snprintf(deltas[0].value, sizeof(deltas[0].value), "warmer on weekends");
+    deltas[1].kind = HU_PERSONA_DELTA_LENGTH;
+    deltas[1].status = HU_DELTA_STATUS_APPLIED;
+    deltas[1].confidence = 0.9f;
+    snprintf(deltas[1].value, sizeof(deltas[1].value), "shorter on Slack");
+
+    hu_world_model_merge_persona(wm, &persona, "slack", 5, deltas, 2);
+
+    /* Latest drift wins; loop iterates 0..1 → final delta is index 1. */
+    HU_ASSERT_STR_EQ(wm->self_model.recent_drift_kind, "LENGTH");
+    HU_ASSERT_NOT_NULL(strstr(wm->self_model.recent_drift_value, "Slack"));
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+/* --- P5.6 / P6.2 — multimodal cells + W10 seams default-zero --- */
+
+static void test_w9_media_and_w10_seams_default_zero(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-seam", 6,
+                                       1735690000000LL, &wm), HU_OK);
+
+    /* P5.6 — media context: every field zero/empty by default. */
+    HU_ASSERT_EQ(wm->media.contact_photo_path[0], '\0');
+    HU_ASSERT_EQ(wm->media.voice_fingerprint_hash[0], '\0');
+    HU_ASSERT_EQ(wm->media.last_image_caption[0], '\0');
+    HU_ASSERT_EQ(wm->media.last_image_at_ms, 0LL);
+
+    /* P6.2 — W10 seams: NULL handle, 0 trace id. */
+    HU_ASSERT(wm->kv_cache_handle == NULL);
+    HU_ASSERT_EQ(wm->last_reasoning_trace_id, 0LL);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
 /* --- adversarial --- */
 
 static void test_w9_invalid_args_rejected(void) {
@@ -1117,6 +1637,32 @@ void run_w9_world_model_tests(void) {
     HU_RUN_TEST(test_w9_residue_add_invalidates_cache);
     /* P2.5 — telemetry counters track loads/hits. */
     HU_RUN_TEST(test_w9_cache_stats_tracks_loads_and_hits);
+    /* P4.1 — provenance carry-through on snapshot relations. */
+    HU_RUN_TEST(test_w9_relations_carry_provenance_into_snapshot);
+    HU_RUN_TEST(test_w9_relations_provenance_survives_cache_clone);
+    /* P4.3 — recent_changes derived from bitemporal relations. */
+    HU_RUN_TEST(test_w9_recent_changes_surfaces_retracted_relation);
+    HU_RUN_TEST(test_w9_recent_changes_empty_when_no_supersede_or_retract);
+    /* P1.5 — user_expects_we_can from persona affordances. */
+    HU_RUN_TEST(test_w9_user_expects_we_can_from_situational_directions);
+    HU_RUN_TEST(test_w9_user_expects_we_can_from_contact_allowed_behaviors);
+    /* P5.1 — Russell VAD + Mehrabian PAD-extended stance vector. */
+    HU_RUN_TEST(test_w9_stance_vector_dominance_low_when_overwhelmed);
+    HU_RUN_TEST(test_w9_stance_vector_certainty_drops_when_residues_disagree);
+    /* P5.3 — conversational pressure cells. */
+    HU_RUN_TEST(test_w9_pressure_recent_anger_count_picks_up_recent_residues);
+    HU_RUN_TEST(test_w9_pressure_neutral_when_no_residues);
+    /* P5.4 — trust gradient sparkline. */
+    HU_RUN_TEST(test_w9_confidence_history_appends_on_merge_persona);
+    HU_RUN_TEST(test_w9_confidence_history_scrolls_when_full);
+    /* P4.2 — n-ary hyperedges on snapshot. */
+    HU_RUN_TEST(test_w9_hyperedges_appear_for_member_entity);
+    HU_RUN_TEST(test_w9_hyperedges_survive_cache_clone);
+    /* P5.2 — self model populated by persona merge. */
+    HU_RUN_TEST(test_w9_self_model_populated_from_persona);
+    HU_RUN_TEST(test_w9_self_model_recent_drift_from_latest_delta);
+    /* P5.6 + P6.2 — multimodal cells + W10 seams default zero. */
+    HU_RUN_TEST(test_w9_media_and_w10_seams_default_zero);
     HU_RUN_TEST(test_w9_invalid_args_rejected);
 #endif
 }
