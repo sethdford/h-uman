@@ -4,8 +4,8 @@
 
 **Goal:** Close the third RL loop from the umbrella spec — the **quality loop** — by:
 
-1. Extending Track D Phase 1's deterministic communication-style fidelity scorer with a **4th decision-style axis** (hedging-vs-direct, question-vs-statement, imperative-vs-suggestive) as an additive surface that keeps the existing 3-axis scorer alive behind a deprecated shim;
-2. Shipping `src/eval/eval_gate.c` — a **statistical** promotion gate that composes (a) the 4-axis persona-fidelity scorer (`hu_communication_style_compare_response_sets`), (b) cached leaderboard runners (MT-Bench / AlpacaEval / IFEval), (c) latency p95, and (d) the Phase 3 `hu_reward_model_t` as the canonical reward signal, all under **bootstrap-CI** decision logic where `lower-95-CI(new) > upper-95-CI(baseline)` is the bar (per umbrella §4.6 / §10 R8 / §11 Q4);
+1. Extending Track D Phase 1's deterministic communication-style fidelity scorer with a **4th decision-style axis** (hedging-vs-direct, question-vs-statement, imperative-vs-suggestive) as an **opt-in additive surface**: a new `hu_communication_style_fidelity_score_v2(...)` symbol that new code calls explicitly, while the existing 3-axis symbol stays the default to keep `tests/test_personal_model.c` and `scripts/check-lora-baseline.sh` byte-stable;
+2. Shipping `src/eval/eval_gate.c` — a **statistical** promotion gate that composes (a) the 4-axis persona-fidelity scorer (`hu_communication_style_compare_response_sets_v2`, opt-in per D1/B1), (b) cached leaderboard runners (MT-Bench / AlpacaEval / IFEval), (c) latency p95, and (d) the Phase 3 `hu_reward_model_t` as the canonical reward signal, all under **one-sided bootstrap-CI** decision logic where `lower-95-CI(candidate) > baseline_mean + delta_min` is the bar (per umbrella §4.6 / §10 R8 / §11 Q4; B2-revised — the baseline is a fixed scalar from the previous baseline-eval run, so the only sample distribution to bootstrap is the candidate's; two-sided non-overlap testing is deferred to Phase 6 once baseline sample arrays are persisted);
 3. Shipping the **competitive harness** that runs side-by-side against stock Gemma-3-4B (`stock_baseline.c`), our DPO/KTO/GRPO LoRAs, **Apple Foundation Models** (via a long-running Swift JSON-over-stdio server), and **Gemini Nano** (via headless Chrome `--enable-features=AIPromptAPI`), with deterministic test-mode fallbacks so the C suite stays hermetic;
 4. **Folding in three Phase 2 sprint-auditor deferrals at production scale** that previous phases marked "deferred to Phase 5": (i) `src/agent/lora_training_runner.c` calls `eval_gate` BEFORE `hu_provider_load_adapter` so the chat-time adapter swap is statistically gated, not just file-existence gated; (ii) the inbound channel-reaction → SQLite preference DB → trainer scheduler path becomes a real production wiring (not test-only `reaction_handler` invocation) by wiring `hu_imessage_poll_reactions` into the daemon poll loop with feature-flag gating; (iii) adapter hot-swap via `hu_provider_load_adapter` at production scale gets the gate's `gate_decision.json` + `~/.human/proofs/<adapter-id>/` evidence directory contract from §8 of the umbrella spec.
 
@@ -22,12 +22,14 @@
 - `scripts/eval_external/chrome_ai_server.js` — Node.js script that spawns headless Chrome with `--enable-features=AIPromptAPI --headless=new --remote-debugging-port=0`, drives `window.ai.languageModel.create()` + `.prompt(text)` via CDP, returns JSON-per-line on stdout. Same lifecycle + same graceful-degradation contract.
 - **Determinism contract:** both servers run **only** when `HU_IS_TEST == 0`. In tests, the C side's `hu_apple_fm_judge_create_for_test` / `hu_gemini_nano_judge_create_for_test` factories install a canned-response table; the subprocess is never spawned. Mirrors the Phase 2 / Phase 3 MLX-subprocess test gating.
 
-**Statistical decision contract (the eval gate):** Bootstrap CI with B=1000 resamples (Phase 3 has the same B in `tests/test_reward_model_train.c::test_reward_model_train_bootstrap_ci`, so the helper lives at `src/eval/bootstrap.c` and Phase 5 just consumes it). Promotion requires **all four** of:
+**Statistical decision contract (the eval gate, B2-revised one-sided form):** Bootstrap CI with B=1000 resamples on the **candidate-side** distribution only; the baseline is a fixed scalar from the previous baseline-eval run (stored as `double baseline_*_mean` per criterion). Phase 3 has the same B in `tests/test_reward_model_train.c::test_reward_model_train_bootstrap_ci`, so the helper lives at `src/eval/bootstrap.c` and Phase 5 just consumes it. Promotion requires **all four** of (where `delta_min` defaults are spec §1 row 2 numerics):
 
-1. `lower-95-CI(new persona-fidelity) > upper-95-CI(baseline persona-fidelity)` AND mean delta ≥ +0.05 absolute (spec §1 row 2 "≥ +5%" decoded per spec §11 Q4 "absolute persona-fidelity-score points");
-2. `lower-95-CI(new MT-Bench)  ≥ baseline_mt_bench - 0.01` AND `lower-95-CI(new IFEval) ≥ baseline_ifeval - 0.02` (the "no regression" half, per spec §1 row 2 columns 3-4);
-3. `upper-95-CI(new p95 latency)  ≤ baseline_p95_latency + 50ms` (spec §1 row 2 column 5);
-4. `lower-95-CI(new reward-model mean score) > 0` (Phase 3 RM as canonical reward, per umbrella spec §3.4 third vtable; required so an adapter that maximises fingerprint match by becoming incoherent is caught — spec §10 R12).
+1. `lower-95-CI(candidate persona-fidelity) > baseline_persona_fidelity_mean + 0.05` (spec §1 row 2 "≥ +5%" decoded per spec §11 Q4 "absolute persona-fidelity-score points"; `delta_min = +0.05` — must improve);
+2. `lower-95-CI(candidate MT-Bench) > baseline_mt_bench_mean + (-0.01)` AND `lower-95-CI(candidate IFEval) > baseline_ifeval_mean + (-0.02)` (the "no regression" half, per spec §1 row 2 columns 3-4; `delta_min` = -0.01 / -0.02 allow small regressions);
+3. `candidate_p95_latency_ms ≤ baseline_p95_latency_mean + 50ms` (spec §1 row 2 column 5; latency p95 is a single pre-aggregated scalar — no sample array, no bootstrap, just a scalar comparison; `delta_min = +50.0ms`);
+4. `lower-95-CI(candidate reward-model mean score) > 0 + 0` (Phase 3 RM as canonical reward, per umbrella spec §3.4 third vtable; `delta_min = 0`. When `gate->reward_model == NULL` this criterion is SKIPPED with a warning written to `verdict.reason` — see D3 / H3 — never dereference a NULL `reward_model->vtable`).
+
+The umbrella spec §5 row 5's "bootstrap CIs" phrasing is interpreted as the **candidate-side** bootstrap; storing baseline sample arrays for two-sided non-overlap testing is deferred — see Phase 6 R-budget.
 
 Any single failure rejects the promotion and writes a structured `gate_decision.json` with per-criterion verdict + CI bounds + the failing criterion's slack-to-pass.
 
@@ -48,7 +50,7 @@ Any single failure rejects the promotion and writes a structured `gate_decision.
 | Plan committed | git | ⏳ | — |
 | Implementation start gate | subagent-driven | ⏳ | — |
 | Tasks 0–14 implemented | subagent-driven | ⏳ | — |
-| 4th-axis additive landing + v1 shim regression gate | Task 1 | ⏳ | — |
+| 4th-axis additive opt-in landing (v1 default unchanged) | Task 1 | ⏳ | — |
 | Bootstrap CI helper extracted + reused | Task 2 | ⏳ | — |
 | Promotion-gate accept/reject on synthetic results | Task 5 | ⏳ | — |
 | Apple FM + Chrome AI test-mode fallback gate | Task 7, Task 8 | ⏳ | — |
@@ -73,7 +75,7 @@ Any single failure rejects the promotion and writes a structured `gate_decision.
 
 **What Phase 5 does NOT touch (other phases own them):**
 
-- DO NOT modify `hu_communication_style_fidelity_score` signature (Track D Phase 1 / Phase 0). Phase 5 ADDS a new 4-axis entry point `hu_communication_style_fidelity_score_v2` and **renames the existing function to `_v1` while leaving a deprecated forwarding shim at the v1 name** — backward-compatible per the user contract ("4th axis added here", spec §4.6 line 349 "Preserves the old 3-axis behavior behind a new entry-point `hu_communication_style_fidelity_score_v1` (deprecated shim)").
+- DO NOT modify `hu_communication_style_fidelity_score` signature OR body (Track D Phase 1 / Phase 0). Phase 5 ADDS a new 4-axis entry point `hu_communication_style_fidelity_score_v2` ALONGSIDE the existing v1 symbol. The v1 symbol's body stays byte-identical (B1: opt-in only — no rename, no deprecation, no forwarding shim).
 - DO NOT rename `hu_communication_style_compare_response_sets` — Phase 5 ADDS a `_v2` variant that uses the 4-axis scorer; existing callers keep working through the unchanged v1 surface.
 - DO NOT modify `hu_reward_model_t` or its vtable (Phase 3). Phase 5 consumes `vtable->score_batch` only.
 - DO NOT modify `src/providers/llamacpp.c` (Phase 1). Phase 5's `stock_baseline.c` consumes the existing `hu_provider_t.chat` API.
@@ -88,7 +90,7 @@ Per spec §1.5.3, Track D Phase 1 still owns `hu_communication_style_fidelity_sc
 
 **Coordination contract:**
 
-- Phase 5 lands the v1→v2 rename + shim in **a single atomic commit** at Task 1 step 4 (`include/human/memory/personal_model.h` + `src/memory/personal_model.c` + `tests/test_personal_model.c` updates + downstream call-site updates in `src/ml/fidelity.c` and `src/ml/cli.c` — all together, no half-states). The shim approach guarantees `scripts/check-lora-baseline.sh` does not flip red even for one CI run.
+- Phase 5 lands the additive v2 symbol in **a single atomic commit** at Task 1 (B1-revised: opt-in only — adds `include/human/memory/personal_model.h` + `src/memory/personal_model.c` v2 entry points; does NOT touch `tests/test_personal_model.c`; does NOT touch `src/ml/fidelity.c` or `src/ml/cli.c` call sites — they stay on the v1 default symbol). Because the v1 symbol's body is byte-identical, `scripts/check-lora-baseline.sh`'s 0.50 floor and `tests/test_personal_model.c::personal_model_fidelity_*` bounds remain green by construction.
 - Track D's `tests/fixtures/lora_baseline_persona.json` is read by Phase 5 in a strictly additive way: a new sidecar fixture `tests/fixtures/lora_baseline_persona_v2_responses.json` holds the 4-axis prompt-tagged reference responses (spec §4.6 line 352). The existing fixture is **read-only** to Phase 5.
 - Rebase against `main` at the start of each task. If Track D Phase 1 lands changes to the scorer between phase boundaries, the spec-verifier subagent at Task 0 step 3 re-validates the fold-in mapping.
 
@@ -96,13 +98,18 @@ Per spec §1.5.3, Track D Phase 1 still owns `hu_communication_style_fidelity_sc
 
 ## Architectural decisions
 
-### D1: 4th decision-style axis is ADDITIVE to the existing scorer, behind a `_v2` entry point + `_v1` deprecation shim
+### D1: 4th decision-style axis is OPT-IN, NOT opt-out
 
 The umbrella spec says (§4.6 line 349): *"Preserves the old 3-axis behavior behind a new entry-point `hu_communication_style_fidelity_score_v1` (deprecated shim) so existing callers and CI fixtures don't break; the new default returns the 4-axis mean."*
 
-Decision: implement the v2 (4-axis) function as the new canonical surface, **rename** the existing v1 function to `_v1_impl`, and have the original symbol `hu_communication_style_fidelity_score` forward to v2. Provide a `_v1` macro / inline alias for callers that want to lock to the 3-axis behaviour (e.g. CI tests that need byte-stable scores). The v1 inline forwards to `_v1_impl` and gets `__attribute__((deprecated("use _v2 for new code; v1 kept for byte-stable CI floors")))`.
+**Decision (B1-revised after adversarial review):** v2 is **opt-in, not opt-out**. The default symbol `hu_communication_style_fidelity_score` stays 3-axis (v1 behaviour, byte-stable). New code that wants the 4th decision-style axis calls `hu_communication_style_fidelity_score_v2(...)` explicitly. The three internal call sites that consume the default symbol — `src/memory/personal_model.c:1377` (personal-model fidelity summary), `src/ml/cli.c:1509` (CLI fidelity output), `src/ml/fidelity.c:75` (internal scorer dispatcher) — STAY on 3-axis. The eval gate (Task 5) and competitive harness (Task 9) opt-in to v2 explicitly. `include/human/memory/personal_model.h` ADDS `hu_communication_style_fidelity_score_v2(...)` ALONGSIDE the existing v1 symbol (no replace, no rename, no deprecation attribute on the v1 symbol).
 
-Rationale: the spec wants the new default to be 4-axis, but the existing fixture floor (`scripts/check-lora-baseline.sh`, set at 0.50 in Track D Phase 1) was tuned against the 3-axis scorer. Flipping the default without an escape hatch means re-tuning the floor in the same PR — which is exactly the kind of cross-stream contamination that bit Phase 2. The shim isolates the scoring-math change from the floor-tuning change.
+Rationale: the existing test suite has hard-coded bounds tuned to the 3-axis mean:
+
+- `tests/test_personal_model.c:1296` `personal_model_fidelity_low_for_uppercase_response` expects `score < 0.75f` — v2 gives exactly 0.75 (boundary failure).
+- `tests/test_personal_model.c:1345` `personal_model_fidelity_zero_when_length_extremely_off` expects `score >= 0.6f && score < 0.7f` — v2 gives 0.75 (definite failure).
+
+Plus `scripts/check-lora-baseline.sh`'s floor of 0.50 was tuned against 3-axis. Silently switching the default would break these existing gates the moment Phase 5 lands — exactly the cross-stream contamination that bit Phase 2. The opt-in approach isolates the scoring-math change from any floor-tuning change. Plan text and tests that previously said "default forwards to v2" have been struck and replaced with "default stays v1; v2 is a new explicit symbol".
 
 **4th axis math (decision-style match):**
 
@@ -125,54 +132,73 @@ Where:
 
 Phase 3 already extracted a bootstrap-CI helper to `src/eval/bootstrap.c` for the RM convergence test (B=1000 resamples, 95% percentile bounds). Phase 5 consumes the same helper at `eval_gate.c`. No new bootstrap implementation. If Phase 3 missed the extraction (sprint-auditor will catch in Task 0), Phase 5 Task 2 extracts it from `tests/test_reward_model_train.c` into `src/eval/bootstrap.c` as the first task — both the test and the gate then use the shared helper.
 
-### D3: `eval_gate` is a struct, not a vtable
+### D3: `eval_gate` is a struct, not a vtable (B2/H2/H3-revised)
 
-There is exactly one gate implementation (the spec). Vtable-izing it would be speculative abstraction (YAGNI). The struct holds:
+There is exactly one gate implementation (the spec). Vtable-izing it would be speculative abstraction (YAGNI).
+
+**Eval-gate criterion (D3-revised, B2):** `lower-95-CI(candidate) > baseline_mean + delta_min` where `delta_min = +0.05` for persona-fidelity (must improve), `delta_min = -0.01` for MT-Bench, `delta_min = -0.02` for IFEval (allow small regressions), `delta_min = +50.0ms` for latency p95 (allow 50ms regression), `delta_min = 0` for the reward criterion. This is a ONE-SIDED bootstrap on the candidate's score distribution against the baseline scalar. The umbrella spec §5 row 5's "bootstrap CIs" phrasing is interpreted as the candidate-side bootstrap; the baseline is a fixed scalar from the previous baseline eval run (stored as `double baseline_*_mean` per criterion). Storing baseline sample arrays for two-sided non-overlap testing is deferred — see Phase 6 R-budget.
+
+**RM optional (H3):** when `gate->reward_model == NULL`, skip the reward criterion + log `"reward criterion skipped: reward_model==NULL"` into `verdict.reason`. NEVER dereference `reward_model->vtable` without a null guard. The verdict's `reward_pass` is set to `true` (skipped criteria do not block promotion) and `reward_ci_lower = reward_ci_upper = 0.0` as a sentinel.
 
 ```c
 typedef struct {
     /* Inputs */
     const hu_communication_style_t *target_style;
-    hu_reward_model_t *reward_model;
+    hu_reward_model_t *reward_model;            /* may be NULL — see H3 */
     hu_leaderboard_runner_t *mt_bench;
     hu_leaderboard_runner_t *ifeval;
-    /* Baselines (from prior eval run on the same prompt set) */
+    /* Baselines (from prior eval run on the same prompt set; scalars only —
+     * baseline sample arrays are deferred to Phase 6 per B2). */
     double baseline_persona_fidelity_mean;
     double baseline_mt_bench_mean;
     double baseline_ifeval_mean;
     double baseline_p95_latency_ms;
     /* Thresholds (spec §1 row 2 numerics) */
-    double persona_delta_min;       /* default +0.05 */
-    double mt_bench_regression_max; /* default -0.01 */
-    double ifeval_regression_max;   /* default -0.02 */
-    double latency_delta_max_ms;    /* default +50.0 */
+    double persona_delta_min;       /* default +0.05 (must improve) */
+    double mt_bench_regression_max; /* default -0.01 (allow small regression) */
+    double ifeval_regression_max;   /* default -0.02 (allow small regression) */
+    double latency_delta_max_ms;    /* default +50.0 (allow 50ms regression) */
     /* Bootstrap config */
-    uint32_t bootstrap_samples;     /* default 1000 */
+    uint32_t bootstrap_samples;     /* MUST be >= 100; 0 returns HU_ERR_INVALID_ARGUMENT (H5) */
     uint32_t bootstrap_seed;        /* deterministic across runs */
 } hu_eval_gate_t;
 ```
 
-Verdict struct:
+Verdict struct (B2-revised: no latency CI because p95 is a pre-aggregated scalar with no samples to bootstrap):
 
 ```c
 typedef struct {
     bool promote;
     char reason[1024];           /* human-readable, written to gate_decision.json */
-    /* Per-criterion bootstrap CIs and pass/fail flags */
+    /* Per-criterion bootstrap CIs and pass/fail flags. Latency has no CI
+     * — candidate_p95_ms is a pre-aggregated scalar (B2). */
     double persona_ci_lower, persona_ci_upper;
     bool   persona_pass;
     double mt_bench_ci_lower, mt_bench_ci_upper;
     bool   mt_bench_pass;
     double ifeval_ci_lower, ifeval_ci_upper;
     bool   ifeval_pass;
-    double latency_ci_lower, latency_ci_upper;
+    double candidate_p95_ms;     /* B2: pre-aggregated scalar (no CI) */
     bool   latency_pass;
     double reward_ci_lower, reward_ci_upper;
-    bool   reward_pass;
+    bool   reward_pass;           /* true when reward_model==NULL — skipped per H3 */
+    bool   reward_skipped;        /* H3: explicit "skipped" flag */
 } hu_eval_gate_verdict_t;
 ```
 
-`hu_eval_gate_decide(gate, candidate_responses, n, candidate_p95, *verdict)` is the only entry point.
+**API signature (H2-revised — must take the prompt fixture array):**
+
+```c
+hu_error_t hu_eval_gate_decide(
+    const hu_eval_gate_t *gate,
+    const char **prompts, size_t n_prompts,      /* H2: prompts MUST be passed */
+    const char **candidate_responses,
+    size_t n_responses,                          /* must equal n_prompts */
+    double candidate_p95_ms,                     /* B2: scalar (no array) */
+    hu_eval_gate_verdict_t *out);
+```
+
+The production call site in `src/agent/lora_training_runner.c` (Task 11) passes the prompt fixture array loaded from `tests/fixtures/lora_baseline_persona_v2_responses.json::prompts`. The `_for_test` array-injected entry point (Task 5) is a separate helper that takes pre-scored per-prompt double arrays for unit-test convenience.
 
 ### D4: External judges DO share a vtable
 
@@ -274,8 +300,10 @@ This keeps `eval_gate.c` pure (input → verdict, no filesystem side effects) an
 | net-new P5 | NEW | `src/eval/eval_gate.c` | ~220 | Composes scorer + leaderboard + reward model + latency; bootstrap CIs (D2); pass/fail per criterion + overall verdict; writes structured reason string |
 | net-new P5 | NEW | `src/eval/apple_fm_client.c` | ~280 | Spawns Swift subprocess in production; canned-table impl under `HU_IS_TEST` (D6); `available()` checks macOS version + entitlement env (`HU_APPLE_FM_AVAILABLE=1`); JSON-per-line wire protocol |
 | net-new P5 | NEW | `scripts/eval_external/apple_fm_server.swift` | ~200 | Long-running Swift server. Imports `FoundationModels`, reads `{"id": int, "prompt": str}` from stdin, returns `{"id": int, "text": str}` or `{"id": int, "error": str}`. Exits 0 on clean stdin EOF; exits 2 on framework-unavailable; exits 3 on entitlement missing |
-| net-new P5 | NEW | `src/eval/gemini_nano_client.c` | ~250 | Spawns Node bridge; canned-table impl under `HU_IS_TEST`; `available()` checks Chrome binary path + `window.ai` capability via a 1-shot Node probe script |
-| net-new P5 | NEW | `scripts/eval_external/chrome_ai_server.js` | ~180 | Node script: spawn headless Chrome via `puppeteer-core` (vendorless: optional `node_modules/` install at first run via `npm install puppeteer-core` in `~/.human/eval_nodemodules/`), drive `window.ai.languageModel.create()` + `.prompt(text)` via CDP, JSON-per-line on stdout |
+| net-new P5 | NEW | `src/eval/gemini_nano_client.c` | ~250 | Spawns Node bridge; canned-table impl under `HU_IS_TEST`; `available()` checks Chrome binary path + `window.ai` capability via a 1-shot Node probe script. **File header comment (L2)** documents the tested Chrome Canary version range identical to `scripts/eval_external/chrome_ai_server.js` (e.g. `/* Tested against Chrome Canary 132.0.6800.0 — 133.0.6900.0; re-test on version bumps. The JS bridge in scripts/eval_external/chrome_ai_server.js carries the same pin. */`) so reviewers can find the pin from either end of the FFI |
+| net-new P5 | NEW | `scripts/eval_external/chrome_ai_server.js` | ~180 | Node script: spawn headless Chrome via `puppeteer-core` (pinned via `scripts/eval_external/package.json` + `scripts/eval_external/package-lock.json` — both committed, M4: lazy `npm ci --prefix scripts/eval_external` at first run for reproducibility, NOT `npm install puppeteer-core`), drive `window.ai.languageModel.create()` + `.prompt(text)` via CDP, JSON-per-line on stdout. File header comment documents the tested Chrome Canary version range (L2: e.g. `// Tested against Chrome Canary 132.0.6800.0 — 133.0.6900.0; re-test on version bumps`) |
+| net-new P5 | NEW | `scripts/eval_external/package.json` | ~15 (file) | M4: pins `puppeteer-core` to an exact version (e.g. `"puppeteer-core": "22.10.0"`); committed alongside `package-lock.json` for byte-stable installs |
+| net-new P5 | NEW | `scripts/eval_external/package-lock.json` | ~50 (file) | M4: npm lockfile committed for reproducible installs; first-run does `npm ci --prefix scripts/eval_external` (lockfile-strict), not `npm install` |
 | net-new P5 | NEW | `src/eval/stock_baseline.c` | ~120 | `hu_eval_judge_external_t` impl that wraps `hu_provider_t.chat` with the adapter unloaded (D10) |
 | net-new P5 | NEW | `include/human/eval/competitive_harness.h` | ~80 | `hu_competitive_harness_config_t`, `hu_competitive_harness_result_t`, `hu_competitive_harness_run` API |
 | net-new P5 | NEW | `src/eval/competitive_harness.c` | ~420 | Orchestrates side-by-side: stock / our DPO / our KTO / our GRPO / Apple FM / Gemini Nano. Uses `hu_communication_style_compare_response_sets` for the persona-fidelity column. Renders the §1 scorecard with bootstrap CIs to markdown + JSON. Honestly writes `unavailable (reason)` for any judge whose `available()` returned false |
@@ -283,7 +311,7 @@ This keeps `eval_gate.c` pure (input → verdict, no filesystem side effects) an
 | net-new P5 | NEW | `tests/fixtures/lora_baseline_persona_v2_rubric.md` | ~30 (file) | The 4-axis rubric documented for reviewer re-rating |
 | net-new P5 | NEW | `tests/fixtures/leaderboard_canned.json` | ~30 (file) | Canned gold-judge scores per prompt for offline determinism |
 | net-new P5 | NEW | `tests/fixtures/external_judge_canned.json` | ~50 (file) | Canned (prompt → response) table for Apple FM + Gemini Nano test-mode |
-| net-new P5 | NEW | `tests/test_communication_style_fidelity_v2_axis.c` | ~250 | The 4th decision-style axis: hand-built persona → score known triples, verify expected ordering, 3-axis backward compat through v1 shim |
+| net-new P5 | NEW | `tests/test_communication_style_fidelity_v2_axis.c` | ~250 | The 4th decision-style axis: hand-built persona → score known triples, verify expected ordering, pin that the default symbol stays 3-axis (B1: opt-in only — v2 must differ from the default scorer's score) |
 | net-new P5 | NEW | `tests/test_leaderboard.c` | ~200 | Cached gold-judge resolution, cache miss → `HU_ERR_NOT_SUPPORTED` in production, canned fallback in test |
 | net-new P5 | NEW | `tests/test_eval_gate.c` | ~300 | Synthetic responses → verdict; per-criterion pass/fail; bootstrap CI math; reason-string contains failing criterion names |
 | net-new P5 | NEW | `tests/test_apple_fm_client.c` | ~180 | Canned-response factory + JSON-wire-protocol roundtrip in test mode; subprocess never spawned |
@@ -298,15 +326,15 @@ This keeps `eval_gate.c` pure (input → verdict, no filesystem side effects) an
 
 | Origin | Action | Path | Delta | What changes |
 |--------|--------|------|-------|--------------|
-| **net-new P5** | MODIFY | `include/human/memory/personal_model.h` | +30 LOC | Add 3 new fields to `hu_communication_style_t` (`hedging_ratio`, `question_ratio`, `imperative_ratio`); add `hu_communication_style_fidelity_score_v2` declaration; rename old `hu_communication_style_fidelity_score` to `_v1` shim with `__attribute__((deprecated))`; add `hu_communication_style_compare_response_sets_v2` |
-| net-new P5 | MODIFY | `src/memory/personal_model.c` | +180 LOC | Implement 4th-axis math (D1); v1 entry point becomes 3-axis-explicit; v2 entry point is the new default returning 4-axis mean; v1 backward-compat regression test (per Task 1 step 1) |
-| net-new P5 | MODIFY | `src/ml/fidelity.c` | +20 LOC | Update internal scorer call site to use `_v2` explicitly; existing callers stay on `_v1` via the shim (no functional change) |
+| **net-new P5** | MODIFY | `include/human/memory/personal_model.h` | +25 LOC | Append 3 new fields to `hu_communication_style_t` (`hedging_ratio`, `question_ratio`, `imperative_ratio`) at the END of the struct (after `last_observed_at`); ADD `hu_communication_style_fidelity_score_v2` declaration ALONGSIDE the existing v1 symbol (B1: no rename, no deprecation, opt-in only); ADD `hu_communication_style_compare_response_sets_v2` ALONGSIDE the existing v1 symbol |
+| net-new P5 | MODIFY | `src/memory/personal_model.c` | +160 LOC | Implement 4th-axis math (D1) as a new internal helper + new `_v2` entry point; the existing `hu_communication_style_fidelity_score` body is UNCHANGED and stays 3-axis (no rename, no forward to v2). The three internal call sites (`personal_model.c:1377`, `ml/cli.c:1509`, `ml/fidelity.c:75`) stay on the v1 default symbol |
+| net-new P5 | (no change) | `src/ml/fidelity.c` | 0 LOC | NO change — internal scorer call site stays on the v1 default symbol per B1. Removed from the MODIFY list |
 | net-new P5 | MODIFY | `tests/fixtures/lora_baseline_persona.json` | +25 LOC additive | Add a `"decision_style"` sub-object per response: `hedging_ratio`, `question_ratio`, `imperative_ratio` reference values. Existing 3-axis floor in `scripts/check-lora-baseline.sh` is unaffected |
 | net-new P5 | MODIFY | `src/main.c::cmd_eval` | +30 LOC | Dispatch new subcommands: `human eval competitive`, `human eval leaderboard`, `human eval gate` |
 | net-new P5 | MODIFY | `scripts/check-lora-baseline.sh` | +20 LOC | Optional `--include-v2-axis` flag that runs the 4-axis path against `lora_baseline_persona_v2_responses.json`; default OFF until corpus-owner ratings are committed (spec coordination) |
 | net-new P5 | MODIFY | `CMakeLists.txt` | +60 LOC | New `HU_ENABLE_COMPETITIVE_EVAL` option, source list additions, Swift + Node availability probes for the optional bridges (configure-time, soft) |
 | net-new P5 | MODIFY | `tests/test_main.c` | +30 LOC | APPEND-ONLY: 8 new `run_*_tests` registrations |
-| **P2 fold-in** | MODIFY | `include/human/agent/lora_runner.h` | +12 LOC | Add `hu_eval_gate_t *eval_gate;` field (optional, NULL = no-gate as before); add `const char *adapter_id_template;` (defaults to `"%Y-%m-%d-%s-step-%zu"`) |
+| **P2 fold-in** | MODIFY | `include/human/agent/lora_runner.h` | +12 LOC | Add `hu_eval_gate_t *eval_gate;` field (optional, NULL = no-gate as before). NO `adapter_id_template` string field — H7 replaces the broken `strftime("%Y-%m-%d-%s-step-%zu", ...)` form (strftime has no `%s` for arbitrary strings) with a two-step `strftime("%Y-%m-%d", &tm)` followed by `snprintf("%s-%s-step-%zu", datebuf, method_name, step_index)`, where `method_name = trainer->vtable->name(ctx)`. Adapter-id format is hard-coded, not a template string |
 | P2 fold-in | MODIFY | `src/agent/lora_training_runner.c` | +180 LOC | Insert post-train, pre-load gate call (D7); generate adapter_id; write `~/.human/proofs/<adapter-id>/` evidence directory on accept; move adapter to `<path>.rejected` on reject; backward-compat when `ctx->eval_gate == NULL` |
 | P2 fold-in | MODIFY | `src/daemon.c` | +90 LOC | Read `[reaction_collection]` from config; if enabled, schedule `hu_imessage_poll_reactions` every 30s (mirrors existing daemon poll cadences); feature-flagged off by default (D8) |
 | P2 fold-in | MODIFY | `src/config.c` + `include/human/config.h` | +25 LOC | New `hu_reaction_collection_config_t` field on `hu_config_t`; JSON schema add; default = disabled |
@@ -317,9 +345,11 @@ This keeps `eval_gate.c` pure (input → verdict, no filesystem side effects) an
 - New test files: 6 net-new + 3 Phase 2 fold-in = **9 new tests**
 - New fixture files: 4 net-new + 1 Phase 2 fold-in = **5 fixtures**
 - New scripts: 2 (Swift + Node bridges) + 0 = **2 scripts**
-- Modified files: 8 net-new + 4 Phase 2 fold-in = **12 modify**
+- Modified files: 7 net-new + 4 Phase 2 fold-in = **11 modify** (down from 12 after M3-revised: `src/ml/fidelity.c` is no longer modified per B1)
 
 **Approximate LOC:** ~2,800 LOC new C, ~1,780 LOC new test C, ~110 LOC Swift, ~180 LOC JS, ~280 LOC fixture+rubric JSON. Mid-pack vs Phase 2 (~3,800 LOC) and Phase 3 (~2,800 LOC).
+
+> **Footnote (M3):** the Phase 5 plan delivers more "modify" rows than umbrella spec §4.6's "~12 + 3" figure suggests because the Phase 2 production-wiring fold-in (LoRA training runner gate integration in Task 11 + daemon reaction-poll wiring in Task 12 + adapter hot-swap proof-directory contract in Task 13) accounts for additional touched files (`src/agent/lora_training_runner.c`, `include/human/agent/lora_runner.h`, `src/daemon.c`, `src/config.c`, `include/human/config.h`). When `sprint-auditor` runs at Task 14 Step 5, it should match the file inventory in **this plan**, NOT umbrella spec §4.6's count — the Phase 2 deferral fold-in is a documented Phase 5 deliverable per the umbrella spec §4.6's own "DEFERRED to Phase 5" rows.
 
 ---
 
@@ -377,7 +407,7 @@ echo "No bridges spawned. Tasks 7+8 will gate by HU_IS_TEST first."
 
 ---
 
-### Task 1: 4th decision-style axis (additive, with v1 shim)
+### Task 1: 4th decision-style axis (additive, opt-in only — v1 default unchanged per B1)
 
 **Files:**
 - Modify: `include/human/memory/personal_model.h`
@@ -422,9 +452,10 @@ static void test_v2_axis_returns_minus_one_on_zero_sample_count(void) {
     HU_ASSERT_TRUE(fabsf(s - (-1.0f)) < 1e-6f);
 }
 
-static void test_v1_shim_returns_same_score_as_3_axis_only(void) {
-    /* v1 must NOT include the 4th axis — byte-stable with pre-Phase-5 behaviour
-     * so scripts/check-lora-baseline.sh stays on its existing 0.50 floor. */
+static void test_default_entry_point_stays_3_axis_v1(void) {
+    /* B1: the default symbol stays 3-axis. v2 is opt-in. The default must
+     * return the SAME score as today; v2 must differ because it includes a
+     * 4th axis. This pins both invariants. */
     hu_communication_style_t target = {
         .lowercase_ratio = 1.0f, .abbreviation_ratio = 0.3f,
         .hedging_ratio = 0.05f, .question_ratio = 0.10f,
@@ -433,57 +464,40 @@ static void test_v1_shim_returns_same_score_as_3_axis_only(void) {
         .last_observed_at = 1000,
     };
     const char *resp = "hey u see this thing rn? maybe we could check it out lmk btw";
-    float v1 = hu_communication_style_fidelity_score_v1(&target, resp, strlen(resp));
-    float v2 = hu_communication_style_fidelity_score_v2(&target, resp, strlen(resp));
-    /* The two MUST differ (v2 adds an axis); the v1 number must be the
-     * pre-Phase-5 value (regression pin). */
-    HU_ASSERT_TRUE(fabsf(v1 - v2) > 0.001f);
-    /* Hardcoded expected from the existing 3-axis impl at the test inputs above
-     * — captured by running the v1 path once and pinning the result here. The
-     * exact float is determined at implementation time and updated in step 2. */
-    HU_ASSERT_TRUE(fabsf(v1 - /*PIN*/0.733f) < 0.01f);
-}
-
-static void test_default_entry_point_returns_v2_score(void) {
-    /* spec §4.6: "the new default returns the 4-axis mean" */
-    hu_communication_style_t target = {
-        .lowercase_ratio = 1.0f, .abbreviation_ratio = 0.0f,
-        .hedging_ratio = 0.05f, .question_ratio = 0.10f,
-        .imperative_ratio = 0.80f,
-        .avg_message_length = 50, .sample_count = 100,
-        .last_observed_at = 1000,
-    };
-    const char *resp = "do the thing.";
     float def = hu_communication_style_fidelity_score(&target, resp, strlen(resp));
     float v2  = hu_communication_style_fidelity_score_v2(&target, resp, strlen(resp));
-    HU_ASSERT_TRUE(fabsf(def - v2) < 1e-6f);
+    /* The two MUST differ — v2 includes the 4th axis. */
+    HU_ASSERT_TRUE(fabsf(def - v2) > 0.001f);
+    /* The default symbol's body is unchanged from pre-Phase-5, so its
+     * existing tests (tests/test_personal_model.c::personal_model_fidelity_*)
+     * remain byte-stable; no PIN constant is hardcoded here. */
 }
 
 void run_v2_axis_tests(void) {
     HU_TEST_SUITE("v2-axis");
     HU_RUN_TEST(test_v2_axis_returns_higher_score_for_matching_decision_style);
     HU_RUN_TEST(test_v2_axis_returns_minus_one_on_zero_sample_count);
-    HU_RUN_TEST(test_v1_shim_returns_same_score_as_3_axis_only);
-    HU_RUN_TEST(test_default_entry_point_returns_v2_score);
+    HU_RUN_TEST(test_default_entry_point_stays_3_axis_v1);
 }
 ```
 
 - [ ] **Step 2: Implement 4th-axis math in `src/memory/personal_model.c`**
 
-Sketch:
+Sketch (B1-revised: opt-in only — do NOT rename or shim the v1 symbol):
 
 1. Three new internal helpers: `hedging_ratio_of(response, len)`, `question_ratio_of(response, len)`, `imperative_ratio_of(response, len)`. Each returns a `float` in [0,1].
-2. New function `hu_communication_style_fidelity_score_v2` implementing the 4-axis mean (D1 formula).
-3. Rename the existing function body to `hu_communication_style_fidelity_score_v1_impl`; add an inline `hu_communication_style_fidelity_score_v1` declaration in the header marked deprecated; have the unmodified symbol `hu_communication_style_fidelity_score` now forward to `_v2` (the default-becomes-v2 contract).
-4. **Backward-compat pin:** before changing the header, capture the exact v1 score for the test fixture used in `test_v1_shim_returns_same_score_as_3_axis_only` by running the existing implementation once and embedding the value into the test (Step 1 marks the position with `/*PIN*/0.733f` — replace with the actual measured value).
+2. New function `hu_communication_style_fidelity_score_v2` implementing the 4-axis mean (D1 formula). This is the only NEW public scorer symbol.
+3. **Do NOT touch the existing `hu_communication_style_fidelity_score` body.** It stays 3-axis, byte-identical to today. No rename, no `__attribute__((deprecated))`, no forwarding shim. The three internal call sites (`personal_model.c:1377`, `ml/cli.c:1509`, `ml/fidelity.c:75`) stay on the v1 symbol unchanged.
+4. New function `hu_communication_style_compare_response_sets_v2` that calls the v2 scorer per response. Existing v1 comparator stays byte-identical.
+5. No "backward-compat pin" against `/*PIN*/0.733f` is needed because the v1 entry point is never modified.
 
 - [ ] **Step 3: Extend `hu_communication_style_t` additively**
 
-In `include/human/memory/personal_model.h`, append three new fields (`hedging_ratio`, `question_ratio`, `imperative_ratio`) AFTER the existing `abbreviation_ratio`. **Do not reorder existing fields** — zero-init compatibility for pre-Phase-5 binaries depends on field ordering.
+In `include/human/memory/personal_model.h`, **append three new fields (`hedging_ratio`, `question_ratio`, `imperative_ratio`) at the END of the struct, AFTER the existing `last_observed_at`** (M2). **Do NOT insert mid-struct** — positional initializers like `hu_communication_style_t s = {.lowercase_ratio = 1.0f, .abbreviation_ratio = 0.0f, .avg_message_length = 50, .sample_count = 100, .last_observed_at = 1000}` already exist across the test suite (see e.g. Task 1 Step 1 above) and an insertion after `abbreviation_ratio` would silently shift later fields. Appending at the end preserves both designated-init and positional-init call sites, and keeps zero-init compatibility for pre-Phase-5 binaries.
 
 - [ ] **Step 4: `_v2` for the comparator**
 
-Add `hu_communication_style_compare_response_sets_v2` that internally calls `hu_communication_style_fidelity_score_v2` for each response. The existing v1 entry stays byte-identical.
+Add `hu_communication_style_compare_response_sets_v2` as a NEW symbol that internally calls `hu_communication_style_fidelity_score_v2` for each response. The existing v1 comparator entry point stays byte-identical and is NOT renamed or deprecated (B1: opt-in only).
 
 - [ ] **Step 5: Wire test + run**
 
@@ -497,7 +511,7 @@ Expected: 4/4 PASS.
 ```bash
 git add include/human/memory/personal_model.h src/memory/personal_model.c \
         tests/test_communication_style_fidelity_v2_axis.c CMakeLists.txt tests/test_main.c
-git commit -m "feat(memory,personal_model): 4th decision-style fidelity axis + v1 shim (Phase 5 Task 1)"
+git commit -m "feat(memory,personal_model): 4th decision-style fidelity axis (opt-in v2, v1 default unchanged) (Phase 5 Task 1)"
 ```
 
 ---
@@ -918,19 +932,16 @@ static void test_apple_fm_create_returns_canned_judge_in_test_mode(void) {
     judge.vtable->deinit(judge.ctx, &alloc);
 }
 
-static void test_apple_fm_available_returns_false_when_canned_missing(void) {
-    HU_SKIP_IF(access("tests/fixtures/external_judge_canned.json", R_OK) == 0,
-               "canned fixture present; cannot test missing-canned path");
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_eval_judge_external_t judge = {0};
-    hu_error_t e = hu_apple_fm_judge_create(&alloc, &judge);
-    HU_ASSERT_EQ(e, HU_ERR_NOT_SUPPORTED);
-}
+/* M1: test_apple_fm_available_returns_false_when_canned_missing was REMOVED
+ * during adversarial review. Once Task 3 ships `tests/fixtures/external_judge_canned.json`,
+ * the fixture is always present in every CI run, so the HU_SKIP_IF would
+ * permanently skip and the test would carry zero signal. The missing-canned
+ * path is already covered by Task 3's
+ * `test_canned_judge_returns_unsupported_for_unknown_prompt`. */
 
 void run_apple_fm_client_tests(void) {
     HU_TEST_SUITE("apple-fm-client");
     HU_RUN_TEST(test_apple_fm_create_returns_canned_judge_in_test_mode);
-    HU_RUN_TEST(test_apple_fm_available_returns_false_when_canned_missing);
 }
 ```
 
@@ -951,48 +962,106 @@ hu_error_t hu_apple_fm_judge_create(hu_allocator_t *alloc, hu_eval_judge_externa
 
 The production helper `apple_fm_judge_create_subprocess` spawns `swift scripts/eval_external/apple_fm_server.swift` via `posix_spawn` + a bi-directional pipe pair (`socketpair(AF_UNIX, SOCK_STREAM, 0)`), implements the JSON-per-line protocol, and reads stderr non-destructively into a 4KB ring buffer for postmortem. The `available()` impl runs `sw_vers -productVersion` and checks `>=26`; if false, the factory itself returns `HU_ERR_NOT_SUPPORTED` (no half-spawn).
 
+**Socketpair lifecycle (H6 — pinned to prevent EOF / zombie ambiguity):**
+
+```c
+/* 1. Parent creates socketpair: sv[0] is the parent end, sv[1] is the child end. */
+int sv[2];
+if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return HU_ERR_IO;
+
+/* 2. posix_spawn the Swift binary; redirect child's stdin and stdout to sv[1]
+ *    via posix_spawn_file_actions_adddup2. */
+posix_spawn_file_actions_t fa;
+posix_spawn_file_actions_init(&fa);
+posix_spawn_file_actions_adddup2(&fa, sv[1], STDIN_FILENO);
+posix_spawn_file_actions_adddup2(&fa, sv[1], STDOUT_FILENO);
+posix_spawn_file_actions_addclose(&fa, sv[0]);   /* child must not inherit sv[0] */
+posix_spawn_file_actions_addclose(&fa, sv[1]);   /* close after dup2 */
+posix_spawn(&child_pid, swift_path, &fa, NULL, swift_argv, environ);
+posix_spawn_file_actions_destroy(&fa);
+
+/* 3. Parent closes sv[1] AFTER spawn (so the child's readLine() returns nil
+ *    when the parent later closes sv[0] — only the child end is held by the
+ *    child, only the parent end by the parent). */
+close(sv[1]);
+
+/* 4. Parent uses sv[0] for both read and write (JSON-per-line). */
+ctx->fd = sv[0];
+ctx->child_pid = child_pid;
+
+/* 5. On shutdown (deinit_subprocess): */
+close(ctx->fd);                                  /* parent end → child sees EOF */
+int status = 0;
+waitpid(ctx->child_pid, &status, 0);             /* blocking wait — prevents zombie */
+if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    hu_log_warn("apple_fm_server exited abnormally: status=%d", status);
+}
+```
+
+Why this exact lifecycle: a leftover `sv[1]` in the parent would keep the child's stdin open after `close(sv[0])`, the child's `readLine()` would block forever instead of returning nil, the child would never exit, and `waitpid` would hang. The sequence above guarantees clean EOF + clean exit + no zombies. A non-blocking `waitpid(..., WNOHANG)` is an option for `deinit()` paths that must not block, but the default contract is the blocking form above to ensure F3 (zombie leak) cannot happen.
+
 - [ ] **Step 3: Implement the Swift server**
 
 ```swift
 // scripts/eval_external/apple_fm_server.swift
+// NOTE: FoundationModels.LanguageModelSession is @MainActor-bound; the entire
+// main() must run on the main actor. Using @main + async throws is REQUIRED:
+// `try await` is not legal at synchronous top-level scope (B3).
 #if canImport(FoundationModels)
 import FoundationModels
 import Foundation
 
-let session = LanguageModelSession()
-while let line = readLine() {
-    guard let data = line.data(using: .utf8),
-          let req = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let id = req["id"] as? Int,
-          let prompt = req["prompt"] as? String else {
-        let err = ["error": "malformed request"] as [String: Any]
-        if let d = try? JSONSerialization.data(withJSONObject: err) {
-            FileHandle.standardOutput.write(d)
-            FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+@main
+struct AppleFMServer {
+    @MainActor
+    static func main() async throws {
+        let session = LanguageModelSession()
+        while let line = readLine() {
+            guard let data = line.data(using: .utf8),
+                  let req = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let id = req["id"] as? Int,
+                  let prompt = req["prompt"] as? String else {
+                let err = ["error": "malformed request"] as [String: Any]
+                if let d = try? JSONSerialization.data(withJSONObject: err) {
+                    FileHandle.standardOutput.write(d)
+                    FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+                    try? FileHandle.standardOutput.synchronize()
+                }
+                continue
+            }
+            do {
+                let resp = try await session.respond(to: prompt)
+                let outObj = ["id": id, "text": resp.content] as [String: Any]
+                let d = try JSONSerialization.data(withJSONObject: outObj)
+                FileHandle.standardOutput.write(d)
+                FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+                try? FileHandle.standardOutput.synchronize()
+            } catch {
+                let outObj = ["id": id, "error": String(describing: error)] as [String: Any]
+                if let d = try? JSONSerialization.data(withJSONObject: outObj) {
+                    FileHandle.standardOutput.write(d)
+                    FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+                    try? FileHandle.standardOutput.synchronize()
+                }
+            }
         }
-        continue
-    }
-    do {
-        let resp = try await session.respond(to: prompt)
-        let outObj = ["id": id, "text": resp.content] as [String: Any]
-        let d = try JSONSerialization.data(withJSONObject: outObj)
-        FileHandle.standardOutput.write(d)
-        FileHandle.standardOutput.write("\n".data(using: .utf8)!)
-    } catch {
-        let outObj = ["id": id, "error": String(describing: error)] as [String: Any]
-        if let d = try? JSONSerialization.data(withJSONObject: outObj) {
-            FileHandle.standardOutput.write(d)
-            FileHandle.standardOutput.write("\n".data(using: .utf8)!)
-        }
+        // readLine() returned nil → stdin EOF → clean exit 0.
     }
 }
 #else
-FileHandle.standardError.write("FoundationModels framework unavailable\n".data(using: .utf8)!)
-exit(2)
+@main
+struct AppleFMServer {
+    static func main() {
+        FileHandle.standardError.write("FoundationModels framework unavailable\n".data(using: .utf8)!)
+        exit(2)
+    }
+}
 #endif
 ```
 
 The C side checks the subprocess's exit code on `deinit()` to detect mid-run framework loss (exit 2). Failed exits cause subsequent `generate()` calls to return `HU_ERR_NOT_SUPPORTED` instead of attempting to respawn.
+
+Implementation note: `FoundationModels.LanguageModelSession` is `@MainActor`-bound, so the entire `main()` must run on the main actor and be `async throws` (B3 — the previous synchronous top-level `try await` form did not compile). The `@main` struct attribute is the Swift-supported way to declare an async entry point.
 
 - [ ] **Step 4-5: Wire + run + commit.**
 
@@ -1009,6 +1078,34 @@ Identical structure to Task 7 with two differences:
 
 1. The subprocess is `node scripts/eval_external/chrome_ai_server.js`. `available()` checks for `chrome-canary` or `google-chrome-canary` on `PATH`, AND probes `window.ai.languageModel.capabilities()` via a tiny one-shot Node script (`scripts/eval_external/chrome_ai_capabilities.js`) the first time it's invoked. The probe is a separate JS file (not a CLI flag) so no source code is passed on the command line.
 2. The Node script spawns headless Chrome with `--enable-features=AIPromptAPI --headless=new --remote-debugging-port=0`, attaches via CDP, creates `window.ai.languageModel.create()` once, then services `generate` requests by calling `.prompt(text)` until stdin EOF.
+
+**H4 — CDP JS injection prevention (MANDATORY):** the Node script MUST call `page.evaluate` with the prompt as a SECOND argument (which Puppeteer auto-JSON-serializes), NEVER by interpolating user input into a template string passed as the JS-code argument. The mandated safe form is:
+
+```js
+// SAFE: prompt is passed as the second argument and auto-JSON-serialized
+// by Puppeteer; never interpolated into the JS code string.
+const result = await page.evaluate(
+    async (promptText) => {
+        const session = await window.ai.languageModel.create();
+        return await session.prompt(promptText);
+    },
+    prompt   // second arg → safely serialized by Puppeteer
+);
+```
+
+The BANNED form (security review will reject):
+
+```js
+// UNSAFE: NEVER use template-string interpolation of user input into the
+// JS code argument of page.evaluate — any `</script>`, backtick, or quote
+// in `prompt` breaks out of the string and runs as code.
+const result = await page.evaluate(`(async () => {
+    const session = await window.ai.languageModel.create();
+    return await session.prompt(\`${prompt}\`);   // BAD
+})()`);
+```
+
+Task 14 Step 4's `security-reviewer` end-gate explicitly checks for the safe form in `scripts/eval_external/chrome_ai_server.js`.
 
 Failure modes mapped per the umbrella spec §10 R3:
 - No Chrome binary → exit 4 → C surfaces `HU_ERR_NOT_SUPPORTED` and scorecard cell becomes `"gemini_nano: unavailable (no chrome)"`.
@@ -1110,6 +1207,75 @@ Each of those `hu_eval_cli_*` entry points lives in a small new file `src/eval/c
 
 ---
 
+### Task 10b (L1): `human ml lora-ab --require-positive` forwards to `hu_eval_gate_decide`
+
+**Files:**
+- Modify: `src/ml/cli.c::lora_ab` (+40 LOC dispatch when `--require-positive` is set)
+- Create: `tests/test_lora_ab_require_positive_forwards_to_gate.c` (~120 LOC)
+- Modify: `tests/test_main.c` (APPEND), `CMakeLists.txt`
+
+Rationale: umbrella spec §4.6 line 367 says "Reuse `human ml lora-ab --require-positive` semantics where applicable" — Phase 5 closes this gap so the cheap pre-commit gate and the heavier runner-side promotion gate share one statistical contract. Without this task, `lora-ab --require-positive` would silently keep using a simpler delta-only check while the runner used the bootstrap-CI gate — two implementations of "is this adapter better?" diverging.
+
+- [ ] **Step 1: Write the failing test**
+
+```c
+/* tests/test_lora_ab_require_positive_forwards_to_gate.c */
+#include "test_framework.h"
+#include "human/eval/eval_gate.h"
+
+static int g_gate_decide_called = 0;
+extern void hu_eval_gate_set_decide_spy_for_test(int *counter);
+
+static void test_lora_ab_with_require_positive_calls_hu_eval_gate_decide(void) {
+    g_gate_decide_called = 0;
+    hu_eval_gate_set_decide_spy_for_test(&g_gate_decide_called);
+    /* Run `human ml lora-ab --require-positive --candidate <path> --baseline <path>`
+     * via the existing CLI dispatch test seam. */
+    char argv0[] = "human", argv1[] = "ml", argv2[] = "lora-ab",
+         argv3[] = "--require-positive",
+         argv4[] = "--candidate", argv5[] = "tests/fixtures/lora_baseline_persona_v2_responses.json",
+         argv6[] = "--baseline",  argv7[] = "tests/fixtures/lora_baseline_persona_v2_responses.json";
+    char *argv[] = {argv0, argv1, argv2, argv3, argv4, argv5, argv6, argv7};
+    HU_ASSERT_EQ(hu_main_for_test(8, argv), HU_OK);
+    HU_ASSERT_TRUE(g_gate_decide_called >= 1);
+}
+
+static void test_lora_ab_without_require_positive_does_not_call_gate(void) {
+    /* Backward-compat: plain `lora-ab` (no flag) keeps its existing
+     * delta-only behaviour. */
+    g_gate_decide_called = 0;
+    hu_eval_gate_set_decide_spy_for_test(&g_gate_decide_called);
+    char argv0[] = "human", argv1[] = "ml", argv2[] = "lora-ab",
+         argv3[] = "--candidate", argv4[] = "tests/fixtures/lora_baseline_persona_v2_responses.json",
+         argv5[] = "--baseline",  argv6[] = "tests/fixtures/lora_baseline_persona_v2_responses.json";
+    char *argv[] = {argv0, argv1, argv2, argv3, argv4, argv5, argv6};
+    HU_ASSERT_EQ(hu_main_for_test(7, argv), HU_OK);
+    HU_ASSERT_EQ(g_gate_decide_called, 0);
+}
+
+void run_lora_ab_require_positive_tests(void) {
+    HU_TEST_SUITE("lora-ab-require-positive");
+    HU_RUN_TEST(test_lora_ab_with_require_positive_calls_hu_eval_gate_decide);
+    HU_RUN_TEST(test_lora_ab_without_require_positive_does_not_call_gate);
+}
+```
+
+- [ ] **Step 2: Wire `--require-positive` to `hu_eval_gate_decide`**
+
+In `src/ml/cli.c::lora_ab`, when `--require-positive` is set:
+
+1. Build a default `hu_eval_gate_t` with the same spec §1 row 2 thresholds the runner uses (`persona_delta_min = +0.05`, `mt_bench_regression_max = -0.01`, `ifeval_regression_max = -0.02`, `latency_delta_max_ms = +50.0`, `bootstrap_samples = 1000`, `bootstrap_seed = 42`).
+2. Skip the leaderboard + reward criteria when running `lora-ab` as a cheap pre-commit gate (`gate.mt_bench = NULL`, `gate.ifeval = NULL`, `gate.reward_model = NULL` — per H3 each NULL criterion is skipped with a clear reason).
+3. Load the candidate and baseline response sets from the fixture paths passed on the CLI.
+4. Call `hu_eval_gate_decide(...)`.
+5. Print the verdict; exit 0 on promote, exit 1 on reject (matching the existing `--require-positive` contract).
+
+Plain `lora-ab` without `--require-positive` keeps its existing delta-only path unchanged.
+
+- [ ] **Step 3-5:** Wire + run + commit. Acceptance: 2/2 tests PASS; existing `tests/test_ml_cli.c::lora_ab_*` tests stay green.
+
+---
+
 ### Task 11 (Phase 2 fold-in): `lora_training_runner` calls promotion gate before promoting
 
 **Files:**
@@ -1145,6 +1311,10 @@ static void test_runner_blocks_promotion_when_gate_rejects(void) {
     hu_lora_runner_ctx_t ctx = {.eval_gate = &gate, .provider = provider, /*...*/};
     /* ... set up a learner with one synthetic signal, fixed adapter_output_path ... */
 
+    /* H1: freeze the runner's clock so the adapter_id is deterministic.
+     * 1747042800 = 2026-05-12T07:00:00Z. */
+    hu_lora_runner_set_test_clock(1747042800);
+
     hu_error_t e = hu_lora_training_runner(NULL, /*spec=*/&(hu_job_spec_t){0},
                                             /*budget_ms=*/1000, &ctx);
     HU_ASSERT_EQ(e, HU_OK);
@@ -1154,9 +1324,13 @@ static void test_runner_blocks_promotion_when_gate_rejects(void) {
     HU_ASSERT_EQ(access("/tmp/test-adapter.lora.rejected", F_OK), 0);
     /* The provider's load_adapter must NOT have been called. */
     HU_ASSERT_EQ(hu_provider_load_adapter_called_count_for_test(provider), 0);
-    /* A gate_decision.json must exist under ~/.human/proofs/<adapter-id>/. */
-    /* (Test sets HOME to /tmp/test-home to make the path discoverable.) */
-    HU_ASSERT_EQ(access("/tmp/test-home/.human/proofs/.../gate_decision.json", F_OK), 0);
+    /* A gate_decision.json must exist under ~/.human/proofs/<adapter-id>/.
+     * (Test sets HOME to /tmp/test-home to make the path discoverable.)
+     * H1: build the deterministic path from the frozen clock + method + step. */
+    char expected[1024];
+    snprintf(expected, sizeof(expected),
+             "/tmp/test-home/.human/proofs/2026-05-12-dpo-step-0/gate_decision.json");
+    HU_ASSERT_EQ(access(expected, F_OK), 0);
 }
 
 static void test_runner_accepts_promotion_when_gate_passes(void) {
@@ -1191,7 +1365,26 @@ void run_runner_eval_gate_tests(void) {
 }
 ```
 
-- [ ] **Step 2-5:** Wire the gate per D7. Note: the runner generates the canonical adapter id via `hu_format_adapter_id(method_name, step_index, time_t, buf, cap)` helper added in the same task (new file `src/agent/adapter_id.c` if extraction is justified; otherwise inline).
+- [ ] **Step 2-5:** Wire the gate per D7. Note: the runner generates the canonical adapter id via `hu_format_adapter_id(method_name, step_index, time_t, buf, cap)` helper added in the same task (new file `src/agent/adapter_id.c` if extraction is justified; otherwise inline). Implementation uses the two-step strftime form per H7 (see below), NOT `"%Y-%m-%d-%s-step-%zu"` (strftime has no `%s` for a method-name string).
+
+**Test seam (H1):** `src/agent/lora_training_runner.c` exposes a test-only symbol `void hu_lora_runner_set_test_clock(time_t frozen)` that overrides the `time(NULL)` call used for the adapter ID timestamp. The symbol is wrapped in `#ifdef HU_IS_TEST`. Tests that need a deterministic proof-directory path call this once at setup time; the runner then uses the frozen value to format the adapter id. Default value (`0`) means "use real wall clock".
+
+**Adapter id formatting (H7):**
+
+```c
+/* Replace the (broken) strftime("%Y-%m-%d-%s-step-%zu", ...) with two steps. */
+hu_error_t hu_format_adapter_id(const char *method_name, size_t step_index,
+                                 time_t when, char *buf, size_t cap) {
+    struct tm tm;
+    gmtime_r(&when, &tm);
+    char datebuf[16];
+    if (strftime(datebuf, sizeof(datebuf), "%Y-%m-%d", &tm) == 0) return HU_ERR_INVALID_ARGUMENT;
+    int written = snprintf(buf, cap, "%s-%s-step-%zu", datebuf, method_name, step_index);
+    return (written > 0 && (size_t)written < cap) ? HU_OK : HU_ERR_BUFFER_TOO_SMALL;
+}
+```
+
+`method_name` comes from `hu_rl_trainer_t.vtable->name(ctx)` — e.g. `"dpo"`, `"kto"`, `"grpo"`. With `when = 1747042800` and `method_name = "dpo"` and `step_index = 0`, the result is `"2026-05-12-dpo-step-0"`.
 
 ---
 
@@ -1248,6 +1441,22 @@ void run_daemon_reaction_poll_tests(void) {
 
 - [ ] **Step 2-5:** Implement per D8. Note: the daemon's existing poll scheduler architecture is the home for this; do NOT spin up a separate thread. The 30s cadence is configurable via the same config block (`poll_interval_seconds`, default 30).
 
+**H8 — Production reaction-register API (cross-phase with Phase 6 — flag here too):**
+
+Phase 5 Task 12 additionally ships `hu_reaction_handler_register_assistant_message_for_production(...)` as a public symbol (NOT `_for_test`). This is a thin wrapper that the daemon poll loop AND the demo CLI both call to pre-register `(prompt, response)` tuples into the assistant-message lookup store before any reaction event is processed. The existing `_for_test` seam stays test-only. The demo CLI's `synthesize_reactions` flow (developed in Phase 6) consumes the production API so it can pre-register tuples without resorting to the test-only seam. The production API:
+
+```c
+/* include/human/agent/reaction_handler.h */
+hu_error_t hu_reaction_handler_register_assistant_message_for_production(
+    hu_reaction_handler_t *handler,
+    const char *chat_id,
+    const char *message_id,
+    const char *prompt,
+    const char *response);
+```
+
+Behaviour is identical to the `_for_test` variant; the rename exists so production call sites (daemon + demo CLI) are not stylistically tainted with `_for_test` symbols. Phase 6 (not Phase 5) wires this from the daemon's outgoing-message path; Phase 5 only ships the symbol so Phase 6 doesn't have to revisit Task 12's header.
+
 ---
 
 ### Task 13 (Phase 2 fold-in): Adapter hot-swap proof-directory contract
@@ -1267,6 +1476,9 @@ void run_daemon_reaction_poll_tests(void) {
 static void test_proof_directory_has_nine_files_on_accept(void) {
     /* Set HOME to /tmp/test-home; run a lenient-gate accept path; verify the
      * nine §8 evidence files exist with non-zero size and valid JSON shape. */
+    /* H1: freeze the runner's clock so the adapter_id is deterministic
+     * (yields "2026-05-12-dpo-step-0" via the two-step strftime in H7). */
+    hu_lora_runner_set_test_clock(1747042800);
     /* ... setup ... */
     HU_ASSERT_EQ(hu_lora_training_runner(/*...*/, &ctx), HU_OK);
     const char *expected[9] = {
@@ -1288,10 +1500,12 @@ static void test_proof_directory_gate_decision_json_only_on_reject(void) {
      * file should exist; the other 7 files (which are evidence of a successful
      * run) should NOT exist. The minimal reject footprint keeps disk noise
      * low when many adapters are tested. */
+    /* H1: freeze the runner's clock so the adapter_id is deterministic. */
+    hu_lora_runner_set_test_clock(1747042800);
     /* ... setup ... */
     HU_ASSERT_EQ(hu_lora_training_runner(/*...*/, &ctx), HU_OK);
-    HU_ASSERT_EQ(access("/tmp/test-home/.human/proofs/.../gate_decision.json", F_OK), 0);
-    HU_ASSERT_EQ(access("/tmp/test-home/.human/proofs/.../manifest.json", F_OK), -1);
+    HU_ASSERT_EQ(access("/tmp/test-home/.human/proofs/2026-05-12-dpo-step-0/gate_decision.json", F_OK), 0);
+    HU_ASSERT_EQ(access("/tmp/test-home/.human/proofs/2026-05-12-dpo-step-0/manifest.json", F_OK), -1);
     HU_ASSERT_EQ(access("/tmp/test-adapter.lora.rejected", F_OK), 0);
 }
 
@@ -1313,9 +1527,9 @@ void run_proof_directory_tests(void) {
 - [ ] **Step 1: Full test suite under `rl_sota` preset + `dev` preset**
 
 ```bash
-cmake --build --preset rl_sota -j8 && ./build-rl-sota/human_tests --suite=v2-axis,bootstrap,judge-external,leaderboard,eval-gate,stock-baseline,apple-fm-client,gemini-nano-client,competitive-harness,cli-eval-phase5,runner-eval-gate,daemon-reaction-poll,proof-directory
+cmake --build --preset rl_sota -j8 && ./build-rl-sota/human_tests --suite=v2-axis,bootstrap,judge-external,leaderboard,eval-gate,stock-baseline,apple-fm-client,gemini-nano-client,competitive-harness,cli-eval-phase5,lora-ab-require-positive,runner-eval-gate,daemon-reaction-poll,proof-directory
 ```
-Expected: all 14 suites pass with 0 failures, 0 skips except the ones with documented HU_SKIP_IF conditions.
+Expected: all 15 suites pass with 0 failures, 0 skips except the ones with documented HU_SKIP_IF conditions.
 
 ```bash
 cmake --build --preset rl_sota -j8 && ./build-rl-sota/human_tests
@@ -1377,6 +1591,7 @@ if(HU_ENABLE_RL_FULL)
         tests/test_stock_baseline.c
         tests/test_competitive_harness.c
         tests/test_cli_eval_phase5.c
+        tests/test_lora_ab_require_positive_forwards_to_gate.c   # Task 10b (L1)
         tests/test_lora_training_runner_eval_gate.c
         tests/test_lora_training_runner_proof_directory.c
         tests/test_daemon_reaction_poll_wiring.c
@@ -1436,11 +1651,11 @@ Default `release` preset stays at `HU_ENABLE_COMPETITIVE_EVAL=OFF` — Phase 5's
 
 | # | Risk | Severity | Mitigation |
 |---|------|----------|------------|
-| **R1** | **4th-axis floor re-tuning conflicts with Track D Phase 1's existing 0.50 floor** in `scripts/check-lora-baseline.sh`. Flipping the default scorer to 4-axis would re-anchor the floor and cause a one-shot CI red. | High | D1: v1 deprecated shim keeps `scripts/check-lora-baseline.sh` on the 3-axis path until a new `--include-v2-axis` flag is added in the same commit. The flag defaults to OFF until the corpus-owner re-rates the fixture for the 4-axis rubric. Pinning test `test_v1_shim_returns_same_score_as_3_axis_only` (Task 1) catches drift. |
+| **R1** | **4th-axis floor re-tuning conflicts with Track D Phase 1's existing 0.50 floor** in `scripts/check-lora-baseline.sh`. Flipping the default scorer to 4-axis would re-anchor the floor and cause a one-shot CI red. | High | D1 (B1-revised): v2 is opt-in only; the default `hu_communication_style_fidelity_score` body is byte-identical to today, so `scripts/check-lora-baseline.sh` cannot drift. The optional `--include-v2-axis` flag on `check-lora-baseline.sh` runs the v2 path against the v2 fixture independently. Pinning test `test_default_entry_point_stays_3_axis_v1` (Task 1) catches accidental forwarding. |
 | **R2** | **Apple FM framework unavailable on macOS < 26 or without entitlement** — Phase 5 ships on a macOS aarch64 reviewer's box that probably doesn't have the framework yet. | Medium | D5 + D6: subprocess only spawned at production runtime. Test mode uses canned fixture. `available()` returns false cleanly on non-macOS-26 hosts. Scorecard cell becomes `"apple_fm: unavailable (macOS < 26)"` — spec §9 DoD #14 is satisfied. |
 | **R3** | **Chrome AI / Gemini Nano flag-gated experimental API surface drift** — Chrome's `--enable-features=AIPromptAPI` and `window.ai` API surface have churned 4 times between Chrome 127 and 132. The Node bridge will break the first time the API changes. | Medium | The Node script probes `window.ai.languageModel.capabilities()` at startup; if it returns anything other than `"readily"` or `"after-download"`, exit 5 cleanly. Bridge version pin in `scripts/eval_external/chrome_ai_server.js` header comment with the Chrome version this was authored against (e.g. `// Tested against Chrome Canary 132.0.6800.0 — re-test on Chrome version bumps`). Failure mode is "unavailable" row, not crash. |
 | **R4** | **Bootstrap CI seed nondeterminism across platforms** — the existing `hu_rng_*` helpers (used in Phase 3 RM init) are deterministic across Linux+macOS, but a future xoshiro impl change would silently break the CI bounds. | Low | Task 2's bootstrap helper has a `test_bootstrap_ci_deterministic_with_fixed_seed` regression pin (verbatim in Step 1) that catches RNG drift immediately. |
-| **R5** | **Gate's 4-criterion AND is too strict** — RM score CI > 0 might never be true if the RM is poorly calibrated. False rejects loop forever. | Medium | D3: the `reward_ci_lower_below_zero` rejection has a documented escape hatch: when `gate.bootstrap_samples == 0`, the reward criterion is skipped (gate degrades to a 4-criterion AND). This is intended for cold-start before the RM has any training data and is logged loudly in the verdict reason. Spec §10 R12 supports the safety net. |
+| **R5** | **Gate's 4-criterion AND is too strict** — RM score CI > 0 might never be true if the RM is poorly calibrated. False rejects loop forever. | Medium | D3 + H3 + H5: the documented escape hatch is `gate->reward_model = NULL` (NOT `bootstrap_samples == 0`). When `reward_model == NULL`, the gate skips the reward criterion + writes `"reward criterion skipped: reward_model==NULL"` into `verdict.reason` and sets `verdict.reward_skipped = true`. `bootstrap_samples` is independently constrained: `bootstrap_samples == 0` is INVALID and returns `HU_ERR_INVALID_ARGUMENT` at construction (H5); `bootstrap_samples >= 100` is enforced. Intended for cold-start before the RM has any training data. Spec §10 R12 supports the safety net. |
 | **R6** | **`lora_training_runner` test gymnastics** — Task 11's tests synthesise an entire training run end-to-end. Phase 2's analogous tests had heavy `HU_IS_TEST` gating that is fragile. | Medium | Reuse Phase 2's `hu_provider_create_for_test_with_canned_response` seam + Phase 3's `hu_learner_create_for_test`. The Task 11 tests inject a learner whose `train` callback writes a 4-byte stub LoRA file (`"LORA"` magic) — no real training, just exercising the post-train flow. |
 | **R7** | **Daemon reaction-poll wiring creates clock drift / poll storms** if the cadence is too tight. | Medium | D8: 30s cadence + opt-in by default. Cadence is configurable via `poll_interval_seconds`. CI-defaults are off so the test suite is unaffected; production uses the user-set value. |
 | **R8** | **Gate false-positive promotions** — bootstrap CIs with small n (e.g. 20 prompts) have wide bounds; a "promote" verdict could land on a noisy 20-sample run. | High | The harness defaults to **N=100 prompts** for production eval runs (spec §11 Q4: "100 persona-tagged prompts committed to `tests/fixtures/lora_baseline_persona_v2_responses.json`"). The gate config has `bootstrap_samples=1000` and the CI helper's percentile bands at N≥100 are ≤ ±0.03 — tight enough that the `+0.05` persona-delta-min has signal. Tests use N=20 only for unit-test speed; production never does. |
@@ -1459,7 +1674,7 @@ These are concrete failure modes anticipated from the file inventory, with expli
 | **F2** | **Leaderboard cache staleness** — `~/.human/eval_cache/<runner>/<prompt_hash>.json` was generated against an older judge model; new prompts hash differently after the prompt fixture is edited. Cache silently misses on every call. | `human eval leaderboard --runner mt_bench` returns `HU_ERR_NOT_SUPPORTED` for prompts that "should" be cached. | `find ~/.human/eval_cache/mt_bench/ -type f | wc -l` vs `jq length tests/fixtures/lora_baseline_persona_v2_responses.json`. | Add a `--regenerate-cache` flag to `human eval leaderboard`; document in proof artifact. Add a manifest at `~/.human/eval_cache/<runner>/MANIFEST.json` listing prompt-hash-set version so the staleness is auditable. |
 | **F3** | **Apple FM Swift FFI process leak** — the subprocess is spawned with `posix_spawn` but `deinit()` forgets to `waitpid()` after sending EOF on stdin. Process becomes zombie until parent exits; under heavy harness runs, ulimit -u trips. | `ps -A | grep apple_fm_server.swift | wc -l` returns >0 after `human eval competitive` completes. | The `apple_fm_judge_create_subprocess` impl in `src/eval/apple_fm_client.c` ; specifically the `deinit_subprocess` function. | Ensure `deinit` does `close(stdin_fd); waitpid(pid, &status, 0);` — and an `atexit()` handler that kills any remaining tracked PIDs. Add `test_apple_fm_no_zombie_after_deinit` (spawned under HU_FORCE_REAL_BRIDGE in nightly only). |
 | **F4** | **Chrome AI server hangs** — Node bridge spawns headless Chrome which spawns child processes for each tab; `puppeteer-core` doesn't `dispose()` cleanly when stdin closes. Bridge hangs in `dispose()`. | The harness completes the last prompt and then the run hangs for ≥30s before SIGKILL. | The bridge's response handler in `scripts/eval_external/chrome_ai_server.js`; specifically the stdin-EOF callback. | Wrap the `browser.close()` call in `Promise.race([browser.close(), timeout(5000)])`; if timeout wins, `process.exit(0)`. Add `test_gemini_nano_deinit_within_5s_under_real_bridge` (HU_FORCE_REAL_BRIDGE nightly). |
-| **F5** | **Gate false-positive promotion** — `bootstrap_samples=10` (test config leaked into a production config); CI bounds are absurdly wide; even a regressed adapter passes. | `~/.human/proofs/<adapter-id>/gate_decision.json` shows `persona_ci_upper - persona_ci_lower > 0.20`. | `jq '.persona_ci_upper - .persona_ci_lower' ~/.human/proofs/*/gate_decision.json`. | The `hu_eval_gate_decide` impl rejects any config with `bootstrap_samples < 100` (return `HU_ERR_INVALID_ARGUMENT`). Document the floor in `hu_eval_gate_t` field comment. |
+| **F5** | **Gate false-positive promotion** — `bootstrap_samples=10` (test config leaked into a production config); CI bounds are absurdly wide; even a regressed adapter passes. | `~/.human/proofs/<adapter-id>/gate_decision.json` shows `persona_ci_upper - persona_ci_lower > 0.20`. | `jq '.persona_ci_upper - .persona_ci_lower' ~/.human/proofs/*/gate_decision.json`. | The `hu_eval_gate_decide` impl rejects any config with `bootstrap_samples < 100` (return `HU_ERR_INVALID_ARGUMENT`). `bootstrap_samples == 0` is INVALID (H5 — NOT a "skip the reward criterion" sentinel; to skip the reward criterion, set `gate->reward_model = NULL` instead per H3). Document the >=100 floor in `hu_eval_gate_t` field comment. |
 | **F6** | **`lora_training_runner` orphan adapter files** — gate rejects, runner moves adapter to `<path>.rejected`, but on next training cycle the same path is targeted; the `.rejected` file accumulates. | `ls -la /tmp/test-adapter.lora.rejected.*` shows numbered backups (`.rejected.1`, `.rejected.2`, ...) growing over CI runs. | The rename-on-reject path in `src/agent/lora_training_runner.c`. | The runner appends a 6-char random suffix (`<path>.rejected.<6hex>`); add a daily job that prunes `.rejected.*` files older than 7 days. Or document that operators clean these up out-of-band (KISS preference). |
 | **F7** | **Daemon reaction-poll thrash** — `hu_imessage_poll_reactions` opens the chat.db on every tick; macOS file-handle cache fills up and SQLite returns `BUSY` for the user's own Messages app. | User reports "iMessage is slow when human daemon is running". `lsof -p $(pgrep daemon) | grep chat.db | wc -l` shows >1 handle. | `src/daemon.c` poll-tick handler. The handle should be held in `hu_daemon_state_t` and reused, not opened per tick. | Cache the SQLite handle in the daemon state, open once on `enable=true`, close on `enable=false`. Add `test_daemon_reaction_poll_reuses_chatdb_handle` (uses a strace shim in dev preset). |
 | **F8** | **Competitive harness empty scorecard** — `available()` returns false for all five competitor judges; the harness writes a markdown table with five "unavailable" rows and the reviewer thinks the run failed. | `cat ~/.human/proofs/<adapter-id>/scorecard.md` shows nothing but unavailable rows. | The harness orchestrator in `src/eval/competitive_harness.c`. | The harness writes a leading "Run summary: X of 5 competitors available" paragraph and exits non-zero if 0 of 5 are available (per spec §10 R2/R3 the goal is to be honest, but a run with zero comparisons isn't a comparison). Make the threshold configurable via `--min-available N` (default 2 — at least stock + one external). |
@@ -1471,7 +1686,7 @@ These are concrete failure modes anticipated from the file inventory, with expli
 Phase 5 is done when **all** of the following are true:
 
 1. All Phase 5 tests (~50 new) pass under both `rl_sota` and `dev` presets, 0 ASan errors, 0 UBSan errors.
-2. `hu_communication_style_fidelity_score` default symbol now returns 4-axis mean; v1 shim regression test pins the 3-axis byte-stable result; `scripts/check-lora-baseline.sh` continues to pass on the existing fixture (no floor change).
+2. `hu_communication_style_fidelity_score_v2` exists as a new opt-in symbol that returns the 4-axis mean; the existing 3-axis `hu_communication_style_fidelity_score` symbol is byte-identical to pre-Phase-5; `tests/test_personal_model.c::personal_model_fidelity_*` and `scripts/check-lora-baseline.sh` continue to pass without modification (no floor change, no test edit).
 3. `hu_eval_gate_decide` correctly accepts/rejects on synthetic per-criterion inputs (Task 5's 4-test matrix passes); bootstrap CIs are deterministic with fixed seed (Task 2 pin).
 4. `human eval competitive` renders the §1 scorecard with at least the stock-Gemma + one external competitor column populated honestly (or `unavailable (reason)` per spec §9 DoD #14); writes both `scorecard.md` and `scorecard.json` to a configurable output path.
 5. `src/agent/lora_training_runner.c` calls the gate before `hu_provider_load_adapter` when `ctx->eval_gate != NULL`; backward-compatible when NULL; rejected adapters land at `<path>.rejected` and never call `load_adapter`.
@@ -1502,13 +1717,13 @@ Phase 5 is done when **all** of the following are true:
 **Author's checklist before handing off:**
 
 - [x] `HU_TEST_SUITE("...")` is inside every `run_*_tests` function body (NOT at file scope) — verified in every test code block above (Task 1 step 1, Task 2 step 1, Task 3 step 1, ..., Task 14 covered by suite-level enforcement).
-- [x] `HU_SKIP_IF` is used for every environment-gated test path: leaderboard production-mode (Task 4), Apple FM canned-missing path (Task 7), CLI competitive-flag-off (Task 10), daemon canned-chatdb missing (Task 12).
-- [x] Backward-compat 4th axis: `hu_communication_style_fidelity_score_v1` kept as deprecated shim, default returns 4-axis mean (D1 + Task 1 step 1 regression pin).
+- [x] `HU_SKIP_IF` is used for every environment-gated test path: leaderboard production-mode (Task 4), CLI competitive-flag-off (Task 10), daemon canned-chatdb missing (Task 12). (The Apple-FM canned-missing path was removed during adversarial review — M1.)
+- [x] Backward-compat 4th axis: `hu_communication_style_fidelity_score_v2` added as opt-in symbol; default `hu_communication_style_fidelity_score` body unchanged (D1 + Task 1 — B1-revised).
 - [x] Fixture extension is additive to `tests/fixtures/lora_baseline_persona.json` + new `tests/fixtures/lora_baseline_persona_v2_responses.json` (D1 + R10).
 - [x] Apple FM bridge runs as long-running Swift server speaking JSON over stdio, mirroring Phase 2/3 MLX subprocess pattern but in Swift (D5 + Task 7).
 - [x] Chrome AI bridge uses headless Chrome with `--enable-features=AIPromptAPI` flag (D5 + Task 8).
 - [x] All external judges have deterministic test-mode fallbacks via canned fixture (D6 + Tasks 7/8/3).
-- [x] Gate is statistical: bootstrap CIs, `lower-95-CI(new) > upper-95-CI(baseline)` is the bar (D3 + Task 5 + R8).
+- [x] Gate is statistical: one-sided bootstrap CI, `lower-95-CI(candidate) > baseline_mean + delta_min` is the bar (D3 + Task 5 + R8 — B2-revised; two-sided non-overlap deferred to Phase 6).
 - [x] Phase 2 deferrals folded in: `lora_training_runner` gate (Task 11), daemon reaction-poll wiring (Task 12), adapter hot-swap proof directory (Task 13).
 - [x] Phase 3 dependency: `hu_reward_model_t` is the canonical reward function for the gate's 4th criterion (D3 + Task 5 + R5).
 - [x] Common failure modes table includes 4th-axis numerical instability (F1), leaderboard cache staleness (F2), Apple FM process leak (F3), Chrome AI hang (F4), gate false-positive (F5), `lora_training_runner` orphan files (F6), daemon poll thrash (F7), competitive harness empty scorecard (F8) — 8 of 8 requested.
@@ -1518,6 +1733,6 @@ Phase 5 is done when **all** of the following are true:
 
 Open questions for the reviewer:
 
-1. The umbrella spec says (§4.6 line 367) "Reuse `human ml lora-ab --require-positive` semantics where applicable" — Phase 5's gate uses a richer 4-criterion AND. Is the intent to KEEP `lora-ab --require-positive` as the cheap pre-commit gate and let the new gate be the heavier promotion gate? This plan assumes YES (the existing `scripts/check-lora-baseline.sh` is unchanged; the new gate is the runner-side gate). If the reviewer wants `lora-ab` to forward to the new gate instead, that's a Task 10b addition.
+1. **RESOLVED (L1):** the umbrella spec says (§4.6 line 367) "Reuse `human ml lora-ab --require-positive` semantics where applicable" — the answer is **YES, `lora-ab --require-positive` forwards to the new `hu_eval_gate_decide`** (Phase 5 closes this gap; spec §4.6 says "reuse where applicable"). See new **Task 10b** below. The existing `scripts/check-lora-baseline.sh` is still unchanged (it uses the v1 default scorer per B1); only the `lora-ab` CLI is rewired.
 2. Daemon reaction-poll cadence default of 30s (D8) — is this right? Phase 2's original spec line was silent on this. 30s mirrors the existing daemon poll-job cadences but feels aggressive for production. Open to reviewer.
 3. Apple FM Swift bridge — should the build configure-time probe `swiftc` and **fail the configure** if `HU_ENABLE_COMPETITIVE_EVAL=ON` AND `swiftc` is missing? This plan defaults to "soft probe" (config succeeds; runtime returns NOT_SUPPORTED). Alternative is hard-fail at configure time which prevents shipping a binary that pretends to support Apple FM but never can.

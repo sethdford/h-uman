@@ -4,8 +4,8 @@
 
 **Goal:** Close the loop, prove it closes, and ship the demo. Two artifacts ship from this phase and they are intentionally split:
 
-1. **`tests/test_e2e_closed_loop.c`** — the canonical, deterministic, CI-runnable proof that the closed loop **wires correctly end-to-end**: a chat call → a synthetic reaction event → a row in the preference store → a `hu_rl_trainer_t` step → an adapter on disk → a `hu_provider_load_adapter` swap on the active provider → the **next chat call returns a response that is byte-different from the first one** (and, on the held-out fixture set, scores higher on `hu_communication_style_fidelity_score`). The test uses the HUML toy GPT (~32-token vocab, hand-controlled weights) so it is fully deterministic, runs under ASan in **≤ 30 seconds in CI**, and can be re-run on Linux x86_64 without GPUs, MLX, or 2.4 GB GGUF downloads. This test answers the question "did the wiring close" — it does **not** answer "did the model improve on a real benchmark"; that is what the demo script is for.
-2. **`scripts/demo-rl-closed-loop.sh`** — the live, non-deterministic, Apple-Silicon-only demo that runs the **same loop** against real Gemma-3-4B-it (Phase 1) and a real Qwen-2.5-0.5B-Instruct reward model (Phase 3). It produces a real `~/.human/proofs/<adapter-id>/` evidence directory matching spec §8 (manifest, training curves, eval_before, eval_after, eval_delta, delta_responses, gate_decision, adversarial_review, reproduce.sh) and the win-condition scorecard from spec §1. It runs locally before each release tag, **never in CI** (per spec §6.5 and the user-decision in spec §14: no paid M-series CI runner). The demo is the artifact a fresh-clone reviewer reproduces from `docs/demos/rl-closed-loop-demo.md` — and the artifact whose persona-fidelity delta of **≥ +0.05 absolute points** (spec §1, §11 row 4) ships in `docs/proof/rl-loop-proof.md`.
+1. **`tests/test_e2e_rl_loop.c`** — the canonical, deterministic, CI-runnable proof that the closed loop **wires correctly end-to-end**: a chat call → a synthetic reaction event → a row in the preference store → a `hu_rl_trainer_t` step → an adapter on disk → a `hu_provider_load_adapter` swap on the active provider → the **next chat call returns a response that is byte-different from the first one** (and, on the held-out fixture set, scores higher on `hu_communication_style_fidelity_score`). The test uses the HUML toy GPT (~32-token vocab, hand-controlled weights) so it is fully deterministic, runs under ASan in **≤ 30 seconds in CI**, and can be re-run on Linux x86_64 without GPUs, MLX, or 2.4 GB GGUF downloads. This test answers the question "did the wiring close" — it does **not** answer "did the model improve on a real benchmark"; that is what the demo script is for.
+2. **`scripts/demo-rl-loop.sh`** — the live, non-deterministic, Apple-Silicon-only demo that runs the **same loop** against real Gemma-3-4B-it (Phase 1) and a real Qwen-2.5-0.5B-Instruct reward model (Phase 3). It produces a real `~/.human/proofs/<adapter-id>/` evidence directory matching spec §8 (manifest, training curves, eval_before, eval_after, eval_delta, delta_responses, gate_decision, adversarial_review, reproduce.sh) and the win-condition scorecard from spec §1. It runs locally before each release tag, **never in CI** (per spec §6.5 and the user-decision in spec §14: no paid M-series CI runner). The demo is the artifact a fresh-clone reviewer reproduces from `docs/demos/rl-loop-demo.md` — and the artifact whose persona-fidelity delta of **≥ +0.05 absolute points** (spec §1, §11 row 4) ships in `docs/proof/rl-loop-proof.md`.
 
 This phase is the smallest of the six (no new vtables, no new losses, no new providers) and the highest-stakes (every prior phase has to actually compose). The work is wiring + evidence, not new architecture.
 
@@ -17,7 +17,7 @@ This phase is the smallest of the six (no new vtables, no new losses, no new pro
 - Phase 4's `hu_rl_trainer_create_grpo` + `hu_rollout_*` + `src/ml/grpo.c` (assumed shipped per user prompt: "assume hu_grpo trainer in src/ml/grpo.c").
 - Phase 5's `hu_eval_gate`, `hu_competitive_harness`, the 4-axis `hu_communication_style_fidelity_score` extension, and `tests/fixtures/lora_baseline_persona_v2_responses.json` + `_v2_rubric.md` (assumed shipped per user prompt: "Phase 5: eval gate + competitive harness + 4th axis").
 
-The Phase 6 code adds **one** new C source (`src/ml/cli_demo.c`), **one** new C header (`include/human/ml/cli_demo.h`), **one** new top-level CLI subcommand (`human demo rl-closed-loop`), **one** small additive helper to `src/agent/lora_training_runner.c` (a synchronous "post-swap re-chat & assert delta" entry point gated by `HU_IS_TEST` and reused by the demo CLI), and **one** new test file (`tests/test_e2e_closed_loop.c`) that ties it all together. Plus the two committable JSON fixtures, the demo shell script, and the runbook markdown.
+The Phase 6 code adds **one** new C source (`src/ml/cli_demo.c`), **one** new C header (`include/human/ml/cli_demo.h`), **one** new top-level CLI subcommand (`human demo rl-closed-loop`), **one** small additive helper to `src/agent/lora_training_runner.c` (a synchronous "post-swap re-chat & assert delta" entry point gated by `HU_IS_TEST` and reused by the demo CLI), and **one** new test file (`tests/test_e2e_rl_loop.c`) that ties it all together. Plus the two committable JSON fixtures, the demo shell script, and the runbook markdown.
 
 **Tech Stack:** C11 (`-Wall -Wextra -Wpedantic -Werror`), AddressSanitizer + UndefinedBehaviorSanitizer in `dev` preset, the existing `hu_gpt_t` toy GPT for the deterministic E2E test, the Phase 1 llama.cpp Metal backend for the demo, the Phase 2 `hu_rl_trainer_t` vtable, the Phase 3 `hu_reward_model_t`, the Phase 5 `hu_eval_gate` + 4-axis fidelity scorer, the existing `hu_provider_t.load_adapter` seam, the existing test framework (`tests/test_framework.h`), conventional commits, the existing `dead-code-finder` + `sprint-auditor` + `spec-verifier` + `critic` + `verifier` subagent gates (no `aspect-panel` required at Phase 6 per spec §7 — only P2/P4/P5 trigger the panel; Phase 6 ships behind `sprint-auditor` PASS).
 
@@ -38,8 +38,8 @@ The Phase 6 code adds **one** new C source (`src/ml/cli_demo.c`), **one** new C 
 | Tasks 0–12 implemented | subagent-driven | ⏳ | — |
 | E2E closed-loop deterministic test passing in ≤ 30 s under ASan | Task 4 + Task 8 | ⏳ | — |
 | `human demo rl-closed-loop` subcommand wired and tested with mock backend | Task 5 + Task 6 | ⏳ | — |
-| `scripts/demo-rl-closed-loop.sh` produces real evidence dir on Apple Silicon | Task 9 | ⏳ | — |
-| `docs/demos/rl-closed-loop-demo.md` runbook committed | Task 10 | ⏳ | — |
+| `scripts/demo-rl-loop.sh` produces real evidence dir on Apple Silicon | Task 9 | ⏳ | — |
+| `docs/demos/rl-loop-demo.md` runbook committed | Task 10 | ⏳ | — |
 | Persona-fidelity delta ≥ +0.05 absolute points on held-out 100 prompts (live demo) | Task 11 | ⏳ | — |
 | Phase 6 end gate (full suite + dead-code + sprint-auditor + tag) | Task 12 | ⏳ | — |
 
@@ -90,7 +90,7 @@ Phase 6 does **not** add a new `human ml *` subcommand. It adds a **new top-leve
 
 ### D1: The E2E test uses HUML toy GPT, NOT real Gemma
 
-**Decision:** `tests/test_e2e_closed_loop.c` instantiates `hu_dpo_real_huml_create` (or `hu_kto_huml_create` for the KTO variant; or `hu_grpo_huml_create` for the GRPO variant — all three are exercised in separate test functions in the same file) and a mock provider that wraps the same toy `hu_gpt_t` instance the trainer mutates. This is a deliberate scope choice, not a shortcut.
+**Decision:** `tests/test_e2e_rl_loop.c` instantiates `hu_dpo_real_huml_create` (or `hu_kto_huml_create` for the KTO variant; or `hu_grpo_huml_create` for the GRPO variant — all three are exercised in separate test functions in the same file) and a mock provider that wraps the same toy `hu_gpt_t` instance the trainer mutates. This is a deliberate scope choice, not a shortcut.
 
 **Why:** The E2E test is answering the question **"did the wiring close end-to-end?"** That is independent of whether real Gemma improves on a real benchmark. Using the toy GPT lets us:
 
@@ -103,7 +103,7 @@ Phase 6 does **not** add a new `human ml *` subcommand. It adds a **new top-leve
 
 ### D2: The demo script (vs E2E test) uses real models, runs locally, and is NEVER in CI
 
-**Decision:** `scripts/demo-rl-closed-loop.sh` invokes `human demo rl-closed-loop` against real Gemma-3-4B-it Q4_K_M (Phase 1) and a real Qwen-2.5-0.5B-Instruct Q4_K_M reward model (Phase 3). It writes evidence to `~/.human/proofs/<YYYY-MM-DD>-<method>-step-<N>/` per spec §8. It runs **locally on Apple Silicon before each release tag**, NEVER in CI. Per spec §14 + spec §6.5 (final paragraph): no paid M-series CI runner for nightly automation; weekly automated reproduction deferred.
+**Decision:** `scripts/demo-rl-loop.sh` invokes `human demo rl-closed-loop` against real Gemma-3-4B-it Q4_K_M (Phase 1) and a real Qwen-2.5-0.5B-Instruct Q4_K_M reward model (Phase 3). It writes evidence to `~/.human/proofs/<YYYY-MM-DD>-<method>-step-<N>/` per spec §8. It runs **locally on Apple Silicon before each release tag**, NEVER in CI. Per spec §14 + spec §6.5 (final paragraph): no paid M-series CI runner for nightly automation; weekly automated reproduction deferred.
 
 **Why:**
 
@@ -128,49 +128,83 @@ Phase 6 does **not** add a new `human ml *` subcommand. It adds a **new top-leve
 ```c
 #ifdef HU_IS_TEST
 typedef struct hu_e2e_closed_loop_input {
-    hu_provider_t *provider;
-    hu_rl_trainer_t *trainer;
+    hu_provider_t      *provider;
+    hu_rl_trainer_t    *trainer;
     hu_dpo_collector_t *collector;
     const hu_reaction_event_t *reaction_events;
-    size_t reaction_event_count;
-    const char *prompt;          /* The single prompt re-chatted before AND after */
-    size_t      prompt_len;
-    const char *adapter_out_path;
+    size_t              reaction_event_count;
+    /* chat_with_system inputs — match the real signature
+     * (include/human/provider.h:207-210). The "prompt" is split into
+     * system + user halves; the test fills both deterministically. */
+    const char *system_prompt;
+    size_t      system_prompt_len;
+    const char *user_message;     /* the single message re-chatted before AND after */
+    size_t      user_message_len;
+    const char *model;
+    size_t      model_len;
+    double      temperature;      /* default 0.0 for deterministic toy GPT */
+    const char *adapter_out_path; /* absolute path under tests/_tmp/ — see LO3 */
     const char *adapter_id;
 } hu_e2e_closed_loop_input_t;
 
 typedef struct hu_e2e_closed_loop_output {
-    char        before_response[4096];
+    /* Heap-allocated response buffers — owned by the output struct,
+     * freed via hu_e2e_closed_loop_output_free. The provider's
+     * chat_with_system signature returns char ** + size_t * (see
+     * include/human/provider.h:207-210), so we keep the same shape
+     * here rather than copying into fixed-size buffers (which would
+     * silently truncate long responses on the demo path that shares
+     * this struct shape via D5 duplication). */
+    char       *before_response;
     size_t      before_response_len;
-    char        after_response[4096];
+    char       *after_response;
     size_t      after_response_len;
     bool        responses_differ;
     double      pairs_consumed;     /* number of preference pairs the trainer actually used */
     int64_t     elapsed_ms;
-    char        adapter_path[1024]; /* echoed back from training */
+    char        adapter_path[1024]; /* echoed back from training (path string, not heap buffer) */
 } hu_e2e_closed_loop_output_t;
 
 /* Test-only synchronous closed-loop runner. Production code uses the
  * existing async hu_lora_training_runner via the scheduler instead.
  *
  * Steps (in order):
- *   1. provider.chat_with_system(prompt) → out.before_response
- *   2. for each reaction_event: hu_reaction_handler_handle_event(event)
- *      → inserts row into collector's dpo_pairs table
+ *   1. provider.chat_with_system(prompt) → out.before_response (heap; caller frees)
+ *   2. hu_reaction_handler_set_collector(collector)
+ *      for each reaction_event: hu_reaction_handler_handle_event(event)
+ *      hu_reaction_handler_set_collector(NULL)
+ *      → inserts rows into collector's dpo_pairs table
  *   3. hu_dpo_pair_count(collector) → assert ≥ N (caller-supplied floor)
- *   4. trainer.vtable->step(...) for K iterations on collected pairs
- *   5. trainer.vtable->save_adapter(adapter_out_path)
- *   6. provider.load_adapter(adapter_out_path, adapter_id)
- *   7. provider.chat_with_system(prompt) → out.after_response
+ *   4. hu_dpo_export(collector, &export) → hu_preference_pair_t array
+ *      trainer.vtable->step(ctx, alloc, pairs, n_pairs, &metrics) for K iters
+ *      hu_dpo_export_free(alloc, &export)
+ *   5. trainer.vtable->save_adapter(ctx, alloc, adapter_out_path)
+ *   6. hu_provider_load_adapter(provider, alloc, adapter_out_path, ...,
+ *      adapter_id, ...). NB: Phase 1's llamacpp_load_adapter
+ *      (src/providers/llamacpp.c:454-455) already calls llama_memory_clear
+ *      + hu_llamacpp_kvcache_reset internally; no extra kv_cache_clear
+ *      call is required (and the vtable has no such field).
+ *   7. provider.chat_with_system(prompt) → out.after_response (heap; caller frees)
  *   8. fill out.responses_differ = (memcmp(before, after, ...) != 0)
  *   9. fill out.pairs_consumed, out.elapsed_ms
  *
  * Returns HU_OK on full traversal, HU_ERR_* on the first failing step.
+ * On HU_OK the caller MUST call hu_e2e_closed_loop_output_free(alloc, &out)
+ * to release before_response / after_response. On error the function frees
+ * whatever it already allocated before returning, so the caller MAY still
+ * call _free unconditionally (it tolerates NULL pointers).
+ *
  * HU_IS_TEST gating means this symbol is NOT in release binaries —
  * binary-size impact is zero in the default release preset.
  */
 hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
+                                  hu_allocator_t *alloc,
                                   hu_e2e_closed_loop_output_t *out);
+
+/* Release heap-allocated buffers inside `out`. Idempotent; safe with
+ * partial-fill outputs from an early-error return. */
+void hu_e2e_closed_loop_output_free(hu_allocator_t *alloc,
+                                    hu_e2e_closed_loop_output_t *out);
 #endif
 ```
 
@@ -185,7 +219,7 @@ hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
 
 **Decision:** The synchronous closed-loop runner exists in two physical locations:
 
-1. `src/agent/lora_training_runner.c` under `#ifdef HU_IS_TEST`, used by `tests/test_e2e_closed_loop.c`. Compiled into `human_tests` only.
+1. `src/agent/lora_training_runner.c` under `#ifdef HU_IS_TEST`, used by `tests/test_e2e_rl_loop.c`. Compiled into `human_tests` only.
 2. `src/ml/cli_demo.c` as `static hu_error_t cli_demo_run_closed_loop(...)`, called from `hu_ml_cli_demo_rl_closed_loop`. Compiled into `human` (release binary) only when `HU_ENABLE_RL_FULL=ON` (i.e. the `rl_sota` preset; default release stays clean). Implementation is copy-pasted from #1, structurally identical.
 
 **Why duplication and not extraction:** AGENTS.md §3 (Rule of Three) — extract after 3 callers, not 2. We have 2 callers and the helper is 9 numbered steps of straight-line orchestration with no branching state. Extraction would require:
@@ -195,6 +229,20 @@ hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
 - A new `HU_ENABLE_*` option to gate the extracted helper.
 
 Each of those costs more than the 80 LOC of duplication. If Phase 7+ adds a third caller (`human demo persona-overlay` or similar that needs the same train→swap→re-chat shape), extract THEN. The duplication is documented in the headers of both files with a back-reference, and `dead-code-finder` (Task 12) is configured to allow the duplication as long as both copies are reachable.
+
+> **ME4 fix — cross-copy version pin (required):** to prevent silent drift between the two copies, BOTH copies define `HU_E2E_LOOP_IMPL_VERSION` and a `_Static_assert` that fires at compile time if a future contributor bumps the version in one copy without bumping the other:
+>
+> ```c
+> /* Both src/agent/lora_training_runner.c (HU_IS_TEST gated) and
+>  * src/ml/cli_demo.c (release-gated). Bump in lock-step. */
+> #define HU_E2E_LOOP_IMPL_VERSION 1
+> _Static_assert(HU_E2E_LOOP_IMPL_VERSION == 1,
+>                "If you bumped HU_E2E_LOOP_IMPL_VERSION in one copy "
+>                "(lora_training_runner.c or cli_demo.c) you MUST bump "
+>                "the matching constant in the other copy. See plan D5 / ME4.");
+> ```
+>
+> The `_Static_assert` references the literal `1` so the diff between the two copies is mechanically detectable by a future contributor (the assert fires when only one copy is bumped to `2` and the other still says `1`, because the assert's compared-against literal differs from the macro value). Compile fails fast; the duplication can no longer drift silently. The duplication is also documented in the leading comment block of each file with the back-reference `/* Phase 6 D5 duplicate — see ME4 */` so `git grep "Phase 6 D5 duplicate"` always surfaces both call sites.
 
 ### D6: Persona-fidelity delta is measured on the **same** held-out 100 prompts pre and post
 
@@ -243,7 +291,7 @@ Each of those costs more than the 80 LOC of duplication. If Phase 7+ adds a thir
     "is this ready to deploy?",
     "..."
   ],
-  "comment": "Synthetic E2E persona — no PII, no real corpus. Generated for tests/test_e2e_closed_loop.c. The communication style is intentionally extreme (lowercase + short + decisive) so the toy GPT moves measurably under 50 reaction signals."
+  "comment": "Synthetic E2E persona — no PII, no real corpus. Generated for tests/test_e2e_rl_loop.c. The communication style is intentionally extreme (lowercase + short + decisive) so the toy GPT moves measurably under 50 reaction signals."
 }
 ```
 
@@ -286,7 +334,15 @@ reproduce.sh
 
 ### D10: Determinism enforcement — three runs of the test produce **byte-identical** adapter SHA-256
 
-**Decision:** Task 8 ships `test_e2e_closed_loop_is_deterministic` which runs `hu_e2e_closed_loop_run` three times in the same test function (with separate `hu_gpt_t` instances for each, all seeded the same way), computes SHA-256 of the resulting `<adapter_path>/lora.bin` byte stream after each run, and asserts all three hashes are byte-identical. Failure of this assertion means we have a hidden source of nondeterminism (RNG not seeded, time-of-day in the manifest, hash-table iteration order, etc.) — we MUST find and fix it before Phase 6 can ship.
+**Decision:** Task 5 ships `test_e2e_closed_loop_deterministic_run1_vs_run2` and `test_e2e_closed_loop_deterministic_run1_vs_run3` (split per LO1 so each test isolates a single comparison) which run `hu_e2e_closed_loop_run` once each (with a fresh `hu_gpt_t` instance per run, all seeded the same way), compute SHA-256 of the resulting `<adapter_path>/lora.bin` byte stream after each run, and assert the hashes are byte-identical. Failure of this assertion means we have a hidden source of nondeterminism (RNG not seeded, time-of-day in the manifest, hash-table iteration order, etc.) — we MUST find and fix it before Phase 6 can ship.
+
+> **HI3 contract (REQUIRED at every call site):** `srand(42)` must be reseeded **immediately before**:
+>
+> - each call to `bootstrap_lower_95` (the bootstrap helper itself also reseeds inside, as a defense-in-depth),
+> - each `hu_gpt_t` initialization (so weight init is reproducible),
+> - each call to `hu_e2e_closed_loop_run` from a determinism test (the `run_one_closed_loop_and_hash` helper in Task 5 does this).
+>
+> Seeding **only** in `set_up_env()` is insufficient: any intervening `rand()` consumer (test framework, libc functions, third-party hash-table iteration) shifts the RNG stream and silently breaks reproducibility on different run compositions. Determinism is per-call, not per-suite.
 
 **Why this is non-negotiable:**
 
@@ -300,18 +356,44 @@ reproduce.sh
 
 ---
 
+## Security
+
+Phase 6 closes a loop that turns external signals (👍/👎 reactions) into gradient updates on a user-owned model. That is a direct **reward-hacking surface**: an adversary who can inject reactions can poison the preference DB, and an adversary who can place a file on disk can poison the loaded adapter. Both must be addressed before the demo ships.
+
+### SEC1 — Reaction signal authenticity (preference-DB poisoning)
+
+The closed loop accepts a reaction event, looks up the assistant message it targets, and writes a `hu_preference_pair_t` row into `dpo_pairs`. If reactions are accepted from any source, an adversary controlling an unverified iMessage handle / Slack workspace member / webhook endpoint can flip the persona's adapter at training time by emitting crafted 👍/👎 streams. Phase 6 MUST gate reaction acceptance on **all** of the following before promoting an adapter:
+
+1. **Verified-user allowlist.** Phase 5 H8 ships the iMessage `access.json` allowlist (`docs/plans/2026-05-11-rl-loop-phase-5-eval-competitive.md` H8). Phase 6's demo + tests refuse to record a preference pair when the reaction's sender is not in the allowlist for that channel. Slack reactions are gated by workspace + channel membership using the existing Phase 2 `hu_channel_slack` allowlist surface; webhook reactions are gated on the signed-payload verification already in `src/channels/meta_common.h`.
+2. **Per-session negative-rate cap.** If more than **30%** of reactions in a single training window are negative, the closed-loop runner logs an `anomaly: high_negative_rate` entry to the evidence dir and (a) the demo's `--require-positive-delta` path refuses to promote the adapter, (b) the deterministic test's `test_e2e_closed_loop_negative_rate_anomaly_recorded` (new in Task 6 step 7) asserts the anomaly fires when the synthetic stream is rebalanced to 35 negative / 15 positive. The cap is a defense against an adversary who only has the ability to inject 👎 (e.g. burner accounts).
+3. **Anomaly logging to evidence dir.** Every gated decision (verified vs unverified sender, negative-rate vs cap) is appended to `~/.human/proofs/<adapter-id>/anomaly_log.jsonl` so a reviewer can audit the decision trail. The schema is `{ ts, channel, sender_hashed, decision, rationale }`; sender id is never logged in plaintext.
+
+Without these three controls, the closed-loop is a direct reward-hacking surface. The deterministic test exercises (1) and (2) with synthetic allowlist and rate-cap fixtures; the demo exercises (3) against the real persona's reactions.
+
+### SEC2 — Adapter file integrity (load-time poisoning)
+
+`save_adapter` writes `lora.bin` to disk; `load_adapter` reads it back. Between those two calls an adversary with filesystem access could swap the file for a hand-crafted adapter that biases the model toward attacker-chosen outputs. Phase 6 MUST:
+
+1. **SHA-256 round-trip verification.** `cli_demo.c::cli_demo_run_closed_loop` computes `hu_sha256` over the bytes returned from `save_adapter` (the canonical post-save read) and pins the digest in `manifest.json::adapter_sha256` BEFORE calling `hu_provider_load_adapter`. Immediately before `load_adapter`, it re-reads the file and recomputes the SHA. If the two digests differ, abort with exit code 3 and write an `anomaly: adapter_sha_mismatch` entry to the evidence dir. The verification uses the same `compute_file_sha256` helper introduced in Task 5 step 1 (ME2 — `hu_sha256` one-shot, not OpenSSL).
+2. **Path validation.** `--out` must resolve under `~/.human/proofs/` (production) or the CMake-anchored `tests/_tmp/proofs/` (tests). Any other prefix is rejected with `HU_ERR_PERMISSION_DENIED` before any file is written. The test path is whitelisted via the `HU_E2E_TMP_ROOT` env var the test harness sets.
+3. **Test pin.** `test_e2e_closed_loop_adapter_sha_mismatch_aborts_swap` (new in Task 6 step 8) tampers with the adapter file between `save_adapter` and `load_adapter` and asserts that the runner returns `HU_ERR_INTEGRITY` and writes the `anomaly_log.jsonl` entry.
+
+The two SEC controls combined turn the closed loop from "anyone who can inject a reaction can move the adapter" into "only verified, rate-limited, integrity-checked signals can move the adapter."
+
+---
+
 ## Risk register
 
 | # | Risk | Severity | Mitigation |
 |---|------|----------|------------|
-| **R1** | **MLX adapter hot-swap during chat causes provider state corruption.** llama.cpp's `llama_adapter_lora_init` + `llama_set_adapters_lora` (Phase 1, `llamacpp.c:425-485`) was tested with cold-loaded adapters. The closed loop hot-swaps mid-session: the *same* `llama_context` that just produced `before_response` then loads a new adapter and produces `after_response`. If the in-flight KV cache is not properly invalidated (or the adapter weights are not properly applied to subsequent forward passes), `after_response` could be garbled, identical to `before_response` (silent no-op), or — worst case — produce a use-after-free in MLX. | High | (a) Phase 1's `llamacpp.c` already calls `llama_kv_cache_clear` on `load_adapter` (verify at Task 0 step 4 — if not, this becomes a Phase 1 bug to fix before Phase 6 starts). (b) The deterministic E2E test in `tests/test_e2e_closed_loop.c` uses a mock provider that DOES NOT have this issue (toy GPT has no KV cache); the test thus pins the wiring but cannot pin this risk. (c) The demo script's first run on real Gemma is the canary — it MUST produce a different `after_response` than `before_response` (Task 11 step 5 asserts this in the demo CLI's exit code). (d) Add `tests/test_llamacpp_lora_hotswap_midsession.c` (NEW in Task 11 step 6) that explicitly does chat→hotswap→chat with the real llama.cpp provider, gated by `HU_HAVE_GEMMA_GGUF=1` so it skips in CI without the model. |
+| **R1** | **MLX adapter hot-swap during chat causes provider state corruption.** llama.cpp's `llama_adapter_lora_init` + `llama_set_adapters_lora` (Phase 1, `llamacpp.c:425-485`) was tested with cold-loaded adapters. The closed loop hot-swaps mid-session: the *same* `llama_context` that just produced `before_response` then loads a new adapter and produces `after_response`. If the in-flight KV cache is not properly invalidated (or the adapter weights are not properly applied to subsequent forward passes), `after_response` could be garbled, identical to `before_response` (silent no-op), or — worst case — produce a use-after-free in MLX. | High | (a) Phase 1's `llamacpp_load_adapter` (`src/providers/llamacpp.c:454-455`) already calls `llama_memory_clear` + `hu_llamacpp_kvcache_reset` internally on every `load_adapter`; verify at Task 0 step 3. The `hu_provider_vtable_t` has NO `kv_cache_clear` field — there is no Phase-6-owned C-side mitigation to add. (b) The deterministic E2E test in `tests/test_e2e_rl_loop.c` uses a mock provider that DOES NOT have this issue (toy GPT has no KV cache); the test thus pins the wiring but cannot pin this risk. (c) The demo script's first run on real Gemma is the canary — it MUST produce a different `after_response` than `before_response` (Task 12 step 3 asserts this via the demo CLI's exit code). (d) `tests/test_llamacpp_lora_hotswap_midsession.c` (NEW in Task 6 step 9) explicitly does chat→hotswap→chat with the real llama.cpp provider, gated by `HU_HAVE_GEMMA_GGUF=1` so it skips in CI without the model. |
 | **R2** | **RM trained on too-narrow data (synthetic reaction stream has only 2 polarities) → RM collapses to constant output.** Phase 3's RM trainer expects diverse Bradley-Terry pairs. Our synthetic 25 👍 + 25 👎 stream produces uniformly-polarized pairs. The RM may overfit to a single feature (e.g. "any token in the chosen-side pile of vocab" → +1) and then provide useless reward signal during the demo's GRPO step. | Medium | (a) Phase 6 does NOT exercise RM training in the deterministic E2E test — DPO is the default path because DPO doesn't need an RM (preference pairs are the supervision). KTO and GRPO branches of the test are separate test functions that use the same 50-pair stream but skip the RM-training step (KTO doesn't need an RM either; GRPO uses the RM as the reward function). (b) The demo script's `--method grpo` path runs `human ml rm-train` on the **same** `dpo_pairs` rows the closed-loop iteration produced, deliberately surfacing the narrow-data limitation in `gate_decision.json`'s rationale field (so the proof artifact records that the RM was trained on a small homogeneous set). (c) DoD §6 default is `--method dpo` for the demo run that produces the win-condition scorecard; KTO and GRPO runs are reported separately so a degenerate RM doesn't tank the headline number. |
-| **R3** | **Demo flakes on small reaction count.** 50 preference pairs may not move real Gemma's persona-fidelity score by ≥ 0.05 absolute points reliably (LoRA on ~16M params trained on 50 pairs is a small signal). | Medium | (a) Demo script defaults to `--reaction-count 200` (4× the spec §11 row 5 floor) and supports `--reaction-count <N>` override for users with smaller corpora. (b) Demo script logs the actual delta + bootstrap CI even when the win-condition fails, so the proof artifact records the honest result. (c) `docs/demos/rl-closed-loop-demo.md` runbook documents the troubleshooting steps if the user's first run misses the threshold (try more reactions, longer training, different `beta` hyperparam — see Task 10 step 4). (d) The DoD's ≥ +0.05 threshold is on the demo's win-condition scorecard (DoD item 6); if the live demo can't hit it on synthetic data we mark Phase 6 NOT done and revisit. |
+| **R3** | **Demo flakes on small reaction count.** 50 preference pairs may not move real Gemma's persona-fidelity score by ≥ 0.05 absolute points reliably (LoRA on ~16M params trained on 50 pairs is a small signal). | Medium | (a) Demo script defaults to `--reaction-count 200` (4× the spec §11 row 5 floor) and supports `--reaction-count <N>` override for users with smaller corpora. (b) Demo script logs the actual delta + bootstrap CI even when the win-condition fails, so the proof artifact records the honest result. (c) `docs/demos/rl-loop-demo.md` runbook documents the troubleshooting steps if the user's first run misses the threshold (try more reactions, longer training, different `beta` hyperparam — see Task 10 step 4). (d) The DoD's ≥ +0.05 threshold is on the demo's win-condition scorecard (DoD item 6); if the live demo can't hit it on synthetic data we mark Phase 6 NOT done and revisit. |
 | **R4** | **Persona-fidelity delta noise too high to detect a 5% real signal.** Bootstrap CI on 100 prompts × per-prompt fidelity score may have width ≥ 0.10 (i.e. ±0.05 on the mean), making the lower-95% CI cross zero even when the point estimate is +0.05. | Medium | (a) Use 1000 bootstrap resamples (standard for production-grade bootstrap CIs; spec §10 risk #8). (b) Use stratified resampling by prompt category if `tests/fixtures/lora_baseline_persona_v2_responses.json` exposes categories; otherwise plain percentile bootstrap. (c) Report both point estimate AND 95% CI in `eval_delta.json`; the DoD test (Task 11) checks BOTH `delta_mean ≥ 0.05` AND `lower_95_ci > 0`. (d) If width is too high, increase the held-out set from 100 → 200 prompts (would require extending Phase 5's fixture; documented as a future enhancement, NOT a Phase 6 blocker). |
-| **R5** | **HUML adapter is meaningless for real chat (toy GPT semantics ≠ Gemma semantics).** A reviewer might run the deterministic E2E test, see the assertion pass, and assume the closed loop also works on real Gemma. It does not — that requires the demo. | Medium | (a) `tests/test_e2e_closed_loop.c` includes a top-of-file comment block (Task 4 step 1) explicitly stating: "This test pins the WIRING. It does NOT pin the QUALITY of the resulting adapter on a real model. For real-Gemma proof, see `scripts/demo-rl-closed-loop.sh` and `docs/demos/rl-closed-loop-demo.md`." (b) `human demo rl-closed-loop --backend huml` (the toy backend) prints a banner: `"WARNING: HUML toy GPT — wiring proof only, NOT a real adapter. Use --backend mlx for real-Gemma demo."` (c) Documented in the runbook (Task 10) as the very first FAQ entry. |
+| **R5** | **HUML adapter is meaningless for real chat (toy GPT semantics ≠ Gemma semantics).** A reviewer might run the deterministic E2E test, see the assertion pass, and assume the closed loop also works on real Gemma. It does not — that requires the demo. | Medium | (a) `tests/test_e2e_rl_loop.c` includes a top-of-file comment block (Task 4 step 1) explicitly stating: "This test pins the WIRING. It does NOT pin the QUALITY of the resulting adapter on a real model. For real-Gemma proof, see `scripts/demo-rl-loop.sh` and `docs/demos/rl-loop-demo.md`." (b) `human demo rl-closed-loop --backend huml` (the toy backend) prints a banner: `"WARNING: HUML toy GPT — wiring proof only, NOT a real adapter. Use --backend mlx for real-Gemma demo."` (c) Documented in the runbook (Task 10) as the very first FAQ entry. |
 | **R6** | **Phase 5 `eval_gate` not stable yet — Phase 6 may need to update or stub.** Phase 6 depends on `hu_eval_gate` being callable from the closed-loop runner. If Phase 5 ships with `eval_gate` returning placeholder values or with API drift, the Phase 6 test harness can't compose. | Medium | (a) Phase 6 Task 0 (start gate) verifies Phase 5 deliverables exist + compile clean before any Phase 6 code lands. (b) If `eval_gate` ships as a stub, the Phase 6 closed-loop runner falls back to calling `hu_communication_style_compare_response_sets` directly (Phase 1 of Track D ships this) — strictly less than `eval_gate` because no leaderboard regression check, but enough to gate the test PASS/FAIL. (c) Phase 6's `gate_decision.json` schema is documented in spec §8 and is independent of `eval_gate`'s implementation — the Phase 6 demo writes the JSON regardless of whether `eval_gate` produced it. |
 | **R7** | **ASan slowdown causes 30 s budget violation on slower CI runners.** GitHub Actions Linux runners are not as fast as M2; ASan-instrumented toy GPT × 50 steps × 100 fidelity-scored prompts may push past 30 s. | Low | (a) Profile early: Task 4 step 6 includes a wall-clock measurement (`getrusage` or `clock_gettime(CLOCK_MONOTONIC)`) and asserts `elapsed_ms ≤ 30_000`. If the assertion fires, Task 4's step 7 reduces fixture sizes proportionally (50 → 25 reactions, 100 → 50 held-out prompts) and re-runs. (b) The 30 s budget is for the single `test_e2e_closed_loop_dpo_shows_measurable_response_change` test function — other test functions in the same file (KTO, GRPO, determinism) each have their own budget. The `--suite=E2E-closed-loop` selector lets developers run just this suite during iteration. (c) If after fixture trimming the budget still slips, document the actual elapsed_ms in the test, lift the assertion to ≤ 60 s with a TODO referencing this risk, and file a follow-up to investigate (e.g. profile-guided HUML optimizations). |
-| **R8** | **CI runner clock drift / rusage nondeterminism corrupts `manifest.json`.** Spec §8's `manifest.json` records training timestamp + hyperparams + base model SHA. If the test embeds wall-clock time into the manifest, Task 8's byte-identical-SHA assertion (D10) will fail. | Low | (a) Test path uses `HU_E2E_FIXED_TIMESTAMP="2026-05-12T00:00:00Z"` env var (set in `test_e2e_closed_loop.c::set_up_env`) to override `time(NULL)` calls in the manifest writer. The manifest writer reads this env var via `getenv` and uses it instead of real time when set. (b) Demo path does NOT set the env var → real timestamps → real evidence dirs. (c) Test asserts SHA of `manifest.json` matches a committed expected value pinned in the test source (regenerate-on-fail flow documented in test comment). |
+| **R8** | **CI runner clock drift / rusage nondeterminism corrupts `manifest.json`.** Spec §8's `manifest.json` records training timestamp + hyperparams + base model SHA. If the test embeds wall-clock time into the manifest, Task 8's byte-identical-SHA assertion (D10) will fail. | Low | (a) Test path uses `HU_E2E_FIXED_TIMESTAMP="2026-05-12T00:00:00Z"` env var (set in `test_e2e_rl_loop.c::set_up_env`) to override `time(NULL)` calls in the manifest writer. The manifest writer reads this env var via `getenv` and uses it instead of real time when set. (b) Demo path does NOT set the env var → real timestamps → real evidence dirs. (c) Test asserts SHA of `manifest.json` matches a committed expected value pinned in the test source (regenerate-on-fail flow documented in test comment). |
 
 ---
 
@@ -321,12 +403,12 @@ These are the failure modes most likely to surface during Phase 6 implementation
 
 | # | Failure mode | Why it happens | Test pin |
 |---|---|---|---|
-| **F1** | **Closed-loop step doesn't propagate adapter to next chat.** The provider holds stale weights — `chat_with_system` returns the same response after the swap because the adapter never actually applied. | `hu_provider_load_adapter` returned `HU_OK` but the underlying `llama_set_adapters_lora` was a no-op; OR the provider's vtable points to a stale `chat_with_system` that pre-loaded weights at startup; OR mock provider's `chat_with_system` function ignores the loaded adapter. | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_provider_after_response_differs_from_before` — explicit `HU_ASSERT_NEQ(memcmp(out.before_response, out.after_response, ...), 0)` after `hu_e2e_closed_loop_run` returns. Uses MOCK provider (the synthetic deterministic one) so the test failure isolates "the wiring asks the provider for a re-chat after swap" from "the real llama.cpp does the right thing." |
-| **F2** | **Reaction event gets dropped between channel and preference DB.** Emits `hu_reaction_event_t`, `hu_reaction_handler_handle_event` returns `HU_OK`, but no row appears in `dpo_pairs`. | Race between event emit and SQLite commit; OR `hu_reaction_handler_handle_event` silently drops events with unknown target (Phase 2 R4 mitigation: spec'd to drop silently, but in the closed-loop case ALL events should have known targets); OR collector's pair-insert is conditional on a flag the test forgot to set. | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs` — emits 50 reactions, calls `hu_dpo_pair_count(collector, &n)`, asserts `n == 50`. Plus checks each row's `source` field is `"e2e_synthetic"` (the Phase 6 fixture's source tag). |
-| **F3** | **eval_gate's bootstrap CI too wide on small N.** 50 reaction signals + 100 held-out prompts produces a per-prompt delta variance large enough that lower-95-CI < 0 even when point estimate is positive. The win-condition test passes on point estimate but fails the CI gate. | Per-prompt fidelity score has high variance because the toy GPT is small; OR the bootstrap resampling is naive and not stratified; OR the CI implementation uses the wrong percentiles. | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_bootstrap_ci_lower_bound_is_positive` — runs the full closed-loop iteration and asserts `lower_95_ci > 0` on the per-prompt delta distribution. If this fires, the test message includes both the point estimate and the CI bounds so the failure is immediately diagnosable. |
-| **F4** | **Demo run nondeterministic across machines.** Two reviewers run `scripts/demo-rl-closed-loop.sh` on identical M2 + identical Gemma checkpoint → produce different scorecard numbers. | MLX kernel scheduling float-order on parallel matmul; OR llama.cpp Metal sampling temperature noise; OR `time(NULL)` in the adapter id; OR Python venv version skew. | Acknowledged-by-design (D10 — only the deterministic E2E test asserts byte-identical hashes; demo cannot). Demo runbook (`docs/demos/rl-closed-loop-demo.md`, Task 10) documents this explicitly and provides expected-range bands for the win-condition numbers (e.g. "delta should be in [0.05, 0.15] on the synthetic corpus") rather than exact values. Reviewers comparing absolute numbers across machines is a documentation bug, not a test failure. |
-| **F5** | **Adapter hot-swap corrupts in-flight KV cache → garbled next response.** `before_response` was generated with KV cache populated; the swap clears the adapter but maybe not the cache; `after_response` decodes against new weights with stale KV → token soup. | llama.cpp's `llama_set_adapters_lora` does NOT clear the KV cache (per llama.cpp source — adapter changes are applied to subsequent forwards but cached attention states from before the swap are now mis-attributed). | `tests/test_llamacpp_lora_hotswap_midsession.c` (NEW in Task 11 step 6, gated by `HU_HAVE_GEMMA_GGUF=1` so it skips in CI without the model). Asserts `after_response` is non-empty, contains no NUL bytes mid-stream, and decodes to UTF-8. The test demonstrates the failure mode and pins the fix: `hu_e2e_closed_loop_run` MUST call `provider->vtable->kv_cache_clear` (existing Phase 1 surface) between the adapter load and the second `chat_with_system`. The test fails if either `hu_e2e_closed_loop_run` skips the clear OR if `kv_cache_clear` is missing from the provider. |
-| **F6** | **Trainer no-ops because pending signals buffer empty when scheduled.** Production async path: reaction events arrive, get queued in `hu_learner_pending_drain`, scheduler wakes the lora-training-runner callback, callback drains 0 events because the events were never enqueued (race between `hu_reaction_handler_handle_event` and `hu_learner_bridge_emit_*`). | The reaction handler writes to `dpo_pairs` SQLite directly but the learner-bridge is a separate in-memory queue; if Phase 6's closed-loop wiring forgets to ALSO enqueue into the learner-bridge, the async runner will never see the events. | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_async_path_drains_pending_signals_after_reactions` — runs the closed loop via the ASYNC path (`hu_lora_training_runner` registered with a stub scheduler that fires once after reactions are emitted) instead of the synchronous `hu_e2e_closed_loop_run`. Asserts the runner sees `n > 0` events to drain. This pins the contract that Phase 2's reaction handler MUST also call `hu_learner_bridge_emit_*` when running in production — the test fails if the async-path enqueue is missing. |
+| **F1** | **Closed-loop step doesn't propagate adapter to next chat.** The provider holds stale weights — `chat_with_system` returns the same response after the swap because the adapter never actually applied. | `hu_provider_load_adapter` returned `HU_OK` but the underlying `llama_set_adapters_lora` was a no-op; OR the provider's vtable points to a stale `chat_with_system` that pre-loaded weights at startup; OR mock provider's `chat_with_system` function ignores the loaded adapter. | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_provider_after_response_differs_from_before` — explicit `HU_ASSERT_NEQ(memcmp(out.before_response, out.after_response, ...), 0)` after `hu_e2e_closed_loop_run` returns. Uses MOCK provider (the synthetic deterministic one) so the test failure isolates "the wiring asks the provider for a re-chat after swap" from "the real llama.cpp does the right thing." |
+| **F2** | **Reaction event gets dropped between channel and preference DB.** Emits `hu_reaction_event_t`, `hu_reaction_handler_handle_event` returns `HU_OK`, but no row appears in `dpo_pairs`. | Race between event emit and SQLite commit; OR `hu_reaction_handler_handle_event` silently drops events with unknown target (Phase 2 R4 mitigation: spec'd to drop silently, but in the closed-loop case ALL events should have known targets); OR collector's pair-insert is conditional on a flag the test forgot to set. | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs` — emits 50 reactions, calls `hu_dpo_pair_count(collector, &n)`, asserts `n == 50`. Plus checks each row's `source` field is `"e2e_synthetic"` (the Phase 6 fixture's source tag). |
+| **F3** | **eval_gate's bootstrap CI too wide on small N.** 50 reaction signals + 100 held-out prompts produces a per-prompt delta variance large enough that lower-95-CI < 0 even when point estimate is positive. The win-condition test passes on point estimate but fails the CI gate. | Per-prompt fidelity score has high variance because the toy GPT is small; OR the bootstrap resampling is naive and not stratified; OR the CI implementation uses the wrong percentiles. | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_bootstrap_ci_lower_bound_is_positive` — runs the full closed-loop iteration and asserts `lower_95_ci > 0` on the per-prompt delta distribution. If this fires, the test message includes both the point estimate and the CI bounds so the failure is immediately diagnosable. |
+| **F4** | **Demo run nondeterministic across machines.** Two reviewers run `scripts/demo-rl-loop.sh` on identical M2 + identical Gemma checkpoint → produce different scorecard numbers. | MLX kernel scheduling float-order on parallel matmul; OR llama.cpp Metal sampling temperature noise; OR `time(NULL)` in the adapter id; OR Python venv version skew. | Acknowledged-by-design (D10 — only the deterministic E2E test asserts byte-identical hashes; demo cannot). Demo runbook (`docs/demos/rl-loop-demo.md`, Task 10) documents this explicitly and provides expected-range bands for the win-condition numbers (e.g. "delta should be in [0.05, 0.15] on the synthetic corpus") rather than exact values. Reviewers comparing absolute numbers across machines is a documentation bug, not a test failure. |
+| **F5** | **Adapter hot-swap corrupts in-flight KV cache → garbled next response.** `before_response` was generated with KV cache populated; the swap loads the new adapter but the cache from the prior decode is now mis-attributed; `after_response` could be token soup. | llama.cpp's `llama_set_adapters_lora` does NOT, by itself, clear the KV cache — adapter changes are applied to subsequent forwards but cached attention states from before the swap remain. | **Fixed by Phase 1**, not Phase 6: `src/providers/llamacpp.c::llamacpp_load_adapter` (lines 454-455) already calls `llama_memory_clear` + `hu_llamacpp_kvcache_reset` internally before returning from `load_adapter`. The `hu_provider_vtable_t` has **no** `kv_cache_clear` field (`include/human/provider.h:205-257`), so `hu_e2e_closed_loop_run` does not — and cannot — invoke one. The R1/F5 risk is owned by Phase 1's load_adapter implementation; Task 0 step 3 verifies the call sites still exist. `tests/test_llamacpp_lora_hotswap_midsession.c` (NEW in Task 6 step 9, gated by `HU_HAVE_GEMMA_GGUF=1` so it skips in CI without the model) asserts `after_response` is non-empty, contains no NUL bytes mid-stream, decodes to UTF-8, and differs from `before_response` — i.e. exercises the post-swap correctness end-to-end against real llama.cpp without re-implementing the KV-clear logic in Phase 6. |
+| **F6** | **Trainer no-ops because pending signals buffer empty when scheduled.** Production async path: reaction events arrive, get queued in `hu_learner_pending_drain`, scheduler wakes the lora-training-runner callback, callback drains 0 events because the events were never enqueued (race between `hu_reaction_handler_handle_event` and `hu_learner_bridge_emit_*`). | The reaction handler writes to `dpo_pairs` SQLite directly but the learner-bridge is a separate in-memory queue; if Phase 6's closed-loop wiring forgets to ALSO enqueue into the learner-bridge, the async runner will never see the events. | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_async_path_drains_pending_signals_after_reactions` — runs the closed loop via the ASYNC path (`hu_lora_training_runner` registered with a stub scheduler that fires once after reactions are emitted) instead of the synchronous `hu_e2e_closed_loop_run`. Asserts the runner sees `n > 0` events to drain. This pins the contract that Phase 2's reaction handler MUST also call `hu_learner_bridge_emit_*` when running in production — the test fails if the async-path enqueue is missing. |
 
 ---
 
@@ -336,11 +418,11 @@ Per spec §8, every adapter promotion writes `~/.human/proofs/<adapter-id>/`. Ph
 
 | # | Field | Where measured | Test pin |
 |---|---|---|---|
-| **E1** | **Persona-fidelity score, before / after, on the same held-out 100 prompts.** Mean of `hu_communication_style_fidelity_score(target, response_i, len_i)` for `i ∈ [0, 100)` on the same prompts pre and post. Includes 95% bootstrap CI on the per-prompt delta. | `eval_before.json` + `eval_after.json` + `eval_delta.json`. Schema: `{ mean: float, min: float, max: float, n: int, lower_95_ci: float, upper_95_ci: float, per_prompt_scores: float[100] }`. | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_bootstrap_ci_lower_bound_is_positive` (F3 pin) + `test_e2e_closed_loop_persona_fidelity_delta_meets_threshold` (Task 11 step 4). |
-| **E2** | **Style match on 4 axes (formality / hedging / decision-style / vocab), before / after.** Per-axis breakdown of the fidelity score, surfacing whether the adapter improved on all axes uniformly or only on one. Phase 5 added the 4th axis; Phase 6 reads all four. | `eval_before.json::axes` + `eval_after.json::axes` (per-axis float array of length 4); `eval_delta.json::axes` (per-axis float deltas). | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_axis_breakdown_present_in_evidence_dir` (Task 9 step 4). |
-| **E3** | **Latency p95, before / after.** Mean + p95 + p99 of `chat_with_system` wall-clock per response, measured across the same 100 held-out prompts. Win-condition: p95 regression ≤ 2% (DoD item 7). | `eval_before.json::latency_ms` + `eval_after.json::latency_ms` (`{ mean: float, p50: float, p95: float, p99: float, n: int }`); `eval_delta.json::latency_p95_ratio` (after/before). | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_latency_regression_within_2_percent` (Task 11 step 5). The toy GPT path bypasses real timing and asserts the schema is populated; the demo path measures real wall-clock. |
-| **E4** | **Number of preference pairs consumed.** Count of rows in `dpo_pairs` that the trainer actually trained on (= the `n` returned from `hu_dpo_pair_count` AFTER the closed-loop iteration; should equal the number of synthetic reactions emitted, modulo Phase 2's silent-drop policy for unknown targets). | `manifest.json::preference_pairs_consumed` (int) + `manifest.json::reactions_emitted` (int); the difference is the silent-drop count. | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_evidence_manifest_records_pair_count` (Task 9 step 4). |
-| **E5** | **Wall-clock time for full closed-loop iteration.** End-to-end seconds from `chat → reactions → train → swap → re-chat`. Reported in the manifest so reviewers can compare across hardware. | `manifest.json::elapsed_ms` (int64). | `tests/test_e2e_closed_loop.c::test_e2e_closed_loop_completes_within_30s_under_asan` (Task 4 step 6). |
+| **E1** | **Persona-fidelity score, before / after, on the same held-out 100 prompts.** Mean of `hu_communication_style_fidelity_score(target, response_i, len_i)` for `i ∈ [0, 100)` on the same prompts pre and post. Includes 95% bootstrap CI on the per-prompt delta. | `eval_before.json` + `eval_after.json` + `eval_delta.json`. Schema: `{ mean: float, min: float, max: float, n: int, lower_95_ci: float, upper_95_ci: float, per_prompt_scores: float[100] }`. | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_bootstrap_ci_lower_bound_is_positive` (F3 pin) + `test_e2e_closed_loop_persona_fidelity_delta_meets_threshold` (Task 11 step 4). |
+| **E2** | **Style match on 4 axes (formality / hedging / decision-style / vocab), before / after.** Per-axis breakdown of the fidelity score, surfacing whether the adapter improved on all axes uniformly or only on one. Phase 5 added the 4th axis; Phase 6 reads all four. | `eval_before.json::axes` + `eval_after.json::axes` (per-axis float array of length 4); `eval_delta.json::axes` (per-axis float deltas). | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_axis_breakdown_present_in_evidence_dir` (Task 9 step 4). |
+| **E3** | **Latency p95, before / after.** Mean + p95 + p99 of `chat_with_system` wall-clock per response, measured across the same 100 held-out prompts. Win-condition: p95 regression ≤ 2% (DoD item 7). | `eval_before.json::latency_ms` + `eval_after.json::latency_ms` (`{ mean: float, p50: float, p95: float, p99: float, n: int }`); `eval_delta.json::latency_p95_ratio` (after/before). | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_latency_regression_within_2_percent` (Task 11 step 5). The toy GPT path bypasses real timing and asserts the schema is populated; the demo path measures real wall-clock. |
+| **E4** | **Number of preference pairs consumed.** Count of rows in `dpo_pairs` that the trainer actually trained on (= the `n` returned from `hu_dpo_pair_count` AFTER the closed-loop iteration; should equal the number of synthetic reactions emitted, modulo Phase 2's silent-drop policy for unknown targets). | `manifest.json::preference_pairs_consumed` (int) + `manifest.json::reactions_emitted` (int); the difference is the silent-drop count. | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_evidence_manifest_records_pair_count` (Task 9 step 4). |
+| **E5** | **Wall-clock time for full closed-loop iteration.** End-to-end seconds from `chat → reactions → train → swap → re-chat`. Reported in the manifest so reviewers can compare across hardware. | `manifest.json::elapsed_ms` (int64). | `tests/test_e2e_rl_loop.c::test_e2e_closed_loop_completes_within_30s_under_asan` (Task 4 step 6). |
 
 The full evidence directory schema is the union of E1–E5 plus the spec §8 mandatory files (`delta_responses.md`, `gate_decision.json`, `adversarial_review.md`, `reproduce.sh`). Phase 6 ships the emission code for ALL of these in `src/ml/cli_demo.c::write_evidence_dir`.
 
@@ -352,14 +434,14 @@ The full evidence directory schema is the union of E1–E5 plus the spec §8 man
 
 | Path | LOC | Responsibility |
 |------|-----|----------------|
-| `tests/test_e2e_closed_loop.c` | ~600 | The canonical deterministic E2E test. Test functions: `test_e2e_closed_loop_dpo_shows_measurable_response_change`, `test_e2e_closed_loop_kto_shows_measurable_response_change`, `test_e2e_closed_loop_grpo_shows_measurable_response_change` (each gated as appropriate), `test_e2e_closed_loop_provider_after_response_differs_from_before` (F1 pin), `test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs` (F2 pin), `test_e2e_closed_loop_bootstrap_ci_lower_bound_is_positive` (F3 pin), `test_e2e_closed_loop_async_path_drains_pending_signals_after_reactions` (F6 pin), `test_e2e_closed_loop_completes_within_30s_under_asan` (R7 pin), `test_e2e_closed_loop_is_deterministic` (D10 pin), `test_e2e_closed_loop_evidence_manifest_records_pair_count` (E4 pin), `test_e2e_closed_loop_axis_breakdown_present_in_evidence_dir` (E2 pin), `test_e2e_closed_loop_latency_regression_within_2_percent` (E3 pin), `test_e2e_closed_loop_persona_fidelity_delta_meets_threshold` (DoD item 6 pin). Plus a single `void run_e2e_closed_loop_tests(void)` runner that calls them in order with `HU_TEST_SUITE("E2E-closed-loop")` declared INSIDE the function body (not at file scope — see Critical Rules below). |
-| `tests/fixtures/e2e_persona_seed.json` | ~150 lines | Synthetic persona definition (D7) + 100 held-out prompts + 50 sample style fingerprints. Schema documented in the file's `$schema` field; reader is `tests/test_e2e_closed_loop.c::load_persona_seed`. |
-| `tests/fixtures/e2e_reaction_signals.json` | ~250 lines | Synthetic reaction stream (D8) — exactly 50 events, 25 positive (`{"kind": "love", "polarity": 1, "target": {...}}`) + 25 negative (`{"kind": "dislike", "polarity": -1, "target": {...}}`). Each event has a `target` referencing a prompt+response pair so `hu_reaction_handler_handle_event` can look up the chosen/rejected text. Reader is `tests/test_e2e_closed_loop.c::load_reaction_signals`. |
+| `tests/test_e2e_rl_loop.c` | ~700 | The canonical deterministic E2E test. Test functions: `test_e2e_closed_loop_dpo_shows_measurable_response_change`, `test_e2e_closed_loop_kto_shows_measurable_response_change`, `test_e2e_closed_loop_grpo_shows_measurable_response_change` (each gated as appropriate), `test_e2e_closed_loop_provider_after_response_differs_from_before` (F1 pin), `test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs` (F2 pin), `test_e2e_closed_loop_bootstrap_ci_lower_bound_is_positive` (F3 pin), `test_e2e_closed_loop_async_path_drains_pending_signals_after_reactions` (F6 pin), `test_e2e_closed_loop_completes_within_30s_under_asan` (R7 pin), `test_e2e_closed_loop_deterministic_run1_vs_run2` + `test_e2e_closed_loop_deterministic_run1_vs_run3` (D10 pin, LO1-split), `test_e2e_closed_loop_evidence_manifest_records_pair_count` (E4 pin), `test_e2e_closed_loop_axis_breakdown_present_in_evidence_dir` (E2 pin), `test_e2e_closed_loop_latency_regression_within_2_percent` (E3 pin), `test_e2e_closed_loop_persona_fidelity_delta_meets_threshold` (DoD item 6 pin), `test_e2e_closed_loop_negative_rate_anomaly_recorded` (SEC1 pin), `test_e2e_closed_loop_adapter_sha_mismatch_aborts_swap` (SEC2 pin). Plus a single `void run_e2e_closed_loop_tests(void)` runner that calls them in order with `HU_TEST_SUITE("E2E-closed-loop")` declared INSIDE the function body (not at file scope — see Critical Rules below). |
+| `tests/fixtures/e2e_persona_seed.json` | ~150 lines | Synthetic persona definition (D7) + 100 held-out prompts + 50 sample style fingerprints. Schema documented in the file's `$schema` field; reader is `tests/test_e2e_rl_loop.c::load_persona_seed`. |
+| `tests/fixtures/e2e_reaction_signals.json` | ~250 lines | Synthetic reaction stream (D8) — exactly 50 events, 25 positive (`{"kind": "love", "polarity": 1, "target": {...}}`) + 25 negative (`{"kind": "dislike", "polarity": -1, "target": {...}}`). Each event has a `target` referencing a prompt+response pair so `hu_reaction_handler_handle_event` can look up the chosen/rejected text. Reader is `tests/test_e2e_rl_loop.c::load_reaction_signals`. |
 | `src/ml/cli_demo.c` | ~400 | `hu_ml_cli_demo_rl_closed_loop` — argv parser (`--persona`, `--method {dpo,kto,grpo}`, `--backend {huml,mlx}`, `--reaction-count N`, `--prompt P`, `--out <evidence-dir>`, `--require-positive-delta`), provider creation (Phase 1 llamacpp factory or HUML mock), trainer creation (Phase 2/3/4 factories), reaction synthesis (or live load from a `--reactions <jsonl>` file), the static `cli_demo_run_closed_loop` (D5 duplicate of `hu_e2e_closed_loop_run`), evidence-dir writer (`write_evidence_dir` emits all 9 spec §8 files), exit-code mapping (0 = win-condition met, 2 = win-condition missed, 3 = harness error). |
 | `include/human/ml/cli_demo.h` | ~30 | Public declaration of `hu_ml_cli_demo_rl_closed_loop(int argc, const char **argv, hu_allocator_t *alloc)` and the `hu_ml_cli_demo_subcommand_dispatch` shim called from `cmd_demo` in `src/main.c`. Header guards `HU_ML_CLI_DEMO_H`. |
-| `scripts/demo-rl-closed-loop.sh` | ~200 | Bash demo runner. Verifies prerequisites (`bash scripts/fetch-gemma.sh`, `bash scripts/fetch-qwen-rm.sh`, `python3 -c "from mlx_lm_lora.trainer.dpo_trainer import train_dpo"`), prompts user for confirmation, runs `./build-rl-sota/human demo rl-closed-loop --persona "${PERSONA:-seth}" --method "${METHOD:-dpo}" --backend mlx --reaction-count "${REACTION_COUNT:-200}" --prompt "${PROMPT:-what should I do first?}" --out ~/.human/proofs/$(date -u +%Y-%m-%d)-${METHOD:-dpo}-step-$$ --require-positive-delta`, prints the evidence dir path, opens the runbook in `$PAGER` (or `cat`s it). Honors `DRY_RUN=1` for runbook validation in CI without invoking `human`. |
-| `docs/demos/rl-closed-loop-demo.md` | ~400 lines | The runbook. YAML frontmatter (required by `scripts/check-docs-frontmatter.sh`) + sections: 1. Prerequisites (Apple Silicon + macOS 13+ + Python 3.11+ venv with mlx-lm + mlx-lm-lora + 5 GB free disk for GGUF). 2. One-command setup (clone, fetch models, build `rl_sota` preset). 3. Running the demo (env vars, expected output, expected wall-clock ~3 min). 4. Reading the evidence dir (file-by-file walkthrough of all 9 spec §8 files). 5. Troubleshooting (R3 mitigation: smaller delta? try more reactions; F4: numbers don't match across machines? expected, document). 6. Reproducibility recipe (mirrors spec §14 verbatim). 7. FAQ (R5: HUML vs MLX; F4: nondeterminism; "can I run this in CI?" → no, see §6.5). 8. Citations (spec, prior phase plans, Apple FM docs, mlx-lm-lora). |
-| `tests/_tmp/.gitkeep` | 0 | Empty file pinning the per-test temp directory (test code writes evidence to `tests/_tmp/proofs/<test-id>/` to keep the user's `~/.human/` clean during test runs). `.gitignore` adds `tests/_tmp/proofs/` (everything except `.gitkeep`). |
+| `scripts/demo-rl-loop.sh` | ~200 | Bash demo runner. Verifies prerequisites (`bash scripts/fetch-gemma.sh`, `bash scripts/fetch-qwen-rm.sh`, `python3 -c "from mlx_lm_lora.trainer.dpo_trainer import train_dpo"`), prompts user for confirmation, runs `./build-rl-sota/human demo rl-closed-loop --persona "${PERSONA:-seth}" --method "${METHOD:-dpo}" --backend mlx --reaction-count "${REACTION_COUNT:-200}" --prompt "${PROMPT:-what should I do first?}" --out ~/.human/proofs/$(date -u +%Y-%m-%d)-${METHOD:-dpo}-step-$$ --require-positive-delta`, prints the evidence dir path, opens the runbook in `$PAGER` (or `cat`s it). Honors `DRY_RUN=1` for runbook validation in CI without invoking `human`. |
+| `docs/demos/rl-loop-demo.md` | ~400 lines | The runbook. YAML frontmatter (required by `scripts/check-docs-frontmatter.sh`) + sections: 1. Prerequisites (Apple Silicon + macOS 13+ + Python 3.11+ venv with mlx-lm + mlx-lm-lora + 5 GB free disk for GGUF). 2. One-command setup (clone, fetch models, build `rl_sota` preset). 3. Running the demo (env vars, expected output, expected wall-clock ~3 min). 4. Reading the evidence dir (file-by-file walkthrough of all 9 spec §8 files). 5. Troubleshooting (R3 mitigation: smaller delta? try more reactions; F4: numbers don't match across machines? expected, document). 6. Reproducibility recipe (mirrors spec §14 verbatim). 7. FAQ (R5: HUML vs MLX; F4: nondeterminism; "can I run this in CI?" → no, see §6.5). 8. Citations (spec, prior phase plans, Apple FM docs, mlx-lm-lora). |
+| `tests/_tmp/.gitkeep` | 0 | Empty file pinning the per-test temp directory (test code writes evidence to `tests/_tmp/proofs/<test-id>/` to keep the user's `~/.human/` clean during test runs). **LO3 fix:** the absolute path is resolved at runtime via `hu_e2e_tmp_root()` (Phase 6 helper that reads the `HU_E2E_TMP_ROOT` env var CMake sets to `${CMAKE_BINARY_DIR}/tests/_tmp` via `set_tests_properties(... ENVIRONMENT ...)`), so tests work regardless of CWD. `hu_e2e_tmp_path(buf, n, "proofs/dpo-step-0001/lora.bin")` concatenates root + relative tail. `.gitignore` adds `tests/_tmp/proofs/` (everything except `.gitkeep`). |
 
 ### Modified files (4):
 
@@ -395,7 +477,7 @@ endif()
 # test itself uses HU_SKIP_IF to gate on rl_sota preset features when
 # needed, so the binary remains buildable under the dev preset).
 list(APPEND HU_TEST_SOURCES
-  tests/test_e2e_closed_loop.c
+  tests/test_e2e_rl_loop.c
 )
 
 # Phase 6 — fixture data installed under build/tests/fixtures/ so the
@@ -411,6 +493,22 @@ endforeach()
 
 # Phase 6 — make the test-only header available to tests/ TU only.
 target_include_directories(human_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests/include)
+
+# Phase 6 LO3 — anchor the per-test scratch dir to an ABSOLUTE path
+# under the build tree so tests are CWD-independent. The test reads
+# the env var via hu_e2e_tmp_root() and concatenates relative tails
+# via hu_e2e_tmp_path(); CMake creates the dir up front. The test
+# target name in this tree is `unit_tests` (see CMakeLists.txt
+# line 3218: add_test(NAME unit_tests COMMAND human_tests)) so we
+# pin properties on that ctest entry.
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/tests/_tmp)
+set_tests_properties(unit_tests PROPERTIES
+  ENVIRONMENT "HU_E2E_TMP_ROOT=${CMAKE_BINARY_DIR}/tests/_tmp")
+# Direct ./build/human_tests invocation (without ctest) reads the
+# env var from the calling shell; agent-preflight.sh and CI both
+# export it before invoking the binary. The test's hu_e2e_tmp_root()
+# helper falls back to "${CMAKE_BINARY_DIR}-equivalent" baked in via
+# a configure_file-generated header if HU_E2E_TMP_ROOT is unset.
 
 # Phase 6 — gated cross-check that exercises real llama.cpp hot-swap
 # mid-session (R5/F5 pin). Skipped automatically when HU_HAVE_GEMMA_GGUF
@@ -463,7 +561,7 @@ cmake --preset rl_sota && cmake --build --preset rl_sota -j
 ./build-rl-sota/human_tests | tail -3
 ```
 
-Record the pre-Phase-6 pass counts as the baseline; Phase 6 must end at baseline + (number of new test functions in `tests/test_e2e_closed_loop.c`) + 1 (for the gated `tests/test_llamacpp_lora_hotswap_midsession.c`).
+Record the pre-Phase-6 pass counts as the baseline; Phase 6 must end at baseline + (number of new test functions in `tests/test_e2e_rl_loop.c`) + 1 (for the gated `tests/test_llamacpp_lora_hotswap_midsession.c`).
 
 - [ ] **Step 3: Verify llama.cpp hot-swap clears the KV cache (R1)**
 
@@ -481,6 +579,15 @@ rg -n 'hu_eval_gate' src/agent/lora_training_runner.c
 
 If present (likely, per Phase 5's plan): Task 3 of Phase 6 has zero LOC — the close-the-loop wiring is already done.
 If absent: Phase 5 deferred this; Phase 6 Task 3 picks it up. Expand the Task 3 step list at execution time to include the wiring change.
+
+- [ ] **Step 4b: Verify Phase 5 H8 — production reaction-handler registration API exists (HI4)**
+
+```bash
+rg -n 'hu_reaction_handler_register_assistant_message_for_production' \
+   include/human/agent/reaction_handler.h
+```
+
+Expected: at least one match, declared OUTSIDE any `#if HU_IS_TEST` block (the `_for_test` variant already exists at line 63 of that header but is compiled out of release builds, so the demo cannot rely on it). If absent, this is the Phase 5 H8 fix; BLOCK Phase 6 and complete H8 in Phase 5 first. The demo's `synthesize_reactions(n)` pre-registers `(prompt, response)` tuples via this API before emitting reactions — without it, every reaction silently drops in release builds and `hu_dpo_pair_count` returns 0.
 
 - [ ] **Step 5: Branch from Phase 5 tag**
 
@@ -525,7 +632,7 @@ The schema must be self-documenting via `$schema` and field names. The persona m
   "$schema": "https://human.dev/schemas/e2e-persona-seed-v1.json",
   "name": "demo_persona_e2e",
   "version": "1.0.0",
-  "comment": "Synthetic E2E persona — no PII, no real corpus. Generated for tests/test_e2e_closed_loop.c per docs/plans/2026-05-11-rl-loop-phase-6-proof.md D7.",
+  "comment": "Synthetic E2E persona — no PII, no real corpus. Generated for tests/test_e2e_rl_loop.c per docs/plans/2026-05-11-rl-loop-phase-6-proof.md D7.",
   "communication_style": {
     "lowercase_ratio_target": 0.85,
     "abbreviation_density_target": 0.30,
@@ -676,85 +783,149 @@ Inside the existing `#ifdef HU_IS_TEST` block of `src/agent/lora_training_runner
 #ifdef HU_IS_TEST
 #include "hu_e2e_closed_loop.h"   /* test-only header in tests/include/ */
 
+/* Cross-copy version pin — see D5 and ME4 below. If you bump this,
+ * bump the matching constant in src/ml/cli_demo.c::cli_demo_run_closed_loop
+ * in the same commit. */
+#define HU_E2E_LOOP_IMPL_VERSION 1
+_Static_assert(HU_E2E_LOOP_IMPL_VERSION == 1,
+               "If you bumped HU_E2E_LOOP_IMPL_VERSION in one copy "
+               "(lora_training_runner.c or cli_demo.c) you MUST bump "
+               "the matching constant in the other copy. See plan D5 / ME4.");
+
+void hu_e2e_closed_loop_output_free(hu_allocator_t *alloc,
+                                    hu_e2e_closed_loop_output_t *out) {
+    if (!alloc || !out) return;
+    if (out->before_response) {
+        alloc->free(alloc->ctx, out->before_response,
+                    out->before_response_len + 1);
+        out->before_response = NULL;
+        out->before_response_len = 0;
+    }
+    if (out->after_response) {
+        alloc->free(alloc->ctx, out->after_response,
+                    out->after_response_len + 1);
+        out->after_response = NULL;
+        out->after_response_len = 0;
+    }
+}
+
 hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
+                                  hu_allocator_t *alloc,
                                   hu_e2e_closed_loop_output_t *out) {
-    if (!in || !out || !in->provider || !in->trainer || !in->collector
+    if (!in || !alloc || !out || !in->provider || !in->provider->vtable
+        || !in->trainer || !in->trainer->vtable || !in->collector
         || !in->reaction_events || !in->prompt || !in->adapter_out_path
-        || !in->adapter_id)
+        || !in->adapter_id || !in->system_prompt || !in->user_message
+        || !in->model)
         return HU_ERR_INVALID_ARGUMENT;
 
     memset(out, 0, sizeof(*out));
     int64_t t0 = hu_monotonic_ms();
+    hu_error_t err = HU_OK;
+    hu_dpo_export_t export_data = {0};
 
-    /* 1. Pre-swap chat */
-    hu_error_t ce = in->provider->vtable->chat_with_system(
-        in->provider->ctx, NULL, in->prompt, in->prompt_len,
-        out->before_response, sizeof(out->before_response),
-        &out->before_response_len);
-    if (ce != HU_OK) return ce;
+    /* 1. Pre-swap chat — real provider signature (include/human/provider.h:207-210):
+     *   chat_with_system(ctx, alloc, system_prompt, system_prompt_len,
+     *                    message, message_len, model, model_len,
+     *                    temperature, char **out, size_t *out_len)
+     * Provider allocates the response on `alloc`; caller (us) owns + frees. */
+    err = in->provider->vtable->chat_with_system(
+        in->provider->ctx, alloc,
+        in->system_prompt, in->system_prompt_len,
+        in->user_message, in->user_message_len,
+        in->model, in->model_len,
+        in->temperature,
+        &out->before_response, &out->before_response_len);
+    if (err != HU_OK) goto cleanup;
 
-    /* 2. Replay reaction events into the preference store */
+    /* 2. Replay reaction events into the preference store.
+     * hu_reaction_handler_handle_event takes ONE argument (the event);
+     * the target collector is a global set via _set_collector
+     * (include/human/agent/reaction_handler.h:41-43). Without the
+     * setter call, every handle_event returns HU_ERR_NOT_SUPPORTED. */
+    hu_reaction_handler_set_collector(in->collector);
     for (size_t i = 0; i < in->reaction_event_count; i++) {
-        hu_error_t re = hu_reaction_handler_handle_event(
-            &in->reaction_events[i], in->collector);
-        if (re != HU_OK && re != HU_ERR_NOT_FOUND) /* unknown target = silent drop */
-            return re;
+        err = hu_reaction_handler_handle_event(&in->reaction_events[i]);
+        if (err != HU_OK && err != HU_ERR_NOT_FOUND) {
+            hu_reaction_handler_set_collector(NULL);
+            goto cleanup;
+        }
+        err = HU_OK;  /* HU_ERR_NOT_FOUND = silent-drop policy from Phase 2 R4 */
     }
+    hu_reaction_handler_set_collector(NULL);
 
     /* 3. Verify floor */
     size_t pair_count = 0;
     (void)hu_dpo_pair_count(in->collector, &pair_count);
     out->pairs_consumed = (double)pair_count;
-    if (pair_count < 50) return HU_ERR_INVALID_STATE;   /* spec §11 row 5 */
+    if (pair_count < 50) { err = HU_ERR_INVALID_STATE; goto cleanup; }  /* spec §11 row 5 */
 
-    /* 4. Train */
-    hu_dpo_pair_t *pairs = NULL;
-    size_t n = 0;
-    hu_error_t le = hu_dpo_load_pairs(in->collector, &pairs, &n);
-    if (le != HU_OK) return le;
-    hu_rl_batch_t batch = { .pairs = pairs, .n = n };
-    double loss = 0.0;
-    hu_error_t te = in->trainer->vtable->step(in->trainer->ctx, &batch, &loss);
-    hu_dpo_pairs_free(pairs, n);
-    if (te != HU_OK) return te;
+    /* 4. Export collected pairs + train.
+     * hu_dpo_export populates a heap-owned hu_preference_pair_t array
+     * (include/human/ml/dpo.h:69-74); we free via hu_dpo_export_free.
+     * The trainer's step signature is
+     *   step(ctx, alloc, pairs, n_pairs, metrics) — no hu_rl_batch_t.
+     * See include/human/ml/rl_trainer.h:55-58. */
+    err = hu_dpo_export(in->collector, alloc, &export_data);
+    if (err != HU_OK) goto cleanup;
 
-    /* 5. Save adapter */
-    hu_error_t se = in->trainer->vtable->save_adapter(in->trainer->ctx,
-                                                     in->adapter_out_path);
-    if (se != HU_OK) return se;
+    hu_rl_trainer_metrics_t metrics = {0};
+    err = in->trainer->vtable->step(
+        in->trainer->ctx, alloc,
+        export_data.pairs, export_data.count,
+        &metrics);
+    if (err != HU_OK) goto cleanup;
+
+    /* 5. Save adapter — save_adapter signature is (ctx, alloc, path)
+     * per include/human/ml/rl_trainer.h:59. */
+    err = in->trainer->vtable->save_adapter(
+        in->trainer->ctx, alloc,
+        in->adapter_out_path);
+    if (err != HU_OK) goto cleanup;
     snprintf(out->adapter_path, sizeof(out->adapter_path), "%s",
              in->adapter_out_path);
 
-    /* 6. Hot-swap */
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_error_t lae = hu_provider_load_adapter(
-        in->provider, &alloc, in->adapter_out_path,
+    /* 6. Hot-swap. Phase 1's llamacpp_load_adapter
+     * (src/providers/llamacpp.c:454-455) already calls llama_memory_clear
+     * + hu_llamacpp_kvcache_reset internally; no extra C-side action
+     * needed. The hu_provider_vtable_t has NO `kv_cache_clear` field
+     * (verify against include/human/provider.h:205-257). */
+    err = hu_provider_load_adapter(
+        in->provider, alloc, in->adapter_out_path,
         strlen(in->adapter_out_path), in->adapter_id, strlen(in->adapter_id));
-    if (lae != HU_OK) return lae;
+    if (err != HU_OK) goto cleanup;
 
-    /* F5 mitigation: clear KV cache after the swap */
-    if (in->provider->vtable->kv_cache_clear)
-        in->provider->vtable->kv_cache_clear(in->provider->ctx);
-
-    /* 7. Post-swap chat — same prompt */
-    hu_error_t ce2 = in->provider->vtable->chat_with_system(
-        in->provider->ctx, NULL, in->prompt, in->prompt_len,
-        out->after_response, sizeof(out->after_response),
-        &out->after_response_len);
-    if (ce2 != HU_OK) return ce2;
+    /* 7. Post-swap chat — same prompt, same signature as step 1. */
+    err = in->provider->vtable->chat_with_system(
+        in->provider->ctx, alloc,
+        in->system_prompt, in->system_prompt_len,
+        in->user_message, in->user_message_len,
+        in->model, in->model_len,
+        in->temperature,
+        &out->after_response, &out->after_response_len);
+    if (err != HU_OK) goto cleanup;
 
     /* 8/9. Difference + timing */
     out->responses_differ =
-        (out->before_response_len != out->after_response_len) ||
-        memcmp(out->before_response, out->after_response,
-               out->before_response_len) != 0;
+        out->before_response && out->after_response &&
+        ((out->before_response_len != out->after_response_len) ||
+         memcmp(out->before_response, out->after_response,
+                out->before_response_len) != 0);
     out->elapsed_ms = hu_monotonic_ms() - t0;
-    return HU_OK;
+
+cleanup:
+    hu_dpo_export_free(alloc, &export_data);
+    if (err != HU_OK) {
+        /* On failure, release whatever was already allocated so the
+         * caller may safely re-use `out`. The _free is idempotent. */
+        hu_e2e_closed_loop_output_free(alloc, out);
+    }
+    return err;
 }
 #endif
 ```
 
-`hu_monotonic_ms()` is the existing helper from `src/core/time.c`. The function signature uses fixed-size response buffers (4 KB each) deliberately — the test's deterministic expected response is short, and the demo path doesn't call this function (it has its own copy in `cli_demo.c`).
+`hu_monotonic_ms()` is the existing helper from `src/core/time.c`. Response buffers are heap-allocated by the provider's `chat_with_system` per its C signature (`char **out` + `size_t *out_len`); ownership transfers to the output struct and is released by `hu_e2e_closed_loop_output_free`. The demo path in `cli_demo.c` (D5 duplicate) uses the same shape so the two copies remain structurally identical.
 
 - [ ] **Step 4: Create the test-only header**
 
@@ -771,13 +942,16 @@ git add src/agent/lora_training_runner.c tests/include/hu_e2e_closed_loop.h
 git commit -m "feat(agent): add hu_e2e_closed_loop_run test seam (Phase 6 D4)
 
 Synchronous projection of the closed-loop algorithm for the
-deterministic E2E test in tests/test_e2e_closed_loop.c. Gated by
+deterministic E2E test in tests/test_e2e_rl_loop.c. Gated by
 HU_IS_TEST so release-binary delta is exactly zero. Reuses every
-production primitive (chat_with_system, hu_reaction_handler_handle_event,
-trainer.step, save_adapter, hu_provider_load_adapter, kv_cache_clear)
-without touching the production async runner.
+production primitive (chat_with_system, hu_reaction_handler_set_collector
++ hu_reaction_handler_handle_event, hu_dpo_export, trainer.step,
+save_adapter, hu_provider_load_adapter) without touching the
+production async runner. Phase 1's load_adapter already clears the
+KV cache internally; no kv_cache_clear field exists on the provider
+vtable (verified against include/human/provider.h).
 
-Refs spec §4.7, plan D4 + D5 + F5."
+Refs spec §4.7, plan C1–C8 + D4 + D5 + F5."
 ```
 
 ---
@@ -785,20 +959,20 @@ Refs spec §4.7, plan D4 + D5 + F5."
 ### Task 4: Write the failing E2E closed-loop test (deterministic DPO path)
 
 **Files:**
-- Create: `tests/test_e2e_closed_loop.c`
+- Create: `tests/test_e2e_rl_loop.c`
 - Modify: `tests/test_main.c` (declare + call `run_e2e_closed_loop_tests`)
 - Modify: `CMakeLists.txt` (already covered in the CMake entries section above; if not yet committed, append now)
 
 - [ ] **Step 1: Write the failing test (header + first test function)**
 
 ```c
-/* tests/test_e2e_closed_loop.c
+/* tests/test_e2e_rl_loop.c
  *
  * Phase 6 — the canonical deterministic E2E closed-loop proof.
  *
  * THIS TEST PINS THE WIRING. It does NOT pin the QUALITY of the
  * resulting adapter on a real model. For real-Gemma proof, see
- * scripts/demo-rl-closed-loop.sh and docs/demos/rl-closed-loop-demo.md.
+ * scripts/demo-rl-loop.sh and docs/demos/rl-loop-demo.md.
  *
  * Determinism contract: srand(42) at suite start; every trainer is
  * configured with seed=42; every fixture file is committed (no live
@@ -862,16 +1036,27 @@ static void test_e2e_closed_loop_dpo_shows_measurable_response_change(void) {
     HU_ASSERT_NOT_NULL(collector);
     HU_ASSERT_NOT_NULL(trainer);
 
+    /* LO3 fix: adapter path is an absolute path under the CMake-anchored
+     * tests/_tmp/ directory so the test is CWD-independent. The literal
+     * below is resolved by helper hu_e2e_tmp_path() at call time. */
+    char adapter_path[1024];
+    hu_e2e_tmp_path(adapter_path, sizeof(adapter_path),
+                    "proofs/dpo-step-0001/lora.bin");
     hu_e2e_closed_loop_input_t in = {
         .provider = provider, .trainer = trainer, .collector = collector,
         .reaction_events = events, .reaction_event_count = n_events,
-        .prompt = "what should i do first?",
-        .prompt_len = strlen("what should i do first?"),
-        .adapter_out_path = "tests/_tmp/proofs/dpo-step-0001/lora.bin",
-        .adapter_id = "e2e-dpo-001",
+        .system_prompt     = "respond like the persona seed.",
+        .system_prompt_len = strlen("respond like the persona seed."),
+        .user_message      = "what should i do first?",
+        .user_message_len  = strlen("what should i do first?"),
+        .model             = "huml-toy-gpt",
+        .model_len         = strlen("huml-toy-gpt"),
+        .temperature       = 0.0,
+        .adapter_out_path  = adapter_path,
+        .adapter_id        = "e2e-dpo-001",
     };
     hu_e2e_closed_loop_output_t out = {0};
-    HU_ASSERT_EQ(hu_e2e_closed_loop_run(&in, &out), HU_OK);
+    HU_ASSERT_EQ(hu_e2e_closed_loop_run(&in, &alloc, &out), HU_OK);
 
     /* The headline assertion: post-swap response differs from pre-swap. */
     HU_ASSERT_TRUE(out.responses_differ);
@@ -886,6 +1071,7 @@ static void test_e2e_closed_loop_dpo_shows_measurable_response_change(void) {
     HU_ASSERT_EQ(stat(out.adapter_path, &st), 0);
     HU_ASSERT_GT(st.st_size, 0);
 
+    hu_e2e_closed_loop_output_free(&alloc, &out);
     free((void *)held_out);
     free(events);
     /* Provider/trainer/collector ownership freed by their respective
@@ -922,7 +1108,7 @@ grep -E 'FAIL|undefined' /tmp/e2e-fail.log   # expect undefined references on li
 
 Each helper is short. Their key contracts:
 
-- `set_up_env`: `srand(42)`; `setenv("HU_E2E_FIXED_TIMESTAMP", "2026-05-12T00:00:00Z", 1)` (R8 mitigation); `mkdir -p tests/_tmp/proofs/`.
+- `set_up_env`: `srand(42)` (initial seed; per HI3, callers reseed at every deterministic call site); `setenv("HU_E2E_FIXED_TIMESTAMP", "1715472000", 1)` (R8 + ME3 mitigation — epoch seconds for 2024-05-12T00:00:00Z, parsed by `strtoll` in `cli_demo.c::hu_e2e_now`); `mkdir -p tests/_tmp/proofs/`.
 - `tear_down_env`: removes the temp dir tree; unsets the env var.
 - `load_persona_seed`: opens `tests/fixtures/e2e_persona_seed.json` (relative path; CMake's `configure_file` ensures this works from `build-dev/`), parses it via the existing `hu_json_*` helpers (or `cJSON` if linked), populates `hu_communication_style_t` via `hu_communication_style_fingerprint_from_samples`, mallocs the `held_out_prompts[]` array.
 - `load_reaction_signals`: opens `tests/fixtures/e2e_reaction_signals.json`, parses each event into `hu_reaction_event_t`, returns the array via out-param. Caller frees.
@@ -947,11 +1133,13 @@ Document the chosen mitigation in a comment above `make_dpo_huml_trainer`.
 ```c
 static void test_e2e_closed_loop_completes_within_30s_under_asan(void) {
     set_up_env();
-    /* ... same setup as test_e2e_closed_loop_dpo_shows_measurable_response_change ... */
+    /* ... same setup as test_e2e_closed_loop_dpo_shows_measurable_response_change;
+     *     `alloc` is the hu_allocator_t the test owns. */
     int64_t t0 = hu_monotonic_ms();
-    HU_ASSERT_EQ(hu_e2e_closed_loop_run(&in, &out), HU_OK);
+    HU_ASSERT_EQ(hu_e2e_closed_loop_run(&in, &alloc, &out), HU_OK);
     int64_t elapsed = hu_monotonic_ms() - t0;
     HU_ASSERT_LE(elapsed, 30000);   /* 30 s budget per spec §6 + plan R7 */
+    hu_e2e_closed_loop_output_free(&alloc, &out);
     /* ... cleanup ... */
 }
 ```
@@ -961,10 +1149,10 @@ If this fires on CI, follow R7's mitigation ladder (reduce fixture sizes 50→25
 - [ ] **Step 7: Commit**
 
 ```bash
-git add tests/test_e2e_closed_loop.c tests/test_main.c
+git add tests/test_e2e_rl_loop.c tests/test_main.c
 git commit -m "test(e2e): pin Phase 6 closed-loop wiring with deterministic DPO test
 
-Adds tests/test_e2e_closed_loop.c with the canonical wiring proof:
+Adds tests/test_e2e_rl_loop.c with the canonical wiring proof:
 mock provider + HUML toy GPT + DPO trainer + 50 synthetic reactions
 + 100 held-out prompts. After 1 trainer step + 1 hot-swap, the
 post-swap response on the same prompt is byte-different from the
@@ -978,52 +1166,91 @@ Refs spec §4.7, §6 Tier 4, plan D1 + D4 + R7 + E5."
 ### Task 5: Add the determinism pin (D10)
 
 **Files:**
-- Modify: `tests/test_e2e_closed_loop.c`
+- Modify: `tests/test_e2e_rl_loop.c`
 
 - [ ] **Step 1: Write the failing test**
 
 ```c
-#include <openssl/sha.h>   /* if linked; else use the existing src/core/sha256.c helper */
+/* ME2: use the existing `hu_sha256` one-shot helper from
+ * include/human/crypto.h. OpenSSL is NOT linked (zero-dependency
+ * constraint — AGENTS.md §1: "zero dependencies beyond libc, optional
+ * SQLite and libcurl"). The real signature is:
+ *   void hu_sha256(const uint8_t *data, size_t len, uint8_t out[32]);
+ * (one-shot, no streaming context). Verified via:
+ *   rg -n 'hu_sha256' include/human/crypto.h  → line 13.
+ * Confirmed used elsewhere in-tree, e.g. src/update.c:257. */
+#include "human/crypto.h"
 
-static void compute_file_sha256(const char *path, unsigned char out[32]) {
+static void compute_file_sha256(hu_allocator_t *alloc,
+                                const char *path,
+                                uint8_t out[32]) {
     FILE *fp = fopen(path, "rb");
     HU_ASSERT_NOT_NULL(fp);
-    SHA256_CTX ctx;
-    SHA256_Init(&ctx);
-    unsigned char buf[8192];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
-        SHA256_Update(&ctx, buf, n);
+    fseek(fp, 0, SEEK_END);
+    long fsize = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    HU_ASSERT_GT(fsize, 0);
+    uint8_t *buf = alloc->malloc(alloc->ctx, (size_t)fsize);
+    HU_ASSERT_NOT_NULL(buf);
+    HU_ASSERT_EQ(fread(buf, 1, (size_t)fsize, fp), (size_t)fsize);
     fclose(fp);
-    SHA256_Final(out, &ctx);
+    hu_sha256(buf, (size_t)fsize, out);
+    alloc->free(alloc->ctx, buf, (size_t)fsize);
 }
 
-static void test_e2e_closed_loop_is_deterministic(void) {
+/* LO1 fix: split the 3-run determinism into two separate test
+ * functions so each one isolates a single comparison (run1 vs run2,
+ * run1 vs run3). HI3 fix: srand(42) is reseeded IMMEDIATELY before
+ * each closed-loop run AND before each hu_gpt_t init — set_up_env's
+ * seed contaminates subsequent bootstrap CI sampling, so determinism
+ * must be per-call, not per-suite. */
+static void run_one_closed_loop_and_hash(hu_allocator_t *alloc,
+                                         int run_idx,
+                                         uint8_t out_hash[32]) {
+    srand(42);  /* HI3: per-call, not per-suite */
+    /* ... full setup with a fresh hu_gpt_t seeded 42 each time ... */
+    char path[1024];
+    hu_e2e_tmp_path(path, sizeof(path),
+                    "proofs/det-run-%d/lora.bin");  /* %d substituted via snprintf */
+    snprintf(path, sizeof(path),
+             "%s/proofs/det-run-%d/lora.bin",
+             hu_e2e_tmp_root(), run_idx);
+    hu_e2e_closed_loop_input_t in = { /* … same fields as DPO test, with path = path … */ };
+    hu_e2e_closed_loop_output_t out = {0};
+    HU_ASSERT_EQ(hu_e2e_closed_loop_run(&in, alloc, &out), HU_OK);
+    compute_file_sha256(alloc, path, out_hash);
+    hu_e2e_closed_loop_output_free(alloc, &out);
+    /* … cleanup gpt/trainer/collector/provider … */
+}
+
+static void test_e2e_closed_loop_deterministic_run1_vs_run2(void) {
     set_up_env();
-    unsigned char h0[32], h1[32], h2[32];
-    for (int run = 0; run < 3; run++) {
-        /* ... full setup with separate hu_gpt_t each time, all seeded 42 ... */
-        char path[256];
-        snprintf(path, sizeof(path),
-                 "tests/_tmp/proofs/det-run-%d/lora.bin", run);
-        in.adapter_out_path = path;
-        HU_ASSERT_EQ(hu_e2e_closed_loop_run(&in, &out), HU_OK);
-        unsigned char *h = (run == 0) ? h0 : (run == 1) ? h1 : h2;
-        compute_file_sha256(path, h);
-        /* ... cleanup ... */
-    }
-    HU_ASSERT_EQ(memcmp(h0, h1, 32), 0);
-    HU_ASSERT_EQ(memcmp(h0, h2, 32), 0);
+    hu_allocator_t alloc = hu_system_allocator();
+    uint8_t h1[32], h2[32];
+    run_one_closed_loop_and_hash(&alloc, 1, h1);
+    run_one_closed_loop_and_hash(&alloc, 2, h2);
+    HU_ASSERT_EQ(memcmp(h1, h2, 32), 0);
+    tear_down_env();
+}
+
+static void test_e2e_closed_loop_deterministic_run1_vs_run3(void) {
+    set_up_env();
+    hu_allocator_t alloc = hu_system_allocator();
+    uint8_t h1[32], h3[32];
+    run_one_closed_loop_and_hash(&alloc, 1, h1);
+    run_one_closed_loop_and_hash(&alloc, 3, h3);
+    HU_ASSERT_EQ(memcmp(h1, h3, 32), 0);
     tear_down_env();
 }
 ```
 
-> **L4 fix:** if `<openssl/sha.h>` is not linked into `human_tests`, use the existing `hu_sha256_*` API in `include/human/core/sha256.h` (the codebase has its own SHA-256 — `rg -n 'hu_sha256' include/` to find the symbol shape). The OpenSSL include shown above is illustrative; verify the actual header at write-time.
+> **ME2 fix:** `<openssl/sha.h>` is NOT available — AGENTS.md §1 mandates "zero dependencies beyond libc, optional SQLite and libcurl." The skeleton above uses the existing one-shot `hu_sha256` helper from `include/human/crypto.h` line 13. This is the canonical in-tree SHA-256 (used by `src/update.c:257`, `src/security/audit.c`, `src/security/pairing.c`, `src/crypto/dispatch.c`). If you reach for OpenSSL during implementation, stop — you've violated the zero-dep constraint.
 
 - [ ] **Step 2: Add to runner**
 
 ```c
-HU_RUN_TEST(test_e2e_closed_loop_is_deterministic);
+HU_RUN_TEST(test_e2e_closed_loop_deterministic_run1_vs_run2);
+HU_RUN_TEST(test_e2e_closed_loop_deterministic_run1_vs_run3);
 ```
 
 - [ ] **Step 3: Run and fix any nondeterminism**
@@ -1054,7 +1281,7 @@ Refs plan D10."
 ### Task 6: Add the F1–F6 common-failure-mode regression pins
 
 **Files:**
-- Modify: `tests/test_e2e_closed_loop.c`
+- Modify: `tests/test_e2e_rl_loop.c`
 
 - [ ] **Step 1: Write `test_e2e_closed_loop_provider_after_response_differs_from_before` (F1)**
 
@@ -1076,21 +1303,42 @@ if (out.before_response_len == out.after_response_len &&
 size_t n_pairs = 0;
 HU_ASSERT_EQ(hu_dpo_pair_count(collector, &n_pairs), HU_OK);
 HU_ASSERT_EQ(n_pairs, 50);
-/* Plus check each row's source field. */
-hu_dpo_pair_t *pairs = NULL;
-size_t n = 0;
-HU_ASSERT_EQ(hu_dpo_load_pairs(collector, &pairs, &n), HU_OK);
-HU_ASSERT_EQ(n, 50);
-for (size_t i = 0; i < n; i++)
-    HU_ASSERT_STR_EQ(pairs[i].source, "e2e_synthetic");
-hu_dpo_pairs_free(pairs, n);
+
+/* Plus check each row's source field. HI2 fix: the reaction handler
+ * does NOT write the fixture's "source_tag" verbatim — it writes one
+ * of "imessage_tapback", "slack_reactji", or the raw channel_id
+ * (e.g. "test-imessage") depending on the event's channel_kind. The
+ * fixture's channel_kind is "synthetic" and channel_id is
+ * "test-imessage", so the handler will write "test-imessage". A
+ * literal `strcmp(..., "e2e_synthetic")` would always fail; we relax
+ * to a substring match that accepts every channel-derived form. */
+hu_dpo_export_t export_data = {0};
+HU_ASSERT_EQ(hu_dpo_export(collector, &alloc, &export_data), HU_OK);
+HU_ASSERT_EQ(export_data.count, 50);
+for (size_t i = 0; i < export_data.count; i++) {
+    HU_ASSERT_TRUE(
+        strstr(export_data.pairs[i].source, "imessage_tapback") != NULL ||
+        strstr(export_data.pairs[i].source, "slack_reactji")    != NULL ||
+        strstr(export_data.pairs[i].source, "test-imessage")    != NULL);
+}
+hu_dpo_export_free(&alloc, &export_data);
 ```
 
 - [ ] **Step 3: Write `test_e2e_closed_loop_bootstrap_ci_lower_bound_is_positive` (F3)**
 
 This requires actually running the closed loop, scoring all 100 held-out prompts pre and post, and computing a 95% bootstrap CI on the per-prompt deltas. Use 1000 resamples with `srand(42)` reseeded right before. The helper is ~80 LOC; isolate it into a static function `static double bootstrap_lower_95(const double *deltas, size_t n)` so other tests can reuse it.
 
+> **HI3 fix:** `srand(42)` MUST be reseeded **immediately before** each call to `bootstrap_lower_95` (and immediately before each `hu_gpt_t` initialization in `make_*_trainer`). Seeding only once in `set_up_env()` contaminates the RNG: every test that uses `rand()` between setup and the bootstrap call shifts the resample sequence, so bootstrap CI samples differ on every run composition (run order, test selection, etc.). Determinism is per-call, not per-suite — the bootstrap helper itself does:
+>
+> ```c
+> static double bootstrap_lower_95(const double *deltas, size_t n) {
+>     srand(42);   /* HI3: reseed at every call site, not at suite start */
+>     /* … 1000 resamples … */
+> }
+> ```
+
 ```c
+srand(42);   /* HI3: reseed immediately before the call */
 HU_ASSERT_GT(bootstrap_lower_95(per_prompt_deltas, 100), 0.0);
 ```
 
@@ -1102,7 +1350,19 @@ This test exercises the ASYNC production path, NOT `hu_e2e_closed_loop_run`. It 
 
 Calls a Task-9-built `write_evidence_dir` helper, then reads back `manifest.json`, asserts `preference_pairs_consumed == 50` and `reactions_emitted == 50`. (Phase 6's `cli_demo.c::write_evidence_dir` is the production code path; the test exercises it via a small wrapper.)
 
-- [ ] **Step 6: Write `test_llamacpp_lora_hotswap_midsession.c` (F5, separate file, gated)**
+- [ ] **Step 7: Write `test_e2e_closed_loop_negative_rate_anomaly_recorded` (SEC1)**
+
+Synthesizes a 35-negative / 15-positive reaction stream and asserts that:
+
+1. `hu_e2e_closed_loop_run` either returns `HU_ERR_POLICY_VIOLATION` or completes but writes `anomaly: high_negative_rate` to the evidence dir's `anomaly_log.jsonl`.
+2. The negative-rate gate fires at exactly the 30% threshold from SEC1 (not 25%, not 33%).
+3. Under `--require-positive-delta` the demo CLI refuses to promote.
+
+- [ ] **Step 8: Write `test_e2e_closed_loop_adapter_sha_mismatch_aborts_swap` (SEC2)**
+
+After `save_adapter` writes `lora.bin` and BEFORE `load_adapter` runs, the test mutates one byte of the file via `fopen("rb+") + fseek + fputc + fclose`. The test then drives `cli_demo_run_closed_loop` (D5 release-path duplicate) and asserts the runner returns `HU_ERR_INTEGRITY` and that the evidence dir contains an `anomaly: adapter_sha_mismatch` entry. The deterministic test exercises this against the mock provider; the real-llama.cpp variant in Task 6 step 9 (gated) exercises it against the real provider.
+
+- [ ] **Step 9: Write `test_llamacpp_lora_hotswap_midsession.c` (F5, separate file, gated)**
 
 ```c
 /* tests/test_llamacpp_lora_hotswap_midsession.c
@@ -1139,15 +1399,21 @@ Wire `run_llamacpp_hotswap_midsession_tests` into `tests/test_main.c`. The CMake
 git commit -m "test(e2e): add F1–F6 regression pins for Phase 6 failure modes
 
 F1: provider after_response differs from before_response (mock provider)
-F2: all 50 synthetic reactions surface as dpo_pairs rows with
-    source='e2e_synthetic'
+F2: all 50 synthetic reactions surface as dpo_pairs rows with a
+    handler-derived source (imessage_tapback / slack_reactji /
+    channel_id substring per HI2)
 F3: 95% bootstrap CI lower bound on per-prompt fidelity delta is > 0
+    (srand reseeded immediately before each bootstrap call per HI3)
 F4: documented as expected (demo nondeterminism, no test pin)
 F5: tests/test_llamacpp_lora_hotswap_midsession.c (gated, real Gemma)
 F6: async path via hu_lora_training_runner drains pending signals
 E4: manifest records preference_pairs_consumed = reactions_emitted = 50
+SEC1: 35-neg/15-pos stream fires high_negative_rate anomaly + blocks
+      promotion under --require-positive-delta
+SEC2: 1-byte adapter tamper between save_adapter and load_adapter
+      causes HU_ERR_INTEGRITY + adapter_sha_mismatch anomaly entry
 
-Refs plan F1–F6, E4."
+Refs plan F1–F6, E4, SEC1, SEC2."
 ```
 
 ---
@@ -1155,7 +1421,7 @@ Refs plan F1–F6, E4."
 ### Task 7: Add the persona-fidelity ≥ +0.05 delta E2E gate (DoD item 6)
 
 **Files:**
-- Modify: `tests/test_e2e_closed_loop.c`
+- Modify: `tests/test_e2e_rl_loop.c`
 
 - [ ] **Step 1: Write `test_e2e_closed_loop_persona_fidelity_delta_meets_threshold`**
 
@@ -1221,7 +1487,7 @@ Refs spec §1, §11 row 4, plan D6 + DoD."
 ### Task 8: Add the KTO + GRPO E2E variants (skipped if Phase 3/4 trainers absent)
 
 **Files:**
-- Modify: `tests/test_e2e_closed_loop.c`
+- Modify: `tests/test_e2e_rl_loop.c`
 
 - [ ] **Step 1: Add `test_e2e_closed_loop_kto_shows_measurable_response_change`**
 
@@ -1235,8 +1501,20 @@ HU_SKIP_IF(/* Phase 3 not present in build */, "KTO trainer requires HU_ENABLE_R
 
 Same shape but uses `hu_rl_trainer_create_grpo` with `rollouts=2` (small to keep CI runtime down — production uses 4). GRPO needs a reward function; the test instantiates a stub RM that returns `+1` for any response containing a vocab token from the persona's `samples[]` and `0` otherwise (deterministic, no real RM training).
 
+> **ME1 fix:** `hu_rl_trainer_create_grpo` is not declared in any header outside the `HU_ENABLE_GRPO` compile branch (Phase 4 ships it; default `dev` preset does not). The test must compile in BOTH branches — declared `extern` (or via the header behind `#ifdef HU_ENABLE_GRPO`) — but only EXECUTE when GRPO is enabled. Use a build-time skip:
+>
+> ```c
+> #ifdef HU_ENABLE_GRPO
+>     /* … real GRPO test body … */
+> #else
+>     HU_SKIP_IF(1, "Phase 4 GRPO not enabled in this build (HU_ENABLE_GRPO undefined)");
+> #endif
+> ```
+>
+> The `HU_SKIP_IF(1, ...)` form is a runtime no-op when the macro is reached but never compiles in a reference to the missing symbol. Document in the test's leading comment that the body compiles in either branch but only executes under `cmake --preset rl_sota`.
+
 ```c
-HU_SKIP_IF(/* Phase 4 not present in build */, "GRPO trainer requires HU_ENABLE_RL_FULL");
+HU_SKIP_IF(!HU_ENABLE_GRPO, "Phase 4 GRPO not enabled in this build");
 ```
 
 - [ ] **Step 3: Commit**
@@ -1356,8 +1634,31 @@ hu_error_t hu_ml_cli_demo_rl_closed_loop(int argc, const char **argv,
 The full implementation is ~400 LOC. Key invariants:
 
 - `parse_args` accepts long options only (`--persona`, `--method`, etc.) — no short options. Same convention as `human ml lora-baseline`.
-- `synthesize_reactions(n)` generates n synthetic events deterministically when `--reactions <jsonl>` is NOT supplied; supports `--reactions <jsonl>` to load from a file (mirrors Phase 2's preference-pair loader).
+- `synthesize_reactions(n)` generates n synthetic events deterministically when `--reactions <jsonl>` is NOT supplied; supports `--reactions <jsonl>` to load from a file (mirrors Phase 2's preference-pair loader). **HI4 fix:** the production `human` binary does NOT compile in the `HU_IS_TEST`-gated `hu_reaction_handler_register_assistant_message_for_test` seam, so without a release-build registration API every synthetic reaction will silently drop in the lookup store and `hu_dpo_pair_count` returns 0. The demo therefore **requires** the production registration API `hu_reaction_handler_register_assistant_message_for_production(channel, thread, msg_ref, prompt, response)` (no `_for_test` suffix; compiled into release builds). The demo calls it for each `(prompt, response)` tuple before emitting reactions. **Forward dependency:** this API is the Phase 5 H8 fix in `docs/plans/2026-05-11-rl-loop-phase-5-eval-competitive.md`. If Phase 5 ships without H8 applied, Phase 6 Task 0 step 4b (new) catches the missing symbol via `rg -n 'hu_reaction_handler_register_assistant_message_for_production' include/human/agent/reaction_handler.h` and BLOCKS Phase 6 until Phase 5 adds it. Phase 6 MUST NOT work around this by leaking the `_for_test` API into release.
 - `write_evidence_dir(dir, &run)` emits all 9 spec §8 files in order (`manifest.json`, `training_curves.json`, `eval_before.json`, `eval_after.json`, `eval_delta.json`, `delta_responses.md`, `gate_decision.json`, `adversarial_review.md`, `reproduce.sh`). Each writer is a separate static function for testability.
+
+  > **ME3 fix:** every wall-clock read inside `write_evidence_dir` MUST honor `HU_E2E_FIXED_TIMESTAMP` so the determinism test's adapter/manifest SHAs are reproducible. The pattern (applied at every `time(NULL)` call site in `cli_demo.c`):
+  >
+  > ```c
+  > static time_t hu_e2e_now(void) {
+  >     const char *fixed_ts = getenv("HU_E2E_FIXED_TIMESTAMP");
+  >     if (fixed_ts && *fixed_ts) return (time_t)strtoll(fixed_ts, NULL, 10);
+  >     return time(NULL);
+  > }
+  > /* … */
+  > char created_at[32];
+  > time_t t = hu_e2e_now();
+  > strftime(created_at, sizeof(created_at), "%Y-%m-%dT%H:%M:%SZ", gmtime(&t));
+  > ```
+  >
+  > **Required call sites** (audit at write-time with `rg -n 'time\(NULL\)|gettimeofday|clock_gettime' src/ml/cli_demo.c`):
+  >
+  > 1. `manifest.json`'s `created_at` field.
+  > 2. The evidence-dir name suffix (`~/.human/proofs/%Y-%m-%d-…`) — the bash demo formats this in `OUT_DIR=...`; the C path constructs it via `strftime` when `--out` is omitted.
+  > 3. Any log timestamp embedded in `training_curves.json`, `eval_before.json`, `eval_after.json`, `eval_delta.json`, or `gate_decision.json`.
+  > 4. The `reproduce.sh` shebang-comment header line "Generated <timestamp> by Phase 6".
+  >
+  > The format the env var carries is **epoch seconds** (e.g. `HU_E2E_FIXED_TIMESTAMP=1715472000`), not ISO-8601 — `strtoll` is the parser. The R8 fix in the risk register table writes the ISO-8601 string `"2026-05-12T00:00:00Z"` which is wrong; treat that table entry as illustrative and use the epoch-seconds form everywhere in the implementation.
 - Exit code mapping (per spec demo-exit-code convention: 0 = pass, 2 = soft fail, 3 = hard fail): `0` if `delta ≥ 0.05` AND `lower_95_ci > 0`; `2` if delta is computed but doesn't meet threshold (still write evidence dir); `3` if harness error before delta could be computed (no evidence dir).
 
 - [ ] **Step 3: Add `cmd_demo` to `src/main.c`**
@@ -1370,8 +1671,12 @@ static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv);
 
 /* ... function body, mirrors cmd_ml shape: */
 static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv) {
-    if (argc < 3 || strcmp(argv[2], "--help") == 0
-                 || strcmp(argv[2], "help") == 0) {
+    /* LO2 fix: explicit argc check FIRST, then dereference argv[2]. The
+     * C `||` short-circuit already prevents UB here, but the explicit
+     * order documents intent and matches the rest of cmd_ml's style. */
+    if (argc < 3
+        || strcmp(argv[2], "--help") == 0
+        || strcmp(argv[2], "help") == 0) {
         printf("Usage: human demo <subcommand>\n\n"
                "Subcommands:\n"
                "  rl-closed-loop   Run the Phase 6 RL closed-loop demo\n"
@@ -1379,11 +1684,13 @@ static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv) {
         return HU_ERR_INVALID_ARGUMENT;
     }
     const char *sub = argv[2];
-    if (strcmp(sub, "rl-closed-loop") == 0)
-        return hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3),
-                                             alloc);
-    fprintf(stderr, "demo: unknown subcommand: %s\n", sub);
-    return HU_ERR_INVALID_ARGUMENT;
+    if (argc < 3 || strcmp(sub, "rl-closed-loop") != 0) {
+        fprintf(stderr, "demo: unknown subcommand: %s\n",
+                argc < 3 ? "(none)" : sub);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    return hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3),
+                                         alloc);
 }
 ```
 
@@ -1424,16 +1731,16 @@ Refs spec §4.7, §8, §9 items 8/10/11, plan D2 + D3 + D5 + D9."
 
 ---
 
-### Task 10: Write the `scripts/demo-rl-closed-loop.sh` runner
+### Task 10: Write the `scripts/demo-rl-loop.sh` runner
 
 **Files:**
-- Create: `scripts/demo-rl-closed-loop.sh`
+- Create: `scripts/demo-rl-loop.sh`
 
 - [ ] **Step 1: Author the script**
 
 ```bash
 #!/usr/bin/env bash
-# scripts/demo-rl-closed-loop.sh — Phase 6 live demo runner.
+# scripts/demo-rl-loop.sh — Phase 6 live demo runner.
 #
 # Apple Silicon only. Runs the closed loop against real Gemma-3-4B-it
 # and a real Qwen-2.5-0.5B-Instruct reward model. Produces the
@@ -1498,15 +1805,15 @@ case "$EXIT" in
     *) echo "==> UNKNOWN exit code: $EXIT"; ;;
 esac
 echo "==> Evidence dir: $OUT_DIR"
-echo "==> Open the runbook for next steps: docs/demos/rl-closed-loop-demo.md"
+echo "==> Open the runbook for next steps: docs/demos/rl-loop-demo.md"
 exit $EXIT
 ```
 
 - [ ] **Step 2: `chmod +x` and dry-run**
 
 ```bash
-chmod +x scripts/demo-rl-closed-loop.sh
-DRY_RUN=1 bash scripts/demo-rl-closed-loop.sh
+chmod +x scripts/demo-rl-loop.sh
+DRY_RUN=1 bash scripts/demo-rl-loop.sh
 ```
 
 Expected: prereq checks all pass (or fall through with the dry-run message), exit 0.
@@ -1514,7 +1821,7 @@ Expected: prereq checks all pass (or fall through with the dry-run message), exi
 - [ ] **Step 3: Commit**
 
 ```bash
-git commit -m "feat(scripts): add demo-rl-closed-loop.sh for Phase 6 live demo
+git commit -m "feat(scripts): add demo-rl-loop.sh for Phase 6 live demo
 
 Apple-Silicon-only script that verifies prerequisites, fetches
 models if needed, runs 'human demo rl-closed-loop' with sensible
@@ -1526,10 +1833,10 @@ Refs plan D2, spec §6.5 + §14."
 
 ---
 
-### Task 11: Write the `docs/demos/rl-closed-loop-demo.md` runbook
+### Task 11: Write the `docs/demos/rl-loop-demo.md` runbook
 
 **Files:**
-- Create: `docs/demos/rl-closed-loop-demo.md`
+- Create: `docs/demos/rl-loop-demo.md`
 
 - [ ] **Step 1: Author the runbook**
 
@@ -1553,7 +1860,7 @@ This runbook walks through running the Phase 6 demo end-to-end on
 Apple Silicon and reading the resulting `~/.human/proofs/` evidence
 directory.
 
-For the deterministic CI test, see `tests/test_e2e_closed_loop.c`.
+For the deterministic CI test, see `tests/test_e2e_rl_loop.c`.
 For the design rationale, see `docs/plans/2026-05-11-rl-loop-phase-6-proof.md`.
 
 ## 1. Prerequisites
@@ -1586,16 +1893,24 @@ Sections 1–8 are filled out per the file structure section above. Sections 5 (
 - [ ] **Step 2: Validate frontmatter**
 
 ```bash
-./scripts/check-docs-frontmatter.sh docs/demos/rl-closed-loop-demo.md
+./scripts/check-docs-frontmatter.sh docs/demos/rl-loop-demo.md
 ./scripts/doc-fleet.sh   # full doc gate
 ```
+
+> **ME5 fix:** verify `check-docs-frontmatter.sh` actually recurses into `docs/demos/`. If its glob is `docs/*.md` (single-level) the demo runbook is silently skipped and YAML frontmatter regressions ship undetected. Inspect the script first:
+>
+> ```bash
+> rg -n '\bfor\b|glob|find' scripts/check-docs-frontmatter.sh
+> ```
+>
+> If the iteration pattern is single-level (e.g. `for f in docs/*.md`), patch it to recurse (`docs/**/*.md` with `shopt -s globstar`, or `find docs -name '*.md'`) in the same Phase 6 commit that introduces `docs/demos/rl-loop-demo.md`. Pin the fix with the explicit invocation above so the runbook is exercised even when the script is non-recursive — that explicit call MUST pass before commit.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git commit -m "docs(demos): add Phase 6 RL closed-loop demo runbook
 
-Runbook for scripts/demo-rl-closed-loop.sh: prereqs, setup,
+Runbook for scripts/demo-rl-loop.sh: prereqs, setup,
 running, reading the evidence dir, troubleshooting, reproducibility,
 FAQ, citations. Apple-Silicon-only; never run in CI.
 
@@ -1615,16 +1930,16 @@ cmake --build build-dev -j && ./build-dev/human_tests
 cmake --build build-rl-sota -j && ./build-rl-sota/human_tests
 ```
 
-Expected: pre-Phase-6 baseline + (number of new test functions in `tests/test_e2e_closed_loop.c`) + 1 (gated llamacpp hot-swap test). All pass; 0 ASan errors; 0 UBSan errors.
+Expected: pre-Phase-6 baseline + (number of new test functions in `tests/test_e2e_rl_loop.c`) + 1 (gated llamacpp hot-swap test). All pass; 0 ASan errors; 0 UBSan errors.
 
 - [ ] **Step 2: Run `dead-code-finder` subagent**
 
 ```
 Task: dead-code-finder
 Prompt: Review src/ml/cli_demo.c, src/agent/lora_training_runner.c (HU_IS_TEST
-        block), src/main.c (cmd_demo additions), tests/test_e2e_closed_loop.c,
-        tests/test_llamacpp_lora_hotswap_midsession.c, scripts/demo-rl-closed-loop.sh,
-        docs/demos/rl-closed-loop-demo.md, include/human/ml/cli_demo.h, and
+        block), src/main.c (cmd_demo additions), tests/test_e2e_rl_loop.c,
+        tests/test_llamacpp_lora_hotswap_midsession.c, scripts/demo-rl-loop.sh,
+        docs/demos/rl-loop-demo.md, include/human/ml/cli_demo.h, and
         tests/include/hu_e2e_closed_loop.h. Catch any unused exports, unreachable
         branches, or dead helper functions introduced in Phase 6. Note that the
         deliberate duplication between src/agent/lora_training_runner.c::hu_e2e_closed_loop_run
@@ -1637,7 +1952,7 @@ Fix all findings; do not lower the bar to silence the subagent.
 - [ ] **Step 3: Run live demo on Apple Silicon (manual verification step)**
 
 ```bash
-bash scripts/demo-rl-closed-loop.sh
+bash scripts/demo-rl-loop.sh
 ls ~/.human/proofs/2026-05-12-dpo-step-*/
 cat ~/.human/proofs/2026-05-12-dpo-step-*/eval_delta.json
 ```
@@ -1652,9 +1967,9 @@ Prompt: Independently re-read docs/plans/2026-05-11-full-sota-rl-improvement-loo
         §4.7, §5 row 6, §6 Tier 4 (line 522), §8, §9 items 8 + 10 + 11, §14,
         and docs/plans/2026-05-11-rl-loop-phase-6-proof.md. Then verify against
         the actual deliverables on disk:
-        - tests/test_e2e_closed_loop.c (≤30s under ASan; deterministic; persona delta ≥ 0.05)
-        - scripts/demo-rl-closed-loop.sh (Apple-Silicon-only, NEVER in CI)
-        - docs/demos/rl-closed-loop-demo.md (runbook with reproducibility recipe)
+        - tests/test_e2e_rl_loop.c (≤30s under ASan; deterministic; persona delta ≥ 0.05)
+        - scripts/demo-rl-loop.sh (Apple-Silicon-only, NEVER in CI)
+        - docs/demos/rl-loop-demo.md (runbook with reproducibility recipe)
         - tests/fixtures/e2e_persona_seed.json (synthetic, no PII, 100 held-out prompts)
         - tests/fixtures/e2e_reaction_signals.json (50 events, 25+/25-)
         - src/ml/cli_demo.c + include/human/ml/cli_demo.h + 'human demo rl-closed-loop' wired
@@ -1706,15 +2021,15 @@ Update `docs/plans/2026-05-11-full-sota-rl-improvement-loop.md` row 6 to `comple
 
 Phase 6 closes when **all** of these are true:
 
-1. `tests/test_e2e_closed_loop.c` passes with all 12+ test functions, including `test_e2e_closed_loop_is_deterministic` (3 runs produce byte-identical adapter SHA-256).
+1. `tests/test_e2e_rl_loop.c` passes with all 16+ test functions, including `test_e2e_closed_loop_deterministic_run1_vs_run2` + `test_e2e_closed_loop_deterministic_run1_vs_run3` (3 deterministic runs of `hu_e2e_closed_loop_run` produce byte-identical adapter SHA-256 pairwise) AND the SEC1/SEC2 pins (`test_e2e_closed_loop_negative_rate_anomaly_recorded`, `test_e2e_closed_loop_adapter_sha_mismatch_aborts_swap`).
 2. The full E2E suite completes in ≤ 30 seconds in CI under ASan (pinned by `test_e2e_closed_loop_completes_within_30s_under_asan`).
 3. `tests/fixtures/e2e_persona_seed.json` (100 held-out prompts + 50 sample fingerprints) and `tests/fixtures/e2e_reaction_signals.json` (25+/25- events) are committed; both parse as valid JSON.
-4. `scripts/demo-rl-closed-loop.sh` runs end-to-end on Apple Silicon and exits 0 (i.e. win-condition met) on the user's real persona corpus.
+4. `scripts/demo-rl-loop.sh` runs end-to-end on Apple Silicon and exits 0 (i.e. win-condition met) on the user's real persona corpus.
 5. `~/.human/proofs/<demo-adapter-id>/` exists with all 9 evidence files from spec §8 (`manifest.json`, `training_curves.json`, `eval_before.json`, `eval_after.json`, `eval_delta.json`, `delta_responses.md`, `gate_decision.json`, `adversarial_review.md`, `reproduce.sh`).
 6. **`eval_delta.json::delta_mean ≥ 0.05` (absolute persona-fidelity points on the [0,1] scale per spec §11 row 4)** AND `eval_delta.json::lower_95_ci > 0` on the same held-out 100 prompts pre and post (spec §1 win-condition row 2).
 7. Latency p95 regression in `eval_delta.json::latency_p95_ratio ≤ 1.02` (i.e. ≤ 2% regression).
 8. `human demo rl-closed-loop --help` lists the subcommand and prints the option set; `human demo --help` lists the `rl-closed-loop` subcommand.
-9. `docs/demos/rl-closed-loop-demo.md` runbook is committed with valid YAML frontmatter and passes `scripts/doc-fleet.sh`.
+9. `docs/demos/rl-loop-demo.md` runbook is committed with valid YAML frontmatter and passes `scripts/doc-fleet.sh`.
 10. `sprint-auditor` subagent has issued PASS (or PASS_WITH_NOTES) verdict on Phase 6, logged in `docs/proof/phase-6-summary.md`. `dead-code-finder` clean. `critic` reviews of Tasks 4, 6, 7, 9 each marked addressed.
 
 ---

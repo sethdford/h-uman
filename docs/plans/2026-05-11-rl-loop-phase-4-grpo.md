@@ -96,6 +96,10 @@ Phase 4 ADDS one subcommand and dispatch branch; it does NOT modify Track D's co
 - `src/main.c::cmd_ml` — add `grpo-train` `strcmp` branch (~6 LOC + help-text update at the two existing help sites), preserving every existing branch. Total dispatch delta ≤ 15 LOC per spec §4.5 row 4.
 - `src/ml/cli.c` — NO changes. Phase 4 follows the Phase 2/3 precedent of putting CLI handlers in fresh `src/ml/cli_grpo.c` next to `cli_dpo.c` / `cli_kto.c` / `cli_rm.c`. No further extraction from `cli.c`.
 
+**[SPEC DEVIATION — fix(plan,grpo,spec): AC-1 drift note (spec-verifier SV1)]**
+
+Phase 4 follows the Phase 2/3 precedent of adding the dispatch branch in `src/main.c::cmd_ml` (NOT `src/ml/cli.c`), even though umbrella spec §4.5 says `src/ml/cli.c`. This matches existing Phase 2/3 dispatch pattern already living in `src/main.c::cmd_ml` for `dpo-train` / `kto-train` / `rm-train`; documenting the deviation here for sprint-auditor traceability. The umbrella plan should be updated in Phase 6 close-out to reflect that all four ML subcommand dispatchers live in `src/main.c::cmd_ml`, with the per-subcommand handlers in `src/ml/cli_<name>.c`.
+
 **Phase 4 must:**
 
 - Branch from tag `rl-sota-phase-3-complete` (`git checkout -b rl-sota-phase-4 rl-sota-phase-3-complete`).
@@ -201,13 +205,21 @@ typedef enum {
 
 Synthetic reward function for tests: count occurrences of "good"-coded tokens (1–5) in the completion, subtract count of "bad"-coded tokens (26–30) — same convention as Phase 3 Task 3's `make_synthetic_pairs` (R3 mitigation), ensuring deterministic ordering with no ML required. CLI `--reward-fn synthetic` selects this; `--reward-fn rm --reward-model <dir>` loads a Phase 3 checkpoint via `hu_reward_model_load`. If both are unset, the CLI errors with `HU_ERR_INVALID_ARGUMENT` (no implicit default — picking the wrong source silently is the umbrella §10 R9 reward-hacking vector).
 
-### D5: Per-step ephemeral π_θ_old snapshot, NOT a long-lived old-policy model
+### D5: **No per-step π_θ_old snapshot needed** — `rolls[i].sum_logprob` IS π_θ_old
 
-Trl and verl both maintain π_θ_old for `num_iterations > 1` PPO mini-epochs (re-use the same rollouts for multiple gradient steps). For v1 we set `num_iterations = 1` (one gradient step per rollout batch) — the standard simplification in DeepSeek-R1's GRPO. With `num_iterations = 1`, π_θ_old at gradient time is identically π_θ at sample time, so the ratio `ρ_i = π_θ(o_i) / π_θ_old(o_i)` equals 1 numerically and the clip is a no-op... UNLESS we capture π_θ_old at sample time and let π_θ drift via the structural backward, then recompute ρ_i.
+fix(plan,grpo): drop dead per-step old_policy snapshot — critic H3.
 
-**Decision:** Capture per-step ephemeral π_θ_old at the start of `grpo_step()` via `hu_reference_model_create_from(alloc, &c->policy, &c->gpt_cfg, &c->old_policy)`; `deinit` the snapshot at the end of the step. This is O(GPT param size) per step — measured at <10 KB on the toy GPT (vocab=32, n_embd=16) — well within the test-suite delta gate. For real Gemma the MLX path delegates entirely; the C side never holds Gemma weights. Document this scope choice in `include/human/ml/grpo.h` header comment and in `src/ml/grpo.c` next to the snapshot call.
+Trl and verl both maintain π_θ_old for `num_iterations > 1` PPO mini-epochs (re-use the same rollouts for multiple gradient steps). For v1 we set `num_iterations = 1` (one gradient step per rollout batch) — the standard simplification in DeepSeek-R1's GRPO. With `num_iterations = 1`, π_θ_old at gradient time is identically π_θ at sample time, so the ratio `ρ_i = π_θ(o_i) / π_θ_old(o_i)` equals 1 numerically and the clip is a no-op... UNLESS the live policy drifts during the step's structural backward (which it does, between samples), in which case ρ correctly captures only the policy delta since each rollout's sample time.
 
-Future deviation (deferred to v1.5): if we want `num_iterations > 1` for sample efficiency, replace the per-step ephemeral snapshot with a long-lived `c->old_policy` that gets refreshed every `num_iterations` outer steps. NOT in v1 scope.
+**Decision:** The rollout module already captures `sum_logprob` from the live policy at sample time (see `hu_rollout_completion_t::sum_logprob`); this IS the π_θ_old log-prob we need for the ratio ρ = exp(lp_pol_now - sum_logprob_at_sample). No separate model snapshot is needed:
+
+- The original plan called `hu_reference_model_create_from(alloc, &c->policy, &c->gpt_cfg, &old_policy)` at step start, kept it for the whole step, and `deinit`'d at step end. Critic H3 caught that the snapshot was **allocated and freed but never queried** — we read `lp_old = rolls[i].sum_logprob` (captured at sample time), not `hu_policy_logprobs(&old_policy, ...)`. The snapshot was dead code carrying a leak risk (R10) without buying any correctness.
+- Removing the snapshot simplifies `grpo_huml_step` — no `hu_reference_model_create_from` call, no `cleanup_old_policy:` label, no goto discipline (R10 simplifies; see R10 update below).
+- The HUML structural backward updates the live policy in-place between samples WITHIN a step, but ρ correctly captures only the policy delta since each rollout's sample time because `lp_old` was frozen at sample time.
+
+For real Gemma the MLX path delegates entirely; the C side never held Gemma weights anyway.
+
+Future deviation (deferred to v1.5): if we want `num_iterations > 1` for sample efficiency, we'll either (a) re-sample at each outer iteration (refreshing `sum_logprob`), or (b) introduce a long-lived `c->old_policy` that gets refreshed every `num_iterations` outer steps. NOT in v1 scope.
 
 ### D6: `n_rollouts` default = 4 (NOT trl's 8)
 
@@ -254,7 +266,13 @@ Document the structural step in `src/ml/grpo.c::grpo_step` next to the lm_head p
 
 Per AGENTS.md §3 Rule of Three: extract a shared `mlx_subprocess_helpers.c` only when 3 callers exist. Phase 2 introduced one MLX wrapper (`dpo_real_mlx.c`), Phase 3 introduced two more (`kto_mlx.c`, `reward_model_mlx.c`). Phase 4 makes the fourth (`grpo_mlx.c`). With four callers we now MEET the threshold — but extraction is a refactor, not a feature, and per umbrella §6 "one concern per change" we SCOPE OUT the extraction to a separate post-Phase-4 cleanup commit. The Phase 4 plan adds Task 11 substep "open issue for `mlx_subprocess_helpers.c` extraction" so it doesn't get lost.
 
-Until extracted, `grpo_mlx.c` duplicates `json_escape`, `write_jsonl`, the single-quote rejection guard, and the `popen` + dummy-adapter test-mode shortcut from `dpo_real_mlx.c` byte-for-byte at the structural level. The duplication is intentional and documented.
+Until extracted, `grpo_mlx.c` mirrors `kto_mlx.c` (Phase 3 Task 7 hardened pattern) — NOT Phase 2's older `dpo_real_mlx.c`. Inherited specifically from `kto_mlx.c`:
+
+- **`O_EXCL + 0600` JSONL write mode** — `open(path, O_WRONLY|O_CREAT|O_EXCL, 0600); fdopen(fd, "w")`. This is the hardened path: pre-existing files are NEVER overwritten, perms are owner-RW only (no group/world readable). Phase 2's `dpo_real_mlx.c` used the legacy `fopen(path, "w")` which silently truncates an attacker-controlled symlink and writes 0644-readable JSONL with user-provided training prompts — Phase 3 KTO hardened this and Phase 4 GRPO inherits the hardened form, not the legacy form.
+- **Specific symbol probe** — `system("python3 -c 'from mlx_lm_lora.trainer.grpo_trainer import train_grpo' 2>/dev/null") == 0`. Same precise-import shape as `kto_mlx.c`'s `mlx_lm_lora_kto_available()`, NOT a fuzzier module-level probe. Catches the case where `mlx_lm_lora.trainer` exists but `grpo_trainer` does not.
+- `json_escape`, `write_jsonl_grpo` (only `prompt` field; ignores chosen/rejected), single-quote shell escape rejection, dummy-adapter test-mode shortcut.
+
+**fix(plan,grpo,security): inherit Phase 3 KTO hardening, not Phase 2 DPO legacy — critic H2.** Phase 2's `fopen("w")` pattern is a known security issue that Phase 3 already fixed in the parallel KTO path; Phase 4 audit-driven decision is to inherit the hardened form directly so we never introduce a regression on the JSONL write surface.
 
 ---
 
@@ -271,9 +289,9 @@ Until extracted, `grpo_mlx.c` duplicates `json_escape`, `write_jsonl`, the singl
 | **R7** | **Multi-rollout slow** (umbrella §10 R5 verbatim) — N completions per prompt × max_new_tokens × max_iters can blow the test-suite +30 sec budget. | (a) N=4 default (D6). (b) `max_new_tokens` default = 8 in HUML tests (toy GPT outputs are small anyway); CLI accepts override. (c) Iteration budget for HUML e2e = 50 iters (Task 7) instead of trl's 1000+ — the toy GPT converges fast on synthetic rewards. (d) Wall-time check in `test_grpo_huml_synthetic_reward_e2e_advantage_drives_loss_decrease`: assert total runtime < 5 sec under ASan (10x relaxation of normal budget). (e) The MLX path skips this entirely on CI (no Gemma in CI default; gated by `HU_HAVE_MLX_LM_GRPO` + Gemma GGUF presence). |
 | **R8** | **Ratio-clip math sign error** — PPO's pessimistic `min` selects the smaller advantage, but a sign flip would produce optimistic `max` clipping and the policy would over-advantage the high-ratio rollouts, accelerating drift. | (a) Inline derivation comment in `src/ml/grpo.c::compute_clipped_advantage` showing the trl/verl reference and the worked sign analysis. (b) Test `test_grpo_loss_clip_is_pessimistic_min_not_max` constructs a pair of synthetic (ratio, advantage) tuples where the clipped vs unclipped values diverge in opposite directions and asserts the implementation picks the smaller-advantage branch. (c) Test `test_grpo_loss_clip_no_op_when_ratio_in_band` asserts that for `ratio ∈ [1−ε, 1+ε]`, the clipped and unclipped values are equal — pinning the algebra. |
 | **R9** | **`hu_rollout_t` non-determinism breaks finite-diff grad checks** — Task 6's grad check perturbs an lm_head weight by ±ε and asserts the loss changes consistently. If `hu_rollout_t` re-samples between L(θ+ε) and L(θ−ε), the loss changes for two reasons (parameter perturbation + RNG drift) and the FD numerical gradient becomes meaningless. | Test seam: the loss-only `grpo_compute_loss_only_for_test()` API takes a CALLER-OWNED array of pre-sampled completions, NOT a `hu_rollout_t`. The test samples once via `hu_rollout_huml.sample` with seed=42, captures the completions, then calls `grpo_compute_loss_only_for_test(rollouts, ...)` twice (with θ+ε and θ−ε). Same pattern as Phase 2 `dpo_huml_compute_loss_only_for_test` and Phase 3 `kto_compute_loss_only_for_test` — explicit seam, no hidden RNG calls. |
-| **R10** | **Per-step ephemeral π_θ_old leaks memory** — `hu_reference_model_create_from` is called every step; if the matching deinit is missed (e.g. via early-return on error), the toy GPT's params accumulate in the heap and ASan trips at suite end. | (a) Explicit `goto cleanup_old_policy` in `grpo_step` for every error path that follows the `create_from` call. (b) Test `test_grpo_huml_step_does_not_leak_under_asan` runs 100 step() calls with deliberate error-injecting inputs (zero-token prompts, NULL fields) and asserts ASan reports zero leaks at deinit time. (c) Per-step deinit also prevents the `c->old_policy` field from being a long-lived state — it is RE-CONSTRUCTED every step, so an error path that skips deinit will be caught by the next step's create_from clobbering the pointer (which would manifest as a use-after-free under ASan, not a silent leak). |
+| **R10** | **Per-step ephemeral π_θ_old leaks memory** — historically risked when `hu_reference_model_create_from` was called every step and could be missed on error paths. **Resolved by D5 simplification (fix(plan,grpo): critic H3):** the per-step snapshot was removed entirely (it was dead code — `lp_old` reads `rolls[i].sum_logprob`, not the snapshot). With no per-step allocation, this risk class collapses to "make sure `rolls[]` / `rewards[]` / `advs[]` cleanup runs on every error path". | (a) Existing `cleanup_rolls:` and `cleanup_prompt:` goto labels in `grpo_huml_step` handle the rollout/rewards/advs/prompt allocations — these REMAIN. (b) Test `test_grpo_huml_step_does_not_leak_under_asan` runs 100 step() calls with deliberate error-injecting inputs (zero-token prompts, NULL fields) and asserts ASan reports zero leaks at deinit time. (c) The dropped snapshot call site has no replacement — there is nothing to free at step end besides the rollout completions. |
 | **R11** | **Aspect-panel disagreement on GRPO loss formula** — spec §7 mandates `aspect-panel` (5 verifiers) for Phase 4 with disagreement <40% required to ship. Panel may flag: GRPO loss equation correctness (Shao 2024 vs trl convention vs verl convention all differ slightly on normalization), ratio-clip pessimism (`min` vs `max`), KL k3 derivation, log-ratio clamp constant, std-floor magnitude, per-step ephemeral π_θ_old vs long-lived. | Plan front-loads ALL contested derivations as C-comment blocks in the source: `src/ml/grpo.c` header has the full Shao 2024 §4.1.2 loss equation transcribed verbatim with citation; `src/ml/kl_divergence.c` header has the Schulman blog post derivation of k1/k2/k3; `src/ml/grpo.c::compute_clipped_advantage` has the trl reference snippet inlined as a comment. References to the canonical papers + GitHub permalinks are in every contested function. Panel runs at Task 11 end-gate. If disagreement ≥ 40%, Phase 4 does NOT close — fix and re-run. |
-| **R12** | **Single-line `--rollouts` parsing accepts negative N → unsigned underflow → giant allocation → OOM/crash** — `atoi("-1")` returns `-1`, casting to `size_t` underflows to `SIZE_MAX`, allocating `n_rollouts * sizeof(hu_rollout_completion_t)` overflows. | `cli_grpo.c` parses `--rollouts` via `strtol` with explicit `< 1 || > 1024` range check before assigning to `cfg.n_rollouts`. Test `test_cli_grpo_rejects_negative_rollouts_with_invalid_argument` asserts `hu_ml_cli_grpo_train` returns `HU_ERR_INVALID_ARGUMENT` for `--rollouts -1`, `--rollouts 0`, `--rollouts 999999`, and `--rollouts abc`. Same pattern as `cli_dpo.c` and `cli_kto.c` arg parsing. |
+| **R12** | **Single-line `--rollouts` parsing accepts negative N → unsigned underflow → giant allocation → OOM/crash** — `atoi("-1")` returns `-1`, casting to `size_t` underflows to `SIZE_MAX`, allocating `n_rollouts * sizeof(hu_rollout_completion_t)` overflows. **Also: N=1 silently produces no gradient** — the group baseline degenerates (`std({r}) = 0`, advantages all clamp to 0, the structural backward never fires) and training looks like it ran but did nothing (fix(plan,grpo,cli): enforce N≥2 — critic M1). | `cli_grpo.c` parses `--rollouts` via `strtol` with explicit `< 2 \|\| > 1024` range check before assigning to `cfg.n_rollouts` (N≥2 required: at N=1 the group baseline has no variance, all advantages = 0, no gradient signal). Additionally, log a warning `[grpo-train] WARNING: N=<n> < 4; group baseline variance high` when `2 ≤ n_rollouts < 4`. Test `test_cli_grpo_rejects_negative_rollouts_with_invalid_argument` asserts `hu_ml_cli_grpo_train` returns `HU_ERR_INVALID_ARGUMENT` for `--rollouts -1`, `--rollouts 0`, `--rollouts 1` (new — single rollout no-gradient pathology), `--rollouts 999999`, and `--rollouts abc`. Same pattern as `cli_dpo.c` and `cli_kto.c` arg parsing. |
 | **R13** | **Cross-platform `srand`/`rand` non-determinism** — toy GPT rollout uses `rand()` (POSIX) for multinomial sampling. Glibc's `rand` and Apple libc's `rand` produce different sequences from the same seed. Phase 4 tests using fixed seed will pass on macOS and fail on Linux (or vice-versa). | Hand-rolled deterministic 64-bit PRNG (xorshift64) inside `src/ml/rollout.c` — `static uint64_t hu_rollout_xorshift64(uint64_t *state)`. Seeded from caller-supplied `uint64_t seed`. Same constants on every platform → identical sequences. Test `test_rollout_huml_seed_42_produces_identical_token_ids_macos_and_linux` is gated only by build success on both platforms (CI matrix already covers both); the absolute token IDs are pinned in the test asserts so any RNG drift is caught. |
 
 ---
@@ -302,18 +320,18 @@ Until extracted, `grpo_mlx.c` duplicates `json_escape`, `write_jsonl`, the singl
 | Path | LOC | Responsibility |
 |------|-----|----------------|
 | `include/human/ml/kl_divergence.h` | ~50 | Public API: `hu_kl_k1` / `hu_kl_k2` / `hu_kl_k3` forward + `hu_kl_k3_backward`. Header guards `HU_ML_KL_DIVERGENCE_H`. Includes `human/core/error.h`. No allocator dependency (pure stack-friendly math on caller-owned arrays). |
-| `src/ml/kl_divergence.c` | ~150 | Three estimators + k3 backward. File-static `static inline double safe_exp(double x)` clamps `x` to `[−700, +700]` before `exp` to prevent overflow. k3 forward: sum over vocab of `(exp(r_i) − r_i − 1)` where `r_i = logp_ref[i] − logp_pol[i]`; sums in `double`; uses Kahan summation for vocab > 1024 (toy GPT V=32, so simple sum suffices for our case). k3 backward: `out_d_logp_pol[i] = 1 − exp(r_i)` per Schulman — derivable in 4 lines of algebra; comment block in source. |
+| `src/ml/kl_divergence.c` | ~150 | Three estimators + k3 backward. **Two API surfaces** (fix(plan,kl): wire k3 module into HUML GRPO hot path — critic H1): (a) `hu_kl_k3_scalar(double r) -> double` for the cheap sequence-level KL approximation used in the current HUML training path (one scalar `r = logp_ref − logp_pol` in); (b) `hu_kl_k3(const double *logp_pol, const double *logp_ref, size_t v) -> double` for per-vocab-position KL when full vocab log-prob arrays are available (used in MLX path future + cross-method reuse like DAPO, PPO+ref). File-static `static inline double safe_exp(double x)` clamps `x` to `[−700, +700]` before `exp` to prevent overflow. k3 forward: **mean** over vocab of `(exp(r_i) − r_i − 1)` where `r_i = logp_ref[i] − logp_pol[i]`; sums in `double`; uses Kahan summation for vocab > 1024 (toy GPT V=32, so simple sum suffices for our case). k3 backward: `out_d_logp_pol[i] = (1 − exp(r_i)) / v` per Schulman (matches MEAN forward) — derivable in 4 lines of algebra; comment block in source. |
 | `include/human/ml/rollout.h` | ~80 | Public API: `hu_rollout_completion_t`, `hu_rollout_vtable_t`, `hu_rollout_t`, factories `hu_rollout_create_huml(alloc, model, seed, *out)` and `hu_rollout_create_mlx(alloc, model_id, *out)`, helper `hu_rollout_free_completions(alloc, completions, n)` for the caller-owned cleanup contract. Header guards `HU_ML_ROLLOUT_H`. Includes `human/core/allocator.h`, `human/core/error.h`, `human/ml/model.h`. |
 | `src/ml/rollout.c` | ~250 | HUML factory: holds `{ hu_model_t *policy_ref; uint64_t rng_state; }`. `sample()` runs `hu_policy_logprobs`-style teacher-forced forward up to `prompt_len`, then iteratively: forward → extract last-position logits → temperature scale (`logits[i] /= temperature`) → softmax → top-p truncate → multinomial-sample via `hu_rollout_xorshift64` → append to token_ids → repeat until `\n` token (id=0 reserved for EOS in toy GPT) or `max_new_tokens`. `sum_logprob` accumulated as the log-softmax of the sampled token at each step. The MLX factory stub returns `HU_ERR_NOT_SUPPORTED` until Task 8 fills it in. `hu_rollout_free_completions` walks the array and frees each `token_ids` via the caller-supplied allocator. |
 | `include/human/ml/grpo.h` | ~80 | Public API: `hu_grpo_huml_create` factory declaration + `hu_grpo_mlx_create` factory declaration + `hu_grpo_reward_source_t` enum + `hu_grpo_reward_fn_t` typedef for the callback shape `double (*)(const int32_t *tokens, size_t n, void *user)`. Header guards `HU_ML_GRPO_H`. Includes `human/core/allocator.h`, `human/core/error.h`, `human/ml/rl_trainer.h`, `human/ml/rollout.h`, `human/ml/reward_model.h`. |
 | `src/ml/grpo.c` | ~450 | GRPO loss (group baseline + ratio clip + KL penalty), structural backward, implements `hu_rl_trainer_t`. Internal helpers: `compute_group_baseline(rewards, n, *out_advantages)`, `compute_clipped_advantage(log_ratio, advantage, eps_clip, *out)`, `compute_kl_penalty(logp_pol, logp_ref, vocab_size, beta)`, `grpo_step_one_prompt(c, alloc, prompt, prompt_len, *out_loss)`, `grpo_structural_backward_lm_head(c, prompt, completions, advantages, n_rollouts)`. Exposes test seam `grpo_compute_loss_only_for_test(c, alloc, prompt, completions, rewards, n, *out_loss)` under `#if HU_IS_TEST`. |
 | `include/human/ml/cli_grpo.h` | ~30 | Public declaration of `hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **argv)`. Mirrors `include/human/ml/cli_kto.h`. |
 | `src/ml/cli_grpo.c` | ~200 | `hu_ml_cli_grpo_train` — argv parsing (`--pairs`, `--rollouts`, `--backend`, `--reward-fn`, `--reward-model`, `--clip-eps`, `--kl-beta`, `--iters`, `--temperature`, `--max-new-tokens`, `--adapter-out`), JSONL loading (mirrors `cli_dpo.c` pattern, only `prompt` field consumed), reward source resolution (synthetic vs `hu_reward_model_load`), trainer dispatch via `hu_rl_trainer_create_grpo`, step loop, metrics print, save_adapter call. Negative-`--rollouts` rejection via R12 mitigation. |
-| `src/ml/grpo_mlx.c` | ~200 | MLX subprocess backend for GRPO. Same structural pattern as `dpo_real_mlx.c` (Phase 2 Task 6) and `kto_mlx.c` (Phase 3 Task 7): `json_escape`, `write_jsonl_grpo` (only `prompt` field; ignores chosen/rejected), `mlx_lm_lora_grpo_available()` create-time probe (per D10 + R1), `grpo_mlx_step` popens `scripts/grpo_mlx_train.py` with `--rollouts`, `--clip-eps`, `--kl-beta`, `--reward-model` args, `grpo_mlx_save` copies adapter dir with single-quote shell escaping. In test mode without `HU_HAVE_MLX_LM_GRPO`, writes a dummy `adapters.safetensors` so unit tests can validate path population without spawning the real subprocess. |
+| `src/ml/grpo_mlx.c` | ~200 | MLX subprocess backend for GRPO. **Mirrors `kto_mlx.c` (Phase 3 Task 7 hardened pattern)** — fix(plan,grpo,security): inherit Phase 3 hardening, NOT Phase 2 `dpo_real_mlx.c` legacy (critic H2): `json_escape`, `write_jsonl_grpo` writes JSONL via `open(path, O_WRONLY\|O_CREAT\|O_EXCL, 0600); fdopen(fd, "w")` (only `prompt` field; ignores chosen/rejected), `mlx_lm_lora_grpo_available()` create-time probe (specific symbol probe: `from mlx_lm_lora.trainer.grpo_trainer import train_grpo` per D10 + R1), `grpo_mlx_step` popens `scripts/grpo_mlx_train.py` with `--rollouts`, `--clip-eps`, `--kl-beta`, `--reward-model` args, `grpo_mlx_save` copies adapter dir with single-quote shell escaping. In test mode without `HU_HAVE_MLX_LM_GRPO`, writes a dummy `adapters.safetensors` so unit tests can validate path population without spawning the real subprocess. |
 | `include/human/ml/grpo_mlx.h` | ~25 | Just declares `hu_grpo_mlx_create` (which is also declared in `grpo.h` for the factory dispatch). Optional file — could be inlined into `grpo.h`; keeping it separate matches Phase 2's `dpo_real.h` / `dpo_real_mlx.c` split where the MLX-only declaration lives in the same header for simplicity. **Plan choice:** put `hu_grpo_mlx_create` in `grpo.h` (matching Phase 3 KTO's `kto.h` layout). DROP this file from the manifest. |
 | `scripts/grpo_mlx_train.py` | ~100 | Python wrapper. Mirrors `scripts/dpo_mlx_train.py` (Phase 2) and `scripts/kto_mlx_train.py` (Phase 3) — delegates to the `python -m mlx_lm_lora.train --train-mode grpo` CLI for stability rather than importing internal symbols. argparse surface: `--model`, `--data`, `--adapter-path`, `--iters`, `--rollouts`, `--clip-eps`, `--kl-beta`, `--reward-model`, `--temperature`, `--max-new-tokens`, `--batch-size`. Exit codes: 0 success, 2 mlx_lm_lora unavailable, 3 adapters.safetensors missing/empty, other = CLI's own non-zero. |
 | `tests/test_kl_divergence.c` | ~250 | Pins kl_divergence.c: `test_kl_self_kl_is_zero` (logp_pol == logp_ref → KL = 0 on all 3 estimators), `test_kl_k3_non_negativity` (random pairs, k3 always ≥ 0), `test_kl_k1_can_be_negative` (k1 is biased and can be < 0; pin that property to prevent a future "fix"), `test_kl_k3_backward_finite_diff_matches_analytical` (perturb logp_pol[3] by ±ε, recompute k3, compare numerical gradient to `1 − exp(r_3)` analytical), `test_kl_k3_overflow_clamp` (large `r` doesn't NaN out — pins safe_exp clamp), `test_kl_k3_underflow_safety` (very negative `r` doesn't underflow to weird numbers). |
-| `tests/test_rollout.c` | ~250 | Pins rollout.c HUML factory: `test_rollout_huml_factory_returns_populated_vtable`, `test_rollout_huml_seed_42_produces_deterministic_token_ids` (call `sample()` twice with same seed, assert identical token IDs and identical `sum_logprob`), `test_rollout_huml_n_rollouts_returns_n_completions` (request N=4 rollouts, assert array length matches), `test_rollout_huml_distinct_seeds_produce_distinct_completions` (seed=1 vs seed=2 produce different token IDs with high probability), `test_rollout_huml_respects_max_new_tokens_cap` (cap=3 → no completion exceeds 3 tokens), `test_rollout_huml_seed_42_produces_identical_token_ids_macos_and_linux` (R13 — pin specific token IDs as test fixtures). MLX factory test stubs as `HU_SKIP_IF` until Task 8. |
+| `tests/test_rollout.c` | ~250 | Pins rollout.c HUML factory: `test_rollout_huml_factory_returns_populated_vtable`, `test_rollout_huml_seed_42_produces_deterministic_token_ids` (call `sample()` twice with same seed, assert identical token IDs and identical `sum_logprob`), `test_rollout_huml_n_rollouts_returns_n_completions` (request N=4 rollouts, assert array length matches), `test_rollout_huml_distinct_seeds_produce_distinct_completions` (seed=1 vs seed=2 produce different token IDs with high probability), `test_rollout_huml_respects_max_new_tokens_cap` (cap=3 → no completion exceeds 3 tokens), `test_rollout_huml_seed_42_produces_identical_token_ids_macos_and_linux` (R13 — pin specific token IDs as test fixtures). MLX factory tests gated by compile-time `#if !defined(HU_HAVE_MLX_LM_GRPO) \|\| HU_HAVE_MLX_LM_GRPO == 0` early-return (matches Phase 3 pattern — fix(plan,grpo,test): standardize on `#if` not `HU_SKIP_IF` — critic L1). |
 | `tests/test_grpo_loss.c` | ~400 | Pins grpo.c: `test_grpo_rl_trainer_vtable_fields_all_populated` (factory returns full vtable), `test_grpo_loss_handles_zero_std_group_without_nan` (D7 + R6 — all-equal-rewards group, advantages = 0, loss finite, gradient zero), `test_grpo_loss_log_ratio_overflow_clamp_kicks_in` (D8 — pathological policy, log_ratio clamped to ±20), `test_grpo_loss_clip_is_pessimistic_min_not_max` (R8 — synthetic ratio/advantage tuples), `test_grpo_loss_clip_no_op_when_ratio_in_band` (R8 — ratio ∈ [0.8, 1.2], clipped == unclipped), `test_grpo_loss_kl_penalty_zero_at_policy_equals_reference` (R2/D3 — k3 KL term zero when π_θ == π_ref), `test_grpo_loss_finite_diff_matches_analytical_on_lm_head_probe` (Task 6 — same pattern as KTO Task 5: probe a single lm_head weight, compare numerical to analytical sign). |
 | `tests/test_grpo_e2e.c` | ~300 | Pins HUML e2e behavior: `test_grpo_huml_synthetic_reward_e2e_advantage_drives_loss_decrease` (Task 7 — 50 iters, N=4, synthetic reward fn, assert final_loss < initial_loss − 0.1), `test_grpo_huml_synthetic_reward_e2e_chosen_token_logprob_increases` (sign-of-improvement: count "good"-token logp at iter 0 vs iter 50, assert increase), `test_grpo_huml_kl_penalty_keeps_policy_close_to_reference` (R5 — final mean KL < 2.0 nats), `test_grpo_huml_step_does_not_leak_under_asan` (R10 — 100 step calls with various error inputs, ASan asserts zero leaks at suite end), `test_grpo_mlx_subprocess_produces_safetensors` (mirror of Phase 2 Task 7's test, gated by `HU_HAVE_MLX_LM_GRPO`), `test_grpo_mlx_dummy_adapter_in_test_mode` (test-mode shortcut without `HU_HAVE_MLX_LM_GRPO` writes dummy adapter). |
 | `tests/fixtures/synthetic_grpo_prompts.jsonl` | ~50 | 20 single-prompt rows (one-line each: `{"prompt": "1 2 3"}` style). Used by `cli_grpo.c` test (Task 9) and the e2e test (Task 7). NO chosen/rejected fields — GRPO ignores them. |
@@ -427,12 +445,22 @@ hu_error_t hu_rl_trainer_create_grpo(hu_allocator_t *alloc,
  * KTO probes — checks whichever symbol grpo_mlx_train.py imports
  * (canonical: mlx_lm_lora.trainer.grpo_trainer.train_grpo; fallback:
  * mlx_lm_lora.train CLI module). Verified at Task 0 step 2 against the
- * actual installed package. */
+ * actual installed package.
+ *
+ * fix(plan,grpo,test): under HU_IS_TEST, short-circuit to "unavailable"
+ * (critic M7). Tests must use `HU_HAVE_MLX_LM_GRPO` compile-time gating
+ * for the real subprocess path; unconditionally spawning a probe
+ * subprocess from test mode is hostile to the test-deterministic /
+ * no-side-effects contract in AGENTS.md §3 / docs/standards/security. */
 static int mlx_lm_lora_grpo_available(void) {
+#if HU_IS_TEST
+    return 0;
+#else
     /* Try the canonical Python API symbol first; fall back to the CLI
      * module probe if the per-trainer symbol moved or doesn't exist. */
     if (system("python3 -c 'from mlx_lm_lora.trainer.grpo_trainer import train_grpo' 2>/dev/null") == 0) return 1;
     return system("python3 -m mlx_lm_lora.train --help 2>/dev/null | grep -q 'train-mode\\|grpo'") == 0;
+#endif
 }
 
 hu_error_t hu_rl_trainer_create_grpo(hu_allocator_t *alloc,
@@ -509,28 +537,42 @@ cmake --build --preset rl_sota -j8 2>&1 | tail -20
 ./build-rl-sota/human_tests --filter='dpo\|kto\|reward_model' 2>&1 | tail -10
 ```
 
-Expected: Phase 2/3 tests PASS (no regression from the additive `n_rollouts`/`clip_eps`/`kl_beta` field additions). Build may fail to link `hu_grpo_huml_create` / `hu_grpo_mlx_create` — that's intentional, Tasks 5+8 land them. To unblock the build now, add a temporary stub at the bottom of `src/ml/rl_trainer.c`:
+Expected: Phase 2/3 tests PASS (no regression from the additive `n_rollouts`/`clip_eps`/`kl_beta` field additions). Build may fail to link `hu_grpo_huml_create` / `hu_grpo_mlx_create` — that's intentional, Tasks 5+8 land them. To unblock the build now, use **conditional compilation guards** matching Phase 2's pattern (NOT `__attribute__((weak))` — fix(plan,grpo,c11): non-portable GCC/Clang extension, replace with `#ifdef` — critic L3):
 
 ```c
 /* Phase 4 Task 0 temporary stubs — replaced by Task 5 (hu_grpo_huml_create
  * via src/ml/grpo.c) and Task 8 (hu_grpo_mlx_create via src/ml/grpo_mlx.c).
- * Keep them as weak references? No — file-static stubs work and get
- * shadowed at link time when the real impls land. */
-__attribute__((weak)) hu_error_t hu_grpo_huml_create(hu_allocator_t *alloc,
-                                                       const hu_rl_trainer_config_t *cfg,
-                                                       hu_rl_trainer_t *out) {
+ *
+ * fix(plan,grpo,c11): use conditional compilation, NOT
+ * __attribute__((weak)) (critic L3). The `weak` attribute is a
+ * GCC/Clang extension, not C11; AGENTS.md §3 mandates C11 strict
+ * compliance. Phase 2 used the same #ifdef pattern for the parallel
+ * dpo_huml_create / dpo_mlx_create stubs (see Phase 2 plan Task 0 step 7).
+ *
+ * `HU_GRPO_HAVE_HUML_IMPL` is defined by src/ml/grpo.c at Task 5 land;
+ * `HU_GRPO_HAVE_MLX_IMPL` by src/ml/grpo_mlx.c at Task 8. When defined,
+ * the strong impl in that TU is the only definition; the stubs below
+ * are NOT compiled, so the linker sees exactly one definition. */
+#ifndef HU_GRPO_HAVE_HUML_IMPL
+hu_error_t hu_grpo_huml_create(hu_allocator_t *alloc,
+                                const hu_rl_trainer_config_t *cfg,
+                                hu_rl_trainer_t *out) {
     (void)alloc; (void)cfg; (void)out;
     return HU_ERR_NOT_SUPPORTED;
 }
-__attribute__((weak)) hu_error_t hu_grpo_mlx_create(hu_allocator_t *alloc,
-                                                      const hu_rl_trainer_config_t *cfg,
-                                                      hu_rl_trainer_t *out) {
+#endif
+
+#ifndef HU_GRPO_HAVE_MLX_IMPL
+hu_error_t hu_grpo_mlx_create(hu_allocator_t *alloc,
+                               const hu_rl_trainer_config_t *cfg,
+                               hu_rl_trainer_t *out) {
     (void)alloc; (void)cfg; (void)out;
     return HU_ERR_NOT_SUPPORTED;
 }
+#endif
 ```
 
-These weak stubs let `rl_trainer.c` link cleanly. Tasks 5 and 8 provide the strong (non-weak) symbols which override at link time. Document in the Task 0 commit message that the weak stubs exist temporarily and that Tasks 5/8 remove them.
+`src/ml/grpo.c` (Task 5) starts with `#define HU_GRPO_HAVE_HUML_IMPL 1` BEFORE its definition of `hu_grpo_huml_create`. `src/ml/grpo_mlx.c` (Task 8) does the same with `HU_GRPO_HAVE_MLX_IMPL`. CMake adds both source files to the build at Tasks 1+8 respectively. When a TU defining the macro lands in the link, the stub in `rl_trainer.c` falls out via the `#ifndef` and the strong impl wins as the sole definition — strict-C11-compliant, no weak attribute, no link order dependency. Document in the Task 0 commit message that the stubs are temporary and Tasks 5/8 land the real impls + the `#define` triggers.
 
 - [ ] **Step 8: Commit**
 
@@ -546,8 +588,10 @@ _create_dpo and _create_kto. AUTO backend probes mlx_lm_lora's GRPO
 trainer (canonical: trainer.grpo_trainer.train_grpo; fallback: train CLI
 module with --train-mode grpo).
 
-Temporary weak stubs for hu_grpo_huml_create / hu_grpo_mlx_create are
-replaced in Tasks 5 and 8; Phase 4 builds cleanly through the gap.
+Temporary #ifndef-guarded stubs for hu_grpo_huml_create / hu_grpo_mlx_create
+(strict C11; not __attribute__((weak))) fall out at Tasks 5 and 8 once
+HU_GRPO_HAVE_HUML_IMPL / HU_GRPO_HAVE_MLX_IMPL are defined by the
+strong-impl TUs; Phase 4 builds cleanly through the gap.
 
 References:
 - DeepSeek R1 (β=0.04 default; umbrella §11 Q10)
@@ -615,14 +659,18 @@ static void test_kl_k1_can_be_negative(void) {
 }
 
 static void test_kl_k3_backward_finite_diff_matches_analytical(void) {
-    /* Analytical: dKL_k3 / d_logp_pol[i] = 1 - exp(r_i) where r_i = logp_ref - logp_pol */
+    /* Analytical (MEAN forward — fix(plan,kl,test): k3 MEAN consistency,
+     * critic H4): dKL_k3 / d_logp_pol[i] = (1 - exp(r_i)) / v
+     * where r_i = logp_ref - logp_pol and v is the vocab size. */
     double logp_pol[5] = {-2.0, -1.5, -3.0, -0.5, -2.5};
     double logp_ref[5] = {-1.0, -2.0, -2.5, -1.5, -1.0};
+    const size_t v = 5;
     double grad[5] = {0};
-    hu_kl_k3_backward(logp_pol, logp_ref, 5, grad);
+    hu_kl_k3_backward(logp_pol, logp_ref, v, grad);
 
-    /* Probe index 2: dKL/d_logp_pol[2] = 1 - exp(-2.5 - (-3.0)) = 1 - exp(0.5) */
-    double expected = 1.0 - exp(0.5);
+    /* Probe index 2: dKL/d_logp_pol[2] = (1 - exp(-2.5 - (-3.0))) / v
+     *                                  = (1 - exp(0.5)) / v */
+    double expected = (1.0 - exp(0.5)) / (double)v;
     HU_ASSERT_TRUE(fabs(grad[2] - expected) < 1e-9);
 
     /* Finite-diff confirmation on probe index 2 */
@@ -690,12 +738,27 @@ extern "C" {
  *
  * k1 (biased, can be negative): KL ≈ mean(logπ_pol - logπ_ref)
  * k2 (Schulman, biased low-variance): KL ≈ 0.5 * mean((logπ_ref - logπ_pol)^2)
- * k3 (Schulman unbiased, always ≥ 0): KL ≈ mean(exp(r) - r - 1)
+ * k3 (Schulman unbiased, always ≥ 0): KL ≈ mean over vocab of (exp(r) - r - 1)
  *      where r_i = logπ_ref[i] - logπ_pol[i]
  *
  * GRPO defaults to k3 (matches huggingface/trl/grpo_trainer.py and
  * volcengine/verl). All values internally use safe_exp clamps to
  * prevent overflow at large r and remain finite at very negative r.
+ *
+ * Two API surfaces for k3 (fix(plan,kl): wire k3 module into HUML
+ * GRPO hot path — critic H1):
+ *   (a) `hu_kl_k3_scalar(double r)` — cheap sequence-level KL
+ *       approximation used in the current HUML training path. Takes
+ *       ONE scalar `r = logp_ref - logp_pol` (already aggregated
+ *       across the response), returns `exp(r) - r - 1` with the same
+ *       safe_exp clamp. Used by `grpo_huml_step` to replace the
+ *       inline `kl_term = exp(rc) - rc - 1.0` math — keeps the
+ *       module the single source of truth for k3 even when the
+ *       per-vocab vector is not materialized.
+ *   (b) `hu_kl_k3(logp_pol, logp_ref, v)` — per-vocab-position KL
+ *       when full vocab log-prob arrays are available. Used in the
+ *       MLX path future (when mlx-lm-lora exposes per-position
+ *       logprobs) and by cross-method reuse (DAPO, PPO+ref).
  *
  * Reference: John Schulman, "Approximating KL Divergence" (2020)
  *   http://joschu.net/blog/kl-approx.html
@@ -704,8 +767,14 @@ double hu_kl_k1(const double *logp_pol, const double *logp_ref, size_t v);
 double hu_kl_k2(const double *logp_pol, const double *logp_ref, size_t v);
 double hu_kl_k3(const double *logp_pol, const double *logp_ref, size_t v);
 
+/* Cheap scalar variant for the HUML GRPO hot path (fix(plan,kl):
+ * critic H1). `r` is the already-aggregated `logp_ref - logp_pol` for
+ * one rollout. Returns `safe_exp(r) - r - 1`, always ≥ 0. */
+double hu_kl_k3_scalar(double r);
+
 /* Backward of k3 wrt logp_pol (logp_ref is frozen, no grad).
  * Analytical: d_logp_pol[i] = (1 - exp(r_i)) / v  where r_i = logp_ref - logp_pol.
+ * Matches the MEAN forward (sum / v) so the gradient is well-scaled.
  * Sign: r > 0 → grad < 0, pushing logp_pol UP toward logp_ref. */
 void hu_kl_k3_backward(const double *logp_pol, const double *logp_ref,
                        size_t v, double *out_d_logp_pol);
@@ -719,6 +788,12 @@ void hu_kl_k3_backward(const double *logp_pol, const double *logp_ref,
 - [ ] **Step 3: Implement `src/ml/kl_divergence.c`**
 
 Body sketch (~150 LOC). File header has the Schulman blog citation block. `safe_exp` clamps `x` to `[-700, +700]` (just inside `double` overflow). Three forwards each loop `for (i = 0; i < v; i++)` with the formulas above; final result divided by `v` for mean. k3 backward: same loop, `r = logp_ref[i] - logp_pol[i]`; `out_d_logp_pol[i] = (1.0 - safe_exp(r)) / (double)v;` (note division by v matches the mean averaging in forward). All sums in `double`. No allocations.
+
+**Exports BOTH variants (fix(plan,kl): two-API-surface for critic H1):**
+1. `hu_kl_k3_scalar(double r) -> double` — the cheap sequence-level form: returns `safe_exp(r) - r - 1`. Used by `grpo_huml_step` and `grpo_compute_loss_only_for_test` in the HUML hot path (one aggregated scalar `r = lp_ref - lp_pol` per rollout, no vocab vector materialized).
+2. `hu_kl_k3(const double *logp_pol, const double *logp_ref, size_t v) -> double` — the per-vocab-position form for the MLX-future path and cross-method reuse (DAPO, PPO+ref).
+
+Implementing one in terms of the other is acceptable (the vector form is just `sum_i safe_exp(r_i) - r_i - 1` divided by `v`), but they MUST be separately addressable symbols so callers don't conjure scalar args into stack arrays. Tests exercise both.
 
 - [ ] **Step 4: Wire CMake + test runner**
 
@@ -909,11 +984,23 @@ static void test_rollout_huml_respects_max_new_tokens_cap(void) {
 static void test_rollout_huml_seed_42_produces_identical_token_ids_macos_and_linux(void) {
     /* Cross-platform determinism (R13). Pin EXACT token IDs.
      *
-     * Note: this test's expected token IDs are captured at plan-execution
-     * Task 2 step 5 by running on the implementer's macOS dev box, then
-     * cross-verifying on the Linux CI runner. If the values diverge, the
-     * implementer must replace `rand()` with the xorshift64 PRNG (which
-     * is the plan's intent — see R13). */
+     * MANDATORY Task 2 acceptance criterion (fix(plan,grpo,test):
+     * make pin assertion mandatory — critic M5): the implementing
+     * engineer MUST:
+     *   1. Run this test once on macOS, capture the actual
+     *      `c[0].token_ids[0]` value via a one-time `fprintf(stderr,
+     *      "[pin-capture] token_ids[0] = %d\n", c[0].token_ids[0]);`
+     *      logged from the test.
+     *   2. Replace the placeholder `<PIN>` below with the captured
+     *      integer value.
+     *   3. UNCOMMENT the assertion BEFORE marking Task 2 complete.
+     *   4. Re-run on Linux CI; if it diverges, the xorshift64 path
+     *      has a platform-dependent bug and the implementer must
+     *      fix it (likely `double` rounding or signed shift UB).
+     *
+     * This is a TASK 2 BLOCKING ACCEPTANCE CRITERION, not optional.
+     * Sprint-auditor will fail Task 2 if the assertion is still
+     * commented out at end-gate. */
     hu_allocator_t alloc = hu_system_allocator();
     hu_model_t model = {0};
     hu_gpt_config_t cfg = {0};
@@ -929,7 +1016,7 @@ static void test_rollout_huml_seed_42_produces_identical_token_ids_macos_and_lin
     /* Cross-platform pin: with the xorshift64 seeded init from the toy GPT,
      * rollout(seed=42, prompt=[1,2,3]) MUST start with a specific token ID.
      * Capture the value at implementation time and pin here. */
-    /* HU_ASSERT_EQ(c[0].token_ids[0], <pinned value>);   // un-comment after Task 2 step 5 capture */
+    /* HU_ASSERT_EQ(c[0].token_ids[0], <PIN>);   // REQUIRED: uncomment + fill PIN before Task 2 close (critic M5) */
 
     hu_rollout_free_completions(&alloc, c, 1);
     r.vtable->deinit(r.ctx, &alloc);
@@ -1172,13 +1259,22 @@ void hu_rollout_free_completions(hu_allocator_t *alloc,
 
 - [ ] **Step 4: Wire CMake + test runner** (mirror Task 1 pattern; src/ml/rollout.c into HU_CORE_SOURCES under HU_ENABLE_RL_FULL, tests/test_rollout.c into HU_TEST_SOURCES, run_rollout_tests in test_main.c).
 
-- [ ] **Step 5: Run test, capture cross-platform token IDs**
+- [ ] **Step 5: Run test, capture cross-platform token IDs (MANDATORY)**
 
 ```bash
 cmake --build --preset rl_sota -j8 && ./build-rl-sota/human_tests --suite=rollout
 ```
 
-Expected: 5/5 PASS (the cross-platform pin test passes with its assertion commented out; uncomment + capture pinned token ID after running once on macOS, then cross-verify on Linux CI).
+Expected: 5/5 PASS.
+
+**fix(plan,grpo,task2): mandatory pin-capture step — critic M5.** The implementer MUST:
+1. Add a one-time `fprintf(stderr, "[pin-capture] token_ids[0] = %d\n", c[0].token_ids[0]);` to `test_rollout_huml_seed_42_produces_identical_token_ids_macos_and_linux` and run on macOS to capture the actual value.
+2. Replace the `<PIN>` placeholder in the test source with that captured integer.
+3. UNCOMMENT the `HU_ASSERT_EQ(c[0].token_ids[0], <PIN>);` line.
+4. Re-run on Linux CI (push to a branch, observe CI output) to cross-verify the assertion holds. If it fails, debug the xorshift64 path for platform-dependent bugs before proceeding.
+5. Remove the `fprintf` instrumentation; commit the uncommented assertion as part of Task 2.
+
+This is a Task 2 BLOCKING acceptance criterion. The cross-platform determinism property is the whole point of R13 — leaving the assertion commented out makes the test a no-op and the property unverified.
 
 - [ ] **Step 6: Commit**
 
@@ -1188,7 +1284,8 @@ git commit -m "feat(ml,rollout): hu_rollout_t HUML multinomial sampling + xorshi
 ```
 
 **Acceptance:**
-- 5/5 rollout tests pass (cross-platform pin token ID captured after first macOS run).
+- 5/5 rollout tests pass.
+- **Cross-platform pin assertion in `test_rollout_huml_seed_42_produces_identical_token_ids_macos_and_linux` is UNCOMMENTED and filled in with the captured token ID (fix(plan,grpo,task2): mandatory — critic M5). Sprint-auditor blocks Task 2 close if the `HU_ASSERT_EQ(c[0].token_ids[0], <PIN>);` line is still commented.**
 - ASan zero leaks (per-sample alloc balanced by per-completion `hu_rollout_free_completions`).
 - Same seed → byte-identical token sequences.
 - Different seeds → distinct sequences.
@@ -1407,13 +1504,12 @@ Sketch (~150 LOC for this task; rest of file lands in Task 5).
 static const double HU_GRPO_STD_FLOOR = 1e-8;        /* D7 */
 static const double HU_GRPO_LOG_RATIO_CLAMP = 20.0;  /* D8 */
 
-/* Group-relative baseline (Shao 2024 §4.1.2):
- *   mean = sum(r) / N
- *   std  = sqrt(sum((r - mean)^2) / N)        (population std, NOT sample std)
- *   Â_i  = (r_i - mean) / (std + std_floor)
- * verl uses population std in core_algos.py — we match that. */
-double grpo_compute_group_baseline_advantage_for_test(const double *rewards, size_t n,
-                                                       double *out_advantages, double std_floor) {
+/* Internal static helpers (production code path) live alongside the
+ * test seam exposing the same logic. The `_for_test` symbols are
+ * wrapped in #if HU_IS_TEST so they don't bloat the release binary
+ * (fix(plan,grpo): scope _for_test seams to test builds — critic M3). */
+static double grpo_compute_group_baseline_advantage(const double *rewards, size_t n,
+                                                     double *out_advantages, double std_floor) {
     if (n == 0) return 0.0;
     double sum = 0.0;
     for (size_t i = 0; i < n; i++) sum += rewards[i];
@@ -1426,7 +1522,33 @@ double grpo_compute_group_baseline_advantage_for_test(const double *rewards, siz
     return mean;
 }
 
-/* PPO clip with log-ratio clamp (D8).
+static double grpo_compute_clipped_advantage(double log_ratio, double advantage, double clip_eps) {
+    if (log_ratio > HU_GRPO_LOG_RATIO_CLAMP) log_ratio = HU_GRPO_LOG_RATIO_CLAMP;
+    if (log_ratio < -HU_GRPO_LOG_RATIO_CLAMP) log_ratio = -HU_GRPO_LOG_RATIO_CLAMP;
+    double ratio = exp(log_ratio);
+    double lo = 1.0 - clip_eps;
+    double hi = 1.0 + clip_eps;
+    double clipped_ratio = ratio < lo ? lo : (ratio > hi ? hi : ratio);
+    double a = ratio * advantage;
+    double b = clipped_ratio * advantage;
+    return a < b ? a : b;
+}
+
+#if HU_IS_TEST
+/* Group-relative baseline test seam (Shao 2024 §4.1.2):
+ *   mean = sum(r) / N
+ *   std  = sqrt(sum((r - mean)^2) / N)        (population std, NOT sample std)
+ *   Â_i  = (r_i - mean) / (std + std_floor)
+ * verl uses population std in core_algos.py — we match that.
+ *
+ * fix(plan,grpo): scoped to HU_IS_TEST to keep release binary lean
+ * (critic M3); production code path calls the static helper above. */
+double grpo_compute_group_baseline_advantage_for_test(const double *rewards, size_t n,
+                                                       double *out_advantages, double std_floor) {
+    return grpo_compute_group_baseline_advantage(rewards, n, out_advantages, std_floor);
+}
+
+/* PPO clip with log-ratio clamp (D8) test seam.
  *   1. Clamp log_ratio to [-20, 20]
  *   2. ratio = exp(clamped)
  *   3. clipped_ratio = min(max(ratio, 1-ε), 1+ε)
@@ -1434,20 +1556,13 @@ double grpo_compute_group_baseline_advantage_for_test(const double *rewards, siz
  *
  * Note: this returns the CLIPPED ADVANTAGE (the term that goes into
  * L_clip_i = min(...)). The full GRPO loss negates the mean of these
- * across rollouts and adds the KL penalty. */
+ * across rollouts and adds the KL penalty.
+ *
+ * fix(plan,grpo): scoped to HU_IS_TEST (critic M3). */
 double grpo_compute_clipped_advantage_for_test(double log_ratio, double advantage, double clip_eps) {
-    /* Clamp to prevent exp overflow */
-    if (log_ratio > HU_GRPO_LOG_RATIO_CLAMP) log_ratio = HU_GRPO_LOG_RATIO_CLAMP;
-    if (log_ratio < -HU_GRPO_LOG_RATIO_CLAMP) log_ratio = -HU_GRPO_LOG_RATIO_CLAMP;
-    double ratio = exp(log_ratio);
-    double lo = 1.0 - clip_eps;
-    double hi = 1.0 + clip_eps;
-    double clipped_ratio = ratio < lo ? lo : (ratio > hi ? hi : ratio);
-
-    double a = ratio * advantage;
-    double b = clipped_ratio * advantage;
-    return a < b ? a : b;  /* PPO pessimistic min */
+    return grpo_compute_clipped_advantage(log_ratio, advantage, clip_eps);
 }
+#endif /* HU_IS_TEST */
 ```
 
 - [ ] **Step 4: Wire CMake + test runner** (same pattern as Task 1/2; src/ml/grpo.c into HU_CORE_SOURCES under HU_ENABLE_RL_FULL, tests/test_grpo_loss.c into HU_TEST_SOURCES, run_grpo_loss_tests in test_main.c).
@@ -1485,8 +1600,12 @@ git commit -m "feat(ml,grpo): group baseline + clipped advantage helpers + std-f
 - [ ] **Step 1: Write the failing test**
 
 ```c
-/* tests/test_grpo_loss.c — Task 4 addition */
-extern double grpo_synthetic_reward_default_for_test(const int32_t *tokens, size_t n);
+/* tests/test_grpo_loss.c — Task 4 addition.
+ * fix(plan,grpo): renamed from grpo_synthetic_reward_default_for_test
+ * (critic L2) — the function is a DOCUMENTED PRODUCTION FALLBACK called
+ * from cli_grpo.c when --reward-fn synthetic is selected, NOT a
+ * test-only seam. Naming it `_for_test` was misleading. */
+extern double hu_grpo_default_synthetic_reward(const int32_t *tokens, size_t n);
 
 static void test_grpo_synthetic_reward_default_counts_good_minus_bad_tokens(void) {
     /* The default synthetic reward function (D4):
@@ -1499,10 +1618,10 @@ static void test_grpo_synthetic_reward_default_counts_good_minus_bad_tokens(void
     int32_t mixed[6]    = {1, 26, 2, 27, 3, 28};  /* 3 - 3 = 0 */
     int32_t empty[0];
 
-    HU_ASSERT_TRUE(fabs(grpo_synthetic_reward_default_for_test(all_good, 5) - 5.0) < 1e-9);
-    HU_ASSERT_TRUE(fabs(grpo_synthetic_reward_default_for_test(all_bad, 5) - (-5.0)) < 1e-9);
-    HU_ASSERT_TRUE(fabs(grpo_synthetic_reward_default_for_test(mixed, 6) - 0.0) < 1e-9);
-    HU_ASSERT_TRUE(fabs(grpo_synthetic_reward_default_for_test(empty, 0) - 0.0) < 1e-9);
+    HU_ASSERT_TRUE(fabs(hu_grpo_default_synthetic_reward(all_good, 5) - 5.0) < 1e-9);
+    HU_ASSERT_TRUE(fabs(hu_grpo_default_synthetic_reward(all_bad, 5) - (-5.0)) < 1e-9);
+    HU_ASSERT_TRUE(fabs(hu_grpo_default_synthetic_reward(mixed, 6) - 0.0) < 1e-9);
+    HU_ASSERT_TRUE(fabs(hu_grpo_default_synthetic_reward(empty, 0) - 0.0) < 1e-9);
 }
 
 /* Add to run_grpo_loss_tests:
@@ -1513,10 +1632,22 @@ static void test_grpo_synthetic_reward_default_counts_good_minus_bad_tokens(void
 - [ ] **Step 2: Implement reward source helpers in `src/ml/grpo.c`**
 
 ```c
-/* Synthetic reward function (D4 default; R3 mitigation).
+/* Default synthetic reward function (D4; R3 mitigation).
+ *
+ * This is a DOCUMENTED PRODUCTION FALLBACK — `human ml grpo-train
+ * --reward-fn synthetic` wires it as the live reward source for
+ * cold-start scenarios where no trained RM is available
+ * (< 200 preference pairs collected, umbrella §11 Q3). It is also
+ * the function `tests/test_grpo_loss.c` pins.
+ *
  * Token IDs 1..5 → "good" (+1 each), 26..30 → "bad" (-1 each).
- * Mirrors Phase 3 Task 3's make_synthetic_pairs convention. */
-double grpo_synthetic_reward_default_for_test(const int32_t *tokens, size_t n) {
+ * Mirrors Phase 3 Task 3's make_synthetic_pairs convention.
+ *
+ * fix(plan,grpo): renamed from `_for_test` form (critic L2) — the
+ * `_for_test` suffix was misleading because cli_grpo.c uses this
+ * symbol as a real production reward source, not a test-only seam.
+ * NOT wrapped in #if HU_IS_TEST. */
+double hu_grpo_default_synthetic_reward(const int32_t *tokens, size_t n) {
     double r = 0.0;
     for (size_t i = 0; i < n; i++) {
         if (tokens[i] >= 1 && tokens[i] <= 5)        r += 1.0;
@@ -1661,11 +1792,10 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
     double total_kl   = 0.0;
     size_t prompt_count = 0;
 
-    /* Per-step ephemeral π_θ_old snapshot (D5).
-     * Captured AT THE START of the step; freed at the end. */
-    hu_model_t old_policy = {0};
-    if (hu_reference_model_create_from(alloc, &c->policy, &c->gpt_cfg, &old_policy) != HU_OK)
-        return HU_ERR_PROVIDER_RESPONSE;
+    /* fix(plan,grpo): no per-step π_θ_old snapshot needed (D5 + critic H3).
+     * lp_old comes from rolls[i].sum_logprob, captured at rollout sample
+     * time by the rollout module. Dropping the snapshot eliminates a leak
+     * risk (R10) and ~30 LOC of goto cleanup discipline. */
 
     for (size_t pi = 0; pi < n_pairs; pi++) {
         if (pairs[pi].prompt_len == 0) continue;
@@ -1696,20 +1826,49 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
             goto cleanup_prompt;
         }
 
-        /* Compute rewards. */
-        double *rewards = (double *)alloc->alloc(alloc->ctx, c->n_rollouts * sizeof(double));
-        double *advs    = (double *)alloc->alloc(alloc->ctx, c->n_rollouts * sizeof(double));
-        if (!rewards || !advs) { /* cleanup */ goto cleanup_rolls; }
+        /* fix(plan,grpo): filter empty completions before reward/baseline
+         * (critic M2). Empty completions (n_tokens == 0) get reward 0 from
+         * the synthetic fn and skip the structural backward — but they
+         * still pollute the group mean/std, biasing the advantages of the
+         * non-empty rollouts toward zero. Compact rolls[] into a parallel
+         * valid_idx[] array of size n_valid; compute baseline + advantages
+         * over valid rollouts ONLY. If n_valid < 2, skip this prompt
+         * (training stalls cleanly — group baseline degenerates at N=1). */
+        size_t *valid_idx = (size_t *)alloc->alloc(alloc->ctx, c->n_rollouts * sizeof(size_t));
+        if (!valid_idx) { alloc->free(alloc->ctx, rolls, c->n_rollouts * sizeof(hu_rollout_completion_t)); goto cleanup_prompt; }
+        size_t n_valid = 0;
         for (size_t i = 0; i < c->n_rollouts; i++)
-            rewards[i] = compute_reward_for_completion(c, alloc, prompt, pl,
-                                                        rolls[i].token_ids, rolls[i].n_tokens);
+            if (rolls[i].n_tokens > 0) valid_idx[n_valid++] = i;
+        if (n_valid < 2) {
+            /* All-empty or single-valid group → group baseline degenerates.
+             * Clean up and skip this prompt; do NOT update prompt_count
+             * (loss accumulator unchanged). */
+            alloc->free(alloc->ctx, valid_idx, c->n_rollouts * sizeof(size_t));
+            hu_rollout_free_completions(alloc, rolls, c->n_rollouts);
+            alloc->free(alloc->ctx, rolls, c->n_rollouts * sizeof(hu_rollout_completion_t));
+            goto cleanup_prompt;
+        }
 
-        /* Group baseline. */
-        grpo_compute_group_baseline_advantage_for_test(rewards, c->n_rollouts, advs, HU_GRPO_STD_FLOOR);
+        /* Compute rewards over VALID rollouts only. */
+        double *rewards = (double *)alloc->alloc(alloc->ctx, n_valid * sizeof(double));
+        double *advs    = (double *)alloc->alloc(alloc->ctx, n_valid * sizeof(double));
+        if (!rewards || !advs) { /* cleanup */ goto cleanup_rolls; }
+        for (size_t k = 0; k < n_valid; k++) {
+            size_t i = valid_idx[k];
+            rewards[k] = compute_reward_for_completion(c, alloc, prompt, pl,
+                                                       rolls[i].token_ids, rolls[i].n_tokens);
+        }
+
+        /* Group baseline over n_valid (NOT c->n_rollouts) so the mean/std
+         * are not biased by zero-reward empty completions. Call the
+         * static helper, NOT the `_for_test` seam — the seam is scoped
+         * to HU_IS_TEST (fix(plan,grpo): critic M3). */
+        grpo_compute_group_baseline_advantage(rewards, n_valid, advs, HU_GRPO_STD_FLOOR);
 
         /* Compute per-rollout PPO clip + KL penalty + structural backward. */
-        for (size_t i = 0; i < c->n_rollouts; i++) {
-            if (rolls[i].n_tokens == 0) continue;
+        for (size_t k = 0; k < n_valid; k++) {
+            size_t i = valid_idx[k];
+            /* n_tokens > 0 invariant: pre-filtered above. */
 
             /* Live policy log-prob of this completion. */
             double lp_pol = 0.0;
@@ -1723,29 +1882,35 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
                                 rolls[i].token_ids, rolls[i].n_tokens, &lp_ref);
 
             double log_ratio = lp_pol - lp_old;
-            double clipped_adv = grpo_compute_clipped_advantage_for_test(
-                log_ratio, advs[i], c->clip_eps);
-            /* KL penalty using k3: KL ≈ exp(r) - r - 1; r = lp_ref - lp_pol per
-             * token. Toy GPT operates on a sequence-level approximation: pass
-             * the per-completion logp values as if they were single-vocab-slot
-             * distributions. Document this approximation in the source comment. */
+            /* advs[] is indexed by VALID index k, not full-array index i —
+             * see the n_valid compaction above (fix(plan,grpo): critic M2).
+             * Use the static production helper, NOT the `_for_test` seam
+             * (fix(plan,grpo): critic M3). */
+            double clipped_adv = grpo_compute_clipped_advantage(
+                log_ratio, advs[k], c->clip_eps);
+            /* KL penalty using k3 (fix(plan,grpo): wire k3 module into HUML
+             * hot path — critic H1). Toy GPT operates on a sequence-level
+             * approximation: pass the per-completion aggregated logp values
+             * as a single scalar r = lp_ref - lp_pol. We call
+             * `hu_kl_k3_scalar` so kl_divergence.c is the SINGLE SOURCE OF
+             * TRUTH for the k3 estimator — even when we don't materialize
+             * the full per-vocab logp arrays. The expensive per-vocab
+             * `hu_kl_k3(logp_pol[], logp_ref[], v)` variant is reserved for
+             * the future MLX path where mlx-lm-lora can expose per-position
+             * vocab distributions. */
             double r_kl = lp_ref - lp_pol;
-            double kl_term = 0.0;
-            {
-                double rc = r_kl;
-                if (rc >  20.0) rc =  20.0;
-                if (rc < -20.0) rc = -20.0;
-                kl_term = exp(rc) - rc - 1.0;
-            }
+            double kl_term = hu_kl_k3_scalar(r_kl);
 
             total_loss += -clipped_adv + c->kl_beta * kl_term;
             total_kl   += kl_term;
             prompt_count++;
 
             /* Structural backward (D9): bump lm_head[t][0] for response
-             * tokens t in the direction of sign(advs[i]). Same shape as
-             * Phase 2 dpo_real_huml.c::dpo_huml_step's structural step. */
-            if (c->learning_rate > 0 && fabs(advs[i]) > 1e-12) {
+             * tokens t in the direction of sign(advs[k]). Same shape as
+             * Phase 2 dpo_real_huml.c::dpo_huml_step's structural step.
+             * Note: inner-loop index renamed `tok_k` to avoid shadowing
+             * the outer valid-index `k` (fix(plan,grpo): critic M2). */
+            if (c->learning_rate > 0 && fabs(advs[k]) > 1e-12) {
                 hu_ml_tensor_t *params = NULL;
                 size_t n_params = 0;
                 if (c->policy.vtable->get_params(c->policy.ctx, &params, &n_params) == HU_OK
@@ -1753,10 +1918,10 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
                     size_t V = c->gpt_cfg.vocab_size, E = c->gpt_cfg.n_embd;
                     if (params[1].size_bytes / sizeof(float) == V * E) {
                         float *lm_head = (float *)params[1].data;
-                        float eps = (float)(c->learning_rate * fabs(advs[i]) * 0.1);
-                        float dir = advs[i] > 0 ? +1.0f : -1.0f;
-                        for (size_t k = 0; k < rolls[i].n_tokens; k++) {
-                            int32_t tk = rolls[i].token_ids[k];
+                        float eps = (float)(c->learning_rate * fabs(advs[k]) * 0.1);
+                        float dir = advs[k] > 0 ? +1.0f : -1.0f;
+                        for (size_t tok_k = 0; tok_k < rolls[i].n_tokens; tok_k++) {
+                            int32_t tk = rolls[i].token_ids[tok_k];
                             if (tk < 0 || (size_t)tk >= V) continue;
                             float *cell = lm_head + (size_t)tk * E;
                             float saved = *cell;
@@ -1764,8 +1929,8 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
                             double lp_new = 0.0;
                             hu_policy_logprobs(alloc, &c->policy, prompt, pl,
                                                 rolls[i].token_ids, rolls[i].n_tokens, &lp_new);
-                            int kept = (advs[i] > 0 && lp_new > lp_pol) ||
-                                       (advs[i] < 0 && lp_new < lp_pol);
+                            int kept = (advs[k] > 0 && lp_new > lp_pol) ||
+                                       (advs[k] < 0 && lp_new < lp_pol);
                             if (!kept) *cell = saved;
                         }
                         /* KL correction (D9 step 4): nudge toward π_ref by
@@ -1774,8 +1939,8 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
                         if (c->kl_beta > 0 && fabs(r_kl) > 1e-12) {
                             float kl_eps = (float)(c->kl_beta * c->learning_rate * fabs(r_kl) * 0.05);
                             float kl_dir = r_kl > 0 ? +1.0f : -1.0f;  /* push lp_pol toward lp_ref */
-                            for (size_t k = 0; k < rolls[i].n_tokens && k < 4; k++) {
-                                int32_t tk = rolls[i].token_ids[k];
+                            for (size_t tok_k = 0; tok_k < rolls[i].n_tokens && tok_k < 4; tok_k++) {
+                                int32_t tk = rolls[i].token_ids[tok_k];
                                 if (tk < 0 || (size_t)tk >= V) continue;
                                 float *cell = lm_head + (size_t)tk * E;
                                 *cell += kl_dir * kl_eps;
@@ -1787,8 +1952,11 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
         }
 
 cleanup_rolls:
-        if (advs)    alloc->free(alloc->ctx, advs, c->n_rollouts * sizeof(double));
-        if (rewards) alloc->free(alloc->ctx, rewards, c->n_rollouts * sizeof(double));
+        /* advs[] and rewards[] are sized to n_valid (not c->n_rollouts) per
+         * the empty-completion filter (fix(plan,grpo): critic M2). */
+        if (advs)    alloc->free(alloc->ctx, advs, n_valid * sizeof(double));
+        if (rewards) alloc->free(alloc->ctx, rewards, n_valid * sizeof(double));
+        alloc->free(alloc->ctx, valid_idx, c->n_rollouts * sizeof(size_t));
         hu_rollout_free_completions(alloc, rolls, c->n_rollouts);
         alloc->free(alloc->ctx, rolls, c->n_rollouts * sizeof(hu_rollout_completion_t));
 
@@ -1796,9 +1964,9 @@ cleanup_prompt:
         if (prompt) alloc->free(alloc->ctx, prompt, pcap * sizeof(int32_t));
     }
 
-    /* Per-step ephemeral π_θ_old deinit (D5 + R10). */
-    if (old_policy.ctx && old_policy.vtable && old_policy.vtable->deinit)
-        old_policy.vtable->deinit(old_policy.ctx, alloc);
+    /* fix(plan,grpo): no old_policy deinit — the snapshot was dropped per
+     * D5 + critic H3. The only per-step allocations are the rollout
+     * completions / rewards / advs / prompt buffers, handled above. */
 
     double denom = prompt_count > 0 ? (double)prompt_count : 1.0;
     out->final_loss = total_loss / denom;
@@ -1849,7 +2017,7 @@ hu_error_t hu_grpo_huml_create(hu_allocator_t *alloc,
     c->clip_eps      = config->clip_eps > 0 ? config->clip_eps : 0.2;       /* trl default */
     c->kl_beta       = config->kl_beta > 0 ? config->kl_beta : 0.04;        /* DeepSeek R1 */
     c->reward_source = HU_GRPO_REWARD_SYNTHETIC;
-    c->reward_fn     = grpo_synthetic_reward_default_for_test;
+    c->reward_fn     = hu_grpo_default_synthetic_reward;  /* fix(plan,grpo): rename — critic L2 */
     c->reward_user   = NULL;
     c->gpt_cfg = (hu_gpt_config_t){
         .vocab_size = 32, .n_layer = 1, .n_head = 1, .n_kv_head = 1,
@@ -1873,7 +2041,7 @@ hu_error_t hu_grpo_huml_create(hu_allocator_t *alloc,
 }
 ```
 
-- [ ] **Step 3: Remove the weak `hu_grpo_huml_create` stub from `src/ml/rl_trainer.c`** (Task 0 step 7's temporary scaffolding). The strong symbol from `src/ml/grpo.c` now wins at link time without needing weak attribute.
+- [ ] **Step 3: Define `HU_GRPO_HAVE_HUML_IMPL` and let `src/ml/rl_trainer.c`'s `#ifndef`-guarded stub fall out (fix(plan,grpo,c11): #ifdef pattern — critic L3).** Add `#define HU_GRPO_HAVE_HUML_IMPL 1` at the top of `src/ml/grpo.c`, BEFORE the `hu_grpo_huml_create` definition. The `#ifndef HU_GRPO_HAVE_HUML_IMPL` block in `rl_trainer.c` now compiles to nothing in this TU; the strong impl in `grpo.c` is the sole definition. No weak-attribute removal needed — the stub was never compiled when this macro is defined.
 
 - [ ] **Step 4: Run test**
 
@@ -1892,8 +2060,8 @@ git commit -m "feat(ml,grpo): hu_grpo_huml_create + step + structural backward (
 **Acceptance:**
 - `hu_rl_trainer_create_grpo` returns a fully-populated vtable.
 - `step()` runs without crashing on a valid prompt + N=4 rollouts under ASan.
-- Per-step ephemeral π_θ_old is created and freed (no leak across 100 step calls — pinned by Task 7 e2e).
-- Removed Task 0's weak stub for `hu_grpo_huml_create`.
+- No per-step π_θ_old snapshot is created anymore — D5 simplification per critic H3 (the snapshot was dead code; `lp_old` reads `rolls[i].sum_logprob`).
+- `HU_GRPO_HAVE_HUML_IMPL` defined in `src/ml/grpo.c`; the `#ifndef`-guarded stub in `src/ml/rl_trainer.c` no longer compiles (fix(plan,grpo,c11): #ifdef discipline — critic L3).
 
 ---
 
@@ -1917,37 +2085,60 @@ extern float *grpo_get_huml_lm_head_param_for_test(void *trainer_ctx,
                                                      size_t row, size_t col);
 
 static void test_grpo_loss_kl_penalty_zero_at_policy_equals_reference(void) {
-    /* R2 + D3: KL term should be 0 when π_θ == π_ref. The trainer's
-     * reference is a clone of the policy at create time; before any
-     * gradient step, the two are identical. We feed the trainer a
-     * synthetic completion and assert mean(kl) ≈ 0. */
+    /* R2 + D3 + fix(plan,grpo,test): isolate the KL term — critic M4.
+     *
+     * Original test used N=1 which makes advantage zero by construction,
+     * making the test unable to distinguish KL=0 from "advantage=0 hides
+     * a non-zero KL". Use N=2 with split rewards {+1.0, -1.0} so the
+     * standardized advantages are non-zero (≈ {+0.707, -0.707}) but
+     * sum to zero, then crank kl_beta to 1.0 to amplify any KL leakage.
+     *
+     * With policy == reference at init:
+     *   - KL_k3(r=0) = exp(0) - 0 - 1 = 0 for every rollout
+     *   - mean(clipped_adv * (ρ=1)) = mean(advantages) = 0 by symmetric
+     *     standardization
+     *   - total loss = -mean(clipped_adv) + kl_beta * mean(kl) ≈ 0
+     */
     hu_allocator_t alloc = hu_system_allocator();
     hu_rl_trainer_config_t cfg = {
         .backend = HU_DPO_BACKEND_HUML,
         .learning_rate = 0.0,  /* freeze: policy must NOT drift */
-        .n_rollouts = 4, .clip_eps = 0.2, .kl_beta = 0.04,
+        .n_rollouts = 2, .clip_eps = 0.2, .kl_beta = 1.0,  /* amplify KL */
     };
     srand(42);
     hu_rl_trainer_t t = {0};
     HU_ASSERT_EQ(hu_rl_trainer_create_grpo(&alloc, &cfg, &t), HU_OK);
 
     int32_t prompt[3] = {1, 2, 3};
-    hu_rollout_completion_t comp[1] = {0};
-    int32_t toks[2] = {4, 5};
-    /* Manually constructed completion (no sampling RNG) */
-    comp[0].token_ids = toks;
+    hu_rollout_completion_t comp[2] = {0};
+    int32_t toks_a[2] = {4, 5};
+    int32_t toks_b[2] = {6, 7};
+    comp[0].token_ids = toks_a;
     comp[0].n_tokens = 2;
     comp[0].token_ids_cap = 2;
-    comp[0].sum_logprob = 0.0;  /* will be unused by loss-only path */
+    comp[0].sum_logprob = 0.0;
+    comp[1].token_ids = toks_b;
+    comp[1].n_tokens = 2;
+    comp[1].token_ids_cap = 2;
+    comp[1].sum_logprob = 0.0;
 
-    double rewards[1] = {1.0};
+    /* Split rewards: advantages standardize to ≈ {+1/sqrt(1), -1/sqrt(1)}
+     * = {+1, -1} after population-std normalization (mean = 0, std = 1). */
+    double rewards[2] = {+1.0, -1.0};
     double loss = 0.0;
     HU_ASSERT_EQ(grpo_compute_loss_only_for_test(t.ctx, &alloc, prompt, 3,
-                                                   comp, rewards, 1, &loss), HU_OK);
-    /* Expected: clipped_adv ≈ 0 (single-rollout group → mean = reward, advantage = 0).
-     * KL term ≈ 0 (policy == reference at iter 0).
-     * Total loss ≈ 0. */
-    HU_ASSERT_TRUE(fabs(loss) < 1e-3);
+                                                   comp, rewards, 2, &loss), HU_OK);
+    /* Total loss ≈ 0 (advantages sum to zero AND KL term is zero). */
+    HU_ASSERT_TRUE(fabs(loss) < 1e-6);
+
+    /* Stronger pin: the KL-only component must be < 1e-9 when policy == ref.
+     * (The test seam reports total loss; for KL isolation we need a sub-seam.
+     * If the seam doesn't expose loss_kl_only, the impl can land a sibling
+     * `grpo_compute_loss_components_for_test(... *out_clip, *out_kl)` and
+     * this assertion becomes `HU_ASSERT_TRUE(fabs(loss_kl_only) < 1e-9)`.
+     * Otherwise: rely on the strong `fabs(loss) < 1e-6` plus the
+     * compile-time invariant that `hu_kl_k3_scalar(0) == 0` exactly. */
+    HU_ASSERT_TRUE(fabs(hu_kl_k3_scalar(0.0)) < 1e-12);
 
     t.vtable->deinit(t.ctx, &alloc);
 }
@@ -2040,7 +2231,9 @@ hu_error_t grpo_compute_loss_only_for_test(
 
     double *advs = (double *)alloc->alloc(alloc->ctx, n_rollouts * sizeof(double));
     if (!advs) return HU_ERR_OUT_OF_MEMORY;
-    grpo_compute_group_baseline_advantage_for_test(rewards, n_rollouts, advs, HU_GRPO_STD_FLOOR);
+    /* Use the static production helpers (fix(plan,grpo): critic M3 —
+     * the `_for_test` symbols just wrap these). */
+    grpo_compute_group_baseline_advantage(rewards, n_rollouts, advs, HU_GRPO_STD_FLOOR);
 
     double total = 0.0;
     for (size_t i = 0; i < n_rollouts; i++) {
@@ -2051,11 +2244,12 @@ hu_error_t grpo_compute_loss_only_for_test(
         hu_policy_logprobs(alloc, &c->reference, prompt, prompt_len,
                            completions[i].token_ids, completions[i].n_tokens, &lp_ref);
         double log_ratio = lp_pol - completions[i].sum_logprob;
-        double clipped_adv = grpo_compute_clipped_advantage_for_test(log_ratio, advs[i], c->clip_eps);
+        double clipped_adv = grpo_compute_clipped_advantage(log_ratio, advs[i], c->clip_eps);
+        /* fix(plan,grpo,test): route the k3 KL through the leaf module
+         * (critic H1) so the test seam exercises the same code path the
+         * production HUML hot path uses. */
         double r_kl = lp_ref - lp_pol;
-        if (r_kl >  20.0) r_kl =  20.0;
-        if (r_kl < -20.0) r_kl = -20.0;
-        double kl_term = exp(r_kl) - r_kl - 1.0;
+        double kl_term = hu_kl_k3_scalar(r_kl);
         total += -clipped_adv + c->kl_beta * kl_term;
     }
     *out_loss = total / (double)n_rollouts;
@@ -2267,11 +2461,9 @@ git commit -m "test(ml,grpo): synthetic reward e2e + KL penalty bound + ASan lea
 - Modify: `src/ml/rl_trainer.c` — REMOVE the weak `hu_grpo_mlx_create` stub (Task 0 step 7)
 - Modify: `CMakeLists.txt` — add `src/ml/grpo_mlx.c` under `HU_ENABLE_MLX_TRAINER` AND `HU_ENABLE_RL_FULL`; add `option(HU_HAVE_MLX_LM_GRPO ...)`
 
-- [ ] **Step 1: Implement `scripts/grpo_mlx_train.py`** mirroring `scripts/dpo_mlx_train.py` and `scripts/kto_mlx_train.py`. Probes `mlx_lm_lora.train` import; delegates to `python -m mlx_lm_lora.train --train-mode grpo --rollouts N --clip-eps E --kl-beta B --reward-model <dir> --data <jsonl> --adapter-path <out>`. Same exit-code contract (0 / 2 / 3 / other).
+**fix(plan,grpo,task8): TDD ordering (spec-verifier SV6).** Same discipline as the rest of Phase 4 — failing test FIRST, then the script, then the C implementation, then the test passes. Steps re-ordered below.
 
-- [ ] **Step 2: Implement `src/ml/grpo_mlx.c`** mirroring `src/ml/kto_mlx.c` byte-for-byte at the structural level (D10): `json_escape`, `write_jsonl_grpo` (only `prompt` field), `mlx_lm_lora_grpo_available()` create-time probe, `grpo_mlx_step` popens the wrapper, single-quote shell escape rejection, dummy-adapter shortcut in test mode without `HU_HAVE_MLX_LM_GRPO`.
-
-- [ ] **Step 3: Write the failing MLX tests** (append to `tests/test_grpo_e2e.c`):
+- [ ] **Step 1: Write the failing MLX tests** (append to `tests/test_grpo_e2e.c`):
 
 ```c
 static void test_grpo_mlx_subprocess_produces_safetensors(void) {
@@ -2341,6 +2533,41 @@ static void test_grpo_mlx_dummy_adapter_in_test_mode(void) {
  */
 ```
 
+At this point the test source compiles (after wiring into test_main.c) but the tests FAIL because `hu_grpo_mlx_create` returns `HU_ERR_NOT_SUPPORTED` from the Task 0 `#ifndef`-guarded stub — that's the expected red state for TDD.
+
+- [ ] **Step 2: Implement `scripts/grpo_mlx_train.py`** mirroring `scripts/dpo_mlx_train.py` and `scripts/kto_mlx_train.py`. Probes `mlx_lm_lora.train` import; delegates to `python -m mlx_lm_lora.train --train-mode grpo --rollouts N --clip-eps E --kl-beta B --reward-model <dir> --data <jsonl> --adapter-path <out>`. Same exit-code contract (0 / 2 / 3 / other).
+
+- [ ] **Step 3: Implement `src/ml/grpo_mlx.c`** mirroring `src/ml/kto_mlx.c` (Phase 3 Task 7 hardened pattern) at the structural level (D10) — fix(plan,grpo,security): use Phase 3 KTO's hardened file-open, NOT Phase 2 DPO's legacy `fopen("w")` (critic H2):
+
+```c
+/* src/ml/grpo_mlx.c — Phase 4 Task 8.
+ * Mirrors src/ml/kto_mlx.c::kto_write_jsonl hardened pattern.
+ * fix(plan,grpo,c11): HU_GRPO_HAVE_MLX_IMPL trips the #ifdef fallout in
+ * rl_trainer.c (critic L3). */
+#define HU_GRPO_HAVE_MLX_IMPL 1
+
+static hu_error_t grpo_write_jsonl(const char *out_path,
+                                    const hu_preference_pair_t *pairs,
+                                    size_t n_pairs) {
+    /* O_EXCL + 0600 — never overwrite an existing file (defeats
+     * symlink-attack on user-controlled out_path), owner-RW only.
+     * fix(plan,grpo,security): inherit Phase 3 KTO hardening; never
+     * regress to fopen("w") even by accident — critic H2. */
+    int fd = open(out_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) return HU_ERR_IO;
+    FILE *f = fdopen(fd, "w");
+    if (!f) { close(fd); return HU_ERR_IO; }
+    for (size_t i = 0; i < n_pairs; i++) {
+        /* only `prompt` field; chosen/rejected ignored — GRPO samples them. */
+        /* ... json_escape(pairs[i].prompt) ... */
+    }
+    fclose(f);
+    return HU_OK;
+}
+```
+
+Other structural elements (also mirroring `kto_mlx.c`, not `dpo_real_mlx.c`): `json_escape`, `mlx_lm_lora_grpo_available()` create-time probe (specific symbol: `from mlx_lm_lora.trainer.grpo_trainer import train_grpo`), `grpo_mlx_step` popens the wrapper, single-quote shell escape rejection, dummy-adapter shortcut in test mode without `HU_HAVE_MLX_LM_GRPO`.
+
 - [ ] **Step 4: Add CMake option + propagation block** (mirror the Phase 3 KTO MLX block at `CMakeLists.txt:3187-3193`):
 
 ```cmake
@@ -2364,7 +2591,7 @@ In the `HU_CORE_SOURCES` `if(HU_ENABLE_RL_FULL)` block, append:
 
 In the `NOT HU_ENABLE_ML` fallback list, append `src/ml/grpo_mlx.c`.
 
-- [ ] **Step 5: Remove the weak `hu_grpo_mlx_create` stub from `src/ml/rl_trainer.c`** (Task 0 step 7).
+- [ ] **Step 5: Define `HU_GRPO_HAVE_MLX_IMPL` so the rl_trainer.c stub falls out (fix(plan,grpo,c11): #ifdef pattern — critic L3).** Add `#define HU_GRPO_HAVE_MLX_IMPL 1` at the top of `src/ml/grpo_mlx.c`, BEFORE the `hu_grpo_mlx_create` definition. The `#ifndef HU_GRPO_HAVE_MLX_IMPL` block in `rl_trainer.c` no longer compiles in this TU; the strong impl in `grpo_mlx.c` is the sole definition.
 
 - [ ] **Step 6: Run tests**
 
@@ -2424,6 +2651,17 @@ static void test_cli_grpo_rejects_zero_rollouts(void) {
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
+static void test_cli_grpo_rejects_single_rollout(void) {
+    /* fix(plan,grpo,cli): N=1 produces no gradient (group baseline
+     * degenerates) — critic M1. Must reject at parse time, not silently
+     * run a no-op training loop. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"--pairs", "tests/fixtures/synthetic_grpo_prompts.jsonl",
+                          "--rollouts", "1", "--reward-fn", "synthetic"};
+    hu_error_t err = hu_ml_cli_grpo_train(&alloc, 6, argv);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+}
+
 static void test_cli_grpo_rejects_excessive_rollouts(void) {
     /* Cap at 1024 (R12) — anything above is almost certainly a typo. */
     hu_allocator_t alloc = hu_system_allocator();
@@ -2475,6 +2713,7 @@ void run_cli_grpo_tests(void) {
     HU_TEST_SUITE("cli_grpo");
     HU_RUN_TEST(test_cli_grpo_rejects_negative_rollouts_with_invalid_argument);
     HU_RUN_TEST(test_cli_grpo_rejects_zero_rollouts);
+    HU_RUN_TEST(test_cli_grpo_rejects_single_rollout);            /* fix(plan,grpo,cli): critic M1 */
     HU_RUN_TEST(test_cli_grpo_rejects_excessive_rollouts);
     HU_RUN_TEST(test_cli_grpo_rejects_non_numeric_rollouts);
     HU_RUN_TEST(test_cli_grpo_requires_explicit_reward_fn_or_reward_model);
@@ -2504,7 +2743,26 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
 #endif /* HU_ML_CLI_GRPO_H */
 ```
 
-- [ ] **Step 3: Implement `src/ml/cli_grpo.c`** (~200 LOC). Mirror `src/ml/cli_kto.c` byte-for-byte at the structural level: argv parser via `strtol` with R12 range checks; JSONL loader extracting only `prompt` field (chosen/rejected ignored); reward source resolution (synthetic → set internal `reward_fn` to `grpo_synthetic_reward_default_for_test`; rm → call `hu_reward_model_load(alloc, --reward-model, &rm)`); trainer creation via `hu_rl_trainer_create_grpo` with `cfg.backend` from `--backend`; setter calls via `grpo_priv.h` (`hu_grpo_set_reward_model` or `hu_grpo_set_synthetic_reward`); step loop `for it in 0..iters` calling `trainer.vtable->step`; metrics print; final `save_adapter` (best-effort — returns `HU_ERR_NOT_SUPPORTED` for HUML backend; the CLI logs and continues).
+- [ ] **Step 3: Implement `src/ml/cli_grpo.c`** (~200 LOC). Mirror `src/ml/cli_kto.c` byte-for-byte at the structural level: argv parser via `strtol` with R12 range checks; JSONL loader extracting only `prompt` field (chosen/rejected ignored); reward source resolution (synthetic → set internal `reward_fn` to `hu_grpo_default_synthetic_reward`; rm → call `hu_reward_model_load(alloc, --reward-model, &rm)`); trainer creation via `hu_rl_trainer_create_grpo` with `cfg.backend` from `--backend`; setter calls via `grpo_priv.h` (`hu_grpo_set_reward_model` or `hu_grpo_set_synthetic_reward`); step loop `for it in 0..iters` calling `trainer.vtable->step`; metrics print; final `save_adapter` (best-effort — returns `HU_ERR_NOT_SUPPORTED` for HUML backend; the CLI logs and continues).
+
+**R12 + critic M1 validation sketch (fix(plan,grpo,cli): enforce N≥2 + warn on N<4):**
+
+```c
+/* Parse --rollouts via strtol with R12 range guard. */
+char *endp = NULL;
+long n_rollouts_raw = strtol(rollouts_arg, &endp, 10);
+if (!endp || *endp != '\0' || n_rollouts_raw < 2 || n_rollouts_raw > 1024) {
+    fprintf(stderr, "[grpo-train] ERROR: --rollouts must be an integer in [2, 1024] "
+                    "(GRPO requires N >= 2 rollouts; group baseline std degenerates "
+                    "with N=1) — critic M1\n");
+    return HU_ERR_INVALID_ARGUMENT;
+}
+size_t n_rollouts = (size_t)n_rollouts_raw;
+if (n_rollouts < 4) {
+    fprintf(stderr, "[grpo-train] WARNING: N=%zu < 4; group baseline variance "
+                    "high — recommended N >= 4 for stable training\n", n_rollouts);
+}
+```
 
 - [ ] **Step 4: Create `tests/fixtures/synthetic_grpo_prompts.jsonl`** (~50 lines, 20 prompt rows like `{"prompt": "1 2 3"}`).
 
@@ -2626,7 +2884,7 @@ if (strcmp(reward_fn_arg, "rm") == 0) {
     /* ... step loop ... */
     rm.vtable->deinit(rm.ctx, alloc);
 } else if (strcmp(reward_fn_arg, "synthetic") == 0) {
-    hu_grpo_set_synthetic_reward(&trainer, grpo_synthetic_reward_default_for_test, NULL);
+    hu_grpo_set_synthetic_reward(&trainer, hu_grpo_default_synthetic_reward, NULL);  /* fix(plan,grpo): rename — critic L2 */
     /* ... step loop ... */
 }
 ```
@@ -2672,6 +2930,28 @@ Expected: ALL tests pass under both presets, ASan clean, 0 leaks.
 
 Phase 3 baseline was 10245/10245 (estimated). Phase 4 adds ~30 new tests across 4 new test files (test_kl_divergence ~6, test_rollout ~5, test_grpo_loss ~8, test_grpo_e2e ~5, test_cli_grpo ~8). Expected new baseline: **~10283/10283 PASS**.
 
+- [ ] **Step 1.5: UBSan re-run (fix(plan,grpo,gate): make UBSan explicit — spec-verifier SV4)**
+
+```bash
+cmake --preset dev -DCMAKE_C_FLAGS='-fsanitize=undefined' -B build-ubsan
+cmake --build build-ubsan --target human_tests -j8
+./build-ubsan/human_tests --suite='grpo_loss\|grpo_e2e\|kl_divergence\|rollout\|cli_grpo' 2>&1 | tail -40
+```
+
+Expected: 0 UBSan errors. Document the run in the Task 11 commit message (paste the final-test-count line + any UBSan output). DoD item 1 requires UBSan-clean, not just ASan-clean — this step makes that verification explicit.
+
+- [ ] **Step 1.7: Binary size regression check (fix(plan,grpo,gate): explicit size check — spec-verifier SV5)**
+
+```bash
+cmake --preset release && cmake --build --preset release -j8 && du -sh build-release/human
+# Compare against the Phase 3 baseline (capture from `rl-sota-phase-3-complete` tag commit message):
+git checkout rl-sota-phase-3-complete -- /dev/null
+git stash pop || true
+echo "Phase 3 size: $(git show rl-sota-phase-3-complete --stat | grep -i 'binary')"
+```
+
+DoD item 3: `du -sh build-release/human` must be ≤ Phase 3 baseline + 250 KB. Default `release` preset has `HU_ENABLE_RL_FULL=OFF`, so binary delta should be exactly the `n_rollouts`/`clip_eps`/`kl_beta` field additions on `hu_rl_trainer_config_t` (~24 bytes per struct instance). If the delta exceeds 250 KB, audit which symbols are linked under release (possibly some `_for_test` seams aren't HU_IS_TEST-guarded). Cite `benchmark.yml` for ongoing tracking.
+
 - [ ] **Step 2: Run `dead-code-finder` subagent**
 
 ```bash
@@ -2685,6 +2965,21 @@ Per umbrella §7: "Once at end of every phase | dead-code-finder | Catches unuse
 Expected findings:
 - The `kto_mlx_dummy_adapter_in_test_mode` pattern was duplicated in `grpo_mlx_dummy_adapter_in_test_mode` — flag for future extraction (D10 deferred-extraction task captured here).
 - `hu_kl_k1` and `hu_kl_k2` are exported but only `hu_kl_k3` is used by GRPO — these are kept for future RL methods (DAPO, vanilla PPO with k1) per AGENTS.md "extension point" reasoning. Document the rationale in `kl_divergence.h` header comment.
+
+- [ ] **Step 2.5: Run `spec-verifier` subagent (fix(plan,grpo,gate): add spec-verifier — critic M6)**
+
+Run `spec-verifier` against the umbrella plan §5 row 4 ship contract:
+
+Verify (with file:line evidence for each):
+1. `./build/human ml grpo-train --rollouts 4 --pairs <jsonl>` produces a valid LoRA adapter — point to `test_cli_grpo_synthetic_reward_4_rollouts_completes_successfully` (HUML side) and `test_grpo_mlx_subprocess_produces_safetensors` (MLX side, gated by `HU_HAVE_MLX_LM_GRPO`).
+2. Every GRPO loss formula has a passing FD grad check — point to `test_grpo_loss_finite_diff_matches_analytical_on_lm_head_probe` (Task 6) and `test_kl_k3_backward_finite_diff_matches_analytical` (Task 1).
+3. Every Definition of Done item has implementing code OR a documented deferral note in this plan's "Out of scope" section.
+4. AC-1 (CLI handler location) drift note is present (see SV1: dispatch lives in `src/main.c::cmd_ml`, not `src/ml/cli.c` — documented deviation from umbrella §4.5).
+5. AC-2 (.safetensors scope) clarification on DoD items 5/6 is present (HUML synthetic-reward N=4 e2e VERIFIED by DoD 5; .safetensors adapter VERIFIED via MLX path by DoD 6).
+
+Per umbrella §7: spec-verifier is the intent-vs-impl check (distinct from `verifier`, which is behavior-vs-test; distinct from `critic`, which is code-review). Phase 4 needs all three.
+
+If spec-verifier reports any AC as FAIL or AC_MISSING_EVIDENCE, fix the implementation OR add the documented deferral note BEFORE running aspect-panel.
 
 - [ ] **Step 3: Run `aspect-panel` subagent (MANDATORY per umbrella §7 + §10 R5)**
 
@@ -2776,8 +3071,8 @@ Phase 4 ships when **all** of these are true:
 2. ✅ `cmake --preset rl_sota && cmake --build --preset rl_sota` clean on macOS aarch64 AND Linux x86_64.
 3. ✅ Default release binary size delta ≤ +250 KB vs Phase 3 baseline (per umbrella §6.4 line 552; Phase 4 only adds code under `HU_ENABLE_RL_FULL` which is OFF in default release).
 4. ✅ Test-suite runtime delta ≤ +30 sec vs Phase 3 baseline (per umbrella §6.4; new tests should add ~5–8 sec total under ASan).
-5. ✅ `./build/human ml grpo-train --pairs tests/fixtures/synthetic_grpo_prompts.jsonl --rollouts 4 --backend huml --reward-fn synthetic --iters 50` produces non-zero loss reduction (umbrella §5 row 4 ship contract — VERIFIED HUML side).
-6. ✅ `./build/human ml grpo-train --rollouts 4 --backend mlx --reward-fn rm --reward-model <dir>` produces a valid `.safetensors` LoRA adapter when `HU_HAVE_MLX_LM_GRPO=1` and Gemma is installed (umbrella §5 row 4 ship contract — VERIFIED MLX side via `test_grpo_mlx_subprocess_produces_safetensors`).
+5. ✅ **Loss math verified (HUML synthetic-reward N=4 e2e)** — `./build/human ml grpo-train --pairs tests/fixtures/synthetic_grpo_prompts.jsonl --rollouts 4 --backend huml --reward-fn synthetic --iters 50` produces non-zero loss reduction. This DoD item verifies that the GRPO loss math (group baseline + ratio clip + KL penalty + structural backward) is correctly wired end-to-end on the toy GPT (fix(plan,grpo,spec): clarify DoD 5 scope — spec-verifier SV2).
+6. ✅ **`.safetensors` adapter produced (MLX path)** — `./build/human ml grpo-train --rollouts 4 --backend mlx --reward-fn rm --reward-model <dir>` produces a valid `.safetensors` LoRA adapter when `HU_HAVE_MLX_LM_GRPO=1` and Gemma is installed, VERIFIED via `test_grpo_mlx_subprocess_produces_safetensors`. This DoD item delivers the actual artifact (the .safetensors adapter) the umbrella §5 row 4 ship contract requires (fix(plan,grpo,spec): clarify DoD 6 scope — spec-verifier SV2). Together, DoD items 5 + 6 satisfy umbrella §5 row 4: item 5 proves the loss math works; item 6 produces the deliverable artifact.
 7. ✅ `tests/test_grpo_loss.c` passes the finite-diff grad check (Task 6) — analytical structural-backward direction matches numerical gradient sign on probed lm_head weight.
 8. ✅ `test_grpo_huml_kl_penalty_keeps_policy_close_to_reference` passes (mean KL < 2.0 nats at default β = 0.04 over 100 iters).
 9. ✅ `aspect-panel` subagent ran with disagreement < 40% per umbrella §7 + §10 R5 (mandatory for Phase 4).
@@ -2798,6 +3093,7 @@ The following are tempting under "GRPO" but are explicitly **NOT in Phase 4**. D
 - ❌ **`num_iterations > 1`** (PPO mini-epochs per rollout batch) — D5 decision; v1.5 may bump to 2 or 4 for sample efficiency.
 - ❌ **Decay schedule for β** — umbrella §11 Q10 explicitly chose constant β = 0.04 for v1; decay is optimization, not correctness.
 - ❌ **External LLM judge as reward source (`HU_GRPO_REWARD_JUDGE`)** — Phase 5 territory. The `hu_eval_judge_external_t` vtable is Phase 5's; GRPO Phase 4 just leaves a `// TODO Phase 5` enum slot.
+- ❌ **LLM-judge as primary reward (deferred to Phase 5 Task 0)** — fix(plan,grpo,spec): AC-5 forward-reference (spec-verifier SV3). Per umbrella §11 Q3: **trained RM is primary, LLM-judge is fallback for cold-start (<200 pairs)**. Phase 4 ships only the trained-RM path (`--reward-fn rm`) + the synthetic-reward test fallback (`--reward-fn synthetic`). Phase 5 Task 0 must land `HU_GRPO_REWARD_JUDGE` for the LLM-judge fallback to come online — that work is OUT OF SCOPE for Phase 4 and is explicitly handed off to Phase 5 in the Phase 5 plan.
 - ❌ **Safety filter on top of reward** — umbrella §11 Q3 third layer; Phase 5 eval-gate territory.
 - ❌ **Reward model fine-tuning during GRPO training** — RM is loaded from the Phase 3 checkpoint and FROZEN throughout GRPO. Joint training of policy + RM is research-grade and not in v1.
 - ❌ **Length-normalized advantage** — trl's "dapo" loss type normalizes by active-token count to remove length bias; we use the simpler per-completion summation. v1.5 may add `--loss-type dapo` if length bias appears in eval.
