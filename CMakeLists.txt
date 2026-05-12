@@ -1233,6 +1233,10 @@ if(HU_ENABLE_ML)
         # Used by hu_dpo_real_huml in Task 4 to anchor the policy-vs-reference
         # log-ratio in the DPO loss.
         src/ml/reference_model.c
+        # Phase 2 Task 8 (RL SOTA): split `human ml dpo-train` into
+        # hu_ml_cli_dpo_judge (legacy provider-scored path) +
+        # hu_ml_cli_dpo_real (Phase 2 real-DPO via hu_rl_trainer_t).
+        src/ml/cli_dpo.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2737,6 +2741,9 @@ set(HU_TEST_SOURCES
     # Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper — JSONL export +
     # dummy-adapter shortcut without HU_HAVE_MLX_LM; real Gemma DPO with it.
     tests/test_dpo_real_mlx.c
+    # Phase 2 Task 8 (RL SOTA): pins surface contract for the post-split
+    # hu_ml_cli_dpo_judge / hu_ml_cli_dpo_real CLI handlers.
+    tests/test_cli_dpo.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c

@@ -74,6 +74,7 @@
 #endif
 #ifdef HU_ENABLE_ML
 #include "human/ml/cli.h"
+#include "human/ml/cli_dpo.h"
 #endif
 #ifdef HU_ENABLE_CURL
 #include "human/paperclip/client.h"
@@ -225,6 +226,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                         "  prepare                 Tokenize data for training\n"
                         "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                         "  dpo-train               Run DPO preference training step\n"
+                        "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
                         "  lora-persona            Train LoRA adapter from persona examples\n"
                         "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
                         "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
@@ -245,6 +247,12 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_status(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "dpo-train") == 0)
         return hu_ml_cli_dpo_train(alloc, argc - 2, (const char **)(argv + 2));
+    /* Phase 2 Task 8: explicit verb for the legacy provider-scored
+     * "judge step" path. `dpo-train` itself now routes through
+     * hu_ml_cli_dpo_real (Phase 2 real-DPO trainer); legacy semantics
+     * remain reachable via `dpo-judge` or `dpo-train --legacy-judge`. */
+    if (strcmp(sub, "dpo-judge") == 0)
+        return hu_ml_cli_dpo_judge(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "prepare-conversations") == 0)
         return hu_ml_cli_prepare_conversations(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "lora-persona") == 0)
@@ -269,6 +277,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                "  prepare                 Tokenize data for training\n"
                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                "  dpo-train               Run DPO preference training step\n"
+               "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
                "  lora-persona            Train LoRA adapter from persona examples\n"
                "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
                "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"

@@ -1,6 +1,7 @@
 /* ML CLI subcommands: train, experiment, prepare, status, dpo-train, lora-persona. */
 
 #include "human/ml/cli.h"
+#include "human/ml/cli_dpo.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
@@ -481,118 +482,18 @@ hu_error_t hu_ml_cli_status(hu_allocator_t *alloc, int argc, const char **argv) 
 #endif
 }
 
+/* Phase 2 Task 8: hu_ml_cli_dpo_train's pre-Phase-2 body has been
+ * extracted into hu_ml_cli_dpo_judge in src/ml/cli_dpo.c (the legacy
+ * provider-scored path). The CLI verb `human ml dpo-train` now routes
+ * through hu_ml_cli_dpo_real, which dispatches the new hu_rl_trainer_t
+ * vtable from Tasks 1/4/6. The legacy semantics are still reachable via
+ * `human ml dpo-judge` or `human ml dpo-train --legacy-judge`.
+ *
+ * This forwarder preserves the existing public symbol so any external
+ * callers of hu_ml_cli_dpo_train (including the cmd_ml dispatch in
+ * src/main.c, until that's updated) keep linking. */
 hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **argv) {
-    const char *db_path = NULL;
-    const char *provider_name = NULL;
-    const char *model = NULL;
-    int batch_size = 20;
-    for (int i = 1; i < argc; i++) {
-        const char *v = get_opt(argv, argc, i, "--db");
-        if (v) {
-            db_path = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--provider");
-        if (v) {
-            provider_name = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--model");
-        if (v) {
-            model = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--batch-size");
-        if (v) {
-            if (parse_int_arg(v, &batch_size) != 0) {
-                hu_log_error("ml", NULL, "Invalid --batch-size: %s", v);
-                return HU_ERR_INVALID_ARGUMENT;
-            }
-            i++;
-            continue;
-        }
-        if (strcmp(argv[i], "--help") == 0) {
-            printf("Usage: human ml dpo-train [--db <path>] [--provider <name>] "
-                   "[--model <name>] [--batch-size <N>] [--help]\n");
-            return HU_OK;
-        }
-    }
-#ifdef HU_IS_TEST
-    (void)alloc;
-    (void)db_path;
-    (void)provider_name;
-    (void)model;
-    (void)batch_size;
-    printf("[dpo] test mode: skipped\n");
-    return HU_OK;
-#else
-#ifdef HU_ENABLE_SQLITE
-    if (!db_path)
-        db_path = "memory.db";
-    if (!provider_name) {
-        fprintf(stderr, "dpo-train requires --provider\n");
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    sqlite3 *db = NULL;
-    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
-        fprintf(stderr, "Cannot open database: %s\n", db_path);
-        return HU_ERR_IO;
-    }
-
-    hu_dpo_collector_t collector;
-    hu_error_t err = hu_dpo_collector_create(alloc, db, 10000, &collector);
-    if (err != HU_OK) {
-        sqlite3_close(db);
-        return err;
-    }
-
-    hu_provider_t provider = {0};
-    size_t pname_len = strlen(provider_name);
-    err = hu_provider_create(alloc, provider_name, pname_len, NULL, 0, NULL, 0, &provider);
-    if (err != HU_OK) {
-        fprintf(stderr, "Cannot create provider '%s': %d\n", provider_name, err);
-        hu_dpo_collector_deinit(&collector);
-        sqlite3_close(db);
-        return err;
-    }
-
-    size_t model_len = model ? strlen(model) : 0;
-    hu_dpo_judge_result_t result = {0};
-    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name,
-           batch_size);
-
-    err = hu_dpo_judge_step(&collector, alloc, &provider, model, model_len, 0.1, (size_t)batch_size,
-                            &result);
-
-    if (err == HU_OK) {
-        printf("[dpo] Judge step complete:\n");
-        printf("  Pairs evaluated: %zu\n", result.pairs_evaluated);
-        printf("  Pairs aligned:   %zu\n", result.pairs_aligned);
-        printf("  Alignment score: %.2f%%\n", result.alignment_score * 100.0);
-        printf("  Loss:            %.4f\n", result.loss);
-    } else {
-        fprintf(stderr, "[dpo] Judge step failed: %d\n", err);
-    }
-
-    if (provider.vtable && provider.vtable->deinit)
-        provider.vtable->deinit(provider.ctx, alloc);
-    hu_dpo_collector_deinit(&collector);
-    sqlite3_close(db);
-    return err;
-#else
-    (void)alloc;
-    (void)db_path;
-    (void)provider_name;
-    (void)model;
-    (void)batch_size;
-    fprintf(stderr, "dpo-train requires HU_ENABLE_SQLITE\n");
-    return HU_ERR_NOT_SUPPORTED;
-#endif
-#endif
+    return hu_ml_cli_dpo_real(alloc, argc, argv);
 }
 
 hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, const char **argv) {

@@ -415,6 +415,9 @@ void run_dpo_real_e2e_tests(void);
 /* Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper — JSONL export
  * + dummy-adapter shortcut without HU_HAVE_MLX_LM; real Gemma DPO with it. */
 void run_dpo_real_mlx_tests(void);
+/* Phase 2 Task 8 (RL SOTA): pins surface contract for the post-split
+ * hu_ml_cli_dpo_judge / hu_ml_cli_dpo_real CLI handlers. */
+void run_cli_dpo_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -986,6 +989,8 @@ int main(int argc, char **argv) {
     /* Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper test (skip stub
      * by default; real Gemma DPO when HU_HAVE_MLX_LM=1). */
     run_dpo_real_mlx_tests();
+    /* Phase 2 Task 8 (RL SOTA): post-split CLI handler surface contract. */
+    run_cli_dpo_tests();
 #endif
 
     run_experience_tests();
