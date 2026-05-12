@@ -173,8 +173,15 @@ static void upsert_with_history_records_in_history_table(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_evolved_opinion_upsert(s_db, S("design"), S("minimalist"), 0.8, 1000);
 
-    hu_evolved_opinion_upsert_with_history(&alloc, s_db, S("design"), S("expressive"), 0.2, 2000,
-                                           S("grew bored"), 0, NULL);
+    /* The 0.6-magnitude shift here triggers narrative generation
+     * (evolved_opinions.c:556-574 allocates HU_NARRATIVE_CAP and
+     * realloc-shrinks to ~70 b). Capture and free — discarding the
+     * return value leaked 70 b on PR55's ASan run. */
+    size_t narr_len = 0;
+    char *narr = hu_evolved_opinion_upsert_with_history(
+        &alloc, s_db, S("design"), S("expressive"), 0.2, 2000, S("grew bored"), 0, &narr_len);
+    if (narr)
+        alloc.free(alloc.ctx, narr, narr_len + 1);
 
     /* Check history was recorded */
     hu_opinion_history_entry_t *entries = NULL;

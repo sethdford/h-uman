@@ -28,8 +28,16 @@ static void save_for_later_create_ok(void) {
 static void save_for_later_execute_null_ctx_fails(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_result_t result = {0};
-    hu_error_t err = hu_save_for_later_create(&alloc, NULL, &(hu_tool_t){0});
+    /* The throwaway create call probes whether the constructor tolerates
+     * a NULL memory engine. It returns a fully-constructed tool whose
+     * inner allocator-owned strings (8 b on PR55's ASan run) leak unless
+     * we deinit. Capture in a named local instead of a compound-literal
+     * pointer that goes out of scope before we can free it. */
+    hu_tool_t throwaway = {0};
+    hu_error_t err = hu_save_for_later_create(&alloc, NULL, &throwaway);
     (void)err;
+    if (throwaway.vtable && throwaway.vtable->deinit)
+        throwaway.vtable->deinit(throwaway.ctx, &alloc);
 
     hu_tool_t tool = {0};
     hu_save_for_later_create(&alloc, NULL, &tool);
