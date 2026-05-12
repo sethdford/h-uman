@@ -1408,10 +1408,23 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         guard_report.max_repetition_run, sresp.content_len);
                     hu_guard_report_t retry_report;
                     memset(&retry_report, 0, sizeof(retry_report));
+                    /* Build a channel-aware persona hint so the slim retry has
+                     * the iMessage/Telegram/etc. overlay style rules
+                     * (lowercase, fragments, emoji frequency) instead of
+                     * collapsing onto a generic polite-assistant register —
+                     * see 2026-05-12 Jordan-iMessage incident. */
+                    char *retry_hint = NULL;
+                    size_t retry_hint_len = 0;
+                    (void)hu_persona_build_retry_hint(agent->alloc, agent->persona,
+                                                       agent->active_channel,
+                                                       agent->active_channel_len, &retry_hint,
+                                                       &retry_hint_len);
                     hu_error_t retry_err = hu_response_guard_retry_slim(
                         agent->alloc, agent->observer, agent->config, &agent->provider, turn_model,
-                        turn_model_len, msg, msg_len, &safe_content, &safe_content_len,
-                        &retry_report);
+                        turn_model_len, msg, msg_len, retry_hint, retry_hint_len, &safe_content,
+                        &safe_content_len, &retry_report);
+                    if (retry_hint)
+                        agent->alloc->free(agent->alloc->ctx, retry_hint, retry_hint_len + 1);
                     if (retry_err == HU_OK && safe_content && safe_content_len > 0) {
                         hu_agent_m3_on_provider_success(agent);
                         safe_owned = true;
@@ -2153,9 +2166,18 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         size_t retry_txt_len = 0;
                         hu_guard_report_t rr;
                         memset(&rr, 0, sizeof(rr));
+                        /* Channel-aware hint preserves persona/style under retry. */
+                        char *retry_hint = NULL;
+                        size_t retry_hint_len = 0;
+                        (void)hu_persona_build_retry_hint(
+                            agent->alloc, agent->persona, agent->active_channel,
+                            agent->active_channel_len, &retry_hint, &retry_hint_len);
                         hu_error_t rre = hu_response_guard_retry_slim(
                             agent->alloc, agent->observer, agent->config, &agent->provider, tm, tml,
-                            msg, msg_len, &retry_txt, &retry_txt_len, &rr);
+                            msg, msg_len, retry_hint, retry_hint_len, &retry_txt, &retry_txt_len,
+                            &rr);
+                        if (retry_hint)
+                            agent->alloc->free(agent->alloc->ctx, retry_hint, retry_hint_len + 1);
                         if (rre == HU_OK && retry_txt && retry_txt_len > 0) {
                             hu_agent_m3_on_provider_success(agent);
                             final_content = retry_txt;

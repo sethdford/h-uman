@@ -584,6 +584,37 @@ void hu_persona_example_banks_free(hu_allocator_t *alloc,
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
                                                     const char *channel, size_t channel_len);
 
+/* Build a compact channel-aware repair hint for hu_response_guard_retry_slim.
+ *
+ * The slim retry path used to be handed only `persona->core_anchor` (a short
+ * identity line). That stripped every style rule the model needs when
+ * response_guard rejects a first draft, so the retry collapsed onto a generic
+ * "polite AI assistant" voice — see the 2026-05-12 Jordan-iMessage incident
+ * documented in `docs/postmortems/2026-05-12-response-guard-style-collapse.md`.
+ *
+ * This helper builds a self-contained hint (identity + channel overlay style)
+ * suitable to pass as `persona_hint` to `hu_response_guard_retry_slim`. The
+ * output is shaped so the retry's `"You are %.*s."` wrapper produces a
+ * coherent system prompt:
+ *
+ *   You are <core_anchor-or-name>. STYLE for <channel>: <formality>. avg_length:
+ *   <avg_length>. emoji: <emoji_usage>. RULES: <style_notes joined with '; '>.
+ *   Reply as <name>, not as an AI assistant.
+ *
+ * Output is capped at HU_PERSONA_RETRY_HINT_MAX bytes (1800) so the existing
+ * 4096-byte slim retry sys_buf cannot overflow. If no overlay is found for the
+ * channel the helper still emits the identity + a generic "match the user's
+ * usual voice on <channel>" suffix — enough to override the model's default.
+ *
+ * Returns HU_OK on success. On allocation failure returns HU_ERR_OUT_OF_MEMORY
+ * with *out = NULL.  If `persona` is NULL the helper returns HU_OK with
+ * *out = NULL / *out_len = 0 so the caller falls back to the legacy hint. */
+#define HU_PERSONA_RETRY_HINT_MAX 1800u
+
+hu_error_t hu_persona_build_retry_hint(hu_allocator_t *alloc, const hu_persona_t *persona,
+                                        const char *channel, size_t channel_len, char **out,
+                                        size_t *out_len);
+
 const hu_contact_profile_t *hu_persona_find_contact(const hu_persona_t *persona,
                                                     const char *contact_id, size_t contact_id_len);
 

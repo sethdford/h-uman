@@ -52,6 +52,129 @@ const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
     return NULL;
 }
 
+/* Append `src` (capped at `src_max` bytes, or strlen(src) if shorter) into
+ * `buf[*used_inout..buf_cap)`, returning false if the append would overflow
+ * the buffer or leave less than 8 bytes of headroom for the closing rules. */
+static bool retry_hint_append(char *buf, size_t buf_cap, size_t *used_inout, const char *src,
+                              size_t src_max) {
+    if (!buf || !used_inout || !src || buf_cap == 0)
+        return false;
+    size_t src_len = strnlen(src, src_max);
+    if (src_len == 0)
+        return true;
+    if (*used_inout + src_len + 8 >= buf_cap)
+        return false;
+    memcpy(buf + *used_inout, src, src_len);
+    *used_inout += src_len;
+    buf[*used_inout] = '\0';
+    return true;
+}
+
+hu_error_t hu_persona_build_retry_hint(hu_allocator_t *alloc, const hu_persona_t *persona,
+                                        const char *channel, size_t channel_len, char **out,
+                                        size_t *out_len) {
+    if (!alloc || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+    if (!persona)
+        return HU_OK; /* legacy fallback path in caller */
+
+    const char *identity = (persona->core_anchor && persona->core_anchor[0])
+                                ? persona->core_anchor
+                                : (persona->name && persona->name[0] ? persona->name : "yourself");
+
+    const hu_persona_overlay_t *ov = NULL;
+    if (channel && channel_len > 0)
+        ov = hu_persona_find_overlay(persona, channel, channel_len);
+
+    char buf[HU_PERSONA_RETRY_HINT_MAX];
+    size_t used = 0;
+    buf[0] = '\0';
+
+    /* Identity (caps at ~256 chars — `core_anchor` is short by design). */
+    if (!retry_hint_append(buf, sizeof(buf), &used, identity, 256))
+        return HU_ERR_INTERNAL;
+
+    /* Channel style block — only emitted when an overlay exists. The slim
+     * retry's wrapper prefixes "You are " so we start with ". STYLE for <ch>:". */
+    if (ov) {
+        if (!retry_hint_append(buf, sizeof(buf), &used, ". STYLE for ", 12))
+            return HU_ERR_INTERNAL;
+        if (channel && channel_len > 0) {
+            if (used + channel_len + 8 >= sizeof(buf))
+                return HU_ERR_INTERNAL;
+            memcpy(buf + used, channel, channel_len);
+            used += channel_len;
+            buf[used] = '\0';
+        }
+        if (!retry_hint_append(buf, sizeof(buf), &used, ": ", 2))
+            return HU_ERR_INTERNAL;
+
+        if (ov->formality && ov->formality[0]) {
+            (void)retry_hint_append(buf, sizeof(buf), &used, "formality=", 10);
+            (void)retry_hint_append(buf, sizeof(buf), &used, ov->formality, 64);
+            (void)retry_hint_append(buf, sizeof(buf), &used, "; ", 2);
+        }
+        if (ov->avg_length && ov->avg_length[0]) {
+            (void)retry_hint_append(buf, sizeof(buf), &used, "avg_length=", 11);
+            (void)retry_hint_append(buf, sizeof(buf), &used, ov->avg_length, 200);
+            (void)retry_hint_append(buf, sizeof(buf), &used, "; ", 2);
+        }
+        if (ov->emoji_usage && ov->emoji_usage[0]) {
+            (void)retry_hint_append(buf, sizeof(buf), &used, "emoji=", 6);
+            (void)retry_hint_append(buf, sizeof(buf), &used, ov->emoji_usage, 160);
+            (void)retry_hint_append(buf, sizeof(buf), &used, "; ", 2);
+        }
+        if (ov->style_notes && ov->style_notes_count > 0) {
+            (void)retry_hint_append(buf, sizeof(buf), &used, "RULES: ", 7);
+            /* Take up to the first 6 style notes; each capped at 200 chars so
+             * one bloated note can't crowd out the others. */
+            size_t emitted = 0;
+            for (size_t i = 0; i < ov->style_notes_count && emitted < 6; i++) {
+                const char *note = ov->style_notes[i];
+                if (!note || !note[0])
+                    continue;
+                if (emitted > 0) {
+                    if (!retry_hint_append(buf, sizeof(buf), &used, "; ", 2))
+                        break;
+                }
+                if (!retry_hint_append(buf, sizeof(buf), &used, note, 200))
+                    break;
+                emitted++;
+            }
+            (void)retry_hint_append(buf, sizeof(buf), &used, ". ", 2);
+        }
+    } else if (channel && channel_len > 0) {
+        /* No overlay — give a generic anchor that still beats the model's
+         * default polite-assistant register. */
+        (void)retry_hint_append(buf, sizeof(buf), &used, ". Match your usual voice on ", 28);
+        if (used + channel_len + 8 < sizeof(buf)) {
+            memcpy(buf + used, channel, channel_len);
+            used += channel_len;
+            buf[used] = '\0';
+        }
+        (void)retry_hint_append(buf, sizeof(buf), &used, ". ", 2);
+    } else {
+        (void)retry_hint_append(buf, sizeof(buf), &used, ". ", 2);
+    }
+
+    const char *name_for_close =
+        (persona->name && persona->name[0]) ? persona->name : "yourself";
+    (void)retry_hint_append(buf, sizeof(buf), &used, "Reply as ", 9);
+    (void)retry_hint_append(buf, sizeof(buf), &used, name_for_close, 64);
+    (void)retry_hint_append(buf, sizeof(buf), &used, ", not as an AI assistant", 24);
+
+    char *copy = (char *)alloc->alloc(alloc->ctx, used + 1);
+    if (!copy)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(copy, buf, used);
+    copy[used] = '\0';
+    *out = copy;
+    *out_len = used;
+    return HU_OK;
+}
+
 /* --- Deinit helpers --- */
 
 static void free_string_array(hu_allocator_t *alloc, char **arr, size_t count) {

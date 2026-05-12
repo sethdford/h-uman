@@ -5744,10 +5744,21 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             size_t retry_len = 0;
                             hu_guard_report_t retry_report;
                             memset(&retry_report, 0, sizeof(retry_report));
+                            /* Channel-aware persona hint so retry keeps the
+                             * channel overlay's style rules (see 2026-05-12
+                             * Jordan-iMessage style-collapse incident). */
+                            char *retry_hint = NULL;
+                            size_t retry_hint_len = 0;
+                            (void)hu_persona_build_retry_hint(
+                                agent->alloc, agent->persona, agent->active_channel,
+                                agent->active_channel_len, &retry_hint, &retry_hint_len);
                             hu_error_t retry_err = hu_response_guard_retry_slim(
                                 agent->alloc, agent->observer, agent->config, &agent->provider,
-                                turn_model, turn_model_len, msg, msg_len, &retry_content,
-                                &retry_len, &retry_report);
+                                turn_model, turn_model_len, msg, msg_len, retry_hint,
+                                retry_hint_len, &retry_content, &retry_len, &retry_report);
+                            if (retry_hint)
+                                agent->alloc->free(agent->alloc->ctx, retry_hint,
+                                                   retry_hint_len + 1);
                             if (retry_err == HU_OK && retry_content && retry_len > 0) {
                                 hu_agent_m3_on_provider_success(agent);
                                 hu_log_warn(
