@@ -1306,6 +1306,12 @@ if(HU_ENABLE_ML)
         # Phase 3 Tasks 9-10: CLI handlers for kto-train and rm-train.
         src/ml/cli_kto.c
         src/ml/cli_rm.c
+        # Phase 4 Task 1 (RL SOTA): KL divergence estimators (k1/k2/k3) +
+        # k3 analytical backward grad. Pure C leaf math primitive — no
+        # model coupling, no allocator. Used by the GRPO trainer
+        # (Task 5) for the beta * KL penalty term in the loss.
+        # Reference: Schulman 2020 "Approximating KL Divergence".
+        src/ml/kl_divergence.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2838,6 +2844,10 @@ set(HU_TEST_SOURCES
     # Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
     # grad check + vtable contract.
     tests/test_kto_loss.c
+    # Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 forward + k3 backward grad
+    # check + v=0 graceful zero-return. Pins the math primitive that
+    # backs the GRPO KL penalty (Task 5).
+    tests/test_kl_divergence.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c

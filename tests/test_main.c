@@ -440,6 +440,10 @@ void run_reward_model_inference_tests(void);
 /* Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
  * grad check + vtable contract. */
 void run_kto_loss_tests(void);
+/* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 estimators + k3 analytical
+ * backward grad — pure C leaf math primitive used by the GRPO
+ * trainer (Task 5) for the KL penalty term. */
+void run_kl_divergence_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -1029,6 +1033,8 @@ int main(int argc, char **argv) {
     run_reward_model_inference_tests();
     /* Phase 3 Task 5 (RL SOTA): KTO loss. */
     run_kto_loss_tests();
+    /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 + k3 backward grad. */
+    run_kl_divergence_tests();
 #endif
 
     run_experience_tests();
