@@ -274,7 +274,25 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Avoid:\n", 7);
         size_t shown = wm->negatives_count > 6 ? 6 : wm->negatives_count;
         for (size_t i = 0; i < shown; i++) {
-            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s%s%s\n", wm->negatives[i].text,
+            /* P5.5 — render each negative with a per-source directive so
+             * the planner / W11 verifier knows how strictly to enforce
+             * it. The four sources map to four enforcement contracts:
+             *   USER_EXPLICIT     — hard refusal ("[hard]")
+             *   SELF_RAG_ABSTAIN  — soft hedge with citation ("[soft]")
+             *   AUTO_EXTRACT      — ask-to-confirm ("[confirm]")
+             *   SYSTEM_POLICY     — hard refusal + audit ("[policy]")
+             *
+             * The tag is a single bracketed prefix so it's easy for the
+             * planner to grep without exploding the prompt budget. */
+            const char *tag = "[hard]";
+            switch (wm->negatives[i].source) {
+            case HU_NEGATIVE_SOURCE_USER_EXPLICIT:    tag = "[hard]";    break;
+            case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN: tag = "[soft]";    break;
+            case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:     tag = "[confirm]"; break;
+            case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:    tag = "[policy]";  break;
+            }
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s%s%s\n",
+                                   tag, wm->negatives[i].text,
                                    wm->negatives[i].reason[0] ? " — " : "",
                                    wm->negatives[i].reason[0] ? wm->negatives[i].reason : "");
         }

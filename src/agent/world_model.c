@@ -1354,6 +1354,124 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
     }
 }
 
+/* P6.1 — case-insensitive substring containment for token-level
+ * goal-anchor scoring. Returns true if any whitespace-separated
+ * token from `goal` (length ≥ 3) appears within `name`. */
+static bool goal_anchor_matches_(const char *goal, size_t goal_len,
+                                  const char *name, size_t name_len) {
+    if (!goal || goal_len == 0 || !name || name_len == 0) return false;
+    /* Walk goal tokens in-place. */
+    size_t i = 0;
+    while (i < goal_len) {
+        while (i < goal_len && (goal[i] == ' ' || goal[i] == '\t' || goal[i] == '\n'))
+            i++;
+        size_t start = i;
+        while (i < goal_len && goal[i] != ' ' && goal[i] != '\t' && goal[i] != '\n')
+            i++;
+        size_t tlen = i - start;
+        if (tlen < 3) continue;
+        for (size_t j = 0; j + tlen <= name_len; j++) {
+            size_t k = 0;
+            for (; k < tlen; k++) {
+                char a = goal[start + k];
+                char b = name[j + k];
+                if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+                if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+                if (a != b) break;
+            }
+            if (k == tlen) return true;
+        }
+    }
+    return false;
+}
+
+hu_error_t hu_world_model_rerank_for_goal(hu_world_model_t *wm,
+                                           const char *goal_text,
+                                           size_t goal_text_len,
+                                           hu_allocator_t *alloc) {
+    if (!wm) return HU_ERR_INVALID_ARGUMENT;
+    (void)alloc; /* reserved for future scoring buffers */
+    if (!goal_text || goal_text_len == 0) return HU_OK;
+
+    /* Stable partition: matched rows preserve relative order, then
+     * unmatched rows preserve relative order. O(N) using a single
+     * pass with a write index. Same template applies to entities,
+     * relations, and recent topics. */
+    if (wm->entities && wm->entities_count > 1) {
+        size_t w = 0;
+        for (size_t r = 0; r < wm->entities_count; r++) {
+            if (goal_anchor_matches_(goal_text, goal_text_len,
+                                     wm->entities[r].name, wm->entities[r].name_len)) {
+                if (r != w) {
+                    hu_graph_entity_t tmp = wm->entities[w];
+                    wm->entities[w] = wm->entities[r];
+                    wm->entities[r] = tmp;
+                    /* Restore relative order of trailing unmatched
+                     * rows by rotating the run [w+1 .. r] left by 1.
+                     * Bounded by entities_count (≤ 32) so this is fine. */
+                    for (size_t k = r; k > w + 1; k--) {
+                        hu_graph_entity_t t2 = wm->entities[k];
+                        wm->entities[k] = wm->entities[k - 1];
+                        wm->entities[k - 1] = t2;
+                    }
+                }
+                w++;
+            }
+        }
+    }
+
+    if (wm->relations && wm->relations_count > 1) {
+        size_t w = 0;
+        for (size_t r = 0; r < wm->relations_count; r++) {
+            const hu_graph_relation_t *rel = &wm->relations[r];
+            bool match = goal_anchor_matches_(goal_text, goal_text_len,
+                                               rel->source_name, rel->source_name_len)
+                         || goal_anchor_matches_(goal_text, goal_text_len,
+                                                  rel->target_name, rel->target_name_len)
+                         || goal_anchor_matches_(goal_text, goal_text_len,
+                                                  rel->context, rel->context_len);
+            if (match) {
+                if (r != w) {
+                    hu_graph_relation_t tmp = wm->relations[w];
+                    wm->relations[w] = wm->relations[r];
+                    wm->relations[r] = tmp;
+                    for (size_t k = r; k > w + 1; k--) {
+                        hu_graph_relation_t t2 = wm->relations[k];
+                        wm->relations[k] = wm->relations[k - 1];
+                        wm->relations[k - 1] = t2;
+                    }
+                }
+                w++;
+            }
+        }
+    }
+
+    if (wm->recent_topics_count > 1) {
+        size_t w = 0;
+        for (size_t r = 0; r < wm->recent_topics_count; r++) {
+            const char *t = wm->recent_topics[r];
+            if (goal_anchor_matches_(goal_text, goal_text_len, t, strlen(t))) {
+                if (r != w) {
+                    char tmp[64];
+                    memcpy(tmp, wm->recent_topics[w], sizeof(tmp));
+                    memcpy(wm->recent_topics[w], wm->recent_topics[r], sizeof(tmp));
+                    memcpy(wm->recent_topics[r], tmp, sizeof(tmp));
+                    for (size_t k = r; k > w + 1; k--) {
+                        char t2[64];
+                        memcpy(t2, wm->recent_topics[k], sizeof(t2));
+                        memcpy(wm->recent_topics[k], wm->recent_topics[k - 1],
+                               sizeof(t2));
+                        memcpy(wm->recent_topics[k - 1], t2, sizeof(t2));
+                    }
+                }
+                w++;
+            }
+        }
+    }
+
+    return HU_OK;
+}
+
 void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm) {
     if (!alloc || !wm) return;
     free_entities_local(alloc, wm->entities, wm->entities_count);
