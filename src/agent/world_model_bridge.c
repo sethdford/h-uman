@@ -164,9 +164,22 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
     if (now_ms == 0)
         now_ms = (int64_t)time(NULL) * 1000;
 
+    /* P2.4 — load with channel-aware key when persona_ctx supplies one.
+     * Same person on Slack vs SMS now gets distinct cached snapshots so
+     * the per-channel persona overlay (P1.2) actually changes ToM
+     * pragmatics. Falls through to the legacy single-key load when no
+     * channel is available. */
     hu_world_model_t *wm = NULL;
+    const char *cache_channel = NULL;
+    size_t cache_channel_len = 0;
+    if (persona_ctx && persona_ctx->channel && persona_ctx->channel_len > 0 &&
+        persona_ctx->channel_len < 32) {
+        cache_channel = persona_ctx->channel;
+        cache_channel_len = persona_ctx->channel_len;
+    }
     hu_error_t e =
-        hu_world_model_load(facade->m, alloc, contact_id, contact_id_len, now_ms, &wm);
+        hu_world_model_load_with_channel(facade->m, alloc, contact_id, contact_id_len,
+                                         cache_channel, cache_channel_len, now_ms, &wm);
     if (e != HU_OK || !wm)
         return e == HU_OK ? HU_OK : e;
 

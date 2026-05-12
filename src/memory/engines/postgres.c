@@ -246,6 +246,9 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
         r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
         r->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
         r->category.data.custom.name_len = strlen(e->category);
+        r->trust_tier = (int)HU_TRUST_THIRD_PARTY;
+        r->provenance = NULL;
+        r->provenance_len = 0;
         if (!r->key || !r->content) {
             for (size_t j = 0; j <= n; j++)
                 hu_memory_entry_free_fields(alloc, &results[j]);

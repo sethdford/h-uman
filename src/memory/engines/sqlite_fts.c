@@ -123,6 +123,9 @@ static void fill_entry_from_mock(hu_allocator_t *alloc, const mock_entry_t *m,
     out->source = NULL;
     out->source_len = 0;
     out->score = NAN;
+    out->trust_tier = (int)HU_TRUST_THIRD_PARTY;
+    out->provenance = NULL;
+    out->provenance_len = 0;
 }
 
 static const char *impl_name(void *ctx) {
@@ -429,6 +432,9 @@ static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
         out->score = sqlite3_column_double(stmt, 6);
     else
         out->score = NAN;
+    out->trust_tier = (int)HU_TRUST_THIRD_PARTY;
+    out->provenance = NULL;
+    out->provenance_len = 0;
     return HU_OK;
 }
 

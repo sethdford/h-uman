@@ -33,6 +33,7 @@
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/neural_memory.h"
 #include "human/memory/personal_model.h"
+#include "human/agent/channel_trust.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
@@ -948,7 +949,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 
 #ifndef HU_IS_TEST
-    (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+    {
+        /* SOTA-2026 init-09: stamp provenance derived from the active
+         * channel so the trust gate + MINJA detector run in production. */
+        hu_provenance_t _ingest_prov = hu_channel_trust_stamp(
+            agent->active_channel, agent->active_channel_len,
+            NULL, 0, (int64_t)time(NULL));
+        (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true,
+                                       (int64_t)time(NULL), &_ingest_prov);
+    }
 #endif
 
     /* B16 follow-up — close the chronotype loop. Whatever populated the

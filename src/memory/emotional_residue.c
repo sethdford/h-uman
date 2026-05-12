@@ -12,6 +12,12 @@ typedef int hu_emotional_residue_unused_;
 #include <string.h>
 #include <time.h>
 
+/* P2.3 — Residue inserts mutate wm.dominant_emotion / valence / arousal
+ * for the contact, so the cached snapshot must be dropped. Forward-
+ * declared to keep the residue TU free of the world-model header (which
+ * pulls in the persona graph); symbol defined in src/agent/world_model.c. */
+extern void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
+
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define INTENSITY_THRESHOLD 0.05
 #define SEC_PER_DAY 86400.0
@@ -48,6 +54,9 @@ hu_error_t hu_emotional_residue_add(sqlite3 *db, int64_t episode_id, const char 
     }
     *out_id = sqlite3_last_insert_rowid(db);
     sqlite3_finalize(stmt);
+    /* P2.3 — drop the cached snapshot for this contact so dominant
+     * emotion shifts are visible immediately, not after the 60s TTL. */
+    hu_world_model_invalidate(contact_id, cid_len);
     return HU_OK;
 }
 

@@ -304,6 +304,9 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
         entries[count].source = source_buf[0] ? hu_strdup(alloc, source_buf) : NULL;
         entries[count].source_len = source_buf[0] ? strlen(source_buf) : 0;
         entries[count].score = NAN;
+        entries[count].trust_tier = (int)HU_TRUST_THIRD_PARTY;
+        entries[count].provenance = NULL;
+        entries[count].provenance_len = 0;
         count++;
     }
     closedir(d);
@@ -406,6 +409,9 @@ static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, si
     out->source = get_source[0] ? hu_strdup(alloc, get_source) : NULL;
     out->source_len = get_source[0] ? strlen(get_source) : 0;
     out->score = NAN;
+    out->trust_tier = (int)HU_TRUST_THIRD_PARTY;
+    out->provenance = NULL;
+    out->provenance_len = 0;
     *found = true;
     return HU_OK;
 }

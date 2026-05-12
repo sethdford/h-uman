@@ -133,3 +133,30 @@ inference doesn't actually execute on local hardware.
 
 `Category B blocker confirmed.`
 `Category B` is the honest answer.
+
+---
+
+## Status update (2026-05-11, Sprint 2 planning)
+
+Two of the six original blockers have been resolved since this
+rationale was written:
+
+- **Blocker #2 (chat stub)**: `src/providers/llamacpp.c` now
+  implements a real chat path when `HU_LLAMACPP_LINKED` is defined.
+  The `llamacpp_chat_with_system` vtable hook performs tokenization,
+  batched prompt decode, and sampling via `hu_llamacpp_decode_run`.
+- **Blocker #3 (no vendored llama.cpp)**: `third_party/llama.cpp/`
+  now exists in the workspace. CMake's `HU_ENABLE_LLAMACPP` path
+  detects and links it when the option is ON.
+
+**Still blocking** (4 of 6):
+1. `HU_ENABLE_LLAMACPP=OFF` by default (no dev build enables it).
+4. No system libllama (macOS dev env has no fallback — moot now
+   that vendored source exists, but requires explicit cmake config).
+5. No GGUF model on disk (`find tests/fixtures -name '*.gguf'` → empty).
+6. AC-D.4 schema mismatch (follow-up planned in Sprint 2 Story D).
+
+**Net:** The descope is still correct — no turnkey GGUF + env exists
+for an end-to-end run — but the technical landscape has improved.
+Re-attempt when a GGUF model is available and the dev configures
+`cmake --preset rl_sota`.

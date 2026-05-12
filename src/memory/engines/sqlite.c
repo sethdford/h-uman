@@ -591,6 +591,14 @@ static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
     out->source = source_p ? hu_strndup(alloc, source_p, source_len) : NULL;
     out->source_len = source_len;
 
+    /* SOTA-2026 init-09: trust_tier + provenance columns read when present.
+     * Existing SELECT lists (id, key, content, category, created_at,
+     * session_id, source[, score]) DO NOT include these columns yet, so
+     * keep the defaults aligned with the M5 migration's safe baseline. */
+    out->trust_tier = (int)HU_TRUST_THIRD_PARTY;
+    out->provenance = NULL;
+    out->provenance_len = 0;
+
     if (sqlite3_column_count(stmt) > 7) {
         out->score = sqlite3_column_double(stmt, 7);
     } else {
@@ -1404,6 +1412,48 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
         sqlite3_exec(db, "ALTER TABLE memories ADD COLUMN source TEXT", NULL, NULL, &err);
         if (err)
             sqlite3_free(err);
+    }
+
+    /* SOTA-2026 init-09 sec 2.8: Migration M5 - trust_tier + provenance.
+     *
+     * The DEFAULT 1 (HU_TRUST_THIRD_PARTY) is the safe, conservative
+     * default for pre-migration rows. The initial design used DEFAULT 2
+     * (FIRST_PARTY) and was flipped to THIRD_PARTY per adversarial
+     * review finding B2: defaulting unclassified rows to FIRST_PARTY
+     * would permanently stamp any already-ingested MINJA-poisoned fact
+     * as high-trust. The sec 2.11 audit promotes rows whose source
+     * unambiguously identifies a 1:1 channel after this default. */
+    {
+        char *e = NULL;
+        sqlite3_exec(db,
+                     "ALTER TABLE memories ADD COLUMN trust_tier "
+                     "INTEGER NOT NULL DEFAULT 1",
+                     NULL, NULL, &e);
+        if (e)
+            sqlite3_free(e);
+    }
+    {
+        char *e = NULL;
+        sqlite3_exec(db, "ALTER TABLE memories ADD COLUMN provenance TEXT",
+                     NULL, NULL, &e);
+        if (e)
+            sqlite3_free(e);
+    }
+    /* sec 2.11 upgrade-on-positive-identification audit. Idempotent. */
+    {
+        const char *audit_q1 =
+            "UPDATE memories SET trust_tier = 4 "
+            "WHERE source IN ('cli','stdin','telegram_dm','discord_dm',"
+            "'slack_dm','imessage_dm') AND trust_tier = 1";
+        const char *audit_q2 =
+            "UPDATE memories SET trust_tier = 2 "
+            "WHERE source IN ('human','tool:human','self_email','calendar_self') "
+            "AND trust_tier = 1";
+        char *e = NULL;
+        sqlite3_exec(db, audit_q1, NULL, NULL, &e);
+        if (e) { sqlite3_free(e); e = NULL; }
+        sqlite3_exec(db, audit_q2, NULL, NULL, &e);
+        if (e) sqlite3_free(e);
     }
 
     hu_sqlite_memory_t *self =

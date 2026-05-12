@@ -123,17 +123,60 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
  *  - cache miss / expired: builds, caches, returns clone
  * Caller still owns the returned pointer and must free with
  * hu_world_model_free. The TTL defaults to 60s; tune via the env var
- * HU_WORLD_MODEL_TTL_MS for tests. */
+ * HU_WORLD_MODEL_TTL_MS for tests.
+ *
+ * Equivalent to `hu_world_model_load_with_channel(..., NULL, 0, now_ms,
+ * out)` — i.e. uses the empty-channel default cache key. Bridge / agent
+ * paths that have a channel handle should call the `_with_channel`
+ * variant so the per-channel persona overlay (P1.2) drives distinct
+ * cached snapshots for the same contact across Slack / SMS / iMessage. */
 hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                 const char *contact_id, size_t cid_len,
                                 int64_t now_ms,
                                 hu_world_model_t **out);
 
-/* Invalidate the cached entry for `(contact_id, cid_len)`.
- * Special case: `(NULL, 0)` clears the entire LRU (graph teardown / tests).
- * An empty-string contact with `cid_len == 0` only invalidates that key,
- * not the whole cache. */
+/* P2.4 — channel-aware cached load. Cache key is `(contact_id, channel)`
+ * so the same person on Slack vs SMS gets distinct snapshots, which is
+ * required for the per-channel persona overlay (P1.2) to drive behavior.
+ * Pass `channel == NULL || channel_len == 0` for the legacy single-key
+ * lookup. `channel_len < 32` (cache slot capacity). */
+hu_error_t hu_world_model_load_with_channel(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                            const char *contact_id, size_t cid_len,
+                                            const char *channel, size_t channel_len,
+                                            int64_t now_ms,
+                                            hu_world_model_t **out);
+
+/* Invalidate cached entries.
+ *
+ * `hu_world_model_invalidate(NULL, 0)` clears the entire LRU (graph
+ * teardown / tests).
+ *
+ * `hu_world_model_invalidate(contact_id, len)` (non-NULL) clears ALL
+ * channel-keyed entries for that contact — the right default because
+ * most writes (graph upsert, negative memory, residue) are not channel-
+ * scoped at the data layer.
+ *
+ * `hu_world_model_invalidate_channel(contact_id, len, channel, ch_len)`
+ * clears only the (contact, channel) entry. Use when a write is
+ * known-scoped to one channel (e.g., a channel-only ToM scenario). */
 void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
+void hu_world_model_invalidate_channel(const char *contact_id, size_t cid_len,
+                                       const char *channel, size_t channel_len);
+
+/* P2.5 — observability: report cache slot capacity, total loads, hits,
+ * and total evictions since process start (or last `_reset_for_tests`).
+ * Hit rate = hits / loads. Any pointer can be NULL.
+ *
+ * Useful as `hu_observer_t` plumbing input — caller polls every N
+ * seconds and emits a metric. Safe to call before the cache has been
+ * touched (returns 0/0/0/configured-capacity). */
+void hu_world_model_cache_stats(size_t *slots, uint64_t *loads, uint64_t *hits,
+                                uint64_t *evictions);
+
+/* Test-only: drop all cached entries AND zero the telemetry counters.
+ * Production paths should use `hu_world_model_invalidate(NULL, 0)`,
+ * which keeps counters intact. */
+void hu_world_model_cache_reset_for_tests(void);
 
 /* Free a world model returned by build/load. Safe with NULL. */
 void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm);

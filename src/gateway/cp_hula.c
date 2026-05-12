@@ -29,6 +29,10 @@ static void resolve_hula_trace_dir(char *buf, size_t cap) {
     buf[0] = '\0';
     const char *e = getenv("HU_HULA_TRACE_DIR");
     if (e && e[0]) {
+        if (e[0] != '/' || strstr(e, "..")) {
+            default_hula_trace_dir(buf, cap);
+            return;
+        }
         size_t el = strlen(e);
         if (el < cap) {
             memcpy(buf, e, el + 1);

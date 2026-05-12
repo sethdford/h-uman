@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/memory/trust.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -105,6 +106,13 @@ typedef struct hu_feed_item_stored {
 
 hu_error_t hu_feed_processor_store_item(hu_feed_processor_t *proc,
                                         const hu_feed_item_stored_t *item);
+
+/* SOTA-2026 init-09: canonical provenance stamp for a stored feed item.
+ * Returns HU_TRUST_THIRD_PARTY plus the source-qualified channel string.
+ * Use this whenever a feed item is promoted into `memories` or the
+ * personal model. */
+hu_provenance_t hu_feed_processor_item_provenance(const hu_feed_item_stored_t *item,
+                                                  int64_t now_ts);
 hu_error_t hu_feed_processor_get_recent(hu_allocator_t *alloc, sqlite3 *db,
                                         const char *source, size_t src_len,
                                         size_t limit,
