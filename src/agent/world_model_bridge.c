@@ -392,6 +392,54 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         }
     }
 
+    /* Story E (sprint-4 follow-up) — render wm->self_model.
+     *
+     * `hu_world_model_merge_persona` already populates `name`,
+     * `focused_topics`, `recent_drift_kind`, `recent_drift_value`, and
+     * `confidence_in_self` every turn from persona identity + recent
+     * topics + applied persona deltas. Without this block the LLM never
+     * sees them — the planner gets the data via the C struct but the
+     * prompt is silent. Render conditionally per field so a fresh
+     * contact (no persona, no topics, no drift) does not get a section
+     * of blanks. Confidence is bucketed into high/medium/low so the
+     * LLM does not try to reason about float precision; <0.1 omits the
+     * line entirely to keep the section honest about low-signal
+     * cases. */
+    {
+        bool self_signal = wm->self_model.name[0]
+            || wm->self_model.focused_topics[0]
+            || wm->self_model.recent_drift_kind[0]
+            || wm->self_model.confidence_in_self >= 0.1f;
+        if (self_signal) {
+            ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Self model:\n", 12);
+            if (wm->self_model.name[0])
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                       "- I am: %s\n", wm->self_model.name);
+            if (wm->self_model.focused_topics[0])
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                       "- Tracking: %s\n",
+                                       wm->self_model.focused_topics);
+            if (wm->self_model.recent_drift_kind[0]) {
+                if (wm->self_model.recent_drift_value[0])
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                           "- Most recent shift: %s — %s\n",
+                                           wm->self_model.recent_drift_kind,
+                                           wm->self_model.recent_drift_value);
+                else
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                           "- Most recent shift: %s\n",
+                                           wm->self_model.recent_drift_kind);
+            }
+            const char *bucket = NULL;
+            if (wm->self_model.confidence_in_self >= 0.7f) bucket = "high";
+            else if (wm->self_model.confidence_in_self >= 0.4f) bucket = "medium";
+            else if (wm->self_model.confidence_in_self >= 0.1f) bucket = "low";
+            if (bucket)
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                       "- Self-confidence: %s\n", bucket);
+        }
+    }
+
     if (style_signal) {
         ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
                                "Communication style: %s\n", wm->style_summary);
