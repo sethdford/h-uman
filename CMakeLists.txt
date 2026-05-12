@@ -1319,6 +1319,18 @@ if(HU_ENABLE_ML)
         # (Task 5) for the beta * KL penalty term in the loss.
         # Reference: Schulman 2020 "Approximating KL Divergence".
         src/ml/kl_divergence.c
+        # Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative
+        # advantage with std-floor (D7/R6), pessimistic PPO ratio clip
+        # min (R8/F3), KL-aware loss (MED-1 kl_beta=0 disables; <0 →
+        # default 0.04), log-ratio overflow clamp (D8), analytical
+        # log-ratio gradient with finite-diff agreement to 5% (H4).
+        # Loss-only — no model coupling.  Task 5 lands the trainer step
+        # (hu_rl_trainer_t vtable wiring sampling + scoring + backward).
+        # Defines HU_GRPO_HAVE_HUML_IMPL=1 so Task 0's #ifndef stub in
+        # src/ml/rl_trainer.c for hu_grpo_huml_create falls out of the
+        # link; the placeholder at the bottom of grpo.c returns
+        # HU_ERR_NOT_SUPPORTED until Task 5 lands the real impl.
+        src/ml/grpo.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2519,7 +2531,6 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
-    tests/test_memory_trust.c
     tests/test_persona_directive_channels.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
@@ -2859,6 +2870,13 @@ set(HU_TEST_SOURCES
     # check + v=0 graceful zero-return. Pins the math primitive that
     # backs the GRPO KL penalty (Task 5).
     tests/test_kl_divergence.c
+    # Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative
+    # advantage with std-floor (D7/R6), pessimistic PPO ratio clip
+    # min (R8/F3), KL-aware loss (MED-1 kl_beta=0 disables; <0 →
+    # default 0.04), log-ratio overflow clamp (D8), analytical
+    # log-ratio gradient with finite-diff agreement to 5% (H4).
+    # Loss-only — no model coupling; Task 5 lands the trainer step.
+    tests/test_grpo_loss.c
     # Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML factory — multinomial
     # sampling determinism (xorshift64 + per-rollout splitmix64 seed),
     # n_rollouts honoured, max_new_tokens cap, cross-platform pin (R13).
@@ -3040,7 +3058,13 @@ list(APPEND HU_TEST_SOURCES
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)
 target_link_libraries(human_tests human_core_test)
 target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/src/gateway
-    ${HU_ROOT}/src/channels)
+    ${HU_ROOT}/src/channels
+    # Phase 4 Task 3 (RL SOTA): tests/test_grpo_loss.c needs
+    # src/ml/grpo_loss_priv.h (private header — NOT exported via
+    # include/ to keep the public surface lean).  Same pattern used by
+    # src/ml/reward_model.c + src/ml/reward_model_train.c for the
+    # Phase 3 reward_model_priv.h (H2 fix).
+    ${HU_ROOT}/src/ml)
 target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)

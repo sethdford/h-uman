@@ -560,6 +560,10 @@ void run_consistency_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+/* Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative advantage,
+ * pessimistic PPO clip, KL-aware loss, analytical gradient.  Loss-only;
+ * Task 5 lands the trainer step. */
+void run_grpo_loss_tests(void);
 void run_persona_directive_channels_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -1154,6 +1158,7 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_grpo_loss_tests();
     run_persona_directive_channels_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();
