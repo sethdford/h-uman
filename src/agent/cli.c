@@ -69,6 +69,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #endif
 
@@ -169,9 +170,18 @@ static bool mlx_auto_serve(const char *prov_name) {
         return false;
     }
 
-    char cmd[HU_CLI_MAX_PATH + 16];
-    snprintf(cmd, sizeof(cmd), "%s ensure", found);
-    int rc = system(cmd);
+    extern char **environ;
+    char *argv[] = {(char *)found, "ensure", NULL};
+    pid_t pid = 0;
+    int spawn_err = posix_spawn(&pid, found, NULL, NULL, argv, environ);
+    if (spawn_err != 0) {
+        hu_log_error("human", NULL,
+                     "MLX server failed to start. Run manually:\n  scripts/human-serve.sh start");
+        return false;
+    }
+    int wstatus = 0;
+    waitpid(pid, &wstatus, 0);
+    int rc = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : 1;
 
     if (rc != 0) {
         hu_log_error("human", NULL,

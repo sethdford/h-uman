@@ -1144,6 +1144,8 @@ static bool cp_fidelity_resolve_ab_status_path(char *buf, size_t cap) {
         size_t n = strlen(override);
         if (n + 1 > cap)
             return false;
+        if (override[0] != '/' || strstr(override, ".."))
+            return false;
         memcpy(buf, override, n + 1);
         return true;
     }
@@ -1284,6 +1286,8 @@ hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *ap
             hu_json_object_set(alloc, baseline, "max", hu_json_number_new(alloc, 0));
             hu_json_object_set(alloc, obj, "baseline", baseline);
         }
+        hu_json_object_set(alloc, obj, "baseline_score", hu_json_number_new(alloc, 0));
+        hu_json_object_set(alloc, obj, "delta", hu_json_null_new(alloc));
         hu_json_value_t *ab = cp_fidelity_empty_ab(alloc);
         if (ab)
             hu_json_object_set(alloc, obj, "ab", ab);
@@ -1330,6 +1334,10 @@ hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *ap
         hu_json_object_set(alloc, obj, "baseline", baseline);
     }
 
+    /* Top-level baseline_score alias (AC-D.3 / AC-D.4) */
+    hu_json_object_set(alloc, obj, "baseline_score",
+                       hu_json_number_new(alloc, baseline_summary.mean));
+
     /* A/B section — opportunistic. If the orchestrator has written
      * a fresh `last_fidelity_ab.json`, surface it; otherwise emit
      * `available:false`. The tile expects both shapes. */
@@ -1338,6 +1346,14 @@ hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *ap
         ab = cp_fidelity_empty_ab(alloc);
     if (ab)
         hu_json_object_set(alloc, obj, "ab", ab);
+
+    /* Top-level delta alias: ab.delta when A/B is available, null otherwise (AC-D.3 / AC-D.4) */
+    hu_json_value_t *ab_delta = ab ? hu_json_object_get(ab, "delta") : NULL;
+    if (ab_delta)
+        hu_json_object_set(alloc, obj, "delta",
+                           hu_json_number_new(alloc, ab_delta->data.number));
+    else
+        hu_json_object_set(alloc, obj, "delta", hu_json_null_new(alloc));
 
     hu_persona_deinit(alloc, &persona);
     hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);

@@ -5,6 +5,7 @@
 #include "human/core/error.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/tiers.h"
+#include "human/memory/trust.h"
 #include "human/persona/circadian.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -28,6 +29,14 @@
 #define HU_PM_MAX_GOALS  8
 #define HU_PM_MAX_TOPICS 16
 #define HU_PM_MAX_FIELD  256
+/* SOTA-2026 init-09 §2.6: pending-facts quarantine queue.
+ * Facts extracted from THIRD_PARTY-or-below content sit here until
+ * the user re-states them in a USER_DIRECT message within
+ * HU_PM_PENDING_FACT_TTL_SEC, or 3 independent low-trust sources
+ * corroborate. Otherwise they expire silently on the next decay tick. */
+#define HU_PM_MAX_PENDING_FACTS 16
+#define HU_PM_PENDING_FACT_TTL_SEC ((int64_t)(24LL * 60 * 60))
+#define HU_PM_PENDING_FACT_PROMOTE_CORROBORATION 3
 
 typedef struct hu_personal_topic {
     char name[HU_PM_MAX_FIELD];
@@ -105,6 +114,25 @@ typedef struct hu_personal_model {
     int64_t updated_at;
     uint32_t interaction_count; /* total conversations analyzed */
     uint32_t version;           /* schema version for migration */
+
+    /* SOTA-2026 init-09 §2.6: pending-facts quarantine queue.
+     *
+     * Facts extracted from `provenance.tier <= THIRD_PARTY` content
+     * are buffered here rather than committed to `facts[]`. They are
+     * promoted to `facts[]` when EITHER:
+     *   (a) the user re-states the fact in a `tier >= USER_DIRECT`
+     *       message within HU_PM_PENDING_FACT_TTL_SEC, OR
+     *   (b) HU_PM_PENDING_FACT_PROMOTE_CORROBORATION independent
+     *       low-trust sources corroborate the same fact.
+     * Otherwise they expire silently on the next decay tick.
+     *
+     * `pending_corroboration_count[i]` tracks how many independent
+     * low-trust sources have asserted `pending_facts[i]` (the contact
+     * handles are compared in personal_model.c). */
+    hu_heuristic_fact_t pending_facts[HU_PM_MAX_PENDING_FACTS];
+    int64_t pending_since[HU_PM_MAX_PENDING_FACTS];
+    uint8_t pending_corroboration_count[HU_PM_MAX_PENDING_FACTS];
+    size_t pending_fact_count;
 } hu_personal_model_t;
 
 /* Initialize a personal model with defaults. */
@@ -203,13 +231,47 @@ const char *hu_personal_model_directive_variant_label(hu_directive_variant_t v);
 bool hu_personal_model_has_content(const hu_personal_model_t *model);
 
 /* Ingest a new message into the personal model.
- * Updates facts, style metrics, topics, and temporal patterns. */
+ * Updates facts, style metrics, topics, and temporal patterns.
+ *
+ * SOTA-2026 init-09: `prov` carries the trust tier + provenance stamp
+ * for `message`. Passing NULL defaults to USER_DIRECT and is permitted
+ * only from inside `#ifdef _HU_PM_SELF_TEST` self-tests; production
+ * call sites MUST pass a non-NULL `hu_provenance_t *` derived from the
+ * active channel (see `hu_channel_trust_stamp`). */
 hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *message,
-                                    size_t message_len, bool from_user, int64_t timestamp);
+                                    size_t message_len, bool from_user, int64_t timestamp,
+                                    const hu_provenance_t *prov);
 
 /* Merge facts from a fact extraction result into the model. */
 hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
                                          const hu_fact_extract_result_t *facts);
+
+/* SOTA-2026 init-09 §2.5: trust-gated merge.
+ *
+ * Same as `hu_personal_model_merge_facts`, except a fact whose
+ * `provenance.tier` is strictly less than an existing duplicate's tier
+ * is *not* allowed to overwrite the stored fact. The lower-trust
+ * contradiction is recorded via `hu_minja_quarantine_log` and dropped.
+ *
+ * Facts originating from `THIRD_PARTY` or below are routed into the
+ * pending-facts quarantine queue rather than `facts[]` unless they
+ * collide with an existing key (same subject+predicate at same-or-higher
+ * trust). See `pending_facts[]` in `hu_personal_model_t`. */
+hu_error_t hu_personal_model_merge_facts_checked(hu_personal_model_t *model,
+                                                 const hu_fact_extract_result_t *facts,
+                                                 const hu_provenance_t *prov);
+
+/* SOTA-2026 init-09: promote any pending facts whose key matches a fact
+ * just asserted in a USER_DIRECT message. Idempotent. Returns the number
+ * of promotions. */
+size_t hu_personal_model_promote_pending_facts(hu_personal_model_t *model,
+                                               const hu_fact_extract_result_t *user_direct_facts,
+                                               int64_t now);
+
+/* SOTA-2026 init-09: expire pending facts older than TTL or whose decay
+ * has dropped below floor. Returns the count expired. Called from the
+ * existing decay-pruning path. */
+size_t hu_personal_model_expire_pending_facts(hu_personal_model_t *model, int64_t now);
 
 /* Query: does the user have a known preference about this topic?
  * Returns the matching fact if found, NULL otherwise. */

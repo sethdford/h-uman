@@ -47,6 +47,7 @@
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/memory/personal_model.h"
+#include "human/agent/channel_trust.h"
 #include "human/persona.h"
 #include "human/persona/creative_voice.h"
 #include "human/persona/delta_observer.h"
@@ -367,7 +368,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     }
 
 #ifndef HU_IS_TEST
-    (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+    {
+        /* SOTA-2026 init-09: stamp provenance derived from the active
+         * channel so the trust gate + MINJA detector run in production. */
+        hu_provenance_t _ingest_prov = hu_channel_trust_stamp(
+            agent->active_channel, agent->active_channel_len,
+            NULL, 0, (int64_t)time(NULL));
+        (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true,
+                                       (int64_t)time(NULL), &_ingest_prov);
+    }
     if (agent->auto_save && hu_personal_model_has_content(&agent->personal_model)) {
         char pm_path[1024];
         if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path)))
@@ -2409,8 +2418,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     /* Personal model: ingest assistant response for style learning */
 #ifndef HU_IS_TEST
     if (!agent->proactive_turn && final_content && final_content_len > 0) {
+        /* Assistant's own response. PERSONA_DERIVED tier — the agent
+         * is observing its own output for style learning. `from_user=false`
+         * means the fact-extraction path is skipped; only the temporal /
+         * interaction counter and metadata are updated. */
+        hu_provenance_t _self_prov = hu_provenance_make(
+            HU_TRUST_PERSONA_DERIVED, "persona_derived", NULL,
+            (int64_t)time(NULL));
         (void)hu_personal_model_ingest(&agent->personal_model, final_content, final_content_len,
-                                       false, (int64_t)time(NULL));
+                                       false, (int64_t)time(NULL), &_self_prov);
     }
 #endif
 

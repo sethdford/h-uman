@@ -34,6 +34,25 @@
 #include <sqlite3.h>
 #endif
 
+/* P2.6 — POSIX mutex around the LRU cache. The agent loop is single-
+ * threaded today but W14 (counterfactual rehearsal) is permitted to
+ * run on an idle background scheduler concurrent with a turn; without
+ * a lock the LRU's last_access updates and slot evictions race. We
+ * scope the lock narrowly: held during cache_lookup / cache_evict /
+ * install / invalidate; NEVER held while building a fresh snapshot
+ * (which can hit SQLite for tens of ms). */
+#if defined(__unix__) || defined(__APPLE__)
+#include <pthread.h>
+#define HU_WM_HAVE_PTHREAD 1
+static pthread_mutex_t s_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+#define WM_CACHE_LOCK()   pthread_mutex_lock(&s_cache_mutex)
+#define WM_CACHE_UNLOCK() pthread_mutex_unlock(&s_cache_mutex)
+#else
+#define HU_WM_HAVE_PTHREAD 0
+#define WM_CACHE_LOCK()   ((void)0)
+#define WM_CACHE_UNLOCK() ((void)0)
+#endif
+
 /* ---- alloc helpers (method-pointer style) -------------------------- */
 
 static inline void *xalloc(hu_allocator_t *a, size_t n) {
@@ -927,10 +946,22 @@ void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm) {
 
 /* ---- LRU cache ---------------------------------------------------- */
 
-#define HU_WM_CACHE_SLOTS 32
+/* P2.5 — slot count is process-startup tunable via the HU_WM_CACHE_SLOTS env
+ * var. Default 32 fits one household (one user + a handful of contacts);
+ * group-chat / multi-tenant deployments can lift to 128/256/512. Hard cap of
+ * 1024 keeps the static memory budget bounded and the linear-scan lookup
+ * sub-microsecond on commodity hardware. */
+#define HU_WM_CACHE_SLOTS_DEFAULT 32u
+#define HU_WM_CACHE_SLOTS_MAX     1024u
 
+/* P2.4 — cache key is `(contact_id, channel)`. The same person on Slack vs
+ * SMS now gets distinct snapshots so the per-channel persona overlay
+ * (P1.2) actually drives behavior. `channel == ""` (len 0) is the "any
+ * channel" default and matches legacy single-key callers. */
 struct wm_cache_entry {
     char contact_id[64];
+    char channel[32];           /* P2.4 — channel-aware key */
+    size_t channel_len;
     int64_t valid_until;
     /* Cached snapshot: stored as a deep clone so we can hand callers their
      * own copy without aliasing. */
@@ -939,26 +970,60 @@ struct wm_cache_entry {
     int64_t last_access;
 };
 
-/* Process-local cache. Mutex omitted: agent loop is single-threaded
- * today; tests are single-threaded. Add a mutex when concurrency lands. */
-static struct wm_cache_entry s_cache[HU_WM_CACHE_SLOTS];
+/* P2.5 — heap-allocated cache + telemetry counters. Initialized lazily
+ * on first lookup (cache_init_once) so the env var is consulted before
+ * any traffic. The init is mutex-guarded so concurrent first-loads from
+ * W14 + agent loop don't double-allocate. */
+static struct wm_cache_entry *s_cache = NULL;
+static size_t s_cache_slots = 0;
+static uint64_t s_cache_loads = 0;       /* total hu_world_model_load calls */
+static uint64_t s_cache_hits = 0;        /* fresh-within-TTL hits */
+static uint64_t s_cache_evictions = 0;   /* slots reclaimed under pressure */
 
-static struct wm_cache_entry *cache_lookup(const char *contact_id, size_t cid_len) {
-    for (size_t i = 0; i < HU_WM_CACHE_SLOTS; i++) {
+static size_t resolve_cache_slots_(void) {
+    const char *env = getenv("HU_WM_CACHE_SLOTS");
+    if (!env || !env[0])
+        return HU_WM_CACHE_SLOTS_DEFAULT;
+    long v = strtol(env, NULL, 10);
+    if (v <= 0)
+        return HU_WM_CACHE_SLOTS_DEFAULT;
+    if ((size_t)v > HU_WM_CACHE_SLOTS_MAX)
+        return HU_WM_CACHE_SLOTS_MAX;
+    return (size_t)v;
+}
+
+/* MUST be called with WM_CACHE_LOCK held. Returns true if cache is ready. */
+static bool cache_init_locked_(void) {
+    if (s_cache) return true;
+    size_t slots = resolve_cache_slots_();
+    s_cache = (struct wm_cache_entry *)calloc(slots, sizeof(*s_cache));
+    if (!s_cache) return false;
+    s_cache_slots = slots;
+    return true;
+}
+
+static struct wm_cache_entry *cache_lookup_locked_(const char *contact_id, size_t cid_len,
+                                                    const char *channel, size_t channel_len) {
+    if (!s_cache) return NULL;
+    for (size_t i = 0; i < s_cache_slots; i++) {
         struct wm_cache_entry *e = &s_cache[i];
         if (!e->wm) continue;
-        if (strncmp(e->contact_id, contact_id, cid_len) == 0
-            && e->contact_id[cid_len] == '\0') {
-            return e;
-        }
+        if (strncmp(e->contact_id, contact_id, cid_len) != 0) continue;
+        if (e->contact_id[cid_len] != '\0') continue;
+        /* Channel must match exactly (including the empty-string default). */
+        if (e->channel_len != channel_len) continue;
+        if (channel_len > 0 && memcmp(e->channel, channel, channel_len) != 0) continue;
+        return e;
     }
     return NULL;
 }
 
-static struct wm_cache_entry *cache_evict_slot(void) {
-    /* Evict the least-recently-accessed empty-or-oldest slot. Empty wins. */
+static struct wm_cache_entry *cache_evict_slot_locked_(void) {
+    /* Evict the least-recently-accessed slot. Empty slot wins; otherwise
+     * the oldest occupied entry is freed in place. */
+    if (!s_cache || s_cache_slots == 0) return NULL;
     struct wm_cache_entry *oldest = &s_cache[0];
-    for (size_t i = 0; i < HU_WM_CACHE_SLOTS; i++) {
+    for (size_t i = 0; i < s_cache_slots; i++) {
         struct wm_cache_entry *e = &s_cache[i];
         if (!e->wm) return e;
         if (e->last_access < oldest->last_access) oldest = e;
@@ -966,8 +1031,42 @@ static struct wm_cache_entry *cache_evict_slot(void) {
     if (oldest->wm) {
         hu_world_model_free(oldest->alloc, oldest->wm);
         oldest->wm = NULL;
+        s_cache_evictions++;
     }
     return oldest;
+}
+
+/* Public telemetry getter. Any pointer can be NULL. Safe to call before
+ * the cache has been touched (returns zeros + the configured slot
+ * capacity). */
+void hu_world_model_cache_stats(size_t *slots, uint64_t *loads, uint64_t *hits,
+                                uint64_t *evictions) {
+    WM_CACHE_LOCK();
+    if (slots)
+        *slots = s_cache ? s_cache_slots : resolve_cache_slots_();
+    if (loads) *loads = s_cache_loads;
+    if (hits) *hits = s_cache_hits;
+    if (evictions) *evictions = s_cache_evictions;
+    WM_CACHE_UNLOCK();
+}
+
+/* Test-only reset: drop all cached entries AND zero the telemetry
+ * counters. Production callers should use hu_world_model_invalidate
+ * (which keeps counters intact for trend monitoring). */
+void hu_world_model_cache_reset_for_tests(void) {
+    WM_CACHE_LOCK();
+    if (s_cache) {
+        for (size_t i = 0; i < s_cache_slots; i++) {
+            if (s_cache[i].wm) {
+                hu_world_model_free(s_cache[i].alloc, s_cache[i].wm);
+                s_cache[i].wm = NULL;
+            }
+        }
+    }
+    s_cache_loads = 0;
+    s_cache_hits = 0;
+    s_cache_evictions = 0;
+    WM_CACHE_UNLOCK();
 }
 
 static hu_world_model_t *clone_wm(hu_allocator_t *alloc, const hu_world_model_t *src) {
@@ -1014,67 +1113,149 @@ static hu_world_model_t *clone_wm(hu_allocator_t *alloc, const hu_world_model_t 
     return wm;
 }
 
-hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
-                                const char *contact_id, size_t cid_len,
-                                int64_t now_ms, hu_world_model_t **out) {
+hu_error_t hu_world_model_load_with_channel(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                            const char *contact_id, size_t cid_len,
+                                            const char *channel, size_t channel_len,
+                                            int64_t now_ms, hu_world_model_t **out) {
     if (!m || !alloc || !contact_id || !out) return HU_ERR_INVALID_ARGUMENT;
-    if (cid_len >= sizeof(s_cache[0].contact_id)) return HU_ERR_INVALID_ARGUMENT;
+    /* Static-key sizes must contain the contact + channel including NUL. */
+    if (cid_len == 0 || cid_len >= 64) return HU_ERR_INVALID_ARGUMENT;
+    if (channel_len >= 32) return HU_ERR_INVALID_ARGUMENT;
+    if (!channel) channel_len = 0; /* NULL channel == "any-channel" key */
 
-    struct wm_cache_entry *entry = cache_lookup(contact_id, cid_len);
-    if (entry && entry->valid_until > now_ms) {
-        entry->last_access = now_ms;
-        hu_world_model_t *cloned = clone_wm(alloc, entry->wm);
-        if (!cloned) return HU_ERR_OUT_OF_MEMORY;
-        *out = cloned;
+    /* Cache phase: lookup under the lock. We bump load+hit counters
+     * here. Clone happens inside the lock too because the cached entry's
+     * deep-clone reads its alloc/wm fields, which could race with an
+     * eviction otherwise. */
+    hu_world_model_t *clone = NULL;
+    int64_t cached_valid_until = 0;
+    bool hit = false;
+
+    WM_CACHE_LOCK();
+    if (!cache_init_locked_()) {
+        WM_CACHE_UNLOCK();
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    s_cache_loads++;
+    {
+        struct wm_cache_entry *entry =
+            cache_lookup_locked_(contact_id, cid_len, channel, channel_len);
+        if (entry && entry->valid_until > now_ms) {
+            entry->last_access = now_ms;
+            clone = clone_wm(alloc, entry->wm);
+            cached_valid_until = entry->valid_until;
+            hit = true;
+            if (clone) s_cache_hits++;
+        }
+    }
+    WM_CACHE_UNLOCK();
+
+    if (hit && clone) {
+        (void)cached_valid_until;
+        *out = clone;
         return HU_OK;
     }
+    if (hit && !clone) {
+        /* Cache hit but clone OOM. Treat as miss — fall through to a
+         * fresh build so the caller still gets data. */
+    }
 
-    /* Miss or expired: build a fresh one. */
+    /* Miss or expired: build outside the lock (build can hit SQLite for
+     * tens of ms; never hold the cache lock that long). */
     hu_world_model_t *fresh = NULL;
     hu_error_t err = hu_world_model_build(m, alloc, contact_id, cid_len, now_ms, &fresh);
     if (err != HU_OK) return err;
 
-    /* Store a clone in the cache. We keep the cache's allocator independent
-     * of the caller's so caller can free without affecting the cache. For
-     * v1 simplicity, the cache uses the same allocator the build was done
-     * with — fine in single-threaded use. */
-    struct wm_cache_entry *slot = entry ? entry : cache_evict_slot();
-    if (slot->wm) {
-        hu_world_model_free(slot->alloc, slot->wm);
-        slot->wm = NULL;
+    /* Install phase: clone the fresh build into a cache slot. We re-
+     * lookup in case another thread populated the same key while we were
+     * building; if so we replace it with our newer clone (newer wins on
+     * `valid_until` since builds use the same TTL). */
+    WM_CACHE_LOCK();
+    if (cache_init_locked_()) {
+        struct wm_cache_entry *entry =
+            cache_lookup_locked_(contact_id, cid_len, channel, channel_len);
+        struct wm_cache_entry *slot = entry ? entry : cache_evict_slot_locked_();
+        if (slot) {
+            if (slot->wm) {
+                hu_world_model_free(slot->alloc, slot->wm);
+                slot->wm = NULL;
+            }
+            slot->wm = clone_wm(alloc, fresh);
+            if (slot->wm) {
+                slot->alloc = alloc;
+                memcpy(slot->contact_id, contact_id, cid_len);
+                slot->contact_id[cid_len] = '\0';
+                slot->channel_len = channel_len;
+                if (channel_len > 0) memcpy(slot->channel, channel, channel_len);
+                slot->channel[channel_len] = '\0';
+                slot->valid_until = fresh->valid_until;
+                slot->last_access = now_ms;
+            }
+        }
     }
-    slot->wm = clone_wm(alloc, fresh);
-    if (slot->wm) {
-        slot->alloc = alloc;
-        memcpy(slot->contact_id, contact_id, cid_len);
-        slot->contact_id[cid_len] = '\0';
-        slot->valid_until = fresh->valid_until;
-        slot->last_access = now_ms;
-    }
+    WM_CACHE_UNLOCK();
+
     /* If clone failed for caching, we still hand the fresh build to caller. */
     *out = fresh;
     return HU_OK;
+}
+
+hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                const char *contact_id, size_t cid_len,
+                                int64_t now_ms, hu_world_model_t **out) {
+    /* Back-compat: legacy callers without a channel use the empty-channel
+     * default key. The bridge passes a real channel via the
+     * `_with_channel` variant so per-channel persona overlays drive
+     * distinct snapshots. */
+    return hu_world_model_load_with_channel(m, alloc, contact_id, cid_len, NULL, 0, now_ms, out);
+}
+
+void hu_world_model_invalidate_channel(const char *contact_id, size_t cid_len,
+                                       const char *channel, size_t channel_len) {
+    if (!contact_id || cid_len == 0) return;
+    if (!channel) channel_len = 0;
+    WM_CACHE_LOCK();
+    if (s_cache) {
+        struct wm_cache_entry *entry =
+            cache_lookup_locked_(contact_id, cid_len, channel, channel_len);
+        if (entry && entry->wm) {
+            hu_world_model_free(entry->alloc, entry->wm);
+            entry->wm = NULL;
+        }
+    }
+    WM_CACHE_UNLOCK();
 }
 
 void hu_world_model_invalidate(const char *contact_id, size_t cid_len) {
     /* Global flush is spelled (NULL, 0) — see graph.c teardown and tests.
      * Do NOT treat ("", 0) as global: empty-string contact_id is a valid
      * graph scope for some callers; flushing every slot with their mixed
-     * allocators would corrupt the cache. */
-    if (!contact_id && cid_len == 0) {
-        for (size_t i = 0; i < HU_WM_CACHE_SLOTS; i++) {
-            if (s_cache[i].wm) {
-                hu_world_model_free(s_cache[i].alloc, s_cache[i].wm);
-                s_cache[i].wm = NULL;
+     * allocators would corrupt the cache.
+     *
+     * P2.4 — for a non-NULL contact_id, this invalidates ALL channels
+     * for that contact. Use hu_world_model_invalidate_channel for finer
+     * granularity. The wide invalidation is the right default because
+     * most writes (graph upsert, negative memory, residue) are not
+     * channel-scoped at the data layer. */
+    WM_CACHE_LOCK();
+    if (s_cache) {
+        if (!contact_id && cid_len == 0) {
+            for (size_t i = 0; i < s_cache_slots; i++) {
+                if (s_cache[i].wm) {
+                    hu_world_model_free(s_cache[i].alloc, s_cache[i].wm);
+                    s_cache[i].wm = NULL;
+                }
+            }
+        } else if (contact_id) {
+            for (size_t i = 0; i < s_cache_slots; i++) {
+                struct wm_cache_entry *e = &s_cache[i];
+                if (!e->wm) continue;
+                if (strncmp(e->contact_id, contact_id, cid_len) != 0) continue;
+                if (e->contact_id[cid_len] != '\0') continue;
+                hu_world_model_free(e->alloc, e->wm);
+                e->wm = NULL;
             }
         }
-        return;
     }
-    if (!contact_id)
-        return;
-    struct wm_cache_entry *entry = cache_lookup(contact_id, cid_len);
-    if (entry && entry->wm) {
-        hu_world_model_free(entry->alloc, entry->wm);
-        entry->wm = NULL;
-    }
+    WM_CACHE_UNLOCK();
 }

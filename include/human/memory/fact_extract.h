@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/memory/trust.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,6 +39,10 @@ typedef struct hu_heuristic_fact {
      * on insert/duplicate-update. Older observations earn less prompt
      * space via `hu_heuristic_fact_effective_confidence`. */
     int64_t last_seen_at;
+    /* SOTA-2026 init-09: per-fact provenance + trust tier. Stamped on
+     * insert by `hu_personal_model_ingest`. Defaults to USER_DIRECT
+     * when callers pass NULL (only inside #ifdef _HU_PM_SELF_TEST). */
+    hu_provenance_t provenance;
 } hu_heuristic_fact_t;
 
 /* Default exponential half-life for fact-confidence decay. After

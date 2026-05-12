@@ -695,6 +695,200 @@ static void test_w9_gated_negmem_open_channel_quarantined(void) {
     close_facade_(g, m);
 }
 
+/* --- P2.4 — channel-aware cache key --- */
+
+static void test_w9_channel_aware_key_isolates_per_channel(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    hu_world_model_cache_reset_for_tests();
+    seed_one_relation_(g, "u-multi");
+
+    hu_world_model_t *wm_slack = NULL;
+    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-multi", 7, "slack", 5,
+                                                  1000LL, &wm_slack),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(wm_slack);
+
+    uint64_t loads = 0, hits = 0;
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    uint64_t hits_before = hits;
+
+    /* Different channel for the same contact MUST miss. */
+    hu_world_model_t *wm_imsg = NULL;
+    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-multi", 7, "imessage", 8,
+                                                  1100LL, &wm_imsg),
+                 HU_OK);
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    HU_ASSERT_EQ(hits, hits_before);
+
+    /* Reload Slack within TTL — MUST hit the slack slot. */
+    hu_world_model_t *wm_slack2 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-multi", 7, "slack", 5,
+                                                  1500LL, &wm_slack2),
+                 HU_OK);
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    HU_ASSERT_EQ(hits, hits_before + 1);
+
+    hu_world_model_free(A(), wm_slack);
+    hu_world_model_free(A(), wm_slack2);
+    hu_world_model_free(A(), wm_imsg);
+    close_facade_(g, m);
+}
+
+static void test_w9_invalidate_clears_all_channels_for_contact(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    hu_world_model_cache_reset_for_tests();
+    seed_one_relation_(g, "u-fanout");
+
+    hu_world_model_t *wm_a = NULL, *wm_b = NULL;
+    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "slack", 5,
+                                                  1000LL, &wm_a),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "imessage", 8,
+                                                  1100LL, &wm_b),
+                 HU_OK);
+
+    /* Wide invalidate (no channel) — clears every cached channel for
+     * the contact. The default for write hooks. */
+    hu_world_model_invalidate("u-fanout", 8);
+
+    uint64_t loads = 0, hits = 0;
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    uint64_t hits_before = hits;
+
+    hu_world_model_t *wm_a2 = NULL, *wm_b2 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "slack", 5,
+                                                  2000LL, &wm_a2),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "imessage", 8,
+                                                  2100LL, &wm_b2),
+                 HU_OK);
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    HU_ASSERT_EQ(hits, hits_before);
+
+    hu_world_model_free(A(), wm_a);
+    hu_world_model_free(A(), wm_b);
+    hu_world_model_free(A(), wm_a2);
+    hu_world_model_free(A(), wm_b2);
+    close_facade_(g, m);
+}
+
+/* --- P2.2 — goal writes invalidate cache --- */
+
+static void test_w9_goal_create_invalidates_cache(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    hu_world_model_cache_reset_for_tests();
+    seed_one_relation_(g, "u-goal");
+
+    /* Goals table on the graph DB. */
+    sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_NOT_NULL(db);
+    hu_goal_engine_t engine = {0};
+    HU_ASSERT_EQ(hu_goal_engine_create(A(), db, &engine), HU_OK);
+    HU_ASSERT_EQ(hu_goal_init_tables(&engine), HU_OK);
+
+    /* Cache a snapshot (zero goals). */
+    hu_world_model_t *wm1 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-goal", 6, 1000LL, &wm1), HU_OK);
+    HU_ASSERT_EQ(wm1->goals_count, 0u);
+
+    /* Goal create — cache must be cleared (goals are global so every
+     * cached contact is affected). */
+    int64_t goal_id = 0;
+    HU_ASSERT_EQ(hu_goal_create(&engine, "ship the prototype", 18, 0.7, 0, 0, 1500, &goal_id),
+                 HU_OK);
+    HU_ASSERT_GT(goal_id, 0);
+
+    uint64_t loads = 0, hits = 0;
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    uint64_t hits_before = hits;
+
+    hu_world_model_t *wm2 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-goal", 6, 1600LL, &wm2), HU_OK);
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    HU_ASSERT_EQ(hits, hits_before);
+    HU_ASSERT_EQ(wm2->goals_count, 1u);
+    HU_ASSERT_EQ(strcmp(wm2->goals[0].text, "ship the prototype"), 0);
+
+    hu_world_model_free(A(), wm1);
+    hu_world_model_free(A(), wm2);
+    hu_goal_engine_deinit(&engine);
+    close_facade_(g, m);
+}
+
+/* --- P2.3 — residue writes invalidate cache --- */
+
+static void test_w9_residue_add_invalidates_cache(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    hu_world_model_cache_reset_for_tests();
+    seed_one_relation_(g, "u-resid");
+
+    sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_NOT_NULL(db);
+    ensure_emotional_residue_table_(db);
+
+    hu_world_model_t *wm1 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-resid", 7, 1000LL, &wm1), HU_OK);
+
+    int64_t res_id = 0;
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-resid", 7, -0.8, 0.9, 0.1, &res_id),
+                 HU_OK);
+
+    uint64_t loads = 0, hits = 0;
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    uint64_t hits_before = hits;
+
+    /* Reload — must MISS because residue write invalidated. */
+    hu_world_model_t *wm2 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-resid", 7, 1100LL, &wm2), HU_OK);
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    HU_ASSERT_EQ(hits, hits_before);
+
+    hu_world_model_free(A(), wm1);
+    hu_world_model_free(A(), wm2);
+    close_facade_(g, m);
+}
+
+/* --- P2.5 — cache stats telemetry --- */
+
+static void test_w9_cache_stats_tracks_loads_and_hits(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    hu_world_model_cache_reset_for_tests();
+    seed_one_relation_(g, "u-stats");
+
+    size_t slots = 0;
+    uint64_t loads = 0, hits = 0, evictions = 0;
+    hu_world_model_cache_stats(&slots, &loads, &hits, &evictions);
+    HU_ASSERT_GT((long)slots, 0L);
+    HU_ASSERT_EQ((long)loads, 0L);
+    HU_ASSERT_EQ((long)hits, 0L);
+
+    hu_world_model_t *wm1 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-stats", 7, 1000LL, &wm1), HU_OK);
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    HU_ASSERT_EQ((long)loads, 1L);
+    HU_ASSERT_EQ((long)hits, 0L);
+
+    hu_world_model_t *wm2 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-stats", 7, 2000LL, &wm2), HU_OK);
+    hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
+    HU_ASSERT_EQ((long)loads, 2L);
+    HU_ASSERT_EQ((long)hits, 1L);
+
+    hu_world_model_free(A(), wm1);
+    hu_world_model_free(A(), wm2);
+    close_facade_(g, m);
+}
+
 /* --- adversarial --- */
 
 static void test_w9_invalid_args_rejected(void) {
@@ -749,6 +943,14 @@ void run_w9_world_model_tests(void) {
     /* P3.1 / P3.3 — write_trust gate on negative-memory writes. */
     HU_RUN_TEST(test_w9_gated_negmem_user_source_lands_live);
     HU_RUN_TEST(test_w9_gated_negmem_open_channel_quarantined);
+    /* P2.4 — channel-aware cache key. */
+    HU_RUN_TEST(test_w9_channel_aware_key_isolates_per_channel);
+    HU_RUN_TEST(test_w9_invalidate_clears_all_channels_for_contact);
+    /* P2.2 / P2.3 — goal + residue writes invalidate the cache. */
+    HU_RUN_TEST(test_w9_goal_create_invalidates_cache);
+    HU_RUN_TEST(test_w9_residue_add_invalidates_cache);
+    /* P2.5 — telemetry counters track loads/hits. */
+    HU_RUN_TEST(test_w9_cache_stats_tracks_loads_and_hits);
     HU_RUN_TEST(test_w9_invalid_args_rejected);
 #endif
 }

@@ -411,6 +411,35 @@ hu_error_t hu_feeds_build_prompt(hu_allocator_t *alloc, const hu_feed_item_t *it
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
+#include "human/memory/trust.h"
+
+/* SOTA-2026 init-09: feed-origin provenance stamp.
+ *
+ * Feed items (RSS, social, news, gmail-from-others, twitter, ...) are
+ * THIRD_PARTY by definition: they are content the user did not type
+ * into a 1:1 session. Any downstream code that promotes a feed item
+ * into the personal model or the memories table MUST stamp this tier
+ * before calling `hu_personal_model_ingest` or `hu_memory_store_with_source`.
+ *
+ * This is the canonical helper for that stamp. Exported for future
+ * call sites; the processor itself stores feed items in the dedicated
+ * `feed_items` SQLite table (not in `memories`), so it doesn't ingest
+ * here today — but the contract is pinned. */
+hu_provenance_t hu_feed_processor_item_provenance(const hu_feed_item_stored_t *item,
+                                                  int64_t now_ts) {
+    char chan[HU_PROV_CHANNEL_MAX];
+    if (item && item->source[0]) {
+        int n = snprintf(chan, sizeof(chan), "feed:%s", item->source);
+        if (n < 0)
+            chan[0] = '\0';
+    } else {
+        const char fallback[] = "feed:unknown";
+        memcpy(chan, fallback, sizeof(fallback));
+    }
+    return hu_provenance_make(HU_TRUST_THIRD_PARTY, chan,
+                              (item && item->contact_id[0]) ? item->contact_id : NULL,
+                              now_ts);
+}
 
 hu_error_t hu_feed_processor_store_item(hu_feed_processor_t *proc,
                                         const hu_feed_item_stored_t *item) {

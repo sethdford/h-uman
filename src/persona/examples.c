@@ -384,7 +384,13 @@ void hu_persona_example_banks_free(hu_allocator_t *alloc,
     alloc->free(alloc->ctx, banks, banks_count * sizeof(hu_persona_example_bank_t));
 }
 
-#ifdef HU_ENABLE_SQLITE
+/* History-extraction helpers (pbh_*) are only reachable from
+ * `hu_persona_banks_extract_from_history`, which itself is gated on
+ * HU_ENABLE_SQLITE && HU_ENABLE_ML (the extractor needs SQLite to read
+ * conversation history and the ML training-data-quality helpers).
+ * Mirror that gate here so the default macOS dev build (HU_ENABLE_ML=OFF)
+ * doesn't trip -Werror=unused-function on these statics. */
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
 
 /* Internal scratch — a growing bank with capacity tracked separately
  * so we can realloc-style grow during scan without touching the
@@ -508,7 +514,7 @@ static void pbh_channel_from_session(const char *session_id,
     *out_len = (size_t)(colon - session_id);
 }
 
-#endif /* HU_ENABLE_SQLITE */
+#endif /* HU_ENABLE_SQLITE && HU_ENABLE_ML — pbh_* helpers */
 
 hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
                                                  const char *db_path,

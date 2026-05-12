@@ -331,6 +331,9 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
             src->session_id ? hu_strndup(alloc, src->session_id, strlen(src->session_id)) : NULL;
         r->session_id_len = r->session_id ? strlen(r->session_id) : 0;
         r->score = NAN;
+        r->trust_tier = (int)HU_TRUST_THIRD_PARTY;
+        r->provenance = NULL;
+        r->provenance_len = 0;
     }
 
     alloc->free(alloc->ctx, matches, cap * sizeof(pair_t));
@@ -370,6 +373,9 @@ static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, si
         e->session_id ? hu_strndup(alloc, e->session_id, strlen(e->session_id)) : NULL;
     out->session_id_len = out->session_id ? strlen(out->session_id) : 0;
     out->score = NAN;
+    out->trust_tier = (int)HU_TRUST_THIRD_PARTY;
+    out->provenance = NULL;
+    out->provenance_len = 0;
     *found = true;
     return HU_OK;
 }
@@ -442,6 +448,9 @@ static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_ca
             e->session_id ? hu_strndup(alloc, e->session_id, strlen(e->session_id)) : NULL;
         r->session_id_len = r->session_id ? strlen(r->session_id) : 0;
         r->score = NAN;
+        r->trust_tier = (int)HU_TRUST_THIRD_PARTY;
+        r->provenance = NULL;
+        r->provenance_len = 0;
         n++;
     }
 

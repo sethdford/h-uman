@@ -465,6 +465,7 @@ set(HU_CORE_SOURCES
     src/agent/context.c
     src/agent/prompt.c
     src/agent/memory_loader.c
+    src/agent/channel_trust.c
     src/agent/agent_definition.c
     src/agent/agent_git.c
     src/agent/dispatcher.c
@@ -642,6 +643,7 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
+    src/memory/minja_guard.c
     src/memory/hallucination_guard.c
     # W7: graph.h is the internal graph API. Direct includes from outside
     # src/memory/ and tests/ are deprecated — callers should migrate to
