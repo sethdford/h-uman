@@ -92,7 +92,88 @@ const char hu_starter_persona_json[] =
     "      \"style_notes\": \"Technical, precise. No emoji. "
     "Format code blocks when showing code.\"\n"
     "    }\n"
-    "  }\n"
+    "  },\n"
+    /* Starter example banks for the four Tier-1 channels. The persona
+     * prompt builder samples from these to anchor tone and length when
+     * a fresh user has no learned-from-history examples yet. Each bank
+     * holds three short examples chosen to match the channel's overlay
+     * (formality / avg_length / emoji_usage). Sprint 2b Story A'.
+     *
+     * Schema (parsed by `hu_persona_load_json` ->
+     * `hu_persona_examples_bank_from_array`):
+     *
+     *   { "channel": "<name>",
+     *     "examples": [
+     *       {"context": "...", "incoming": "...", "response": "..."},
+     *       ... ] }
+     *
+     * Examples are deliberately neutral (no proper nouns, no PII, no
+     * politics, no proper names) so they ship as defaults for every
+     * user without baking-in a single voice. They demonstrate length
+     * and emoji norms; the persona system overlays the user's learned
+     * style on top once `personal_model.bin` has data. */
+    "  \"example_banks\": [\n"
+    "    {\n"
+    "      \"channel\": \"imessage\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"casual check-in\",\n"
+    "          \"incoming\": \"hey you up?\",\n"
+    "          \"response\": \"yeah, what's up?\" },\n"
+    "        { \"context\": \"quick thanks\",\n"
+    "          \"incoming\": \"thx for the help earlier\",\n"
+    "          \"response\": \"anytime 🙏\" },\n"
+    "        { \"context\": \"running late\",\n"
+    "          \"incoming\": \"i'm gonna be like 10 min late\",\n"
+    "          \"response\": \"no worries, see you soon\" }\n"
+    "      ]\n"
+    "    },\n"
+    "    {\n"
+    "      \"channel\": \"telegram\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"news chat\",\n"
+    "          \"incoming\": \"did you see the latest update?\",\n"
+    "          \"response\": \"just read it. interesting take, "
+    "though i'd want to see the data.\" },\n"
+    "        { \"context\": \"making plans\",\n"
+    "          \"incoming\": \"want to grab dinner tonight?\",\n"
+    "          \"response\": \"i can do 7pm. any spot in mind?\" },\n"
+    "        { \"context\": \"meeting recap\",\n"
+    "          \"incoming\": \"how did the meeting go?\",\n"
+    "          \"response\": \"longer than i wanted but they're "
+    "on board with the proposal.\" }\n"
+    "      ]\n"
+    "    },\n"
+    "    {\n"
+    "      \"channel\": \"discord\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"game invite\",\n"
+    "          \"incoming\": \"anyone wanna play tonight?\",\n"
+    "          \"response\": \"i'm in 🎮 what are we playing?\" },\n"
+    "        { \"context\": \"thanks for help\",\n"
+    "          \"incoming\": \"thanks for helping me debug that\",\n"
+    "          \"response\": \"np 🙌 hit me up anytime\" },\n"
+    "        { \"context\": \"reacting to news\",\n"
+    "          \"incoming\": \"they finally fixed the lag bug!\",\n"
+    "          \"response\": \"about time 🔥 release notes drop today?\" }\n"
+    "      ]\n"
+    "    },\n"
+    "    {\n"
+    "      \"channel\": \"slack\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"PR review request\",\n"
+    "          \"incoming\": \"Can you review my PR when you have a sec?\",\n"
+    "          \"response\": \"Reviewing now \\u2014 I'll leave "
+    "comments by EOD.\" },\n"
+    "        { \"context\": \"calendar coordination\",\n"
+    "          \"incoming\": \"Quick sync at 3?\",\n"
+    "          \"response\": \"Works for me. I'll send the invite.\" },\n"
+    "        { \"context\": \"deploy heads-up\",\n"
+    "          \"incoming\": \"Heads up: the deploy is delayed an hour.\",\n"
+    "          \"response\": \"Thanks for the flag. I'll let the "
+    "team know in the channel.\" }\n"
+    "      ]\n"
+    "    }\n"
+    "  ]\n"
     "}\n";
 
 #ifdef HU_IS_TEST
