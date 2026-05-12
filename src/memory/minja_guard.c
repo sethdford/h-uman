@@ -391,7 +391,15 @@ void hu_minja_quarantine_log(const char *text, size_t len,
                      (int)strlen(prov->channel), prov->channel,
                      (int)strlen(prov->contact_handle), prov->contact_handle,
                      snippet);
-    if (w > 0 && (size_t)w < sizeof(line))
-        (void)write(fd, line, (size_t)w);
+    if (w > 0 && (size_t)w < sizeof(line)) {
+        /* GNU libc declares write() with warn_unused_result; the
+         * (void) cast isn't enough on -Werror=unused-result. We
+         * truly don't have a meaningful recovery here — the
+         * quarantine log is best-effort diagnostic — but check the
+         * return so the compiler is satisfied. A short write or EIO
+         * is swallowed intentionally. */
+        ssize_t n = write(fd, line, (size_t)w);
+        (void)n;
+    }
     close(fd);
 }
