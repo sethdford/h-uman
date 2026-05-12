@@ -395,6 +395,22 @@ void hu_conversation_data_cleanup(void) {
     }
 
     if (s_contractions) {
+        /* `load_contractions` heap-allocates per-entry `from` and `to`
+         * copies (see lines 149-150) — the contraction struct itself
+         * holds borrowed-looking `const char *` but they're owned. We
+         * must free both copies before releasing the array, otherwise
+         * each contraction reload leaks 158 + 135 bytes (293 b/cycle,
+         * 18 cycles in the data-loader integration tests = 5,274 b).
+         * The ASan leak summary at b9055/PR55 attributed this to
+         * `load_contractions` -> `hu_conversation_data_init`. */
+        for (size_t i = 0; i < s_contractions_len; i++) {
+            if (s_contractions[i].from && s_contractions[i].from_len > 0)
+                s_conv_alloc->free(s_conv_alloc->ctx, (void *)s_contractions[i].from,
+                                   s_contractions[i].from_len + 1);
+            if (s_contractions[i].to && s_contractions[i].to_len > 0)
+                s_conv_alloc->free(s_conv_alloc->ctx, (void *)s_contractions[i].to,
+                                   s_contractions[i].to_len + 1);
+        }
         s_conv_alloc->free(s_conv_alloc->ctx, s_contractions,
                            s_contractions_len * sizeof(hu_conversation_contraction_t));
         s_contractions = NULL;
