@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -1568,6 +1569,211 @@ static void test_w9_media_and_w10_seams_default_zero(void) {
     close_facade_(g, m);
 }
 
+/* --- P6.1 — goal-conditioned re-rank --- */
+
+static void test_w9_rerank_for_goal_promotes_matching_entities(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    /* Three entities, ordered by mention_count: zebra (3), apple (2),
+     * meeting (1). After re-ranking on "meeting", meeting should
+     * surface to position 0 with apple/zebra preserving order. */
+    int64_t zebra = 0, apple = 0, meeting = 0, anchor = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5,
+                                          HU_ENTITY_TOPIC, NULL, &zebra), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5,
+                                          HU_ENTITY_TOPIC, NULL, &zebra), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5,
+                                          HU_ENTITY_TOPIC, NULL, &zebra), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "apple", 5,
+                                          HU_ENTITY_TOPIC, NULL, &apple), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "apple", 5,
+                                          HU_ENTITY_TOPIC, NULL, &apple), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "meeting", 7,
+                                          HU_ENTITY_TOPIC, NULL, &meeting), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "anchor", 6,
+                                          HU_ENTITY_PERSON, NULL, &anchor), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-rr", 4, anchor, zebra,
+                                            HU_REL_RELATED_TO, 1.0f, NULL, 0), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-rr", 4, anchor, apple,
+                                            HU_REL_RELATED_TO, 1.0f, NULL, 0), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-rr", 4, anchor, meeting,
+                                            HU_REL_RELATED_TO, 1.0f, NULL, 0), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-rr", 4, 1735690000000LL, &wm),
+                 HU_OK);
+
+    /* Find the meeting entity's pre-rerank position. */
+    size_t pre_meeting_pos = SIZE_MAX;
+    for (size_t i = 0; i < wm->entities_count; i++) {
+        if (wm->entities[i].name && strcmp(wm->entities[i].name, "meeting") == 0) {
+            pre_meeting_pos = i;
+            break;
+        }
+    }
+    HU_ASSERT(pre_meeting_pos != SIZE_MAX);
+
+    HU_ASSERT_EQ(hu_world_model_rerank_for_goal(wm, "schedule the meeting Friday",
+                                                  27, A()), HU_OK);
+
+    /* Post-rerank: meeting must be at index 0. */
+    HU_ASSERT_NOT_NULL(wm->entities[0].name);
+    HU_ASSERT_EQ(strcmp(wm->entities[0].name, "meeting"), 0);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_rerank_for_goal_no_match_is_noop(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    seed_one_relation_(g, "u-noop");
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-noop", 6, 1735690000000LL, &wm), HU_OK);
+    /* Snapshot order before rerank. */
+    char first_before[64] = {0};
+    if (wm->entities_count > 0 && wm->entities[0].name) {
+        strncpy(first_before, wm->entities[0].name, sizeof(first_before) - 1);
+    }
+
+    HU_ASSERT_EQ(hu_world_model_rerank_for_goal(wm, "totally unrelated tokens here",
+                                                  29, A()), HU_OK);
+
+    if (first_before[0]) {
+        HU_ASSERT_NOT_NULL(wm->entities[0].name);
+        HU_ASSERT_EQ(strcmp(wm->entities[0].name, first_before), 0);
+    }
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+/* --- P7.1 — latency benchmark --- */
+
+static void test_w9_latency_benchmark_load_under_budget(void) {
+    /* Spec target: p99 ≤ 5 ms per cached load. We can't run a true 1000-
+     * sample p99 in unit-test scope without slowing CI, so this gate
+     * pins a much weaker but actionable invariant: 200 cached loads
+     * complete in under 1 second total wall time (avg ≤ 5 ms). The
+     * full 1000-sample p99 lives in the perf benchmark suite. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    /* Seed 32 entities + 32 relations to exercise the realistic
+     * snapshot footprint. */
+    int64_t anchor = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-perf", 6, "Anchor", 6,
+                                          HU_ENTITY_PERSON, NULL, &anchor), HU_OK);
+    for (int i = 0; i < 32; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "Entity%02d", i);
+        int64_t eid = 0;
+        HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-perf", 6, name, strlen(name),
+                                              HU_ENTITY_TOPIC, NULL, &eid), HU_OK);
+        HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-perf", 6, anchor, eid,
+                                                HU_REL_RELATED_TO, 1.0f, NULL, 0),
+                     HU_OK);
+    }
+
+    hu_world_model_t *wm0 = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-perf", 6, 1735690000000LL, &wm0),
+                 HU_OK);
+    hu_world_model_free(A(), wm0);
+
+    struct timespec t0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int i = 0; i < 200; i++) {
+        hu_world_model_t *wm = NULL;
+        HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-perf", 6,
+                                          1735690000000LL + i, &wm), HU_OK);
+        hu_world_model_free(A(), wm);
+    }
+    struct timespec t1;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double elapsed_ms = (double)(t1.tv_sec - t0.tv_sec) * 1000.0
+                        + (double)(t1.tv_nsec - t0.tv_nsec) / 1.0e6;
+    /* 200 loads in < 1 second total = avg < 5 ms / load. CI-safe. */
+    HU_ASSERT(elapsed_ms < 1000.0);
+
+    close_facade_(g, m);
+}
+
+/* --- P7.2 — A/B test: negatives change behavior --- */
+
+static void test_w9_ab_negative_memory_changes_planner_signal(void) {
+    /* Three measurable behavior changes when negative memory is set:
+     *   1. wm->negatives_count goes from 0 → N
+     *   2. The render-snapshot prompt-fragment includes a tagged "Avoid:"
+     *      block with per-source [hard]/[soft]/[confirm]/[policy] tags
+     *      (verified via wm->negatives[i].source).
+     *   3. tom.user_expects_we_cannot is non-empty (it gets the negative
+     *      text appended by the existing build path's heuristic).
+     *
+     * This is the A/B contract from the W9 spec — it pins that adding
+     * a negative actually shifts what the planner sees. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    seed_one_relation_(g, "u-ab");
+
+    hu_world_model_t *wm_a = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-ab", 4, 1735690000000LL, &wm_a),
+                 HU_OK);
+    HU_ASSERT_EQ(wm_a->negatives_count, 0u);
+    int a_can_not = wm_a->tom.user_expects_we_cannot[0] ? 1 : 0;
+    hu_world_model_free(A(), wm_a);
+
+    /* Insert two negatives with different provenance. */
+    hu_negative_memory_t nm;
+    memset(&nm, 0, sizeof(nm));
+    snprintf(nm.text, sizeof(nm.text), "do not bring up cancelled wedding");
+    snprintf(nm.scope, sizeof(nm.scope), "topic");
+    snprintf(nm.reason, sizeof(nm.reason), "user explicitly said so");
+    nm.belief.mean = 1.0f;
+    nm.source = HU_NEGATIVE_SOURCE_USER_EXPLICIT;
+    int64_t out_id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add_facade(m, "u-ab", 4, &nm, &out_id), HU_OK);
+
+    memset(&nm, 0, sizeof(nm));
+    snprintf(nm.text, sizeof(nm.text), "do not assert salary numbers");
+    snprintf(nm.scope, sizeof(nm.scope), "topic");
+    nm.belief.mean = 0.6f;
+    nm.source = HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN;
+    out_id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add_facade(m, "u-ab", 4, &nm, &out_id), HU_OK);
+
+    hu_world_model_t *wm_b = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-ab", 4, 1735690000001LL, &wm_b),
+                 HU_OK);
+
+    /* Behavior 1: count rose from 0 → 2. */
+    HU_ASSERT(wm_b->negatives_count >= 2);
+    /* Behavior 2: each row carries its source faithfully (the rendering
+     * path uses these to emit the [hard]/[soft] tag). */
+    bool saw_user = false, saw_abstain = false;
+    for (size_t i = 0; i < wm_b->negatives_count; i++) {
+        if (wm_b->negatives[i].source == HU_NEGATIVE_SOURCE_USER_EXPLICIT)
+            saw_user = true;
+        if (wm_b->negatives[i].source == HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN)
+            saw_abstain = true;
+    }
+    HU_ASSERT(saw_user);
+    HU_ASSERT(saw_abstain);
+    /* Behavior 3: tom.user_expects_we_cannot is now populated (the
+     * existing build path appends negatives' text into it). */
+    int b_can_not = wm_b->tom.user_expects_we_cannot[0] ? 1 : 0;
+    HU_ASSERT(b_can_not >= a_can_not);
+    HU_ASSERT(wm_b->tom.user_expects_we_cannot[0] != '\0');
+
+    hu_world_model_free(A(), wm_b);
+    close_facade_(g, m);
+}
+
 /* --- adversarial --- */
 
 static void test_w9_invalid_args_rejected(void) {
@@ -1663,6 +1869,13 @@ void run_w9_world_model_tests(void) {
     HU_RUN_TEST(test_w9_self_model_recent_drift_from_latest_delta);
     /* P5.6 + P6.2 — multimodal cells + W10 seams default zero. */
     HU_RUN_TEST(test_w9_media_and_w10_seams_default_zero);
+    /* P6.1 — goal-conditioned re-rank. */
+    HU_RUN_TEST(test_w9_rerank_for_goal_promotes_matching_entities);
+    HU_RUN_TEST(test_w9_rerank_for_goal_no_match_is_noop);
+    /* P7.1 — latency budget gate. */
+    HU_RUN_TEST(test_w9_latency_benchmark_load_under_budget);
+    /* P7.2 — A/B test: negatives change planner-visible signal. */
+    HU_RUN_TEST(test_w9_ab_negative_memory_changes_planner_signal);
     HU_RUN_TEST(test_w9_invalid_args_rejected);
 #endif
 }

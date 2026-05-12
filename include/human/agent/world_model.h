@@ -490,6 +490,33 @@ void hu_negative_memory_free(hu_allocator_t *alloc, hu_negative_memory_t *nm,
 void hu_world_model_merge_personal(hu_world_model_t *wm,
                                    const hu_personal_model_t *pm);
 
+/* P6.1 — Goal-conditioned re-ranking. HippoRAG-style PageRank seeded
+ * from goal anchors: tokens shared between `goal_text` and an
+ * entity's `name` (or a relation's endpoint names) bump that row's
+ * effective relevance for this turn. Mutates the snapshot in-place
+ * by reordering `wm->entities`, `wm->relations`, and `wm->recent_topics`
+ * so that goal-aligned rows surface first.
+ *
+ * IMPORTANT: this is a snapshot-local re-rank, not a re-query — the
+ * graph table is not consulted. Useful when the planner wants the
+ * same snapshot framed for two different goals across one turn (e.g.,
+ * draft + verify) without re-paying the build cost.
+ *
+ * `goal_text` is treated as a whitespace-separated bag of tokens;
+ * comparison is case-insensitive. Tokens shorter than 3 chars are
+ * ignored (filters out "a", "is", etc.). Empty or NULL `goal_text`
+ * is a no-op (returns HU_OK). `alloc` is reserved for future
+ * scoring buffers (currently unused; pass the same alloc that
+ * built the snapshot).
+ *
+ * Idempotent: re-running with the same goal_text leaves the order
+ * unchanged. Safe to call from any thread that owns the world-model
+ * pointer (no shared cache state is touched). */
+hu_error_t hu_world_model_rerank_for_goal(hu_world_model_t *wm,
+                                           const char *goal_text,
+                                           size_t goal_text_len,
+                                           hu_allocator_t *alloc);
+
 /* P1.1 + P1.2 + P1.3 — Persona-grounded ToM synthesis.
  *
  * Closes the W9 spec's "deferred" item (file header of `world_model.c` and
