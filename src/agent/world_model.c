@@ -85,12 +85,29 @@ static hu_error_t ensure_negative_memory_schema(struct sqlite3 *db) {
         "reason TEXT,"
         "confidence_mean REAL NOT NULL DEFAULT 1.0,"
         "confidence_variance REAL NOT NULL DEFAULT 0.0,"
-        "created_at INTEGER NOT NULL)",
+        "created_at INTEGER NOT NULL,"
+        /* P3.2 — semantic origin. 0=USER_EXPLICIT default for backward
+         * compatibility with rows inserted before the column existed. */
+        "source INTEGER NOT NULL DEFAULT 0)",
         "CREATE INDEX IF NOT EXISTS idx_neg_mem_contact ON negative_memory(contact_id)",
         NULL,
     };
     for (size_t i = 0; stmts[i]; i++) {
         if (run_ddl_(db, stmts[i]) != SQLITE_OK) return HU_ERR_IO;
+    }
+    /* P3.2 migration — older databases may have the table without
+     * `source`. ALTER TABLE ADD COLUMN is a no-op if the column exists
+     * (sqlite returns SQLITE_ERROR + "duplicate column" which we ignore).
+     * The DEFAULT 0 pre-fills existing rows as USER_EXPLICIT, which is
+     * the closest semantic match for legacy hand-inserted negatives. */
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "ALTER TABLE negative_memory ADD COLUMN "
+                                "source INTEGER NOT NULL DEFAULT 0",
+                                -1, &st, NULL);
+    if (rc == SQLITE_OK) {
+        (void)sqlite3_step(st);
+        sqlite3_finalize(st);
     }
     return HU_OK;
 }
@@ -108,7 +125,7 @@ static hu_error_t negative_memory_list_sqlite(struct sqlite3 *db, hu_allocator_t
     sqlite3_stmt *st = NULL;
     const char *sql =
         "SELECT id, text, scope, reason, confidence_mean, confidence_variance, "
-        "       created_at FROM negative_memory "
+        "       created_at, source FROM negative_memory "
         "WHERE contact_id = ? ORDER BY created_at DESC LIMIT ?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_IO;
@@ -145,6 +162,13 @@ static hu_error_t negative_memory_list_sqlite(struct sqlite3 *db, hu_allocator_t
         r->belief.mean = (float)sqlite3_column_double(st, 4);
         r->belief.variance = (float)sqlite3_column_double(st, 5);
         r->created_at = sqlite3_column_int64(st, 6);
+        /* P3.2 — semantic source. Bounded to the enum range; out-of-band
+         * values (corruption / future schemas) coerce to USER_EXPLICIT
+         * which is the safest default (planner treats as hard refusal). */
+        int src = sqlite3_column_int(st, 7);
+        if (src < 0 || src > HU_NEGATIVE_SOURCE_SYSTEM_POLICY)
+            src = HU_NEGATIVE_SOURCE_USER_EXPLICIT;
+        r->source = (hu_negative_source_t)src;
         n++;
     }
     sqlite3_finalize(st);
@@ -171,8 +195,8 @@ static hu_error_t negative_memory_add_sqlite(struct sqlite3 *db, const char *con
     sqlite3_stmt *st = NULL;
     const char *sql =
         "INSERT INTO negative_memory(contact_id, text, scope, reason, "
-        " confidence_mean, confidence_variance, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)";
+        " confidence_mean, confidence_variance, created_at, source) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_IO;
     sqlite3_bind_text(st, 1, contact_id ? contact_id : "", (int)cid_len, SQLITE_STATIC);
@@ -182,6 +206,12 @@ static hu_error_t negative_memory_add_sqlite(struct sqlite3 *db, const char *con
     sqlite3_bind_double(st, 5, (double)nm->belief.mean);
     sqlite3_bind_double(st, 6, (double)nm->belief.variance);
     sqlite3_bind_int64(st, 7, nm->created_at);
+    /* P3.2 — semantic source. Coerce out-of-band values to USER_EXPLICIT
+     * (the safest default; planner treats as hard refusal). */
+    int src = (int)nm->source;
+    if (src < 0 || src > HU_NEGATIVE_SOURCE_SYSTEM_POLICY)
+        src = HU_NEGATIVE_SOURCE_USER_EXPLICIT;
+    sqlite3_bind_int(st, 8, src);
     int rc = sqlite3_step(st);
     int64_t id = sqlite3_last_insert_rowid(db);
     sqlite3_finalize(st);
@@ -284,10 +314,19 @@ hu_error_t hu_negative_memory_add_facade_gated(hu_memory_facade_t *m, const char
      * allowlist on top: only USER, AGENT (self-rag), and CHANNEL_TRUSTED
      * (paired/authenticated) sources may insert negative memory at LIVE
      * belief. Anything else demotes to QUARANTINE so the planner reads it
-     * as a hint, not a hard rule. DROP stays DROP. */
-    bool source_trusted_for_negmem = (source == HU_WRITE_SOURCE_USER ||
-                                      source == HU_WRITE_SOURCE_AGENT ||
-                                      source == HU_WRITE_SOURCE_CHANNEL_TRUSTED);
+     * as a hint, not a hard rule. DROP stays DROP.
+     *
+     * P3.2 / P3.3 — `nm->source == HU_NEGATIVE_SOURCE_SYSTEM_POLICY`
+     * additionally bypasses the channel-source check. SYSTEM_POLICY rows
+     * are inserted by privileged init paths (config-loaded safety rules,
+     * Apple-Intelligence guardrails, etc.) and must always land LIVE
+     * regardless of which write_source is technically supplying the
+     * bytes. The privileged path is responsible for ensuring the bytes
+     * are trusted before calling. */
+    bool source_trusted_for_negmem =
+        (source == HU_WRITE_SOURCE_USER || source == HU_WRITE_SOURCE_AGENT ||
+         source == HU_WRITE_SOURCE_CHANNEL_TRUSTED) ||
+        nm->source == HU_NEGATIVE_SOURCE_SYSTEM_POLICY;
     if (!source_trusted_for_negmem && outcome == HU_WRITE_OUTCOME_LIVE)
         outcome = HU_WRITE_OUTCOME_QUARANTINE;
 
@@ -821,6 +860,15 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
                                   const struct hu_persona_delta *deltas,
                                   size_t deltas_count) {
     if (!wm || !persona) return;
+
+    /* P1.4 — borrowed persona snapshot. Lifetime contract documented
+     * on the field declaration: persona must outlive every cached
+     * snapshot. The agent loop today loads persona once at startup
+     * and keeps it for the process lifetime, so the borrow is safe
+     * by construction. Consumers that mutate persona must call
+     * hu_world_model_invalidate(NULL, 0) before the borrowed memory
+     * is reused. */
+    wm->persona = persona;
 
     int new_signals = 0;
 

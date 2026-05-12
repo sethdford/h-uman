@@ -42,6 +42,29 @@ typedef struct hu_active_goal {
     int64_t expires_at;      /* 0 = persistent */
 } hu_active_goal_t;
 
+/* P3.2 — semantic origin tag for a negative-memory row. ORTHOGONAL to
+ * `hu_write_source_t` (which is "where did the bytes enter the system";
+ * P3.1 trust gate). This is "what KIND of negative is this", which the
+ * planner / W11 verifier needs to differentiate handling:
+ *
+ *   USER_EXPLICIT     — user said "don't ever say X". Hard refusal in
+ *                       responses; surface in transcript with citation.
+ *   SELF_RAG_ABSTAIN  — W11 self-RAG abstained on a related claim.
+ *                       Soft hedge in responses ("I'm not sure about X");
+ *                       not a permanent refusal.
+ *   AUTO_EXTRACT      — pulled from conversation by NLP heuristic.
+ *                       Ask-to-confirm before treating as a hard rule.
+ *   SYSTEM_POLICY     — built-in safety / compliance rule. Hard refusal +
+ *                       audit-log every time it fires. Immutable from
+ *                       agent-side writes (only privileged init paths
+ *                       insert these). */
+typedef enum hu_negative_source {
+    HU_NEGATIVE_SOURCE_USER_EXPLICIT = 0,
+    HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN = 1,
+    HU_NEGATIVE_SOURCE_AUTO_EXTRACT = 2,
+    HU_NEGATIVE_SOURCE_SYSTEM_POLICY = 3,
+} hu_negative_source_t;
+
 /* "Don't say X around Y." First-class so retrieval and verification can
  * surface it explicitly rather than burying it in persona avoid_vocab. */
 typedef struct hu_negative_memory {
@@ -51,6 +74,10 @@ typedef struct hu_negative_memory {
     char reason[120];
     hu_belief_t belief;      /* W8: how sure we are this is a hard rule */
     int64_t created_at;
+    /* P3.2 — semantic origin (defaults to USER_EXPLICIT for back-compat
+     * with rows inserted before the column existed; the schema migration
+     * fills NULL with 0 = USER_EXPLICIT). */
+    hu_negative_source_t source;
 } hu_negative_memory_t;
 
 /* What the user appears to believe about us. Synthesized lazily from
@@ -72,6 +99,25 @@ typedef struct hu_theory_of_mind {
  * invalidated on relevant writes (see hu_world_model_invalidate). */
 typedef struct hu_world_model {
     char contact_id[64];
+
+    /* P1.4 — borrowed persona pointer (W9 spec line 65 "persona snapshot").
+     *
+     * LIFETIME CONTRACT: the world model does NOT own this pointer. The
+     * persona must outlive every cached snapshot that may reference it
+     * (the per-process LRU TTL is 60s; in practice the agent's persona
+     * is loaded once at startup and lives for the process lifetime, so
+     * this is a non-issue). Set lazily by `hu_world_model_merge_persona`;
+     * NULL when no persona was merged.
+     *
+     * Stored as a borrowed pointer (not a deep copy) because
+     * `hu_persona_t` carries hundreds of strings — copying it into
+     * every cached snapshot for every contact would multiply RAM by
+     * `cache_slots * |persona_strings|` (32-512 KB per slot at 32 slots
+     * = 1-16 MB just for redundant persona). The borrowed pointer keeps
+     * cache install at O(1) and consumers that mutate persona must
+     * call `hu_world_model_invalidate(NULL, 0)` to flush every snapshot
+     * before the borrowed memory is reused. */
+    const struct hu_persona *persona;
 
     /* Top-K entities relevant to this contact (mention_count desc). */
     hu_graph_entity_t *entities;

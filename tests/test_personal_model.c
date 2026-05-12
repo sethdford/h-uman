@@ -17,7 +17,7 @@
 static void personal_model_init_sets_defaults(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    HU_ASSERT_EQ((long)m.version, 4L);
+    HU_ASSERT_EQ((long)m.version, 5L);
     HU_ASSERT_EQ((long)m.created_at, 0L);
     HU_ASSERT_EQ((long)m.fact_count, 0L);
     HU_ASSERT_EQ((long)m.topic_count, 0L);
@@ -215,7 +215,7 @@ static void personal_model_load_rejects_bad_magic(void) {
     hu_personal_model_t out;
     HU_ASSERT_EQ(hu_personal_model_load(&out, path), HU_ERR_PARSE);
     /* Initialized to defaults — version matches current schema. */
-    HU_ASSERT_EQ(out.version, 4U);
+    HU_ASSERT_EQ(out.version, 5U);
     HU_ASSERT_EQ(out.fact_count, (size_t)0);
     HU_ASSERT_FALSE(hu_personal_model_has_content(&out));
 
@@ -2677,8 +2677,9 @@ static void personal_model_load_migrates_v3_facts_and_topics(void) {
     HU_ASSERT_EQ(loaded.topic_count, 1u);
     HU_ASSERT_STR_EQ(loaded.topics[0].name, "hiking");
     /* In-memory model now reports the current schema, even though the
-     * on-disk file was v3. Re-saving will write a v4 file. */
-    HU_ASSERT_EQ((unsigned)loaded.version, 4u);
+     * on-disk file was v3. Re-saving will write a v5 file (init-09: trust
+     * tiers + provenance + pending-facts quarantine). */
+    HU_ASSERT_EQ((unsigned)loaded.version, 5u);
 }
 
 static void personal_model_load_migrates_v3_goals_zero_fills_last_referenced(void) {

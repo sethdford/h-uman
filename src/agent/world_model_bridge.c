@@ -434,6 +434,11 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
         snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
         nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
         nm.created_at = now_ms;
+        /* P3.2 — semantic origin tag. SELF_RAG_ABSTAIN tells the planner
+         * to treat this as a SOFT hedge ("I'm not sure about X"), not a
+         * hard refusal. The W11 abstention is a "we don't know enough"
+         * signal, not a "user said never". */
+        nm.source = HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN;
         int64_t nm_id = 0;
         /* P3.1 — gate self-rag abstention writes through W1 write_trust.
          * Source is the agent itself, so trust is high; the gate guards the
