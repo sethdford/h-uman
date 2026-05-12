@@ -37,9 +37,24 @@ mem_re = re.compile(
     r"memset\s*\(\s*&(\w+)\s*,\s*0\s*,\s*sizeof\s*\(\s*(?:hu_memory_query_t|\1)\s*\)\s*\)\s*;"
 )
 
+# Sprint 2c F3 — strip C and C++ comments before scanning. Without this
+# the lookahead window for `.variant =` matched comments like
+# `/* No .variant = X */`, falsely accepting code that never assigned
+# the variant. Replace comments with same-length whitespace so line
+# numbers stay correct in diagnostics. C++ `// ...` comments stop at
+# end-of-line (no greedy multi-line risk). C `/* ... */` are matched
+# non-greedy across newlines.
+def strip_comments(text):
+    def blank_run(match):
+        return re.sub(r"[^\n]", " ", match.group(0))
+    text = re.sub(r"/\*.*?\*/", blank_run, text, flags=re.DOTALL)
+    text = re.sub(r"//[^\n]*", blank_run, text)
+    return text
+
 bad = []
 for path in sorted(paths):
-    text = path.read_text(encoding="utf-8", errors="replace")
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    text = strip_comments(raw)
     lines = text.splitlines()
     for i, line in enumerate(lines):
         m = mem_re.search(line)

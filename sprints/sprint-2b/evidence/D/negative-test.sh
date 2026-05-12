@@ -96,6 +96,43 @@ else
   cat "$TMP/good.log" >&2 || true
 fi
 
+# --- comment-defeat fixture: comments containing `.variant = ...` --------
+# Sprint 2c F3 — before the comment-stripping fix, the scanner treated
+# `.variant =` substrings inside C/C++ comments as proof of variant
+# assignment. A future regression to that behavior would silently allow
+# a memset+missing-variant past the gate when the surrounding code had
+# any nearby comment mentioning `.variant`. Pin the fix.
+COMMENT_DIR="$TMP/comment-defeat"
+mkdir -p "$COMMENT_DIR/src/memory"
+cat >"$COMMENT_DIR/src/memory/comment_defeat.c" <<'C'
+#include "human/memory.h"
+
+void run_query(void) {
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(hu_memory_query_t));
+    /* No .variant = ...  -- this comment used to defeat the gate. */
+    // q.variant = HU_MEMORY_QUERY_FACT;  // also commented out
+    q.text = "comment-defeat";
+    facade_read(&q);
+}
+C
+echo "== F3: scanner MUST flag missing .variant even when comments fake it =="
+set +e
+HU_VARIANT_SCAN_ROOT="$COMMENT_DIR" bash "$SCANNER" >"$TMP/comment.log" 2>&1
+rc=$?
+set -e
+if [[ "$rc" -ne 0 ]]; then
+  ac_pass "scanner exit non-zero on comment-defeat fixture (rc=$rc)"
+else
+  ac_fail "scanner accepted comment-only .variant — F3 fix regressed"
+  cat "$TMP/comment.log" >&2 || true
+fi
+if grep -q "without \`.variant =\`" "$TMP/comment.log"; then
+  ac_pass "scanner emitted expected diagnostic on comment-defeat"
+else
+  ac_fail "scanner did not emit diagnostic on comment-defeat"
+fi
+
 # --- run scanner against the live tree (sanity check inventory still clean) ---
 echo "== inventory: scanner MUST be clean against the live tree =="
 set +e
