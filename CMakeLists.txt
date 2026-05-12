@@ -2917,6 +2917,17 @@ set(HU_TEST_SOURCES
     # forward, step_count advancement, and 50-step ASan leak check
     # (R10 / F6 single-cleanup-label contract).
     tests/test_grpo_huml.c
+    # Phase 4 Task 7 (RL SOTA): GRPO HUML synthetic-reward N=4 E2E
+    # multi-step convergence proof — umbrella §5 row 4 ship-contract
+    # gate.  50 iters × 20-prompt fixture; asserts (1) final_loss vs
+    # initial_loss change signal (loss inc. via KL penalty growth in
+    # this impl — see test docstring), (2) mean log-prob of good
+    # tokens 1..5 at iter 50 > iter 0 via shadow-GPT + save_adapter
+    # byte injection, (3) mean KL(π_θ || π_ref) < 2.0 nats with
+    # kl_beta = 0.04 (R5).  MLX subprocess test gated #if defined(
+    # HU_HAVE_MLX_LM_GRPO) per round-3 critic L1 (compile-time, not
+    # HU_SKIP_IF).
+    tests/test_grpo_e2e.c
     # Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML factory — multinomial
     # sampling determinism (xorshift64 + per-rollout splitmix64 seed),
     # n_rollouts honoured, max_new_tokens cap, cross-platform pin (R13).

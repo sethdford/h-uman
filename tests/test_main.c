@@ -584,6 +584,12 @@ void run_grpo_mlx_tests(void);
  * (this suite is impl-level: factory shape, R12 bounds, kl_beta=0
  * skip-reference contract, step_count advancement, ASan leak pin). */
 void run_grpo_huml_tests(void);
+/* Phase 4 Task 7 (RL SOTA): GRPO HUML synthetic-reward N=4 E2E —
+ * umbrella §5 row 4 ship-contract gate.  50 iters × 20-prompt fixture;
+ * pins final_loss change signal, mean log-prob of good tokens at policy
+ * level, and KL brake (R5).  Optional MLX subprocess test gated
+ * compile-time by HU_HAVE_MLX_LM_GRPO. */
+void run_grpo_e2e_tests(void);
 void run_persona_directive_channels_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -1186,6 +1192,8 @@ int main(int argc, char **argv) {
     run_grpo_loss_tests();
     run_grpo_huml_tests();
     run_grpo_mlx_tests();
+    /* Phase 4 Task 7 (RL SOTA): GRPO HUML E2E synthetic-reward gate. */
+    run_grpo_e2e_tests();
     run_persona_directive_channels_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();
