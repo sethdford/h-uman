@@ -569,6 +569,16 @@ void run_personal_model_atomic_save_tests(void);
  * pessimistic PPO clip, KL-aware loss, analytical gradient.  Loss-only;
  * Task 5 lands the trainer step. */
 void run_grpo_loss_tests(void);
+/* Phase 4 Task 8 (RL SOTA): GRPO MLX subprocess wrapper — JSONL secure
+ * perms (H2), factory probe M7 short-circuit, dummy-adapter Python
+ * shortcut, real-subprocess gated by HU_HAVE_MLX_LM_GRPO (L1). */
+void run_grpo_mlx_tests(void);
+/* Phase 4 Task 5 (RL SOTA): GRPO HUML trainer — full hu_rl_trainer_t
+ * impl that composes rollout + reward_source + KL k3 + GRPO loss math
+ * + structural backward into the toy GPT.  Distinct from grpo_loss
+ * (this suite is impl-level: factory shape, R12 bounds, kl_beta=0
+ * skip-reference contract, step_count advancement, ASan leak pin). */
+void run_grpo_huml_tests(void);
 void run_persona_directive_channels_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -1167,6 +1177,8 @@ int main(int argc, char **argv) {
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
     run_grpo_loss_tests();
+    run_grpo_huml_tests();
+    run_grpo_mlx_tests();
     run_persona_directive_channels_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();

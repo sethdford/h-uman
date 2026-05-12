@@ -2884,6 +2884,14 @@ set(HU_TEST_SOURCES
     # log-ratio gradient with finite-diff agreement to 5% (H4).
     # Loss-only — no model coupling; Task 5 lands the trainer step.
     tests/test_grpo_loss.c
+    # Phase 4 Task 5 (RL SOTA): GRPO HUML trainer — full
+    # hu_rl_trainer_t vtable impl composing rollout (Task 2) +
+    # reward_source (Task 4) + KL k3 (Task 1) + GRPO loss math
+    # (Task 3) + structural backward on lm_head.  Pins factory shape,
+    # R12 n_rollouts bounds [2, 1024], MED-1 kl_beta=0 skips reference
+    # forward, step_count advancement, and 50-step ASan leak check
+    # (R10 / F6 single-cleanup-label contract).
+    tests/test_grpo_huml.c
     # Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML factory — multinomial
     # sampling determinism (xorshift64 + per-rollout splitmix64 seed),
     # n_rollouts honoured, max_new_tokens cap, cross-platform pin (R13).
