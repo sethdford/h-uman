@@ -1384,6 +1384,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                               cognition_budget.max_memory_chars);
         hu_memory_loader_set_facade(&loader, agent->w7_facade);
         hu_memory_loader_set_personal_model(&loader, &agent->personal_model);
+        /* Story B (sprint-4 follow-up): bind persona context so the loader's
+         * supplementary graph render runs with persona-grounded ToM and the
+         * channel-aware pragmatics digest. */
+        hu_persona_context_t loader_pctx;
+        if (agent->persona) {
+            loader_pctx.persona = agent->persona;
+            loader_pctx.channel = agent->active_channel;
+            loader_pctx.channel_len = agent->active_channel_len;
+            loader_pctx.delta_limit = 8;
+            hu_memory_loader_set_persona_context(&loader, &loader_pctx);
+        }
         hu_error_t load_err = hu_memory_loader_load(
             &loader, msg, msg_len, agent->memory_session_id ? agent->memory_session_id : "",
             agent->memory_session_id ? agent->memory_session_id_len : 0, &memory_ctx,
@@ -3486,10 +3497,22 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             size_t tom_p_len = tom_p[0] ? strlen(tom_p) : 0;
             size_t tom_q_len = tom_q[0] ? strlen(tom_q) : 0;
             size_t tom_c_len = tom_c[0] ? strlen(tom_c) : 0;
+            /* Story B (sprint-4 follow-up): thread persona context so the
+             * bridge's persona-merge runs and interaction_style reaches the
+             * rendered prompt. Previously this passed NULL → merge skipped. */
+            hu_persona_context_t pctx;
+            const hu_persona_context_t *pctx_p = NULL;
+            if (agent->persona) {
+                pctx.persona = agent->persona;
+                pctx.channel = agent->active_channel;
+                pctx.channel_len = agent->active_channel_len;
+                pctx.delta_limit = 8;
+                pctx_p = &pctx;
+            }
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                      agent->memory_session_id_len, 0, &world_model_ctx,
                                      &world_model_ctx_len, tom_p, tom_p_len, tom_q, tom_q_len,
-                                     tom_c, tom_c_len, &agent->personal_model, NULL);
+                                     tom_c, tom_c_len, &agent->personal_model, pctx_p);
             if (world_model_ctx_len > 0)
                 agent->world_model_loads++;
         }
