@@ -497,6 +497,200 @@ static void simulation_b2_prompt_shrinks_after_long_drift(void) {
 }
 
 /* ─────────────────────────────────────────────────────────────────── */
+/*  Story B3 — 1000-turn invariant stress test                         */
+/* ─────────────────────────────────────────────────────────────────── */
+
+/* A small pool of message templates that each match exactly one
+ * fact_extract pattern when filled. The {OBJ} slot gets substituted
+ * with one of a fixed set of objects; the result is deterministic
+ * for any fixed PRNG seed. */
+static const char *k_b3_templates[] = {
+    "i love {OBJ}",
+    "i hate {OBJ}",
+    "i prefer {OBJ}",
+    "i live in {OBJ}",
+    "i work at {OBJ}",
+    "my favorite is {OBJ}",
+    "i'm working on {OBJ}",
+    "i need to {OBJ}",
+    "i'm trying to {OBJ}",
+    "u up?",                     /* doesn't match — exits early path */
+    "ok",                        /* short message — style sample */
+    "BTW THAT'S COOL",           /* uppercase — drives lowercase_ratio down */
+    "lol",                       /* abbreviation */
+    "ty",                        /* abbreviation */
+    "rn busy",                   /* abbreviation cluster */
+};
+static const size_t k_b3_template_count =
+    sizeof(k_b3_templates) / sizeof(k_b3_templates[0]);
+
+static const char *k_b3_objects[] = {
+    "coffee", "tea", "hiking", "running", "cooking", "reading",
+    "portland", "seattle", "san francisco", "new york",
+    "initech", "globex", "soylent",
+    "the deck", "the launch", "the migration", "the runbook",
+    "ship today", "ship tomorrow", "draft the spec",
+};
+static const size_t k_b3_object_count =
+    sizeof(k_b3_objects) / sizeof(k_b3_objects[0]);
+
+static void b3_render_message(unsigned int *seed, char *out, size_t cap) {
+    /* rand_r is BSD/POSIX, available on macOS + Linux glibc. The
+     * test framework already uses libc-portable code; rand_r keeps
+     * the PRNG state under our control and away from any global
+     * srand() the suite might also touch. */
+    const char *tpl = k_b3_templates[rand_r(seed) % k_b3_template_count];
+    const char *obj = k_b3_objects[rand_r(seed) % k_b3_object_count];
+
+    const char *slot = strstr(tpl, "{OBJ}");
+    if (!slot) {
+        strncpy(out, tpl, cap - 1);
+        out[cap - 1] = '\0';
+        return;
+    }
+    size_t prefix_len = (size_t)(slot - tpl);
+    if (prefix_len >= cap)
+        prefix_len = cap - 1;
+    memcpy(out, tpl, prefix_len);
+    size_t pos = prefix_len;
+    size_t obj_len = strlen(obj);
+    if (pos + obj_len >= cap)
+        obj_len = cap - 1 - pos;
+    memcpy(out + pos, obj, obj_len);
+    pos += obj_len;
+    const char *suffix = slot + 5; /* skip "{OBJ}" */
+    size_t suffix_len = strlen(suffix);
+    if (pos + suffix_len >= cap)
+        suffix_len = cap - 1 - pos;
+    memcpy(out + pos, suffix, suffix_len);
+    pos += suffix_len;
+    out[pos] = '\0';
+}
+
+static void b3_assert_invariants(const hu_personal_model_t *m, int64_t now) {
+    /* Slot caps: ingest must never overflow the fixed-size arrays. */
+    HU_ASSERT_TRUE(m->fact_count <= (size_t)HU_PM_MAX_FACTS);
+    HU_ASSERT_TRUE(m->topic_count <= (size_t)HU_PM_MAX_TOPICS);
+    HU_ASSERT_TRUE(m->goal_count <= (size_t)HU_PM_MAX_GOALS);
+
+    /* Per-fact bounds. */
+    for (size_t i = 0; i < m->fact_count; i++) {
+        const hu_heuristic_fact_t *f = &m->facts[i];
+        HU_ASSERT_TRUE(f->confidence >= 0.0f);
+        HU_ASSERT_TRUE(f->confidence <= 1.0f);
+        float eff = hu_heuristic_fact_effective_confidence(f, now);
+        HU_ASSERT_TRUE(eff >= 0.0f);
+        HU_ASSERT_TRUE(eff <= 1.0f + 0.001f); /* float epsilon slack */
+    }
+
+    /* Per-topic bounds. */
+    for (size_t i = 0; i < m->topic_count; i++) {
+        const hu_personal_topic_t *t = &m->topics[i];
+        HU_ASSERT_TRUE(t->interest_score >= 0.0f);
+        HU_ASSERT_TRUE(t->interest_score <= 1.0f + 0.001f);
+        float eff = hu_personal_topic_effective_score(t, now);
+        HU_ASSERT_TRUE(eff >= 0.0f);
+        HU_ASSERT_TRUE(eff <= 1.0f + 0.001f);
+    }
+
+    /* Per-goal bounds (priority is 0 for inactive — covered). */
+    for (size_t i = 0; i < m->goal_count; i++) {
+        const hu_personal_goal_t *g = &m->goals[i];
+        HU_ASSERT_TRUE(g->progress >= 0.0f);
+        HU_ASSERT_TRUE(g->progress <= 1.0f + 0.001f);
+        float eff = hu_personal_goal_effective_priority(g, now);
+        HU_ASSERT_TRUE(eff >= 0.0f);
+        HU_ASSERT_TRUE(eff <= 1.0f + 0.001f);
+    }
+
+    /* Style axes. */
+    HU_ASSERT_TRUE(m->style.formality >= 0.0f && m->style.formality <= 1.0f + 0.001f);
+    HU_ASSERT_TRUE(m->style.verbosity >= 0.0f && m->style.verbosity <= 1.0f + 0.001f);
+    HU_ASSERT_TRUE(m->style.emoji_frequency >= 0.0f &&
+                   m->style.emoji_frequency <= 1.0f + 0.001f);
+    HU_ASSERT_TRUE(m->style.humor_receptivity >= 0.0f &&
+                   m->style.humor_receptivity <= 1.0f + 0.001f);
+    HU_ASSERT_TRUE(m->style.lowercase_ratio >= 0.0f &&
+                   m->style.lowercase_ratio <= 1.0f + 0.001f);
+    HU_ASSERT_TRUE(m->style.abbreviation_ratio >= 0.0f &&
+                   m->style.abbreviation_ratio <= 1.0f + 0.001f);
+
+    /* Build prompt within a 4 KB cap returns NUL-terminated, non-zero. */
+    char buf[4096];
+    size_t n = hu_personal_model_build_prompt(m, buf, sizeof(buf));
+    HU_ASSERT_GT((long)n, 0L);
+    HU_ASSERT_TRUE(n < sizeof(buf));
+    HU_ASSERT_EQ((int)buf[n], 0);
+}
+
+static void simulation_b3_thousand_turn_invariants(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    unsigned int seed = 42; /* deterministic */
+    char msg[256];
+    /* Spread 1000 turns over 60 simulated days at random hours. */
+    for (size_t turn = 1; turn <= 1000; turn++) {
+        b3_render_message(&seed, msg, sizeof(msg));
+        int day = (int)((turn - 1) % 60);
+        int hour = (int)(rand_r(&seed) % 24);
+        int64_t ts = SIM_T0 + (int64_t)day * 86400LL + (int64_t)hour * 3600LL;
+        bool from_user = (rand_r(&seed) % 4) != 0; /* ~75% user turns */
+        hu_error_t err =
+            hu_personal_model_ingest(&m, msg, strlen(msg), from_user, ts);
+        HU_ASSERT_EQ(err, HU_OK);
+
+        if (turn % 100 == 0)
+            b3_assert_invariants(&m, ts);
+    }
+
+    /* After 1000 turns, the model should be at or near saturation. */
+    HU_ASSERT_TRUE(m.fact_count > 0);
+    HU_ASSERT_TRUE(m.topic_count > 0);
+    HU_ASSERT_EQ((unsigned)m.interaction_count, 1000U);
+}
+
+static void simulation_b3_thousand_turn_save_load_after_stress(void) {
+    /* Same stress run, then save → load → invariants on the loaded
+     * model. Pins that the binary save format survives a saturated
+     * model end-to-end. */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    unsigned int seed = 1337;
+    char msg[256];
+    int64_t last_ts = SIM_T0;
+    for (size_t turn = 1; turn <= 1000; turn++) {
+        b3_render_message(&seed, msg, sizeof(msg));
+        int day = (int)((turn - 1) % 60);
+        int hour = (int)(rand_r(&seed) % 24);
+        last_ts = SIM_T0 + (int64_t)day * 86400LL + (int64_t)hour * 3600LL;
+        bool from_user = (rand_r(&seed) % 4) != 0;
+        HU_ASSERT_EQ(
+            hu_personal_model_ingest(&m, msg, strlen(msg), from_user, last_ts),
+            HU_OK);
+    }
+
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/sprint4_b3_pm_%d.bin", getpid());
+    HU_ASSERT_EQ(hu_personal_model_save(&m, path), HU_OK);
+
+    hu_personal_model_t loaded;
+    hu_personal_model_init(&loaded);
+    HU_ASSERT_EQ(hu_personal_model_load(&loaded, path), HU_OK);
+
+    HU_ASSERT_EQ((unsigned)loaded.interaction_count,
+                 (unsigned)m.interaction_count);
+    HU_ASSERT_EQ((unsigned)loaded.fact_count, (unsigned)m.fact_count);
+    HU_ASSERT_EQ((unsigned)loaded.topic_count, (unsigned)m.topic_count);
+    HU_ASSERT_EQ((unsigned)loaded.style.sample_count,
+                 (unsigned)m.style.sample_count);
+
+    b3_assert_invariants(&loaded, last_ts);
+
+    unlink(path);
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
 /*  Test runner                                                        */
 /* ─────────────────────────────────────────────────────────────────── */
 
@@ -512,4 +706,6 @@ void run_personal_model_simulation_tests(void) {
     HU_RUN_TEST(simulation_b2_style_freshness_decays_after_long_silence);
     HU_RUN_TEST(simulation_b2_apply_decay_prunes_after_long_drift);
     HU_RUN_TEST(simulation_b2_prompt_shrinks_after_long_drift);
+    HU_RUN_TEST(simulation_b3_thousand_turn_invariants);
+    HU_RUN_TEST(simulation_b3_thousand_turn_save_load_after_stress);
 }
