@@ -75,6 +75,8 @@
 #ifdef HU_ENABLE_ML
 #include "human/ml/cli.h"
 #include "human/ml/cli_dpo.h"
+#include "human/ml/cli_kto.h"
+#include "human/ml/cli_rm.h"
 #endif
 #ifdef HU_ENABLE_CURL
 #include "human/paperclip/client.h"
@@ -227,6 +229,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                         "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                         "  dpo-train               Run DPO preference training step\n"
                         "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
+                        "  kto-train               Train a KTO trainer on one-sided preference signals\n"
+                        "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
                         "  lora-persona            Train LoRA adapter from persona examples\n"
                         "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
                         "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
@@ -253,6 +257,10 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
      * remain reachable via `dpo-judge` or `dpo-train --legacy-judge`. */
     if (strcmp(sub, "dpo-judge") == 0)
         return hu_ml_cli_dpo_judge(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "kto-train") == 0)
+        return hu_ml_cli_kto_train(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "rm-train") == 0)
+        return hu_ml_cli_rm_train(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "prepare-conversations") == 0)
         return hu_ml_cli_prepare_conversations(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "lora-persona") == 0)
@@ -278,6 +286,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                "  dpo-train               Run DPO preference training step\n"
                "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
+               "  kto-train               Train a KTO trainer on one-sided preference signals\n"
+               "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
                "  lora-persona            Train LoRA adapter from persona examples\n"
                "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
                "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
