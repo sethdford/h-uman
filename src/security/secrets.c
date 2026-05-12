@@ -1,6 +1,7 @@
 #include "human/core/error.h"
 #include "human/crypto.h"
 #include "human/security.h"
+#include "human/security/secure_mem.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -16,19 +17,6 @@
 #endif
 
 #define HU_KEY_LEN 32
-
-static void hu_secure_zero(void *p, size_t n) {
-#if defined(__STDC_LIB_EXT1__)
-    memset_s(p, n, 0, n);
-#elif defined(__GNUC__) || defined(__clang__)
-    memset(p, 0, n);
-    __asm__ __volatile__("" : : "r"(p) : "memory");
-#else
-    volatile unsigned char *vp = (volatile unsigned char *)p;
-    while (n--)
-        *vp++ = 0;
-#endif
-}
 #define HU_NONCE_LEN       12
 #define HU_HMAC_LEN        32
 #define HU_ENC2_PREFIX     "enc2:"

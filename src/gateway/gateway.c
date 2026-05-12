@@ -19,6 +19,7 @@
 #include "human/health.h"
 #include "human/memory.h"
 #include "human/security.h"
+#include "human/security/secure_mem.h"
 #include "human/version.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -451,12 +452,15 @@ static bool verify_hmac(const char *body, size_t body_len, const char *sig_heade
         snprintf(hex + i * 2, 3, "%02x", computed[i]);
     hex[64] = '\0';
     size_t sig_len = strlen(sig_header);
-    if (sig_len < 64)
+    if (sig_len < 64) {
+        hu_secure_zero(computed, sizeof(computed));
+        hu_secure_zero(hex, sizeof(hex));
         return false;
-    volatile unsigned char diff = 0;
-    for (int i = 0; i < 64; i++)
-        diff |= (unsigned char)sig_header[i] ^ (unsigned char)hex[i];
-    return diff == 0;
+    }
+    bool ok = hu_constant_time_eq(sig_header, hex, 64);
+    hu_secure_zero(computed, sizeof(computed));
+    hu_secure_zero(hex, sizeof(hex));
+    return ok;
 }
 
 /* ── HTTP response helpers ──────────────────────────────────────────────── */

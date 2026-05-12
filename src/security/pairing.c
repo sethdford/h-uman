@@ -1,6 +1,7 @@
 #include "human/core/error.h"
 #include "human/crypto.h"
 #include "human/security.h"
+#include "human/security/secure_mem.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,19 +11,6 @@
 
 #define HU_MAX_PAIR_ATTEMPTS 5
 #define HU_PAIR_LOCKOUT_SECS 600
-
-static void hu_secure_zero(void *p, size_t n) {
-#if defined(__STDC_LIB_EXT1__)
-    memset_s(p, n, 0, n);
-#elif defined(__GNUC__) || defined(__clang__)
-    memset(p, 0, n);
-    __asm__ __volatile__("" : : "r"(p) : "memory");
-#else
-    volatile unsigned char *vp = (volatile unsigned char *)p;
-    while (n--)
-        *vp++ = 0;
-#endif
-}
 #define HU_TOKEN_PREFIX       "zc_"
 #define HU_TOKEN_PREFIX_LEN   3
 #define HU_TOKEN_RANDOM_BYTES 32

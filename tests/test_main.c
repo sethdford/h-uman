@@ -135,6 +135,7 @@ void run_identity_tests(void);
 void run_channel_manager_tests(void);
 void run_new_modules_tests(void);
 void run_provider_all_tests(void);
+void run_mlx_qwen3_provider_tests(void);
 void run_channel_all_tests(void);
 void run_idempotency_tests(void);
 void run_idempotency_hula_integration_tests(void);
@@ -432,6 +433,10 @@ void run_mcp_resources_tests(void);
 void run_eval_tests(void);
 void run_eval_judge_tests(void);
 void run_eval_benchmarks_tests(void);
+/* Init #14 — public benchmark suite expansion.
+ * tests/test_eval_public_suites.c is wired into HU_TEST_SOURCES
+ * (see CMakeLists.txt §HU_TEST_SOURCES). */
+void run_eval_public_suites_tests(void);
 void run_eval_runner_tests(void);
 void run_eval_history_tests(void);
 void run_corrective_rag_tests(void);
@@ -514,6 +519,9 @@ void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_persona_directive_channels_tests(void);
+/* SOTA-2026 init-01 — prompt-side activation steering (S1). */
+void run_persona_steering_tests(void);
+void run_provider_steering_dispatch_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
 void run_self_improve_tests(void);
@@ -521,6 +529,7 @@ void run_sycophancy_guard_tests(void);
 void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
+void run_typing_simulator_tests(void);
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -704,6 +713,7 @@ int main(int argc, char **argv) {
     run_channel_manager_tests();
     run_new_modules_tests();
     run_provider_all_tests();
+    run_mlx_qwen3_provider_tests();
     run_channel_all_tests();
     run_meta_common_tests();
     run_channel_integration_tests();
@@ -989,6 +999,7 @@ int main(int argc, char **argv) {
     run_eval_tests();
     run_eval_judge_tests();
     run_eval_benchmarks_tests();
+    run_eval_public_suites_tests();
     run_eval_runner_tests();
     run_eval_history_tests();
     run_corrective_rag_tests();
@@ -1072,6 +1083,9 @@ int main(int argc, char **argv) {
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
     run_persona_directive_channels_tests();
+    /* SOTA-2026 init-01 — prompt-side activation steering (S1). */
+    run_persona_steering_tests();
+    run_provider_steering_dispatch_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();
     run_self_improve_tests();
@@ -1084,6 +1098,7 @@ int main(int argc, char **argv) {
     run_canvas_e2e_tests();
     run_canvas_persist_tests();
     run_canvas_render_tests();
+    run_typing_simulator_tests();
 
     HU_TEST_REPORT();
     HU_TEST_EXIT();

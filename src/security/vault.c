@@ -8,6 +8,7 @@
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include "human/security/secure_mem.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
@@ -19,20 +20,7 @@
 #include <sys/stat.h>
 #endif
 
-#if defined(__STDC_LIB_EXT1__)
-#define hu_vault_secure_zero(p, n) memset_s((p), (n), 0, (n))
-#elif defined(__GNUC__) || defined(__clang__)
-static void hu_vault_secure_zero(void *p, size_t n) {
-    memset(p, 0, n);
-    __asm__ __volatile__("" : : "r"(p) : "memory");
-}
-#else
-static void hu_vault_secure_zero(void *p, size_t n) {
-    volatile unsigned char *vp = (volatile unsigned char *)p;
-    while (n--)
-        *vp++ = 0;
-}
-#endif
+#define hu_vault_secure_zero(p, n) hu_secure_zero((p), (n))
 
 #define VAULT_KEY_MAX  64
 #define VAULT_PATH_MAX 1024
