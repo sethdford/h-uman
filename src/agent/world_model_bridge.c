@@ -211,6 +211,15 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
             hu_persona_delta_free(alloc, deltas, deltas_count);
     }
 
+    /* Story F.1 — agent capabilities. Independent of `persona` (the agent
+     * may have tools without a persona), so check separately. NULL/0
+     * tools → merge skipped (back-compat with all pre-F.1 callers
+     * which leave the new pctx fields zero-initialized). */
+    if (persona_ctx && persona_ctx->tools && persona_ctx->tools_count > 0) {
+        hu_world_model_merge_self_capabilities(wm, persona_ctx->tools,
+                                               persona_ctx->tools_count);
+    }
+
     /* If everything is empty, return NULL/0 -- callers skip injection.
      *
      * As of P2D the W9 builder synthesizes `dominant_emotion`, `valence`, and
@@ -324,6 +333,32 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         }
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
     }
+    /* Story F.1 — render `self_model.capabilities` as a short "Self
+     * capabilities: ..." line. Populated by
+     * `hu_world_model_merge_self_capabilities` IFF the caller threaded
+     * `persona_ctx->tools` through; otherwise the slot is empty and we
+     * silently skip.
+     *
+     * Renders inline as "- I can use: a, b, c" so the LLM sees a
+     * compact preference list without firing a separate retrieval. The
+     * "Self capabilities:" header is intentionally distinct from the
+     * "Self model:" section that ships with Story E — when both land
+     * on sprint-4 a follow-up integration commit will fold the line
+     * inside the Self model block (per docs/plans/2026-05-12-self-
+     * model-cell.md, Story F.1). Keeping them separate here avoids
+     * cross-PR merge conflicts in the same brace. */
+    if (wm->self_model.capabilities_count > 0) {
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Self capabilities:\n", 19);
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "- I can use: ", 13);
+        for (size_t i = 0; i < wm->self_model.capabilities_count; i++) {
+            if (i > 0)
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s",
+                                   wm->self_model.capabilities[i]);
+        }
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+    }
+
     if (style_signal) {
         ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
                                "Communication style: %s\n", wm->style_summary);

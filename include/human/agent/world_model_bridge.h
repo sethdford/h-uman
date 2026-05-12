@@ -43,11 +43,24 @@ typedef struct hu_w7_facade hu_w7_facade_t;
  *
  * Wrapped in a struct because the bridge function already has 14 params. */
 struct hu_persona;
+/* Story F.1 — `tools`/`tools_count` are optional. When set, the bridge
+ * calls `hu_world_model_merge_self_capabilities` so the snapshot's
+ * `self_model.capabilities[]` is populated. NULL/0 → merge skipped
+ * (back-compat with all callers from before F.1). Forward-declared
+ * here so callers do not have to include `human/tool.h`.
+ *
+ * Lifetime: the bridge only reads tool *names* via
+ * `tools[i].vtable->name(ctx)` and copies them into the inline slab,
+ * so the caller can free the registry the moment this call returns. */
+struct hu_tool;
+
 typedef struct hu_persona_context {
     const struct hu_persona *persona;
     const char *channel;
     size_t channel_len;
     size_t delta_limit;
+    const struct hu_tool *tools;
+    size_t tools_count;
 } hu_persona_context_t;
 
 /* Forward-declare provider type at file scope so all `_with_provider`

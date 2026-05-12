@@ -536,7 +536,7 @@ static void bridge_render_with_persona_ctx_emits_interaction_style(void) {
     hu_persona_overlay_t overlay;
     story_b_make_persona(&persona, &overlay);
 
-    hu_persona_context_t pctx;
+    hu_persona_context_t pctx = {0};
     pctx.persona = &persona;
     pctx.channel = "discord";
     pctx.channel_len = strlen("discord");
@@ -600,7 +600,7 @@ static void bridge_render_with_persona_no_overlay_falls_back_to_identity_only(vo
     hu_persona_overlay_t overlay;
     story_b_make_persona(&persona, &overlay);
 
-    hu_persona_context_t pctx;
+    hu_persona_context_t pctx = {0};
     pctx.persona = &persona;
     pctx.channel = "telegram"; /* persona only has a "discord" overlay */
     pctx.channel_len = strlen("telegram");
@@ -634,7 +634,7 @@ static void bridge_render_with_persona_ctx_null_persona_skips_merge(void) {
     const char *cid = "ut_storyb_nullp";
     story_b_seed_negative(g, cid, strlen(cid));
 
-    hu_persona_context_t pctx;
+    hu_persona_context_t pctx = {0};
     pctx.persona = NULL;
     pctx.channel = "discord";
     pctx.channel_len = strlen("discord");
@@ -648,6 +648,201 @@ static void bridge_render_with_persona_ctx_null_persona_skips_merge(void) {
     HU_ASSERT_NOT_NULL(txt);
     HU_ASSERT(tlen > 0);
     HU_ASSERT(strstr(txt, "Interaction style") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story F.1 (sprint-4 follow-up) — render wm->self_model.capabilities.
+ *
+ * `hu_world_model_merge_self_capabilities` walks `persona_ctx->tools`
+ * and copies the first N tool names into `wm->self_model.capabilities`
+ * (top-6, 31-char limit). The bridge renders a `Self capabilities:`
+ * section with a single `- I can use: a, b, c` line. These tests
+ * exercise: (1) tools present → line emitted with all names in order;
+ * (2) no tools threaded → section omitted entirely; (3) dedup +
+ * truncation paths so registry weirdness doesn't crash render.
+ * ────────────────────────────────────────────────────────────────────── */
+
+#include "human/tool.h"
+
+/* Inline fake tool: vtable returns a static name, no execute. We never
+ * call execute() in these tests — the bridge only reads vtable->name(). */
+typedef struct story_f1_fake_tool_ctx {
+    const char *name;
+} story_f1_fake_tool_ctx_t;
+
+static const char *story_f1_fake_tool_name(void *ctx) {
+    return ctx ? ((story_f1_fake_tool_ctx_t *)ctx)->name : NULL;
+}
+
+static const hu_tool_vtable_t story_f1_fake_vtable = {
+    .name = story_f1_fake_tool_name,
+};
+
+static void story_f1_make_tool(hu_tool_t *out, story_f1_fake_tool_ctx_t *ctx,
+                               const char *name) {
+    ctx->name = name;
+    out->ctx = ctx;
+    out->vtable = &story_f1_fake_vtable;
+}
+
+static void bridge_render_with_self_capabilities_emits_section(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf1_emit";
+    /* Need a non-empty snapshot so we reach the render path. */
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    story_f1_fake_tool_ctx_t ctxs[3];
+    hu_tool_t tools[3];
+    story_f1_make_tool(&tools[0], &ctxs[0], "shell");
+    story_f1_make_tool(&tools[1], &ctxs[1], "web_search");
+    story_f1_make_tool(&tools[2], &ctxs[2], "memory_query");
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    pctx.tools = tools;
+    pctx.tools_count = 3;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self capabilities:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "I can use:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "shell"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "web_search"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "memory_query"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_without_tools_omits_capabilities_section(void) {
+    /* Persona ctx is set but `tools` is NULL → merge_self_capabilities
+     * is skipped and capabilities_count stays 0 → no `Self capabilities:`
+     * header in the prompt. Pin this so callers that only want persona
+     * (Story B path) don't accidentally get an empty capabilities line. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf1_omit";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    /* pctx.tools stays NULL, pctx.tools_count stays 0 by {0}-init. */
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Self capabilities:") == NULL);
+    HU_ASSERT(strstr(txt, "I can use:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_capabilities_dedups_and_caps_at_six(void) {
+    /* Registry has 8 tools, two of which are duplicates ("shell" appears
+     * twice). Verify: (1) dedup keeps only one "shell", (2) hard cap at
+     * 6 entries means the 7th and 8th unique names never make it in.
+     * Together these prove the slab is bounded and the count truthful. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf1_caps";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    /* 8 entries: shell, web_search, shell (dup), memory_query, edit_file,
+     * read_file, run_python, fetch_url. After dedup: 7 unique. After
+     * cap-at-6: only the first 6 unique names survive. */
+    story_f1_fake_tool_ctx_t ctxs[8];
+    hu_tool_t tools[8];
+    story_f1_make_tool(&tools[0], &ctxs[0], "shell");
+    story_f1_make_tool(&tools[1], &ctxs[1], "web_search");
+    story_f1_make_tool(&tools[2], &ctxs[2], "shell"); /* dup */
+    story_f1_make_tool(&tools[3], &ctxs[3], "memory_query");
+    story_f1_make_tool(&tools[4], &ctxs[4], "edit_file");
+    story_f1_make_tool(&tools[5], &ctxs[5], "read_file");
+    story_f1_make_tool(&tools[6], &ctxs[6], "run_python");
+    story_f1_make_tool(&tools[7], &ctxs[7], "fetch_url");
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    pctx.tools = tools;
+    pctx.tools_count = 8;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self capabilities:"));
+    /* First 6 unique names should render. */
+    HU_ASSERT_NOT_NULL(strstr(txt, "shell"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "web_search"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "memory_query"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "edit_file"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "read_file"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "run_python"));
+    /* 7th unique (fetch_url) MUST NOT appear — slab capped at 6. */
+    HU_ASSERT(strstr(txt, "fetch_url") == NULL);
+    /* Dedup proof: "shell" should appear exactly once in the capabilities
+     * line. Count occurrences by walking from the "Self capabilities:"
+     * header to the next newline. */
+    const char *header = strstr(txt, "Self capabilities:");
+    HU_ASSERT_NOT_NULL(header);
+    const char *line_end = strchr(header, '\n');
+    /* Header line ends; next line is the "- I can use:" body. Find IT. */
+    const char *body = strstr(header, "I can use:");
+    HU_ASSERT_NOT_NULL(body);
+    line_end = strchr(body, '\n');
+    HU_ASSERT_NOT_NULL(line_end);
+    int shell_count = 0;
+    for (const char *p = body; p < line_end; p++) {
+        if (strncmp(p, "shell", 5) == 0) shell_count++;
+    }
+    HU_ASSERT_EQ(shell_count, 1);
 
     A()->free(A()->ctx, txt, tlen + 1);
     cleanup(g, f);
@@ -682,5 +877,9 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(bridge_render_without_persona_ctx_omits_interaction_style);
     HU_RUN_TEST(bridge_render_with_persona_no_overlay_falls_back_to_identity_only);
     HU_RUN_TEST(bridge_render_with_persona_ctx_null_persona_skips_merge);
+    /* sprint-4 follow-up Story F.1 — render wm->self_model.capabilities. */
+    HU_RUN_TEST(bridge_render_with_self_capabilities_emits_section);
+    HU_RUN_TEST(bridge_render_without_tools_omits_capabilities_section);
+    HU_RUN_TEST(bridge_render_capabilities_dedups_and_caps_at_six);
 #endif
 }
