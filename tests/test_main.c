@@ -535,6 +535,10 @@ void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
 void run_typing_simulator_tests(void);
 void run_channel_cli_tests(void);
+void run_channel_telegram_tests(void);
+void run_channel_slack_tests(void);
+void run_channel_discord_tests(void);
+void run_channel_imessage_tests(void);
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -1109,6 +1113,10 @@ int main(int argc, char **argv) {
     run_canvas_render_tests();
     run_typing_simulator_tests();
     run_channel_cli_tests();
+    run_channel_telegram_tests();
+    run_channel_slack_tests();
+    run_channel_discord_tests();
+    run_channel_imessage_tests();
 
     HU_TEST_REPORT();
     HU_TEST_EXIT();

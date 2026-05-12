@@ -1,3 +1,4 @@
+#include "human/agent/typing_simulator.h"
 #include "human/channels/discord.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
@@ -28,6 +29,8 @@ typedef struct hu_discord_ctx {
     char *token;
     size_t token_len;
     bool running;
+    /* Persona handle for typing-profile resolution. NULL ⇒ direct send. */
+    const void *persona;
     /* Polling: channel IDs to monitor */
     char **channel_ids;
     size_t channel_ids_count;
@@ -109,9 +112,10 @@ static void discord_stop(void *ctx) {
         c->running = false;
 }
 
-static hu_error_t discord_send(void *ctx, const char *target, size_t target_len,
-                               const char *message, size_t message_len, const char *const *media,
-                               size_t media_count) {
+/* Raw wire-send: actual HTTP delivery, no typing simulation. */
+static hu_error_t discord_raw_send(void *ctx, const char *target, size_t target_len,
+                                   const char *message, size_t message_len,
+                                   const char *const *media, size_t media_count) {
     (void)media;
     (void)media_count;
     hu_discord_ctx_t *c = (hu_discord_ctx_t *)ctx;
@@ -443,6 +447,38 @@ static hu_error_t discord_start_typing(void *ctx, const char *recipient, size_t 
         return HU_ERR_CHANNEL_SEND;
     return HU_OK;
 #endif
+}
+
+/* Raw vtable for hu_typing_send: exposes start/stop_typing so the simulator
+ * pulses POST /channels/{id}/typing on the WPM schedule. Discord's typing
+ * indicator auto-expires in ~10s; the 4s refresh keeps it alive. Rate-safety:
+ * max 4 POST /typing calls per message, well within Discord's 5req/5s limit. */
+static const hu_channel_vtable_t discord_raw_vtable = {
+    .send         = discord_raw_send,
+    .start_typing = discord_start_typing,
+    .stop_typing  = discord_stop_typing,
+};
+
+/* Public send entry (vtable). Routes through hu_typing_send when persona is
+ * attached; falls back to direct send otherwise. */
+static hu_error_t discord_send(void *ctx, const char *target, size_t target_len,
+                               const char *message, size_t message_len,
+                               const char *const *media, size_t media_count) {
+    hu_discord_ctx_t *c = (hu_discord_ctx_t *)ctx;
+    if (!c || !c->persona)
+        return discord_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_typing_profile_t profile;
+    hu_typing_profile_resolve(c->persona, "discord", &profile);
+    if (profile.instant)
+        return discord_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_channel_t raw_ch = {.ctx = ctx, .vtable = &discord_raw_vtable};
+    hu_error_t   err    = hu_typing_send(&raw_ch, target, target_len, message, message_len,
+                                         media, media_count, &profile);
+    if (err != HU_OK)
+        return discord_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+    return HU_OK;
 }
 
 static hu_error_t discord_react(void *ctx, const char *target, size_t target_len, int64_t message_id,
@@ -1192,6 +1228,13 @@ hu_error_t hu_discord_test_inject_mock_full(hu_channel_t *ch, const char *sessio
     return HU_OK;
 }
 #endif
+
+void hu_discord_set_persona(hu_channel_t *ch, const void *persona) {
+    if (!ch || !ch->ctx || ch->vtable != &discord_vtable)
+        return;
+    hu_discord_ctx_t *c = (hu_discord_ctx_t *)ch->ctx;
+    c->persona = persona;
+}
 
 void hu_discord_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {

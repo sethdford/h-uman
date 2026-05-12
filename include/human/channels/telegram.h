@@ -18,6 +18,11 @@ hu_error_t hu_telegram_create_ex(hu_allocator_t *alloc, const char *token, size_
 void hu_telegram_set_allowlist(hu_channel_t *ch, const char *const *allow_from,
                                size_t allow_from_count);
 
+/* Attach a persona handle for WPM-based typing simulation on outbound sends.
+ * NULL ⇒ direct send (legacy behavior). Persona is opaque so this header
+ * does not pull in persona.h. Must be called after hu_telegram_create. */
+void hu_telegram_set_persona(hu_channel_t *ch, const void *persona);
+
 const char *hu_telegram_commands_help(void);
 
 char *hu_telegram_escape_markdown_v2(hu_allocator_t *alloc, const char *text, size_t len,

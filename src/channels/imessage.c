@@ -1,3 +1,4 @@
+#include "human/agent/typing_simulator.h"
 #include "human/core/log.h"
 #include "human/channels/imessage.h"
 #include "human/channel_loop.h"
@@ -163,6 +164,8 @@ typedef struct hu_imessage_ctx {
     char typing_last_target[128];
     size_t typing_last_target_len;
     _Atomic bool typing_active;
+    /* Persona handle for typing-profile resolution. NULL ⇒ direct send. */
+    const void *persona;
     bool use_imsg_cli;
     bool imsg_cli_checked;
     bool has_imsg_cli;
@@ -1093,166 +1096,15 @@ unsigned int hu_imessage_typing_duration(size_t msg_len, uint32_t seed) {
     return base;
 }
 
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-/*
- * Typing indicator with chat ID caching and group chat support.
- * Caches target to skip expensive chat iteration on repeat sends.
- * Skipped when the daemon already called start_typing (typing_active).
- */
-static void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_len,
-                                     size_t message_len) {
-    if (!c || atomic_load(&c->typing_active))
-        return;
-
-    unsigned int delay_ms =
-        hu_imessage_typing_duration(message_len, (uint32_t)time(NULL) ^ (uint32_t)message_len);
-
-    size_t tgt_esc_cap = tgt_len * 2 + 1;
-    if (tgt_esc_cap > 4096)
-        return;
-
-    char tgt_esc[4096];
-    escape_for_applescript(tgt_esc, sizeof(tgt_esc), tgt, tgt_len);
-
-    if (delay_ms <= 3000) {
-        bool same_target = (c->typing_last_target_len == tgt_len && tgt_len > 0 &&
-                            memcmp(c->typing_last_target, tgt, tgt_len) == 0);
-        if (tgt_len > 0 && tgt_len < sizeof(c->typing_last_target)) {
-            memcpy(c->typing_last_target, tgt, tgt_len);
-            c->typing_last_target[tgt_len] = '\0';
-            c->typing_last_target_len = tgt_len;
-        }
-
-        char typing_script[1024];
-        int ts_n;
-        if (same_target) {
-            ts_n = snprintf(typing_script, sizeof(typing_script),
-                            "tell application \"Messages\" to activate\n"
-                            "delay 0.2\n"
-                            "tell application \"System Events\" to tell process \"Messages\"\n"
-                            "  keystroke \".\"\n"
-                            "  delay %.1f\n"
-                            "  keystroke \"a\" using command down\n"
-                            "  key code 51\n"
-                            "end tell",
-                            (float)delay_ms / 1000.0f);
-        } else {
-            ts_n = snprintf(typing_script, sizeof(typing_script),
-                            "tell application \"Messages\"\n"
-                            "  activate\n"
-                            "  set targetHandle to \"%s\"\n"
-                            "  set targetChat to missing value\n"
-                            "  repeat with c in every chat\n"
-                            "    try\n"
-                            "      repeat with p in participants of c\n"
-                            "        if handle of p is targetHandle then\n"
-                            "          set targetChat to c\n"
-                            "          exit repeat\n"
-                            "        end if\n"
-                            "      end repeat\n"
-                            "    end try\n"
-                            "    if targetChat is not missing value then exit repeat\n"
-                            "  end repeat\n"
-                            "end tell\n"
-                            "delay 0.3\n"
-                            "tell application \"System Events\" to tell process \"Messages\"\n"
-                            "  keystroke \".\"\n"
-                            "  delay %.1f\n"
-                            "  keystroke \"a\" using command down\n"
-                            "  key code 51\n"
-                            "end tell",
-                            tgt_esc, (float)delay_ms / 1000.0f);
-        }
-        if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
-            const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
-            hu_run_result_t ts_result = {0};
-            hu_error_t ts_err = hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
-            hu_run_result_free(c->alloc, &ts_result);
-            if (ts_err != HU_OK && getenv("HU_DEBUG"))
-                hu_log_error("imessage", NULL, "typing indicator failed (accessibility?)");
-        }
-    } else {
-        /* Longer messages: re-trigger typing indicator every ~2.5s so the
-         * bubble stays visible for the entire simulated composing period. */
-        bool same_target = (c->typing_last_target_len == tgt_len && tgt_len > 0 &&
-                            memcmp(c->typing_last_target, tgt, tgt_len) == 0);
-        if (tgt_len > 0 && tgt_len < sizeof(c->typing_last_target)) {
-            memcpy(c->typing_last_target, tgt, tgt_len);
-            c->typing_last_target[tgt_len] = '\0';
-            c->typing_last_target_len = tgt_len;
-        }
-
-        unsigned int remaining = delay_ms;
-        while (remaining > 0) {
-            unsigned int chunk = remaining > 2500 ? 2500 : remaining;
-            char typing_script[1024];
-            int ts_n;
-            if (same_target) {
-                ts_n = snprintf(typing_script, sizeof(typing_script),
-                                "tell application \"Messages\" to activate\n"
-                                "delay 0.2\n"
-                                "tell application \"System Events\" to tell process "
-                                "\"Messages\"\n"
-                                "  keystroke \".\"\n"
-                                "  delay %.1f\n"
-                                "  keystroke \"a\" using command down\n"
-                                "  key code 51\n"
-                                "end tell",
-                                (float)chunk / 1000.0f);
-            } else {
-                ts_n = snprintf(typing_script, sizeof(typing_script),
-                                "tell application \"Messages\"\n"
-                                "  activate\n"
-                                "  set targetHandle to \"%s\"\n"
-                                "  set targetChat to missing value\n"
-                                "  repeat with c in every chat\n"
-                                "    try\n"
-                                "      repeat with p in participants of c\n"
-                                "        if handle of p is targetHandle then\n"
-                                "          set targetChat to c\n"
-                                "          exit repeat\n"
-                                "        end if\n"
-                                "      end repeat\n"
-                                "    end try\n"
-                                "    if targetChat is not missing value then exit repeat\n"
-                                "  end repeat\n"
-                                "end tell\n"
-                                "delay 0.3\n"
-                                "tell application \"System Events\" to tell process "
-                                "\"Messages\"\n"
-                                "  keystroke \".\"\n"
-                                "  delay %.1f\n"
-                                "  keystroke \"a\" using command down\n"
-                                "  key code 51\n"
-                                "end tell",
-                                tgt_esc, (float)chunk / 1000.0f);
-                same_target = true;
-            }
-            if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
-                const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
-                hu_run_result_t ts_result = {0};
-                hu_error_t ts_err =
-                    hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
-                hu_run_result_free(c->alloc, &ts_result);
-                if (ts_err != HU_OK) {
-                    usleep((unsigned int)(remaining) * 1000);
-                    break;
-                }
-            } else {
-                usleep((unsigned int)(remaining) * 1000);
-                break;
-            }
-            remaining -= chunk;
-        }
-    }
-}
-#endif
 
 #endif
 
-static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
-                                const char *message, size_t message_len, const char *const *media,
-                                size_t media_count) {
+/* Raw wire-send: actual AppleScript/imsg-CLI delivery, no typing simulation.
+ * The legacy imessage_simulate_typing inline call has been removed; the WPM
+ * schedule is now driven by hu_typing_send via imessage_start_typing vtable. */
+static hu_error_t imessage_raw_send(void *ctx, const char *target, size_t target_len,
+                                    const char *message, size_t message_len,
+                                    const char *const *media, size_t media_count) {
 #if HU_IS_TEST
     (void)target;
     (void)target_len;
@@ -1377,8 +1229,6 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                 clean[message_len] = '\0';
             }
         }
-
-        imessage_simulate_typing(c, tgt, tgt_len, message_len);
 
         {
             if (c->use_imsg_cli && imsg_cli_available(c)) {
@@ -3263,6 +3113,37 @@ static hu_error_t imessage_stop_typing(void *ctx, const char *recipient,
 #endif
 }
 
+/* Raw vtable for hu_typing_send: exposes start/stop_typing so the simulator
+ * drives the native AX/IMCore/AppleScript typing indicator on the WPM schedule.
+ * Rate-safety: max 4 indicator refreshes per message (every 4 s, 15 s ceiling). */
+static const hu_channel_vtable_t imessage_raw_vtable = {
+    .send         = imessage_raw_send,
+    .start_typing = imessage_start_typing,
+    .stop_typing  = imessage_stop_typing,
+};
+
+/* Public send entry (vtable). Routes through hu_typing_send when persona is
+ * attached; falls back to direct send otherwise. */
+static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
+                                const char *message, size_t message_len,
+                                const char *const *media, size_t media_count) {
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
+    if (!c || !c->persona)
+        return imessage_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_typing_profile_t profile;
+    hu_typing_profile_resolve(c->persona, "imessage", &profile);
+    if (profile.instant)
+        return imessage_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_channel_t raw_ch = {.ctx = ctx, .vtable = &imessage_raw_vtable};
+    hu_error_t   err    = hu_typing_send(&raw_ch, target, target_len, message, message_len,
+                                         media, media_count, &profile);
+    if (err != HU_OK)
+        return imessage_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+    return HU_OK;
+}
+
 static const hu_channel_vtable_t imessage_vtable = {
     .start = imessage_start,
     .stop = imessage_stop,
@@ -3359,6 +3240,13 @@ bool hu_imessage_is_configured(hu_channel_t *ch) {
         return false;
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     return c->default_target != NULL && c->default_target_len > 0;
+}
+
+void hu_imessage_set_persona(hu_channel_t *ch, const void *persona) {
+    if (!ch || !ch->ctx || ch->vtable != &imessage_vtable)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    c->persona = persona;
 }
 
 void hu_imessage_set_use_imsg_cli(hu_channel_t *ch, bool use) {

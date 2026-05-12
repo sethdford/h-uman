@@ -2,6 +2,7 @@
  * Slack channel — chat.postMessage for outbound, auth.test for bot identity.
  * Supports thread replies (channel_id:thread_ts), typing, markdown→mrkdwn.
  */
+#include "human/agent/typing_simulator.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
 #include "human/channels/slack.h"
@@ -45,6 +46,8 @@ typedef struct hu_slack_ctx {
     char **channel_ids;
     size_t channel_ids_count;
     char **last_ts;
+    /* Persona handle for typing-profile resolution. NULL ⇒ direct send. */
+    const void *persona;
     /* Streaming: message under edit */
     char *stream_ts;
     char *stream_text;
@@ -499,8 +502,10 @@ static void slack_stop(void *ctx) {
         c->running = false;
 }
 
-static hu_error_t slack_send(void *ctx, const char *target, size_t target_len, const char *message,
-                             size_t message_len, const char *const *media, size_t media_count) {
+/* Raw wire-send: actual HTTP delivery, no typing simulation. */
+static hu_error_t slack_raw_send(void *ctx, const char *target, size_t target_len,
+                                 const char *message, size_t message_len,
+                                 const char *const *media, size_t media_count) {
     (void)media;
     (void)media_count;
     hu_slack_ctx_t *c = (hu_slack_ctx_t *)ctx;
@@ -650,6 +655,37 @@ static hu_error_t slack_stop_typing(void *ctx, const char *recipient, size_t rec
         return HU_OK;
 
     return slack_set_thread_status(c, channel, channel_len, thread_ts, thread_ts_len, "", 0);
+}
+
+/* Raw vtable for hu_typing_send: exposes start/stop_typing so the simulator
+ * pulses the native assistant status indicator on the WPM schedule. */
+static const hu_channel_vtable_t slack_raw_vtable = {
+    .send         = slack_raw_send,
+    .start_typing = slack_start_typing,
+    .stop_typing  = slack_stop_typing,
+};
+
+/* Public send entry (vtable). Routes through hu_typing_send when persona is
+ * attached. Rate-safety: the simulator calls start_typing at most every 4 s
+ * (≤ 4 times per message), well within Slack Tier-1 rate limits. */
+static hu_error_t slack_send(void *ctx, const char *target, size_t target_len,
+                             const char *message, size_t message_len,
+                             const char *const *media, size_t media_count) {
+    hu_slack_ctx_t *c = (hu_slack_ctx_t *)ctx;
+    if (!c || !c->persona)
+        return slack_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_typing_profile_t profile;
+    hu_typing_profile_resolve(c->persona, "slack", &profile);
+    if (profile.instant)
+        return slack_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_channel_t raw_ch = {.ctx = ctx, .vtable = &slack_raw_vtable};
+    hu_error_t   err    = hu_typing_send(&raw_ch, target, target_len, message, message_len,
+                                         media, media_count, &profile);
+    if (err != HU_OK)
+        return slack_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+    return HU_OK;
 }
 
 static const char *slack_name(void *ctx) {
@@ -1586,6 +1622,13 @@ hu_error_t hu_slack_create_ex(hu_allocator_t *alloc, const char *token, size_t t
 hu_error_t hu_slack_create(hu_allocator_t *alloc, const char *token, size_t token_len,
                            hu_channel_t *out) {
     return hu_slack_create_ex(alloc, token, token_len, NULL, 0, out);
+}
+
+void hu_slack_set_persona(hu_channel_t *ch, const void *persona) {
+    if (!ch || !ch->ctx || ch->vtable != &slack_vtable)
+        return;
+    hu_slack_ctx_t *c = (hu_slack_ctx_t *)ch->ctx;
+    c->persona = persona;
 }
 
 void hu_slack_destroy(hu_channel_t *ch) {

@@ -20,6 +20,10 @@ hu_error_t hu_discord_on_webhook(void *channel_ctx, hu_allocator_t *alloc, const
 hu_error_t hu_discord_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                            size_t max_msgs, size_t *out_count);
 
+/* Attach a persona handle for WPM-based typing simulation on outbound sends.
+ * NULL ⇒ direct send (legacy behavior). Must be called after hu_discord_create. */
+void hu_discord_set_persona(hu_channel_t *ch, const void *persona);
+
 void hu_discord_destroy(hu_channel_t *ch);
 
 #if HU_IS_TEST

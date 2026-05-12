@@ -2430,6 +2430,10 @@ set(HU_TEST_SOURCES
     tests/test_markdown_loader.c
     tests/test_typing_simulator.c
     tests/test_channel_cli.c
+    tests/test_channel_telegram.c
+    tests/test_channel_slack.c
+    tests/test_channel_discord.c
+    tests/test_channel_imessage.c
     tests/test_mcp_http_integration.c
     tests/test_self_improve.c
     tests/test_sycophancy_guard.c

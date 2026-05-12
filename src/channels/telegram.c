@@ -2,6 +2,7 @@
  * Telegram channel — Bot API with long-polling (getUpdates).
  * Send/receive, media, commands, smart splitting, typing, policy.
  */
+#include "human/agent/typing_simulator.h"
 #include "human/channels/telegram.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
@@ -100,6 +101,10 @@ typedef struct hu_telegram_ctx {
     /* Policy: NULL or count 0 = allow all; otherwise check allowlist */
     const char *const *allow_from;
     size_t allow_from_count;
+    /* Persona handle for typing-profile resolution. NULL ⇒ direct send
+     * (legacy behavior). Opaque void * so this file does not pull in
+     * persona.h; see hu_typing_profile_resolve for the casting contract. */
+    const void *persona;
     /* Streaming: message under edit, accumulated text */
     int64_t stream_message_id;
     char *stream_text;
@@ -736,9 +741,13 @@ static void telegram_stop(void *ctx) {
         c->running = false;
 }
 
-static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len,
-                                const char *message, size_t message_len, const char *const *media,
-                                size_t media_count) {
+/* Raw wire-send: actual HTTP delivery, no typing simulation. This is the
+ * callback that hu_typing_send invokes after the WPM-based budget elapses.
+ * Keeping it separate from the public send entry avoids recursion:
+ *   telegram_send → hu_typing_send → telegram_raw_send (NOT telegram_send). */
+static hu_error_t telegram_raw_send(void *ctx, const char *target, size_t target_len,
+                                    const char *message, size_t message_len,
+                                    const char *const *media, size_t media_count) {
     (void)media;
     (void)media_count;
     hu_telegram_ctx_t *c = (hu_telegram_ctx_t *)ctx;
@@ -759,9 +768,6 @@ static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len
         return HU_OK;
     }
 #else
-    /* Typing indicator (best-effort) */
-    send_typing_action(c, target, target_len);
-
     char url_buf[512];
     int n = build_api_url(url_buf, sizeof(url_buf), c->token, c->token_len, "sendMessage");
     if (n < 0 || (size_t)n >= sizeof(url_buf))
@@ -837,6 +843,37 @@ static hu_error_t telegram_stop_typing(void *ctx, const char *recipient, size_t 
     (void)recipient;
     (void)recipient_len;
     /* Telegram has no stop-typing API; typing auto-expires */
+    return HU_OK;
+}
+
+/* Raw vtable used solely as the hu_typing_send callback target. Exposes
+ * start_typing/stop_typing so hu_channel_supports_typing returns true and the
+ * simulator pulses the native sendChatAction on the WPM schedule. */
+static const hu_channel_vtable_t telegram_raw_vtable = {
+    .send         = telegram_raw_send,
+    .start_typing = telegram_start_typing,
+    .stop_typing  = telegram_stop_typing,
+};
+
+/* Public send entry (vtable). Routes through hu_typing_send when a persona is
+ * attached, preserving byte-for-byte legacy behavior when it is not. */
+static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len,
+                                const char *message, size_t message_len,
+                                const char *const *media, size_t media_count) {
+    hu_telegram_ctx_t *c = (hu_telegram_ctx_t *)ctx;
+    if (!c || !c->persona)
+        return telegram_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_typing_profile_t profile;
+    hu_typing_profile_resolve(c->persona, "telegram", &profile);
+    if (profile.instant)
+        return telegram_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_channel_t raw_ch = {.ctx = ctx, .vtable = &telegram_raw_vtable};
+    hu_error_t   err    = hu_typing_send(&raw_ch, target, target_len, message, message_len,
+                                         media, media_count, &profile);
+    if (err != HU_OK)
+        return telegram_raw_send(ctx, target, target_len, message, message_len, media, media_count);
     return HU_OK;
 }
 
@@ -1226,6 +1263,13 @@ void hu_telegram_set_allowlist(hu_channel_t *ch, const char *const *allow_from,
     hu_telegram_ctx_t *c = (hu_telegram_ctx_t *)ch->ctx;
     c->allow_from = allow_from;
     c->allow_from_count = allow_from_count;
+}
+
+void hu_telegram_set_persona(hu_channel_t *ch, const void *persona) {
+    if (!ch || !ch->ctx || ch->vtable != &telegram_vtable)
+        return;
+    hu_telegram_ctx_t *c = (hu_telegram_ctx_t *)ch->ctx;
+    c->persona = persona;
 }
 
 const char *hu_telegram_commands_help(void) {
