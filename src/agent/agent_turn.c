@@ -1387,12 +1387,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         /* Story B (sprint-4 follow-up): bind persona context so the loader's
          * supplementary graph render runs with persona-grounded ToM and the
          * channel-aware pragmatics digest. */
-        hu_persona_context_t loader_pctx;
+        hu_persona_context_t loader_pctx = {0};
         if (agent->persona) {
             loader_pctx.persona = agent->persona;
             loader_pctx.channel = agent->active_channel;
             loader_pctx.channel_len = agent->active_channel_len;
             loader_pctx.delta_limit = 8;
+            loader_pctx.tools = agent->tools;
+            loader_pctx.tools_count = agent->tools_count;
             hu_memory_loader_set_persona_context(&loader, &loader_pctx);
         }
         hu_error_t load_err = hu_memory_loader_load(
@@ -3500,13 +3502,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             /* Story B (sprint-4 follow-up): thread persona context so the
              * bridge's persona-merge runs and interaction_style reaches the
              * rendered prompt. Previously this passed NULL → merge skipped. */
-            hu_persona_context_t pctx;
+            hu_persona_context_t pctx = {0};
             const hu_persona_context_t *pctx_p = NULL;
             if (agent->persona) {
                 pctx.persona = agent->persona;
                 pctx.channel = agent->active_channel;
                 pctx.channel_len = agent->active_channel_len;
                 pctx.delta_limit = 8;
+                pctx.tools = agent->tools;
+                pctx.tools_count = agent->tools_count;
                 pctx_p = &pctx;
             }
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
