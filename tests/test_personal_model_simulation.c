@@ -691,6 +691,128 @@ static void simulation_b3_thousand_turn_save_load_after_stress(void) {
 }
 
 /* ─────────────────────────────────────────────────────────────────── */
+/*  Story B4 — Save/load round-trip AFTER long simulation              */
+/* ─────────────────────────────────────────────────────────────────── */
+
+/* Compare two models at the public-field level. Used by both B4
+ * cycles. Asserts every counter, every fact identity, and every
+ * style axis matches byte-for-byte (within float epsilon). */
+static void b4_assert_models_equivalent(const hu_personal_model_t *a,
+                                        const hu_personal_model_t *b) {
+    HU_ASSERT_EQ((unsigned)a->interaction_count, (unsigned)b->interaction_count);
+    HU_ASSERT_EQ((unsigned)a->fact_count, (unsigned)b->fact_count);
+    HU_ASSERT_EQ((unsigned)a->topic_count, (unsigned)b->topic_count);
+    HU_ASSERT_EQ((unsigned)a->goal_count, (unsigned)b->goal_count);
+    HU_ASSERT_EQ((unsigned)a->style.sample_count, (unsigned)b->style.sample_count);
+    HU_ASSERT_EQ((long long)a->created_at, (long long)b->created_at);
+    HU_ASSERT_EQ((long long)a->updated_at, (long long)b->updated_at);
+    HU_ASSERT_EQ((long long)a->style.last_observed_at,
+                 (long long)b->style.last_observed_at);
+    HU_ASSERT_EQ((unsigned)a->version, (unsigned)b->version);
+
+    for (size_t i = 0; i < a->fact_count; i++) {
+        const hu_heuristic_fact_t *fa = &a->facts[i];
+        const hu_heuristic_fact_t *fb = &b->facts[i];
+        HU_ASSERT_STR_EQ(fa->subject, fb->subject);
+        HU_ASSERT_STR_EQ(fa->predicate, fb->predicate);
+        HU_ASSERT_STR_EQ(fa->object, fb->object);
+        HU_ASSERT_FLOAT_EQ(fa->confidence, fb->confidence, 0.0001f);
+        HU_ASSERT_EQ((long long)fa->last_seen_at, (long long)fb->last_seen_at);
+    }
+
+    HU_ASSERT_FLOAT_EQ(a->style.formality, b->style.formality, 0.0001f);
+    HU_ASSERT_FLOAT_EQ(a->style.verbosity, b->style.verbosity, 0.0001f);
+    HU_ASSERT_FLOAT_EQ(a->style.emoji_frequency, b->style.emoji_frequency, 0.0001f);
+    HU_ASSERT_FLOAT_EQ(a->style.humor_receptivity, b->style.humor_receptivity, 0.0001f);
+    HU_ASSERT_FLOAT_EQ(a->style.lowercase_ratio, b->style.lowercase_ratio, 0.0001f);
+    HU_ASSERT_FLOAT_EQ(a->style.abbreviation_ratio, b->style.abbreviation_ratio, 0.0001f);
+}
+
+static void simulation_b4_save_load_after_50_turns_round_trips_state(void) {
+    hu_personal_model_t source;
+    hu_personal_model_init(&source);
+    sim_run_through(&source, k_simulation_50turns_count);
+
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/sprint4_b4_pm_%d.bin", getpid());
+
+    HU_ASSERT_EQ(hu_personal_model_save(&source, path), HU_OK);
+
+    hu_personal_model_t loaded;
+    hu_personal_model_init(&loaded);
+    HU_ASSERT_EQ(hu_personal_model_load(&loaded, path), HU_OK);
+
+    b4_assert_models_equivalent(&source, &loaded);
+
+    /* Build prompt on both — must be byte-identical. */
+    char prompt_source[8192];
+    char prompt_loaded[8192];
+    size_t n_src = hu_personal_model_build_prompt(&source, prompt_source,
+                                                  sizeof(prompt_source));
+    size_t n_load = hu_personal_model_build_prompt(&loaded, prompt_loaded,
+                                                   sizeof(prompt_loaded));
+    HU_ASSERT_EQ((unsigned)n_src, (unsigned)n_load);
+    HU_ASSERT_STR_EQ(prompt_source, prompt_loaded);
+
+    unlink(path);
+}
+
+static void simulation_b4_two_cycle_save_load_preserves_state(void) {
+    /* Cycle 1: run B1 → save → load → check equivalent.
+     * Cycle 2: run B1 again on the loaded model (so interaction
+     * count doubles, second pass refreshes existing facts) →
+     * save → load → check equivalent.
+     *
+     * Pins that save/load is idempotent across multiple cycles —
+     * a corruption in the persistence layer that only manifested
+     * after a load would surface here, where the existing
+     * `personal_model_save_load_round_trips` test (single cycle on
+     * a fresh model) wouldn't catch it. */
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/sprint4_b4_two_%d.bin", getpid());
+
+    /* Cycle 1 */
+    hu_personal_model_t cycle1_source;
+    hu_personal_model_init(&cycle1_source);
+    sim_run_through(&cycle1_source, k_simulation_50turns_count);
+    HU_ASSERT_EQ(hu_personal_model_save(&cycle1_source, path), HU_OK);
+
+    hu_personal_model_t cycle1_loaded;
+    hu_personal_model_init(&cycle1_loaded);
+    HU_ASSERT_EQ(hu_personal_model_load(&cycle1_loaded, path), HU_OK);
+    b4_assert_models_equivalent(&cycle1_source, &cycle1_loaded);
+
+    size_t cycle1_facts = cycle1_loaded.fact_count;
+    size_t cycle1_topics = cycle1_loaded.topic_count;
+    HU_ASSERT_TRUE(cycle1_facts > 0);
+
+    /* Cycle 2: run another 50 turns on the loaded model. */
+    sim_run_through(&cycle1_loaded, k_simulation_50turns_count);
+    /* interaction_count should now be ~100. The exact number depends
+     * on whether ingest counted agent turns the same way both cycles
+     * — assert 100 (the simulator counts every turn). */
+    HU_ASSERT_EQ((unsigned)cycle1_loaded.interaction_count, 100U);
+    /* Style sample_count should also have ~doubled (only user turns
+     * count). */
+    HU_ASSERT_TRUE(cycle1_loaded.style.sample_count >
+                   cycle1_source.style.sample_count);
+
+    /* Save the cycle-2 model and reload. */
+    HU_ASSERT_EQ(hu_personal_model_save(&cycle1_loaded, path), HU_OK);
+    hu_personal_model_t cycle2_loaded;
+    hu_personal_model_init(&cycle2_loaded);
+    HU_ASSERT_EQ(hu_personal_model_load(&cycle2_loaded, path), HU_OK);
+
+    b4_assert_models_equivalent(&cycle1_loaded, &cycle2_loaded);
+
+    /* Topic count survives — even when facts hit dup paths in the
+     * second cycle, topic bumping is idempotent. */
+    HU_ASSERT_TRUE(cycle2_loaded.topic_count >= cycle1_topics);
+
+    unlink(path);
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
 /*  Test runner                                                        */
 /* ─────────────────────────────────────────────────────────────────── */
 
@@ -708,4 +830,6 @@ void run_personal_model_simulation_tests(void) {
     HU_RUN_TEST(simulation_b2_prompt_shrinks_after_long_drift);
     HU_RUN_TEST(simulation_b3_thousand_turn_invariants);
     HU_RUN_TEST(simulation_b3_thousand_turn_save_load_after_stress);
+    HU_RUN_TEST(simulation_b4_save_load_after_50_turns_round_trips_state);
+    HU_RUN_TEST(simulation_b4_two_cycle_save_load_preserves_state);
 }
