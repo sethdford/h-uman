@@ -406,6 +406,187 @@ static void guard_passes_normal_asterisk_text(void) {
     HU_ASSERT(out == raw);
 }
 
+/* ── Sprint 29 — CoT / prompt-context leak detectors (G1/G2/G3) ───────
+ *
+ * Production root-cause: 2026-05-12, the live service-loop daemon sent
+ * a 979-byte CoT / prompt-context dump to a real human contact via
+ * iMessage. Primary guard returned REWROTE (stripped 82 bytes of leading
+ * whitespace) and let 897 bytes of model self-narration pass.
+ *
+ * These tests pin the detection of the three structural failure
+ * signatures: numbered analytical-list dump (G1), model self-talk /
+ * scene-direction echo (G2), and third-person-about-the-user double-
+ * pattern (G3). See sprints/sprint-29/stories.md for the full design. */
+
+static void guard_rejects_2026_05_12_brea_leak_verbatim(void) {
+    /* Reconstructed from the 979-byte payload that landed at a real
+     * human contact (+14848158444) on 2026-05-12 17:08 UTC-4. The
+     * leading `1.  ` was already stripped by an upstream pass, so the
+     * wire content begins with ` A link...` — but every detector below
+     * (G1, G2, G3) would still fire independently. */
+    const char *raw =
+        " A link (presumably to a business or quote).\n"
+        "        2.  \"King Carpet and Flooring\" (Business name).\n"
+        "        3.  \"Noon tmr\" (Appointment time).\n"
+        "        4.  Instruction to ignore a \"consumer notice\" question.\n"
+        "        5.  Venmo handle (@fegofficial) and a price ($25) for a photographer today.\n"
+        "\n"
+        " Seth is a technical professional, lives alone with a cat.\n"
+        " He's talking to Brea (romantic interest, casual, early stage).\n"
+        " The conversation has suddenly pivoted to logistics (carpet repair, "
+        "consumer notices, photographers). This feels like a mix-up or a "
+        "very specific coordinated effort.\n"
+        " Seth just \"glitched\" in the previous message, admitting he was "
+        "off-track.\n"
+        " Now the user is bombarding him with logistics.\n"
+        "\n"
+        " Professional, slightly skeptical (per scene direction, though that "
+        "was for a previous prompt, I should still maintain the persona).\n"
+        " Wait, the prompt says \"Professional, slightly skeptical, ask for "
+        "clarification on why they\"";
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(out == NULL);
+    HU_ASSERT_EQ(out_len, 0u);
+    HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* G1 — numbered analytical-list dump.  3+ long items, no reply tail. */
+static void guard_rejects_numbered_analysis_dump(void) {
+    const char *raw =
+        "1.  Project Apollo (NASA's lunar landing program from 1961-1972).\n"
+        "2.  Project Gemini (preceded Apollo, ran 1961-1966 with two-person crews).\n"
+        "3.  Project Mercury (the first US human spaceflight program 1958-1963).\n";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* G1 — handles `1)` paren form too (defensive — model could emit either). */
+static void guard_rejects_numbered_analysis_paren_form(void) {
+    const char *raw =
+        "1) The first analytical observation is fairly long and detailed here.\n"
+        "2) The second analytical observation also runs well over thirty chars.\n"
+        "3) The third analytical observation continues the structured analysis.\n";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    HU_ASSERT_EQ(hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+}
+
+/* G2 — model self-talk / scene-direction echo. Each pattern, in
+ * isolation, is a hard reject because none has a legit human-reply
+ * use case. */
+static void guard_rejects_self_talk_substrings(void) {
+    static const char *cases[] = {
+        "Yeah, the prompt says I should reply briefly.",
+        "Wait, the prompt asked something different earlier.",
+        "Sure, but I should still maintain a casual tone here.",
+        "Hey (per scene direction), let's keep this short.",
+        "OK, per the scene direction, brief is better.",
+        "The user is bombarding me with questions today.",
+    };
+    const size_t n = sizeof(cases) / sizeof(cases[0]);
+    for (size_t i = 0; i < n; i++) {
+        hu_allocator_t alloc = A();
+        char *out = NULL;
+        size_t out_len = 0;
+        hu_guard_outcome_t outcome = HU_GUARD_OK;
+        hu_guard_report_t report;
+        memset(&report, 0, sizeof(report));
+        HU_ASSERT_EQ(hu_response_guard_check(&alloc, cases[i], strlen(cases[i]), &out, &out_len,
+                                             &outcome, &report),
+                     HU_OK);
+        HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+        HU_ASSERT(report.detected_semantic_leak);
+    }
+}
+
+/* G3 — third-person-about-the-user. Two distinct patterns → REJECT. */
+static void guard_rejects_third_person_double_pattern(void) {
+    /* Two distinct G3 hits: "is a technical professional" + "lives alone with". */
+    const char *two_hits =
+        "Sure, sounds good. Seth is a technical professional, lives alone with a cat.";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check(&alloc, two_hits, strlen(two_hits), &out, &out_len,
+                                         &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* G3 — single hit must NOT trigger reject. A real human reply may
+ * legitimately say "He's talking to me later." */
+static void guard_passes_third_person_single_hit(void) {
+    const char *one_hit = "He's talking to me later, I'll let you know.";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_REJECT;
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, one_hit, strlen(one_hit), &out, &out_len, &outcome, NULL),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+    HU_ASSERT(out == one_hit);
+}
+
+/* Negatives — legit replies whose surface features superficially
+ * resemble the leak signatures but shouldn't trip any detector. */
+static void guard_passes_legit_replies_with_similar_surface_features(void) {
+    static const char *cases[] = {
+        /* "Wait, ..." without "the prompt" — legit. */
+        "Wait, what time tomorrow?",
+        /* Short legit numbered list — items < 30 chars each. */
+        "1. coffee\n2. lunch\n3. dinner",
+        /* Inline numbered mention — not at line starts. */
+        "first 1. coffee, then 2. lunch, then 3. dinner",
+        /* Single G3 hit only. */
+        "lives alone with my dog now",
+        /* Casual reply with no leak signatures. */
+        "lol yeah totally",
+        /* Single G2 lookalike — "the user is" without "bombarding". */
+        "the user is online now btw",
+    };
+    const size_t n = sizeof(cases) / sizeof(cases[0]);
+    for (size_t i = 0; i < n; i++) {
+        hu_allocator_t alloc = A();
+        char *out = NULL;
+        size_t out_len = 0;
+        hu_guard_outcome_t outcome = HU_GUARD_REJECT;
+        HU_ASSERT_EQ(hu_response_guard_check(&alloc, cases[i], strlen(cases[i]), &out, &out_len,
+                                             &outcome, NULL),
+                     HU_OK);
+        HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+        HU_ASSERT(out == cases[i]);
+    }
+}
+
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 void run_response_guard_tests(void) {
@@ -430,4 +611,13 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_strips_gemma4_untagged_reasoning);
     HU_RUN_TEST(guard_rejects_gemma4_reasoning_only);
     HU_RUN_TEST(guard_passes_normal_asterisk_text);
+
+    /* Sprint 29 — CoT / prompt-context leak detectors. */
+    HU_RUN_TEST(guard_rejects_2026_05_12_brea_leak_verbatim);
+    HU_RUN_TEST(guard_rejects_numbered_analysis_dump);
+    HU_RUN_TEST(guard_rejects_numbered_analysis_paren_form);
+    HU_RUN_TEST(guard_rejects_self_talk_substrings);
+    HU_RUN_TEST(guard_rejects_third_person_double_pattern);
+    HU_RUN_TEST(guard_passes_third_person_single_hit);
+    HU_RUN_TEST(guard_passes_legit_replies_with_similar_surface_features);
 }

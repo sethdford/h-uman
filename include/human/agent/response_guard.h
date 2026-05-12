@@ -51,6 +51,17 @@ typedef struct {
     bool stripped_harmony_tokens;
     bool stripped_thinking_block;
     bool detected_degenerate_repetition;
+    /* Sprint 29 — semantic leak class. Set when the response was rejected
+     * because it contained a chain-of-thought / prompt-context dump that
+     * earlier phases couldn't catch (no markup, no repetition):
+     *   G1. Numbered analytical-list dump (≥ 3 long numbered items).
+     *   G2. Model self-talk / scene-direction echo ("the prompt says",
+     *       "Wait, the prompt", "I should still maintain", etc.).
+     *   G3. Third-person-about-the-user double-pattern ("[Name] is a
+     *       [profession]", "He's talking to ...", "lives alone with ...",
+     *       etc. — ≥ 2 distinct hits).
+     * See `docs/postmortems/2026-05-12-cot-leak.md`. */
+    bool detected_semantic_leak;
     /* If rejected, the longest run length that triggered rejection. */
     size_t max_repetition_run;
     /* Number of bytes removed by sanitization (0 if rejected outright). */

@@ -55,6 +55,21 @@
  * unlikely to be degenerate model output anyway. */
 #define HU_GUARD_TOKEN_LEN_MAX 8
 
+/* Sprint 29 — numbered analytical-list dump detector thresholds.
+ *
+ * Calibrated against the 2026-05-12 leak (5 items, content lengths
+ * 32 / 32 / 52 / 72 / 45 chars) and against legitimate short numbered
+ * lists ("1. coffee\n2. lunch\n3. dinner" — items 6, 5, 6 chars).
+ *
+ * `LONG_THRESHOLD = 30` cleanly separates the two: every leak item is
+ * >= 32 chars; every legit short-list item is <= 12 chars.
+ *
+ * `MIN_ITEMS = 3` is the smallest count that distinguishes a real
+ * structured analytical dump from a one-off "as I said in (1) ..."
+ * casual mention. */
+#define HU_GUARD_NUMBERED_LONG_THRESHOLD 30
+#define HU_GUARD_NUMBERED_MIN_ITEMS      3
+
 /* Documented surface (handled by the catch-all <|...|> stripper, listed
  * here so future maintainers know what model formats we cover):
  *
@@ -177,6 +192,239 @@ size_t hu_response_guard_longest_token_run(const char *s, size_t len) {
         }
     }
     return best;
+}
+
+/* ── Sprint 29: semantic leak detectors (CoT / prompt-context dumps) ───
+ *
+ * Three failure classes that Phase 0/1/2 cannot catch because they have
+ * no markup signature and no repetition signature. They are all variants
+ * of "the model dumped its internal reasoning verbatim into the reply."
+ * Caught from a real production leak on 2026-05-12 to a real human
+ * contact via the live service-loop daemon. See docs/postmortems/. */
+
+/* Case-insensitive substring search. Returns true if `needle[0..nlen)`
+ * occurs anywhere in `hay[0..hlen)`. ASCII-only; we do not normalize
+ * unicode case here because every leak signature we match against is
+ * pure ASCII. */
+static bool hu_guard_ci_contains(const char *hay, size_t hlen, const char *needle, size_t nlen) {
+    if (nlen == 0)
+        return true;
+    if (hlen < nlen)
+        return false;
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        bool match = true;
+        for (size_t k = 0; k < nlen; k++) {
+            char a = hay[i + k];
+            char b = needle[k];
+            if (a >= 'A' && a <= 'Z')
+                a = (char)(a + 32);
+            if (b >= 'A' && b <= 'Z')
+                b = (char)(b + 32);
+            if (a != b) {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+            return true;
+    }
+    return false;
+}
+
+/* G1 — numbered analytical-list dump.
+ *
+ * Returns true if `s[0..len)` contains ≥ HU_GUARD_NUMBERED_MIN_ITEMS
+ * numbered list items (each on its own line, leading-whitespace tolerant)
+ * where each qualifying item has content length ≥
+ * HU_GUARD_NUMBERED_LONG_THRESHOLD chars.
+ *
+ * Shape recognized:    `<line-start>[ \t]*\d+[.)] [ \t]*CONTENT<\n>`
+ *
+ * Calibrated: legitimate short lists ("1. coffee\n2. lunch\n3. dinner")
+ * have content lengths 6/5/6 chars — well below the 30-char threshold.
+ * The 2026-05-12 leak items were 32/32/52/72/45 chars — well above. */
+static bool hu_guard_has_numbered_analysis_dump(const char *s, size_t len) {
+    if (len < 8)
+        return false;
+    int long_items = 0;
+    size_t pos = 0;
+    while (pos < len) {
+        /* Walk to the next line start unless we're already at one. */
+        if (pos > 0 && s[pos - 1] != '\n') {
+            const char *nl = (const char *)memchr(s + pos, '\n', len - pos);
+            if (!nl)
+                break;
+            pos = (size_t)(nl - s) + 1;
+            if (pos >= len)
+                break;
+        }
+        /* At a line start. Skip leading whitespace. */
+        while (pos < len && (s[pos] == ' ' || s[pos] == '\t'))
+            pos++;
+        if (pos >= len)
+            break;
+        size_t scan = pos;
+        /* Need 1+ digit. */
+        if (!(s[scan] >= '0' && s[scan] <= '9')) {
+            const char *nl = (const char *)memchr(s + pos, '\n', len - pos);
+            if (!nl)
+                break;
+            pos = (size_t)(nl - s) + 1;
+            continue;
+        }
+        while (scan < len && s[scan] >= '0' && s[scan] <= '9')
+            scan++;
+        /* Followed by `.` or `)`. */
+        if (scan >= len || (s[scan] != '.' && s[scan] != ')')) {
+            const char *nl = (const char *)memchr(s + pos, '\n', len - pos);
+            if (!nl)
+                break;
+            pos = (size_t)(nl - s) + 1;
+            continue;
+        }
+        scan++;
+        /* Followed by 1+ whitespace (space or tab). */
+        if (scan >= len || (s[scan] != ' ' && s[scan] != '\t')) {
+            const char *nl = (const char *)memchr(s + pos, '\n', len - pos);
+            if (!nl)
+                break;
+            pos = (size_t)(nl - s) + 1;
+            continue;
+        }
+        while (scan < len && (s[scan] == ' ' || s[scan] == '\t'))
+            scan++;
+        /* `scan` is now at the content start. Measure to end-of-line. */
+        const char *nl = (const char *)memchr(s + scan, '\n', len - scan);
+        size_t content_end = nl ? (size_t)(nl - s) : len;
+        size_t content_len = content_end - scan;
+        if (content_len >= HU_GUARD_NUMBERED_LONG_THRESHOLD) {
+            long_items++;
+            if (long_items >= HU_GUARD_NUMBERED_MIN_ITEMS)
+                return true;
+        }
+        pos = nl ? content_end + 1 : len;
+    }
+    return false;
+}
+
+/* G2 — model self-talk / scene-direction echo.
+ *
+ * These patterns have no legitimate human-to-human reply use case. A
+ * single hit is a hard reject. All six were present in the 2026-05-12
+ * leak; none can plausibly appear in a normal text message to a friend. */
+static bool hu_guard_has_self_talk_pattern(const char *s, size_t len) {
+    static const struct {
+        const char *pat;
+        size_t pat_len;
+    } patterns[] = {
+        {"the prompt says", 15},
+        {"wait, the prompt", 16},
+        {"i should still maintain", 23},
+        {"(per scene direction", 20},
+        {"per the scene direction", 23},
+        {"the user is bombarding", 22},
+    };
+    const size_t n = sizeof(patterns) / sizeof(patterns[0]);
+    for (size_t i = 0; i < n; i++) {
+        if (hu_guard_ci_contains(s, len, patterns[i].pat, patterns[i].pat_len))
+            return true;
+    }
+    return false;
+}
+
+/* G3 — third-person-about-the-user pattern counter.
+ *
+ * Returns the number of distinct third-person profile signals found.
+ * Single hits are ambiguous (a real reply might say "He's coming over").
+ * Two or more distinct signals is structural — that's a profile dump,
+ * not a casual reference.
+ *
+ * Each pattern is counted at most once even if it appears multiple
+ * times; we want pattern *diversity* as the signal. */
+static int hu_guard_count_third_person_patterns(const char *s, size_t len) {
+    static const char *const patterns[] = {
+        " is a technical professional",
+        " is a software engineer",
+        " is a chief architect",
+        " is a data scientist",
+        " is a product manager",
+        " is a senior engineer",
+        " is a senior software",
+        " is a software developer",
+        " is a machine learning",
+        "he's talking to ",
+        "she's talking to ",
+        "they're talking to ",
+        " lives alone with",
+        " lives with his ",
+        " lives with her ",
+        "(romantic interest",
+        "(early stage relationship",
+        "early stage)",
+    };
+    const size_t n = sizeof(patterns) / sizeof(patterns[0]);
+    int hits = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (hu_guard_ci_contains(s, len, patterns[i], strlen(patterns[i])))
+            hits++;
+    }
+    /* Bonus rule: "<Capitalized-Name> just \"" — proper-name self-narration
+     * with a quoted action. From the leak: `Seth just "glitched"`. We do
+     * a single pass: find `just "` (5 chars + the quote), walk back to
+     * the previous word boundary, check the word starts with an
+     * uppercase letter. Counts at most once. */
+    if (len >= 7) {
+        for (size_t i = 0; i + 5 < len; i++) {
+            if (s[i] == 'j' && s[i + 1] == 'u' && s[i + 2] == 's' && s[i + 3] == 't' &&
+                s[i + 4] == ' ' && s[i + 5] == '"') {
+                if (i == 0)
+                    continue;
+                /* Walk back to find start of prior word. */
+                size_t end = i - 1;
+                while (end > 0 && (s[end] == ' ' || s[end] == '\t'))
+                    end--;
+                if (end == 0 && (s[end] == ' ' || s[end] == '\t'))
+                    continue;
+                size_t start = end;
+                while (start > 0 && s[start - 1] != ' ' && s[start - 1] != '\n' &&
+                       s[start - 1] != '\t')
+                    start--;
+                if (start <= end && s[start] >= 'A' && s[start] <= 'Z') {
+                    hits++;
+                    break;
+                }
+            }
+        }
+    }
+    return hits;
+}
+
+/* Orchestrator — returns true if the response trips ANY of G1/G2/G3.
+ * Out-param `which` is set to a small bitmask for diagnostics:
+ *   bit 0 = G1 numbered analysis    bit 1 = G2 self-talk
+ *   bit 2 = G3 third-person double  (other bits reserved). */
+static bool hu_guard_detect_semantic_leak(const char *s, size_t len, unsigned *which) {
+    if (which)
+        *which = 0;
+    if (!s || len == 0)
+        return false;
+    bool hit = false;
+    if (hu_guard_has_numbered_analysis_dump(s, len)) {
+        if (which)
+            *which |= 1u << 0;
+        hit = true;
+    }
+    if (hu_guard_has_self_talk_pattern(s, len)) {
+        if (which)
+            *which |= 1u << 1;
+        hit = true;
+    }
+    if (hu_guard_count_third_person_patterns(s, len) >= 2) {
+        if (which)
+            *which |= 1u << 2;
+        hit = true;
+    }
+    return hit;
 }
 
 /* ── Internal: strip known patterns into `out` (must be ≥ in_len + 1) ── */
@@ -475,6 +723,32 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, 
         *out_response = NULL;
         *out_len = 0;
         *out_outcome = HU_GUARD_REJECT;
+        return HU_OK;
+    }
+
+    /* Phase 3 (Sprint 29) — semantic leak detection. Catches CoT /
+     * prompt-context dumps that earlier phases miss because the leak
+     * has no markup signature and no repetition signature.
+     *
+     * Production root-cause: 2026-05-12 leak via the live service-loop
+     * daemon. The primary guard returned REWROTE (stripped 82 bytes of
+     * leading whitespace) and let 897 bytes of model self-narration
+     * pass to a real human contact. Phase 3 inspects the cleaned text
+     * for three structural signatures (G1/G2/G3) and rejects on any
+     * single hit.
+     *
+     * See `docs/postmortems/2026-05-12-cot-leak.md`. */
+    unsigned semantic_which = 0;
+    bool semantic_leak =
+        hu_guard_detect_semantic_leak(for_repetition_check, check_len, &semantic_which);
+    if (semantic_leak) {
+        if (cleaned)
+            alloc->free(alloc->ctx, cleaned, effective_len + 1);
+        *out_response = NULL;
+        *out_len = 0;
+        *out_outcome = HU_GUARD_REJECT;
+        if (report)
+            report->detected_semantic_leak = true;
         return HU_OK;
     }
 
