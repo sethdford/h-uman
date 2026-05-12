@@ -40,8 +40,35 @@ typedef struct {
     size_t max_iters;       /* default 100 */
     const char *model_id;   /* MLX: HF id like "mlx-community/gemma-3-4b-it-bf16"; HUML: ignored */
     const char *adapter_out_dir; /* MLX: writes adapters.safetensors here; HUML: ignored */
-    double lambda_d;   /* KTO weight for desirable signal; 0.0 treated as 1.0. DPO impls IGNORE. */
-    double lambda_u;   /* KTO weight for undesirable signal; 0.0 treated as 1.0. DPO impls IGNORE. */
+    double lambda_d;   /* KTO weight for desirable signal; 0.0 treated as 1.0. DPO+GRPO impls IGNORE. */
+    double lambda_u;   /* KTO weight for undesirable signal; 0.0 treated as 1.0. DPO+GRPO impls IGNORE. */
+    /* Phase 4 Task 0 (RL SOTA) — GRPO-only fields. DPO+KTO impls IGNORE
+     * them (the dispatcher just forwards the whole config struct, and the
+     * step functions of those backends never read these fields).  Zero
+     * defaults are safe for existing callers. */
+    size_t n_rollouts;     /* GRPO rollouts per prompt; 0 treated as default 4
+                            * (umbrella §5 ship contract; deviation from trl's
+                            * default of 8 — D6 rationale in the Phase 4 plan). */
+    double clip_eps;       /* GRPO PPO ratio clip ε; 0.0 treated as default 0.2
+                            * (trl/grpo_config.py convention). */
+    /* GRPO KL penalty coefficient β (Phase 4 critic R3 MED-1 contract):
+     *   kl_beta <  0  → use default 0.04  (DeepSeek R1; umbrella §11 Q10)
+     *   kl_beta == 0  → KL penalty DISABLED (R4 escape valve; Task 6
+     *                                        finite-diff grad-check uses
+     *                                        this to isolate the policy
+     *                                        gradient from the KL term)
+     *   kl_beta >  0  → use literal value
+     * The negative sentinel is required because 0.0 is the canonical
+     * "feature off" value used by ablation tests; without the sentinel
+     * we'd lose the ability to express "I want the literature default"
+     * vs "I want the KL term gone". */
+    double kl_beta;
+    /* SimPO fields (reference-free DPO). DPO+KTO+GRPO impls IGNORE. */
+    double gamma;        /* SimPO reward margin; 0.0 treated as default 0.5 */
+    bool length_norm;    /* SimPO length normalization; default false */
+    /* ORPO fields (odds-ratio preference optimization). DPO+KTO+GRPO+SimPO impls IGNORE. */
+    double lambda_or;    /* ORPO odds-ratio weight; 0.0 treated as default 0.1 */
+    double odds_clip;    /* ORPO odds-ratio clip; 0.0 treated as default 10.0 */
 } hu_rl_trainer_config_t;
 
 typedef struct {
@@ -77,6 +104,23 @@ hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
 hu_error_t hu_rl_trainer_create_kto(hu_allocator_t *alloc,
                                      const hu_rl_trainer_config_t *config,
                                      hu_rl_trainer_t *out);
+
+/* Phase 4 (RL SOTA): Construct a GRPO trainer (Group Relative Policy
+ * Optimization, Shao et al. 2024 — DeepSeekMath §4.1.2). Like
+ * _create_dpo / _create_kto but uses multi-rollout group-relative
+ * baseline + PPO-clipped ratio + optional KL penalty against a frozen
+ * reference. Consumes hu_preference_pair_t rows for the PROMPT only —
+ * chosen/rejected text is IGNORED because rollouts are sampled from the
+ * live policy via hu_rollout_t.
+ *
+ * Dispatches to hu_grpo_huml_create (HUML in-process toy GPT, Phase 4
+ * Task 5) or hu_grpo_mlx_create (MLX subprocess wrapping
+ * scripts/grpo_mlx_train.py, Phase 4 Task 8) based on
+ * config->backend. AUTO probes mlx-lm-lora's GRPO trainer at runtime
+ * and falls back to HUML when unavailable. */
+hu_error_t hu_rl_trainer_create_grpo(hu_allocator_t *alloc,
+                                      const hu_rl_trainer_config_t *config,
+                                      hu_rl_trainer_t *out);
 
 #if HU_IS_TEST
 /* Test hooks for inspecting last-resolved backend without spawning a subprocess. */

@@ -54,6 +54,14 @@ option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time L
 # the target exists.
 option(HU_HAVE_MLX_LM "Enable mlx-lm-lora DPO subprocess integration tests" OFF)
 option(HU_HAVE_MLX_LM_KTO "Enable mlx-lm-lora KTO subprocess integration tests" OFF)
+# Phase 4 Task 0 (RL SOTA) — mirrors HU_HAVE_MLX_LM_KTO. Default OFF; user
+# opts in explicitly after verifying that `python3 -c "from
+# mlx_lm_lora.trainer.grpo_trainer import train_grpo"` (or the fallback
+# `python3 -m mlx_lm_lora.train --train-mode grpo`) succeeds on their box.
+# No auto-detection in CMake — keeps configure output deterministic across
+# Apple/Linux dev boxes that may or may not have the third-party package
+# installed.
+option(HU_HAVE_MLX_LM_GRPO "Enable mlx-lm-lora GRPO subprocess integration tests" OFF)
 # Phase 1 (RL SOTA) — Metal GPU offload for the vendored llama.cpp build.
 # Defaults ON only on Apple platforms (the only OS llama.cpp ships Metal
 # for). Linux and other non-Apple targets default OFF; setting it ON
@@ -2494,6 +2502,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_memory_trust.c
     tests/test_persona_directive_channels.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
@@ -3193,6 +3202,16 @@ if(HU_HAVE_MLX_LM_KTO)
     target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM_KTO=1)
     target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM_KTO=1)
     target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM_KTO=1)
+endif()
+
+# Phase 4 Task 0 (RL SOTA) — propagate HU_HAVE_MLX_LM_GRPO into targets.
+# OFF by default; flipping ON activates the real MLX GRPO subprocess path
+# (scripts/grpo_mlx_train.py — landed by Task 8). When unset, the GRPO
+# MLX backend ships with HU_ERR_NOT_SUPPORTED and gated tests skip cleanly.
+if(HU_HAVE_MLX_LM_GRPO)
+    target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM_GRPO=1)
+    target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM_GRPO=1)
+    target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM_GRPO=1)
 endif()
 
 # Keep assert() active in tests even for Release/MinSizeRel builds (which define NDEBUG).
