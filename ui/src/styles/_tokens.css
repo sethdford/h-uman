@@ -992,6 +992,7 @@
   --hu-text-faint: #9a9490;
   --hu-text-muted: #6b655e;
   --hu-text-secondary: #4a4540;
+  --hu-text-tertiary: #6b655e;
   --hu-user-message-gradient: linear-gradient(135deg, #2563eb, #3b82f6);
   --hu-warning: #ca8a04;
   --hu-warning-dim: rgba(202, 138, 4, 0.1);
