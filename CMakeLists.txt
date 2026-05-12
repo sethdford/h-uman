@@ -1331,6 +1331,14 @@ if(HU_ENABLE_ML)
         # link; the placeholder at the bottom of grpo.c returns
         # HU_ERR_NOT_SUPPORTED until Task 5 lands the real impl.
         src/ml/grpo.c
+        # Phase 4 Task 8 (RL SOTA): GRPO MLX subprocess wrapper around
+        # scripts/grpo_mlx_train.py.  Apple-only at runtime (the create
+        # path returns HU_ERR_NOT_SUPPORTED on non-Apple); the M7 probe
+        # short-circuit under HU_IS_TEST keeps the test suite hermetic.
+        # Defines HU_GRPO_HAVE_MLX_IMPL=1 so Task 0's #ifndef stub in
+        # src/ml/rl_trainer.c for hu_grpo_mlx_create falls out of the
+        # link.  Real subprocess execution gated by HU_HAVE_MLX_LM_GRPO.
+        src/ml/grpo_mlx.c
         # Phase 4 Task 4 (RL SOTA): hu_reward_source_t leaf vtable — three
         # backends (synthetic token-counting fn, Phase 3 hu_reward_model_t
         # composition, Phase 5 llm-judge stub). Used by the GRPO trainer
@@ -2289,7 +2297,7 @@ if(NOT HU_ENABLE_ML)
         src/ml/training_data_quality.c
         src/providers/huml.c
         src/ml/rl_trainer.c src/ml/dpo_real_huml.c src/ml/dpo_real_mlx.c
-        src/ml/kto.c src/ml/kto_mlx.c
+        src/ml/kto.c src/ml/kto_mlx.c src/ml/grpo_mlx.c
         src/ml/value_head.c src/ml/policy_logprobs.c src/ml/reference_model.c
         src/ml/cli_dpo.c src/ml/reward_model.c src/ml/reward_model_mlx.c
         src/ml/reward_model_train.c
@@ -2884,6 +2892,12 @@ set(HU_TEST_SOURCES
     # log-ratio gradient with finite-diff agreement to 5% (H4).
     # Loss-only — no model coupling; Task 5 lands the trainer step.
     tests/test_grpo_loss.c
+    # Phase 4 Task 8 (RL SOTA): GRPO MLX subprocess wrapper — JSONL
+    # secure-perms (H2: O_EXCL + 0600) + factory probe short-circuit
+    # (M7) + dummy-adapter Python shortcut (HU_E2E_TEST_MODE).  The
+    # real-subprocess test is gated by HU_HAVE_MLX_LM_GRPO (L1 — compile
+    # time, not HU_SKIP_IF).
+    tests/test_grpo_mlx.c
     # Phase 4 Task 5 (RL SOTA): GRPO HUML trainer — full
     # hu_rl_trainer_t vtable impl composing rollout (Task 2) +
     # reward_source (Task 4) + KL k3 (Task 1) + GRPO loss math
@@ -3271,6 +3285,20 @@ if(HU_HAVE_MLX_LM_KTO)
     target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM_KTO=1)
     target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM_KTO=1)
 endif()
+
+# Phase 4 Task 8 (RL SOTA) — propagate HU_GRPO_HAVE_HUML_IMPL and
+# HU_GRPO_HAVE_MLX_IMPL globally so Task 0's #ifndef-guarded stubs in
+# src/ml/rl_trainer.c fall out of EVERY TU, not just the TUs that
+# define the macro source-locally (grpo.c and grpo_mlx.c).  Without
+# this, the macros are TU-local: rl_trainer.c still compiles both
+# stubs and the linker hits duplicate-symbol against the strong impls
+# in grpo.c (Task 5) and grpo_mlx.c (Task 8).  This is the canonical
+# Phase 4 fix for round-3 critic L3 (strict C11, no __attribute__((weak)));
+# the source-level #defines remain as documentation but are now
+# redundant with these target_compile_definitions.
+target_compile_definitions(human_core PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+target_compile_definitions(human_core_test PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+target_compile_definitions(human_tests PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
 
 # Phase 4 Task 0 (RL SOTA) — propagate HU_HAVE_MLX_LM_GRPO into targets.
 # OFF by default; flipping ON activates the real MLX GRPO subprocess path
