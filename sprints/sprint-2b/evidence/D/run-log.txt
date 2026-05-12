@@ -3,9 +3,12 @@
   PASS: scanner emitted the expected diagnostic
 == positive: scanner MUST accept explicit .variant ==
   PASS: scanner exit 0 on good fixture
+== F3: scanner MUST flag missing .variant even when comments fake it ==
+  PASS: scanner exit non-zero on comment-defeat fixture (rc=1)
+  PASS: scanner emitted expected diagnostic on comment-defeat
 == inventory: scanner MUST be clean against the live tree ==
   PASS: live tree inventory clean
 
 ==========================================================
-Story D (Sprint 2b) Track B negative test: PASS=4 FAIL=0
+Story D (Sprint 2b) Track B negative test: PASS=6 FAIL=0
 ==========================================================
