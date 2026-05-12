@@ -430,8 +430,40 @@ hu_error_t hu_response_verify_against_world_model(
     size_t max = cfg->max_claims > 0 && cfg->max_claims < 16 ? cfg->max_claims : 16;
     size_t n = extract_claims(draft, draft_len, out_report->claims, max);
     out_report->claims_extracted = n;
-    if (n == 0)
+    if (n == 0) {
+        /* sprint-2c Story A — questions and other non-propositional drafts
+         * yield zero claims, but they can still be policy violations
+         * (e.g. "Have you been to your therapy sessions?" when therapy
+         * is on the negative list). Run a single whole-draft negative
+         * pass so [hard]/[policy] still ABSTAIN and [soft]/[confirm]
+         * still HEDGE under SOFT mode. */
+        if (!wm)
+            return HU_OK;
+        char neg_refusal0[256] = {0};
+        char neg_hedge0[160] = {0};
+        bool policy_hit0 = false;
+        hu_verifier_outcome_t o = hu_negatives_scan_claim(
+            wm, draft, neg_refusal0, sizeof(neg_refusal0),
+            neg_hedge0, sizeof(neg_hedge0), &policy_hit0);
+        if (o == HU_VERIFY_RESULT_ABSTAIN) {
+            out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
+            snprintf(out_report->refusal_text, sizeof(out_report->refusal_text), "%s",
+                     neg_refusal0);
+            if (policy_hit0)
+                hu_log_warn("response_verifier", NULL,
+                            "negative-memory [policy] hit forced ABSTAIN for contact=%.*s",
+                            (int)(contact_id_len > 64 ? 64 : contact_id_len),
+                            contact_id ? contact_id : "");
+        } else if (o == HU_VERIFY_RESULT_HEDGED) {
+            out_report->outcome = HU_VERIFY_RESULT_HEDGED;
+            if (cfg->mode == HU_VERIFY_SOFT) {
+                snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
+                         "%s %.*s.", neg_hedge0, (int)draft_len, draft);
+                out_report->draft_modified = true;
+            }
+        }
         return HU_OK;
+    }
 
     /* sprint-2c Story A — scan extracted claims against wm->negatives.
      * Runs BEFORE the facade pass so a [hard] / [policy] hit forces
