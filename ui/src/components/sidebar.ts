@@ -329,13 +329,15 @@ export class ScSidebar extends LitElement {
       font-weight: var(--hu-weight-medium);
       animation: hu-nav-enter var(--hu-duration-normal, 300ms) var(--hu-ease-out) both;
     }
+    /* Transform-only entrance: animating opacity causes axe to read mid-
+     * animation labels at partial opacity, blending them with the background
+     * and tripping color-contrast at WCAG 4.5:1. Visually identical (slide
+     * from the left). See e2e/accessibility.spec.ts color-contrast cases. */
     @keyframes hu-nav-enter {
       from {
-        opacity: 0;
         transform: translateX(calc(-1 * var(--hu-space-sm)));
       }
       to {
-        opacity: 1;
         transform: translateX(0);
       }
     }
@@ -353,6 +355,11 @@ export class ScSidebar extends LitElement {
     }
     .nav-section .nav-item:nth-child(5) {
       animation-delay: 250ms;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .nav-item {
+        animation: none;
+      }
     }
 
     .nav-item {

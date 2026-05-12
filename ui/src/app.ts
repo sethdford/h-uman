@@ -331,20 +331,21 @@ export class ScApp extends LitElement {
     }
     .disconnect-banner button,
     .demo-fallback-banner button {
-      background: color-mix(in srgb, var(--hu-on-accent) 20%, transparent);
-      border: 1px solid color-mix(in srgb, var(--hu-on-accent) 40%, transparent);
-      color: var(--hu-on-accent);
+      background: var(--hu-bg);
+      border: 1px solid var(--hu-on-accent);
+      color: var(--hu-text);
       padding: var(--hu-space-2xs) var(--hu-space-sm);
       border-radius: var(--hu-radius-sm);
       font-size: var(--hu-text-xs);
       font-family: var(--hu-font);
+      font-weight: var(--hu-weight-medium);
       cursor: pointer;
       transition: background var(--hu-duration-fast) var(--hu-ease-out);
       line-height: 1;
     }
     .disconnect-banner button:hover,
     .demo-fallback-banner button:hover {
-      background: color-mix(in srgb, var(--hu-on-accent) 35%, transparent);
+      background: var(--hu-bg-surface);
     }
     .banner-dismiss {
       background: transparent;

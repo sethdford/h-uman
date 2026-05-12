@@ -1470,8 +1470,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
             <button
               type="button"
               class="session-item active"
-              role="option"
-              aria-selected="true"
+              aria-current="page"
               aria-label="Current session"
             >
               <span class="session-item-icon">${icons.mic}</span>
