@@ -105,10 +105,28 @@ static void test_rollout_huml_seed_42_produces_deterministic_token_ids(void) {
         HU_ASSERT_EQ(a[0].token_ids[i], b[0].token_ids[i]);
     for (size_t i = 0; i < a[1].n_tokens; i++)
         HU_ASSERT_EQ(a[1].token_ids[i], b[1].token_ids[i]);
-    /* sum_logprob must match to within tight float-precision bounds —
-     * the same forward + same sampled tokens accumulate the same logs. */
+    /* F3 (Phase 4 end-gate audit): same machine + same input + same
+     * sampled tokens MUST produce BIT-IDENTICAL sum_logprob, not just
+     * within 1e-9 tolerance.  A tolerance-only pin would silently
+     * accept sub-1e-9 float drift in the policy forward — exactly the
+     * kind of drift that would make GRPO non-deterministic between
+     * L(θ±ε) probes without this test catching it.  memcmp on the
+     * raw bytes is strictly stronger than the prior fabs(...) < 1e-9
+     * check (and just as portable: IEEE-754 doubles are bit-stable
+     * under identical compute). */
+    HU_ASSERT_EQ(memcmp(&a[0].sum_logprob, &b[0].sum_logprob, sizeof(double)), 0);
+    HU_ASSERT_EQ(memcmp(&a[1].sum_logprob, &b[1].sum_logprob, sizeof(double)), 0);
+    /* Float-precision tolerance check kept as a redundant (looser)
+     * pin so a future relaxation of the bit-exact check still catches
+     * gross drift. */
     HU_ASSERT_TRUE(fabs(a[0].sum_logprob - b[0].sum_logprob) < 1e-9);
     HU_ASSERT_TRUE(fabs(a[1].sum_logprob - b[1].sum_logprob) < 1e-9);
+    /* sum_logprob is a sum of logs of probabilities ≤ 1, so it must
+     * be ≤ 0 whenever n_tokens > 0 (rules out the silent-zero failure
+     * mode flagged by F1 — a fresh, uninitialised double could happen
+     * to match between runs and pass the bit-equal check above). */
+    if (a[0].n_tokens > 0) HU_ASSERT_TRUE(a[0].sum_logprob <= 0.0);
+    if (a[1].n_tokens > 0) HU_ASSERT_TRUE(a[1].sum_logprob <= 0.0);
 
     hu_rollout_free_completions(&alloc, a, 2);
     hu_rollout_free_completions(&alloc, b, 2);
@@ -244,6 +262,13 @@ static void test_rollout_huml_seed_42_produces_identical_token_ids_macos_and_lin
      * arm64 / glibc / musl. If CI fails here, the bug is in this file
      * (or in hu_gpt_create's parameter init), not in the test. */
     HU_ASSERT_EQ(c[0].token_ids[0], 25);
+    /* F3 (Phase 4 end-gate audit): sum_logprob is a sum of logs of
+     * probabilities ≤ 1, so it must be < 0 whenever n_tokens > 0.  A
+     * silent failure mode the audit flagged was a fresh-zero
+     * sum_logprob slipping through (e.g., uninitialised by a probe-
+     * forward error path); pinning the sign is a cheap structural
+     * witness even without a hardcoded cross-platform value. */
+    HU_ASSERT_TRUE(c[0].sum_logprob < 0.0);
 
     hu_rollout_free_completions(&alloc, c, 1);
     r.vtable->deinit(r.ctx, &alloc);

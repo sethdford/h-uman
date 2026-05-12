@@ -341,28 +341,37 @@ static hu_error_t logprob_on(grpo_huml_ctx_t *c, hu_allocator_t *alloc,
  * lp must INCREASE; advantage < 0 → lp must DECREASE).  Mirrors the
  * DPO + KTO huml structural backward (sign-based finite-diff lm_head
  * probe — the real per-parameter backward lives in the MLX subprocess,
- * Task 8). */
-static void structural_backward_one_rollout(grpo_huml_ctx_t *c,
-                                            hu_allocator_t *alloc,
-                                            const int32_t *prompt, size_t pl,
-                                            const hu_rollout_completion_t *roll,
-                                            double advantage,
-                                            double lp_pol_before) {
-    if (c->learning_rate <= 0) return;
-    if (fabs(advantage) < 1e-12) return;
-    if (roll->n_tokens == 0) return;
+ * Task 8).
+ *
+ * Returns the underlying hu_policy_logprobs error if any probe forward
+ * fails (F1 end-gate audit — Phase 4 closure).  On error the speculative
+ * lm_head bump for the failing slot is reverted before returning so the
+ * model state is restored to the pre-probe value; caller propagates the
+ * error and aborts the iteration via cleanup_rolls.  The toy GPT used in
+ * Phase 4 cannot fail, but Phase 5/6 swap in real backends where
+ * propagation matters. */
+static hu_error_t structural_backward_one_rollout(grpo_huml_ctx_t *c,
+                                                   hu_allocator_t *alloc,
+                                                   const int32_t *prompt, size_t pl,
+                                                   const hu_rollout_completion_t *roll,
+                                                   double advantage,
+                                                   double lp_pol_before) {
+    if (c->learning_rate <= 0) return HU_OK;
+    if (fabs(advantage) < 1e-12) return HU_OK;
+    if (roll->n_tokens == 0) return HU_OK;
 
     hu_ml_tensor_t *params = NULL;
     size_t n_params = 0;
-    if (c->policy.vtable->get_params(c->policy.ctx, &params, &n_params) != HU_OK) return;
-    if (n_params < 2 || params[1].dtype != HU_ML_DTYPE_F32) return;
+    hu_error_t perr = c->policy.vtable->get_params(c->policy.ctx, &params, &n_params);
+    if (perr != HU_OK) return perr;
+    if (n_params < 2 || params[1].dtype != HU_ML_DTYPE_F32) return HU_OK;
     const size_t V = c->gpt_cfg.vocab_size;
     const size_t E = c->gpt_cfg.n_embd;
-    if (params[1].size_bytes / sizeof(float) != V * E) return;
+    if (params[1].size_bytes / sizeof(float) != V * E) return HU_OK;
     float *lm_head = (float *)params[1].data;
 
     const float eps = (float)(c->learning_rate * fabs(advantage) * 0.1);
-    if (!(eps > 0)) return;
+    if (!(eps > 0)) return HU_OK;
     const float dir = advantage > 0 ? +1.0f : -1.0f;
     double lp_now = lp_pol_before;
 
@@ -373,8 +382,17 @@ static void structural_backward_one_rollout(grpo_huml_ctx_t *c,
         const float saved = *cell;
         *cell = saved + dir * eps;
         double lp_new = 0.0;
-        hu_policy_logprobs(alloc, &c->policy, prompt, pl,
-                            roll->token_ids, roll->n_tokens, &lp_new);
+        /* F1 (end-gate audit, silent-failure-hunter + code-reviewer):
+         * a failing probe forward would leave lp_new = 0, masquerading
+         * as "policy collapsed to log-prob zero" and silently flipping
+         * the keep/revert decision.  Restore the cell and propagate. */
+        hu_error_t lerr = hu_policy_logprobs(alloc, &c->policy, prompt, pl,
+                                              roll->token_ids, roll->n_tokens,
+                                              &lp_new);
+        if (lerr != HU_OK) {
+            *cell = saved;
+            return lerr;
+        }
         const int kept = (advantage > 0 && lp_new > lp_now) ||
                          (advantage < 0 && lp_new < lp_now);
         if (kept) {
@@ -383,6 +401,7 @@ static void structural_backward_one_rollout(grpo_huml_ctx_t *c,
             *cell = saved;
         }
     }
+    return HU_OK;
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -486,9 +505,16 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
         for (size_t k = 0; k < n_valid; k++) {
             const size_t i = valid_idx[k];
             lp_pol_arr[k] = 0.0;
-            hu_policy_logprobs(alloc, &c->policy, prompt, pl,
-                                rolls[i].token_ids, rolls[i].n_tokens,
-                                &lp_pol_arr[k]);
+            /* F1 (end-gate audit): a discarded failure here would
+             * leave lp_pol_arr[k] = 0, yielding log_ratio = -sum_logprob
+             * (huge magnitude) → poisoned advantage + loss + structural
+             * backward.  Latent under the toy GPT (cannot fail); critical
+             * once Phase 5/6 swap in real backends. */
+            hu_error_t lpe = hu_policy_logprobs(alloc, &c->policy, prompt, pl,
+                                                 rolls[i].token_ids,
+                                                 rolls[i].n_tokens,
+                                                 &lp_pol_arr[k]);
+            if (lpe != HU_OK) goto cleanup_rolls;
             log_ratios[k] = lp_pol_arr[k] - rolls[i].sum_logprob;
         }
 
@@ -500,8 +526,14 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
             for (size_t k = 0; k < n_valid; k++) {
                 const size_t i = valid_idx[k];
                 double lp_ref = 0.0;
-                logprob_on(c, alloc, &c->reference, prompt, pl,
-                           rolls[i].token_ids, rolls[i].n_tokens, &lp_ref);
+                /* F1 (end-gate audit): same poisoning hazard as the
+                 * policy logprobs loop above — a discarded reference
+                 * forward failure would leave lp_ref = 0 and silently
+                 * inflate the k3 estimator. */
+                hu_error_t rfe = logprob_on(c, alloc, &c->reference, prompt, pl,
+                                             rolls[i].token_ids,
+                                             rolls[i].n_tokens, &lp_ref);
+                if (rfe != HU_OK) goto cleanup_rolls;
                 /* k3 over a 1-element vocab view: KL ≈ exp(r) - r - 1
                  * with r = lp_ref - lp_pol.  Routes through Task 1's
                  * primitive so kl_divergence.c stays single source of
@@ -531,10 +563,15 @@ static hu_error_t grpo_huml_step(void *vctx, hu_allocator_t *alloc,
          * gets bumped, which empirically matches the DPO precedent). */
         for (size_t k = 0; k < n_valid; k++) {
             const size_t i = valid_idx[k];
-            structural_backward_one_rollout(c, alloc, prompt, pl,
-                                            &rolls[i],
-                                            advantages_v[k],
-                                            lp_pol_arr[k]);
+            /* F1 (end-gate audit): probe logprobs inside the structural
+             * backward share the same silent-failure hazard.  The helper
+             * reverts the speculative bump on error before returning; we
+             * propagate via cleanup_rolls so the iteration aborts. */
+            hu_error_t sbe = structural_backward_one_rollout(c, alloc, prompt, pl,
+                                                              &rolls[i],
+                                                              advantages_v[k],
+                                                              lp_pol_arr[k]);
+            if (sbe != HU_OK) goto cleanup_rolls;
         }
 
 cleanup_rolls:

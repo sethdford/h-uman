@@ -178,6 +178,25 @@ static void test_cli_grpo_train_kl_beta_zero_disables_kl_penalty(void) {
 
 /* ─── Phase 4 Task 10 additions ────────────────────────────────────── */
 
+/* F2 (Phase 4 end-gate audit) helper — read a whole adapter file into a
+ * malloc'd buffer.  Returns NULL on any IO failure; caller frees. */
+static unsigned char *read_adapter_bytes(const char *path, size_t *out_n) {
+    *out_n = 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    long sz = ftell(f);
+    if (sz <= 0) { fclose(f); return NULL; }
+    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return NULL; }
+    unsigned char *buf = (unsigned char *)malloc((size_t)sz);
+    if (!buf) { fclose(f); return NULL; }
+    size_t n = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    if (n != (size_t)sz) { free(buf); return NULL; }
+    *out_n = n;
+    return buf;
+}
+
 static void test_cli_grpo_rm_backed_reward_loads_phase3_checkpoint(void) {
     /* The --reward-fn rm path must load the Phase 3 RM checkpoint
      * fixture (tests/fixtures/rm_synthetic_checkpoint/, built by
@@ -189,25 +208,69 @@ static void test_cli_grpo_rm_backed_reward_loads_phase3_checkpoint(void) {
      * reward signal, and the CLI must actually wire it through —
      * silently falling back to synthetic would defeat the guard.
      *
+     * F2 (end-gate audit, code-reviewer + sprint-auditor concurred):
+     * exit-code-only assertion is insufficient — a bug where the rm
+     * path silently fell back to synthetic would still produce HU_OK.
+     * Witness via adapter-byte divergence: two trainer constructions
+     * with the SAME seed (rollout seed=42 inside hu_grpo_huml_create)
+     * sample byte-identical rollouts at every iter, so the only path
+     * to different lm_head bytes after N iters is a different reward
+     * function → different advantages → different structural-backward
+     * bumps.  If the RM run produces a byte-identical adapter to the
+     * synthetic run, the RM path never consulted the loaded model.
+     *
      * --adapter-out points at /tmp/... so the test doesn't write a
      * stray ./grpo-adapters into the workspace root (matches the
      * hygiene pattern of tests 6 and 7 above). */
-    const char *adapter_path = "/tmp/hu_test_cli_grpo_rm_adapter.bin";
-    unlink_quiet(adapter_path);
+    const char *adapter_synth = "/tmp/hu_test_cli_grpo_rm_witness_synth.bin";
+    const char *adapter_rm    = "/tmp/hu_test_cli_grpo_rm_witness_rm.bin";
+    unlink_quiet(adapter_synth);
+    unlink_quiet(adapter_rm);
 
     hu_allocator_t alloc = hu_system_allocator();
-    const char *argv[] = {
+
+    /* Reference run: synthetic reward, same fixture, same iters. */
+    const char *argv_synth[] = {
+        "--pairs",        "tests/fixtures/synthetic_grpo_prompts.jsonl",
+        "--reward-fn",    "synthetic",
+        "--rollouts",     "4",
+        "--iters",        "3",
+        "--backend",      "huml",
+        "--adapter-out",  adapter_synth,
+    };
+    hu_error_t err_synth = hu_ml_cli_grpo_train(&alloc, 12, argv_synth);
+    HU_ASSERT_EQ(err_synth, HU_OK);
+
+    /* Witness run: RM-backed reward against the Phase 3 checkpoint. */
+    const char *argv_rm[] = {
         "--pairs",        "tests/fixtures/synthetic_grpo_prompts.jsonl",
         "--reward-fn",    "rm",
         "--reward-model", "tests/fixtures/rm_synthetic_checkpoint",
         "--rollouts",     "4",
         "--iters",        "3",
         "--backend",      "huml",
-        "--adapter-out",  adapter_path,
+        "--adapter-out",  adapter_rm,
     };
-    hu_error_t err = hu_ml_cli_grpo_train(&alloc, 14, argv);
-    HU_ASSERT_EQ(err, HU_OK);
-    unlink_quiet(adapter_path);
+    hu_error_t err_rm = hu_ml_cli_grpo_train(&alloc, 14, argv_rm);
+    HU_ASSERT_EQ(err_rm, HU_OK);
+
+    /* F2 witness: the two adapters MUST diverge.  Same seed, same
+     * rollouts, same prompts — only the reward source differs.  A
+     * silent fallback to synthetic would produce byte-identical
+     * adapters and slip past the previous exit-code-only check. */
+    size_t n_synth = 0, n_rm = 0;
+    unsigned char *buf_synth = read_adapter_bytes(adapter_synth, &n_synth);
+    unsigned char *buf_rm    = read_adapter_bytes(adapter_rm,    &n_rm);
+    HU_ASSERT_NOT_NULL(buf_synth);
+    HU_ASSERT_NOT_NULL(buf_rm);
+    HU_ASSERT_GT(n_synth, 0);
+    HU_ASSERT_EQ(n_synth, n_rm);
+    HU_ASSERT_NEQ(memcmp(buf_synth, buf_rm, n_synth), 0);
+    free(buf_synth);
+    free(buf_rm);
+
+    unlink_quiet(adapter_synth);
+    unlink_quiet(adapter_rm);
 }
 
 static void test_cli_grpo_rm_path_errors_clearly_on_missing_checkpoint(void) {

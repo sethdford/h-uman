@@ -35,6 +35,7 @@
 #include "human/ml/grpo.h"
 #include "human/ml/rl_trainer.h"
 #include "human/core/error.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -160,7 +161,16 @@ hu_error_t hu_grpo_mlx_write_jsonl_for_test(const char *out_path,
         if (fd < 0) return HU_ERR_IO;
     }
     FILE *f = fdopen(fd, "w");
-    if (!f) { close(fd); return HU_ERR_IO; }
+    if (!f) {
+        /* F4 (end-gate audit): the O_EXCL open already created the
+         * 0600 file at out_path.  A bare close(fd) here would leak the
+         * empty file in /tmp.  Unlink before returning so subsequent
+         * runs on the same PID (predictable jsonl_path) don't trip the
+         * O_EXCL retry-once contract. */
+        close(fd);
+        unlink(out_path);
+        return HU_ERR_IO;
+    }
     for (size_t i = 0; i < n_pairs; i++) {
         if (pairs[i].prompt_len == 0) continue;
         char p_esc[8192];
@@ -191,7 +201,14 @@ static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
     hu_error_t werr = grpo_write_jsonl(jsonl_path, pairs, n_pairs);
     if (werr != HU_OK) return werr;
 
-    mkdir(c->adapter_dir, 0755);
+    /* F5 (end-gate audit): the unchecked mkdir return previously
+     * masked filesystem errors (EACCES, ENOSPC, ENAMETOOLONG, …) as a
+     * later opaque stat() failure post-popen.  EEXIST is the expected
+     * benign case — the test fixtures reuse adapter_dir across runs. */
+    if (mkdir(c->adapter_dir, 0700) == -1 && errno != EEXIST) {
+        unlink(jsonl_path);
+        return HU_ERR_IO;
+    }
 
     /* Single-quote rejection — defends the popen shell-string against
      * injection via user-controlled paths/ids. Same guard as Phase 2
