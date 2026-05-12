@@ -1,6 +1,6 @@
 /* include/human/channels/reaction_event.h */
-#ifndef HUMAN_CHANNELS_REACTION_EVENT_H
-#define HUMAN_CHANNELS_REACTION_EVENT_H
+#ifndef HU_CHANNELS_REACTION_EVENT_H
+#define HU_CHANNELS_REACTION_EVENT_H
 
 #include "human/core/error.h"
 #include <stddef.h>

@@ -15,8 +15,8 @@
  * not exist in this repo — the real paths are `human/core/allocator.h`
  * and `human/core/error.h`. Using the real paths so this file compiles.
  */
-#ifndef HUMAN_ML_RL_TRAINER_H
-#define HUMAN_ML_RL_TRAINER_H
+#ifndef HU_ML_RL_TRAINER_H
+#define HU_ML_RL_TRAINER_H
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -68,7 +68,7 @@ hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
                                      const hu_rl_trainer_config_t *config,
                                      hu_rl_trainer_t *out);
 
-#ifdef HU_IS_TEST
+#if HU_IS_TEST
 /* Test hooks for inspecting last-resolved backend without spawning a subprocess. */
 hu_dpo_backend_t hu_rl_trainer_last_resolved_backend_for_test(void);
 void hu_rl_trainer_reset_for_test(void);
@@ -77,4 +77,4 @@ void hu_rl_trainer_reset_for_test(void);
 #ifdef __cplusplus
 }
 #endif
-#endif /* HUMAN_ML_RL_TRAINER_H */
+#endif /* HU_ML_RL_TRAINER_H */

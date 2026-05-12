@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef HU_IS_TEST
+#if HU_IS_TEST
 static hu_dpo_backend_t s_last_backend = HU_DPO_BACKEND_AUTO;
 hu_dpo_backend_t hu_rl_trainer_last_resolved_backend_for_test(void) { return s_last_backend; }
 void hu_rl_trainer_reset_for_test(void) { s_last_backend = HU_DPO_BACKEND_AUTO; }
@@ -45,7 +45,7 @@ hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
         resolved = HU_DPO_BACKEND_HUML;
 #endif
     }
-#ifdef HU_IS_TEST
+#if HU_IS_TEST
     s_last_backend = resolved;
 #endif
     if (resolved == HU_DPO_BACKEND_HUML) return hu_dpo_real_huml_create(alloc, config, out);

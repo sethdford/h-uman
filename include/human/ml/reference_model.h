@@ -9,8 +9,8 @@
  * exist in this repo — the real paths are `human/core/allocator.h` and
  * `human/core/error.h`. Same correction as Tasks 1 + 2.
  */
-#ifndef HUMAN_ML_REFERENCE_MODEL_H
-#define HUMAN_ML_REFERENCE_MODEL_H
+#ifndef HU_ML_REFERENCE_MODEL_H
+#define HU_ML_REFERENCE_MODEL_H
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -37,4 +37,4 @@ hu_error_t hu_reference_model_create_from(hu_allocator_t *alloc,
 #ifdef __cplusplus
 }
 #endif
-#endif /* HUMAN_ML_REFERENCE_MODEL_H */
+#endif /* HU_ML_REFERENCE_MODEL_H */

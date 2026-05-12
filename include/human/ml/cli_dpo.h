@@ -16,8 +16,8 @@
  * and `"human/core/error.h"` (matches the convention used by every other
  * Phase 2 header, e.g. include/human/ml/rl_trainer.h:21–22).
  */
-#ifndef HUMAN_ML_CLI_DPO_H
-#define HUMAN_ML_CLI_DPO_H
+#ifndef HU_ML_CLI_DPO_H
+#define HU_ML_CLI_DPO_H
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -32,4 +32,4 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
 #ifdef __cplusplus
 }
 #endif
-#endif /* HUMAN_ML_CLI_DPO_H */
+#endif /* HU_ML_CLI_DPO_H */

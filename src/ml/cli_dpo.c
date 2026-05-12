@@ -287,8 +287,14 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
         }
         fclose(f);
     } else {
-        /* TODO Task 13: load from SQLite dpo_pairs table. */
-        fprintf(stderr, "[dpo-train] no --pairs and SQLite path not yet wired (Phase 2 Task 13)\n");
+        /* NOTE: Task 13 (the reaction-handler write path that populates the
+         * SQLite dpo_pairs table) shipped in commits a45ee11f + b3059e9a.
+         * The CLI *read-from-SQLite* path here is a separate, intentional
+         * Phase 5 daemon-integration deferral — once the daemon owns a
+         * single hu_dpo_collector_t lifecycle (see plan §"NOT in scope"),
+         * this branch will reuse hu_dpo_collector_open + a SELECT over
+         * dpo_pairs. Until then `--pairs <jsonl>` is the only entry point. */
+        fprintf(stderr, "[dpo-train] no --pairs and SQLite path not yet wired (Phase 5 daemon integration)\n");
         trainer.vtable->deinit(trainer.ctx, alloc);
         return HU_ERR_NOT_SUPPORTED;
     }

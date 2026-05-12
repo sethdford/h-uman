@@ -21,8 +21,8 @@
  * reactions on messages older than the most recent 256 sends silently
  * drop (R4 in the risk register documented in the plan).
  */
-#ifndef HUMAN_AGENT_REACTION_HANDLER_H
-#define HUMAN_AGENT_REACTION_HANDLER_H
+#ifndef HU_AGENT_REACTION_HANDLER_H
+#define HU_AGENT_REACTION_HANDLER_H
 
 #include "human/core/error.h"
 #include "human/channels/reaction_event.h"

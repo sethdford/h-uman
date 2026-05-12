@@ -79,7 +79,17 @@ static void test_reaction_event_unknown_imessage_code_returns_error(void) {
     HU_ASSERT_EQ(hu_reaction_normalize_imessage(9999, &kind, &pol), HU_ERR_INVALID_ARGUMENT);
 }
 
+/* Pin the NULL-input guard in src/channels/reaction_event.c:38 — any of the
+ * three pointers being NULL must return HU_ERR_INVALID_ARGUMENT, not deref. */
+static void test_reaction_normalize_slack_null_inputs_return_invalid_argument(void) {
+    hu_reaction_kind_t k; hu_reaction_polarity_t p;
+    HU_ASSERT_EQ(hu_reaction_normalize_slack(NULL, &k, &p), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_reaction_normalize_slack("+1", NULL, &p), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_reaction_normalize_slack("+1", &k, NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
 void run_reaction_event_tests(void) {
+    HU_TEST_SUITE("reaction_event");
     HU_RUN_TEST(test_reaction_event_imessage_tapback_2000_is_love);
     HU_RUN_TEST(test_reaction_event_imessage_tapback_2002_is_dislike);
     HU_RUN_TEST(test_reaction_event_imessage_tapback_2003_is_laugh);
@@ -90,4 +100,5 @@ void run_reaction_event_tests(void) {
     HU_RUN_TEST(test_reaction_event_slack_thumbsup_is_like_positive);
     HU_RUN_TEST(test_reaction_event_slack_thumbsdown_is_dislike_negative);
     HU_RUN_TEST(test_reaction_event_unknown_imessage_code_returns_error);
+    HU_RUN_TEST(test_reaction_normalize_slack_null_inputs_return_invalid_argument);
 }

@@ -39,7 +39,19 @@
 #include "human/core/allocator.h"
 #include <math.h>
 
-static void test_dpo_real_huml_loss_finite_diff_lm_head(void) {
+/* Renamed from test_dpo_real_huml_loss_finite_diff_lm_head per the Phase 2
+ * end-gate audit (sprint-auditor's highest-severity finding). The test does
+ * NOT actually do a finite-difference grad check — at lr=0 the policy ==
+ * reference, so chosen_logprob_delta == rejected_logprob_delta == 0 and the
+ * "0 >= 0" assertion is trivially true. The honest interpretation is that
+ * step() at lr=0 is a no-op on the metrics, which is what we now assert.
+ *
+ * The real per-parameter analytical-vs-numerical grad match (tol 1e-3) is
+ * deferred to Phase 3: the structural backward in dpo_huml_step is
+ * sign-based, not gradient-descent, so a strict finite-diff check is not
+ * the right test for it. Phase 3's MLX subprocess path is where analytical
+ * gradients live and where that test belongs. */
+static void test_dpo_real_huml_step_at_zero_lr_is_no_op(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_gpt_config_t cfg = {
         .vocab_size = 16,
@@ -68,11 +80,63 @@ static void test_dpo_real_huml_loss_finite_diff_lm_head(void) {
     hu_rl_trainer_metrics_t m = {0};
     HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, &pair, 1, &m), HU_OK);
 
-    /* Sign-of-gradient check: with learning_rate=0 the policy is unchanged,
-     * so policy log-probs equal reference log-probs and both deltas are 0
-     * (so 0 >= 0 trivially). The full per-parameter finite-diff lives in
-     * the step() implementation's debug-mode hook (Phase 5 work). */
-    HU_ASSERT_TRUE(m.chosen_logprob_delta >= m.rejected_logprob_delta);
+    /* At lr=0 the policy is unchanged, so policy log-probs equal reference
+     * log-probs and both deltas are 0 — step() reports a no-op. This pins
+     * that contract: chosen and rejected deltas are equal (both 0). */
+    HU_ASSERT_TRUE(m.chosen_logprob_delta == m.rejected_logprob_delta);
+
+    trainer.vtable->deinit(trainer.ctx, &alloc);
+}
+
+/* Honest evidence-based check: at lr > 0, multi-step training produces
+ * observable training dynamics. We assert one of two signals (whichever
+ * holds for this toy GPT + synthetic pair):
+ *   (a) the per-step reported final_loss at iter=29 is strictly lower
+ *       than at iter=0, OR
+ *   (b) the chosen-vs-rejected logprob delta WIDENS (chosen pulled up
+ *       relative to rejected).
+ *
+ * Why both: the structural backward in dpo_huml_step is sign-based, not
+ * gradient-descent (see dpo_real_huml.c). With a small toy GPT and one
+ * pair it can oscillate or converge unevenly, so loss alone may not be
+ * monotone. The plan's stronger "per-parameter analytical-vs-numerical
+ * grad match within tol 1e-3" check is deferred to Phase 3 — see the
+ * audit verdict at docs/plans/2026-05-11-rl-loop-phase-2-dpo-reactions.md. */
+static void test_dpo_real_huml_loss_decreases_under_positive_lr(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_rl_trainer_config_t tcfg = {
+        .backend = HU_DPO_BACKEND_HUML,
+        .beta = 0.1,
+        .learning_rate = 0.01,
+        .max_iters = 1,
+    };
+    hu_rl_trainer_t trainer = {0};
+    HU_ASSERT_EQ(hu_rl_trainer_create_dpo(&alloc, &tcfg, &trainer), HU_OK);
+
+    hu_preference_pair_t pair = {
+        .prompt = "1 2 3",
+        .chosen = "4 5",
+        .rejected = "6 7",
+        .source = "test",
+    };
+
+    hu_rl_trainer_metrics_t first = {0};
+    HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, &pair, 1, &first), HU_OK);
+
+    hu_rl_trainer_metrics_t last = {0};
+    for (int i = 1; i < 30; i++) {
+        HU_ASSERT_EQ(trainer.vtable->step(trainer.ctx, &alloc, &pair, 1, &last), HU_OK);
+    }
+
+    double first_delta_gap = first.chosen_logprob_delta - first.rejected_logprob_delta;
+    double last_delta_gap  = last.chosen_logprob_delta  - last.rejected_logprob_delta;
+    int loss_decreased = (last.final_loss < first.final_loss);
+    int delta_widened  = (last_delta_gap > first_delta_gap);
+
+    /* At least one signal must hold — anything else means training had
+     * no observable effect, which would contradict the documented intent
+     * of dpo_huml_step at positive lr. */
+    HU_ASSERT_TRUE(loss_decreased || delta_widened);
 
     trainer.vtable->deinit(trainer.ctx, &alloc);
 }
@@ -110,6 +174,7 @@ static void test_dpo_real_huml_e2e_sign_of_improvement(void) {
 }
 
 void run_dpo_real_loss_tests(void) {
-    HU_RUN_TEST(test_dpo_real_huml_loss_finite_diff_lm_head);
+    HU_RUN_TEST(test_dpo_real_huml_step_at_zero_lr_is_no_op);
+    HU_RUN_TEST(test_dpo_real_huml_loss_decreases_under_positive_lr);
     HU_RUN_TEST(test_dpo_real_huml_e2e_sign_of_improvement);
 }

@@ -17,8 +17,8 @@
  * `include/human/ml/` and every test under `tests/`). Using the real
  * paths so this file compiles.
  */
-#ifndef HUMAN_ML_DPO_REAL_H
-#define HUMAN_ML_DPO_REAL_H
+#ifndef HU_ML_DPO_REAL_H
+#define HU_ML_DPO_REAL_H
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -48,4 +48,4 @@ hu_error_t hu_dpo_real_mlx_create(hu_allocator_t *alloc,
 #ifdef __cplusplus
 }
 #endif
-#endif /* HUMAN_ML_DPO_REAL_H */
+#endif /* HU_ML_DPO_REAL_H */

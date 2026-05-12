@@ -13,8 +13,8 @@
  * and `human/core/error.h`. Using the real paths so this header
  * compiles. (The same correction was applied to Task 1's rl_trainer.h.)
  */
-#ifndef HUMAN_ML_POLICY_LOGPROBS_H
-#define HUMAN_ML_POLICY_LOGPROBS_H
+#ifndef HU_ML_POLICY_LOGPROBS_H
+#define HU_ML_POLICY_LOGPROBS_H
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -41,4 +41,4 @@ hu_error_t hu_policy_logprobs(hu_allocator_t *alloc, hu_model_t *model,
 #ifdef __cplusplus
 }
 #endif
-#endif /* HUMAN_ML_POLICY_LOGPROBS_H */
+#endif /* HU_ML_POLICY_LOGPROBS_H */

@@ -102,12 +102,24 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
 
     mkdir(c->adapter_dir, 0755);  /* OK if exists */
 
+    /* Match dpo_mlx_save's hardening pattern: reject single-quote in any
+     * user-provided field that lands in the popen()'d shell command, then
+     * wrap each interpolation in single quotes so spaces / metacharacters
+     * in model_id or adapter_dir cannot escape the argument. jsonl_path is
+     * derived from getpid() so it is internally safe, but is single-quoted
+     * for symmetry. Today's exploitability is low (model_id / adapter_dir
+     * are config-owned), but the audit flagged the inconsistency with
+     * dpo_mlx_save and we close the gap here. */
+    if (strchr(c->model_id, '\'') || strchr(c->adapter_dir, '\'')) {
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
     char cmd[2048];
     snprintf(cmd, sizeof(cmd),
              "python3 scripts/dpo_mlx_train.py "
-             "--model %s "
-             "--data %s "
-             "--adapter-path %s "
+             "--model '%s' "
+             "--data '%s' "
+             "--adapter-path '%s' "
              "--iters %zu "
              "--beta %.4f "
              "--batch-size 1 "

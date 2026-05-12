@@ -138,9 +138,21 @@ static void test_agent_turn_clear_turn_resets_called_flag(void) {
     hu_reaction_handler_reset_for_test();
 }
 
+/* Pin the NULL-input guards in src/agent/reaction_handler.c:53. Adding this
+ * regression test (cheap, no setup) so any future refactor that drops the
+ * `if (!e || !e->channel_id)` early-return surfaces as a test failure
+ * instead of a daemon-loop NULL-deref. */
+static void test_reaction_handler_handle_event_null_returns_invalid_argument(void) {
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(NULL), HU_ERR_INVALID_ARGUMENT);
+    /* Also pin: event with NULL channel_id */
+    hu_reaction_event_t e = {0};  /* channel_id NULL */
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_ERR_INVALID_ARGUMENT);
+}
+
 void run_reaction_handler_e2e_tests(void) {
     HU_TEST_SUITE("reaction_handler_e2e");
     HU_RUN_TEST(test_reaction_event_with_known_target_inserts_dpo_pair);
     HU_RUN_TEST(test_reaction_event_with_unknown_target_drops_silently);
     HU_RUN_TEST(test_agent_turn_clear_turn_resets_called_flag);
+    HU_RUN_TEST(test_reaction_handler_handle_event_null_returns_invalid_argument);
 }
