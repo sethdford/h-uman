@@ -2721,6 +2721,8 @@ set(HU_TEST_SOURCES
     tests/test_policy_logprobs.c
     # Phase 2 Task 3 (RL SOTA): hu_reference_model_create_from clone + freeze.
     tests/test_reference_model.c
+    # Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient.
+    tests/test_dpo_real_loss.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c

@@ -408,6 +408,8 @@ void run_rl_trainer_tests(void);
 void run_policy_logprobs_tests(void);
 /* Phase 2 Task 3 (RL SOTA): hu_reference_model_create_from clone + freeze. */
 void run_reference_model_tests(void);
+/* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
+void run_dpo_real_loss_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -972,6 +974,8 @@ int main(int argc, char **argv) {
     run_policy_logprobs_tests();
     /* Phase 2 Task 3 (RL SOTA): hu_reference_model_create_from clone + freeze. */
     run_reference_model_tests();
+    /* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
+    run_dpo_real_loss_tests();
 #endif
 
     run_experience_tests();
