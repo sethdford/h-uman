@@ -1,6 +1,7 @@
 #include "config_internal.h"
 #include "human/config.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include <stdio.h>
@@ -474,8 +475,10 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
     if (!json_str)
         return HU_ERR_OUT_OF_MEMORY;
 
-    FILE *f = fopen(cfg->config_path, "w");
-    if (!f) {
+    /* config.json may contain provider api_keys — 0600. The same
+     * file is migrated in onboard.c / cli_commands.c / config_mutator.c. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(cfg->config_path, HU_IO_PERM_SECRET, "w", &f) != HU_OK || !f) {
         a.free(a.ctx, json_str, json_len + 1);
         return HU_ERR_IO;
     }

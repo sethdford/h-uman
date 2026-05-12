@@ -1,5 +1,6 @@
 #include "human/security/audit.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/core/string.h"
 #include "human/crypto.h"
 #include "human/security.h"
@@ -536,8 +537,10 @@ static hu_error_t load_or_create_audit_key(const char *key_path,
         }
     }
 #endif
-    f = fopen(key_path, "wb");
-    if (!f) {
+    /* Audit-log signing key — owner-only read/write (0600). If this
+     * file leaks, audit-log entries can be forged. Route through
+     * hu_io_secure_open for the explicit mode + traversal guard. */
+    if (hu_io_secure_open(key_path, HU_IO_PERM_SECRET, "wb", &f) != HU_OK || !f) {
         audit_secure_zero(key, HU_AUDIT_HMAC_LEN);
         return HU_ERR_IO;
     }
@@ -840,9 +843,10 @@ hu_error_t hu_audit_rotate_key(hu_audit_logger_t *logger) {
     /* 8. Update prev_hmac for next entry (rotation entry's hmac becomes new chain head) */
     memcpy(logger->prev_hmac, rotation_hmac, HU_AUDIT_HMAC_LEN);
 
-    /* 9. Save new key to key file */
-    FILE *fkey = fopen(logger->key_path, "wb");
-    if (!fkey) {
+    /* 9. Save new key to key file — same 0600 enforcement as the
+     * initial write above; rotation must not relax the mode. */
+    FILE *fkey = NULL;
+    if (hu_io_secure_open(logger->key_path, HU_IO_PERM_SECRET, "wb", &fkey) != HU_OK || !fkey) {
         audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
         return HU_ERR_IO;
     }
