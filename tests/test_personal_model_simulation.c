@@ -351,6 +351,152 @@ static void simulation_b1_turn_50_prompt_contract(void) {
 }
 
 /* ─────────────────────────────────────────────────────────────────── */
+/*  Story B2 — drift / time-travel regression                          */
+/* ─────────────────────────────────────────────────────────────────── */
+
+static void simulation_b2_fact_decay_halves_at_sim_end_plus_one_half_life(void) {
+    /* Run B1, pluck a fact, then check effective_confidence at
+     * last_seen_at + 90d. The existing test_personal_model.c proves
+     * this for synthetic stamping; this version proves the same
+     * primitive holds when called on a fact that was actually
+     * accumulated through hu_personal_model_ingest. */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    sim_run_through(&m, k_simulation_50turns_count);
+
+    const hu_heuristic_fact_t *love = sim_find_fact(&m, "i love", NULL);
+    HU_ASSERT_NOT_NULL(love);
+    HU_ASSERT_TRUE(love->last_seen_at > 0);
+
+    float raw = love->confidence;
+    HU_ASSERT_TRUE(raw > 0.0f);
+
+    /* At last_seen_at: no decay. */
+    float now0 = hu_heuristic_fact_effective_confidence(love, love->last_seen_at);
+    HU_ASSERT_FLOAT_EQ(now0, raw, 0.001f);
+
+    /* +1 half-life: ~0.5 × raw. (decay is approximated via the
+     * lookup table in fact_extract.c, so loosen tolerance to ±15%
+     * of the raw value.) */
+    int64_t t1 = love->last_seen_at + HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    float e1 = hu_heuristic_fact_effective_confidence(love, t1);
+    HU_ASSERT_TRUE(e1 > 0.40f * raw);
+    HU_ASSERT_TRUE(e1 < 0.60f * raw);
+
+    /* +2 half-lives: ~0.25 × raw. */
+    int64_t t2 = love->last_seen_at + 2 * HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    float e2 = hu_heuristic_fact_effective_confidence(love, t2);
+    HU_ASSERT_TRUE(e2 > 0.18f * raw);
+    HU_ASSERT_TRUE(e2 < 0.32f * raw);
+
+    /* +20 half-lives: floored. */
+    int64_t t_far = love->last_seen_at + 20 * HU_FACT_CONFIDENCE_HALF_LIFE_SEC;
+    float e_far = hu_heuristic_fact_effective_confidence(love, t_far);
+    HU_ASSERT_TRUE(e_far >= 0.0f);
+    HU_ASSERT_TRUE(e_far < 0.01f * raw);
+}
+
+static void simulation_b2_topic_decay_halves_at_sim_end_plus_one_half_life(void) {
+    /* Topics use a 60-day half-life. Find any topic with a stamped
+     * last_mentioned and verify decay shape. */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    sim_run_through(&m, k_simulation_50turns_count);
+
+    HU_ASSERT_TRUE(m.topic_count > 0);
+    const hu_personal_topic_t *t = NULL;
+    for (size_t i = 0; i < m.topic_count; i++) {
+        if (m.topics[i].last_mentioned > 0 && m.topics[i].interest_score > 0.0f) {
+            t = &m.topics[i];
+            break;
+        }
+    }
+    HU_ASSERT_NOT_NULL(t);
+
+    float raw = t->interest_score;
+    int64_t base = t->last_mentioned;
+
+    float at_zero = hu_personal_topic_effective_score(t, base);
+    HU_ASSERT_FLOAT_EQ(at_zero, raw, 0.001f);
+
+    int64_t one_hl = base + HU_PM_TOPIC_INTEREST_HALF_LIFE_SEC;
+    float at_one_hl = hu_personal_topic_effective_score(t, one_hl);
+    HU_ASSERT_TRUE(at_one_hl > 0.40f * raw);
+    HU_ASSERT_TRUE(at_one_hl < 0.60f * raw);
+}
+
+static void simulation_b2_style_freshness_decays_after_long_silence(void) {
+    /* Style freshness has a 180-day half-life. After 360 days of
+     * silence, freshness should be ≤ 0.30 (two half-lives → 0.25). */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    sim_run_through(&m, k_simulation_50turns_count);
+
+    HU_ASSERT_TRUE(m.style.last_observed_at > 0);
+    float fresh_now =
+        hu_personal_communication_style_freshness(&m.style, m.style.last_observed_at);
+    HU_ASSERT_FLOAT_EQ(fresh_now, 1.0f, 0.001f);
+
+    int64_t two_hl = m.style.last_observed_at + 2 * HU_PM_STYLE_OBSERVATION_HALF_LIFE_SEC;
+    float fresh_2hl = hu_personal_communication_style_freshness(&m.style, two_hl);
+    HU_ASSERT_TRUE(fresh_2hl > 0.18f);
+    HU_ASSERT_TRUE(fresh_2hl < 0.32f);
+}
+
+static void simulation_b2_apply_decay_prunes_after_long_drift(void) {
+    /* Run B1, then call apply_decay with a `now` two years past the
+     * end of the simulation. The lowest-confidence facts and topics
+     * fall below HU_PM_FORGET_FLOOR and get pruned. */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    int64_t sim_end = sim_run_through(&m, k_simulation_50turns_count);
+
+    size_t facts_before = m.fact_count;
+    size_t topics_before = m.topic_count;
+    HU_ASSERT_TRUE(facts_before > 0);
+    HU_ASSERT_TRUE(topics_before > 0);
+
+    /* +730 days ≈ 8 fact half-lives, 12 topic half-lives, 4 style
+     * half-lives. Effective scores well below HU_PM_FORGET_FLOOR. */
+    int64_t far_future = sim_end + 730LL * 86400LL;
+    size_t pruned = hu_personal_model_apply_decay(&m, far_future);
+
+    HU_ASSERT_TRUE(pruned > 0);
+    HU_ASSERT_TRUE(m.fact_count < facts_before);
+    HU_ASSERT_TRUE(m.topic_count < topics_before);
+}
+
+static void simulation_b2_prompt_shrinks_after_long_drift(void) {
+    /* The prompt builder uses model->updated_at as `now`. After
+     * advancing updated_at two years, the rebuilt prompt should
+     * either shrink (decayed signal dropped) or, at worst, stay
+     * the same length but differ in content. We assert the
+     * stronger property: it must shrink, since the fixture
+     * accumulates enough signal that pruning some of it is the
+     * expected outcome. */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    int64_t sim_end = sim_run_through(&m, k_simulation_50turns_count);
+
+    char buf_now[8192];
+    size_t n_now = hu_personal_model_build_prompt(&m, buf_now, sizeof(buf_now));
+    HU_ASSERT_GT((long)n_now, 0L);
+
+    /* Time-travel: bump updated_at by 730 days and re-build. */
+    m.updated_at = sim_end + 730LL * 86400LL;
+
+    char buf_far[8192];
+    size_t n_far = hu_personal_model_build_prompt(&m, buf_far, sizeof(buf_far));
+    HU_ASSERT_GT((long)n_far, 0L);
+
+    /* The header [Personal Context] and the basic style summary
+     * survive in both — but the body should shrink as decayed
+     * signal gets dropped from the prompt. Assert at least
+     * 100 bytes of difference (a single avoid-line or topic line). */
+    HU_ASSERT_TRUE(n_far + 100 <= n_now);
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
 /*  Test runner                                                        */
 /* ─────────────────────────────────────────────────────────────────── */
 
@@ -361,4 +507,9 @@ void run_personal_model_simulation_tests(void) {
     HU_RUN_TEST(simulation_b1_turn_25_style_emerges);
     HU_RUN_TEST(simulation_b1_turn_50_terminal_state);
     HU_RUN_TEST(simulation_b1_turn_50_prompt_contract);
+    HU_RUN_TEST(simulation_b2_fact_decay_halves_at_sim_end_plus_one_half_life);
+    HU_RUN_TEST(simulation_b2_topic_decay_halves_at_sim_end_plus_one_half_life);
+    HU_RUN_TEST(simulation_b2_style_freshness_decays_after_long_silence);
+    HU_RUN_TEST(simulation_b2_apply_decay_prunes_after_long_drift);
+    HU_RUN_TEST(simulation_b2_prompt_shrinks_after_long_drift);
 }
