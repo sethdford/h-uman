@@ -1209,6 +1209,13 @@ if(HU_ENABLE_ML)
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
         src/providers/huml.c
+        # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t vtable + factory.
+        # Backends are stubbed at HU_ERR_NOT_SUPPORTED until Tasks 4
+        # (HUML, in-process DPO + gradient check) and 6 (MLX subprocess
+        # via the third-party mlx-lm-lora package).
+        src/ml/rl_trainer.c
+        src/ml/dpo_real_huml.c
+        src/ml/dpo_real_mlx.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2700,6 +2707,8 @@ set(HU_TEST_SOURCES
     tests/test_ml.c
     tests/test_ml_cli_actually_trains.c
     tests/test_dpo_judge_naming.c
+    # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t factory dispatch pin.
+    tests/test_rl_trainer.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c

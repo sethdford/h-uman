@@ -402,6 +402,8 @@ void run_agent_trainer_tests(void);
 void run_training_data_tests(void);
 void run_training_data_extractor_tests(void);
 void run_training_data_quality_tests(void);
+/* Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t factory dispatch pin. */
+void run_rl_trainer_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -960,6 +962,8 @@ int main(int argc, char **argv) {
     run_training_data_tests();
     run_training_data_extractor_tests();
     run_training_data_quality_tests();
+    /* Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t factory dispatch pin. */
+    run_rl_trainer_tests();
 #endif
 
     run_experience_tests();
