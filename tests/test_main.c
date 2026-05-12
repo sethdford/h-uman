@@ -49,6 +49,8 @@ void run_channel_embeds_tests(void);
 void run_reaction_event_tests(void);
 /* Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll. */
 void run_imessage_reactions_tests(void);
+/* Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch. */
+void run_slack_reactions_tests(void);
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
 void run_tool_tests(void);
@@ -631,6 +633,7 @@ int main(int argc, char **argv) {
     run_channel_embeds_tests();
     run_reaction_event_tests();
     run_imessage_reactions_tests();
+    run_slack_reactions_tests();
     run_declarative_tools_tests();
     run_skill_trust_tests();
     run_tool_tests();

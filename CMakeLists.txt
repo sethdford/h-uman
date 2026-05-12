@@ -199,6 +199,12 @@ if(HU_ENABLE_DISCORD)
 endif()
 if(HU_ENABLE_SLACK)
     list(APPEND CHANNEL_SOURCES src/channels/slack.c)
+    # Phase 2 Task 12 (RL SOTA): reaction_added/removed webhook branch.
+    # Lives in its own TU to avoid an enum-name collision between
+    # human/channels/reaction_event.h (Task 10) and human/channel.h
+    # (HU_REACTION_QUESTION / HU_REACTION_CUSTOM_EMOJI redefinition).
+    # Same pattern as Task 11's imessage_reactions.c.
+    list(APPEND CHANNEL_SOURCES src/channels/slack_reactions.c)
 endif()
 if(HU_ENABLE_WHATSAPP)
     list(APPEND CHANNEL_SOURCES src/channels/whatsapp.c)
@@ -2834,6 +2840,9 @@ list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 # Default-skipped stub; opt in to the real chat.db path with -DHU_HAVE_CHATDB=1
 # (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
+# Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
+# (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
+list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
 
 # SOTA capability tests
 list(APPEND HU_TEST_SOURCES
