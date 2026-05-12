@@ -329,6 +329,7 @@ set(HU_CORE_SOURCES
     src/core/error.c
     src/core/arena.c
     src/core/string.c
+    src/core/io_secure.c
     src/core/json.c
     src/core/http.c
     src/core/vertex_auth.c
@@ -2422,6 +2423,7 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_io_secure.c
     tests/test_slice.c
     tests/test_memory.c
     tests/test_sql_transaction.c

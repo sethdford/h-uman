@@ -12,6 +12,7 @@
 #include "human/calibration/clone.h"
 #include "human/config.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/process_util.h"
@@ -202,9 +203,12 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     if (mkdir(dir_path, 0700) != 0 && errno != EEXIST)
         return HU_ERR_IO;
 
-    /* Write config.json */
-    FILE *f = fopen(config_path, "w");
-    if (!f)
+    /* Write config.json. Treated as secret because the user may add
+     * API keys to it via `human config edit`; we want the 0600 mode
+     * to persist from creation. Path traversal guard kills the
+     * cpp/path-injection alert at this line. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(config_path, HU_IO_PERM_SECRET, "w", &f) != HU_OK || !f)
         return HU_ERR_IO;
 
     size_t len = sizeof(HU_INIT_DEFAULT_JSON) - 1;
@@ -222,7 +226,13 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
             char persona_path[HU_INIT_MAX_PATH];
             n = snprintf(persona_path, sizeof(persona_path), "%s/default.json", persona_dir);
             if (n > 0 && (size_t)n < sizeof(persona_path) && access(persona_path, F_OK) != 0) {
-                FILE *pf = fopen(persona_path, "w");
+                /* Persona JSON; no secrets; 0644 matches the existing
+                 * convention. The access-then-open pattern here is
+                 * still a TOCTOU window (CodeQL alert) but the helper
+                 * keeps the mode explicit; the race is a separate
+                 * follow-up below. */
+                FILE *pf = NULL;
+                (void)hu_io_secure_open(persona_path, HU_IO_PERM_USER, "w", &pf);
                 if (pf) {
                     size_t plen = strlen(hu_starter_persona_json);
                     (void)fwrite(hu_starter_persona_json, 1, plen, pf);

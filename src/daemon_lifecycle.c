@@ -11,6 +11,7 @@
 #include "human/daemon_lifecycle.h"
 #include "human/daemon.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,8 +107,13 @@ hu_error_t hu_daemon_start(void) {
     if (pid < 0)
         return HU_ERR_IO;
     if (pid > 0) {
-        FILE *f = fopen(path, "w");
-        if (f) {
+        /* PID file lives at ~/.human/human.pid. The path is built from
+         * $HOME (validated above by validate_home) so CodeQL flags it
+         * as cpp/path-injection + cpp/world-writable-file-creation.
+         * hu_io_secure_open replaces fopen("w") with explicit 0644 and
+         * a traversal-rejecting open(). */
+        FILE *f = NULL;
+        if (hu_io_secure_open(path, HU_IO_PERM_USER, "w", &f) == HU_OK && f) {
             fprintf(f, "%d\n", (int)pid);
             fclose(f);
         }
@@ -191,8 +197,12 @@ hu_error_t hu_daemon_write_pid(void) {
     mkdir(dir, 0700);
 #endif
 
-    FILE *f = fopen(path, "w");
-    if (!f)
+    /* Service-loop PID at ~/.human/human.pid — same env-derived path
+     * as hu_daemon_start above; route through hu_io_secure_open for
+     * the explicit 0644 mode and the traversal guard. */
+    FILE *f = NULL;
+    hu_error_t open_err = hu_io_secure_open(path, HU_IO_PERM_USER, "w", &f);
+    if (open_err != HU_OK || !f)
         return HU_ERR_IO;
     fprintf(f, "%d\n", (int)getpid());
     fclose(f);
@@ -280,8 +290,12 @@ hu_error_t hu_daemon_install(hu_allocator_t *alloc) {
     if (n <= 0 || (size_t)n >= sizeof(log_path))
         return HU_ERR_IO;
 
-    FILE *f = fopen(plist, "w");
-    if (!f)
+    /* launchd plist at ~/Library/LaunchAgents/com.human.app.plist —
+     * path derived from $HOME; route through hu_io_secure_open.
+     * launchd only loads plists whose mode allows owner-read, 0644
+     * keeps the existing semantics and pacifies CodeQL. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(plist, HU_IO_PERM_USER, "w", &f) != HU_OK || !f)
         return HU_ERR_IO;
 
     fprintf(f,
@@ -421,8 +435,12 @@ hu_error_t hu_daemon_install(hu_allocator_t *alloc) {
     if (n <= 0 || (size_t)n >= sizeof(unit_path))
         return HU_ERR_IO;
 
-    FILE *f = fopen(unit_path, "w");
-    if (!f)
+    /* systemd unit at ~/.config/systemd/user/human.service — path
+     * derived from $XDG_CONFIG_HOME / $HOME; route through
+     * hu_io_secure_open. systemd requires the unit file be readable;
+     * 0644 is the systemd convention for user-level units. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(unit_path, HU_IO_PERM_USER, "w", &f) != HU_OK || !f)
         return HU_ERR_IO;
 
     fprintf(f,

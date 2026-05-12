@@ -52,20 +52,28 @@ hu_error_t hu_plugin_discover_and_load(hu_allocator_t *alloc, const char *dir,
             return HU_ERR_OUT_OF_MEMORY;
         memset(*results, 0, sizeof(hu_plugin_discovery_result_t));
 
+        /* CodeQL cpp/potentially-dangerous-function flags strcpy — fine
+         * for string literals into sized buffers like these, but every
+         * agent + reviewer trips on it. Use memcpy with the explicit
+         * length (we just allocated len+1 above) to satisfy the lint and
+         * make the bound visible. */
         const char *mock_path = "mock-plugin.so";
-        (*results)[0].path = (char *)alloc->alloc(alloc->ctx, strlen(mock_path) + 1);
+        size_t mock_path_len = strlen(mock_path);
+        (*results)[0].path = (char *)alloc->alloc(alloc->ctx, mock_path_len + 1);
         if ((*results)[0].path)
-            strcpy((*results)[0].path, mock_path);
+            memcpy((*results)[0].path, mock_path, mock_path_len + 1);
 
         const char *mock_name = "mock-plugin";
-        (*results)[0].name = (char *)alloc->alloc(alloc->ctx, strlen(mock_name) + 1);
+        size_t mock_name_len = strlen(mock_name);
+        (*results)[0].name = (char *)alloc->alloc(alloc->ctx, mock_name_len + 1);
         if ((*results)[0].name)
-            strcpy((*results)[0].name, mock_name);
+            memcpy((*results)[0].name, mock_name, mock_name_len + 1);
 
         const char *mock_ver = "1.0.0";
-        (*results)[0].version = (char *)alloc->alloc(alloc->ctx, strlen(mock_ver) + 1);
+        size_t mock_ver_len = strlen(mock_ver);
+        (*results)[0].version = (char *)alloc->alloc(alloc->ctx, mock_ver_len + 1);
         if ((*results)[0].version)
-            strcpy((*results)[0].version, mock_ver);
+            memcpy((*results)[0].version, mock_ver, mock_ver_len + 1);
 
         (*results)[0].load_error = HU_OK;
         return HU_OK;

@@ -1,6 +1,7 @@
 #include "human/music.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/platform.h"
 #include <stdio.h>
@@ -490,15 +491,19 @@ hu_error_t hu_music_taste_save(const char *path, size_t path_len) {
     memcpy(path_buf, path, path_len);
     path_buf[path_len] = '\0';
 
-    FILE *f = fopen(path_buf, "w");
-    if (!f) {
+    /* Music taste file at caller-supplied path (typically
+     * ~/.human/music_taste.json). Path is user/config derived so we
+     * need the traversal guard; contents are user data, not secrets,
+     * so 0644 is appropriate. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path_buf, HU_IO_PERM_USER, "w", &f) != HU_OK || !f) {
         /* Try creating parent directory (e.g. ~/.human/) */
         char *last_slash = strrchr(path_buf, '/');
         if (last_slash && last_slash != path_buf) {
             *last_slash = '\0';
             (void)mkdir(path_buf, 0700);
             *last_slash = '/';
-            f = fopen(path_buf, "w");
+            (void)hu_io_secure_open(path_buf, HU_IO_PERM_USER, "w", &f);
         }
         if (!f)
             return HU_ERR_IO;
