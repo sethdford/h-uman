@@ -263,9 +263,7 @@ export class HuDirectiveTelemetryTile extends LitElement {
     return html`
       <div class="header">
         <div class="title">Acknowledgment-directive variants</div>
-        <div class="total-readout">
-          <span class="total-value">${total}</span> total fires
-        </div>
+        <div class="total-readout"><span class="total-value">${total}</span> total fires</div>
       </div>
     `;
   }
@@ -281,17 +279,10 @@ export class HuDirectiveTelemetryTile extends LitElement {
   }
 
   private renderBar(data: DirectiveTelemetry) {
-    const variantSum = DIRECTIVE_VARIANTS.reduce(
-      (acc, key) => acc + safeCount(data, key),
-      0,
-    );
+    const variantSum = DIRECTIVE_VARIANTS.reduce((acc, key) => acc + safeCount(data, key), 0);
 
     if (variantSum === 0) {
-      return html`<div
-        class="bar-empty"
-        role="status"
-        aria-label="No variants fired yet"
-      >
+      return html`<div class="bar-empty" role="status" aria-label="No variants fired yet">
         no variants fired yet
       </div>`;
     }
@@ -322,10 +313,7 @@ export class HuDirectiveTelemetryTile extends LitElement {
   }
 
   private renderLegend(data: DirectiveTelemetry) {
-    const variantSum = DIRECTIVE_VARIANTS.reduce(
-      (acc, key) => acc + safeCount(data, key),
-      0,
-    );
+    const variantSum = DIRECTIVE_VARIANTS.reduce((acc, key) => acc + safeCount(data, key), 0);
     return html`
       <div class="legend" aria-hidden="true">
         ${DIRECTIVE_VARIANTS.map((key) => {
