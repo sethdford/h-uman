@@ -164,9 +164,22 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
     if (now_ms == 0)
         now_ms = (int64_t)time(NULL) * 1000;
 
+    /* P2.4 — load with channel-aware key when persona_ctx supplies one.
+     * Same person on Slack vs SMS now gets distinct cached snapshots so
+     * the per-channel persona overlay (P1.2) actually changes ToM
+     * pragmatics. Falls through to the legacy single-key load when no
+     * channel is available. */
     hu_world_model_t *wm = NULL;
+    const char *cache_channel = NULL;
+    size_t cache_channel_len = 0;
+    if (persona_ctx && persona_ctx->channel && persona_ctx->channel_len > 0 &&
+        persona_ctx->channel_len < 32) {
+        cache_channel = persona_ctx->channel;
+        cache_channel_len = persona_ctx->channel_len;
+    }
     hu_error_t e =
-        hu_world_model_load(facade->m, alloc, contact_id, contact_id_len, now_ms, &wm);
+        hu_world_model_load_with_channel(facade->m, alloc, contact_id, contact_id_len,
+                                         cache_channel, cache_channel_len, now_ms, &wm);
     if (e != HU_OK || !wm)
         return e == HU_OK ? HU_OK : e;
 
@@ -261,7 +274,25 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Avoid:\n", 7);
         size_t shown = wm->negatives_count > 6 ? 6 : wm->negatives_count;
         for (size_t i = 0; i < shown; i++) {
-            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s%s%s\n", wm->negatives[i].text,
+            /* P5.5 — render each negative with a per-source directive so
+             * the planner / W11 verifier knows how strictly to enforce
+             * it. The four sources map to four enforcement contracts:
+             *   USER_EXPLICIT     — hard refusal ("[hard]")
+             *   SELF_RAG_ABSTAIN  — soft hedge with citation ("[soft]")
+             *   AUTO_EXTRACT      — ask-to-confirm ("[confirm]")
+             *   SYSTEM_POLICY     — hard refusal + audit ("[policy]")
+             *
+             * The tag is a single bracketed prefix so it's easy for the
+             * planner to grep without exploding the prompt budget. */
+            const char *tag = "[hard]";
+            switch (wm->negatives[i].source) {
+            case HU_NEGATIVE_SOURCE_USER_EXPLICIT:    tag = "[hard]";    break;
+            case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN: tag = "[soft]";    break;
+            case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:     tag = "[confirm]"; break;
+            case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:    tag = "[policy]";  break;
+            }
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s%s%s\n",
+                                   tag, wm->negatives[i].text,
                                    wm->negatives[i].reason[0] ? " — " : "",
                                    wm->negatives[i].reason[0] ? wm->negatives[i].reason : "");
         }
@@ -421,6 +452,11 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
         snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
         nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
         nm.created_at = now_ms;
+        /* P3.2 — semantic origin tag. SELF_RAG_ABSTAIN tells the planner
+         * to treat this as a SOFT hedge ("I'm not sure about X"), not a
+         * hard refusal. The W11 abstention is a "we don't know enough"
+         * signal, not a "user said never". */
+        nm.source = HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN;
         int64_t nm_id = 0;
         /* P3.1 — gate self-rag abstention writes through W1 write_trust.
          * Source is the agent itself, so trust is high; the gate guards the

@@ -158,7 +158,7 @@ static int64_t sim_run_through(hu_personal_model_t *model, size_t up_to) {
         int64_t ts = sim_turn_timestamp(t);
         last_ts = ts;
         hu_error_t err = hu_personal_model_ingest(model, t->text, strlen(t->text),
-                                                  (bool)t->from_user, ts);
+                                                  (bool)t->from_user, ts, /*prov=*/NULL);
         HU_ASSERT_EQ(err, HU_OK);
     }
     return last_ts;
@@ -637,7 +637,7 @@ static void simulation_b3_thousand_turn_invariants(void) {
         int64_t ts = SIM_T0 + (int64_t)day * 86400LL + (int64_t)hour * 3600LL;
         bool from_user = (rand_r(&seed) % 4) != 0; /* ~75% user turns */
         hu_error_t err =
-            hu_personal_model_ingest(&m, msg, strlen(msg), from_user, ts);
+            hu_personal_model_ingest(&m, msg, strlen(msg), from_user, ts, /*prov=*/NULL);
         HU_ASSERT_EQ(err, HU_OK);
 
         if (turn % 100 == 0)
@@ -666,7 +666,7 @@ static void simulation_b3_thousand_turn_save_load_after_stress(void) {
         last_ts = SIM_T0 + (int64_t)day * 86400LL + (int64_t)hour * 3600LL;
         bool from_user = (rand_r(&seed) % 4) != 0;
         HU_ASSERT_EQ(
-            hu_personal_model_ingest(&m, msg, strlen(msg), from_user, last_ts),
+            hu_personal_model_ingest(&m, msg, strlen(msg), from_user, last_ts, /*prov=*/NULL),
             HU_OK);
     }
 

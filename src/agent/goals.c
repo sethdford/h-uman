@@ -13,6 +13,13 @@
 #include <string.h>
 #include <time.h>
 
+/* P2.2 — Goals are a global table (no contact_id). Any goal mutation
+ * is observable in hu_world_model_t.goals for every cached contact, so
+ * a successful write must clear the entire world-model LRU. We forward-
+ * declare here to avoid a circular include with human/agent/world_model.h;
+ * the symbol is defined in src/agent/world_model.c. */
+extern void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
+
 hu_error_t hu_goal_engine_create(hu_allocator_t *alloc, sqlite3 *db,
                                  hu_goal_engine_t *out) {
     if (!alloc || !db || !out)
@@ -82,6 +89,8 @@ hu_error_t hu_goal_create(hu_goal_engine_t *engine,
         return HU_ERR_MEMORY_BACKEND;
 
     *out_id = sqlite3_last_insert_rowid(engine->db);
+    /* P2.2 — drop all cached snapshots; goals appear in every wm.goals[]. */
+    hu_world_model_invalidate(NULL, 0);
     return HU_OK;
 }
 
@@ -103,7 +112,11 @@ hu_error_t hu_goal_update_status(hu_goal_engine_t *engine, int64_t goal_id,
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    /* P2.2 — status flip moves a goal in/out of wm.goals (active filter). */
+    hu_world_model_invalidate(NULL, 0);
+    return HU_OK;
 }
 
 hu_error_t hu_goal_update_progress(hu_goal_engine_t *engine, int64_t goal_id,
@@ -126,7 +139,11 @@ hu_error_t hu_goal_update_progress(hu_goal_engine_t *engine, int64_t goal_id,
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    /* P2.2 — progress mutates wm.goals[i].progress and may flip status. */
+    hu_world_model_invalidate(NULL, 0);
+    return HU_OK;
 }
 
 static void copy_str_to_field(char *dst, size_t cap, const char *src, size_t src_len,
@@ -220,6 +237,8 @@ hu_error_t hu_goal_decompose(hu_goal_engine_t *engine, int64_t parent_id,
         out_ids[i] = sqlite3_last_insert_rowid(engine->db);
     }
     sqlite3_finalize(stmt);
+    /* P2.2 — decompose inserts N child goals; same invalidation rule. */
+    hu_world_model_invalidate(NULL, 0);
     return HU_OK;
 }
 

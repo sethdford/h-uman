@@ -282,6 +282,8 @@ static void test_diff_tool(void) {
     hu_tool_t tool = {0};
     HU_ASSERT_EQ(hu_diff_tool_create(&a, NULL, 0, NULL, &tool), HU_OK);
     HU_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "diff");
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &a);
 }
 
 static void test_policy_engine_deny(void) {
@@ -632,6 +634,8 @@ static void test_diff_description(void) {
     HU_ASSERT_EQ(hu_diff_tool_create(&a, NULL, 0, NULL, &tool), HU_OK);
     HU_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
     HU_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &a);
 }
 
 static void test_database_description(void) {

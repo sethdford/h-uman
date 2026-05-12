@@ -1146,6 +1146,18 @@ hu_error_t hu_planner_multi_hop(hu_memory_facade_t *m, hu_allocator_t *alloc,
         xfree(alloc, pr_scores, pr_count * sizeof(*pr_scores));
     }
 
+    /* The aggregator owns FIVE parallel arrays (see agg_t at line 458).
+     * We surface `a.items` to the caller — `hu_planner_records_free`
+     * will free that one — but the four sibling arrays (`scores`,
+     * `is_anchor`, `rel_src`, `rel_tgt`) are working-state only and
+     * must be released here. ASan leak summary on PR55 flagged 128 b
+     * leaks at agg_grow's rel_src/rel_tgt reallocs because the function
+     * exited without releasing them. */
+    if (a.scores)    xfree(alloc, a.scores,    a.cap * sizeof(*a.scores));
+    if (a.is_anchor) xfree(alloc, a.is_anchor, a.cap * sizeof(*a.is_anchor));
+    if (a.rel_src)   xfree(alloc, a.rel_src,   a.cap * sizeof(*a.rel_src));
+    if (a.rel_tgt)   xfree(alloc, a.rel_tgt,   a.cap * sizeof(*a.rel_tgt));
+
     *out = a.items;
     *out_count = a.count;
     return HU_OK;

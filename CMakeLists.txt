@@ -465,6 +465,7 @@ set(HU_CORE_SOURCES
     src/agent/context.c
     src/agent/prompt.c
     src/agent/memory_loader.c
+    src/agent/channel_trust.c
     src/agent/agent_definition.c
     src/agent/agent_git.c
     src/agent/dispatcher.c
@@ -642,6 +643,7 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
+    src/memory/minja_guard.c
     src/memory/hallucination_guard.c
     # W7: graph.h is the internal graph API. Direct includes from outside
     # src/memory/ and tests/ are deprecated — callers should migrate to
@@ -2550,6 +2552,7 @@ set(HU_TEST_SOURCES
     tests/test_cli.c
     tests/test_update.c
     tests/test_memory_engines_ext.c
+    tests/test_memory_poisoning.c
     tests/test_runtime.c
     tests/test_runtime_bundle.c
     tests/test_util_modules.c
@@ -2629,6 +2632,9 @@ set(HU_TEST_SOURCES
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_personal_model_contradicts.c
+    tests/test_channel_trust.c
+    tests/test_minja_guard.c
+    tests/test_frontier_prompt.c
     tests/test_w11_abstain_calibration.c
     tests/test_fast_capture.c
     tests/test_promotion.c
