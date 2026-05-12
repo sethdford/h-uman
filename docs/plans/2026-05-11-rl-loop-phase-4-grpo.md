@@ -119,7 +119,13 @@ GRPO and DPO/KTO share the caller surface: configure → step → save_adapter �
 /* additive on hu_rl_trainer_config_t — DPO/KTO impls IGNORE these */
 size_t n_rollouts;       /* GRPO: # samples per prompt; default 4. Others: 0. */
 double clip_eps;         /* GRPO: PPO ratio clip; default 0.2. Others: 0. */
-double kl_beta;          /* GRPO: KL penalty coefficient; default 0.04. Others: 0. */
+/* fix(plan,grpo,config): kl_beta = 0 disables KL penalty (R4 escape valve);
+ * negative sentinel selects default 0.04. Critic R3 MED-1: previous "0 treated
+ * as default" pattern contradicted R4's "drop kl_beta = 0 to disable" guidance. */
+double kl_beta;          /* GRPO: KL penalty coefficient. 0.0 disables the KL penalty
+                          *       (R4 escape valve, used by Task 6 finite-diff test).
+                          *       Negative value selects default 0.04 (DeepSeek R1,
+                          *       umbrella §11 Q10). DPO/KTO impls IGNORE this field. */
 ```
 
 These three new fields land in `include/human/ml/rl_trainer.h` next to the existing `lambda_d` / `lambda_u` Phase 3 additions. Field comments document defaults and DPO/KTO-ignore semantics. The alternative (a parallel `hu_rl_trainer_config_grpo_t`) duplicates 7+ shared fields for 3 new ones — strictly worse on KISS + Rule of Three.
@@ -283,7 +289,7 @@ Until extracted, `grpo_mlx.c` mirrors `kto_mlx.c` (Phase 3 Task 7 hardened patte
 | **R1** | **`mlx-lm-lora` GRPO API drift** — Phase 2 introduced the package for DPO; Phase 3 added KTO. GRPO trainer in the package may live at a different symbol path (`mlx_lm_lora.trainer.grpo_trainer.train_grpo` vs `mlx_lm_lora.trainers.grpo` vs `mlx_lm_lora.train --train-mode grpo` CLI-only vs not implemented at all). The package is actively evolving (we already saw KTO landing later than DPO). | Task 0 step 2 verifies the actual symbol path with `python3 -c "from mlx_lm_lora.trainer.grpo_trainer import train_grpo"`. If that fails, Task 0 step 2b probes `python3 -c "import mlx_lm_lora.trainer; print(dir(mlx_lm_lora.trainer))"` to discover the actual module. Plan amendment is single-line edits to `scripts/grpo_mlx_train.py` and `src/ml/rl_trainer.c::mlx_lm_lora_grpo_available()`. CMake option `HU_HAVE_MLX_LM_GRPO` (separate from the existing `HU_HAVE_MLX_LM` and `HU_HAVE_MLX_LM_KTO`) gates the GRPO MLX integration test. If the package only exposes GRPO via CLI (`python -m mlx_lm_lora.train --train-mode grpo`) and not as a Python API, our wrapper script delegates to the CLI exactly like `scripts/dpo_mlx_train.py` does — that's the Phase 2 precedent (the CLI is the stable contract; internal symbols rotate). |
 | **R2** | **GRPO is the highest-risk single block** (umbrella §10 R5 verbatim) — multi-rollout slow, KL-penalty schedule sensitive, group-baseline numerical stability. | Three-pronged mitigation: (a) **mandatory aspect-panel** at Task 11 end-gate per spec §7 + §10 R5 — phase does NOT close if 5-verifier disagreement ≥ 40%. (b) **Three explicit numerical-stability tests** in `tests/test_grpo_loss.c`: `test_grpo_loss_handles_zero_std_group_without_nan` (D7), `test_grpo_loss_log_ratio_overflow_clamp_kicks_in` (D8), `test_grpo_loss_kl_penalty_zero_at_policy_equals_reference` (D3 — k3 KL = 0 at logp_pol == logp_ref). (c) **Constant-schedule β = 0.04** (umbrella §11 Q10) — no decay schedule in v1. Decay is an optimization, not correctness; a constant schedule is easier to debug. |
 | **R3** | **GRPO reward function source ambiguity** (umbrella §11 Q3 — RM primary, judge fallback, safety filter) — picking the wrong source silently or composing them in the wrong order opens a reward-hacking surface. | Phase 4 implements ONLY the RM + synthetic-fallback layers. Safety filter and external judge are explicitly Phase 5 territory (deferred at the file boundary in the §"What Phase 4 does NOT touch" list). CLI `--reward-fn` argument has NO default — user must pick `synthetic` or `rm` explicitly (D4). Test fixtures use `--reward-fn synthetic` exclusively so no fixture training run depends on a Phase-3 RM checkpoint existing at test time. The `rm` path's CLI test is gated by the presence of a known-checkpoint fixture (`tests/fixtures/rm_synthetic_checkpoint/`; created by Task 9 step 3 via `hu_reward_model_train` on the same Phase-3 synthetic pairs). |
-| **R4** | **KL penalty β = 0.04 too high → reward collapse** (umbrella §10 risk vector implicit in R5 + R9) — the policy can't move because the KL leash is too short, training stalls at zero gradient. | Pin β = 0.04 from DeepSeek R1 paper (umbrella §11 Q10). Test `test_grpo_huml_synthetic_reward_e2e_advantage_drives_loss_decrease` (Task 7) asserts the loss STRICTLY decreases over 50 iterations on a synthetic-reward pin where the optimal policy is known — if β over-leashes, this test fails immediately (loss stays flat or increases). CLI `--kl-beta <X>` allows user override; if a future Gemma run shows reward collapse, the override is the escape valve. **Defensive choice:** in HUML the structural backward applies the KL correction as a separate weighted nudge AFTER the advantage step (D9 step 4), not blended into the analytical gradient — making it trivial to disable by setting `--kl-beta 0` for debugging without touching the math elsewhere. |
+| **R4** | **KL penalty β = 0.04 too high → reward collapse** (umbrella §10 risk vector implicit in R5 + R9) — the policy can't move because the KL leash is too short, training stalls at zero gradient. | Pin β = 0.04 from DeepSeek R1 paper (umbrella §11 Q10). Test `test_grpo_huml_synthetic_reward_e2e_advantage_drives_loss_decrease` (Task 7) asserts the loss STRICTLY decreases over 50 iterations on a synthetic-reward pin where the optimal policy is known — if β over-leashes, this test fails immediately (loss stays flat or increases). CLI `--kl-beta <X>` allows user override; if a future Gemma run shows reward collapse, the override is the escape valve. **Defensive choice:** in HUML the structural backward applies the KL correction as a separate weighted nudge AFTER the advantage step (D9 step 4), not blended into the analytical gradient — making it trivial to disable by setting `--kl-beta 0` for debugging without touching the math elsewhere. **fix(plan,grpo,config): factory contract aligned with R4 escape valve — critic R3 MED-1.** The `hu_rl_trainer_config_t::kl_beta` factory contract treats `kl_beta == 0` as "KL penalty disabled" (the R4 escape valve) and only a negative sentinel selects the default 0.04 — see field comment in `include/human/ml/rl_trainer.h` and the factory precondition in `include/human/ml/grpo.h`. |
 | **R5** | **KL penalty β = 0.04 too low → catastrophic policy drift** — opposite failure mode of R4. Policy diverges past where the reference model's distribution provides any signal, MT-Bench scores collapse, persona fidelity degrades. | The umbrella spec catches this at the Phase 5 eval gate (regression check ≤ 1% on MT-Bench). Phase 4's Task 7 e2e test catches an earlier symptom: `test_grpo_huml_kl_penalty_keeps_policy_close_to_reference` constructs a synthetic-reward function where the maximum reward demands a >5x logp_pol shift from logp_ref, runs GRPO for 100 iters with the default β, and asserts the final `mean(D_KL[π_θ || π_ref])` over the held-out prompts is < 2.0 nats — i.e. the policy didn't run away. Failing this test means β is too low; the user can re-tune to 0.1 or 0.2 via `--kl-beta`. |
 | **R6** | **Group-baseline numerical stability — std=0 silent NaN** (umbrella §10 R5 verbatim) — when all rewards in a group are equal (e.g. all completions get reward 0 because none contained a "good" token), `std = 0`, advantages = `0/0` = NaN, gradients = NaN, training silently no-ops while loss appears finite (initial loss of `−L_clip = 0` is finite even with NaN advantages because `min(NaN * 0, NaN * 0) → NaN → loss accumulator stays 0`). | (a) verl-style `(r − mean) / (std + 1e-8)` floor (D7). (b) Pin test `test_grpo_loss_handles_zero_std_group_without_nan` (Task 6) constructs an all-equal-rewards group, asserts advantages are exactly 0, loss is finite, gradient is zero. (c) Optional `HU_GRPO_LOG_ZERO_STD` log message at warning level when std-floor kicks in (gated by env flag, off by default) — surface the pathology to the operator without spamming. |
 | **R7** | **Multi-rollout slow** (umbrella §10 R5 verbatim) — N completions per prompt × max_new_tokens × max_iters can blow the test-suite +30 sec budget. | (a) N=4 default (D6). (b) `max_new_tokens` default = 8 in HUML tests (toy GPT outputs are small anyway); CLI accepts override. (c) Iteration budget for HUML e2e = 50 iters (Task 7) instead of trl's 1000+ — the toy GPT converges fast on synthetic rewards. (d) Wall-time check in `test_grpo_huml_synthetic_reward_e2e_advantage_drives_loss_decrease`: assert total runtime < 5 sec under ASan (10x relaxation of normal budget). (e) The MLX path skips this entirely on CI (no Gemma in CI default; gated by `HU_HAVE_MLX_LM_GRPO` + Gemma GGUF presence). |
@@ -423,7 +429,12 @@ typedef struct {
     /* Phase 4 (RL SOTA): GRPO-only fields. DPO+KTO impls IGNORE. */
     size_t n_rollouts;     /* GRPO rollouts per prompt; 0 treated as default 4 (umbrella §5 ship contract). */
     double clip_eps;       /* GRPO PPO ratio clip; 0.0 treated as default 0.2 (trl convention). */
-    double kl_beta;        /* GRPO KL penalty coefficient; 0.0 treated as default 0.04 (DeepSeek R1, umbrella §11 Q10). */
+    /* fix(plan,grpo,config): kl_beta = 0 disables the KL penalty (R4 escape valve)
+     * — critic R3 MED-1. Use a negative sentinel to select the default 0.04. */
+    double kl_beta;        /* GRPO KL penalty coefficient.
+                            *   kl_beta < 0  → use default 0.04 (DeepSeek R1, umbrella §11 Q10)
+                            *   kl_beta == 0 → KL penalty DISABLED (R4 escape valve, Task 6 finite-diff test)
+                            *   kl_beta  > 0 → use literal value */
 } hu_rl_trainer_config_t;
 
 /* Factory for GRPO trainer. Like _create_dpo / _create_kto but uses
@@ -1448,7 +1459,17 @@ typedef double (*hu_grpo_reward_fn_t)(const int32_t *response_tokens, size_t n, 
  * reward_fn are configured via Phase-4-internal setters
  * (hu_grpo_set_reward_model / hu_grpo_set_synthetic_reward — both
  * static-internal, exposed only to cli_grpo.c via grpo_priv.h NOT in
- * the public header to keep the surface lean). */
+ * the public header to keep the surface lean).
+ *
+ * fix(plan,grpo,config): kl_beta sentinel convention — critic R3 MED-1.
+ * Preconditions on `config` (caller-honored, factory does NOT reject — these
+ * are interpretation rules, not validation gates):
+ *   - config->kl_beta < 0  → use default 0.04 (DeepSeek R1, umbrella §11 Q10).
+ *   - config->kl_beta == 0 → KL penalty DISABLED (R4 escape valve; see also
+ *                            the Task 6 finite-diff grad-check test which
+ *                            relies on this contract for a clean signal).
+ *   - config->kl_beta  > 0 → use the literal value.
+ * The DPO/KTO factories IGNORE this field entirely. */
 hu_error_t hu_grpo_huml_create(hu_allocator_t *alloc,
                                 const hu_rl_trainer_config_t *config,
                                 hu_rl_trainer_t *out);
@@ -2015,7 +2036,10 @@ hu_error_t hu_grpo_huml_create(hu_allocator_t *alloc,
     c->learning_rate = config->learning_rate > 0 ? config->learning_rate : 1e-5;
     c->n_rollouts    = config->n_rollouts > 0 ? config->n_rollouts : 4;     /* D6 */
     c->clip_eps      = config->clip_eps > 0 ? config->clip_eps : 0.2;       /* trl default */
-    c->kl_beta       = config->kl_beta > 0 ? config->kl_beta : 0.04;        /* DeepSeek R1 */
+    /* fix(plan,grpo,config): kl_beta = 0 means KL penalty DISABLED (R4 escape
+     * valve, Task 6 finite-diff test) — critic R3 MED-1. Only a negative
+     * sentinel selects the default 0.04 (DeepSeek R1, umbrella §11 Q10). */
+    c->kl_beta       = config->kl_beta < 0 ? 0.04 : config->kl_beta;
     c->reward_source = HU_GRPO_REWARD_SYNTHETIC;
     c->reward_fn     = hu_grpo_default_synthetic_reward;  /* fix(plan,grpo): rename — critic L2 */
     c->reward_user   = NULL;
@@ -2160,6 +2184,10 @@ static void test_grpo_loss_finite_diff_matches_analytical_on_lm_head_probe(void)
     hu_rl_trainer_config_t cfg = {
         .backend = HU_DPO_BACKEND_HUML,
         .learning_rate = 0.0,
+        /* fix(plan,grpo,config): kl_beta = 0 honored as "KL penalty DISABLED"
+         * per the factory contract in `include/human/ml/grpo.h` (R4 escape
+         * valve) — critic R3 MED-1. Pre-fix, the factory replaced 0 with
+         * the default 0.04, contaminating the finite-diff signal. */
         .n_rollouts = 4, .clip_eps = 0.2, .kl_beta = 0.0,  /* disable KL for cleaner signal */
     };
     srand(42);
@@ -2940,17 +2968,42 @@ cmake --build build-ubsan --target human_tests -j8
 
 Expected: 0 UBSan errors. Document the run in the Task 11 commit message (paste the final-test-count line + any UBSan output). DoD item 1 requires UBSan-clean, not just ASan-clean — this step makes that verification explicit.
 
-- [ ] **Step 1.7: Binary size regression check (fix(plan,grpo,gate): explicit size check — spec-verifier SV5)**
+- [ ] **Step 1.7: Binary size regression check (fix(plan,grpo,gate): explicit size check — spec-verifier SV5; fix(plan,grpo,gate): mechanically verifiable worktree-based diff — critic R3 MED-2)**
 
 ```bash
-cmake --preset release && cmake --build --preset release -j8 && du -sh build-release/human
-# Compare against the Phase 3 baseline (capture from `rl-sota-phase-3-complete` tag commit message):
-git checkout rl-sota-phase-3-complete -- /dev/null
-git stash pop || true
-echo "Phase 3 size: $(git show rl-sota-phase-3-complete --stat | grep -i 'binary')"
+# fix(plan,grpo,gate): worktree-based baseline (critic R3 MED-2). The pre-fix
+# script referenced a nonexistent /tmp/p3-check source path and a
+# `git checkout ... -- /dev/null` no-op that left no measurable baseline
+# artifact. This version builds both refs to completion and diffs the bytes,
+# satisfying DoD item 3's "mechanically verifiable" requirement.
+
+set -euo pipefail
+
+# 1) Build the Phase 3 baseline binary in a disposable worktree.
+git worktree add /tmp/grpo-binsize-baseline rl-sota-phase-3-complete
+cmake --preset release -B /tmp/grpo-binsize-baseline/build-binsize -S /tmp/grpo-binsize-baseline
+cmake --build /tmp/grpo-binsize-baseline/build-binsize --target human -j8
+SIZE_BEFORE=$(stat -f%z /tmp/grpo-binsize-baseline/build-binsize/human 2>/dev/null \
+             || stat -c%s /tmp/grpo-binsize-baseline/build-binsize/human)
+
+# 2) Build the current (Phase 4) binary.
+cmake --preset release && cmake --build --preset release --target human -j8
+SIZE_AFTER=$(stat -f%z build-release/human 2>/dev/null \
+            || stat -c%s build-release/human)
+
+# 3) Mechanical assertion.
+DELTA=$((SIZE_AFTER - SIZE_BEFORE))
+echo "Binary size delta: ${DELTA} bytes (Phase 3 baseline: ${SIZE_BEFORE}, Phase 4: ${SIZE_AFTER})"
+if [ "$DELTA" -gt 256000 ]; then
+  echo "FAIL: binary size delta ${DELTA} bytes exceeds +250 KB budget" >&2
+  exit 1
+fi
+
+# 4) Clean up.
+git worktree remove /tmp/grpo-binsize-baseline
 ```
 
-DoD item 3: `du -sh build-release/human` must be ≤ Phase 3 baseline + 250 KB. Default `release` preset has `HU_ENABLE_RL_FULL=OFF`, so binary delta should be exactly the `n_rollouts`/`clip_eps`/`kl_beta` field additions on `hu_rl_trainer_config_t` (~24 bytes per struct instance). If the delta exceeds 250 KB, audit which symbols are linked under release (possibly some `_for_test` seams aren't HU_IS_TEST-guarded). Cite `benchmark.yml` for ongoing tracking.
+DoD item 3: `${SIZE_AFTER} - ${SIZE_BEFORE}` must be ≤ +250 KB (256 000 bytes). Default `release` preset has `HU_ENABLE_RL_FULL=OFF`, so the delta should be exactly the `n_rollouts`/`clip_eps`/`kl_beta` field additions on `hu_rl_trainer_config_t` (~24 bytes per struct instance). If the delta exceeds 250 KB, audit which symbols are linked under release (possibly some `_for_test` seams aren't `HU_IS_TEST`-guarded). Cite `benchmark.yml` for ongoing tracking. The block above is mechanically verifiable (single `exit 1` on budget breach) — `sprint-auditor` can paste it verbatim and accept exit code 0 as the proof for DoD item 3.
 
 - [ ] **Step 2: Run `dead-code-finder` subagent**
 
@@ -3057,8 +3110,8 @@ These are the failure modes that are EASY to introduce and HARD to detect. Each 
 | **F3** | **Ratio-clip math sign error — `max` instead of `min`** — flipping the PPO clip from pessimistic min to optimistic max causes the policy to over-credit high-ratio rollouts, accelerating drift, accelerating reward hacking, and likely causing the eval gate to reject the resulting adapter for regression on benchmarks. | Phase 4 e2e tests still pass (advantage drives loss decrease — possibly faster than with proper clipping). The failure surfaces only at Phase 5 eval gate or Phase 6 E2E proof. | `test_grpo_loss_clip_is_pessimistic_min_not_max` (Task 3) — explicitly constructs a (ratio, advantage) tuple where min and max diverge in opposite directions and asserts the implementation picks the min. |
 | **F4** | **KL penalty β too high → reward collapse** — the KL leash is too tight; the policy can't move; gradient norm drops to zero; loss stays flat at the initial value. | The Phase 4 e2e test (Task 7) `final_loss < initial_loss - 0.05` assertion fails. Operator sees no training progress. | `test_grpo_huml_synthetic_reward_e2e_advantage_drives_loss_decrease` (Task 7). Failure mode signal: assertion fails with `final_loss ≈ initial_loss`. |
 | **F5** | **KL penalty β too low → catastrophic policy drift** — opposite of F4. Policy diverges past the reference's distributional support; MT-Bench scores collapse at Phase 5 eval gate. | Phase 4 tests still pass (loss decreases on synthetic reward). The failure surfaces at Phase 5. | `test_grpo_huml_kl_penalty_keeps_policy_close_to_reference` (Task 7) — asserts mean KL < 2.0 nats after 100 iters at default β = 0.04. Failure mode signal: KL > 2.0 indicates β should be raised. |
-| **F6** | **Per-step π_θ_old leak** — `hu_reference_model_create_from` is called every step but the matching deinit is missed on an error path. Toy GPT params accumulate in heap; ASan trips at suite end (good — caught). On non-ASan builds, a long-running daemon would silently grow RSS. | ASan reports the leak; non-ASan operator sees gradual memory growth in `human ml grpo-train --iters 1000`. | `test_grpo_huml_step_does_not_leak_under_asan` (Task 7) — runs 100 step calls with various error inputs and ASan asserts zero leaks at suite end. Plus the explicit `goto cleanup_old_policy` discipline in `grpo_step` per R10. |
-| **F7** | **Negative `--rollouts` parses to size_t SIZE_MAX → giant allocation → OOM crash** — `atoi("-1")` returns -1; cast to `size_t` becomes 18446744073709551615; `n_rollouts * sizeof(hu_rollout_completion_t)` overflows to a smaller positive number; `alloc->alloc(...)` succeeds at the smaller size; iterating `for (i = 0; i < n_rollouts; i++)` walks past the buffer end and SEGVs. | Operator sees segfault with no clear cause. CI fails at the segfault step, not at the input validation step. | `test_cli_grpo_rejects_negative_rollouts_with_invalid_argument` (Task 9) — pins explicit `< 1 || > 1024` range check via `strtol`. |
+| **F6** | **Per-step rollout-buffer / advantage-array leak** — `grpo_huml_step` allocates per-step rollouts + advantages but an error path skips the cleanup goto. ASan trips at suite end (good — caught). On non-ASan builds, a long-running daemon would silently grow RSS. fix(plan,grpo,doc): F6 phrasing now matches the post-H3 architecture — critic R3 LOW-1. The old per-step π_θ_old snapshot was removed in D5 (critic H3), so the historical `cleanup_old_policy:` label no longer exists; leak protection is now solely the `cleanup_rolls:` discipline in `grpo_huml_step` per R10. | ASan reports the leak; non-ASan operator sees gradual memory growth in `human ml grpo-train --iters 1000`. | `test_grpo_huml_step_does_not_leak_under_asan` (Task 7) — runs 100 step calls with various error inputs and ASan asserts zero leaks at suite end. The single `cleanup_rolls:` label in `grpo_huml_step` (per R10) is the sole leak-protection discipline. |
+| **F7** | **Negative `--rollouts` parses to size_t SIZE_MAX → giant allocation → OOM crash** — `atoi("-1")` returns -1; cast to `size_t` becomes 18446744073709551615; `n_rollouts * sizeof(hu_rollout_completion_t)` overflows to a smaller positive number; `alloc->alloc(...)` succeeds at the smaller size; iterating `for (i = 0; i < n_rollouts; i++)` walks past the buffer end and SEGVs. | Operator sees segfault with no clear cause. CI fails at the segfault step, not at the input validation step. | `test_cli_grpo_rejects_negative_rollouts_with_invalid_argument` (Task 9) — pins explicit `< 2 \|\| > 1024` range check via `strtol`. fix(plan,grpo,doc): range bound aligned with R12 + impl — critic R3 LOW-2. The lower bound is N≥2 (not N≥1) because at N=1 the group baseline has no variance (`std({r}) = 0`), all advantages clamp to 0, and the structural backward never fires — training silently no-ops. |
 | **F8** | **Non-deterministic rollout sampling between L_+ and L_-** — finite-diff grad check uses `rand()` for sampling; libc `rand()` advances state on every call; `L(θ+ε)` samples differ from `L(θ-ε)` samples; numerical gradient becomes meaningless noise. | Finite-diff grad check intermittently passes/fails on the same code; "flaky test" hypothesis distracts from the real cause. | (a) Caller-supplied completions in `grpo_compute_loss_only_for_test` (R9 + Task 6) — the test pre-samples once, then calls loss-only twice. (b) `xorshift64` PRNG instead of `rand()` (R13) — same seed produces same sequence on every platform. |
 
 ---

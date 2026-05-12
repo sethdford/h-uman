@@ -84,6 +84,15 @@ Phase 6 does **not** add a new `human ml *` subcommand. It adds a **new top-leve
 - Use `git stash push -- <files>` if Track D contamination appears in the working tree (recurring pattern from Phases 0/1/2/3/4/5).
 - Stage ONLY Phase 6 files into Phase 6 commits.
 
+### Hard dependency on Phase 5 H8 (fix(plan,e2e,cross-agent))
+
+Phase 6 **cannot** merge until Phase 5 H8 lands `hu_reaction_handler_register_assistant_message_for_production` in `include/human/agent/reaction_handler.h`. Concrete blast radius if a Phase 6 PR merges first:
+
+- `src/ml/cli_demo.c::synthesize_reactions(n)` (Task 9 step 2) takes the production code path on the demo. The function calls `hu_reaction_handler_register_assistant_message_for_production(handler, chat_id, message_id, prompt, response)` for each `(prompt, response)` tuple BEFORE emitting reactions. Without H8, that symbol does not exist in release builds and the link step fails with `undefined symbol: _hu_reaction_handler_register_assistant_message_for_production` against `human` (the `rl_sota` preset release binary). The deterministic test path is unaffected because it uses the `HU_IS_TEST`-gated `_for_test` seam (Phase 2 Task 12).
+- Any other agent wiring `cli_demo.c` (e.g. a Track D Phase 1 contributor adding an unrelated `cmd_demo` subcommand under the same dispatcher) will inherit the same link error.
+
+**Mitigation:** Task 0 step 4b of this plan (existing, untouched) explicitly probes for the symbol with `rg -n 'hu_reaction_handler_register_assistant_message_for_production' include/human/agent/reaction_handler.h` and BLOCKS Phase 6 if absent. Merge order must be Phase 5 → Phase 6, never the reverse. The merge-queue label `phase-6-needs-phase-5-h8` SHOULD be applied to the Phase 6 PR until Phase 5 lands H8; CI's `release` job exercising `cmake --preset rl_sota && cmake --build --preset rl_sota` will catch the link error before any merge if the label is dropped prematurely.
+
 ---
 
 ## Architectural decisions (justification)
@@ -127,11 +136,31 @@ Phase 6 does **not** add a new `human ml *` subcommand. It adds a **new top-leve
 
 ```c
 #ifdef HU_IS_TEST
+/* fix(plan,e2e,H4): auxiliary tuple per reaction event used by
+ * the test path to pre-register synthetic assistant messages via
+ * hu_reaction_handler_register_assistant_message_for_test BEFORE the
+ * reaction events are replayed. Without this pre-registration, the
+ * Phase 2 R4 silent-drop policy fires on every event lookup and
+ * hu_dpo_pair_count stays at 0. The fixture loader populates this
+ * parallel array from the JSON `_aux` field on each event. */
+typedef struct hu_e2e_reaction_aux {
+    const char *prompt;             /* the user prompt that elicited the response */
+    const char *response_chosen;    /* what the assistant said in the positive case */
+    const char *response_rejected;  /* what the assistant said in the negative case */
+} hu_e2e_reaction_aux_t;
+
 typedef struct hu_e2e_closed_loop_input {
     hu_provider_t      *provider;
     hu_rl_trainer_t    *trainer;
     hu_dpo_collector_t *collector;
     const hu_reaction_event_t *reaction_events;
+    /* fix(plan,e2e,H4): parallel array — one entry per reaction event.
+     * MAY be NULL (production demo path skips pre-registration because
+     * the live daemon already registered each assistant message via
+     * hu_reaction_handler_register_assistant_message_for_production
+     * before emitting the reactions). The DETERMINISTIC test path
+     * always provides this so the synthetic stream finds its targets. */
+    const hu_e2e_reaction_aux_t *reaction_aux;
     size_t              reaction_event_count;
     /* chat_with_system inputs — match the real signature
      * (include/human/provider.h:207-210). The "prompt" is split into
@@ -170,12 +199,21 @@ typedef struct hu_e2e_closed_loop_output {
  *
  * Steps (in order):
  *   1. provider.chat_with_system(prompt) → out.before_response (heap; caller frees)
- *   2. hu_reaction_handler_set_collector(collector)
- *      for each reaction_event: hu_reaction_handler_handle_event(event)
- *      hu_reaction_handler_set_collector(NULL)
- *      → inserts rows into collector's dpo_pairs table
+ *   2a. fix(plan,e2e,H4): for each entry in in->reaction_aux (if non-NULL),
+ *       call hu_reaction_handler_register_assistant_message_for_test so the
+ *       handler's lookup store finds the synthetic message targeted by the
+ *       reaction event. Without this, every reaction below silently drops
+ *       per Phase 2 R4 and the pair_count check at step 3 fails.
+ *   2b. hu_reaction_handler_set_collector(collector)
+ *       for each reaction_event: hu_reaction_handler_handle_event(event)
+ *       hu_reaction_handler_set_collector(NULL)
+ *       → inserts rows into collector's dpo_pairs table
  *   3. hu_dpo_pair_count(collector) → assert ≥ N (caller-supplied floor)
- *   4. hu_dpo_export(collector, &export) → hu_preference_pair_t array
+ *   4. hu_dpo_export(collector, alloc, &export) → hu_preference_pair_t array
+ *      (fix(plan,e2e,C4): hu_dpo_export is added by this plan in
+ *      Task 2.5 — it's the in-memory companion to the existing
+ *      hu_dpo_export_jsonl + hu_dpo_export_free pair. See
+ *      include/human/ml/dpo.h after Task 2.5 lands.)
  *      trainer.vtable->step(ctx, alloc, pairs, n_pairs, &metrics) for K iters
  *      hu_dpo_export_free(alloc, &export)
  *   5. trainer.vtable->save_adapter(ctx, alloc, adapter_out_path)
@@ -393,7 +431,7 @@ The two SEC controls combined turn the closed loop from "anyone who can inject a
 | **R5** | **HUML adapter is meaningless for real chat (toy GPT semantics ≠ Gemma semantics).** A reviewer might run the deterministic E2E test, see the assertion pass, and assume the closed loop also works on real Gemma. It does not — that requires the demo. | Medium | (a) `tests/test_e2e_rl_loop.c` includes a top-of-file comment block (Task 4 step 1) explicitly stating: "This test pins the WIRING. It does NOT pin the QUALITY of the resulting adapter on a real model. For real-Gemma proof, see `scripts/demo-rl-loop.sh` and `docs/demos/rl-loop-demo.md`." (b) `human demo rl-closed-loop --backend huml` (the toy backend) prints a banner: `"WARNING: HUML toy GPT — wiring proof only, NOT a real adapter. Use --backend mlx for real-Gemma demo."` (c) Documented in the runbook (Task 10) as the very first FAQ entry. |
 | **R6** | **Phase 5 `eval_gate` not stable yet — Phase 6 may need to update or stub.** Phase 6 depends on `hu_eval_gate` being callable from the closed-loop runner. If Phase 5 ships with `eval_gate` returning placeholder values or with API drift, the Phase 6 test harness can't compose. | Medium | (a) Phase 6 Task 0 (start gate) verifies Phase 5 deliverables exist + compile clean before any Phase 6 code lands. (b) If `eval_gate` ships as a stub, the Phase 6 closed-loop runner falls back to calling `hu_communication_style_compare_response_sets` directly (Phase 1 of Track D ships this) — strictly less than `eval_gate` because no leaderboard regression check, but enough to gate the test PASS/FAIL. (c) Phase 6's `gate_decision.json` schema is documented in spec §8 and is independent of `eval_gate`'s implementation — the Phase 6 demo writes the JSON regardless of whether `eval_gate` produced it. |
 | **R7** | **ASan slowdown causes 30 s budget violation on slower CI runners.** GitHub Actions Linux runners are not as fast as M2; ASan-instrumented toy GPT × 50 steps × 100 fidelity-scored prompts may push past 30 s. | Low | (a) Profile early: Task 4 step 6 includes a wall-clock measurement (`getrusage` or `clock_gettime(CLOCK_MONOTONIC)`) and asserts `elapsed_ms ≤ 30_000`. If the assertion fires, Task 4's step 7 reduces fixture sizes proportionally (50 → 25 reactions, 100 → 50 held-out prompts) and re-runs. (b) The 30 s budget is for the single `test_e2e_closed_loop_dpo_shows_measurable_response_change` test function — other test functions in the same file (KTO, GRPO, determinism) each have their own budget. The `--suite=E2E-closed-loop` selector lets developers run just this suite during iteration. (c) If after fixture trimming the budget still slips, document the actual elapsed_ms in the test, lift the assertion to ≤ 60 s with a TODO referencing this risk, and file a follow-up to investigate (e.g. profile-guided HUML optimizations). |
-| **R8** | **CI runner clock drift / rusage nondeterminism corrupts `manifest.json`.** Spec §8's `manifest.json` records training timestamp + hyperparams + base model SHA. If the test embeds wall-clock time into the manifest, Task 8's byte-identical-SHA assertion (D10) will fail. | Low | (a) Test path uses `HU_E2E_FIXED_TIMESTAMP="2026-05-12T00:00:00Z"` env var (set in `test_e2e_rl_loop.c::set_up_env`) to override `time(NULL)` calls in the manifest writer. The manifest writer reads this env var via `getenv` and uses it instead of real time when set. (b) Demo path does NOT set the env var → real timestamps → real evidence dirs. (c) Test asserts SHA of `manifest.json` matches a committed expected value pinned in the test source (regenerate-on-fail flow documented in test comment). |
+| **R8** | **CI runner clock drift / rusage nondeterminism corrupts `manifest.json`.** Spec §8's `manifest.json` records training timestamp + hyperparams + base model SHA. If the test embeds wall-clock time into the manifest, Task 8's byte-identical-SHA assertion (D10) will fail. | Low | (a) fix(plan,e2e,NEW-LOW-2): test path uses `HU_E2E_FIXED_TIMESTAMP=1715472000` (epoch SECONDS, parsed by `strtoll` — see ME3 below in Task 9; the round-2 plan incorrectly wrote the value as ISO-8601 `"2026-05-12T00:00:00Z"`, but the actual parser is `(time_t)strtoll(env, NULL, 10)` which would silently coerce to 0 on an ISO-8601 string). The env var is set in `test_e2e_rl_loop.c::set_up_env`. The manifest writer reads it via `getenv` and uses the parsed epoch instead of `time(NULL)` when set. (b) Demo path does NOT set the env var → real `time(NULL)` → real timestamps in real evidence dirs. (c) Test asserts SHA of `manifest.json` matches a committed expected value pinned in the test source (regenerate-on-fail flow documented in test comment). |
 
 ---
 
@@ -436,18 +474,20 @@ The full evidence directory schema is the union of E1–E5 plus the spec §8 man
 |------|-----|----------------|
 | `tests/test_e2e_rl_loop.c` | ~700 | The canonical deterministic E2E test. Test functions: `test_e2e_closed_loop_dpo_shows_measurable_response_change`, `test_e2e_closed_loop_kto_shows_measurable_response_change`, `test_e2e_closed_loop_grpo_shows_measurable_response_change` (each gated as appropriate), `test_e2e_closed_loop_provider_after_response_differs_from_before` (F1 pin), `test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs` (F2 pin), `test_e2e_closed_loop_bootstrap_ci_lower_bound_is_positive` (F3 pin), `test_e2e_closed_loop_async_path_drains_pending_signals_after_reactions` (F6 pin), `test_e2e_closed_loop_completes_within_30s_under_asan` (R7 pin), `test_e2e_closed_loop_deterministic_run1_vs_run2` + `test_e2e_closed_loop_deterministic_run1_vs_run3` (D10 pin, LO1-split), `test_e2e_closed_loop_evidence_manifest_records_pair_count` (E4 pin), `test_e2e_closed_loop_axis_breakdown_present_in_evidence_dir` (E2 pin), `test_e2e_closed_loop_latency_regression_within_2_percent` (E3 pin), `test_e2e_closed_loop_persona_fidelity_delta_meets_threshold` (DoD item 6 pin), `test_e2e_closed_loop_negative_rate_anomaly_recorded` (SEC1 pin), `test_e2e_closed_loop_adapter_sha_mismatch_aborts_swap` (SEC2 pin). Plus a single `void run_e2e_closed_loop_tests(void)` runner that calls them in order with `HU_TEST_SUITE("E2E-closed-loop")` declared INSIDE the function body (not at file scope — see Critical Rules below). |
 | `tests/fixtures/e2e_persona_seed.json` | ~150 lines | Synthetic persona definition (D7) + 100 held-out prompts + 50 sample style fingerprints. Schema documented in the file's `$schema` field; reader is `tests/test_e2e_rl_loop.c::load_persona_seed`. |
-| `tests/fixtures/e2e_reaction_signals.json` | ~250 lines | Synthetic reaction stream (D8) — exactly 50 events, 25 positive (`{"kind": "love", "polarity": 1, "target": {...}}`) + 25 negative (`{"kind": "dislike", "polarity": -1, "target": {...}}`). Each event has a `target` referencing a prompt+response pair so `hu_reaction_handler_handle_event` can look up the chosen/rejected text. Reader is `tests/test_e2e_rl_loop.c::load_reaction_signals`. |
+| `tests/fixtures/e2e_reaction_signals.json` | ~250 lines | Synthetic reaction stream (D8) — exactly 50 events, 25 with `polarity: 1` + 25 with `polarity: -1`. fix(plan,e2e,NEW-MED-1): every top-level event field is a 1:1 name match for `hu_reaction_event_t` (`channel_id`, `target_thread_id`, `target_message_ref`, `sender_handle`, `kind`, `polarity`, `timestamp_unix` (epoch SECONDS), `is_removal`). The `(prompt, response_chosen, response_rejected)` triple lives under the leading-underscore `_aux` key — that key is consumed by the loader only and never written into the C struct. Reader is `tests/test_e2e_rl_loop.c::load_reaction_signals`: parses each event into `hu_reaction_event_t`, parallel-strdups `_aux.*` into `hu_e2e_reaction_aux_t[]`, returns both via out-params. The aux array drives the pre-registration loop in `hu_e2e_closed_loop_run` step 2a (fix(plan,e2e,H4)). |
 | `src/ml/cli_demo.c` | ~400 | `hu_ml_cli_demo_rl_closed_loop` — argv parser (`--persona`, `--method {dpo,kto,grpo}`, `--backend {huml,mlx}`, `--reaction-count N`, `--prompt P`, `--out <evidence-dir>`, `--require-positive-delta`), provider creation (Phase 1 llamacpp factory or HUML mock), trainer creation (Phase 2/3/4 factories), reaction synthesis (or live load from a `--reactions <jsonl>` file), the static `cli_demo_run_closed_loop` (D5 duplicate of `hu_e2e_closed_loop_run`), evidence-dir writer (`write_evidence_dir` emits all 9 spec §8 files), exit-code mapping (0 = win-condition met, 2 = win-condition missed, 3 = harness error). |
 | `include/human/ml/cli_demo.h` | ~30 | Public declaration of `hu_ml_cli_demo_rl_closed_loop(int argc, const char **argv, hu_allocator_t *alloc)` and the `hu_ml_cli_demo_subcommand_dispatch` shim called from `cmd_demo` in `src/main.c`. Header guards `HU_ML_CLI_DEMO_H`. |
 | `scripts/demo-rl-loop.sh` | ~200 | Bash demo runner. Verifies prerequisites (`bash scripts/fetch-gemma.sh`, `bash scripts/fetch-qwen-rm.sh`, `python3 -c "from mlx_lm_lora.trainer.dpo_trainer import train_dpo"`), prompts user for confirmation, runs `./build-rl-sota/human demo rl-closed-loop --persona "${PERSONA:-seth}" --method "${METHOD:-dpo}" --backend mlx --reaction-count "${REACTION_COUNT:-200}" --prompt "${PROMPT:-what should I do first?}" --out ~/.human/proofs/$(date -u +%Y-%m-%d)-${METHOD:-dpo}-step-$$ --require-positive-delta`, prints the evidence dir path, opens the runbook in `$PAGER` (or `cat`s it). Honors `DRY_RUN=1` for runbook validation in CI without invoking `human`. |
 | `docs/demos/rl-loop-demo.md` | ~400 lines | The runbook. YAML frontmatter (required by `scripts/check-docs-frontmatter.sh`) + sections: 1. Prerequisites (Apple Silicon + macOS 13+ + Python 3.11+ venv with mlx-lm + mlx-lm-lora + 5 GB free disk for GGUF). 2. One-command setup (clone, fetch models, build `rl_sota` preset). 3. Running the demo (env vars, expected output, expected wall-clock ~3 min). 4. Reading the evidence dir (file-by-file walkthrough of all 9 spec §8 files). 5. Troubleshooting (R3 mitigation: smaller delta? try more reactions; F4: numbers don't match across machines? expected, document). 6. Reproducibility recipe (mirrors spec §14 verbatim). 7. FAQ (R5: HUML vs MLX; F4: nondeterminism; "can I run this in CI?" → no, see §6.5). 8. Citations (spec, prior phase plans, Apple FM docs, mlx-lm-lora). |
 | `tests/_tmp/.gitkeep` | 0 | Empty file pinning the per-test temp directory (test code writes evidence to `tests/_tmp/proofs/<test-id>/` to keep the user's `~/.human/` clean during test runs). **LO3 fix:** the absolute path is resolved at runtime via `hu_e2e_tmp_root()` (Phase 6 helper that reads the `HU_E2E_TMP_ROOT` env var CMake sets to `${CMAKE_BINARY_DIR}/tests/_tmp` via `set_tests_properties(... ENVIRONMENT ...)`), so tests work regardless of CWD. `hu_e2e_tmp_path(buf, n, "proofs/dpo-step-0001/lora.bin")` concatenates root + relative tail. `.gitignore` adds `tests/_tmp/proofs/` (everything except `.gitkeep`). |
 
-### Modified files (4):
+### Modified files (6):
 
 | Path | Delta | What changes |
 |------|-------|--------------|
-| `src/agent/lora_training_runner.c` | +130 LOC inside `#ifdef HU_IS_TEST` block | Add `hu_e2e_closed_loop_input_t` + `hu_e2e_closed_loop_output_t` structs (declared in a new test-only header `tests/include/hu_e2e_closed_loop.h` so they don't pollute the public surface) and `hu_e2e_closed_loop_run` function (D4). Also add the close-the-loop wiring fold-in if Phase 5 deferred it: ensure `hu_lora_training_runner` calls `hu_eval_gate` before promoting the adapter (verify at Task 0 step 5; if the call site is already there, this delta is zero — Phase 5 owns it). |
+| `include/human/ml/dpo.h` | +12 LOC | fix(plan,e2e,C4): add the missing public declaration `hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc, hu_dpo_export_t *out)`. Slots in next to the existing `hu_dpo_export_t` struct (lines 69–72) and `hu_dpo_export_free` (line 74). Required by Phase 6 because the closed-loop runner needs an in-memory companion to `hu_dpo_export_jsonl` (which writes to file only). Round-2 plan referenced this function without ever shipping it; round 3 lands it in Task 2.5 below. |
+| `src/ml/dpo.c` | +60 LOC | fix(plan,e2e,C4): implement `hu_dpo_export`. SQLite path mirrors the `hu_dpo_export_jsonl` `SELECT … FROM dpo_pairs ORDER BY id` (src/ml/dpo.c:200-203) but materializes rows into a heap-allocated `hu_preference_pair_t` array sized via `hu_dpo_pair_count`. Returns `HU_ERR_NOT_SUPPORTED` when `HU_ENABLE_SQLITE` is off (matches the existing dpo.c gating pattern). Caller owns + frees via `hu_dpo_export_free`. New test `tests/test_dpo.c::test_dpo_export_in_memory_roundtrip` (Task 2.5 step 2) pins record → export → free correctness. |
+| `src/agent/lora_training_runner.c` | +130 LOC inside `#ifdef HU_IS_TEST` block | Add `hu_e2e_closed_loop_input_t` + `hu_e2e_closed_loop_output_t` + `hu_e2e_reaction_aux_t` structs (declared in a new test-only header `tests/include/hu_e2e_closed_loop.h` so they don't pollute the public surface) and `hu_e2e_closed_loop_run` function (D4). Also add the close-the-loop wiring fold-in if Phase 5 deferred it: ensure `hu_lora_training_runner` calls `hu_eval_gate` before promoting the adapter (verify at Task 0 step 5; if the call site is already there, this delta is zero — Phase 5 owns it). |
 | `src/main.c` | +25 LOC | Add `cmd_demo` static function (12 LOC mirroring `cmd_ml`'s structure), declare it at the forward-decl block (~line 199), register it in `commands[]` array (~line 510 — single new row: `{"demo", "Reproducible end-to-end demonstrations (RL closed loop)", cmd_demo}`). The dispatcher inside `cmd_demo` calls `hu_ml_cli_demo_rl_closed_loop` for `argv[2] == "rl-closed-loop"`, prints help otherwise. |
 | `tests/test_main.c` | +5 LOC | Forward-declare `void run_e2e_closed_loop_tests(void)` and add a single call to it in the appropriate place (between existing E2E suites, locate by `rg -n 'run_e2e' tests/test_main.c`). READ first; APPEND only; do NOT replace existing runners — every prior phase has burned a token on this rule and Phase 6 honors it. |
 | `CMakeLists.txt` | +35 LOC | (See "CMakeLists.txt entries" section below for the exact diff; goes inside the existing `if(HU_ENABLE_RL_FULL)` guard block established by Phase 2.) |
@@ -697,19 +737,21 @@ Exactly 50 events (D8). Each event has a `target` referencing the prompt+respons
 
 ```json
 {
-  "$schema": "https://human.dev/schemas/e2e-reaction-signals-v1.json",
-  "version": "1.0.0",
+  "$schema": "https://human.dev/schemas/e2e-reaction-signals-v2.json",
+  "version": "2.0.0",
   "source_tag": "e2e_synthetic",
-  "comment": "Synthetic reaction stream for Phase 6 deterministic E2E test. Exactly 25 positive + 25 negative reactions matching the spec §11 row 5 floor of 50 preference pairs.",
+  "comment": "Synthetic reaction stream for Phase 6 deterministic E2E test. Exactly 25 positive + 25 negative reactions matching the spec §11 row 5 floor of 50 preference pairs. fix(plan,e2e,NEW-MED-1): every top-level event field is a 1:1 match for hu_reaction_event_t (include/human/channels/reaction_event.h after Phase 2 ships): channel_id, target_thread_id, target_message_ref, sender_handle, kind, polarity, timestamp_unix, is_removal. The (prompt, response_chosen, response_rejected) tuple lives under the auxiliary `_aux` key — it is NOT part of the C struct; the test loader strdups it into a parallel hu_e2e_reaction_aux_t[] array so the test path can pre-register synthetic assistant messages via hu_reaction_handler_register_assistant_message_for_test before replaying events (fix(plan,e2e,H4)).",
   "events": [
     {
-      "event_id": "e2e-pos-001",
-      "channel_kind": "synthetic",
-      "channel_id": "test-imessage",
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-001",
+      "sender_handle": "+15550100001",
       "kind": "love",
       "polarity": 1,
-      "ts_ms": 1715472000000,
-      "target": {
+      "timestamp_unix": 1715472000,
+      "is_removal": 0,
+      "_aux": {
         "prompt": "what should i do first?",
         "response_chosen": "ship the small fix.",
         "response_rejected": "perhaps consider exploring options."
@@ -720,7 +762,21 @@ Exactly 50 events (D8). Each event has a `target` referencing the prompt+respons
 }
 ```
 
-The `polarity` field is `+1` for desirable (👍, ❤️, 😂, 😮) reactions and `-1` for undesirable (👎). The `kind` field maps to the existing `hu_reaction_kind_t` enum (per `include/human/channels/reaction_event.h`). Exactly 25 events have polarity `+1` and 25 have polarity `-1`. The `ts_ms` is monotonically increasing (so any sort-by-time ordering is stable).
+Canonical field names (each MUST match `hu_reaction_event_t` exactly — the loader's struct-field-by-field assignment fails the test if a name drifts):
+
+| Fixture JSON key | `hu_reaction_event_t` field | Type / range |
+|---|---|---|
+| `channel_id` | `channel_id` | string, e.g. `"imessage"` or `"slack"` |
+| `target_thread_id` | `target_thread_id` | string, chat_guid (iMessage) or channel_id (Slack) |
+| `target_message_ref` | `target_message_ref` | string, associated_message_guid OR slack `item.ts` |
+| `sender_handle` | `sender_handle` | string, opaque per-channel id |
+| `kind` | `kind` | `hu_reaction_kind_t` — one of `"love"`, `"like"`, `"dislike"`, `"laugh"`, `"emphasize"`, `"question"` |
+| `polarity` | `polarity` | `+1` (`HU_REACTION_POSITIVE`), `-1` (`HU_REACTION_NEGATIVE`), or `0` (`HU_REACTION_NEUTRAL`) |
+| `timestamp_unix` | `timestamp_unix` | int64, **seconds since epoch** (NOT milliseconds) |
+| `is_removal` | `is_removal` | `0` (add) or `1` (remove) |
+| `_aux.prompt`, `_aux.response_chosen`, `_aux.response_rejected` | (none — auxiliary) | strings; loader stores in parallel `hu_e2e_reaction_aux_t[]` |
+
+The `polarity` field is `+1` for desirable (👍, ❤️, 😂, 😮) reactions and `-1` for undesirable (👎). The `kind` field maps to the existing `hu_reaction_kind_t` enum. Exactly 25 events have polarity `+1` and 25 have polarity `-1`. The `timestamp_unix` is monotonically increasing (so any sort-by-time ordering is stable). The `_aux` triple is consumed only by the test loader and never written into the C struct — keep it under the leading-underscore key to mark it as non-canonical.
 
 - [ ] **Step 2: Verify and commit**
 
@@ -728,6 +784,12 @@ The `polarity` field is `+1` for desirable (👍, ❤️, 😂, 😮) reactions 
 python3 -m json.tool tests/fixtures/e2e_reaction_signals.json > /dev/null
 jq '[.events[] | select(.polarity == 1)] | length' tests/fixtures/e2e_reaction_signals.json   # 25
 jq '[.events[] | select(.polarity == -1)] | length' tests/fixtures/e2e_reaction_signals.json  # 25
+# fix(plan,e2e,NEW-MED-1): pin the canonical struct-field names so the
+# fixture cannot drift from hu_reaction_event_t silently.
+jq '.events[0] | keys' tests/fixtures/e2e_reaction_signals.json
+# Expected (modulo _aux): ["_aux", "channel_id", "is_removal", "kind",
+#   "polarity", "sender_handle", "target_message_ref",
+#   "target_thread_id", "timestamp_unix"]
 git add tests/fixtures/e2e_reaction_signals.json
 git commit -m "test(e2e): add synthetic 50-event reaction stream for closed-loop test
 
@@ -736,7 +798,203 @@ of 50 preference pairs. Each event references a prompt from
 e2e_persona_seed.json::held_out_prompts[] so the reaction handler can
 construct (prompt, chosen, rejected) tuples for hu_dpo_record_pair.
 
-Refs plan D8."
+fix(plan,e2e,NEW-MED-1): every top-level event key is a 1:1 name match
+for hu_reaction_event_t — channel_id, target_thread_id,
+target_message_ref, sender_handle, kind, polarity, timestamp_unix
+(epoch seconds, NOT ms — matches the C struct's int64 field),
+is_removal. The (prompt, chosen, rejected) tuple lives under the
+leading-underscore _aux key to mark it as loader-only auxiliary data
+that never enters the C struct.
+
+Refs plan D8 + NEW-MED-1."
+```
+
+---
+
+### Task 2.5: Ship `hu_dpo_export` in-memory exporter (fix(plan,e2e,C4))
+
+**Files:**
+- Modify: `include/human/ml/dpo.h`
+- Modify: `src/ml/dpo.c`
+- Modify: `tests/test_dpo.c`
+
+**Context:** Round 2 of this plan referenced `hu_dpo_export(collector, alloc, &export_data)` in the closed-loop runner skeleton (Task 3 step 3) and in the F2 pin (Task 6 step 2) — but the function does not exist in `main`. `include/human/ml/dpo.h` (verified at round-3 plan time via `rg -n 'hu_dpo_export\b'`) ships only the `hu_dpo_export_t` struct typedef (line 69-72), `hu_dpo_export_jsonl` (line 62, writes to file), and `hu_dpo_export_free` (line 74). Phase 6 must land the in-memory exporter BEFORE Task 3 wires the test seam — otherwise the build breaks the moment `hu_e2e_closed_loop_run` is compiled.
+
+- [ ] **Step 1: Add the declaration**
+
+In `include/human/ml/dpo.h`, immediately AFTER the existing `hu_dpo_export_t` struct definition (current line 69-72) and BEFORE `hu_dpo_export_free` (current line 74):
+
+```c
+/* In-memory companion to hu_dpo_export_jsonl. Materializes every row
+ * in the collector's dpo_pairs table into a heap-allocated
+ * hu_preference_pair_t array; ownership transfers to *out and is
+ * released via hu_dpo_export_free(alloc, out).
+ *
+ * Behaviour contract:
+ *   - Returns HU_OK with out->count == 0 and out->pairs == NULL when
+ *     the collector has zero rows. (Empty result is not an error.)
+ *   - Returns HU_ERR_NOT_SUPPORTED when HU_ENABLE_SQLITE is off, in
+ *     keeping with the existing pattern at src/ml/dpo.c:248-253.
+ *   - Returns HU_ERR_INVALID_ARGUMENT on NULL inputs.
+ *   - Returns HU_ERR_IO on SQLite prepare/step failure.
+ *   - On any error, *out is left zero-initialized; the caller MAY
+ *     still call hu_dpo_export_free unconditionally (idempotent).
+ *
+ * Rows are emitted in `ORDER BY id` (same ordering as the JSONL
+ * exporter) so two consecutive exports return the same ordering — a
+ * determinism prerequisite for the Phase 6 D10 byte-identical-SHA
+ * guarantee. */
+hu_error_t hu_dpo_export(hu_dpo_collector_t *collector,
+                         hu_allocator_t *alloc,
+                         hu_dpo_export_t *out);
+```
+
+- [ ] **Step 2: Implement in `src/ml/dpo.c`**
+
+Place the implementation immediately AFTER `hu_dpo_export_jsonl` (current line 255) and BEFORE `hu_dpo_get_best_examples` (current line 257). Mirror `hu_dpo_export_jsonl`'s SQL but materialize into the array:
+
+```c
+hu_error_t hu_dpo_export(hu_dpo_collector_t *collector,
+                         hu_allocator_t *alloc,
+                         hu_dpo_export_t *out) {
+    if (!collector || !alloc || !out) return HU_ERR_INVALID_ARGUMENT;
+    out->pairs = NULL;
+    out->count = 0;
+#ifdef HU_ENABLE_SQLITE
+    if (!collector->db) return HU_OK;  /* empty collector is not an error */
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(collector->db,
+        "SELECT prompt, chosen, rejected, margin, source, timestamp "
+        "FROM dpo_pairs ORDER BY id",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return HU_ERR_IO;
+
+    size_t cap = collector->pair_count > 0 ? collector->pair_count : 8;
+    hu_preference_pair_t *pairs =
+        alloc->malloc(alloc->ctx, cap * sizeof(hu_preference_pair_t));
+    if (!pairs) { sqlite3_finalize(stmt); return HU_ERR_OUT_OF_MEMORY; }
+    memset(pairs, 0, cap * sizeof(hu_preference_pair_t));
+
+    size_t n = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (n == cap) {
+            size_t ncap = cap * 2;
+            hu_preference_pair_t *grow =
+                alloc->malloc(alloc->ctx, ncap * sizeof(hu_preference_pair_t));
+            if (!grow) {
+                alloc->free(alloc->ctx, pairs, cap * sizeof(hu_preference_pair_t));
+                sqlite3_finalize(stmt);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memset(grow, 0, ncap * sizeof(hu_preference_pair_t));
+            memcpy(grow, pairs, n * sizeof(hu_preference_pair_t));
+            alloc->free(alloc->ctx, pairs, cap * sizeof(hu_preference_pair_t));
+            pairs = grow; cap = ncap;
+        }
+        hu_preference_pair_t *p = &pairs[n];
+        const char *prompt   = (const char *)sqlite3_column_text(stmt, 0);
+        const char *chosen   = (const char *)sqlite3_column_text(stmt, 1);
+        const char *rejected = (const char *)sqlite3_column_text(stmt, 2);
+        const char *source   = (const char *)sqlite3_column_text(stmt, 4);
+        if (prompt) {
+            size_t L = strnlen(prompt, sizeof(p->prompt) - 1);
+            memcpy(p->prompt, prompt, L); p->prompt_len = L;
+        }
+        if (chosen) {
+            size_t L = strnlen(chosen, sizeof(p->chosen) - 1);
+            memcpy(p->chosen, chosen, L); p->chosen_len = L;
+        }
+        if (rejected) {
+            size_t L = strnlen(rejected, sizeof(p->rejected) - 1);
+            memcpy(p->rejected, rejected, L); p->rejected_len = L;
+        }
+        p->margin    = sqlite3_column_double(stmt, 3);
+        p->timestamp = sqlite3_column_int64 (stmt, 5);
+        if (source) {
+            size_t L = strnlen(source, sizeof(p->source) - 1);
+            memcpy(p->source, source, L); p->source_len = L;
+        }
+        n++;
+    }
+    sqlite3_finalize(stmt);
+    out->pairs = pairs;
+    out->count = n;
+    return HU_OK;
+#else
+    (void)alloc;
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+}
+```
+
+- [ ] **Step 3: Pin behaviour with a test**
+
+In `tests/test_dpo.c`, add `test_dpo_export_in_memory_roundtrip`:
+
+```c
+static void test_dpo_export_in_memory_roundtrip(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 16, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    hu_preference_pair_t in = {0};
+    memcpy(in.prompt, "what should i do first?", 23); in.prompt_len = 23;
+    memcpy(in.chosen, "ship the small fix.", 19);    in.chosen_len = 19;
+    memcpy(in.rejected, "perhaps consider.", 17);    in.rejected_len = 17;
+    in.margin = 0.7; in.timestamp = 1715472000;
+    memcpy(in.source, "e2e_test", 8); in.source_len = 8;
+    HU_ASSERT_EQ(hu_dpo_record_pair(&col, &in), HU_OK);
+
+    hu_dpo_export_t ex = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &ex), HU_OK);
+    HU_ASSERT_EQ(ex.count, 1u);
+    HU_ASSERT_EQ(memcmp(ex.pairs[0].prompt, in.prompt, in.prompt_len), 0);
+    hu_dpo_export_free(&alloc, &ex);
+
+    /* Empty-collector case is not an error. */
+    hu_dpo_collector_t col2 = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 16, &col2), HU_OK);
+    hu_dpo_export_t ex2 = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col2, &alloc, &ex2), HU_OK);
+    HU_ASSERT_EQ(ex2.count, 0u);
+    hu_dpo_export_free(&alloc, &ex2);
+
+    hu_dpo_collector_deinit(&col);
+    hu_dpo_collector_deinit(&col2);
+    sqlite3_close(db);
+}
+```
+
+Wire into the existing `run_dpo_tests` runner in the same file.
+
+- [ ] **Step 4: Build + run the new test**
+
+```bash
+cmake --build build-dev -j
+./build-dev/human_tests --suite=DPO --filter=test_dpo_export_in_memory_roundtrip
+```
+
+Expected: PASS, 0 ASan errors, 0 leaks.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add include/human/ml/dpo.h src/ml/dpo.c tests/test_dpo.c
+git commit -m "feat(ml,dpo): add hu_dpo_export in-memory exporter (Phase 6 prereq)
+
+fix(plan,e2e,C4): the round-2 closed-loop runner in
+docs/plans/2026-05-11-rl-loop-phase-6-proof.md references hu_dpo_export
+but only hu_dpo_export_t (struct), hu_dpo_export_jsonl (file writer),
+and hu_dpo_export_free (deallocator) exist in main. Adds the in-memory
+companion to unblock Phase 6 Task 3. Caller-owned heap array,
+ORDER-BY-id stable, HU_ERR_NOT_SUPPORTED without SQLite, empty
+collector returns HU_OK + count=0.
+
+Refs Phase 6 plan §'Modified files' + Task 2.5."
 ```
 
 ---
@@ -814,10 +1072,17 @@ hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
                                   hu_e2e_closed_loop_output_t *out) {
     if (!in || !alloc || !out || !in->provider || !in->provider->vtable
         || !in->trainer || !in->trainer->vtable || !in->collector
-        || !in->reaction_events || !in->prompt || !in->adapter_out_path
+        || !in->reaction_events || !in->adapter_out_path
         || !in->adapter_id || !in->system_prompt || !in->user_message
         || !in->model)
         return HU_ERR_INVALID_ARGUMENT;
+    /* fix(plan,e2e,C4-stale): drop the stale `!in->prompt` guard — the
+     * struct has no `prompt` field. The real input fields are
+     * system_prompt + user_message + model (see hu_e2e_closed_loop_input_t
+     * definition under D4) and they are NULL-checked above. A leftover
+     * `!in->prompt` would have failed to compile against the actual
+     * struct shape, surfacing as a Phase 6 build break the moment the
+     * test seam was first compiled. */
 
     memset(out, 0, sizeof(*out));
     int64_t t0 = hu_monotonic_ms();
@@ -838,7 +1103,39 @@ hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
         &out->before_response, &out->before_response_len);
     if (err != HU_OK) goto cleanup;
 
-    /* 2. Replay reaction events into the preference store.
+    /* 2a. fix(plan,e2e,H4): pre-register the synthetic assistant
+     * messages each reaction event targets. Without this, every
+     * `hu_reaction_handler_handle_event` call below would hit Phase 2's
+     * silent-drop policy (R4 in the Phase 2 plan): the handler looks up
+     * the (channel_id, target_thread_id, target_message_ref) tuple in
+     * the assistant-message store, finds nothing, drops the event, and
+     * `hu_dpo_pair_count` stays at 0. The Phase 5 H8 wiring exposes the
+     * `_for_test` registration seam (Phase 2 Task 12) AND the
+     * production `hu_reaction_handler_register_assistant_message_for_production`
+     * (Phase 5 H8 Task 12); the test seam below is the canonical pre-
+     * registration path the deterministic E2E test uses. The fixture
+     * carries the (prompt, chosen, rejected) auxiliary tuple on each
+     * event (under the JSON `_aux` key, see fixture schema in Task 2);
+     * the loader strdups it into a parallel array `in->reaction_aux`
+     * (added to the input struct) so this loop can register without
+     * re-parsing JSON. */
+    for (size_t i = 0; i < in->reaction_event_count; i++) {
+        const hu_reaction_event_t *e = &in->reaction_events[i];
+        const hu_e2e_reaction_aux_t *aux =
+            in->reaction_aux ? &in->reaction_aux[i] : NULL;
+        if (!aux || !aux->prompt || !aux->response_chosen) continue;
+        /* Register BOTH the chosen and the rejected responses against
+         * the same (channel, thread, msg_ref) tuple — positive events
+         * use chosen as the "what the assistant said" anchor; negative
+         * events use rejected. The handler routes by event.polarity. */
+        hu_reaction_handler_register_assistant_message_for_test(
+            e->channel_id, e->target_thread_id, e->target_message_ref,
+            aux->prompt,
+            e->polarity == HU_REACTION_POSITIVE ? aux->response_chosen
+                                                : aux->response_rejected);
+    }
+
+    /* 2b. Replay reaction events into the preference store.
      * hu_reaction_handler_handle_event takes ONE argument (the event);
      * the target collector is a global set via _set_collector
      * (include/human/agent/reaction_handler.h:41-43). Without the
@@ -861,8 +1158,16 @@ hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
     if (pair_count < 50) { err = HU_ERR_INVALID_STATE; goto cleanup; }  /* spec §11 row 5 */
 
     /* 4. Export collected pairs + train.
-     * hu_dpo_export populates a heap-owned hu_preference_pair_t array
-     * (include/human/ml/dpo.h:69-74); we free via hu_dpo_export_free.
+     * fix(plan,e2e,C4): hu_dpo_export populates a heap-owned
+     * hu_preference_pair_t array; the function is ADDED by Task 2.5 of
+     * this plan (it does NOT exist in main as of round 2 — the
+     * codebase has only hu_dpo_export_jsonl + hu_dpo_export_free +
+     * the hu_dpo_export_t struct typedef). Signature after Task 2.5:
+     *
+     *   hu_error_t hu_dpo_export(hu_dpo_collector_t *collector,
+     *                            hu_allocator_t     *alloc,
+     *                            hu_dpo_export_t    *out);
+     *
      * The trainer's step signature is
      *   step(ctx, alloc, pairs, n_pairs, metrics) — no hu_rl_batch_t.
      * See include/human/ml/rl_trainer.h:55-58. */
@@ -933,7 +1238,7 @@ cleanup:
 mkdir -p tests/include
 ```
 
-Write `tests/include/hu_e2e_closed_loop.h` with the two struct definitions and the function declaration as shown in D4 above. Header guard `HU_E2E_CLOSED_LOOP_H`.
+Write `tests/include/hu_e2e_closed_loop.h` with the three struct definitions (`hu_e2e_reaction_aux_t`, `hu_e2e_closed_loop_input_t`, `hu_e2e_closed_loop_output_t`), the `hu_e2e_closed_loop_run` declaration, the `hu_e2e_closed_loop_output_free` declaration, and the `hu_e2e_reaction_aux_free(hu_e2e_reaction_aux_t *aux, size_t n)` helper declaration — all as shown in D4 above (fix(plan,e2e,H4) added the aux struct and free helper). Header guard `HU_E2E_CLOSED_LOOP_H`.
 
 - [ ] **Step 5: Commit**
 
@@ -1006,7 +1311,15 @@ Refs spec §4.7, plan C1–C8 + D4 + D5 + F5."
 static void                          load_persona_seed(hu_communication_style_t *out_style,
                                                        const char ***out_held_out_prompts,
                                                        size_t *out_n_prompts);
+/* fix(plan,e2e,H4 + NEW-MED-1): returns a parallel aux array sized to
+ * match *out_events so the test path can pre-register synthetic
+ * assistant messages via hu_reaction_handler_register_assistant_message_for_test
+ * inside hu_e2e_closed_loop_run step 2a. Pass `out_aux = NULL` to skip
+ * the aux array (production demo path uses this when the live daemon
+ * already registered the assistant messages via the _for_production
+ * variant). */
 static void                          load_reaction_signals(hu_reaction_event_t **out_events,
+                                                           hu_e2e_reaction_aux_t **out_aux,
                                                            size_t *out_n);
 static hu_provider_t *               make_huml_mock_provider(hu_allocator_t *alloc);
 static hu_dpo_collector_t *          make_in_memory_dpo_collector(hu_allocator_t *alloc);
@@ -1025,8 +1338,9 @@ static void test_e2e_closed_loop_dpo_shows_measurable_response_change(void) {
     HU_ASSERT_EQ(n_held_out, 100);
 
     hu_reaction_event_t *events = NULL;
+    hu_e2e_reaction_aux_t *aux = NULL;   /* fix(plan,e2e,H4) */
     size_t n_events = 0;
-    load_reaction_signals(&events, &n_events);
+    load_reaction_signals(&events, &aux, &n_events);
     HU_ASSERT_EQ(n_events, 50);
 
     hu_provider_t *provider = make_huml_mock_provider(&alloc);
@@ -1044,7 +1358,9 @@ static void test_e2e_closed_loop_dpo_shows_measurable_response_change(void) {
                     "proofs/dpo-step-0001/lora.bin");
     hu_e2e_closed_loop_input_t in = {
         .provider = provider, .trainer = trainer, .collector = collector,
-        .reaction_events = events, .reaction_event_count = n_events,
+        .reaction_events = events,
+        .reaction_aux   = aux,   /* fix(plan,e2e,H4): drives step 2a pre-registration */
+        .reaction_event_count = n_events,
         .system_prompt     = "respond like the persona seed.",
         .system_prompt_len = strlen("respond like the persona seed."),
         .user_message      = "what should i do first?",
@@ -1074,6 +1390,11 @@ static void test_e2e_closed_loop_dpo_shows_measurable_response_change(void) {
     hu_e2e_closed_loop_output_free(&alloc, &out);
     free((void *)held_out);
     free(events);
+    /* fix(plan,e2e,H4): aux strings were strdup'd by load_reaction_signals;
+     * free each entry's prompt/response_chosen/response_rejected then the
+     * outer array. Helper hu_e2e_reaction_aux_free(aux, n_events) wraps this
+     * (defined alongside load_reaction_signals). */
+    hu_e2e_reaction_aux_free(aux, n_events);
     /* Provider/trainer/collector ownership freed by their respective
      * deinit calls inside the make_* helpers' cleanup blocks. */
     tear_down_env();
@@ -1111,7 +1432,7 @@ Each helper is short. Their key contracts:
 - `set_up_env`: `srand(42)` (initial seed; per HI3, callers reseed at every deterministic call site); `setenv("HU_E2E_FIXED_TIMESTAMP", "1715472000", 1)` (R8 + ME3 mitigation — epoch seconds for 2024-05-12T00:00:00Z, parsed by `strtoll` in `cli_demo.c::hu_e2e_now`); `mkdir -p tests/_tmp/proofs/`.
 - `tear_down_env`: removes the temp dir tree; unsets the env var.
 - `load_persona_seed`: opens `tests/fixtures/e2e_persona_seed.json` (relative path; CMake's `configure_file` ensures this works from `build-dev/`), parses it via the existing `hu_json_*` helpers (or `cJSON` if linked), populates `hu_communication_style_t` via `hu_communication_style_fingerprint_from_samples`, mallocs the `held_out_prompts[]` array.
-- `load_reaction_signals`: opens `tests/fixtures/e2e_reaction_signals.json`, parses each event into `hu_reaction_event_t`, returns the array via out-param. Caller frees.
+- `load_reaction_signals`: opens `tests/fixtures/e2e_reaction_signals.json`, parses each event into `hu_reaction_event_t` (using the canonical struct-field names per NEW-MED-1: `channel_id` → `e.channel_id`, `target_thread_id` → `e.target_thread_id`, `target_message_ref` → `e.target_message_ref`, `sender_handle` → `e.sender_handle`, `kind` (string-to-enum), `polarity` (int-to-enum), `timestamp_unix` (epoch seconds, **NOT** ms), `is_removal`). fix(plan,e2e,H4 + NEW-MED-1): if `out_aux != NULL`, also parses the `_aux.{prompt,response_chosen,response_rejected}` strings via `strdup` into a parallel `hu_e2e_reaction_aux_t[]` array. Returns both arrays via out-params. Caller frees both (the aux array via the `hu_e2e_reaction_aux_free(aux, n)` companion that frees each entry's three strings plus the outer array).
 - `make_huml_mock_provider`: instantiates a `hu_provider_t` whose `vtable->chat_with_system` reads from a shared `hu_gpt_t` (the one the trainer mutates), runs greedy decode, and emits the resulting tokens as text. The mock provider's `chat_with_system` is a tiny shim — ~30 LOC. It exposes `vtable->load_adapter` as a no-op (the trainer mutates the GPT directly; no adapter-file path needed for the mock — so the mock's `load_adapter` accepts any path and returns `HU_OK`, and the test's "the post-swap response differs" assertion is true because the underlying GPT changed in-place during `trainer->step`).
 - `make_in_memory_dpo_collector`: `sqlite3_open(":memory:", &db)` + `hu_dpo_init_tables(&col)`.
 - `make_dpo_huml_trainer`: `hu_rl_trainer_create_dpo(HU_DPO_BACKEND_HUML, ...)` with `seed=42`, `learning_rate=1e-2`, `beta=0.1`, points at the same `hu_gpt_t` the mock provider reads.
@@ -1215,7 +1536,12 @@ static void run_one_closed_loop_and_hash(hu_allocator_t *alloc,
     snprintf(path, sizeof(path),
              "%s/proofs/det-run-%d/lora.bin",
              hu_e2e_tmp_root(), run_idx);
-    hu_e2e_closed_loop_input_t in = { /* … same fields as DPO test, with path = path … */ };
+    /* … same field-fill as the DPO test (including `.reaction_aux = aux`
+     * from a fresh load_reaction_signals call — fix(plan,e2e,H4) — so
+     * the per-call srand(42) above + the per-call assistant-message
+     * registration combine to produce byte-identical adapter SHA across
+     * runs), with path = path … */
+    hu_e2e_closed_loop_input_t in = { /* … */ };
     hu_e2e_closed_loop_output_t out = {0};
     HU_ASSERT_EQ(hu_e2e_closed_loop_run(&in, alloc, &out), HU_OK);
     compute_file_sha256(alloc, path, out_hash);
@@ -1312,6 +1638,10 @@ HU_ASSERT_EQ(n_pairs, 50);
  * "test-imessage", so the handler will write "test-imessage". A
  * literal `strcmp(..., "e2e_synthetic")` would always fail; we relax
  * to a substring match that accepts every channel-derived form. */
+/* fix(plan,e2e,C4): hu_dpo_export added by Task 2.5 of this plan.
+ * Signature: hu_error_t hu_dpo_export(hu_dpo_collector_t *,
+ *                                     hu_allocator_t *,
+ *                                     hu_dpo_export_t *out). */
 hu_dpo_export_t export_data = {0};
 HU_ASSERT_EQ(hu_dpo_export(collector, &alloc, &export_data), HU_OK);
 HU_ASSERT_EQ(export_data.count, 50);
@@ -1349,6 +1679,13 @@ This test exercises the ASYNC production path, NOT `hu_e2e_closed_loop_run`. It 
 - [ ] **Step 5: Write `test_e2e_closed_loop_evidence_manifest_records_pair_count` (E4)**
 
 Calls a Task-9-built `write_evidence_dir` helper, then reads back `manifest.json`, asserts `preference_pairs_consumed == 50` and `reactions_emitted == 50`. (Phase 6's `cli_demo.c::write_evidence_dir` is the production code path; the test exercises it via a small wrapper.)
+
+> **fix(plan,e2e,H4) — required test pre-registration step:** every test that drives reactions through `hu_e2e_closed_loop_run` (including this one, Step 7's SEC1 synthesizer, and Step 8's SEC2 mid-flight tamper) MUST go through one of two equivalent paths to ensure the synthetic assistant messages are looked up by the reaction handler:
+>
+> 1. **Preferred (fixture-driven):** call `load_reaction_signals(&events, &aux, &n_events)` — the loader strdups the `_aux.{prompt,response_chosen,response_rejected}` triple into a parallel `hu_e2e_reaction_aux_t[]` and `hu_e2e_closed_loop_run` step 2a calls `hu_reaction_handler_register_assistant_message_for_test` for each entry BEFORE the replay loop. This is what Task 4 step 1 does.
+> 2. **Synthesizer tests (Step 7 SEC1, Step 8 SEC2):** build the `hu_reaction_event_t[]` programmatically AND the parallel `hu_e2e_reaction_aux_t[]` in the same loop — every event MUST have a matching aux entry whose `(prompt, response_chosen, response_rejected)` triple is set, otherwise the silent-drop policy (Phase 2 R4) fires and `hu_dpo_pair_count` returns 0. Pin this contract with a one-line assertion in the test wrapper: `HU_ASSERT_GT(out.pairs_consumed, 0)` immediately after `hu_e2e_closed_loop_run` returns, BEFORE checking the actual anomaly behavior. If the assertion fires, the test forgot to populate the aux array — fix the test, do not lower the bar.
+>
+> The round-2 plan fixed the demo path (`synthesize_reactions` in `cli_demo.c`) via HI4 but left the test path silently broken. Without this step the test's `hu_dpo_pair_count` would be 0, the trainer would no-op, the SHA assertions in D10 would still pass (the adapter file would be created from an unchanged GPT — byte-identical because nothing changed), and the wiring failure would slip through as a false PASS.
 
 - [ ] **Step 7: Write `test_e2e_closed_loop_negative_rate_anomaly_recorded` (SEC1)**
 
@@ -1494,7 +1831,14 @@ Refs spec §1, §11 row 4, plan D6 + DoD."
 Same shape as the DPO test but with `hu_rl_trainer_create_kto`. The reaction stream is reused as-is (KTO interprets one-sided pairs naturally per Phase 3's plan D1; the 50-event mixed positive/negative stream maps to 50 KTO signals).
 
 ```c
-HU_SKIP_IF(/* Phase 3 not present in build */, "KTO trainer requires HU_ENABLE_RL_FULL");
+/* fix(plan,e2e,NEW-LOW-1): gate at the preprocessor, NOT via
+ * HU_SKIP_IF(!HU_ENABLE_KTO, ...). The bang-form draws -Wundef
+ * under -Werror when the macro is undefined on the dev preset. */
+#ifdef HU_ENABLE_KTO
+    /* … real KTO test body … */
+#else
+    HU_SKIP_IF(1, "Phase 3 KTO not enabled in this build (HU_ENABLE_KTO undefined)");
+#endif
 ```
 
 - [ ] **Step 2: Add `test_e2e_closed_loop_grpo_shows_measurable_response_change`**
@@ -1512,10 +1856,8 @@ Same shape but uses `hu_rl_trainer_create_grpo` with `rollouts=2` (small to keep
 > ```
 >
 > The `HU_SKIP_IF(1, ...)` form is a runtime no-op when the macro is reached but never compiles in a reference to the missing symbol. Document in the test's leading comment that the body compiles in either branch but only executes under `cmake --preset rl_sota`.
-
-```c
-HU_SKIP_IF(!HU_ENABLE_GRPO, "Phase 4 GRPO not enabled in this build");
-```
+>
+> **fix(plan,e2e,NEW-LOW-1):** the round-2 plan had a trailing `HU_SKIP_IF(!HU_ENABLE_GRPO, ...)` example just below this prose. That form draws a `-Wundef` warning under `-Werror`: when `HU_ENABLE_GRPO` is not defined the C preprocessor treats it as `0` AND emits the `-Wundef` diagnostic; the warning is then promoted to an error and the build fails on the `dev` preset. The `#ifdef HU_ENABLE_GRPO` early-return shape above is the canonical pattern (matches Phase 4 plan ME1) and avoids the `-Wundef` trap entirely. Same goes for any `HU_HAVE_MLX_LM_GRPO` / `HU_HAVE_*` macro: gate at the preprocessor, not via `HU_SKIP_IF(!MACRO, …)`.
 
 - [ ] **Step 3: Commit**
 
