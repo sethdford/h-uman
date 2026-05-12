@@ -1,7 +1,7 @@
 ---
 title: "Sprint 4 — M2 measurement bundle (multi-turn simulation)"
 created: 2026-05-12
-status: in-progress
+status: closed
 sprint: 4
 branch: sprint-4-m2-measurement
 working_directory: /Users/sethford/Documents/human-sprint-4
