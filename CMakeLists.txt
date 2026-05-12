@@ -62,6 +62,17 @@ option(HU_HAVE_MLX_LM_KTO "Enable mlx-lm-lora KTO subprocess integration tests" 
 # Apple/Linux dev boxes that may or may not have the third-party package
 # installed.
 option(HU_HAVE_MLX_LM_GRPO "Enable mlx-lm-lora GRPO subprocess integration tests" OFF)
+# Phase 5 Task 0 (RL SOTA) — master gate for the Phase 5 + Phase 6 RL
+# evaluation infrastructure (competitive harness, gold-judge leaderboard,
+# external-judge bridges, eval gate). OFF by default keeps the default
+# release / dev build a zero-byte delta versus Phase 4 close-out; the
+# rl_sota preset flips this ON so subsequent Phase 5 tasks can land code
+# behind the flag without changing default builds. The actual
+# target_compile_definitions wiring lives after the human / human_core /
+# human_core_test / human_tests targets are declared (alongside
+# HU_HAVE_MLX_LM_GRPO's wiring); CMake forbids defining symbols on a
+# target before the target exists.
+option(HU_ENABLE_RL_FULL "Enable RL evaluation infrastructure (Phase 5 + 6)" OFF)
 # Phase 1 (RL SOTA) — Metal GPU offload for the vendored llama.cpp build.
 # Defaults ON only on Apple platforms (the only OS llama.cpp ships Metal
 # for). Linux and other non-Apple targets default OFF; setting it ON
@@ -3337,6 +3348,21 @@ if(HU_HAVE_MLX_LM_GRPO)
     target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM_GRPO=1)
     target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM_GRPO=1)
     target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM_GRPO=1)
+endif()
+
+# Phase 5 Task 0 (RL SOTA) — propagate HU_ENABLE_RL_FULL into targets.
+# OFF by default keeps default release / dev builds a zero-byte delta vs
+# Phase 4 close-out; the rl_sota preset flips this ON so Tasks 1-13 can
+# land code (and #ifdef-gated cmd_eval subcommands per Task 10) behind
+# the flag without changing the default build surface. The macro is
+# defined on both the library (human_core / human_core_test) and the
+# executables (human / human_tests) so that source files in either
+# stage of the build graph can use it.
+if(HU_ENABLE_RL_FULL)
+    target_compile_definitions(human PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_RL_FULL=1)
 endif()
 
 # Keep assert() active in tests even for Release/MinSizeRel builds (which define NDEBUG).

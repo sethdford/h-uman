@@ -1219,6 +1219,12 @@ hu_error_t hu_cmd_eval_w16_dispatch_for_test(hu_allocator_t *alloc, int argc, ch
 
 /* ── eval (run/list/compare) ────────────────────────────────────────────── */
 hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
+#ifdef HU_ENABLE_RL_FULL
+    /* Phase 5 Task 10 lands subcommand dispatch here
+     * (`human eval competitive`, `human eval leaderboard`, `human eval gate`).
+     * Empty in Task 0 -- the guard exists so Tasks 3-10 land their
+     * dispatch behind it without rewriting the function signature. */
+#endif
     if (argc < 3) {
         printf("Usage: human eval "
                "<run|baseline|validate|check-regression|list|compare|dashboard|history|trend|"
