@@ -1331,6 +1331,13 @@ if(HU_ENABLE_ML)
         # link; the placeholder at the bottom of grpo.c returns
         # HU_ERR_NOT_SUPPORTED until Task 5 lands the real impl.
         src/ml/grpo.c
+        # Phase 4 Task 4 (RL SOTA): hu_reward_source_t leaf vtable — three
+        # backends (synthetic token-counting fn, Phase 3 hu_reward_model_t
+        # composition, Phase 5 llm-judge stub). Used by the GRPO trainer
+        # (Task 5) to attach a scalar reward to each rollout, and by the
+        # CLI (Task 9) to dispatch on --reward-fn vs --reward-model
+        # (R9 reward-hacking pin — no implicit default).
+        src/ml/reward_source.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2881,6 +2888,10 @@ set(HU_TEST_SOURCES
     # sampling determinism (xorshift64 + per-rollout splitmix64 seed),
     # n_rollouts honoured, max_new_tokens cap, cross-platform pin (R13).
     tests/test_rollout.c
+    # Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic
+    # token-counting backend (good=1..5, bad=26..30 convention), Phase 3
+    # hu_reward_model_t composition smoke, Phase 5 judge stub pin.
+    tests/test_reward_source.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
