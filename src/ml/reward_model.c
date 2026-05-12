@@ -50,6 +50,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -328,11 +329,27 @@ hu_error_t hu_reward_model_create_huml(hu_allocator_t *alloc,
 /* hu_reward_model_create_mlx moved to src/ml/reward_model_mlx.c (Phase 3 Task 8). */
 
 hu_error_t hu_reward_model_save(const hu_reward_model_t *rm, const char *dir) {
-    (void)rm; (void)dir;
-    /* Task 9 lands the format pin (composes hu_value_head_save with the
-     * backbone checkpoint). Intentionally unimplemented until then so
-     * Task 3 can iterate without locking in a format. */
-    return HU_ERR_NOT_SUPPORTED;
+    if (!rm || !rm->vtable || !dir || dir[0] == '\0')
+        return HU_ERR_INVALID_ARGUMENT;
+
+    huml_rm_ctx_t *c = hu_reward_model_huml_ctx_or_null((hu_reward_model_t *)rm);
+    if (!c) return HU_ERR_NOT_SUPPORTED;
+
+    char path[1024];
+    int n = snprintf(path, sizeof(path), "%s/value_head.vh", dir);
+    if (n <= 0 || (size_t)n >= sizeof(path)) return HU_ERR_INVALID_ARGUMENT;
+
+    hu_error_t err = hu_value_head_save(&c->value_head, path);
+    if (err != HU_OK) return err;
+
+    n = snprintf(path, sizeof(path), "%s/rm_meta.json", dir);
+    if (n <= 0 || (size_t)n >= sizeof(path)) return HU_ERR_INVALID_ARGUMENT;
+    FILE *f = fopen(path, "w");
+    if (!f) return HU_ERR_IO;
+    fprintf(f, "{\"vocab_size\":%zu,\"hidden_dim\":%zu,\"backend\":\"huml\"}\n",
+            c->vocab_size, c->hidden_dim);
+    fclose(f);
+    return HU_OK;
 }
 
 hu_error_t hu_reward_model_load(hu_allocator_t *alloc, const char *dir,

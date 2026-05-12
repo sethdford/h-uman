@@ -100,6 +100,20 @@ def main():
             "--batch-size",
             "1",
         ]
+        # Phase 3 audit fold-in (critic MEDIUM-5): forward --lambda-d/--lambda-u
+        # to the upstream CLI. The C caller (src/ml/kto_mlx.c::kto_mlx_step)
+        # passes configured weights through snprintf and expects them to take
+        # effect — without these flags, mlx-lm-lora used its hard-coded defaults
+        # (typically 1.0/1.0) regardless of what the user configured.
+        # NOTE: Some mlx-lm-lora releases accept these flags via --kto-* prefix
+        # or via the desirable_weight/undesirable_weight HF dataset columns.
+        # If the upstream CLI rejects them, the popen call surfaces the error
+        # to the caller (return code != 0); this is preferable to silently
+        # ignoring user-configured hyperparameters.
+        if args.lambda_d != 1.0:
+            cmd.extend(["--desirable-weight", str(args.lambda_d)])
+        if args.lambda_u != 1.0:
+            cmd.extend(["--undesirable-weight", str(args.lambda_u)])
         print(f"[kto_mlx_train] invoking: {' '.join(cmd)}", flush=True)
         result = subprocess.run(cmd, check=False)
         if result.returncode != 0:

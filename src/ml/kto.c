@@ -26,6 +26,7 @@
 #include "human/ml/ml.h"
 #include "human/core/error.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -90,7 +91,14 @@ static hu_error_t kto_huml_step(void *vctx, hu_allocator_t *alloc,
         int is_two_sided   = (pairs[i].chosen_len > 0 && pairs[i].rejected_len > 0);
 
         if (is_two_sided) continue;
-        if (!is_desirable && !is_undesirable) return HU_ERR_INVALID_ARGUMENT;
+        /* Phase 3 audit fold-in (critic MEDIUM-3): null-pair (neither
+         * chosen nor rejected populated) used to mid-batch `return
+         * HU_ERR_INVALID_ARGUMENT`, which would leave any pairs
+         * already processed before this index with mutated lm_head
+         * weights but no metrics in `out`. Skip silently — same
+         * convention as is_two_sided above. Caller-side validation
+         * happens at `human ml kto-train` JSONL load time. */
+        if (!is_desirable && !is_undesirable) continue;
 
         int32_t *prompt = NULL, *response = NULL;
         size_t pl = 0, rl = 0;
@@ -197,7 +205,20 @@ cleanup_pair:
 
 static hu_error_t kto_huml_save(void *vctx, hu_allocator_t *alloc, const char *path) {
     if (!vctx || !alloc || !path) return HU_ERR_INVALID_ARGUMENT;
-    return HU_ERR_NOT_SUPPORTED;
+    kto_huml_ctx_t *c = (kto_huml_ctx_t *)vctx;
+    if (!c->initialized) return HU_ERR_INVALID_ARGUMENT;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) return HU_ERR_IO;
+
+    hu_ml_tensor_t *params = NULL;
+    size_t n_params = 0;
+    hu_error_t err = c->policy.vtable->get_params(c->policy.ctx, &params, &n_params);
+    if (err != HU_OK || n_params < 2) { fclose(f); return err == HU_OK ? HU_ERR_INVALID_ARGUMENT : err; }
+
+    fwrite(params[1].data, 1, params[1].size_bytes, f);
+    fclose(f);
+    return HU_OK;
 }
 
 static const char *kto_huml_name(void *vctx) { (void)vctx; return "kto_huml"; }

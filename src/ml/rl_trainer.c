@@ -55,9 +55,14 @@ hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
 }
 
 /* Probe: KTO trainer importable from mlx-lm-lora. Mirrors the DPO
- * probe above — checks for the mlx_lm_lora.train module. */
+ * probe above — checks for the specific KTOTrainingArgs symbol path
+ * (Phase 3 audit fold-in F2). Generic `import mlx_lm_lora.train`
+ * succeeds on partial installs that lack the KTO trainer module,
+ * deferring failure to popen() time. */
 static int mlx_lm_lora_kto_available(void) {
-    return system("python3 -c 'import mlx_lm_lora.train' 2>/dev/null") == 0;
+    return system(
+        "python3 -c 'from mlx_lm_lora.trainer.kto_trainer "
+        "import train_kto, KTOTrainingArgs' 2>/dev/null") == 0;
 }
 
 hu_error_t hu_rl_trainer_create_kto(hu_allocator_t *alloc,

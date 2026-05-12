@@ -76,8 +76,11 @@ static hu_error_t rm_mlx_score(void *vctx, hu_allocator_t *alloc,
 
     if (n < 0 || (size_t)n >= sizeof(cmd)) return HU_ERR_INVALID_ARGUMENT;
 
-#if defined(HU_IS_TEST) && !defined(HU_HAVE_MLX_LM)
-    /* In test mode without MLX, return a dummy score. */
+/* Phase 3 audit fold-in (critic MEDIUM-3): `#if HU_IS_TEST` is the repo
+ * standard (numeric check). `defined(HU_IS_TEST)` is true when the build
+ * system explicitly defines HU_IS_TEST=0 to disable test mode, which
+ * would mistakenly route real scoring requests through the dummy path. */
+#if HU_IS_TEST && !defined(HU_HAVE_MLX_LM)
     *out_score = 0.42;
     return HU_OK;
 #endif

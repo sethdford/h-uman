@@ -154,8 +154,21 @@ static void test_kto_loss_finite_diff_matches_analytical(void) {
     /* The desirable and undesirable losses are mirrors:
      * dL_D/dtheta = -lambda*beta*sig*(1-sig) * d(logpi)/dtheta
      * dL_U/dtheta = +lambda*beta*sig*(1-sig) * d(logpi)/dtheta
-     * So the gradients must have opposite signs. */
+     * With identical prompt+response on both branches and equal lambdas
+     * (lambda_d == lambda_u == 1.0), the magnitudes must also match.
+     * Phase 3 audit fold-in (critic HIGH-2): the bare sign check
+     * grads[0]*grads[1] < 0 would pass for ANY formula that produced
+     * opposite signs — even one off by a factor of 10 or 100. Pin the
+     * mathematical correctness of the KTO gradient formula by also
+     * asserting magnitude equivalence within 5% (HUML toy-GPT FD has
+     * higher noise than analytical gradients; 5% absorbs O(eps) FD
+     * approximation error without admitting formula drift). */
     HU_ASSERT_TRUE(grads[0] * grads[1] < 0);
+    double mag_diff = fabs(grads[0] + grads[1]);
+    double mag_avg = 0.5 * (fabs(grads[0]) + fabs(grads[1]));
+    HU_ASSERT_TRUE(mag_avg > 0.0);
+    double rel_err = mag_diff / mag_avg;
+    HU_ASSERT_TRUE(rel_err < 0.05);
 
     trainer.vtable->deinit(trainer.ctx, &alloc);
 }

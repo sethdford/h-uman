@@ -165,8 +165,17 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
     FILE *fp = popen(cmd, "r");
     if (!fp) { unlink(jsonl_path); return HU_ERR_IO; }
     char buf[1024];
+    double last_loss = 0.0;
+    size_t last_iter = 0;
     while (fgets(buf, sizeof(buf), fp)) {
-        /* TODO Phase 5: parse loss/iters from stdout */
+        double parsed_loss = 0.0;
+        unsigned long parsed_iter = 0;
+        if (sscanf(buf, "Iter %lu: Val loss %lf", &parsed_iter, &parsed_loss) == 2 ||
+            sscanf(buf, "Iter %lu, loss: %lf", &parsed_iter, &parsed_loss) == 2 ||
+            sscanf(buf, "iter %lu: loss=%lf", &parsed_iter, &parsed_loss) == 2) {
+            last_loss = parsed_loss;
+            last_iter = (size_t)parsed_iter;
+        }
     }
     int status = pclose(fp);
     unlink(jsonl_path);
@@ -174,12 +183,11 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
 
     snprintf(out->adapter_path, sizeof(out->adapter_path),
              "%s/adapters.safetensors", c->adapter_dir);
-    /* Verify file exists and is non-empty */
     struct stat st;
     if (stat(out->adapter_path, &st) != 0 || st.st_size == 0) return HU_ERR_PROVIDER_RESPONSE;
 
-    out->iters_completed = c->max_iters;
-    out->final_loss = 0.0;
+    out->iters_completed = last_iter > 0 ? last_iter : c->max_iters;
+    out->final_loss = last_loss;
     return HU_OK;
 }
 

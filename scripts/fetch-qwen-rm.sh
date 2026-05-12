@@ -90,7 +90,16 @@ verify_or_die() {
     echo "fetch-qwen-rm: SHA MISMATCH" >&2
     echo "  expected: ${MODEL_SHA}" >&2
     echo "  actual:   ${actual}" >&2
-    echo "  file kept at ${path} for forensic inspection (delete manually before retry)" >&2
+    # Phase 3 audit fold-in (critic MEDIUM-4): delete the bad file before
+    # exit. Previously the file was kept "for forensic inspection", but
+    # downstream tests (tests/test_reward_model_inference.c) only check
+    # for fopen() success — a partially-downloaded or substituted GGUF
+    # that fails SHA but exists on disk would silently be fed to the MLX
+    # runtime on the next test run. Quarantine to a .bad sidecar so the
+    # bytes survive forensics without re-tripping the existence check.
+    local quarantine="${path}.bad"
+    mv -f "${path}" "${quarantine}" 2>/dev/null || rm -f "${path}"
+    echo "  bad bytes moved to: ${quarantine} (delete after inspection)" >&2
     exit 2
   fi
   echo "fetch-qwen-rm: SHA verified (${actual:0:16}...${actual: -8})"

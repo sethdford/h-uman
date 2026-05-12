@@ -26,6 +26,7 @@ hu_error_t hu_ml_cli_rm_train(hu_allocator_t *alloc, int argc, const char **argv
     const char *pairs_path = NULL;
     const char *backend_str = "huml";
     const char *save_dir = NULL;
+    const char *backbone_path = NULL;
     int max_iters = 200;
     double learning_rate = 1e-2;
     size_t vocab_size = 32;
@@ -33,21 +34,24 @@ hu_error_t hu_ml_cli_rm_train(hu_allocator_t *alloc, int argc, const char **argv
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             printf("Usage: human ml rm-train [options]\n"
-                   "  --pairs <path>         JSONL preference pairs (two-sided only)\n"
-                   "  --backend {huml,mlx}   default: huml\n"
-                   "  --save <dir>           save trained RM to directory\n"
-                   "  --iters <N>            training iterations (default: 200)\n"
-                   "  --learning-rate <f>    SGD learning rate (default: 0.01)\n"
-                   "  --vocab-size <N>       HUML toy GPT vocab (default: 32)\n"
+                   "  --pairs <path>           JSONL preference pairs (two-sided only)\n"
+                   "  --backend {huml,mlx}     default: huml\n"
+                   "  --backbone-path <path>   MLX-only: path to backbone GGUF (e.g. ~/.human/models/qwen-2.5-0.5b-instruct-q4_k_m.gguf)\n"
+                   "  --save <dir>             HUML-only: save value_head.vh + rm_meta.json to directory\n"
+                   "  --iters <N>              training iterations (default: 200)\n"
+                   "  --learning-rate <f>      SGD learning rate (default: 0.01)\n"
+                   "  --vocab-size <N>         HUML toy GPT vocab (default: 32)\n"
                    "\n"
                    "HUML backend trains the toy reference GPT — useful for gradient\n"
                    "verification, NOT for improving real chat. Use --backend mlx for\n"
-                   "real Qwen-scale reward model training.\n");
+                   "real Qwen-scale reward model training (requires HU_HAVE_MLX_LM\n"
+                   "+ scripts/fetch-qwen-rm.sh + --backbone-path).\n");
             return HU_OK;
         }
         const char *v;
         if ((v = rm_get_opt(argv, argc, &i, "--pairs")))          pairs_path = v;
         else if ((v = rm_get_opt(argv, argc, &i, "--backend")))   backend_str = v;
+        else if ((v = rm_get_opt(argv, argc, &i, "--backbone-path"))) backbone_path = v;
         else if ((v = rm_get_opt(argv, argc, &i, "--save")))      save_dir = v;
         else if ((v = rm_get_opt(argv, argc, &i, "--iters")))     max_iters = atoi(v);
         else if ((v = rm_get_opt(argv, argc, &i, "--learning-rate"))) learning_rate = atof(v);
@@ -57,11 +61,24 @@ hu_error_t hu_ml_cli_rm_train(hu_allocator_t *alloc, int argc, const char **argv
     hu_reward_model_backend_t backend = HU_REWARD_MODEL_BACKEND_HUML;
     if (strcmp(backend_str, "mlx") == 0) backend = HU_REWARD_MODEL_BACKEND_MLX;
 
+    /* Phase 3 audit fold-in (auditor F4): require --backbone-path for MLX
+     * backend. Previously the flag was advertised but the field was never
+     * set, causing every `human ml rm-train --backend mlx` to immediately
+     * fail with HU_ERR_INVALID_ARGUMENT inside hu_reward_model_create_mlx. */
+    if (backend == HU_REWARD_MODEL_BACKEND_MLX && (!backbone_path || !backbone_path[0])) {
+        fprintf(stderr,
+                "[rm-train] --backend mlx requires --backbone-path <path-to-gguf>\n"
+                "[rm-train] e.g. ~/.human/models/qwen-2.5-0.5b-instruct-q4_k_m.gguf\n"
+                "[rm-train] run scripts/fetch-qwen-rm.sh to fetch the canonical Qwen GGUF\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
     hu_reward_model_config_t cfg = {
         .backend = backend,
         .vocab_size = vocab_size,
         .hidden_dim = vocab_size,
     };
+    if (backbone_path) cfg.backbone_path = backbone_path;
     hu_reward_model_t rm = {0};
     hu_error_t err;
     if (backend == HU_REWARD_MODEL_BACKEND_HUML) {
@@ -176,10 +193,22 @@ hu_error_t hu_ml_cli_rm_train(hu_allocator_t *alloc, int argc, const char **argv
     if (save_dir) {
         err = hu_reward_model_save(&rm, save_dir);
         if (err == HU_ERR_NOT_SUPPORTED) {
-            fprintf(stderr, "[rm-train] save not yet implemented (Task 9)\n");
+            /* Phase 3 audit fold-in (auditor F3): be honest about which
+             * backend supports save. HUML does (writes value_head.vh +
+             * rm_meta.json), MLX does not (Python wrapper persists
+             * value_head.npz directly via scripts/rm_mlx_train.py --train). */
+            fprintf(stderr,
+                    "[rm-train] --save is HUML-only — MLX persists "
+                    "value_head.npz via scripts/rm_mlx_train.py --train\n");
+            rm.vtable->deinit(rm.ctx, alloc);
+            return HU_ERR_NOT_SUPPORTED;
         } else if (err != HU_OK) {
             fprintf(stderr, "[rm-train] save failed: error %d\n", (int)err);
+            rm.vtable->deinit(rm.ctx, alloc);
+            return err;
         }
+        fprintf(stderr, "[rm-train] saved value_head.vh + rm_meta.json to %s\n",
+                save_dir);
     }
 
     rm.vtable->deinit(rm.ctx, alloc);

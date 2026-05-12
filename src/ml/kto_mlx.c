@@ -13,6 +13,7 @@
 #include "human/ml/kto.h"
 #include "human/ml/rl_trainer.h"
 #include "human/core/error.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,8 +29,15 @@ typedef struct {
     size_t max_iters;
 } kto_mlx_ctx_t;
 
+/* Phase 3 audit fold-in (auditor F2 + Task 0 D6): probe the specific KTO
+ * trainer symbol, not just the generic `mlx_lm_lora.train` module. A
+ * partial install (module imports, trainer symbol missing) was Phase 2's
+ * deferred-failure root cause; matching the DPO probe pattern in
+ * src/ml/dpo_real_mlx.c::mlx_lm_lora_available eliminates it for KTO too. */
 static int mlx_lm_lora_kto_available(void) {
-    return system("python3 -c 'import mlx_lm_lora.train' 2>/dev/null") == 0;
+    return system(
+        "python3 -c 'from mlx_lm_lora.trainer.kto_trainer "
+        "import train_kto, KTOTrainingArgs' 2>/dev/null") == 0;
 }
 
 /* Minimal JSON string escaper — same logic as dpo_real_mlx.c.
@@ -61,16 +69,39 @@ static size_t kto_json_escape(char *dst, size_t cap, const char *src) {
 }
 
 /* Write KTO signals as JSONL to /tmp/hu_kto_mlx_<pid>.jsonl.
- * Schema: {"prompt": "...", "completion": "...", "label": true/false} */
+ * Schema: {"prompt": "...", "completion": "...", "label": true/false}
+ *
+ * Phase 3 audit fold-in (critic HIGH-1): two-sided pairs (chosen AND
+ * rejected populated) are silently skipped to match the HUML backend's
+ * behavior at src/ml/kto.c::kto_huml_step. Without this guard the MLX
+ * path would write the chosen side as label=true and silently drop the
+ * rejected side — same input batch produces different training signal
+ * across backends. KTO is one-sided by definition; mixed batches are
+ * a caller-side error.
+ *
+ * Phase 3 audit fold-in (critic MEDIUM-1): O_EXCL + 0600 mode prevents
+ * symlink-attack and limits exposure to other local users on shared
+ * macOS CI runners or workstations. Predictable PID is acceptable here
+ * because O_EXCL fails on pre-placed symlink + the file is removed
+ * after popen() completes (kto_mlx_step does unlink(jsonl_path)). */
 static hu_error_t kto_write_jsonl(const hu_preference_pair_t *pairs, size_t n,
                                    char *out_path, size_t out_path_cap) {
     snprintf(out_path, out_path_cap, "/tmp/hu_kto_mlx_%d.jsonl", getpid());
-    FILE *f = fopen(out_path, "w");
-    if (!f) return HU_ERR_IO;
+    int fd = open(out_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) {
+        /* Stale file from previous PID-collision run — unlink and retry once. */
+        unlink(out_path);
+        fd = open(out_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (fd < 0) return HU_ERR_IO;
+    }
+    FILE *f = fdopen(fd, "w");
+    if (!f) { close(fd); return HU_ERR_IO; }
     for (size_t i = 0; i < n; i++) {
         if (pairs[i].prompt_len == 0) continue;
         int is_desirable   = (pairs[i].chosen_len > 0);
         int is_undesirable = (pairs[i].rejected_len > 0);
+        int is_two_sided   = (is_desirable && is_undesirable);
+        if (is_two_sided) continue;
         if (!is_desirable && !is_undesirable) continue;
 
         const char *completion = is_desirable ? pairs[i].chosen : pairs[i].rejected;
@@ -116,7 +147,12 @@ static hu_error_t kto_mlx_step(void *vctx, hu_allocator_t *alloc,
              c->model_id, jsonl_path, c->adapter_dir,
              c->max_iters, c->beta, c->lambda_d, c->lambda_u);
 
-#ifdef HU_IS_TEST
+/* Phase 3 audit fold-in (critic MEDIUM-3): use `#if HU_IS_TEST` (numeric
+ * check) — the repo standard. `#ifdef HU_IS_TEST` would activate this
+ * dummy-write path even when the build system explicitly defines
+ * HU_IS_TEST=0 to disable test mode. See reward_model_train.c:26 for
+ * the same standardization (Phase 2 audit b6a71f81). */
+#if HU_IS_TEST
 #ifndef HU_HAVE_MLX_LM_KTO
     char dummy_path[768];
     snprintf(dummy_path, sizeof(dummy_path), "%s/adapters.safetensors", c->adapter_dir);
@@ -133,8 +169,17 @@ static hu_error_t kto_mlx_step(void *vctx, hu_allocator_t *alloc,
     FILE *fp = popen(cmd, "r");
     if (!fp) { unlink(jsonl_path); return HU_ERR_IO; }
     char buf[1024];
+    double last_loss = 0.0;
+    size_t last_iter = 0;
     while (fgets(buf, sizeof(buf), fp)) {
-        /* TODO Phase 5: parse loss/iters from stdout */
+        double parsed_loss = 0.0;
+        unsigned long parsed_iter = 0;
+        if (sscanf(buf, "Iter %lu: Val loss %lf", &parsed_iter, &parsed_loss) == 2 ||
+            sscanf(buf, "Iter %lu, loss: %lf", &parsed_iter, &parsed_loss) == 2 ||
+            sscanf(buf, "iter %lu: loss=%lf", &parsed_iter, &parsed_loss) == 2) {
+            last_loss = parsed_loss;
+            last_iter = (size_t)parsed_iter;
+        }
     }
     int status = pclose(fp);
     unlink(jsonl_path);
@@ -146,8 +191,8 @@ static hu_error_t kto_mlx_step(void *vctx, hu_allocator_t *alloc,
     if (stat(out->adapter_path, &st) != 0 || st.st_size == 0)
         return HU_ERR_PROVIDER_RESPONSE;
 
-    out->iters_completed = c->max_iters;
-    out->final_loss = 0.0;
+    out->iters_completed = last_iter > 0 ? last_iter : c->max_iters;
+    out->final_loss = last_loss;
     return HU_OK;
 }
 
