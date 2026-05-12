@@ -70,6 +70,22 @@
 #define HU_GUARD_NUMBERED_LONG_THRESHOLD 30
 #define HU_GUARD_NUMBERED_MIN_ITEMS      3
 
+/* Sprint 31 — context-aware detection thresholds.
+ *
+ * Length anomaly multiplier. Calibrated against the 2026-05-12 Brea
+ * leak (979 char response vs 44 char rolling avg = 22x). A
+ * "long-but-legit" reply (story telling, link with explanation,
+ * detailed answer) is typically 3-5x the rolling avg. 8x is the safe
+ * midpoint that catches the leak with margin.
+ *
+ * Director echo minimum match length. The leak quoted 64 verbatim
+ * chars from the director string. 30 chars is shorter than that (so
+ * we catch it) and longer than incidental phrase matches like
+ * "I think we should" that happen to appear in both director and
+ * reply for normal reasons. */
+#define HU_GUARD_LENGTH_ANOMALY_MULT      8
+#define HU_GUARD_DIRECTOR_ECHO_MIN_MATCH  30
+
 /* Documented surface (handled by the catch-all <|...|> stripper, listed
  * here so future maintainers know what model formats we cover):
  *
@@ -442,6 +458,37 @@ static int hu_guard_count_third_person_patterns(const char *s, size_t len) {
     return hits;
 }
 
+/* G5 — length anomaly. Returns true if `response_len` exceeds
+ * `ctx->recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT`. A NULL ctx or
+ * `recent_avg_len == 0` disables the check (returns false). */
+static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t response_len) {
+    if (!ctx || ctx->recent_avg_len == 0)
+        return false;
+    /* Use a multiply rather than divide to avoid floating-point and to
+     * make the threshold explicit. response_len > avg * MULT. */
+    return response_len > ctx->recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT;
+}
+
+/* G6 — director-string echo. Returns true if any 30-char substring of
+ * `ctx->director_text` appears verbatim (case-insensitively) in
+ * `s[0..len)`. NULL ctx, NULL director_text, or director_len <
+ * HU_GUARD_DIRECTOR_ECHO_MIN_MATCH disables the check. */
+static bool hu_guard_has_director_echo(const hu_guard_context_t *ctx, const char *s, size_t len) {
+    if (!ctx || !ctx->director_text ||
+        ctx->director_len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
+        return false;
+    if (len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
+        return false;
+    /* Slide a 30-char window over director_text. For each window,
+     * check if the response contains it. First match wins. */
+    size_t window = (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH;
+    for (size_t i = 0; i + window <= ctx->director_len; i++) {
+        if (hu_guard_ci_contains(s, len, ctx->director_text + i, window))
+            return true;
+    }
+    return false;
+}
+
 /* Orchestrator — returns true if the response trips ANY of G1/G2/G3.
  * Out-param `which` is set to a small bitmask for diagnostics:
  *   bit 0 = G1 numbered analysis    bit 1 = G2 self-talk
@@ -627,6 +674,17 @@ static void strip_special_into(const char *in, size_t in_len, char *out, size_t 
 hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, size_t response_len,
                                    char **out_response, size_t *out_len,
                                    hu_guard_outcome_t *out_outcome, hu_guard_report_t *report) {
+    /* Sprint 31 — thin wrapper. ctx=NULL disables context-aware
+     * detections so legacy callers see byte-identical behavior. */
+    return hu_response_guard_check_ex(alloc, response, response_len, NULL, out_response, out_len,
+                                      out_outcome, report);
+}
+
+hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *response,
+                                      size_t response_len, const hu_guard_context_t *ctx,
+                                      char **out_response, size_t *out_len,
+                                      hu_guard_outcome_t *out_outcome,
+                                      hu_guard_report_t *report) {
     if (!alloc || !response || !out_response || !out_len || !out_outcome)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -793,6 +851,35 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, 
         if (report)
             report->detected_semantic_leak = true;
         return HU_OK;
+    }
+
+    /* Phase 4 (Sprint 31) — context-aware detections. Skipped when
+     * `ctx` is NULL (legacy `hu_response_guard_check` callers).
+     *
+     * Phase 4a: length anomaly (response_len >> recent_avg_len).
+     * Phase 4b: director-string echo (verbatim quote of upstream
+     * scene-direction text).
+     *
+     * Both run on the cleaned text (post-Phase 1 strip). The length
+     * anomaly check uses the original `response_len` because the
+     * cleaning only removes markup, not user-visible content — the
+     * "what got sent on the wire" length is what matters relative
+     * to the recipient's avg. */
+    if (ctx) {
+        bool length_anomaly = hu_guard_has_length_anomaly(ctx, response_len);
+        bool director_echo = hu_guard_has_director_echo(ctx, for_repetition_check, check_len);
+        if (length_anomaly || director_echo) {
+            if (cleaned)
+                alloc->free(alloc->ctx, cleaned, effective_len + 1);
+            *out_response = NULL;
+            *out_len = 0;
+            *out_outcome = HU_GUARD_REJECT;
+            if (report) {
+                report->detected_length_anomaly = length_anomaly;
+                report->detected_director_echo = director_echo;
+            }
+            return HU_OK;
+        }
     }
 
     if (needs_strip) {

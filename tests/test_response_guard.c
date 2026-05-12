@@ -731,6 +731,176 @@ static void guard_rejects_template_label_substrings(void) {
     }
 }
 
+/* ── Sprint 31 — context-aware detections (G5/G6) ─────────────────────
+ *
+ * G5 (length anomaly) and G6 (director echo) require per-turn context
+ * the guard doesn't have access to without an opt-in API. Tests here
+ * exercise `hu_response_guard_check_ex` with a populated
+ * `hu_guard_context_t`. The legacy `hu_response_guard_check` callers
+ * see byte-identical behavior because they pass ctx=NULL. */
+
+/* Build a benign long response with varied content that won't trip
+ * Phase 0/1/2/3 detectors — useful for isolating Phase 4 in tests.
+ * Uses a short text loop that exceeds Phase 2's token-run threshold
+ * gracefully (the loop's tokens are >8 chars). Returns NUL-terminated
+ * length. */
+static size_t guard_test_make_benign_long(char *out, size_t out_cap, size_t target_len) {
+    static const char *phrase =
+        "Sure thing, that all sounds reasonable to me right now. "
+        "Maybe we can grab coffee tomorrow if you have free time then. ";
+    size_t phrase_len = strlen(phrase);
+    size_t i = 0;
+    while (i + phrase_len < target_len && i + phrase_len + 1 < out_cap) {
+        memcpy(out + i, phrase, phrase_len);
+        i += phrase_len;
+    }
+    /* Pad to exactly target_len with spaces and a final period. */
+    while (i + 1 < target_len && i + 1 < out_cap) {
+        char c = (i % 10 == 0) ? '.' : ' ';
+        out[i] = c;
+        i++;
+    }
+    if (i < out_cap)
+        out[i] = '\0';
+    return i;
+}
+
+/* G5 — length anomaly. Response 22x recipient's rolling avg → REJECT.
+ * Calibrated against the 2026-05-12 leak: 979 chars vs 44 char avg. */
+static void guard_ex_rejects_length_anomaly(void) {
+    char raw[1024];
+    size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 979);
+    HU_ASSERT(raw_len >= 970 && raw_len <= 980);
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    hu_guard_context_t ctx = {0};
+    ctx.recent_avg_len = 44;
+
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome,
+                                            &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_length_anomaly);
+    HU_ASSERT(!report.detected_director_echo);
+    HU_ASSERT(out == NULL);
+}
+
+/* G6 — director-string echo. Response quotes 50+ chars of director
+ * text → REJECT. */
+static void guard_ex_rejects_director_echo(void) {
+    const char *director =
+        "Professional, slightly skeptical, ask for clarification on why "
+        "they are sending it again.";
+    /* Reply that quotes a substantial fragment of the director string. */
+    const char *reply =
+        "ok will do — Professional, slightly skeptical, ask for clarification";
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    hu_guard_context_t ctx = {0};
+    ctx.director_text = director;
+    ctx.director_len = strlen(director);
+
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, reply, strlen(reply), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_director_echo);
+}
+
+/* G5 negative — recent_avg_len=0 (no history) disables the check.
+ * A long response should pass through. */
+static void guard_ex_passes_long_response_when_no_avg(void) {
+    char raw[2048];
+    size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 1500);
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_REJECT;
+
+    hu_guard_context_t ctx = {0};
+    ctx.recent_avg_len = 0; /* explicit: no history */
+
+    HU_ASSERT_EQ(
+        hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome, NULL),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+    HU_ASSERT(out == raw);
+}
+
+/* G5 negative — 5x rolling avg is below the 8x threshold; legit long
+ * reply should pass. */
+static void guard_ex_passes_legit_5x_response(void) {
+    char raw[512];
+    size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 200);
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_REJECT;
+
+    hu_guard_context_t ctx = {0};
+    ctx.recent_avg_len = 44;
+
+    HU_ASSERT_EQ(
+        hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome, NULL),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+}
+
+/* G6 negative — director_text shorter than MIN_MATCH (30 chars)
+ * disables the check. Reply containing the short director text
+ * should pass. */
+static void guard_ex_passes_short_director_text(void) {
+    const char *director = "be nice"; /* 7 chars, below 30 */
+    const char *reply = "ok i will be nice promise";
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_REJECT;
+
+    hu_guard_context_t ctx = {0};
+    ctx.director_text = director;
+    ctx.director_len = strlen(director);
+
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, reply, strlen(reply), &ctx, &out, &out_len,
+                                            &outcome, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+    HU_ASSERT(out == reply);
+}
+
+/* G5+G6 — NULL ctx must be byte-identical to hu_response_guard_check.
+ * Long response that would trip G5 with ctx must pass with NULL ctx. */
+static void guard_ex_with_null_ctx_matches_legacy_behavior(void) {
+    char raw[1024];
+    size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 979);
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_REJECT;
+
+    HU_ASSERT_EQ(
+        hu_response_guard_check_ex(&alloc, raw, raw_len, NULL, &out, &out_len, &outcome, NULL),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+    HU_ASSERT(out == raw);
+}
+
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 void run_response_guard_tests(void) {
@@ -770,4 +940,13 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_rejects_msg_56055_persona_block_leak_verbatim);
     HU_RUN_TEST(guard_rejects_msg_56065_persona_block_leak_verbatim);
     HU_RUN_TEST(guard_rejects_template_label_substrings);
+
+    /* Sprint 31 — context-aware detections (G5 length anomaly, G6
+     * director echo). All exercise the new `_ex` API. */
+    HU_RUN_TEST(guard_ex_rejects_length_anomaly);
+    HU_RUN_TEST(guard_ex_rejects_director_echo);
+    HU_RUN_TEST(guard_ex_passes_long_response_when_no_avg);
+    HU_RUN_TEST(guard_ex_passes_legit_5x_response);
+    HU_RUN_TEST(guard_ex_passes_short_director_text);
+    HU_RUN_TEST(guard_ex_with_null_ctx_matches_legacy_behavior);
 }

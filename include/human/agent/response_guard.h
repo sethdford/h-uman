@@ -60,13 +60,50 @@ typedef struct {
      *   G3. Third-person-about-the-user double-pattern ("[Name] is a
      *       [profession]", "He's talking to ...", "lives alone with ...",
      *       etc. — ≥ 2 distinct hits).
+     * Sprint 30 added:
+     *   G4. Prompt-template label leak ("Persona:", "Scene Direction:",
+     *       "User: \"", "Rules: All lowercase", etc.).
      * See `docs/postmortems/2026-05-12-cot-leak.md`. */
     bool detected_semantic_leak;
+    /* Sprint 31 — context-aware detections. These ONLY fire when the
+     * caller used `hu_response_guard_check_ex` with a non-NULL context.
+     *
+     * G5. Length anomaly. Set when response_len > recent_avg_len *
+     *     HU_GUARD_LENGTH_ANOMALY_MULT (default 8x). Caught the
+     *     2026-05-12 Brea leak (979 chars vs 44 char rolling avg = 22x)
+     *     post-hoc.
+     * G6. Director echo. Set when a 30+ char substring of the
+     *     director's scene-direction text appears verbatim in the
+     *     response. Caught the same Brea leak (which quoted
+     *     "Professional, slightly skeptical, ask for clarification
+     *     on why they"). */
+    bool detected_length_anomaly;
+    bool detected_director_echo;
     /* If rejected, the longest run length that triggered rejection. */
     size_t max_repetition_run;
     /* Number of bytes removed by sanitization (0 if rejected outright). */
     size_t bytes_stripped;
 } hu_guard_report_t;
+
+/* Sprint 31 — optional per-turn context for context-aware leak
+ * detections. Pass to `hu_response_guard_check_ex`. NULL means "no
+ * context available" — the function behaves identically to
+ * `hu_response_guard_check`. */
+typedef struct {
+    /* Rolling average reply length from the recipient over the last
+     * N messages. The guard rejects if `response_len >
+     * recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT` (default 8x).
+     * 0 disables the check (e.g. no chat history yet). */
+    size_t recent_avg_len;
+
+    /* The director's / scene-direction text for this turn (the
+     * upstream prompt fragment that drove tone/style decisions).
+     * The guard rejects if a 30+ char substring of director_text
+     * appears verbatim (case-insensitively) in the response. NULL
+     * or director_len < 30 disables the check. */
+    const char *director_text;
+    size_t director_len;
+} hu_guard_context_t;
 
 /* Run the guard over a response.
  *
@@ -96,6 +133,26 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc,
                                    char **out_response, size_t *out_len,
                                    hu_guard_outcome_t *out_outcome,
                                    hu_guard_report_t *report);
+
+/* Context-aware variant. Same as `hu_response_guard_check` but accepts
+ * an optional `ctx` with rolling-average reply length and the director's
+ * scene-direction text. Enables Sprint 31's context-aware detections:
+ *
+ *   G5 (length anomaly): if `ctx->recent_avg_len > 0` and `response_len
+ *       > ctx->recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT` (default
+ *       8x), REJECT.
+ *   G6 (director echo): if `ctx->director_text` is non-NULL and at
+ *       least 30 chars long, scan the response for a verbatim 30+ char
+ *       substring of director_text. If found, REJECT.
+ *
+ * `ctx == NULL` is identical to `hu_response_guard_check` — no
+ * context-aware detections run. */
+hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc,
+                                      const char *response, size_t response_len,
+                                      const hu_guard_context_t *ctx,
+                                      char **out_response, size_t *out_len,
+                                      hu_guard_outcome_t *out_outcome,
+                                      hu_guard_report_t *report);
 
 /* Lower-level helpers, exposed for testing. ────────────────────────────── */
 
