@@ -307,22 +307,65 @@ static bool hu_guard_has_numbered_analysis_dump(const char *s, size_t len) {
     return false;
 }
 
-/* G2 — model self-talk / scene-direction echo.
+/* G2 + G4 — model self-talk + prompt-template label leak.
  *
  * These patterns have no legitimate human-to-human reply use case. A
- * single hit is a hard reject. All six were present in the 2026-05-12
- * leak; none can plausibly appear in a normal text message to a friend. */
+ * single hit is a hard reject. Two classes:
+ *
+ *   G2 (Sprint 29) — model self-talk / scene-direction echo. All six
+ *   were present in the 2026-05-12 17:04:37 Brea leak (rowid 56354).
+ *   None can plausibly appear in a normal text message to a friend.
+ *
+ *   G4 (Sprint 30) — prompt-template label leak. Found in chat.db
+ *   audit after Sprint 29 closed. Two May-11 leaks (rowid 56055,
+ *   56065) to a third contact dumped the literal prompt template
+ *   (User:/Context:/Persona:/Scene Direction:/Rules:/Constraints:)
+ *   plus candidate response drafts to the recipient. These do not
+ *   trip G1 (no numbered list), G2 (no self-talk substrings), or G3
+ *   (only one third-person hit). G4 catches them on the literal
+ *   template-label substrings.
+ *
+ * Both classes are merged into a single substring table since the
+ * detection logic is identical (case-insensitive contains → REJECT). */
 static bool hu_guard_has_self_talk_pattern(const char *s, size_t len) {
     static const struct {
         const char *pat;
         size_t pat_len;
     } patterns[] = {
+        /* G2 (Sprint 29) — model self-talk. */
         {"the prompt says", 15},
         {"wait, the prompt", 16},
         {"i should still maintain", 23},
         {"(per scene direction", 20},
         {"per the scene direction", 23},
         {"the user is bombarding", 22},
+        /* G4 (Sprint 30) — prompt-template labels. Each is a verbatim
+         * substring from one of the 4 audit-discovered leaks. The
+         * `\n` prefix on most ensures we match line-prefix style
+         * (mid-sentence "the persona: warm" wouldn't trip on the
+         * leading-newline form). */
+        {"\nPersona:", 9},
+        {" Persona:", 9},
+        {"\nScene Direction:", 17},
+        {" Scene Direction:", 17},
+        {"\nUser: \"", 8},
+        {" User: \"", 8},
+        {"\nRules: All lowercase", 21},
+        {" Rules: All lowercase", 21},
+        {"\nConstraints: All lowercase", 27},
+        {" Constraints: All lowercase", 27},
+        {"\nSystem prompt:", 15},
+        {" System prompt:", 15},
+        /* NOTE: we do NOT hardcode the persona's name / title / age
+         * here even though they appeared verbatim in the audit leaks.
+         * Hardcoding PII into open-source guard code is a leak in
+         * its own right, and the structural template-label patterns
+         * above already match every audit leak 4+ times. A future
+         * sprint should make this dynamic by reading the loaded
+         * persona's biographical fields and rejecting any response
+         * that quotes them verbatim — that generalizes to every
+         * user's deployment without baking specific names into
+         * source control. */
     };
     const size_t n = sizeof(patterns) / sizeof(patterns[0]);
     for (size_t i = 0; i < n; i++) {

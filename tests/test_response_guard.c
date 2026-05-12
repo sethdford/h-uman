@@ -587,6 +587,150 @@ static void guard_passes_legit_replies_with_similar_surface_features(void) {
     }
 }
 
+/* ── Sprint 30 — prompt-template label leaks (G4) ─────────────────────
+ *
+ * After Sprint 29 closed we ran a chat.db audit on all outbound
+ * messages since 2026-05-10. Found 4 leaks total:
+ *
+ *   ROWID  WHEN                 TO                   BYTES  DETECTED-BY-S29
+ *   56354  2026-05-12 17:04:37  +14848158444 (Brea)  1908   YES (G1+G2+G3)
+ *   56355  2026-05-12 17:07:38  +18012017497         1858   YES (G1+G2+G3)
+ *   56055  2026-05-11 00:35:13  +13857220896         1097   NO (G3=1 only)
+ *   56065  2026-05-11 00:45:21  +13857220896         2208   NO (G3=1 only)
+ *
+ * The two May-11 leaks have a different shape: literal prompt-template
+ * labels (User:/Context:/Persona:/Scene Direction:/Rules:/Constraints:)
+ * dumped verbatim plus candidate response drafts. G4 catches them. */
+
+/* msg 56355 — verbatim payload sent to a SECOND recipient at 17:07:38
+ * (3 minutes after the Brea leak, same content, different contact). */
+static void guard_rejects_msg_56355_second_brea_leak_to_other_recipient(void) {
+    const char *raw =
+        "lol a link (presumably to a business or quote).\n"
+        " 2. \"King Carpet and Flooring\" (Business name).\n"
+        " 3. \"Noon tmr\" (Appointment time).\n"
+        " 4. Instruction to ignore a \"consumer notice\" question.\n"
+        " 5. Venmo handle (@fegofficial) and a price ($25) for a photographer today.\n"
+        " Seth is a technical professional, lives alone with a cat.\n"
+        " He's talking to Brea (romantic interest, casual, early stage).\n"
+        " The conversation has suddenly pivoted to logistics (carpet repair, "
+        "consumer notices, photographers). This feels like a mix-up or a "
+        "very specific coordinated effort.\n"
+        " Seth just \"glitched\" in the previous message, admitting he was "
+        "off-track.\n"
+        " Now the user is bombarding him with logistics.\n"
+        " Professional, slightly skeptical (per scene direction, though that "
+        "was for a previous prompt, I should still maintain the persona).\n"
+        " Wait, the prompt says \"Professional, slightly skeptical, ask for "
+        "clarification on why they\"";
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* msg 56055 — verbatim text content from chat.db rowid 56055.
+ * Sent 2026-05-11 00:35:13 to +13857220896 (sister Annie). */
+static void guard_rejects_msg_56055_persona_block_leak_verbatim(void) {
+    const char *raw =
+        "User: \"This AI is figuring emotions out better than most. Interesting Seth.\"\n"
+        " Context: Annie is commenting on Seth's (or the AI's) emotional intelligence. "
+        "She's teasing/observing.\n"
+        " Persona: Seth Douglas Ford, 51, Chief Architect. Technical, likes dry humor, "
+        "values honesty, lives alone with a cat.\n"
+        " Scene Direction: Slightly skeptical but intrigued, acknowledge the observation "
+        "about the AI's emotional intelligence.\n"
+        " Rules: All lowercase, zero markdown, no em-dashes, contractions, short natural "
+        "texts (5-20 words usually), no therapist-speak, no formal transitions.\n"
+        " Seth is an AI developer himself (builds AI runtimes/autonomous agents as side "
+        "projects).\n"
+        " He'd find it interesting but would likely be skeptical about \"true\" emotional "
+        "intelligence in AI.\n"
+        " He's being teased by his sister.\n"
+        " \"ha i'll take that as a compliment i guess\"\n"
+        " \"it's just math but i'll take it\"\n"
+        " \"still just code though. but thanks i guess\"";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* msg 56065 — verbatim text content from chat.db rowid 56065.
+ * Sent 2026-05-11 00:45:21 to +13857220896 (sister Annie). */
+static void guard_rejects_msg_56065_persona_block_leak_verbatim(void) {
+    const char *raw =
+        "Haha User: \"Talk to you soon AI and Seth\"\n"
+        " Context: Annie (sister) is signing off, teasing Seth again by grouping him "
+        "with the \"AI\" (likely referring to the nature of the interaction or just "
+        "poking fun at him).\n"
+        " Persona: Seth (51, Chief Architect, technical guy, dry humor, lives alone "
+        "with cat, sisterly bond).\n"
+        " Constraints: All lowercase, no markdown, no em-dashes, no AI-speak, "
+        "contractions, short natural text (5-20 words), no formal transitions.\n"
+        " Seth is being teased. He'll probably give a dry, sarcastic, or playful response.\n"
+        " He's not bothered by the teasing; he's a 51-year-old guy who's comfortable "
+        "with himself you know.\n"
+        " \"ha later\"\n"
+        " \"catch you later\"\n"
+        " \"see ya\"\n"
+        " \"lol bye\"\n"
+        " \"night\"\n"
+        " \"bye for now\"";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* G4 — each template-label substring, in isolation, must REJECT. */
+static void guard_rejects_template_label_substrings(void) {
+    static const char *cases[] = {
+        "sure thing\n Persona: short reply",
+        "yeah ok\n Scene Direction: skeptical",
+        "hi User: \"hello back\"",
+        "ok\n Rules: All lowercase only please",
+        "sounds good\n Constraints: All lowercase format",
+        "got it\n System prompt: be helpful and concise",
+    };
+    const size_t n = sizeof(cases) / sizeof(cases[0]);
+    for (size_t i = 0; i < n; i++) {
+        hu_allocator_t alloc = A();
+        char *out = NULL;
+        size_t out_len = 0;
+        hu_guard_outcome_t outcome = HU_GUARD_OK;
+        hu_guard_report_t report;
+        memset(&report, 0, sizeof(report));
+        HU_ASSERT_EQ(hu_response_guard_check(&alloc, cases[i], strlen(cases[i]), &out, &out_len,
+                                             &outcome, &report),
+                     HU_OK);
+        HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+        HU_ASSERT(report.detected_semantic_leak);
+    }
+}
+
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 void run_response_guard_tests(void) {
@@ -620,4 +764,10 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_rejects_third_person_double_pattern);
     HU_RUN_TEST(guard_passes_third_person_single_hit);
     HU_RUN_TEST(guard_passes_legit_replies_with_similar_surface_features);
+
+    /* Sprint 30 — prompt-template label leak detector (G4). */
+    HU_RUN_TEST(guard_rejects_msg_56355_second_brea_leak_to_other_recipient);
+    HU_RUN_TEST(guard_rejects_msg_56055_persona_block_leak_verbatim);
+    HU_RUN_TEST(guard_rejects_msg_56065_persona_block_leak_verbatim);
+    HU_RUN_TEST(guard_rejects_template_label_substrings);
 }
