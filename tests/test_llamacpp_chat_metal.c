@@ -28,12 +28,27 @@
 
 #include <stdio.h>
 
+/* Mirror the discovery pattern used by src/providers/llamacpp.c lines
+ * 50-62: HU_ENABLE_LLAMACPP is the *user request*, but the actual link
+ * + header availability is detected separately via __has_include. The
+ * CI feature-flags matrix sets HU_ENABLE_LLAMACPP=ON on runners that
+ * do NOT install libllama (the comment at .github/workflows/ci.yml:141
+ * explicitly documents the fall-through-to-stub contract); without
+ * the __has_include guard this test file failed to compile on Ubuntu
+ * even though the production code linked cleanly. */
 #ifdef HU_ENABLE_LLAMACPP
+#if __has_include("llama.h")
 #include "llama.h"
+#define HU_LLAMACPP_LINKED 1
+#else
+#define HU_LLAMACPP_LINKED 0
+#endif
+#else
+#define HU_LLAMACPP_LINKED 0
 #endif
 
 static void test_human_core_test_links_llama_when_enabled(void) {
-#ifdef HU_ENABLE_LLAMACPP
+#if HU_LLAMACPP_LINKED
     /* Calling any llama_* symbol from this test object proves the
      * test-binary link mirror at CMakeLists.txt:2191-2211 is intact.
      * llama_print_system_info() is a one-line printf-style helper
@@ -45,8 +60,12 @@ static void test_human_core_test_links_llama_when_enabled(void) {
      * actually executed and didn't get inlined to a NULL stub. */
     HU_ASSERT_TRUE(info[0] != '\0');
 #else
-    fprintf(stderr, "[skip] HU_ENABLE_LLAMACPP not defined — link-mirror "
-                    "test only meaningful in rl_sota preset\n");
+    fprintf(stderr, "[skip] HU_LLAMACPP_LINKED == 0 — either "
+                    "HU_ENABLE_LLAMACPP is off (dev/test preset) or "
+                    "llama.h was not on the include path (CI runner "
+                    "without libllama; production falls through to "
+                    "HU_ERR_NOT_SUPPORTED stub). Link-mirror test only "
+                    "meaningful in the rl_sota preset.\n");
 #endif
 }
 

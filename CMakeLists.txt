@@ -468,6 +468,17 @@ set(HU_CORE_SOURCES
     src/agent/agent_plan.c
     src/agent/agent_stream.c
     src/agent/agent_turn.c
+    # RL SOTA Phase 1 — frontier prompt bundle assembler.
+    # Composes humanness / presence / micro-expression / novelty /
+    # attachment / rupture / narrative-self / creative-voice / growth
+    # / boundary / relational-episode / residue / imperfect-delivery
+    # context strings into a single bundle for the system prompt.
+    # Header: include/human/agent/frontier_prompt.h.
+    # NOTE: this file landed on sprint-2c-followups without being
+    # wired into HU_CORE_SOURCES (orphaned dead-code), which combined
+    # with the missing test reference turned the base-branch CI red
+    # for four S2 commits. Both gaps fixed in fix/base-ci-frontier-prompt-and-llamacpp.
+    src/agent/frontier_prompt.c
     src/agent/humanness.c
     src/agent/context.c
     src/agent/prompt.c
@@ -2416,6 +2427,11 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    # RL SOTA Phase 1 — frontier prompt bundle assembler.
+    # Closes the check-untested.sh gap that turned sprint-2c-followups
+    # red for the four S2 commits leading up to the 2026-05-12 gap audit.
+    # Header: include/human/agent/frontier_prompt.h; impl: src/agent/frontier_prompt.c.
+    tests/test_frontier_prompt.c
     tests/test_persona_directive_channels.c
     # SOTA-2026 init-01: prompt-side activation steering (S1).
     # Header lives at include/human/persona/steering.h; impl at
