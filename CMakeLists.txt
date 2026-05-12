@@ -1216,6 +1216,10 @@ if(HU_ENABLE_ML)
         src/ml/rl_trainer.c
         src/ml/dpo_real_huml.c
         src/ml/dpo_real_mlx.c
+        # Phase 2 Task 2 (RL SOTA): teacher-forced log π(y|x) on hu_model_t.
+        # Used by hu_dpo_real_huml in Task 4 and (paired with reference_model
+        # from Task 3) the log π_ref counterparts that drive the DPO loss.
+        src/ml/policy_logprobs.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2709,6 +2713,8 @@ set(HU_TEST_SOURCES
     tests/test_dpo_judge_naming.c
     # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t factory dispatch pin.
     tests/test_rl_trainer.c
+    # Phase 2 Task 2 (RL SOTA): hu_policy_logprobs sanity + determinism + null-arg.
+    tests/test_policy_logprobs.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
