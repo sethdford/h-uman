@@ -27,6 +27,9 @@ void run_slice_tests(void);
 void run_memory_tests(void);
 void run_sql_transaction_tests(void);
 void run_memory_util_tests(void);
+#if defined(HU_ENABLE_KV_COMPRESSION)
+void run_kv_compressor_tests(void);
+#endif
 void run_tunnel_tests(void);
 void run_gateway_tests(void);
 void run_auth_tests(void);
@@ -596,6 +599,9 @@ int main(int argc, char **argv) {
     run_memory_tests();
     run_sql_transaction_tests();
     run_memory_util_tests();
+#if defined(HU_ENABLE_KV_COMPRESSION)
+    run_kv_compressor_tests();
+#endif
     run_tunnel_tests();
     run_gateway_tests();
     run_auth_tests();
