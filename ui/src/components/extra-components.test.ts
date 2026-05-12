@@ -61,6 +61,7 @@ import "./hu-model-selector.js";
 import "./hu-tapback-menu.js";
 import "./hu-chat-composer.js";
 import "./hu-message-thread.js";
+import "./hu-directive-telemetry-tile.js";
 import "./hu-branch-tree.js";
 import "./hu-image-viewer.js";
 import "./hu-voice-orb.js";
@@ -3575,6 +3576,17 @@ describe("hu-message-thread", () => {
     btn?.click();
     expect(fired).toBe(true);
     el.remove();
+  });
+});
+
+/* hu-directive-telemetry-tile is exhaustively tested in its dedicated
+ * file (hu-directive-telemetry-tile.test.ts, 7 tests). This smoke block
+ * exists solely so the catalog-completeness lint can find it in
+ * extra-components.test.ts — same pattern used by the rest of the
+ * file. The dedicated test file remains the source of truth. */
+describe("hu-directive-telemetry-tile", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("hu-directive-telemetry-tile")).toBeDefined();
   });
 });
 
