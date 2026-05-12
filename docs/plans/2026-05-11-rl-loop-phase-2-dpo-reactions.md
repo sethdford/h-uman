@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current `hu_dpo_judge_step` (provider-scored sigmoid loss, no policy gradients) with a real, two-track DPO training pipeline: (1) HUML in-process — real DPO loss with frozen π_ref + finite-difference grad checks on the toy reference GPT (cross-platform, scientifically rigorous), and (2) MLX subprocess — `python3 -m mlx_lm.dpo` bridge that produces `.safetensors` adapters that llama.cpp hot-loads (Apple-only, real chat fidelity improvement). Wire iMessage tapbacks + Slack `reactions.added/removed` through a channel-agnostic reaction-event normalizer into the existing `dpo_pairs` SQLite table. End the phase with a `human ml dpo-train` that auto-selects backend, satisfies DoD #4 (real `.safetensors` adapter), and an `aspect-panel` 5-verifier subagent gate (mandatory per spec §7 for P2/P4/P5).
 
-**Architecture:** Two-track DPO via a new `hu_rl_trainer_t` vtable in `include/human/ml/rl_trainer.h`. The factory dispatches to `hu_rl_trainer_create_dpo_huml` (in-process, builds on `hu_gpt_t` + new `policy_logprobs.c` + `reference_model.c` + `dpo_real_huml.c`) or `hu_rl_trainer_create_dpo_mlx` (extends `learner_mlx.c`'s subprocess pattern with a `mlx_lm.dpo` invocation that consumes `dpo_pairs` exported as JSONL and writes `.safetensors`). CLI `human ml dpo-train` defaults to MLX on `__APPLE__` when `python3 -c "import mlx_lm"` succeeds, falls back to HUML otherwise (`--backend {huml,mlx,auto}` overrides). Reaction wiring is a new `hu_reaction_event_t` type (`include/human/channels/reaction_event.h`) emitted by `imessage.c` (tapback poll branch) and `slack.c` (webhook reactions branch), normalized by `reaction_event.c`, and consumed by `reaction_handler.c` which inserts into `dpo_pairs` with `source = "imessage_tapback" | "slack_reactji"`. The text-channel substring heuristic in `agent_turn.c:6038-6044` is preserved unchanged (spec §4.3 explicit).
+**Architecture:** Two-track DPO via a new `hu_rl_trainer_t` vtable in `include/human/ml/rl_trainer.h`. The factory dispatches to `hu_rl_trainer_create_dpo_huml` (in-process, builds on `hu_gpt_t` + new `policy_logprobs.c` + `reference_model.c` + `dpo_real_huml.c`) or `hu_rl_trainer_create_dpo_mlx` (extends `learner_mlx.c`'s subprocess pattern by `popen`-ing a NEW `scripts/dpo_mlx_train.py` wrapper that programmatically invokes `mlx_lm_lora.trainer.dpo_trainer.train_dpo` from the third-party `mlx-lm-lora` package — DPO is NOT in standard `mlx-lm` — consuming `dpo_pairs` exported as JSONL and writing `.safetensors`). CLI `human ml dpo-train` defaults to MLX on `__APPLE__` when `python3 -c "from mlx_lm_lora.trainer.dpo_trainer import train_dpo"` succeeds, falls back to HUML otherwise (`--backend {huml,mlx,auto}` overrides). Reaction wiring is a new `hu_reaction_event_t` type (`include/human/channels/reaction_event.h`) emitted by `imessage.c` (tapback poll branch) and `slack.c` (webhook reactions branch), normalized by `reaction_event.c`, and consumed by `reaction_handler.c` which inserts into `dpo_pairs` with `source = "imessage_tapback" | "slack_reactji"`. The text-channel substring heuristic in `agent_turn.c:6038-6044` is preserved unchanged (spec §4.3 explicit).
 
 **Tech Stack:** C11, AddressSanitizer, the existing `hu_gpt_t` / `hu_lora_t` / `hu_ml_train` ML stack, the existing `dpo_pairs` SQLite schema in `src/ml/dpo.c`, third-party Python package **`mlx-lm-lora`** (NOT standard `mlx-lm` — DPO trainer lives in `mlx_lm_lora.trainer.dpo_trainer.train_dpo`, see https://github.com/Goekdeniz-Guelmez/mlx-lm-lora and `examples/dpo_minimal.ipynb`; verified via WebSearch at plan-authoring time after a v1 of this plan incorrectly assumed `python3 -m mlx_lm.dpo`), our own `scripts/dpo_mlx_train.py` wrapper that imports `train_dpo` programmatically (not a CLI invocation), `tests/test_framework.h`, conventional commits, the existing `dead-code-finder` + `sprint-auditor` + `spec-verifier` + new mandatory `aspect-panel` (5-verifier) subagent gates.
 
@@ -51,7 +51,7 @@
 - DO NOT rename `hu_dpo_judge_step` again (Phase 0). Phase 2 ADDS a new `hu_dpo_real_step` alongside; the judge step stays as-is. Keep the `hu_dpo_train_step` deprecated shim.
 - DO NOT touch `hu_personal_model_save` atomicity (Phase 0).
 - DO NOT modify `src/providers/llamacpp.c` or any `llamacpp_*` module (Phase 1). Phase 2 CONSUMES llama.cpp via `provider->vtable->load_adapter(path_to_safetensors)` only.
-- DO NOT vendor a new third-party library. The MLX bridge uses `popen` to invoke `python3 -m mlx_lm.dpo` via the same pattern `learner_mlx.c:43,259` already uses.
+- DO NOT vendor a new third-party library. The MLX bridge uses `popen` to invoke our new `scripts/dpo_mlx_train.py` (which itself calls into the third-party `mlx-lm-lora` Python package) via the same `popen` pattern `learner_mlx.c:43,259` already uses for SFT. The `mlx_lm.dpo` CLI module DOES NOT EXIST — DPO functionality lives only in the separate `mlx-lm-lora` PyPI package's programmatic API. (v1 of this plan got this wrong; corrected in v2.)
 - DO NOT re-wire the substring heuristic in `agent_turn.c:6038-6044`. Phase 2 ADDS reaction-event branch in parallel; substring fallback remains for text-channel users (spec §4.3 explicit).
 
 ---
@@ -115,7 +115,7 @@ CLI `human ml dpo-train --backend {auto|huml|mlx}`. Default `auto`.
 | **R2** | **Toy GPT (10K vocab) DPO is meaningless for real chat** — user might assume HUML adapters improve Gemma chat. | The `human ml dpo-train --backend huml` help text (Task 9) states explicitly: "HUML backend trains the toy reference GPT — useful for gradient verification, NOT for improving real chat. Use --backend mlx (or auto on Apple) for real Gemma adapters." The CLI also writes a caveat into the adapter metadata. |
 | **R3** | **Synthetic preference pairs are not realistic** — DoD #4 needs N≥50 pairs but tests can't depend on user data. | Task 5 ships TWO fixture files because the HUML and MLX backends consume different formats: (1) `tests/fixtures/synthetic_preference_pairs.jsonl` — 50 hand-constructed (prompt, chosen, rejected) NATURAL LANGUAGE tuples for the MLX path (covers helpful-vs-evasive, concise-vs-verbose, factual-vs-fabricated, persona-aligned-vs-generic); (2) `tests/fixtures/synthetic_preference_pairs_huml.jsonl` — same 50 logical pairs but rendered as SPACE-SEPARATED INTEGER TOKEN IDS in the toy GPT vocab (V=32, IDs 0-31, generated by `scripts/gen-synthetic-prefs.py --backend huml`). The HUML backend's `parse_id_string` only accepts integers, so feeding it the natural-language fixture would silently produce empty token arrays. JSON schema documented in `tests/fixtures/synthetic_preference_pairs.schema.json`. |
 | **R4** | **Reaction handler races** — tapback arrives before original assistant message is in `dpo_pairs` lookup window. | Task 12's `hu_reaction_handler_handle_event` looks up the original message via channel-specific (`thread_id`, `message_ts`) tuple, NOT in-memory ID. iMessage uses `associated_message_guid` from chat.db; Slack uses `item.ts`. Both are durable. If lookup fails (race or out-of-window), the event is logged and silently dropped (NOT inserted as a stub) — better to lose a signal than to insert garbage. Test: `tests/test_reaction_handler_e2e.c::test_reaction_event_with_unknown_target_drops_silently`. |
-| **R5** | **iMessage poll gap** — current poll filters `WHERE associated_message_type = 0` (`imessage.c:3765`), which excludes tapbacks entirely. Flipping the filter risks treating tapbacks as text messages. | Task 11 adds a SECOND poll function `hu_imessage_poll_reactions` that runs in parallel to the main poll, queries `WHERE associated_message_type BETWEEN 2000 AND 2005 OR BETWEEN 3000 AND 3005` AND `associated_message_guid IS NOT NULL` (codes per `imessage.c:1017`: 2000=love, 2001=like, 2002=dislike, 2003=laugh, 2004=emphasis, 2005=question), joins to the original message, and emits `hu_reaction_event_t` directly via the new `reaction_handler` API. Main poll stays unchanged — text inbound is unaffected. |
+| **R5** | **iMessage poll gap** — current poll filters `WHERE associated_message_type = 0` (`imessage.c:3765`), which excludes tapbacks entirely. Flipping the filter risks treating tapbacks as text messages. | Task 11 adds a SECOND poll function `hu_imessage_poll_reactions` that runs in parallel to the main poll, queries `WHERE (associated_message_type BETWEEN 2000 AND 2006 OR associated_message_type BETWEEN 3000 AND 3006) AND associated_message_guid IS NOT NULL` (codes match `imessage.c:1820-1832` switch + line 1783 SQL range: 2000=love, 2001=like, 2002=dislike, 2003=laugh, 2004=emphasis, 2005=question, 2006=custom_emoji; 3xxx are removals), joins to the original message, and emits `hu_reaction_event_t` directly via the new `reaction_handler` API. Main poll stays unchanged — text inbound is unaffected. |
 | **R6** | **Slack webhook security** — naive parsing of `reactions.*` events could let a bot spoof reactions on the user's behalf. | Task 11 validates `event.user != bot_user_id` (skip self-reactions) AND `event.item.type == "message"` (skip file/file_comment reactions). Existing `slack.c` HMAC verification on the outer webhook (search `slack.c` for `X-Slack-Signature`) is unchanged — Phase 2 inherits it. |
 | **R7** | **`dpo-train` semantic collision** — current `human ml dpo-train` calls `hu_dpo_judge_step`. Renaming breaks downstream scripts. | Task 8 keeps `human ml dpo-train` BUT changes its dispatch: by default it calls `hu_ml_cli_dpo_real` (the new real DPO). The existing judge-step path moves to `human ml dpo-judge`. CHANGELOG entry in Task 9 commit message. Backward-compat: the deprecated `hu_dpo_train_step` C shim stays, and `human ml dpo-train --legacy-judge` is a temporary alias for one phase (removed in Phase 3). |
 | **R8** | **`.safetensors` writer is Python-side** — DoD #4 requires `human ml dpo-train` to produce a valid `.safetensors`. C-side has no writer. | Task 7's MLX backend invokes `mlx_lm.dpo --adapter-path <dir>`; mlx_lm writes `<dir>/adapters.safetensors` directly. The C side never serializes — it just resolves the output path and verifies the file exists with `>0` bytes. Validation test loads the file via `llama_adapter_lora_init` (real test, not mock). |
@@ -141,8 +141,8 @@ CLI `human ml dpo-train --backend {auto|huml|mlx}`. Default `auto`.
 | `include/human/ml/dpo_real.h` | ~70 | Public header for both DPO backends — `hu_dpo_real_huml_create`, `hu_dpo_real_mlx_create`, shared `hu_dpo_real_metrics_t`, used by `rl_trainer.c` and `cli_dpo.c` |
 | `src/ml/dpo_real_huml.c` | ~280 | Real DPO loss + backward (Rafailov et al. formula), uses policy_logprobs + reference_model + hu_lora_t |
 | `src/ml/dpo_real_mlx.c` | ~200 | JSONL export from `dpo_pairs`, invokes `scripts/dpo_mlx_train.py` via `popen` (NOT `python3 -m mlx_lm.dpo` — that doesn't exist; the v1 of this plan was wrong), output validation |
-| `scripts/dpo_mlx_train.py` | ~80 | Python wrapper around third-party `mlx_lm_lora.trainer.dpo_trainer.train_dpo` — instantiates `DPOTrainingArgs` + `PreferenceDataset`, runs train, exits 0/2/3 |
-| `scripts/gen-synthetic-prefs.py` | ~120 | Generates `synthetic_preference_pairs.jsonl` (MLX/natural language) AND `synthetic_preference_pairs_huml.jsonl` (HUML/integer IDs); deterministic seed |
+| `scripts/dpo_mlx_train.py` | ~80 | Python wrapper around third-party `mlx_lm_lora.trainer.dpo_trainer.train_dpo` — instantiates `DPOTrainingArgs` + `PreferenceDataset`, runs train, exits 0/2/3 (created in **Task 6**) |
+| `scripts/gen-synthetic-prefs.py` | ~120 | Generates `synthetic_preference_pairs.jsonl` (MLX/natural language) AND `synthetic_preference_pairs_huml.jsonl` (HUML/integer IDs); deterministic seed (created in **Task 5**) |
 | `src/ml/cli_dpo.c` | ~220 | `hu_ml_cli_dpo_real` (new), `hu_ml_cli_dpo_judge` (extracted from existing `cli.c:484-595` body) |
 | `include/human/ml/cli_dpo.h` | ~30 | Public CLI handler declarations |
 | `include/human/channels/reaction_event.h` | ~80 | `hu_reaction_event_t` struct (channel_id, kind, target_thread, target_ts, sender, polarity), enum `hu_reaction_kind_t` (LOVE/LIKE/DISLIKE/LAUGH/EMPHASIZE/QUESTION) |
@@ -172,7 +172,7 @@ CLI `human ml dpo-train --backend {auto|huml|mlx}`. Default `auto`.
 |------|-------|--------------|
 | `src/main.c` | +25 LOC at `cmd_ml` (lines 218-284) | Add `dpo-judge` and ensure `dpo-train` routes to `hu_ml_cli_dpo_real`; help text updated |
 | `src/ml/cli.c` | -110 LOC at lines 484-595 | EXTRACT existing `hu_ml_cli_dpo_train` body into `cli_dpo.c::hu_ml_cli_dpo_judge`; leave a 6-line forwarding shim for backward C-API compat |
-| `src/channels/imessage.c` | +180 LOC near line 3765 (parallel poll) | Add `hu_imessage_poll_reactions` query branch (`WHERE associated_message_type BETWEEN 2000 AND 2005 OR BETWEEN 3000 AND 3005`); call `hu_reaction_handler_handle_event` for each row |
+| `src/channels/imessage.c` | +180 LOC near line 3765 (parallel poll) | Add `hu_imessage_poll_reactions` query branch (`WHERE (associated_message_type BETWEEN 2000 AND 2006 OR associated_message_type BETWEEN 3000 AND 3006) AND associated_message_guid IS NOT NULL`); call `hu_reaction_handler_handle_event` for each row |
 | `src/channels/slack.c` | +90 LOC near line 1219 (webhook event dispatch) | Add `event.type == "reactions.added"` and `"reactions.removed"` branches; emit `hu_reaction_event_t`; respect bot-user filter |
 | `src/agent/agent_turn.c` | +30 LOC near `is_positive`/`is_negative` `strstr` block (locate by symbol, NOT line number — Phase 1 may have shifted from 6038) | Gate the substring heuristic behind `!hu_reaction_handler_was_called_this_turn()` — preserves text-channel users |
 | `src/daemon.c` | +5 LOC at end of per-turn loop | Call `hu_reaction_handler_clear_turn()` after each turn returns so the next turn starts with a clean flag |
@@ -264,9 +264,11 @@ static void test_rl_trainer_factory_huml_returns_valid_vtable(void) {
 
 static void test_rl_trainer_factory_mlx_errors_clearly_when_unavailable(void) {
 #if defined(__APPLE__)
-    /* On Apple, this is environment-dependent; skip if mlx_lm is installed */
-    if (system("python3 -c 'import mlx_lm.dpo' 2>/dev/null") == 0) {
-        fprintf(stderr, "[skip] mlx_lm.dpo present; cannot test unavailability\n");
+    /* On Apple, this is environment-dependent; skip if the third-party
+     * mlx-lm-lora package is installed (DPO trainer lives there, NOT in
+     * standard mlx-lm — see Task 0 step 2 verification). */
+    if (system("python3 -c 'from mlx_lm_lora.trainer.dpo_trainer import train_dpo' 2>/dev/null") == 0) {
+        fprintf(stderr, "[skip] mlx-lm-lora present; cannot test unavailability\n");
         return;
     }
 #endif
@@ -388,7 +390,12 @@ void hu_rl_trainer_reset_for_test(void) { s_last_backend = HU_DPO_BACKEND_AUTO; 
 #endif
 
 static int mlx_dpo_available(void) {
-    return system("python3 -c 'import mlx_lm.dpo' 2>/dev/null") == 0;
+    /* Probe the THIRD-PARTY mlx-lm-lora package (NOT standard mlx-lm).
+     * The DPO trainer is `mlx_lm_lora.trainer.dpo_trainer.train_dpo`,
+     * matching the symbol our scripts/dpo_mlx_train.py wrapper imports
+     * and Task 0 step 2's verification check. Probing the wrong module
+     * (`mlx_lm.dpo`) here would make AUTO never resolve to MLX. */
+    return system("python3 -c 'from mlx_lm_lora.trainer.dpo_trainer import train_dpo' 2>/dev/null") == 0;
 }
 
 hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
@@ -414,11 +421,11 @@ hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
 
 - [ ] **Step 5: Stub the HUML and MLX backends so the test compiles**
 
-For now, both `hu_dpo_real_huml_create` and `hu_dpo_real_mlx_create` return `HU_ERR_NOT_SUPPORTED`. Tasks 4 and 6 fill them in.
+Before this step works, `include/human/ml/dpo_real.h` must exist (Task 4 step 0 creates it; if Task 1 is being executed before Task 4, create the header now using the snippet from Task 4 step 0). For now, both `hu_dpo_real_huml_create` and `hu_dpo_real_mlx_create` return `HU_ERR_NOT_SUPPORTED`. Tasks 4 and 6 fill them in.
 
 ```c
 /* src/ml/dpo_real_huml.c — STUB until Task 4 */
-#include "human/ml/rl_trainer.h"
+#include "human/ml/dpo_real.h"
 hu_error_t hu_dpo_real_huml_create(hu_allocator_t *a, const hu_rl_trainer_config_t *c, hu_rl_trainer_t *o) {
     (void)a; (void)c; (void)o; return HU_ERR_NOT_SUPPORTED;
 }
@@ -426,7 +433,7 @@ hu_error_t hu_dpo_real_huml_create(hu_allocator_t *a, const hu_rl_trainer_config
 
 ```c
 /* src/ml/dpo_real_mlx.c — STUB until Task 6 */
-#include "human/ml/rl_trainer.h"
+#include "human/ml/dpo_real.h"
 hu_error_t hu_dpo_real_mlx_create(hu_allocator_t *a, const hu_rl_trainer_config_t *c, hu_rl_trainer_t *o) {
     (void)a; (void)c; (void)o; return HU_ERR_NOT_SUPPORTED;
 }
@@ -448,7 +455,16 @@ list(APPEND HU_TEST_SOURCES tests/test_rl_trainer.c)
 ```
 
 ```c
-/* tests/test_main.c */
+/* tests/test_main.c — APPEND to existing file; do NOT replace. */
+/* IMPORTANT subagent guidance: 12 of the 15 Phase 2 tasks touch
+ * tests/test_main.c. Each task MUST:
+ *   1. Read the current contents of tests/test_main.c first.
+ *   2. Append its new `extern void run_*_tests(void);` declaration to the
+ *      existing block of externs (do NOT replace the block).
+ *   3. Append its new call site to the existing main() block (same rule).
+ * If you replace the file, you delete every prior task's runner and the
+ * full suite silently shrinks. The verifier subagent gate (Task 15) will
+ * catch this, but at the cost of a full re-do of every dropped task. */
 #ifdef HU_ENABLE_ML
 extern void run_rl_trainer_tests(void);
 /* ... in main: */
@@ -471,13 +487,14 @@ feat(ml): hu_rl_trainer_t vtable + factory dispatch (Phase 2 Task 1)
 New abstraction for RL training (DPO, KTO Phase 3, GRPO Phase 4) that
 dispatches to either an in-process HUML backend (cross-platform, toy
 GPT, gradient-checked) or an MLX subprocess backend (Apple-only, real
-Gemma adapters via mlx_lm.dpo, .safetensors output).
+Gemma adapters via the third-party mlx-lm-lora package, .safetensors
+output).
 
 Both backends are stubbed at HU_ERR_NOT_SUPPORTED in this commit; Tasks
 4 and 6 fill them in. The factory's auto/huml/mlx selection logic is
 real and tested:
 - HUML always available (cross-platform)
-- MLX requires __APPLE__ AND `python3 -c 'import mlx_lm.dpo'` succeeds
+- MLX requires __APPLE__ AND `python3 -c 'from mlx_lm_lora.trainer.dpo_trainer import train_dpo'` succeeds
 - AUTO prefers MLX on Apple, falls back to HUML elsewhere
 
 Test hook hu_rl_trainer_last_resolved_backend_for_test exposes the
@@ -631,18 +648,27 @@ hu_error_t hu_policy_logprobs(hu_allocator_t *alloc, hu_model_t *model,
     memcpy(ids, prompt, prompt_len * sizeof(int32_t));
     memcpy(ids + prompt_len, response, response_len * sizeof(int32_t));
 
-    hu_tensor_t input = {.data = ids, .n = total, .shape = {1, (int)total, 0, 0}};
-    hu_tensor_t output = {0};
+    /* hu_ml_tensor_t per include/human/ml/model.h:13-19 — shape[4] (size_t),
+     * size_bytes (NOT .n). Forward output ownership: caller frees via project
+     * allocator (matches src/ml/train.c:171 pattern). */
+    hu_ml_tensor_t input = {
+        .data = ids,
+        .shape = {1, total, 0, 0},
+        .ndim = 2,
+        .dtype = HU_ML_DTYPE_I32,
+        .size_bytes = total * sizeof(int32_t),
+    };
+    hu_ml_tensor_t output = {0};
     hu_error_t err = model->vtable->forward(model->ctx, &input, &output);
     if (err != HU_OK) {
-        alloc->free(alloc->ctx, ids);
+        alloc->free(alloc->ctx, ids, total * sizeof(int32_t));
         return err;
     }
     /* output.data: float logits, shape [1, total, V]. We need positions
      * (prompt_len - 1) .. (total - 2) predicting response tokens at
      * indices [prompt_len, total - 1]. */
     float *logits = (float *)output.data;
-    size_t V = (size_t)output.shape[2];
+    size_t V = output.shape[2];  /* size_t, no cast */
     double sum = 0.0;
     for (size_t i = 0; i < response_len; i++) {
         size_t pred_pos = prompt_len - 1 + i;  /* position predicting response[i] */
@@ -657,9 +683,10 @@ hu_error_t hu_policy_logprobs(hu_allocator_t *alloc, hu_model_t *model,
     }
     *out_logprob = sum;
 
-    /* hu_model_t forward output owned by caller per src/ml/CLAUDE.md */
-    free(output.data);
-    alloc->free(alloc->ctx, ids);
+    /* Forward output owned by caller; free via project allocator
+     * (matches src/ml/train.c:171). output.size_bytes is set by forward. */
+    alloc->free(alloc->ctx, output.data, output.size_bytes);
+    alloc->free(alloc->ctx, ids, total * sizeof(int32_t));
     return HU_OK;
 }
 ```
@@ -732,14 +759,20 @@ static void test_reference_model_unchanged_after_base_perturbed(void) {
     double lp_ref_t0=0, lp_ref_t1=0;
     hu_policy_logprobs(&alloc, &ref, p,2, r,2, &lp_ref_t0);
 
-    /* Perturb base via the params buffer */
-    hu_param_t params[256];
+    /* Perturb base via the params buffer.
+     * get_params signature per include/human/ml/model.h:32:
+     *   hu_error_t (*get_params)(void *ctx, hu_ml_tensor_t **params, size_t *count);
+     * Returns a pointer-to-array owned by the model (NOT caller-allocated). */
+    hu_ml_tensor_t *params = NULL;
     size_t n_params = 0;
-    base.vtable->get_params(base.ctx, params, 256, &n_params);
+    HU_ASSERT_EQ(base.vtable->get_params(base.ctx, &params, &n_params), HU_OK);
     HU_ASSERT_TRUE(n_params > 0);
-    /* Hammer the first param buffer with a known offset */
+    /* Hammer the first float buffer with a known offset.
+     * No .n field — element count = size_bytes / sizeof(float) for float tensors. */
+    HU_ASSERT_EQ(params[0].dtype, HU_ML_DTYPE_F32);
     float *first = (float *)params[0].data;
-    for (size_t i = 0; i < params[0].n; i++) first[i] += 0.5f;
+    size_t first_count = params[0].size_bytes / sizeof(float);
+    for (size_t i = 0; i < first_count; i++) first[i] += 0.5f;
 
     hu_policy_logprobs(&alloc, &ref, p,2, r,2, &lp_ref_t1);
     HU_ASSERT_TRUE(fabs(lp_ref_t0 - lp_ref_t1) < 1e-9);  /* ref UNCHANGED */
@@ -807,22 +840,32 @@ hu_error_t hu_reference_model_create_from(hu_allocator_t *alloc,
     hu_error_t err = hu_gpt_create(alloc, config, out);
     if (err != HU_OK) return err;
 
-    hu_param_t base_params[512];
-    hu_param_t ref_params[512];
+    /* get_params returns a pointer-to-array owned by the model
+     * (per include/human/ml/model.h:32, see src/ml/checkpoint.c:27 usage). */
+    hu_ml_tensor_t *base_params = NULL;
+    hu_ml_tensor_t *ref_params = NULL;
     size_t n_base = 0, n_ref = 0;
-    base->vtable->get_params(base->ctx, base_params, 512, &n_base);
-    out->vtable->get_params(out->ctx, ref_params, 512, &n_ref);
+    err = base->vtable->get_params(base->ctx, &base_params, &n_base);
+    if (err != HU_OK) {
+        out->vtable->deinit(out->ctx, alloc);
+        return err;
+    }
+    err = out->vtable->get_params(out->ctx, &ref_params, &n_ref);
+    if (err != HU_OK) {
+        out->vtable->deinit(out->ctx, alloc);
+        return err;
+    }
     if (n_base != n_ref) {
         out->vtable->deinit(out->ctx, alloc);
         return HU_ERR_PROVIDER_RESPONSE;  /* shape mismatch */
     }
     for (size_t i = 0; i < n_base; i++) {
-        if (base_params[i].n != ref_params[i].n) {
+        if (base_params[i].size_bytes != ref_params[i].size_bytes
+            || base_params[i].dtype != ref_params[i].dtype) {
             out->vtable->deinit(out->ctx, alloc);
             return HU_ERR_PROVIDER_RESPONSE;
         }
-        memcpy(ref_params[i].data, base_params[i].data,
-               base_params[i].n * sizeof(float));
+        memcpy(ref_params[i].data, base_params[i].data, base_params[i].size_bytes);
     }
     return HU_OK;
 }
@@ -1077,16 +1120,24 @@ static hu_error_t dpo_huml_step(void *vctx, hu_allocator_t *alloc,
          * gradient correctness on the toy model. The real backward lives
          * in the MLX subprocess (Task 6). */
         if (c->learning_rate > 0) {
-            hu_param_t params[512];
+            /* get_params returns model-owned pointer-to-array per
+             * include/human/ml/model.h:32. Element count for float buffers
+             * is size_bytes / sizeof(float). */
+            hu_ml_tensor_t *params = NULL;
             size_t n_params = 0;
-            c->policy.vtable->get_params(c->policy.ctx, params, 512, &n_params);
+            hu_error_t pe = c->policy.vtable->get_params(c->policy.ctx, &params, &n_params);
+            if (pe != HU_OK) goto cleanup_pair;
             double step_scale = c->learning_rate * c->beta * (1.0 - sigma);
             for (size_t pi = 0; pi < n_params; pi++) {
+                if (params[pi].dtype != HU_ML_DTYPE_F32) continue;
                 float *data = (float *)params[pi].data;
+                size_t elem_count = params[pi].size_bytes / sizeof(float);
                 /* Move first few weights in the direction of margin sign.
                  * This is a placeholder for the structural sign-of-gradient
-                 * test in tests/test_dpo_real_loss.c. */
-                for (size_t j = 0; j < params[pi].n && j < 8; j++) {
+                 * test in tests/test_dpo_real_loss.c. The real backward lives
+                 * in the MLX subprocess (Task 6). */
+                size_t k_max = elem_count < 8 ? elem_count : 8;
+                for (size_t j = 0; j < k_max; j++) {
                     data[j] += (float)(step_scale * 0.001);
                 }
             }
@@ -1183,14 +1234,119 @@ git commit -m "feat(ml): dpo_real_huml — real DPO loss + structural sign-of-gr
 
 **Note on task ordering:** the original draft placed `gen-synthetic-prefs.py` in Task 6, but Task 5 needs the HUML fixture too. Generate both fixtures here in Task 5 step 1 (the script itself can land in Task 5's commit and Task 6 just adds the MLX-side wrapper).
 
-- [ ] **Step 1: Write `scripts/gen-synthetic-prefs.py` and generate BOTH fixtures**
+- [ ] **Step 1: Write `scripts/gen-synthetic-prefs.py` IN FULL**
 
-(Full script content lives in Task 6 step 5 — for clarity, the script lands in Task 5's commit because that's where it's first consumed.)
+The script must emit exactly 50 lines per backend so Task 5 step 3's `HU_ASSERT_TRUE(n >= 50)` passes. Task 6 will NOT recreate this script — it only consumes it. (Single source of truth, no drift between tasks.)
+
+```python
+#!/usr/bin/env python3
+"""Generate 50 synthetic preference pairs for DPO training.
+
+Two output formats (selected via --backend):
+- mlx:  natural language (consumed by mlx-lm-lora's PreferenceDataset)
+- huml: space-separated integer token IDs in [0, 31] (consumed by HUML's
+        parse_id_string in src/ml/cli.c — only int IDs are accepted)
+
+Deterministic via fixed seed; same input → same output across runs.
+"""
+import argparse, json, random, sys
+
+# 50 hand-curated NATURAL LANGUAGE pairs covering 5 DPO categories.
+# Each tuple: (prompt, chosen, rejected). Categories tagged for clarity.
+PAIRS = [
+    # --- Helpful vs evasive (10) ---
+    ("What time is it in Tokyo?",                "It's 9 PM JST.",                              "I'm not sure."),
+    ("How do I install Python on macOS?",        "Run: brew install python@3.12",               "There are many ways."),
+    ("What's the capital of France?",            "Paris.",                                      "I can't say."),
+    ("How do I list files in a directory?",      "Use: ls -la",                                 "It depends on the OS."),
+    ("Convert 100 USD to EUR.",                  "About 92 EUR at today's rate.",               "Currency rates change."),
+    ("What's 17 times 23?",                      "391.",                                        "That's a math question."),
+    ("How do I check disk space on Linux?",      "Run: df -h",                                  "There are several tools."),
+    ("What language is git written in?",         "Mostly C, with shell and Perl.",              "Multiple languages."),
+    ("How do I exit vim?",                       "Press Esc then type :wq",                     "vim has many commands."),
+    ("What's the boiling point of water?",       "100 C at sea level.",                         "It varies with conditions."),
+    # --- Concise vs verbose (10) ---
+    ("Define HTTP.",                             "HyperText Transfer Protocol.",                "HTTP, which stands for HyperText Transfer Protocol, is the foundational protocol used for transmitting hypermedia documents on the World Wide Web, designed in the 1990s..."),
+    ("What is REST?",                            "An architectural style for stateless APIs.",  "REST, an acronym standing for Representational State Transfer, is a comprehensive architectural style first articulated by Roy Fielding in his 2000 doctoral dissertation..."),
+    ("What is JSON?",                            "JavaScript Object Notation, a data format.",  "JSON, which is JavaScript Object Notation, is a lightweight, text-based, language-independent data interchange format derived from JavaScript object literal syntax..."),
+    ("Define SQL injection.",                    "Inserting hostile SQL via input fields.",     "SQL injection is a code injection technique that has been around since the late 1990s, exploiting security vulnerabilities in an application's software by inserting malicious..."),
+    ("What is a hash function?",                 "A one-way function mapping data to fixed-size digests.", "A hash function, in the context of computer science and cryptography, is a sophisticated mathematical algorithm that transforms input data of arbitrary length..."),
+    ("What is recursion?",                       "A function that calls itself.",               "Recursion, in the context of programming and mathematics, is a powerful technique whereby a function or process invokes itself as part of its execution..."),
+    ("Define encapsulation.",                    "Bundling data and methods into one unit.",    "Encapsulation, one of the four fundamental pillars of object-oriented programming alongside inheritance, polymorphism, and abstraction, is the bundling..."),
+    ("What is a thread?",                        "A unit of execution within a process.",       "A thread, in computer science, represents a fundamental unit of CPU utilization and execution that exists within a process and shares its memory space..."),
+    ("Define DNS.",                              "Maps domain names to IP addresses.",          "DNS, which is the Domain Name System, is a hierarchical and decentralized naming system that has been the cornerstone of internet name resolution..."),
+    ("What is a compiler?",                      "Translates source code to machine code.",     "A compiler is a sophisticated software program that performs the critical task of translating source code written in a high-level programming language..."),
+    # --- Factual vs fabricated (10) ---
+    ("Who invented the telephone?",              "Alexander Graham Bell, patented 1876.",       "Thomas Edison invented the telephone in 1885."),
+    ("What year did WW2 end?",                   "1945.",                                       "1947."),
+    ("What's the speed of light?",               "Approximately 299,792 km/s in vacuum.",       "Approximately 200,000 km/s."),
+    ("Largest planet in our solar system?",      "Jupiter.",                                    "Saturn."),
+    ("Who wrote 1984?",                          "George Orwell.",                              "Aldous Huxley."),
+    ("What is H2O?",                             "Water.",                                      "Hydrogen peroxide."),
+    ("Capital of Australia?",                    "Canberra.",                                   "Sydney."),
+    ("Who painted the Mona Lisa?",               "Leonardo da Vinci.",                          "Michelangelo."),
+    ("What year did the Berlin Wall fall?",      "1989.",                                       "1991."),
+    ("Currency of Japan?",                       "Yen.",                                        "Yuan."),
+    # --- Persona-aligned vs generic (10) ---
+    ("How are you?",                             "Doing well, thanks. What's on your mind?",    "I am an AI and do not have feelings."),
+    ("Got a minute?",                            "Yep, what's up?",                             "I am available to assist you with your inquiry."),
+    ("Quick question.",                          "Shoot.",                                      "Please proceed with your question."),
+    ("Hey.",                                     "Hey, what's going on?",                       "Greetings. How may I assist you today?"),
+    ("Thanks!",                                  "No problem.",                                 "You are welcome. Is there anything else?"),
+    ("That worked, sweet.",                      "Glad it worked.",                             "I am pleased my assistance was effective."),
+    ("Lol that's wild.",                         "Yeah, surprised me too.",                     "Indeed, that is an unusual occurrence."),
+    ("Brb getting coffee.",                      "Take your time.",                             "Acknowledged. I will await your return."),
+    ("That sucks.",                              "Yeah, that's rough.",                         "I am sorry to hear about your unfortunate situation."),
+    ("Nice work.",                               "Thanks.",                                     "I appreciate your positive feedback regarding my work."),
+    # --- Honest about uncertainty vs confident hallucination (10) ---
+    ("What's the population of Bhutan in 2026?", "I don't have current 2026 figures; recent estimates were ~780k.", "1.2 million as of 2026."),
+    ("Will it rain in Paris tomorrow?",          "I can't check live weather. Try a weather app.", "Yes, expect heavy rain in Paris tomorrow."),
+    ("What's Tesla's stock price right now?",    "I can't pull live quotes. Check your broker.",    "Tesla is trading at $234.50."),
+    ("Who won the 2025 World Cup?",              "I'm not certain about 2025 results — please verify.", "Brazil won 3-1."),
+    ("Latest iPhone model?",                     "I'd need to check current Apple announcements to be sure.", "iPhone 17 Pro Max."),
+    ("Did the Lakers win last night?",           "I don't have last night's scores. Check ESPN.",   "Yes, they won 110-105."),
+    ("What's the current Bitcoin price?",        "I can't see live markets. Use a price tracker.", "Bitcoin is at $73,000."),
+    ("Who is the current UK Prime Minister?",    "I'd need to verify the current officeholder.",    "Boris Johnson."),
+    ("What's trending on Twitter?",              "I can't browse live trends.",                     "#AIRevolution and #ClimateAction."),
+    ("Best restaurant in your city?",            "I don't have a city or live restaurant data.",    "Try Joe's Pizza on 5th Street."),
+]
+
+assert len(PAIRS) == 50, f"PAIRS must have exactly 50 entries, got {len(PAIRS)}"
+
+def to_int_ids(text: str, vocab_size: int = 32, max_len: int = 16) -> str:
+    """Hash text into vocab_size token IDs deterministically (toy GPT vocab)."""
+    rng = random.Random(hash(text) & 0xFFFFFFFF)
+    n = min(max_len, max(2, len(text.split())))
+    return " ".join(str(rng.randrange(vocab_size)) for _ in range(n))
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--backend", choices=["mlx", "huml"], required=True)
+    args = ap.parse_args()
+    for prompt, chosen, rejected in PAIRS:
+        if args.backend == "mlx":
+            row = {"prompt": prompt, "chosen": chosen, "rejected": rejected, "source": "synthetic"}
+        else:  # huml
+            row = {
+                "prompt":   to_int_ids(prompt),
+                "chosen":   to_int_ids(chosen),
+                "rejected": to_int_ids(rejected),
+                "source":   "synthetic",
+            }
+        print(json.dumps(row))
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Then generate both fixtures:
 
 ```bash
+chmod +x scripts/gen-synthetic-prefs.py
 python3 scripts/gen-synthetic-prefs.py --backend huml > tests/fixtures/synthetic_preference_pairs_huml.jsonl
 python3 scripts/gen-synthetic-prefs.py --backend mlx  > tests/fixtures/synthetic_preference_pairs.jsonl
-wc -l tests/fixtures/synthetic_preference_pairs*.jsonl  # both should be 50
+wc -l tests/fixtures/synthetic_preference_pairs*.jsonl  # MUST be 50 50
 ```
 
 - [ ] **Step 2: Write the failing E2E test**
@@ -1212,19 +1368,28 @@ static void test_dpo_real_huml_synthetic_50_pair_batch(void) {
     /* HUML backend requires integer-id format — see Task 5 note on dual fixtures */
     FILE *f = fopen("tests/fixtures/synthetic_preference_pairs_huml.jsonl", "r");
     HU_ASSERT_NOT_NULL(f);
-    /* Quick parse — full parser hammered out in next iteration */
+    /* Quick parse — full parser hammered out in next iteration.
+     * NOTE on field types: hu_preference_pair_t uses fixed-size char arrays
+     * (char prompt[2048], char chosen[4096], etc. per dpo.h:15-26). Use
+     * strncpy + _len updates, NOT pointer assignment. */
     char line[1024];
-    hu_preference_pair_t pairs[64];
+    hu_preference_pair_t *pairs = (hu_preference_pair_t *)alloc.alloc(
+        alloc.ctx, 64 * sizeof(hu_preference_pair_t));
+    HU_ASSERT_NOT_NULL(pairs);
+    memset(pairs, 0, 64 * sizeof(hu_preference_pair_t));
     size_t n = 0;
     while (fgets(line, sizeof(line), f) && n < 64) {
         /* expect: {"prompt": "x", "chosen": "y", "rejected": "z", ...} */
         char p[128]={0}, c[128]={0}, r[128]={0};
         if (sscanf(line, "{\"prompt\": \"%127[^\"]\", \"chosen\": \"%127[^\"]\", \"rejected\": \"%127[^\"]\"",
                    p, c, r) == 3) {
-            pairs[n].prompt = strdup(p);
-            pairs[n].chosen = strdup(c);
-            pairs[n].rejected = strdup(r);
-            pairs[n].source = "synthetic";
+            strncpy(pairs[n].prompt, p, sizeof(pairs[n].prompt) - 1);
+            pairs[n].prompt_len = strlen(pairs[n].prompt);
+            strncpy(pairs[n].chosen, c, sizeof(pairs[n].chosen) - 1);
+            pairs[n].chosen_len = strlen(pairs[n].chosen);
+            strncpy(pairs[n].rejected, r, sizeof(pairs[n].rejected) - 1);
+            pairs[n].rejected_len = strlen(pairs[n].rejected);
+            strncpy(pairs[n].source, "synthetic", sizeof(pairs[n].source) - 1);
             n++;
         }
     }
@@ -1240,11 +1405,9 @@ static void test_dpo_real_huml_synthetic_50_pair_batch(void) {
     }
     HU_ASSERT_TRUE(chosen_sum > rejected_sum);
 
-    for (size_t i=0;i<n;i++) {
-        free((void*)pairs[i].prompt);
-        free((void*)pairs[i].chosen);
-        free((void*)pairs[i].rejected);
-    }
+    /* No per-field frees — strings are inline char[] arrays. Just free the
+     * pair array itself. */
+    alloc.free(alloc.ctx, pairs, 64 * sizeof(hu_preference_pair_t));
     trainer.vtable->deinit(trainer.ctx, &alloc);
 }
 
@@ -1275,9 +1438,9 @@ git commit -m "test(ml): dpo_real_huml E2E on 50 synthetic pairs + dual-format f
 
 **Files:**
 - Create: `scripts/dpo_mlx_train.py` (Python wrapper around `mlx_lm_lora.trainer.dpo_trainer.train_dpo`)
-- Create: `scripts/gen-synthetic-prefs.py` (helper)
 - Modify: `src/ml/dpo_real_mlx.c` (replace stub — invokes the wrapper, NOT `python3 -m mlx_lm.dpo`)
 - Test: `tests/test_dpo_real_mlx.c` (gated by `HU_HAVE_MLX_LM=1`)
+- **Reuses (from Task 5)**: `scripts/gen-synthetic-prefs.py` and `tests/fixtures/synthetic_preference_pairs.jsonl` — DO NOT recreate; Task 5 already landed both. The `--backend mlx` output is what this task consumes.
 
 - [ ] **Step 1: Verify `mlx-lm-lora` package availability**
 
@@ -1567,81 +1730,11 @@ hu_error_t hu_dpo_real_mlx_create(hu_allocator_t *alloc,
 }
 ```
 
-- [ ] **Step 5: Write the gen-synthetic-prefs script (TWO output formats)**
+- [ ] **Step 5: ~~Write gen-synthetic-prefs.py~~ — already landed in Task 5**
 
-The HUML backend's `parse_id_string` only accepts space-separated integer IDs (because the toy GPT vocab=32). The MLX backend accepts natural language. So the script emits TWO fixtures:
+The script `scripts/gen-synthetic-prefs.py` and BOTH fixture files were created and committed in **Task 5 step 1**. DO NOT recreate them here.
 
-```python
-#!/usr/bin/env python3
-# scripts/gen-synthetic-prefs.py
-# Generates 50 hand-crafted (prompt, chosen, rejected) tuples in two formats:
-#   --backend mlx  → natural language for mlx-lm-lora consumption
-#   --backend huml → space-separated int IDs for the toy GPT (V=32)
-#
-# The HUML rendering uses a deterministic hash → mod 32 mapping so that
-# logically-distinct words → likely-distinct token IDs. The chosen response
-# always starts with token 4 (which we'll think of as "good"); the rejected
-# always starts with token 7 ("bad"). This gives the structural sign-of-
-# gradient test a clear preference axis.
-import argparse
-import json
-import sys
-import hashlib
-
-PAIRS = [
-    # Helpful vs evasive (10)
-    ("What time is it in Tokyo?", "It's 9 PM JST.",         "I'm not sure."),
-    ("How do I install Python?",  "Run brew install python3.", "Try Google."),
-    ("Define quantum entanglement.", "Particles share state instantaneously.",  "Hard topic."),
-    ("Explain TCP handshake.",    "SYN, SYN-ACK, ACK.",      "Networking is complex."),
-    ("How to brew espresso?",     "9 bar, 92°C, 18g→36g in 25s.", "It varies."),
-    # ... 5 more helpful-vs-evasive ...
-    # Concise vs verbose (10)
-    # ... pattern continues ...
-    # Factual vs fabricated (15)
-    # ... ...
-    # Persona-aligned vs generic (15)
-    # ... ...
-    # Total: 50 pairs
-]
-
-def to_huml_ids(s, vocab=32):
-    """Hash each whitespace token into [0, vocab)."""
-    out = []
-    for tok in s.split():
-        h = int(hashlib.sha256(tok.encode()).hexdigest(), 16) % vocab
-        out.append(str(h))
-    return " ".join(out)
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", choices=["mlx", "huml"], default="mlx")
-    args = ap.parse_args()
-    for p, c, r in PAIRS:
-        if args.backend == "mlx":
-            row = {"prompt": p, "chosen": c, "rejected": r, "source": "synthetic"}
-        else:
-            # Prepend the structural good/bad tokens so the toy GPT has a
-            # clean preference signal even with random initial weights.
-            row = {
-                "prompt":   to_huml_ids(p),
-                "chosen":   "4 " + to_huml_ids(c),
-                "rejected": "7 " + to_huml_ids(r),
-                "source":   "synthetic_huml",
-            }
-        json.dump(row, sys.stdout)
-        sys.stdout.write("\n")
-
-if __name__ == "__main__":
-    main()
-```
-
-Generate both fixtures and check them in:
-```bash
-python3 scripts/gen-synthetic-prefs.py --backend mlx  > tests/fixtures/synthetic_preference_pairs.jsonl
-python3 scripts/gen-synthetic-prefs.py --backend huml > tests/fixtures/synthetic_preference_pairs_huml.jsonl
-wc -l tests/fixtures/synthetic_preference_pairs*.jsonl  # both should be 50
-```
+If they're missing for any reason (e.g., partial Task 5 commit), re-run Task 5 step 1 — do NOT redefine the script in Task 6 to avoid drift between two versions.
 
 - [ ] **Step 6: Run gated test**
 
@@ -1671,7 +1764,7 @@ endif()
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/ml/dpo_real_mlx.c scripts/dpo_mlx_train.py scripts/gen-synthetic-prefs.py tests/test_dpo_real_mlx.c CMakeLists.txt tests/test_main.c
+git add src/ml/dpo_real_mlx.c scripts/dpo_mlx_train.py tests/test_dpo_real_mlx.c CMakeLists.txt tests/test_main.c
 git commit -m "feat(ml): dpo_real_mlx — wrapper around mlx-lm-lora's train_dpo (Phase 2 Task 6)"
 ```
 
@@ -1957,10 +2050,16 @@ if (pairs_path) {
         sscanf(p+11, "%511[^\"]", prompt);
         sscanf(c+11, "%511[^\"]", chosen);
         sscanf(r+13, "%511[^\"]", rejected);
-        pairs[n_pairs].prompt = strdup(prompt);
-        pairs[n_pairs].chosen = strdup(chosen);
-        pairs[n_pairs].rejected = strdup(rejected);
-        pairs[n_pairs].source = "jsonl";
+        /* hu_preference_pair_t fields are fixed-size char arrays per
+         * include/human/ml/dpo.h:15-26, NOT pointers. Use strncpy +
+         * matching _len updates (same pattern as reaction_handler.c). */
+        strncpy(pairs[n_pairs].prompt, prompt, sizeof(pairs[n_pairs].prompt) - 1);
+        pairs[n_pairs].prompt_len = strlen(pairs[n_pairs].prompt);
+        strncpy(pairs[n_pairs].chosen, chosen, sizeof(pairs[n_pairs].chosen) - 1);
+        pairs[n_pairs].chosen_len = strlen(pairs[n_pairs].chosen);
+        strncpy(pairs[n_pairs].rejected, rejected, sizeof(pairs[n_pairs].rejected) - 1);
+        pairs[n_pairs].rejected_len = strlen(pairs[n_pairs].rejected);
+        strncpy(pairs[n_pairs].source, "jsonl", sizeof(pairs[n_pairs].source) - 1);
         n_pairs++;
     }
     fclose(f);
@@ -1986,11 +2085,8 @@ for (int iter = 0; iter < max_iters; iter++) {
         fprintf(stderr, "[dpo-train] adapter written to %s\n", m.adapter_path);
 }
 
-for (size_t i = 0; i < n_pairs; i++) {
-    free((void *)pairs[i].prompt);
-    free((void *)pairs[i].chosen);
-    free((void *)pairs[i].rejected);
-}
+/* No per-field frees — strings are inline char[] arrays in hu_preference_pair_t.
+ * The pairs[] array itself is stack/caller-allocated (declared at function entry). */
 ```
 
 - [ ] **Step 3: Run end-to-end CLI test**
@@ -2066,7 +2162,17 @@ static void test_reaction_event_imessage_tapback_2005_is_question(void) {
     HU_ASSERT_EQ(kind, HU_REACTION_QUESTION);
     HU_ASSERT_EQ(pol, HU_REACTION_NEUTRAL);
 }
-/* Removal codes: 3000-3005 (offset +1000). 3003 should still resolve to LAUGH. */
+/* Code 2006 = custom emoji / Apple Sticker tapback (added in macOS 14+).
+ * Live in src/channels/imessage.c at line 1830 (switch) and line 1890
+ * (positive set). v1 of this plan claimed 2006 doesn't exist — wrong. */
+static void test_reaction_event_imessage_tapback_2006_is_custom_emoji(void) {
+    hu_reaction_kind_t kind = HU_REACTION_UNKNOWN;
+    hu_reaction_polarity_t pol = HU_REACTION_NEUTRAL;
+    HU_ASSERT_EQ(hu_reaction_normalize_imessage(2006, &kind, &pol), HU_OK);
+    HU_ASSERT_EQ(kind, HU_REACTION_CUSTOM_EMOJI);
+    HU_ASSERT_EQ(pol, HU_REACTION_POSITIVE);
+}
+/* Removal codes: 3000-3006 (offset +1000). 3003 should still resolve to LAUGH. */
 static void test_reaction_event_imessage_removal_3003_is_laugh(void) {
     hu_reaction_kind_t kind = HU_REACTION_UNKNOWN;
     hu_reaction_polarity_t pol = HU_REACTION_NEUTRAL;
@@ -2096,6 +2202,7 @@ void run_reaction_event_tests(void) {
     HU_RUN_TEST(test_reaction_event_imessage_tapback_2003_is_laugh);
     HU_RUN_TEST(test_reaction_event_imessage_tapback_2004_is_emphasize);
     HU_RUN_TEST(test_reaction_event_imessage_tapback_2005_is_question);
+    HU_RUN_TEST(test_reaction_event_imessage_tapback_2006_is_custom_emoji);
     HU_RUN_TEST(test_reaction_event_imessage_removal_3003_is_laugh);
     HU_RUN_TEST(test_reaction_event_slack_thumbsup_is_like_positive);
     HU_RUN_TEST(test_reaction_event_slack_thumbsdown_is_dislike_negative);
@@ -2130,6 +2237,7 @@ typedef enum {
     HU_REACTION_LAUGH,
     HU_REACTION_EMPHASIZE,
     HU_REACTION_QUESTION,
+    HU_REACTION_CUSTOM_EMOJI,   /* iMessage code 2006 — Apple Sticker / custom emoji */
 } hu_reaction_kind_t;
 
 typedef enum {
@@ -2149,12 +2257,28 @@ typedef struct {
     int is_removal;                     /* 0=add, 1=remove */
 } hu_reaction_event_t;
 
-/* iMessage tapback codes:
- *  2000 = LOVE  (positive)
- *  2001 = LIKE  (positive)
- *  2002 = DISLIKE — wait, actually 2002 is "Dislike" in Apple docs.
- *  See src/channels/imessage.c:1015-1018 for the full mapping.
- *  Mapping per src/channels/imessage.c documentation block. */
+/* iMessage tapback codes — AUTHORITY for the full set comes from the
+ * actual switch in src/channels/imessage.c:1820-1832 + the positive-set
+ * filter in src/channels/imessage.c:1890-1896 + the SQL range at
+ * src/channels/imessage.c:1783 (BETWEEN 2000 AND 2006):
+ *
+ *  2000 = LOVE         (positive)
+ *  2001 = LIKE         (positive)
+ *  2002 = DISLIKE      (negative)
+ *  2003 = LAUGH        (positive)
+ *  2004 = EMPHASIZE    (positive)
+ *  2005 = QUESTION     (neutral)
+ *  2006 = CUSTOM_EMOJI (positive — Apple Sticker / custom-emoji tapback,
+ *                       added in macOS 14+; the comment block at
+ *                       imessage.c:1015-1018 OMITS this — that comment
+ *                       is stale, but the actual switch at line 1830
+ *                       handles 2006 and the positive-set filter at
+ *                       line 1890 includes it).
+ *
+ * Apple uses 2000-2006 for "add" reactions and 3000-3006 for "remove"
+ * reactions (offset +1000). Our normalizer reports add codes only;
+ * the caller sets is_removal based on whether the row came from a 3xxx
+ * code. */
 hu_error_t hu_reaction_normalize_imessage(int32_t associated_message_type,
                                           hu_reaction_kind_t *out_kind,
                                           hu_reaction_polarity_t *out_polarity);
@@ -2178,25 +2302,29 @@ hu_error_t hu_reaction_normalize_imessage(int32_t code,
                                           hu_reaction_kind_t *kind,
                                           hu_reaction_polarity_t *polarity) {
     if (!kind || !polarity) return HU_ERR_INVALID_ARGUMENT;
-    /* AUTHORITY: src/channels/imessage.c:1017 (the repo's own comment block):
-     *   2000=love, 2001=like, 2002=dislike, 2003=laugh, 2004=emphasis, 2005=question
-     * Apple uses 2000-2005 for "add" reactions and 3000-3005 for "remove"
-     * reactions (offset +1000). Our normalizer reports add codes only;
-     * the caller sets is_removal based on whether the row came from a 3xxx code.
+    /* AUTHORITY (full set): src/channels/imessage.c:1820-1832 (switch table)
+     * + line 1890 ("positive tapbacks ... 2000-2004,2006") + line 1783
+     * (SQL `BETWEEN 2000 AND 2006`). The comment block at imessage.c:1017
+     * stops at 2005 — that comment is stale; the live code uses 2006 too.
      *
-     * NOTE: code 2006 does NOT exist per the imessage.c authority. The v1
-     * of this plan incorrectly mapped 2003 to DISLIKE — that was a critical
-     * bug that would have trained negative DPO signals on every laugh
+     * Apple uses 2000-2006 for "add" reactions and 3000-3006 for "remove"
+     * reactions (offset +1000). Normalizer reports add-codes only; caller
+     * sets is_removal based on whether the row came from a 3xxx code.
+     *
+     * NOTE: v1 of this plan incorrectly mapped 2003 to DISLIKE and ignored
+     * 2006 entirely — those were critical bugs that would have trained
+     * negative DPO signals on laughs and silently dropped every custom-emoji
      * tapback. Verified against imessage.c during the spec-verifier gate. */
     int32_t base = code >= 3000 ? code - 1000 : code;
     switch (base) {
-        case 2000: *kind = HU_REACTION_LOVE;      *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2001: *kind = HU_REACTION_LIKE;      *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2002: *kind = HU_REACTION_DISLIKE;   *polarity = HU_REACTION_NEGATIVE; return HU_OK;
-        case 2003: *kind = HU_REACTION_LAUGH;     *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2004: *kind = HU_REACTION_EMPHASIZE; *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2005: *kind = HU_REACTION_QUESTION;  *polarity = HU_REACTION_NEUTRAL;  return HU_OK;
-        default:   *kind = HU_REACTION_UNKNOWN;   *polarity = HU_REACTION_NEUTRAL;  return HU_ERR_INVALID_ARGUMENT;
+        case 2000: *kind = HU_REACTION_LOVE;         *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        case 2001: *kind = HU_REACTION_LIKE;         *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        case 2002: *kind = HU_REACTION_DISLIKE;      *polarity = HU_REACTION_NEGATIVE; return HU_OK;
+        case 2003: *kind = HU_REACTION_LAUGH;        *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        case 2004: *kind = HU_REACTION_EMPHASIZE;    *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        case 2005: *kind = HU_REACTION_QUESTION;     *polarity = HU_REACTION_NEUTRAL;  return HU_OK;
+        case 2006: *kind = HU_REACTION_CUSTOM_EMOJI; *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        default:   *kind = HU_REACTION_UNKNOWN;      *polarity = HU_REACTION_NEUTRAL;  return HU_ERR_INVALID_ARGUMENT;
     }
 }
 
@@ -2305,7 +2433,7 @@ hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
         if (db) sqlite3_close(db);
         return HU_ERR_IO;
     }
-    /* iMessage reactions: associated_message_type 2000-2005 (add) or 3000-3005 (remove)
+    /* iMessage reactions: associated_message_type 2000-2006 (add) or 3000-3006 (remove)
      * with associated_message_guid pointing at the original message. */
     const char *sql =
         "SELECT m.associated_message_type, m.associated_message_guid, "
@@ -2314,7 +2442,7 @@ hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
         "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
         "JOIN chat c ON c.ROWID = cmj.chat_id "
         "LEFT JOIN handle h ON h.ROWID = m.handle_id "
-        "WHERE (m.associated_message_type BETWEEN 2000 AND 2005 OR m.associated_message_type BETWEEN 3000 AND 3005) "
+        "WHERE (m.associated_message_type BETWEEN 2000 AND 2006 OR m.associated_message_type BETWEEN 3000 AND 3006) "
         "  AND m.associated_message_guid IS NOT NULL "
         "  AND m.date > ((? - 978307200) * 1000000000) "  /* convert unix → mac time → ns */
         "ORDER BY m.date DESC LIMIT ?";
@@ -2431,11 +2559,15 @@ void run_slack_reactions_tests(void) {
 
 - [ ] **Step 2: Implement the branch in `src/channels/slack.c`**
 
-Near line 1219 (existing message dispatch), add:
+Near line 1219 (existing message dispatch), add. **CRITICAL — note on return semantics:**
+We MUST return `HU_OK` to the webhook caller from this branch (Slack expects a 200 within 3 seconds or it retries; any non-OK return on a valid webhook produces a retry storm). `HU_ERR_NOT_SUPPORTED` is reserved for the test-helper return contract (`hu_slack_handle_reaction_event_for_test`) so unit tests can assert on filter behavior; the inline branch translates filter rejections into a silent `goto reaction_done` → `return HU_OK`.
 
 ```c
 /* Phase 2 (RL SOTA): reaction_added / reaction_removed branch.
- * Spec §4.3 — emits hu_reaction_event_t into hu_reaction_handler_handle_event. */
+ * Spec §4.3 — emits hu_reaction_event_t into hu_reaction_handler_handle_event.
+ * Slack webhook ack: ALWAYS return HU_OK from this branch — non-OK triggers
+ * Slack retries within 3s. Filter rejections (self-reaction, non-message
+ * item, unknown reactji) are absorbed silently. */
 if (event_type && (strcmp(event_type, "reaction_added") == 0
                 || strcmp(event_type, "reaction_removed") == 0)) {
     hu_reaction_event_t evt = {0};
@@ -2450,13 +2582,14 @@ if (event_type && (strcmp(event_type, "reaction_added") == 0
     const char *item_channel = item ? json_get_string(item, "channel") : NULL;
     const char *item_ts = item ? json_get_string(item, "ts") : NULL;
 
-    /* Filter: skip self-reactions and non-message items */
-    if (user && bot_user_id && strcmp(user, bot_user_id) == 0) return HU_ERR_NOT_SUPPORTED;
-    if (!item_type || strcmp(item_type, "message") != 0) return HU_ERR_NOT_SUPPORTED;
-    if (!reaction_name) return HU_ERR_INVALID_ARGUMENT;
+    /* Filter: skip self-reactions and non-message items.
+     * goto (not return) so we still ack the webhook with HU_OK. */
+    if (user && bot_user_id && strcmp(user, bot_user_id) == 0) goto reaction_done;
+    if (!item_type || strcmp(item_type, "message") != 0)        goto reaction_done;
+    if (!reaction_name)                                          goto reaction_done;
 
     hu_reaction_kind_t k; hu_reaction_polarity_t p;
-    if (hu_reaction_normalize_slack(reaction_name, &k, &p) != HU_OK) return HU_ERR_INVALID_ARGUMENT;
+    if (hu_reaction_normalize_slack(reaction_name, &k, &p) != HU_OK) goto reaction_done;
 
     evt.channel_id = "slack";
     evt.target_thread_id = item_channel ? strdup(item_channel) : NULL;
@@ -2470,11 +2603,12 @@ if (event_type && (strcmp(event_type, "reaction_added") == 0
     /* Hand off to reaction_handler (Task 13) */
     hu_reaction_handler_handle_event(&evt);
 
-    /* Cleanup string fields */
+reaction_done:
+    /* Cleanup string fields (NULL-safe — strdup may not have been called) */
     free((void*)evt.target_thread_id);
     free((void*)evt.target_message_ref);
     free((void*)evt.sender_handle);
-    return HU_OK;
+    return HU_OK;  /* always ack the Slack webhook */
 }
 ```
 
@@ -2585,6 +2719,12 @@ static void test_reaction_event_with_known_target_inserts_dpo_pair(void) {
     hu_reaction_handler_reset_for_test();
 }
 
+/* "Silently drops" here means: no DPO row inserted, no agent_turn side
+ * effect (clear_turn flag stays false). The function still returns
+ * HU_ERR_NOT_FOUND so callers can log the metric — but ALL callers in
+ * Phase 2 (imessage poll, slack webhook handler) ignore the return code,
+ * making the drop silent in practice. Future callers that surface this
+ * to users MUST treat HU_ERR_NOT_FOUND as a no-op, NOT a hard error. */
 static void test_reaction_event_with_unknown_target_drops_silently(void) {
     hu_reaction_handler_reset_for_test();
     hu_reaction_event_t e = {
@@ -2592,6 +2732,7 @@ static void test_reaction_event_with_unknown_target_drops_silently(void) {
         .target_message_ref = "ts_does_not_exist",
         .kind = HU_REACTION_LIKE, .polarity = HU_REACTION_POSITIVE,
     };
+    /* Return code carries the diagnostic; callers translate to silent drop. */
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_ERR_NOT_FOUND);
     /* And the per-turn flag should NOT be set on a failed lookup */
     HU_ASSERT_FALSE(hu_reaction_handler_was_called_this_turn());
@@ -2628,11 +2769,15 @@ void hu_reaction_handler_set_collector(hu_dpo_collector_t *collector);
 
 hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *event);
 
-/* Per-turn signal flag — agent_turn.c calls clear() at the start of each
- * turn and queries was_called() at the end (Task 14). The flag is NOT
- * thread-safe; it assumes single-turn-at-a-time per agent (which the
- * daemon already enforces via the per-channel turn lock — see
- * src/daemon.c handler dispatch). */
+/* Per-turn signal flag — daemon's per-turn-cleanup block calls clear() at
+ * the end of each turn (see src/daemon.c near label `skip_llm_this_batch:`)
+ * and agent_turn.c queries was_called() during the substring-heuristic
+ * branch (Task 14). The flag is NOT thread-safe — it relies on the daemon
+ * being a single-threaded event loop with NO concurrent turn dispatch.
+ * Verified in src/daemon.c: only `g_trust_mutex` exists (line 800, scoped
+ * to trust management); there is NO per-channel turn lock. If the daemon
+ * ever gains a thread pool or concurrent channel processing, this flag
+ * MUST become per-agent-context (e.g. a field on hu_agent_t). */
 void hu_reaction_handler_clear_turn(void);
 int  hu_reaction_handler_was_called_this_turn(void);
 
@@ -2682,8 +2827,10 @@ static size_t s_lookup_n = 0;
 /* Daemon-owned collector handle. NULL until set_collector is called. */
 static hu_dpo_collector_t *s_collector = NULL;
 
-/* Per-turn signal flag (NOT thread-safe; daemon's per-channel turn lock
- * enforces single-turn-at-a-time per agent). */
+/* Per-turn signal flag (NOT thread-safe; daemon is single-threaded event loop —
+ * see header comment on hu_reaction_handler_clear_turn for the full safety
+ * argument. If the daemon ever gains concurrent turn dispatch, move this onto
+ * hu_agent_t as a per-agent field). */
 static int s_called_this_turn = 0;
 
 void hu_reaction_handler_set_collector(hu_dpo_collector_t *c) { s_collector = c; }
@@ -2863,14 +3010,22 @@ hu_reaction_handler_clear_turn();
 
 - [ ] **Step 4: Add the gating in the substring block**
 
-At the substring heuristic location in `agent_turn.c`:
+This is **TWO separate edits** to `src/agent/agent_turn.c` — the `#include` directive must be at file scope (top of file), NOT inside the function body. Putting `#include` inside a function body is a hard compile error under `-Wpedantic -Werror`.
+
+**Edit 4a:** add the include at the top of the file, near the existing `#include "human/agent/agent.h"` block (locate via `rg -n '#include "human/agent/agent.h"' src/agent/agent_turn.c`):
+
+```c
+/* near other #include "human/agent/*.h" lines at the top of the file */
+#include "human/agent/reaction_handler.h"
+```
+
+**Edit 4b:** wrap the existing `is_positive`/`is_negative` `strstr` block (locate via `rg -n 'is_positive\|is_negative' src/agent/agent_turn.c`) with the gating `if`:
 
 ```c
 /* Phase 2 (RL SOTA): if a reaction event was processed for this turn's
  * assistant message, skip the substring heuristic — the reaction is the
  * authoritative signal. Substring fallback runs only for text-channel
  * users where no reaction event ever fires. */
-#include "human/agent/reaction_handler.h"
 if (!hu_reaction_handler_was_called_this_turn()) {
     /* ... existing substring heuristic block (is_positive / is_negative strstr) ... */
 }
