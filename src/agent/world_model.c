@@ -543,17 +543,89 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
             for (size_t i = 0; i < rn; i++) {
                 hu_memory_relation_row_t *src = (hu_memory_relation_row_t *)recs[i].payload;
                 if (src) arr[i] = *src;
-                /* We do NOT carry context/provenance through into the world
-                 * model — keep this snapshot lean. Callers that need them
-                 * fetch directly via hu_memory_facade_read. */
+                /* `context` is the raw conversation excerpt — too heavy
+                 * for the snapshot. Callers that need it fetch directly
+                 * via hu_memory_facade_read. */
                 arr[i].context = NULL;
                 arr[i].context_len = 0;
-                arr[i].provenance = NULL;
-                arr[i].provenance_len = 0;
+                /* P4.1 — deep-copy `provenance` so callers can distinguish
+                 * "0.8 confidence from channel-trusted source" from
+                 * "0.8 confidence from auto-extract". The source rows are
+                 * about to be freed below; without a deep copy the
+                 * pointer would dangle. `confidence` and
+                 * `confidence_variance` already flow through via the
+                 * preceding struct copy. */
+                if (src && src->provenance && src->provenance_len > 0) {
+                    char *dup = xalloc(alloc, src->provenance_len + 1);
+                    if (dup) {
+                        memcpy(dup, src->provenance, src->provenance_len);
+                        dup[src->provenance_len] = '\0';
+                        arr[i].provenance = dup;
+                        arr[i].provenance_len = src->provenance_len;
+                    } else {
+                        arr[i].provenance = NULL;
+                        arr[i].provenance_len = 0;
+                    }
+                } else {
+                    arr[i].provenance = NULL;
+                    arr[i].provenance_len = 0;
+                }
+                /* Endpoint name pointers are owned by `recs`; null them
+                 * so the relation_free path doesn't double-free. */
+                arr[i].source_name = NULL;
+                arr[i].source_name_len = 0;
+                arr[i].target_name = NULL;
+                arr[i].target_name_len = 0;
             }
             hu_memory_facade_records_free(m, alloc, recs, rn);
             wm->relations = arr;
             wm->relations_count = rn;
+
+            /* P4.3 — derive recent_changes from the relations window.
+             * Cheap (O(N) over rn ≤ 32), no extra DB queries, no extra
+             * lifetime contracts. We surface up to 8 most-recent
+             * SUPERSEDED / RETRACTED rows so the planner can see
+             * "this fact was retracted yesterday" without re-querying W1. */
+            size_t change_cap = rn < 8 ? rn : 8;
+            hu_world_recent_change_t *changes = xalloc(alloc, change_cap * sizeof(*changes));
+            if (changes) {
+                memset(changes, 0, change_cap * sizeof(*changes));
+                size_t cn = 0;
+                for (size_t i = 0; i < rn && cn < change_cap; i++) {
+                    const hu_graph_relation_t *r = &arr[i];
+                    hu_world_change_kind_t kind = HU_WORLD_CHANGE_NONE;
+                    int64_t at = 0;
+                    if (r->supersedes_id != 0) {
+                        kind = HU_WORLD_CHANGE_SUPERSEDED;
+                        at = r->last_seen;
+                    } else if (r->event_end > 0) {
+                        kind = HU_WORLD_CHANGE_RETRACTED;
+                        at = r->event_end;
+                    } else {
+                        continue;
+                    }
+                    changes[cn].relation_id = r->id;
+                    changes[cn].prior_id = r->supersedes_id;
+                    changes[cn].kind = kind;
+                    changes[cn].at_ms = at;
+                    if (kind == HU_WORLD_CHANGE_SUPERSEDED) {
+                        snprintf(changes[cn].summary, sizeof(changes[cn].summary),
+                                 "rel #%lld supersedes #%lld",
+                                 (long long)r->id, (long long)r->supersedes_id);
+                    } else {
+                        snprintf(changes[cn].summary, sizeof(changes[cn].summary),
+                                 "rel #%lld retracted at %lld",
+                                 (long long)r->id, (long long)r->event_end);
+                    }
+                    cn++;
+                }
+                if (cn > 0) {
+                    wm->recent_changes = changes;
+                    wm->recent_changes_count = cn;
+                } else {
+                    xfree(alloc, changes, change_cap * sizeof(*changes));
+                }
+            }
         }
 
         /* Negative memory list. */
@@ -564,6 +636,74 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
             && neg_n > 0) {
             wm->negatives = negs;
             wm->negatives_count = neg_n;
+        }
+
+        /* P4.2 — n-ary facts (W8 hyperedges). Per top-K entity, query
+         * hyperedges that name it as a member; dedupe by id; cap the
+         * total at 16 to keep snapshot install at O(1).
+         *
+         * Hyperedges already own deep copies of `members` and
+         * `provenance` (per `hu_hyperedge_query_by_member` contract),
+         * so we slot them into the snapshot directly and free with
+         * `hu_hyperedges_free` in `hu_world_model_free`. We allocate a
+         * generous upper-bound staging buffer (top-K * 4) and shrink
+         * to the deduped count before installing. */
+        if (wm->entities && wm->entities_count > 0) {
+            size_t cap_target = 16;
+            size_t stage_cap = wm->entities_count * 4;
+            if (stage_cap < cap_target) stage_cap = cap_target;
+            hu_hyperedge_t *stage = xalloc(alloc, stage_cap * sizeof(*stage));
+            if (stage) {
+                memset(stage, 0, stage_cap * sizeof(*stage));
+                size_t kept = 0;
+                for (size_t i = 0; i < wm->entities_count && kept < cap_target; i++) {
+                    int64_t eid = wm->entities[i].id;
+                    if (eid <= 0) continue;
+                    hu_hyperedge_t *batch = NULL;
+                    size_t bn = 0;
+                    if (hu_hyperedge_query_by_member(m, alloc, eid, &batch, &bn) != HU_OK)
+                        continue;
+                    for (size_t j = 0; j < bn && kept < cap_target; j++) {
+                        bool dup = false;
+                        for (size_t k = 0; k < kept; k++) {
+                            if (stage[k].id == batch[j].id) { dup = true; break; }
+                        }
+                        if (dup) continue;
+                        /* Move ownership: copy struct, zero source row's
+                         * owned pointers so the per-batch free below
+                         * leaves them alone. */
+                        stage[kept] = batch[j];
+                        batch[j].members = NULL;
+                        batch[j].members_count = 0;
+                        batch[j].provenance = NULL;
+                        kept++;
+                    }
+                    hu_hyperedges_free(alloc, batch, bn);
+                }
+                if (kept > 0) {
+                    /* Shrink-fit so the snapshot only carries actual rows.
+                     * OOM here drops the hyperedge load entirely (a 60s
+                     * snapshot under memory pressure is not the place to
+                     * keep a 4x-oversized staging buffer alive). */
+                    hu_hyperedge_t *shrunk = xalloc(alloc, kept * sizeof(*shrunk));
+                    if (shrunk) {
+                        memcpy(shrunk, stage, kept * sizeof(*shrunk));
+                        wm->hyperedges = shrunk;
+                        wm->hyperedges_count = kept;
+                    } else {
+                        for (size_t k = 0; k < kept; k++) {
+                            if (stage[k].members) {
+                                xfree(alloc, stage[k].members,
+                                      stage[k].members_count * sizeof(*stage[k].members));
+                            }
+                            if (stage[k].provenance) {
+                                xfree(alloc, stage[k].provenance, strlen(stage[k].provenance) + 1);
+                            }
+                        }
+                    }
+                }
+                xfree(alloc, stage, stage_cap * sizeof(*stage));
+            }
         }
     }
 
@@ -578,6 +718,15 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
     snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "neutral");
     wm->arousal = 0.5f;
     wm->valence = 0.0f;
+    /* P5.1 — neutral default for the stance vector. */
+    wm->stance.valence = 0.0f;
+    wm->stance.arousal = 0.5f;
+    wm->stance.dominance = 0.0f;
+    wm->stance.certainty = 0.5f;
+    /* P5.3 — neutral default for conversational pressure. */
+    wm->pressure.recent_anger_count = 0;
+    wm->pressure.sustained_complaint_minutes = 0;
+    wm->pressure.urgency_score = 0.0f;
 #ifdef HU_ENABLE_SQLITE
     {
         struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
@@ -591,12 +740,42 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
                 double total_weight = 0.0;
                 double weighted_valence = 0.0;
                 double max_intensity = 0.0;
+                /* P5.3 — pressure derivation accumulators. We walk
+                 * residues once and harvest (a) the legacy aggregate,
+                 * (b) the stance vector certainty (variance of valence),
+                 * and (c) the pressure cells. */
+                int anger_count = 0;
+                int64_t earliest_neg_ts = 0;
+                int64_t latest_neg_ts = 0;
+                double sum_valence = 0.0;
+                double sum_valence_sq = 0.0;
+                size_t neg_count = 0;
                 for (size_t i = 0; i < residue_n; i++) {
                     double w = residues[i].intensity > 0.0 ? residues[i].intensity : 0.1;
                     weighted_valence += residues[i].valence * w;
                     total_weight += w;
                     if (residues[i].intensity > max_intensity)
                         max_intensity = residues[i].intensity;
+                    sum_valence += residues[i].valence;
+                    sum_valence_sq += residues[i].valence * residues[i].valence;
+                    /* Anger window: last 60 min with strongly negative
+                     * valence and meaningful intensity. */
+                    int64_t age_ts = now_ts - residues[i].created_at;
+                    if (age_ts <= 60 * 60
+                        && residues[i].valence < -0.3
+                        && residues[i].intensity > 0.6) {
+                        anger_count++;
+                    }
+                    if (residues[i].valence < -0.15) {
+                        if (earliest_neg_ts == 0
+                            || residues[i].created_at < earliest_neg_ts) {
+                            earliest_neg_ts = residues[i].created_at;
+                        }
+                        if (residues[i].created_at > latest_neg_ts) {
+                            latest_neg_ts = residues[i].created_at;
+                        }
+                        neg_count++;
+                    }
                 }
                 if (total_weight > 0.0)
                     wm->valence = (float)(weighted_valence / total_weight);
@@ -611,6 +790,58 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
                     snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "concerned");
                 else
                     snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "distressed");
+
+                /* P5.1 — populate (V, A, D, C). dominance heuristic:
+                 * positive valence with low arousal feels in-control;
+                 * negative valence with high arousal feels overwhelmed.
+                 * certainty heuristic: low variance across residue
+                 * valences = high certainty about the direction. Both
+                 * clamp to their valid ranges. */
+                wm->stance.valence = wm->valence;
+                wm->stance.arousal = wm->arousal;
+                float dom = wm->valence - 0.5f * wm->arousal;
+                if (dom > 1.0f) dom = 1.0f;
+                if (dom < -1.0f) dom = -1.0f;
+                wm->stance.dominance = dom;
+                if (residue_n > 1) {
+                    double mean = sum_valence / (double)residue_n;
+                    double var = sum_valence_sq / (double)residue_n - mean * mean;
+                    if (var < 0.0) var = 0.0;
+                    /* var ≤ 1.0 for valence in [-1, 1]. Higher variance
+                     * = lower certainty. */
+                    float cert = (float)(1.0 - var);
+                    if (cert > 1.0f) cert = 1.0f;
+                    if (cert < 0.0f) cert = 0.0f;
+                    wm->stance.certainty = cert;
+                } else {
+                    /* Single residue → high certainty (no contradiction
+                     * to dilute the signal). */
+                    wm->stance.certainty = 0.85f;
+                }
+
+                /* P5.3 — populate pressure cells. */
+                if (anger_count > 99) anger_count = 99;
+                wm->pressure.recent_anger_count = anger_count;
+                if (neg_count >= 2 && latest_neg_ts > earliest_neg_ts) {
+                    int64_t span_min = (latest_neg_ts - earliest_neg_ts) / 60;
+                    if (span_min < 0) span_min = 0;
+                    if (span_min > 24 * 60) span_min = 24 * 60;
+                    wm->pressure.sustained_complaint_minutes = (int)span_min;
+                }
+                /* Composite: anger window dominates short-term, complaint
+                 * span dominates long-term. Each branch caps near 1.0
+                 * before mixing so a single 30-min complaint doesn't
+                 * push the score past saturation on its own. */
+                float anger_term = (float)anger_count / 5.0f;
+                if (anger_term > 1.0f) anger_term = 1.0f;
+                float complaint_term =
+                    (float)wm->pressure.sustained_complaint_minutes / 30.0f;
+                if (complaint_term > 1.0f) complaint_term = 1.0f;
+                float urgency = 0.6f * anger_term + 0.4f * complaint_term;
+                if (urgency > 1.0f) urgency = 1.0f;
+                if (urgency < 0.0f) urgency = 0.0f;
+                wm->pressure.urgency_score = urgency;
+
                 alloc->free(alloc->ctx, residues, residue_n * sizeof(*residues));
             }
         }
@@ -949,6 +1180,63 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
         if (cp1 || cp2 || cp3) new_signals++;
     }
 
+    /* P1.5 — `user_expects_we_can` from persona affordances.
+     *
+     * Two evidence sources, both already in persona memory at agent
+     * startup so this stays a pure in-memory walk (no W7 lookup):
+     *
+     *   1. Per-contact `allowed_behaviors[]` from the matching
+     *      `hu_contact_profile_t`. These are the most precise signal —
+     *      they say "this user has explicitly told us they want X
+     *      behavior from us". Up to 3 entries appended.
+     *   2. Persona `situational_directions[].instruction` ("when X,
+     *      offer to Y"). These represent agent affordances the user
+     *      expects to be able to invoke regardless of contact. Up to 2
+     *      entries appended after the contact-specific ones so the
+     *      contact-specific signal wins on truncation.
+     *
+     * Both sources only fire when at least one entry is non-empty so
+     * we don't bump tom.confidence on a no-op merge. W12 planner
+     * affordances and recent positive case_outcomes are the next
+     * evidence sources to wire (deferred until W12 ships an enumeration
+     * API; tracked as P5.5). */
+    if (wm->contact_id[0]) {
+        for (size_t i = 0; i < persona->contacts_count; i++) {
+            const hu_contact_profile_t *c = &persona->contacts[i];
+            /* Match by stable contact_id (preferred) or display name —
+             * agents identify contacts by either depending on channel
+             * (phone for SMS, handle for Slack, name for in-process
+             * tests). */
+            bool match = false;
+            if (c->contact_id && c->contact_id[0]
+                && strcmp(c->contact_id, wm->contact_id) == 0) match = true;
+            if (!match && c->name && c->name[0]
+                && strcasecmp(c->name, wm->contact_id) == 0) match = true;
+            if (!match) continue;
+            size_t added = 0;
+            for (size_t j = 0; j < c->allowed_behaviors_count && added < 3; j++) {
+                const char *b = c->allowed_behaviors[j];
+                if (!b || !b[0]) continue;
+                tom_append_str_(wm->tom.user_expects_we_can,
+                                sizeof(wm->tom.user_expects_we_can), b);
+                added++;
+            }
+            if (added > 0) new_signals++;
+            break; /* contact_id is unique within persona->contacts */
+        }
+    }
+    {
+        size_t added = 0;
+        for (size_t i = 0; i < persona->situational_directions_count && added < 2; i++) {
+            const hu_situational_direction_t *d = &persona->situational_directions[i];
+            if (!d->instruction || !d->instruction[0]) continue;
+            tom_append_str_(wm->tom.user_expects_we_can,
+                            sizeof(wm->tom.user_expects_we_can), d->instruction);
+            added++;
+        }
+        if (added > 0) new_signals++;
+    }
+
     /* Step 3 — recent persona deltas (P1.3). Only APPLIED deltas with
      * confidence >= 0.6 are folded; pending/dropped/quarantined deltas
      * carry too little signal to drive ToM. */
@@ -982,12 +1270,60 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
         if (bumped > 0.85f) bumped = 0.85f;
         wm->tom.confidence.mean = bumped;
     }
+
+    /* P5.4 — append the post-merge mean to the trust gradient sparkline.
+     * Newest sample at index `count - 1`; full buffer scrolls left.
+     * Done unconditionally so the planner can detect "trust dropped
+     * sharply over the last 3 turns" even on no-op merges (which leave
+     * the mean unchanged but still represent an observation). */
+    if (wm->tom.confidence_history_count < HU_TOM_CONFIDENCE_HISTORY) {
+        wm->tom.confidence_history[wm->tom.confidence_history_count] =
+            wm->tom.confidence.mean;
+        wm->tom.confidence_history_count++;
+    } else {
+        for (size_t i = 1; i < HU_TOM_CONFIDENCE_HISTORY; i++) {
+            wm->tom.confidence_history[i - 1] = wm->tom.confidence_history[i];
+        }
+        wm->tom.confidence_history[HU_TOM_CONFIDENCE_HISTORY - 1] =
+            wm->tom.confidence.mean;
+    }
 }
 
 void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm) {
     if (!alloc || !wm) return;
     free_entities_local(alloc, wm->entities, wm->entities_count);
-    xfree(alloc, wm->relations, wm->relations_count * sizeof(*wm->relations));
+    /* P4.1 — relations now own a deep-copied `provenance` string per row.
+     * Free per-row before releasing the array. */
+    if (wm->relations) {
+        for (size_t i = 0; i < wm->relations_count; i++) {
+            if (wm->relations[i].provenance) {
+                xfree(alloc, wm->relations[i].provenance,
+                      wm->relations[i].provenance_len + 1);
+            }
+        }
+        xfree(alloc, wm->relations, wm->relations_count * sizeof(*wm->relations));
+    }
+    /* P4.3 — recent_changes is a POD slab; one xfree releases it. */
+    if (wm->recent_changes) {
+        xfree(alloc, wm->recent_changes,
+              wm->recent_changes_count * sizeof(*wm->recent_changes));
+    }
+    /* P4.2 — hyperedges own deep copies of `members` and `provenance`. */
+    if (wm->hyperedges) {
+        for (size_t i = 0; i < wm->hyperedges_count; i++) {
+            if (wm->hyperedges[i].members) {
+                xfree(alloc, wm->hyperedges[i].members,
+                      wm->hyperedges[i].members_count
+                          * sizeof(*wm->hyperedges[i].members));
+            }
+            if (wm->hyperedges[i].provenance) {
+                xfree(alloc, wm->hyperedges[i].provenance,
+                      strlen(wm->hyperedges[i].provenance) + 1);
+            }
+        }
+        xfree(alloc, wm->hyperedges,
+              wm->hyperedges_count * sizeof(*wm->hyperedges));
+    }
     if (wm->negatives) hu_negative_memory_free(alloc, wm->negatives, wm->negatives_count);
     xfree(alloc, wm, sizeof(*wm));
 }
@@ -1140,17 +1476,154 @@ static hu_world_model_t *clone_wm(hu_allocator_t *alloc, const hu_world_model_t 
             return NULL;
         }
         memcpy(wm->relations, src->relations, bytes);
-        /* Relations are POD-shaped in the world model (no owned strings) so
-         * a memcpy is sufficient. */
+        /* P4.1 — `provenance` is the only owned string in the snapshot's
+         * relation rows. Deep-copy each so the clone owns its own
+         * lifetime; on partial failure roll back what we already
+         * allocated to keep the leak budget at zero. */
+        for (size_t i = 0; i < src->relations_count; i++) {
+            wm->relations[i].provenance = NULL;
+            wm->relations[i].provenance_len = 0;
+            const char *p = src->relations[i].provenance;
+            size_t plen = src->relations[i].provenance_len;
+            if (p && plen > 0) {
+                char *dup = xalloc(alloc, plen + 1);
+                if (!dup) {
+                    for (size_t j = 0; j < i; j++) {
+                        if (wm->relations[j].provenance) {
+                            xfree(alloc, wm->relations[j].provenance,
+                                  wm->relations[j].provenance_len + 1);
+                        }
+                    }
+                    free_entities_local(alloc, wm->entities, wm->entities_count);
+                    xfree(alloc, wm->relations, bytes);
+                    xfree(alloc, wm, sizeof(*wm));
+                    return NULL;
+                }
+                memcpy(dup, p, plen);
+                dup[plen] = '\0';
+                wm->relations[i].provenance = dup;
+                wm->relations[i].provenance_len = plen;
+            }
+        }
     } else {
         wm->relations = NULL;
     }
+    /* P4.3 — recent_changes is POD; one allocation + memcpy. */
+    if (src->recent_changes && src->recent_changes_count > 0) {
+        size_t bytes = src->recent_changes_count * sizeof(*src->recent_changes);
+        wm->recent_changes = xalloc(alloc, bytes);
+        if (!wm->recent_changes) {
+            for (size_t i = 0; i < src->relations_count; i++) {
+                if (wm->relations && wm->relations[i].provenance) {
+                    xfree(alloc, wm->relations[i].provenance,
+                          wm->relations[i].provenance_len + 1);
+                }
+            }
+            free_entities_local(alloc, wm->entities, wm->entities_count);
+            xfree(alloc, wm->relations, src->relations_count * sizeof(*src->relations));
+            xfree(alloc, wm, sizeof(*wm));
+            return NULL;
+        }
+        memcpy(wm->recent_changes, src->recent_changes, bytes);
+    } else {
+        wm->recent_changes = NULL;
+    }
+    /* P4.2 — hyperedges. Deep-copy `members` and `provenance` per row.
+     * On any partial failure, roll back the slots already populated and
+     * free everything we've allocated so far in the clone. */
+    if (src->hyperedges && src->hyperedges_count > 0) {
+        size_t bytes = src->hyperedges_count * sizeof(*src->hyperedges);
+        wm->hyperedges = xalloc(alloc, bytes);
+        if (!wm->hyperedges) goto clone_oom_after_changes_;
+        memset(wm->hyperedges, 0, bytes);
+        for (size_t i = 0; i < src->hyperedges_count; i++) {
+            wm->hyperedges[i] = src->hyperedges[i];
+            wm->hyperedges[i].members = NULL;
+            wm->hyperedges[i].provenance = NULL;
+            if (src->hyperedges[i].members && src->hyperedges[i].members_count > 0) {
+                size_t mb = src->hyperedges[i].members_count
+                            * sizeof(*src->hyperedges[i].members);
+                hu_hyperedge_member_t *mdup = xalloc(alloc, mb);
+                if (!mdup) goto clone_oom_in_hyperedges_;
+                memcpy(mdup, src->hyperedges[i].members, mb);
+                wm->hyperedges[i].members = mdup;
+                wm->hyperedges[i].members_count = src->hyperedges[i].members_count;
+            }
+            if (src->hyperedges[i].provenance) {
+                size_t plen = strlen(src->hyperedges[i].provenance);
+                char *pdup = xalloc(alloc, plen + 1);
+                if (!pdup) goto clone_oom_in_hyperedges_;
+                memcpy(pdup, src->hyperedges[i].provenance, plen + 1);
+                wm->hyperedges[i].provenance = pdup;
+            }
+        }
+        wm->hyperedges_count = src->hyperedges_count;
+    } else {
+        wm->hyperedges = NULL;
+    }
+    goto clone_continue_;
+
+clone_oom_in_hyperedges_:
+    for (size_t i = 0; i < src->hyperedges_count; i++) {
+        if (wm->hyperedges[i].members) {
+            xfree(alloc, wm->hyperedges[i].members,
+                  wm->hyperedges[i].members_count
+                      * sizeof(*wm->hyperedges[i].members));
+        }
+        if (wm->hyperedges[i].provenance) {
+            xfree(alloc, wm->hyperedges[i].provenance,
+                  strlen(wm->hyperedges[i].provenance) + 1);
+        }
+    }
+    xfree(alloc, wm->hyperedges, src->hyperedges_count * sizeof(*src->hyperedges));
+    wm->hyperedges = NULL;
+
+clone_oom_after_changes_:
+    if (wm->recent_changes) {
+        xfree(alloc, wm->recent_changes,
+              src->recent_changes_count * sizeof(*src->recent_changes));
+    }
+    for (size_t i = 0; i < src->relations_count; i++) {
+        if (wm->relations && wm->relations[i].provenance) {
+            xfree(alloc, wm->relations[i].provenance,
+                  wm->relations[i].provenance_len + 1);
+        }
+    }
+    free_entities_local(alloc, wm->entities, wm->entities_count);
+    xfree(alloc, wm->relations, src->relations_count * sizeof(*src->relations));
+    xfree(alloc, wm, sizeof(*wm));
+    return NULL;
+
+clone_continue_:
     if (src->negatives && src->negatives_count > 0) {
         size_t bytes = src->negatives_count * sizeof(*src->negatives);
         wm->negatives = xalloc(alloc, bytes);
         if (!wm->negatives) {
+            for (size_t i = 0; i < src->relations_count; i++) {
+                if (wm->relations && wm->relations[i].provenance) {
+                    xfree(alloc, wm->relations[i].provenance,
+                          wm->relations[i].provenance_len + 1);
+                }
+            }
+            if (wm->hyperedges) {
+                for (size_t i = 0; i < src->hyperedges_count; i++) {
+                    if (wm->hyperedges[i].members) {
+                        xfree(alloc, wm->hyperedges[i].members,
+                              wm->hyperedges[i].members_count
+                                  * sizeof(*wm->hyperedges[i].members));
+                    }
+                    if (wm->hyperedges[i].provenance) {
+                        xfree(alloc, wm->hyperedges[i].provenance,
+                              strlen(wm->hyperedges[i].provenance) + 1);
+                    }
+                }
+                xfree(alloc, wm->hyperedges,
+                      src->hyperedges_count * sizeof(*src->hyperedges));
+            }
             free_entities_local(alloc, wm->entities, wm->entities_count);
             xfree(alloc, wm->relations, src->relations_count * sizeof(*src->relations));
+            xfree(alloc, wm->recent_changes,
+                  src->recent_changes_count * sizeof(*src->recent_changes));
             xfree(alloc, wm, sizeof(*wm));
             return NULL;
         }

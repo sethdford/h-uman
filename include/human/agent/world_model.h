@@ -17,6 +17,7 @@
 #include "human/core/error.h"
 #include "human/memory/belief.h"
 #include "human/memory/graph.h"
+#include "human/memory/hyperedge.h"
 #include "human/memory/memory.h"
 #include "human/memory/personal_model.h"
 #include "human/memory/write_trust.h"
@@ -65,6 +66,41 @@ typedef enum hu_negative_source {
     HU_NEGATIVE_SOURCE_SYSTEM_POLICY = 3,
 } hu_negative_source_t;
 
+/* P4.3 — Bitemporal change kind. Surfaced on the snapshot so the planner
+ * can see "this fact was retracted yesterday" or "this relation replaces
+ * the older one #42" without having to re-query W1 every turn.
+ *
+ *   SUPERSEDED — newer relation row points at an older one via
+ *                supersedes_id; the older row's event_end was set when
+ *                the new fact landed.
+ *   RETRACTED  — relation's event_end > 0 but no successor was written
+ *                (relationship explicitly ended; e.g. "we stopped
+ *                meeting weekly"). */
+typedef enum hu_world_change_kind {
+    HU_WORLD_CHANGE_NONE = 0,
+    HU_WORLD_CHANGE_SUPERSEDED = 1,
+    HU_WORLD_CHANGE_RETRACTED = 2,
+} hu_world_change_kind_t;
+
+/* P4.3 — One bitemporal change in the snapshot's recent window.
+ *
+ * `at_ms` is the user-visible "when did this change happen":
+ *   - SUPERSEDED → the new row's `last_seen` (when the new fact was
+ *     first observed and the old row was retired)
+ *   - RETRACTED  → the row's `event_end` (when the world stopped
+ *     including this relation)
+ *
+ * `summary` is a short, human-readable digest the planner can lift
+ * verbatim into chain-of-thought ("worked_at #4 → SUPERSEDED by #7"),
+ * truncated to 120 chars. `prior_id` is 0 for RETRACTED. */
+typedef struct hu_world_recent_change {
+    int64_t relation_id;
+    int64_t prior_id;
+    hu_world_change_kind_t kind;
+    int64_t at_ms;
+    char summary[120];
+} hu_world_recent_change_t;
+
 /* "Don't say X around Y." First-class so retrieval and verification can
  * surface it explicitly rather than burying it in persona avoid_vocab. */
 typedef struct hu_negative_memory {
@@ -80,6 +116,13 @@ typedef struct hu_negative_memory {
     hu_negative_source_t source;
 } hu_negative_memory_t;
 
+/* P5.4 — trust gradient sparkline length. Sized at 16 to match the
+ * roughly-one-conversation horizon (≈8 turns / hour over a typical
+ * exchange) without making the snapshot unwieldy. The newest sample is
+ * always at index `confidence_history_count - 1`; older samples scroll
+ * left as new merges fire. */
+#define HU_TOM_CONFIDENCE_HISTORY 16
+
 /* What the user appears to believe about us. Synthesized lazily from
  * persona expectations + recent persona deltas + emotional reactions. */
 typedef struct hu_theory_of_mind {
@@ -93,7 +136,64 @@ typedef struct hu_theory_of_mind {
      * interact on this channel. Empty when no persona overlay was merged. */
     char interaction_style[256];
     hu_belief_t confidence;
+    /* P5.4 — last N confidence.mean samples, oldest-first. Lets the
+     * planner detect "trust dropped sharply over the last 3 turns" (a
+     * de-escalation signal) without chasing every single dip the
+     * way a single scalar forces it to. Populated by
+     * `hu_world_model_merge_persona`: each call appends the new
+     * post-merge mean and shifts older samples left when full. */
+    float confidence_history[HU_TOM_CONFIDENCE_HISTORY];
+    size_t confidence_history_count;
 } hu_theory_of_mind_t;
+
+/* P5.1 — Russell VAD + Mehrabian PAD-extended stance vector for the
+ * latest emotional snapshot. Distinct from the legacy (valence, arousal,
+ * dominant_emotion) triple which the planner has had since W9 day-0:
+ *
+ *   valence    — pleasure/displeasure axis [-1, 1]
+ *   arousal    — calm/excited axis [0, 1]
+ *   dominance  — submissive/dominant axis [-1, 1] (PAD; user's sense of
+ *                control in the exchange)
+ *   certainty  — wishy-washy/firm axis [0, 1] (Mehrabian extension; how
+ *                resolute the user appears about their position)
+ *
+ * `dominance` and `certainty` are derived heuristically from the same
+ * residue rows that drive (valence, arousal) — see the build path for
+ * the exact mapping. NaN-safe: every component clamps to its valid
+ * range; missing residue rows leave the vector at neutral defaults. */
+typedef struct hu_stance_vector {
+    float valence;
+    float arousal;
+    float dominance;
+    float certainty;
+} hu_stance_vector_t;
+
+/* P5.3 — Conversational pressure cells. The planner has access to the
+ * latest emotional snapshot via (valence, arousal, dominant_emotion),
+ * but it has no view of the *trajectory* — "this is the third angry
+ * message in a row" or "the user has been complaining for 47 minutes
+ * straight". This struct surfaces the trajectory directly so the
+ * planner can de-escalate / hand off / shorten responses without
+ * re-querying the residue table.
+ *
+ *   recent_anger_count          — # negative-high-arousal residues in
+ *                                 the last 60 minutes (cap 99). 0 when
+ *                                 no recent anger.
+ *   sustained_complaint_minutes — span (in minutes) over which negative
+ *                                 residues have been continuously
+ *                                 present without an interruption of
+ *                                 ≥10 minutes. 0 when no complaint.
+ *   urgency_score               — [0, 1] composite of recent anger,
+ *                                 sustained complaint, and any explicit
+ *                                 urgency cues in the latest residue
+ *                                 reasons. 1.0 = "drop everything, this
+ *                                 user needs a different response right
+ *                                 now". */
+typedef struct hu_conv_pressure {
+    int recent_anger_count;
+    int sustained_complaint_minutes;
+    float urgency_score;
+} hu_conv_pressure_t;
 
 /* Single struct the planner consults every turn. Built lazily, cached, and
  * invalidated on relevant writes (see hu_world_model_invalidate). */
@@ -123,14 +223,45 @@ typedef struct hu_world_model {
     hu_graph_entity_t *entities;
     size_t entities_count;
 
-    /* Top-K relations for those entities (weight desc). */
+    /* Top-K relations for those entities (weight desc).
+     *
+     * P4.1 — each row carries belief (mean = `confidence`,
+     * variance = `confidence_variance`) and a deep-copied
+     * `provenance` string so the planner can distinguish "0.8 from
+     * channel-trusted source" from "0.8 from auto-extract". The
+     * `context` field is still nulled (lean snapshot); callers that
+     * need raw conversation context fetch via `hu_memory_facade_read`. */
     hu_graph_relation_t *relations;
     size_t relations_count;
 
-    /* Latest emotional snapshot (placeholder until emotional state lands). */
+    /* P4.3 — recent bitemporal changes derived from the relations
+     * window above. Filtered to rows where `supersedes_id != 0` or
+     * `event_end > 0`, sorted newest-first, capped at 8 to keep the
+     * snapshot lean. NULL when no changes were observed. */
+    hu_world_recent_change_t *recent_changes;
+    size_t recent_changes_count;
+
+    /* P4.2 — n-ary fact rows from W8. Queried per top-K entity and
+     * deduped, capped at 16 to keep snapshot install at O(1). NULL
+     * when no hyperedges touch any entity in this window. Owns deep
+     * copies of `members` and `provenance`; freed by
+     * `hu_world_model_free`. */
+    hu_hyperedge_t *hyperedges;
+    size_t hyperedges_count;
+
+    /* Latest emotional snapshot. The legacy (valence, arousal,
+     * dominant_emotion) triple stays in place for back-compat with
+     * the prompt builder, the directive engine, and ~40 callers.
+     * P5.1 layers a richer (V, A, D, C) stance vector on top via
+     * `stance` below — every snapshot populates both. */
     char dominant_emotion[32];
     float arousal;
     float valence;
+    /* P5.1 — Russell VAD + Mehrabian PAD-extended stance vector. */
+    hu_stance_vector_t stance;
+    /* P5.3 — conversational pressure derived from the residue
+     * trajectory (NOT just the latest cell). */
+    hu_conv_pressure_t pressure;
 
     /* Active goals (top-K by salience). */
     hu_active_goal_t goals[8];
