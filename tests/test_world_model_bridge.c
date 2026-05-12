@@ -10,6 +10,7 @@
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "human/memory/personal_model.h"
+#include "human/persona.h"
 #include "test_framework.h"
 #include <stdlib.h>
 
@@ -482,6 +483,176 @@ static void w14_autodream_rejects_null_args(void) {
     HU_ASSERT_EQ(hu_w14_scheduler_enqueue_autodream(NULL, 0, 100), HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story B (sprint-4 follow-up) — persona_ctx threading.
+ *
+ * Pin that hu_w7_render_world_model calls `hu_world_model_merge_persona` IFF
+ * the caller passes a non-NULL persona_ctx. Without that merge, the channel-
+ * aware pragmatics digest (`tom.interaction_style`) is populated by the
+ * persona system but never reaches the rendered prompt block — which was the
+ * bug before this story.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Helper: build a minimal hu_persona_t with a "discord" overlay whose
+ * `formality` field is unique enough to grep for in the rendered output. The
+ * struct is stack-allocated; we deliberately reuse string literals so the
+ * persona itself owns no heap (matches the borrow contract documented on
+ * `hu_world_model_t::persona`). */
+static void story_b_make_persona(hu_persona_t *p, hu_persona_overlay_t *ov) {
+    memset(p, 0, sizeof(*p));
+    memset(ov, 0, sizeof(*ov));
+    p->name = (char *)"story-b-test";
+    p->identity = (char *)"story-b-witness";
+    ov->channel = (char *)"discord";
+    ov->formality = (char *)"casual-direct";
+    ov->avg_length = (char *)"short";
+    p->overlays = ov;
+    p->overlays_count = 1;
+}
+
+/* Helper: seed a negative so the world-model snapshot has *something* to
+ * render. Without a non-empty snapshot the bridge returns NULL/0 and we
+ * never reach the merge step. */
+static void story_b_seed_negative(hu_graph_t *g, const char *contact_id, size_t cid_len) {
+    hu_negative_memory_t nm = {0};
+    snprintf(nm.text, sizeof(nm.text), "topic seed for story-b");
+    snprintf(nm.scope, sizeof(nm.scope), "topic");
+    nm.belief = hu_belief_init(0.95f, "test", 1700000000000LL);
+    nm.created_at = 1700000000000LL;
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add(g, contact_id, cid_len, &nm, &id), HU_OK);
+    HU_ASSERT(id > 0);
+}
+
+static void bridge_render_with_persona_ctx_emits_interaction_style(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyb_with";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    hu_persona_context_t pctx;
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 8;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    /* Persona merge wrote the overlay's formality token into
+     * `tom.interaction_style`; the bridge renders it as
+     * "Interaction style: ..." inside the ToM block. */
+    HU_ASSERT_NOT_NULL(strstr(txt, "Interaction style"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "casual-direct"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_without_persona_ctx_omits_interaction_style(void) {
+    /* Regression guard: passing NULL persona_ctx must NOT cause the merge
+     * to run. This is the pre-Story-B behavior — we keep it exactly so
+     * callers that haven't migrated yet are byte-for-byte unchanged. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyb_without";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    /* No persona merge happened → no Interaction style line. */
+    HU_ASSERT(strstr(txt, "Interaction style") == NULL);
+    HU_ASSERT(strstr(txt, "casual-direct") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_with_persona_no_overlay_falls_back_to_identity_only(void) {
+    /* Persona is set, but the active channel has no overlay. The merge
+     * should still populate `user_thinks_we_are` from persona identity
+     * without crashing and without injecting an Interaction-style line. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyb_no_overlay";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    hu_persona_context_t pctx;
+    pctx.persona = &persona;
+    pctx.channel = "telegram"; /* persona only has a "discord" overlay */
+    pctx.channel_len = strlen("telegram");
+    pctx.delta_limit = 8;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    /* Identity merge still happens → "story-b-witness" should appear in the
+     * ToM block under "User thinks we are". */
+    HU_ASSERT_NOT_NULL(strstr(txt, "story-b-witness"));
+    /* But no overlay → no Interaction style line. */
+    HU_ASSERT(strstr(txt, "casual-direct") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_with_persona_ctx_null_persona_skips_merge(void) {
+    /* Defensive: caller passes a non-NULL hu_persona_context_t but with
+     * pctx.persona = NULL. The bridge must treat this as "no persona"
+     * (back-compat path) rather than dereferencing NULL. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyb_nullp";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_context_t pctx;
+    pctx.persona = NULL;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 8;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Interaction style") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_world_model_bridge_tests(void) {
@@ -506,5 +677,10 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(w14_scheduler_enqueue_then_tick_drains_job);
     HU_RUN_TEST(w14_autodream_phases_drain_through_scheduler);
     HU_RUN_TEST(w14_autodream_rejects_null_args);
+    /* sprint-4 follow-up Story B — persona_ctx threading. */
+    HU_RUN_TEST(bridge_render_with_persona_ctx_emits_interaction_style);
+    HU_RUN_TEST(bridge_render_without_persona_ctx_omits_interaction_style);
+    HU_RUN_TEST(bridge_render_with_persona_no_overlay_falls_back_to_identity_only);
+    HU_RUN_TEST(bridge_render_with_persona_ctx_null_persona_skips_merge);
 #endif
 }

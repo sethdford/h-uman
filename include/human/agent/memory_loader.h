@@ -11,6 +11,7 @@
  * hu_memory_facade_t type collision. See world_model_bridge.h for details. */
 struct hu_w7_facade;
 struct hu_personal_model;
+struct hu_persona_context;
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Memory loader — recall relevant memories, format as markdown for context
@@ -24,6 +25,12 @@ typedef struct hu_memory_loader {
     size_t max_context_chars;
     struct hu_w7_facade *facade; /* optional W7 facade for W12 planner recall */
     struct hu_personal_model *personal_model; /* optional; merged into W9 graph context */
+    /* Story B (sprint-4 follow-up) — optional persona context threaded into
+     * `hu_w7_render_world_model` so the channel-aware pragmatics digest
+     * (`tom.interaction_style`) and persona-grounded ToM updates make it
+     * into the rendered prompt. Caller retains ownership of the pointed-to
+     * persona; this is a borrowed pointer. */
+    const struct hu_persona_context *persona_ctx;
 } hu_memory_loader_t;
 
 hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *alloc,
@@ -41,6 +48,16 @@ void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade
  * the graph snapshot. Safe to pass NULL. */
 void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader,
                                          struct hu_personal_model *pm);
+
+/* Story B (sprint-4 follow-up) — bind a persona context for W9 graph
+ * rendering. When set, the loader's supplementary render call threads the
+ * context into `hu_w7_render_world_model` so the bridge merges persona
+ * overlay (channel-aware `interaction_style`, formality, directness,
+ * face-saving, vulnerability tier) and persona-grounded ToM updates into
+ * the snapshot. Safe to pass NULL to clear. Caller retains ownership of
+ * the pointed-to persona context; the loader stores the pointer only. */
+void hu_memory_loader_set_persona_context(hu_memory_loader_t *loader,
+                                          const struct hu_persona_context *ctx);
 
 /* Load relevant memories for a query and format them as markdown text.
  * Returns HU_OK with *out_context=NULL, *out_context_len=0 if no memories.
