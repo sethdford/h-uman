@@ -426,6 +426,9 @@ void run_dpo_real_mlx_tests(void);
 /* Phase 2 Task 8 (RL SOTA): pins surface contract for the post-split
  * hu_ml_cli_dpo_judge / hu_ml_cli_dpo_real CLI handlers. */
 void run_cli_dpo_tests(void);
+/* Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + backward grad
+ * check + save/load round trip. */
+void run_value_head_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -1003,6 +1006,9 @@ int main(int argc, char **argv) {
     run_dpo_real_mlx_tests();
     /* Phase 2 Task 8 (RL SOTA): post-split CLI handler surface contract. */
     run_cli_dpo_tests();
+    /* Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection — forward,
+     * backward (analytical + finite-diff grad check), save/load round trip. */
+    run_value_head_tests();
 #endif
 
     run_experience_tests();

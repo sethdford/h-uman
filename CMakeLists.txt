@@ -1248,6 +1248,11 @@ if(HU_ENABLE_ML)
         src/ml/rl_trainer.c
         src/ml/dpo_real_huml.c
         src/ml/dpo_real_mlx.c
+        # Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection
+        # (score = W . h + b) — trainable surface on top of frozen
+        # backbones in the reward-model composition (Task 2) and
+        # Bradley-Terry RM training loop (Task 3).
+        src/ml/value_head.c
         # Phase 2 Task 2 (RL SOTA): teacher-forced log π(y|x) on hu_model_t.
         # Used by hu_dpo_real_huml in Task 4 and (paired with reference_model
         # from Task 3) the log π_ref counterparts that drive the DPO loss.
@@ -1260,6 +1265,13 @@ if(HU_ENABLE_ML)
         # hu_ml_cli_dpo_judge (legacy provider-scored path) +
         # hu_ml_cli_dpo_real (Phase 2 real-DPO via hu_rl_trainer_t).
         src/ml/cli_dpo.c
+        # Phase 3 Task 1 (RL SOTA): hu_value_head_t — linear projection
+        # (score = W·h + b) with Xavier-Glorot init + hand-derived
+        # backward + "VHED" save format. Sole trainable surface on
+        # top of frozen backbones in Phase 3's reward-model composition
+        # (hu_reward_model_t, Task 2) and Bradley-Terry RM training
+        # loop (Task 3).
+        src/ml/value_head.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2764,9 +2776,15 @@ set(HU_TEST_SOURCES
     # Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper — JSONL export +
     # dummy-adapter shortcut without HU_HAVE_MLX_LM; real Gemma DPO with it.
     tests/test_dpo_real_mlx.c
+    # Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + backward grad
+    # check (analytical vs finite-diff) + save/load round trip.
+    tests/test_value_head.c
     # Phase 2 Task 8 (RL SOTA): pins surface contract for the post-split
     # hu_ml_cli_dpo_judge / hu_ml_cli_dpo_real CLI handlers.
     tests/test_cli_dpo.c
+    # Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + analytical-vs-
+    # finite-diff backward grad check + "VHED" save/load round trip.
+    tests/test_value_head.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
