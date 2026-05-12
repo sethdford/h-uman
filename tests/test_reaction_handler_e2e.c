@@ -104,8 +104,43 @@ static void test_reaction_event_with_unknown_target_drops_silently(void) {
     HU_ASSERT_FALSE(hu_reaction_handler_was_called_this_turn());
 }
 
+/* Phase 2 Task 14: lifecycle smoke for the per-turn flag. handle_event
+ * sets it on success; clear_turn (called at the end of every successful
+ * hu_agent_turn) resets it. Pinned here as a standalone smoke because
+ * integration with hu_agent_turn is exercised in production paths and
+ * Phase 5 will add a daemon-level e2e. */
+static void test_agent_turn_clear_turn_resets_called_flag(void) {
+    hu_reaction_handler_reset_for_test();
+
+    sqlite3 *db = NULL;
+    sqlite3_open(":memory:", &db);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_dpo_collector_t col = {0};
+    hu_dpo_collector_create(&alloc, db, 1024, &col);
+    hu_dpo_init_tables(&col);
+    hu_reaction_handler_set_collector(&col);
+    hu_reaction_handler_register_assistant_message_for_test(
+        "imessage", "ct", "mr", "p", "r");
+
+    HU_ASSERT_FALSE(hu_reaction_handler_was_called_this_turn());
+
+    hu_reaction_event_t e = {.channel_id="imessage",.target_thread_id="ct",
+                             .target_message_ref="mr",.kind=HU_REACTION_LOVE,
+                             .polarity=HU_REACTION_POSITIVE};
+    HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
+    HU_ASSERT_TRUE(hu_reaction_handler_was_called_this_turn());
+
+    hu_reaction_handler_clear_turn();
+    HU_ASSERT_FALSE(hu_reaction_handler_was_called_this_turn());
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+    hu_reaction_handler_reset_for_test();
+}
+
 void run_reaction_handler_e2e_tests(void) {
     HU_TEST_SUITE("reaction_handler_e2e");
     HU_RUN_TEST(test_reaction_event_with_known_target_inserts_dpo_pair);
     HU_RUN_TEST(test_reaction_event_with_unknown_target_drops_silently);
+    HU_RUN_TEST(test_agent_turn_clear_turn_resets_called_flag);
 }

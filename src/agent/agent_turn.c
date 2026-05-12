@@ -22,6 +22,27 @@
 
 #include "human/agent/conv_goals.h"
 #include "human/agent/model_router.h"
+/* Phase 2 Task 14 (RL SOTA): forward-declare the two reaction-handler
+ * lifecycle hooks instead of including human/agent/reaction_handler.h.
+ *
+ * Why forward-decl, not #include:
+ *   reaction_handler.h transitively pulls in human/channels/reaction_event.h,
+ *   which redefines HU_REACTION_QUESTION and HU_REACTION_CUSTOM_EMOJI as
+ *   members of hu_reaction_kind_t. Those names are ALREADY defined as
+ *   members of hu_reaction_type_t in human/channel.h, which agent_turn.c
+ *   pulls in transitively via agent_internal.h -> human/agent.h:30. The
+ *   collision is a hard -Wpedantic -Werror compile error. The codebase
+ *   already documents this constraint in src/channels/slack_reactions.c
+ *   header comment ("Pulling both headers into the same translation unit
+ *   is a compile error"); the Phase 2 plan's Correction #4 told us to
+ *   #include the header but did not account for this collision.
+ *
+ * Forward-decl is safe here because both functions are pure (void) -> void
+ * and (void) -> int — no types from reaction_event.h cross the boundary.
+ * Resolving the collision properly (renaming one of the colliding enum
+ * values) is a separate, larger change tracked outside Task 14. */
+void hu_reaction_handler_clear_turn(void);
+int  hu_reaction_handler_was_called_this_turn(void);
 #include "human/cognition/trust.h"
 #include "human/context/contact_style_overlay.h"
 #include "human/context/humor.h"
@@ -6091,16 +6112,29 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             (void)hu_value_learn_from_correction(&ve, "thoroughness", 12,
                                                                  "User prefers detailed responses",
                                                                  31, 0.2, now_vl);
-                        /* DPO: record user feedback as preference signal */
-                        if (agent->sota.sota_initialized && agent->history_count >= 2) {
-                            const char *last_resp =
-                                agent->history[agent->history_count - 2].content;
-                            size_t last_resp_len =
-                                agent->history[agent->history_count - 2].content_len;
-                            if (last_resp && last_resp_len > 0 && (is_positive || is_negative))
-                                hu_dpo_record_from_feedback(&agent->sota.dpo_collector, msg,
-                                                            msg_len, last_resp, last_resp_len,
-                                                            is_positive);
+                        /* DPO: record user feedback as preference signal.
+                         *
+                         * Phase 2 Task 14 (RL SOTA): if a real reaction event
+                         * (iMessage tapback / Slack reactji) already produced a
+                         * dpo_pair for this turn's assistant message via
+                         * hu_reaction_handler_handle_event, skip the
+                         * substring-heuristic record to avoid double-counting.
+                         * Value-learning calls above are independent and
+                         * continue to fire — only the DPO collector is gated.
+                         * The flag is consumed (cleared) at the end of
+                         * hu_agent_turn so each turn starts fresh. */
+                        if (!hu_reaction_handler_was_called_this_turn()) {
+                            if (agent->sota.sota_initialized && agent->history_count >= 2) {
+                                const char *last_resp =
+                                    agent->history[agent->history_count - 2].content;
+                                size_t last_resp_len =
+                                    agent->history[agent->history_count - 2].content_len;
+                                if (last_resp && last_resp_len > 0 &&
+                                    (is_positive || is_negative))
+                                    hu_dpo_record_from_feedback(
+                                        &agent->sota.dpo_collector, msg, msg_len, last_resp,
+                                        last_resp_len, is_positive);
+                            }
                         }
 
                         hu_value_engine_deinit(&ve);
@@ -6854,6 +6888,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_workflow_event_log_append(agent->infra.workflow_log, agent->alloc, &ev);
             }
 
+            /* Phase 2 Task 14 (RL SOTA): consume the per-turn reaction flag at
+             * the single point where the substring-heuristic DPO collector
+             * gating above could have been evaluated. This is the primary
+             * success exit of hu_agent_turn — the path that actually
+             * synthesised a response and ran the value-learning + DPO blocks
+             * inside the HU_ENABLE_SQLITE region. Other returns (early cache
+             * hits, error/cancel/timeout/OOM paths) bypass the substring block
+             * entirely, so leaving the flag set there is harmless: the next
+             * turn that reaches this point will still see it. Clearing here
+             * means each turn that consulted the gate consumes the signal
+             * exactly once. If the daemon ever gains concurrent turn dispatch,
+             * move the flag onto hu_agent_t (see header). */
+            hu_reaction_handler_clear_turn();
             return HU_OK;
         }
 
