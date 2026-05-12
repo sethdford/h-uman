@@ -2095,26 +2095,38 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             {
                 hu_self_improve_t si;
                 if (hu_self_improve_create(agent->alloc, intel_db, &si) == HU_OK) {
+                    /* Both self-improve helpers return HU_OK + a 1-byte
+                     * empty string on the "no rows" path (self_improve.c:442
+                     * and :500). The previous gate freed only on len > 0,
+                     * leaking the empty buffer every turn — PR55 ASan ran
+                     * caught 4 such 1-byte chains. Free whenever the helper
+                     * returns HU_OK and the pointer is non-NULL; keep
+                     * len > 0 as the gate for appending to the prompt. */
                     char *patches = NULL;
                     size_t patches_len = 0;
-                    if (hu_self_improve_get_prompt_patches(&si, &patches, &patches_len) == HU_OK &&
-                        patches && patches_len > 0) {
-                        int n =
-                            snprintf(parts + pos, sizeof(parts) - pos,
-                                     "### Learned Behaviors\n%.*s\n", (int)patches_len, patches);
-                        if (n > 0 && pos + (size_t)n < sizeof(parts))
-                            pos += (size_t)n;
-                        agent->alloc->free(agent->alloc->ctx, patches, patches_len + 1);
+                    if (hu_self_improve_get_prompt_patches(&si, &patches, &patches_len) == HU_OK) {
+                        if (patches && patches_len > 0) {
+                            int n = snprintf(parts + pos, sizeof(parts) - pos,
+                                             "### Learned Behaviors\n%.*s\n", (int)patches_len,
+                                             patches);
+                            if (n > 0 && pos + (size_t)n < sizeof(parts))
+                                pos += (size_t)n;
+                        }
+                        if (patches)
+                            agent->alloc->free(agent->alloc->ctx, patches, patches_len + 1);
                     }
                     char *tool_prefs = NULL;
                     size_t tool_prefs_len = 0;
                     if (hu_self_improve_get_tool_prefs_prompt(&si, &tool_prefs, &tool_prefs_len) ==
-                            HU_OK &&
-                        tool_prefs && tool_prefs_len > 0) {
-                        int n = snprintf(parts + pos, sizeof(parts) - pos, "\n%s\n", tool_prefs);
-                        if (n > 0 && pos + (size_t)n < sizeof(parts))
-                            pos += (size_t)n;
-                        agent->alloc->free(agent->alloc->ctx, tool_prefs, tool_prefs_len + 1);
+                        HU_OK) {
+                        if (tool_prefs && tool_prefs_len > 0) {
+                            int n =
+                                snprintf(parts + pos, sizeof(parts) - pos, "\n%s\n", tool_prefs);
+                            if (n > 0 && pos + (size_t)n < sizeof(parts))
+                                pos += (size_t)n;
+                        }
+                        if (tool_prefs)
+                            agent->alloc->free(agent->alloc->ctx, tool_prefs, tool_prefs_len + 1);
                     }
                     hu_self_improve_deinit(&si);
                 }

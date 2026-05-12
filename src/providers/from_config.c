@@ -126,6 +126,13 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
         hu_provider_t primary;
         hu_error_t err = hu_provider_create(alloc, primary_name, primary_len, api_key, api_key_len,
                                             base_url, base_url_len, &primary);
+        /* Mirror the create_provider_from_name fix above: every provider
+         * deep-copies api_key into its own context, so the heap copy from
+         * resolve_key is ours to release on both success and failure paths.
+         * This branch was missed in 8cff4a99 — PR55's ASan run still
+         * attributed an 8 b leak to api_key.c:60 here. */
+        if (api_key)
+            alloc->free(alloc->ctx, api_key, api_key_len + 1);
         if (err != HU_OK)
             return err;
 

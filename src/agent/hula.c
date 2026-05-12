@@ -543,7 +543,17 @@ hu_error_t hu_hula_parse_json(hu_allocator_t *alloc, const char *json, size_t js
     }
 
     hu_json_free(alloc, root);
-    return out->root ? HU_OK : HU_ERR_PARSE;
+    if (!out->root) {
+        /* hu_hula_program_init above allocated `prog->name`; the other
+         * parse_* entry points in this file (lines 2064/2070/2081/...) all
+         * deinit on the failure path. PR55's ASan run flagged a 6-byte leak
+         * here from hula_parse_missing_root_returns_error feeding `{"name":
+         * "empty"}` — name copy survives, error returns, caller never
+         * inits→deinits. Match the existing pattern. */
+        hu_hula_program_deinit(out);
+        return HU_ERR_PARSE;
+    }
+    return HU_OK;
 }
 
 /* ── Serialize to JSON ──────────────────────────────────────────────────── */
