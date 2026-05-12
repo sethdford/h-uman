@@ -217,11 +217,6 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
         }
     }
 
-    /* TODO(Task 9): load pairs from `--pairs` JSONL or from the SQLite
-     * dpo_pairs table and feed them to trainer.vtable->step(). For now
-     * we just accept and ignore the path so `--pairs <p>` parses. */
-    (void)pairs_path;
-
     hu_dpo_backend_t backend = HU_DPO_BACKEND_AUTO;
     if (strcmp(backend_str, "huml") == 0) backend = HU_DPO_BACKEND_HUML;
     else if (strcmp(backend_str, "mlx") == 0) backend = HU_DPO_BACKEND_MLX;
@@ -236,10 +231,87 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
         fprintf(stderr, "[dpo-train] failed to create trainer: error %d\n", (int)err);
         return err;
     }
-    /* TODO(Task 9): once pair loading lands, drive trainer.vtable->step()
-     * here. Task 8 just prints the resolved backend and exits. */
     fprintf(stderr, "[dpo-train] backend=%s, iters=%d, beta=%.2f\n",
             trainer.vtable->name(trainer.ctx), max_iters, beta);
+
+    /* Task 9: JSONL pair loader + iteration loop. Replaces the Task 8
+     * fprintf-and-exit placeholder.
+     *
+     * Plan deviation #4 (vs lines 2113-2123): the canonical snippet's
+     * `if (!f) return HU_ERR_IO;` early-return leaks the trainer (created
+     * above). The plan's `else` branch correctly deinits before
+     * returning HU_ERR_NOT_SUPPORTED — we apply the same discipline to
+     * the fopen-failure path to keep ASan clean.
+     *
+     * `pairs[256]` ≈ 256 * sizeof(hu_preference_pair_t) (~10 KB each) =
+     * ~2.65 MB on the function stack. macOS default main-thread stack is
+     * 8 MB so this fits, but with ASan red zones it gets tight; if a
+     * future test runs on a smaller pthread stack this should switch to
+     * `alloc->alloc(...)`. Tracked but not changed in this task to
+     * minimize diff vs the plan snippet (plan lines 2116 + 2170-2171
+     * explicitly call out the stack/caller-allocated discipline). */
+    hu_preference_pair_t pairs[256];
+    size_t n_pairs = 0;
+
+    if (pairs_path) {
+        FILE *f = fopen(pairs_path, "r");
+        if (!f) {
+            fprintf(stderr, "[dpo-train] failed to open --pairs %s\n", pairs_path);
+            trainer.vtable->deinit(trainer.ctx, alloc);
+            return HU_ERR_IO;
+        }
+        char line[2048];
+        while (fgets(line, sizeof(line), f) && n_pairs < 256) {
+            char *p = strstr(line, "\"prompt\": \"");
+            char *c = strstr(line, "\"chosen\": \"");
+            char *r = strstr(line, "\"rejected\": \"");
+            if (!p || !c || !r) continue;
+            char prompt[512] = {0}, chosen[512] = {0}, rejected[512] = {0};
+            sscanf(p + 11, "%511[^\"]", prompt);
+            sscanf(c + 11, "%511[^\"]", chosen);
+            sscanf(r + 13, "%511[^\"]", rejected);
+            /* hu_preference_pair_t fields are fixed-size char arrays per
+             * include/human/ml/dpo.h:15-26, NOT pointers. strncpy + _len
+             * updates match the Phase 2 discipline (same pattern as
+             * test_dpo_real_e2e.c:55-61). */
+            memset(&pairs[n_pairs], 0, sizeof(pairs[n_pairs]));
+            strncpy(pairs[n_pairs].prompt, prompt, sizeof(pairs[n_pairs].prompt) - 1);
+            pairs[n_pairs].prompt_len = strlen(pairs[n_pairs].prompt);
+            strncpy(pairs[n_pairs].chosen, chosen, sizeof(pairs[n_pairs].chosen) - 1);
+            pairs[n_pairs].chosen_len = strlen(pairs[n_pairs].chosen);
+            strncpy(pairs[n_pairs].rejected, rejected, sizeof(pairs[n_pairs].rejected) - 1);
+            pairs[n_pairs].rejected_len = strlen(pairs[n_pairs].rejected);
+            strncpy(pairs[n_pairs].source, "jsonl", sizeof(pairs[n_pairs].source) - 1);
+            pairs[n_pairs].source_len = strlen(pairs[n_pairs].source);
+            n_pairs++;
+        }
+        fclose(f);
+    } else {
+        /* TODO Task 13: load from SQLite dpo_pairs table. */
+        fprintf(stderr, "[dpo-train] no --pairs and SQLite path not yet wired (Phase 2 Task 13)\n");
+        trainer.vtable->deinit(trainer.ctx, alloc);
+        return HU_ERR_NOT_SUPPORTED;
+    }
+
+    for (int iter = 0; iter < max_iters; iter++) {
+        hu_rl_trainer_metrics_t m = {0};
+        hu_error_t serr = trainer.vtable->step(trainer.ctx, alloc, pairs, n_pairs, &m);
+        if (serr != HU_OK) {
+            fprintf(stderr, "[dpo-train] step %d failed: error %d\n", iter, (int)serr);
+            break;
+        }
+        if ((iter + 1) % 10 == 0 || iter == max_iters - 1)
+            fprintf(stderr,
+                    "[dpo-train] iter %d/%d loss=%.4f Δlogp_w=%.4f Δlogp_l=%.4f\n",
+                    iter + 1, max_iters, m.final_loss,
+                    m.chosen_logprob_delta, m.rejected_logprob_delta);
+        if (m.adapter_path[0])
+            fprintf(stderr, "[dpo-train] adapter written to %s\n", m.adapter_path);
+    }
+
+    /* No per-field frees — strings are inline char[] arrays in
+     * hu_preference_pair_t. The pairs[] array itself is stack-allocated
+     * and falls out of scope at function return. */
     trainer.vtable->deinit(trainer.ctx, alloc);
     return HU_OK;
 }
