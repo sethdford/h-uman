@@ -433,6 +433,9 @@ void run_value_head_tests(void);
  * M3 NaN contract for one-sided KTO pairs. Task 3 will APPEND
  * Bradley-Terry convergence + FD grad check to the same runner. */
 void run_reward_model_train_tests(void);
+/* Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
+ * grad check + vtable contract. */
+void run_kto_loss_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -1017,6 +1020,8 @@ int main(int argc, char **argv) {
      * (toy GPT + Task 1 value head). Smoke score-returns-finite + M3
      * NaN contract for one-sided KTO pairs in score_batch. */
     run_reward_model_train_tests();
+    /* Phase 3 Task 5 (RL SOTA): KTO loss. */
+    run_kto_loss_tests();
 #endif
 
     run_experience_tests();

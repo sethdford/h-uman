@@ -13,6 +13,7 @@
  */
 #include "human/ml/rl_trainer.h"
 #include "human/ml/dpo_real.h"  /* hu_dpo_real_huml_create, hu_dpo_real_mlx_create */
+#include "human/ml/kto.h"      /* hu_kto_huml_create, hu_kto_mlx_create */
 #include "human/core/error.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,5 +51,31 @@ hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
 #endif
     if (resolved == HU_DPO_BACKEND_HUML) return hu_dpo_real_huml_create(alloc, config, out);
     if (resolved == HU_DPO_BACKEND_MLX)  return hu_dpo_real_mlx_create(alloc, config, out);
+    return HU_ERR_INVALID_ARGUMENT;
+}
+
+/* Probe: KTO trainer importable from mlx-lm-lora. Returns 0 for now —
+ * Task 7 fills in the real symbol path. */
+static int mlx_lm_lora_kto_available(void) {
+    return 0;
+}
+
+hu_error_t hu_rl_trainer_create_kto(hu_allocator_t *alloc,
+                                     const hu_rl_trainer_config_t *config,
+                                     hu_rl_trainer_t *out) {
+    if (!alloc || !config || !out) return HU_ERR_INVALID_ARGUMENT;
+    hu_dpo_backend_t resolved = config->backend;
+    if (resolved == HU_DPO_BACKEND_AUTO) {
+#if defined(__APPLE__)
+        resolved = mlx_lm_lora_kto_available() ? HU_DPO_BACKEND_MLX : HU_DPO_BACKEND_HUML;
+#else
+        resolved = HU_DPO_BACKEND_HUML;
+#endif
+    }
+#if HU_IS_TEST
+    s_last_backend = resolved;
+#endif
+    if (resolved == HU_DPO_BACKEND_HUML) return hu_kto_huml_create(alloc, config, out);
+    if (resolved == HU_DPO_BACKEND_MLX)  return hu_kto_mlx_create(alloc, config, out);
     return HU_ERR_INVALID_ARGUMENT;
 }

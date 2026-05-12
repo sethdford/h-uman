@@ -40,6 +40,8 @@ typedef struct {
     size_t max_iters;       /* default 100 */
     const char *model_id;   /* MLX: HF id like "mlx-community/gemma-3-4b-it-bf16"; HUML: ignored */
     const char *adapter_out_dir; /* MLX: writes adapters.safetensors here; HUML: ignored */
+    double lambda_d;   /* KTO weight for desirable signal; 0.0 treated as 1.0. DPO impls IGNORE. */
+    double lambda_u;   /* KTO weight for undesirable signal; 0.0 treated as 1.0. DPO impls IGNORE. */
 } hu_rl_trainer_config_t;
 
 typedef struct {
@@ -65,6 +67,14 @@ typedef struct {
 } hu_rl_trainer_t;
 
 hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
+                                     const hu_rl_trainer_config_t *config,
+                                     hu_rl_trainer_t *out);
+
+/* Construct a KTO trainer. Like _create_dpo but consumes one-sided
+ * preference pairs (chosen_len > 0 XOR rejected_len > 0). Two-sided
+ * pairs are silently skipped at step time. The same backend enum
+ * (HUML / MLX / AUTO) gates dispatch. */
+hu_error_t hu_rl_trainer_create_kto(hu_allocator_t *alloc,
                                      const hu_rl_trainer_config_t *config,
                                      hu_rl_trainer_t *out);
 
