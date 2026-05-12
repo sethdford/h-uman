@@ -102,6 +102,64 @@ hu_error_t hu_reward_model_save(const hu_reward_model_t *rm, const char *dir);
 hu_error_t hu_reward_model_load(hu_allocator_t *alloc, const char *dir,
                                  hu_reward_model_t *out);
 
+/* ---------------------------------------------------------------------- *
+ * Phase 3 Task 3: Bradley-Terry reward-model training.
+ *
+ * Per-iteration mini-batch SGD on the value head (W, b) only — the
+ * backbone is FROZEN (Christiano 2017 §2.2 RM-training convention; the
+ * frontier-scale path in Task 8 uses a frozen Qwen encoder identically).
+ *
+ * Bradley-Terry loss for a two-sided preference pair (chosen y_w,
+ * rejected y_l):
+ *
+ *     r_w = score(prompt, y_w)
+ *     r_l = score(prompt, y_l)
+ *     L_i = -log σ(r_w - r_l)
+ *
+ * Gradients (w.r.t. the scalar scores; chained through the value head's
+ * linear projection by hu_value_head_backward):
+ *
+ *     dL/dr_w = σ(r_w - r_l) - 1
+ *     dL/dr_l = 1 - σ(r_w - r_l)
+ *
+ * One-sided KTO pairs (chosen_len == 0 OR rejected_len == 0) are
+ * SKIPPED — Bradley-Terry needs both sides. The skipped count is
+ * reported in `metrics.skipped_count` and a single `fprintf(stderr, …)`
+ * is emitted (per training run) so operators notice. The KTO unpaired
+ * loss is Task 4's responsibility, not Task 3's. */
+
+typedef struct {
+    size_t max_iters;        /* number of full passes over the batch */
+    double learning_rate;    /* SGD step size; mini-batch SGD with no momentum */
+    size_t log_every;        /* 0 = silent; >0 = fprintf(stderr) every k iters */
+} hu_reward_model_train_config_t;
+
+typedef struct {
+    double initial_loss;       /* mean BT loss BEFORE iter 0 (forward-only pass) */
+    double final_loss;         /* mean BT loss AFTER the last SGD step */
+    size_t iters_completed;    /* number of SGD iterations actually run */
+    size_t skipped_count;      /* one-sided KTO pairs skipped (see above) */
+} hu_reward_model_train_metrics_t;
+
+/* Train the reward model's value head on `pairs` for `config->max_iters`
+ * iterations. Returns:
+ *   HU_OK on a clean run (even if all pairs were skipped — caller must
+ *     check `metrics.skipped_count` vs n).
+ *   HU_ERR_INVALID_ARGUMENT for NULL inputs, n == 0, max_iters == 0, or
+ *     learning_rate <= 0.
+ *   HU_ERR_NOT_SUPPORTED if `rm` is not the HUML backend (MLX path is in
+ *     Python — see Task 8).
+ *   HU_ERR_OUT_OF_MEMORY on allocator failure.
+ *
+ * AC-6: every loss computation in this file goes through the same
+ * Bradley-Terry forward path used by the FD-grad-check test seam, so
+ * the analytical gradient applied by SGD is the SAME object the
+ * finite-difference test perturbs. */
+hu_error_t hu_reward_model_train(hu_reward_model_t *rm, hu_allocator_t *alloc,
+                                  const hu_preference_pair_t *pairs, size_t n,
+                                  const hu_reward_model_train_config_t *config,
+                                  hu_reward_model_train_metrics_t *out_metrics);
+
 #ifdef __cplusplus
 }
 #endif

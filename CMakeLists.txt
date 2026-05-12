@@ -1248,6 +1248,9 @@ if(HU_ENABLE_ML)
         src/ml/rl_trainer.c
         src/ml/dpo_real_huml.c
         src/ml/dpo_real_mlx.c
+        # Phase 3 Task 4 (RL SOTA): KTO (Kahneman-Tversky Optimization)
+        # HUML backend + MLX stub. One-sided preference signals.
+        src/ml/kto.c
         # Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection
         # (score = W . h + b) — trainable surface on top of frozen
         # backbones in the reward-model composition (Task 2) and
@@ -1265,13 +1268,6 @@ if(HU_ENABLE_ML)
         # hu_ml_cli_dpo_judge (legacy provider-scored path) +
         # hu_ml_cli_dpo_real (Phase 2 real-DPO via hu_rl_trainer_t).
         src/ml/cli_dpo.c
-        # Phase 3 Task 1 (RL SOTA): hu_value_head_t — linear projection
-        # (score = W·h + b) with Xavier-Glorot init + hand-derived
-        # backward + "VHED" save format. Sole trainable surface on
-        # top of frozen backbones in Phase 3's reward-model composition
-        # (hu_reward_model_t, Task 2) and Bradley-Terry RM training
-        # loop (Task 3).
-        src/ml/value_head.c
         # Phase 3 Task 2 (RL SOTA): hu_reward_model_t — vtable + HUML
         # factory (toy GPT backbone + Task 1 value head on last-position
         # logits) + M3 NaN contract for one-sided KTO pairs. MLX factory
@@ -1281,6 +1277,19 @@ if(HU_ENABLE_ML)
         # reward_model_train.c can access the value head for the SGD
         # step without a HU_IS_TEST accessor.
         src/ml/reward_model.c
+        # Phase 3 Task 3 (RL SOTA): hu_reward_model_train — Bradley-Terry
+        # mini-batch SGD on the value head (W, b); backbone is frozen
+        # (Christiano 2017 §2.2). One-sided KTO pairs are skipped + counted
+        # in metrics.skipped_count (KTO unpaired loss is Task 4). MLX path
+        # returns HU_ERR_NOT_SUPPORTED — MLX-side RM training lives in
+        # scripts/rm_mlx_train.py (Task 8). The HU_IS_TEST seams expose a
+        # forward-only BT-loss helper + direct W[] pointer so AC-6's
+        # finite-difference grad check can perturb the same storage the
+        # SGD step writes (no test/prod gradient gap).
+        src/ml/reward_model_train.c
+        # Phase 3 Tasks 9-10: CLI handlers for kto-train and rm-train.
+        src/ml/cli_kto.c
+        src/ml/cli_rm.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2134,6 +2143,9 @@ endif()
 if(NOT HU_ENABLE_GOOGLE_RCS)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/google_rcs.c)
 endif()
+if(NOT HU_ENABLE_SLACK)
+    list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/slack.c src/channels/slack_reactions.c)
+endif()
 # Tests always compile all optional modules so test suites don't break
 set(HU_TEST_EXTRA_MODULES)
 if(NOT HU_ENABLE_PERIPHERALS)
@@ -2227,7 +2239,12 @@ if(NOT HU_ENABLE_ML)
         src/ml/fidelity.c
         src/ml/training_data.c src/ml/training_data_extractor.c
         src/ml/training_data_quality.c
-        src/providers/huml.c)
+        src/providers/huml.c
+        src/ml/rl_trainer.c src/ml/dpo_real_huml.c src/ml/dpo_real_mlx.c
+        src/ml/kto.c
+        src/ml/value_head.c src/ml/policy_logprobs.c src/ml/reference_model.c
+        src/ml/cli_dpo.c src/ml/reward_model.c src/ml/reward_model_train.c
+        src/ml/cli_kto.c src/ml/cli_rm.c)
 endif()
 if(NOT HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -2791,14 +2808,14 @@ set(HU_TEST_SOURCES
     # Phase 2 Task 8 (RL SOTA): pins surface contract for the post-split
     # hu_ml_cli_dpo_judge / hu_ml_cli_dpo_real CLI handlers.
     tests/test_cli_dpo.c
-    # Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + analytical-vs-
-    # finite-diff backward grad check + "VHED" save/load round trip.
-    tests/test_value_head.c
     # Phase 3 Task 2 (RL SOTA): hu_reward_model_t HUML composition smoke
     # test + M3 NaN contract pin for one-sided KTO pairs. Task 3 will
     # APPEND Bradley-Terry convergence + finite-diff grad-check tests to
     # tests/test_reward_model_train.c (same suite, same runner).
     tests/test_reward_model_train.c
+    # Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
+    # grad check + vtable contract.
+    tests/test_kto_loss.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c

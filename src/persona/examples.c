@@ -384,7 +384,7 @@ void hu_persona_example_banks_free(hu_allocator_t *alloc,
     alloc->free(alloc->ctx, banks, banks_count * sizeof(hu_persona_example_bank_t));
 }
 
-#ifdef HU_ENABLE_SQLITE
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
 
 /* Internal scratch — a growing bank with capacity tracked separately
  * so we can realloc-style grow during scan without touching the
@@ -508,7 +508,7 @@ static void pbh_channel_from_session(const char *session_id,
     *out_len = (size_t)(colon - session_id);
 }
 
-#endif /* HU_ENABLE_SQLITE */
+#endif /* HU_ENABLE_SQLITE && HU_ENABLE_ML */
 
 hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
                                                  const char *db_path,
