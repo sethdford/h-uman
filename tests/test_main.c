@@ -51,6 +51,8 @@ void run_reaction_event_tests(void);
 void run_imessage_reactions_tests(void);
 /* Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch. */
 void run_slack_reactions_tests(void);
+/* Phase 2 Task 13 (RL SOTA): reaction_handler event → dpo_pairs row E2E. */
+void run_reaction_handler_e2e_tests(void);
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
 void run_tool_tests(void);
@@ -634,6 +636,7 @@ int main(int argc, char **argv) {
     run_reaction_event_tests();
     run_imessage_reactions_tests();
     run_slack_reactions_tests();
+    run_reaction_handler_e2e_tests();
     run_declarative_tools_tests();
     run_skill_trust_tests();
     run_tool_tests();

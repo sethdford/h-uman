@@ -949,6 +949,14 @@ list(APPEND HU_CORE_SOURCES src/security/wasi_sandbox.c)
 # Channel-agnostic reaction event normalizer (Phase 2 Task 10).
 list(APPEND HU_CORE_SOURCES src/channels/reaction_event.c)
 
+# Phase 2 Task 13 (RL SOTA): reaction event → dpo_pairs row handler.
+# Writes into the daemon-owned hu_dpo_collector_t set via
+# hu_reaction_handler_set_collector at startup. Same TU split rationale
+# as Tasks 11/12: lives in src/agent/ rather than src/channels/ so it
+# can include human/channels/reaction_event.h without colliding with
+# human/channel.h's older hu_reaction_type_t enum.
+list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
+
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
     src/a2a.c
@@ -2843,6 +2851,10 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
 # (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
+# Phase 2 Task 13 (RL SOTA): hu_reaction_handler_handle_event — event ⇒
+# dpo_pairs row + per-turn signal flag (consumed by Task 14's agent_turn
+# substring-heuristic guard).
+list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
 
 # SOTA capability tests
 list(APPEND HU_TEST_SOURCES
