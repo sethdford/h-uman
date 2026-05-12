@@ -279,22 +279,23 @@ After the fleet returns, this document gets a synthesis section choosing the top
 
 | # | Slug | Subagent | Status | Spec file |
 |---|------|----------|--------|-----------|
-| 01 | activation-steering | code-architect | **design done** | `2026-05-11-init-01-activation-steering.md` |
+| 01 | activation-steering | code-architect | **S1 SHIPPED — prompt half + agent_turn retry wiring + critic H1 reset** (commits in `96968daf` + `383cba08`) | `2026-05-11-init-01-activation-steering.md` |
 | 02 | molora-channels | code-architect | **design done** | `2026-05-11-init-02-molora-channels.md` |
 | 03 | apple-fm-provider | code-architect | **design done** | `2026-05-11-init-03-apple-fm-provider.md` |
-| 04 | mlx-qwen3-provider | code-architect | **design done — S1 ADOPTED** | `2026-05-11-init-04-mlx-qwen3-provider.md` |
+| 04 | mlx-qwen3-provider | code-architect | **S1 SHIPPED — provider scaffold + S1.5(a) `load_adapter` widening + path-traversal guards** (commits in `96968daf` + `383cba08`) | `2026-05-11-init-04-mlx-qwen3-provider.md` |
 | 05 | verifier-driven-ttt | code-architect | **design done — DEFERRED (needs #09 + #07 land)** | `2026-05-11-init-05-verifier-driven-ttt.md` |
 | 06 | simpo-orpo-grpo2 | code-architect | **design done** | `2026-05-11-init-06-simpo-orpo-grpo2.md` |
 | 07 | thinkprm-verifier | code-architect | **design done** | `2026-05-11-init-07-thinkprm-verifier.md` |
 | 08 | federated-lora | code-architect | **design done — DEFERRED (SECAGG protocol revision required)** | `2026-05-11-init-08-federated-lora.md` |
-| 09 | memory-trust-tiers | security-reviewer | **design done — S1 ADOPTED (patched post-review)** | `2026-05-11-init-09-memory-trust-tiers.md` |
+| 09 | memory-trust-tiers | security-reviewer | **S1 SHIPPED** (patched post-review; memory_poisoning + channel_trust suites green) | `2026-05-11-init-09-memory-trust-tiers.md` |
 | 10 | episode-storage-sleep-consolidation | code-architect | **design done — DEFERRED (job_kind collision now resolved here)** | `2026-05-11-init-10-episode-storage-sleep-consolidation.md` |
-| 11 | proactivity-typing | code-architect | **design done — S1 ADOPTED (typing half only)** | `2026-05-11-init-11-proactivity-typing.md` |
+| 11 | proactivity-typing | code-architect | **S1 SHIPPED — typing half + CLI channel wiring** (commits in `96968daf` + `383cba08`) | `2026-05-11-init-11-proactivity-typing.md` |
 | 12 | mcp-server-mode | code-architect | **design done — DEFERRED (adapter-replacement attack)** | `2026-05-11-init-12-mcp-server-mode.md` |
 | 13 | kv-compression | code-architect | **design done — DEFERRED (correctness budget)** | `2026-05-11-init-13-kv-compression.md` |
-| 14 | public-benchmarks | code-architect | **design done — S1 ADOPTED** | `2026-05-11-init-14-public-benchmarks.md` |
+| 14 | public-benchmarks | code-architect | **S1 SHIPPED — 5 benchmark adapters + CLI + 19 regression tests** (commit `96968daf`) | `2026-05-11-init-14-public-benchmarks.md` |
 | **W0a** | hu_episode_t ODR cleanup | code-simplifier | **done** (commit `1b9705ac`) | `2026-05-11-w0a-episode-rename-report.md` |
 | **W0b** | hu_mcp_server_t → hu_mcp_client_t rename | code-simplifier | **done** (commit `1e6746c7`) | `2026-05-11-w0b-mcp-rename-report.md` |
+| **S1.5** | follow-ups (a/b/c/d) + adversarial audit | parent agent | **done** (commit `383cba08`; verdict GREEN; 10267/10267 pass, 0 ASan; cloud-safety intact; binary flat) | `2026-05-12-s1.5-audit-verdict.md` |
 
 Legend: `dispatched` → `design done` → `sprint open` → `done` (or `parked` / `DEFERRED`).
 
@@ -341,6 +342,24 @@ Five initiatives chosen for S1 based on (a) cleared adversarial gate after preco
 ### Sprint 2+ inputs
 
 This synthesis updates `2026-05-10-sota-roadmap-6mo.md` Month-2 with the S1 plan above and slots #05/#10/#12 into Month-3 once the unblock conditions clear. Concrete S1 stories will be opened in `sprints/sprint-2/stories.md` after the planning gate commit lands.
+
+### S1.5 closure — adversarial audit landed (2026-05-12)
+
+S1 implementer subagents identified four follow-ups required to close the contract gaps in the S1 deliverables. All four shipped in commit `383cba08` on `sprint-2c-followups`, with both adversarial reviews (security-reviewer + critic) addressed in the same pass.
+
+| Tag | Title | Outcome |
+|----|------|---------|
+| (a) | Widen `hu_provider_t.load_adapter` to locked deployment-spec shape | **GREEN** — new public `include/human/lora.h` with `hu_lora_adapter_spec_t` + hoisted `hu_lora_apply_mode_t`; 3 provider impls + helper + 13 call sites migrated |
+| (b) | Wire `hu_typing_send` into CLI channel `send` path | **GREEN** — split raw/public vtable avoids recursion; 6 new tests |
+| (c) | Wire `hu_persona_steering_vector` into `agent_turn` retry path | **GREEN** — first-attempt byte-identity preserved; 6 new tests including critic H1 reset regression |
+| (d) | Annotate misleading commit `96968daf` | **GREEN** — non-destructive audit trail at `docs/plans/2026-05-12-commit-96968daf-annotation.md` |
+
+**Adversarial findings — all addressed in `383cba08`:**
+
+- Security-reviewer (`RESULT_security-reviewer=BLOCKED` pre-fix): 2 CRITICAL path-traversal vulnerabilities (CWE-22) in `huml.c` and `llamacpp.c` patched with regression tests; HIGH-2 free-size mismatch (CWE-131) fixed via embedded-NUL `spec->id` rejection; all MEDIUM (mode-range, alloc-NULL centralization, `bytes_len` consistency) + LOW (id NUL, trailing-NUL path) remediated. HIGH-1 (absolute-path / `~/.human/` prefix guard) deferred — requires daemon-passed home-dir context; ticketed for init-04 follow-up.
+- Critic (`RESULT_critic=HAS_FINDINGS_0_2`): 0 BLOCKERs. H1 (`apply_steering` state never reset between turns) fixed with entry-point reset call in `hu_agent_turn` + regression test. H2 (lora.h docstring lied about helper alloc-NULL enforcement) resolved by the MEDIUM-2 centralization. 5 half-fixes deferred with explicit ownership routed to init-01 / init-02 / init-04 / init-08 tickets.
+
+Full evidence-based verdict: `docs/plans/2026-05-12-s1.5-audit-verdict.md`.
 
 ## Adversarial review
 
