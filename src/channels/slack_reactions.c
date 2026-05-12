@@ -40,6 +40,7 @@
  *      see test file for the asserts that depend on the helper's
  *      contract. */
 
+#include "human/agent/reaction_handler.h"
 #include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -48,11 +49,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-/* TODO(Task 13): forward decl of hu_reaction_handler_handle_event will
- * land alongside src/agent/reaction_handler.c. For Task 12 we deliberately
- * build the event then drop it — see the comment immediately above the
- * free block in hu_slack_handle_reaction_webhook below. */
 
 int hu_slack_handle_reaction_webhook(const char *body, size_t body_len,
                                      hu_allocator_t *alloc,
@@ -114,11 +110,15 @@ int hu_slack_handle_reaction_webhook(const char *body, size_t body_len,
     evt.is_removal = is_removed ? 1 : 0;
     evt.timestamp_unix = time(NULL);
 
-    /* TODO(Task 13): hu_reaction_handler_handle_event(&evt);
-     * The handler symbol is created by Task 13 (src/agent/reaction_handler.c).
-     * For Task 12 we build the event then drop it — Task 13's e2e test
-     * exercises the dispatch path; the three Task 12 unit tests hit the
-     * test helper below directly, not this branch. */
+    /* Phase 2 Task 13: dispatch the event to the reaction_handler. The
+     * handler resolves (channel, thread, msg_ref) → assistant message
+     * and writes a dpo_pairs row when the lookup hits and polarity is
+     * non-neutral. Return code is informational only — Slack retries on
+     * non-200 within 3s, so we own the webhook ack regardless of whether
+     * the handler resolved the lookup, recorded the pair, or returned
+     * HU_ERR_NOT_FOUND because the message predates the in-memory
+     * lookup window (R4 in the risk register). */
+    hu_reaction_handler_handle_event(&evt);  /* fire-and-forget; return code is informational only */
 
 done:
     /* NULL-safe: strdup may not have been called if a filter goto'd here. */
