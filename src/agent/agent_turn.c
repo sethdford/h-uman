@@ -36,6 +36,7 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
+#include "human/persona/steering.h"
 #include "human/security/sycophancy_guard.h"
 #include "human/behavior/policy.h"
 #include "human/behavior/pressure.h"
@@ -730,6 +731,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
     if (getenv("HU_DEBUG"))
         hu_log_info("agent_turn", NULL, "ENTER agent_turn msg_len=%zu", msg_len);
+
+    /* S1.5 critic H1 / CI-3 (init-04 pre-condition): clear any steering
+     * residue from a prior turn's retry path. The provider docstring
+     * (hu_provider_apply_steering) explicitly says to call with
+     * (NULL, 0) BETWEEN turns so a stale vector from turn N-1's last
+     * retry doesn't leak into turn N's first (unsteered) attempt.
+     *
+     * Cloud providers ignore this call (vtable slot NULL -> helper
+     * returns HU_ERR_NOT_SUPPORTED, swallowed). The on-device providers
+     * landing in init-04 will rely on this reset for determinism. */
+    (void)hu_provider_apply_steering(&agent->provider, NULL, 0);
 
     hu_agent_set_current_for_tools(agent);
 
@@ -4079,6 +4091,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     int reflection_retries_left = agent->reflection.max_retries;
     char *dpo_rejected_resp = NULL;
     size_t dpo_rejected_resp_len = 0;
+    /* SOTA-2026 init-01 — verifier-rejected retry counter for activation
+     * steering. First attempt runs unsteered (retry_attempt == 0) so the
+     * byte-identical-determinism contract every existing agent_turn test
+     * pins is preserved. Each reflection-driven `continue` increments it
+     * before the next iteration's chat() call. `steered_prompt` holds an
+     * iteration-local prompt copy with the rendered persona-steering
+     * directive appended; it's allocated immediately before the chat call
+     * and freed immediately after, so msgs[] (rebuilt per-iteration via
+     * `turn_arena`) never outlives it. */
+    unsigned retry_attempt = 0;
+    char *steered_prompt = NULL;
+    size_t steered_prompt_len = 0;
     uint64_t max_tokens =
         agent->token_limit ? agent->token_limit
                            : hu_context_tokens_resolve(0, agent->model_name, agent->model_name_len);
@@ -4744,6 +4768,86 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
 #endif
 
+        /* SOTA-2026 init-01 — activation steering on retry attempts.
+         *
+         * Determinism contract: the FIRST attempt (retry_attempt == 0)
+         * runs byte-identical to the pre-steering baseline. Steering only
+         * fires on attempts the verifier already rejected, so existing
+         * agent_turn test fixtures keep their pinned prompts unchanged.
+         *
+         * Two-pronged dispatch:
+         *   1. Prompt-side: project persona + personal_model into the
+         *      abstract trait-coefficient vector, render a directive
+         *      snippet via `hu_persona_steering_directive`, and append it
+         *      to the system prompt for THIS chat() call only. The boost
+         *      ramps with retry depth (1.0 → 1.5 → 2.0, capped at 3.0)
+         *      so a stubborn provider gets stronger nudging on later
+         *      attempts.
+         *   2. Provider-side: dispatch the same vector through
+         *      `hu_provider_apply_steering`. Cloud providers leave the
+         *      vtable slot NULL → HU_ERR_NOT_SUPPORTED is the silent
+         *      common case; on-device providers (init-04) translate it
+         *      into residual-stream addition. Anything else gets logged
+         *      but does NOT fail the turn — prompt-side steering is the
+         *      load-bearing path here.
+         *
+         * Sub-floor / NULL-persona / projection-failure cases all leave
+         * the prompt untouched, so the un-steered fallback is the safe
+         * default. */
+        if (retry_attempt > 0 && system_prompt && system_prompt_len > 0 &&
+            msgs && msgs_count > 0) {
+            float steering_vec[HU_STEERING_VEC_DIM];
+            long long steering_now = (long long)time(NULL);
+            hu_error_t sv_err = hu_persona_steering_vector(
+                agent->persona, &agent->personal_model, steering_now, steering_vec,
+                HU_STEERING_VEC_DIM);
+            if (sv_err == HU_OK) {
+                char *steering_directive = NULL;
+                size_t steering_directive_len = 0;
+                float steering_boost = 1.0f + 0.5f * (float)(retry_attempt - 1);
+                if (steering_boost > 3.0f)
+                    steering_boost = 3.0f;
+                hu_error_t dir_err = hu_persona_steering_directive(
+                    agent->alloc, steering_vec, HU_STEERING_VEC_DIM, steering_boost,
+                    &steering_directive, &steering_directive_len);
+                if (dir_err == HU_OK && steering_directive && steering_directive_len > 0) {
+                    size_t composed_len =
+                        system_prompt_len + 1 + steering_directive_len;
+                    char *composed =
+                        (char *)agent->alloc->alloc(agent->alloc->ctx, composed_len + 1);
+                    if (composed) {
+                        memcpy(composed, system_prompt, system_prompt_len);
+                        composed[system_prompt_len] = '\n';
+                        memcpy(composed + system_prompt_len + 1, steering_directive,
+                               steering_directive_len);
+                        composed[composed_len] = '\0';
+                        steered_prompt = composed;
+                        steered_prompt_len = composed_len;
+                        msgs[0].content = steered_prompt;
+                        msgs[0].content_len = steered_prompt_len;
+                    }
+                } else if (dir_err != HU_OK) {
+                    hu_log_warn("agent_turn", NULL,
+                                "persona steering directive render failed: %s",
+                                hu_error_string(dir_err));
+                }
+                if (steering_directive)
+                    agent->alloc->free(agent->alloc->ctx, steering_directive,
+                                       steering_directive_len + 1);
+                hu_error_t aps_err = hu_provider_apply_steering(
+                    &agent->provider, steering_vec, HU_STEERING_VEC_DIM);
+                if (aps_err != HU_OK && aps_err != HU_ERR_NOT_SUPPORTED) {
+                    hu_log_warn("agent_turn", NULL,
+                                "provider apply_steering failed: %s",
+                                hu_error_string(aps_err));
+                }
+            } else {
+                hu_log_warn("agent_turn", NULL,
+                            "persona steering vector projection failed: %s",
+                            hu_error_string(sv_err));
+            }
+        }
+
         /* Provider graceful degradation: try primary -> fallback -> honest failure */
         if (getenv("HU_DEBUG"))
             hu_log_info("agent_turn", NULL,
@@ -4779,6 +4883,22 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                    fb_cfg.reflexive_model,
                                                    fb_cfg.reflexive_model_len, turn_temp, &resp);
             }
+        }
+
+        /* SOTA-2026 init-01 — release the per-call steered prompt as soon
+         * as both chat attempts above have observed it. msgs[] is rebuilt
+         * at the top of every loop iteration (turn_arena reset), so the
+         * pointer we just freed is never dereferenced again; we still
+         * restore msgs[0] to the canonical system_prompt for any code
+         * below that inspects it before the next iteration. */
+        if (steered_prompt) {
+            if (msgs && msgs_count > 0) {
+                msgs[0].content = system_prompt;
+                msgs[0].content_len = system_prompt_len;
+            }
+            agent->alloc->free(agent->alloc->ctx, steered_prompt, steered_prompt_len + 1);
+            steered_prompt = NULL;
+            steered_prompt_len = 0;
         }
 
         (void)degrade_strategy;
@@ -5173,6 +5293,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         }
 
                         hu_chat_response_free(agent->alloc, &resp);
+                        /* SOTA-2026 init-01 — bump the retry-attempt counter
+                         * BEFORE `continue`. The next iteration's chat()
+                         * call sees retry_attempt >= 1 and injects the
+                         * persona-steering directive. */
+                        retry_attempt++;
                         iter++;
                         continue; /* retry with critique feedback */
                     }

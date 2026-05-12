@@ -405,30 +405,52 @@ static bool llamacpp_supports_native_tools(void *ctx) {
 
 /* ── vtable: LoRA adapter management ──────────────────────────────────── */
 
-static hu_error_t llamacpp_load_adapter(void *ctx, hu_allocator_t *alloc,
-                                        const char *adapter_path,
-                                        size_t adapter_path_len,
-                                        const char *adapter_id,
-                                        size_t adapter_id_len) {
-    if (!ctx || !alloc || !adapter_path || adapter_path_len == 0 ||
-        !adapter_id || adapter_id_len == 0)
+static hu_error_t llamacpp_load_adapter(void *ctx, const hu_lora_adapter_spec_t *spec,
+                                        hu_lora_apply_mode_t mode) {
+    if (!ctx || !spec)
         return HU_ERR_INVALID_ARGUMENT;
+    /* llama.cpp's `llama_adapter_lora_init` is path-based; pre-read
+     * bytes is reserved for federated LoRA (init-08). */
+    if (!spec->path || spec->path_len == 0 || spec->bytes)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!spec->id || spec->id_len == 0 || !spec->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* S1.5 security review CRITICAL-2: reject unknown enum values. The
+     * helper guards this for callers going through `hu_provider_load_adapter`
+     * but direct-vtable callers bypass that fence. */
+    if (mode != HU_LORA_APPLY_MODE_REPLACE && mode != HU_LORA_APPLY_MODE_STACK)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (mode == HU_LORA_APPLY_MODE_STACK)
+        return HU_ERR_NOT_SUPPORTED; /* MoLoRA arrives via init-02 */
+    /* S1.5 security review CRITICAL-2 / CWE-22: reject `..` traversal and
+     * embedded NULs in `spec->path` before handing it to
+     * `llama_adapter_lora_init` (which fopens internally with no
+     * validation). Mirrors the mlx_qwen3 reference impl. */
+    if (spec->path_len > 0 && spec->path[spec->path_len - 1] == '\0')
+        return HU_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < spec->path_len; i++) {
+        if (spec->path[i] == '\0')
+            return HU_ERR_INVALID_ARGUMENT;
+        if (i + 1 < spec->path_len && spec->path[i] == '.' && spec->path[i + 1] == '.')
+            return HU_ERR_INVALID_ARGUMENT;
+    }
     llamacpp_ctx_t *c = (llamacpp_ctx_t *)ctx;
+    hu_allocator_t *alloc = spec->alloc;
 #if HU_LLAMACPP_LINKED
     if (!c->ctx || !c->model)
         return HU_ERR_NOT_SUPPORTED;
     /* Replace any active adapter atomically so callers see at-most-one
      * adapter active at any time. */
     clear_active_adapter(c, alloc);
-    char *path_buf = alloc->alloc(alloc->ctx, adapter_path_len + 1);
+    char *path_buf = alloc->alloc(alloc->ctx, spec->path_len + 1);
     if (!path_buf)
         return HU_ERR_OUT_OF_MEMORY;
-    memcpy(path_buf, adapter_path, adapter_path_len);
-    path_buf[adapter_path_len] = '\0';
+    memcpy(path_buf, spec->path, spec->path_len);
+    path_buf[spec->path_len] = '\0';
     struct llama_adapter_lora *adapter =
         llama_adapter_lora_init(c->model, path_buf);
     if (!adapter) {
-        alloc->free(alloc->ctx, path_buf, adapter_path_len + 1);
+        alloc->free(alloc->ctx, path_buf, spec->path_len + 1);
         return HU_ERR_PROVIDER_RESPONSE;
     }
     /* Modern API: hand the context an array of (adapter, scale) pairs.
@@ -437,12 +459,12 @@ static hu_error_t llamacpp_load_adapter(void *ctx, hu_allocator_t *alloc,
     struct llama_adapter_lora *adapters[1] = {adapter};
     if (llama_set_adapters_lora(c->ctx, adapters, 1, &scale) != 0) {
         llama_adapter_lora_free(adapter);
-        alloc->free(alloc->ctx, path_buf, adapter_path_len + 1);
+        alloc->free(alloc->ctx, path_buf, spec->path_len + 1);
         return HU_ERR_PROVIDER_RESPONSE;
     }
     c->active_adapter = adapter;
     c->active_adapter_path = path_buf;
-    c->active_adapter_id = hu_strndup(alloc, adapter_id, adapter_id_len);
+    c->active_adapter_id = hu_strndup(alloc, spec->id, spec->id_len);
     if (!c->active_adapter_id) {
         clear_active_adapter(c, alloc);
         return HU_ERR_OUT_OF_MEMORY;
@@ -456,6 +478,7 @@ static hu_error_t llamacpp_load_adapter(void *ctx, hu_allocator_t *alloc,
     return HU_OK;
 #else
     (void)c;
+    (void)alloc;
     return HU_ERR_NOT_SUPPORTED;
 #endif
 }

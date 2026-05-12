@@ -372,21 +372,54 @@ static void huml_detach_active_lora(huml_ctx_t *ctx) {
  * it to the live GPT's Q+V projections so the next forward pass is
  * actually biased by the adapter. If the model isn't loaded yet, we
  * remember the adapter and attach lazily when ensure_loaded() runs. */
-static hu_error_t huml_load_adapter(void *ctx_ptr, hu_allocator_t *alloc,
-                                    const char *adapter_path, size_t adapter_path_len,
-                                    const char *adapter_id, size_t adapter_id_len) {
+static hu_error_t huml_load_adapter(void *ctx_ptr, const hu_lora_adapter_spec_t *spec,
+                                    hu_lora_apply_mode_t mode) {
     huml_ctx_t *ctx = (huml_ctx_t *)ctx_ptr;
-    if (!ctx || !alloc || !adapter_path || adapter_path_len == 0 || !adapter_id ||
-        adapter_id_len == 0)
+    if (!ctx || !spec)
         return HU_ERR_INVALID_ARGUMENT;
+    /* huml only knows how to mmap from disk today; pre-read bytes path
+     * is reserved for federated LoRA (init-08) where the helper hands
+     * weights over IPC. Reject early so the caller knows. */
+    if (!spec->path || spec->path_len == 0 || spec->bytes)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!spec->id || spec->id_len == 0 || !spec->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* S1.5 security review CRITICAL-1: reject unknown enum values. The
+     * helper guards this for callers going through `hu_provider_load_adapter`
+     * but direct-vtable callers (init-02 MoLoRA dispatcher) bypass that
+     * fence. Self-defending impls cost one comparison. */
+    if (mode != HU_LORA_APPLY_MODE_REPLACE && mode != HU_LORA_APPLY_MODE_STACK)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* STACK is a MoLoRA primitive (init-02). huml is single-adapter only,
+     * so we honor the contract by returning NOT_SUPPORTED rather than
+     * silently downgrading — see lora.h docstring. */
+    if (mode == HU_LORA_APPLY_MODE_STACK)
+        return HU_ERR_NOT_SUPPORTED;
+
+    /* S1.5 security review CRITICAL-1 / CWE-22: reject `..` traversal and
+     * embedded NULs in `spec->path` before any fopen-equivalent. Mirrors
+     * the mlx_qwen3 reference impl. Without this guard, a caller passing
+     * `../../etc/shadow` would have it handed verbatim to `hu_lora_load`'s
+     * fopen(), giving a path-probing oracle at minimum and arbitrary-file
+     * read with magic-byte collision as the worst case. */
+    if (spec->path_len > 0 && spec->path[spec->path_len - 1] == '\0')
+        return HU_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < spec->path_len; i++) {
+        if (spec->path[i] == '\0')
+            return HU_ERR_INVALID_ARGUMENT;
+        if (i + 1 < spec->path_len && spec->path[i] == '.' && spec->path[i + 1] == '.')
+            return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    hu_allocator_t *alloc = spec->alloc;
 
     /* hu_lora_load takes a NUL-terminated path; copy so callers can pass
      * any slice. */
     char path_buf[512];
-    if (adapter_path_len >= sizeof(path_buf))
+    if (spec->path_len >= sizeof(path_buf))
         return HU_ERR_INVALID_ARGUMENT;
-    memcpy(path_buf, adapter_path, adapter_path_len);
-    path_buf[adapter_path_len] = '\0';
+    memcpy(path_buf, spec->path, spec->path_len);
+    path_buf[spec->path_len] = '\0';
 
     hu_lora_adapter_t *fresh = NULL;
     hu_error_t err = hu_lora_load(alloc, path_buf, &fresh);
@@ -403,10 +436,10 @@ static hu_error_t huml_load_adapter(void *ctx_ptr, hu_allocator_t *alloc,
 
     ctx->active_lora = fresh;
     ctx->active_lora_attached = false;
-    size_t copy_len = adapter_id_len < sizeof(ctx->active_adapter_id) - 1
-                          ? adapter_id_len
+    size_t copy_len = spec->id_len < sizeof(ctx->active_adapter_id) - 1
+                          ? spec->id_len
                           : sizeof(ctx->active_adapter_id) - 1;
-    memcpy(ctx->active_adapter_id, adapter_id, copy_len);
+    memcpy(ctx->active_adapter_id, spec->id, copy_len);
     ctx->active_adapter_id[copy_len] = '\0';
 
     /* If the model is already loaded, attach now; otherwise the

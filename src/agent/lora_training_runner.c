@@ -109,9 +109,15 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
             load_alloc = *ctx->alloc;
         else
             load_alloc = hu_system_allocator();
-        hu_error_t le = hu_provider_load_adapter(
-            ctx->provider, &load_alloc, report.adapter_path,
-            strlen(report.adapter_path), aid, strlen(aid));
+        const hu_lora_adapter_spec_t load_spec = {
+            .path = report.adapter_path,
+            .path_len = strlen(report.adapter_path),
+            .id = aid,
+            .id_len = strlen(aid),
+            .alloc = &load_alloc,
+        };
+        hu_error_t le = hu_provider_load_adapter(ctx->provider, &load_spec,
+                                                 HU_LORA_APPLY_MODE_REPLACE);
         if (le == HU_OK)
             hu_log_info("lora-runner", NULL,
                         "auto-loaded adapter '%s' from %s", aid, report.adapter_path);

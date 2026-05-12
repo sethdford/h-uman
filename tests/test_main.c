@@ -522,6 +522,7 @@ void run_persona_directive_channels_tests(void);
 /* SOTA-2026 init-01 — prompt-side activation steering (S1). */
 void run_persona_steering_tests(void);
 void run_provider_steering_dispatch_tests(void);
+void run_agent_turn_steering_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
 void run_self_improve_tests(void);
@@ -530,6 +531,7 @@ void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
 void run_typing_simulator_tests(void);
+void run_channel_cli_tests(void);
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -1086,6 +1088,8 @@ int main(int argc, char **argv) {
     /* SOTA-2026 init-01 — prompt-side activation steering (S1). */
     run_persona_steering_tests();
     run_provider_steering_dispatch_tests();
+    /* SOTA-2026 init-01 follow-up (c): retry-loop wiring in agent_turn.c. */
+    run_agent_turn_steering_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();
     run_self_improve_tests();
@@ -1099,6 +1103,7 @@ int main(int argc, char **argv) {
     run_canvas_persist_tests();
     run_canvas_render_tests();
     run_typing_simulator_tests();
+    run_channel_cli_tests();
 
     HU_TEST_REPORT();
     HU_TEST_EXIT();

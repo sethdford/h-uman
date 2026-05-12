@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Documentation
+
+- **`docs/plans/2026-05-12-commit-96968daf-annotation.md`**: non-destructive
+  annotation correcting commit `96968daf` whose title ("docs(sprint-3): update
+  stories A-D with implementation status") understates +4,334 / -320 lines spanning
+  init-04 (MLX Qwen3 provider), init-14 (public benchmarks), and the RL Phase 3
+  plan doc. Audit trail substitute for the history rewrite that concurrent
+  automation made unsafe.
+
 ### Added
 
 - **BTH**: `hula_tool_turns` counter when the HuLa IR path executes a tool batch

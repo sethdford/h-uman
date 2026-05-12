@@ -2483,9 +2483,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             id_buf[blen] = '\0';
             adapter_id = id_buf;
         }
-        hu_error_t le = hu_provider_load_adapter(
-            &agent->provider, alloc, adapter_path, strlen(adapter_path),
-            adapter_id, strlen(adapter_id));
+        const hu_lora_adapter_spec_t spec = {
+            .path = adapter_path,
+            .path_len = strlen(adapter_path),
+            .id = adapter_id,
+            .id_len = strlen(adapter_id),
+            .alloc = alloc,
+        };
+        hu_error_t le = hu_provider_load_adapter(&agent->provider, &spec,
+                                                 HU_LORA_APPLY_MODE_REPLACE);
         if (le == HU_OK)
             hu_log_info("human", agent->observer,
                         "personalization: loaded adapter '%s' from %s", adapter_id,

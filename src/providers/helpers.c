@@ -140,21 +140,57 @@ char *hu_helpers_extract_anthropic_content(hu_allocator_t *alloc, const char *bo
     return out;
 }
 
-/* W13 — adapter loading helpers. Each NULL-checks the vtable triple
- * (load_adapter, unload_adapter, active_adapter) and returns
+/* W13 / SOTA-2026 init-04 — adapter loading helpers. Each NULL-checks the
+ * vtable triple (load_adapter, unload_adapter, active_adapter) and returns
  * HU_ERR_NOT_SUPPORTED when the provider doesn't implement adapters
  * (the cloud-API common case). Returning a structured error here lets
- * callers cleanly fall back to the no-adapter path without crashing. */
-hu_error_t hu_provider_load_adapter(hu_provider_t *provider, hu_allocator_t *alloc,
-                                    const char *adapter_path, size_t adapter_path_len,
-                                    const char *adapter_id, size_t adapter_id_len) {
-    if (!provider || !provider->vtable || !alloc || !adapter_path || adapter_path_len == 0 ||
-        !adapter_id || adapter_id_len == 0)
+ * callers cleanly fall back to the no-adapter path without crashing.
+ *
+ * S1.5 (a): widened to the locked-convention shape
+ * (`hu_lora_adapter_spec_t *spec`, `hu_lora_apply_mode_t mode`). Validation
+ * enforces both source-mutex (path XOR bytes) and the id-required
+ * contract so providers can rely on `spec->id_len > 0` and exactly one of
+ * `spec->path` / `spec->bytes` being set. */
+hu_error_t hu_provider_load_adapter(hu_provider_t *provider,
+                                    const hu_lora_adapter_spec_t *spec,
+                                    hu_lora_apply_mode_t mode) {
+    if (!provider || !provider->vtable || !spec)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!spec->id || spec->id_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* S1.5 security review LOW-1: reject embedded NULs in `spec->id`. The
+     * provider stores it via `hu_strndup(id, id_len)` and later calls
+     * `strlen(stored_id)` (for free()-size). An embedded NUL splits those,
+     * causing a free-size mismatch (HIGH-2) and an unload-ID mismatch in
+     * mlx_qwen3 (LOW-1 itself). Centralizing the check here means all
+     * future providers inherit the fence. */
+    for (size_t i = 0; i < spec->id_len; i++) {
+        if (spec->id[i] == '\0')
+            return HU_ERR_INVALID_ARGUMENT;
+    }
+    /* S1.5 security review MEDIUM-3: align the source-mutex with each
+     * provider's own check. Providers reject any non-NULL `bytes` pointer
+     * regardless of `bytes_len`. Treating `bytes != NULL && bytes_len == 0`
+     * as "has bytes" here makes the helper and provider agree, avoiding
+     * the surprising HU_ERR_INVALID_ARGUMENT-from-the-provider case in
+     * the init-08 hookup window. */
+    const bool has_path = (spec->path != NULL && spec->path_len > 0);
+    const bool has_bytes = (spec->bytes != NULL);
+    if (has_path == has_bytes) /* both or neither */
+        return HU_ERR_INVALID_ARGUMENT;
+    if (has_bytes && spec->bytes_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (mode != HU_LORA_APPLY_MODE_REPLACE && mode != HU_LORA_APPLY_MODE_STACK)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* S1.5 security review MEDIUM-2: centralize the `alloc` NULL check.
+     * All in-tree providers require a non-NULL allocator; making the
+     * helper enforce it means a future provider that forgets the check
+     * still returns a structured error rather than dereferencing NULL. */
+    if (!spec->alloc)
         return HU_ERR_INVALID_ARGUMENT;
     if (!provider->vtable->load_adapter)
         return HU_ERR_NOT_SUPPORTED;
-    return provider->vtable->load_adapter(provider->ctx, alloc, adapter_path, adapter_path_len,
-                                          adapter_id, adapter_id_len);
+    return provider->vtable->load_adapter(provider->ctx, spec, mode);
 }
 
 hu_error_t hu_provider_unload_adapter(hu_provider_t *provider, const char *adapter_id,

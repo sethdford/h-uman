@@ -6,7 +6,9 @@
  * test fixture for channel-loop semantics. Tracked in
  * `docs/orphan-channels.md`.
  */
+#include "human/agent/typing_simulator.h"
 #include "human/channel.h"
+#include "human/channels/cli.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include <stdio.h>
@@ -23,6 +25,12 @@
 typedef struct hu_cli_ctx {
     hu_allocator_t *alloc;
     bool running;
+    /* SOTA-2026 init-11 (S1.5): persona handle used to resolve the
+     * outbound typing profile. NULL ⇒ legacy byte-for-byte path,
+     * `hu_typing_send` is bypassed entirely. Opaque on purpose so the
+     * CLI channel does not pull in persona.h (matches the typing-
+     * simulator surface convention). */
+    const void *persona;
 } hu_cli_ctx_t;
 
 static hu_error_t cli_start(void *ctx) {
@@ -39,8 +47,14 @@ static void cli_stop(void *ctx) {
         c->running = false;
 }
 
-static hu_error_t cli_send(void *ctx, const char *target, size_t target_len, const char *message,
-                           size_t message_len, const char *const *media, size_t media_count) {
+/* The actual stdout writer. This is the byte-for-byte legacy path —
+ * also the function `hu_typing_send` calls back into after the
+ * (test-mode no-op) typing budget elapses. Keeping it independent of
+ * the public vtable avoids `cli_send → hu_typing_send → cli_send`
+ * recursion. */
+static hu_error_t cli_raw_send(void *ctx, const char *target, size_t target_len,
+                               const char *message, size_t message_len, const char *const *media,
+                               size_t media_count) {
     (void)ctx;
     (void)target;
     (void)target_len;
@@ -51,6 +65,52 @@ static hu_error_t cli_send(void *ctx, const char *target, size_t target_len, con
         fputc('\n', stdout);
         fflush(stdout);
     }
+    return HU_OK;
+}
+
+/* Raw vtable used solely as the inner callback target for
+ * `hu_typing_send`. Intentionally leaves start_typing/stop_typing
+ * NULL so `hu_channel_supports_typing` reports false — CLI has no
+ * native typing indicator, just stdout. */
+static const hu_channel_vtable_t cli_raw_vtable = {
+    .send = cli_raw_send,
+};
+
+static hu_error_t cli_send(void *ctx, const char *target, size_t target_len, const char *message,
+                           size_t message_len, const char *const *media, size_t media_count) {
+    hu_cli_ctx_t *c = (hu_cli_ctx_t *)ctx;
+    if (!c)
+        return cli_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    /* No persona attached ⇒ preserve byte-for-byte legacy behavior.
+     * Existing call sites (and existing tests) created via
+     * `hu_cli_create` without `hu_cli_set_persona` MUST never observe
+     * typing simulation. */
+    if (!c->persona)
+        return cli_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    hu_typing_profile_t profile;
+    hu_typing_profile_resolve(c->persona, "cli", &profile);
+
+    /* Instant-mode profile ⇒ still preserve byte-for-byte legacy
+     * behavior. Emergency override exit, per init-11 design D2. */
+    if (profile.instant)
+        return cli_raw_send(ctx, target, target_len, message, message_len, media, media_count);
+
+    /* Wrap the existing ctx into a local channel handle whose vtable
+     * routes back into `cli_raw_send`. `hu_typing_send` honors the
+     * (deterministic, test-no-op) budget and then calls
+     * `raw_ch.vtable->send(raw_ch.ctx, …)` ⇒ `cli_raw_send`. */
+    hu_channel_t raw_ch = {.ctx = ctx, .vtable = &cli_raw_vtable};
+    hu_error_t   err    = hu_typing_send(&raw_ch, target, target_len, message, message_len, media,
+                                         media_count, &profile);
+
+    /* CLI must never fail to deliver just because the typing decorator
+     * failed (e.g. NULL-arg defensive return). Fall back to the
+     * legacy direct write so callers see the same effective semantics
+     * either way. */
+    if (err != HU_OK)
+        return cli_raw_send(ctx, target, target_len, message, message_len, media, media_count);
     return HU_OK;
 }
 
@@ -84,9 +144,17 @@ hu_error_t hu_cli_create(hu_allocator_t *alloc, hu_channel_t *out) {
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     c->running = false;
+    c->persona = NULL;
     out->ctx = c;
     out->vtable = &cli_vtable;
     return HU_OK;
+}
+
+void hu_cli_set_persona(hu_channel_t *ch, const void *persona) {
+    if (!ch || !ch->ctx || ch->vtable != &cli_vtable)
+        return;
+    hu_cli_ctx_t *c = (hu_cli_ctx_t *)ch->ctx;
+    c->persona = persona;
 }
 
 void hu_cli_destroy(hu_channel_t *ch) {

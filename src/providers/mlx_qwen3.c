@@ -327,37 +327,65 @@ static hu_error_t mlx_qwen3_chat(void *ctx_ptr, hu_allocator_t *alloc,
  * Vtable: adapter loading (REPLACE semantics, S1)
  * ────────────────────────────────────────────────────────────────── */
 
-static hu_error_t mlx_qwen3_load_adapter(void *ctx_ptr, hu_allocator_t *alloc,
-                                         const char *adapter_path, size_t adapter_path_len,
-                                         const char *adapter_id, size_t adapter_id_len) {
-    if (!ctx_ptr || !alloc || !adapter_path || adapter_path_len == 0 || !adapter_id ||
-        adapter_id_len == 0)
+static hu_error_t mlx_qwen3_load_adapter(void *ctx_ptr, const hu_lora_adapter_spec_t *spec,
+                                         hu_lora_apply_mode_t mode) {
+    if (!ctx_ptr || !spec)
         return HU_ERR_INVALID_ARGUMENT;
+    /* MLX helper protocol passes a path, not bytes; pre-read bytes is
+     * reserved for federated LoRA (init-08). */
+    if (!spec->path || spec->path_len == 0 || spec->bytes)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!spec->id || spec->id_len == 0 || !spec->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* S1.5 security review MEDIUM-1: reject unknown enum values for
+     * direct-vtable callers (the helper guards this for indirect callers). */
+    if (mode != HU_LORA_APPLY_MODE_REPLACE && mode != HU_LORA_APPLY_MODE_STACK)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* STACK is MoLoRA (init-02). The helper does not multiplex
+     * adapters today; signal honestly so the dispatcher knows. */
+    if (mode == HU_LORA_APPLY_MODE_STACK)
+        return HU_ERR_NOT_SUPPORTED;
     mlx_qwen3_ctx_t *c = (mlx_qwen3_ctx_t *)ctx_ptr;
+    hu_allocator_t *alloc = spec->alloc;
 
 #if !HU_MLX_QWEN3_HAS_RUNTIME
     (void)c;
+    (void)alloc;
     return HU_ERR_NOT_SUPPORTED;
 #else
     /* Adapter path-traversal guard: any embedded NUL or `..` segment is
      * rejected up-front. Same shape the design doc §14 calls out as
-     * the load_adapter hardening contract. */
-    for (size_t i = 0; i + 1 < adapter_path_len; i++) {
-        if (adapter_path[i] == '.' && adapter_path[i + 1] == '.')
+     * the load_adapter hardening contract. S1.5 security review LOW-2:
+     * also reject a trailing NUL byte at index path_len-1 (was missed by
+     * the original `i + 1 < path_len` loop bound). */
+    if (spec->path_len > 0 && spec->path[spec->path_len - 1] == '\0')
+        return HU_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < spec->path_len; i++) {
+        if (spec->path[i] == '\0')
             return HU_ERR_INVALID_ARGUMENT;
-        if (adapter_path[i] == '\0')
+        if (i + 1 < spec->path_len && spec->path[i] == '.' && spec->path[i + 1] == '.')
+            return HU_ERR_INVALID_ARGUMENT;
+    }
+    /* S1.5 security review LOW-1 → fixes HIGH-2: reject embedded NUL in
+     * `spec->id`. Without this, `hu_strndup(spec->id, spec->id_len)`
+     * stores the NUL faithfully but the deinit/replace path frees by
+     * `strlen(active_adapter_id) + 1` — a free-size mismatch under any
+     * non-trivial allocator (CWE-131). The helper already centralizes
+     * this for indirect callers; we defend direct-vtable callers too. */
+    for (size_t i = 0; i < spec->id_len; i++) {
+        if (spec->id[i] == '\0')
             return HU_ERR_INVALID_ARGUMENT;
     }
 
     /* REPLACE semantics: any incumbent adapter is dropped only after
      * the new one validates. */
-    char *new_id = hu_strndup(alloc, adapter_id, adapter_id_len);
-    char *new_path = hu_strndup(alloc, adapter_path, adapter_path_len);
+    char *new_id = hu_strndup(alloc, spec->id, spec->id_len);
+    char *new_path = hu_strndup(alloc, spec->path, spec->path_len);
     if (!new_id || !new_path) {
         if (new_id)
-            alloc->free(alloc->ctx, new_id, adapter_id_len + 1);
+            alloc->free(alloc->ctx, new_id, spec->id_len + 1);
         if (new_path)
-            alloc->free(alloc->ctx, new_path, adapter_path_len + 1);
+            alloc->free(alloc->ctx, new_path, spec->path_len + 1);
         return HU_ERR_OUT_OF_MEMORY;
     }
 

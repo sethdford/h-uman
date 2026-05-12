@@ -2420,10 +2420,14 @@ set(HU_TEST_SOURCES
     # src/persona/steering.c.
     tests/test_persona_steering.c
     tests/test_provider_steering_dispatch.c
+    # SOTA-2026 init-01 follow-up (c): wire activation steering into
+    # the agent_turn retry loop. Pinned in tests/test_agent_turn_steering.c.
+    tests/test_agent_turn_steering.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c
     tests/test_typing_simulator.c
+    tests/test_channel_cli.c
     tests/test_mcp_http_integration.c
     tests/test_self_improve.c
     tests/test_sycophancy_guard.c

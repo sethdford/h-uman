@@ -4,6 +4,7 @@
 #include "core/allocator.h"
 #include "core/error.h"
 #include "core/slice.h"
+#include "human/lora.h" /* hu_lora_adapter_spec_t, hu_lora_apply_mode_t (S1.5 (a)) */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -229,29 +230,41 @@ typedef struct hu_provider_vtable {
                               hu_stream_callback_t callback, void *callback_ctx,
                               hu_stream_chat_result_t *out);
 
-    /* W13 — On-device personalization adapter loading. Optional triple. A
-     * provider that supports LoRA/PEFT-style adapter swapping at chat time
-     * implements all three. Providers that don't (cloud APIs) leave the
-     * pointers NULL and callers should fall back to the no-adapter path.
+    /* W13 / SOTA-2026 init-04 — On-device personalization adapter loading.
+     * Optional triple. A provider that supports LoRA/PEFT-style adapter
+     * swapping at chat time implements all three. Providers that don't
+     * (cloud APIs) leave the pointers NULL and callers should fall back
+     * to the no-adapter path.
      *
-     *   load_adapter:    Read the adapter blob at `adapter_path` and bind
-     *                    it under `adapter_id` (an opaque label the caller
-     *                    supplies — the persona id is the obvious choice).
-     *                    Implementations may keep multiple adapters resident
-     *                    and switch via `active_adapter`.
+     *   load_adapter:    Bind the adapter described by `spec` and apply
+     *                    according to `mode` (REPLACE — default, swap any
+     *                    incumbent; STACK — additive composition for
+     *                    MoLoRA, init-02). `spec` is short-lived; the
+     *                    provider MUST copy any fields it wants to keep.
+     *                    Providers that do not support STACK MUST return
+     *                    HU_ERR_NOT_SUPPORTED for that mode rather than
+     *                    silently downgrading — the MoLoRA dispatcher
+     *                    needs accurate state.
      *   unload_adapter:  Drop the adapter; safe-NULL-arg if not currently
-     *                    loaded. After unload the next chat call falls back
-     *                    to the base model.
-     *   active_adapter:  Return the id of the currently active adapter, or
-     *                    NULL when none is loaded. Owned by the provider
-     *                    (caller must NOT free).
+     *                    loaded. After unload the next chat call falls
+     *                    back to the base model.
+     *   active_adapter:  Return the id of the currently active adapter,
+     *                    or NULL when none is loaded. Owned by the
+     *                    provider (caller must NOT free).
      *
      * The contract is intentionally narrow so cloud providers can leave
      * the pointers NULL with no churn. The local huml provider is the
-     * first reference implementation. */
-    hu_error_t (*load_adapter)(void *ctx, hu_allocator_t *alloc, const char *adapter_path,
-                               size_t adapter_path_len, const char *adapter_id,
-                               size_t adapter_id_len);
+     * first reference implementation.
+     *
+     * S1.5 (a): signature was widened from (alloc, path, path_len, id,
+     * id_len) to (spec, mode). The path-based fields moved into
+     * `hu_lora_adapter_spec_t`; the mode is new and supports the locked
+     * convention from `docs/plans/2026-05-11-sota-2026-massive-team-program.md`
+     * §"hu_provider_t.load_adapter surface". Cloud-safety contract is
+     * unchanged: providers that leave this NULL still fall through to
+     * HU_ERR_NOT_SUPPORTED via the helper. */
+    hu_error_t (*load_adapter)(void *ctx, const hu_lora_adapter_spec_t *spec,
+                               hu_lora_apply_mode_t mode);
     hu_error_t (*unload_adapter)(void *ctx, const char *adapter_id, size_t adapter_id_len);
     const char *(*active_adapter)(void *ctx);
 
@@ -294,10 +307,16 @@ typedef struct hu_provider_vtable {
 #endif
 
 /* Optional adapter-loading helpers. Each returns HU_ERR_NOT_SUPPORTED when
- * the provider's vtable leaves the corresponding method NULL. */
-hu_error_t hu_provider_load_adapter(hu_provider_t *provider, hu_allocator_t *alloc,
-                                    const char *adapter_path, size_t adapter_path_len,
-                                    const char *adapter_id, size_t adapter_id_len);
+ * the provider's vtable leaves the corresponding method NULL.
+ *
+ * S1.5 (a): `hu_provider_load_adapter` was widened to take a
+ * `hu_lora_adapter_spec_t *` + `hu_lora_apply_mode_t` (matches the new
+ * vtable surface). Cloud-safety contract: NULL `vtable->load_adapter`
+ * → HU_ERR_NOT_SUPPORTED, pinned by `tests/test_provider_all.c::
+ * test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat`. */
+hu_error_t hu_provider_load_adapter(hu_provider_t *provider,
+                                    const hu_lora_adapter_spec_t *spec,
+                                    hu_lora_apply_mode_t mode);
 hu_error_t hu_provider_unload_adapter(hu_provider_t *provider, const char *adapter_id,
                                       size_t adapter_id_len);
 /* Returns the active adapter id (provider-owned, caller must not free), or

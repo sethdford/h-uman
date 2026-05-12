@@ -2988,7 +2988,12 @@ static void load_adapter_check_not_supported(const char *kind, size_t kind_len,
     HU_ASSERT_EQ(hu_provider_create(&alloc, kind, kind_len, key, key_len, NULL, 0, &prov), HU_OK);
     /* Dispatcher must reject without crashing even though the provider
      * has no `load_adapter` hook. */
-    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, "/tmp/x.lora", 11, "id", 2),
+    const hu_lora_adapter_spec_t spec = {
+        .path = "/tmp/x.lora", .path_len = 11,
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &spec, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_NOT_SUPPORTED);
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
@@ -3017,17 +3022,87 @@ static void test_load_adapter_dispatcher_not_supported_on_openrouter(void) {
 
 static void test_load_adapter_dispatcher_invalid_args(void) {
     /* The dispatcher must reject malformed calls without ever touching
-     * the provider's vtable. */
+     * the provider's vtable. S1.5 (a) widened the signature: each NULL /
+     * empty / mutually-exclusive field is now a spec-level rejection. */
     hu_allocator_t alloc = hu_system_allocator();
     hu_provider_t prov;
     HU_ASSERT_EQ(hu_provider_create(&alloc, "openai", 6, "key", 3, NULL, 0, &prov), HU_OK);
 
-    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, &alloc, "/x", 2, "id", 2), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, NULL, "/x", 2, "id", 2), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, NULL, 2, "id", 2), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, "/x", 0, "id", 2), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, "/x", 2, NULL, 2), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &alloc, "/x", 2, "id", 0), HU_ERR_INVALID_ARGUMENT);
+    const hu_lora_adapter_spec_t good = {
+        .path = "/x", .path_len = 2,
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    /* NULL provider */
+    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, &good, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* NULL spec */
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, NULL, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* NULL path AND NULL bytes — neither source set */
+    hu_lora_adapter_spec_t no_source = good;
+    no_source.path = NULL;
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &no_source, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* Empty path_len */
+    hu_lora_adapter_spec_t empty_path = good;
+    empty_path.path_len = 0;
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &empty_path, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* NULL id */
+    hu_lora_adapter_spec_t no_id = good;
+    no_id.id = NULL;
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &no_id, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* Empty id_len */
+    hu_lora_adapter_spec_t empty_id = good;
+    empty_id.id_len = 0;
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &empty_id, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* S1.5 (a) NEW invariants: */
+    /* Both path AND bytes set is rejected (source-mutex). */
+    const uint8_t bytes[] = {0x01, 0x02, 0x03};
+    hu_lora_adapter_spec_t both_source = good;
+    both_source.bytes = bytes;
+    both_source.bytes_len = sizeof(bytes);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &both_source, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* Out-of-range mode is rejected. */
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &good, (hu_lora_apply_mode_t)99),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* S1.5 security review MEDIUM-2: spec->alloc NULL is rejected at the
+     * helper level (was previously delegated to per-provider validation,
+     * which a future provider could forget). */
+    hu_lora_adapter_spec_t no_alloc = good;
+    no_alloc.alloc = NULL;
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &no_alloc, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* S1.5 security review MEDIUM-3: bytes set but bytes_len==0 is
+     * rejected at the helper level. Previously the source-mutex passed
+     * (helper treated has_bytes=false when bytes_len==0), then the
+     * provider rejected non-NULL bytes — surprising INVALID_ARGUMENT
+     * from the provider. The helper now treats any non-NULL bytes as
+     * the bytes source and requires a non-zero length. */
+    hu_lora_adapter_spec_t bytes_zero_len = {
+        .path = NULL, .path_len = 0,
+        .bytes = bytes, .bytes_len = 0,
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &bytes_zero_len, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* S1.5 security review LOW-1: spec->id with embedded NUL is rejected
+     * centrally. This prevents the HIGH-2 free-size mismatch downstream:
+     * providers call `hu_strndup(spec->id, spec->id_len)` then later
+     * `strlen(active_adapter_id) + 1` for free()-size; an embedded NUL
+     * splits those into a heap-safety violation under custom allocators. */
+    const char id_with_nul[] = {'p', 'e', 'r', 's', '\0', 'e', 'v', 'i', 'l'};
+    hu_lora_adapter_spec_t embedded_nul_id = good;
+    embedded_nul_id.id = id_with_nul;
+    embedded_nul_id.id_len = sizeof(id_with_nul);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&prov, &embedded_nul_id,
+                                            HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
 
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
@@ -3078,8 +3153,12 @@ static void test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat(voi
      * from the path. We exercise the same shape the daemon uses. */
     const char *adapter_path = "/tmp/persona-default.lora";
     const char *adapter_id = "persona-default";
-    hu_error_t le = hu_provider_load_adapter(&prov, &alloc, adapter_path, strlen(adapter_path),
-                                              adapter_id, strlen(adapter_id));
+    const hu_lora_adapter_spec_t spec = {
+        .path = adapter_path, .path_len = strlen(adapter_path),
+        .id = adapter_id, .id_len = strlen(adapter_id),
+        .alloc = &alloc,
+    };
+    hu_error_t le = hu_provider_load_adapter(&prov, &spec, HU_LORA_APPLY_MODE_REPLACE);
     HU_ASSERT_EQ(le, HU_ERR_NOT_SUPPORTED);
 
     /* Critical: the provider must remain usable for chat afterward.

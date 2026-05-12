@@ -1,6 +1,8 @@
 #ifndef HU_PROVIDERS_MLX_QWEN3_H
 #define HU_PROVIDERS_MLX_QWEN3_H
 
+#include "human/lora.h" /* hoisted hu_lora_apply_mode_t (S1.5 (a)) */
+
 /*
  * MLX Qwen3-4B-Instruct provider (init-04, M3 Bridge B — S1 scope).
  *
@@ -64,16 +66,11 @@ typedef enum hu_mlx_qwen3_quant {
     HU_MLX_QWEN3_QUANT_FP16,
 } hu_mlx_qwen3_quant_t;
 
-/* LoRA application mode, kept in the header so callers (daemon + tests)
- * can encode the eventual REPLACE / STACK contract without waiting for
- * the future provider-vtable widening. Today only REPLACE is honored;
- * STACK falls through to REPLACE and is documented as a v1.5+ feature.
- * See design doc §7.1 (MoLoRA compatibility plan).
- */
-typedef enum hu_lora_apply_mode {
-    HU_LORA_APPLY_MODE_REPLACE = 0, /* swap any incumbent (default) */
-    HU_LORA_APPLY_MODE_STACK,       /* additive mix (v1.5+; falls back to REPLACE) */
-} hu_lora_apply_mode_t;
+/* SOTA-2026 S1.5 (a): `hu_lora_apply_mode_t` was hoisted to
+ * `include/human/lora.h` so initiatives #02 (MoLoRA), #05 (TTT), and #08
+ * (federated LoRA) can consume the same enum without depending on the
+ * MLX provider header. The transitive include below preserves source
+ * compatibility for anything that included `mlx_qwen3.h` for the enum. */
 
 typedef struct hu_mlx_qwen3_config {
     /* Absolute or ~-relative path to the Qwen3-4B base model on disk.

@@ -92,9 +92,13 @@ static void test_lora_hot_swap_changes_output_then_unload_restores(void) {
     char *output_a = do_chat(&provider, &alloc, sys, msg);
     HU_ASSERT_NOT_NULL(output_a);
 
-    HU_ASSERT_EQ(provider.vtable->load_adapter(provider.ctx, &alloc, fixture,
-                                               strlen(fixture), "test-lora",
-                                               strlen("test-lora")),
+    const hu_lora_adapter_spec_t spec = {
+        .path = fixture, .path_len = strlen(fixture),
+        .id = "test-lora", .id_len = strlen("test-lora"),
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(provider.vtable->load_adapter(provider.ctx, &spec,
+                                               HU_LORA_APPLY_MODE_REPLACE),
                  HU_OK);
     const char *active = provider.vtable->active_adapter(provider.ctx);
     HU_ASSERT_NOT_NULL(active);

@@ -2143,8 +2143,15 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
             id_buf[copy] = '\0';
             id = id_buf;
         }
-        hu_error_t lerr = hu_provider_load_adapter(&provider, alloc, adapter_path,
-                                                   strlen(adapter_path), id, strlen(id));
+        const hu_lora_adapter_spec_t spec = {
+            .path = adapter_path,
+            .path_len = strlen(adapter_path),
+            .id = id,
+            .id_len = strlen(id),
+            .alloc = alloc,
+        };
+        hu_error_t lerr = hu_provider_load_adapter(&provider, &spec,
+                                                   HU_LORA_APPLY_MODE_REPLACE);
         if (lerr != HU_OK) {
             fprintf(stderr,
                     "[lora-runner] adapter load failed (path=%s, id=%s, err=%d). "
@@ -2731,8 +2738,14 @@ hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char *
         return err;
     }
 
-    err = hu_provider_load_adapter(&prov, alloc, adapter_path, strlen(adapter_path),
-                                   adapter_id, strlen(adapter_id));
+    const hu_lora_adapter_spec_t apply_spec = {
+        .path = adapter_path,
+        .path_len = strlen(adapter_path),
+        .id = adapter_id,
+        .id_len = strlen(adapter_id),
+        .alloc = alloc,
+    };
+    err = hu_provider_load_adapter(&prov, &apply_spec, HU_LORA_APPLY_MODE_REPLACE);
     if (err != HU_OK) {
         fprintf(stderr, "load_adapter failed: %s\n", hu_error_string(err));
         if (prov.vtable && prov.vtable->deinit)

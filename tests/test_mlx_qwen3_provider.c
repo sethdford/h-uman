@@ -118,18 +118,45 @@ static void test_mlx_qwen3_load_adapter_rejects_invalid_args(void) {
     hu_mlx_qwen3_config_t cfg = {0};
     hu_provider_t prov = {0};
     HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(NULL, &alloc, "/p", 2, "id", 2),
+    const hu_lora_adapter_spec_t good = {
+        .path = "/p", .path_len = 2,
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    /* NULL ctx */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(NULL, &good, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, NULL, "/p", 2, "id", 2),
+    /* NULL spec */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, NULL, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, NULL, 2, "id", 2),
+    /* NULL path (no source) */
+    hu_lora_adapter_spec_t no_path = good;
+    no_path.path = NULL;
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &no_path, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/p", 0, "id", 2),
+    /* Empty path_len */
+    hu_lora_adapter_spec_t empty_path = good;
+    empty_path.path_len = 0;
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &empty_path, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/p", 2, NULL, 2),
+    /* NULL id */
+    hu_lora_adapter_spec_t no_id = good;
+    no_id.id = NULL;
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &no_id, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/p", 2, "id", 0),
+    /* Empty id_len */
+    hu_lora_adapter_spec_t empty_id = good;
+    empty_id.id_len = 0;
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &empty_id, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
+    /* NULL alloc (provider requires it) */
+    hu_lora_adapter_spec_t no_alloc = good;
+    no_alloc.alloc = NULL;
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &no_alloc, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* STACK mode unsupported by mlx_qwen3 (MoLoRA arrives via init-02) */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &good, HU_LORA_APPLY_MODE_STACK),
+                 HU_ERR_NOT_SUPPORTED);
     prov.vtable->deinit(prov.ctx, &alloc);
 }
 
@@ -147,8 +174,12 @@ static void test_mlx_qwen3_load_adapter_then_active_adapter_returns_id(void) {
 
     const char *path = "/tmp/mlx-test-adapter";
     const char *id = "persona-test";
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, path, strlen(path), id,
-                                            strlen(id)),
+    const hu_lora_adapter_spec_t spec = {
+        .path = path, .path_len = strlen(path),
+        .id = id, .id_len = strlen(id),
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &spec, HU_LORA_APPLY_MODE_REPLACE),
                  HU_OK);
     const char *active = prov.vtable->active_adapter(prov.ctx);
     HU_ASSERT_NOT_NULL(active);
@@ -162,7 +193,12 @@ static void test_mlx_qwen3_unload_clears_active_adapter(void) {
     hu_provider_t prov = {0};
     HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
 
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/tmp/x", 6, "abc", 3), HU_OK);
+    const hu_lora_adapter_spec_t spec = {
+        .path = "/tmp/x", .path_len = 6,
+        .id = "abc", .id_len = 3,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &spec, HU_LORA_APPLY_MODE_REPLACE), HU_OK);
     HU_ASSERT_STR_EQ(prov.vtable->active_adapter(prov.ctx), "abc");
     HU_ASSERT_EQ(prov.vtable->unload_adapter(prov.ctx, "abc", 3), HU_OK);
     HU_ASSERT_NULL((void *)prov.vtable->active_adapter(prov.ctx));
@@ -178,7 +214,12 @@ static void test_mlx_qwen3_unload_with_nonmatching_id_is_noop(void) {
     hu_provider_t prov = {0};
     HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
 
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/tmp/a", 6, "first", 5), HU_OK);
+    const hu_lora_adapter_spec_t spec = {
+        .path = "/tmp/a", .path_len = 6,
+        .id = "first", .id_len = 5,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &spec, HU_LORA_APPLY_MODE_REPLACE), HU_OK);
     HU_ASSERT_EQ(prov.vtable->unload_adapter(prov.ctx, "second", 6), HU_OK);
     HU_ASSERT_STR_EQ(prov.vtable->active_adapter(prov.ctx), "first");
     prov.vtable->deinit(prov.ctx, &alloc);
@@ -190,8 +231,20 @@ static void test_mlx_qwen3_load_adapter_replaces_incumbent(void) {
     hu_provider_t prov = {0};
     HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
 
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/tmp/a", 6, "first", 5), HU_OK);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/tmp/b", 6, "second", 6), HU_OK);
+    const hu_lora_adapter_spec_t first_spec = {
+        .path = "/tmp/a", .path_len = 6,
+        .id = "first", .id_len = 5,
+        .alloc = &alloc,
+    };
+    const hu_lora_adapter_spec_t second_spec = {
+        .path = "/tmp/b", .path_len = 6,
+        .id = "second", .id_len = 6,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &first_spec, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &second_spec, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
     /* REPLACE semantics: only the most recent adapter is reported. */
     HU_ASSERT_STR_EQ(prov.vtable->active_adapter(prov.ctx), "second");
     prov.vtable->deinit(prov.ctx, &alloc);
@@ -206,7 +259,12 @@ static void test_mlx_qwen3_load_adapter_rejects_path_traversal(void) {
     /* Design doc §14 — adapter paths containing `..` are rejected
      * to defeat traversal attempts before the helper sees them. */
     const char *bad = "../etc/passwd";
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, bad, strlen(bad), "id", 2),
+    const hu_lora_adapter_spec_t bad_spec = {
+        .path = bad, .path_len = strlen(bad),
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &bad_spec, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_NULL((void *)prov.vtable->active_adapter(prov.ctx));
     prov.vtable->deinit(prov.ctx, &alloc);
@@ -219,7 +277,12 @@ static void test_mlx_qwen3_load_adapter_returns_not_supported_when_option_off(vo
     hu_mlx_qwen3_config_t cfg = {0};
     hu_provider_t prov = {0};
     HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/tmp/x", 6, "id", 2),
+    const hu_lora_adapter_spec_t off_spec = {
+        .path = "/tmp/x", .path_len = 6,
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &off_spec, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL((void *)prov.vtable->active_adapter(prov.ctx));
     /* Critical: after a NOT_SUPPORTED return, the provider must remain
@@ -266,8 +329,12 @@ static void test_mlx_qwen3_chat_references_active_adapter_id(void) {
     hu_provider_t prov = {0};
     HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&alloc, &cfg, &prov), HU_OK);
 
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &alloc, "/tmp/persona-seth", 17,
-                                            "seth", 4),
+    const hu_lora_adapter_spec_t seth_spec = {
+        .path = "/tmp/persona-seth", .path_len = 17,
+        .id = "seth", .id_len = 4,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &seth_spec, HU_LORA_APPLY_MODE_REPLACE),
                  HU_OK);
 
     char *out = NULL;
@@ -328,8 +395,12 @@ static void test_mlx_qwen3_dispatcher_load_adapter_via_factory(void) {
     HU_ASSERT_EQ(hu_provider_create(&alloc, "mlx_qwen3", 9, NULL, 0, NULL, 0, &prov), HU_OK);
     const char *path = "/tmp/adapter";
     const char *id = "test";
-    hu_error_t err =
-        hu_provider_load_adapter(&prov, &alloc, path, strlen(path), id, strlen(id));
+    const hu_lora_adapter_spec_t spec = {
+        .path = path, .path_len = strlen(path),
+        .id = id, .id_len = strlen(id),
+        .alloc = &alloc,
+    };
+    hu_error_t err = hu_provider_load_adapter(&prov, &spec, HU_LORA_APPLY_MODE_REPLACE);
 #ifdef HU_ENABLE_MLX_QWEN3
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_STR_EQ(hu_provider_active_adapter(&prov), "test");

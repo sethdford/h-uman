@@ -152,8 +152,12 @@ static void test_llamacpp_load_adapter_returns_not_supported_until_linked(void) 
     HU_ASSERT_EQ(hu_llamacpp_provider_create(&a, &cfg, &prov), HU_OK);
     /* Bypass the helper: invoke the vtable hook directly. */
     HU_ASSERT_NOT_NULL(prov.vtable->load_adapter);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &a, "/tmp/x.lora", 11,
-                                            "x", 1),
+    const hu_lora_adapter_spec_t spec = {
+        .path = "/tmp/x.lora", .path_len = 11,
+        .id = "x", .id_len = 1,
+        .alloc = &a,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &spec, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NOT_NULL(prov.vtable->unload_adapter);
     HU_ASSERT_EQ(prov.vtable->unload_adapter(prov.ctx, "x", 1),
@@ -169,14 +173,93 @@ static void test_llamacpp_load_adapter_rejects_null_args(void) {
     hu_llamacpp_config_t cfg = {0};
     hu_provider_t prov = {0};
     HU_ASSERT_EQ(hu_llamacpp_provider_create(&a, &cfg, &prov), HU_OK);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(NULL, &a, "/x", 2, "x", 1),
+    const hu_lora_adapter_spec_t good = {
+        .path = "/x", .path_len = 2,
+        .id = "x", .id_len = 1,
+        .alloc = &a,
+    };
+    /* NULL ctx */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(NULL, &good, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, NULL, "/x", 2, "x", 1),
+    /* NULL spec */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, NULL, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &a, NULL, 0, "x", 1),
+    /* No source (NULL path AND NULL bytes) */
+    hu_lora_adapter_spec_t no_src = good;
+    no_src.path = NULL;
+    no_src.path_len = 0;
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &no_src, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &a, "/x", 2, NULL, 0),
+    /* Empty id */
+    hu_lora_adapter_spec_t empty_id = good;
+    empty_id.id = NULL;
+    empty_id.id_len = 0;
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &empty_id, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
+    /* STACK mode unsupported by llamacpp (MoLoRA arrives via init-02) */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &good, HU_LORA_APPLY_MODE_STACK),
+                 HU_ERR_NOT_SUPPORTED);
+    /* S1.5 security review MEDIUM-1: out-of-range mode rejected with
+     * INVALID_ARGUMENT, not silently treated as REPLACE. */
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &good, (hu_lora_apply_mode_t)99),
+                 HU_ERR_INVALID_ARGUMENT);
+    prov.vtable->deinit(prov.ctx, &a);
+}
+
+/* S1.5 security review CRITICAL-2: ensure path traversal (`..`) and
+ * embedded NUL bytes are rejected with HU_ERR_INVALID_ARGUMENT before
+ * any fopen-equivalent runs. Mirrors the mlx_qwen3 reference test. */
+static void test_llamacpp_load_adapter_rejects_path_traversal(void) {
+    hu_allocator_t a = alloc();
+    hu_llamacpp_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_llamacpp_provider_create(&a, &cfg, &prov), HU_OK);
+    HU_ASSERT_NOT_NULL(prov.vtable->load_adapter);
+
+    /* Classic `..` traversal — must be rejected pre-fopen. */
+    const char *traversal = "../etc/passwd";
+    const hu_lora_adapter_spec_t bad_dotdot = {
+        .path = traversal, .path_len = strlen(traversal),
+        .id = "id", .id_len = 2,
+        .alloc = &a,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &bad_dotdot,
+                                            HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* `..` deep inside a long path — still rejected. */
+    const char *deep = "/usr/share/lora/../../../etc/shadow";
+    const hu_lora_adapter_spec_t bad_deep = {
+        .path = deep, .path_len = strlen(deep),
+        .id = "id", .id_len = 2,
+        .alloc = &a,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &bad_deep,
+                                            HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* Embedded NUL — defeats any downstream C-string handling. */
+    const char nul_path[] = "/tmp/safe\0/etc/shadow";
+    const hu_lora_adapter_spec_t bad_nul = {
+        .path = nul_path, .path_len = sizeof(nul_path) - 1,
+        .id = "id", .id_len = 2,
+        .alloc = &a,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &bad_nul,
+                                            HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* Trailing NUL (LOW-2): also rejected. */
+    const char trail_nul[] = "/tmp/safe.lora\0";
+    const hu_lora_adapter_spec_t bad_trail = {
+        .path = trail_nul, .path_len = sizeof(trail_nul) - 1,
+        .id = "id", .id_len = 2,
+        .alloc = &a,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &bad_trail,
+                                            HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+
     prov.vtable->deinit(prov.ctx, &a);
 }
 
@@ -193,4 +276,5 @@ void run_llamacpp_provider_tests(void) {
     HU_RUN_TEST(test_llamacpp_load_adapter_returns_not_supported_until_linked);
 #endif
     HU_RUN_TEST(test_llamacpp_load_adapter_rejects_null_args);
+    HU_RUN_TEST(test_llamacpp_load_adapter_rejects_path_traversal);
 }

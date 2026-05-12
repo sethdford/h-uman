@@ -4620,9 +4620,14 @@ static void test_huml_provider_load_unload_adapter(void) {
     HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
 
     /* Load it under id "test_persona". */
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "test_persona", 12),
-        HU_OK);
+    const hu_lora_adapter_spec_t test_persona_spec = {
+        .path = path, .path_len = strlen(path),
+        .id = "test_persona", .id_len = 12,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &test_persona_spec,
+                                          HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
     const char *id = hu_provider_active_adapter(&provider);
     HU_ASSERT_NOT_NULL(id);
     HU_ASSERT_STR_EQ(id, "test_persona");
@@ -4636,14 +4641,93 @@ static void test_huml_provider_load_unload_adapter(void) {
     HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
 
     /* Re-loading should work; replacing an incumbent should also work. */
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "first", 5), HU_OK);
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "second", 6), HU_OK);
+    const hu_lora_adapter_spec_t first_spec = {
+        .path = path, .path_len = strlen(path),
+        .id = "first", .id_len = 5,
+        .alloc = &alloc,
+    };
+    const hu_lora_adapter_spec_t second_spec = {
+        .path = path, .path_len = strlen(path),
+        .id = "second", .id_len = 6,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &first_spec, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &second_spec, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
     HU_ASSERT_STR_EQ(hu_provider_active_adapter(&provider), "second");
 
     provider.vtable->deinit(provider.ctx, &alloc);
     (void)remove(path);
+}
+
+/* S1.5 security review CRITICAL-1: huml_load_adapter must reject `..`
+ * traversal and embedded NULs in spec->path before any fopen-equivalent.
+ * Mirrors the mlx_qwen3 reference test. Without this guard,
+ * hu_lora_load() runs fopen() on attacker-controlled paths, leaking a
+ * path-existence oracle at minimum and arbitrary-file read at worst. */
+static void test_huml_provider_load_adapter_rejects_path_traversal(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t provider = {0};
+    HU_ASSERT_EQ(hu_huml_provider_create(&alloc, NULL, &provider), HU_OK);
+
+    /* Classic `..` traversal — must be rejected pre-fopen. */
+    const char *traversal = "../etc/passwd";
+    const hu_lora_adapter_spec_t bad_dotdot = {
+        .path = traversal, .path_len = strlen(traversal),
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(provider.vtable->load_adapter(provider.ctx, &bad_dotdot,
+                                                HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* `..` embedded in a longer path. */
+    const char *deep = "/usr/share/lora/../../../etc/shadow";
+    const hu_lora_adapter_spec_t bad_deep = {
+        .path = deep, .path_len = strlen(deep),
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(provider.vtable->load_adapter(provider.ctx, &bad_deep,
+                                                HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* Embedded NUL byte mid-path. */
+    const char nul_path[] = "/tmp/safe\0/etc/shadow";
+    const hu_lora_adapter_spec_t bad_nul = {
+        .path = nul_path, .path_len = sizeof(nul_path) - 1,
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(provider.vtable->load_adapter(provider.ctx, &bad_nul,
+                                                HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* Trailing NUL byte (LOW-2). */
+    const char trail_nul[] = "/tmp/safe.lora\0";
+    const hu_lora_adapter_spec_t bad_trail = {
+        .path = trail_nul, .path_len = sizeof(trail_nul) - 1,
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(provider.vtable->load_adapter(provider.ctx, &bad_trail,
+                                                HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* Out-of-range mode (MEDIUM-1). */
+    const hu_lora_adapter_spec_t ok_spec = {
+        .path = "/tmp/x", .path_len = 6,
+        .id = "id", .id_len = 2,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(provider.vtable->load_adapter(provider.ctx, &ok_spec,
+                                                (hu_lora_apply_mode_t)99),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    /* No adapter loaded after any of the rejections. */
+    HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
+    provider.vtable->deinit(provider.ctx, &alloc);
 }
 
 /* Cloud / non-adapter providers leave the triple NULL. The helper
@@ -4652,7 +4736,8 @@ static void test_provider_adapter_helpers_not_supported(void) {
     /* Build a minimal provider with the triple NULL. We can't easily
      * do that without a non-test provider, so exercise the helper
      * NULL-check paths directly. */
-    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, "p", 1, "id", 2),
+    /* NULL provider rejected up-front. */
+    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, HU_LORA_APPLY_MODE_REPLACE),
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_provider_unload_adapter(NULL, "id", 2), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT(hu_provider_active_adapter(NULL) == NULL);
@@ -4662,8 +4747,11 @@ static void test_provider_adapter_helpers_not_supported(void) {
     hu_provider_vtable_t empty_vtable = {0};
     hu_provider_t empty = {.ctx = (void *)1, .vtable = &empty_vtable};
     hu_allocator_t alloc = hu_system_allocator();
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&empty, &alloc, "p", 1, "id", 2), HU_ERR_NOT_SUPPORTED);
+    const hu_lora_adapter_spec_t empty_spec = {
+        .path = "p", .path_len = 1, .id = "id", .id_len = 2, .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(hu_provider_load_adapter(&empty, &empty_spec, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_EQ(hu_provider_unload_adapter(&empty, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT(hu_provider_active_adapter(&empty) == NULL);
 }
@@ -5305,6 +5393,7 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_huml_provider_chat_test_mode);
     HU_RUN_TEST(test_huml_provider_get_name);
     HU_RUN_TEST(test_huml_provider_load_unload_adapter);
+    HU_RUN_TEST(test_huml_provider_load_adapter_rejects_path_traversal);
     HU_RUN_TEST(test_provider_adapter_helpers_not_supported);
     /* Speculative predict with model (test mode falls back to heuristic) */
     HU_RUN_TEST(test_speculative_predict_with_model_null_provider);
