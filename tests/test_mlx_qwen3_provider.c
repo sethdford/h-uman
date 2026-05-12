@@ -157,6 +157,17 @@ static void test_mlx_qwen3_load_adapter_rejects_invalid_args(void) {
     /* STACK mode unsupported by mlx_qwen3 (MoLoRA arrives via init-02) */
     HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &good, HU_LORA_APPLY_MODE_STACK),
                  HU_ERR_NOT_SUPPORTED);
+    /* S1.5 critic PE2: bytes-only spec (no path) returns NOT_SUPPORTED,
+     * not INVALID_ARGUMENT. mlx_qwen3 is path-based today; bytes-source
+     * is reserved for init-08 federated LoRA over IPC. */
+    const uint8_t fake_weights[] = {0xDE, 0xAD};
+    hu_lora_adapter_spec_t bytes_only = good;
+    bytes_only.path = NULL;
+    bytes_only.path_len = 0;
+    bytes_only.bytes = fake_weights;
+    bytes_only.bytes_len = sizeof(fake_weights);
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &bytes_only, HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_NOT_SUPPORTED);
     prov.vtable->deinit(prov.ctx, &alloc);
 }
 
@@ -223,6 +234,108 @@ static void test_mlx_qwen3_unload_with_nonmatching_id_is_noop(void) {
     HU_ASSERT_EQ(prov.vtable->unload_adapter(prov.ctx, "second", 6), HU_OK);
     HU_ASSERT_STR_EQ(prov.vtable->active_adapter(prov.ctx), "first");
     prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+/* S1.5 critic HF1: when the second `load_adapter` call comes with a
+ * different `spec->alloc` than the first, the second call's
+ * `clear_active_adapter` must free through the SAME allocator that
+ * allocated the incumbent strings (i.e. the FIRST call's allocator).
+ * The fix synchronises `c->alloc = spec->alloc` BEFORE clearing the
+ * incumbent, which ensures the free goes through the correct
+ * allocator. ASan + a counting allocator pins this down.
+ *
+ * Counting-allocator design: free() must be called from the same
+ * allocator that malloc'd the bytes. If clear_active_adapter
+ * accidentally frees through spec->alloc (the new allocator) while
+ * the incumbent bytes were allocated by the previous spec->alloc,
+ * the counter goes negative (free without matching malloc), which
+ * we assert against. */
+typedef struct {
+    int       alloc_count;
+    int       free_count;
+    const char *label;
+} hu_qwen3_count_alloc_t;
+
+static void *hu_qwen3_count_malloc(void *ctx, size_t n) {
+    hu_qwen3_count_alloc_t *c = (hu_qwen3_count_alloc_t *)ctx;
+    c->alloc_count++;
+    return malloc(n);
+}
+
+static void hu_qwen3_count_free(void *ctx, void *p, size_t n) {
+    hu_qwen3_count_alloc_t *c = (hu_qwen3_count_alloc_t *)ctx;
+    (void)n;
+    if (p)
+        c->free_count++;
+    free(p);
+}
+
+static void *hu_qwen3_count_realloc(void *ctx, void *p, size_t old_n, size_t new_n) {
+    (void)ctx;
+    (void)old_n;
+    return realloc(p, new_n);
+}
+
+static void test_mlx_qwen3_load_adapter_replace_keeps_allocator_in_sync(void) {
+    /* Two counting allocators. First load uses A; second load uses B.
+     * Both adapter strings (id + path) are allocated through the call's
+     * allocator. The fix ensures that the second call's
+     * clear_active_adapter frees the incumbent's strings via A, not B. */
+    hu_qwen3_count_alloc_t a_ctx = {0, 0, "A"};
+    hu_qwen3_count_alloc_t b_ctx = {0, 0, "B"};
+    hu_allocator_t a_alloc = {
+        .ctx = &a_ctx,
+        .malloc = hu_qwen3_count_malloc,
+        .free = hu_qwen3_count_free,
+        .realloc = hu_qwen3_count_realloc,
+    };
+    hu_allocator_t b_alloc = {
+        .ctx = &b_ctx,
+        .malloc = hu_qwen3_count_malloc,
+        .free = hu_qwen3_count_free,
+        .realloc = hu_qwen3_count_realloc,
+    };
+
+    /* Build provider with the system allocator — the provider's own
+     * state is allocated via that. Adapter strings are allocated via
+     * the spec's allocator. */
+    hu_allocator_t sys_alloc = hu_system_allocator();
+    hu_mlx_qwen3_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_mlx_qwen3_provider_create(&sys_alloc, &cfg, &prov), HU_OK);
+
+    const hu_lora_adapter_spec_t first_spec = {
+        .path = "/tmp/a", .path_len = 6,
+        .id = "first", .id_len = 5,
+        .alloc = &a_alloc,
+    };
+    const hu_lora_adapter_spec_t second_spec = {
+        .path = "/tmp/b", .path_len = 6,
+        .id = "second", .id_len = 6,
+        .alloc = &b_alloc,
+    };
+
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &first_spec,
+                                            HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    /* First call allocates id + path through A. */
+    HU_ASSERT_EQ(a_ctx.alloc_count, 2);
+    HU_ASSERT_EQ(a_ctx.free_count, 0);
+
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &second_spec,
+                                            HU_LORA_APPLY_MODE_REPLACE),
+                 HU_OK);
+    /* Second call: incumbent strings are freed through A (NOT B);
+     * new strings are allocated through B. */
+    HU_ASSERT_EQ(a_ctx.alloc_count, 2);
+    HU_ASSERT_EQ(a_ctx.free_count, 2); /* both first-call strings freed via A */
+    HU_ASSERT_EQ(b_ctx.alloc_count, 2);
+    HU_ASSERT_EQ(b_ctx.free_count, 0);
+
+    prov.vtable->deinit(prov.ctx, &sys_alloc);
+    /* After deinit the incumbent (second) strings must be freed
+     * through B (the allocator that allocated them). */
+    HU_ASSERT_EQ(b_ctx.free_count, 2);
 }
 
 static void test_mlx_qwen3_load_adapter_replaces_incumbent(void) {
@@ -431,6 +544,7 @@ void run_mlx_qwen3_provider_tests(void) {
     HU_RUN_TEST(test_mlx_qwen3_unload_clears_active_adapter);
     HU_RUN_TEST(test_mlx_qwen3_unload_with_nonmatching_id_is_noop);
     HU_RUN_TEST(test_mlx_qwen3_load_adapter_replaces_incumbent);
+    HU_RUN_TEST(test_mlx_qwen3_load_adapter_replace_keeps_allocator_in_sync);
     HU_RUN_TEST(test_mlx_qwen3_load_adapter_rejects_path_traversal);
 #if HU_IS_TEST
     HU_RUN_TEST(test_mlx_qwen3_chat_returns_mock_response);

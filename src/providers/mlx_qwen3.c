@@ -331,6 +331,10 @@ static hu_error_t mlx_qwen3_load_adapter(void *ctx_ptr, const hu_lora_adapter_sp
                                          hu_lora_apply_mode_t mode) {
     if (!ctx_ptr || !spec)
         return HU_ERR_INVALID_ARGUMENT;
+    /* S1.5 critic PE2: bytes-only returns NOT_SUPPORTED so init-08
+     * capability detection sees the right signal. */
+    if (spec->bytes && (!spec->path || spec->path_len == 0))
+        return HU_ERR_NOT_SUPPORTED;
     /* MLX helper protocol passes a path, not bytes; pre-read bytes is
      * reserved for federated LoRA (init-08). */
     if (!spec->path || spec->path_len == 0 || spec->bytes)
@@ -377,6 +381,17 @@ static hu_error_t mlx_qwen3_load_adapter(void *ctx_ptr, const hu_lora_adapter_sp
             return HU_ERR_INVALID_ARGUMENT;
     }
 
+    /* S1.5 critic HF1: keep allocator state in sync. `clear_active_adapter`
+     * frees through `c->alloc`; the new strings are allocated through
+     * `spec->alloc`. With `hu_system_allocator()` these are both NULL-ctx
+     * malloc/free and equivalent, but the API permits the caller to pass
+     * a different allocator. We must store `spec->alloc` so the next
+     * `clear_active_adapter` frees through the allocator that actually
+     * owns the memory. The clear MUST run BEFORE the swap so any
+     * incumbent state is freed via its original allocator. */
+    clear_active_adapter(c);
+    c->alloc = alloc;
+
     /* REPLACE semantics: any incumbent adapter is dropped only after
      * the new one validates. */
     char *new_id = hu_strndup(alloc, spec->id, spec->id_len);
@@ -389,7 +404,6 @@ static hu_error_t mlx_qwen3_load_adapter(void *ctx_ptr, const hu_lora_adapter_sp
         return HU_ERR_OUT_OF_MEMORY;
     }
 
-    clear_active_adapter(c);
     c->active_adapter_id = new_id;
     c->active_adapter_path = new_path;
 

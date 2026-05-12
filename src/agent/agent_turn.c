@@ -4103,6 +4103,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     unsigned retry_attempt = 0;
     char *steered_prompt = NULL;
     size_t steered_prompt_len = 0;
+    /* S1.5 critic HF3: snapshot the steering-vector wall clock ONCE per
+     * turn rather than re-reading `time(NULL)` on every retry. Otherwise
+     * `hu_persona_steering_vector` sees a different clock on each retry
+     * iteration, and for users with a populated personal_model the
+     * circadian-timing logic can perturb the projected vector between
+     * retries — undermining the deterministic boost ramp (1.0 -> 1.5 ->
+     * 2.0). Empty personal_model is unaffected (no clock-dependent
+     * features fire) so existing determinism tests still pass.
+     *
+     * `long long` matches `hu_persona_steering_vector`'s third arg. */
+    const long long turn_steering_clock = (long long)time(NULL);
     uint64_t max_tokens =
         agent->token_limit ? agent->token_limit
                            : hu_context_tokens_resolve(0, agent->model_name, agent->model_name_len);
@@ -4797,9 +4808,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (retry_attempt > 0 && system_prompt && system_prompt_len > 0 &&
             msgs && msgs_count > 0) {
             float steering_vec[HU_STEERING_VEC_DIM];
-            long long steering_now = (long long)time(NULL);
+            /* HF3: use the turn-entry snapshot so all retries see the
+             * same wall clock; circadian-timing in the persona projection
+             * cannot perturb the boost ramp. */
             hu_error_t sv_err = hu_persona_steering_vector(
-                agent->persona, &agent->personal_model, steering_now, steering_vec,
+                agent->persona, &agent->personal_model, turn_steering_clock, steering_vec,
                 HU_STEERING_VEC_DIM);
             if (sv_err == HU_OK) {
                 char *steering_directive = NULL;
@@ -5091,6 +5104,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     resp.content =
                         hu_strndup(agent->alloc, "I need to reconsider my approach.", 33);
                     resp.content_len = resp.content ? 33 : 0;
+                    /* S1.5 critic HF4: intentional asymmetry — CoT-audit
+                     * `continue` does NOT bump `retry_attempt`. Persona
+                     * steering only fires on reflection-driven retries
+                     * (verifier-rejected response quality), not on
+                     * CoT-audit goal-hijack / exfiltration retries.
+                     * Rationale: a hijacked CoT is a security signal,
+                     * not a quality signal, and steering toward "be
+                     * more like the persona" is not the right pressure
+                     * — the agent needs to refuse, not adapt. If init-07
+                     * (ThinkPRM) decides differently, it should bump
+                     * `retry_attempt` here explicitly with a comment. */
                     continue;
                 }
                 hu_cot_audit_result_free(agent->alloc, &cot_result);

@@ -377,9 +377,16 @@ static hu_error_t huml_load_adapter(void *ctx_ptr, const hu_lora_adapter_spec_t 
     huml_ctx_t *ctx = (huml_ctx_t *)ctx_ptr;
     if (!ctx || !spec)
         return HU_ERR_INVALID_ARGUMENT;
-    /* huml only knows how to mmap from disk today; pre-read bytes path
-     * is reserved for federated LoRA (init-08) where the helper hands
-     * weights over IPC. Reject early so the caller knows. */
+    /* S1.5 critic PE2: bytes-only spec is a "feature not supported here"
+     * signal for init-08 federated LoRA capability detection — not a
+     * caller bug. Returning HU_ERR_NOT_SUPPORTED lets init-08 probe
+     * which providers can ingest pre-read weights without misreading
+     * the result as an INVALID_ARGUMENT misuse. */
+    if (spec->bytes && (!spec->path || spec->path_len == 0))
+        return HU_ERR_NOT_SUPPORTED;
+    /* Path-only is the only mode huml understands today. Anything else
+     * (no source, or both source set — the latter caught by the helper
+     * source-mutex, but we defend here for direct-vtable callers too). */
     if (!spec->path || spec->path_len == 0 || spec->bytes)
         return HU_ERR_INVALID_ARGUMENT;
     if (!spec->id || spec->id_len == 0 || !spec->alloc)

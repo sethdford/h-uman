@@ -409,8 +409,12 @@ static hu_error_t llamacpp_load_adapter(void *ctx, const hu_lora_adapter_spec_t 
                                         hu_lora_apply_mode_t mode) {
     if (!ctx || !spec)
         return HU_ERR_INVALID_ARGUMENT;
-    /* llama.cpp's `llama_adapter_lora_init` is path-based; pre-read
-     * bytes is reserved for federated LoRA (init-08). */
+    /* S1.5 critic PE2: bytes-only spec returns NOT_SUPPORTED so init-08
+     * capability detection sees the right signal. */
+    if (spec->bytes && (!spec->path || spec->path_len == 0))
+        return HU_ERR_NOT_SUPPORTED;
+    /* llama.cpp's `llama_adapter_lora_init` is path-based; bytes-source
+     * is reserved for federated LoRA (init-08). */
     if (!spec->path || spec->path_len == 0 || spec->bytes)
         return HU_ERR_INVALID_ARGUMENT;
     if (!spec->id || spec->id_len == 0 || !spec->alloc)

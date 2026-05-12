@@ -263,6 +263,32 @@ static void test_llamacpp_load_adapter_rejects_path_traversal(void) {
     prov.vtable->deinit(prov.ctx, &a);
 }
 
+/* S1.5 critic PE2: bytes-only spec on a path-only provider must return
+ * HU_ERR_NOT_SUPPORTED, not HU_ERR_INVALID_ARGUMENT, so init-08
+ * federated-LoRA capability detection can distinguish "feature missing"
+ * from "API misuse". */
+static void test_llamacpp_load_adapter_bytes_only_spec_returns_not_supported(void) {
+    hu_allocator_t a = alloc();
+    hu_llamacpp_config_t cfg = {0};
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_llamacpp_provider_create(&a, &cfg, &prov), HU_OK);
+
+    const uint8_t fake_weights[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    const hu_lora_adapter_spec_t bytes_only = {
+        .path = NULL,
+        .path_len = 0,
+        .bytes = fake_weights,
+        .bytes_len = sizeof(fake_weights),
+        .id = "id",
+        .id_len = 2,
+        .alloc = &a,
+    };
+    HU_ASSERT_EQ(prov.vtable->load_adapter(prov.ctx, &bytes_only,
+                                            HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_NOT_SUPPORTED);
+    prov.vtable->deinit(prov.ctx, &a);
+}
+
 void run_llamacpp_provider_tests(void) {
     HU_TEST_SUITE("Llamacpp Provider (W13 Bridge A scaffold)");
     HU_RUN_TEST(test_llamacpp_factory_creates_with_minimal_config);
@@ -277,4 +303,5 @@ void run_llamacpp_provider_tests(void) {
 #endif
     HU_RUN_TEST(test_llamacpp_load_adapter_rejects_null_args);
     HU_RUN_TEST(test_llamacpp_load_adapter_rejects_path_traversal);
+    HU_RUN_TEST(test_llamacpp_load_adapter_bytes_only_spec_returns_not_supported);
 }

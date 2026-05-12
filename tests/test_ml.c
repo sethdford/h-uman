@@ -4730,6 +4730,35 @@ static void test_huml_provider_load_adapter_rejects_path_traversal(void) {
     provider.vtable->deinit(provider.ctx, &alloc);
 }
 
+/* S1.5 critic PE2: bytes-only spec (no path) on a path-based provider
+ * returns HU_ERR_NOT_SUPPORTED, not HU_ERR_INVALID_ARGUMENT. This is
+ * the capability-detection signal init-08 federated LoRA will probe
+ * to decide which providers can ingest pre-read weight bytes over IPC.
+ * HUML can only mmap from disk today, so the answer is "not supported"
+ * (a future capability), not "you misused the API" (a caller bug). */
+static void test_huml_provider_bytes_only_spec_returns_not_supported(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t provider;
+    HU_ASSERT_EQ(hu_huml_provider_create(&alloc, NULL, &provider), HU_OK);
+
+    const uint8_t fake_weights[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    const hu_lora_adapter_spec_t bytes_only = {
+        .path = NULL,
+        .path_len = 0,
+        .bytes = fake_weights,
+        .bytes_len = sizeof(fake_weights),
+        .id = "pers",
+        .id_len = 4,
+        .alloc = &alloc,
+    };
+    HU_ASSERT_EQ(provider.vtable->load_adapter(provider.ctx, &bytes_only,
+                                                HU_LORA_APPLY_MODE_REPLACE),
+                 HU_ERR_NOT_SUPPORTED);
+    /* No state change on the rejection. */
+    HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
+    provider.vtable->deinit(provider.ctx, &alloc);
+}
+
 /* Cloud / non-adapter providers leave the triple NULL. The helper
  * functions must return HU_ERR_NOT_SUPPORTED rather than crash. */
 static void test_provider_adapter_helpers_not_supported(void) {
@@ -5394,6 +5423,7 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_huml_provider_get_name);
     HU_RUN_TEST(test_huml_provider_load_unload_adapter);
     HU_RUN_TEST(test_huml_provider_load_adapter_rejects_path_traversal);
+    HU_RUN_TEST(test_huml_provider_bytes_only_spec_returns_not_supported);
     HU_RUN_TEST(test_provider_adapter_helpers_not_supported);
     /* Speculative predict with model (test mode falls back to heuristic) */
     HU_RUN_TEST(test_speculative_predict_with_model_null_provider);
