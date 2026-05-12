@@ -189,7 +189,7 @@ static unsigned char hu_cyrillic_confusable_to_ascii(uint32_t cp) {
 static size_t hu_minja_normalize(const char *in, size_t in_len, char *out,
                                  size_t out_cap, size_t *out_nonascii) {
     size_t w = 0;
-    size_t nonascii = 0;
+    size_t nonascii_bytes = 0;
     const unsigned char *p = (const unsigned char *)in;
     size_t i = 0;
     while (i < in_len && w + 1 < out_cap) {
@@ -219,7 +219,10 @@ static size_t hu_minja_normalize(const char *in, size_t in_len, char *out,
         } else {
             folded = hu_cyrillic_confusable_to_ascii(cp);
             if (folded == 0) {
-                nonascii++;
+                /* Count BYTES, not codepoints, so the locale-mismatch
+                 * threshold compares apples to apples against `in_len`
+                 * (also bytes). A 3-byte CJK glyph contributes 3. */
+                nonascii_bytes += (size_t)consumed;
                 continue;
             }
         }
@@ -229,7 +232,7 @@ static size_t hu_minja_normalize(const char *in, size_t in_len, char *out,
     if (w < out_cap)
         out[w] = '\0';
     if (out_nonascii)
-        *out_nonascii = nonascii;
+        *out_nonascii = nonascii_bytes;
     return w;
 }
 
