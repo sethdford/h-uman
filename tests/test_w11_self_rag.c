@@ -1045,6 +1045,119 @@ static void test_w11_inline_wm_no_match_leaves_score_unchanged(void) {
     close_facade(g, m);
 }
 
+/* W11 negative-memory gate: when a world-model snapshot contains a
+ * negative memory whose text appears in the critique claim, the claim
+ * is forced to fabricated=true with score 0, regardless of SQL evidence.
+ * In STRICT mode with threshold crossed, the refusal uses
+ * HU_REFUSAL_NEGATIVE_MEMORY_MATCH. */
+static void test_w11_inline_negative_memory_blocks_critique(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    /* Add a negative memory: "Don't talk about Alice's salary." */
+    hu_negative_memory_t nm;
+    memset(&nm, 0, sizeof(nm));
+    snprintf(nm.text, sizeof(nm.text), "salary");
+    snprintf(nm.scope, sizeof(nm.scope), "topic");
+    snprintf(nm.reason, sizeof(nm.reason), "sensitive topic");
+    nm.belief = hu_belief_init(1.0f, "user-stated", 1735690000000LL);
+    nm.created_at = 1735690000000LL;
+    int64_t nm_id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add_facade(m, "u1", 2, &nm, &nm_id), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(
+        hu_world_model_build(m, A(), "u1", 2, 1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_NOT_NULL(wm);
+    HU_ASSERT(wm->negatives_count >= 1);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req;
+    memset(&req, 0, sizeof(req));
+    const char *draft = "<critique>Alice's salary is $150k</critique>.";
+    req.draft = draft;
+    req.draft_len = strlen(draft);
+    req.mode = HU_VERIFY_STRICT;
+    req.contact_id = "u1";
+    req.contact_id_len = 2;
+    req.abstain_threshold = 0.5f;
+    req.now_ms = 1735690000000LL;
+    req.wm = wm;
+
+    hu_self_rag_response_t resp;
+    memset(&resp, 0, sizeof(resp));
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.claims_count, 1);
+    HU_ASSERT_TRUE(resp.claims[0].fabricated);
+    HU_ASSERT(resp.claims[0].support.mean < 0.01f);
+    HU_ASSERT(resp.claims[0].support.prov_count >= 1);
+    HU_ASSERT_STR_EQ(resp.claims[0].support.prov[0].source,
+                      "inline-negative-mem");
+
+    /* STRICT mode with 100% fabricated → abstention. */
+    HU_ASSERT_EQ((int)resp.outcome, HU_SELF_RAG_ABSTAINED);
+    HU_ASSERT_STR_CONTAINS(resp.refusal_text, "rather not weigh in");
+
+    hu_self_rag_close(&r);
+    hu_world_model_free(A(), wm);
+    close_facade(g, m);
+}
+
+/* Negative memory should NOT block claims that don't match. */
+static void test_w11_inline_negative_memory_no_match_passes(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_negative_memory_t nm;
+    memset(&nm, 0, sizeof(nm));
+    snprintf(nm.text, sizeof(nm.text), "salary");
+    snprintf(nm.scope, sizeof(nm.scope), "topic");
+    snprintf(nm.reason, sizeof(nm.reason), "sensitive topic");
+    nm.belief = hu_belief_init(1.0f, "user-stated", 1735690000000LL);
+    nm.created_at = 1735690000000LL;
+    int64_t nm_id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add_facade(m, "u1", 2, &nm, &nm_id), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(
+        hu_world_model_build(m, A(), "u1", 2, 1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_NOT_NULL(wm);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_inline(m, NULL, &r), HU_OK);
+
+    hu_self_rag_request_t req;
+    memset(&req, 0, sizeof(req));
+    /* Claim mentions Alice's job, not salary — should NOT be blocked. */
+    const char *draft = "<critique>Alice works at Acme</critique>.";
+    req.draft = draft;
+    req.draft_len = strlen(draft);
+    req.mode = HU_VERIFY_STRICT;
+    req.contact_id = "u1";
+    req.contact_id_len = 2;
+    req.abstain_threshold = 0.5f;
+    req.now_ms = 1735690000000LL;
+    req.wm = wm;
+
+    hu_self_rag_response_t resp;
+    memset(&resp, 0, sizeof(resp));
+    HU_ASSERT_EQ(hu_self_rag_verify(&r, A(), &req, &resp), HU_OK);
+    HU_ASSERT_EQ((int)resp.claims_count, 1);
+    /* "Alice works at Acme" is seeded evidence — should be supported. */
+    HU_ASSERT_FALSE(resp.claims[0].fabricated);
+    HU_ASSERT_NEQ((int)resp.outcome, HU_SELF_RAG_ABSTAINED);
+
+    hu_self_rag_close(&r);
+    hu_world_model_free(A(), wm);
+    close_facade(g, m);
+}
+
 static void test_w11_inline_strict_supported_when_evidence_present(void) {
     hu_graph_t *g = NULL;
     hu_memory_facade_t *m = NULL;
@@ -1626,6 +1739,8 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_inline_strict_supported_when_evidence_present);
     HU_RUN_TEST(test_w11_inline_wm_entity_match_lifts_weak_score);
     HU_RUN_TEST(test_w11_inline_wm_no_match_leaves_score_unchanged);
+    HU_RUN_TEST(test_w11_inline_negative_memory_blocks_critique);
+    HU_RUN_TEST(test_w11_inline_negative_memory_no_match_passes);
     HU_RUN_TEST(test_w11_agent_self_rag_apply_swaps_under_soft_and_bumps_counters);
     HU_RUN_TEST(test_w11_agent_self_rag_apply_telemetry_does_not_swap);
     HU_RUN_TEST(test_w11_agent_self_rag_apply_off_short_circuits);
