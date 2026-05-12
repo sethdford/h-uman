@@ -2416,6 +2416,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_personal_model_ingest_provenance.c
     tests/test_persona_directive_channels.c
     # SOTA-2026 init-01: prompt-side activation steering (S1).
     # Header lives at include/human/persona/steering.h; impl at

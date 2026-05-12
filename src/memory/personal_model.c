@@ -1,4 +1,6 @@
 #include "human/memory/personal_model.h"
+#include "human/memory/write_trust.h"
+#include "human/core/log.h"
 #include "human/persona.h"
 #include "human/platform.h"
 #include <ctype.h>
@@ -931,7 +933,8 @@ static void bump_temporal(hu_personal_model_t *model, int64_t timestamp) {
 }
 
 hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *message,
-                                    size_t message_len, bool from_user, int64_t timestamp) {
+                                    size_t message_len, int64_t timestamp,
+                                    const hu_provenance_t *prov) {
     if (!model)
         return HU_ERR_INVALID_ARGUMENT;
     if (message_len > 0 && !message)
@@ -945,11 +948,50 @@ hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *mess
         model->updated_at = timestamp;
     }
 
-    if (!from_user)
+    /* Determine effective trust source.
+     * NULL provenance → backward-compat first-party path (no gate). */
+    hu_write_source_t src = (prov != NULL) ? prov->source : HU_WRITE_SOURCE_USER;
+
+    /* Agent self-ingest: preserve pre-G0 from_user=false early-return.
+     * The agent's own words do not describe the user's preferences. */
+    if (src == HU_WRITE_SOURCE_AGENT) {
         return HU_OK;
+    }
 
     if (message_len == 0)
         return HU_OK;
+
+    /* G0 MINJA gate — runs for every non-first-party, non-agent source.
+     * Pure-local: no LLM call, no network I/O. */
+    if (src != HU_WRITE_SOURCE_USER) {
+        hu_write_trust_input_t tin = {
+            .source             = src,
+            .observed_at        = prov ? prov->observed_at : timestamp,
+            .now                = timestamp,
+            .contradiction_flag = false,
+            .supersession       = false,
+            /* Rate hints: pass through from provenance when provided.
+             * Production code leaves both at 0 (anomaly_score = 1.0, no
+             * rate-limit penalty) until a per-source write tracker lands.
+             * Tests set these explicitly to simulate flooding attacks. */
+            .recent_writes      = prov ? prov->recent_writes : 0,
+            .rate_limit         = prov ? prov->rate_limit    : 0,
+        };
+        hu_write_trust_decision_t td = hu_write_trust_score(&tin);
+
+        if (td.outcome != HU_WRITE_OUTCOME_LIVE) {
+            const char *ch = (prov && prov->channel[0]) ? prov->channel : "?";
+            const char *sn = (prov && prov->sender[0])  ? prov->sender  : "?";
+            hu_log_warn("personal_model", NULL,
+                        "ingest suppressed (MINJA gate): channel=%s sender=%s "
+                        "source=%s outcome=%s score=%.3f reason=%s",
+                        ch, sn,
+                        hu_write_source_str(src),
+                        hu_write_outcome_str(td.outcome),
+                        (double)td.score, td.reason);
+            return HU_OK; /* suppressed — not an error; caller gets HU_OK */
+        }
+    }
 
     bump_temporal(model, timestamp);
     update_style_from_message(&model->style, message, message_len, timestamp);
@@ -1648,7 +1690,7 @@ size_t hu_personal_model_touch_goals_in_message(hu_personal_model_t *model, cons
 
 hu_personal_model_turn_tick_result_t
 hu_personal_model_per_turn_tick(hu_personal_model_t *model, const char *msg, size_t msg_len,
-                                bool from_user, int64_t now) {
+                                int64_t now, const hu_provenance_t *prov) {
     hu_personal_model_turn_tick_result_t r;
     memset(&r, 0, sizeof(r));
     if (!model) {
@@ -1659,7 +1701,7 @@ hu_personal_model_per_turn_tick(hu_personal_model_t *model, const char *msg, siz
      * don't abort the rest of the tick — a partially-failed ingest
      * still benefits from goal-mention bumping and decay pruning of
      * pre-existing entries. */
-    r.ingest_error = hu_personal_model_ingest(model, msg, msg_len, from_user, now);
+    r.ingest_error = hu_personal_model_ingest(model, msg, msg_len, now, prov);
 
     /* Phase 2: bump last_referenced on any active goal whose
      * description shares a content-word with the message. Runs

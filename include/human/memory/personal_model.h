@@ -4,6 +4,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory/fact_extract.h"
+#include "human/memory/provenance.h" /* hu_provenance_t, helper constructors */
 #include "human/memory/tiers.h"
 #include "human/persona/circadian.h"
 #include <stdbool.h>
@@ -203,9 +204,38 @@ const char *hu_personal_model_directive_variant_label(hu_directive_variant_t v);
 bool hu_personal_model_has_content(const hu_personal_model_t *model);
 
 /* Ingest a new message into the personal model.
+ *
+ * G0 — provenance-aware ingestion with MINJA guard.
+ *
+ * `prov` stamps the origin of this content and gates write access:
+ *
+ *   NULL (or prov->source == HU_WRITE_SOURCE_USER)
+ *       First-party direct user input.  Fact extraction runs unconditionally.
+ *       NULL is the backward-compat path — callers that have not yet been
+ *       updated pass NULL and receive first-party treatment.
+ *
+ *   prov->source == HU_WRITE_SOURCE_AGENT
+ *       Agent self-ingest (assistant response style learning).  Returns HU_OK
+ *       immediately without extracting user facts — matches the pre-G0
+ *       from_user=false early-return behaviour.
+ *
+ *   prov->source is any other tier (CHANNEL_TRUSTED, CHANNEL_OPEN, FEED_*,
+ *   UNKNOWN)
+ *       Third-party / channel content.  Routed through hu_write_trust_score
+ *       (the write-time MINJA gate).  QUARANTINE and DROP outcomes suppress
+ *       ingest and emit a hu_log_warn so daemon operators can observe
+ *       suppression.  LIVE content proceeds to fact extraction at the caller's
+ *       trust tier.
+ *
+ * Cloud-safety: the gate is pure-local (no LLM call at any trust tier).
+ * Performance: first-party path is O(1) for the trust check (single integer
+ * compare); the gate adds one deterministic float-multiply chain for non-
+ * first-party content.
+ *
  * Updates facts, style metrics, topics, and temporal patterns. */
 hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *message,
-                                    size_t message_len, bool from_user, int64_t timestamp);
+                                    size_t message_len, int64_t timestamp,
+                                    const hu_provenance_t *prov);
 
 /* Merge facts from a fact extraction result into the model. */
 hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
@@ -588,7 +618,7 @@ typedef struct hu_personal_model_turn_tick_result {
  * phases on whatever state ingest produced (empty model is fine). */
 hu_personal_model_turn_tick_result_t
 hu_personal_model_per_turn_tick(hu_personal_model_t *model, const char *msg, size_t msg_len,
-                                bool from_user, int64_t now);
+                                int64_t now, const hu_provenance_t *prov);
 
 /* Periodic decay tick — sweep every fact, topic, and goal, and
  * remove entries whose effective_* score has fallen below the

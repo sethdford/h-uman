@@ -157,7 +157,7 @@ static void contradicts_finds_match_in_multiple_facts(void) {
 static void contradicts_after_ingest_round_trip(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "I live in Berlin.", 17, true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "I live in Berlin.", 17, 1700000001, NULL), HU_OK);
 
     bool c = false;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "I live in Paris.", 16, &c), HU_OK);

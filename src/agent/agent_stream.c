@@ -367,11 +367,19 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     }
 
 #ifndef HU_IS_TEST
-    (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
-    if (agent->auto_save && hu_personal_model_has_content(&agent->personal_model)) {
-        char pm_path[1024];
-        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path)))
-            (void)hu_personal_model_save(&agent->personal_model, pm_path);
+    {
+        int64_t stream_ts = (int64_t)time(NULL);
+        hu_provenance_t stream_prov =
+            (agent->active_channel && agent->active_channel_len > 0)
+                ? hu_provenance_from_channel(agent->active_channel, NULL, stream_ts)
+                : hu_provenance_user_direct(stream_ts);
+        (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len,
+                                       stream_ts, &stream_prov);
+        if (agent->auto_save && hu_personal_model_has_content(&agent->personal_model)) {
+            char pm_path[1024];
+            if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path)))
+                (void)hu_personal_model_save(&agent->personal_model, pm_path);
+        }
     }
 #endif
 
@@ -2409,8 +2417,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     /* Personal model: ingest assistant response for style learning */
 #ifndef HU_IS_TEST
     if (!agent->proactive_turn && final_content && final_content_len > 0) {
+        int64_t post_ts = (int64_t)time(NULL);
+        hu_provenance_t post_prov = hu_provenance_self(post_ts);
         (void)hu_personal_model_ingest(&agent->personal_model, final_content, final_content_len,
-                                       false, (int64_t)time(NULL));
+                                       post_ts, &post_prov);
     }
 #endif
 

@@ -521,6 +521,8 @@ void run_consistency_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+/* G0 — ingest provenance + MINJA gate */
+void run_personal_model_ingest_provenance_tests(void);
 void run_persona_directive_channels_tests(void);
 /* SOTA-2026 init-01 — prompt-side activation steering (S1). */
 void run_persona_steering_tests(void);
@@ -1089,6 +1091,7 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_personal_model_ingest_provenance_tests();
     run_persona_directive_channels_tests();
     /* SOTA-2026 init-01 — prompt-side activation steering (S1). */
     run_persona_steering_tests();

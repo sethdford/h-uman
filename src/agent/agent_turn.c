@@ -960,7 +960,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 
 #ifndef HU_IS_TEST
-    (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+    {
+        int64_t ingest_ts = (int64_t)time(NULL);
+        hu_provenance_t ingest_prov =
+            (agent->active_channel && agent->active_channel_len > 0)
+                ? hu_provenance_from_channel(agent->active_channel, NULL, ingest_ts)
+                : hu_provenance_user_direct(ingest_ts);
+        (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len,
+                                       ingest_ts, &ingest_prov);
+    }
 #endif
 
     /* B16 follow-up — close the chronotype loop. Whatever populated the
