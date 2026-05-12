@@ -3980,6 +3980,24 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 #endif
 }
 
+/* ── Phase 2 Task 11 (RL SOTA): tapback inbound poll ─────────────────────
+ *
+ * hu_imessage_poll_reactions reads the chat.db `message` table for rows
+ * whose associated_message_type sits in 2000-2006 (add) or 3000-3006
+ * (remove), normalizes the code via hu_reaction_normalize_imessage (the
+ * single source of truth for the tapback kind/polarity table — see
+ * src/channels/reaction_event.c), and writes one hu_reaction_event_t per
+ * row into the caller's buffer.
+ *
+ * The implementation lives in src/channels/imessage_reactions.c. It must
+ * NOT live in this translation unit because human/channels/reaction_event.h
+ * (Task 10) reuses two enumerator names already taken by the older
+ * hu_reaction_type_t enum in human/channel.h (HU_REACTION_QUESTION,
+ * HU_REACTION_CUSTOM_EMOJI). Including both headers in the same TU is a
+ * compile error and Task 10 cannot be modified from Task 11. Splitting
+ * the new function into its own .c (which only includes reaction_event.h)
+ * sidesteps the conflict without touching either header. */
+
 /* ── Tenor JSON fallback + GIF download (v2) ─────────────────────────── */
 
 #if HU_IS_TEST || defined(HU_HTTP_CURL)

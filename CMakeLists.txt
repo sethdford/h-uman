@@ -241,6 +241,12 @@ if(HU_ENABLE_IMAP)
 endif()
 if(HU_ENABLE_IMESSAGE)
     list(APPEND CHANNEL_SOURCES src/channels/imessage.c)
+    # Phase 2 Task 11 (RL SOTA): tapback inbound poll. Lives in its own TU
+    # to avoid an enum-name collision between human/channels/reaction_event.h
+    # (Task 10) and human/channel.h (HU_REACTION_QUESTION /
+    # HU_REACTION_CUSTOM_EMOJI redefinition). See the navigation comment
+    # in src/channels/imessage.c near hu_imessage_poll for the full story.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -2824,6 +2830,10 @@ list(APPEND HU_TEST_SOURCES tests/test_config_reload.c)
 list(APPEND HU_TEST_SOURCES tests/test_plugin_hooks.c)
 # Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers.
 list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
+# Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll.
+# Default-skipped stub; opt in to the real chat.db path with -DHU_HAVE_CHATDB=1
+# (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
+list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 
 # SOTA capability tests
 list(APPEND HU_TEST_SOURCES
