@@ -45,6 +45,8 @@ void run_channel_http_tests(void);
 void run_webhook_channel_tests(void);
 void run_bg_registry_tests(void);
 void run_channel_embeds_tests(void);
+/* Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers. */
+void run_reaction_event_tests(void);
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
 void run_tool_tests(void);
@@ -625,6 +627,7 @@ int main(int argc, char **argv) {
     run_webhook_channel_tests();
     run_bg_registry_tests();
     run_channel_embeds_tests();
+    run_reaction_event_tests();
     run_declarative_tools_tests();
     run_skill_trust_tests();
     run_tool_tests();

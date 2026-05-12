@@ -934,6 +934,9 @@ endif()
 # WASI sandbox is cross-platform
 list(APPEND HU_CORE_SOURCES src/security/wasi_sandbox.c)
 
+# Channel-agnostic reaction event normalizer (Phase 2 Task 10).
+list(APPEND HU_CORE_SOURCES src/channels/reaction_event.c)
+
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
     src/a2a.c
@@ -2819,6 +2822,8 @@ list(APPEND HU_TEST_SOURCES tests/test_integration.c)
 list(APPEND HU_TEST_SOURCES tests/test_hook_pipeline.c)
 list(APPEND HU_TEST_SOURCES tests/test_config_reload.c)
 list(APPEND HU_TEST_SOURCES tests/test_plugin_hooks.c)
+# Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers.
+list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 
 # SOTA capability tests
 list(APPEND HU_TEST_SOURCES
