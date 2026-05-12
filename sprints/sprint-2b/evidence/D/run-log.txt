@@ -1,0 +1,11 @@
+== negative: scanner MUST flag missing .variant ==
+  PASS: scanner exit non-zero on bad fixture (rc=1)
+  PASS: scanner emitted the expected diagnostic
+== positive: scanner MUST accept explicit .variant ==
+  PASS: scanner exit 0 on good fixture
+== inventory: scanner MUST be clean against the live tree ==
+  PASS: live tree inventory clean
+
+==========================================================
+Story D (Sprint 2b) Track B negative test: PASS=4 FAIL=0
+==========================================================

@@ -4,10 +4,19 @@
 # Flags memset(&VAR, 0, sizeof(hu_memory_query_t)) and memset(&VAR, 0, sizeof(VAR))
 # when the preceding lines declare `hu_memory_query_t VAR`. The next 48 lines
 # must contain `.variant =`.
+#
+# Override the scan root via HU_VARIANT_SCAN_ROOT (test-only). When unset,
+# the scanner runs against the repo root (script-relative). Sprint 2b
+# Story D negative test exercises this override to inject bad fixtures
+# without polluting the live tree.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+if [[ -n "${HU_VARIANT_SCAN_ROOT:-}" ]]; then
+  cd "$HU_VARIANT_SCAN_ROOT"
+else
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  cd "$ROOT"
+fi
 
 if ! command -v python3 &>/dev/null; then
   echo "check-memory-query-variant: python3 not found; skip." >&2
