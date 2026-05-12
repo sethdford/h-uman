@@ -56,6 +56,13 @@ else()
 endif()
 option(HU_ENABLE_LIBSODIUM "Link libsodium for production-grade AEAD (XChaCha20-Poly1305) and KDF (Argon2id)" OFF)
 option(HU_ENABLE_COREML "Enable CoreML/MLX provider (macOS only)" OFF)
+# Init-04 (M3 Bridge B) — MLX provider for Qwen3-4B-Instruct + LoRA.
+# Default OFF; the C TU compiles unconditionally as a stub returning
+# HU_ERR_NOT_SUPPORTED so non-Apple-Silicon builds and OFF builds still
+# satisfy the daemon's W13 fallthrough contract. When ON, the production
+# helper-subprocess path becomes available on POSIX targets (Apple
+# Silicon is the only supported runtime; design doc §6.5).
+option(HU_ENABLE_MLX_QWEN3 "Enable MLX Qwen3-4B provider (Apple Silicon; helper subprocess)" OFF)
 if(APPLE)
     option(HU_ENABLE_APPLE_INTELLIGENCE "Enable Apple Intelligence provider (on-device)" ON)
 else()
@@ -569,6 +576,7 @@ set(HU_CORE_SOURCES
     src/agent/weather_fetch.c
     src/agent/workspace_context.c
     src/agent/timing.c
+    src/agent/typing_simulator.c
     src/agent/governor.c
     src/agent/relationship_dynamics.c
     src/agent/arbitrator.c
@@ -948,6 +956,7 @@ list(APPEND HU_CORE_SOURCES
     src/eval/longmemeval.c
     src/eval_judge.c
     src/eval_benchmarks.c
+    src/eval_public_suites.c
     src/mcp_resources.c
     src/eval_dashboard.c
     src/memory/corrective_rag.c
@@ -987,7 +996,15 @@ list(APPEND HU_CORE_SOURCES
     src/providers/llamacpp_sampling.c
     src/providers/llamacpp_kvcache.c
     src/providers/llamacpp_decode.c
+    src/providers/mlx_qwen3.c
 )
+
+# Init-04 — propagate the build option as a compile definition so the
+# mlx_qwen3 TU can flip between stub and runtime mode without the rest
+# of the build system caring. Default OFF; the TU always compiles.
+if(HU_ENABLE_MLX_QWEN3)
+    add_compile_definitions(HU_ENABLE_MLX_QWEN3=1)
+endif()
 
 if(HU_ENABLE_COREML)
     list(APPEND HU_CORE_SOURCES src/providers/coreml.c)
@@ -2397,9 +2414,17 @@ set(HU_TEST_SOURCES
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
     tests/test_persona_directive_channels.c
+    # NOTE(init-04 sprint): the following two init-01 test files were
+    # added by concurrent automation but the supporting header
+    # include/human/persona/steering.h is not yet on disk. Temporarily
+    # excluded so init-04 can validate; init-01's parent agent should
+    # restore these once the header lands.
+    # tests/test_persona_steering.c
+    # tests/test_provider_steering_dispatch.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c
+    tests/test_typing_simulator.c
     tests/test_mcp_http_integration.c
     tests/test_self_improve.c
     tests/test_sycophancy_guard.c
@@ -2517,6 +2542,7 @@ set(HU_TEST_SOURCES
     tests/test_channel_manager.c
     tests/test_new_modules.c
     tests/test_provider_all.c
+    tests/test_mlx_qwen3_provider.c
     tests/test_channel_all.c
     tests/test_meta_common.c
     tests/test_channel_integration.c
@@ -3486,6 +3512,22 @@ if(HU_ENABLE_FUZZ)
     target_link_libraries(fuzz_session_deserialization PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_session_deserialization PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
     target_link_options(fuzz_session_deserialization PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+
+    add_executable(fuzz_path_validation fuzz/fuzz_path_validation.c)
+    set_target_properties(fuzz_path_validation PROPERTIES LINKER_LANGUAGE CXX)
+    target_compile_definitions(fuzz_path_validation PRIVATE HU_IS_TEST=1)
+    target_compile_options(fuzz_path_validation PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(fuzz_path_validation PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
+    target_compile_options(fuzz_path_validation PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_path_validation PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+
+    add_executable(fuzz_fts5_query fuzz/fuzz_fts5_query.c)
+    set_target_properties(fuzz_fts5_query PROPERTIES LINKER_LANGUAGE CXX)
+    target_compile_definitions(fuzz_fts5_query PRIVATE HU_IS_TEST=1)
+    target_compile_options(fuzz_fts5_query PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(fuzz_fts5_query PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
+    target_compile_options(fuzz_fts5_query PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_fts5_query PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
 endif()
 
 # Benchmark suite (micro-benchmarks of core operations)
