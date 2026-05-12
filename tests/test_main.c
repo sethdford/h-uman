@@ -410,6 +410,8 @@ void run_policy_logprobs_tests(void);
 void run_reference_model_tests(void);
 /* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
 void run_dpo_real_loss_tests(void);
+/* Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs. */
+void run_dpo_real_e2e_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -976,6 +978,8 @@ int main(int argc, char **argv) {
     run_reference_model_tests();
     /* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
     run_dpo_real_loss_tests();
+    /* Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs. */
+    run_dpo_real_e2e_tests();
 #endif
 
     run_experience_tests();

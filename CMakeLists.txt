@@ -2723,6 +2723,8 @@ set(HU_TEST_SOURCES
     tests/test_reference_model.c
     # Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient.
     tests/test_dpo_real_loss.c
+    # Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs.
+    tests/test_dpo_real_e2e.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
