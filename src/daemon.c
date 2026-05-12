@@ -22,6 +22,7 @@
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/training_data_runner.h"
+#include "human/agent/molora_dispatcher.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
@@ -2505,6 +2506,74 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_log_warn("human", agent->observer,
                         "personalization: load_adapter('%s', %s) failed: %d",
                         adapter_id, adapter_path, (int)le);
+    }
+    /* MoLoRA per-channel STACK — G1 wiring (SOTA-2026 init-02).
+     *
+     * After the W13 base REPLACE above, iterate over every persona overlay
+     * that carries a `lora_adapter_path` and STACK the channel expert into
+     * the provider's per-channel adapter pool.  This pre-warms all channel
+     * experts once at daemon startup (or personalization reload) so the
+     * active channel can be hot-switched at turn time without per-turn
+     * load latency.
+     *
+     * Integration-point rationale (daemon vs per-turn):
+     *   The daemon site was chosen because it loads the base adapter once
+     *   (W13 REPLACE above), and per-channel experts are similarly a one-
+     *   time startup cost.  Loading them here amortises the I/O across all
+     *   subsequent turns on every channel.  A per-turn approach (agent_turn.c)
+     *   would be cheaper in steady state but would incur disk I/O on the first
+     *   message for each new channel, which is worse for latency-sensitive
+     *   channels like iMessage and Telegram.
+     *
+     * Error semantics preserved:
+     *   - Cloud providers have no `load_adapter` vtable; `hu_provider_load_adapter`
+     *     returns HU_ERR_NOT_SUPPORTED for STACK just as it does for REPLACE.
+     *     The dispatcher converts this to `channel_expert_skipped = true` and
+     *     returns HU_OK.  We detect the first skip, log exactly once, and stop
+     *     iterating — the cloud-safety contract from
+     *     `test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat`
+     *     is preserved.
+     *   - Providers that support REPLACE but not STACK (huml, llamacpp) produce
+     *     the same `channel_expert_skipped` signal; handled identically.
+     *   - Overlays without a `lora_adapter_path` are silently skipped (they
+     *     use the macro-mode base alone). */
+    if (config && config->personalization.enabled && agent &&
+        agent->provider.vtable && agent->persona &&
+        agent->persona->overlays_count > 0) {
+        bool molora_not_supported_logged = false;
+        for (size_t oi = 0; oi < agent->persona->overlays_count; oi++) {
+            const hu_persona_overlay_t *ov = &agent->persona->overlays[oi];
+            if (!ov->channel || !ov->lora_adapter_path)
+                continue;
+            size_t ch_len = strlen(ov->channel);
+            hu_molora_apply_result_t mres = {0};
+            /* base_spec = NULL: the REPLACE was already done by W13 above;
+             * only STACK the per-channel expert on top. */
+            hu_error_t me = hu_molora_dispatcher_apply(
+                &agent->provider, alloc, agent->persona,
+                ov->channel, ch_len, NULL, &mres);
+            if (me != HU_OK) {
+                hu_log_warn("human", agent->observer,
+                            "MoLoRA: failed to STACK channel expert '%s' "
+                            "from %s (%d)",
+                            ov->channel, ov->lora_adapter_path, (int)me);
+            } else if (mres.channel_stacked) {
+                hu_log_info("human", agent->observer,
+                            "MoLoRA: stacked channel expert '%s' from %s",
+                            ov->channel, ov->lora_adapter_path);
+            } else if (mres.channel_expert_skipped) {
+                /* Provider cannot STACK (cloud or REPLACE-only backend).
+                 * Log once and stop — all remaining overlays will fail
+                 * identically. */
+                if (!molora_not_supported_logged) {
+                    hu_log_info("human", agent->observer,
+                                "MoLoRA: provider does not support adapter "
+                                "STACK; per-channel experts skipped");
+                    molora_not_supported_logged = true;
+                }
+                break;
+            }
+        }
     }
     /* Initialize contact identity graph for cross-channel resolution */
     if (agent && agent->memory) {

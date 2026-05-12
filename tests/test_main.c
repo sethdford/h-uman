@@ -137,6 +137,7 @@ void run_new_modules_tests(void);
 void run_provider_all_tests(void);
 void run_mlx_qwen3_provider_tests(void);
 void run_molora_dispatcher_tests(void);
+void run_daemon_personalization_tests(void);
 void run_channel_all_tests(void);
 void run_idempotency_tests(void);
 void run_idempotency_hula_integration_tests(void);
@@ -1081,6 +1082,7 @@ int main(int argc, char **argv) {
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
     run_daemon_trust_tests();
+    run_daemon_personalization_tests();
     run_cp_tasks_tests();
     run_cp_canvas_tests();
     run_vector_retrieval_remote_tests();

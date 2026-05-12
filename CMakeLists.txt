@@ -2549,6 +2549,7 @@ set(HU_TEST_SOURCES
     tests/test_provider_all.c
     tests/test_mlx_qwen3_provider.c
     tests/test_molora_dispatcher.c
+    tests/test_daemon_personalization.c
     tests/test_channel_all.c
     tests/test_meta_common.c
     tests/test_channel_integration.c
