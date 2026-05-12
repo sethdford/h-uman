@@ -36,8 +36,17 @@ static hu_error_t create_provider_from_name(hu_allocator_t *alloc, const hu_conf
         base_url = hu_compatible_provider_url(prov_name);
         base_url_len = base_url ? strlen(base_url) : 0;
     }
-    return hu_provider_create(alloc, prov_name, len, api_key, api_key_len, base_url, base_url_len,
-                              out);
+    hu_error_t err = hu_provider_create(alloc, prov_name, len, api_key, api_key_len, base_url,
+                                        base_url_len, out);
+    /* `hu_provider_create` takes a `const char *` api_key — every provider
+     * deep-copies it into its own context (see openai.c:1220-1226 et al).
+     * The heap copy allocated by `hu_api_key_resolve` is the caller's to
+     * free. PR55's ASan run attributed seven separate 8-20 byte leaks
+     * here, one per provider in the test matrix. Free on both success
+     * and failure paths — providers don't retain ownership on error. */
+    if (api_key)
+        alloc->free(alloc->ctx, api_key, api_key_len + 1);
+    return err;
 }
 
 hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config_t *cfg,

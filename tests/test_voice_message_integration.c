@@ -138,8 +138,12 @@ static void test_full_pipeline_tool_to_audio_file(void) {
     hu_cartesia_tts_free_bytes(&alloc, audio_bytes, audio_len);
 #else
     (void)tts_err;
-    (void)audio_bytes;
-    (void)audio_len;
+    /* Under HU_IS_TEST the mock at src/tts/cartesia.c:242-260 allocates
+     * 400 b unconditionally regardless of HU_ENABLE_CARTESIA. The Linux
+     * ASan CI compiles without Cartesia and was leaking those 400 b on
+     * every run. Free on both paths. */
+    if (audio_bytes)
+        hu_cartesia_tts_free_bytes(&alloc, audio_bytes, audio_len);
 #endif
 
     /* 11. Clear pending voice (daemon does this unconditionally) */
