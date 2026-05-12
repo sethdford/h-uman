@@ -137,6 +137,14 @@ static void test_llamacpp_supports_streaming_is_false(void) {
     prov.vtable->deinit(prov.ctx, &a);
 }
 
+/* Phase 1 (RL SOTA) — this stub assertion is only valid when
+ * llama.cpp is NOT linked. With HU_ENABLE_LLAMACPP=ON the vendored
+ * library provides real load_adapter/unload_adapter implementations
+ * that reach the GGUF loader and return HU_ERR_PROVIDER_RESPONSE for
+ * a nonexistent path (or HU_OK + state mutation for a real one), not
+ * HU_ERR_NOT_SUPPORTED. The linked-path coverage lives in Task 9's
+ * tests/test_llamacpp_lora_hotswap.c. */
+#if !defined(HU_ENABLE_LLAMACPP)
 static void test_llamacpp_load_adapter_returns_not_supported_until_linked(void) {
     hu_allocator_t a = alloc();
     hu_llamacpp_config_t cfg = {0};
@@ -154,6 +162,7 @@ static void test_llamacpp_load_adapter_returns_not_supported_until_linked(void) 
     HU_ASSERT(prov.vtable->active_adapter(prov.ctx) == NULL);
     prov.vtable->deinit(prov.ctx, &a);
 }
+#endif  /* !HU_ENABLE_LLAMACPP */
 
 static void test_llamacpp_load_adapter_rejects_null_args(void) {
     hu_allocator_t a = alloc();
@@ -180,6 +189,8 @@ void run_llamacpp_provider_tests(void) {
     HU_RUN_TEST(test_llamacpp_chat_multimessage_returns_not_supported);
     HU_RUN_TEST(test_llamacpp_chat_rejects_null_args);
     HU_RUN_TEST(test_llamacpp_supports_streaming_is_false);
+#if !defined(HU_ENABLE_LLAMACPP)
     HU_RUN_TEST(test_llamacpp_load_adapter_returns_not_supported_until_linked);
+#endif
     HU_RUN_TEST(test_llamacpp_load_adapter_rejects_null_args);
 }

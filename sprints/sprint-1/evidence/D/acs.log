@@ -1,0 +1,6 @@
+AC-D.1 (DESCOPE_OK): rationale.md exists with >=10 lines:
+  PASS:      135 sprints/sprint-1/evidence/D/descope-rationale.md
+AC-D.2: evidence dir has >=1 files:
+         4 files: acs.log build-log.txt descope-rationale.md run-log.txt 
+AC-D.5: rationale states Category B:
+  matches: 4 (PASS if >=1)

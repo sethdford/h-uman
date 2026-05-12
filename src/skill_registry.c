@@ -4,6 +4,7 @@
  */
 #include "human/skill_registry.h"
 #include "human/core/http.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/crypto.h"
@@ -316,8 +317,12 @@ static hu_error_t copy_file(const char *src_file, const char *dst_file) {
     FILE *src = fopen(src_file, "rb");
     if (!src)
         return HU_ERR_IO;
-    FILE *dst = fopen(dst_file, "wb");
-    if (!dst) {
+    /* Copies a skill file into the user's skill directory. Skills
+     * are executable, but they're already user-owned trusted code
+     * (skill_trust gate ran earlier); 0644 keeps the existing
+     * permission semantics and adds the traversal guard. */
+    FILE *dst = NULL;
+    if (hu_io_secure_open(dst_file, HU_IO_PERM_USER, "wb", &dst) != HU_OK || !dst) {
         fclose(src);
         return HU_ERR_IO;
     }
@@ -439,8 +444,11 @@ static bool github_tree_url_to_raw_base(const char *tree_url, char *out, size_t 
 }
 
 static hu_error_t write_bytes_to_file(const char *path, const void *data, size_t len) {
-    FILE *f = fopen(path, "wb");
-    if (!f)
+    /* Generic write helper used by skill install/publish — every
+     * call site passes a path that came from the skill manifest, so
+     * the traversal guard is genuinely defending us here. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path, HU_IO_PERM_USER, "wb", &f) != HU_OK || !f)
         return HU_ERR_IO;
     if (len > 0 && fwrite(data, 1, len, f) != len) {
         fclose(f);
@@ -823,8 +831,10 @@ hu_error_t hu_skill_registry_publish(hu_allocator_t *alloc, const char *skill_di
     int n = snprintf(published_path, sizeof(published_path), "%s/.published", skill_dir);
     if (n <= 0 || (size_t)n >= sizeof(published_path))
         return HU_ERR_INVALID_ARGUMENT;
-    FILE *pf = fopen(published_path, "wb");
-    if (!pf)
+    /* Local "published" marker for skills the user has published —
+     * not secret, but path is user-derived; use the helper. */
+    FILE *pf = NULL;
+    if (hu_io_secure_open(published_path, HU_IO_PERM_USER, "wb", &pf) != HU_OK || !pf)
         return HU_ERR_IO;
     size_t written = fwrite(buf, 1, read_len, pf);
     fclose(pf);

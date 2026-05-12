@@ -2,6 +2,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/ml/tokenizer_ml.h"
 #include <limits.h>
 #include <stdint.h>
@@ -478,8 +479,11 @@ hu_error_t hu_bpe_tokenizer_save(const hu_bpe_tokenizer_t *tok, const char *path
 
     const struct hu_bpe_tokenizer *t = (const struct hu_bpe_tokenizer *)tok;
 
-    FILE *f = fopen(path, "wb");
-    if (!f)
+    /* BPE tokenizer file (.hbpe) — vocabulary and merges learned from
+     * training corpus. Not secret per se but contains the same kind
+     * of data leaked from training corpus. 0644. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path, HU_IO_PERM_USER, "wb", &f) != HU_OK || !f)
         return HU_ERR_IO;
 
     uint32_t magic = HBPE_MAGIC;

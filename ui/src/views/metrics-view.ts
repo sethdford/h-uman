@@ -13,6 +13,8 @@ import "../components/hu-empty-state.js";
 import "../components/hu-button.js";
 import "../components/hu-fidelity-tile.js";
 import type { FidelityStatus } from "../components/hu-fidelity-tile.js";
+import "../components/hu-directive-telemetry-tile.js";
+import type { DirectiveTelemetry } from "../components/hu-directive-telemetry-tile.js";
 import { icons } from "../icons.js";
 import { friendlyError } from "../utils/friendly-error.js";
 
@@ -246,6 +248,11 @@ export class ScMetricsView extends GatewayAwareLitElement {
    * + error state independently. */
   @state() private fidelity: FidelityStatus | null = null;
   @state() private fidelityError = "";
+  /* Same fail-isolation pattern as fidelity: directive telemetry
+   * loads in parallel with `metrics.snapshot` so a slow or absent
+   * counter backend never blanks the main view. */
+  @state() private directiveTelemetry: DirectiveTelemetry | null = null;
+  @state() private directiveTelemetryError = "";
 
   protected override async load(): Promise<void> {
     const gw = this.gateway;
@@ -270,6 +277,29 @@ export class ScMetricsView extends GatewayAwareLitElement {
       this.loading = false;
     }
     void this._loadFidelity();
+    void this._loadDirectiveTelemetry();
+  }
+
+  private async _loadDirectiveTelemetry(): Promise<void> {
+    const gw = this.gateway;
+    if (!gw) return;
+    this.directiveTelemetry = null;
+    this.directiveTelemetryError = "";
+    try {
+      const res = (await gw.request<DirectiveTelemetry>("metrics.directive_telemetry", {})) as
+        | DirectiveTelemetry
+        | { result?: DirectiveTelemetry };
+      const data =
+        (res && "result" in res && (res as { result?: DirectiveTelemetry }).result) ||
+        (res && "variants" in res ? (res as DirectiveTelemetry) : null);
+      if (data && data.variants !== undefined) {
+        this.directiveTelemetry = data;
+      } else {
+        this.directiveTelemetryError = "no telemetry data";
+      }
+    } catch (e) {
+      this.directiveTelemetryError = friendlyError(e);
+    }
   }
 
   private async _loadFidelity(): Promise<void> {
@@ -571,9 +601,10 @@ export class ScMetricsView extends GatewayAwareLitElement {
       ${this.loading
         ? this._renderSkeleton()
         : html`
-            ${this._renderFidelity()} ${this._renderIntelligenceStats()}
-            ${this._renderEvalCalibration()} ${this._renderHulaObservability()}
-            ${this._renderSystemHealth()} ${this._renderIntelligencePipeline()}
+            ${this._renderFidelity()} ${this._renderDirectiveTelemetry()}
+            ${this._renderIntelligenceStats()} ${this._renderEvalCalibration()}
+            ${this._renderHulaObservability()} ${this._renderSystemHealth()}
+            ${this._renderIntelligencePipeline()}
           `}
     `;
   }
@@ -596,6 +627,21 @@ export class ScMetricsView extends GatewayAwareLitElement {
           description="LoRA-adapter delta against the active persona's example bank"
         ></hu-section-header>
         <hu-fidelity-tile .data=${this.fidelity} .errorMessage=${errMsg}></hu-fidelity-tile>
+      </div>
+    `;
+  }
+
+  private _renderDirectiveTelemetry() {
+    return html`
+      <div class="section hu-scroll-reveal" role="region" aria-label="Directive variant telemetry">
+        <hu-section-header
+          heading="Directive Variant Telemetry"
+          description="Distribution of acknowledgment-directive variants fired across all channels"
+        ></hu-section-header>
+        <hu-directive-telemetry-tile
+          .data=${this.directiveTelemetry}
+          .errorMessage=${this.directiveTelemetryError}
+        ></hu-directive-telemetry-tile>
       </div>
     `;
   }

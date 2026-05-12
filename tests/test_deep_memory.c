@@ -19,7 +19,7 @@ static void episodic_create_table_valid(void) {
 }
 
 static void episodic_insert_sql_valid(void) {
-    hu_episode_t ep = {
+    hu_deep_episode_t ep = {
         .summary = "Had coffee with user_a",
         .summary_len = 19,
         .emotional_arc = "started anxious, ended relieved",
@@ -109,7 +109,7 @@ static void consolidation_merge_sql_valid(void) {
 
 /* --- F74 Source Tagging --- */
 static void episodic_source_tag_in_insert(void) {
-    hu_episode_t ep = {
+    hu_deep_episode_t ep = {
         .summary = "event",
         .summary_len = 5,
         .source_tag = "event",
@@ -276,7 +276,7 @@ static void residue_build_prompt_with_data(void) {
 
 static void episode_deinit_clears_fields(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_episode_t ep = {0};
+    hu_deep_episode_t ep = {0};
     ep.summary = hu_strndup(&alloc, "test", 4);
     ep.summary_len = 4;
     ep.emotional_arc = hu_strndup(&alloc, "arc", 3);

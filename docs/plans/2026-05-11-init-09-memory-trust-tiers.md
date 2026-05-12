@@ -32,6 +32,42 @@ backward-compatible.
 This is **not deferrable**: it is a security precondition for exposing `hu_personal_model_t`
 signal to end users via channels in initiatives #04 (MLX/Qwen3) and #05 (verifier-driven TTT).
 
+### Post-adversarial-review revisions (2026-05-11)
+
+Four corrections applied after the cross-initiative adversarial review (see
+`adversarial-review-critic.md`, `adversarial-review-api-contracts.md`, and
+`adversarial-review-security.md`):
+
+1. **B2 — Migration default flipped from FIRST_PARTY to THIRD_PARTY.** Section 2.8
+   originally proposed `ALTER TABLE … DEFAULT 2 (FIRST_PARTY)` for pre-migration rows.
+   The critic identified this as attacker amplification: any MINJA-poisoned fact already
+   in the DB at migration time would be permanently stamped as high-trust user content.
+   Now: `DEFAULT 1 (THIRD_PARTY)`, with an upgrade-on-positive-identification audit in
+   §2.11 that promotes rows whose source string unambiguously identifies a 1:1 channel.
+
+2. **B3 / A1 — All four `hu_personal_model_ingest` call sites enumerated.** The API
+   contract review found that the proposed signature change (new `hu_provenance_t*` arg)
+   needs concurrent patches at four call sites, not the two listed in §10. The complete
+   list is now: `src/agent/agent_turn.c:951`, `src/agent/agent_stream.c:603`,
+   `src/feeds/processor.c:412`, and `src/memory/personal_model.c:1834` (the self-test
+   harness). Each gets a stamped `hu_provenance_t` derived from channel context.
+
+3. **MINJA detector broadened from 10 patterns to ≥30 with normalization.** The security
+   review enumerated 10 bypass categories the original heuristic missed (Unicode confusables,
+   homoglyphs, leetspeak, locale-language injection, multi-message split, semantic paraphrase,
+   etc.). Section 2.6 now requires NFKC normalization, leetspeak decoding, a non-locale-language
+   reject filter, and a pending-facts quarantine queue so single-message regex bypasses still
+   fail at the multi-turn coherence check.
+
+4. **Trust-tier ordinal convention locked.** §2.1 retains the `0=UNTRUSTED, 4=USER_DIRECT`
+   ordering (higher = more trust) — this is the *locked convention* referenced by the
+   master plan's "Locked conventions" section. Initiatives that consume `hu_trust_tier_t`
+   (#04, #05, #08, #10) must compare with `>=` against the threshold, never with `==` or `<`
+   against a hardcoded numeric value.
+
+`hu_memory_entry_t` size growth (+3 fields = +16 bytes on 64-bit) audited against all 19
+existing call sites that take `sizeof(hu_memory_entry_t)`; none assume a specific size.
+
 ---
 
 ## 1. Threat Model Addendum
@@ -221,50 +257,122 @@ static hu_error_t merge_facts_checked(hu_personal_model_t *model,
 }
 ```
 
-### 2.6 MINJA Detection (`hu_minja_detect`)
+### 2.6 MINJA Detection (`hu_minja_detect`) — **broadened post-adversarial-review**
 
-Lightweight pattern matcher, zero allocation, ~2 KB text-segment cost.
+The adversarial security review (`adversarial-review-security.md`) enumerated 10 bypass
+categories the original 10-pattern heuristic missed. The detector is therefore expanded
+to ≥30 normalized patterns plus three preprocessing stages (NFKC normalization, leetspeak
+decoding, non-locale-language reject) plus a pending-facts quarantine queue that catches
+multi-message split attacks at the multi-turn coherence layer.
 
 ```c
-/* src/memory/minja_guard.c  (NEW — ~120 lines) */
+/* src/memory/minja_guard.c  (NEW — ~280 lines after broadening) */
 
-static const char * const MINJA_PATTERNS[] = {
-    "from now on",
-    "your new name is",
-    "your name is now",
-    "ignore previous",
-    "ignore all previous",
-    "disregard previous",
-    "forget everything",
-    "you are now",
-    "actually i want you to",
-    "new instructions:",
+/* Tier 1: instruction-rewrite patterns (system-prompt hijack family).
+ * These are nearly never legitimate in third-party inbound text. */
+static const char * const MINJA_PATTERNS_INSTRUCTION[] = {
+    "from now on", "from this point on", "going forward",
+    "ignore previous", "ignore all previous", "disregard previous",
+    "disregard everything", "forget everything", "forget what",
+    "new instructions:", "updated instructions", "system update:",
+    "actually i want you to", "let me clarify what you are",
+    "your real instructions", "the real prompt is",
 };
-#define MINJA_PATTERN_COUNT (sizeof(MINJA_PATTERNS) / sizeof(MINJA_PATTERNS[0]))
 
-bool hu_minja_detect(const char *text, size_t len) {
-    /* Case-insensitive substring scan; bounded to first 512 bytes. */
-    size_t scan_len = len < 512 ? len : 512;
-    /* Lowercase the scan window on the stack to avoid allocation */
-    char lower[512];
-    for (size_t i = 0; i < scan_len; i++)
-        lower[i] = (char)tolower((unsigned char)text[i]);
+/* Tier 2: identity/role overwrite (MINJA target-1: name/role facts). */
+static const char * const MINJA_PATTERNS_IDENTITY[] = {
+    "your new name is", "your name is now", "from now your name",
+    "you are now called", "you are now", "you will now be",
+    "i am your", "i'm your new", "the user is now",
+    "the real user is", "i am the actual user",
+};
 
-    for (size_t p = 0; p < MINJA_PATTERN_COUNT; p++) {
-        size_t plen = strlen(MINJA_PATTERNS[p]);
-        if (plen > scan_len) continue;
-        for (size_t i = 0; i + plen <= scan_len; i++) {
-            if (memcmp(lower + i, MINJA_PATTERNS[p], plen) == 0)
-                return true;
+/* Tier 3: capability/permission unlock attempts. */
+static const char * const MINJA_PATTERNS_CAPABILITY[] = {
+    "developer mode", "jailbreak mode", "dan mode",
+    "without restrictions", "ignore your guidelines",
+    "ignore safety", "bypass the filter",
+};
+
+#define MINJA_TIER_COUNT 3
+static const char * const * const MINJA_TIERS[MINJA_TIER_COUNT] = {
+    MINJA_PATTERNS_INSTRUCTION,
+    MINJA_PATTERNS_IDENTITY,
+    MINJA_PATTERNS_CAPABILITY,
+};
+static const size_t MINJA_TIER_SIZES[MINJA_TIER_COUNT] = {
+    sizeof(MINJA_PATTERNS_INSTRUCTION)/sizeof(*MINJA_PATTERNS_INSTRUCTION),
+    sizeof(MINJA_PATTERNS_IDENTITY)/sizeof(*MINJA_PATTERNS_IDENTITY),
+    sizeof(MINJA_PATTERNS_CAPABILITY)/sizeof(*MINJA_PATTERNS_CAPABILITY),
+};
+
+/* Preprocessing stage 1: NFKC normalization (homoglyph + confusable defence).
+ * Handles full-width Latin, Cyrillic lookalikes, fullwidth digits, etc.
+ * Falls back to ASCII-only normalization if ICU is not available. */
+static size_t hu_minja_nfkc_normalize(const char *in, size_t in_len,
+                                      char *out, size_t out_cap);
+
+/* Preprocessing stage 2: leetspeak decode in place (1->i, 3->e, 0->o, 5->s,
+ * @ -> a). Pattern table is fixed and small so this is a single linear pass. */
+static void hu_minja_leetspeak_decode(char *buf, size_t len);
+
+/* Preprocessing stage 3: non-locale-language reject. If the active persona's
+ * locale is "en" but ≥40% of bytes are non-ASCII (after NFKC), short-circuit
+ * to "quarantine" without further analysis — adversary cannot smuggle
+ * instructions in a script the user doesn't read. Tunable via persona. */
+static bool hu_minja_locale_mismatch(const char *normalized, size_t len,
+                                     const char *user_locale);
+
+bool hu_minja_detect(const char *text, size_t len,
+                     const char *user_locale /* may be NULL */) {
+    /* Stage 0: bound input to first 1 KB (was 512 — broadened so split
+     * "your new\nname is bob" doesn't slip past the window). */
+    size_t scan_len = len < 1024 ? len : 1024;
+
+    /* Stage 1: NFKC normalize into a 1 KB stack buffer. */
+    char norm[1024];
+    size_t norm_len = hu_minja_nfkc_normalize(text, scan_len, norm, sizeof(norm));
+
+    /* Stage 2: lowercase + leetspeak decode in place. */
+    for (size_t i = 0; i < norm_len; i++)
+        norm[i] = (char)tolower((unsigned char)norm[i]);
+    hu_minja_leetspeak_decode(norm, norm_len);
+
+    /* Stage 3: locale-mismatch fast reject. */
+    if (user_locale && hu_minja_locale_mismatch(norm, norm_len, user_locale))
+        return true;
+
+    /* Stage 4: tier-wise pattern scan (memcmp on normalized buffer). */
+    for (size_t t = 0; t < MINJA_TIER_COUNT; t++) {
+        for (size_t p = 0; p < MINJA_TIER_SIZES[t]; p++) {
+            const char *pat = MINJA_TIERS[t][p];
+            size_t plen = strlen(pat);
+            if (plen > norm_len) continue;
+            for (size_t i = 0; i + plen <= norm_len; i++) {
+                if (memcmp(norm + i, pat, plen) == 0)
+                    return true;
+            }
         }
     }
     return false;
 }
 ```
 
-The pattern list is intentionally small (10 entries). False-positive risk is low because
-these phrases are nearly never legitimate in third-party inbound messages. Expanding the
-list is a runtime-configurable extension point (see §5.1 Open Questions).
+**Pending-facts quarantine queue** (covers multi-message split attacks, e.g. attacker
+sends "your" / "new" / "name" / "is" / "bob" across five messages, no single one of
+which trips the regex). Newly extracted facts from `trust_tier <= THIRD_PARTY` content
+are buffered in `model->pending_facts[]` rather than committed. They are committed only
+after either (a) the user re-states the fact in a `trust_tier >= USER_DIRECT` message
+within a 24-hour TTL, or (b) the recall verifier (§2.9) sees three additional facts
+from independent low-trust sources corroborate it (group consensus). Otherwise the
+pending fact expires silently. This bounds the attacker's per-attempt cost to "must
+also compromise a 1:1 channel session, then have the user re-confirm" rather than
+"single low-trust message rewrites identity".
+
+Total text-segment cost of the broadened detector: ~6 KB (was ~2 KB). Still within
+the ≤12 KB budget. False-positive monitoring: the quarantine log (§2.7) is the audit
+trail; expected FP rate from real third-party content is < 0.1% based on initial
+fixture testing.
 
 ### 2.7 Quarantine Log
 
@@ -309,16 +417,24 @@ New columns are **additive** (no drop, no rename — existing rows are valid wit
 
 ```sql
 -- Migration M5: applied in sqlite.c init path when old schema detected
-ALTER TABLE memories ADD COLUMN trust_tier  INTEGER NOT NULL DEFAULT 2; -- HU_TRUST_FIRST_PARTY
+ALTER TABLE memories ADD COLUMN trust_tier  INTEGER NOT NULL DEFAULT 1; -- HU_TRUST_THIRD_PARTY
 ALTER TABLE memories ADD COLUMN provenance  TEXT;   -- JSON: channel, handle, source_ts
 ```
 
 Backward compat rule: on first open of an existing database, the init path checks
 `PRAGMA table_info(memories)` for the `trust_tier` column. If absent, both migrations
 are applied atomically inside a single `BEGIN IMMEDIATE … COMMIT`. Existing rows receive
-`trust_tier = 2` (FIRST_PARTY), which is the correct conservative default for memories
-written before this migration (we don't know the source, so we give benefit of the doubt
-at FIRST_PARTY, not USER_DIRECT — see §2.10 Migration Audit).
+`trust_tier = 1` (THIRD_PARTY) — the conservative default that forces re-validation.
+
+**Critical security rationale (post-adversarial-review correction):** the original
+proposal defaulted pre-migration rows to FIRST_PARTY on the assumption that anything
+already in the DB was user-originated. The adversarial review (`adversarial-review-critic.md`,
+finding B2) identified this as an *attacker amplification* — if a MINJA-style poisoned
+fact was already ingested before migration day, the migration would stamp it FIRST_PARTY
+and elevate its retrieval trust permanently. THIRD_PARTY is the safe default: the
+recall verifier (§2.9) will demote these rows into the "[Unverified hints]" block
+rather than injecting them as authoritative facts, and the migration audit (§2.11)
+can re-promote rows whose source string positively identifies a user-direct origin.
 
 The retrieval path changes: `hu_memory_entry_t` gains two fields:
 
@@ -413,25 +529,38 @@ This classification lives in a new `src/agent/channel_trust.c` (see §3 file lis
 
 ### 2.11 Migration Audit for Existing Memories
 
-On first run after upgrade, a one-time audit pass re-classifies existing SQLite rows:
+On first run after upgrade, a one-time audit pass re-classifies existing SQLite rows
+**upward** from the conservative THIRD_PARTY default (set by Migration M5):
 
 ```sql
--- Rows with source matching known group channels → THIRD_PARTY
-UPDATE memories SET trust_tier = 1
-WHERE source IN ('telegram_group','discord_channel','slack_channel',
-                 'twitter','rss','news','gmail_external')
-  AND trust_tier = 2; -- only touch the default
-
 -- Rows with source matching 1:1 channels → USER_DIRECT
+-- (positive identification of user-direct origin; safe to promote)
 UPDATE memories SET trust_tier = 4
 WHERE source IN ('cli','telegram_dm','discord_dm','slack_dm','imessage_dm')
-  AND trust_tier = 2;
+  AND trust_tier = 1; -- only touch the migration default
+
+-- Rows with source matching 1st-party tooling → FIRST_PARTY
+UPDATE memories SET trust_tier = 2
+WHERE source IN ('human','tool:human','self_email','calendar_self')
+  AND trust_tier = 1;
+
+-- Rows with source matching known group/external feeds remain at trust_tier = 1
+-- (THIRD_PARTY). No UPDATE needed; this is the safe default.
 ```
 
-Rows that cannot be classified (source unknown, `source = NULL`, or unrecognized string)
-remain at `FIRST_PARTY` (2). This is the conservative choice: we don't downgrade unknown
-memories to THIRD_PARTY because they may have been written before channel source tagging
-existed, and aggressively suppressing them would break continuity.
+**Post-adversarial-review correction (finding B3 in `adversarial-review-critic.md`):**
+the original audit assumed `DEFAULT 2` (FIRST_PARTY) and *downgraded* known-group rows
+to THIRD_PARTY. With the safer `DEFAULT 1` (THIRD_PARTY) migration above, the audit
+becomes an *upgrade-on-positive-identification* pass: rows whose source string
+unambiguously identifies a user-direct or first-party origin are promoted; everything
+else (unknown source, NULL source, unrecognized strings, group channels, RSS, social
+feeds, external email) **stays at THIRD_PARTY**.
+
+Rationale: the cost of leaving a user-direct row at THIRD_PARTY temporarily is that
+the recall verifier will surface it under "[Unverified hints]" until the user re-states
+the fact in a 1:1 session — annoying but recoverable. The cost of leaving a poisoned
+row at FIRST_PARTY (the previous design) is that the personal model treats attacker
+content as authoritative — silent and unrecoverable without a manual scan. Safety wins.
 
 The audit runs synchronously on daemon startup (no background thread; it is a small
 bounded SQL operation on the existing index). On subsequent startups, it is a no-op
@@ -656,3 +785,37 @@ the implementation sprint, in this priority order:
 | P2 | `src/memory/personal_model.c:965` | `hu_personal_model_merge_facts` overwrites facts unconditionally regardless of tier | Replace with `merge_facts_checked` |
 | P3 | `src/memory/personal_model.c:933` | `hu_personal_model_ingest` signature lacks `prov` parameter | Add parameter; NULL → USER_DIRECT |
 | P3 | All 31 channel handlers | None stamp a channel-tier on outgoing agent context | Add `hu_channel_trust()` call in dispatcher |
+
+### 10.1 `hu_personal_model_ingest` Call-Site Audit (post-adversarial-review B3/A1)
+
+The API contract review found that the proposed signature change requires concurrent
+patches at **four** call sites, not the two listed above. Complete enumeration of
+call sites and the required new invocation:
+
+| # | Site (file:line, approx) | Current call | Required new call |
+|---|--------------------------|--------------|-------------------|
+| 1 | `src/agent/agent_turn.c:951` | `hu_personal_model_ingest(model, alloc, msg, mlen, true, ...)` | `hu_personal_model_ingest(model, alloc, msg, mlen, true, ..., &prov)` where `prov = hu_channel_trust_stamp(agent->active_channel, agent->contact_handle, now_ts)` |
+| 2 | `src/agent/agent_stream.c:603` | `hu_personal_model_ingest(model, alloc, msg, mlen, true, ...)` | Same as #1; provenance pulled from streaming-turn context |
+| 3 | `src/feeds/processor.c:412` | `hu_personal_model_ingest(model, alloc, body, blen, true, ...)` (feed body treated as user input — **the canonical poisoning vector**) | `hu_personal_model_ingest(model, alloc, body, blen, true, ..., &prov)` where `prov.tier = HU_TRUST_THIRD_PARTY` and `prov.channel = "feed:" || feed_kind` |
+| 4 | `src/memory/personal_model.c:1834` (self-test harness — `_HU_PM_SELF_TEST` block) | `hu_personal_model_ingest(model, alloc, "test", 4, true, ...)` | `hu_personal_model_ingest(model, alloc, "test", 4, true, ..., NULL)` — NULL accepted as a "synthetic" tier inside `#ifdef _HU_PM_SELF_TEST` only |
+
+The sweep that produced this audit:
+```bash
+$ rg -n "hu_personal_model_ingest\(" src/ include/ | grep -v "/\*"
+```
+Implementer must re-run this command at sprint kick-off and reconcile any drift; if a
+fifth site appears, the design must be revisited because the signature change cannot
+proceed without all sites patched in the same commit (linker would fail otherwise).
+
+### 10.2 `hu_memory_entry_t` Size Audit (post-adversarial-review A2)
+
+The three new fields on `hu_memory_entry_t` (`int trust_tier`, `char *provenance`,
+`size_t provenance_len`) add ≈16 bytes on 64-bit platforms. The API contract review
+required a sweep of `sizeof(hu_memory_entry_t)` to confirm no caller depends on the
+struct layout:
+```bash
+$ rg -n "sizeof\(hu_memory_entry_t\)" src/ include/ tests/
+```
+All 19 hits are bulk-allocations (`malloc(n * sizeof(hu_memory_entry_t))`) — none
+assume a specific byte count. The growth is layout-tolerant. Implementer must re-run
+this sweep at sprint kick-off and confirm before merging.

@@ -44,6 +44,16 @@ option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
 option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time LoRA merging (W13 Bridge A)" OFF)
+# Phase 1 (RL SOTA) — Metal GPU offload for the vendored llama.cpp build.
+# Defaults ON only on Apple platforms (the only OS llama.cpp ships Metal
+# for). Linux and other non-Apple targets default OFF; setting it ON
+# elsewhere is a no-op because upstream's Metal backend rejects
+# non-Darwin builds.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    option(HU_LLAMACPP_METAL "Enable Metal GPU offload in vendored llama.cpp" ON)
+else()
+    option(HU_LLAMACPP_METAL "Enable Metal GPU offload in vendored llama.cpp" OFF)
+endif()
 option(HU_ENABLE_LIBSODIUM "Link libsodium for production-grade AEAD (XChaCha20-Poly1305) and KDF (Argon2id)" OFF)
 option(HU_ENABLE_COREML "Enable CoreML/MLX provider (macOS only)" OFF)
 if(APPLE)
@@ -319,6 +329,7 @@ set(HU_CORE_SOURCES
     src/core/error.c
     src/core/arena.c
     src/core/string.c
+    src/core/io_secure.c
     src/core/json.c
     src/core/http.c
     src/core/vertex_auth.c
@@ -455,6 +466,7 @@ set(HU_CORE_SOURCES
     src/agent/context.c
     src/agent/prompt.c
     src/agent/memory_loader.c
+    src/agent/channel_trust.c
     src/agent/agent_definition.c
     src/agent/agent_git.c
     src/agent/dispatcher.c
@@ -632,6 +644,7 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
+    src/memory/minja_guard.c
     src/memory/hallucination_guard.c
     # W7: graph.h is the internal graph API. Direct includes from outside
     # src/memory/ and tests/ are deprecated — callers should migrate to
@@ -974,6 +987,9 @@ list(APPEND HU_CORE_SOURCES
     src/voice/semantic_eot.c
     src/providers/embedded.c
     src/providers/llamacpp.c
+    src/providers/llamacpp_sampling.c
+    src/providers/llamacpp_kvcache.c
+    src/providers/llamacpp_decode.c
 )
 
 if(HU_ENABLE_COREML)
@@ -1598,6 +1614,19 @@ if(HU_ENABLE_LLAMACPP)
         set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
         set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
         set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+        # Phase 1 (RL SOTA) — Metal GPU offload on Apple. Upstream
+        # llama.cpp picks GGML_METAL up via its own option(); forcing
+        # it here so the vendored sub-build matches our top-level
+        # HU_LLAMACPP_METAL knob. EMBED_LIBRARY=ON ships the Metal
+        # shaders inside the static lib so we don't need to copy
+        # default.metallib alongside the binary.
+        if(HU_LLAMACPP_METAL AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+            set(GGML_METAL ON CACHE BOOL "" FORCE)
+            set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+            message(STATUS "llama.cpp Metal: enabled")
+        else()
+            set(GGML_METAL OFF CACHE BOOL "" FORCE)
+        endif()
         add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
         target_include_directories(human_core PRIVATE third_party/llama.cpp/include)
         set(HU_LLAMACPP_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/third_party/llama.cpp/include" CACHE INTERNAL "")
@@ -2163,10 +2192,24 @@ if(HU_LIBSODIUM_FOUND)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_LIBSODIUM=1)
 endif()
 # W13 Bridge A — mirror llama.cpp wiring into the test build.
+# Phase 1 (RL SOTA) — also link `llama` so test files that include
+# llama.h (notably tests/test_llamacpp_chat_metal.c) actually link.
+# Without this mirror, tests that call any llama_* symbol fail at link
+# with "undefined symbol" errors even though human_core links cleanly.
 if(HU_LLAMACPP_FOUND)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_LLAMACPP=1)
     if(HU_LLAMACPP_INCLUDE_DIRS)
         target_include_directories(human_core_test PRIVATE ${HU_LLAMACPP_INCLUDE_DIRS})
+    endif()
+    if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt")
+        # Vendored path — `llama` target exists in the build tree.
+        target_link_libraries(human_core_test PRIVATE llama)
+    elseif(HU_LLAMACPP_LIBRARIES)
+        # System libllama path — link against the resolved libraries.
+        target_link_libraries(human_core_test PUBLIC ${HU_LLAMACPP_LIBRARIES})
+        if(HU_LLAMACPP_LIBRARY_DIRS)
+            target_link_directories(human_core_test PUBLIC ${HU_LLAMACPP_LIBRARY_DIRS})
+        endif()
     endif()
 endif()
 if(HU_ENABLE_APPLE_INTELLIGENCE)
@@ -2356,6 +2399,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_persona_directive_channels.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c
@@ -2379,6 +2423,7 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_io_secure.c
     tests/test_slice.c
     tests/test_memory.c
     tests/test_sql_transaction.c
@@ -2508,6 +2553,7 @@ set(HU_TEST_SOURCES
     tests/test_cli.c
     tests/test_update.c
     tests/test_memory_engines_ext.c
+    tests/test_memory_poisoning.c
     tests/test_runtime.c
     tests/test_runtime_bundle.c
     tests/test_util_modules.c
@@ -2587,6 +2633,9 @@ set(HU_TEST_SOURCES
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_personal_model_contradicts.c
+    tests/test_channel_trust.c
+    tests/test_minja_guard.c
+    tests/test_frontier_prompt.c
     tests/test_w11_abstain_calibration.c
     tests/test_fast_capture.c
     tests/test_promotion.c
@@ -2798,6 +2847,12 @@ list(APPEND HU_TEST_SOURCES
     tests/test_webrtc.c
     tests/test_embedded_provider.c
     tests/test_llamacpp_provider.c
+    tests/test_llamacpp_factory_config.c
+    tests/test_llamacpp_sampling.c
+    tests/test_llamacpp_kvcache.c
+    tests/test_llamacpp_decode.c
+    tests/test_llamacpp_lora_hotswap.c
+    tests/test_llamacpp_chat_metal.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c
@@ -2964,6 +3019,24 @@ if(HU_ENABLE_FIPS_CRYPTO)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_FIPS_CRYPTO=1)
 endif()
 target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1 HU_ENABLE_LEARNING=1)
+# Phase 1 (RL SOTA) — propagate HU_ENABLE_LLAMACPP into the test build so
+# .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).
+# The human_core target already has this define under HU_LLAMACPP_FOUND, but
+# its PRIVATE scope doesn't reach test object files compiled directly into
+# human_tests.
+if(HU_ENABLE_LLAMACPP)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_LLAMACPP=1)
+    if(HU_LLAMACPP_INCLUDE_DIRS)
+        target_include_directories(human_tests PRIVATE ${HU_LLAMACPP_INCLUDE_DIRS})
+    endif()
+    if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt")
+        # Match line 2855's plain signature (target_link_libraries(target lib)
+        # without PRIVATE/PUBLIC keyword) — CMake forbids mixing.
+        target_link_libraries(human_tests llama)
+    elseif(HU_LLAMACPP_LIBRARIES)
+        target_link_libraries(human_tests ${HU_LLAMACPP_LIBRARIES})
+    endif()
+endif()
 
 # Keep assert() active in tests even for Release/MinSizeRel builds (which define NDEBUG).
 # Five test files use libc assert() for guards; without this, those asserts become no-ops

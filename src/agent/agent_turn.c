@@ -33,6 +33,7 @@
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/neural_memory.h"
 #include "human/memory/personal_model.h"
+#include "human/agent/channel_trust.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
@@ -948,7 +949,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 
 #ifndef HU_IS_TEST
-    (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+    {
+        /* SOTA-2026 init-09: stamp provenance derived from the active
+         * channel so the trust gate + MINJA detector run in production. */
+        hu_provenance_t _ingest_prov = hu_channel_trust_stamp(
+            agent->active_channel, agent->active_channel_len,
+            NULL, 0, (int64_t)time(NULL));
+        (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true,
+                                       (int64_t)time(NULL), &_ingest_prov);
+    }
 #endif
 
     /* B16 follow-up — close the chronotype loop. Whatever populated the
@@ -2086,26 +2095,38 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             {
                 hu_self_improve_t si;
                 if (hu_self_improve_create(agent->alloc, intel_db, &si) == HU_OK) {
+                    /* Both self-improve helpers return HU_OK + a 1-byte
+                     * empty string on the "no rows" path (self_improve.c:442
+                     * and :500). The previous gate freed only on len > 0,
+                     * leaking the empty buffer every turn — PR55 ASan ran
+                     * caught 4 such 1-byte chains. Free whenever the helper
+                     * returns HU_OK and the pointer is non-NULL; keep
+                     * len > 0 as the gate for appending to the prompt. */
                     char *patches = NULL;
                     size_t patches_len = 0;
-                    if (hu_self_improve_get_prompt_patches(&si, &patches, &patches_len) == HU_OK &&
-                        patches && patches_len > 0) {
-                        int n =
-                            snprintf(parts + pos, sizeof(parts) - pos,
-                                     "### Learned Behaviors\n%.*s\n", (int)patches_len, patches);
-                        if (n > 0 && pos + (size_t)n < sizeof(parts))
-                            pos += (size_t)n;
-                        agent->alloc->free(agent->alloc->ctx, patches, patches_len + 1);
+                    if (hu_self_improve_get_prompt_patches(&si, &patches, &patches_len) == HU_OK) {
+                        if (patches && patches_len > 0) {
+                            int n = snprintf(parts + pos, sizeof(parts) - pos,
+                                             "### Learned Behaviors\n%.*s\n", (int)patches_len,
+                                             patches);
+                            if (n > 0 && pos + (size_t)n < sizeof(parts))
+                                pos += (size_t)n;
+                        }
+                        if (patches)
+                            agent->alloc->free(agent->alloc->ctx, patches, patches_len + 1);
                     }
                     char *tool_prefs = NULL;
                     size_t tool_prefs_len = 0;
                     if (hu_self_improve_get_tool_prefs_prompt(&si, &tool_prefs, &tool_prefs_len) ==
-                            HU_OK &&
-                        tool_prefs && tool_prefs_len > 0) {
-                        int n = snprintf(parts + pos, sizeof(parts) - pos, "\n%s\n", tool_prefs);
-                        if (n > 0 && pos + (size_t)n < sizeof(parts))
-                            pos += (size_t)n;
-                        agent->alloc->free(agent->alloc->ctx, tool_prefs, tool_prefs_len + 1);
+                        HU_OK) {
+                        if (tool_prefs && tool_prefs_len > 0) {
+                            int n =
+                                snprintf(parts + pos, sizeof(parts) - pos, "\n%s\n", tool_prefs);
+                            if (n > 0 && pos + (size_t)n < sizeof(parts))
+                                pos += (size_t)n;
+                        }
+                        if (tool_prefs)
+                            agent->alloc->free(agent->alloc->ctx, tool_prefs, tool_prefs_len + 1);
                     }
                     hu_self_improve_deinit(&si);
                 }
@@ -3480,7 +3501,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                      agent->memory_session_id_len, 0, &world_model_ctx,
                                      &world_model_ctx_len, tom_p, tom_p_len, tom_q, tom_q_len,
-                                     tom_c, tom_c_len, &agent->personal_model);
+                                     tom_c, tom_c_len, &agent->personal_model, NULL);
             if (world_model_ctx_len > 0)
                 agent->world_model_loads++;
         }

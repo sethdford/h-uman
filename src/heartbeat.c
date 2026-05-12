@@ -1,4 +1,5 @@
 #include "human/heartbeat.h"
+#include "human/core/io_secure.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -245,8 +246,10 @@ hu_error_t hu_heartbeat_ensure_file(const char *workspace_dir, hu_allocator_t *a
         fclose(f);
         return HU_OK;
     }
-    f = fopen(path, "wb");
-    if (!f)
+    /* Heartbeat tasks file at workspace/.human/heartbeat.md.
+     * User-readable template; the agent edits it. 0644. */
+    f = NULL;
+    if (hu_io_secure_open(path, HU_IO_PERM_USER, "wb", &f) != HU_OK || !f)
         return HU_ERR_IO;
     fputs("# Periodic Tasks\n\n"
           "# Add tasks below (one per line, starting with `- `)\n"

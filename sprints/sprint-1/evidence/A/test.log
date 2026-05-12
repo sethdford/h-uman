@@ -1,0 +1,13 @@
+
+ RUN  v4.0.18 /Users/sethford/Documents/h-uman/ui
+
+stderr | src/components/hu-directive-telemetry-tile.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+ ✓ src/components/hu-directive-telemetry-tile.test.ts (7 tests) 26ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  18:25:22
+   Duration  265ms (transform 31ms, setup 0ms, import 44ms, tests 26ms, environment 106ms)
+

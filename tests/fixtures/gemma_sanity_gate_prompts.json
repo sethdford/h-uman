@@ -1,0 +1,165 @@
+{
+  "_comment": "Phase 1 (RL SOTA) — stock Gemma sanity gate. Each prompt has objective pass criteria. Run via scripts/run-gemma-sanity-gate.sh against a local Gemma-3-4B-it Q4_K_M GGUF. Expected pass rate: 20/20 (allow 18/20 if a prompt's expect_substring needs tuning). 20/20 = Gemma is good enough to be the base for Phase 2 (DPO/KTO/GRPO training).",
+  "prompts": [
+    {
+      "id": "greet",
+      "system": "You are a friendly assistant. Keep replies concise.",
+      "user": "Say hi.",
+      "expect_substring": "hi",
+      "min_length": 2,
+      "max_length": 200
+    },
+    {
+      "id": "math_simple",
+      "system": "You are a math tutor.",
+      "user": "What is 7 plus 5?",
+      "expect_substring": "12",
+      "min_length": 1,
+      "max_length": 200
+    },
+    {
+      "id": "math_subtraction",
+      "system": "You are a math tutor. Answer briefly.",
+      "user": "What is 100 minus 37?",
+      "expect_substring": "63",
+      "min_length": 1,
+      "max_length": 200
+    },
+    {
+      "id": "capital_france",
+      "system": "You are a geography quiz bot.",
+      "user": "What is the capital of France?",
+      "expect_substring": "Paris",
+      "min_length": 4,
+      "max_length": 200
+    },
+    {
+      "id": "capital_japan",
+      "system": "You are a geography quiz bot.",
+      "user": "What is the capital of Japan?",
+      "expect_substring": "Tokyo",
+      "min_length": 4,
+      "max_length": 200
+    },
+    {
+      "id": "list_colors",
+      "system": "You are an assistant. Be concise.",
+      "user": "Name three primary colors.",
+      "expect_substring": "red",
+      "min_length": 5,
+      "max_length": 300
+    },
+    {
+      "id": "definition_pi",
+      "system": "You are a math tutor. Be concise.",
+      "user": "What is pi to two decimal places?",
+      "expect_substring": "3.14",
+      "min_length": 3,
+      "max_length": 200
+    },
+    {
+      "id": "year_moon_landing",
+      "system": "You are a history teacher. Answer briefly.",
+      "user": "In what year did Apollo 11 land on the moon?",
+      "expect_substring": "1969",
+      "min_length": 3,
+      "max_length": 300
+    },
+    {
+      "id": "language_python",
+      "system": "You are a programming assistant.",
+      "user": "Is Python a compiled or interpreted language?",
+      "expect_substring": "interpret",
+      "min_length": 5,
+      "max_length": 4000
+    },
+    {
+      "id": "tense_simple",
+      "system": "You are a grammar coach. Be concise.",
+      "user": "Convert to past tense: 'I run to the store.'",
+      "expect_substring": "ran",
+      "min_length": 3,
+      "max_length": 200
+    },
+    {
+      "id": "antonym_hot",
+      "system": "You are a vocabulary helper.",
+      "user": "Give an antonym of 'hot'.",
+      "expect_substring": "cold",
+      "min_length": 3,
+      "max_length": 800
+    },
+    {
+      "id": "json_keys",
+      "system": "You output valid JSON only.",
+      "user": "Return a JSON object with keys 'name' and 'age' for a person named Sam aged 30.",
+      "expect_substring": "Sam",
+      "min_length": 10,
+      "max_length": 400
+    },
+    {
+      "id": "yes_no",
+      "system": "You answer questions with a single word: yes or no.",
+      "user": "Is the sun a star?",
+      "expect_substring": "yes",
+      "min_length": 1,
+      "max_length": 200
+    },
+    {
+      "id": "code_hello",
+      "system": "You are a coding assistant. Reply with the code only.",
+      "user": "Write Python code that prints 'hello world'.",
+      "expect_substring": "hello world",
+      "min_length": 10,
+      "max_length": 400
+    },
+    {
+      "id": "weather_concept",
+      "system": "You explain science. Be concise.",
+      "user": "Why does it rain?",
+      "expect_substring": "water",
+      "min_length": 20,
+      "max_length": 800
+    },
+    {
+      "id": "translation_es",
+      "system": "You translate English to Spanish.",
+      "user": "Translate 'good morning' to Spanish.",
+      "expect_substring": "Buenos",
+      "min_length": 5,
+      "max_length": 200
+    },
+    {
+      "id": "definition_water",
+      "system": "You are a chemistry teacher. Be concise.",
+      "user": "What is the chemical formula for water?",
+      "expect_substring": "hydrogen",
+      "min_length": 3,
+      "max_length": 800
+    },
+    {
+      "id": "count_continents",
+      "system": "You are a geography teacher. Answer in one sentence.",
+      "user": "How many continents are there? Answer in one short sentence.",
+      "expect_substring": "seven",
+      "min_length": 1,
+      "max_length": 800
+    },
+    {
+      "id": "follow_instructions",
+      "system": "You follow user instructions exactly.",
+      "user": "Reply with exactly the word: banana",
+      "expect_substring": "banana",
+      "min_length": 5,
+      "max_length": 200
+    },
+    {
+      "id": "explain_short",
+      "system": "You explain things in one sentence.",
+      "user": "What is photosynthesis?",
+      "expect_substring": "plant",
+      "min_length": 20,
+      "max_length": 500
+    }
+  ]
+}

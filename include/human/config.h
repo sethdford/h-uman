@@ -19,6 +19,16 @@ typedef struct hu_provider_entry {
     char *base_url;
     bool native_tools;
     bool ws_streaming;
+    /* Phase 1 (RL SOTA) — llamacpp-specific tuning. These fields are
+     * read from `providers[].context_size`/`.threads`/`.use_gpu`/
+     * `.n_gpu_layers` in the JSON config and forwarded into
+     * hu_llamacpp_config_t when the entry's name is "llamacpp" /
+     * "llama.cpp". Zero values mean "use llama.cpp's default".
+     * Other providers ignore these fields. */
+    size_t context_size;
+    int    threads;
+    bool   use_gpu;
+    int    n_gpu_layers;
 } hu_provider_entry_t;
 
 typedef struct hu_diagnostics_config {

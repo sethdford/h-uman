@@ -24,6 +24,8 @@ void hu_memory_entry_free_fields(hu_allocator_t *alloc, hu_memory_entry_t *e) {
         alloc->free(alloc->ctx, (void *)e->session_id, e->session_id_len + 1);
     if (e->source)
         alloc->free(alloc->ctx, (void *)e->source, e->source_len + 1);
+    if (e->provenance)
+        alloc->free(alloc->ctx, (void *)e->provenance, e->provenance_len + 1);
 }
 
 /* JSON-escape into a fixed buffer; truncates silently on overflow. */

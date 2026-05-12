@@ -690,7 +690,7 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
     hu_tool_t *mcp_tools = NULL;
     size_t mcp_count = 0;
     if (config && config->mcp_servers_len > 0) {
-        hu_mcp_server_config_t mcp_configs[HU_MCP_SERVERS_MAX];
+        hu_mcp_client_config_t mcp_configs[HU_MCP_SERVERS_MAX];
         for (size_t i = 0; i < config->mcp_servers_len && i < HU_MCP_SERVERS_MAX; i++) {
             mcp_configs[i].command = config->mcp_servers[i].command;
             mcp_configs[i].args = (const char **)config->mcp_servers[i].args;

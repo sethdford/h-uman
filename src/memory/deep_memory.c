@@ -77,7 +77,8 @@ hu_error_t hu_episodic_create_table_sql(char *buf, size_t cap, size_t *out_len) 
     return HU_OK;
 }
 
-hu_error_t hu_episodic_insert_sql(const hu_episode_t *ep, char *buf, size_t cap, size_t *out_len) {
+hu_error_t hu_episodic_insert_sql(const hu_deep_episode_t *ep, char *buf, size_t cap,
+                                  size_t *out_len) {
     if (!ep || !buf || !out_len || cap < 256)
         return HU_ERR_INVALID_ARGUMENT;
     if (!ep->summary)
@@ -414,7 +415,7 @@ hu_error_t hu_residue_build_prompt(hu_allocator_t *alloc,
     return HU_OK;
 }
 
-void hu_episode_deinit(hu_allocator_t *alloc, hu_episode_t *ep) {
+void hu_episode_deinit(hu_allocator_t *alloc, hu_deep_episode_t *ep) {
     if (!alloc || !ep)
         return;
     hu_str_free(alloc, ep->summary);

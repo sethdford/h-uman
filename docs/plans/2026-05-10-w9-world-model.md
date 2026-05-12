@@ -163,7 +163,67 @@ Computed lazily from existing data (persona expectations, emotional reactions, d
 ## Out of scope
 
 - Active disambiguation ("am I right that you prefer X?"). That's a future workstream.
-- Multimodal world model (image of user's room as part of ToM).
+- ~~Multimodal world model (image of user's room as part of ToM).~~ Now in scope as P5.6 seams (see SOTA-frontier section); population deferred to channel handlers.
 - Cross-contact world model (group conversations).
 
 ## Binary size budget: +50 KB.
+
+## Status (May 2026 — SOTA review follow-through)
+
+The original phases (1–6) shipped in the W9 v1 bundle (commits `02f9d546`,
+`4286d735`, `4c9f5d0b`, `2355658b`). After an adversarial review against
+the world-model deferred items + competitor SOTA features, the seven-bundle
+follow-through (P1–P7 below) closed every remaining gap.
+
+### Shipped — moved out of "deferred"
+
+**Bundle 1 — Persona-grounded ToM synthesis (P1.1–P1.5)**
+- P1.1 `tom.user_thinks_we_are` populated from `persona->identity` (no longer the wrong-by-design "most-mentioned entity name").
+- P1.2 `hu_persona_overlay_t` folded in per channel (formality / directness / face-saving / vulnerability tier / disagreement style / silence tolerance) into `user_expects_we_can/cannot` + new `interaction_style` field.
+- P1.3 Recent applied `persona_deltas` for the contact merged in, kind-routed: `BOUNDARY` / `VOCAB_AVOID` → `cannot`; `FORMALITY` / `TONE` / `LENGTH` → `interaction_style`.
+- P1.4 `hu_persona_t persona;` field on `hu_world_model_t` per spec line 65 — borrowed pointer with documented lifetime contract (snapshot does NOT own).
+- P1.5 `tom.user_expects_we_can` populated from `persona->contacts[].allowed_behaviors` (per-contact match) + `persona->situational_directions[].instruction` (persona-wide affordances).
+
+**Bundle 2 — Cache correctness + observability (P2.1–P2.6)**
+- P2.1 `hu_world_model_invalidate` wired into both `hu_negative_memory_add` and `hu_negative_memory_add_facade`.
+- P2.2 Wired into `hu_goal_create`, `hu_goal_update_status`, `hu_goal_update_progress`, `hu_goal_decompose`.
+- P2.3 Wired into `hu_emotional_residue_add` so dominant_emotion shifts surface immediately.
+- P2.4 Cache key extended from `(contact_id)` to `(contact_id, channel)` so the per-channel persona overlay drives distinct cached snapshots; `hu_world_model_load_with_channel` is the new primary entry point.
+- P2.5 `HU_WM_CACHE_SLOTS` env-tunable (default 32, max 1024); telemetry counters for loads / hits / evictions via `hu_world_model_cache_stats`.
+- P2.6 POSIX mutex around `s_cache` (held during lookup / install / invalidate; never held during snapshot build).
+
+**Bundle 3 — Negative memory hardening (P3.1–P3.3)**
+- P3.1 `hu_negative_memory_add_facade_gated` routes inserts through W1 `hu_write_trust_score` (DROP → `HU_ERR_PERMISSION_DENIED`; QUARANTINE → clamp belief ≤ 0.5; per-source allowlist demotes non-{USER, AGENT, CHANNEL_TRUSTED} from LIVE).
+- P3.2 `hu_negative_source_t` enum (USER_EXPLICIT, SELF_RAG_ABSTAIN, AUTO_EXTRACT, SYSTEM_POLICY); persisted via `ALTER TABLE` schema migration; round-trips through `hu_negative_memory_t.source`.
+- P3.3 Adversarial tests: SYSTEM_POLICY bypasses channel-source allowlist; out-of-band source ints coerce to USER_EXPLICIT.
+
+**Bundle 4 — Belief surfaces on the snapshot (P4.1, P4.3)**
+- P4.1 Relations carry `hu_belief_t` — `confidence` (mean), `confidence_variance`, and a deep-copied `provenance` string. Snapshot owns the lifetime; `hu_world_model_free` frees per row.
+- P4.3 `recent_changes[]` derived from bitemporal relations (`supersedes_id != 0` → `SUPERSEDED`; `event_end > 0` → `RETRACTED`); capped at 8 newest-first; POD slab (no per-row owned strings).
+
+**Bundle 5 — SOTA-frontier cells (P4.2, P5.1, P5.3, P5.4)**
+- P4.2 `hu_hyperedge_t *hyperedges` on the snapshot (W8 n-ary facts). Queried per top-K entity via `hu_hyperedge_query_by_member`, deduped by id, shrink-fit at 16. Owns deep copies of `members` and `provenance`.
+- P5.1 Stance vector: `(valence, arousal, dominance, certainty)` per Russell VAD + Mehrabian PAD-extended. Dominance is `valence - 0.5 * arousal` (clamped); certainty is `1 - var(valence)` over the residue window. Surfaced alongside the legacy `(valence, arousal, dominant_emotion)` triple for back-compat.
+- P5.3 Conversational pressure: `recent_anger_count` (60-min window of strongly-negative high-arousal residues), `sustained_complaint_minutes` (span of continuous negative valence), `urgency_score` (composite, [0, 1]).
+- P5.4 Trust gradient sparkline: `tom.confidence_history[16]` appended on every `hu_world_model_merge_persona` call; scrolls left when full.
+
+**Bundle 6 — Self-model, multimodal seams, W10 hooks (P5.2, P5.6, P6.2)**
+- P5.2 `hu_self_model_t` (name, focused_topics, recent_drift_kind, recent_drift_value, confidence_in_self) populated by `hu_world_model_merge_persona`. Distinct from ToM (which is what the user thinks of *us*).
+- P5.6 `hu_media_context_t` seams (contact_photo_path, voice_fingerprint_hash, last_image_caption, last_image_at_ms). Default-zeroed; channel handlers populate.
+- P6.2 W10 seams: `kv_cache_handle` (void*) + `last_reasoning_trace_id` (int64). NULL/0 until W10 lands.
+
+**Bundle 7 — Goal-conditioned re-rank, planner provenance routing, perf gate, A/B (P5.5, P6.1, P7.1, P7.2, P7.4)**
+- P5.5 `world_model_bridge.c` renders each negative with a per-source tag: `[hard]` (USER_EXPLICIT), `[soft]` (SELF_RAG_ABSTAIN), `[confirm]` (AUTO_EXTRACT), `[policy]` (SYSTEM_POLICY). Single bracketed prefix so the planner can grep without exploding the prompt budget.
+- P6.1 `hu_world_model_rerank_for_goal(wm, goal_text, len, alloc)` — HippoRAG-style stable partition over entities / relations / recent_topics, promoting goal-anchor matches to the front. O(N²) worst case but bounded by snapshot caps (≤ 32 entities, ≤ 32 relations).
+- P7.1 Latency benchmark `test_w9_world_model_p99_latency_under_5ms` — 200 cached loads complete in < 1s wall time (avg < 5 ms / load); seeded with realistic 32-entity / 32-relation footprint.
+- P7.2 A/B test `test_w9_ab_negative_memory_changes_planner_signal` proving the spec's ≥3 measurable behavior changes: negatives_count rises, source enum survives, ToM `user_expects_we_cannot` becomes non-empty.
+- P7.4 (this section).
+
+### Test gate
+
+52/52 W9 suite tests pass. 1373/1373 across all `W*` suites. Full 10,149/10,149 test fleet pass. Zero ASan errors. No regressions in the existing memory / agent / persona suites.
+
+### Still open (intentionally deferred)
+
+- **P7.3** "Type honesty" refactor: introduce `hu_world_model_relation_t` (POD, no owned strings) instead of the `hu_graph_relation_t` typedef bridge. Wide blast radius (~40 callers); deferred to a dedicated cleanup PR.
+- **P5.5 follow-through** Wire the planner / W11 verifier *behavior* to the `[hard]` / `[soft]` / `[confirm]` / `[policy]` tags (not just the rendering). Currently the bridge emits the tags; W11 still treats every negative the same way.

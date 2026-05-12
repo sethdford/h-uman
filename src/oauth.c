@@ -1,6 +1,7 @@
 #include "human/oauth.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include <ctype.h>
@@ -430,8 +431,13 @@ hu_error_t hu_mcp_oauth_token_save(hu_allocator_t *alloc, const char *path,
     char tmp_path[1024];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp_%d", path, (int)getpid());
 
-    FILE *tmp_f = fopen(tmp_path, "wb");
-    if (!tmp_f) {
+    /* OAuth tokens are secrets — refresh tokens enable full account
+     * access and access tokens carry whatever scope the user granted.
+     * Force 0600 so a misconfigured umask can't drop them as
+     * world-readable. The path is derived from $HOME so we also need
+     * the traversal guard. */
+    FILE *tmp_f = NULL;
+    if (hu_io_secure_open(tmp_path, HU_IO_PERM_SECRET, "wb", &tmp_f) != HU_OK || !tmp_f) {
         alloc->free(alloc->ctx, json_str, json_len + 1);
         return HU_ERR_IO;
     }

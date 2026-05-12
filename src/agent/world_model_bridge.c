@@ -16,6 +16,8 @@
 #include "human/agent/tom_scenario.h"
 #include "human/agent/world_model.h"
 #include "human/memory/memory.h"
+#include "human/persona.h"
+#include "human/persona/persona_deltas.h"
 #include "human/provider.h"
 #include "human/memory/belief.h"
 #include "human/security/audit_log.h"
@@ -150,7 +152,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                     size_t tom_premise_len, const char *tom_question,
                                     size_t tom_question_len, const char *tom_category,
                                     size_t tom_category_len,
-                                    const hu_personal_model_t *pm) {
+                                    const hu_personal_model_t *pm,
+                                    const hu_persona_context_t *persona_ctx) {
     if (out_text)
         *out_text = NULL;
     if (out_len)
@@ -161,9 +164,22 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
     if (now_ms == 0)
         now_ms = (int64_t)time(NULL) * 1000;
 
+    /* P2.4 — load with channel-aware key when persona_ctx supplies one.
+     * Same person on Slack vs SMS now gets distinct cached snapshots so
+     * the per-channel persona overlay (P1.2) actually changes ToM
+     * pragmatics. Falls through to the legacy single-key load when no
+     * channel is available. */
     hu_world_model_t *wm = NULL;
+    const char *cache_channel = NULL;
+    size_t cache_channel_len = 0;
+    if (persona_ctx && persona_ctx->channel && persona_ctx->channel_len > 0 &&
+        persona_ctx->channel_len < 32) {
+        cache_channel = persona_ctx->channel;
+        cache_channel_len = persona_ctx->channel_len;
+    }
     hu_error_t e =
-        hu_world_model_load(facade->m, alloc, contact_id, contact_id_len, now_ms, &wm);
+        hu_world_model_load_with_channel(facade->m, alloc, contact_id, contact_id_len,
+                                         cache_channel, cache_channel_len, now_ms, &wm);
     if (e != HU_OK || !wm)
         return e == HU_OK ? HU_OK : e;
 
@@ -177,6 +193,23 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
     /* M2 ↔ W9 bridge: merge personal model signal into the world model. */
     if (pm)
         hu_world_model_merge_personal(wm, pm);
+
+    /* P1.1-P1.3 — persona-grounded ToM merge. Loads recent applied
+     * persona deltas via the facade (cheap; bounded by delta_limit) and
+     * folds persona identity + channel overlay + deltas into ToM. */
+    if (persona_ctx && persona_ctx->persona) {
+        hu_persona_delta_t *deltas = NULL;
+        size_t deltas_count = 0;
+        if (persona_ctx->delta_limit > 0) {
+            (void)hu_persona_delta_list_facade(facade->m, alloc, contact_id, contact_id_len,
+                                               HU_DELTA_STATUS_APPLIED,
+                                               persona_ctx->delta_limit, &deltas, &deltas_count);
+        }
+        hu_world_model_merge_persona(wm, persona_ctx->persona, persona_ctx->channel,
+                                     persona_ctx->channel_len, deltas, deltas_count);
+        if (deltas)
+            hu_persona_delta_free(alloc, deltas, deltas_count);
+    }
 
     /* If everything is empty, return NULL/0 -- callers skip injection.
      *
@@ -192,7 +225,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                       (wm->tom.user_expects_we_can[0] &&
                        strcmp(wm->tom.user_expects_we_can, "unknown") != 0) ||
                       (wm->tom.user_expects_we_cannot[0] &&
-                       strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0);
+                       strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0) ||
+                      wm->tom.interaction_style[0] != '\0';
     bool style_signal = wm->style_summary[0] != '\0';
     bool any = wm->entities_count > 0 || wm->relations_count > 0 || wm->goals_count > 0 ||
                wm->negatives_count > 0 || wm->recent_topics_count > 0 || emo_signal ||
@@ -240,7 +274,25 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Avoid:\n", 7);
         size_t shown = wm->negatives_count > 6 ? 6 : wm->negatives_count;
         for (size_t i = 0; i < shown; i++) {
-            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s%s%s\n", wm->negatives[i].text,
+            /* P5.5 — render each negative with a per-source directive so
+             * the planner / W11 verifier knows how strictly to enforce
+             * it. The four sources map to four enforcement contracts:
+             *   USER_EXPLICIT     — hard refusal ("[hard]")
+             *   SELF_RAG_ABSTAIN  — soft hedge with citation ("[soft]")
+             *   AUTO_EXTRACT      — ask-to-confirm ("[confirm]")
+             *   SYSTEM_POLICY     — hard refusal + audit ("[policy]")
+             *
+             * The tag is a single bracketed prefix so it's easy for the
+             * planner to grep without exploding the prompt budget. */
+            const char *tag = "[hard]";
+            switch (wm->negatives[i].source) {
+            case HU_NEGATIVE_SOURCE_USER_EXPLICIT:    tag = "[hard]";    break;
+            case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN: tag = "[soft]";    break;
+            case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:     tag = "[confirm]"; break;
+            case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:    tag = "[policy]";  break;
+            }
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s%s%s\n",
+                                   tag, wm->negatives[i].text,
                                    wm->negatives[i].reason[0] ? " — " : "",
                                    wm->negatives[i].reason[0] ? wm->negatives[i].reason : "");
         }
@@ -260,6 +312,9 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
             strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0)
             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They expect I cannot: %s\n",
                                    wm->tom.user_expects_we_cannot);
+        if (wm->tom.interaction_style[0])
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- Interaction style: %s\n",
+                                   wm->tom.interaction_style);
     }
     if (wm->recent_topics_count > 0) {
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Recent topics: ", 15);
@@ -397,8 +452,18 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
         snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
         nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
         nm.created_at = now_ms;
+        /* P3.2 — semantic origin tag. SELF_RAG_ABSTAIN tells the planner
+         * to treat this as a SOFT hedge ("I'm not sure about X"), not a
+         * hard refusal. The W11 abstention is a "we don't know enough"
+         * signal, not a "user said never". */
+        nm.source = HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN;
         int64_t nm_id = 0;
-        (void)hu_negative_memory_add_facade(facade->m, contact_id, contact_id_len, &nm, &nm_id);
+        /* P3.1 — gate self-rag abstention writes through W1 write_trust.
+         * Source is the agent itself, so trust is high; the gate guards the
+         * shared code path against quarantine/drop edge cases (e.g., bursty
+         * abstentions get clamped instead of raw inserted). */
+        (void)hu_negative_memory_add_facade_gated(facade->m, contact_id, contact_id_len, &nm,
+                                                  HU_WRITE_SOURCE_AGENT, now_ms, &nm_id);
     }
 
     if (out_claims_total)

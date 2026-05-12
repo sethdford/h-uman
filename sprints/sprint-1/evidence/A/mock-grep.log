@@ -1,0 +1,2 @@
+      // Live C handler: `cp_admin_metrics_directive_telemetry`
+      case "metrics.directive_telemetry":

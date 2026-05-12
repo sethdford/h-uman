@@ -13,13 +13,16 @@
 #define HU_EPISODIC_MAX_SUMMARY    512
 #define HU_EPISODIC_MAX_LOAD       5
 
-typedef struct hu_episode {
+/* Session-level conversation episode (agent loop / per-session summary).
+ * Renamed from hu_episode_t to avoid ODR conflict with the deep-memory
+ * episode struct in memory/deep_memory.h (which now uses hu_deep_episode_t). */
+typedef struct hu_session_episode {
     char *summary;
     size_t summary_len;
     uint64_t timestamp_ms; /* Unix epoch milliseconds */
     char *session_id;
     size_t session_id_len;
-} hu_episode_t;
+} hu_session_episode_t;
 
 /* Build a short session summary from the conversation for episodic storage.
  * messages is an array of alternating user/assistant content strings.

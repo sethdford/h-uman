@@ -12,6 +12,7 @@
 #include "human/calibration/clone.h"
 #include "human/config.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/process_util.h"
@@ -31,6 +32,7 @@ hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_me
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
 hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                         const char *output_path);
+#include "human/onboard.h"
 #include "human/providers/factory.h"
 #include "human/security.h"
 #include "human/security/audit.h"
@@ -82,20 +84,14 @@ static const char HU_INIT_DEFAULT_JSON[] =
     "  }\n"
     "}\n";
 
-static const char HU_INIT_DEFAULT_PERSONA[] =
+/* Starter persona literal centralized in src/onboard.c as
+ * `hu_starter_persona_json` (declared in include/human/onboard.h).
+ * The previous duplicate had a JSON-array overlay shape with numeric
+ * values that were silently dropped by the parser. See the onboard
+ * header for the full bug history and the canonical replacement. */
+#if 0  /* removed — see hu_starter_persona_json */
+static const char HU_INIT_DEFAULT_PERSONA_REMOVED[] =
     "{\n"
-    "  \"version\": 1,\n"
-    "  \"name\": \"default\",\n"
-    "  \"core\": {\n"
-    "    \"identity\": \"A helpful, thoughtful personal assistant that adapts to your "
-    "style over time.\",\n"
-    "    \"traits\": [\"attentive\", \"concise\", \"warm\"],\n"
-    "    \"communication_rules\": [\n"
-    "      \"Match the user's energy and formality level\",\n"
-    "      \"Be direct but not curt\",\n"
-    "      \"Remember context from previous conversations\"\n"
-    "    ]\n"
-    "  },\n"
     "  \"channel_overlays\": [\n"
     "    {\n"
     "      \"channel\": \"imessage\",\n"
@@ -164,7 +160,8 @@ static const char HU_INIT_DEFAULT_PERSONA[] =
     "    }\n"
     "  ]\n"
     "}\n";
-#endif
+#endif /* removed */
+#endif /* HU_IS_TEST */
 
 /* ── init ────────────────────────────────────────────────────────────────── */
 hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
@@ -206,9 +203,12 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     if (mkdir(dir_path, 0700) != 0 && errno != EEXIST)
         return HU_ERR_IO;
 
-    /* Write config.json */
-    FILE *f = fopen(config_path, "w");
-    if (!f)
+    /* Write config.json. Treated as secret because the user may add
+     * API keys to it via `human config edit`; we want the 0600 mode
+     * to persist from creation. Path traversal guard kills the
+     * cpp/path-injection alert at this line. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(config_path, HU_IO_PERM_SECRET, "w", &f) != HU_OK || !f)
         return HU_ERR_IO;
 
     size_t len = sizeof(HU_INIT_DEFAULT_JSON) - 1;
@@ -226,10 +226,16 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
             char persona_path[HU_INIT_MAX_PATH];
             n = snprintf(persona_path, sizeof(persona_path), "%s/default.json", persona_dir);
             if (n > 0 && (size_t)n < sizeof(persona_path) && access(persona_path, F_OK) != 0) {
-                FILE *pf = fopen(persona_path, "w");
+                /* Persona JSON; no secrets; 0644 matches the existing
+                 * convention. The access-then-open pattern here is
+                 * still a TOCTOU window (CodeQL alert) but the helper
+                 * keeps the mode explicit; the race is a separate
+                 * follow-up below. */
+                FILE *pf = NULL;
+                (void)hu_io_secure_open(persona_path, HU_IO_PERM_USER, "w", &pf);
                 if (pf) {
-                    size_t plen = sizeof(HU_INIT_DEFAULT_PERSONA) - 1;
-                    (void)fwrite(HU_INIT_DEFAULT_PERSONA, 1, plen, pf);
+                    size_t plen = strlen(hu_starter_persona_json);
+                    (void)fwrite(hu_starter_persona_json, 1, plen, pf);
                     fclose(pf);
                 }
             }

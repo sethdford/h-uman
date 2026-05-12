@@ -1,4 +1,5 @@
 #include "human/config_mutator.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include <stdbool.h>
@@ -136,8 +137,12 @@ static hu_error_t write_config_file(hu_allocator_t *alloc, const char *path, con
         return HU_ERR_INVALID_ARGUMENT;
     }
 
-    FILE *f = fopen(tmp_path, "wb");
-    if (!f) {
+    /* Config files may contain provider api_keys (see config.json
+     * schema in src/config.c). Treat as secret — 0600. The mutator
+     * writes atomically via a .tmp + rename, both targets get the
+     * same mode. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(tmp_path, HU_IO_PERM_SECRET, "wb", &f) != HU_OK || !f) {
         alloc->free(alloc->ctx, tmp_path, tmp_len);
         return HU_ERR_IO;
     }
@@ -149,8 +154,8 @@ static hu_error_t write_config_file(hu_allocator_t *alloc, const char *path, con
         return HU_ERR_IO;
     }
     if (rename(tmp_path, path) != 0) {
-        f = fopen(path, "wb");
-        if (f) {
+        f = NULL;
+        if (hu_io_secure_open(path, HU_IO_PERM_SECRET, "wb", &f) == HU_OK && f) {
             (void)fwrite(content, 1, content_len, f);
             fclose(f);
         }
@@ -572,8 +577,13 @@ hu_error_t hu_config_mutator_mutate(hu_allocator_t *alloc, hu_mutation_action_t 
                     alloc->free(alloc->ctx, backup_path, bak_len);
                     backup_path = NULL;
                 } else {
-                    FILE *bak = fopen(backup_path, "wb");
-                    if (bak) {
+                    /* Config backup — must match the original's
+                     * 0600 mode so a backup doesn't accidentally
+                     * become world-readable. */
+                    FILE *bak = NULL;
+                    if (hu_io_secure_open(backup_path, HU_IO_PERM_SECRET, "wb", &bak) ==
+                            HU_OK &&
+                        bak) {
                         (void)fwrite(content, 1, content_len, bak);
                         fclose(bak);
                     }

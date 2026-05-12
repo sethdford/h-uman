@@ -22,6 +22,7 @@ void run_crypto_tests(void);
 void run_json_tests(void);
 void run_wasm_tests(void); /* from test_wasm.c when built */
 void run_string_tests(void);
+void run_io_secure_tests(void);
 void run_slice_tests(void);
 void run_memory_tests(void);
 void run_sql_transaction_tests(void);
@@ -180,6 +181,7 @@ void run_cli_tests(void);
 void run_update_tests(void);
 void run_vector_stores_tests(void);
 void run_memory_engines_ext_tests(void);
+void run_memory_poisoning_tests(void);
 void run_runtime_tests(void);
 void run_runtime_bundle_tests(void);
 void run_channel_loop_tests(void);
@@ -259,6 +261,9 @@ void run_v2_wiring_e2e_tests(void);
 void run_b11_pressure_history_e2e_tests(void);
 void run_b9_user_sim_agent_turn_e2e_tests(void);
 void run_personal_model_contradicts_tests(void);
+void run_channel_trust_tests(void);
+void run_minja_guard_tests(void);
+void run_frontier_prompt_tests(void);
 void run_w11_abstain_calibration_tests(void);
 void run_fast_capture_tests(void);
 void run_promotion_tests(void);
@@ -457,6 +462,12 @@ void run_lsp_tests(void);
 void run_webrtc_tests(void);
 void run_embedded_provider_tests(void);
 void run_llamacpp_provider_tests(void);
+void run_llamacpp_factory_config_tests(void);
+void run_llamacpp_sampling_tests(void);
+void run_llamacpp_kvcache_tests(void);
+void run_llamacpp_decode_tests(void);
+void run_llamacpp_lora_hotswap_tests(void);
+void run_llamacpp_chat_metal_tests(void);
 void run_coreml_provider_tests(void);
 void run_forgetting_tests(void);
 void run_bootstrap_tests(void);
@@ -507,6 +518,7 @@ void run_consistency_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+void run_persona_directive_channels_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
 void run_self_improve_tests(void);
@@ -526,7 +538,25 @@ static void print_usage(const char *prog) {
     printf("  %s --suite=security --filter=vault  # combine both\n", prog);
 }
 
+/* Phase 1 (RL SOTA) — declared in src/providers/llamacpp.c when
+ * HU_LLAMACPP_LINKED is set; provides a one-shot CLI that loads a
+ * GGUF, decodes one chat turn, and prints the response. Used by
+ * scripts/run-gemma-sanity-gate.sh to score the 20-prompt fixture. */
+#ifdef HU_ENABLE_LLAMACPP
+int hu_llamacpp_sanity_gate_main(int argc, char **argv);
+#endif
+
 int main(int argc, char **argv) {
+    if (argc >= 2 && strcmp(argv[1], "--sanity-gate") == 0) {
+#ifdef HU_ENABLE_LLAMACPP
+        return hu_llamacpp_sanity_gate_main(argc, argv);
+#else
+        fprintf(stderr,
+                "[sanity-gate] HU_ENABLE_LLAMACPP not set; rebuild with --preset rl_sota\n");
+        return 1;
+#endif
+    }
+
     for (int i = 1; i < argc; i++) {
         if (strncmp(argv[i], "--suite=", 8) == 0) {
             hu__suite_filter = argv[i] + 8;
@@ -561,6 +591,7 @@ int main(int argc, char **argv) {
     run_wasm_tests();
     run_json_tests();
     run_string_tests();
+    run_io_secure_tests();
     run_slice_tests();
     run_memory_tests();
     run_sql_transaction_tests();
@@ -719,6 +750,7 @@ int main(int argc, char **argv) {
     run_cli_tests();
     run_update_tests();
     run_memory_engines_ext_tests();
+    run_memory_poisoning_tests();
     run_runtime_tests();
     run_runtime_bundle_tests();
     run_channel_loop_tests();
@@ -798,6 +830,9 @@ int main(int argc, char **argv) {
     run_b11_pressure_history_e2e_tests();
     run_b9_user_sim_agent_turn_e2e_tests();
     run_personal_model_contradicts_tests();
+    run_channel_trust_tests();
+    run_minja_guard_tests();
+    run_frontier_prompt_tests();
     run_w11_abstain_calibration_tests();
     run_fast_capture_tests();
     run_promotion_tests();
@@ -989,6 +1024,12 @@ int main(int argc, char **argv) {
     run_webrtc_tests();
     run_embedded_provider_tests();
     run_llamacpp_provider_tests();
+    run_llamacpp_factory_config_tests();
+    run_llamacpp_sampling_tests();
+    run_llamacpp_kvcache_tests();
+    run_llamacpp_decode_tests();
+    run_llamacpp_lora_hotswap_tests();
+    run_llamacpp_chat_metal_tests();
     run_coreml_provider_tests();
     run_forgetting_tests();
     run_bootstrap_tests();
@@ -1040,6 +1081,7 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_persona_directive_channels_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();
     run_self_improve_tests();

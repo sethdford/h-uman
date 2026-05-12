@@ -1,0 +1,120 @@
+
+> human-control-ui@0.5.0 check
+> npm run typecheck && npm run lint && npm run format:check && npm run lint:tokens && npm run test
+
+
+> human-control-ui@0.5.0 typecheck
+> tsc --noEmit
+
+
+> human-control-ui@0.5.0 lint
+> eslint src/
+
+
+/Users/sethford/Documents/h-uman/ui/src/components/hu-button.ts
+  226:7  warning  Unexpected console statement  no-console
+
+/Users/sethford/Documents/h-uman/ui/src/components/hu-message-thread.ts
+  40:7  warning  'DEMO_FOLLOWUP_SUGGESTIONS' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/sethford/Documents/h-uman/ui/src/controllers/chat-controller.test.ts
+  285:87  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/Users/sethford/Documents/h-uman/ui/src/controllers/chat-controller.ts
+  154:7  warning  Unexpected console statement  no-console
+
+/Users/sethford/Documents/h-uman/ui/src/views/agents-view.ts
+  1:21  warning  'nothing' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 5 problems (0 errors, 5 warnings)
+
+
+> human-control-ui@0.5.0 format:check
+> prettier --check src/
+
+Checking formatting...
+All matched files use Prettier code style!
+
+> human-control-ui@0.5.0 lint:tokens
+> bash scripts/lint-raw-values.sh
+
+Checking for design token drift in /Users/sethford/Documents/h-uman/ui/src/...
+
+--- Raw hex colors ---
+--- Raw rgba() colors ---
+--- Raw breakpoints in @media ---
+--- Raw pixel spacing ---
+--- Raw pixel radii ---
+--- Raw durations ---
+--- Emoji as icons ---
+
+No design token drift found.
+
+> human-control-ui@0.5.0 test
+> vitest run
+
+
+ RUN  v4.0.18 /Users/sethford/Documents/h-uman/ui
+
+stderr | src/lib/markdown.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | src/components/hu-file-preview.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | src/components/hu-message-actions.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | src/components/hu-directive-telemetry-tile.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | src/components/components.test.ts > hu-button > should be defined as a custom element
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+ ✓ src/utils/gesture.test.ts (8 tests) 6ms
+ ✓ src/voice-stream-perf.test.ts (6 tests) 12ms
+stderr | src/components/hu-chat-sessions-panel.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+ ✓ src/utils.test.ts (14 tests) 13ms
+stderr | src/views/views.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+ ✓ src/audio-playback.test.ts (13 tests) 31ms
+stderr | src/components/extra-components.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+ ✓ src/components/hu-file-preview.test.ts (3 tests) 10ms
+ ✓ src/gateway.test.ts (11 tests) 30ms
+ ✓ src/components/hu-chat-sessions-panel.test.ts (6 tests) 18ms
+ ✓ src/components/hu-message-actions.test.ts (4 tests) 12ms
+ ✓ src/components/hu-directive-telemetry-tile.test.ts (7 tests) 29ms
+ ✓ src/lib/markdown.test.ts (11 tests) 26ms
+ ✓ src/controllers/chat-controller.test.ts (40 tests) 54ms
+ ✓ src/components/components.test.ts (95 tests) 286ms
+ ✓ src/voice-stream-silence.test.ts (3 tests) 2ms
+stderr | src/icons.test.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+ ✓ src/icons.test.ts (4 tests) 2ms
+ ✓ src/tests/gateway.test.ts (1 test) 479ms
+     ✓ DemoGatewayClient reaches connected status within 500ms  478ms
+(node:16583) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/extra-components.test.ts > hu-reasoning-block > auto-collapses long content after streaming stops
+Warning: KaTeX doesn't work in quirks mode. Make sure your website has a suitable doctype.
+
+(node:16584) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/extra-components.test.ts > hu-chart > should keep the same canvas when only data changes (update path, not destroy)
+Failed to create chart: can't acquire context from the given item
+Failed to create chart: can't acquire context from the given item
+
+ ✓ src/views/views.test.ts (97 tests) 292ms
+ ✓ src/components/extra-components.test.ts (350 tests) 434ms
+
+ Test Files  17 passed (17)
+      Tests  673 passed (673)
+   Start at  17:50:17
+   Duration  1.32s (transform 2.30s, setup 0ms, import 2.71s, tests 1.74s, environment 4.10s)
+

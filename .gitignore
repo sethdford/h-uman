@@ -141,3 +141,11 @@ lora-persona-seth.bin
 # inside the working tree.
 .human/private/
 **/.human/private/
+
+# Phase 1 (RL SOTA) — Gemma GGUF and other large model files. The
+# fetcher script writes to ~/.human/models/, but contributors who
+# fetch from inside the repo for testing should never accidentally
+# commit a 4 GB GGUF.
+.human/models/
+**/.human/models/
+*.gguf

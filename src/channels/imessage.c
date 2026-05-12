@@ -3,6 +3,7 @@
 #include "human/channel_loop.h"
 #include "human/context/conversation.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #ifndef HU_CODENAME
@@ -102,8 +103,10 @@ static void imessage_save_rowid(int64_t rowid) {
     imessage_rowid_path(path, sizeof(path));
     if (!path[0])
         return;
-    FILE *f = fopen(path, "w");
-    if (!f)
+    /* iMessage cursor (last-seen rowid) at ~/.human/imessage_rowid.
+     * No secret content; 0644. Path derived from $HOME. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path, HU_IO_PERM_USER, "w", &f) != HU_OK || !f)
         return;
     fprintf(f, "%lld\n", (long long)rowid);
     fclose(f);
@@ -247,8 +250,11 @@ static void imessage_save_poll_status(const hu_imessage_ctx_t *c) {
         if (dn > 0 && (size_t)dn < sizeof(dir))
             (void)mkdir(dir, 0700);
     }
-    FILE *f = fopen(path, "w");
-    if (!f)
+    /* iMessage channel config at ~/.human/imessage.json. Contains
+     * allow-list contacts (PII) and channel preferences; 0600 to
+     * match the daemon's other config files. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path, HU_IO_PERM_SECRET, "w", &f) != HU_OK || !f)
         return;
     fprintf(f,
             "{\n"
@@ -4132,8 +4138,12 @@ char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t que
     snprintf(tmp_path, sizeof(tmp_path), "/tmp/human_gif_%u_%d_%u.gif", (unsigned)time(NULL),
              (int)getpid(), gc);
 
-    FILE *f = fopen(tmp_path, "wb");
-    if (!f) {
+    /* /tmp GIF download buffer — short-lived, but still goes through
+     * hu_io_secure_open so the path is checked for traversal and the
+     * mode is explicit (0644 — GIF is shown to the user via the
+     * channel). */
+    FILE *f = NULL;
+    if (hu_io_secure_open(tmp_path, HU_IO_PERM_USER, "wb", &f) != HU_OK || !f) {
         hu_http_response_free(alloc, &gif_resp);
         return NULL;
     }

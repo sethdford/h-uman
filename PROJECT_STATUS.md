@@ -99,7 +99,7 @@ The MCP (Model Context Protocol) client is **fully implemented**:
 - `tools/list` — discovers tools from MCP servers
 - `tools/call` — executes MCP tools with arguments
 - Auto-wraps MCP server tools as `hu_tool_t` via `hu_mcp_init_tools()`
-- MCP Host server mode (`hu_mcp_host_t`) for exposing Human tools
+- MCP Engine server mode (`hu_mcp_engine_t`, formerly `hu_mcp_host_t`) for exposing Human tools
 - Config: `mcp_servers` array in config.json
 
 ## Voice — Real (STT + TTS)

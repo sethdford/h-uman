@@ -1,0 +1,30 @@
+  PASS  test_canvas_tool_vtable_fields
+  PASS  test_canvas_tool_null_args
+
+=== canvas_e2e ===
+  PASS  test_store_version_history_undo_redo
+  PASS  test_store_list_all
+  PASS  test_store_user_edit_sets_pending
+  PASS  test_store_format_fields
+  PASS  test_store_remove_canvas
+  PASS  test_store_version_ring_wraparound
+  PASS  test_store_imports_and_language
+  PASS  test_store_null_args
+  PASS  test_rpc_handlers_mock_mode
+
+=== CanvasPersist ===
+  PASS  test_canvas_persist_set_db_null
+  PASS  test_canvas_persist_save_null
+  PASS  test_canvas_persist_delete_null
+  PASS  test_canvas_persist_load_null
+  PASS  test_canvas_persist_sqlite_roundtrip
+  PASS  test_canvas_persist_sqlite_delete
+  PASS  test_canvas_persist_version_roundtrip
+
+=== CanvasRender ===
+  PASS  canvas_render_null_args
+  PASS  canvas_format_from_string_known
+  PASS  canvas_format_from_string_unknown
+  PASS  canvas_render_test_mode
+
+--- Results: 10100/10100 passed ---

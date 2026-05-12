@@ -6,6 +6,7 @@
 #include "human/security/vault.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include <ctype.h>
@@ -223,8 +224,11 @@ static hu_error_t vault_save(hu_vault_t *v, hu_json_value_t *obj) {
         v->alloc->free(v->alloc->ctx, json, json_len + 1);
         return err;
     }
-    FILE *f = fopen(v->vault_path, "wb");
-    if (!f) {
+    /* Secrets vault: API keys, OAuth tokens, anything sensitive the
+     * user explicitly stored here. Must be 0600 — a vault that's
+     * world-readable defeats the point. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(v->vault_path, HU_IO_PERM_SECRET, "wb", &f) != HU_OK || !f) {
         v->alloc->free(v->alloc->ctx, json, json_len + 1);
         return HU_ERR_IO;
     }
