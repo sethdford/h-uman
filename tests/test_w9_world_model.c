@@ -695,6 +695,165 @@ static void test_w9_gated_negmem_open_channel_quarantined(void) {
     close_facade_(g, m);
 }
 
+/* --- P1.4 — borrowed persona snapshot on hu_world_model_t --- */
+
+static void test_w9_merge_persona_sets_borrowed_persona_pointer(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    seed_one_relation_(g, "u-bp");
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-bp", 4, 1000LL, &wm), HU_OK);
+    /* Field starts NULL until merge. */
+    HU_ASSERT(wm->persona == NULL);
+
+    hu_persona_t persona = {0};
+    persona.identity = "your assistant";
+    persona.name = "Bot";
+    hu_world_model_merge_persona(wm, &persona, NULL, 0, NULL, 0);
+
+    /* Borrowed pointer points at the caller's persona. */
+    HU_ASSERT(wm->persona == &persona);
+    /* And the identity drove the ToM string too. */
+    HU_ASSERT_EQ(strcmp(wm->tom.user_thinks_we_are, "your assistant"), 0);
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+/* --- P3.2 — negative-memory source enum round-trip --- */
+
+static void test_w9_negative_memory_source_roundtrips_through_db(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    /* Insert one of each source kind via the gated facade (USER source so
+     * write_trust lets all four kinds land LIVE). */
+    static const struct { const char *text; hu_negative_source_t src; } cases[] = {
+        {"never call me bro",       HU_NEGATIVE_SOURCE_USER_EXPLICIT},
+        {"unsure if Acme acquired Beta", HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN},
+        {"avoid politics topic",    HU_NEGATIVE_SOURCE_AUTO_EXTRACT},
+        {"do not share PHI",        HU_NEGATIVE_SOURCE_SYSTEM_POLICY},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        hu_negative_memory_t nm = {0};
+        snprintf(nm.text, sizeof(nm.text), "%s", cases[i].text);
+        snprintf(nm.scope, sizeof(nm.scope), "topic");
+        nm.belief = hu_belief_init(0.9f, "test", 1000LL + (int64_t)i);
+        nm.created_at = 1000LL + (int64_t)i;
+        nm.source = cases[i].src;
+        int64_t id = 0;
+        HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-src", 5, &nm,
+                                                          HU_WRITE_SOURCE_USER, 1000LL, &id),
+                     HU_OK);
+        HU_ASSERT_GT(id, 0);
+    }
+
+    /* Read back via the facade list — each row must carry its source. */
+    hu_negative_memory_t *out = NULL;
+    size_t out_count = 0;
+    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-src", 5, 16, &out, &out_count),
+                 HU_OK);
+    HU_ASSERT_EQ(out_count, 4u);
+
+    /* Newest first (created_at DESC). */
+    HU_ASSERT_EQ((int)out[0].source, (int)HU_NEGATIVE_SOURCE_SYSTEM_POLICY);
+    HU_ASSERT_EQ((int)out[1].source, (int)HU_NEGATIVE_SOURCE_AUTO_EXTRACT);
+    HU_ASSERT_EQ((int)out[2].source, (int)HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN);
+    HU_ASSERT_EQ((int)out[3].source, (int)HU_NEGATIVE_SOURCE_USER_EXPLICIT);
+
+    hu_negative_memory_free(A(), out, out_count);
+    close_facade_(g, m);
+}
+
+/* --- P3.3 — adversarial: SYSTEM_POLICY bypasses channel-source allowlist --- */
+
+static void test_w9_adversarial_system_policy_lands_live_on_open_channel(void) {
+    /* SYSTEM_POLICY rows must land LIVE even when the bytes arrive from
+     * an open channel — the privileged init path is asserting "this is a
+     * built-in safety rule" via the source tag, and the per-source
+     * allowlist (P3.1 + P3.2 hardening) honors it.
+     *
+     * Counterpart: USER_EXPLICIT from CHANNEL_OPEN is QUARANTINED (the
+     * existing test_w9_gated_negmem_open_channel_quarantined). */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_negative_memory_t nm = {0};
+    snprintf(nm.text, sizeof(nm.text), "do not output unredacted SSNs");
+    snprintf(nm.scope, sizeof(nm.scope), "global");
+    /* High belief — SYSTEM_POLICY should preserve it (no quarantine clamp). */
+    nm.belief = hu_belief_init(0.95f, "policy-init", 1000LL);
+    nm.created_at = 1000LL;
+    nm.source = HU_NEGATIVE_SOURCE_SYSTEM_POLICY;
+
+    /* Stale observation + open channel — without the SYSTEM_POLICY
+     * bypass, P3.1 quarantines this. */
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-policy", 8, &nm,
+                                                     HU_WRITE_SOURCE_CHANNEL_OPEN,
+                                                     1000LL + 7LL * 24 * 3600 * 1000, &id),
+                 HU_OK);
+    HU_ASSERT_GT(id, 0);
+
+    hu_negative_memory_t *out = NULL;
+    size_t out_count = 0;
+    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-policy", 8, 8, &out, &out_count),
+                 HU_OK);
+    HU_ASSERT_EQ(out_count, 1u);
+    /* Belief was NOT clamped to ≤ 0.5 — proves SYSTEM_POLICY bypassed
+     * the quarantine band. */
+    HU_ASSERT(out[0].belief.mean > 0.9f);
+    HU_ASSERT_EQ((int)out[0].source, (int)HU_NEGATIVE_SOURCE_SYSTEM_POLICY);
+
+    hu_negative_memory_free(A(), out, out_count);
+    close_facade_(g, m);
+}
+
+static void test_w9_adversarial_unauthorized_source_int_coerces_to_user_explicit(void) {
+    /* Schema fault tolerance: a corrupted/future row whose `source` int
+     * is out of band reads back as USER_EXPLICIT (the safest default
+     * since the planner treats it as a hard refusal). Insert via a row
+     * with an in-bounds source then mutate via SQL? No — the cleanest
+     * way is to test the in-memory coercion path with the round-trip
+     * already covering the in-band cases. We rely on the
+     * negative_memory_list_sqlite coercion: any value > SYSTEM_POLICY
+     * reads as USER_EXPLICIT.
+     *
+     * What we CAN test cheaply: the insert path coerces an out-of-band
+     * source to USER_EXPLICIT before binding. So inserting nm.source =
+     * 99 round-trips as 0. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_negative_memory_t nm = {0};
+    snprintf(nm.text, sizeof(nm.text), "garbage source code path");
+    snprintf(nm.scope, sizeof(nm.scope), "topic");
+    nm.belief = hu_belief_init(0.9f, "test", 1000LL);
+    nm.created_at = 1000LL;
+    /* Out-of-band source value — must coerce to USER_EXPLICIT on insert. */
+    nm.source = (hu_negative_source_t)99;
+
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-coerce", 8, &nm,
+                                                     HU_WRITE_SOURCE_USER, 1000LL, &id),
+                 HU_OK);
+
+    hu_negative_memory_t *out = NULL;
+    size_t out_count = 0;
+    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-coerce", 8, 4, &out, &out_count),
+                 HU_OK);
+    HU_ASSERT_EQ(out_count, 1u);
+    HU_ASSERT_EQ((int)out[0].source, (int)HU_NEGATIVE_SOURCE_USER_EXPLICIT);
+
+    hu_negative_memory_free(A(), out, out_count);
+    close_facade_(g, m);
+}
+
 /* --- P2.4 — channel-aware cache key --- */
 
 static void test_w9_channel_aware_key_isolates_per_channel(void) {
@@ -943,6 +1102,13 @@ void run_w9_world_model_tests(void) {
     /* P3.1 / P3.3 — write_trust gate on negative-memory writes. */
     HU_RUN_TEST(test_w9_gated_negmem_user_source_lands_live);
     HU_RUN_TEST(test_w9_gated_negmem_open_channel_quarantined);
+    /* P1.4 — borrowed persona snapshot. */
+    HU_RUN_TEST(test_w9_merge_persona_sets_borrowed_persona_pointer);
+    /* P3.2 — semantic source enum round-trip + adversarial. */
+    HU_RUN_TEST(test_w9_negative_memory_source_roundtrips_through_db);
+    /* P3.3 expanded — SYSTEM_POLICY bypasses channel allowlist. */
+    HU_RUN_TEST(test_w9_adversarial_system_policy_lands_live_on_open_channel);
+    HU_RUN_TEST(test_w9_adversarial_unauthorized_source_int_coerces_to_user_explicit);
     /* P2.4 — channel-aware cache key. */
     HU_RUN_TEST(test_w9_channel_aware_key_isolates_per_channel);
     HU_RUN_TEST(test_w9_invalidate_clears_all_channels_for_contact);
