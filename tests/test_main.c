@@ -598,6 +598,19 @@ void run_sycophancy_guard_tests(void);
 void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
+#ifdef HU_ENABLE_RL_FULL
+/* Phase 5 Task 2 (RL SOTA): bootstrap CI helper — percentile-bootstrap
+ * on a vector of per-conversation scores (round-1 BLOCKER-2 fix: NOT
+ * a single aggregated scalar — that's degenerate).  Pins n>=30
+ * production floor (Wilson NEW-MED-3), n>=10 _for_test floor, finite
+ * CI bracketing the mean on a known Normal(0.5, 0.1) sample, byte-
+ * identical results across seed=42 calls, and the Task 9 baseline-vs-
+ * policy compare-means p-value (low for distinct distributions, high
+ * for identical).  Consumed by Task 5 hu_eval_gate_decide and Task 9
+ * competitive harness; gated so default release/dev builds
+ * (HU_ENABLE_RL_FULL=OFF) do not link the suite. */
+extern void run_bootstrap_ci_tests(void);
+#endif
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -1207,6 +1220,12 @@ int main(int argc, char **argv) {
     run_canvas_e2e_tests();
     run_canvas_persist_tests();
     run_canvas_render_tests();
+#ifdef HU_ENABLE_RL_FULL
+    /* Phase 5 Task 2 (RL SOTA): bootstrap CI suite — only linked when
+     * the RL-full gate is ON, so default release/dev builds are byte-
+     * identical to the pre-Phase-5 test surface. */
+    run_bootstrap_ci_tests();
+#endif
 
     HU_TEST_REPORT();
     HU_TEST_EXIT();

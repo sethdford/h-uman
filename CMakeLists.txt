@@ -1465,6 +1465,22 @@ set(HU_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${HU_ROOT}/include)
 include_directories(${HU_ROOT}/asm/generic)
 
+# Phase 5 Task 2 (RL SOTA) — bootstrap CI helper.  Gated behind
+# HU_ENABLE_RL_FULL so default release/dev builds pay zero binary cost.
+# Consumed by Task 5 hu_eval_gate_decide (LoRA promotion gate) and Task
+# 9 competitive harness.  Subsequent Phase 5 tasks (judge external,
+# leaderboard runners, eval gate, competitive harness) will append
+# their TUs into this same gated block to keep the wiring uniform.
+if(HU_ENABLE_RL_FULL)
+    list(APPEND HU_CORE_SOURCES src/eval/bootstrap_ci.c)
+    # Phase 5 Task 3 (RL SOTA) — hu_eval_judge_external_t vtable +
+    # canned-response factory. Apple FM (Task 7) and Gemini Nano
+    # (Task 8) factories live in the same TU behind
+    # `HU_EVAL_JUDGE_HAVE_*_IMPL` #ifndef guards, so Tasks 7/8 fall
+    # the stub bodies out without touching Task 3 code.
+    list(APPEND HU_CORE_SOURCES src/eval/eval_judge_external.c)
+endif()
+
 # Deduplicate source lists to prevent parallel build races
 list(REMOVE_DUPLICATES HU_CORE_SOURCES)
 
@@ -2568,6 +2584,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_personal_model_fidelity_v2.c
     tests/test_persona_directive_channels.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
@@ -3127,6 +3144,19 @@ list(APPEND HU_TEST_SOURCES
     tests/test_adversarial_concurrency.c
     tests/test_adversarial_integration.c
 )
+
+# Phase 5 Task 2 (RL SOTA) — bootstrap_ci tests live in the same gated
+# bucket as the impl above.  Mirrored guard so the test TU is only
+# compiled when HU_ENABLE_RL_FULL is ON (default release/dev keep the
+# pre-Phase-5 test surface untouched).
+if(HU_ENABLE_RL_FULL)
+    list(APPEND HU_TEST_SOURCES tests/test_bootstrap_ci.c)
+    # Phase 5 Task 3 (RL SOTA) — hu_eval_judge_external_t tests
+    # (canned cycle, verdict round-trip, zero-verdicts rejection,
+    # Apple FM / Gemini Nano stubs return HU_ERR_NOT_SUPPORTED, ASan
+    # leak-free deinit). Same gating as Task 2.
+    list(APPEND HU_TEST_SOURCES tests/test_eval_judge_external.c)
+endif()
 
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)
 target_link_libraries(human_tests human_core_test)
