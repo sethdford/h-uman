@@ -87,4 +87,19 @@ hu_error_t hu_ml_cli_train_feed_predictor(hu_allocator_t *alloc, int argc, const
  * pipeline is verifiable from a single CLI command. */
 hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char **argv);
 
+/* SOTA-2026 init-07 — Train a Process Reward Model (PRM) scorer on the
+ * existing DPO pair format from S1 and emit a `.prm` checkpoint that
+ * `hu_verifier_panel_create` can load. Reuses the GPT scaffold; the
+ * output head is a single sigmoid scalar per step.
+ *
+ * S2 deliverable: panel + training-driver CLI lands; real gradient-
+ * descent training arrives in S3 (M3 frontier bridge dependency). The
+ * S2 driver writes a deterministic checkpoint seeded by `--seed` and
+ * the DPO pair count, so the panel runtime + checkpoint format can be
+ * exercised end to end without a real ML training run.
+ *
+ * Usage: human ml train-verifier --output PATH [--db PATH] [--seed N]
+ *                                [--feature-dim N] */
+hu_error_t hu_ml_cli_train_verifier(hu_allocator_t *alloc, int argc, const char **argv);
+
 #endif

@@ -1143,6 +1143,10 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_dpo_collector_deinit(&agent->sota.dpo_collector);
         agent->sota.sota_initialized = false;
     }
+    /* SOTA-2026 init-07 — release verifier panel weights. Safe even when
+     * scorer_count == 0 (default-OFF path). */
+    hu_verifier_panel_deinit(&agent->sota.verifier_panel);
+    agent->sota.verifier_panel_enabled = false;
     hu_pattern_radar_deinit(&agent->radar);
     if (agent->commitment_store) {
         hu_commitment_store_destroy(agent->commitment_store);

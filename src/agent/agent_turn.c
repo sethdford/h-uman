@@ -5263,6 +5263,24 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     prm_turn_score = step_score;
                 }
 
+                /* SOTA-2026 init-07 trained verifier panel (opt-in).
+                 * Default OFF when verifier_panel_enabled is false, in
+                 * which case this whole block is short-circuited and
+                 * the call graph is byte-identical to the pre-init-07
+                 * path. Pinned in tests/test_think_prm.c. */
+                if (agent->sota.verifier_panel_enabled &&
+                    agent->sota.verifier_panel.scorer_count > 0 &&
+                    resp.content && resp.content_len > 0) {
+                    hu_verifier_panel_result_t vp_res;
+                    hu_error_t vp_err = hu_verifier_panel_score_chain(
+                        &agent->sota.verifier_panel, resp.content, resp.content_len,
+                        HU_VERIFIER_PANEL_MAX_STEPS, &vp_res);
+                    if (vp_err == HU_OK) {
+                        prm_turn_score = (double)vp_res.aggregate;
+                        hu_verifier_panel_result_free(agent->alloc, &vp_res);
+                    }
+                }
+
                 /* Reflection: evaluate response quality and retry if needed */
                 hu_reflection_quality_t quality = hu_reflection_evaluate(
                     msg, msg_len, resp.content, resp.content_len, &agent->reflection);

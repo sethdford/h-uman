@@ -47,6 +47,7 @@
 #include "human/agent/growth_narrative.h"
 #include "human/agent/process_reward.h"
 #include "human/agent/reflection.h"
+#include "human/agent/think_prm.h"
 #include "human/cognition/attachment.h"
 #include "human/cognition/dual_process.h"
 #include "human/cognition/emotional.h"
@@ -114,6 +115,18 @@ typedef struct hu_agent_extensions {
     hu_dpo_collector_t dpo_collector;
     int64_t current_trajectory_id; /* ML trajectory for RL training (0 = inactive) */
     bool sota_initialized;
+
+    /* SOTA-2026 init-07 — ThinkPRM trained verifier panel. Default OFF
+     * (scorer_count == 0). When non-zero, agent_turn consults the panel
+     * as an opt-in alternative to the legacy reflection critique. Pinned
+     * default-OFF byte-identical by
+     * tests/test_think_prm.c::agent_turn_is_byte_identical_when_panel_disabled.
+     *
+     * Owned: the panel is initialized lazily by the agent (or the daemon)
+     * via hu_verifier_panel_create / _from_dir and freed by the agent
+     * deinit path through hu_verifier_panel_deinit. */
+    hu_verifier_panel_t verifier_panel;
+    bool verifier_panel_enabled; /* config.agent.verifier_panel mirror */
 
     hu_gvr_config_t gvr_config;
     hu_provider_degradation_config_t degradation_config;

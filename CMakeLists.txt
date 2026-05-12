@@ -965,6 +965,7 @@ list(APPEND HU_CORE_SOURCES
     src/memory/self_rag.c
     src/memory/tiers.c
     src/agent/process_reward.c
+    src/agent/think_prm.c
     src/ml/dpo.c
     src/security/cot_audit.c
     src/security/escalate.c
@@ -2854,6 +2855,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_memory_tiers.c
     tests/test_process_reward.c
     tests/test_dpo.c
+    tests/test_think_prm.c
     tests/test_sota_e2e.c
     tests/test_sota_adversarial.c
     tests/test_otel.c
