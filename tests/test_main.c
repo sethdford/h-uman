@@ -454,6 +454,11 @@ void run_rollout_tests(void);
  * [26..30]) + Phase 3 hu_reward_model_t composition smoke + Phase 5
  * judge factory NOT_SUPPORTED pin. */
 void run_reward_source_tests(void);
+/* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler surface
+ * contract — argument validation (R9, R12, --reward-fn/-model pairing,
+ * --backend mlx demands --backbone-path) + HUML synthetic-reward e2e
+ * smokes (adapter file written; --kl-beta 0 disables KL via CLI). */
+void run_cli_grpo_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -1065,6 +1070,8 @@ int main(int argc, char **argv) {
     /* Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic token
      * counting + Phase 3 RM composition + Phase 5 judge stub pin. */
     run_reward_source_tests();
+    /* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler. */
+    run_cli_grpo_tests();
 #endif
 
     run_experience_tests();

@@ -1313,6 +1313,17 @@ if(HU_ENABLE_ML)
         # Phase 3 Tasks 9-10: CLI handlers for kto-train and rm-train.
         src/ml/cli_kto.c
         src/ml/cli_rm.c
+        # Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler.
+        # Mirrors the cli_kto.c / cli_dpo.c structural pattern: argv
+        # parser (R12 strict integer parse for --rollouts), JSONL prompt
+        # extraction (chosen/rejected ignored — GRPO samples rollouts
+        # from the live policy), trainer creation via
+        # hu_rl_trainer_create_grpo, step loop, final save_adapter.
+        # Validation gates per umbrella §10: R9 reward-hacking (explicit
+        # --reward-fn beats convenient default), R12 group-baseline
+        # degeneracy (N<2 / N>1024), Phase 3 cli_rm precedent (--backend
+        # mlx demands --backbone-path).
+        src/ml/cli_grpo.c
         # Phase 4 Task 1 (RL SOTA): KL divergence estimators (k1/k2/k3) +
         # k3 analytical backward grad. Pure C leaf math primitive — no
         # model coupling, no allocator. Used by the GRPO trainer
@@ -2301,7 +2312,7 @@ if(NOT HU_ENABLE_ML)
         src/ml/value_head.c src/ml/policy_logprobs.c src/ml/reference_model.c
         src/ml/cli_dpo.c src/ml/reward_model.c src/ml/reward_model_mlx.c
         src/ml/reward_model_train.c
-        src/ml/cli_kto.c src/ml/cli_rm.c
+        src/ml/cli_kto.c src/ml/cli_rm.c src/ml/cli_grpo.c
         # Phase 4 Task 2 (RL SOTA): hu_rollout_t. Mirror the ML-disabled
         # fallback for the other Phase 2/3 RL TUs above so symbol resolution
         # still works in minimal builds.
@@ -2914,6 +2925,13 @@ set(HU_TEST_SOURCES
     # token-counting backend (good=1..5, bad=26..30 convention), Phase 3
     # hu_reward_model_t composition smoke, Phase 5 judge stub pin.
     tests/test_reward_source.c
+    # Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI surface contract —
+    # 5 argument-rejection cases (R9 reward-hacking, R12 N<2 bounds,
+    # --reward-fn rm requires --reward-model, --backend mlx requires
+    # --backbone-path) + 2 HUML synthetic-reward e2e smokes (5 iters
+    # writes a non-empty adapter file; --kl-beta 0 disables KL flows
+    # through the CLI per MED-1 escape valve).
+    tests/test_cli_grpo.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
