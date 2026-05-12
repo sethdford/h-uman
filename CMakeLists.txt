@@ -1272,6 +1272,15 @@ if(HU_ENABLE_ML)
         # (hu_reward_model_t, Task 2) and Bradley-Terry RM training
         # loop (Task 3).
         src/ml/value_head.c
+        # Phase 3 Task 2 (RL SOTA): hu_reward_model_t — vtable + HUML
+        # factory (toy GPT backbone + Task 1 value head on last-position
+        # logits) + M3 NaN contract for one-sided KTO pairs. MLX factory
+        # stubs at HU_ERR_NOT_SUPPORTED until Task 8 wires
+        # scripts/rm_mlx_train.py. The HUML ctx layout lives in
+        # src/ml/reward_model_priv.h (plan H2 fix) so Task 3's
+        # reward_model_train.c can access the value head for the SGD
+        # step without a HU_IS_TEST accessor.
+        src/ml/reward_model.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2785,6 +2794,11 @@ set(HU_TEST_SOURCES
     # Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + analytical-vs-
     # finite-diff backward grad check + "VHED" save/load round trip.
     tests/test_value_head.c
+    # Phase 3 Task 2 (RL SOTA): hu_reward_model_t HUML composition smoke
+    # test + M3 NaN contract pin for one-sided KTO pairs. Task 3 will
+    # APPEND Bradley-Terry convergence + finite-diff grad-check tests to
+    # tests/test_reward_model_train.c (same suite, same runner).
+    tests/test_reward_model_train.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
