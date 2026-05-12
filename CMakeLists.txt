@@ -1220,6 +1220,10 @@ if(HU_ENABLE_ML)
         # Used by hu_dpo_real_huml in Task 4 and (paired with reference_model
         # from Task 3) the log π_ref counterparts that drive the DPO loss.
         src/ml/policy_logprobs.c
+        # Phase 2 Task 3 (RL SOTA): frozen π_ref clone via deep-copy of params.
+        # Used by hu_dpo_real_huml in Task 4 to anchor the policy-vs-reference
+        # log-ratio in the DPO loss.
+        src/ml/reference_model.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -2715,6 +2719,8 @@ set(HU_TEST_SOURCES
     tests/test_rl_trainer.c
     # Phase 2 Task 2 (RL SOTA): hu_policy_logprobs sanity + determinism + null-arg.
     tests/test_policy_logprobs.c
+    # Phase 2 Task 3 (RL SOTA): hu_reference_model_create_from clone + freeze.
+    tests/test_reference_model.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
