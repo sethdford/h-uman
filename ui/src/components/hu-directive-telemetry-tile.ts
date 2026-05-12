@@ -139,7 +139,7 @@ export class HuDirectiveTelemetryTile extends LitElement {
 
     .bar {
       display: flex;
-      gap: 2px;
+      gap: var(--hu-space-2xs);
       height: 1.25rem;
       width: 100%;
       border-radius: var(--hu-radius-sm);
@@ -207,7 +207,7 @@ export class HuDirectiveTelemetryTile extends LitElement {
       display: inline-block;
       width: 0.5rem;
       height: 0.5rem;
-      border-radius: 2px;
+      border-radius: var(--hu-radius-sm);
     }
 
     .legend-count {
