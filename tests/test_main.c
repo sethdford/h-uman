@@ -444,6 +444,11 @@ void run_kto_loss_tests(void);
  * backward grad — pure C leaf math primitive used by the GRPO
  * trainer (Task 5) for the KL penalty term. */
 void run_kl_divergence_tests(void);
+/* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML factory — sample N
+ * completions per prompt with cross-platform-deterministic xorshift64
+ * + per-rollout splitmix64 seed (R13). Used by GRPO trainer (Task 5)
+ * to gather (token_ids, sum_logprob) for the PPO ratio clip. */
+void run_rollout_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -1035,6 +1040,9 @@ int main(int argc, char **argv) {
     run_kto_loss_tests();
     /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 + k3 backward grad. */
     run_kl_divergence_tests();
+    /* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML — sampling determinism
+     * + per-rollout splitmix64 PRNG (R13 cross-platform pin). */
+    run_rollout_tests();
 #endif
 
     run_experience_tests();

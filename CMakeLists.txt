@@ -1276,6 +1276,13 @@ if(HU_ENABLE_ML)
         # Used by hu_dpo_real_huml in Task 4 to anchor the policy-vs-reference
         # log-ratio in the DPO loss.
         src/ml/reference_model.c
+        # Phase 4 Task 2 (RL SOTA): hu_rollout_t — sample N completions per
+        # prompt from a hu_model_t. HUML backend uses xorshift64 PRNG seeded
+        # per-rollout via splitmix64(seed XOR rollout_index) (R13: cross-
+        # platform-deterministic; libc rand() / rand_r() differ across
+        # glibc / Apple libc). MLX backend stubs at HU_ERR_NOT_SUPPORTED
+        # until Task 8 wires scripts/grpo_mlx_train.py sampling mode.
+        src/ml/rollout.c
         # Phase 2 Task 8 (RL SOTA): split `human ml dpo-train` into
         # hu_ml_cli_dpo_judge (legacy provider-scored path) +
         # hu_ml_cli_dpo_real (Phase 2 real-DPO via hu_rl_trainer_t).
@@ -2267,7 +2274,11 @@ if(NOT HU_ENABLE_ML)
         src/ml/value_head.c src/ml/policy_logprobs.c src/ml/reference_model.c
         src/ml/cli_dpo.c src/ml/reward_model.c src/ml/reward_model_mlx.c
         src/ml/reward_model_train.c
-        src/ml/cli_kto.c src/ml/cli_rm.c)
+        src/ml/cli_kto.c src/ml/cli_rm.c
+        # Phase 4 Task 2 (RL SOTA): hu_rollout_t. Mirror the ML-disabled
+        # fallback for the other Phase 2/3 RL TUs above so symbol resolution
+        # still works in minimal builds.
+        src/ml/rollout.c)
 endif()
 if(NOT HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -2848,6 +2859,10 @@ set(HU_TEST_SOURCES
     # check + v=0 graceful zero-return. Pins the math primitive that
     # backs the GRPO KL penalty (Task 5).
     tests/test_kl_divergence.c
+    # Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML factory — multinomial
+    # sampling determinism (xorshift64 + per-rollout splitmix64 seed),
+    # n_rollouts honoured, max_new_tokens cap, cross-platform pin (R13).
+    tests/test_rollout.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
