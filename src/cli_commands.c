@@ -21,6 +21,7 @@
 #include "human/eval_benchmarks.h"
 #include "human/eval_dashboard.h"
 #include "human/evaluation/evaluation.h"
+#include "human/eval_public_suites.h"
 #include "human/memory.h"
 #include "human/memory/factory.h"
 #include "human/memory/graph.h"
@@ -2276,6 +2277,105 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
                hu_benchmark_type_name(bench_type), bench_suite.name ? bench_suite.name : "");
         hu_eval_suite_free(alloc, &bench_suite);
         return HU_OK;
+    }
+
+    /* Init #14 — public benchmark suite smoke harness.
+     *
+     *   human eval public-benchmark <name> [--output <path>]
+     *
+     * Loads the committed smoke fixture under
+     *   tests/fixtures/benchmarks/<name>/smoke.json
+     * runs it against the configured provider (mock under HU_IS_TEST),
+     * prints a structured JSON report, and exits non-zero if the
+     * checked-in regression floor is breached.  `--output` atomically
+     * persists the report next to the fixture for longitudinal use.
+     *
+     * Valid names: longmemeval, locomo, knowu, empa, proagentbench.
+     */
+    if (strcmp(sub, "public-benchmark") == 0) {
+        if (argc < 4) {
+            fprintf(stderr,
+                    "Usage: human eval public-benchmark "
+                    "<longmemeval|locomo|knowu|empa|proagentbench> [--output PATH]\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        const char *pb_name = argv[3];
+        const char *out_path = NULL;
+        for (int i = 4; i < argc; i++) {
+            if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
+                out_path = argv[++i];
+            } else {
+                fprintf(stderr, "Unknown flag: %s\n", argv[i]);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+        }
+        hu_public_benchmark_t pb;
+        if (!hu_public_benchmark_from_string(pb_name, &pb)) {
+            fprintf(stderr,
+                    "Unknown public benchmark '%s' (expected one of: longmemeval, locomo, "
+                    "knowu, empa, proagentbench)\n",
+                    pb_name);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+
+        hu_public_benchmark_result_t pbr;
+        memset(&pbr, 0, sizeof(pbr));
+
+        hu_error_t prerr = HU_OK;
+#ifdef HU_IS_TEST
+        prerr = hu_public_benchmark_run_smoke(alloc, pb, NULL, "mock", 4, &pbr);
+#else
+        {
+            hu_config_t cfg;
+            hu_error_t cfg_err = hu_config_load(alloc, &cfg);
+            if (cfg_err != HU_OK) {
+                hu_log_error("eval", NULL, "public-benchmark config error: %s",
+                             hu_error_string(cfg_err));
+                return cfg_err;
+            }
+            const char *prov = cfg.default_provider ? cfg.default_provider : "openai";
+            size_t prov_len = strlen(prov);
+            const char *model = cfg.default_model ? cfg.default_model : "";
+            size_t model_len = model ? strlen(model) : 0;
+            hu_provider_t provider = {0};
+            prerr = hu_provider_create_from_config(alloc, &cfg, prov, prov_len, &provider);
+            if (prerr != HU_OK) {
+                hu_log_error("eval", NULL, "public-benchmark provider error: %s",
+                             hu_error_string(prerr));
+                hu_config_deinit(&cfg);
+                return prerr;
+            }
+            prerr = hu_public_benchmark_run_smoke(alloc, pb, &provider, model, model_len, &pbr);
+            if (provider.vtable && provider.vtable->deinit)
+                provider.vtable->deinit(provider.ctx, alloc);
+            hu_config_deinit(&cfg);
+        }
+#endif
+        if (prerr != HU_OK) {
+            hu_log_error("eval", NULL, "public-benchmark run failed: %s",
+                         hu_error_string(prerr));
+            hu_public_benchmark_result_free(alloc, &pbr);
+            return prerr;
+        }
+
+        char *json = NULL;
+        size_t json_len = 0;
+        hu_error_t jerr = hu_public_benchmark_result_to_json(alloc, &pbr, &json, &json_len);
+        if (jerr == HU_OK && json) {
+            printf("%.*s\n", (int)json_len, json);
+            if (out_path) {
+                hu_error_t perr = hu_public_benchmark_publish_results(out_path, json, json_len);
+                if (perr != HU_OK)
+                    hu_log_error("eval", NULL, "could not publish to %s: %s", out_path,
+                                 hu_error_string(perr));
+            }
+            alloc->free(alloc->ctx, json, json_len + 1);
+        }
+        bool passed = pbr.passed_floor;
+        hu_public_benchmark_result_free(alloc, &pbr);
+        /* Floor failure is a CI-gate non-zero exit, as required by the
+         * regression contract in init-14 §Acceptance #6. */
+        return passed ? HU_OK : HU_ERR_TOOL_VALIDATION;
     }
 
     if (strcmp(sub, "turing-adversarial") == 0) {

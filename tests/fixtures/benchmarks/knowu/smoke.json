@@ -1,0 +1,48 @@
+{
+  "name": "knowu-smoke",
+  "data_version": "2026-05-12.1",
+  "sourced_from": "KnowU-Bench (provisional; pin-before-publish per init-14 §D5)",
+  "match_mode": "contains",
+  "tasks": [
+    {
+      "id": "knu_persona_fact_01",
+      "prompt": "Test persona user_a self-describes as a backend engineer who prefers minimalist tooling. What is user_a's profession? backend engineer.",
+      "expected": "backend engineer",
+      "category": "persona_fact",
+      "difficulty": 1,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "knu_preference_01",
+      "prompt": "Test persona user_a has stated they prefer dark themes over light themes in every editor. Which theme does user_a prefer? dark.",
+      "expected": "dark",
+      "category": "preference",
+      "difficulty": 1,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "knu_relationship_01",
+      "prompt": "Test persona user_a often pairs with collaborator user_b on the doc_project. Who pairs with user_a on doc_project? user_b.",
+      "expected": "user_b",
+      "category": "relationship",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "knu_constraint_01",
+      "prompt": "Test persona user_a has stated they never message before 9am local time. May agent_a ping user_a at 7am? Answer: no.",
+      "expected": "no",
+      "category": "constraint",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "knu_goal_01",
+      "prompt": "Test persona user_a has set a long-term goal: ship version_one of project_alpha by quarter_three. What is the goal? ship version_one of project_alpha by quarter_three.",
+      "expected": "ship version_one of project_alpha",
+      "category": "goal",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    }
+  ]
+}

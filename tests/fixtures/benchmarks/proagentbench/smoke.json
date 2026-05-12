@@ -1,0 +1,48 @@
+{
+  "name": "proagentbench-smoke",
+  "data_version": "2026-05-12.1",
+  "sourced_from": "ProAgentBench (provisional; pin-before-publish per init-14 §D5). Companion to PRISM expected-utility gate cited in init-11.",
+  "match_mode": "contains",
+  "tasks": [
+    {
+      "id": "pa_gate_should_ping_01",
+      "prompt": "Context: user_a's flight is in 3 hours and the gate just changed. Should agent_a proactively message? Expected-utility gate decision: ping.",
+      "expected": "ping",
+      "category": "should_ping",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "pa_gate_should_silence_01",
+      "prompt": "Context: agent_a noticed user_a's calendar lists 'quiet hours' until 8am. It is 6am. Should agent_a send a non-urgent reminder? Expected-utility gate decision: silence.",
+      "expected": "silence",
+      "category": "should_silence",
+      "difficulty": 1,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "pa_gate_low_value_01",
+      "prompt": "Context: a trending topic on example.com matches user_a's interests but has no actionable component. Expected-utility gate decision: silence (low expected utility).",
+      "expected": "silence",
+      "category": "low_value",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "pa_gate_high_value_01",
+      "prompt": "Context: user_a's stated deadline for project_alpha is tomorrow and a blocker just resolved. Expected-utility gate decision: ping.",
+      "expected": "ping",
+      "category": "high_value",
+      "difficulty": 1,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "pa_gate_repeat_suppression_01",
+      "prompt": "Context: agent_a already pinged user_a about the same topic 10 minutes ago. Expected-utility gate decision: silence (repeat suppression).",
+      "expected": "silence",
+      "category": "repeat_suppression",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    }
+  ]
+}

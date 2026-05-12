@@ -1,0 +1,48 @@
+{
+  "name": "locomo-smoke",
+  "data_version": "2026-05-12.1",
+  "sourced_from": "arXiv:2402.17753 (LoCoMo) — synthetic phrasings only",
+  "match_mode": "contains",
+  "tasks": [
+    {
+      "id": "loc_session_recall_01",
+      "prompt": "In session 1, user_a mentioned owning a dog named Pixel. In a later session user_a asks: 'What did I name my dog?' Answer: Pixel.",
+      "expected": "Pixel",
+      "category": "session_recall",
+      "difficulty": 1,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "loc_cross_session_01",
+      "prompt": "Session 3 contained: 'I started learning Italian.' Session 7 asks: 'Which language am I learning?' Answer: Italian.",
+      "expected": "Italian",
+      "category": "cross_session",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "loc_long_horizon_01",
+      "prompt": "Over fifty sessions ago, user_a noted their favorite hiking trail is the ridge_loop near example.com/parks. What is user_a's favorite trail? ridge_loop.",
+      "expected": "ridge_loop",
+      "category": "long_horizon",
+      "difficulty": 3,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "loc_open_question_01",
+      "prompt": "user_a previously discussed three project ideas: tool_x, tool_y, and tool_z. Which one did user_a say they would prototype first? tool_y.",
+      "expected": "tool_y",
+      "category": "open_question",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "loc_temporal_reasoning_01",
+      "prompt": "user_a booked a flight on day_10 and the return on day_17. How many days is the trip? 7 days.",
+      "expected": "7 days",
+      "category": "temporal_reasoning",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    }
+  ]
+}

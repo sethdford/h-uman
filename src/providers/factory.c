@@ -17,6 +17,10 @@
 #ifdef HU_ENABLE_EMBEDDED_MODEL
 #include "human/providers/embedded.h"
 #endif
+/* Init-04 (M3 Bridge B) — MLX Qwen3 provider. Header is always
+ * included; the factory always succeeds, the runtime mode is decided
+ * inside mlx_qwen3.c based on HU_ENABLE_MLX_QWEN3 + HU_IS_TEST. */
+#include "human/providers/mlx_qwen3.h"
 /* W13 Bridge A — always include the header so the dispatcher can
  * compile-test the symbol; the implementation falls through to
  * HU_ERR_NOT_SUPPORTED when HU_ENABLE_LLAMACPP is undefined. */
@@ -229,6 +233,21 @@ hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t na
         return hu_embedded_provider_create(alloc, &ec, out);
     }
 #endif
+
+    /* Init-04 (M3 Bridge B) — MLX Qwen3 provider. Factory always
+     * succeeds; the chat / load_adapter hooks return NOT_SUPPORTED
+     * when HU_ENABLE_MLX_QWEN3 is OFF. base_url, when present, is
+     * treated as the Qwen3-4B model directory path. The provider is
+     * intentionally not aliased to "mlx" (that alias is owned by the
+     * CoreML provider) — call it explicitly as "mlx_qwen3". */
+    if (name_len == 9 && memcmp(name, "mlx_qwen3", 9) == 0) {
+        hu_mlx_qwen3_config_t mc = {0};
+        if (base_url && base_url_len > 0) {
+            mc.model_path = base_url;
+            mc.model_path_len = base_url_len;
+        }
+        return hu_mlx_qwen3_provider_create(alloc, &mc, out);
+    }
 
     /* W13 Bridge A — in-process llama.cpp. The factory always succeeds
      * when selected; the chat/load_adapter hooks return NOT_SUPPORTED

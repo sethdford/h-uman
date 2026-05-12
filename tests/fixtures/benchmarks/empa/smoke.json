@@ -1,0 +1,49 @@
+{
+  "name": "empa-smoke",
+  "data_version": "2026-05-12.1",
+  "sourced_from": "arXiv:2603.00552 (EMPA) — synthetic trajectories only",
+  "match_mode": "contains",
+  "trajectory_scores": [0.40, 0.55, 0.65, 0.72, 0.80, 0.78, 0.84, 0.86],
+  "tasks": [
+    {
+      "id": "empa_alignment_01",
+      "prompt": "Trajectory turn_1: user_a expresses frustration. Agent responds: 'I hear you — that sounds frustrating.' Did the response move toward the user's emotional need? Answer: yes.",
+      "expected": "yes",
+      "category": "directional_alignment",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "empa_cumulative_01",
+      "prompt": "Across turns_1_through_5 the empathy score rose from 0.40 to 0.80. Was the net emotional impact positive? Answer: yes.",
+      "expected": "yes",
+      "category": "cumulative_impact",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "empa_stability_01",
+      "prompt": "After turn_5 reached 0.80, turn_6 dropped to 0.78. Was this a small regression within stability tolerance? Answer: yes.",
+      "expected": "yes",
+      "category": "stability",
+      "difficulty": 3,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "empa_repair_01",
+      "prompt": "user_a says 'that response missed the point.' Agent replies: 'I'm sorry — let me try again, what part felt off?' Is this a repair attempt? Answer: yes.",
+      "expected": "yes",
+      "category": "repair",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "empa_no_overclaim_01",
+      "prompt": "user_a shares a loss. Should the agent claim to fully understand the experience? Answer: no.",
+      "expected": "no",
+      "category": "humility",
+      "difficulty": 3,
+      "timeout_ms": 5000
+    }
+  ]
+}

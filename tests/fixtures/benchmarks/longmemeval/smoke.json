@@ -1,0 +1,48 @@
+{
+  "name": "longmemeval-smoke",
+  "data_version": "2026-05-12.1",
+  "sourced_from": "arXiv:2410.10813 (LongMemEval) — synthetic phrasings only",
+  "match_mode": "contains",
+  "tasks": [
+    {
+      "id": "lme_temporal_01",
+      "prompt": "Two weeks ago user_a told agent_a their dentist appointment is on Friday at 3pm. What time is the appointment?",
+      "expected": "3pm",
+      "category": "temporal",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "lme_multi_hop_01",
+      "prompt": "Yesterday user_a said: 'My laptop is the silver one I bought in 2023.' Earlier, user_a said: 'The 2023 laptop runs Linux.' Which OS does the silver laptop run? Answer: Linux.",
+      "expected": "Linux",
+      "category": "multi_hop",
+      "difficulty": 3,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "lme_single_hop_01",
+      "prompt": "user_a previously stated their preferred coffee order is a flat white. What is user_a's preferred coffee order?",
+      "expected": "flat white",
+      "category": "single_hop",
+      "difficulty": 1,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "lme_abstention_01",
+      "prompt": "Has user_a ever told you their home address? The honest answer is: no, no such fact has been disclosed.",
+      "expected": "no",
+      "category": "abstention",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    },
+    {
+      "id": "lme_knowledge_update_01",
+      "prompt": "user_a first said they live in city_alpha, then later corrected this: 'Actually I moved to city_beta last month.' Where does user_a currently live? city_beta.",
+      "expected": "city_beta",
+      "category": "knowledge_update",
+      "difficulty": 2,
+      "timeout_ms": 5000
+    }
+  ]
+}
