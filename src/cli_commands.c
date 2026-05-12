@@ -24,6 +24,7 @@
 #include "human/evaluation/evaluation.h"
 #include "human/memory.h"
 #include "human/memory/factory.h"
+#include "human/providers/api_key.h"
 #include "human/memory/graph.h"
 /* W7 facade: do not include human/memory/memory.h here — it collides with
  * legacy human/memory.h (hu_memory_t). Only three entrypoints are needed. */
@@ -1586,6 +1587,45 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
         return HU_ERR_NOT_SUPPORTED;
 #elif defined(__unix__) || defined(__APPLE__)
         {
+            // Early credential probe: regression-check ends up hitting a real
+            // provider (OpenAI by default) for any suite that doesn't have a
+            // mock score, so without credentials it always degenerates into
+            // "no suites scored" + non-zero exit. CI environments without
+            // OPENAI_API_KEY would otherwise fail every build-and-test run.
+            // Detect missing credentials up front and emit a clean SKIP that
+            // exits 0, mirroring how other CI eval gates handle no-network.
+            {
+                hu_config_t probe_cfg;
+                hu_error_t probe_err = hu_config_load(alloc, &probe_cfg);
+                if (probe_err == HU_OK) {
+                    const char *prov_ref = (probe_cfg.default_provider &&
+                                            probe_cfg.default_provider[0])
+                                               ? probe_cfg.default_provider
+                                               : "openai";
+                    // Snapshot the provider name into a stack buffer: prov_ref
+                    // points into probe_cfg memory and would dangle after
+                    // hu_config_deinit, leaving the SKIP message printing ''.
+                    char prov[64];
+                    size_t prov_len = strlen(prov_ref);
+                    if (prov_len >= sizeof(prov))
+                        prov_len = sizeof(prov) - 1;
+                    memcpy(prov, prov_ref, prov_len);
+                    prov[prov_len] = '\0';
+                    char *resolved =
+                        hu_api_key_resolve(alloc, prov, prov_len, NULL, 0);
+                    bool have_key = resolved && hu_api_key_valid(resolved, strlen(resolved));
+                    if (resolved)
+                        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
+                    hu_config_deinit(&probe_cfg);
+                    if (!have_key) {
+                        printf("Regression check: SKIP (no API credentials for default provider"
+                               " '%s'; set the corresponding API_KEY env var or change"
+                               " default_provider to enable this gate)\n",
+                               prov);
+                        return HU_OK;
+                    }
+                }
+            }
             const char *dir_path = argv[3];
             enum { max_json_files = 256 };
             DIR *d = opendir(dir_path);
