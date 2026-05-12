@@ -324,6 +324,74 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         }
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
     }
+
+    /* Story C (sprint-4 follow-up) — render `wm->recent_changes`.
+     *
+     * `hu_world_model_load` already derives up to 8 SUPERSEDED / RETRACTED
+     * relations per snapshot (src/agent/world_model.c P4.3 block) but the
+     * data was never surfaced to the LLM. The stored `summary` field is a
+     * mechanical "rel #X supersedes #Y" — useless on its own — so we join
+     * locally to `wm->relations` to produce a readable "src predicate
+     * target (kind)" line. Falls back to the mechanical summary if the
+     * relation row is not in the current snapshot window. */
+    if (wm->recent_changes_count > 0) {
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Recent changes:\n", 16);
+        size_t rc_cap = wm->recent_changes_count > 5 ? 5 : wm->recent_changes_count;
+        for (size_t i = 0; i < rc_cap; i++) {
+            const hu_world_recent_change_t *ch = &wm->recent_changes[i];
+            const char *kind_str = (ch->kind == HU_WORLD_CHANGE_SUPERSEDED)
+                                       ? "updated" : "no longer holds";
+            const hu_graph_relation_t *rel = NULL;
+            for (size_t r = 0; r < wm->relations_count; r++) {
+                if (wm->relations[r].id == ch->relation_id) {
+                    rel = &wm->relations[r];
+                    break;
+                }
+            }
+            if (rel && rel->source_name && rel->target_name) {
+                const char *t = hu_relation_type_to_string(rel->type);
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s %s (%s)\n",
+                                       rel->source_name, t ? t : "->",
+                                       rel->target_name, kind_str);
+            } else if (ch->summary[0]) {
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s (%s)\n",
+                                       ch->summary, kind_str);
+            }
+        }
+    }
+
+    /* Story D (sprint-4 follow-up) — render `wm->hyperedges`.
+     *
+     * `hu_world_model_load` already pulls up to 16 deduped hyperedges per
+     * snapshot (src/agent/world_model.c P4.2 block). They are n-ary facts
+     * with a `relation_label`, an array of `members` (each with entity_id
+     * + semantic role), and a belief posterior. Render as a compact
+     * "label: name[role], name[role], ..." line so the agent gets a
+     * relational view of the world without firing a separate retrieval. */
+    if (wm->hyperedges_count > 0) {
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Multi-entity facts:\n", 20);
+        size_t he_cap = wm->hyperedges_count > 5 ? 5 : wm->hyperedges_count;
+        for (size_t i = 0; i < he_cap; i++) {
+            const hu_hyperedge_t *he = &wm->hyperedges[i];
+            if (!he->relation_label[0]) continue;
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s: ", he->relation_label);
+            size_t mem_cap = he->members_count > 6 ? 6 : he->members_count;
+            for (size_t j = 0; j < mem_cap; j++) {
+                if (j > 0) ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
+                const char *name = wm_entity_name_by_id(wm, he->members[j].entity_id);
+                if (name) {
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s[%s]",
+                                           name, he->members[j].role);
+                } else {
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "ent#%lld[%s]",
+                                           (long long)he->members[j].entity_id,
+                                           he->members[j].role);
+                }
+            }
+            ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+        }
+    }
+
     if (style_signal) {
         ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
                                "Communication style: %s\n", wm->style_summary);

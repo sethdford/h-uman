@@ -9,6 +9,8 @@
 #include "human/agent/self_rag.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
+#include "human/memory/hyperedge.h"
+#include "human/memory/memory.h"
 #include "human/memory/personal_model.h"
 #include "test_framework.h"
 #include <stdlib.h>
@@ -482,6 +484,340 @@ static void w14_autodream_rejects_null_args(void) {
     HU_ASSERT_EQ(hu_w14_scheduler_enqueue_autodream(NULL, 0, 100), HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story C (sprint-4 follow-up) — render wm->recent_changes.
+ *
+ * hu_world_model_load already derives up to 8 SUPERSEDED/RETRACTED relations
+ * per snapshot (src/agent/world_model.c P4.3 block), but until this story
+ * they were never rendered into the prompt. The render section joins
+ * `recent_changes` to the relation rows (already in `wm->relations`) so the
+ * line looks like "alice works_at globex (updated)" instead of the
+ * mechanical "rel #4 supersedes #7".
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Helper: open graph + w7 facade (existing pattern). Returns a fresh
+ * contact_id seeded with two entities. */
+static void story_c_seed_two_entities(hu_graph_t *g, const char *cid, size_t cid_len,
+                                       int64_t *out_a, int64_t *out_b) {
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, cid_len, "alice", 5, HU_ENTITY_PERSON, NULL, out_a),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, cid_len, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, out_b),
+        HU_OK);
+}
+
+static void bridge_render_with_recent_changes_emits_section(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyc_yes";
+    int64_t alice = 0, acme = 0, globex = 0;
+    story_c_seed_two_entities(g, cid, strlen(cid), &alice, &acme);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "globex", 6,
+                                HU_ENTITY_ORGANIZATION, NULL, &globex),
+        HU_OK);
+
+    /* Insert relation A (alice works_at acme), then B (alice works_at globex)
+     * with a later event_start. The bitemporal conflict resolver should
+     * supersede A with B, leaving A retracted and B carrying
+     * supersedes_id = A.id. Both feed wm->recent_changes. */
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                     1735689600000LL, 0, 1.0f, "ctx-a", 5, "imessage", 8),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, globex, HU_REL_WORKS_AT, 1.0f,
+                                     1735776000000LL, 0, 1.0f, "ctx-b", 5, "imessage", 8),
+        HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1735776100000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Recent changes:"));
+    /* The fresh relation supersedes the old one → its line shows the new
+     * target (globex) tagged as "updated". The old relation is now
+     * retracted → its line shows the old target (acme) tagged as
+     * "no longer holds". Both are valid simultaneously. */
+    HU_ASSERT(strstr(txt, "globex") != NULL || strstr(txt, "acme") != NULL);
+    HU_ASSERT(strstr(txt, "(updated)") != NULL || strstr(txt, "(no longer holds)") != NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_with_no_recent_changes_omits_section(void) {
+    /* Regression guard: a contact with only fresh (non-superseded, non-
+     * retracted) relations must NOT cause the "Recent changes:" header to
+     * appear. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyc_no";
+    int64_t alice = 0, acme = 0;
+    story_c_seed_two_entities(g, cid, strlen(cid), &alice, &acme);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                     1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
+        HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1735689700000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Recent changes:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_recent_changes_caps_at_five(void) {
+    /* Insert 6 relations, each superseding the previous, so wm->recent_changes
+     * carries 6 entries. The render section must cap at 5 (configurable in
+     * world_model_bridge.c). We verify by counting "- " bullets between
+     * "Recent changes:" and the next section header. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyc_cap";
+    int64_t alice = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+
+    /* Each iteration inserts a new "works_at orgN" that supersedes the
+     * previous via the bitemporal resolver. */
+    for (int i = 0; i < 7; i++) {
+        char org_name[16];
+        snprintf(org_name, sizeof(org_name), "org%d", i);
+        int64_t org = 0;
+        HU_ASSERT_EQ(hu_graph_upsert_entity(g, cid, strlen(cid), org_name,
+                                              strlen(org_name), HU_ENTITY_ORGANIZATION,
+                                              NULL, &org),
+                     HU_OK);
+        int64_t event_start = 1735689600000LL + (int64_t)i * 86400000LL;
+        HU_ASSERT_EQ(
+            hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, org, HU_REL_WORKS_AT,
+                                         1.0f, event_start, 0, 1.0f, "c", 1, "imessage", 8),
+            HU_OK);
+    }
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1735776100000LL + 700000000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+
+    /* Find the "Recent changes:" header, then count "- " bullets until the
+     * next blank line or known following header. */
+    const char *header = strstr(txt, "Recent changes:");
+    HU_ASSERT_NOT_NULL(header);
+    const char *scan = header + strlen("Recent changes:");
+    size_t bullets = 0;
+    while (*scan) {
+        if (scan[0] == '\n' && scan[1] == '-' && scan[2] == ' ') {
+            bullets++;
+            scan += 3;
+        } else if (scan[0] == '\n' && scan[1] != '-') {
+            break;
+        } else {
+            scan++;
+        }
+    }
+    HU_ASSERT(bullets <= 5);
+    HU_ASSERT(bullets > 0);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story D (sprint-4 follow-up) — render wm->hyperedges.
+ *
+ * hu_world_model_load already pulls up to 16 deduped hyperedges per snapshot
+ * (src/agent/world_model.c P4.2 block). They are n-ary facts with a
+ * relation_label, members[] (entity_id + role), and a belief posterior.
+ * Until this story they were never rendered. The render section produces
+ * "- label: name[role], name[role], ..." lines.
+ *
+ * Hyperedge writes go through the memory_facade (hu_hyperedge_upsert), so
+ * these tests open both the graph (for entities) and a memory_facade (for
+ * the hyperedge), then point the W7 facade at the same graph for render.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+static void story_d_open_all(hu_graph_t **g, hu_memory_facade_t **m, hu_w7_facade_t **f) {
+    setenv("HU_WORLD_MODEL_TTL_MS", "0", 1);
+    HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), *g, m), HU_OK);
+    HU_ASSERT_EQ(hu_w7_facade_open(*g, A(), f), HU_OK);
+}
+
+static void story_d_cleanup_all(hu_graph_t *g, hu_memory_facade_t *m, hu_w7_facade_t *f) {
+    if (f) hu_w7_facade_close(f, A());
+    if (m) hu_memory_facade_close(m, A());
+    if (g) hu_graph_close(g, A());
+}
+
+static void bridge_render_with_hyperedges_emits_multi_entity_section(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_w7_facade_t *f = NULL;
+    story_d_open_all(&g, &m, &f);
+
+    const char *cid = "ut_storyd_yes";
+    int64_t alice = 0, bob = 0, acme = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "bob", 3, HU_ENTITY_PERSON, NULL, &bob),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+        HU_OK);
+
+    hu_hyperedge_member_t members[3];
+    memset(members, 0, sizeof(members));
+    members[0].entity_id = alice;
+    memcpy(members[0].role, "subject", 7);
+    members[1].entity_id = bob;
+    memcpy(members[1].role, "subject", 7);
+    members[2].entity_id = acme;
+    memcpy(members[2].role, "location", 8);
+
+    hu_hyperedge_t he;
+    memset(&he, 0, sizeof(he));
+    memcpy(he.relation_label, "met_at", 6);
+    he.members = members;
+    he.members_count = 3;
+    he.belief = hu_belief_init(0.9f, "imessage", 5000LL);
+    he.event_start = 5000LL;
+
+    int64_t edge_id = 0;
+    HU_ASSERT_EQ(hu_hyperedge_upsert(m, cid, strlen(cid), &he, &edge_id), HU_OK);
+    HU_ASSERT_GT(edge_id, 0);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Multi-entity facts:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "met_at"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "alice[subject]"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "acme[location]"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    story_d_cleanup_all(g, m, f);
+}
+
+static void bridge_render_with_no_hyperedges_omits_section(void) {
+    /* Regression guard: a contact with entities/relations but no hyperedges
+     * must NOT cause the "Multi-entity facts:" header to appear. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_w7_facade_t *f = NULL;
+    story_d_open_all(&g, &m, &f);
+
+    const char *cid = "ut_storyd_no";
+    int64_t alice = 0, acme = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                     1700000000000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
+        HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000001000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Multi-entity facts:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    story_d_cleanup_all(g, m, f);
+}
+
+static void bridge_render_hyperedge_member_not_in_entities_renders_id_fallback(void) {
+    /* If a hyperedge references an entity id that did not make it into the
+     * snapshot's top-K wm->entities window, the bridge falls back to
+     * "ent#<id>[role]" rather than crashing or dropping the member. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_w7_facade_t *f = NULL;
+    story_d_open_all(&g, &m, &f);
+
+    const char *cid = "ut_storyd_fb";
+    int64_t alice = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+
+    /* Synthesize a member with an entity id far outside the seeded range so
+     * the entity-name lookup misses. */
+    hu_hyperedge_member_t members[2];
+    memset(members, 0, sizeof(members));
+    members[0].entity_id = alice;
+    memcpy(members[0].role, "subject", 7);
+    members[1].entity_id = 999999LL; /* not in graph */
+    memcpy(members[1].role, "object", 6);
+
+    hu_hyperedge_t he;
+    memset(&he, 0, sizeof(he));
+    memcpy(he.relation_label, "discussed", 9);
+    he.members = members;
+    he.members_count = 2;
+    he.belief = hu_belief_init(0.8f, "imessage", 1000LL);
+    he.event_start = 1000LL;
+
+    int64_t edge_id = 0;
+    HU_ASSERT_EQ(hu_hyperedge_upsert(m, cid, strlen(cid), &he, &edge_id), HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000001000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Multi-entity facts:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "discussed"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "alice[subject]"));
+    /* Unknown member rendered with id fallback. */
+    HU_ASSERT_NOT_NULL(strstr(txt, "ent#999999[object]"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    story_d_cleanup_all(g, m, f);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_world_model_bridge_tests(void) {
@@ -506,5 +842,13 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(w14_scheduler_enqueue_then_tick_drains_job);
     HU_RUN_TEST(w14_autodream_phases_drain_through_scheduler);
     HU_RUN_TEST(w14_autodream_rejects_null_args);
+    /* sprint-4 follow-up Story C — render wm->recent_changes. */
+    HU_RUN_TEST(bridge_render_with_recent_changes_emits_section);
+    HU_RUN_TEST(bridge_render_with_no_recent_changes_omits_section);
+    HU_RUN_TEST(bridge_render_recent_changes_caps_at_five);
+    /* sprint-4 follow-up Story D — render wm->hyperedges. */
+    HU_RUN_TEST(bridge_render_with_hyperedges_emits_multi_entity_section);
+    HU_RUN_TEST(bridge_render_with_no_hyperedges_omits_section);
+    HU_RUN_TEST(bridge_render_hyperedge_member_not_in_entities_renders_id_fallback);
 #endif
 }
