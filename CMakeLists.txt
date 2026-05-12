@@ -592,6 +592,7 @@ set(HU_CORE_SOURCES
     src/agent/workspace_context.c
     src/agent/timing.c
     src/agent/governor.c
+    src/agent/activation_steering.c
     src/agent/relationship_dynamics.c
     src/agent/arbitrator.c
     src/agent/planning.c
@@ -2740,6 +2741,7 @@ set(HU_TEST_SOURCES
     tests/test_calibration.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
+    tests/test_activation_steering.c
     tests/test_relationship_dynamics.c
     tests/test_arbitrator.c
     tests/test_planning.c
