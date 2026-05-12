@@ -1,4 +1,4 @@
-import { html, css, nothing } from "lit";
+import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { staggerMotion9Styles } from "../styles/scroll-entrance.js";
 import { formatDate, formatRelative } from "../utils.js";

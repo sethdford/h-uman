@@ -282,7 +282,12 @@ describe("ChatController", () => {
       ctrl.lastFailedMessage = "Retry this";
       // Simulate a failed message already in items (retry updates in-place)
       ctrl.items = [
-        { type: "message", role: "user", content: "Retry this", status: "failed" } as any,
+        {
+          type: "message",
+          role: "user",
+          content: "Retry this",
+          status: "failed",
+        } satisfies ChatItem,
       ];
 
       await ctrl.retry("sess-2");

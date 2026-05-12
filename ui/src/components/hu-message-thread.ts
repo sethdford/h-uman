@@ -37,12 +37,6 @@ const HERO_SUGGESTIONS = [
   { label: "Explain a concept", icon: "book-open" as const },
 ];
 
-const DEMO_FOLLOWUP_SUGGESTIONS = [
-  "Tell me more about this",
-  "Can you show an example?",
-  "What are the alternatives?",
-];
-
 const VALUE_TO_ICON: Record<string, keyof typeof icons> = {
   like: "thumbs-up",
   dislike: "thumbs-down",

@@ -223,6 +223,7 @@ export class ScButton extends LitElement {
     super.connectedCallback();
     this.addEventListener("pointerdown", this._onPointerDown);
     if (this.iconOnly && !this.ariaLabelAttr) {
+      // eslint-disable-next-line no-console
       console.warn(
         `<hu-button icon-only> missing aria-label — screen readers cannot name this control`,
       );
