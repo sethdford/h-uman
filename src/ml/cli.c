@@ -1051,7 +1051,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     hu_persona_example_t *delta_examples = NULL;
     size_t delta_examples_count = 0;
     if (from_deltas_db && from_deltas_db[0]) {
-#ifdef HU_ENABLE_SQLITE
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_LEARNING)
         if (!signal_contact) {
             fprintf(stderr,
                     "[lora-persona] --from-deltas requires --contact <id>\n");
@@ -1119,7 +1119,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         hu_graph_close(signal_graph, alloc);
 #else
         fprintf(stderr,
-                "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE\n");
+                "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE + HU_ENABLE_LEARNING\n");
         hu_persona_deinit(alloc, &persona);
         return HU_ERR_NOT_SUPPORTED;
 #endif
