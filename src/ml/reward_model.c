@@ -352,8 +352,98 @@ hu_error_t hu_reward_model_save(const hu_reward_model_t *rm, const char *dir) {
     return HU_OK;
 }
 
+/* Phase 4 Task 10: Load an HUML reward-model checkpoint written by
+ * hu_reward_model_save. The on-disk schema is two files:
+ *   <dir>/value_head.vh  — "VHED" magic + u32 hidden_dim + float[hd] W + float b
+ *   <dir>/rm_meta.json   — {"vocab_size":N,"hidden_dim":N,"backend":"huml"}
+ *
+ * We parse rm_meta.json with the same minimal-JSON pattern used by the
+ * sibling JSONL loaders (substring + numeric strtoul); a real JSON
+ * dependency is out of scope for a 5 KB fixture loader. Strict-mode
+ * checks: backend MUST be "huml", vocab_size MUST equal hidden_dim
+ * (HUML invariant — see hu_reward_model_create_huml above), and the
+ * value_head.vh hidden_dim header MUST match. Missing dir / missing
+ * meta / corrupt header → HU_ERR_IO or HU_ERR_PARSE (no segfault).
+ *
+ * Approach: construct a fresh HUML RM via hu_reward_model_create_huml
+ * (which xavier-inits a value head), then SWAP in the value head we
+ * just loaded from disk. This way the backbone is always fresh — the
+ * HUML backbone is frozen during RM training (see reward_model_train.c)
+ * and the trained surface is the value head only. */
 hu_error_t hu_reward_model_load(hu_allocator_t *alloc, const char *dir,
                                  hu_reward_model_t *out) {
-    (void)alloc; (void)dir; (void)out;
-    return HU_ERR_NOT_SUPPORTED;
+    if (!alloc || !alloc->alloc || !alloc->free || !dir || !dir[0] || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char meta_path[1024];
+    char vh_path[1024];
+    int n = snprintf(meta_path, sizeof(meta_path), "%s/rm_meta.json", dir);
+    if (n <= 0 || (size_t)n >= sizeof(meta_path)) return HU_ERR_INVALID_ARGUMENT;
+    n = snprintf(vh_path, sizeof(vh_path), "%s/value_head.vh", dir);
+    if (n <= 0 || (size_t)n >= sizeof(vh_path)) return HU_ERR_INVALID_ARGUMENT;
+
+    FILE *f = fopen(meta_path, "r");
+    if (!f) return HU_ERR_IO;
+    char meta_buf[1024];
+    size_t got = fread(meta_buf, 1, sizeof(meta_buf) - 1, f);
+    fclose(f);
+    if (got == 0) return HU_ERR_PARSE;
+    meta_buf[got] = '\0';
+
+    size_t vocab_size = 0, hidden_dim = 0;
+    const char *vf = strstr(meta_buf, "\"vocab_size\"");
+    const char *hf = strstr(meta_buf, "\"hidden_dim\"");
+    const char *bf = strstr(meta_buf, "\"backend\"");
+    if (!vf || !hf || !bf) return HU_ERR_PARSE;
+    /* Strict: backend must be "huml" (this loader only handles HUML). */
+    const char *bq = strchr(bf + 9, '"');
+    if (!bq) return HU_ERR_PARSE;
+    bq++;
+    const char *be = strchr(bq, '"');
+    if (!be || (size_t)(be - bq) != 4 || strncmp(bq, "huml", 4) != 0)
+        return HU_ERR_NOT_SUPPORTED;
+    /* Find the first digit after each field name. */
+    const char *vp = vf + strlen("\"vocab_size\"");
+    while (*vp && (*vp < '0' || *vp > '9')) vp++;
+    if (!*vp) return HU_ERR_PARSE;
+    vocab_size = (size_t)strtoul(vp, NULL, 10);
+    const char *hp = hf + strlen("\"hidden_dim\"");
+    while (*hp && (*hp < '0' || *hp > '9')) hp++;
+    if (!*hp) return HU_ERR_PARSE;
+    hidden_dim = (size_t)strtoul(hp, NULL, 10);
+    if (vocab_size == 0 || hidden_dim == 0 || vocab_size != hidden_dim)
+        return HU_ERR_PARSE;
+
+    hu_reward_model_config_t cfg = {
+        .backend = HU_REWARD_MODEL_BACKEND_HUML,
+        .vocab_size = vocab_size,
+        .hidden_dim = hidden_dim,
+    };
+    hu_reward_model_t tmp = {0};
+    hu_error_t err = hu_reward_model_create_huml(alloc, &cfg, &tmp);
+    if (err != HU_OK) return err;
+
+    huml_rm_ctx_t *c = hu_reward_model_huml_ctx_or_null(&tmp);
+    if (!c) {
+        tmp.vtable->deinit(tmp.ctx, alloc);
+        return HU_ERR_PROVIDER_RESPONSE; /* defensive — create_huml just made one */
+    }
+
+    /* Swap in the loaded value head; free the xavier-init one. */
+    hu_value_head_t loaded_vh = {0};
+    err = hu_value_head_load(alloc, vh_path, &loaded_vh);
+    if (err != HU_OK) {
+        tmp.vtable->deinit(tmp.ctx, alloc);
+        return err;
+    }
+    if (loaded_vh.hidden_dim != hidden_dim) {
+        hu_value_head_deinit(&loaded_vh, alloc);
+        tmp.vtable->deinit(tmp.ctx, alloc);
+        return HU_ERR_PARSE;
+    }
+    hu_value_head_deinit(&c->value_head, alloc);
+    c->value_head = loaded_vh;
+
+    *out = tmp;
+    return HU_OK;
 }

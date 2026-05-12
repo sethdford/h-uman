@@ -679,6 +679,47 @@ hu_error_t hu_grpo_huml_create(hu_allocator_t *alloc,
 }
 
 /* ──────────────────────────────────────────────────────────────────────
+ *  Phase 4 Task 10: reward-source swap on a constructed trainer.
+ *
+ *  The factory above always installs a synthetic reward source. The CLI
+ *  (`human ml grpo-train --reward-fn rm --reward-model <dir>`) loads a
+ *  Phase 3 RM checkpoint, wraps it in hu_reward_source_create_rm, and
+ *  calls this setter to replace the default synthetic source. The
+ *  trainer's deinit will clean up the new source via the same vtable
+ *  contract (hu_reward_source_vtable_t.deinit). The borrowed
+ *  hu_reward_model_t pointer inside the RM-backed source is the CLI's
+ *  responsibility — that's documented in include/human/ml/grpo.h.
+ *
+ *  Vtable identity is the trainer-kind discriminator: only the HUML
+ *  backend (this file) has an in-process reward source. The MLX
+ *  subprocess samples + scores entirely in Python (see grpo_mlx.c), so
+ *  the setter cleanly returns HU_ERR_NOT_SUPPORTED there.
+ * ────────────────────────────────────────────────────────────────────── */
+
+hu_error_t hu_grpo_set_reward_source(hu_rl_trainer_t *trainer,
+                                      hu_reward_source_t source) {
+    if (!trainer || !trainer->ctx || !trainer->vtable || !source.vtable)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (trainer->vtable != &grpo_huml_vtable) {
+        /* MLX backend, or some future GRPO impl. No in-process reward
+         * source to swap; surface a clean "not supported" so the CLI
+         * can report it without segfaulting on a misdirected setter. */
+        return HU_ERR_NOT_SUPPORTED;
+    }
+    grpo_huml_ctx_t *c = (grpo_huml_ctx_t *)trainer->ctx;
+    if (!c->initialized) return HU_ERR_INVALID_ARGUMENT;
+
+    /* Tear down the previously owned source (synthetic by default).
+     * After deinit the vtable+ctx are NULLed so the value-copy below
+     * is safe even if the caller passes the same struct twice. */
+    if (c->reward.vtable && c->reward.vtable->deinit) {
+        c->reward.vtable->deinit(&c->reward);
+    }
+    c->reward = source;
+    return HU_OK;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
  *  HU_IS_TEST seams.
  * ────────────────────────────────────────────────────────────────────── */
 

@@ -23,6 +23,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/ml/reward_source.h"
 #include "human/ml/rl_trainer.h"
 
 #ifdef __cplusplus
@@ -36,6 +37,28 @@ hu_error_t hu_grpo_huml_create(hu_allocator_t *alloc,
 hu_error_t hu_grpo_mlx_create(hu_allocator_t *alloc,
                                const hu_rl_trainer_config_t *config,
                                hu_rl_trainer_t *out);
+
+/* Phase 4 Task 10: swap the reward source on a GRPO trainer.
+ *
+ * The HUML backend constructs a synthetic reward source by default at
+ * factory time (see hu_grpo_huml_create); this setter lets the CLI
+ * replace it with an RM-backed (Phase 3) or judge-backed (Phase 5)
+ * source AFTER construction but BEFORE the first step() call. The
+ * trainer takes ownership of `source` by value-copy: the previously
+ * owned reward source is deinitialized before the swap. The trainer
+ * does NOT take ownership of any pointers `source` borrows (e.g. the
+ * hu_reward_model_t *rm in an RM-backed source) — those must outlive
+ * the trainer.
+ *
+ * Returns:
+ *   HU_OK                — swap completed on a HUML GRPO trainer.
+ *   HU_ERR_INVALID_ARGUMENT — NULL trainer / NULL trainer->ctx /
+ *                             source.vtable NULL.
+ *   HU_ERR_NOT_SUPPORTED — trainer is not the HUML GRPO backend (MLX
+ *                          subprocess samples + scores in Python; the
+ *                          C side has no reward source to swap). */
+hu_error_t hu_grpo_set_reward_source(hu_rl_trainer_t *trainer,
+                                      hu_reward_source_t source);
 
 #ifdef __cplusplus
 }

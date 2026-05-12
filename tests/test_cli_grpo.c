@@ -1,4 +1,4 @@
-/* tests/test_cli_grpo.c — Phase 4 Task 9 (RL SOTA)
+/* tests/test_cli_grpo.c — Phase 4 Tasks 9 + 10 (RL SOTA)
  *
  * Pins the surface contract for `human ml grpo-train` (hu_ml_cli_grpo_train).
  *
@@ -25,11 +25,21 @@
  *        end-to-end (the trainer-side test_grpo_huml.c suite pins the
  *        ref_forward_count==0 contract; this CLI smoke confirms the
  *        flag flows through correctly).
+ *   8. test_cli_grpo_rm_backed_reward_loads_phase3_checkpoint   (Task 10)
+ *      — Umbrella §10 R9 reward-hacking guard at the integration
+ *        level: --reward-fn rm --reward-model <fixture> loads a Phase
+ *        3 RM checkpoint via hu_reward_model_load, wraps it in
+ *        hu_reward_source_create_rm, swaps it onto the trainer via
+ *        hu_grpo_set_reward_source, and runs to HU_OK.
+ *   9. test_cli_grpo_rm_path_errors_clearly_on_missing_checkpoint (Task 10)
+ *      — The --reward-fn rm path produces a clean error code (not a
+ *        segfault, not a silent fallback to synthetic) when the
+ *        checkpoint directory does not exist.
  *
- * Out of scope for Task 9 (deferred to Task 10):
- *   - `--reward-fn rm` happy path (needs hu_reward_model_load + a
- *     swap-into-trainer setter; Task 10 lands both).
+ * Out of scope (deferred):
  *   - `--reward-fn judge` (Phase 5 territory).
+ *   - MLX-backend RM path (mlx subprocess scores in Python; setter
+ *     surfaces HU_ERR_NOT_SUPPORTED on that path).
  */
 
 #include "test_framework.h"
@@ -166,6 +176,59 @@ static void test_cli_grpo_train_kl_beta_zero_disables_kl_penalty(void) {
     unlink_quiet(adapter_path);
 }
 
+/* ─── Phase 4 Task 10 additions ────────────────────────────────────── */
+
+static void test_cli_grpo_rm_backed_reward_loads_phase3_checkpoint(void) {
+    /* The --reward-fn rm path must load the Phase 3 RM checkpoint
+     * fixture (tests/fixtures/rm_synthetic_checkpoint/, built by
+     * scripts/build-rm-fixture.sh), wrap it in a reward_source, swap
+     * it onto the GRPO trainer, and run a small step loop to HU_OK.
+     *
+     * This is the umbrella §10 R9 reward-hacking guard at the
+     * integration level: the user explicitly named the RM as the
+     * reward signal, and the CLI must actually wire it through —
+     * silently falling back to synthetic would defeat the guard.
+     *
+     * --adapter-out points at /tmp/... so the test doesn't write a
+     * stray ./grpo-adapters into the workspace root (matches the
+     * hygiene pattern of tests 6 and 7 above). */
+    const char *adapter_path = "/tmp/hu_test_cli_grpo_rm_adapter.bin";
+    unlink_quiet(adapter_path);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {
+        "--pairs",        "tests/fixtures/synthetic_grpo_prompts.jsonl",
+        "--reward-fn",    "rm",
+        "--reward-model", "tests/fixtures/rm_synthetic_checkpoint",
+        "--rollouts",     "4",
+        "--iters",        "3",
+        "--backend",      "huml",
+        "--adapter-out",  adapter_path,
+    };
+    hu_error_t err = hu_ml_cli_grpo_train(&alloc, 14, argv);
+    HU_ASSERT_EQ(err, HU_OK);
+    unlink_quiet(adapter_path);
+}
+
+static void test_cli_grpo_rm_path_errors_clearly_on_missing_checkpoint(void) {
+    /* When --reward-model points at a nonexistent directory the CLI
+     * must error cleanly (HU_ERR_IO from missing rm_meta.json, or
+     * HU_ERR_PARSE / HU_ERR_INVALID_ARGUMENT on a corrupted file). It
+     * must NOT segfault, must NOT silently swallow the error and
+     * proceed against the trainer's default synthetic reward source.
+     * Any non-HU_OK code satisfies the guard. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {
+        "--pairs",        "tests/fixtures/synthetic_grpo_prompts.jsonl",
+        "--reward-fn",    "rm",
+        "--reward-model", "/nonexistent/path/that/does/not/exist",
+        "--rollouts",     "4",
+        "--backend",      "huml",
+    };
+    hu_error_t err = hu_ml_cli_grpo_train(&alloc, 10, argv);
+    HU_ASSERT_NEQ(err, HU_OK);
+}
+
 void run_cli_grpo_tests(void) {
     HU_TEST_SUITE("cli_grpo");
     HU_RUN_TEST(test_cli_grpo_train_rejects_no_args);
@@ -175,4 +238,6 @@ void run_cli_grpo_tests(void) {
     HU_RUN_TEST(test_cli_grpo_train_rejects_backend_mlx_without_backbone);
     HU_RUN_TEST(test_cli_grpo_train_synthetic_reward_smoke_huml_completes_and_writes_adapter);
     HU_RUN_TEST(test_cli_grpo_train_kl_beta_zero_disables_kl_penalty);
+    HU_RUN_TEST(test_cli_grpo_rm_backed_reward_loads_phase3_checkpoint);
+    HU_RUN_TEST(test_cli_grpo_rm_path_errors_clearly_on_missing_checkpoint);
 }

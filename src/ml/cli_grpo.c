@@ -25,6 +25,7 @@
  * other ml subcommand is routed today.
  */
 #include "human/ml/cli_grpo.h"
+#include "human/ml/grpo.h"          /* Task 10: hu_grpo_set_reward_source */
 #include "human/ml/rl_trainer.h"
 #include "human/ml/dpo.h"
 #include "human/ml/reward_model.h"
@@ -237,68 +238,93 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         .odds_clip     = 10.0,
     };
 
-    hu_rl_trainer_t trainer = {0};
-    hu_error_t err = hu_rl_trainer_create_grpo(alloc, &cfg, &trainer);
-    if (err != HU_OK) {
-        fprintf(stderr, "[grpo-train] failed to create GRPO trainer: error %d\n", (int)err);
-        return err;
-    }
-
-    /* ---------------- Reward source resolution ---------------------- *
-     *
-     * The HUML backend auto-creates a synthetic reward source inside
-     * hu_grpo_huml_create (see src/ml/grpo.c). For --reward-fn synthetic
-     * that's exactly what we want — no swap needed.
-     *
-     * For --reward-fn rm we MUST be able to plumb a Phase 3 reward
-     * model in. Task 10 (the Phase 4 follow-up that lands the RM
-     * checkpoint fixture and the reward-source swap on the trainer)
-     * fills this in; for Task 9 we keep the error path explicit so the
-     * user sees a clear "not yet" rather than silently training against
-     * the wrong reward signal.
-     *
-     * --reward-fn judge is always not-supported in Phase 4 (Phase 5
-     * lands the real multi-judge consensus impl per umbrella §10 R3). */
+    /* --reward-fn judge is always not-supported in Phase 4 (Phase 5
+     * lands the real multi-judge consensus impl per umbrella §10 R3).
+     * Surfaced BEFORE trainer construction so the failure path doesn't
+     * leak a half-built trainer. */
     if (strcmp(reward_fn_arg, "judge") == 0) {
         fprintf(stderr,
                 "[grpo-train] --reward-fn judge is not implemented in Phase 4 — "
                 "Phase 5 lands the real multi-judge consensus reward source per "
                 "umbrella §10 R3.\n");
-        trainer.vtable->deinit(trainer.ctx, alloc);
         return HU_ERR_NOT_SUPPORTED;
     }
+
+    /* ---------------- Reward-model load (Task 10) ------------------- *
+     *
+     * For --reward-fn rm we load the Phase 3 RM checkpoint BEFORE
+     * constructing the trainer so a missing/corrupt fixture doesn't
+     * leak a half-built trainer on the failure path. The RM owns its
+     * own backbone + value head; the GRPO trainer will only BORROW the
+     * RM pointer (via hu_reward_source_create_rm). RM lifetime must
+     * outlive trainer.deinit(), so we keep both in scope and tear
+     * down in the reverse order at the end of the function. */
+    hu_reward_model_t rm = {0};
+    int rm_loaded = 0;
     if (strcmp(reward_fn_arg, "rm") == 0) {
-        /* Best-effort surface of the load error so a missing fixture
-         * path or an unsupported backend is reported the same way as
-         * Phase 3 cli_rm. The actual swap-into-trainer wiring lands in
-         * Task 10 alongside the fixture build script
-         * (scripts/build-rm-fixture.sh) and a setter on the GRPO
-         * trainer (hu_grpo_set_reward_model). */
-        hu_reward_model_t rm = {0};
         hu_error_t lerr = hu_reward_model_load(alloc, reward_model_arg, &rm);
         if (lerr != HU_OK) {
             fprintf(stderr,
-                    "[grpo-train] failed to load reward model from \"%s\": error %d "
-                    "(Phase 3 hu_reward_model_load is currently HU_ERR_NOT_SUPPORTED; "
-                    "Phase 4 Task 10 lands the checkpoint format pin + fixture)\n",
+                    "[grpo-train] failed to load reward model from \"%s\": error %d\n"
+                    "[grpo-train] expected layout: <dir>/value_head.vh + <dir>/rm_meta.json\n"
+                    "[grpo-train] regenerate via scripts/build-rm-fixture.sh\n",
                     reward_model_arg, (int)lerr);
-            trainer.vtable->deinit(trainer.ctx, alloc);
             return lerr;
         }
-        /* Defensive: if a future hu_reward_model_load impl returns OK
-         * but the trainer doesn't yet expose a swap setter, free the
-         * RM cleanly and surface NOT_SUPPORTED rather than silently
-         * training against the trainer's default synthetic source. */
-        if (rm.vtable && rm.vtable->deinit) rm.vtable->deinit(rm.ctx, alloc);
-        fprintf(stderr,
-                "[grpo-train] --reward-fn rm is partial in Phase 4 Task 9 — "
-                "the reward-source swap on the trainer lands in Task 10 "
-                "(scripts/build-rm-fixture.sh + hu_grpo_set_reward_model).\n");
-        trainer.vtable->deinit(trainer.ctx, alloc);
-        return HU_ERR_NOT_SUPPORTED;
+        rm_loaded = 1;
     }
-    /* synthetic path: the trainer-owned default reward source is exactly
-     * what we want; no swap needed. */
+
+    hu_rl_trainer_t trainer = {0};
+    hu_error_t err = hu_rl_trainer_create_grpo(alloc, &cfg, &trainer);
+    if (err != HU_OK) {
+        fprintf(stderr, "[grpo-train] failed to create GRPO trainer: error %d\n", (int)err);
+        if (rm_loaded) rm.vtable->deinit(rm.ctx, alloc);
+        return err;
+    }
+
+    /* ---------------- Reward source swap (Task 10) ------------------ *
+     *
+     * The HUML backend auto-installs a synthetic reward source inside
+     * hu_grpo_huml_create. For --reward-fn rm we wrap the loaded RM in
+     * a Phase 4 Task 4 hu_reward_source_t and swap it onto the trainer
+     * via hu_grpo_set_reward_source. The trainer takes ownership of
+     * the new source (by value-copy) and deinits the synthetic one.
+     * The RM pointer inside the source is BORROWED — we (the CLI) keep
+     * ownership of `rm` until the final cleanup below.
+     *
+     * For --reward-fn synthetic the default source is already what we
+     * want; no swap needed. */
+    if (strcmp(reward_fn_arg, "rm") == 0) {
+        hu_reward_source_t rm_source = {0};
+        err = hu_reward_source_create_rm(alloc, &rm, &rm_source);
+        if (err != HU_OK) {
+            fprintf(stderr,
+                    "[grpo-train] failed to wrap reward model in reward source: error %d\n",
+                    (int)err);
+            trainer.vtable->deinit(trainer.ctx, alloc);
+            rm.vtable->deinit(rm.ctx, alloc);
+            return err;
+        }
+        err = hu_grpo_set_reward_source(&trainer, rm_source);
+        if (err != HU_OK) {
+            /* Setter rejected the swap (e.g. MLX backend) — drop the
+             * source ourselves since the trainer never took ownership.
+             * The CLI's earlier --backend mlx + --reward-fn rm path is
+             * legal in Phase 4 (MLX subprocess can be wired to use a
+             * remote RM in Phase 5); the in-process setter just isn't
+             * the integration point for it. */
+            fprintf(stderr,
+                    "[grpo-train] cannot swap reward source on this trainer: error %d "
+                    "(MLX backend scores in Python; --reward-fn rm wiring is HUML-only)\n",
+                    (int)err);
+            if (rm_source.vtable && rm_source.vtable->deinit) {
+                rm_source.vtable->deinit(&rm_source);
+            }
+            trainer.vtable->deinit(trainer.ctx, alloc);
+            rm.vtable->deinit(rm.ctx, alloc);
+            return err;
+        }
+    }
 
     /* ---------------- JSONL prompt ingest --------------------------- *
      *
@@ -315,6 +341,7 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         if (!f) {
             fprintf(stderr, "[grpo-train] cannot open %s\n", pairs_path);
             trainer.vtable->deinit(trainer.ctx, alloc);
+            if (rm_loaded) rm.vtable->deinit(rm.ctx, alloc);
             return HU_ERR_IO;
         }
         char line[8192];
@@ -342,6 +369,7 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         fprintf(stderr, "[grpo-train] no valid prompts found in %s\n",
                 pairs_path ? pairs_path : "(--pairs missing)");
         trainer.vtable->deinit(trainer.ctx, alloc);
+        if (rm_loaded) rm.vtable->deinit(rm.ctx, alloc);
         return HU_ERR_INVALID_ARGUMENT;
     }
 
@@ -378,6 +406,12 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         }
     }
 
+    /* Tear down in reverse construction order. The trainer's deinit
+     * calls into the reward source's deinit (which frees its rm_ctx_t
+     * scratch but does NOT touch the borrowed RM, per the Task 4
+     * contract). After the trainer is gone the RM can be safely
+     * deinitialized. */
     trainer.vtable->deinit(trainer.ctx, alloc);
+    if (rm_loaded) rm.vtable->deinit(rm.ctx, alloc);
     return err;
 }
