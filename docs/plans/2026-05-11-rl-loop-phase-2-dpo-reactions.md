@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the current `hu_dpo_judge_step` (provider-scored sigmoid loss, no policy gradients) with a real, two-track DPO training pipeline: (1) HUML in-process — real DPO loss with frozen π_ref + finite-difference grad checks on the toy reference GPT (cross-platform, scientifically rigorous), and (2) MLX subprocess — `python3 -m mlx_lm.dpo` bridge that produces `.safetensors` adapters that llama.cpp hot-loads (Apple-only, real chat fidelity improvement). Wire iMessage tapbacks + Slack `reactions.added/removed` through a channel-agnostic reaction-event normalizer into the existing `dpo_pairs` SQLite table. End the phase with a `human ml dpo-train` that auto-selects backend, satisfies DoD #4 (real `.safetensors` adapter), and an `aspect-panel` 5-verifier subagent gate (mandatory per spec §7 for P2/P4/P5).
+**Goal:** Replace the current `hu_dpo_judge_step` (provider-scored sigmoid loss, no policy gradients) with a real, two-track DPO training pipeline: (1) HUML in-process — real DPO loss with frozen π_ref + finite-difference grad checks on the toy reference GPT (cross-platform, scientifically rigorous), and (2) MLX subprocess — a NEW `scripts/dpo_mlx_train.py` wrapper that calls the third-party `mlx-lm-lora` package's `train_dpo` programmatically and produces `.safetensors` adapters that llama.cpp hot-loads (Apple-only, real chat fidelity improvement; v1 of this plan incorrectly assumed `python3 -m mlx_lm.dpo` — that module DOES NOT EXIST in standard `mlx-lm`). Wire iMessage tapbacks + Slack `reactions.added/removed` through a channel-agnostic reaction-event normalizer into the existing `dpo_pairs` SQLite table. End the phase with a `human ml dpo-train` that auto-selects backend, satisfies DoD #4 (real `.safetensors` adapter), and an `aspect-panel` 5-verifier subagent gate (mandatory per spec §7 for P2/P4/P5).
 
 **Architecture:** Two-track DPO via a new `hu_rl_trainer_t` vtable in `include/human/ml/rl_trainer.h`. The factory dispatches to `hu_rl_trainer_create_dpo_huml` (in-process, builds on `hu_gpt_t` + new `policy_logprobs.c` + `reference_model.c` + `dpo_real_huml.c`) or `hu_rl_trainer_create_dpo_mlx` (extends `learner_mlx.c`'s subprocess pattern by `popen`-ing a NEW `scripts/dpo_mlx_train.py` wrapper that programmatically invokes `mlx_lm_lora.trainer.dpo_trainer.train_dpo` from the third-party `mlx-lm-lora` package — DPO is NOT in standard `mlx-lm` — consuming `dpo_pairs` exported as JSONL and writing `.safetensors`). CLI `human ml dpo-train` defaults to MLX on `__APPLE__` when `python3 -c "from mlx_lm_lora.trainer.dpo_trainer import train_dpo"` succeeds, falls back to HUML otherwise (`--backend {huml,mlx,auto}` overrides). Reaction wiring is a new `hu_reaction_event_t` type (`include/human/channels/reaction_event.h`) emitted by `imessage.c` (tapback poll branch) and `slack.c` (webhook reactions branch), normalized by `reaction_event.c`, and consumed by `reaction_handler.c` which inserts into `dpo_pairs` with `source = "imessage_tapback" | "slack_reactji"`. The text-channel substring heuristic in `agent_turn.c:6038-6044` is preserved unchanged (spec §4.3 explicit).
 
@@ -113,22 +113,22 @@ CLI `human ml dpo-train --backend {auto|huml|mlx}`. Default `auto`.
 |---|------|------------|
 | **R1** | **`mlx-lm-lora` API drift** — DPO trainer lives in third-party `mlx-lm-lora` (NOT standard `mlx-lm`). Newer versions may rename `train_dpo` or change `DPOTrainingArgs` shape. | `learner_mlx.c:43` already probes `python3 -c "import mlx_lm"`. Task 6 adds a separate probe `python3 -c "from mlx_lm_lora.trainer.dpo_trainer import train_dpo, DPOTrainingArgs"` AND a wrapper-script-level try/except that prints a helpful message including `pip install mlx-lm-lora` when the import fails. CMake option `HU_HAVE_MLX_LM` gates the integration tests; the `dpo_real_mlx` C-side stays compilable without the package. |
 | **R2** | **Toy GPT (10K vocab) DPO is meaningless for real chat** — user might assume HUML adapters improve Gemma chat. | The `human ml dpo-train --backend huml` help text (Task 9) states explicitly: "HUML backend trains the toy reference GPT — useful for gradient verification, NOT for improving real chat. Use --backend mlx (or auto on Apple) for real Gemma adapters." The CLI also writes a caveat into the adapter metadata. |
-| **R3** | **Synthetic preference pairs are not realistic** — DoD #4 needs N≥50 pairs but tests can't depend on user data. | Task 5 ships TWO fixture files because the HUML and MLX backends consume different formats: (1) `tests/fixtures/synthetic_preference_pairs.jsonl` — 50 hand-constructed (prompt, chosen, rejected) NATURAL LANGUAGE tuples for the MLX path (covers helpful-vs-evasive, concise-vs-verbose, factual-vs-fabricated, persona-aligned-vs-generic); (2) `tests/fixtures/synthetic_preference_pairs_huml.jsonl` — same 50 logical pairs but rendered as SPACE-SEPARATED INTEGER TOKEN IDS in the toy GPT vocab (V=32, IDs 0-31, generated by `scripts/gen-synthetic-prefs.py --backend huml`). The HUML backend's `parse_id_string` only accepts integers, so feeding it the natural-language fixture would silently produce empty token arrays. JSON schema documented in `tests/fixtures/synthetic_preference_pairs.schema.json`. |
+| **R3** | **Synthetic preference pairs are not realistic** — DoD #4 needs N≥50 pairs but tests can't depend on user data. | Task 5 ships TWO fixture files because the HUML and MLX backends consume different formats: (1) `tests/fixtures/synthetic_preference_pairs.jsonl` — 50 hand-constructed (prompt, chosen, rejected) NATURAL LANGUAGE tuples for the MLX path (covers helpful-vs-evasive, concise-vs-verbose, factual-vs-fabricated, persona-aligned-vs-generic, honest-uncertainty-vs-confident-hallucination); (2) `tests/fixtures/synthetic_preference_pairs_huml.jsonl` — same 50 logical pairs but rendered as SPACE-SEPARATED INTEGER TOKEN IDS in the toy GPT vocab (V=32, IDs 0-31, generated by `scripts/gen-synthetic-prefs.py --backend huml`). The HUML backend's `parse_id_string` only accepts integers, so feeding it the natural-language fixture would silently produce empty token arrays. The schema is self-documenting via the gen script's source — no separate `.schema.json` file (YAGNI; v1 had one in the plan but no task that built it). |
 | **R4** | **Reaction handler races** — tapback arrives before original assistant message is in `dpo_pairs` lookup window. | Task 12's `hu_reaction_handler_handle_event` looks up the original message via channel-specific (`thread_id`, `message_ts`) tuple, NOT in-memory ID. iMessage uses `associated_message_guid` from chat.db; Slack uses `item.ts`. Both are durable. If lookup fails (race or out-of-window), the event is logged and silently dropped (NOT inserted as a stub) — better to lose a signal than to insert garbage. Test: `tests/test_reaction_handler_e2e.c::test_reaction_event_with_unknown_target_drops_silently`. |
 | **R5** | **iMessage poll gap** — current poll filters `WHERE associated_message_type = 0` (`imessage.c:3765`), which excludes tapbacks entirely. Flipping the filter risks treating tapbacks as text messages. | Task 11 adds a SECOND poll function `hu_imessage_poll_reactions` that runs in parallel to the main poll, queries `WHERE (associated_message_type BETWEEN 2000 AND 2006 OR associated_message_type BETWEEN 3000 AND 3006) AND associated_message_guid IS NOT NULL` (codes match `imessage.c:1820-1832` switch + line 1783 SQL range: 2000=love, 2001=like, 2002=dislike, 2003=laugh, 2004=emphasis, 2005=question, 2006=custom_emoji; 3xxx are removals), joins to the original message, and emits `hu_reaction_event_t` directly via the new `reaction_handler` API. Main poll stays unchanged — text inbound is unaffected. |
 | **R6** | **Slack webhook security** — naive parsing of `reactions.*` events could let a bot spoof reactions on the user's behalf. | Task 11 validates `event.user != bot_user_id` (skip self-reactions) AND `event.item.type == "message"` (skip file/file_comment reactions). Existing `slack.c` HMAC verification on the outer webhook (search `slack.c` for `X-Slack-Signature`) is unchanged — Phase 2 inherits it. |
 | **R7** | **`dpo-train` semantic collision** — current `human ml dpo-train` calls `hu_dpo_judge_step`. Renaming breaks downstream scripts. | Task 8 keeps `human ml dpo-train` BUT changes its dispatch: by default it calls `hu_ml_cli_dpo_real` (the new real DPO). The existing judge-step path moves to `human ml dpo-judge`. CHANGELOG entry in Task 9 commit message. Backward-compat: the deprecated `hu_dpo_train_step` C shim stays, and `human ml dpo-train --legacy-judge` is a temporary alias for one phase (removed in Phase 3). |
-| **R8** | **`.safetensors` writer is Python-side** — DoD #4 requires `human ml dpo-train` to produce a valid `.safetensors`. C-side has no writer. | Task 7's MLX backend invokes `mlx_lm.dpo --adapter-path <dir>`; mlx_lm writes `<dir>/adapters.safetensors` directly. The C side never serializes — it just resolves the output path and verifies the file exists with `>0` bytes. Validation test loads the file via `llama_adapter_lora_init` (real test, not mock). |
+| **R8** | **`.safetensors` writer is Python-side** — DoD #4 requires `human ml dpo-train` to produce a valid `.safetensors`. C-side has no writer. | Task 7's MLX backend `popen`s `scripts/dpo_mlx_train.py`, which calls `mlx_lm_lora.trainer.dpo_trainer.train_dpo(...)`; that writes `<adapter_dir>/adapters.safetensors` directly to disk. The C side never serializes — it just resolves the output path and verifies the file exists with `>0` bytes. Validation test loads the file via `llama_adapter_lora_init` (real test, not mock). |
 | **R9** | **Factory test contamination** — `hu_provider_create_from_entry` (Phase 1, Task 4) now has test hooks. Phase 2's `hu_rl_trainer_create_dpo` factory needs the same pattern to be testable without spawning real subprocesses. | Task 1 defines `hu_rl_trainer_factory_capture_for_test` (gated by `HU_IS_TEST`) using deep-copy semantics — same pattern as `hu_llamacpp_factory_capture_for_test` (`include/human/providers/factory.h`, Phase 1). |
 | **R10** | **Aspect-panel disagreement** — spec §7 mandates `aspect-panel` (5 verifiers) for P2 with disagreement <40% required to ship. The panel may flag DPO loss formula correctness, π_ref freezing semantics, or reaction race conditions. | The plan front-loads the loss formula (Task 4 step 1 has the exact LaTeX → C transcription as a comment in `dpo_real_huml.c`), the freezing test (Task 3), and the race test (R4 above). Aspect-panel runs at Task 15 end-gate, after dead-code-finder. If panel disagreement ≥ 40%, Phase 2 does NOT close — fix and re-run. |
-| **R11** | **MLX subprocess nondeterminism** — `mlx_lm.dpo` may not honor `--seed`. CI test would flake. | Task 7's MLX validation test asserts `safetensors file exists with >0 bytes` AND `loading via llama.cpp produces output that DIFFERS from baseline`, NOT exact tokens. This is the same pattern Phase 1's `test_llamacpp_lora_hotswap.c` uses. Determinism is a Phase 5 eval-gate concern, not a Phase 2 unit-test concern. |
+| **R11** | **MLX subprocess nondeterminism** — `mlx_lm_lora.trainer.dpo_trainer.train_dpo` may not honor a seed argument; even if it does, MLX kernel scheduling can introduce float-order nondeterminism. CI test would flake. | Task 7's MLX validation test asserts `safetensors file exists with >0 bytes` AND `loading via llama.cpp produces output that DIFFERS from baseline`, NOT exact tokens. This is the same pattern Phase 1's `test_llamacpp_lora_hotswap.c` uses. Determinism is a Phase 5 eval-gate concern, not a Phase 2 unit-test concern. |
 | **R12** | **Channel API expansion pressure** — the natural impulse is to add `on_reaction` to `hu_channel_vtable_t`. This touches every channel (~31 channels). | Phase 2 does NOT extend `hu_channel_vtable_t`. Reaction events are emitted DIRECTLY by iMessage poll and Slack webhook into `hu_reaction_handler_handle_event`, bypassing the channel vtable entirely. This is consistent with how feed events bypass the channel vtable today (`src/feeds/processor.c`). Future channels that want reactions add their own emit call; channels that don't, don't. |
 
 ---
 
 ## File structure
 
-### New files (20):
+### New files (19):
 
 | Path | LOC | Responsibility |
 |------|-----|----------------|
@@ -151,7 +151,6 @@ CLI `human ml dpo-train --backend {auto|huml|mlx}`. Default `auto`.
 | `src/agent/reaction_handler.c` | ~220 | Event → look up original message via (thread_id, message_ts) → derive (prompt, chosen, rejected) → call `hu_dpo_record_pair` with `source = "imessage_tapback"` etc. |
 | `tests/fixtures/synthetic_preference_pairs.jsonl` | 50 lines | 50 hand-curated NATURAL LANGUAGE (prompt, chosen, rejected) tuples for the MLX backend |
 | `tests/fixtures/synthetic_preference_pairs_huml.jsonl` | 50 lines | Same 50 logical pairs rendered as space-separated INTEGER TOKEN IDS for the toy GPT (V=32) — required because HUML's `parse_id_string` only accepts ints |
-| `tests/fixtures/synthetic_preference_pairs.schema.json` | ~30 | JSON Schema documenting both fixture formats |
 
 ### New test files (8):
 
@@ -1045,9 +1044,15 @@ typedef struct {
 
 /* Tokenize a space-separated int-id string into int32_t array. The HUML
  * trainer is toy-grade; real tokenization comes via MLX path or a future
- * BPE bridge. */
+ * BPE bridge.
+ *
+ * NOTE on allocator contract: hu_allocator_t.free is a 3-arg function
+ * (ctx, ptr, size — see include/human/core/allocator.h:11). Callers MUST
+ * pass the EXACT allocated size for the tracking allocator to balance
+ * its leak ledger. We therefore return the final `cap` via *out_cap so
+ * callers can free with `cap * sizeof(int32_t)`. */
 static hu_error_t parse_id_string(hu_allocator_t *alloc, const char *s,
-                                  int32_t **out, size_t *out_n) {
+                                  int32_t **out, size_t *out_n, size_t *out_cap) {
     if (!s) return HU_ERR_INVALID_ARGUMENT;
     size_t cap = 16, n = 0;
     int32_t *buf = (int32_t *)alloc->alloc(alloc->ctx, cap * sizeof(int32_t));
@@ -1058,11 +1063,15 @@ static hu_error_t parse_id_string(hu_allocator_t *alloc, const char *s,
         long v = strtol(p, &endp, 10);
         if (endp == p) break;
         if (n == cap) {
+            size_t old_cap = cap;
             cap *= 2;
             int32_t *nb = (int32_t *)alloc->alloc(alloc->ctx, cap * sizeof(int32_t));
-            if (!nb) { alloc->free(alloc->ctx, buf); return HU_ERR_OUT_OF_MEMORY; }
+            if (!nb) {
+                alloc->free(alloc->ctx, buf, old_cap * sizeof(int32_t));
+                return HU_ERR_OUT_OF_MEMORY;
+            }
             memcpy(nb, buf, n * sizeof(int32_t));
-            alloc->free(alloc->ctx, buf);
+            alloc->free(alloc->ctx, buf, old_cap * sizeof(int32_t));
             buf = nb;
         }
         buf[n++] = (int32_t)v;
@@ -1070,6 +1079,7 @@ static hu_error_t parse_id_string(hu_allocator_t *alloc, const char *s,
         while (*p == ' ' || *p == '\t') p++;
     }
     *out = buf; *out_n = n;
+    if (out_cap) *out_cap = cap;
     return HU_OK;
 }
 
@@ -1084,12 +1094,15 @@ static hu_error_t dpo_huml_step(void *vctx, hu_allocator_t *alloc,
     for (size_t i = 0; i < n_pairs; i++) {
         int32_t *prompt = NULL, *chosen = NULL, *rejected = NULL;
         size_t pl = 0, cl = 0, rl = 0;
-        if (parse_id_string(alloc, pairs[i].prompt,   &prompt,   &pl) != HU_OK) continue;
-        if (parse_id_string(alloc, pairs[i].chosen,   &chosen,   &cl) != HU_OK) {
-            alloc->free(alloc->ctx, prompt); continue;
+        size_t pcap = 0, ccap = 0, rcap = 0;  /* tracked caps for size-aware free */
+        if (parse_id_string(alloc, pairs[i].prompt,   &prompt,   &pl, &pcap) != HU_OK) continue;
+        if (parse_id_string(alloc, pairs[i].chosen,   &chosen,   &cl, &ccap) != HU_OK) {
+            alloc->free(alloc->ctx, prompt, pcap * sizeof(int32_t)); continue;
         }
-        if (parse_id_string(alloc, pairs[i].rejected, &rejected, &rl) != HU_OK) {
-            alloc->free(alloc->ctx, prompt); alloc->free(alloc->ctx, chosen); continue;
+        if (parse_id_string(alloc, pairs[i].rejected, &rejected, &rl, &rcap) != HU_OK) {
+            alloc->free(alloc->ctx, prompt, pcap * sizeof(int32_t));
+            alloc->free(alloc->ctx, chosen, ccap * sizeof(int32_t));
+            continue;
         }
         if (pl == 0 || cl == 0 || rl == 0) goto cleanup_pair;
 
@@ -1144,9 +1157,9 @@ static hu_error_t dpo_huml_step(void *vctx, hu_allocator_t *alloc,
         }
 
 cleanup_pair:
-        alloc->free(alloc->ctx, prompt);
-        alloc->free(alloc->ctx, chosen);
-        alloc->free(alloc->ctx, rejected);
+        if (prompt)   alloc->free(alloc->ctx, prompt,   pcap * sizeof(int32_t));
+        if (chosen)   alloc->free(alloc->ctx, chosen,   ccap * sizeof(int32_t));
+        if (rejected) alloc->free(alloc->ctx, rejected, rcap * sizeof(int32_t));
     }
     out->final_loss = total_loss / (double)n_pairs;
     out->iters_completed = 1;
@@ -1172,7 +1185,7 @@ static void dpo_huml_deinit(void *vctx, hu_allocator_t *alloc) {
         c->policy.vtable->deinit(c->policy.ctx, alloc);
         c->reference.vtable->deinit(c->reference.ctx, alloc);
     }
-    alloc->free(alloc->ctx, c);
+    alloc->free(alloc->ctx, c, sizeof(dpo_huml_ctx_t));
 }
 
 static const hu_rl_trainer_vtable_t dpo_huml_vtable = {
@@ -1193,11 +1206,13 @@ hu_error_t hu_dpo_real_huml_create(hu_allocator_t *alloc,
     c->learning_rate = config->learning_rate > 0 ? config->learning_rate : 1e-5;
     c->gpt_cfg = (hu_gpt_config_t){.vocab_size=32,.n_layers=1,.n_heads=1,.d_model=16,.max_seq_len=64};
     if (hu_gpt_create(alloc, &c->gpt_cfg, &c->policy) != HU_OK) {
-        alloc->free(alloc->ctx, c); return HU_ERR_PROVIDER_RESPONSE;
+        alloc->free(alloc->ctx, c, sizeof(dpo_huml_ctx_t));
+        return HU_ERR_PROVIDER_RESPONSE;
     }
     if (hu_reference_model_create_from(alloc, &c->policy, &c->gpt_cfg, &c->reference) != HU_OK) {
         c->policy.vtable->deinit(c->policy.ctx, alloc);
-        alloc->free(alloc->ctx, c); return HU_ERR_PROVIDER_RESPONSE;
+        alloc->free(alloc->ctx, c, sizeof(dpo_huml_ctx_t));
+        return HU_ERR_PROVIDER_RESPONSE;
     }
     c->initialized = 1;
     out->ctx = c;
@@ -1247,9 +1262,11 @@ Two output formats (selected via --backend):
 - huml: space-separated integer token IDs in [0, 31] (consumed by HUML's
         parse_id_string in src/ml/cli.c — only int IDs are accepted)
 
-Deterministic via fixed seed; same input → same output across runs.
+Deterministic across processes: we seed with a SHA-256 of the text, NOT
+Python's built-in hash() (which is randomized per-process by PYTHONHASHSEED).
+Same input → same output regardless of interpreter or PYTHONHASHSEED setting.
 """
-import argparse, json, random, sys
+import argparse, hashlib, json, random, sys
 
 # 50 hand-curated NATURAL LANGUAGE pairs covering 5 DPO categories.
 # Each tuple: (prompt, chosen, rejected). Categories tagged for clarity.
@@ -1314,8 +1331,16 @@ PAIRS = [
 assert len(PAIRS) == 50, f"PAIRS must have exactly 50 entries, got {len(PAIRS)}"
 
 def to_int_ids(text: str, vocab_size: int = 32, max_len: int = 16) -> str:
-    """Hash text into vocab_size token IDs deterministically (toy GPT vocab)."""
-    rng = random.Random(hash(text) & 0xFFFFFFFF)
+    """Hash text into vocab_size token IDs deterministically (toy GPT vocab).
+
+    Use SHA-256, NOT Python's built-in hash() — the latter is randomized
+    per-process unless PYTHONHASHSEED=0 is set, which would make this
+    function emit different fixtures on each `python3 gen-synthetic-prefs.py`
+    invocation, silently breaking the dpo_real_e2e test that depends on
+    fixture stability across CI/local runs.
+    """
+    seed = int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
+    rng = random.Random(seed)
     n = min(max_len, max(2, len(text.split())))
     return " ".join(str(rng.randrange(vocab_size)) for _ in range(n))
 
@@ -1359,24 +1384,28 @@ wc -l tests/fixtures/synthetic_preference_pairs*.jsonl  # MUST be 50 50
 
 static void test_dpo_real_huml_synthetic_50_pair_batch(void) {
     /* Load 50 pairs from fixture and run 100 DPO iterations.
-     * Final mean(chosen_logprob_delta) > Final mean(rejected_logprob_delta). */
+     * Final mean(chosen_logprob_delta) > Final mean(rejected_logprob_delta).
+     *
+     * Cleanup discipline: HU_ASSERT_* may abort the test mid-flow. To keep
+     * ASan clean, allocate ONLY when the prerequisite passes (FILE handle
+     * before pairs[]; trainer after both load successfully) and clean up
+     * in reverse order at function exit. */
     hu_allocator_t alloc = hu_system_allocator();
-    hu_rl_trainer_config_t cfg = {.backend=HU_DPO_BACKEND_HUML,.beta=0.1,.learning_rate=1e-3,.max_iters=100};
-    hu_rl_trainer_t trainer = {0};
-    HU_ASSERT_EQ(hu_rl_trainer_create_dpo(&alloc, &cfg, &trainer), HU_OK);
 
     /* HUML backend requires integer-id format — see Task 5 note on dual fixtures */
     FILE *f = fopen("tests/fixtures/synthetic_preference_pairs_huml.jsonl", "r");
-    HU_ASSERT_NOT_NULL(f);
+    HU_ASSERT_NOT_NULL(f);  /* before any allocations — safe to abort */
+
+    /* Allocate pairs buffer. Cleanup goto from here on. */
+    hu_preference_pair_t *pairs = (hu_preference_pair_t *)alloc.alloc(
+        alloc.ctx, 64 * sizeof(hu_preference_pair_t));
+    if (!pairs) { fclose(f); HU_ASSERT_NOT_NULL(pairs); return; }
+    memset(pairs, 0, 64 * sizeof(hu_preference_pair_t));
     /* Quick parse — full parser hammered out in next iteration.
      * NOTE on field types: hu_preference_pair_t uses fixed-size char arrays
      * (char prompt[2048], char chosen[4096], etc. per dpo.h:15-26). Use
      * strncpy + _len updates, NOT pointer assignment. */
     char line[1024];
-    hu_preference_pair_t *pairs = (hu_preference_pair_t *)alloc.alloc(
-        alloc.ctx, 64 * sizeof(hu_preference_pair_t));
-    HU_ASSERT_NOT_NULL(pairs);
-    memset(pairs, 0, 64 * sizeof(hu_preference_pair_t));
     size_t n = 0;
     while (fgets(line, sizeof(line), f) && n < 64) {
         /* expect: {"prompt": "x", "chosen": "y", "rejected": "z", ...} */
@@ -1394,21 +1423,34 @@ static void test_dpo_real_huml_synthetic_50_pair_batch(void) {
         }
     }
     fclose(f);
-    HU_ASSERT_TRUE(n >= 50);
 
-    double chosen_sum=0, rejected_sum=0;
-    for (int iter=0; iter<100; iter++) {
-        hu_rl_trainer_metrics_t m = {0};
-        trainer.vtable->step(trainer.ctx, &alloc, pairs, n, &m);
-        chosen_sum += m.chosen_logprob_delta;
-        rejected_sum += m.rejected_logprob_delta;
+    /* Defer the n>=50 check until trainer is set up so ALL paths converge
+     * on the same cleanup. Track success via a flag and bail if needed. */
+    int loaded_enough = (n >= 50);
+    hu_rl_trainer_config_t cfg = {.backend=HU_DPO_BACKEND_HUML,.beta=0.1,
+                                  .learning_rate=1e-3,.max_iters=100};
+    hu_rl_trainer_t trainer = {0};
+    hu_error_t terr = hu_rl_trainer_create_dpo(&alloc, &cfg, &trainer);
+
+    double chosen_sum = 0, rejected_sum = 0;
+    if (loaded_enough && terr == HU_OK) {
+        for (int iter=0; iter<100; iter++) {
+            hu_rl_trainer_metrics_t m = {0};
+            trainer.vtable->step(trainer.ctx, &alloc, pairs, n, &m);
+            chosen_sum += m.chosen_logprob_delta;
+            rejected_sum += m.rejected_logprob_delta;
+        }
     }
-    HU_ASSERT_TRUE(chosen_sum > rejected_sum);
 
-    /* No per-field frees — strings are inline char[] arrays. Just free the
-     * pair array itself. */
+    /* Cleanup — runs on every path, including assertion failures below.
+     * No per-field frees — strings are inline char[] arrays. */
+    if (terr == HU_OK) trainer.vtable->deinit(trainer.ctx, &alloc);
     alloc.free(alloc.ctx, pairs, 64 * sizeof(hu_preference_pair_t));
-    trainer.vtable->deinit(trainer.ctx, &alloc);
+
+    /* Assertions AFTER cleanup so an abort here doesn't leak. */
+    HU_ASSERT_TRUE(loaded_enough);
+    HU_ASSERT_EQ(terr, HU_OK);
+    HU_ASSERT_TRUE(chosen_sum > rejected_sum);
 }
 
 void run_dpo_real_e2e_tests(void) {
@@ -1469,7 +1511,7 @@ Expected: `OK`. If it fails, the entire MLX path is unavailable and `dpo_real_ml
 
 #ifndef HU_HAVE_MLX_LM
 static void test_dpo_real_mlx_skipped(void) {
-    fprintf(stderr, "[skip] HU_HAVE_MLX_LM not defined; mlx_lm.dpo subprocess test deferred to local run\n");
+    fprintf(stderr, "[skip] HU_HAVE_MLX_LM not defined; mlx-lm-lora DPO subprocess test deferred to local run\n");
 }
 #else
 static void test_dpo_real_mlx_jsonl_export_then_subprocess(void) {
@@ -1605,10 +1647,41 @@ typedef struct {
     size_t max_iters;
 } dpo_mlx_ctx_t;
 
+/* Minimal JSON string escaper. RFC 8259 requires escaping " \ and U+0000-U+001F.
+ * We escape \" \\ \n \r \t \b \f explicitly and use \uXXXX for the rest of the
+ * control range. Output is appended to dst (writes nothing if dst lacks space). */
+static size_t json_escape(char *dst, size_t cap, const char *src) {
+    size_t w = 0;
+    if (cap == 0) return 0;
+    for (const unsigned char *p = (const unsigned char *)src; *p && w + 7 < cap; p++) {
+        switch (*p) {
+            case '"':  if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='"'; } break;
+            case '\\': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='\\'; } break;
+            case '\n': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='n'; } break;
+            case '\r': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='r'; } break;
+            case '\t': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='t'; } break;
+            case '\b': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='b'; } break;
+            case '\f': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='f'; } break;
+            default:
+                if (*p < 0x20) {
+                    int n = snprintf(dst + w, cap - w, "\\u%04x", *p);
+                    if (n < 0 || (size_t)n >= cap - w) return w;
+                    w += (size_t)n;
+                } else {
+                    dst[w++] = (char)*p;
+                }
+        }
+    }
+    if (w < cap) dst[w] = '\0';
+    return w;
+}
+
 /* Write pairs as JSONL to /tmp/hu_dpo_mlx_<pid>.jsonl. Note: hu_preference_pair_t
- * uses fixed-size char arrays (char prompt[2048], etc) per dpo.h:15-26, so we
- * write field contents directly (no NULL-pointer guard needed, but we do skip
- * empty rows for cleanliness). */
+ * uses fixed-size char arrays (char prompt[2048], etc) per dpo.h:15-26.
+ * We MUST JSON-escape every field — synthetic test fixtures are safe but real
+ * dpo_pairs rows from chat history routinely contain quotes, newlines, and
+ * pasted code blocks that would produce invalid JSONL and cause the Python
+ * wrapper's PreferenceDataset() to throw json.JSONDecodeError. */
 static hu_error_t write_jsonl(const hu_preference_pair_t *pairs, size_t n,
                               char *out_path, size_t out_path_cap) {
     snprintf(out_path, out_path_cap, "/tmp/hu_dpo_mlx_%d.jsonl", getpid());
@@ -1617,8 +1690,12 @@ static hu_error_t write_jsonl(const hu_preference_pair_t *pairs, size_t n,
     for (size_t i = 0; i < n; i++) {
         if (pairs[i].prompt_len == 0) continue;
         if (pairs[i].chosen_len == 0 && pairs[i].rejected_len == 0) continue;
+        char p_esc[8192], c_esc[16384], r_esc[16384];
+        json_escape(p_esc, sizeof(p_esc), pairs[i].prompt);
+        json_escape(c_esc, sizeof(c_esc), pairs[i].chosen);
+        json_escape(r_esc, sizeof(r_esc), pairs[i].rejected);
         fprintf(f, "{\"prompt\": \"%s\", \"chosen\": \"%s\", \"rejected\": \"%s\"}\n",
-                pairs[i].prompt, pairs[i].chosen, pairs[i].rejected);
+                p_esc, c_esc, r_esc);
     }
     fclose(f);
     return HU_OK;
@@ -1686,11 +1763,16 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
 }
 
 static hu_error_t dpo_mlx_save(void *vctx, hu_allocator_t *alloc, const char *path) {
-    /* mlx_lm.dpo writes the adapter directly during step(); save is a copy. */
+    /* The mlx-lm-lora train_dpo subprocess writes the adapter directly
+     * during step(); save is a copy. Use snprintf-bounded shell-quoted
+     * paths to avoid metacharacter issues if adapter_dir contains spaces. */
     if (!vctx || !alloc || !path) return HU_ERR_INVALID_ARGUMENT;
     dpo_mlx_ctx_t *c = (dpo_mlx_ctx_t *)vctx;
+    /* Reject paths containing single quote (would escape our quoting). */
+    if (strchr(c->adapter_dir, '\'') || strchr(path, '\'')) return HU_ERR_INVALID_ARGUMENT;
     char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "cp -r %s %s", c->adapter_dir, path);
+    int n = snprintf(cmd, sizeof(cmd), "cp -r '%s' '%s'", c->adapter_dir, path);
+    if (n < 0 || (size_t)n >= sizeof(cmd)) return HU_ERR_INVALID_ARGUMENT;
     return system(cmd) == 0 ? HU_OK : HU_ERR_IO;
 }
 
@@ -1698,7 +1780,7 @@ static const char *dpo_mlx_name(void *vctx) { (void)vctx; return "dpo_mlx"; }
 
 static void dpo_mlx_deinit(void *vctx, hu_allocator_t *alloc) {
     if (!vctx) return;
-    alloc->free(alloc->ctx, vctx);
+    alloc->free(alloc->ctx, vctx, sizeof(dpo_mlx_ctx_t));
 }
 
 static const hu_rl_trainer_vtable_t dpo_mlx_vtable = {
@@ -2102,6 +2184,9 @@ Expected: PASS
 - [ ] **Step 4: Commit**
 
 ```bash
+# tests/test_cli_dpo.c was created in Task 8 (and should already be in HU_TEST_SOURCES);
+# Task 9 adds new test cases inside it. CMake/test_main.c are unchanged unless Task 8
+# left them stale.
 git add src/ml/cli_dpo.c tests/test_cli_dpo.c
 git commit -m "feat(ml,cli): wire JSONL pair loading + iteration loop into dpo-train (Phase 2 Task 9)"
 ```
@@ -2130,10 +2215,13 @@ static void test_reaction_event_imessage_tapback_2000_is_love(void) {
     HU_ASSERT_EQ(kind, HU_REACTION_LOVE);
     HU_ASSERT_EQ(pol, HU_REACTION_POSITIVE);
 }
-/* Per src/channels/imessage.c:1017 (the repo's authoritative comment):
- *   2000=love, 2001=like, 2002=dislike, 2003=laugh, 2004=emphasis, 2005=question
- * NOT 2003=dislike — that mistake in the v1 of this plan would have trained
- * negative DPO signals on every laugh tapback. Fixed before execution. */
+/* AUTHORITATIVE source for the full code set is the actual switch in
+ * src/channels/imessage.c:1820-1832 (handles 2000-2006) plus the positive-set
+ * filter at imessage.c:1890. The comment block at imessage.c:1017 is stale
+ * (omits 2006). Tests below pin every code: 2000=love, 2001=like,
+ * 2002=dislike, 2003=laugh, 2004=emphasis, 2005=question, 2006=custom_emoji.
+ * v1 of this plan mapped 2003→DISLIKE — that would have trained negative DPO
+ * signals on every laugh tapback. Fixed in v2 + 2006 added in v3. */
 static void test_reaction_event_imessage_tapback_2002_is_dislike(void) {
     hu_reaction_kind_t kind = HU_REACTION_UNKNOWN;
     hu_reaction_polarity_t pol = HU_REACTION_NEUTRAL;
@@ -2402,6 +2490,14 @@ static void test_imessage_poll_reactions_returns_recent_tapbacks(void) {
     hu_reaction_event_t events[16] = {0};
     size_t n = 0;
     hu_error_t err = hu_imessage_poll_reactions(getenv("HU_CHATDB"), time(NULL) - 86400, events, 16, &n);
+    /* hu_imessage_poll_reactions strdup's target_thread_id, target_message_ref,
+     * sender_handle into each event (per impl in Step 2). MUST free or ASan
+     * reports leaks. */
+    for (size_t i = 0; i < n; i++) {
+        free((void *)events[i].target_thread_id);
+        free((void *)events[i].target_message_ref);
+        free((void *)events[i].sender_handle);
+    }
     HU_ASSERT_EQ(err, HU_OK);
     /* Just assert it doesn't crash; specific tapback content depends on user data */
 }
@@ -2509,18 +2605,24 @@ git commit -m "feat(channels,imessage): hu_imessage_poll_reactions for tapback i
 #include "test_framework.h"
 #include "human/channels/reaction_event.h"
 
-/* Forward decl for the new branch — exposed via a test hook in slack.c */
+/* Forward decl for the new branch — exposed via a test hook in slack.c.
+ * NOTE: takes hu_allocator_t* because the implementation must call
+ * hu_json_parse(alloc, ...) — slack.c's JSON helpers are NOT static
+ * "json_*" stubs; they are the project-wide `hu_json_*` API in
+ * include/human/core/json.h, all of which require an allocator. */
 hu_error_t hu_slack_handle_reaction_event_for_test(const char *json_payload,
+                                                    hu_allocator_t *alloc,
                                                     const char *bot_user_id,
                                                     hu_reaction_event_t *out);
 
 static void test_slack_reaction_added_thumbsup_emits_event(void) {
+    hu_allocator_t alloc = hu_system_allocator();
     const char *payload =
         "{\"event\": {\"type\": \"reaction_added\", \"reaction\": \"+1\", "
         "\"user\": \"U_REAL_USER\", \"item\": {\"type\": \"message\", "
         "\"channel\": \"C_TEST\", \"ts\": \"1234567890.123\"}}}";
     hu_reaction_event_t e = {0};
-    HU_ASSERT_EQ(hu_slack_handle_reaction_event_for_test(payload, "U_BOT", &e), HU_OK);
+    HU_ASSERT_EQ(hu_slack_handle_reaction_event_for_test(payload, &alloc, "U_BOT", &e), HU_OK);
     HU_ASSERT_EQ(e.kind, HU_REACTION_LIKE);
     HU_ASSERT_EQ(e.polarity, HU_REACTION_POSITIVE);
     HU_ASSERT_STR_EQ(e.channel_id, "slack");
@@ -2534,20 +2636,22 @@ static void test_slack_reaction_added_thumbsup_emits_event(void) {
 }
 
 static void test_slack_reaction_from_bot_self_is_dropped(void) {
+    hu_allocator_t alloc = hu_system_allocator();
     const char *payload =
         "{\"event\": {\"type\": \"reaction_added\", \"reaction\": \"+1\", "
         "\"user\": \"U_BOT\", \"item\": {\"type\": \"message\", "
         "\"channel\": \"C_TEST\", \"ts\": \"1234567890.123\"}}}";
     hu_reaction_event_t e = {0};
-    HU_ASSERT_EQ(hu_slack_handle_reaction_event_for_test(payload, "U_BOT", &e), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(hu_slack_handle_reaction_event_for_test(payload, &alloc, "U_BOT", &e), HU_ERR_NOT_SUPPORTED);
 }
 
 static void test_slack_reaction_on_file_item_is_dropped(void) {
+    hu_allocator_t alloc = hu_system_allocator();
     const char *payload =
         "{\"event\": {\"type\": \"reaction_added\", \"reaction\": \"+1\", "
         "\"user\": \"U_REAL_USER\", \"item\": {\"type\": \"file\", \"file\": \"F_X\"}}}";
     hu_reaction_event_t e = {0};
-    HU_ASSERT_EQ(hu_slack_handle_reaction_event_for_test(payload, "U_BOT", &e), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(hu_slack_handle_reaction_event_for_test(payload, &alloc, "U_BOT", &e), HU_ERR_NOT_SUPPORTED);
 }
 
 void run_slack_reactions_tests(void) {
@@ -2559,34 +2663,38 @@ void run_slack_reactions_tests(void) {
 
 - [ ] **Step 2: Implement the branch in `src/channels/slack.c`**
 
-Near line 1219 (existing message dispatch), add. **CRITICAL — note on return semantics:**
+Insert the new branch in `hu_slack_on_webhook` AFTER the `subtype` filter check (around current line 1229) but BEFORE the message-text dispatch (line 1242). At this point, `parsed`, `event` (both `hu_json_value_t *`), `event_type`, `alloc`, and `c` are all already in scope. **CRITICAL — note on return semantics:**
 We MUST return `HU_OK` to the webhook caller from this branch (Slack expects a 200 within 3 seconds or it retries; any non-OK return on a valid webhook produces a retry storm). `HU_ERR_NOT_SUPPORTED` is reserved for the test-helper return contract (`hu_slack_handle_reaction_event_for_test`) so unit tests can assert on filter behavior; the inline branch translates filter rejections into a silent `goto reaction_done` → `return HU_OK`.
+
+Also note: this branch must be inserted BEFORE the existing `event_type == "message"` filter (slack.c:1219-1223), which currently early-returns `HU_OK` for any non-message event. Without this ordering, `reaction_added` events get silently dropped by the message filter.
 
 ```c
 /* Phase 2 (RL SOTA): reaction_added / reaction_removed branch.
  * Spec §4.3 — emits hu_reaction_event_t into hu_reaction_handler_handle_event.
  * Slack webhook ack: ALWAYS return HU_OK from this branch — non-OK triggers
  * Slack retries within 3s. Filter rejections (self-reaction, non-message
- * item, unknown reactji) are absorbed silently. */
+ * item, unknown reactji) are absorbed silently.
+ * `event`, `event_type`, `alloc`, `parsed`, and `c` are all in scope from
+ * the surrounding hu_slack_on_webhook function (slack.c:1185-1255). */
 if (event_type && (strcmp(event_type, "reaction_added") == 0
                 || strcmp(event_type, "reaction_removed") == 0)) {
     hu_reaction_event_t evt = {0};
     int is_removal = (strcmp(event_type, "reaction_removed") == 0);
 
-    /* Parse: event.reaction, event.user, event.item.type, event.item.channel, event.item.ts */
-    /* (Use existing JSON helpers in slack.c.) */
-    const char *reaction_name = json_get_string(event_obj, "reaction");
-    const char *user = json_get_string(event_obj, "user");
-    json_value *item = json_get_object(event_obj, "item");
-    const char *item_type = item ? json_get_string(item, "type") : NULL;
-    const char *item_channel = item ? json_get_string(item, "channel") : NULL;
-    const char *item_ts = item ? json_get_string(item, "ts") : NULL;
+    /* Use the project-wide hu_json_* helpers (include/human/core/json.h). */
+    const char *reaction_name = hu_json_get_string(event, "reaction");
+    const char *user = hu_json_get_string(event, "user");
+    hu_json_value_t *item = hu_json_object_get(event, "item");
+    const char *item_type = item ? hu_json_get_string(item, "type") : NULL;
+    const char *item_channel = item ? hu_json_get_string(item, "channel") : NULL;
+    const char *item_ts = item ? hu_json_get_string(item, "ts") : NULL;
 
     /* Filter: skip self-reactions and non-message items.
-     * goto (not return) so we still ack the webhook with HU_OK. */
-    if (user && bot_user_id && strcmp(user, bot_user_id) == 0) goto reaction_done;
-    if (!item_type || strcmp(item_type, "message") != 0)        goto reaction_done;
-    if (!reaction_name)                                          goto reaction_done;
+     * goto (not return) so we still ack the webhook with HU_OK and
+     * the surrounding hu_json_free(alloc, parsed) cleanup runs. */
+    if (user && c->bot_user_id && strcmp(user, c->bot_user_id) == 0) goto reaction_done;
+    if (!item_type || strcmp(item_type, "message") != 0)              goto reaction_done;
+    if (!reaction_name)                                                goto reaction_done;
 
     hu_reaction_kind_t k; hu_reaction_polarity_t p;
     if (hu_reaction_normalize_slack(reaction_name, &k, &p) != HU_OK) goto reaction_done;
@@ -2608,20 +2716,73 @@ reaction_done:
     free((void*)evt.target_thread_id);
     free((void*)evt.target_message_ref);
     free((void*)evt.sender_handle);
-    return HU_OK;  /* always ack the Slack webhook */
+    hu_json_free(alloc, parsed);   /* mirror line 1252's cleanup */
+    return HU_OK;                  /* always ack the Slack webhook */
 }
 ```
 
-Also expose a test-only helper at the bottom of `slack.c`:
+Also expose a test-only helper at the bottom of `slack.c`. Note the **different return contract** from the inline branch: this helper returns `HU_ERR_NOT_SUPPORTED` for filter rejections (so unit tests can assert on the filter behavior) instead of swallowing them as the inline webhook branch does. The two filter-rejection tests above (`test_slack_reaction_from_bot_self_is_dropped`, `test_slack_reaction_on_file_item_is_dropped`) depend on this — if you make the helper return `HU_OK` like the webhook, both fail.
+
+The helper must take `hu_allocator_t *alloc` because slack.c's JSON layer is the project-wide `hu_json_*` API (`include/human/core/json.h`), every entry point of which requires an allocator (`hu_json_parse(alloc, ...)`, `hu_json_free(alloc, ...)`). The helper does NOT silently use a static allocator — that would bypass ASan tracking.
 
 ```c
 #ifdef HU_IS_TEST
 hu_error_t hu_slack_handle_reaction_event_for_test(const char *payload,
+                                                    hu_allocator_t *alloc,
                                                     const char *bot_user_id,
                                                     hu_reaction_event_t *out) {
-    /* Minimal JSON parse + same logic as inline branch above, returning the
-     * synthesized event into *out instead of dispatching to the handler. */
-    /* ... (mechanical extraction of the parse block) ... */
+    if (!payload || !alloc || !out) return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+
+    /* Project-wide JSON API: hu_json_parse returns hu_error_t, fills *out. */
+    hu_json_value_t *root = NULL;
+    hu_error_t perr = hu_json_parse(alloc, payload, strlen(payload), &root);
+    if (perr != HU_OK || !root) return HU_ERR_INVALID_ARGUMENT;
+
+    hu_json_value_t *event_obj = hu_json_object_get(root, "event");
+    if (!event_obj) { hu_json_free(alloc, root); return HU_ERR_INVALID_ARGUMENT; }
+
+    const char *event_type = hu_json_get_string(event_obj, "type");
+    int is_removal = event_type && strcmp(event_type, "reaction_removed") == 0;
+    if (!event_type || (strcmp(event_type, "reaction_added") != 0 && !is_removal)) {
+        hu_json_free(alloc, root); return HU_ERR_INVALID_ARGUMENT;
+    }
+    const char *reaction_name = hu_json_get_string(event_obj, "reaction");
+    const char *user = hu_json_get_string(event_obj, "user");
+    hu_json_value_t *item = hu_json_object_get(event_obj, "item");
+    const char *item_type = item ? hu_json_get_string(item, "type") : NULL;
+    const char *item_channel = item ? hu_json_get_string(item, "channel") : NULL;
+    const char *item_ts = item ? hu_json_get_string(item, "ts") : NULL;
+
+    /* TEST CONTRACT (different from inline branch above):
+     * filter rejections return HU_ERR_NOT_SUPPORTED so the two filter
+     * tests above can assert on the filter behavior. The inline webhook
+     * branch translates these to HU_OK (to ack the webhook); this helper
+     * does NOT — that is intentional. */
+    if (user && bot_user_id && strcmp(user, bot_user_id) == 0) {
+        hu_json_free(alloc, root); return HU_ERR_NOT_SUPPORTED;
+    }
+    if (!item_type || strcmp(item_type, "message") != 0) {
+        hu_json_free(alloc, root); return HU_ERR_NOT_SUPPORTED;
+    }
+    if (!reaction_name) { hu_json_free(alloc, root); return HU_ERR_INVALID_ARGUMENT; }
+
+    hu_reaction_kind_t k; hu_reaction_polarity_t p;
+    if (hu_reaction_normalize_slack(reaction_name, &k, &p) != HU_OK) {
+        hu_json_free(alloc, root); return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    out->channel_id = "slack";
+    out->target_thread_id = item_channel ? strdup(item_channel) : NULL;
+    out->target_message_ref = item_ts ? strdup(item_ts) : NULL;
+    out->sender_handle = user ? strdup(user) : NULL;
+    out->kind = k;
+    out->polarity = p;
+    out->is_removal = is_removal;
+    out->timestamp_unix = time(NULL);
+
+    hu_json_free(alloc, root);
+    return HU_OK;
 }
 #endif
 ```
@@ -3137,21 +3298,46 @@ Per the writing-plans skill self-review checklist:
 
 **3. Type consistency:** `hu_rl_trainer_t`, `hu_rl_trainer_config_t`, `hu_rl_trainer_metrics_t`, `hu_dpo_backend_t`, `hu_reaction_event_t`, `hu_reaction_kind_t`, `hu_reaction_polarity_t` — all consistent across Tasks 1-15. `hu_preference_pair_t` reused from existing `include/human/ml/dpo.h:15-26` (FIXED-SIZE char arrays, NOT pointers — `reaction_handler.c` uses `strncpy` not pointer assignment). `hu_dpo_collector_t` API uses the actual functions `hu_dpo_collector_create(alloc, db, max_pairs, out)`, `hu_dpo_init_tables(collector)`, `hu_dpo_record_pair(collector, pair)`, `hu_dpo_pair_count(collector, *out)`, `hu_dpo_collector_deinit(collector)` — all from `include/human/ml/dpo.h`.
 
-**Pre-execution review fixes applied (v2 of plan):**
+**Pre-execution review fixes applied (v2 + v3 of plan):**
 
-The v1 of this plan was reviewed by the `critic` and `spec-verifier` subagents BEFORE execution and flagged 5 blockers + 4 highs. All were fixed in this v2:
+The v1 of this plan was reviewed by the `critic` and `spec-verifier` subagents BEFORE execution and flagged 5 blockers + 4 highs. All were fixed in v2. Then **v2 was re-reviewed by the same subagents and flagged 6 NEW hard gaps + 4 mediums** that v2's fixes had introduced or missed. All v3 fixes are listed below:
 
-| # | v1 issue | v2 fix |
+| # | v1/v2 issue | v3 fix |
 |---|----------|--------|
-| B1 | iMessage tapback codes off-by-one (2003 mapped to DISLIKE — actually LAUGH) | Switch table corrected per `imessage.c:1017` authority; tests for 2002/2003/2004/2005/3003 added |
-| B2 | `python3 -m mlx_lm.dpo` doesn't exist | Replaced with our own `scripts/dpo_mlx_train.py` wrapper around third-party `mlx-lm-lora` package's `train_dpo` |
-| B3 | Synthetic JSONL was natural language but HUML backend expects int IDs | Split into TWO fixtures (`synthetic_preference_pairs.jsonl` for MLX, `_huml.jsonl` for HUML); `gen-synthetic-prefs.py` emits both |
-| B4 | `hu_dpo_collector_record_pair` invented — real API is `hu_dpo_record_pair(collector, pair)` | Rewrote `reaction_handler.c` to use real API + `hu_reaction_handler_set_collector` setter |
-| B5 | `reaction_handler.c` assigned `const char *` to `char[]` struct fields (C11 type error) | Use `strncpy` with explicit `_len` field updates |
-| H1 | `include/human/ml/dpo_real.h` listed but not created | Added explicit creation in Task 4 |
-| H2 | `s_called_this_turn` had no documented reset call site | Reset added to `src/daemon.c` per-turn loop in Task 14 step 3 |
-| H3 | `s_lookup` 256-entry cap with no production caveat | Documented as test seam + interim production path; production resolution deferred to Phase 5 daemon integration |
-| H4 | `HU_HAVE_MLX_LM` CMake plumbing undefined | Added `option(HU_HAVE_MLX_LM ...)` with `target_compile_definitions` in Task 6 step 6 |
+| **v1 B1** | iMessage tapback codes off-by-one (2003 mapped to DISLIKE — actually LAUGH) | Switch table corrected per `imessage.c:1017` authority; tests for 2002/2003/2004/2005/3003 added |
+| **v1 B2** | `python3 -m mlx_lm.dpo` doesn't exist | Replaced with our own `scripts/dpo_mlx_train.py` wrapper around third-party `mlx-lm-lora` package's `train_dpo` |
+| **v1 B3** | Synthetic JSONL was natural language but HUML backend expects int IDs | Split into TWO fixtures (`synthetic_preference_pairs.jsonl` for MLX, `_huml.jsonl` for HUML); `gen-synthetic-prefs.py` emits both |
+| **v1 B4** | `hu_dpo_collector_record_pair` invented — real API is `hu_dpo_record_pair(collector, pair)` | Rewrote `reaction_handler.c` to use real API + `hu_reaction_handler_set_collector` setter |
+| **v1 B5** | `reaction_handler.c` assigned `const char *` to `char[]` struct fields (C11 type error) | Use `strncpy` with explicit `_len` field updates |
+| **v1 H1** | `include/human/ml/dpo_real.h` listed but not created | Added explicit creation in Task 4 step 0 |
+| **v1 H2** | `s_called_this_turn` had no documented reset call site | Reset added to `src/daemon.c` per-turn loop in Task 14 step 3 |
+| **v1 H3** | `s_lookup` 256-entry cap with no production caveat | Documented as test seam + interim production path; production resolution deferred to Phase 5 daemon integration |
+| **v1 H4** | `HU_HAVE_MLX_LM` CMake plumbing undefined | Added `option(HU_HAVE_MLX_LM ...)` with `target_compile_definitions` in Task 6 step 6 |
+| **v2 HG1 (new)** | `hu_param_t` and `hu_tensor_t` types don't exist; `get_params(ctx, buf, cap, &n)` signature wrong | Replaced with `hu_ml_tensor_t` per `include/human/ml/model.h:13-19`; `get_params(ctx, hu_ml_tensor_t **params, size_t *count)` per `model.h:32` (model-owned pointer-to-array, NOT caller buffer); `.n` → `size_bytes / sizeof(float)` with `dtype` check |
+| **v2 HG2 (new)** | B5 resurfaced in Task 5 test (`pairs[n].prompt = strdup(p)`) and Task 9 CLI (same) | Both Task 5 and Task 9 rewritten to use `strncpy` + `_len` updates; per-field `free()` calls removed (UB on stack arrays) |
+| **v2 HG3 (new)** | `mlx_dpo_available()` probed `import mlx_lm.dpo` — wrong module (B2 half-fix) | All 3 stale probes corrected to `from mlx_lm_lora.trainer.dpo_trainer import train_dpo` (factory probe in `rl_trainer.c`, Task 1 test skip guard, Task 1 commit message text) |
+| **v2 HG4 (new)** | `gen-synthetic-prefs.py` PAIRS list had 5 real entries + comments; `n >= 50` would fail | Wrote full 50-entry PAIRS list inline (10 helpful-vs-evasive, 10 concise-vs-verbose, 10 factual-vs-fabricated, 10 persona-aligned-vs-generic, 10 honest-uncertainty-vs-confident-hallucination) + `assert len(PAIRS) == 50` in script |
+| **v2 HG5 (new)** | `#include` directive inside function body in Task 14 (compile error under `-Wpedantic`) | Split Task 14 step 4 into TWO edits: 4a adds the `#include` at file scope, 4b wraps the substring block |
+| **v2 HG6 (new)** | Task 5 forward-referenced Task 6 for `gen-synthetic-prefs.py` body; Task 6 also said "Create" | Full script body moved into Task 5 step 1; Task 6 step 5 says "DO NOT recreate — already in Task 5"; new-files table tags script with "(created in Task 5)" |
+| **v2 H1 (new)** | Critic found Task 5 unable to execute without Task 6 read-ahead | Same as HG6 — full script in Task 5 |
+| **v2 H2 (new)** | False PIN-DOWN claim: "per-channel turn lock in daemon" — no such lock exists | Comment rewritten to truthfully state: daemon is single-threaded event loop with only `g_trust_mutex` (line 800, scoped to trust); if daemon ever gains a thread pool, this flag MUST move to `hu_agent_t` |
+| **v2 H3 (new)** | 12 tasks all touch `tests/test_main.c` with no merge protocol — sequential subagents may drop earlier runners | Added explicit "READ first; APPEND only; do NOT replace" instruction at the first `tests/test_main.c` mention (Task 1 step 6) |
+| **v2 M1 (new)** | `policy_logprobs.c` used raw `free(output.data)` instead of project allocator | Changed to `alloc->free(alloc->ctx, output.data, output.size_bytes)` per `src/ml/train.c:171` pattern |
+| **v2 M2 (new)** | `HU_ERR_NOT_FOUND` vs "silently drops" naming inconsistency | Test docstring + comment block clarifies: return code carries diagnostic, callers MUST translate to silent no-op |
+| **v2 M3 (new)** | Code 2006 (custom emoji tapback) silently dropped despite being USED in `imessage.c:1830,1890,1895,1950` | Added `HU_REACTION_CUSTOM_EMOJI` enum value, switch case 2006 → CUSTOM_EMOJI/POSITIVE, SQL range extended to `BETWEEN 2000 AND 2006`, new test `test_reaction_event_imessage_tapback_2006_is_custom_emoji` added |
+| **v2 M4 (new)** | Slack reaction handler `return HU_ERR_NOT_SUPPORTED` from inside webhook handler — exits whole handler, breaks Slack 3s ack timeout | Refactored to `goto reaction_done` for filter rejections, `return HU_OK` always at end of branch (ack the webhook); test helper `hu_slack_handle_reaction_event_for_test` keeps `HU_ERR_NOT_SUPPORTED` return for unit-test assertions |
+| **v3 NEW-HG1** | All 11 `alloc->free(alloc->ctx, ptr)` calls in `dpo_real_huml.c` + `dpo_real_mlx.c` had wrong arity (2-arg, but `hu_allocator_t.free` is 3-arg per `allocator.h:11`) | All 11 sites converted to `alloc->free(alloc->ctx, ptr, size)`. `parse_id_string` extended with `*out_cap` so callers can free with `cap * sizeof(int32_t)` (correct allocated size, not just element count) |
+| **v3 NEW-H1** | `parse_id_string` callers couldn't compute correct allocated size (cap diverges from n after doubling) | Added `*out_cap` output param; cleanup uses `cap * sizeof(int32_t)` |
+| **v3 NEW-M1** | `gen-synthetic-prefs.py` used `hash()` (PYTHONHASHSEED-randomized) — claim "deterministic across runs" was false | Replaced with `hashlib.sha256(text)[:8]` for stable cross-process seed |
+| **v3 NEW-M2** | `write_jsonl` in `dpo_real_mlx.c` had no JSON escaping — real chat data with `"`, `\n`, `\\` would produce invalid JSONL | Added `json_escape` helper (handles `"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, `\uXXXX` for control chars); applied to all three fields |
+| **v3 NEW-M3** | Task 5 test leaked `pairs` and `trainer` if `HU_ASSERT_TRUE(n >= 50)` failed | Restructured: deferred all asserts until after cleanup; uses `loaded_enough` flag + post-cleanup assert pattern |
+| **v3 NEW-M4** | Slack test helper `hu_slack_handle_reaction_event_for_test` body was a `/* ... */` stub — would compile but tests at lines 2542/2550 would have ambiguous semantics | Wrote out the full helper body explicitly, with explicit "DIFFERENT return contract from inline branch" comment to prevent future drift |
+| **v3 NEW-L1** | `dpo_mlx_save` used unquoted `system("cp -r %s %s")` — anti-pattern under "Secure by Default" | Added single-quote shell escaping + reject paths containing `'` to prevent quote-escape injection |
+| **v3 NEW-L2** | Risk register R8/R11 still referenced `mlx_lm.dpo` | Updated to reference `mlx-lm-lora`'s `dpo_trainer.train_dpo` and `scripts/dpo_mlx_train.py` |
+| **v3 NEW-L3** | Stale `mlx_lm.dpo` text in test skip log + a `.c` comment | s/`mlx_lm.dpo`/`mlx-lm-lora`/ in user-facing strings |
+| **v3 NEW-L4** | Task 11 gated test (`test_imessage_poll_reactions_returns_recent_tapbacks`) leaked strdup'd strings on returned events | Added explicit free loop over the returned events |
+| **v3 NEW-L5** | `synthetic_preference_pairs.schema.json` listed in new-files table but no task built it | Removed from table + R3 (YAGNI; the gen script is self-documenting) |
+| **v3.1 BLOCKER** | `hu_slack_handle_reaction_event_for_test` body and inline branch used fictitious JSON API (`json_parse`, `json_get_object`, `json_get_string`, `json_value`) that doesn't exist anywhere; real API is `hu_json_parse(alloc, body, len, &out)`, `hu_json_object_get`, `hu_json_get_string`, `hu_json_free(alloc, val)`, `hu_json_value_t` per `include/human/core/json.h:49-51` and slack.c:1195,1213 usage | Helper signature now takes `hu_allocator_t *alloc` (3rd param); body uses `hu_json_*` API throughout; inline branch reuses `event` (already `hu_json_value_t *` in scope from slack.c:1213) and `c->bot_user_id`; all 3 test call-sites set up `hu_allocator_t alloc = hu_system_allocator()` and pass `&alloc`; misleading comment "(json_parse, json_get_object, json_get_string)" replaced with explicit reference to project-wide `hu_json_*` API + `include/human/core/json.h` |
 
 **Known gaps from this v2 that the implementer should address inline:**
 1. The MLX wrapper script (`scripts/dpo_mlx_train.py`) parses no progress output today; a future Phase 5 enhancement adds structured `iter,loss` lines to stdout that the C side parses for `hu_rl_trainer_metrics_t.final_loss`.
