@@ -22,7 +22,7 @@
 |---|---|---|---|---|
 | 0 | Honesty pass | `docs/plans/2026-05-11-rl-loop-phase-0-honesty.md` (✅ authored alongside this umbrella) | None | 2–3 days |
 | 1 | llama.cpp Metal inference | [`docs/plans/2026-05-11-rl-loop-phase-1-llamacpp.md`](2026-05-11-rl-loop-phase-1-llamacpp.md) (✅ complete 2026-05-11; tag `rl-sota-phase-1-complete`) | Phase 0 | 5–7 days |
-| 2 | Real DPO + reaction wiring | [`docs/plans/2026-05-11-rl-loop-phase-2-dpo-reactions.md`](2026-05-11-rl-loop-phase-2-dpo-reactions.md) (✅ authored 2026-05-11; user chose two-track DPO: HUML in-process canonical + MLX subprocess real-Gemma) | Phase 1 | 10–14 days |
+| 2 | Real DPO + reaction wiring | [`docs/plans/2026-05-11-rl-loop-phase-2-dpo-reactions.md`](2026-05-11-rl-loop-phase-2-dpo-reactions.md) (✅ complete 2026-05-12; tag `rl-sota-phase-2-complete`; two-track DPO: HUML in-process canonical + MLX subprocess real-Gemma) | Phase 1 | 10–14 days |
 | 3 | KTO + reward model | `docs/plans/2026-05-11-rl-loop-phase-3-kto-rm.md` (TBA) | Phases 0, 1 | 5–7 days |
 | 4 | GRPO + multi-rollout | `docs/plans/2026-05-11-rl-loop-phase-4-grpo.md` (TBA) | Phases 1, 3 | 10–14 days (50% timeline padding per spec risk #5) |
 | 5 | Eval gate + competitive harness | `docs/plans/2026-05-11-rl-loop-phase-5-eval-competitive.md` (TBA) | All prior | 7–10 days |
@@ -157,7 +157,7 @@ bash scripts/check-lora-baseline.sh                        # Track D Phase 1 4-a
 |---|---|---|---|---|
 | 0 | ✅ 2026-05-11 | ✅ 2026-05-11 | ✅ 2026-05-11 (tag `rl-sota-phase-0-complete`) | ✅ PASS (all 9 items, file:line evidence; dead-code-finder also PASS) |
 | 1 | ✅ 2026-05-11 ([phase-1 plan](2026-05-11-rl-loop-phase-1-llamacpp.md)) | ✅ 2026-05-11 | ✅ 2026-05-11 (tag `rl-sota-phase-1-complete`) | ✅ PASS (sanity gate 20/20 with real Gemma-3-4B-it Metal; dev 9739/9739 + rl_sota 10140/10140 tests pass under ASan; dead-code-finder PASS; sprint-auditor PASS_WITH_NOTES on first pass — link-mirror test, `vtable.warmup` hook, and umbrella verdict accuracy all addressed in follow-up commit before tag) |
-| 2 | ✅ 2026-05-11 ([phase-2 plan](2026-05-11-rl-loop-phase-2-dpo-reactions.md)) — 3 critic+spec-verifier review rounds (v1→v2→v3→v3.1), `PLAN_CLEAN_FOR_COMMIT` gate passed | — | — | — |
+| 2 | ✅ 2026-05-11 ([phase-2 plan](2026-05-11-rl-loop-phase-2-dpo-reactions.md)) — 4 critic+spec-verifier review rounds (v1→v2→v3→v3.1), `PLAN_CLEAN_FOR_COMMIT` gate passed | ✅ 2026-05-11 | ✅ 2026-05-12 (tag `rl-sota-phase-2-complete`) | ✅ PASS_WITH_NOTES — full suite 10167/10167 (rl_sota) + 10165/10165 (dev) under ASan, 0 leaks; topology check 0 violations; dead-code-finder PASS; 5-verifier aspect panel 0 FAIL (1 PASS / 4 PASS_WITH_NOTES, 0% disagreement); sprint-auditor PASS_WITH_NOTES (AC1 PARTIAL — DPO loss formula real, structural sign-based backward present, but per-parameter analytical-vs-numerical grad check honestly deferred to Phase 3 since structural backward isn't gradient-descent; production wiring of `hu_imessage_poll_reactions` and `hu_reaction_handler_set_collector` documented as Phase 5 daemon-integration deferral; Slack reaction path is fully wired end-to-end). All high-confidence audit findings addressed in audit follow-through commit `b6a71f81` before tag (HU_ guard convention, `dpo_mlx_step` popen hardening, rename of tautological `_finite_diff_` test + new `_decreases_under_positive_lr`, NULL-pin regression tests). |
 | 3 | ⏸ TBA at phase start | — | — | — |
 | 4 | ⏸ TBA at phase start | — | — | — |
 | 5 | ⏸ TBA at phase start | — | — | — |
