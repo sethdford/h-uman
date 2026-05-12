@@ -1143,6 +1143,15 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_dpo_collector_deinit(&agent->sota.dpo_collector);
         agent->sota.sota_initialized = false;
     }
+    /* Scratchpad's max_bytes is set in hu_agent_init (agent.c:629) and
+     * populated per-turn by hu_agent_turn (agent_turn.c:8601). Without
+     * an explicit deinit, the heap copies of each turn's metadata leak
+     * (17-18 bytes per turn) — ASan flagged ~108 small leaks across
+     * the agent/agent_security/e2e suites on PR55. Deinit unconditionally:
+     * `hu_scratchpad_deinit` is NULL-safe (entries[] is a fixed-size
+     * inline array) and handles the never-set case gracefully via
+     * entry_count==0. */
+    hu_scratchpad_deinit(&agent->sota.scratchpad, agent->alloc);
     hu_pattern_radar_deinit(&agent->radar);
     if (agent->commitment_store) {
         hu_commitment_store_destroy(agent->commitment_store);
