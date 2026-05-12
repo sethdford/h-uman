@@ -976,6 +976,230 @@ static void bridge_render_hyperedge_member_not_in_entities_renders_id_fallback(v
     story_d_cleanup_all(g, m, f);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story E (sprint-4 follow-up) — render wm->self_model.
+ *
+ * `hu_world_model_merge_persona` already fills self_model.name from
+ * persona->name, focused_topics from the first three entries of
+ * wm->recent_topics, and confidence_in_self from persona identity
+ * completeness (0.5 with name, 0.85 with name+identity). Before Story E
+ * the LLM never saw any of those fields — the prompt block silently
+ * skipped them. These tests pin that the Self model section renders
+ * exactly when there is signal and never when there is not.
+ *
+ * Note: recent_drift_kind/recent_drift_value require APPLIED persona
+ * deltas which the bridge pulls from the memory facade. Bridge-driven
+ * tests of the drift line are intentionally out of scope here; the
+ * underlying merge populator is already covered in test_w9_world_model.c
+ * (search HU_DELTA_STATUS_APPLIED). ────────────────────────────────────── */
+
+static void story_e_make_full_persona(hu_persona_t *p, hu_persona_overlay_t *ov) {
+    /* Name AND identity → confidence_in_self = 0.85 → bucket "high". */
+    memset(p, 0, sizeof(*p));
+    memset(ov, 0, sizeof(*ov));
+    p->name = (char *)"story-e-self";
+    p->identity = (char *)"story-e-witness";
+    ov->channel = (char *)"discord";
+    ov->formality = (char *)"casual-direct";
+    p->overlays = ov;
+    p->overlays_count = 1;
+}
+
+static void story_e_make_name_only_persona(hu_persona_t *p, hu_persona_overlay_t *ov) {
+    /* Name only → confidence_in_self = 0.5 → bucket "medium". */
+    memset(p, 0, sizeof(*p));
+    memset(ov, 0, sizeof(*ov));
+    p->name = (char *)"story-e-medium";
+    /* identity left NULL on purpose. */
+    ov->channel = (char *)"discord";
+    p->overlays = ov;
+    p->overlays_count = 1;
+}
+
+static void bridge_render_with_self_model_emits_section(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storye_full";
+    /* Seed two entities so wm->recent_topics has signal, which seeds
+     * self_model.focused_topics (top-3 ';'-joined). */
+    int64_t a = 0, b = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "tea-house", 9, HU_ENTITY_PLACE,
+                                NULL, &a),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "ringo-bell", 10, HU_ENTITY_PERSON,
+                                NULL, &b),
+        HU_OK);
+    /* Give the snapshot a render-trigger so we reach the merge step. */
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_full_persona(&persona, &overlay);
+
+    hu_persona_context_t pctx;
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0; /* drift line intentionally out of scope here */
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "I am: story-e-self"));
+    /* focused_topics is the recent_topics digest; both entity names should
+     * appear on the Tracking line (order/separator handled by populator). */
+    HU_ASSERT_NOT_NULL(strstr(txt, "Tracking:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: high"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_with_empty_self_model_omits_section(void) {
+    /* No persona context → merge_persona never runs → self_model stays
+     * zero across all five fields → the Self model section must not
+     * appear, even though the snapshot itself has signal (a negative
+     * memory) and produces other render sections. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storye_empty";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Self model:") == NULL);
+    HU_ASSERT(strstr(txt, "Self-confidence:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_self_confidence_bucket_high_vs_medium(void) {
+    /* The populator clamps confidence_in_self to 0.85 (name+identity)
+     * or 0.5 (name only) or 0.0 (neither). Verify both reachable
+     * buckets render the right adjective so the LLM doesn't see a
+     * raw float. */
+
+    /* Case A: name + identity → high. */
+    {
+        hu_graph_t *g = NULL;
+        hu_w7_facade_t *f = NULL;
+        open_graph_and_facade(&g, &f);
+        const char *cid = "ut_storye_high";
+        story_b_seed_negative(g, cid, strlen(cid));
+
+        hu_persona_t persona;
+        hu_persona_overlay_t overlay;
+        story_e_make_full_persona(&persona, &overlay);
+        hu_persona_context_t pctx;
+        pctx.persona = &persona;
+        pctx.channel = "discord";
+        pctx.channel_len = strlen("discord");
+        pctx.delta_limit = 0;
+
+        char *txt = NULL;
+        size_t tlen = 0;
+        HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                              1700000000000LL + 1000, &txt, &tlen,
+                                              NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                     HU_OK);
+        HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: high"));
+        HU_ASSERT(strstr(txt, "Self-confidence: medium") == NULL);
+        A()->free(A()->ctx, txt, tlen + 1);
+        cleanup(g, f);
+    }
+
+    /* Case B: name only → medium. */
+    {
+        hu_graph_t *g = NULL;
+        hu_w7_facade_t *f = NULL;
+        open_graph_and_facade(&g, &f);
+        const char *cid = "ut_storye_medium";
+        story_b_seed_negative(g, cid, strlen(cid));
+
+        hu_persona_t persona;
+        hu_persona_overlay_t overlay;
+        story_e_make_name_only_persona(&persona, &overlay);
+        hu_persona_context_t pctx;
+        pctx.persona = &persona;
+        pctx.channel = "discord";
+        pctx.channel_len = strlen("discord");
+        pctx.delta_limit = 0;
+
+        char *txt = NULL;
+        size_t tlen = 0;
+        HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                              1700000000000LL + 1000, &txt, &tlen,
+                                              NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                     HU_OK);
+        HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: medium"));
+        HU_ASSERT(strstr(txt, "Self-confidence: high") == NULL);
+        A()->free(A()->ctx, txt, tlen + 1);
+        cleanup(g, f);
+    }
+}
+
+static void bridge_render_self_model_partial_fields_renders_only_present(void) {
+    /* Persona name only + NO entities seeded → wm->recent_topics is empty
+     * → focused_topics stays "" → the Tracking line must be omitted.
+     * The "I am:" line and the medium-confidence line are still rendered
+     * because both have real signal. This pins that per-field rendering
+     * is conditional, not all-or-nothing. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storye_partial";
+    /* story_b_seed_negative inserts a scope="topic" negative, NOT a
+     * graph entity. Negatives feed wm->negatives, not wm->entities, so
+     * recent_topics stays empty for this contact. */
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_name_only_persona(&persona, &overlay);
+    hu_persona_context_t pctx;
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "I am: story-e-medium"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: medium"));
+    HU_ASSERT(strstr(txt, "Tracking:") == NULL);
+    HU_ASSERT(strstr(txt, "Most recent shift:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_world_model_bridge_tests(void) {
@@ -1013,5 +1237,10 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(bridge_render_with_hyperedges_emits_multi_entity_section);
     HU_RUN_TEST(bridge_render_with_no_hyperedges_omits_section);
     HU_RUN_TEST(bridge_render_hyperedge_member_not_in_entities_renders_id_fallback);
+    /* sprint-4 follow-up Story E — render wm->self_model. */
+    HU_RUN_TEST(bridge_render_with_self_model_emits_section);
+    HU_RUN_TEST(bridge_render_with_empty_self_model_omits_section);
+    HU_RUN_TEST(bridge_render_self_confidence_bucket_high_vs_medium);
+    HU_RUN_TEST(bridge_render_self_model_partial_fields_renders_only_present);
 #endif
 }
