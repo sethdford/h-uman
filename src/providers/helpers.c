@@ -171,3 +171,24 @@ const char *hu_provider_active_adapter(const hu_provider_t *provider) {
         return NULL;
     return provider->vtable->active_adapter(provider->ctx);
 }
+
+/* SOTA-2026 init-01 — activation steering helper. Same safe-no-op
+ * pattern as `hu_provider_load_adapter`: NULL vtable slot →
+ * HU_ERR_NOT_SUPPORTED, callers fall back to prompt-side directive.
+ *
+ * Bounds checks run BEFORE dispatch so providers can assume
+ * `dim <= HU_STEERING_VEC_MAX_DIM` and `vec != NULL when dim > 0`.
+ * The (NULL, 0) reset form is forwarded verbatim — providers that
+ * implement steering use it to drop any retained vector and fall
+ * back to base behavior on the next chat(). */
+hu_error_t hu_provider_apply_steering(hu_provider_t *provider, const float *vec, size_t dim) {
+    if (!provider || !provider->vtable)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (dim > HU_STEERING_VEC_MAX_DIM)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (dim > 0 && !vec)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!provider->vtable->apply_steering)
+        return HU_ERR_NOT_SUPPORTED;
+    return provider->vtable->apply_steering(provider->ctx, vec, dim);
+}

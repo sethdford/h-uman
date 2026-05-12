@@ -1040,6 +1040,21 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             goto fail;
     }
 
+    /* SOTA-2026 init-01 — persona steering directive (prompt-side
+     * fallback for providers that don't implement
+     * `apply_steering`). Injected before the imperfect-delivery
+     * block so the steering nudge composes with hedging guidance
+     * rather than contradicting it. */
+    if (config->steering_directive && config->steering_directive_len > 0) {
+        err = append(alloc, &buf, &len, &cap, config->steering_directive,
+                     config->steering_directive_len);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, "\n", 1);
+        if (err != HU_OK)
+            goto fail;
+    }
+
     /* Imperfect delivery: express genuine uncertainty */
     if (config->imperfect_delivery && config->imperfect_delivery_len > 0) {
         err = append(alloc, &buf, &len, &cap, config->imperfect_delivery,

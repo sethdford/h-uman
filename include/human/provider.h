@@ -254,7 +254,44 @@ typedef struct hu_provider_vtable {
                                size_t adapter_id_len);
     hu_error_t (*unload_adapter)(void *ctx, const char *adapter_id, size_t adapter_id_len);
     const char *(*active_adapter)(void *ctx);
+
+    /* SOTA-2026 init-01 — activation steering. Optional. Cloud
+     * providers leave this NULL; on-device providers (llamacpp,
+     * embedded, future mlx_qwen3) implement it.
+     *
+     * `vec` is a small abstract trait-coefficient vector of `dim`
+     * floats produced by `hu_persona_steering_vector(...)`. The
+     * provider is responsible for mapping each coefficient to
+     * its model's residual stream (typically via a precomputed
+     * SAE-decoder projection or CAA-style difference vector at
+     * a configured layer index).
+     *
+     * Calling with vec == NULL and dim == 0 disables steering
+     * (resets to base). Returning HU_ERR_NOT_SUPPORTED is legal
+     * at any time — callers MUST fall through to the prompt-side
+     * directive path.
+     *
+     * Contract:
+     *   - `vec` is owned by the caller; the provider must copy
+     *     any state it wants to retain across chat() calls.
+     *   - `dim` is bounded by HU_STEERING_VEC_MAX_DIM. Providers
+     *     MUST reject larger dims with HU_ERR_INVALID_ARGUMENT.
+     *   - Steering applies to subsequent chat()/stream_chat()
+     *     calls on the same provider context until
+     *     `apply_steering(NULL, 0)` resets it or a new vector
+     *     overwrites. */
+    hu_error_t (*apply_steering)(void *ctx, const float *vec, size_t dim);
 } hu_provider_vtable_t;
+
+/* SOTA-2026 init-01 — hard cap on the abstract steering vector
+ * dimension. The persona-layer header (`human/persona/steering.h`)
+ * defines the canonical fixed dim (HU_STEERING_VEC_DIM = 32); this
+ * boundary is what providers and the dispatch helper reject above.
+ * Kept here so callers don't have to pull the persona header just
+ * to validate a dim. */
+#ifndef HU_STEERING_VEC_MAX_DIM
+#define HU_STEERING_VEC_MAX_DIM 64
+#endif
 
 /* Optional adapter-loading helpers. Each returns HU_ERR_NOT_SUPPORTED when
  * the provider's vtable leaves the corresponding method NULL. */
@@ -266,6 +303,21 @@ hu_error_t hu_provider_unload_adapter(hu_provider_t *provider, const char *adapt
 /* Returns the active adapter id (provider-owned, caller must not free), or
  * NULL when none is loaded or the provider doesn't support adapters. */
 const char *hu_provider_active_adapter(const hu_provider_t *provider);
+
+/* SOTA-2026 init-01 — activation steering dispatch helper.
+ *
+ * Mirrors `hu_provider_load_adapter`'s safe-no-op pattern. Returns
+ * HU_ERR_NOT_SUPPORTED when the provider's vtable leaves
+ * `apply_steering` NULL (the cloud-provider common case); callers
+ * (agent_turn.c) treat that as a signal to inject the prompt-side
+ * directive instead. Returns HU_OK on success; residual-stream
+ * steering took the load.
+ *
+ * Validates argument bounds (`dim <= HU_STEERING_VEC_MAX_DIM`,
+ * non-NULL vec when dim > 0) before dispatch so providers never
+ * have to repeat those checks. Calling with `vec == NULL && dim == 0`
+ * is the reset form and is forwarded to the provider verbatim. */
+hu_error_t hu_provider_apply_steering(hu_provider_t *provider, const float *vec, size_t dim);
 
 /* Free allocations in a chat response (content, model, tool_calls and their strings). */
 void hu_chat_response_free(hu_allocator_t *alloc, hu_chat_response_t *resp);

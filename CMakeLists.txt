@@ -1019,6 +1019,7 @@ endif()
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
     src/persona/examples.c
+    src/persona/steering.c
     src/persona/sampler.c
     src/persona/analyzer.c
     src/persona/creator.c
@@ -2414,13 +2415,11 @@ set(HU_TEST_SOURCES
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
     tests/test_persona_directive_channels.c
-    # NOTE(init-04 sprint): the following two init-01 test files were
-    # added by concurrent automation but the supporting header
-    # include/human/persona/steering.h is not yet on disk. Temporarily
-    # excluded so init-04 can validate; init-01's parent agent should
-    # restore these once the header lands.
-    # tests/test_persona_steering.c
-    # tests/test_provider_steering_dispatch.c
+    # SOTA-2026 init-01: prompt-side activation steering (S1).
+    # Header lives at include/human/persona/steering.h; impl at
+    # src/persona/steering.c.
+    tests/test_persona_steering.c
+    tests/test_provider_steering_dispatch.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c
@@ -2814,6 +2813,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_turing_adversarial.c
     tests/test_eval_judge.c
     tests/test_eval_benchmarks.c
+    tests/test_eval_public_suites.c
     tests/test_token_budget.c
     tests/test_data_quality.c
     tests/test_tool_validation.c

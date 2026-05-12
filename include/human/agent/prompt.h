@@ -133,6 +133,22 @@ typedef struct hu_prompt_config {
      * an empty model (callers skip injection). */
     const char *world_model_context;
     size_t world_model_context_len;
+    /* SOTA-2026 init-01 — activation steering directive.
+     *
+     * Produced by `hu_persona_steering_directive(...)` from the
+     * abstract trait-coefficient vector. Cloud providers (which
+     * leave `hu_provider_vtable_t.apply_steering` NULL) rely on
+     * this prompt-side fallback to move the model toward the
+     * persona's warmth / formality / humor / hedging traits.
+     * On-device providers (S2) may also receive the vector via
+     * `apply_steering` and skip this field, OR consume both for
+     * a belt-and-suspenders effect (configurable in S2).
+     *
+     * Injected between the humanness block and the imperfect-
+     * delivery block so persona steering composes with —
+     * not contradicts — the imperfect-delivery hedging rules. */
+    const char *steering_directive;
+    size_t steering_directive_len;
 } hu_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc. */
