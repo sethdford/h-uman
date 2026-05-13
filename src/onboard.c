@@ -378,6 +378,47 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
         }
     }
 
+    /* Telegram bot token — optional but the highest-leverage channel
+     * to wire up during onboarding because it's the fastest path to
+     * "the assistant on every device." Users on iMessage already have
+     * the chat experience natively; Telegram unlocks cross-platform.
+     *
+     * Skipping is fine — config.json will be written without a
+     * channels.telegram.token entry and the user can paste one later
+     * via `human config edit` or by re-running this wizard. */
+    const char *telegram_token = "";
+    if (!cli_provider) { /* only prompt in interactive mode */
+        printf("\nWire up Telegram now? (optional, recommended)\n");
+        printf("  1. Open Telegram → talk to @BotFather → /newbot\n");
+        printf("  2. Follow prompts (bot name + username)\n");
+        printf("  3. BotFather gives you a token like 123456789:ABCdef...\n");
+        printf("  Paste it here (or press Enter to skip): ");
+        fflush(stdout);
+        line = read_line(buf, sizeof(buf));
+        if (line && line[0]) {
+            /* Basic shape validation: Telegram tokens are
+             * `<digits>:<base64-ish>`, typically 40+ chars. Reject
+             * obvious typos like a single word or sub-30-char input
+             * so users get a quick "that doesn't look right" instead
+             * of a silent failure when the daemon starts. */
+            size_t tok_len = strlen(line);
+            const char *colon = strchr(line, ':');
+            bool looks_valid = (tok_len >= 30 && colon && colon != line && colon[1] != '\0');
+            if (looks_valid) {
+                telegram_token = line; /* points into buf, used before next read_line */
+                printf("Telegram token saved. Make sure to start your bot in Telegram\n");
+                printf("(send /start to it) before running `human service-loop`.\n");
+            } else {
+                printf("That doesn't look like a Telegram bot token. Skipping —\n");
+                printf("you can paste it later via `human config edit` (look for\n");
+                printf("the channels.telegram.token field).\n");
+            }
+        } else {
+            printf("Skipped. Run this wizard again, or edit config.json directly,\n");
+            printf("to add Telegram later.\n");
+        }
+    }
+
     const char *home = getenv("HOME");
     if (!home)
         home = ".";
@@ -446,7 +487,20 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
         fprintf(f, "  \"providers\": [],\n");
     fprintf(f, "  \"agent\": {\"persona\": \"default\"},\n");
     fprintf(f, "  \"memory\": {\"backend\": \"sqlite\", \"auto_save\": true},\n");
-    fprintf(f, "  \"gateway\": {\"port\": 3000, \"host\": \"127.0.0.1\"}\n");
+    fprintf(f, "  \"gateway\": {\"port\": 3000, \"host\": \"127.0.0.1\"}");
+    if (telegram_token[0]) {
+        /* The token JSON-escape footprint is tiny: Telegram tokens are
+         * `<digits>:<alnum/-/_>` per BotFather's format. No quotes,
+         * backslashes, or control chars to worry about. */
+        fprintf(f, ",\n  \"channels\": {\n");
+        fprintf(f, "    \"telegram\": {\n");
+        fprintf(f, "      \"token\": \"%s\",\n", telegram_token);
+        fprintf(f, "      \"enabled\": true\n");
+        fprintf(f, "    }\n");
+        fprintf(f, "  }\n");
+    } else {
+        fprintf(f, "\n");
+    }
     fprintf(f, "}\n");
     fclose(f);
 
