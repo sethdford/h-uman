@@ -19,13 +19,19 @@
 
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
+#include "human/core/json.h"
 #include "human/filler_recency.h"
 #include "human/persona.h"
 #include "test_framework.h"
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#ifndef HU_TEST_DATA_DIR
+#error "HU_TEST_DATA_DIR must be defined when building human_tests"
+#endif
 
 #define PCTT_BANK_SIZE 5
 
@@ -225,11 +231,82 @@ static void test_pctt_bank_rotation_under_recency(void) {
     HU_ASSERT(hits >= 3); /* should hit at least 3 of 5 over 50 trials */
 }
 
+/* Drift guard: verify that g_corpus[] matches data/eval_pctt.json::corpus.
+ *
+ * The JSON file is the source of truth (see note at top of file). If a
+ * developer edits the JSON without updating the embedded C array (or vice
+ * versa), this test fires immediately and identifies the divergent index. */
+static void test_pctt_corpus_matches_json_fixture(void) {
+    const char *path = HU_TEST_DATA_DIR "/eval_pctt.json";
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "PCTT drift guard: cannot open %s\n", path);
+        HU_ASSERT(0);
+        return;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        HU_ASSERT(0);
+        return;
+    }
+    long sz = ftell(f);
+    HU_ASSERT(sz > 0 && sz <= (long)(4 * 1024 * 1024));
+    rewind(f);
+    char *buf = (char *)malloc((size_t)sz + 1);
+    HU_ASSERT_NOT_NULL(buf);
+    size_t rd = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    buf[rd] = '\0';
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_value_t *root = NULL;
+    HU_ASSERT_EQ(hu_json_parse(&alloc, buf, rd, &root), HU_OK);
+    free(buf);
+    HU_ASSERT_NOT_NULL(root);
+    HU_ASSERT_EQ(root->type, HU_JSON_OBJECT);
+
+    hu_json_value_t *arr = hu_json_object_get(root, "corpus");
+    HU_ASSERT_NOT_NULL(arr);
+    HU_ASSERT_EQ(arr->type, HU_JSON_ARRAY);
+
+    /* Length must match. */
+    if (arr->data.array.len != PCTT_CORPUS_SIZE) {
+        fprintf(stderr, "PCTT drift: JSON corpus has %zu entries but g_corpus has %zu\n",
+                arr->data.array.len, PCTT_CORPUS_SIZE);
+        hu_json_free(&alloc, root);
+        HU_ASSERT(0);
+        return;
+    }
+
+    /* Entry-by-entry comparison. */
+    for (size_t i = 0; i < PCTT_CORPUS_SIZE; i++) {
+        hu_json_value_t *entry = arr->data.array.items[i];
+        HU_ASSERT_NOT_NULL(entry);
+        const char *json_in = hu_json_get_string(entry, "incoming");
+        const char *json_ch = hu_json_get_string(entry, "channel");
+        HU_ASSERT_NOT_NULL(json_in);
+        HU_ASSERT_NOT_NULL(json_ch);
+        if (strcmp(json_in, g_corpus[i].incoming) != 0 ||
+            strcmp(json_ch, g_corpus[i].channel) != 0) {
+            fprintf(stderr,
+                    "PCTT drift at corpus[%zu]: "
+                    "json={\"%s\", \"%s\"}, c={\"%s\", \"%s\"}\n",
+                    i, json_in, json_ch, g_corpus[i].incoming, g_corpus[i].channel);
+            hu_json_free(&alloc, root);
+            HU_ASSERT(0);
+            return;
+        }
+    }
+
+    hu_json_free(&alloc, root);
+}
+
 void run_filler_pctt_tests(void) {
     HU_TEST_SUITE("filler_pctt");
     HU_RUN_TEST(test_pctt_no_echo_across_corpus);
     HU_RUN_TEST(test_pctt_imessage_never_triggers);
     HU_RUN_TEST(test_pctt_bank_rotation_under_recency);
+    HU_RUN_TEST(test_pctt_corpus_matches_json_fixture);
 }
 
 #else /* !HU_ENABLE_PERSONA */
