@@ -43,6 +43,7 @@ void run_provider_http_tests(void);
 void run_ensemble_tests(void);
 void run_api_key_tests(void);
 void run_channel_tests(void);
+void run_channel_class_tests(void);
 void run_channel_format_tests(void);
 void run_channel_rate_limit_tests(void);
 void run_channel_http_tests(void);
@@ -615,6 +616,7 @@ int main(int argc, char **argv) {
     run_ensemble_tests();
     run_api_key_tests();
     run_channel_tests();
+    run_channel_class_tests();
     run_channel_format_tests();
     run_channel_rate_limit_tests();
     run_channel_http_tests();
