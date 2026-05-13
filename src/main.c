@@ -218,20 +218,21 @@ static bool svc_agent_on_message_locked(hu_bus_event_type_t type, const hu_bus_e
 #ifdef HU_ENABLE_ML
 static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: human ml <subcommand>\n\n"
-                        "Subcommands:\n"
-                        "  train                   Train a model from config\n"
-                        "  experiment              Run experiment loop\n"
-                        "  prepare                 Tokenize data for training\n"
-                        "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
-                        "  dpo-train               Run DPO preference training step\n"
-                        "  lora-persona            Train LoRA adapter from persona examples\n"
-                        "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
-                        "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
-                        "  lora-runner             Generate response set from persona via provider (D2.2)\n"
-                        "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
-                        "  train-feed-predictor    Train topic/trend predictor from feed data\n"
-                        "  status                  Show experiment results\n");
+        fprintf(stderr,
+                "Usage: human ml <subcommand>\n\n"
+                "Subcommands:\n"
+                "  train                   Train a model from config\n"
+                "  experiment              Run experiment loop\n"
+                "  prepare                 Tokenize data for training\n"
+                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
+                "  dpo-train               Run DPO preference training step\n"
+                "  lora-persona            Train LoRA adapter from persona examples\n"
+                "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
+                "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
+                "  lora-runner             Generate response set from persona via provider (D2.2)\n"
+                "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
+                "  train-feed-predictor    Train topic/trend predictor from feed data\n"
+                "  status                  Show experiment results\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
     const char *sub = argv[2];
@@ -654,8 +655,8 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
             printf("\n  human doctor %s — diagnostics\n\n", argv[2]);
             for (size_t i = 0; i < item_count; i++) {
                 const char *sev_str = (items[i].severity == HU_DIAG_ERR)    ? "error  "
-                                       : (items[i].severity == HU_DIAG_WARN) ? "warn   "
-                                                                             : "ok     ";
+                                      : (items[i].severity == HU_DIAG_WARN) ? "warn   "
+                                                                            : "ok     ";
                 printf("  %s %s\n", sev_str, items[i].message ? items[i].message : "");
             }
             printf("\n  Summary: %zu ok, %zu warnings, %zu errors\n\n", ok_n, warn_n, err_n);
@@ -2203,10 +2204,9 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
     hu_persona_cli_args_t args;
     hu_error_t err = hu_persona_cli_parse(argc, (const char **)argv, &args);
     if (err != HU_OK) {
-        fprintf(
-            stderr,
-            "Usage: human persona <create|update|show|list|delete|validate|eval|export|merge|import> "
-            "[name] [options]\n");
+        fprintf(stderr, "Usage: human persona "
+                        "<create|update|show|list|delete|validate|eval|export|merge|import> "
+                        "[name] [options]\n");
         fprintf(
             stderr,
             "  create <name> [--from-imessage] [--from-gmail] [--from-facebook] [--interactive]\n");
@@ -2521,18 +2521,74 @@ static bool gw_agent_on_message(hu_bus_event_type_t type, const hu_bus_event_t *
     if (!msg || !msg[0])
         return true;
 
+    hu_agent_t *agent = b->agent;
+    hu_allocator_t *alloc = agent->alloc;
+
     char *reply = NULL;
     size_t reply_len = 0;
-    b->agent->active_channel = "gateway";
-    b->agent->active_channel_len = 8;
+    agent->active_channel = "gateway";
+    agent->active_channel_len = 8;
+
+    /* Build conversation-awareness context so humor bridging and consistency
+     * scoring run on the gateway WebSocket chat path. The daemon path does this
+     * in src/daemon.c; without it, agent->conversation_context stays NULL and
+     * downstream features (agent_stream.c, agent_turn.c) silently degrade. */
+    hu_channel_history_entry_t *hist_entries = NULL;
+    size_t hist_count = 0;
+    size_t hist_cap = agent->history_count < 20 ? agent->history_count : 20;
+    if (hist_cap > 0) {
+        hist_entries = (hu_channel_history_entry_t *)alloc->alloc(
+            alloc->ctx, hist_cap * sizeof(hu_channel_history_entry_t));
+        if (hist_entries) {
+            size_t start = agent->history_count > hist_cap ? agent->history_count - hist_cap : 0;
+            for (size_t i = start; i < agent->history_count; i++) {
+                const hu_owned_message_t *m = &agent->history[i];
+                if (m->role != HU_ROLE_USER && m->role != HU_ROLE_ASSISTANT)
+                    continue;
+                if (!m->content || m->content_len == 0)
+                    continue;
+                hu_channel_history_entry_t *e = &hist_entries[hist_count];
+                e->from_me = (m->role == HU_ROLE_ASSISTANT);
+                size_t copy =
+                    m->content_len < sizeof(e->text) - 1 ? m->content_len : sizeof(e->text) - 1;
+                memcpy(e->text, m->content, copy);
+                e->text[copy] = '\0';
+                e->timestamp[0] = '\0';
+                hist_count++;
+            }
+        }
+    }
+
+    char *convo_ctx = NULL;
+    size_t convo_ctx_len = 0;
+    if (hist_count > 0) {
+        convo_ctx = hu_conversation_build_awareness(alloc, hist_entries, hist_count,
+#ifdef HU_HAS_PERSONA
+                                                    agent->persona,
+#else
+                                                    NULL,
+#endif
+                                                    &convo_ctx_len);
+    }
+    agent->conversation_context = convo_ctx;
+    agent->conversation_context_len = convo_ctx_len;
+
     gw_stream_ctx_t stream_ctx;
     memset(&stream_ctx, 0, sizeof(stream_ctx));
     stream_ctx.bus = b->bus;
     snprintf(stream_ctx.channel, HU_BUS_CHANNEL_LEN, "%s",
              ev->channel[0] ? ev->channel : "gateway");
     snprintf(stream_ctx.id, HU_BUS_ID_LEN, "%s", ev->id);
-    hu_error_t err = hu_agent_turn_stream_v2(b->agent, msg, strlen(msg), gw_stream_event_cb,
+    hu_error_t err = hu_agent_turn_stream_v2(agent, msg, strlen(msg), gw_stream_event_cb,
                                              &stream_ctx, &reply, &reply_len);
+
+    /* Zero pointer before free so any concurrent reader sees NULL, not dangling. */
+    agent->conversation_context = NULL;
+    agent->conversation_context_len = 0;
+    if (convo_ctx)
+        alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+    if (hist_entries)
+        alloc->free(alloc->ctx, hist_entries, hist_cap * sizeof(hu_channel_history_entry_t));
     if (err == HU_OK && reply && reply_len > 0) {
         hu_bus_event_t rev;
         memset(&rev, 0, sizeof(rev));
