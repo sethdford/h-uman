@@ -361,6 +361,7 @@ set(HU_CORE_SOURCES
     src/doctor.c
     src/doctor_fix.c
     src/humanness.c
+    src/channels/channel_class.c
     src/channels/channel_monitor.c
     src/memory/evolved_opinions.c
     src/status.c
@@ -2841,6 +2842,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_context_engine.c
     tests/test_exec_env.c
     tests/test_channel_monitor.c
+    tests/test_channel_class.c
     tests/test_context_engine_rag.c
     tests/test_doctor_fix.c
     tests/test_humanness.c
