@@ -195,6 +195,26 @@ size_t imessage_build_attach_script(char *out, size_t out_cap, const char *targe
                                     const char *path_escaped);
 #endif
 
+/* ── Poll module — src/channels/imessage_poll.c (Step 5) ──────────────
+ *
+ * chat.db reads: history, attachment paths, GUID lookup, the main poll
+ * function, and the user-activity probe. Functions are extracted one at
+ * a time so each carries its own behavior preservation evidence.
+ *
+ * imessage_load_conversation_history is the vtable hook (extern so the
+ * channel vtable in imessage.c can point at it). */
+
+hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *alloc,
+                                              const char *contact_id, size_t contact_id_len,
+                                              size_t limit, hu_channel_history_entry_t **out,
+                                              size_t *out_count);
+
+/* Rowid persistence (~/.human/imessage.rowid). Used by poll.c to checkpoint
+ * the last-seen chat.db ROWID across daemon restarts. */
+void imessage_rowid_path(char *buf, size_t cap);
+int64_t imessage_load_rowid(void);
+void imessage_save_rowid(int64_t rowid);
+
 /* ── React module — src/channels/imessage_react.c (Step 4) ────────────
  *
  * Vtable hook for tapback reactions. 3-tier fallback (imsg CLI → AX →
