@@ -497,4 +497,15 @@ bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_
 }
 #endif /* HU_IMESSAGE_TAPBACK_ENABLED */
 
+/* ── AX trust check (public API, used by doctor) ──────────────────────
+ *
+ * W10 — distinct from Full Disk Access. AX permission is granted in
+ * System Settings → Privacy & Security → Accessibility, while FDA is
+ * granted under "Full Disk Access" in the same pane. The daemon needs
+ * both for full functionality but doctor should tell the user which
+ * one is missing. */
+bool hu_imessage_ax_is_trusted(void) {
+    return (bool)AXIsProcessTrusted();
+}
+
 #endif /* !HU_IS_TEST && __APPLE__ && __MACH__ */

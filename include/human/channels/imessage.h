@@ -9,10 +9,72 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * HU_ERR_NOT_SUPPORTED return conventions
+ * =======================================
+ *
+ * Many functions in this header can return HU_ERR_NOT_SUPPORTED. The cause
+ * varies by site; here's the canonical dispositioning so callers know
+ * which retries / fallbacks are appropriate.
+ *
+ * Cross-reference: docs/investigations/imessage-capability-matrix.md
+ *
+ * Class 1 — Platform unavailable
+ *   - Non-Apple build (no __APPLE__/__MACH__): iMessage doesn't exist
+ *     on this OS. NOT_SUPPORTED is permanent for this binary; the
+ *     daemon should treat the channel as absent.
+ *   - Sites: every Apple-gated vtable hook (send / react / typing /
+ *     poll / load_history / get_attachment_path / lookup_by_guid).
+ *
+ * Class 2 — Test-mode stubs
+ *   - HU_IS_TEST=1 build: stubs return NOT_SUPPORTED for paths that
+ *     would otherwise require chat.db or AppleScript subprocesses.
+ *     Tests that need these features mock them via the
+ *     hu_imessage_test_* helpers.
+ *
+ * Class 3 — Missing build-time dependency
+ *   - HU_ENABLE_SQLITE=OFF: chat.db reads (poll, history, lookup_by_guid,
+ *     get_attachment_path) return NOT_SUPPORTED. Recovery: rebuild with
+ *     HU_ENABLE_SQLITE=ON.
+ *   - HU_HTTP_CURL=OFF: hu_imessage_fetch_gif (Tenor API) returns NULL
+ *     (which the caller treats as NOT_SUPPORTED).
+ *
+ * Class 4 — Feature flag OFF
+ *   - HU_IMESSAGE_TAPBACK_ENABLED=OFF: AX-based tapback returns
+ *     NOT_SUPPORTED unless the imsg CLI is on PATH (imsg react path
+ *     still works). Recovery: install steipete/imsg, OR rebuild with
+ *     -DHU_IMESSAGE_TAPBACK_ENABLED=ON.
+ *
+ * Class 5 — Environment incomplete at runtime
+ *   - No HOME env var: NOT_SUPPORTED (chat.db path unresolvable).
+ *   - Full Disk Access missing: chat.db open fails → NOT_SUPPORTED for
+ *     the operation. Recovery: `human doctor imessage --fix` (opens
+ *     System Settings to the FDA pane).
+ *   - All typing tiers fail (IMCore + AX + imsg): start_typing returns
+ *     NOT_SUPPORTED. The send still works; typing indicator is best-
+ *     effort.
+ *
+ * NEVER means
+ *   No public Apple API exists. See capability-matrix.md for the full
+ *   list. Examples: message editing, unsend, sending message effects,
+ *   sending stickers / Memoji, sending inline reply quotes. These are
+ *   intentional gaps; the daemon avoids them entirely.
+ */
+
 hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
                               size_t default_target_len, const char *const *allow_from,
                               size_t allow_from_count, hu_channel_t *out);
 void hu_imessage_destroy(hu_channel_t *ch);
+
+/** Returns true if the calling process has Accessibility (AX) permission.
+ *
+ * Distinct from Full Disk Access — chat.db reads need FDA, but the typing
+ * indicator and AX-based tapback need AX. They're granted independently in
+ * System Settings → Privacy & Security. Doctor reports the two states
+ * separately so users know which one to grant.
+ *
+ * On non-Apple builds and in HU_IS_TEST mode, always returns false. */
+bool hu_imessage_ax_is_trusted(void);
 
 /** Enable the imsg CLI (steipete/imsg) for send/react at runtime.
  * Must be called after hu_imessage_create. */

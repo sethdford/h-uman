@@ -68,11 +68,53 @@ typedef struct hu_imessage_ctx {
     bool has_imsg_cli;
     const char *loopback_handle;
     int64_t last_ai_send_epoch;
-    /* FDA-aware circuit breaker + poll status (always present so tests + non-Apple
-     * builds can interrogate state without #ifdef gymnastics). */
+    /* ── Circuit breaker state machine ──────────────────────────────────
+     *
+     * The breaker protects the daemon from busy-looping on chat.db opens
+     * when Full Disk Access (FDA) has been revoked or the database is
+     * inaccessible. Four orthogonal fields encode the state — auditors
+     * occasionally suggest collapsing them into one enum, but each
+     * tracks a genuinely different thing:
+     *
+     *   consecutive_open_failures   counter, 0 = no recent failures.
+     *                               When it crosses a threshold the
+     *                               breaker LATCHES (circuit_breaker_
+     *                               tripped = true) and we stop trying.
+     *   circuit_breaker_tripped     LATCHED bool. Stays true across
+     *                               polls until a probe succeeds.
+     *                               Distinct from the counter because
+     *                               the threshold-cross is one-way: a
+     *                               single success below threshold
+     *                               doesn't relatch.
+     *   breaker_log_emitted         ONE-SHOT log gate. We want to log
+     *                               "breaker tripped" once per trip,
+     *                               not on every tick. Cleared when
+     *                               state recovers.
+     *   breaker_recovery_probe_counter   cycles 0..N while tripped.
+     *                               When it hits N, the poller probes
+     *                               chat.db (cheap stat() — see audit
+     *                               B5 / W5) to detect FDA recovery.
+     *                               Resets after each probe.
+     *
+     * State transitions
+     * -----------------
+     *   HEALTHY (counter=0, !tripped) → DEGRADED (counter>0, !tripped)
+     *      on first failure.
+     *   DEGRADED → TRIPPED (counter>=N, tripped=true, log emitted)
+     *      when threshold crossed.
+     *   TRIPPED → HEALTHY (counter=0, !tripped, log_emitted=false)
+     *      when a probe succeeds.
+     *
+     * The combined public-facing view is hu_imessage_health_t in
+     * include/human/channels/imessage.h (UNKNOWN/OK/STALLED/TRIPPED).
+     * That enum IS the recommended single-state-variable abstraction —
+     * but it's the read side. The four internal fields are the write
+     * side, and collapsing them loses the orthogonality the writers
+     * need (e.g. resetting the probe counter without clearing the
+     * trip latch). */
     uint32_t consecutive_open_failures;
     bool circuit_breaker_tripped;
-    bool breaker_log_emitted; /* one-shot log gate */
+    bool breaker_log_emitted; /* one-shot log gate; see state-machine block above */
     hu_imessage_error_class_t last_error_class;
     int64_t last_successful_poll_epoch;
     /* Watchdog state machine — collapses breaker-tripped + poll-stalled into a

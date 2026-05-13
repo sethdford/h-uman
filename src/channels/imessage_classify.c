@@ -115,3 +115,13 @@ size_t hu_imessage_copy_bounded(char *dst, size_t dst_cap, const char *src, size
     dst[cplen] = '\0';
     return cplen;
 }
+
+/* AX trust check stub for non-Apple / test builds. The real implementation
+ * lives in imessage_ax.c (Apple-only); on every other platform AX permission
+ * is meaningless — return false unconditionally so doctor surfaces the
+ * "platform doesn't have AX" case rather than crashing on a missing symbol. */
+#if HU_IS_TEST || !defined(__APPLE__) || !defined(__MACH__)
+bool hu_imessage_ax_is_trusted(void) {
+    return false;
+}
+#endif
