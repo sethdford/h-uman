@@ -51,8 +51,8 @@
 #include <sqlite3.h>
 #endif
 
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-#include <unistd.h>
+#if !HU_IS_TEST
+#include <unistd.h> /* getpid for GIF temp-file naming; available on macOS + Linux */
 #endif
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
