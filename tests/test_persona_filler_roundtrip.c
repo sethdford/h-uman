@@ -19,6 +19,7 @@
 #include "human/persona.h"
 #include "test_framework.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -220,6 +221,83 @@ static void load_overlay_truncates_filler_bank_above_32(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+static void filler_truncation_above_cap_emits_warning(void) {
+#if defined(__unix__) || defined(__APPLE__)
+    /* Build a persona JSON with 40 filler entries in the imessage overlay. */
+    char json[4096];
+    size_t off = 0;
+    int n = snprintf(json + off, sizeof(json) - off,
+                     "{"
+                     "  \"version\": 1,"
+                     "  \"name\": \"warn_test\","
+                     "  \"core\": {\"identity\": \"x\", \"traits\": [\"x\"]},"
+                     "  \"channel_overlays\": {"
+                     "    \"imessage\": {"
+                     "      \"formality\": \"casual\","
+                     "      \"avg_length\": \"short\","
+                     "      \"emoji_usage\": \"minimal\","
+                     "      \"style_notes\": [],"
+                     "      \"filler_bank\": [");
+    if (n < 0 || (size_t)n >= sizeof(json) - off)
+        return;
+    off += (size_t)n;
+    for (int i = 0; i < 40; i++) {
+        n = snprintf(json + off, sizeof(json) - off, "%s\"w%d\"", i == 0 ? "" : ",", i);
+        if (n < 0 || (size_t)n >= sizeof(json) - off)
+            return;
+        off += (size_t)n;
+    }
+    n = snprintf(json + off, sizeof(json) - off, "]}}}");
+    if (n < 0 || (size_t)n >= sizeof(json) - off)
+        return;
+    off += (size_t)n;
+
+    /* Redirect stderr to a temp file so we can inspect the warning. */
+    char tmpl[] = "/tmp/hu_filler_warn_XXXXXX";
+    int tfd = mkstemp(tmpl);
+    HU_ASSERT(tfd >= 0);
+
+    int save_err = dup(STDERR_FILENO);
+    HU_ASSERT(save_err >= 0);
+    if (!freopen(tmpl, "w", stderr)) {
+        dup2(save_err, STDERR_FILENO);
+        close(save_err);
+        close(tfd);
+        unlink(tmpl);
+        HU_FAIL("freopen stderr");
+    }
+    close(tfd); /* freopen owns the stream now */
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, off, &p);
+
+    fflush(stderr);
+    dup2(save_err, STDERR_FILENO);
+    close(save_err);
+
+    /* Read back what was written to stderr. */
+    FILE *rf = fopen(tmpl, "r");
+    HU_ASSERT_NOT_NULL(rf);
+    char captured[1024];
+    size_t cap_len = fread(captured, 1, sizeof(captured) - 1, rf);
+    captured[cap_len] = '\0';
+    fclose(rf);
+    unlink(tmpl);
+
+    /* Verify the load succeeded and the count is capped. */
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(p.overlays_count, 1);
+    HU_ASSERT_EQ(p.overlays[0].filler_bank_count, 32);
+
+    /* Verify the warning names the channel and says "truncated". */
+    HU_ASSERT_TRUE(strstr(captured, "imessage") != NULL);
+    HU_ASSERT_TRUE(strstr(captured, "truncated") != NULL);
+
+    hu_persona_deinit(&alloc, &p);
+#endif
+}
+
 void run_persona_filler_roundtrip_tests(void) {
     HU_TEST_SUITE("PersonaFillerRoundtrip");
 
@@ -227,6 +305,7 @@ void run_persona_filler_roundtrip_tests(void) {
     HU_RUN_TEST(load_legacy_persona_without_filler_bank_succeeds);
     HU_RUN_TEST(load_overlay_with_empty_filler_array_succeeds);
     HU_RUN_TEST(load_overlay_truncates_filler_bank_above_32);
+    HU_RUN_TEST(filler_truncation_above_cap_emits_warning);
 }
 
 #else
