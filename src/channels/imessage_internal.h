@@ -182,6 +182,15 @@ void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_
                               size_t message_len);
 #endif
 
+/* ── React module — src/channels/imessage_react.c (Step 4) ────────────
+ *
+ * Vtable hook for tapback reactions. 3-tier fallback (imsg CLI → AX →
+ * JXA). Test-mode + non-Apple builds short-circuit; HU_IMESSAGE_TAPBACK_
+ * ENABLED gates Tiers 2-3. */
+
+hu_error_t imessage_react(void *ctx, const char *target, size_t target_len, int64_t message_id,
+                          hu_reaction_type_t reaction);
+
 /* ── AX module — src/channels/imessage_ax.c (Step 1) ──────────────────── */
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
