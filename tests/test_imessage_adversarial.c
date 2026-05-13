@@ -20,8 +20,8 @@
 #include "human/core/error.h"
 #include "human/persona.h"
 #include "test_framework.h"
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -326,6 +326,43 @@ static void imessage_gif_json_extract_truncates_to_out_cap(void) {
     HU_ASSERT_EQ(n, 11u);
     HU_ASSERT_EQ(strlen(out), 11u);
     HU_ASSERT_EQ(out[11], '\0');
+}
+
+/* B6 — escape-aware scanning. A `\"` inside the URL must NOT be treated as
+ * the value terminator; we want the FULL string including the `\"` bytes. */
+static void imessage_gif_json_extract_handles_escaped_quote(void) {
+    char out[256];
+    /* URL contains an escaped quote in the path. Naive scan would
+     * truncate at `\"`. Escape-aware scan should yield the whole
+     * `path\"with\"quotes/g.gif` segment. */
+    const char *j = "\"url\":\"https://x.test/path\\\"with\\\"quotes/g.gif\"";
+    size_t n = hu_imessage_test_gif_json_extract(j, strlen(j), "url", out, sizeof(out));
+    HU_ASSERT_TRUE(n > strlen("https://x.test/path"));
+    /* The output should include the bytes past the first escaped quote
+     * (the actual escape characters are passed through verbatim per the
+     * function's contract; downstream HTTP fetch tolerates them). */
+    HU_ASSERT_NOT_NULL(strstr(out, "with"));
+    HU_ASSERT_NOT_NULL(strstr(out, "/g.gif"));
+}
+
+/* B6 — escaped backslash followed by quote should not terminate the value. */
+static void imessage_gif_json_extract_handles_escaped_backslash(void) {
+    char out[128];
+    const char *j = "\"url\":\"https://x.test/path\\\\file.gif\"";
+    size_t n = hu_imessage_test_gif_json_extract(j, strlen(j), "url", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_NOT_NULL(strstr(out, "file.gif"));
+}
+
+/* B6 — guard against NULL/empty args. */
+static void imessage_gif_json_extract_null_safe(void) {
+    char out[32];
+    HU_ASSERT_EQ(hu_imessage_test_gif_json_extract(NULL, 10, "url", out, sizeof(out)), 0u);
+    HU_ASSERT_EQ(hu_imessage_test_gif_json_extract("{\"url\":\"x\"}", 11, NULL, out, sizeof(out)),
+                 0u);
+    HU_ASSERT_EQ(hu_imessage_test_gif_json_extract("{\"url\":\"x\"}", 11, "url", NULL, sizeof(out)),
+                 0u);
+    HU_ASSERT_EQ(hu_imessage_test_gif_json_extract("{\"url\":\"x\"}", 11, "url", out, 0), 0u);
 }
 
 static void imessage_lookup_guid_not_supported_under_test(void) {
@@ -1819,21 +1856,21 @@ static void imessage_dm_msg_chat_id_empty(void) {
 
 #if HU_IS_TEST
 static void imessage_classify_known_codes(void) {
-    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(0),  HU_IMESSAGE_ERR_NONE);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(0), HU_IMESSAGE_ERR_NONE);
     HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(23), HU_IMESSAGE_ERR_AUTH);
     HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(14), HU_IMESSAGE_ERR_CANTOPEN);
-    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(5),  HU_IMESSAGE_ERR_BUSY);
-    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(6),  HU_IMESSAGE_ERR_BUSY);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(5), HU_IMESSAGE_ERR_BUSY);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(6), HU_IMESSAGE_ERR_BUSY);
     HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(99), HU_IMESSAGE_ERR_OTHER);
     HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(-1), HU_IMESSAGE_ERR_OTHER);
 }
 
 static void imessage_classify_name_roundtrip(void) {
-    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_NONE),     "NONE") == 0);
-    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_AUTH),     "AUTH") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_NONE), "NONE") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_AUTH), "AUTH") == 0);
     HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_CANTOPEN), "CANTOPEN") == 0);
-    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_BUSY),     "BUSY") == 0);
-    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_OTHER),    "OTHER") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_BUSY), "BUSY") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_OTHER), "OTHER") == 0);
 }
 
 static void imessage_breaker_trips_after_threshold_auth(void) {
@@ -2268,6 +2305,9 @@ void run_imessage_adversarial_tests(void) {
     HU_RUN_TEST(imessage_gif_json_extract_finds_url_value);
     HU_RUN_TEST(imessage_gif_json_extract_returns_zero_when_key_missing);
     HU_RUN_TEST(imessage_gif_json_extract_truncates_to_out_cap);
+    HU_RUN_TEST(imessage_gif_json_extract_handles_escaped_quote);
+    HU_RUN_TEST(imessage_gif_json_extract_handles_escaped_backslash);
+    HU_RUN_TEST(imessage_gif_json_extract_null_safe);
     HU_RUN_TEST(imessage_lookup_guid_not_supported_under_test);
     HU_RUN_TEST(imessage_start_stop_idempotent);
 #endif

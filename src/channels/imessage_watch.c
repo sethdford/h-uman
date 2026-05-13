@@ -75,6 +75,35 @@ bool imsg_cli_available(hu_imessage_ctx_t *c) {
 
 /* ── imsg watch subprocess (event-driven poll trigger) ─────────────── */
 
+/* SIGCHLD reaper: tell the kernel to auto-reap any of OUR children that
+ * exit, so a long-running `imsg watch` process that dies between our
+ * waitpid() calls in has_data/stop doesn't accumulate as a zombie.
+ *
+ * Installed lazily on first imsg_watch_start (one-shot guard) rather than
+ * unconditionally at daemon init, because the daemon also forks via
+ * hu_process_run with explicit waitpid; this would cause those waitpids
+ * to return -1/ECHILD. Those callers tolerate that gracefully (they
+ * ignore the return value past the "did it exit" check), but the change
+ * is still less invasive when applied just-in-time here.
+ *
+ * SIGCHLD=SIG_IGN is the canonical POSIX pattern for "fire-and-forget
+ * children with no reap-loop". After it's installed, our explicit
+ * waitpid(WNOHANG) in imsg_watch_has_data / imsg_watch_stop returns
+ * -1/ECHILD (child auto-reaped); both call sites treat non-zero as
+ * "child gone" → goto reaped, which is the correct behavior. */
+static void imsg_watch_install_sigchld_reaper(void) {
+    static bool installed = false;
+    if (installed)
+        return;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_NOCLDSTOP; /* don't deliver SIGCHLD for stopped children */
+    (void)sigaction(SIGCHLD, &sa, NULL);
+    installed = true;
+}
+
 void imsg_watch_start(hu_imessage_ctx_t *c) {
     if (!c || c->imsg_watch_running || !c->use_imsg_cli || !imsg_cli_available(c))
         return;
@@ -83,6 +112,8 @@ void imsg_watch_start(hu_imessage_ctx_t *c) {
          * just exit immediately on its own AUTH read of chat.db. */
         return;
     }
+
+    imsg_watch_install_sigchld_reaper();
 
     int pipefd[2];
     if (pipe(pipefd) < 0)

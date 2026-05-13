@@ -472,9 +472,35 @@ hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const c
 
 #if HU_IS_TEST || defined(HU_HTTP_CURL)
 /* Simple JSON string extractor: find "key":"value" and return value.
- * Writes into out (up to cap). Returns length or 0 on failure. */
+ *
+ * Used as a last-resort fallback when the structured hu_json_parse path
+ * fails (Tenor response shape drift, partial body, etc.). The structured
+ * parser in hu_imessage_fetch_gif is the canonical path; this exists so
+ * one API-shape change doesn't disable GIFs entirely.
+ *
+ * Escape handling
+ * ---------------
+ * The scanner is escape-aware: when it sees a `\` inside the string
+ * value, it skips the next character so embedded `\"` doesn't
+ * prematurely terminate the value. Common JSON escapes (`\/`, `\\`,
+ * `\"`, `\n`, `\t`, `\uXXXX`) are passed through verbatim — the
+ * resulting URL is consumed by libcurl, which tolerates literal
+ * backslashes in paths but would mis-fetch a truncated URL.
+ *
+ * What this does NOT do (intentional):
+ *   - Full JSON unescape. We don't translate `\"` → `"` or `/` → `/`.
+ *     Tenor URLs in practice contain `\/` (escaped slashes) which work
+ *     in HTTP GET regardless of escaping.
+ *   - Skip whitespace beyond the simple `: `. JSON allows tabs/newlines
+ *     between `:` and the value; Tenor produces single-line JSON.
+ *   - Distinguish nested-object `"url"` from the field we want. Caller
+ *     pre-anchors the search to the right region (after `"gif"`).
+ *
+ * Returns 0 if key not found or no value follows it. */
 static size_t gif_json_extract(const char *json, size_t json_len, const char *key, char *out,
                                size_t cap) {
+    if (!json || !key || !out || cap == 0)
+        return 0;
     size_t key_len = strlen(key);
     for (size_t i = 0; i + key_len + 3 < json_len; i++) {
         if (json[i] == '"' && memcmp(json + i + 1, key, key_len) == 0 &&
@@ -486,8 +512,13 @@ static size_t gif_json_extract(const char *json, size_t json_len, const char *ke
             if (j < json_len && json[j] == '"') {
                 j++;
                 size_t start = j;
-                while (j < json_len && json[j] != '"')
+                /* Escape-aware scan: skip the char after every `\` so
+                 * `\"` or `\\` doesn't end the value prematurely. */
+                while (j < json_len && json[j] != '"') {
+                    if (json[j] == '\\' && j + 1 < json_len)
+                        j++; /* swallow escape's next char */
                     j++;
+                }
                 size_t vlen = j - start;
                 if (vlen >= cap)
                     vlen = cap - 1;

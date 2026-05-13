@@ -41,9 +41,28 @@
  *
  * This is a pure file-move. The chat.db SQL and parsing logic is
  * byte-identical to the pre-refactor `imessage.c`. The followups
- * called out by the audit (schema-cache, IMSG_POLL_SQL_BASE header,
- * defensive null-guard on sqlite3_column_blob) are left as their own
- * focused commits so this carve-out remains a clean refactor.
+ * called out by the audit (schema-cache, IMSG_POLL_SQL_BASE header)
+ * are left as their own focused commits so this carve-out remains a
+ * clean refactor.
+ *
+ * attributedBody null-blob convention
+ * ====================================
+ *
+ * The audit's B2 item flagged a possible null-deref pattern around
+ * `sqlite3_column_blob()` returning NULL even when `_column_bytes()`
+ * is non-zero. Investigation: every blob read in this file uses the
+ * canonical guard `if (ab && ab_len > 0)` BEFORE deref (see lines
+ * ~226, ~498, ~863 — search for `sqlite3_column_blob`). The called
+ * helper `hu_imessage_extract_attributed_body` itself checks
+ * `!blob || blob_len < 4` at entry. Two layers of NULL safety.
+ *
+ * When adding a new column_blob site, follow the convention:
+ *   const unsigned char *ab = sqlite3_column_blob(stmt, idx);
+ *   int ab_len = sqlite3_column_bytes(stmt, idx);
+ *   if (ab && ab_len > 0) { ... use ab ... }
+ *
+ * Do NOT trust `ab_len > 0` alone — sqlite3 column type promotion can
+ * produce non-zero bytes with a NULL pointer for empty BLOBs.
  */
 
 #include "imessage_internal.h"
