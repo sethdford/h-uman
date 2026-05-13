@@ -700,7 +700,10 @@ typedef enum {
     HU_PERSONA_ACTION_EXPORT,
     HU_PERSONA_ACTION_MERGE,
     HU_PERSONA_ACTION_IMPORT,
-    HU_PERSONA_ACTION_EVAL
+    HU_PERSONA_ACTION_EVAL,
+    HU_PERSONA_ACTION_FILLER_ADD,   /* human persona filler add --channel <ch> "<text>" */
+    HU_PERSONA_ACTION_FILLER_LIST,  /* human persona filler list --channel <ch> */
+    HU_PERSONA_ACTION_FILLER_REMOVE /* human persona filler remove --channel <ch> --index N */
 } hu_persona_action_t;
 
 typedef struct hu_persona_cli_args {
@@ -717,7 +720,10 @@ typedef struct hu_persona_cli_args {
     const char *with_contact;  /* --with-contact <handle_id> for conversation extraction */
     const char **merge_sources;
     size_t merge_sources_count;
-    const char *import_file; /* --from-file <path> or NULL for --from-stdin */
+    const char *import_file;    /* --from-file <path> or NULL for --from-stdin */
+    const char *filler_channel; /* --channel <name> for filler subcommands */
+    const char *filler_text;    /* positional "<text>" for filler add */
+    int filler_index;           /* --index <n> for filler remove; -1 = not set */
 } hu_persona_cli_args_t;
 
 hu_error_t hu_persona_cli_parse(int argc, const char **argv, hu_persona_cli_args_t *out);
