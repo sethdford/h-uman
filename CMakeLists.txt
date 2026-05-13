@@ -1933,7 +1933,10 @@ endif()
 # builds where Task 4 has not yet merged. Flip to remove the bypass once
 # Task 4 lands on main.
 # Skip on Windows (script is POSIX bash).
-if(NOT WIN32)
+if(NOT WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh")
+    # Defense-in-depth: skip silently if tools/ wasn't copied into the build
+    # context (the Dockerfile must COPY tools/ explicitly — see Dockerfile).
+    # Local dev and CI runners always have tools/ so the guard runs there.
     add_custom_target(human_filler_guard
         ALL
         COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh
