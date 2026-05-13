@@ -242,7 +242,8 @@ if(HU_ENABLE_IMESSAGE)
         src/channels/imessage_typing.c
         src/channels/imessage_watch.c
         src/channels/imessage_react.c
-        src/channels/imessage_send.c)
+        src/channels/imessage_send.c
+        src/channels/imessage_attachment.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
