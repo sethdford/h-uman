@@ -88,6 +88,12 @@ typedef struct hu_imessage_ctx {
      * watch-active code path through the test seam (the prod fields below
      * remain platform-gated). */
     bool imsg_watch_running;
+    /* C6: cache chat.db schema column detection. -1 = unchecked, 0 = absent,
+     * 1 = present. Set lazily on first poll; chat.db schema doesn't change
+     * at runtime so the value is stable for the daemon's lifetime. Avoids
+     * a redundant `SELECT date_retracted FROM message LIMIT 0` prepare on
+     * every poll tick. */
+    int has_date_retracted_cached;
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
     pid_t imsg_watch_pid;
     int imsg_watch_fd;

@@ -817,6 +817,7 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
     c->default_target_len = 0;
     c->allow_from = allow_from;
     c->allow_from_count = allow_from_count;
+    c->has_date_retracted_cached = -1; /* C6: unchecked; populated lazily in poll */
     if (default_target && default_target_len > 0) {
         c->default_target = (char *)alloc->alloc(alloc->ctx, default_target_len + 1);
         if (!c->default_target) {
