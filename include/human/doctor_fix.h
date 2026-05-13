@@ -46,4 +46,21 @@ hu_error_t hu_doctor_fix_personas_dir(hu_allocator_t *alloc, hu_doctor_fix_resul
 /* Write a default config.json if none exists. */
 hu_error_t hu_doctor_fix_default_config(hu_allocator_t *alloc, hu_doctor_fix_result_t *out);
 
+/* Diagnose and apply recovery actions for iMessage on macOS.
+ *
+ * Recovery actions (in order of cost / invasiveness):
+ *  - **FDA missing.** chat.db can't be opened. Open System Settings to
+ *    Privacy → Full Disk Access via the `x-apple.systempreferences:` deep
+ *    link so the user can grant access in one click. Cannot auto-grant
+ *    (security boundary), but eliminates the "user doesn't know where
+ *    to go" gap that today turns into a silent-daemon support ticket.
+ *  - **Stale rowid cache.** ~/.human/.imessage_poll_status has a
+ *    timestamp older than 24 hours or is unreadable → delete it so
+ *    the next poll rebuilds it from scratch.
+ *  - **Healthy.** No-op result with action_taken="(no recovery needed)".
+ *
+ * Non-Apple platforms / test mode return a deterministic "(skipped)"
+ * result. The function never fails — recovery is best-effort. */
+hu_error_t hu_doctor_fix_imessage(hu_allocator_t *alloc, hu_doctor_fix_result_t *out);
+
 #endif /* HU_DOCTOR_FIX_H */

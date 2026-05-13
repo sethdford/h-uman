@@ -8,6 +8,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
+#endif
 
 #if HU_IS_TEST
 
@@ -17,7 +22,7 @@ hu_error_t hu_doctor_fix(hu_allocator_t *alloc, hu_config_t *cfg, hu_doctor_fix_
     if (!alloc || !results || !result_count)
         return HU_ERR_INVALID_ARGUMENT;
 
-    *result_count = 5;
+    *result_count = 6;
     *results = (hu_doctor_fix_result_t *)alloc->alloc(alloc->ctx, sizeof(hu_doctor_fix_result_t) *
                                                                       (*result_count));
     if (!*results)
@@ -28,6 +33,15 @@ hu_error_t hu_doctor_fix(hu_allocator_t *alloc, hu_config_t *cfg, hu_doctor_fix_
     (*results)[2] = (hu_doctor_fix_result_t){"plugins directory", "exists (test mode)", true};
     (*results)[3] = (hu_doctor_fix_result_t){"personas directory", "exists (test mode)", true};
     (*results)[4] = (hu_doctor_fix_result_t){"default config", "exists (test mode)", true};
+    (*results)[5] = (hu_doctor_fix_result_t){"imessage", "(skipped — test mode)", true};
+    return HU_OK;
+}
+
+hu_error_t hu_doctor_fix_imessage(hu_allocator_t *alloc, hu_doctor_fix_result_t *out) {
+    (void)alloc;
+    if (!out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = (hu_doctor_fix_result_t){"imessage", "(skipped — test mode)", true};
     return HU_OK;
 }
 
@@ -212,13 +226,81 @@ hu_error_t hu_doctor_fix_default_config(hu_allocator_t *alloc, hu_doctor_fix_res
     return HU_OK;
 }
 
+/* iMessage recovery: probe chat.db readability, open System Settings on FDA
+ * failure, clear stale poll-status. Apple-only; non-Apple returns "(skipped)". */
+hu_error_t hu_doctor_fix_imessage(hu_allocator_t *alloc, hu_doctor_fix_result_t *out) {
+    (void)alloc;
+    if (!out)
+        return HU_ERR_INVALID_ARGUMENT;
+#if defined(__APPLE__) && defined(__MACH__)
+    char dir[512];
+    if (!get_human_dir(dir, sizeof(dir))) {
+        *out = (hu_doctor_fix_result_t){"imessage", "cannot resolve HOME", false};
+        return HU_OK;
+    }
+
+    /* 1. Probe FDA by attempting to stat chat.db. We deliberately do NOT
+     * open() it — stat() is the lightest probe that reflects FDA state. */
+    const char *home = getenv("HOME");
+    char chatdb[1024];
+    snprintf(chatdb, sizeof(chatdb), "%s/Library/Messages/chat.db", home ? home : "");
+    struct stat st;
+    if (stat(chatdb, &st) != 0) {
+        /* chat.db unreachable — most often FDA missing. Pop System Settings
+         * to the right pane. The deep-link is documented at
+         * https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/SystemDefinedURLSchemes.html
+         */
+        int rc = system("open 'x-apple.systempreferences:com.apple.preference.security?"
+                        "Privacy_AllFiles' >/dev/null 2>&1");
+        if (rc == 0) {
+            *out = (hu_doctor_fix_result_t){
+                "imessage",
+                "opened System Settings → Privacy → Full Disk Access; "
+                "grant access to your terminal (or the human binary) and re-run",
+                true};
+        } else {
+            *out = (hu_doctor_fix_result_t){
+                "imessage",
+                "Full Disk Access missing; open System Settings → Privacy → "
+                "Full Disk Access and grant access manually",
+                false};
+        }
+        return HU_OK;
+    }
+
+    /* 2. chat.db reachable — check for stale poll-status (>24h since last
+     * successful poll). The status file is plain text written by the
+     * iMessage channel after every successful poll. Delete it; the next
+     * poll rebuilds it. */
+    char status_path[1024];
+    snprintf(status_path, sizeof(status_path), "%s/.imessage_poll_status", dir);
+    if (stat(status_path, &st) == 0) {
+        time_t now = time(NULL);
+        if (now > st.st_mtime && (now - st.st_mtime) > 24 * 60 * 60) {
+            if (unlink(status_path) == 0) {
+                *out = (hu_doctor_fix_result_t){
+                    "imessage", "cleared stale poll-status (>24h old); next poll will rebuild",
+                    true};
+                return HU_OK;
+            }
+        }
+    }
+
+    *out = (hu_doctor_fix_result_t){"imessage", "(no recovery needed)", true};
+    return HU_OK;
+#else
+    *out = (hu_doctor_fix_result_t){"imessage", "(skipped — non-Apple platform)", true};
+    return HU_OK;
+#endif
+}
+
 hu_error_t hu_doctor_fix(hu_allocator_t *alloc, hu_config_t *cfg, hu_doctor_fix_result_t **results,
                          size_t *result_count) {
     (void)cfg;
     if (!alloc || !results || !result_count)
         return HU_ERR_INVALID_ARGUMENT;
 
-    size_t cap = 5;
+    size_t cap = 6;
     *results =
         (hu_doctor_fix_result_t *)alloc->alloc(alloc->ctx, sizeof(hu_doctor_fix_result_t) * cap);
     if (!*results)
@@ -230,6 +312,7 @@ hu_error_t hu_doctor_fix(hu_allocator_t *alloc, hu_config_t *cfg, hu_doctor_fix_
     hu_doctor_fix_plugins_dir(alloc, &(*results)[(*result_count)++]);
     hu_doctor_fix_personas_dir(alloc, &(*results)[(*result_count)++]);
     hu_doctor_fix_default_config(alloc, &(*results)[(*result_count)++]);
+    hu_doctor_fix_imessage(alloc, &(*results)[(*result_count)++]);
 
     return HU_OK;
 }
