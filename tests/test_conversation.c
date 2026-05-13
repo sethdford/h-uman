@@ -424,6 +424,77 @@ static void awareness_detects_excitement(void) {
     alloc.free(alloc.ctx, ctx, len + 1);
 }
 
+/* W1: iMessage register hint — appended only when channel_name is "imessage" */
+static void awareness_on_imessage_appends_register(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[2] = {
+        make_entry(false, "you around later?", "12:00"),
+        make_entry(true, "yeah whats up", "12:01"),
+    };
+    size_t len = 0;
+    char *ctx = hu_conversation_build_awareness_on(&alloc, entries, 2, NULL, "imessage", 8, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "tapback") != NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
+/* W1: short last incoming → mirror brevity hint */
+static void awareness_on_imessage_short_msg_adds_mirror_hint(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[2] = {
+        make_entry(true, "hey im back", "12:00"),
+        make_entry(false, "lol same", "12:01"), /* 8 chars, last from them */
+    };
+    size_t len = 0;
+    char *ctx = hu_conversation_build_awareness_on(&alloc, entries, 2, NULL, "imessage", 8, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "over-explaining") != NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
+/* W1: case-insensitive channel match */
+static void awareness_on_imessage_case_insensitive(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[1] = {
+        make_entry(false, "hey", "12:00"),
+    };
+    size_t len = 0;
+    char *ctx = hu_conversation_build_awareness_on(&alloc, entries, 1, NULL, "iMessage", 8, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") != NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
+/* W1: non-iMessage channel does NOT get the register hint */
+static void awareness_on_telegram_omits_imessage_register(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[2] = {
+        make_entry(false, "hi", "12:00"),
+        make_entry(true, "hey", "12:01"),
+    };
+    size_t len = 0;
+    char *ctx = hu_conversation_build_awareness_on(&alloc, entries, 2, NULL, "telegram", 8, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") == NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
+/* W1: backward compat — legacy hu_conversation_build_awareness omits register */
+static void awareness_legacy_api_omits_register(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[2] = {
+        make_entry(false, "hi", "12:00"),
+        make_entry(true, "hey", "12:01"),
+    };
+    size_t len = 0;
+    char *ctx = hu_conversation_build_awareness(&alloc, entries, 2, NULL, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") == NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
 static void awareness_output_bounded(void) {
     hu_allocator_t alloc = hu_system_allocator();
 
@@ -1195,9 +1266,8 @@ static void calibrate_for_contact_softens_ping_for_warm_dm(void) {
     hu_contact_profile_t cp = {0};
     cp.relationship_type = (char *)"friend";
     const char *m = "call me soon";
-    size_t cal_len = hu_conversation_calibrate_length_for_contact(m, strlen(m), NULL, 0, false,
-                                                                  &cp, HU_REL_TRUSTED, buf,
-                                                                  sizeof(buf));
+    size_t cal_len = hu_conversation_calibrate_length_for_contact(m, strlen(m), NULL, 0, false, &cp,
+                                                                  HU_REL_TRUSTED, buf, sizeof(buf));
     HU_ASSERT_TRUE(cal_len > 80);
     HU_ASSERT_TRUE(strstr(buf, "real friend") != NULL);
 }
@@ -1210,7 +1280,8 @@ static void calibrate_for_contact_group_uses_neutral_ratio(void) {
     size_t cal_len = hu_conversation_calibrate_length_for_contact(m, strlen(m), NULL, 0, true, &cp,
                                                                   HU_REL_TRUSTED, buf, sizeof(buf));
     HU_ASSERT_TRUE(cal_len > 40);
-    HU_ASSERT_TRUE(strstr(buf, "Moderate length") != NULL || strstr(buf, "Their last message") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Moderate length") != NULL ||
+                   strstr(buf, "Their last message") != NULL);
     /* Group path: 2x cap only — numeric limit in buf should reflect ~46 chars max, not ~69 */
     HU_ASSERT_TRUE(strstr(buf, "48") != NULL || strstr(buf, "46") != NULL);
 }
@@ -3094,7 +3165,8 @@ static void strip_formal_no_change(void) {
 static void strip_formal_en_dash(void) {
     char buf[128];
     /* en-dash is UTF-8 E2 80 93 */
-    strcpy(buf, "pages 1\xe2\x80\x93" "10");
+    strcpy(buf, "pages 1\xe2\x80\x93"
+                "10");
     size_t len = hu_conversation_strip_formal_structure(buf, strlen(buf));
     HU_ASSERT(strstr(buf, "-") != NULL);
     (void)len;
@@ -3140,13 +3212,12 @@ static void strip_formal_colon_preserves_inline(void) {
 
 static void strip_pipeline_full_integration(void) {
     char buf[512];
-    const char *dirty =
-        "<thinking>internal reasoning</thinking>"
-        "1. Weather: It's pretty nice\n"
-        "2. Food \xe2\x80\x94 pizza sounds good\n"
-        "- Also check out **bold text**\n"
-        "<|endoftext|>"
-        "As an AI, I hope this helps!";
+    const char *dirty = "<thinking>internal reasoning</thinking>"
+                        "1. Weather: It's pretty nice\n"
+                        "2. Food \xe2\x80\x94 pizza sounds good\n"
+                        "- Also check out **bold text**\n"
+                        "<|endoftext|>"
+                        "As an AI, I hope this helps!";
     size_t len = strlen(dirty);
     HU_ASSERT(len < sizeof(buf));
     memcpy(buf, dirty, len + 1);
@@ -3885,6 +3956,11 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(awareness_null_returns_null);
     HU_RUN_TEST(awareness_builds_context);
     HU_RUN_TEST(awareness_detects_excitement);
+    HU_RUN_TEST(awareness_on_imessage_appends_register);
+    HU_RUN_TEST(awareness_on_imessage_short_msg_adds_mirror_hint);
+    HU_RUN_TEST(awareness_on_imessage_case_insensitive);
+    HU_RUN_TEST(awareness_on_telegram_omits_imessage_register);
+    HU_RUN_TEST(awareness_legacy_api_omits_register);
     HU_RUN_TEST(awareness_output_bounded);
 
     /* Narrative detection */

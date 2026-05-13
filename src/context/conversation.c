@@ -1121,9 +1121,36 @@ static const char *day_name(int wday) {
     return (wday >= 0 && wday < 7) ? days[wday] : "?";
 }
 
+/* Case-insensitive channel-name match used by the awareness register hint. */
+static bool channel_name_eq(const char *channel_name, size_t channel_name_len, const char *target) {
+    if (!channel_name || channel_name_len == 0 || !target)
+        return false;
+    size_t tlen = strlen(target);
+    if (tlen != channel_name_len)
+        return false;
+    for (size_t i = 0; i < tlen; i++) {
+        char a = channel_name[i];
+        char b = target[i];
+        if (a >= 'A' && a <= 'Z')
+            a = (char)(a + 32);
+        if (b >= 'A' && b <= 'Z')
+            b = (char)(b + 32);
+        if (a != b)
+            return false;
+    }
+    return true;
+}
+
 char *hu_conversation_build_awareness(hu_allocator_t *alloc,
                                       const hu_channel_history_entry_t *entries, size_t count,
                                       const struct hu_persona *persona, size_t *out_len) {
+    return hu_conversation_build_awareness_on(alloc, entries, count, persona, NULL, 0, out_len);
+}
+
+char *hu_conversation_build_awareness_on(hu_allocator_t *alloc,
+                                         const hu_channel_history_entry_t *entries, size_t count,
+                                         const struct hu_persona *persona, const char *channel_name,
+                                         size_t channel_name_len, size_t *out_len) {
     if (!alloc || !out_len)
         return NULL;
     *out_len = 0;
@@ -1358,6 +1385,49 @@ char *hu_conversation_build_awareness(hu_allocator_t *alloc,
             size_t cal_len = hu_conversation_calibrate_length(
                 last_their_msg, last_their_len, entries, count, buf + pos, CTX_BUF_CAP - pos);
             pos += cal_len;
+        }
+    }
+
+    /* Channel-specific register hint.
+     *
+     * iMessage is the highest-leverage Tier-1 channel today; its conversational
+     * register (DM brevity, tapback-as-reply, single-emoji legitimacy) is the
+     * single biggest "is this a friend or a chatbot" signal. This block injects
+     * a short directive when the active channel is iMessage. Other channels are
+     * unchanged (NULL channel_name → no-op preserves the older API contract). */
+    if (channel_name_eq(channel_name, channel_name_len, "imessage")) {
+        const char *last_their_msg = NULL;
+        size_t last_their_len = 0;
+        if (entries && count > 0) {
+            for (size_t i = count; i > 0; i--) {
+                if (!entries[i - 1].from_me) {
+                    last_their_msg = entries[i - 1].text;
+                    last_their_len = strlen(last_their_msg);
+                    break;
+                }
+            }
+        }
+        w = snprintf(buf + pos, CTX_BUF_CAP - pos,
+                     "\n--- iMessage register ---\n"
+                     "- This is iMessage, a personal DM/group thread — not a help "
+                     "desk or productivity assistant.\n"
+                     "- Single-word, single-emoji, or fragment replies are normal "
+                     "and often the most natural option.\n"
+                     "- A tapback (👍 ❤️ 😆 😮 😢 ‼️) is a valid response when the "
+                     "incoming message doesn't ask anything; consider it before "
+                     "reaching for text.\n"
+                     "- Multi-paragraph essays, numbered lists, and corporate "
+                     "openers (\"Great question\", \"I'd be happy to\") read as "
+                     "robotic in this register. Avoid them.\n");
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
+        if (last_their_msg && last_their_len > 0 && last_their_len <= 20) {
+            w = snprintf(buf + pos, CTX_BUF_CAP - pos,
+                         "- Their last message was %zu chars (very short). "
+                         "Your reply should be similarly tight — usually under "
+                         "30 chars. If you're typing a paragraph, you're "
+                         "over-explaining.\n",
+                         last_their_len);
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
     }
 
@@ -3609,7 +3679,7 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
     /* Last message length (structural) + numeric char limit for prompt */
     int max_chars = is_group ? hu_conversation_max_response_chars(last_msg_len)
                              : hu_conversation_max_response_chars_relational(last_msg_len, contact,
-                                                                           session_stage);
+                                                                             session_stage);
     w = snprintf(buf + pos, cap - pos, "Their last message: %zu chars. ", last_msg_len);
     POS_ADVANCE(w, pos, cap);
     if (last_msg_len < 15) {
@@ -3620,8 +3690,8 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
                          "up to %d chars.\n",
                          max_chars);
         } else {
-            w = snprintf(buf + pos, cap - pos, "Very brief — match that brevity. Target: 1-%d chars.\n",
-                         max_chars);
+            w = snprintf(buf + pos, cap - pos,
+                         "Very brief — match that brevity. Target: 1-%d chars.\n", max_chars);
         }
     } else if (last_msg_len > 100) {
         w = snprintf(buf + pos, cap - pos,
@@ -6598,8 +6668,8 @@ size_t hu_conversation_strip_channel_tags(char *buf, size_t len) {
         return len;
 
     /* Known artifact tags to strip entirely (paired XML-style) */
-    static const char *const xml_tags[] = {"thinking", "answer", "analysis", "reflection",
-                                           "internal", "scratchpad"};
+    static const char *const xml_tags[] = {"thinking",   "answer",   "analysis",
+                                           "reflection", "internal", "scratchpad"};
     static const size_t xml_tag_count = sizeof(xml_tags) / sizeof(xml_tags[0]);
 
     /* Known standalone tokens to strip */
@@ -6607,11 +6677,17 @@ size_t hu_conversation_strip_channel_tags(char *buf, size_t len) {
         const char *token;
         size_t len;
     } standalone[] = {
-        {"</s>", 4},   {"<s>", 3},       {"<|endoftext|>", 14},
+        {"</s>", 4},
+        {"<s>", 3},
+        {"<|endoftext|>", 14},
         {"<|im_start|>", 12},
         /* Split literal so "\\r" in "redacted\\r..." is not parsed as a carriage return. */
-        {"<|redacted" "_im_end|>", 19},
-        {"[INST]", 6}, {"[/INST]", 7},   {"<<SYS>>", 7},
+        {"<|redacted"
+         "_im_end|>",
+         19},
+        {"[INST]", 6},
+        {"[/INST]", 7},
+        {"<<SYS>>", 7},
         {"<</SYS>>", 8},
     };
     static const size_t standalone_count = sizeof(standalone) / sizeof(standalone[0]);
@@ -6716,8 +6792,7 @@ size_t hu_conversation_strip_formal_structure(char *buf, size_t len) {
         }
 
         /* Strip bullet markers at line start: "- ", "* " */
-        if (at_line_start && i + 1 < len && (buf[i] == '-' || buf[i] == '*') &&
-            buf[i + 1] == ' ') {
+        if (at_line_start && i + 1 < len && (buf[i] == '-' || buf[i] == '*') && buf[i + 1] == ' ') {
             i += 2;
             continue;
         }
@@ -6726,8 +6801,8 @@ size_t hu_conversation_strip_formal_structure(char *buf, size_t len) {
          * Keeps the text after the colon. */
         if (at_line_start && buf[i] >= 'A' && buf[i] <= 'Z') {
             size_t j = i + 1;
-            while (j < len && ((buf[j] >= 'a' && buf[j] <= 'z') ||
-                               (buf[j] >= 'A' && buf[j] <= 'Z')))
+            while (j < len &&
+                   ((buf[j] >= 'a' && buf[j] <= 'z') || (buf[j] >= 'A' && buf[j] <= 'Z')))
                 j++;
             if (j < len && buf[j] == ':' && j + 1 < len && buf[j + 1] == ' ' && j - i >= 2 &&
                 j - i <= 20) {

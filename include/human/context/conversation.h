@@ -49,6 +49,15 @@ char *hu_conversation_build_awareness(hu_allocator_t *alloc,
                                       const hu_channel_history_entry_t *entries, size_t count,
                                       const struct hu_persona *persona, size_t *out_len);
 
+/* Like hu_conversation_build_awareness, but also appends channel-specific register
+ * hints based on `channel_name` (case-insensitive). Today: iMessage gets a brevity /
+ * tapback-aware texting-register directive; other channels behave identically to the
+ * unparameterized form. Pass NULL / 0 to opt out (equivalent to the older API). */
+char *hu_conversation_build_awareness_on(hu_allocator_t *alloc,
+                                         const hu_channel_history_entry_t *entries, size_t count,
+                                         const struct hu_persona *persona, const char *channel_name,
+                                         size_t channel_name_len, size_t *out_len);
+
 /* Conversation quality score (0-100). Evaluates a draft response for:
  * brevity, validation/reflection, repair/rephrase, and follow-up.
  * Qualitative: compares to their average length, energy level; needs_revision

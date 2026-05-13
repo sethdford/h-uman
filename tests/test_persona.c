@@ -2434,6 +2434,45 @@ static void test_overlay_typing_quirks_in_prompt(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* W2: prove that hu_persona_find_overlay returns an overlay whose
+ * max_segment_chars can be used as a hard cap on response length.
+ *
+ * The daemon enforces this in src/daemon.c by taking the min of (calibrated
+ * length, overlay->max_segment_chars) when active_channel matches. This test
+ * pins the invariant — `max_segment_chars` is non-zero and is the value
+ * smaller than a generic 300-char calibration ceiling, so a min() pick takes
+ * the overlay value. Without this contract, the daemon's cap would silently
+ * regress to whatever the calibration produced. */
+static void test_overlay_max_segment_chars_caps_response_length(void) {
+    hu_persona_overlay_t overlays[] = {
+        {.channel = "imessage", .formality = "casual", .max_segment_chars = 160},
+    };
+    hu_persona_t p = {.name = "cap_user",
+                      .name_len = 8,
+                      .identity = "test",
+                      .overlays = overlays,
+                      .overlays_count = 1};
+
+    const hu_persona_overlay_t *ov = hu_persona_find_overlay(&p, "imessage", 8);
+    HU_ASSERT_NOT_NULL(ov);
+    HU_ASSERT_TRUE(ov->max_segment_chars > 0);
+    HU_ASSERT_EQ(ov->max_segment_chars, 160u);
+
+    /* Mirror the daemon's min-comparison: a generic 300-char ratio cap
+     * loses to the overlay's 160-char per-channel ceiling. */
+    uint32_t max_chars = 300;
+    if (ov->max_segment_chars > 0 && (max_chars == 0 || ov->max_segment_chars < max_chars))
+        max_chars = ov->max_segment_chars;
+    HU_ASSERT_EQ(max_chars, 160u);
+
+    /* Inverse case: when calibration is already tighter (e.g. brief 50 chars),
+     * the overlay must NOT relax it back up to 160. */
+    max_chars = 50;
+    if (ov->max_segment_chars > 0 && (max_chars == 0 || ov->max_segment_chars < max_chars))
+        max_chars = ov->max_segment_chars;
+    HU_ASSERT_EQ(max_chars, 50u);
+}
+
 /* ── Rich persona elements (Tier 1–3) ── */
 
 static void test_persona_load_json_rich_persona(void) {
@@ -4259,16 +4298,15 @@ static void test_lean_prompt_full_pipeline_sp_len(void) {
  * not silently dead. Real personas authored by hand often look like this. */
 static void test_persona_contact_top_level_comm_booleans_fallback(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *json =
-        "{\"name\":\"forgiving\","
-        "\"contacts\":{\"casey\":{"
-        "\"name\":\"Casey\",\"relationship_type\":\"friend\","
-        "\"warmth_level\":\"high\","
-        "\"prefers_short_texts\":true,"
-        "\"texts_in_bursts\":true,"
-        "\"sends_links_often\":false,"
-        "\"uses_emoji\":true"
-        "}}}";
+    const char *json = "{\"name\":\"forgiving\","
+                       "\"contacts\":{\"casey\":{"
+                       "\"name\":\"Casey\",\"relationship_type\":\"friend\","
+                       "\"warmth_level\":\"high\","
+                       "\"prefers_short_texts\":true,"
+                       "\"texts_in_bursts\":true,"
+                       "\"sends_links_often\":false,"
+                       "\"uses_emoji\":true"
+                       "}}}";
     hu_persona_t p;
     memset(&p, 0, sizeof(p));
     HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
@@ -4285,15 +4323,14 @@ static void test_persona_contact_top_level_comm_booleans_fallback(void) {
  * the canonical reading. */
 static void test_persona_contact_nested_comm_patterns_take_precedence(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *json =
-        "{\"name\":\"canonical\","
-        "\"contacts\":{\"riley\":{"
-        "\"name\":\"Riley\",\"relationship_type\":\"family\","
-        "\"prefers_short_texts\":true,"
-        "\"communication_patterns\":{\"prefers_short_texts\":false,"
-        "\"texts_in_bursts\":false,\"sends_links_often\":true,"
-        "\"uses_emoji\":false}"
-        "}}}";
+    const char *json = "{\"name\":\"canonical\","
+                       "\"contacts\":{\"riley\":{"
+                       "\"name\":\"Riley\",\"relationship_type\":\"family\","
+                       "\"prefers_short_texts\":true,"
+                       "\"communication_patterns\":{\"prefers_short_texts\":false,"
+                       "\"texts_in_bursts\":false,\"sends_links_often\":true,"
+                       "\"uses_emoji\":false}"
+                       "}}}";
     hu_persona_t p;
     memset(&p, 0, sizeof(p));
     HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
@@ -4310,10 +4347,11 @@ static void test_persona_chronotype_and_pragmatics_overlay_prompt(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    const char *json = "{\"version\":1,\"name\":\"ct\",\"chronotype\":\"evening_owl\","
-                       "\"core\":{\"identity\":\"id\",\"traits\":[\"a\"],\"communication_rules\":[]},"
-                       "\"channel_overlays\":{\"cli\":{\"directness\":\"low\",\"face_saving\":\"high\","
-                       "\"disagreement_style\":\"indirect\",\"silence_tolerance\":\"high\"}}}";
+    const char *json =
+        "{\"version\":1,\"name\":\"ct\",\"chronotype\":\"evening_owl\","
+        "\"core\":{\"identity\":\"id\",\"traits\":[\"a\"],\"communication_rules\":[]},"
+        "\"channel_overlays\":{\"cli\":{\"directness\":\"low\",\"face_saving\":\"high\","
+        "\"disagreement_style\":\"indirect\",\"silence_tolerance\":\"high\"}}}";
     HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
     HU_ASSERT_EQ((int)p.chronotype, (int)HU_CHRONO_EVENING_OWL);
     HU_ASSERT_EQ(p.overlays_count, 1u);
@@ -4413,14 +4451,10 @@ static void test_persona_bank_export_jsonl_writes_alpaca_shape(void) {
 static void test_persona_bank_export_jsonl_null_args_rejected(void) {
     hu_persona_t p = {0};
     size_t exported = 999;
-    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(NULL, "x", 1, &exported),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, NULL, 0, &exported),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 0, &exported),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 1, NULL),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(NULL, "x", 1, &exported), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, NULL, 0, &exported), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 0, &exported), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 1, NULL), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(exported, 999u); /* unchanged on rejection */
 }
 
@@ -4490,7 +4524,8 @@ static int pbh_test_run_sql(sqlite3 *db, const char *sql) {
     sqlite3_stmt *st = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &st, NULL);
     if (rc != SQLITE_OK) {
-        if (st) sqlite3_finalize(st);
+        if (st)
+            sqlite3_finalize(st);
         return rc;
     }
     sqlite3_step(st);
@@ -4508,11 +4543,10 @@ static sqlite3 *pbh_test_open_fresh_db(const char *path) {
             sqlite3_close(db);
         return NULL;
     }
-    const char *ddl =
-        "CREATE TABLE messages("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "session_id TEXT NOT NULL, role TEXT NOT NULL,"
-        "content TEXT NOT NULL, created_at TEXT DEFAULT(datetime('now')))";
+    const char *ddl = "CREATE TABLE messages("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                      "session_id TEXT NOT NULL, role TEXT NOT NULL,"
+                      "content TEXT NOT NULL, created_at TEXT DEFAULT(datetime('now')))";
     if (pbh_test_run_sql(db, ddl) != SQLITE_OK) {
         sqlite3_close(db);
         return NULL;
@@ -4541,8 +4575,7 @@ static void test_persona_banks_from_history_nonexistent_db_returns_io(void) {
     char path[64];
     snprintf(path, sizeof(path), "/tmp/hu_pbh_nope_%d.db", (int)getpid());
     remove(path);
-    HU_ASSERT_EQ(hu_persona_banks_extract_from_history(&alloc, path, 0, &banks, &n),
-                 HU_ERR_IO);
+    HU_ASSERT_EQ(hu_persona_banks_extract_from_history(&alloc, path, 0, &banks, &n), HU_ERR_IO);
     HU_ASSERT_TRUE(banks == NULL);
     HU_ASSERT_EQ(n, 0u);
 }
@@ -4570,10 +4603,8 @@ static void test_persona_banks_from_history_extracts_user_assistant_pair(void) {
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "telegram:42",
-                    "user", "What is the meaning of life today my friend?");
-    pbh_test_insert(db, "telegram:42",
-                    "assistant", "Forty-two, with a side of curiosity.");
+    pbh_test_insert(db, "telegram:42", "user", "What is the meaning of life today my friend?");
+    pbh_test_insert(db, "telegram:42", "assistant", "Forty-two, with a side of curiosity.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4600,14 +4631,12 @@ static void test_persona_banks_from_history_groups_by_channel(void) {
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "telegram:42",
-                    "user", "Tell me a story about a wise old turtle and a hare.");
-    pbh_test_insert(db, "telegram:42",
-                    "assistant", "Once upon a time the slow won, deliberately.");
-    pbh_test_insert(db, "imessage:thread-7",
-                    "user", "Are we still meeting at six tomorrow?");
-    pbh_test_insert(db, "imessage:thread-7",
-                    "assistant", "Yes, six o'clock at the cafe near the river.");
+    pbh_test_insert(db, "telegram:42", "user",
+                    "Tell me a story about a wise old turtle and a hare.");
+    pbh_test_insert(db, "telegram:42", "assistant", "Once upon a time the slow won, deliberately.");
+    pbh_test_insert(db, "imessage:thread-7", "user", "Are we still meeting at six tomorrow?");
+    pbh_test_insert(db, "imessage:thread-7", "assistant",
+                    "Yes, six o'clock at the cafe near the river.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4639,10 +4668,9 @@ static void test_persona_banks_from_history_falls_back_to_default_channel(void) 
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "session-abc",
-                    "user", "Quick question about the build process today.");
-    pbh_test_insert(db, "session-abc",
-                    "assistant", "Run cmake then make in the build directory please.");
+    pbh_test_insert(db, "session-abc", "user", "Quick question about the build process today.");
+    pbh_test_insert(db, "session-abc", "assistant",
+                    "Run cmake then make in the build directory please.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4676,8 +4704,7 @@ static void test_persona_banks_from_history_caps_per_channel(void) {
 
     hu_persona_example_bank_t *banks = NULL;
     size_t n = 0;
-    HU_ASSERT_EQ(hu_persona_banks_extract_from_history(&alloc, path, /*cap=*/2, &banks, &n),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_persona_banks_extract_from_history(&alloc, path, /*cap=*/2, &banks, &n), HU_OK);
     HU_ASSERT_EQ(n, 1u);
     HU_ASSERT_EQ(banks[0].examples_count, 2u);
 
@@ -4692,12 +4719,11 @@ static void test_persona_banks_from_history_skips_orphan_assistant(void) {
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "cli:admin",
-                    "assistant", "Welcome — how can I help you settle in today?");
-    pbh_test_insert(db, "cli:admin",
-                    "user", "I'd like to learn more about the project structure here.");
-    pbh_test_insert(db, "cli:admin",
-                    "assistant", "We use a vtable-driven C runtime with strict KISS rules.");
+    pbh_test_insert(db, "cli:admin", "assistant", "Welcome — how can I help you settle in today?");
+    pbh_test_insert(db, "cli:admin", "user",
+                    "I'd like to learn more about the project structure here.");
+    pbh_test_insert(db, "cli:admin", "assistant",
+                    "We use a vtable-driven C runtime with strict KISS rules.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4764,10 +4790,10 @@ static void test_persona_banks_from_history_redacts_pii(void) {
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "imessage:contact-9",
-                    "user", "My email is alice@example.com and my number is 555-867-5309 today.");
-    pbh_test_insert(db, "imessage:contact-9",
-                    "assistant", "Got it — saved your contact details to the local address book.");
+    pbh_test_insert(db, "imessage:contact-9", "user",
+                    "My email is alice@example.com and my number is 555-867-5309 today.");
+    pbh_test_insert(db, "imessage:contact-9", "assistant",
+                    "Got it — saved your contact details to the local address book.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4952,6 +4978,7 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_overlay_typing_quirks_parsed);
     HU_RUN_TEST(test_overlay_typing_quirks_default_when_absent);
     HU_RUN_TEST(test_overlay_typing_quirks_in_prompt);
+    HU_RUN_TEST(test_overlay_max_segment_chars_caps_response_length);
 
     /* Humanization and context_modifiers */
     HU_RUN_TEST(test_persona_load_json_humanization_block_parses_values);

@@ -2562,13 +2562,14 @@ static bool gw_agent_on_message(hu_bus_event_type_t type, const hu_bus_event_t *
     char *convo_ctx = NULL;
     size_t convo_ctx_len = 0;
     if (hist_count > 0) {
-        convo_ctx = hu_conversation_build_awareness(alloc, hist_entries, hist_count,
+        convo_ctx = hu_conversation_build_awareness_on(alloc, hist_entries, hist_count,
 #ifdef HU_HAS_PERSONA
-                                                    agent->persona,
+                                                       agent->persona,
 #else
-                                                    NULL,
+                                                       NULL,
 #endif
-                                                    &convo_ctx_len);
+                                                       agent->active_channel,
+                                                       agent->active_channel_len, &convo_ctx_len);
     }
     agent->conversation_context = convo_ctx;
     agent->conversation_context_len = convo_ctx_len;
