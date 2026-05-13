@@ -10,8 +10,7 @@
 #if (defined(__APPLE__) && defined(__MACH__)) || HU_IS_TEST
 extern size_t escape_for_applescript(char *out, size_t out_cap, const char *in, size_t in_len);
 extern size_t imessage_sanitize_output(char *buf, size_t len);
-extern size_t imessage_build_attach_script(char *out, size_t out_cap,
-                                           const char *target_escaped,
+extern size_t imessage_build_attach_script(char *out, size_t out_cap, const char *target_escaped,
                                            const char *path_escaped);
 #endif
 
@@ -94,6 +93,16 @@ static void test_imessage_health_check(void) {
     hu_imessage_destroy(&ch);
 }
 
+static void test_imessage_ax_is_trusted_test_mode_returns_false(void) {
+    /* hu_imessage_ax_is_trusted lives in src/channels/imessage_ax.c on
+     * Apple platforms (consults AXIsProcessTrustedWithOptions) and in
+     * src/channels/imessage_classify.c on every other build (always
+     * returns false). The test-mode stub must report "no AX permission"
+     * so doctor / W10 surfaces the platform-doesn't-have-AX case
+     * deterministically. */
+    HU_ASSERT_EQ(hu_imessage_ax_is_trusted(), false);
+}
+
 static void test_imessage_send_test_mode(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t ch;
@@ -167,8 +176,7 @@ static void test_imessage_custom_emoji_react_records(void) {
     hu_imessage_create(&alloc, "+15551234567", 11, NULL, 0, &ch);
     HU_ASSERT_NOT_NULL(ch.vtable->react);
 
-    hu_error_t err =
-        ch.vtable->react(ch.ctx, "+15551234567", 11, 42, HU_REACTION_CUSTOM_EMOJI);
+    hu_error_t err = ch.vtable->react(ch.ctx, "+15551234567", 11, 42, HU_REACTION_CUSTOM_EMOJI);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_reaction_type_t out_reaction = HU_REACTION_NONE;
@@ -294,7 +302,6 @@ static void test_imessage_allow_from_filter_no_crash(void) {
     hu_imessage_destroy(&ch);
 }
 
-
 /* -- imessage_sanitize_output tests -- */
 
 static void test_sanitize_strips_ai_phrases(void) {
@@ -363,9 +370,8 @@ static void test_sanitize_null_safe(void) {
 
 static void test_build_attach_script_basic(void) {
     char out[1024];
-    size_t len = imessage_build_attach_script(out, sizeof(out),
-                                              "+15551234567",
-                                              "/tmp/human_img_test.png");
+    size_t len =
+        imessage_build_attach_script(out, sizeof(out), "+15551234567", "/tmp/human_img_test.png");
     HU_ASSERT(len > 0);
     HU_ASSERT(strstr(out, "POSIX file") != NULL);
     HU_ASSERT(strstr(out, "/tmp/human_img_test.png") != NULL);
@@ -376,9 +382,7 @@ static void test_build_attach_script_basic(void) {
 
 static void test_build_attach_script_small_buf_fails(void) {
     char out[32];
-    size_t len = imessage_build_attach_script(out, sizeof(out),
-                                              "+15551234567",
-                                              "/tmp/img.png");
+    size_t len = imessage_build_attach_script(out, sizeof(out), "+15551234567", "/tmp/img.png");
     HU_ASSERT_EQ(len, 0u);
 }
 
@@ -427,6 +431,7 @@ void run_imessage_extended_tests(void) {
     HU_RUN_TEST(test_imessage_create_with_allow_from);
     HU_RUN_TEST(test_imessage_create_null_alloc);
     HU_RUN_TEST(test_imessage_health_check);
+    HU_RUN_TEST(test_imessage_ax_is_trusted_test_mode_returns_false);
     HU_RUN_TEST(test_imessage_gif_tapback_stub_returns_zero);
     HU_RUN_TEST(test_imessage_allow_from_filter_no_crash);
 #if defined(__APPLE__) && defined(__MACH__)
