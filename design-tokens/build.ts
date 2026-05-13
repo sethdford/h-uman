@@ -394,21 +394,17 @@ function main() {
     : path.join(ROOT, "include", "human", "design_tokens.h");
   writeOutput(outdir, headerPath, "design_tokens.h", header);
 
-  try {
-    execFileSync("clang-format", ["-i", headerPath], { stdio: "ignore" });
-  } catch {
-    try {
-      execFileSync(
-        "/opt/homebrew/opt/llvm/bin/clang-format",
-        ["-i", headerPath],
-        {
-          stdio: "ignore",
-        },
-      );
-    } catch {
-      /* clang-format not available — skip */
-    }
-  }
+  /* Intentionally NO clang-format pass on the C header.
+   *
+   * Previously this code ran `clang-format -i` on the canonical
+   * include/human/design_tokens.h path but NOT on the --outdir path.
+   * That asymmetry meant CI's drift check (which uses --outdir) would
+   * see the un-aligned generator output while the committed file was
+   * the clang-formatted version — guaranteed false-positive drift on
+   * every PR if the CI runner lacked a matching clang-format version.
+   *
+   * Keeping the generator output as the canonical committed form makes
+   * the two paths byte-identical without depending on a host tool. */
 
   const refJson = generateDocsReference(tokens);
   const refPath = outdir
@@ -1852,6 +1848,7 @@ function generateCHeader(tokens: TokenMap): string {
     .join("\n");
 
   return `/* Auto-generated from design-tokens/ — do not edit manually */
+/* clang-format off */
 #ifndef HU_DESIGN_TOKENS_H
 #define HU_DESIGN_TOKENS_H
 
