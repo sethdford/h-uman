@@ -22,6 +22,9 @@ typedef struct hu_persona_overlay {
     char *emoji_usage;
     char **style_notes;
     size_t style_notes_count;
+    char **filler_bank; /* per-channel thinking-filler strings */
+    size_t filler_bank_count;
+    size_t filler_bank_cap; /* allocated capacity; soft cap 32 enforced at add */
     bool message_splitting;
     uint32_t max_segment_chars;
     char **typing_quirks;
@@ -495,9 +498,8 @@ hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *c
  * without requiring llama.cpp to be vendored in-tree. See
  * docs/plans/2026-05-10-m3-frontier-model-bridge.md for the full
  * Bridge A plan. */
-hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
-                                         const char *path, size_t path_len,
-                                         size_t *exported_count);
+hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona, const char *path,
+                                        size_t path_len, size_t *exported_count);
 
 /* Phase A1.3 — derive per-channel persona example banks from
  * conversation history.
@@ -552,8 +554,7 @@ hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
  * channel-segregated bank with the obvious garbage filtered out,
  * and feed it straight to hu_persona_bank_export_jsonl for fine-
  * tuning. Closes the M3 Bridge A loop end-to-end. */
-hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
-                                                 const char *db_path,
+hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc, const char *db_path,
                                                  size_t max_per_channel,
                                                  hu_persona_example_bank_t **out_banks,
                                                  size_t *out_count);
@@ -564,8 +565,7 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
  * the banks array itself. Safe to call with banks==NULL or count==0;
  * a zero-initialized bank within the array is also safe (NULL fields
  * are skipped). */
-void hu_persona_example_banks_free(hu_allocator_t *alloc,
-                                   hu_persona_example_bank_t *banks,
+void hu_persona_example_banks_free(hu_allocator_t *alloc, hu_persona_example_bank_t *banks,
                                    size_t banks_count);
 
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
@@ -729,9 +729,9 @@ struct hu_legacy_memory;
 struct hu_provider;
 hu_error_t hu_persona_style_reanalyze(hu_allocator_t *alloc, struct hu_provider *provider,
                                       const char *model, size_t model_len,
-                                      struct hu_legacy_memory *memory,
-                                      const char *persona_name, size_t persona_name_len,
-                                      const char *channel, size_t channel_len,
-                                      const char *contact_id, size_t contact_id_len);
+                                      struct hu_legacy_memory *memory, const char *persona_name,
+                                      size_t persona_name_len, const char *channel,
+                                      size_t channel_len, const char *contact_id,
+                                      size_t contact_id_len);
 
 #endif /* HU_PERSONA_H */
