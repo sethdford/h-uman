@@ -727,7 +727,7 @@ static hu_error_t imessage_vt_build_read_receipt_context(void *ctx, hu_allocator
 }
 
 static hu_error_t imessage_mark_read(void *ctx, const char *contact_id, size_t contact_id_len) {
-#ifdef HU_IS_TEST
+#if HU_IS_TEST
     (void)ctx;
     (void)contact_id;
     (void)contact_id_len;

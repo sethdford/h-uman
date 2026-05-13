@@ -370,6 +370,7 @@ set(HU_CORE_SOURCES
     src/doctor.c
     src/doctor_fix.c
     src/humanness.c
+    src/channels/channel_class.c
     src/channels/channel_monitor.c
     src/memory/evolved_opinions.c
     src/status.c
@@ -523,6 +524,7 @@ set(HU_CORE_SOURCES
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/filler_recency.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
     src/context/theory_of_mind.c
@@ -1932,6 +1934,25 @@ if(HU_ENABLE_TOPOLOGY_CHECK AND NOT WIN32)
         VERBATIM)
     add_dependencies(human human_topology_check)
 endif()
+# PCTT Task 9 — regression guard: prevent the three hardcoded DECISION-bucket
+# fillers from being reintroduced under src/ after PCTT Task 4 deletes them.
+# data/eval_*.json preserves the strings as fixtures and is excluded by the
+# script. The guard is ALL (runs on every `cmake --build --preset dev`) but
+# honours the HU_SKIP_FILLER_GUARD=1 env-var bypass for Wave 2 in-flight
+# builds where Task 4 has not yet merged. Flip to remove the bypass once
+# Task 4 lands on main.
+# Skip on Windows (script is POSIX bash).
+if(NOT WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh")
+    # Defense-in-depth: skip silently if tools/ wasn't copied into the build
+    # context (the Dockerfile must COPY tools/ explicitly — see Dockerfile).
+    # Local dev and CI runners always have tools/ so the guard runs there.
+    add_custom_target(human_filler_guard
+        ALL
+        COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Checking no hardcoded fillers regressed (PCTT Task 9)"
+        VERBATIM)
+endif()
 # Embed Info.plist for macOS TCC (accessibility, AppleEvents) identity
 if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/resources/Info.plist")
     target_link_options(human PRIVATE
@@ -2431,6 +2452,8 @@ set(HU_TEST_SOURCES
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
     tests/test_persona_directive_channels.c
+    tests/test_filler_recency.c
+    tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c
@@ -2779,7 +2802,7 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c)
 list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
@@ -2850,6 +2873,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_context_engine.c
     tests/test_exec_env.c
     tests/test_channel_monitor.c
+    tests/test_channel_class.c
     tests/test_context_engine_rag.c
     tests/test_doctor_fix.c
     tests/test_humanness.c
@@ -2908,6 +2932,7 @@ target_link_libraries(human_tests human_core_test)
 target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/src/gateway
     ${HU_ROOT}/src/channels)
 target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
+target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
 if(HU_ENABLE_APPLE_INTELLIGENCE)

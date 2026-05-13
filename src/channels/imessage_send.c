@@ -109,14 +109,18 @@ hu_error_t imessage_send(void *ctx, const char *target, size_t target_len, const
     return HU_ERR_NOT_SUPPORTED;
 #else
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
-    /* Use target if provided, else default_target */
+    if (!c || !c->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Use target if provided, else default_target. NULL guard on c must
+     * happen BEFORE we dereference c->default_target, or a NULL ctx
+     * crashes here instead of being reported. */
     const char *tgt = target;
     size_t tgt_len = target_len;
     if ((!tgt || tgt_len == 0) && c->default_target && c->default_target_len > 0) {
         tgt = c->default_target;
         tgt_len = c->default_target_len;
     }
-    if (!c || !c->alloc || !tgt || tgt_len == 0)
+    if (!tgt || tgt_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
     if (message_len == 0 && media_count == 0)
         return HU_ERR_INVALID_ARGUMENT;

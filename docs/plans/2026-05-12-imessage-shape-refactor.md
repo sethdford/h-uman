@@ -44,7 +44,7 @@ next feature wave doesn't ossify it further.
 
 ## Target shape
 
-```
+```text
 src/channels/
 ├── imessage.c              ← vtable, factory, ctx, lifecycle (target: ~600 LOC)
 ├── imessage_internal.h     ← cross‑module ctx + helper signatures (NEW)

@@ -89,6 +89,17 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
     if (!handle || handle_len == 0 || within_seconds <= 0)
         return false;
 
+    /*
+     * Short-circuit BEFORE opening chat.db: if the target handle is the
+     * loopback (self-chat), the AI's own sends look like "user is active"
+     * and produce false positives. Returning here also avoids leaking the
+     * sqlite3 handle that the previous version opened before this check.
+     */
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)channel_ctx;
+    if (c && c->loopback_handle && handle_len > 0 && strlen(c->loopback_handle) == handle_len &&
+        memcmp(c->loopback_handle, handle, handle_len) == 0)
+        return false;
+
     const char *home = getenv("HOME");
     if (!home)
         return false;
@@ -106,10 +117,6 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
      * Check for is_from_me=1 messages to this handle within the time window.
      * macOS Messages stores dates as nanoseconds since 2001-01-01 (Core Data epoch).
      */
-    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)channel_ctx;
-    if (c && c->loopback_handle && handle_len > 0 && strlen(c->loopback_handle) == handle_len &&
-        memcmp(c->loopback_handle, handle, handle_len) == 0)
-        return false;
 
     /* Exclude messages sent by the AI: only count is_from_me=1 rows whose
      * timestamp is after the last known AI send (+3s grace for clock skew).

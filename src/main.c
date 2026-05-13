@@ -231,6 +231,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                 "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
                 "  lora-runner             Generate response set from persona via provider (D2.2)\n"
                 "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
+                "  apply-adapter           Load a trained adapter into the local provider (W13)\n"
                 "  train-feed-predictor    Train topic/trend predictor from feed data\n"
                 "  status                  Show experiment results\n");
         return HU_ERR_INVALID_ARGUMENT;
@@ -2205,7 +2206,7 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
     hu_error_t err = hu_persona_cli_parse(argc, (const char **)argv, &args);
     if (err != HU_OK) {
         fprintf(stderr, "Usage: human persona "
-                        "<create|update|show|list|delete|validate|eval|export|merge|import> "
+                        "<create|update|show|list|delete|validate|eval|export|merge|import|filler> "
                         "[name] [options]\n");
         fprintf(
             stderr,
@@ -2219,6 +2220,9 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "  export <name>\n");
         fprintf(stderr, "  merge <output_name> <name1> <name2> [name3...]\n");
         fprintf(stderr, "  import <name> [--from-stdin | --from-file <path>]\n");
+        fprintf(stderr, "  filler <name> add --channel <name> \"<text>\"     append a filler\n");
+        fprintf(stderr, "  filler <name> list --channel <name>             list fillers\n");
+        fprintf(stderr, "  filler <name> remove --channel <name> --index N  remove by index\n");
         return err;
     }
     return hu_persona_cli_run(alloc, &args);
@@ -2526,28 +2530,37 @@ static bool gw_agent_on_message(hu_bus_event_type_t type, const hu_bus_event_t *
 
     char *reply = NULL;
     size_t reply_len = 0;
-    agent->active_channel = "gateway";
-    agent->active_channel_len = 8;
+    static const char k_gateway_channel[] = "gateway";
+    agent->active_channel = k_gateway_channel;
+    agent->active_channel_len = sizeof(k_gateway_channel) - 1;
 
     /* Build conversation-awareness context so humor bridging and consistency
      * scoring run on the gateway WebSocket chat path. The daemon path does this
      * in src/daemon.c; without it, agent->conversation_context stays NULL and
-     * downstream features (agent_stream.c, agent_turn.c) silently degrade. */
+     * downstream features (agent_stream.c, agent_turn.c) silently degrade.
+     *
+     * Walk newest→oldest skipping non-conversational roles (SYSTEM/TOOL/etc.)
+     * so we always get up to 20 USER/ASSISTANT turns, not "the last 20 slots
+     * which may contain only system messages." */
     hu_channel_history_entry_t *hist_entries = NULL;
     size_t hist_count = 0;
-    size_t hist_cap = agent->history_count < 20 ? agent->history_count : 20;
-    if (hist_cap > 0) {
+    enum { HU_GW_HIST_CAP = 20 };
+    size_t hist_cap = HU_GW_HIST_CAP;
+    if (agent->history_count > 0) {
         hist_entries = (hu_channel_history_entry_t *)alloc->alloc(
             alloc->ctx, hist_cap * sizeof(hu_channel_history_entry_t));
         if (hist_entries) {
-            size_t start = agent->history_count > hist_cap ? agent->history_count - hist_cap : 0;
-            for (size_t i = start; i < agent->history_count; i++) {
+            /* Collect newest-first into the tail of the buffer, then memmove to head. */
+            size_t i = agent->history_count;
+            while (i > 0 && hist_count < hist_cap) {
+                i--;
                 const hu_owned_message_t *m = &agent->history[i];
                 if (m->role != HU_ROLE_USER && m->role != HU_ROLE_ASSISTANT)
                     continue;
                 if (!m->content || m->content_len == 0)
                     continue;
-                hu_channel_history_entry_t *e = &hist_entries[hist_count];
+                /* Slot newest-first at the tail. */
+                hu_channel_history_entry_t *e = &hist_entries[hist_cap - 1 - hist_count];
                 e->from_me = (m->role == HU_ROLE_ASSISTANT);
                 size_t copy =
                     m->content_len < sizeof(e->text) - 1 ? m->content_len : sizeof(e->text) - 1;
@@ -2555,6 +2568,12 @@ static bool gw_agent_on_message(hu_bus_event_type_t type, const hu_bus_event_t *
                 e->text[copy] = '\0';
                 e->timestamp[0] = '\0';
                 hist_count++;
+            }
+            if (hist_count > 0 && hist_count < hist_cap) {
+                /* Slide the collected window down to the start of the buffer
+                 * so callers see hist_entries[0..hist_count) in chronological order. */
+                memmove(hist_entries, &hist_entries[hist_cap - hist_count],
+                        hist_count * sizeof(hu_channel_history_entry_t));
             }
         }
     }

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+#include <errno.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -240,13 +241,32 @@ hu_error_t hu_doctor_fix_imessage(hu_allocator_t *alloc, hu_doctor_fix_result_t 
     }
 
     /* 1. Probe FDA by attempting to stat chat.db. We deliberately do NOT
-     * open() it — stat() is the lightest probe that reflects FDA state. */
+     * open() it — stat() is the lightest probe that reflects FDA state.
+     *
+     * Distinguish "doesn't exist" (ENOENT — iMessage was never set up on this
+     * Mac) from "exists but unreadable" (EACCES — the real FDA failure mode).
+     * Treating both the same makes the doctor lie to users without iMessage. */
     const char *home = getenv("HOME");
     char chatdb[1024];
     snprintf(chatdb, sizeof(chatdb), "%s/Library/Messages/chat.db", home ? home : "");
     struct stat st;
     if (stat(chatdb, &st) != 0) {
-        /* chat.db unreachable — most often FDA missing. Pop System Settings
+        int err = errno;
+        if (err == ENOENT) {
+            *out = (hu_doctor_fix_result_t){
+                "imessage", "chat.db not found — iMessage isn't set up on this Mac (skipping)",
+                true};
+            return HU_OK;
+        }
+        if (err != EACCES && err != EPERM) {
+            /* Some other stat error (EIO, EOVERFLOW, etc.). Report it
+             * without claiming this is an FDA problem. */
+            char msg[256];
+            snprintf(msg, sizeof(msg), "stat(chat.db) failed: %s", strerror(err));
+            *out = (hu_doctor_fix_result_t){"imessage", msg, false};
+            return HU_OK;
+        }
+        /* EACCES / EPERM — most often FDA missing. Pop System Settings
          * to the right pane. The deep-link is documented at
          * https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/SystemDefinedURLSchemes.html
          */
@@ -271,9 +291,11 @@ hu_error_t hu_doctor_fix_imessage(hu_allocator_t *alloc, hu_doctor_fix_result_t 
     /* 2. chat.db reachable — check for stale poll-status (>24h since last
      * successful poll). The status file is plain text written by the
      * iMessage channel after every successful poll. Delete it; the next
-     * poll rebuilds it. */
+     * poll rebuilds it. Path matches HU_IMESSAGE_STATUS_FILE in
+     * src/channels/imessage_internal.h: ".human/imessage.poll_status",
+     * which is relative to $HOME, NOT to $HOME/.human. */
     char status_path[1024];
-    snprintf(status_path, sizeof(status_path), "%s/.imessage_poll_status", dir);
+    snprintf(status_path, sizeof(status_path), "%s/imessage.poll_status", dir);
     if (stat(status_path, &st) == 0) {
         time_t now = time(NULL);
         if (now > st.st_mtime && (now - st.st_mtime) > 24 * 60 * 60) {
@@ -283,6 +305,12 @@ hu_error_t hu_doctor_fix_imessage(hu_allocator_t *alloc, hu_doctor_fix_result_t 
                     true};
                 return HU_OK;
             }
+            int uerr = errno;
+            char msg[256];
+            snprintf(msg, sizeof(msg), "stale poll-status detected but unlink() failed: %s",
+                     strerror(uerr));
+            *out = (hu_doctor_fix_result_t){"imessage", msg, false};
+            return HU_OK;
         }
     }
 

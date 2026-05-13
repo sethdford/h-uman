@@ -102,6 +102,16 @@ static void free_overlay(hu_allocator_t *alloc, hu_persona_overlay_t *ov) {
         alloc->free(alloc->ctx, ov->silence_tolerance, len + 1);
     }
     free_string_array(alloc, ov->style_notes, ov->style_notes_count);
+    if (ov->filler_bank) {
+        for (size_t i = 0; i < ov->filler_bank_count; i++) {
+            if (ov->filler_bank[i]) {
+                size_t len = strlen(ov->filler_bank[i]);
+                alloc->free(alloc->ctx, ov->filler_bank[i], len + 1);
+            }
+        }
+        alloc->free(alloc->ctx, (void *)ov->filler_bank, ov->filler_bank_cap * sizeof(char *));
+        ov->filler_bank = NULL;
+    }
     free_string_array(alloc, ov->typing_quirks, ov->typing_quirks_count);
     if (ov->vulnerability_tier) {
         size_t len = strlen(ov->vulnerability_tier);
@@ -813,7 +823,7 @@ static hu_error_t parse_string_array(hu_allocator_t *a, const hu_json_value_t *a
     size_t n = arr->data.array.len;
     if (n == 0)
         return HU_OK;
-    if (n > 100000 || n > SIZE_MAX / sizeof(char *))
+    if (n > 100000)
         return HU_ERR_INVALID_ARGUMENT;
     char **buf = (char **)a->alloc(a->ctx, n * sizeof(char *));
     if (!buf)
@@ -827,25 +837,25 @@ static hu_error_t parse_string_array(hu_allocator_t *a, const hu_json_value_t *a
         if (!dup) {
             for (size_t j = 0; j < count; j++)
                 a->free(a->ctx, buf[j], strlen(buf[j]) + 1);
-            a->free(a->ctx, buf, n * sizeof(char *));
+            a->free(a->ctx, (void *)buf, n * sizeof(char *));
             return HU_ERR_OUT_OF_MEMORY;
         }
         buf[count++] = dup;
     }
     if (count == 0) {
-        a->free(a->ctx, buf, n * sizeof(char *));
+        a->free(a->ctx, (void *)buf, n * sizeof(char *));
         return HU_OK;
     }
     if (count < n) {
         char **shrunk = (char **)a->alloc(a->ctx, count * sizeof(char *));
         if (shrunk) {
-            memcpy(shrunk, buf, count * sizeof(char *));
-            a->free(a->ctx, buf, n * sizeof(char *));
+            memcpy((void *)shrunk, (const void *)buf, count * sizeof(char *));
+            a->free(a->ctx, (void *)buf, n * sizeof(char *));
             buf = shrunk;
         } else {
             for (size_t j = 0; j < count; j++)
                 a->free(a->ctx, buf[j], strlen(buf[j]) + 1);
-            a->free(a->ctx, buf, n * sizeof(char *));
+            a->free(a->ctx, (void *)buf, n * sizeof(char *));
             return HU_ERR_OUT_OF_MEMORY;
         }
     }
@@ -972,6 +982,52 @@ static hu_error_t parse_overlay(hu_allocator_t *a, const char *channel_name,
         if (lor && lor->type == HU_JSON_NUMBER) {
             int v = (int)lor->data.number;
             ov->leave_on_read_pct = (uint8_t)(v > 100 ? 100 : (v < 0 ? 0 : v));
+        }
+    }
+    {
+        /* filler_bank: optional array of thinking-filler strings, capped at 32 entries.
+         * Absent key → forward-compat zero init (already zero from callsite memset).
+         * Present but empty array → count=0, no allocation.
+         * Present and non-array → treat as parse error (OOM path reused for simplicity). */
+        hu_json_value_t *fb = hu_json_object_get(obj, "filler_bank");
+        if (fb) {
+            if (fb->type != HU_JSON_ARRAY) {
+                goto ov_oom;
+            }
+            size_t n = fb->data.array.len;
+            if (n > 32) {
+                fprintf(stderr,
+                        "[persona] warning: persona overlay '%s' filler_bank truncated:"
+                        " %zu entries provided, capped at 32\n",
+                        channel_name ? channel_name : "(unknown)", n);
+                n = 32;
+            }
+            if (n > 0) {
+                char **buf = (char **)a->alloc(a->ctx, n * sizeof(char *));
+                if (!buf)
+                    goto ov_oom;
+                size_t count = 0;
+                for (size_t i = 0; i < n; i++) {
+                    const hu_json_value_t *item = fb->data.array.items[i];
+                    if (!item || item->type != HU_JSON_STRING || !item->data.string.ptr)
+                        continue;
+                    char *dup = hu_strndup(a, item->data.string.ptr, item->data.string.len);
+                    if (!dup) {
+                        for (size_t j = 0; j < count; j++)
+                            a->free(a->ctx, buf[j], strlen(buf[j]) + 1);
+                        a->free(a->ctx, (void *)buf, n * sizeof(char *));
+                        goto ov_oom;
+                    }
+                    buf[count++] = dup;
+                }
+                if (count == 0) {
+                    a->free(a->ctx, (void *)buf, n * sizeof(char *));
+                } else {
+                    ov->filler_bank = buf;
+                    ov->filler_bank_count = count;
+                    ov->filler_bank_cap = n;
+                }
+            }
         }
     }
     return HU_OK;
@@ -4174,7 +4230,8 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                 }
             }
             if (ov->face_saving && ov->face_saving[0]) {
-                n = snprintf(header, sizeof(header), "- Face-saving preference: %s\n", ov->face_saving);
+                n = snprintf(header, sizeof(header), "- Face-saving preference: %s\n",
+                             ov->face_saving);
                 if (n > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
                     if (err != HU_OK)

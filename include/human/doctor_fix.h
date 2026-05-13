@@ -54,13 +54,17 @@ hu_error_t hu_doctor_fix_default_config(hu_allocator_t *alloc, hu_doctor_fix_res
  *    link so the user can grant access in one click. Cannot auto-grant
  *    (security boundary), but eliminates the "user doesn't know where
  *    to go" gap that today turns into a silent-daemon support ticket.
- *  - **Stale rowid cache.** ~/.human/.imessage_poll_status has a
+ *  - **Stale rowid cache.** `~/.human/imessage.poll_status` has a
  *    timestamp older than 24 hours or is unreadable → delete it so
- *    the next poll rebuilds it from scratch.
+ *    the next poll rebuilds it from scratch. (Path matches
+ *    HU_IMESSAGE_STATUS_FILE in src/channels/imessage_internal.h.)
  *  - **Healthy.** No-op result with action_taken="(no recovery needed)".
  *
  * Non-Apple platforms / test mode return a deterministic "(skipped)"
- * result. The function never fails — recovery is best-effort. */
+ * result. Recovery is best-effort and never throws; the only error
+ * code the function returns is HU_ERR_INVALID_ARGUMENT when `out` is
+ * NULL. All other conditions are reported in the result struct's
+ * action_taken / success fields. */
 hu_error_t hu_doctor_fix_imessage(hu_allocator_t *alloc, hu_doctor_fix_result_t *out);
 
 #endif /* HU_DOCTOR_FIX_H */

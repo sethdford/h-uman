@@ -335,7 +335,6 @@ bool ax_stop_typing(void) {
     CFStringRef empty = CFSTR("");
     AXError err = AXUIElementSetAttributeValue(field, kAXValueAttribute, empty);
     CFRelease(field);
-    /* Send Return key to dismiss any pending text (just clears the field). */
     return (err == kAXErrorSuccess);
 }
 

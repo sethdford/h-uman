@@ -1,9 +1,11 @@
 #include "human/context/conversation.h"
+#include "human/channel_class.h"
 #include "human/core/allocator.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
+#include "human/filler_recency.h"
 #include "human/persona.h"
 #include "human/provider.h"
 #ifdef HU_ENABLE_SQLITE
@@ -1370,10 +1372,11 @@ char *hu_conversation_build_awareness_on(hu_allocator_t *alloc,
         POS_ADVANCE(w, pos, CTX_BUF_CAP);
     }
 
-    /* Situational length calibration from the last incoming message */
+    /* Find the most recent inbound message once and reuse below for both
+     * calibrate_length and the channel-specific register hint. */
+    const char *last_their_msg = NULL;
+    size_t last_their_len = 0;
     if (entries && count > 0) {
-        const char *last_their_msg = NULL;
-        size_t last_their_len = 0;
         for (size_t i = count; i > 0; i--) {
             if (!entries[i - 1].from_me) {
                 last_their_msg = entries[i - 1].text;
@@ -1381,11 +1384,11 @@ char *hu_conversation_build_awareness_on(hu_allocator_t *alloc,
                 break;
             }
         }
-        if (last_their_msg && last_their_len > 0) {
-            size_t cal_len = hu_conversation_calibrate_length(
-                last_their_msg, last_their_len, entries, count, buf + pos, CTX_BUF_CAP - pos);
-            pos += cal_len;
-        }
+    }
+    if (last_their_msg && last_their_len > 0) {
+        size_t cal_len = hu_conversation_calibrate_length(last_their_msg, last_their_len, entries,
+                                                          count, buf + pos, CTX_BUF_CAP - pos);
+        pos += cal_len;
     }
 
     /* Channel-specific register hint.
@@ -1399,17 +1402,6 @@ char *hu_conversation_build_awareness_on(hu_allocator_t *alloc,
      * for whichever channel is active. NULL/unknown channel → no-op,
      * preserving the older API contract for callers that don't opt in. */
     if (channel_name_eq(channel_name, channel_name_len, "imessage")) {
-        const char *last_their_msg = NULL;
-        size_t last_their_len = 0;
-        if (entries && count > 0) {
-            for (size_t i = count; i > 0; i--) {
-                if (!entries[i - 1].from_me) {
-                    last_their_msg = entries[i - 1].text;
-                    last_their_len = strlen(last_their_msg);
-                    break;
-                }
-            }
-        }
         w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                      "\n--- iMessage register ---\n"
                      "- This is iMessage, a personal DM/group thread — not a help "
@@ -1471,8 +1463,10 @@ char *hu_conversation_build_awareness_on(hu_allocator_t *alloc,
                      "broadcast channels ≈ near-formal).\n"
                      "- Threading is the norm for follow-ups. Reactions (emoji) "
                      "are an established way to acknowledge without replying.\n"
-                     "- Code blocks (``` ```) are expected for code or commands; "
-                     "use them instead of quoting inline.\n"
+                     "- For prose, write plain sentences — Slack chat reads "
+                     "best without markdown. Reserve fenced code (``` ```) "
+                     "for actual code or shell commands; do NOT wrap regular "
+                     "answers in code fences.\n"
                      "- AI-tells to avoid: \"Hope this finds you well\", "
                      "\"Please let me know if you have any questions\", overly "
                      "long bullet structures on quick asks, treating teammates "
@@ -4246,46 +4240,29 @@ size_t hu_conversation_apply_typos(char *buf, size_t len, size_t cap, uint32_t s
 
 /* ── Two-phase "let me think" thinking response classifier ─────────────── */
 
-typedef enum {
-    HU_THINK_DECISION = 0,  /* advice/complex decision */
-    HU_THINK_EMOTIONAL = 1, /* emotional support */
-    HU_THINK_COMPLEX = 2,   /* philosophical/factual */
-} hu_think_type_t;
-
-static hu_think_type_t classify_think_type(const char *msg, size_t msg_len) {
-    size_t excl = 0;
-    size_t words = 0;
-    for (size_t i = 0; i < msg_len; i++) {
-        if (msg[i] == '!')
-            excl++;
-        if (msg[i] == ' ' || msg[i] == '\n')
-            words++;
-    }
-    if (msg_len > 0)
-        words++;
-
-    /* Emotional: high exclamation density or short + intense */
-    if (excl >= 2 || (excl >= 1 && msg_len < 60))
-        return HU_THINK_EMOTIONAL;
-    /* Complex: long message, often philosophical or multi-part */
-    if (msg_len > 120 && words > 15)
-        return HU_THINK_COMPLEX;
-    /* Decision: medium-length question (advice-seeking) */
-    return HU_THINK_DECISION;
-}
-
-bool hu_conversation_classify_thinking(const char *msg, size_t msg_len,
-                                       const hu_channel_history_entry_t *entries,
-                                       size_t entry_count, hu_thinking_response_t *out,
-                                       uint32_t seed) {
+bool hu_conversation_classify_thinking(const hu_thinking_context_t *ctx, const char *msg,
+                                       size_t msg_len, const hu_channel_history_entry_t *entries,
+                                       size_t entry_count, hu_thinking_response_t *out) {
     (void)entries;
     (void)entry_count;
-    if (!msg || msg_len == 0 || !out)
+    if (!ctx || !msg || msg_len == 0 || !out)
         return false;
-
     memset(out, 0, sizeof(*out));
 
-    /* Trigger: message characteristics */
+    /* text_fast channels (iMessage/SMS): no thinking filler — speed wins */
+    hu_channel_class_t cls = hu_channel_class_for_name(ctx->channel_name);
+    if (cls == HU_CHANNEL_CLASS_TEXT_FAST)
+        return false;
+
+    /* Persona and filler bank are required */
+    if (!ctx->persona || !ctx->channel_name)
+        return false;
+    const hu_persona_overlay_t *ov =
+        hu_persona_find_overlay(ctx->persona, ctx->channel_name, strlen(ctx->channel_name));
+    if (!ov || ov->filler_bank_count == 0)
+        return false;
+
+    /* Trigger heuristic — preserved from original */
     bool has_question = false;
     size_t words = 0;
     for (size_t i = 0; i < msg_len; i++) {
@@ -4296,43 +4273,35 @@ bool hu_conversation_classify_thinking(const char *msg, size_t msg_len,
     }
     if (msg_len > 0)
         words++;
-
     bool triggered = false;
     if (has_question && msg_len > 35 && words > 6)
         triggered = true;
     if (!triggered && msg_len > 80 && words > 10)
         triggered = true;
-
     if (!triggered)
         return false;
 
-    hu_think_type_t t = classify_think_type(msg, msg_len);
-    const char *fillers[4];
-    size_t filler_count;
-    switch (t) {
-    case HU_THINK_EMOTIONAL:
-        fillers[0] = "hmm";
-        fillers[1] = "oh wow";
-        fillers[2] = "oh";
-        filler_count = 3;
-        break;
-    case HU_THINK_DECISION:
-        fillers[0] = "ooh that's a tough one";
-        fillers[1] = "let me think about that for a sec";
-        fillers[2] = "hm good question";
-        filler_count = 3;
-        break;
-    case HU_THINK_COMPLEX:
-        fillers[0] = "that's a really good question";
-        fillers[1] = "okay give me a sec";
-        fillers[2] = "let me think about that";
-        filler_count = 3;
-        break;
+    /* Select index, excluding recency_last when bank has >=2 entries */
+    uint32_t state = ctx->seed * 1103515245u + 12345u;
+    uint32_t n = (uint32_t)ov->filler_bank_count;
+    int32_t last =
+        ctx->recency ? hu_filler_recency_last(ctx->recency, ctx->chat_id, ctx->chat_id_len) : -1;
+    uint32_t idx;
+    if (n >= 2 && last >= 0 && (uint32_t)last < n) {
+        /* pick from n-1 alternatives, skipping the excluded slot */
+        uint32_t pick = (state >> 16) % (n - 1);
+        idx = (pick >= (uint32_t)last) ? pick + 1 : pick;
+    } else {
+        idx = (state >> 16) % n;
     }
 
-    uint32_t state = seed * 1103515245u + 12345u;
-    uint32_t idx = (state >> 16) % (uint32_t)filler_count;
-    const char *filler = fillers[idx];
+    if (ctx->recency) {
+        hu_filler_recency_record(ctx->recency, ctx->chat_id, ctx->chat_id_len, (uint16_t)idx);
+    }
+
+    const char *filler = ov->filler_bank[idx];
+    if (!filler)
+        return false;
     size_t flen = strlen(filler);
     if (flen >= sizeof(out->filler))
         flen = sizeof(out->filler) - 1;
@@ -4340,18 +4309,26 @@ bool hu_conversation_classify_thinking(const char *msg, size_t msg_len,
     out->filler[flen] = '\0';
     out->filler_len = flen;
 
-    uint32_t base = 30000;
-    uint32_t extra = 0;
-    if (msg_len > 150)
-        extra = 30000;
-    else if (msg_len > 100)
-        extra = 15000;
-    else if (msg_len > 80)
-        extra = 10000;
-    out->delay_ms = base + extra;
-    if (out->delay_ms > 60000)
-        out->delay_ms = 60000;
-
+    /* Channel-aware delay */
+    if (cls == HU_CHANNEL_CLASS_VOICE) {
+#ifdef HU_ENABLE_VOICE_VAD_TIMING
+        out->delay_ms = 200 + ((state >> 8) % 301); /* 200-500ms uniform */
+#else
+        out->delay_ms = 0; /* voice channel without VAD timing: no delay */
+#endif
+    } else {
+        /* TEXT_ASYNC / UNKNOWN: existing dynamic formula */
+        uint32_t base = 30000, extra = 0;
+        if (msg_len > 150)
+            extra = 30000;
+        else if (msg_len > 100)
+            extra = 15000;
+        else if (msg_len > 80)
+            extra = 10000;
+        out->delay_ms = base + extra;
+        if (out->delay_ms > 60000)
+            out->delay_ms = 60000;
+    }
     return true;
 }
 

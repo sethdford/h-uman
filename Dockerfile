@@ -17,6 +17,10 @@ COPY cmake/ cmake/
 # the Alpine build fails with "bash: scripts/check-layer-topology.sh: No
 # such file or directory" (Error 127).
 COPY scripts/ scripts/
+# tools/ is required at build time: the human_filler_guard custom CMake target
+# (PCTT Task 9) invokes tools/check-no-hardcoded-fillers.sh during `make`.
+# Without it the build fails with "sh: can't open ... No such file or directory".
+COPY tools/ tools/
 
 RUN mkdir build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_CURL=ON -DHU_BUILD_TESTS=OFF && \
