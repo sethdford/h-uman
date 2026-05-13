@@ -311,46 +311,150 @@ static void classify_vulnerable_is_delayed(void) {
 
 /* ── Two-phase thinking response tests ─────────────────────────────────── */
 
+/* Helper: build a synthetic persona+overlay with a 3-entry filler bank on "slack". */
+static void make_test_thinking_ctx(hu_persona_t *persona, hu_persona_overlay_t *overlay,
+                                   char **bank, hu_filler_recency_t *recency,
+                                   hu_thinking_context_t *ctx, uint32_t seed) {
+    memset(persona, 0, sizeof(*persona));
+    memset(overlay, 0, sizeof(*overlay));
+    memset(recency, 0, sizeof(*recency));
+    overlay->channel = "slack";
+    bank[0] = "hmm";
+    bank[1] = "let me think";
+    bank[2] = "one sec";
+    overlay->filler_bank = bank;
+    overlay->filler_bank_count = 3;
+    persona->overlays = overlay;
+    persona->overlays_count = 1;
+    ctx->persona = persona;
+    ctx->channel_name = "slack";
+    ctx->chat_id = "test_chat";
+    ctx->chat_id_len = 9;
+    ctx->recency = recency;
+    ctx->seed = seed;
+}
+
 static void thinking_triggers_on_complex_question(void) {
     const char *msg =
         "What do you think about moving to a new city? I've been going back and forth on it for "
         "weeks and I'm not sure what the right call is";
-    hu_thinking_response_t out;
-    bool ok = hu_conversation_classify_thinking(msg, strlen(msg), NULL, 0, &out, 42);
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    char *bank[3];
+    hu_filler_recency_t recency;
+    hu_thinking_context_t ctx;
+    make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 42);
+    hu_thinking_response_t out = {0};
+    bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
     HU_ASSERT_TRUE(ok);
     HU_ASSERT_TRUE(out.filler_len > 0);
     HU_ASSERT_TRUE(out.delay_ms >= 30000 && out.delay_ms <= 60000);
+    /* filler must be one of the 3 bank entries */
+    bool valid = (strcmp(out.filler, "hmm") == 0 || strcmp(out.filler, "let me think") == 0 ||
+                  strcmp(out.filler, "one sec") == 0);
+    HU_ASSERT_TRUE(valid);
 }
 
 static void thinking_no_trigger_simple_message(void) {
     const char *msg = "hey what's up";
-    hu_thinking_response_t out;
-    bool ok = hu_conversation_classify_thinking(msg, strlen(msg), NULL, 0, &out, 42);
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    char *bank[3];
+    hu_filler_recency_t recency;
+    hu_thinking_context_t ctx;
+    make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 42);
+    hu_thinking_response_t out = {0};
+    bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
     HU_ASSERT_FALSE(ok);
 }
 
 static void thinking_triggers_on_advice(void) {
     const char *msg = "should I take the new job or stay where I am?";
-    hu_thinking_response_t out;
-    bool ok = hu_conversation_classify_thinking(msg, strlen(msg), NULL, 0, &out, 42);
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    char *bank[3];
+    hu_filler_recency_t recency;
+    hu_thinking_context_t ctx;
+    make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 42);
+    hu_thinking_response_t out = {0};
+    bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
     HU_ASSERT_TRUE(ok);
     HU_ASSERT_TRUE(out.filler_len > 0);
     HU_ASSERT_TRUE(out.delay_ms >= 30000 && out.delay_ms <= 60000);
+    bool valid = (strcmp(out.filler, "hmm") == 0 || strcmp(out.filler, "let me think") == 0 ||
+                  strcmp(out.filler, "one sec") == 0);
+    HU_ASSERT_TRUE(valid);
 }
 
 static void thinking_filler_varies_by_seed(void) {
     const char *msg =
         "What do you think about moving to a new city? I've been going back and forth on it for "
         "weeks and I'm not sure what the right call is";
-    hu_thinking_response_t out0, out1;
-    bool ok0 = hu_conversation_classify_thinking(msg, strlen(msg), NULL, 0, &out0, 0);
-    bool ok1 = hu_conversation_classify_thinking(msg, strlen(msg), NULL, 0, &out1, 1);
+    hu_persona_t persona0, persona1;
+    hu_persona_overlay_t overlay0, overlay1;
+    char *bank0[3], *bank1[3];
+    hu_filler_recency_t recency0, recency1;
+    hu_thinking_context_t ctx0, ctx1;
+    make_test_thinking_ctx(&persona0, &overlay0, bank0, &recency0, &ctx0, 0);
+    make_test_thinking_ctx(&persona1, &overlay1, bank1, &recency1, &ctx1, 1);
+    hu_thinking_response_t out0 = {0}, out1 = {0};
+    bool ok0 = hu_conversation_classify_thinking(&ctx0, msg, strlen(msg), NULL, 0, &out0);
+    bool ok1 = hu_conversation_classify_thinking(&ctx1, msg, strlen(msg), NULL, 0, &out1);
     HU_ASSERT_TRUE(ok0);
     HU_ASSERT_TRUE(ok1);
-    /* Different seeds should produce different fillers (6 options, LCG varies) */
+    /* Different seeds should produce different fillers (3 options, LCG varies) */
     bool same = (out0.filler_len == out1.filler_len &&
                  memcmp(out0.filler, out1.filler, out0.filler_len) == 0);
     HU_ASSERT_FALSE(same);
+}
+
+static void thinking_text_fast_returns_false(void) {
+    /* iMessage is text_fast — should always return false regardless of persona/content */
+    const char *msg =
+        "What do you think about moving to a new city? I've been going back and forth on it for "
+        "weeks and I'm not sure what the right call is";
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    char *bank[3];
+    hu_filler_recency_t recency;
+    hu_thinking_context_t ctx;
+    make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 42);
+    /* Override channel to iMessage (text_fast) */
+    ctx.channel_name = "imessage";
+    overlay.channel = "imessage";
+    hu_thinking_response_t out = {0};
+    bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
+    HU_ASSERT_FALSE(ok);
+}
+
+static void thinking_no_consecutive_duplicates_with_3_bank(void) {
+    /* AC-3 regression guard: drive 10 emissions; assert no two consecutive are the same */
+    const char *msg =
+        "What do you think about moving to a new city? I've been going back and forth on it for "
+        "weeks and I'm not sure what the right call is";
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    char *bank[3];
+    hu_filler_recency_t recency;
+    hu_thinking_context_t ctx;
+    make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 0);
+
+    char prev[64] = {0};
+    size_t prev_len = 0;
+    for (uint32_t i = 0; i < 10; i++) {
+        ctx.seed = i * 7919u + 1u; /* vary seed each round */
+        hu_thinking_response_t out = {0};
+        bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
+        HU_ASSERT_TRUE(ok);
+        HU_ASSERT_TRUE(out.filler_len > 0);
+        if (prev_len > 0) {
+            bool same = (out.filler_len == prev_len && memcmp(out.filler, prev, prev_len) == 0);
+            HU_ASSERT_FALSE(same);
+        }
+        memcpy(prev, out.filler, out.filler_len);
+        prev[out.filler_len] = '\0';
+        prev_len = out.filler_len;
+    }
 }
 
 /* ── Quality evaluator enhanced tests ────────────────────────────────── */
@@ -1195,9 +1299,8 @@ static void calibrate_for_contact_softens_ping_for_warm_dm(void) {
     hu_contact_profile_t cp = {0};
     cp.relationship_type = (char *)"friend";
     const char *m = "call me soon";
-    size_t cal_len = hu_conversation_calibrate_length_for_contact(m, strlen(m), NULL, 0, false,
-                                                                  &cp, HU_REL_TRUSTED, buf,
-                                                                  sizeof(buf));
+    size_t cal_len = hu_conversation_calibrate_length_for_contact(m, strlen(m), NULL, 0, false, &cp,
+                                                                  HU_REL_TRUSTED, buf, sizeof(buf));
     HU_ASSERT_TRUE(cal_len > 80);
     HU_ASSERT_TRUE(strstr(buf, "real friend") != NULL);
 }
@@ -1210,7 +1313,8 @@ static void calibrate_for_contact_group_uses_neutral_ratio(void) {
     size_t cal_len = hu_conversation_calibrate_length_for_contact(m, strlen(m), NULL, 0, true, &cp,
                                                                   HU_REL_TRUSTED, buf, sizeof(buf));
     HU_ASSERT_TRUE(cal_len > 40);
-    HU_ASSERT_TRUE(strstr(buf, "Moderate length") != NULL || strstr(buf, "Their last message") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "Moderate length") != NULL ||
+                   strstr(buf, "Their last message") != NULL);
     /* Group path: 2x cap only — numeric limit in buf should reflect ~46 chars max, not ~69 */
     HU_ASSERT_TRUE(strstr(buf, "48") != NULL || strstr(buf, "46") != NULL);
 }
@@ -3094,7 +3198,8 @@ static void strip_formal_no_change(void) {
 static void strip_formal_en_dash(void) {
     char buf[128];
     /* en-dash is UTF-8 E2 80 93 */
-    strcpy(buf, "pages 1\xe2\x80\x93" "10");
+    strcpy(buf, "pages 1\xe2\x80\x93"
+                "10");
     size_t len = hu_conversation_strip_formal_structure(buf, strlen(buf));
     HU_ASSERT(strstr(buf, "-") != NULL);
     (void)len;
@@ -3140,13 +3245,12 @@ static void strip_formal_colon_preserves_inline(void) {
 
 static void strip_pipeline_full_integration(void) {
     char buf[512];
-    const char *dirty =
-        "<thinking>internal reasoning</thinking>"
-        "1. Weather: It's pretty nice\n"
-        "2. Food \xe2\x80\x94 pizza sounds good\n"
-        "- Also check out **bold text**\n"
-        "<|endoftext|>"
-        "As an AI, I hope this helps!";
+    const char *dirty = "<thinking>internal reasoning</thinking>"
+                        "1. Weather: It's pretty nice\n"
+                        "2. Food \xe2\x80\x94 pizza sounds good\n"
+                        "- Also check out **bold text**\n"
+                        "<|endoftext|>"
+                        "As an AI, I hope this helps!";
     size_t len = strlen(dirty);
     HU_ASSERT(len < sizeof(buf));
     memcpy(buf, dirty, len + 1);
@@ -3873,6 +3977,8 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(thinking_no_trigger_simple_message);
     HU_RUN_TEST(thinking_triggers_on_advice);
     HU_RUN_TEST(thinking_filler_varies_by_seed);
+    HU_RUN_TEST(thinking_text_fast_returns_false);
+    HU_RUN_TEST(thinking_no_consecutive_duplicates_with_3_bank);
 
     /* Quality evaluator */
     HU_RUN_TEST(quality_penalizes_semicolons);

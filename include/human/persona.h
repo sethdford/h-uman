@@ -22,6 +22,9 @@ typedef struct hu_persona_overlay {
     char *emoji_usage;
     char **style_notes;
     size_t style_notes_count;
+    char **filler_bank; /* per-channel thinking-filler strings */
+    size_t filler_bank_count;
+    size_t filler_bank_cap; /* allocated capacity; soft cap 32 enforced at add */
     bool message_splitting;
     uint32_t max_segment_chars;
     char **typing_quirks;
@@ -495,9 +498,8 @@ hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *c
  * without requiring llama.cpp to be vendored in-tree. See
  * docs/plans/2026-05-10-m3-frontier-model-bridge.md for the full
  * Bridge A plan. */
-hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
-                                         const char *path, size_t path_len,
-                                         size_t *exported_count);
+hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona, const char *path,
+                                        size_t path_len, size_t *exported_count);
 
 /* Phase A1.3 — derive per-channel persona example banks from
  * conversation history.
@@ -552,8 +554,7 @@ hu_error_t hu_persona_bank_export_jsonl(const hu_persona_t *persona,
  * channel-segregated bank with the obvious garbage filtered out,
  * and feed it straight to hu_persona_bank_export_jsonl for fine-
  * tuning. Closes the M3 Bridge A loop end-to-end. */
-hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
-                                                 const char *db_path,
+hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc, const char *db_path,
                                                  size_t max_per_channel,
                                                  hu_persona_example_bank_t **out_banks,
                                                  size_t *out_count);
@@ -564,8 +565,7 @@ hu_error_t hu_persona_banks_extract_from_history(hu_allocator_t *alloc,
  * the banks array itself. Safe to call with banks==NULL or count==0;
  * a zero-initialized bank within the array is also safe (NULL fields
  * are skipped). */
-void hu_persona_example_banks_free(hu_allocator_t *alloc,
-                                   hu_persona_example_bank_t *banks,
+void hu_persona_example_banks_free(hu_allocator_t *alloc, hu_persona_example_bank_t *banks,
                                    size_t banks_count);
 
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
@@ -700,7 +700,10 @@ typedef enum {
     HU_PERSONA_ACTION_EXPORT,
     HU_PERSONA_ACTION_MERGE,
     HU_PERSONA_ACTION_IMPORT,
-    HU_PERSONA_ACTION_EVAL
+    HU_PERSONA_ACTION_EVAL,
+    HU_PERSONA_ACTION_FILLER_ADD,   /* human persona filler add --channel <ch> "<text>" */
+    HU_PERSONA_ACTION_FILLER_LIST,  /* human persona filler list --channel <ch> */
+    HU_PERSONA_ACTION_FILLER_REMOVE /* human persona filler remove --channel <ch> --index N */
 } hu_persona_action_t;
 
 typedef struct hu_persona_cli_args {
@@ -717,7 +720,10 @@ typedef struct hu_persona_cli_args {
     const char *with_contact;  /* --with-contact <handle_id> for conversation extraction */
     const char **merge_sources;
     size_t merge_sources_count;
-    const char *import_file; /* --from-file <path> or NULL for --from-stdin */
+    const char *import_file;    /* --from-file <path> or NULL for --from-stdin */
+    const char *filler_channel; /* --channel <name> for filler subcommands */
+    const char *filler_text;    /* positional "<text>" for filler add */
+    int filler_index;           /* --index <n> for filler remove; -1 = not set */
 } hu_persona_cli_args_t;
 
 hu_error_t hu_persona_cli_parse(int argc, const char **argv, hu_persona_cli_args_t *out);
@@ -729,9 +735,9 @@ struct hu_legacy_memory;
 struct hu_provider;
 hu_error_t hu_persona_style_reanalyze(hu_allocator_t *alloc, struct hu_provider *provider,
                                       const char *model, size_t model_len,
-                                      struct hu_legacy_memory *memory,
-                                      const char *persona_name, size_t persona_name_len,
-                                      const char *channel, size_t channel_len,
-                                      const char *contact_id, size_t contact_id_len);
+                                      struct hu_legacy_memory *memory, const char *persona_name,
+                                      size_t persona_name_len, const char *channel,
+                                      size_t channel_len, const char *contact_id,
+                                      size_t contact_id_len);
 
 #endif /* HU_PERSONA_H */

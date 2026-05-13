@@ -2,8 +2,10 @@
 #define HU_CONTEXT_CONVERSATION_H
 
 #include "human/channel.h"
+#include "human/channel_class.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/filler_recency.h"
 #include "human/memory.h"
 #include "human/persona.h"
 #include "human/provider.h"
@@ -388,13 +390,22 @@ typedef struct hu_thinking_response {
     uint32_t delay_ms; /* delay before the real response (30000-60000ms) */
 } hu_thinking_response_t;
 
+/* Context for persona-driven thinking filler selection (PCTT Task 4). */
+typedef struct hu_thinking_context {
+    const hu_persona_t *persona; /* active persona, may be NULL */
+    const char *channel_name;    /* e.g. "imessage", "slack" */
+    const char *chat_id;         /* send_target — stable chat identifier */
+    size_t chat_id_len;
+    hu_filler_recency_t *recency; /* may be NULL — caller's recency LRU */
+    uint32_t seed;                /* random seed */
+} hu_thinking_context_t;
+
 /* Classify whether this message warrants a "thinking" response.
- * Returns true if the message is complex/emotional enough.
- * Fills out the thinking response with an appropriate filler message. */
-bool hu_conversation_classify_thinking(const char *msg, size_t msg_len,
-                                       const hu_channel_history_entry_t *entries,
-                                       size_t entry_count, hu_thinking_response_t *out,
-                                       uint32_t seed);
+ * Returns true if the message is complex enough and a persona filler bank
+ * is available for the channel.  Fills out with the chosen filler + delay. */
+bool hu_conversation_classify_thinking(const hu_thinking_context_t *ctx, const char *msg,
+                                       size_t msg_len, const hu_channel_history_entry_t *entries,
+                                       size_t entry_count, hu_thinking_response_t *out);
 
 /* Classify how to respond, factoring in conversation context. */
 hu_response_action_t hu_conversation_classify_response(const char *msg, size_t msg_len,
