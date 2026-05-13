@@ -1,9 +1,9 @@
-#include "human/core/log.h"
 #include "human/channels/imessage.h"
 #include "human/channel_loop.h"
 #include "human/context/conversation.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
+#include "human/core/log.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #ifndef HU_CODENAME
@@ -21,15 +21,15 @@
 #include <unistd.h>
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <sys/wait.h>
 #include <ApplicationServices/ApplicationServices.h>
 #include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <libproc.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
+#include <signal.h>
+#include <sys/wait.h>
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 #endif
@@ -121,22 +121,32 @@ static void imessage_save_rowid(int64_t rowid) {
  * including test builds that do not include sqlite3.h. */
 hu_imessage_error_class_t hu_imessage_classify_sqlite_error(int rc) {
     switch (rc) {
-        case 0:  return HU_IMESSAGE_ERR_NONE;     /* SQLITE_OK */
-        case 23: return HU_IMESSAGE_ERR_AUTH;     /* SQLITE_AUTH */
-        case 14: return HU_IMESSAGE_ERR_CANTOPEN; /* SQLITE_CANTOPEN */
-        case 5:  /* SQLITE_BUSY */
-        case 6:  return HU_IMESSAGE_ERR_BUSY;     /* SQLITE_LOCKED */
-        default: return HU_IMESSAGE_ERR_OTHER;
+    case 0:
+        return HU_IMESSAGE_ERR_NONE; /* SQLITE_OK */
+    case 23:
+        return HU_IMESSAGE_ERR_AUTH; /* SQLITE_AUTH */
+    case 14:
+        return HU_IMESSAGE_ERR_CANTOPEN; /* SQLITE_CANTOPEN */
+    case 5:                              /* SQLITE_BUSY */
+    case 6:
+        return HU_IMESSAGE_ERR_BUSY; /* SQLITE_LOCKED */
+    default:
+        return HU_IMESSAGE_ERR_OTHER;
     }
 }
 
 const char *hu_imessage_error_class_name(hu_imessage_error_class_t cls) {
     switch (cls) {
-        case HU_IMESSAGE_ERR_NONE:     return "NONE";
-        case HU_IMESSAGE_ERR_AUTH:     return "AUTH";
-        case HU_IMESSAGE_ERR_CANTOPEN: return "CANTOPEN";
-        case HU_IMESSAGE_ERR_BUSY:     return "BUSY";
-        case HU_IMESSAGE_ERR_OTHER:    return "OTHER";
+    case HU_IMESSAGE_ERR_NONE:
+        return "NONE";
+    case HU_IMESSAGE_ERR_AUTH:
+        return "AUTH";
+    case HU_IMESSAGE_ERR_CANTOPEN:
+        return "CANTOPEN";
+    case HU_IMESSAGE_ERR_BUSY:
+        return "BUSY";
+    case HU_IMESSAGE_ERR_OTHER:
+        return "OTHER";
     }
     return "OTHER";
 }
@@ -264,10 +274,8 @@ static void imessage_save_poll_status(const hu_imessage_ctx_t *c) {
             "  \"circuit_breaker_tripped\": %s,\n"
             "  \"last_error_class\": \"%s\"\n"
             "}\n",
-            (long long)c->last_rowid,
-            (long long)c->last_successful_poll_epoch,
-            (unsigned)c->consecutive_open_failures,
-            c->circuit_breaker_tripped ? "true" : "false",
+            (long long)c->last_rowid, (long long)c->last_successful_poll_epoch,
+            (unsigned)c->consecutive_open_failures, c->circuit_breaker_tripped ? "true" : "false",
             hu_imessage_error_class_name(c->last_error_class));
     fclose(f);
 }
@@ -309,8 +317,7 @@ static bool imessage_record_open_result(hu_imessage_ctx_t *c, int rc, int64_t no
                      "circuit breaker tripped after %u consecutive %s errors — likely Full "
                      "Disk Access revoked. Run `human doctor imessage` and re-grant FDA on "
                      "the binary at $(readlink -f $(which human)).",
-                     (unsigned)c->consecutive_open_failures,
-                     hu_imessage_error_class_name(cls));
+                     (unsigned)c->consecutive_open_failures, hu_imessage_error_class_name(cls));
     }
     return just_tripped;
 }
@@ -333,8 +340,8 @@ static void imessage_record_poll_success(hu_imessage_ctx_t *c, int64_t now) {
  * compile-time guards (#if HU_IS_TEST and the macOS+SQLite production
  * branch). On Linux or no-SQLite builds neither caller is compiled in,
  * which would otherwise trip -Werror=unused-function. */
-static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c,
-                                           int64_t now) __attribute__((unused));
+static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now)
+    __attribute__((unused));
 static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now) {
     if (!c)
         return;
@@ -430,8 +437,7 @@ void hu_imessage_watchdog_tick(hu_channel_t *ch, int64_t now_epoch, int64_t stal
      * the transition target so log readers can correlate. */
     switch (cur) {
     case HU_IMESSAGE_HEALTH_OK:
-        hu_log_info("imessage", NULL,
-                    "iMessage health %s → OK (recovered; last success %llds ago)",
+        hu_log_info("imessage", NULL, "iMessage health %s → OK (recovered; last success %llds ago)",
                     hu_imessage_health_name(prev), (long long)since_success);
         break;
     case HU_IMESSAGE_HEALTH_STALLED:
@@ -495,14 +501,11 @@ static void ax_open_conversation(const char *recipient, size_t recipient_len);
 static bool ax_start_typing(const char *target, size_t target_len);
 static bool ax_stop_typing(void);
 #ifdef HU_IMESSAGE_TAPBACK_ENABLED
-static bool ax_tapback(const char *content_prefix, int row_offset,
-                       const char *tapback_label);
+static bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_label);
 #endif
 static bool imcore_init(hu_imessage_ctx_t *c);
-static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient,
-                                size_t recipient_len);
-static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient,
-                               size_t recipient_len);
+static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
+static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
 
 static uint32_t imessage_hash(const char *s, size_t len) {
     uint32_t h = 2166136261u;
@@ -559,8 +562,8 @@ static int imessage_open_chatdb(const char *db_path, sqlite3 **db_out) {
         }
         if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED)
             return rc;
-        hu_log_info("imessage", NULL, "chat.db locked (attempt %d/3, rc=%d), retrying",
-                    attempt + 1, rc);
+        hu_log_info("imessage", NULL, "chat.db locked (attempt %d/3, rc=%d), retrying", attempt + 1,
+                    rc);
         usleep((unsigned)(100000 << attempt));
     }
     return rc;
@@ -589,8 +592,7 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
      * macOS Messages stores dates as nanoseconds since 2001-01-01 (Core Data epoch).
      */
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)channel_ctx;
-    if (c && c->loopback_handle && handle_len > 0 &&
-        strlen(c->loopback_handle) == handle_len &&
+    if (c && c->loopback_handle && handle_len > 0 && strlen(c->loopback_handle) == handle_len &&
         memcmp(c->loopback_handle, handle, handle_len) == 0)
         return false;
 
@@ -693,8 +695,8 @@ static void imsg_watch_start(hu_imessage_ctx_t *c) {
     c->imsg_watch_pid = pid;
     c->imsg_watch_fd = pipefd[0];
     c->imsg_watch_running = true;
-    hu_log_info("imessage", NULL, "started imsg watch (pid=%d, since-rowid=%s)",
-                (int)pid, rowid_str);
+    hu_log_info("imessage", NULL, "started imsg watch (pid=%d, since-rowid=%s)", (int)pid,
+                rowid_str);
 
     /* Watch path is the steady-state happy path; once it spawns, the SQL poll
      * function returns OK early without saving status. Without this update,
@@ -711,8 +713,7 @@ static void imsg_watch_start(hu_imessage_ctx_t *c) {
 /* Only called from the SQLite/Apple poll path below; without those flags
  * the function is dead code and -Werror=unused-function fires on minimal
  * Linux builds (HU_ENABLE_SQLITE=OFF + non-Apple host). */
-__attribute__((unused))
-static bool imsg_watch_has_data(hu_imessage_ctx_t *c) {
+__attribute__((unused)) static bool imsg_watch_has_data(hu_imessage_ctx_t *c) {
     if (!c->imsg_watch_running || c->imsg_watch_fd < 0)
         return false;
 
@@ -729,15 +730,14 @@ static bool imsg_watch_has_data(hu_imessage_ctx_t *c) {
             close(c->imsg_watch_fd);
             c->imsg_watch_fd = -1;
             waitpid(c->imsg_watch_pid, NULL, WNOHANG);
-            hu_log_info("imessage", NULL,
-                        "imsg watch exited, falling back to timer-based polling");
+            hu_log_info("imessage", NULL, "imsg watch exited, falling back to timer-based polling");
             return got_data;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK)
             return got_data;
         /* Unexpected read error — tear down watch to avoid zombie state */
-        hu_log_error("imessage", NULL,
-                     "imsg watch pipe read error (errno=%d), tearing down", errno);
+        hu_log_error("imessage", NULL, "imsg watch pipe read error (errno=%d), tearing down",
+                     errno);
         c->imsg_watch_running = false;
         close(c->imsg_watch_fd);
         c->imsg_watch_fd = -1;
@@ -789,8 +789,7 @@ static bool imsg_validate_target(hu_imessage_ctx_t *c) {
     bool found = false;
     if (result.stdout_buf && result.stdout_len >= c->default_target_len) {
         for (size_t i = 0; i <= result.stdout_len - c->default_target_len; i++) {
-            if (memcmp(result.stdout_buf + i, c->default_target,
-                       c->default_target_len) == 0) {
+            if (memcmp(result.stdout_buf + i, c->default_target, c->default_target_len) == 0) {
                 found = true;
                 break;
             }
@@ -811,8 +810,7 @@ static bool imsg_validate_target(hu_imessage_ctx_t *c) {
 
 /* ── imsg react helper (shared by both tapback-enabled and tapback-disabled paths) ── */
 
-static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id,
-                           hu_reaction_type_t reaction) {
+static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction_type_t reaction) {
     if (!c || !c->alloc || message_id <= 0)
         return false;
     const char *tapback_name = hu_imessage_reaction_to_tapback_name(reaction);
@@ -836,8 +834,7 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id,
                     sqlite3_bind_int64(cs, 1, message_id);
                     if (sqlite3_step(cs) == SQLITE_ROW) {
                         int64_t rowid = sqlite3_column_int64(cs, 0);
-                        snprintf(chat_rowid_str, sizeof(chat_rowid_str), "%lld",
-                                 (long long)rowid);
+                        snprintf(chat_rowid_str, sizeof(chat_rowid_str), "%lld", (long long)rowid);
                     }
                     sqlite3_finalize(cs);
                 }
@@ -849,19 +846,16 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id,
     if (!chat_rowid_str[0])
         return false;
 
-    const char *react_argv[] = {"imsg",         "react",      "--chat-id",
-                                chat_rowid_str, "--reaction",  tapback_name, NULL};
+    const char *react_argv[] = {"imsg",       "react",      "--chat-id", chat_rowid_str,
+                                "--reaction", tapback_name, NULL};
     hu_run_result_t rr = {0};
     hu_error_t re = hu_process_run_with_timeout(c->alloc, react_argv, NULL, 65536, 15, &rr);
     bool rok = (re == HU_OK && rr.success && rr.exit_code == 0);
     if (!rok)
-        hu_log_info("imessage", NULL,
-                    "imsg react failed (exit=%d stdout=%.*s stderr=%.*s)",
-                    rr.exit_code,
-                    (int)(rr.stdout_len < 200 ? rr.stdout_len : 200),
-                    rr.stdout_buf ? rr.stdout_buf : "",
-                    (int)(rr.stderr_len < 200 ? rr.stderr_len : 200),
-                    rr.stderr_buf ? rr.stderr_buf : "");
+        hu_log_info(
+            "imessage", NULL, "imsg react failed (exit=%d stdout=%.*s stderr=%.*s)", rr.exit_code,
+            (int)(rr.stdout_len < 200 ? rr.stdout_len : 200), rr.stdout_buf ? rr.stdout_buf : "",
+            (int)(rr.stderr_len < 200 ? rr.stderr_len : 200), rr.stderr_buf ? rr.stderr_buf : "");
     hu_run_result_free(c->alloc, &rr);
     return rok;
 }
@@ -931,90 +925,12 @@ size_t imessage_sanitize_output(char *buf, size_t len) {
     return len;
 }
 
-const char *hu_imessage_reaction_to_tapback_name(hu_reaction_type_t reaction) {
-    switch (reaction) {
-    case HU_REACTION_HEART:
-        return "love";
-    case HU_REACTION_THUMBS_UP:
-        return "like";
-    case HU_REACTION_THUMBS_DOWN:
-        return "dislike";
-    case HU_REACTION_HAHA:
-        return "laugh";
-    case HU_REACTION_EMPHASIS:
-        return "emphasize";
-    case HU_REACTION_QUESTION:
-        return "question";
-    case HU_REACTION_CUSTOM_EMOJI:
-        return "emoji";
-    default:
-        return NULL;
-    }
-}
-
-const char *hu_imessage_effect_name(const char *style_id) {
-    if (!style_id || !style_id[0])
-        return NULL;
-    if (strstr(style_id, "impact"))
-        return "Slam";
-    if (strstr(style_id, "loud"))
-        return "Loud";
-    if (strstr(style_id, "gentle"))
-        return "Gentle";
-    if (strstr(style_id, "invisibleink"))
-        return "Invisible Ink";
-    if (strstr(style_id, "CKConfettiEffect"))
-        return "Confetti";
-    if (strstr(style_id, "CKEchoEffect"))
-        return "Echo";
-    if (strstr(style_id, "CKFireworksEffect"))
-        return "Fireworks";
-    if (strstr(style_id, "CKHappyBirthdayEffect"))
-        return "Happy Birthday";
-    if (strstr(style_id, "CKHeartEffect"))
-        return "Heart";
-    if (strstr(style_id, "CKLasersEffect"))
-        return "Lasers";
-    if (strstr(style_id, "CKShootingStarEffect"))
-        return "Shooting Star";
-    if (strstr(style_id, "CKSparklesEffect"))
-        return "Sparkles";
-    if (strstr(style_id, "CKSpotlightEffect"))
-        return "Spotlight";
-    return NULL;
-}
-
-const char *hu_imessage_balloon_label(const char *balloon_id) {
-    if (!balloon_id || !balloon_id[0])
-        return NULL;
-    /* Animoji/Memoji checked first: their bundle IDs often contain "Stickers" */
-    if (strstr(balloon_id, "Animoji") || strstr(balloon_id, "animoji") ||
-        strstr(balloon_id, "Memoji") || strstr(balloon_id, "memoji"))
-        return "[Memoji]";
-    if (strstr(balloon_id, "Sticker") || strstr(balloon_id, "sticker"))
-        return "[Sticker]";
-    return "[iMessage App]";
-}
-
-bool hu_imessage_text_is_placeholder(const char *text) {
-    if (!text || text[0] == '\0')
-        return true;
-    return strcmp(text, "[Photo]") == 0 || strcmp(text, "[Video]") == 0 ||
-           strcmp(text, "[Voice Message]") == 0;
-}
-
-size_t hu_imessage_copy_bounded(char *dst, size_t dst_cap, const char *src, size_t src_len) {
-    if (!dst || dst_cap == 0)
-        return 0;
-    if (!src || src_len == 0) {
-        dst[0] = '\0';
-        return 0;
-    }
-    size_t cplen = src_len >= dst_cap ? dst_cap - 1 : src_len;
-    memcpy(dst, src, cplen);
-    dst[cplen] = '\0';
-    return cplen;
-}
+/* Pure lookup / classification helpers (reaction names, effect names,
+ * balloon labels, placeholder detection, bounded copy) live in
+ * src/channels/imessage_classify.c. This is the first carve-out from the
+ * 4400-LOC imessage.c — see docs/plans/2026-05-12-imessage-shape-refactor.md
+ * for the full sequence. The public API in include/human/channels/imessage.h
+ * is unchanged. */
 
 #if defined(HU_IMESSAGE_TAPBACK_ENABLED)
 /*
@@ -1067,22 +983,20 @@ size_t escape_for_applescript(char *out, size_t out_cap, const char *in, size_t 
     return j;
 }
 
-
 /* Build an AppleScript to send a POSIX file attachment via iMessage.
  * Pure string builder — does NOT execute the script.
  * Returns bytes written (excluding NUL) or 0 on error. */
-size_t imessage_build_attach_script(char *out, size_t out_cap,
-                                    const char *target_escaped,
+size_t imessage_build_attach_script(char *out, size_t out_cap, const char *target_escaped,
                                     const char *path_escaped) {
     if (!out || out_cap < 128 || !target_escaped || !path_escaped)
         return 0;
     int n = snprintf(out, out_cap,
-        "tell application \"Messages\"\n"
-        "  set targetService to 1st service whose service type = iMessage\n"
-        "  set targetBuddy to buddy \"%s\" of targetService\n"
-        "  send POSIX file \"%s\" to targetBuddy\n"
-        "end tell",
-        target_escaped, path_escaped);
+                     "tell application \"Messages\"\n"
+                     "  set targetService to 1st service whose service type = iMessage\n"
+                     "  set targetBuddy to buddy \"%s\" of targetService\n"
+                     "  send POSIX file \"%s\" to targetBuddy\n"
+                     "end tell",
+                     target_escaped, path_escaped);
     if (n > 0 && (size_t)n < out_cap)
         return (size_t)n;
     return 0;
@@ -1237,8 +1151,7 @@ static void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size
             if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
                 const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
                 hu_run_result_t ts_result = {0};
-                hu_error_t ts_err =
-                    hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
+                hu_error_t ts_err = hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
                 hu_run_result_free(c->alloc, &ts_result);
                 if (ts_err != HU_OK) {
                     usleep((unsigned int)(remaining) * 1000);
@@ -1392,9 +1305,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                 size_t tb = tgt_len < sizeof(tgt_buf) - 1 ? tgt_len : sizeof(tgt_buf) - 1;
                 memcpy(tgt_buf, tgt, tb);
                 tgt_buf[tb] = '\0';
-                const char *imsg_argv[] = {
-                    "imsg", "send", "--to", tgt_buf, "--text", message,
-                    "--service", "imessage", NULL};
+                const char *imsg_argv[] = {"imsg",  "send",      "--to",     tgt_buf, "--text",
+                                           message, "--service", "imessage", NULL};
                 hu_run_result_t imsg_result = {0};
                 hu_error_t imsg_err =
                     hu_process_run_with_timeout(c->alloc, imsg_argv, NULL, 65536, 15, &imsg_result);
@@ -1406,8 +1318,7 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                     goto imsg_media;
                 }
                 if (getenv("HU_DEBUG"))
-                    hu_log_info("imessage", NULL,
-                                "imsg send failed, falling back to AppleScript");
+                    hu_log_info("imessage", NULL, "imsg send failed, falling back to AppleScript");
             }
         }
         /* Escaped strings: worst case 2x length */
@@ -1501,9 +1412,8 @@ imsg_media:
                 continue;
 
             if (try_imsg_file) {
-                const char *fa[] = {"imsg",      "send",    "--to",      imsg_tgt_buf,
-                                    "--file",    url,       "--service", "imessage",
-                                    NULL};
+                const char *fa[] = {"imsg", "send",      "--to",     imsg_tgt_buf, "--file",
+                                    url,    "--service", "imessage", NULL};
                 hu_run_result_t ir = {0};
                 hu_error_t ie = hu_process_run_with_timeout(c->alloc, fa, NULL, 65536, 15, &ir);
                 bool fok = (ie == HU_OK && ir.success && ir.exit_code == 0);
@@ -1530,8 +1440,8 @@ imsg_media:
             size_t m_script_cap = 256 + strlen(m_tgt_esc) + strlen(path_esc);
             char *m_script = (char *)c->alloc->alloc(c->alloc->ctx, m_script_cap);
             if (m_script) {
-                size_t m_n = imessage_build_attach_script(
-                    m_script, m_script_cap, m_tgt_esc, path_esc);
+                size_t m_n =
+                    imessage_build_attach_script(m_script, m_script_cap, m_tgt_esc, path_esc);
                 c->alloc->free(c->alloc->ctx, path_esc, path_esc_cap);
                 if (m_n > 0) {
                     const char *argv[] = {"osascript", "-e", m_script, NULL};
@@ -1693,8 +1603,8 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
             const unsigned char *ab = sqlite3_column_blob(stmt, 6);
             int ab_len = sqlite3_column_bytes(stmt, 6);
             if (ab && ab_len > 0) {
-                size_t extracted =
-                    hu_imessage_extract_attributed_body(ab, (size_t)ab_len, attr_buf, sizeof(attr_buf));
+                size_t extracted = hu_imessage_extract_attributed_body(ab, (size_t)ab_len, attr_buf,
+                                                                       sizeof(attr_buf));
                 if (extracted > 0)
                     txt = attr_buf;
             }
@@ -1712,8 +1622,7 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
         if (txt && txt[0] != '\0') {
             const char *ename = hu_imessage_effect_name(hist_effect);
             if (ename) {
-                snprintf(hist_effect_buf, sizeof(hist_effect_buf), "[Sent with %s] %s",
-                         ename, txt);
+                snprintf(hist_effect_buf, sizeof(hist_effect_buf), "[Sent with %s] %s", ename, txt);
                 txt = hist_effect_buf;
             }
         }
@@ -1849,13 +1758,11 @@ hu_error_t hu_imessage_build_tapback_context(hu_allocator_t *alloc, const char *
     size_t pos = 0;
     pos = hu_buf_appendf(buf, sizeof(buf), pos, "[REACTIONS on your recent messages:");
     if (hearts > 0)
-        pos = hu_buf_appendf(buf, sizeof(buf), pos, " %d heart%s", hearts,
-                             hearts > 1 ? "s" : "");
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, " %d heart%s", hearts, hearts > 1 ? "s" : "");
     if (likes > 0)
         pos = hu_buf_appendf(buf, sizeof(buf), pos, " %d like%s", likes, likes > 1 ? "s" : "");
     if (laughs > 0)
-        pos = hu_buf_appendf(buf, sizeof(buf), pos, " %d laugh%s", laughs,
-                             laughs > 1 ? "s" : "");
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, " %d laugh%s", laughs, laughs > 1 ? "s" : "");
     if (emphasis > 0)
         pos = hu_buf_appendf(buf, sizeof(buf), pos, " %d emphasis", emphasis);
     if (questions > 0)
@@ -2003,10 +1910,9 @@ int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len)
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
         return -1;
 
-    const char *sql =
-        "SELECT MAX(m.ROWID) FROM message m "
-        "JOIN handle h ON m.handle_id = h.ROWID "
-        "WHERE m.is_from_me = 1 AND h.id = ?1";
+    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 1 AND h.id = ?1";
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -2234,8 +2140,7 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     if (!target || target_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
-    if (c->use_imsg_cli && imsg_cli_available(c) &&
-        imsg_try_react(c, message_id, reaction))
+    if (c->use_imsg_cli && imsg_cli_available(c) && imsg_try_react(c, message_id, reaction))
         return HU_OK;
 
     /* Tier 2: Native AX tapback — uses our process's Accessibility permission
@@ -2257,9 +2162,8 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
                 if (imessage_open_chatdb(db_path, &db) == SQLITE_OK) {
                     sqlite3_stmt *stmt = NULL;
                     if (sqlite3_prepare_v2(
-                            db,
-                            "SELECT text, attributedBody FROM message WHERE ROWID = ?",
-                            -1, &stmt, NULL) == SQLITE_OK) {
+                            db, "SELECT text, attributedBody FROM message WHERE ROWID = ?", -1,
+                            &stmt, NULL) == SQLITE_OK) {
                         sqlite3_bind_int64(stmt, 1, message_id);
                         if (sqlite3_step(stmt) == SQLITE_ROW) {
                             const char *text = (const char *)sqlite3_column_text(stmt, 0);
@@ -2429,14 +2333,13 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
         return HU_ERR_INTERNAL;
     }
 
-    const char *argv[] = {
-        "osascript", "-l", "JavaScript", "-e", script, NULL};
+    const char *argv[] = {"osascript", "-l", "JavaScript", "-e", script, NULL};
     hu_run_result_t result = {0};
     hu_error_t err = hu_process_run_with_timeout(c->alloc, argv, NULL, 65536, 15, &result);
     c->alloc->free(c->alloc->ctx, script, script_cap);
     if (err != HU_OK) {
         hu_log_error("imessage", NULL, "tapback osascript failed: hu_process_run err=%s",
-                hu_error_string(err));
+                     hu_error_string(err));
         hu_run_result_free(c->alloc, &result);
         return HU_ERR_NOT_SUPPORTED;
     }
@@ -2444,11 +2347,15 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     bool ok = result.success && exit_code == 0;
     if (!ok) {
         hu_log_error("imessage", NULL, "tapback JXA failed: exit=%d stdout=%.*s stderr=%.*s",
-                exit_code,
-                (int)(result.stdout_buf && result.stdout_len > 0 ? (result.stdout_len < 200 ? result.stdout_len : 200) : 0),
-                result.stdout_buf ? result.stdout_buf : "",
-                (int)(result.stderr_buf && result.stderr_len > 0 ? (result.stderr_len < 200 ? result.stderr_len : 200) : 0),
-                result.stderr_buf ? result.stderr_buf : "");
+                     exit_code,
+                     (int)(result.stdout_buf && result.stdout_len > 0
+                               ? (result.stdout_len < 200 ? result.stdout_len : 200)
+                               : 0),
+                     result.stdout_buf ? result.stdout_buf : "",
+                     (int)(result.stderr_buf && result.stderr_len > 0
+                               ? (result.stderr_len < 200 ? result.stderr_len : 200)
+                               : 0),
+                     result.stderr_buf ? result.stderr_buf : "");
     }
     hu_run_result_free(c->alloc, &result);
     if (!ok)
@@ -2510,9 +2417,7 @@ static hu_error_t imessage_vt_build_read_receipt_context(void *ctx, hu_allocator
     return hu_imessage_build_read_receipt_context(alloc, contact_id, contact_id_len, out, out_len);
 }
 
-
-static hu_error_t imessage_mark_read(void *ctx, const char *contact_id,
-                                     size_t contact_id_len) {
+static hu_error_t imessage_mark_read(void *ctx, const char *contact_id, size_t contact_id_len) {
 #ifdef HU_IS_TEST
     (void)ctx;
     (void)contact_id;
@@ -2545,12 +2450,13 @@ static hu_error_t imessage_mark_read(void *ctx, const char *contact_id,
         return HU_ERR_OUT_OF_MEMORY;
     }
     int n = snprintf(script, script_cap,
-             "tell application \"Messages\"\n"
-             "  set targetService to 1st service whose service type = iMessage\n"
-             "  set targetBuddy to buddy \"%s\" of targetService\n"
-             "  set targetChat to a reference to chat id (id of targetBuddy)\n"
-             "  read targetChat\n"
-             "end tell", esc);
+                     "tell application \"Messages\"\n"
+                     "  set targetService to 1st service whose service type = iMessage\n"
+                     "  set targetBuddy to buddy \"%s\" of targetService\n"
+                     "  set targetChat to a reference to chat id (id of targetBuddy)\n"
+                     "  read targetChat\n"
+                     "end tell",
+                     esc);
     if (n < 0 || (size_t)n >= script_cap) {
         c->alloc->free(c->alloc->ctx, script, script_cap);
         c->alloc->free(c->alloc->ctx, esc, esc_cap);
@@ -2635,12 +2541,10 @@ static AXUIElementRef ax_find_compose_field_recurse(AXUIElementRef elem, int dep
                  * entry area". Only accept fields with desc="Message" or
                  * AXTextField role (which is never a message bubble). */
                 CFStringRef desc = NULL;
-                AXUIElementCopyAttributeValue(child, kAXDescriptionAttribute,
-                                              (CFTypeRef *)&desc);
+                AXUIElementCopyAttributeValue(child, kAXDescriptionAttribute, (CFTypeRef *)&desc);
                 bool is_compose = false;
                 if (desc) {
-                    is_compose = (CFStringCompare(desc, CFSTR("Message"), 0) ==
-                                  kCFCompareEqualTo);
+                    is_compose = (CFStringCompare(desc, CFSTR("Message"), 0) == kCFCompareEqualTo);
                     CFRelease(desc);
                 }
                 if (!is_compose) {
@@ -2722,8 +2626,7 @@ static void ax_open_conversation(const char *recipient, size_t recipient_len) {
     /* Also set AXFrontmost as a belt-and-suspenders approach */
     AXUIElementRef app = AXUIElementCreateApplication(pid);
     if (app) {
-        AXError aerr = AXUIElementSetAttributeValue(app, CFSTR("AXFrontmost"),
-                                                    kCFBooleanTrue);
+        AXError aerr = AXUIElementSetAttributeValue(app, CFSTR("AXFrontmost"), kCFBooleanTrue);
         if (aerr != kAXErrorSuccess)
             hu_log_info("imessage", NULL, "AX setFrontmost: error %d", (int)aerr);
 
@@ -2775,14 +2678,13 @@ static AXUIElementRef ax_get_messages_window(void) {
                 AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
                 CFStringRef role = NULL;
                 AXUIElementCopyAttributeValue(child, kAXRoleAttribute, (CFTypeRef *)&role);
-                bool is_menu = (role && CFStringCompare(role, CFSTR("AXMenuBar"), 0) ==
-                                            kCFCompareEqualTo);
+                bool is_menu =
+                    (role && CFStringCompare(role, CFSTR("AXMenuBar"), 0) == kCFCompareEqualTo);
                 if (role)
                     CFRelease(role);
                 if (!is_menu) {
                     CFArrayRef sub = NULL;
-                    AXUIElementCopyAttributeValue(child, kAXChildrenAttribute,
-                                                  (CFTypeRef *)&sub);
+                    AXUIElementCopyAttributeValue(child, kAXChildrenAttribute, (CFTypeRef *)&sub);
                     if (sub) {
                         CFIndex sub_count = CFArrayGetCount(sub);
                         CFRelease(sub);
@@ -2883,8 +2785,8 @@ static AXUIElementRef ax_find_message_group(AXUIElementRef elem, const char *con
 
         /* Check this element's description for message text. */
         CFStringRef desc = NULL;
-        if (AXUIElementCopyAttributeValue(child, kAXDescriptionAttribute,
-                                          (CFTypeRef *)&desc) == kAXErrorSuccess &&
+        if (AXUIElementCopyAttributeValue(child, kAXDescriptionAttribute, (CFTypeRef *)&desc) ==
+                kAXErrorSuccess &&
             desc) {
             char dbuf[512] = {0};
             CFStringGetCString(desc, dbuf, (CFIndex)sizeof(dbuf), kCFStringEncodingUTF8);
@@ -2911,14 +2813,14 @@ static AXUIElementRef ax_find_message_group(AXUIElementRef elem, const char *con
         if (!found) {
             CFStringRef role = NULL;
             AXUIElementCopyAttributeValue(child, kAXRoleAttribute, (CFTypeRef *)&role);
-            bool is_textarea = (role &&
-                CFStringCompare(role, CFSTR("AXTextArea"), 0) == kCFCompareEqualTo);
+            bool is_textarea =
+                (role && CFStringCompare(role, CFSTR("AXTextArea"), 0) == kCFCompareEqualTo);
             if (role)
                 CFRelease(role);
             if (is_textarea) {
                 CFStringRef val = NULL;
-                if (AXUIElementCopyAttributeValue(child, kAXValueAttribute,
-                                                  (CFTypeRef *)&val) == kAXErrorSuccess &&
+                if (AXUIElementCopyAttributeValue(child, kAXValueAttribute, (CFTypeRef *)&val) ==
+                        kAXErrorSuccess &&
                     val) {
                     char vbuf[512] = {0};
                     CFStringGetCString(val, vbuf, (CFIndex)sizeof(vbuf), kCFStringEncodingUTF8);
@@ -2950,8 +2852,8 @@ static bool ax_perform_tapback_on_row(AXUIElementRef row, const char *tapback_la
     AXUIElementRef targets[2] = {row, NULL};
     int target_count = 1;
     CFArrayRef children = NULL;
-    if (AXUIElementCopyAttributeValue(row, kAXChildrenAttribute,
-                                      (CFTypeRef *)&children) == kAXErrorSuccess &&
+    if (AXUIElementCopyAttributeValue(row, kAXChildrenAttribute, (CFTypeRef *)&children) ==
+            kAXErrorSuccess &&
         children) {
         if (CFArrayGetCount(children) > 0) {
             targets[1] = (AXUIElementRef)CFArrayGetValueAtIndex(children, 0);
@@ -2983,8 +2885,7 @@ static bool ax_perform_tapback_on_row(AXUIElementRef row, const char *tapback_la
     return success;
 }
 
-static bool ax_tapback(const char *content_prefix, int row_offset,
-                       const char *tapback_label) {
+static bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_label) {
     (void)row_offset;
 
     /* Retry loop: window or message may not be in AX tree immediately */
@@ -3011,8 +2912,8 @@ static bool ax_tapback(const char *content_prefix, int row_offset,
 
     bool ok = ax_perform_tapback_on_row(msg_group, tapback_label);
     CFRelease(msg_group);
-    hu_log_info("imessage", NULL, "AX tapback: %s (action=%s)",
-                ok ? "sent" : "action not found", tapback_label);
+    hu_log_info("imessage", NULL, "AX tapback: %s (action=%s)", ok ? "sent" : "action not found",
+                tapback_label);
     return ok;
 }
 #endif /* HU_IMESSAGE_TAPBACK_ENABLED */
@@ -3036,8 +2937,7 @@ static bool imcore_init(hu_imessage_ctx_t *c) {
     }
 
     typedef id (*id_msg)(id, SEL);
-    id controller = ((id_msg)objc_msgSend)((id)daemon_cls,
-                                           sel_registerName("sharedInstance"));
+    id controller = ((id_msg)objc_msgSend)((id)daemon_cls, sel_registerName("sharedInstance"));
     if (!controller) {
         dlclose(c->imcore_handle);
         c->imcore_handle = NULL;
@@ -3050,8 +2950,7 @@ static bool imcore_init(hu_imessage_ctx_t *c) {
     ((void_msg)objc_msgSend)(controller, sel_registerName("connectToDaemon"));
 
     typedef BOOL (*bool_msg)(id, SEL);
-    BOOL connected = ((bool_msg)objc_msgSend)(controller,
-                                              sel_registerName("isConnected"));
+    BOOL connected = ((bool_msg)objc_msgSend)(controller, sel_registerName("isConnected"));
     c->imcore_connected = (connected != 0);
     if (!c->imcore_connected) {
         hu_log_info("imessage", NULL,
@@ -3061,8 +2960,7 @@ static bool imcore_init(hu_imessage_ctx_t *c) {
     return c->imcore_connected;
 }
 
-static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient,
-                                size_t recipient_len) {
+static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len) {
     if (!c || !c->imcore_connected || !recipient || recipient_len == 0)
         return false;
 
@@ -3071,8 +2969,7 @@ static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient,
         return false;
 
     typedef id (*id_msg)(id, SEL, ...);
-    id registry = ((id_msg)objc_msgSend)((id)registry_cls,
-                                         sel_registerName("sharedInstance"));
+    id registry = ((id_msg)objc_msgSend)((id)registry_cls, sel_registerName("sharedInstance"));
     if (!registry)
         return false;
 
@@ -3085,13 +2982,12 @@ static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient,
     char chat_id[320];
     id chat = NULL;
     for (int px = 0; px < 3 && !chat; px++) {
-        int n = snprintf(chat_id, sizeof(chat_id), "%s%.*s",
-                         prefixes[px], (int)recipient_len, recipient);
+        int n = snprintf(chat_id, sizeof(chat_id), "%s%.*s", prefixes[px], (int)recipient_len,
+                         recipient);
         if (n < 0 || (size_t)n >= sizeof(chat_id))
             continue;
         id chat_id_str = ((id_msg)objc_msgSend)((id)ns_string,
-                                                sel_registerName("stringWithUTF8String:"),
-                                                chat_id);
+                                                sel_registerName("stringWithUTF8String:"), chat_id);
         if (chat_id_str)
             chat = ((id_msg)objc_msgSend)(
                 registry, sel_registerName("existingChatWithChatIdentifier:"), chat_id_str);
@@ -3100,13 +2996,11 @@ static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient,
         return false;
 
     typedef void (*bool_set_msg)(id, SEL, BOOL);
-    ((bool_set_msg)objc_msgSend)(chat, sel_registerName("setLocalUserIsTyping:"),
-                                 (BOOL)1);
+    ((bool_set_msg)objc_msgSend)(chat, sel_registerName("setLocalUserIsTyping:"), (BOOL)1);
     return true;
 }
 
-static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient,
-                               size_t recipient_len) {
+static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len) {
     if (!c || !c->imcore_connected || !recipient || recipient_len == 0)
         return false;
 
@@ -3115,8 +3009,7 @@ static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient,
         return false;
 
     typedef id (*id_msg)(id, SEL, ...);
-    id registry = ((id_msg)objc_msgSend)((id)registry_cls,
-                                         sel_registerName("sharedInstance"));
+    id registry = ((id_msg)objc_msgSend)((id)registry_cls, sel_registerName("sharedInstance"));
     if (!registry)
         return false;
 
@@ -3128,13 +3021,12 @@ static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient,
     char chat_id[320];
     id chat = NULL;
     for (int px = 0; px < 3 && !chat; px++) {
-        int n = snprintf(chat_id, sizeof(chat_id), "%s%.*s",
-                         prefixes[px], (int)recipient_len, recipient);
+        int n = snprintf(chat_id, sizeof(chat_id), "%s%.*s", prefixes[px], (int)recipient_len,
+                         recipient);
         if (n < 0 || (size_t)n >= sizeof(chat_id))
             continue;
         id chat_id_str = ((id_msg)objc_msgSend)((id)ns_string,
-                                                sel_registerName("stringWithUTF8String:"),
-                                                chat_id);
+                                                sel_registerName("stringWithUTF8String:"), chat_id);
         if (chat_id_str)
             chat = ((id_msg)objc_msgSend)(
                 registry, sel_registerName("existingChatWithChatIdentifier:"), chat_id_str);
@@ -3143,8 +3035,7 @@ static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient,
         return false;
 
     typedef void (*bool_set_msg)(id, SEL, BOOL);
-    ((bool_set_msg)objc_msgSend)(chat, sel_registerName("setLocalUserIsTyping:"),
-                                 (BOOL)0);
+    ((bool_set_msg)objc_msgSend)(chat, sel_registerName("setLocalUserIsTyping:"), (BOOL)0);
     return true;
 }
 
@@ -3155,8 +3046,7 @@ static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient,
  * Tier 2: AX compose field injection (bypasses keystroke block, macOS 14+)
  * Tier 3: AppleScript keystroke via System Events (last resort)
  * Requires Accessibility permission for tiers 2+3. */
-static hu_error_t imessage_start_typing(void *ctx, const char *recipient,
-                                        size_t recipient_len) {
+static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t recipient_len) {
 #if HU_IS_TEST
     (void)ctx;
     (void)recipient;
@@ -3218,8 +3108,7 @@ static hu_error_t imessage_start_typing(void *ctx, const char *recipient,
 #endif
 }
 
-static hu_error_t imessage_stop_typing(void *ctx, const char *recipient,
-                                       size_t recipient_len) {
+static hu_error_t imessage_stop_typing(void *ctx, const char *recipient, size_t recipient_len) {
 #if HU_IS_TEST
     (void)ctx;
     (void)recipient;
@@ -3335,10 +3224,11 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
                     }
                     if (persisted > 0 && persisted <= db_max) {
                         c->last_rowid = persisted;
-                        hu_log_info("imessage", NULL, "resuming from persisted rowid=%lld (db max=%lld, "
-                                "recovering %lld messages)",
-                                (long long)persisted, (long long)db_max,
-                                (long long)(db_max - persisted));
+                        hu_log_info("imessage", NULL,
+                                    "resuming from persisted rowid=%lld (db max=%lld, "
+                                    "recovering %lld messages)",
+                                    (long long)persisted, (long long)db_max,
+                                    (long long)(db_max - persisted));
                     } else {
                         c->last_rowid = db_max;
                         const char *lookback_env = getenv("HU_IMESSAGE_LOOKBACK");
@@ -3695,8 +3585,9 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 c->last_rowid = sqlite3_column_int64(seed, 0);
             sqlite3_finalize(seed);
         }
-        hu_log_info("imessage", NULL, "late-seeded last_rowid=%lld (only new messages will be processed)",
-                (long long)c->last_rowid);
+        hu_log_info("imessage", NULL,
+                    "late-seeded last_rowid=%lld (only new messages will be processed)",
+                    (long long)c->last_rowid);
         sqlite3_close(db);
         imessage_record_poll_success(c, (int64_t)time(NULL));
         imessage_save_poll_status(c);
@@ -3714,93 +3605,90 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
      *
      * Attachment type classification uses EXISTS (cheaper than COUNT). */
 
-#define IMSG_POLL_SQL_BASE \
-        "SELECT m.ROWID, m.guid, " \
-        "  COALESCE(m.text, " \
-        "    (SELECT CASE " \
-        "       WHEN EXISTS (SELECT 1 FROM message_attachment_join maja " \
-        "             JOIN attachment aa ON maja.attachment_id = aa.ROWID " \
-        "             WHERE maja.message_id = m.ROWID AND aa.filename IS NOT NULL " \
-        "             AND (LOWER(aa.filename) LIKE '%.caf' OR LOWER(aa.filename) LIKE '%.m4a' " \
-        "               OR LOWER(aa.filename) LIKE '%.mp3' OR LOWER(aa.filename) LIKE '%.aac' " \
-        "               OR LOWER(aa.filename) LIKE '%.opus')) " \
-        "       THEN '[Voice Message]' " \
-        "       WHEN EXISTS (SELECT 1 FROM message_attachment_join majv " \
-        "             JOIN attachment av ON majv.attachment_id = av.ROWID " \
-        "             WHERE majv.message_id = m.ROWID AND av.filename IS NOT NULL " \
-        "             AND (LOWER(av.filename) LIKE '%.mov' OR LOWER(av.filename) LIKE '%.mp4' " \
-        "               OR LOWER(av.filename) LIKE '%.m4v')) " \
-        "       THEN '[Video]' ELSE '[Photo]' END)) AS text, h.id, " \
-        "  COALESCE(" \
-        "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj " \
-        "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id " \
-        "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, " \
-        "  EXISTS (SELECT 1 FROM message_attachment_join maj " \
-        "   JOIN attachment a ON maj.attachment_id = a.ROWID " \
-        "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL " \
-        "   AND (LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' " \
-        "     OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' " \
-        "     OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp')) " \
-        "   AS has_image, " \
-        "  EXISTS (SELECT 1 FROM message_attachment_join maj2 " \
-        "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID " \
-        "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL " \
-        "   AND (LOWER(a2.filename) LIKE '%.mov' OR LOWER(a2.filename) LIKE '%.mp4' " \
-        "     OR LOWER(a2.filename) LIKE '%.m4v')) AS has_video, " \
-        "  EXISTS (SELECT 1 FROM message_attachment_join maj3 " \
-        "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID " \
-        "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL " \
-        "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' " \
-        "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' " \
-        "     OR LOWER(a3.filename) LIKE '%.opus')) AS has_audio, " \
-        "  CASE WHEN m.date_edited > 0 THEN 1 ELSE 0 END AS was_edited, " \
-        "  m.thread_originator_guid, " \
-        "  m.attributedBody, " \
-        "  m.balloon_bundle_id, " \
-        "  m.expressive_send_style_id, " \
-        "  m.date / 1000000000 + 978307200 AS unix_ts"
+#define IMSG_POLL_SQL_BASE                                                                  \
+    "SELECT m.ROWID, m.guid, "                                                              \
+    "  COALESCE(m.text, "                                                                   \
+    "    (SELECT CASE "                                                                     \
+    "       WHEN EXISTS (SELECT 1 FROM message_attachment_join maja "                       \
+    "             JOIN attachment aa ON maja.attachment_id = aa.ROWID "                     \
+    "             WHERE maja.message_id = m.ROWID AND aa.filename IS NOT NULL "             \
+    "             AND (LOWER(aa.filename) LIKE '%.caf' OR LOWER(aa.filename) LIKE '%.m4a' " \
+    "               OR LOWER(aa.filename) LIKE '%.mp3' OR LOWER(aa.filename) LIKE '%.aac' " \
+    "               OR LOWER(aa.filename) LIKE '%.opus')) "                                 \
+    "       THEN '[Voice Message]' "                                                        \
+    "       WHEN EXISTS (SELECT 1 FROM message_attachment_join majv "                       \
+    "             JOIN attachment av ON majv.attachment_id = av.ROWID "                     \
+    "             WHERE majv.message_id = m.ROWID AND av.filename IS NOT NULL "             \
+    "             AND (LOWER(av.filename) LIKE '%.mov' OR LOWER(av.filename) LIKE '%.mp4' " \
+    "               OR LOWER(av.filename) LIKE '%.m4v')) "                                  \
+    "       THEN '[Video]' ELSE '[Photo]' END)) AS text, h.id, "                            \
+    "  COALESCE("                                                                           \
+    "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "                \
+    "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "                        \
+    "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "                       \
+    "  EXISTS (SELECT 1 FROM message_attachment_join maj "                                  \
+    "   JOIN attachment a ON maj.attachment_id = a.ROWID "                                  \
+    "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "                         \
+    "   AND (LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' "            \
+    "     OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' "            \
+    "     OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp')) "          \
+    "   AS has_image, "                                                                     \
+    "  EXISTS (SELECT 1 FROM message_attachment_join maj2 "                                 \
+    "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID "                               \
+    "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL "                       \
+    "   AND (LOWER(a2.filename) LIKE '%.mov' OR LOWER(a2.filename) LIKE '%.mp4' "           \
+    "     OR LOWER(a2.filename) LIKE '%.m4v')) AS has_video, "                              \
+    "  EXISTS (SELECT 1 FROM message_attachment_join maj3 "                                 \
+    "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "                               \
+    "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "                       \
+    "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "           \
+    "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "           \
+    "     OR LOWER(a3.filename) LIKE '%.opus')) AS has_audio, "                             \
+    "  CASE WHEN m.date_edited > 0 THEN 1 ELSE 0 END AS was_edited, "                       \
+    "  m.thread_originator_guid, "                                                          \
+    "  m.attributedBody, "                                                                  \
+    "  m.balloon_bundle_id, "                                                               \
+    "  m.expressive_send_style_id, "                                                        \
+    "  m.date / 1000000000 + 978307200 AS unix_ts"
 
-#define IMSG_POLL_SQL_RETRACT \
-        ", CASE WHEN m.date_retracted > 0 THEN 1 ELSE 0 END AS was_retracted"
+#define IMSG_POLL_SQL_RETRACT ", CASE WHEN m.date_retracted > 0 THEN 1 ELSE 0 END AS was_retracted"
 
-#define IMSG_POLL_SQL_CHAT_ID \
-        ", (SELECT c.guid FROM chat_message_join cmj2 " \
-        "   JOIN chat c ON cmj2.chat_id = c.ROWID " \
-        "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid"
+#define IMSG_POLL_SQL_CHAT_ID                       \
+    ", (SELECT c.guid FROM chat_message_join cmj2 " \
+    "   JOIN chat c ON cmj2.chat_id = c.ROWID "     \
+    "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid"
 
-#define IMSG_POLL_SQL_FROM \
-        " FROM message m " \
-        "JOIN handle h ON m.handle_id = h.ROWID " \
-        "WHERE (m.is_from_me = 0 OR (m.is_from_me = 1 AND h.id = ?3)) " \
-        "AND m.associated_message_type = 0 " \
-        "AND m.ROWID > ?1 " \
-        "AND ((m.text IS NOT NULL AND LENGTH(m.text) > 0) " \
-        "     OR (m.attributedBody IS NOT NULL AND LENGTH(m.attributedBody) > 0) " \
-        "     OR (EXISTS (SELECT 1 FROM message_attachment_join maj " \
-        "         JOIN attachment a ON maj.attachment_id = a.ROWID " \
-        "         WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL " \
-        "         AND ((LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' " \
-        "           OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' " \
-        "           OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp') " \
-        "           OR (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' " \
-        "             OR LOWER(a.filename) LIKE '%.m4v') " \
-        "           OR (LOWER(a.filename) LIKE '%.caf' OR LOWER(a.filename) LIKE '%.m4a' " \
-        "             OR LOWER(a.filename) LIKE '%.mp3' OR LOWER(a.filename) LIKE '%.aac' " \
-        "             OR LOWER(a.filename) LIKE '%.opus')))) " \
-        "     OR (m.balloon_bundle_id IS NOT NULL)) " \
-        "ORDER BY m.ROWID ASC LIMIT ?2"
+#define IMSG_POLL_SQL_FROM                                                              \
+    " FROM message m "                                                                  \
+    "JOIN handle h ON m.handle_id = h.ROWID "                                           \
+    "WHERE (m.is_from_me = 0 OR (m.is_from_me = 1 AND h.id = ?3)) "                     \
+    "AND m.associated_message_type = 0 "                                                \
+    "AND m.ROWID > ?1 "                                                                 \
+    "AND ((m.text IS NOT NULL AND LENGTH(m.text) > 0) "                                 \
+    "     OR (m.attributedBody IS NOT NULL AND LENGTH(m.attributedBody) > 0) "          \
+    "     OR (EXISTS (SELECT 1 FROM message_attachment_join maj "                       \
+    "         JOIN attachment a ON maj.attachment_id = a.ROWID "                        \
+    "         WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "               \
+    "         AND ((LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' " \
+    "           OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' "  \
+    "           OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp') " \
+    "           OR (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' "  \
+    "             OR LOWER(a.filename) LIKE '%.m4v') "                                  \
+    "           OR (LOWER(a.filename) LIKE '%.caf' OR LOWER(a.filename) LIKE '%.m4a' "  \
+    "             OR LOWER(a.filename) LIKE '%.mp3' OR LOWER(a.filename) LIKE '%.aac' " \
+    "             OR LOWER(a.filename) LIKE '%.opus')))) "                              \
+    "     OR (m.balloon_bundle_id IS NOT NULL)) "                                       \
+    "ORDER BY m.ROWID ASC LIMIT ?2"
 
     /* Build SQL variant based on available columns */
     char sql_buf[4096];
     int sql_len;
     if (has_date_retracted) {
-        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s%s",
-                           IMSG_POLL_SQL_BASE, IMSG_POLL_SQL_RETRACT,
-                           IMSG_POLL_SQL_CHAT_ID, IMSG_POLL_SQL_FROM);
+        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s%s", IMSG_POLL_SQL_BASE,
+                           IMSG_POLL_SQL_RETRACT, IMSG_POLL_SQL_CHAT_ID, IMSG_POLL_SQL_FROM);
     } else {
-        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s",
-                           IMSG_POLL_SQL_BASE, IMSG_POLL_SQL_CHAT_ID,
-                           IMSG_POLL_SQL_FROM);
+        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s", IMSG_POLL_SQL_BASE,
+                           IMSG_POLL_SQL_CHAT_ID, IMSG_POLL_SQL_FROM);
     }
     if (sql_len < 0 || (size_t)sql_len >= sizeof(sql_buf)) {
         sqlite3_close(db);
@@ -3817,8 +3705,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 
     sqlite3_bind_int64(stmt, 1, c->last_rowid);
     sqlite3_bind_int(stmt, 2, (int)max_msgs);
-    sqlite3_bind_text(stmt, 3, c->loopback_handle ? c->loopback_handle : "",
-                      -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, c->loopback_handle ? c->loopback_handle : "", -1, SQLITE_STATIC);
 
     const int col_retracted = has_date_retracted ? 14 : -1;
     const int col_chat_guid = has_date_retracted ? 15 : 14;
@@ -3868,8 +3755,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         if (text && text[0]) {
             const char *effect_name = hu_imessage_effect_name(effect_id);
             if (effect_name) {
-                snprintf(effect_buf, sizeof(effect_buf), "[Sent with %s] %s",
-                         effect_name, text);
+                snprintf(effect_buf, sizeof(effect_buf), "[Sent with %s] %s", effect_name, text);
                 text = effect_buf;
             }
         }
@@ -3933,9 +3819,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
             msgs[count].guid[0] = '\0';
         }
         msgs[count].was_edited = (was_edited != 0);
-        msgs[count].was_unsent = (col_retracted >= 0)
-                                     ? (sqlite3_column_int(stmt, col_retracted) != 0)
-                                     : false;
+        msgs[count].was_unsent =
+            (col_retracted >= 0) ? (sqlite3_column_int(stmt, col_retracted) != 0) : false;
         if (reply_to && reply_to[0]) {
             size_t rt_len = strlen(reply_to);
             if (rt_len >= sizeof(msgs[count].reply_to_guid))
@@ -3965,8 +3850,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     }
 
     if (step_rc != SQLITE_DONE && step_rc != SQLITE_ROW)
-        hu_log_error("imessage", NULL, "poll step unexpected result: %d (%s)",
-                     step_rc, sqlite3_errmsg(db));
+        hu_log_error("imessage", NULL, "poll step unexpected result: %d (%s)", step_rc,
+                     sqlite3_errmsg(db));
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
@@ -3976,7 +3861,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 
     if (count == 0 && getenv("HU_DEBUG"))
         hu_log_info("imessage", NULL, "poll: 0 messages (last_rowid=%lld)",
-                (long long)c->last_rowid);
+                    (long long)c->last_rowid);
 
     imessage_record_poll_success(c, (int64_t)time(NULL));
     imessage_save_poll_status(c);
@@ -4043,8 +3928,7 @@ char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t que
         if (ch == ' ') {
             encoded[eidx++] = '+';
         } else if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-                   (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
-                   ch == '.' || ch == '~') {
+                   (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
             encoded[eidx++] = (char)ch;
         } else {
             static const char hex[] = "0123456789ABCDEF";
@@ -4113,8 +3997,7 @@ char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t que
         }
         if (gif_section) {
             size_t remaining = resp.body_len - (size_t)(gif_section - resp.body);
-            gif_url_len =
-                gif_json_extract(gif_section, remaining, "url", gif_url, sizeof(gif_url));
+            gif_url_len = gif_json_extract(gif_section, remaining, "url", gif_url, sizeof(gif_url));
         }
     }
 
@@ -4253,11 +4136,13 @@ void hu_imessage_test_set_guid_lookup(const char *guid, const char *text) {
         return;
     size_t i = s_test_guid_count++;
     size_t gl = strlen(guid);
-    if (gl > 95) gl = 95;
+    if (gl > 95)
+        gl = 95;
     memcpy(s_test_guid_store[i].guid, guid, gl);
     s_test_guid_store[i].guid[gl] = '\0';
     size_t tl = strlen(text);
-    if (tl > 511) tl = 511;
+    if (tl > 511)
+        tl = 511;
     memcpy(s_test_guid_store[i].text, text, tl);
     s_test_guid_store[i].text[tl] = '\0';
 }
@@ -4277,9 +4162,8 @@ hu_error_t hu_imessage_lookup_message_by_guid(hu_allocator_t *alloc, const char 
     for (size_t i = 0; i < s_test_guid_count; i++) {
         if (strlen(s_test_guid_store[i].guid) == guid_len &&
             memcmp(s_test_guid_store[i].guid, guid, guid_len) == 0) {
-            *out_len = hu_imessage_copy_bounded(out_text, out_cap,
-                           s_test_guid_store[i].text,
-                           strlen(s_test_guid_store[i].text));
+            *out_len = hu_imessage_copy_bounded(out_text, out_cap, s_test_guid_store[i].text,
+                                                strlen(s_test_guid_store[i].text));
             return HU_OK;
         }
     }
@@ -4366,19 +4250,22 @@ hu_error_t hu_imessage_test_inject_mock_full(hu_channel_t *ch, const char *sessi
     c->mock_msgs[i].timestamp_sec = opts->timestamp_sec;
     if (opts->guid && opts->guid[0]) {
         size_t gl = strlen(opts->guid);
-        if (gl > 95) gl = 95;
+        if (gl > 95)
+            gl = 95;
         memcpy(c->mock_msgs[i].guid, opts->guid, gl);
         c->mock_msgs[i].guid[gl] = '\0';
     }
     if (opts->reply_to_guid && opts->reply_to_guid[0]) {
         size_t rl = strlen(opts->reply_to_guid);
-        if (rl > 95) rl = 95;
+        if (rl > 95)
+            rl = 95;
         memcpy(c->mock_msgs[i].reply_to_guid, opts->reply_to_guid, rl);
         c->mock_msgs[i].reply_to_guid[rl] = '\0';
     }
     if (opts->chat_id && opts->chat_id[0]) {
         size_t cl = strlen(opts->chat_id);
-        if (cl > 127) cl = 127;
+        if (cl > 127)
+            cl = 127;
         memcpy(c->mock_msgs[i].chat_id, opts->chat_id, cl);
         c->mock_msgs[i].chat_id[cl] = '\0';
     }
@@ -4393,7 +4280,8 @@ void hu_imessage_test_store_guid_text(hu_channel_t *ch, const char *guid, const 
         return;
     size_t i = c->mock_guid_count++;
     size_t gl = strlen(guid);
-    if (gl > 95) gl = 95;
+    if (gl > 95)
+        gl = 95;
     memcpy(c->mock_guid_store[i], guid, gl);
     c->mock_guid_store[i][gl] = '\0';
     (void)text;
