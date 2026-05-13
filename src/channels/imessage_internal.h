@@ -182,6 +182,19 @@ void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_
                               size_t message_len);
 #endif
 
+/* ── Send module — src/channels/imessage_send.c (Step 6) ──────────────
+ *
+ * Text + media send vtable hook, plus the AppleScript attachment-script
+ * builder (kept in send.c because send is its only caller). */
+
+hu_error_t imessage_send(void *ctx, const char *target, size_t target_len, const char *message,
+                         size_t message_len, const char *const *media, size_t media_count);
+
+#if (defined(__APPLE__) && defined(__MACH__)) || HU_IS_TEST
+size_t imessage_build_attach_script(char *out, size_t out_cap, const char *target_escaped,
+                                    const char *path_escaped);
+#endif
+
 /* ── React module — src/channels/imessage_react.c (Step 4) ────────────
  *
  * Vtable hook for tapback reactions. 3-tier fallback (imsg CLI → AX →
