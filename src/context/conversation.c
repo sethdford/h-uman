@@ -1390,11 +1390,14 @@ char *hu_conversation_build_awareness_on(hu_allocator_t *alloc,
 
     /* Channel-specific register hint.
      *
-     * iMessage is the highest-leverage Tier-1 channel today; its conversational
-     * register (DM brevity, tapback-as-reply, single-emoji legitimacy) is the
-     * single biggest "is this a friend or a chatbot" signal. This block injects
-     * a short directive when the active channel is iMessage. Other channels are
-     * unchanged (NULL channel_name → no-op preserves the older API contract). */
+     * Each Tier-1 channel has its own conversational register: iMessage is DM
+     * brevity + tapback-as-reply; Telegram is medium-length with rich emoji
+     * reactions; Discord is gamer-casual heavy on custom emoji; Slack is
+     * work-leaning with threading conventions. A single channel-agnostic
+     * "be natural" instruction can't capture this — the AI-tell patterns
+     * literally differ per channel. This block injects a focused directive
+     * for whichever channel is active. NULL/unknown channel → no-op,
+     * preserving the older API contract for callers that don't opt in. */
     if (channel_name_eq(channel_name, channel_name_len, "imessage")) {
         const char *last_their_msg = NULL;
         size_t last_their_len = 0;
@@ -1429,6 +1432,52 @@ char *hu_conversation_build_awareness_on(hu_allocator_t *alloc,
                          last_their_len);
             POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
+    } else if (channel_name_eq(channel_name, channel_name_len, "telegram")) {
+        w = snprintf(buf + pos, CTX_BUF_CAP - pos,
+                     "\n--- Telegram register ---\n"
+                     "- This is Telegram — bot-heavy ecosystem, so any whiff of "
+                     "\"bot voice\" makes you indistinguishable from spam.\n"
+                     "- 1-3 sentences is the texting sweet spot. Brief is fine; "
+                     "a single emoji reaction is fine when the message is just an "
+                     "acknowledgment.\n"
+                     "- Reply-to-message (quoting) is common when the thread has "
+                     "diverged; use it when answering a specific earlier point.\n"
+                     "- AI-tells to avoid here: \"I'd be happy to help with that\", "
+                     "numbered/bulleted explanations on casual asks, formal "
+                     "sign-offs (\"Best,\", \"Cheers,\"). This is texting, not "
+                     "email.\n");
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
+    } else if (channel_name_eq(channel_name, channel_name_len, "discord")) {
+        w = snprintf(buf + pos, CTX_BUF_CAP - pos,
+                     "\n--- Discord register ---\n"
+                     "- This is Discord — casual, often gaming/tech-leaning, heavy "
+                     "emoji and reaction culture. Bots are everywhere, so sounding "
+                     "like one is the cardinal sin.\n"
+                     "- Lowercase is normal. Caps are emphasis. \"lol\", \"lmao\", "
+                     "\"yeah\", \"fr\" are normal interjections, not slang to "
+                     "translate.\n"
+                     "- Reactions (any emoji) and threaded replies are first-class "
+                     "responses. Consider them before composing text.\n"
+                     "- AI-tells to avoid: capitalized-formal first letter, "
+                     "\"Certainly!\", explanatory paragraphs on chat messages, "
+                     "treating the server like a help desk.\n");
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
+    } else if (channel_name_eq(channel_name, channel_name_len, "slack")) {
+        w = snprintf(buf + pos, CTX_BUF_CAP - pos,
+                     "\n--- Slack register ---\n"
+                     "- This is Slack — work-leaning but still conversational. Not "
+                     "email-formal, not iMessage-casual. The line varies by "
+                     "channel (DMs ≈ texting; #general ≈ light formality; "
+                     "broadcast channels ≈ near-formal).\n"
+                     "- Threading is the norm for follow-ups. Reactions (emoji) "
+                     "are an established way to acknowledge without replying.\n"
+                     "- Code blocks (``` ```) are expected for code or commands; "
+                     "use them instead of quoting inline.\n"
+                     "- AI-tells to avoid: \"Hope this finds you well\", "
+                     "\"Please let me know if you have any questions\", overly "
+                     "long bullet structures on quick asks, treating teammates "
+                     "like customer-support tickets.\n");
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
     }
 
     buf[pos] = '\0';

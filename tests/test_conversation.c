@@ -481,6 +481,74 @@ static void awareness_on_telegram_omits_imessage_register(void) {
     alloc.free(alloc.ctx, ctx, len + 1);
 }
 
+/* Awareness: Telegram register block lands when channel matches. */
+static void awareness_on_telegram_appends_register(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[2] = {
+        make_entry(false, "hey can you remind me later", "12:00"),
+        make_entry(true, "sure when", "12:01"),
+    };
+    size_t len = 0;
+    char *ctx = hu_conversation_build_awareness_on(&alloc, entries, 2, NULL, "telegram", 8, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "Telegram register") != NULL);
+    /* Telegram-specific tell — formal email sign-offs */
+    HU_ASSERT_TRUE(strstr(ctx, "Cheers") != NULL || strstr(ctx, "sign-offs") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") == NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
+/* Awareness: Discord register block lands when channel matches. */
+static void awareness_on_discord_appends_register(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[1] = {
+        make_entry(false, "lol yeah", "12:00"),
+    };
+    size_t len = 0;
+    char *ctx = hu_conversation_build_awareness_on(&alloc, entries, 1, NULL, "discord", 7, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "Discord register") != NULL);
+    /* Discord-specific tell — being formal */
+    HU_ASSERT_TRUE(strstr(ctx, "Certainly") != NULL || strstr(ctx, "help desk") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") == NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "Telegram register") == NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
+/* Awareness: Slack register block lands when channel matches. */
+static void awareness_on_slack_appends_register(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[2] = {
+        make_entry(false, "got a sec to look at #1234", "12:00"),
+        make_entry(true, "yeah pulling it up", "12:01"),
+    };
+    size_t len = 0;
+    char *ctx = hu_conversation_build_awareness_on(&alloc, entries, 2, NULL, "slack", 5, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "Slack register") != NULL);
+    /* Slack-specific guidance — threading + code blocks */
+    HU_ASSERT_TRUE(strstr(ctx, "Threading") != NULL || strstr(ctx, "thread") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") == NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
+/* Awareness: unknown channel — no register block emitted. */
+static void awareness_on_unknown_channel_omits_all_registers(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t entries[1] = {
+        make_entry(false, "hello", "12:00"),
+    };
+    size_t len = 0;
+    char *ctx =
+        hu_conversation_build_awareness_on(&alloc, entries, 1, NULL, "mattermost", 10, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "iMessage register") == NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "Telegram register") == NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "Discord register") == NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "Slack register") == NULL);
+    alloc.free(alloc.ctx, ctx, len + 1);
+}
+
 /* W1: backward compat — legacy hu_conversation_build_awareness omits register */
 static void awareness_legacy_api_omits_register(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -3960,6 +4028,10 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(awareness_on_imessage_short_msg_adds_mirror_hint);
     HU_RUN_TEST(awareness_on_imessage_case_insensitive);
     HU_RUN_TEST(awareness_on_telegram_omits_imessage_register);
+    HU_RUN_TEST(awareness_on_telegram_appends_register);
+    HU_RUN_TEST(awareness_on_discord_appends_register);
+    HU_RUN_TEST(awareness_on_slack_appends_register);
+    HU_RUN_TEST(awareness_on_unknown_channel_omits_all_registers);
     HU_RUN_TEST(awareness_legacy_api_omits_register);
     HU_RUN_TEST(awareness_output_bounded);
 
