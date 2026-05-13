@@ -995,8 +995,13 @@ static hu_error_t parse_overlay(hu_allocator_t *a, const char *channel_name,
                 goto ov_oom;
             }
             size_t n = fb->data.array.len;
-            if (n > 32)
-                n = 32; /* cap advisory — excess entries silently truncated */
+            if (n > 32) {
+                fprintf(stderr,
+                        "[persona] warning: persona overlay '%s' filler_bank truncated:"
+                        " %zu entries provided, capped at 32\n",
+                        channel_name ? channel_name : "(unknown)", n);
+                n = 32;
+            }
             if (n > 0) {
                 char **buf = (char **)a->alloc(a->ctx, n * sizeof(char *));
                 if (!buf)
