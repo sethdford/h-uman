@@ -109,6 +109,7 @@ void run_style_clone_tests(void);
 void run_life_sim_tests(void);
 void run_persona_mood_tests(void);
 void run_persona_feedback_tests(void);
+void run_persona_filler_roundtrip_tests(void);
 void run_persona_cli_tests(void);
 void run_voice_maturity_tests(void);
 void run_style_learner_tests(void);
@@ -687,6 +688,7 @@ int main(int argc, char **argv) {
     run_life_sim_tests();
     run_persona_mood_tests();
     run_persona_feedback_tests();
+    run_persona_filler_roundtrip_tests();
     run_persona_cli_tests();
     run_voice_maturity_tests();
     run_style_learner_tests();
