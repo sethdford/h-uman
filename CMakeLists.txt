@@ -2441,6 +2441,7 @@ set(HU_TEST_SOURCES
     tests/test_personal_model_atomic_save.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
+    tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c
