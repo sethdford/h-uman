@@ -2,61 +2,181 @@
 #define HU_IMESSAGE_INTERNAL_H
 
 /*
- * Cross-module signatures for the carved-out iMessage modules.
+ * Cross-module signatures and shared state for the carved-out iMessage modules.
  *
  * NOT part of the public API at include/human/channels/imessage.h. Consumers
  * of iMessage from outside src/channels/ continue to use only the public
- * header. This file exists solely so the (still-being-carved) imessage*.c
- * modules can call each other without making everything global.
+ * header. This file is the internal contract between the imessage*.c files.
  *
- * Current contents:
- *   - AX (Accessibility) module — src/channels/imessage_ax.c
- *
- * Future modules per docs/plans/2026-05-12-imessage-shape-refactor.md will
- * add their own internal signatures here.
+ * Layout:
+ *   - Shared constants (sent-ring sizes, status-file paths).
+ *   - Shared `hu_imessage_ctx_t` struct definition.
+ *   - Cross-module function declarations grouped by source module.
  *
  * Visibility note: until the build system gains a `-fvisibility=hidden`
- * default for libhuman_core, these symbols are still externally linkable;
- * the contract is by header inclusion + naming convention. Treat any
- * symbol declared in this header as INTERNAL — do not call from outside
+ * default for libhuman_core, these symbols are still externally linkable.
+ * The contract is by header inclusion + naming convention — treat any
+ * symbol declared here as INTERNAL. Do not call from outside
  * src/channels/imessage*.c.
  */
 
+#include "human/channels/imessage.h"
+#include "human/core/allocator.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-
-/* AX (Accessibility) module — src/channels/imessage_ax.c.
- *
- * Apple-only. On non-Apple or test builds these functions are not defined;
- * callers MUST guard each call site with the same
- *   #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
- * that gates the module itself. Declarations are inside that guard here
- * to make link-time mistakes loud (undefined symbol) rather than silent.
- */
-
-/* Open a chat in Messages.app for the given recipient (phone / email /
- * group GUID). Activates Messages.app if it isn't focused. Idempotent. */
-void ax_open_conversation(const char *recipient, size_t recipient_len);
-
-/* Start the iMessage typing indicator for `target` by focusing the
- * Messages.app compose field and typing+clearing a placeholder character.
- * Returns true on success; false if AX permission is missing, Messages.app
- * isn't running, or the compose field couldn't be found. */
-bool ax_start_typing(const char *target, size_t target_len);
-
-/* Stop the iMessage typing indicator by clearing the compose field. */
-bool ax_stop_typing(void);
-
-#ifdef HU_IMESSAGE_TAPBACK_ENABLED
-/* Send a tapback (love / like / dislike / laugh / emphasize / question)
- * to a message identified by a content prefix + row offset within the
- * current chat. Requires HU_IMESSAGE_TAPBACK_ENABLED at build time
- * because the AX context-menu walk is macOS-version-fragile. */
-bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_label);
+#include <sys/types.h> /* pid_t */
 #endif
 
-#endif /* !HU_IS_TEST && __APPLE__ && __MACH__ */
+#ifdef HU_ENABLE_SQLITE
+struct sqlite3;
+#endif
+
+/* ── Constants ────────────────────────────────────────────────────────── */
+
+#define HU_IMESSAGE_SENT_RING_SIZE  32
+#define HU_IMESSAGE_SENT_PREFIX_LEN 256
+#define HU_IMESSAGE_ROWID_FILE      ".human/imessage.rowid"
+#define HU_IMESSAGE_STATUS_FILE     ".human/imessage.poll_status"
+
+/* ── Shared ctx struct ───────────────────────────────────────────────────
+ *
+ * Owned by imessage.c (the channel factory creates and frees it). Carved-out
+ * modules read/write fields directly. Each field is documented in-place
+ * where its bookkeeping function lives. */
+
+typedef struct hu_imessage_ctx {
+    hu_allocator_t *alloc;
+    char *default_target;
+    size_t default_target_len;
+    bool running;
+    int64_t last_rowid;
+    const char *const *allow_from;
+    size_t allow_from_count;
+    char sent_ring[HU_IMESSAGE_SENT_RING_SIZE][HU_IMESSAGE_SENT_PREFIX_LEN];
+    size_t sent_ring_len[HU_IMESSAGE_SENT_RING_SIZE];
+    uint32_t sent_ring_hash[HU_IMESSAGE_SENT_RING_SIZE];
+    size_t sent_ring_idx;
+    char typing_last_target[128];
+    size_t typing_last_target_len;
+    _Atomic bool typing_active;
+    bool use_imsg_cli;
+    bool imsg_cli_checked;
+    bool has_imsg_cli;
+    const char *loopback_handle;
+    int64_t last_ai_send_epoch;
+    /* FDA-aware circuit breaker + poll status (always present so tests + non-Apple
+     * builds can interrogate state without #ifdef gymnastics). */
+    uint32_t consecutive_open_failures;
+    bool circuit_breaker_tripped;
+    bool breaker_log_emitted; /* one-shot log gate */
+    hu_imessage_error_class_t last_error_class;
+    int64_t last_successful_poll_epoch;
+    /* Watchdog state machine — collapses breaker-tripped + poll-stalled into a
+     * single coarse health enum so the daemon emits exactly ONE log line per
+     * transition rather than spamming on every tick. */
+    hu_imessage_health_t last_logged_health;
+    /* When the breaker is tripped, the poller short-circuits to HU_OK / 0
+     * messages on most ticks but probes chat.db once every N ticks so FDA
+     * recovery is detected promptly. The counter resets on each probe and
+     * after a successful poll. */
+    uint32_t breaker_recovery_probe_counter;
+    /* `imsg_watch_running` is always compiled so test builds can drive the
+     * watch-active code path through the test seam (the prod fields below
+     * remain platform-gated). */
+    bool imsg_watch_running;
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+    pid_t imsg_watch_pid;
+    int imsg_watch_fd;
+    bool imsg_target_validated;
+    void *imcore_handle;
+    bool imcore_tried;
+    bool imcore_connected;
+#endif
+#if HU_IS_TEST
+    char last_message[4096];
+    size_t last_message_len;
+    size_t last_media_count;
+    char last_media_path[256];
+    struct {
+        char session_key[128];
+        char content[4096];
+        char guid[96];
+        char reply_to_guid[96];
+        char chat_id[128];
+        bool has_attachment;
+        bool has_video;
+        bool is_group;
+        bool was_edited;
+        bool was_unsent;
+        int64_t timestamp_sec;
+    } mock_msgs[8];
+    size_t mock_count;
+    char mock_guid_store[8][96];
+    size_t mock_guid_count;
+    hu_reaction_type_t last_reaction;
+    int64_t last_reaction_message_id;
+#endif
+} hu_imessage_ctx_t;
+
+/* ── Shared helpers (imessage.c) ───────────────────────────────────────── */
+
+/* Sent-ring tracking (used by send + poll to suppress echo of our own sends). */
+uint32_t imessage_hash(const char *s, size_t len);
+void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t msg_len);
+bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size_t text_len);
+
+/* Poll-status bookkeeping (used by poll + start/stop + the watchdog). */
+void imessage_save_poll_status(const hu_imessage_ctx_t *c);
+bool imessage_record_open_result(hu_imessage_ctx_t *c, int rc, int64_t now);
+void imessage_record_poll_success(hu_imessage_ctx_t *c, int64_t now);
+void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now);
+
+/* Chat.db opening (used by poll + react + lookups). */
+#ifdef HU_ENABLE_SQLITE
+int imessage_open_chatdb(const char *db_path, struct sqlite3 **db_out);
+#endif
+
+/* Output sanitizer (used by send and any other module that emits text to Messages). */
+size_t imessage_sanitize_output(char *buf, size_t len);
+
+/* AX→tapback action prefix mapping (used by react module). */
+const char *imessage_reaction_to_ax_action_prefix(hu_reaction_type_t reaction);
+
+/* ── imsg CLI helpers (imessage_watch.c after Step 3) ─────────────────── */
+
+/* imsg CLI availability (cached after first probe). Used by send + typing + react. */
+bool imsg_cli_available(hu_imessage_ctx_t *c);
+
+/* AppleScript escape helper (used by typing + send). */
+size_t escape_for_applescript(char *out, size_t out_cap, const char *in, size_t in_len);
+
+/* ── Typing module — src/channels/imessage_typing.c (Step 2) ───────────
+ *
+ * Vtable hooks (always defined; non-Apple / test builds return early).
+ * The Tier-3 AppleScript simulator is exposed because the send path
+ * triggers it directly when the daemon hasn't pre-activated typing. */
+
+hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t recipient_len);
+hu_error_t imessage_stop_typing(void *ctx, const char *recipient, size_t recipient_len);
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_len,
+                              size_t message_len);
+#endif
+
+/* ── AX module — src/channels/imessage_ax.c (Step 1) ──────────────────── */
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+void ax_open_conversation(const char *recipient, size_t recipient_len);
+bool ax_start_typing(const char *target, size_t target_len);
+bool ax_stop_typing(void);
+#ifdef HU_IMESSAGE_TAPBACK_ENABLED
+bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_label);
+#endif
+#endif
 
 #endif /* HU_IMESSAGE_INTERNAL_H */

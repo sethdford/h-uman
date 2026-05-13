@@ -36,10 +36,7 @@
 #endif
 #endif
 
-#define HU_IMESSAGE_SENT_RING_SIZE  32
-#define HU_IMESSAGE_SENT_PREFIX_LEN 256
-#define HU_IMESSAGE_ROWID_FILE      ".human/imessage.rowid"
-#define HU_IMESSAGE_STATUS_FILE     ".human/imessage.poll_status"
+/* Shared constants + ctx struct now live in imessage_internal.h. */
 
 size_t hu_imessage_extract_attributed_body(const unsigned char *blob, size_t blob_len, char *out,
                                            size_t out_cap) {
@@ -162,80 +159,6 @@ bool hu_imessage_status_path(char *buf, size_t cap) {
     return n > 0 && (size_t)n < cap;
 }
 
-typedef struct hu_imessage_ctx {
-    hu_allocator_t *alloc;
-    char *default_target;
-    size_t default_target_len;
-    bool running;
-    int64_t last_rowid;
-    const char *const *allow_from;
-    size_t allow_from_count;
-    char sent_ring[HU_IMESSAGE_SENT_RING_SIZE][HU_IMESSAGE_SENT_PREFIX_LEN];
-    size_t sent_ring_len[HU_IMESSAGE_SENT_RING_SIZE];
-    uint32_t sent_ring_hash[HU_IMESSAGE_SENT_RING_SIZE];
-    size_t sent_ring_idx;
-    char typing_last_target[128];
-    size_t typing_last_target_len;
-    _Atomic bool typing_active;
-    bool use_imsg_cli;
-    bool imsg_cli_checked;
-    bool has_imsg_cli;
-    const char *loopback_handle;
-    int64_t last_ai_send_epoch;
-    /* FDA-aware circuit breaker + poll status (always present so tests + non-Apple
-     * builds can interrogate state without #ifdef gymnastics). */
-    uint32_t consecutive_open_failures;
-    bool circuit_breaker_tripped;
-    bool breaker_log_emitted; /* one-shot log gate */
-    hu_imessage_error_class_t last_error_class;
-    int64_t last_successful_poll_epoch;
-    /* Watchdog state machine — collapses breaker-tripped + poll-stalled into a
-     * single coarse health enum so the daemon emits exactly ONE log line per
-     * transition rather than spamming on every tick. */
-    hu_imessage_health_t last_logged_health;
-    /* When the breaker is tripped, the poller short-circuits to HU_OK / 0
-     * messages on most ticks but probes chat.db once every N ticks so FDA
-     * recovery is detected promptly. The counter resets on each probe and
-     * after a successful poll. */
-    uint32_t breaker_recovery_probe_counter;
-    /* `imsg_watch_running` is always compiled so test builds can drive the
-     * watch-active code path through the test seam (the prod fields below
-     * remain platform-gated). */
-    bool imsg_watch_running;
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-    pid_t imsg_watch_pid;
-    int imsg_watch_fd;
-    bool imsg_target_validated;
-    void *imcore_handle;
-    bool imcore_tried;
-    bool imcore_connected;
-#endif
-#if HU_IS_TEST
-    char last_message[4096];
-    size_t last_message_len;
-    size_t last_media_count;
-    char last_media_path[256];
-    struct {
-        char session_key[128];
-        char content[4096];
-        char guid[96];
-        char reply_to_guid[96];
-        char chat_id[128];
-        bool has_attachment;
-        bool has_video;
-        bool is_group;
-        bool was_edited;
-        bool was_unsent;
-        int64_t timestamp_sec;
-    } mock_msgs[8];
-    size_t mock_count;
-    char mock_guid_store[8][96];
-    size_t mock_guid_count;
-    hu_reaction_type_t last_reaction;
-    int64_t last_reaction_message_id;
-#endif
-} hu_imessage_ctx_t;
-
 /* ── Circuit breaker / status: ctx-dependent helpers (always compiled) ── */
 
 /* Persist the channel's poll status to disk. Best-effort: silently no-ops if
@@ -244,7 +167,7 @@ typedef struct hu_imessage_ctx {
  * doctor command without pulling in a JSON library at this layer. Creates
  * $HOME/.human if it does not exist (matches the rowid file's lifetime
  * assumption). */
-static void imessage_save_poll_status(const hu_imessage_ctx_t *c) {
+void imessage_save_poll_status(const hu_imessage_ctx_t *c) {
     if (!c)
         return;
     char path[512];
@@ -283,7 +206,7 @@ static void imessage_save_poll_status(const hu_imessage_ctx_t *c) {
 
 /* Core breaker accounting. Pure with respect to time (caller passes `now`).
  * Returns true if this call caused the breaker to trip on this invocation. */
-static bool imessage_record_open_result(hu_imessage_ctx_t *c, int rc, int64_t now) {
+bool imessage_record_open_result(hu_imessage_ctx_t *c, int rc, int64_t now) {
     if (!c)
         return false;
     hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(rc);
@@ -323,7 +246,7 @@ static bool imessage_record_open_result(hu_imessage_ctx_t *c, int rc, int64_t no
     return just_tripped;
 }
 
-static void imessage_record_poll_success(hu_imessage_ctx_t *c, int64_t now) {
+void imessage_record_poll_success(hu_imessage_ctx_t *c, int64_t now) {
     (void)imessage_record_open_result(c, 0, now);
 }
 
@@ -341,9 +264,8 @@ static void imessage_record_poll_success(hu_imessage_ctx_t *c, int64_t now) {
  * compile-time guards (#if HU_IS_TEST and the macOS+SQLite production
  * branch). On Linux or no-SQLite builds neither caller is compiled in,
  * which would otherwise trip -Werror=unused-function. */
-static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now)
-    __attribute__((unused));
-static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now) {
+void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now) __attribute__((unused));
+void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now) {
     if (!c)
         return;
     imessage_record_poll_success(c, now);
@@ -504,18 +426,15 @@ int64_t hu_imessage_test_get_last_success_epoch(const hu_channel_t *ch) {
  *
  * IMCore (private framework, Tier-1 typing) is forward-declared here for now;
  * it'll move with imessage_typing.c in Step 2 of the refactor. */
-static bool imcore_init(hu_imessage_ctx_t *c);
-static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
-static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
 
-static uint32_t imessage_hash(const char *s, size_t len) {
+uint32_t imessage_hash(const char *s, size_t len) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < len; i++)
         h = (h ^ (uint8_t)s[i]) * 16777619u;
     return h;
 }
 
-static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t msg_len) {
+void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t msg_len) {
     c->last_ai_send_epoch = (int64_t)time(NULL);
     size_t slot = c->sent_ring_idx % HU_IMESSAGE_SENT_RING_SIZE;
     size_t copy_len =
@@ -528,7 +447,7 @@ static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t m
 }
 
 #ifdef HU_ENABLE_SQLITE
-static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size_t text_len) {
+bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size_t text_len) {
     uint32_t h = imessage_hash(text, text_len);
     for (size_t i = 0; i < HU_IMESSAGE_SENT_RING_SIZE; i++) {
         size_t slen = c->sent_ring_len[i];
@@ -548,7 +467,7 @@ static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size
 /** Open chat.db readonly with a 3s busy timeout to tolerate Messages.app locks.
  * Retries up to 3 times with exponential backoff (100ms, 200ms, 400ms)
  * when the database is locked. */
-static int imessage_open_chatdb(const char *db_path, sqlite3 **db_out) {
+int imessage_open_chatdb(const char *db_path, sqlite3 **db_out) {
     int rc = SQLITE_OK;
     for (int attempt = 0; attempt < 3; attempt++) {
         *db_out = NULL;
@@ -638,7 +557,7 @@ bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
 /* Check if the imsg CLI (steipete/imsg) is available on $PATH.
  * Caches the result after first check. Only compiled in non-test macOS builds
  * since all callers are behind !HU_IS_TEST guards. */
-static bool imsg_cli_available(hu_imessage_ctx_t *c) {
+bool imsg_cli_available(hu_imessage_ctx_t *c) {
     if (!c || !c->alloc)
         return false;
     if (c->imsg_cli_checked)
@@ -941,7 +860,7 @@ size_t imessage_sanitize_output(char *buf, size_t len) {
  * Sending uses JXA + System Events AXShowMenu; AppleScript has no native tapback API.
  * Requires accessibility permissions; UI hierarchy may vary by macOS version.
  */
-static const char *imessage_reaction_to_ax_action_prefix(hu_reaction_type_t reaction) {
+const char *imessage_reaction_to_ax_action_prefix(hu_reaction_type_t reaction) {
     /* macOS 26 SwiftUI Messages: tapbacks are AX actions on the message
      * element named "Name:Heart", "Name:Thumbs up", etc. */
     switch (reaction) {
@@ -1013,160 +932,6 @@ unsigned int hu_imessage_typing_duration(size_t msg_len, uint32_t seed) {
         base = 6000u;
     return base;
 }
-
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-/*
- * Typing indicator with chat ID caching and group chat support.
- * Caches target to skip expensive chat iteration on repeat sends.
- * Skipped when the daemon already called start_typing (typing_active).
- */
-static void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_len,
-                                     size_t message_len) {
-    if (!c || atomic_load(&c->typing_active))
-        return;
-
-    unsigned int delay_ms =
-        hu_imessage_typing_duration(message_len, (uint32_t)time(NULL) ^ (uint32_t)message_len);
-
-    size_t tgt_esc_cap = tgt_len * 2 + 1;
-    if (tgt_esc_cap > 4096)
-        return;
-
-    char tgt_esc[4096];
-    escape_for_applescript(tgt_esc, sizeof(tgt_esc), tgt, tgt_len);
-
-    if (delay_ms <= 3000) {
-        bool same_target = (c->typing_last_target_len == tgt_len && tgt_len > 0 &&
-                            memcmp(c->typing_last_target, tgt, tgt_len) == 0);
-        if (tgt_len > 0 && tgt_len < sizeof(c->typing_last_target)) {
-            memcpy(c->typing_last_target, tgt, tgt_len);
-            c->typing_last_target[tgt_len] = '\0';
-            c->typing_last_target_len = tgt_len;
-        }
-
-        char typing_script[1024];
-        int ts_n;
-        if (same_target) {
-            ts_n = snprintf(typing_script, sizeof(typing_script),
-                            "tell application \"Messages\" to activate\n"
-                            "delay 0.2\n"
-                            "tell application \"System Events\" to tell process \"Messages\"\n"
-                            "  keystroke \".\"\n"
-                            "  delay %.1f\n"
-                            "  keystroke \"a\" using command down\n"
-                            "  key code 51\n"
-                            "end tell",
-                            (float)delay_ms / 1000.0f);
-        } else {
-            ts_n = snprintf(typing_script, sizeof(typing_script),
-                            "tell application \"Messages\"\n"
-                            "  activate\n"
-                            "  set targetHandle to \"%s\"\n"
-                            "  set targetChat to missing value\n"
-                            "  repeat with c in every chat\n"
-                            "    try\n"
-                            "      repeat with p in participants of c\n"
-                            "        if handle of p is targetHandle then\n"
-                            "          set targetChat to c\n"
-                            "          exit repeat\n"
-                            "        end if\n"
-                            "      end repeat\n"
-                            "    end try\n"
-                            "    if targetChat is not missing value then exit repeat\n"
-                            "  end repeat\n"
-                            "end tell\n"
-                            "delay 0.3\n"
-                            "tell application \"System Events\" to tell process \"Messages\"\n"
-                            "  keystroke \".\"\n"
-                            "  delay %.1f\n"
-                            "  keystroke \"a\" using command down\n"
-                            "  key code 51\n"
-                            "end tell",
-                            tgt_esc, (float)delay_ms / 1000.0f);
-        }
-        if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
-            const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
-            hu_run_result_t ts_result = {0};
-            hu_error_t ts_err = hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
-            hu_run_result_free(c->alloc, &ts_result);
-            if (ts_err != HU_OK && getenv("HU_DEBUG"))
-                hu_log_error("imessage", NULL, "typing indicator failed (accessibility?)");
-        }
-    } else {
-        /* Longer messages: re-trigger typing indicator every ~2.5s so the
-         * bubble stays visible for the entire simulated composing period. */
-        bool same_target = (c->typing_last_target_len == tgt_len && tgt_len > 0 &&
-                            memcmp(c->typing_last_target, tgt, tgt_len) == 0);
-        if (tgt_len > 0 && tgt_len < sizeof(c->typing_last_target)) {
-            memcpy(c->typing_last_target, tgt, tgt_len);
-            c->typing_last_target[tgt_len] = '\0';
-            c->typing_last_target_len = tgt_len;
-        }
-
-        unsigned int remaining = delay_ms;
-        while (remaining > 0) {
-            unsigned int chunk = remaining > 2500 ? 2500 : remaining;
-            char typing_script[1024];
-            int ts_n;
-            if (same_target) {
-                ts_n = snprintf(typing_script, sizeof(typing_script),
-                                "tell application \"Messages\" to activate\n"
-                                "delay 0.2\n"
-                                "tell application \"System Events\" to tell process "
-                                "\"Messages\"\n"
-                                "  keystroke \".\"\n"
-                                "  delay %.1f\n"
-                                "  keystroke \"a\" using command down\n"
-                                "  key code 51\n"
-                                "end tell",
-                                (float)chunk / 1000.0f);
-            } else {
-                ts_n = snprintf(typing_script, sizeof(typing_script),
-                                "tell application \"Messages\"\n"
-                                "  activate\n"
-                                "  set targetHandle to \"%s\"\n"
-                                "  set targetChat to missing value\n"
-                                "  repeat with c in every chat\n"
-                                "    try\n"
-                                "      repeat with p in participants of c\n"
-                                "        if handle of p is targetHandle then\n"
-                                "          set targetChat to c\n"
-                                "          exit repeat\n"
-                                "        end if\n"
-                                "      end repeat\n"
-                                "    end try\n"
-                                "    if targetChat is not missing value then exit repeat\n"
-                                "  end repeat\n"
-                                "end tell\n"
-                                "delay 0.3\n"
-                                "tell application \"System Events\" to tell process "
-                                "\"Messages\"\n"
-                                "  keystroke \".\"\n"
-                                "  delay %.1f\n"
-                                "  keystroke \"a\" using command down\n"
-                                "  key code 51\n"
-                                "end tell",
-                                tgt_esc, (float)chunk / 1000.0f);
-                same_target = true;
-            }
-            if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
-                const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
-                hu_run_result_t ts_result = {0};
-                hu_error_t ts_err = hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
-                hu_run_result_free(c->alloc, &ts_result);
-                if (ts_err != HU_OK) {
-                    usleep((unsigned int)(remaining) * 1000);
-                    break;
-                }
-            } else {
-                usleep((unsigned int)(remaining) * 1000);
-                break;
-            }
-            remaining -= chunk;
-        }
-    }
-}
-#endif
 
 #endif
 
@@ -2472,264 +2237,6 @@ static hu_error_t imessage_mark_read(void *ctx, const char *contact_id, size_t c
     c->alloc->free(c->alloc->ctx, script, script_cap);
     c->alloc->free(c->alloc->ctx, esc, esc_cap);
     return ok ? HU_OK : (err != HU_OK ? err : HU_ERR_INTERNAL);
-#endif
-}
-
-/* ══════════════════════════════════════════════════════════════════════
- * Native Messages.app bridge — IMCore (Tier-1 typing private framework).
- *
- * Three-tier fallback for typing indicators and tapback reactions:
- *   Tier 1: IMCore private framework (dlopen, macOS 14-15, fast, no UI) — this file
- *   Tier 2: Accessibility API (AXUIElement) — src/channels/imessage_ax.c
- *   Tier 3: AppleScript/JXA subprocess (existing, last resort) — this file
- *
- * Step 1 of the iMessage shape refactor (see docs/plans/2026-05-12-imessage-
- * shape-refactor.md) extracted the AX tier into its own module. IMCore
- * stays here pending Step 2 (imessage_typing.c), where the entire typing
- * tier stack will move together.
- * ══════════════════════════════════════════════════════════════════════ */
-
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-
-/* ── IMCore (Tier-1 typing) — see imessage_ax.c for AX (Tier-2) ────── */
-
-/* ── IMCore private framework bridge ────────────────────────────────── */
-static bool imcore_init(hu_imessage_ctx_t *c) {
-    if (!c || c->imcore_tried)
-        return c ? c->imcore_connected : false;
-    c->imcore_tried = true;
-
-    c->imcore_handle =
-        dlopen("/System/Library/PrivateFrameworks/IMCore.framework/IMCore", RTLD_LAZY);
-    if (!c->imcore_handle)
-        return false;
-
-    Class daemon_cls = (Class)objc_getClass("IMDaemonController");
-    if (!daemon_cls) {
-        dlclose(c->imcore_handle);
-        c->imcore_handle = NULL;
-        return false;
-    }
-
-    typedef id (*id_msg)(id, SEL);
-    id controller = ((id_msg)objc_msgSend)((id)daemon_cls, sel_registerName("sharedInstance"));
-    if (!controller) {
-        dlclose(c->imcore_handle);
-        c->imcore_handle = NULL;
-        return false;
-    }
-
-    /* Try connecting to the imagent daemon. Fails on macOS 26+ due to
-     * private entitlement lockdown (com.apple.imagent.desktop.auth). */
-    typedef void (*void_msg)(id, SEL);
-    ((void_msg)objc_msgSend)(controller, sel_registerName("connectToDaemon"));
-
-    typedef BOOL (*bool_msg)(id, SEL);
-    BOOL connected = ((bool_msg)objc_msgSend)(controller, sel_registerName("isConnected"));
-    c->imcore_connected = (connected != 0);
-    if (!c->imcore_connected) {
-        hu_log_info("imessage", NULL,
-                    "IMCore loaded but daemon connection failed "
-                    "(expected on macOS 26+, falling back to AX)");
-    }
-    return c->imcore_connected;
-}
-
-static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len) {
-    if (!c || !c->imcore_connected || !recipient || recipient_len == 0)
-        return false;
-
-    Class registry_cls = (Class)objc_getClass("IMChatRegistry");
-    if (!registry_cls)
-        return false;
-
-    typedef id (*id_msg)(id, SEL, ...);
-    id registry = ((id_msg)objc_msgSend)((id)registry_cls, sel_registerName("sharedInstance"));
-    if (!registry)
-        return false;
-
-    Class ns_string = (Class)objc_getClass("NSString");
-    if (!ns_string)
-        return false;
-
-    /* macOS 26 uses "any;-;" prefix; older versions use "iMessage;-;" / "SMS;-;". */
-    static const char *prefixes[] = {"iMessage;-;", "SMS;-;", "any;-;"};
-    char chat_id[320];
-    id chat = NULL;
-    for (int px = 0; px < 3 && !chat; px++) {
-        int n = snprintf(chat_id, sizeof(chat_id), "%s%.*s", prefixes[px], (int)recipient_len,
-                         recipient);
-        if (n < 0 || (size_t)n >= sizeof(chat_id))
-            continue;
-        id chat_id_str = ((id_msg)objc_msgSend)((id)ns_string,
-                                                sel_registerName("stringWithUTF8String:"), chat_id);
-        if (chat_id_str)
-            chat = ((id_msg)objc_msgSend)(
-                registry, sel_registerName("existingChatWithChatIdentifier:"), chat_id_str);
-    }
-    if (!chat)
-        return false;
-
-    typedef void (*bool_set_msg)(id, SEL, BOOL);
-    ((bool_set_msg)objc_msgSend)(chat, sel_registerName("setLocalUserIsTyping:"), (BOOL)1);
-    return true;
-}
-
-static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len) {
-    if (!c || !c->imcore_connected || !recipient || recipient_len == 0)
-        return false;
-
-    Class registry_cls = (Class)objc_getClass("IMChatRegistry");
-    if (!registry_cls)
-        return false;
-
-    typedef id (*id_msg)(id, SEL, ...);
-    id registry = ((id_msg)objc_msgSend)((id)registry_cls, sel_registerName("sharedInstance"));
-    if (!registry)
-        return false;
-
-    Class ns_string = (Class)objc_getClass("NSString");
-    if (!ns_string)
-        return false;
-
-    static const char *prefixes[] = {"iMessage;-;", "SMS;-;", "any;-;"};
-    char chat_id[320];
-    id chat = NULL;
-    for (int px = 0; px < 3 && !chat; px++) {
-        int n = snprintf(chat_id, sizeof(chat_id), "%s%.*s", prefixes[px], (int)recipient_len,
-                         recipient);
-        if (n < 0 || (size_t)n >= sizeof(chat_id))
-            continue;
-        id chat_id_str = ((id_msg)objc_msgSend)((id)ns_string,
-                                                sel_registerName("stringWithUTF8String:"), chat_id);
-        if (chat_id_str)
-            chat = ((id_msg)objc_msgSend)(
-                registry, sel_registerName("existingChatWithChatIdentifier:"), chat_id_str);
-    }
-    if (!chat)
-        return false;
-
-    typedef void (*bool_set_msg)(id, SEL, BOOL);
-    ((bool_set_msg)objc_msgSend)(chat, sel_registerName("setLocalUserIsTyping:"), (BOOL)0);
-    return true;
-}
-
-#endif /* !HU_IS_TEST && __APPLE__ */
-
-/* ── Typing indicators: three-tier fallback ──────────────────────────
- * Tier 1: IMCore private framework (direct API, no UI, macOS 14-15)
- * Tier 2: AX compose field injection (bypasses keystroke block, macOS 14+)
- * Tier 3: AppleScript keystroke via System Events (last resort)
- * Requires Accessibility permission for tiers 2+3. */
-static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t recipient_len) {
-#if HU_IS_TEST
-    (void)ctx;
-    (void)recipient;
-    (void)recipient_len;
-    return HU_OK;
-#elif !defined(__APPLE__) || !defined(__MACH__)
-    (void)ctx;
-    (void)recipient;
-    (void)recipient_len;
-    return HU_ERR_NOT_SUPPORTED;
-#else
-    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
-    if (!c || !c->alloc || !recipient || recipient_len == 0)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    if (recipient_len > 0 && recipient_len < sizeof(c->typing_last_target)) {
-        memcpy(c->typing_last_target, recipient, recipient_len);
-        c->typing_last_target[recipient_len] = '\0';
-        c->typing_last_target_len = recipient_len;
-    }
-
-    /* Tier 1: IMCore — direct API, no UI activation needed. */
-    imcore_init(c);
-    if (imcore_start_typing(c, recipient, recipient_len)) {
-        hu_log_info("imessage", NULL, "typing started via IMCore");
-        atomic_store(&c->typing_active, true);
-        return HU_OK;
-    }
-
-    /* Tier 2: AX compose field injection — no keystrokes, uses our process's
-     * Accessibility permission directly. ax_start_typing opens the conversation
-     * via imessage:// URL scheme before manipulating the compose field. */
-    if (ax_start_typing(recipient, recipient_len)) {
-        hu_log_info("imessage", NULL, "typing started via AX compose field");
-        atomic_store(&c->typing_active, true);
-        return HU_OK;
-    }
-
-    /* Tier 3: imsg typing CLI or AppleScript keystroke (legacy). */
-    if (c->use_imsg_cli && imsg_cli_available(c)) {
-        char tgt_buf[256];
-        size_t tb = recipient_len < sizeof(tgt_buf) - 1 ? recipient_len : sizeof(tgt_buf) - 1;
-        memcpy(tgt_buf, recipient, tb);
-        tgt_buf[tb] = '\0';
-        const char *argv[] = {"imsg", "typing", "--to", tgt_buf, "--duration", "5s", NULL};
-        hu_run_result_t result = {0};
-        hu_error_t err = hu_process_run(c->alloc, argv, NULL, 4096, &result);
-        bool ok = (err == HU_OK && result.exit_code == 0);
-        hu_run_result_free(c->alloc, &result);
-        if (ok) {
-            hu_log_info("imessage", NULL, "typing started via imsg CLI");
-            atomic_store(&c->typing_active, true);
-            return HU_OK;
-        }
-    }
-
-    hu_log_info("imessage", NULL, "all typing tiers failed (IMCore/AX/imsg)");
-    return HU_ERR_NOT_SUPPORTED;
-#endif
-}
-
-static hu_error_t imessage_stop_typing(void *ctx, const char *recipient, size_t recipient_len) {
-#if HU_IS_TEST
-    (void)ctx;
-    (void)recipient;
-    (void)recipient_len;
-    return HU_OK;
-#elif !defined(__APPLE__) || !defined(__MACH__)
-    (void)ctx;
-    (void)recipient;
-    (void)recipient_len;
-    return HU_ERR_NOT_SUPPORTED;
-#else
-    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
-    if (!c || !c->alloc)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    /* Tier 1: IMCore */
-    if (imcore_stop_typing(c, recipient, recipient_len)) {
-        atomic_store(&c->typing_active, false);
-        return HU_OK;
-    }
-
-    /* Tier 2: AX — clear compose field */
-    if (ax_stop_typing()) {
-        atomic_store(&c->typing_active, false);
-        return HU_OK;
-    }
-
-    /* Tier 3: imsg CLI or AppleScript (legacy) */
-    if (c->use_imsg_cli && imsg_cli_available(c) && recipient && recipient_len > 0) {
-        char tgt_buf[256];
-        size_t tb = recipient_len < sizeof(tgt_buf) - 1 ? recipient_len : sizeof(tgt_buf) - 1;
-        memcpy(tgt_buf, recipient, tb);
-        tgt_buf[tb] = '\0';
-        const char *argv[] = {"imsg", "typing", "--to", tgt_buf, "--stop", "true", NULL};
-        hu_run_result_t result = {0};
-        hu_error_t err = hu_process_run(c->alloc, argv, NULL, 4096, &result);
-        bool ok = (err == HU_OK && result.exit_code == 0);
-        hu_run_result_free(c->alloc, &result);
-        if (ok) {
-            atomic_store(&c->typing_active, false);
-            return HU_OK;
-        }
-    }
-
-    atomic_store(&c->typing_active, false);
-    return HU_OK;
 #endif
 }
 
