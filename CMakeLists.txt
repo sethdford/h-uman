@@ -1925,6 +1925,22 @@ if(HU_ENABLE_TOPOLOGY_CHECK AND NOT WIN32)
         VERBATIM)
     add_dependencies(human human_topology_check)
 endif()
+# PCTT Task 9 — regression guard: prevent the three hardcoded DECISION-bucket
+# fillers from being reintroduced under src/ after PCTT Task 4 deletes them.
+# data/eval_*.json preserves the strings as fixtures and is excluded by the
+# script. The guard is ALL (runs on every `cmake --build --preset dev`) but
+# honours the HU_SKIP_FILLER_GUARD=1 env-var bypass for Wave 2 in-flight
+# builds where Task 4 has not yet merged. Flip to remove the bypass once
+# Task 4 lands on main.
+# Skip on Windows (script is POSIX bash).
+if(NOT WIN32)
+    add_custom_target(human_filler_guard
+        ALL
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Checking no hardcoded fillers regressed (PCTT Task 9)"
+        VERBATIM)
+endif()
 # Embed Info.plist for macOS TCC (accessibility, AppleEvents) identity
 if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/resources/Info.plist")
     target_link_options(human PRIVATE
