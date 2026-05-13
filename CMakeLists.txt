@@ -1936,7 +1936,7 @@ endif()
 if(NOT WIN32)
     add_custom_target(human_filler_guard
         ALL
-        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh
+        COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Checking no hardcoded fillers regressed (PCTT Task 9)"
         VERBATIM)

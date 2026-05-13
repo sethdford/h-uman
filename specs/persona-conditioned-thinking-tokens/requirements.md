@@ -45,12 +45,13 @@
   repeat (only constraint is "no consecutive duplicates"; AC-2 prevents zero-entry
   emissions).
 
-- [ ] **AC-4 (Hardcoded fillers removed):** The `const char *fillers[…]` arrays at
-  [src/context/conversation.c:4191-4211](src/context/conversation.c:4191) are
-  deleted along with the `classify_think_type` enum/switch. `grep -rn "ooh that's
-  a tough one\|let me think about that for a sec\|hm good question" src/` returns
-  zero hits in `src/`. The eval data file `data/eval_blinded_ab.json` is excluded
-  from this check (it preserves the historical failure case for evaluation).
+- [ ] **AC-4 (Hardcoded fillers removed):** The previous `const char *fillers[…]`
+  arrays inside `src/context/conversation.c` are deleted along with the
+  `classify_think_type` enum/switch (originally at the DECISION-bucket dispatch
+  site near the bottom of the file). `grep -rn "ooh that's a tough one\|let me
+  think about that for a sec\|hm good question" src/` returns zero hits in
+  `src/`. The eval data file `data/eval_blinded_ab.json` is excluded from this
+  check (it preserves the historical failure case for evaluation).
 
 - [ ] **AC-5 (Persona schema extension):** `hu_persona_overlay_t` gains a per-channel
   `filler_bank` field (NULL-terminated array of `char *` with explicit count),

@@ -1,8 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # PCTT regression guard: prevent hardcoded thinking fillers from being
 # reintroduced under src/. The strings below are the original three from
 # the deprecated classify_think_type DECISION bucket. data/eval_*.json
 # preserves them as fixtures and is intentionally excluded.
+#
+# POSIX sh (not bash) so the script runs in slim Docker base images that
+# don't carry bash on PATH.
 #
 # Usage:
 #   ./tools/check-no-hardcoded-fillers.sh
@@ -12,11 +15,11 @@
 #   1 — at least one hardcoded filler found
 #
 # Environment:
-#   HU_SKIP_FILLER_GUARD=1 — bypass the check (for Wave 2 in-flight builds
-#                             before PCTT Task 4 deletes the strings).
-#                             Remove this bypass once Task 4 merges.
+#   HU_SKIP_FILLER_GUARD=1 — bypass the check (intended for transitional
+#                             builds; remove this once Task 4 has merged
+#                             everywhere).
 
-set -euo pipefail
+set -eu
 
 if [ "${HU_SKIP_FILLER_GUARD:-0}" = "1" ]; then
     echo "check-no-hardcoded-fillers: SKIPPED (HU_SKIP_FILLER_GUARD=1)"
@@ -26,28 +29,26 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-PATTERNS=(
-  "ooh that's a tough one"
-  "let me think about that for a sec"
-  "hm good question"
-)
-
 found=0
-for pat in "${PATTERNS[@]}"; do
-  if hits=$(grep -rn --include='*.c' --include='*.h' "$pat" src/ 2>/dev/null); then
+check_one() {
+    pat=$1
+    hits=$(grep -rn --include='*.c' --include='*.h' "$pat" src/ 2>/dev/null || true)
     if [ -n "$hits" ]; then
-      echo "ERROR: hardcoded filler regression: '$pat'" >&2
-      echo "$hits" >&2
-      found=1
+        echo "ERROR: hardcoded filler regression: '$pat'" >&2
+        echo "$hits" >&2
+        found=1
     fi
-  fi
-done
+}
+
+check_one "ooh that's a tough one"
+check_one "let me think about that for a sec"
+check_one "hm good question"
 
 if [ "$found" -ne 0 ]; then
-  echo "" >&2
-  echo "These hardcoded fillers were deleted in PCTT Task 4. If you need them" >&2
-  echo "for an eval fixture, put them in data/eval_*.json which is excluded." >&2
-  exit 1
+    echo "" >&2
+    echo "These hardcoded fillers were deleted in PCTT Task 4. If you need them" >&2
+    echo "for an eval fixture, put them in data/eval_*.json which is excluded." >&2
+    exit 1
 fi
 
 echo "check-no-hardcoded-fillers: OK"
