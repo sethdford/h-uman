@@ -148,8 +148,22 @@ const char *imessage_reaction_to_ax_action_prefix(hu_reaction_type_t reaction);
 
 /* ── imsg CLI helpers (imessage_watch.c after Step 3) ─────────────────── */
 
-/* imsg CLI availability (cached after first probe). Used by send + typing + react. */
+/* ── Watch module — src/channels/imessage_watch.c (Step 3) ────────────
+ *
+ * imsg CLI lifecycle: availability probe, watch subprocess (start/stop/
+ * has-data), target validation, and the CLI-based react fallback used
+ * by the tapback dispatcher. Apple-only; non-Apple builds skip the
+ * subprocess entirely and the watch flag stays false. */
+
 bool imsg_cli_available(hu_imessage_ctx_t *c);
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+void imsg_watch_start(hu_imessage_ctx_t *c);
+void imsg_watch_stop(hu_imessage_ctx_t *c);
+bool imsg_watch_has_data(hu_imessage_ctx_t *c);
+bool imsg_validate_target(hu_imessage_ctx_t *c);
+bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction_type_t reaction);
+#endif
 
 /* AppleScript escape helper (used by typing + send). */
 size_t escape_for_applescript(char *out, size_t out_cap, const char *in, size_t in_len);
