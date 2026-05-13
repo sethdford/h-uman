@@ -514,6 +514,7 @@ set(HU_CORE_SOURCES
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/filler_recency.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
     src/context/theory_of_mind.c
@@ -2422,6 +2423,7 @@ set(HU_TEST_SOURCES
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
     tests/test_persona_directive_channels.c
+    tests/test_filler_recency.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c
