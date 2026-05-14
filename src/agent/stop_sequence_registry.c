@@ -19,6 +19,10 @@ static const provider_entry_t PROVIDER_TABLE[] = {
     {"openrouter", OPENAI_STOPS, sizeof(OPENAI_STOPS) / sizeof(OPENAI_STOPS[0])},
     {"gemini", GEMINI_STOPS, sizeof(GEMINI_STOPS) / sizeof(GEMINI_STOPS[0])},
     {"ollama", OLLAMA_STOPS, sizeof(OLLAMA_STOPS) / sizeof(OLLAMA_STOPS[0])},
+    /* apple: OpenAI-compatible /v1/chat/completions endpoint on localhost */
+    {"apple", OPENAI_STOPS, sizeof(OPENAI_STOPS) / sizeof(OPENAI_STOPS[0])},
+    /* compatible: generic OpenAI-compatible adapter for 41+ services */
+    {"compatible", OPENAI_STOPS, sizeof(OPENAI_STOPS) / sizeof(OPENAI_STOPS[0])},
 };
 static const size_t PROVIDER_TABLE_COUNT = sizeof(PROVIDER_TABLE) / sizeof(PROVIDER_TABLE[0]);
 
