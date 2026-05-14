@@ -84,10 +84,87 @@ static void deinit_calls_vtable_deinit_when_present(void) {
     HU_ASSERT(v.ctx == NULL && v.vtable == NULL);
 }
 
+#include "human/agent/output_validator_chain.h"
+
+/* Synthetic validator used across chain tests: marks ctx as visited. */
+typedef struct {
+    int visited;
+} visit_ctx_t;
+static hu_error_t visit_validate(void *vctx, hu_allocator_t *alloc, const hu_validator_context_t *c,
+                                 const char *r, size_t rl, hu_validator_result_t *out) {
+    (void)alloc;
+    (void)c;
+    (void)r;
+    (void)rl;
+    visit_ctx_t *ctx = (visit_ctx_t *)vctx;
+    ctx->visited++;
+    memset(out, 0, sizeof(*out));
+    out->decision = HU_VALIDATOR_PASS;
+    return HU_OK;
+}
+static const char *visit_name(void *vctx) {
+    (void)vctx;
+    return "visit";
+}
+static const hu_output_validator_vtable_t visit_vtable = {
+    .validate = visit_validate,
+    .name = visit_name,
+    .deinit = NULL,
+};
+
+static void chain_create_and_destroy_empty(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    HU_ASSERT_EQ(hu_output_validator_chain_create(&alloc, &chain), HU_OK);
+    HU_ASSERT_NOT_NULL(chain);
+    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 0u);
+    hu_output_validator_chain_destroy(chain);
+}
+
+static void chain_add_then_len_increments(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    HU_ASSERT_EQ(hu_output_validator_chain_create(&alloc, &chain), HU_OK);
+    visit_ctx_t v1 = {0}, v2 = {0};
+    hu_output_validator_t ov1 = {.ctx = &v1, .vtable = &visit_vtable};
+    hu_output_validator_t ov2 = {.ctx = &v2, .vtable = &visit_vtable};
+    HU_ASSERT_EQ(hu_output_validator_chain_add(chain, ov1), HU_OK);
+    HU_ASSERT_EQ(hu_output_validator_chain_add(chain, ov2), HU_OK);
+    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 2u);
+    hu_output_validator_chain_destroy(chain);
+}
+
+static void chain_create_rejects_null_args(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    HU_ASSERT_EQ(hu_output_validator_chain_create(NULL, &chain), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_output_validator_chain_create(&alloc, NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
+static void chain_add_rejects_invalid_validator(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    HU_ASSERT_EQ(hu_output_validator_chain_create(&alloc, &chain), HU_OK);
+    hu_output_validator_t bogus = {.ctx = NULL, .vtable = NULL};
+    HU_ASSERT_EQ(hu_output_validator_chain_add(chain, bogus), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 0u);
+    hu_output_validator_chain_destroy(chain);
+}
+
+static void chain_destroy_on_null_is_safe(void) {
+    hu_output_validator_chain_destroy(NULL);
+    /* Did not crash == pass. */
+}
+
 void run_output_validator_tests(void) {
     HU_TEST_SUITE("output_validator");
     HU_RUN_TEST(result_free_on_zeroed_struct_is_safe);
     HU_RUN_TEST(result_free_releases_owned_text_and_reason);
     HU_RUN_TEST(deinit_on_zeroed_struct_is_safe);
     HU_RUN_TEST(deinit_calls_vtable_deinit_when_present);
+    HU_RUN_TEST(chain_create_and_destroy_empty);
+    HU_RUN_TEST(chain_add_then_len_increments);
+    HU_RUN_TEST(chain_create_rejects_null_args);
+    HU_RUN_TEST(chain_add_rejects_invalid_validator);
+    HU_RUN_TEST(chain_destroy_on_null_is_safe);
 }

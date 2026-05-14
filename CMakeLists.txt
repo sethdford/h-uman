@@ -513,6 +513,7 @@ set(HU_CORE_SOURCES
     src/agent/awareness.c
     src/agent/outcomes.c
     src/agent/output_validator.c
+    src/agent/output_validator_chain.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
