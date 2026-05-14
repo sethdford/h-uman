@@ -537,6 +537,7 @@ void run_sycophancy_guard_tests(void);
 void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
+void run_structured_output_tests(void);
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -1111,6 +1112,7 @@ int main(int argc, char **argv) {
     run_trust_calibration_tests();
     run_vision_ocr_tests();
     run_markdown_loader_tests();
+    run_structured_output_tests();
     run_anticipatory_state_tests();
     run_canvas_tool_tests();
     run_canvas_e2e_tests();

@@ -635,6 +635,7 @@ set(HU_CORE_SOURCES
     src/providers/openai.c
     src/providers/anthropic.c
     src/providers/gemini.c
+    src/providers/structured_output.c
     src/providers/ollama.c
     src/providers/openrouter.c
     src/providers/compatible.c
@@ -2933,6 +2934,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_adversarial_concurrency.c
     tests/test_adversarial_integration.c
     tests/test_stop_sequences.c
+    tests/test_structured_output.c
 )
 
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)

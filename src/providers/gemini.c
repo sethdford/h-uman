@@ -750,8 +750,23 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
                            hu_json_number_new(alloc, (double)max_tok));
         if (request->response_format && request->response_format_len >= 4 &&
             memcmp(request->response_format, "json", 4) == 0) {
-            hu_json_object_set(alloc, gen_cfg, "responseMimeType",
-                               hu_json_string_new(alloc, "application/json", 16));
+            if (request->response_format_len == 11 &&
+                memcmp(request->response_format, "json_schema", 11) == 0 &&
+                request->response_schema && request->response_schema_len > 0) {
+                /* json_schema mode: embed the schema and force application/json */
+                hu_json_value_t *schema_val = NULL;
+                if (hu_json_parse(alloc, request->response_schema, request->response_schema_len,
+                                  &schema_val) == HU_OK &&
+                    schema_val) {
+                    hu_json_object_set(alloc, gen_cfg, "responseSchema", schema_val);
+                }
+                hu_json_object_set(alloc, gen_cfg, "responseMimeType",
+                                   hu_json_string_new(alloc, "application/json", 16));
+            } else {
+                /* generic json_object / json mode */
+                hu_json_object_set(alloc, gen_cfg, "responseMimeType",
+                                   hu_json_string_new(alloc, "application/json", 16));
+            }
         }
         if (request->thinking_budget > 0) {
             hu_json_value_t *think_cfg = hu_json_object_new(alloc);
