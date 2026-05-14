@@ -514,6 +514,12 @@ set(HU_CORE_SOURCES
     src/agent/outcomes.c
     src/agent/output_validator.c
     src/agent/output_validator_chain.c
+    src/agent/validators/response_guard_validator.c
+    src/agent/validators/channel_tags_validator.c
+    src/agent/validators/ai_phrases_validator.c
+    src/agent/validators/formal_structure_validator.c
+    src/agent/validators/cot_audit_validator.c
+    src/agent/validators/default_chains.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
@@ -2657,6 +2663,7 @@ set(HU_TEST_SOURCES
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
     tests/test_output_validator.c
+    tests/test_validators_builtin.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c
