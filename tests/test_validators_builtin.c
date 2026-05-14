@@ -119,7 +119,7 @@ static void default_chain_assembles_and_destroys(void) {
     hu_output_validator_chain_t *chain = NULL;
     HU_ASSERT_EQ(hu_validators_build_default_outbound_chain(&alloc, NULL, 0, &chain), HU_OK);
     HU_ASSERT_NOT_NULL(chain);
-    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 4u);
+    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 7u);
     hu_output_validator_chain_destroy(chain);
 }
 

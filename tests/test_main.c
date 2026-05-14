@@ -244,6 +244,7 @@ void run_orphan_channel_audit_tests(void);
 void run_verifier_metrics_tests(void);
 void run_output_validator_tests(void);
 void run_validators_builtin_tests(void);
+void run_validators_persona_safety_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
 void run_w6_e2e_adversarial_tests(void);
@@ -822,6 +823,7 @@ int main(int argc, char **argv) {
     run_verifier_metrics_tests();
     run_output_validator_tests();
     run_validators_builtin_tests();
+    run_validators_persona_safety_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
     run_w6_e2e_adversarial_tests();

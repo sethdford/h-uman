@@ -519,6 +519,9 @@ set(HU_CORE_SOURCES
     src/agent/validators/ai_phrases_validator.c
     src/agent/validators/formal_structure_validator.c
     src/agent/validators/cot_audit_validator.c
+    src/agent/validators/persona_narrator_validator.c
+    src/agent/validators/assistant_closer_validator.c
+    src/agent/validators/role_consistency_validator.c
     src/agent/validators/default_chains.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
@@ -2664,6 +2667,7 @@ set(HU_TEST_SOURCES
     tests/test_verifier_metrics.c
     tests/test_output_validator.c
     tests/test_validators_builtin.c
+    tests/test_validators_persona_safety.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c

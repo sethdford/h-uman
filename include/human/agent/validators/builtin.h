@@ -20,16 +20,32 @@ hu_error_t hu_validator_ai_phrases_create(hu_allocator_t *alloc, hu_output_valid
 hu_error_t hu_validator_formal_structure_create(hu_allocator_t *alloc, hu_output_validator_t *out);
 hu_error_t hu_validator_cot_audit_create(hu_allocator_t *alloc, hu_output_validator_t *out);
 
+/* P3 validators — Jordan-channel leak prevention (2026-05-14).
+ *
+ * F1: Detects prose-CoT narrating about the persona in third person.
+ *     Pass persona_name/len (may be NULL/0 to always PASS — requires name to
+ *     detect condition b). */
+hu_error_t hu_validator_persona_narrator_create(hu_allocator_t *alloc, const char *persona_name,
+                                                size_t persona_name_len,
+                                                hu_output_validator_t *out);
+
+/* F2: Strips known AI-helper closing phrases (REWRITE or PASS, never REJECT). */
+hu_error_t hu_validator_assistant_closer_create(hu_allocator_t *alloc, hu_output_validator_t *out);
+
+/* F3: Detects turn-boundary mid-message (first "\n\n" followed by bot speech). */
+hu_error_t hu_validator_role_consistency_create(hu_allocator_t *alloc, hu_output_validator_t *out);
+
 /* Build the default outbound chain in registration order:
  *   1. response_guard          (REWRITE or REJECT special-tokens/thinking/degen/bullet-CoT)
  *   2. channel_tags            (REWRITE stripping)
  *   3. ai_phrases              (REWRITE stripping)
  *   4. formal_structure        (REWRITE stripping)
+ *   5. assistant_closer        (REWRITE stripping — F2)
+ *   6. persona_narrator        (REJECT on third-person narration — F1)
+ *   7. role_consistency        (REJECT on mid-message role collapse — F3)
  *
  * Note: cot_audit_validator is NOT wired in this default chain — it
- * operates on `reasoning_content`, not on the main reply content. The
- * P3 validators (assistant_closer, persona_narrator, role_consistency)
- * will be appended here in a follow-on task. */
+ * operates on `reasoning_content`, not on the main reply content. */
 hu_error_t hu_validators_build_default_outbound_chain(hu_allocator_t *alloc,
                                                       const char *persona_name,
                                                       size_t persona_name_len,
