@@ -32,14 +32,17 @@ typedef enum hu_validator_decision {
 
 /* Per-call result. If decision == REWRITE, `text` is the new output and
  * `text_owned` indicates whether the caller must free it via `alloc`. If
- * decision == REJECT, `text` is NULL and `reason` explains why. */
+ * decision == REJECT, `text` is NULL and `reason` explains why; the
+ * `reason_owned` flag mirrors `text_owned` and tells the caller whether
+ * to free the reason buffer. */
 typedef struct hu_validator_result {
     hu_validator_decision_t decision;
     const char *text;
     size_t text_len;
     bool text_owned;    /* if true, caller frees via alloc->free(.., text, text_len + 1) */
-    const char *reason; /* allocator-owned; may be NULL on PASS/REWRITE */
+    const char *reason; /* may be NULL on PASS/REWRITE */
     size_t reason_len;
+    bool reason_owned; /* if true, caller frees via alloc->free(.., reason, reason_len + 1) */
 } hu_validator_result_t;
 
 void hu_validator_result_free(hu_allocator_t *alloc, hu_validator_result_t *result);

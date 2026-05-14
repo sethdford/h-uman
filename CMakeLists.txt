@@ -512,6 +512,7 @@ set(HU_CORE_SOURCES
     src/agent/preferences.c
     src/agent/awareness.c
     src/agent/outcomes.c
+    src/agent/output_validator.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
@@ -2654,6 +2655,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
+    tests/test_output_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c
