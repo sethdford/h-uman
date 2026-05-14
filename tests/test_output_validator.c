@@ -156,6 +156,199 @@ static void chain_destroy_on_null_is_safe(void) {
     /* Did not crash == pass. */
 }
 
+/* Pass-pass-pass chain returns final text unchanged, no allocation transferred. */
+static void chain_execute_all_pass_returns_input_unchanged(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    HU_ASSERT_EQ(hu_output_validator_chain_create(&alloc, &chain), HU_OK);
+    visit_ctx_t v1 = {0}, v2 = {0};
+    hu_output_validator_t ov1 = {.ctx = &v1, .vtable = &visit_vtable};
+    hu_output_validator_t ov2 = {.ctx = &v2, .vtable = &visit_vtable};
+    hu_output_validator_chain_add(chain, ov1);
+    hu_output_validator_chain_add(chain, ov2);
+    const char *in = "hello world";
+    hu_chain_result_t cr;
+    memset(&cr, 0, sizeof(cr));
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, in, 11, &cr), HU_OK);
+    HU_ASSERT_EQ(cr.final_decision, HU_VALIDATOR_PASS);
+    HU_ASSERT(cr.final_text == in);
+    HU_ASSERT_EQ(cr.final_text_len, 11u);
+    HU_ASSERT(!cr.final_text_owned);
+    HU_ASSERT_EQ(v1.visited, 1);
+    HU_ASSERT_EQ(v2.visited, 1);
+    hu_chain_result_free(&alloc, &cr);
+    hu_output_validator_chain_destroy(chain);
+}
+
+/* Synthetic uppercase-rewriter: turns 'h' -> 'H' etc. */
+typedef struct {
+    int call_count;
+} upper_ctx_t;
+static hu_error_t upper_validate(void *vctx, hu_allocator_t *alloc, const hu_validator_context_t *c,
+                                 const char *r, size_t rl, hu_validator_result_t *out) {
+    (void)c;
+    upper_ctx_t *ctx = (upper_ctx_t *)vctx;
+    ctx->call_count++;
+    char *buf = (char *)alloc->alloc(alloc->ctx, rl + 1);
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
+    for (size_t i = 0; i < rl; i++) {
+        char ch = r[i];
+        buf[i] = (ch >= 'a' && ch <= 'z') ? (char)(ch - 32) : ch;
+    }
+    buf[rl] = '\0';
+    memset(out, 0, sizeof(*out));
+    out->decision = HU_VALIDATOR_REWRITE;
+    out->text = buf;
+    out->text_len = rl;
+    out->text_owned = true;
+    return HU_OK;
+}
+static const char *upper_name(void *vctx) {
+    (void)vctx;
+    return "upper";
+}
+static const hu_output_validator_vtable_t upper_vtable = {
+    .validate = upper_validate,
+    .name = upper_name,
+    .deinit = NULL,
+};
+
+static void chain_rewrite_then_pass_returns_rewritten(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    hu_output_validator_chain_create(&alloc, &chain);
+    upper_ctx_t u = {0};
+    visit_ctx_t v = {0};
+    hu_output_validator_chain_add(chain,
+                                  (hu_output_validator_t){.ctx = &u, .vtable = &upper_vtable});
+    hu_output_validator_chain_add(chain,
+                                  (hu_output_validator_t){.ctx = &v, .vtable = &visit_vtable});
+    hu_chain_result_t cr;
+    memset(&cr, 0, sizeof(cr));
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, "hi", 2, &cr), HU_OK);
+    HU_ASSERT_EQ(cr.final_decision, HU_VALIDATOR_REWRITE);
+    HU_ASSERT(cr.final_text_owned);
+    HU_ASSERT_EQ(cr.final_text_len, 2u);
+    HU_ASSERT(strncmp(cr.final_text, "HI", 2) == 0);
+    HU_ASSERT_EQ(cr.rewrite_count, 1u);
+    HU_ASSERT_EQ(v.visited, 1);
+    hu_chain_result_free(&alloc, &cr);
+    hu_output_validator_chain_destroy(chain);
+}
+
+/* Reject validator. */
+typedef struct {
+    const char *msg;
+} reject_ctx_t;
+static hu_error_t reject_validate(void *vctx, hu_allocator_t *alloc,
+                                  const hu_validator_context_t *c, const char *r, size_t rl,
+                                  hu_validator_result_t *out) {
+    (void)c;
+    (void)r;
+    (void)rl;
+    reject_ctx_t *ctx = (reject_ctx_t *)vctx;
+    size_t mlen = strlen(ctx->msg);
+    char *reason = (char *)alloc->alloc(alloc->ctx, mlen + 1);
+    if (!reason)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(reason, ctx->msg, mlen + 1);
+    memset(out, 0, sizeof(*out));
+    out->decision = HU_VALIDATOR_REJECT;
+    out->reason = reason;
+    out->reason_len = mlen;
+    out->reason_owned = true;
+    return HU_OK;
+}
+static const char *reject_name(void *vctx) {
+    (void)vctx;
+    return "reject";
+}
+static const hu_output_validator_vtable_t reject_vtable = {
+    .validate = reject_validate,
+    .name = reject_name,
+    .deinit = NULL,
+};
+
+static void chain_reject_short_circuits(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    hu_output_validator_chain_create(&alloc, &chain);
+    reject_ctx_t rc = {.msg = "nope"};
+    visit_ctx_t v = {0};
+    hu_output_validator_chain_add(chain,
+                                  (hu_output_validator_t){.ctx = &rc, .vtable = &reject_vtable});
+    hu_output_validator_chain_add(chain,
+                                  (hu_output_validator_t){.ctx = &v, .vtable = &visit_vtable});
+    hu_chain_result_t cr;
+    memset(&cr, 0, sizeof(cr));
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, "x", 1, &cr), HU_OK);
+    HU_ASSERT_EQ(cr.final_decision, HU_VALIDATOR_REJECT);
+    HU_ASSERT(cr.final_text == NULL);
+    HU_ASSERT_EQ(cr.reject_count, 1u);
+    HU_ASSERT(cr.reject_reason && strncmp(cr.reject_reason, "nope", 4) == 0);
+    HU_ASSERT(cr.reject_reason_owned);
+    HU_ASSERT_EQ(v.visited, 0); /* never reached */
+    hu_chain_result_free(&alloc, &cr);
+    hu_output_validator_chain_destroy(chain);
+}
+
+/* REWRITE followed by REJECT: intermediate rewrite buffer must be freed. */
+static void chain_rewrite_then_reject_frees_intermediate_buffer(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    hu_output_validator_chain_create(&alloc, &chain);
+    upper_ctx_t u = {0};
+    reject_ctx_t rc = {.msg = "after rewrite"};
+    hu_output_validator_chain_add(chain,
+                                  (hu_output_validator_t){.ctx = &u, .vtable = &upper_vtable});
+    hu_output_validator_chain_add(chain,
+                                  (hu_output_validator_t){.ctx = &rc, .vtable = &reject_vtable});
+    hu_chain_result_t cr;
+    memset(&cr, 0, sizeof(cr));
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, "hi", 2, &cr), HU_OK);
+    HU_ASSERT_EQ(cr.final_decision, HU_VALIDATOR_REJECT);
+    HU_ASSERT(cr.final_text == NULL);
+    /* The intermediate "HI" rewrite buffer must have been freed by the chain
+     * before reject; ASan catches a leak here. */
+    hu_chain_result_free(&alloc, &cr);
+    hu_output_validator_chain_destroy(chain);
+}
+
+/* Execute on an empty chain returns PASS with input unchanged. */
+static void chain_execute_empty_returns_pass(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    hu_output_validator_chain_create(&alloc, &chain);
+    const char *in = "anything";
+    hu_chain_result_t cr;
+    memset(&cr, 0, sizeof(cr));
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, in, 8, &cr), HU_OK);
+    HU_ASSERT_EQ(cr.final_decision, HU_VALIDATOR_PASS);
+    HU_ASSERT(cr.final_text == in);
+    HU_ASSERT(!cr.final_text_owned);
+    hu_chain_result_free(&alloc, &cr);
+    hu_output_validator_chain_destroy(chain);
+}
+
+/* Execute with NULL args returns HU_ERR_INVALID_ARGUMENT. */
+static void chain_execute_rejects_null_args(void) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_chain_t *chain = NULL;
+    hu_output_validator_chain_create(&alloc, &chain);
+    hu_chain_result_t cr;
+    memset(&cr, 0, sizeof(cr));
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(NULL, &alloc, NULL, "x", 1, &cr),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, NULL, NULL, "x", 1, &cr),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, NULL, 1, &cr),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, "x", 1, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    hu_output_validator_chain_destroy(chain);
+}
+
 void run_output_validator_tests(void) {
     HU_TEST_SUITE("output_validator");
     HU_RUN_TEST(result_free_on_zeroed_struct_is_safe);
@@ -167,4 +360,10 @@ void run_output_validator_tests(void) {
     HU_RUN_TEST(chain_create_rejects_null_args);
     HU_RUN_TEST(chain_add_rejects_invalid_validator);
     HU_RUN_TEST(chain_destroy_on_null_is_safe);
+    HU_RUN_TEST(chain_execute_all_pass_returns_input_unchanged);
+    HU_RUN_TEST(chain_rewrite_then_pass_returns_rewritten);
+    HU_RUN_TEST(chain_reject_short_circuits);
+    HU_RUN_TEST(chain_rewrite_then_reject_frees_intermediate_buffer);
+    HU_RUN_TEST(chain_execute_empty_returns_pass);
+    HU_RUN_TEST(chain_execute_rejects_null_args);
 }
