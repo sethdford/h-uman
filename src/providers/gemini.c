@@ -761,6 +761,17 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
                 hu_json_object_set(alloc, gen_cfg, "thinkingConfig", think_cfg);
             }
         }
+        if (request->stop_sequences && request->stop_sequences_count > 0) {
+            hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+            if (stop_arr) {
+                for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                    hu_json_array_push(alloc, stop_arr,
+                                       hu_json_string_new(alloc, request->stop_sequences[i],
+                                                          strlen(request->stop_sequences[i])));
+                }
+                hu_json_object_set(alloc, gen_cfg, "stopSequences", stop_arr);
+            }
+        }
     }
 
     /* Safety settings: BLOCK_NONE for minimal filtering (matching Zig default) */
@@ -1265,6 +1276,17 @@ static hu_error_t gemini_stream_chat(void *ctx, hu_allocator_t *alloc,
                 hu_json_object_set(alloc, think_cfg, "thinkingBudget",
                                    hu_json_number_new(alloc, (double)request->thinking_budget));
                 hu_json_object_set(alloc, gen_cfg, "thinkingConfig", think_cfg);
+            }
+        }
+        if (request->stop_sequences && request->stop_sequences_count > 0) {
+            hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+            if (stop_arr) {
+                for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                    hu_json_array_push(alloc, stop_arr,
+                                       hu_json_string_new(alloc, request->stop_sequences[i],
+                                                          strlen(request->stop_sequences[i])));
+                }
+                hu_json_object_set(alloc, gen_cfg, "stopSequences", stop_arr);
             }
         }
     }

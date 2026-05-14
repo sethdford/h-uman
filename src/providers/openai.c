@@ -371,6 +371,19 @@ static hu_error_t openai_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
     hu_json_value_t *temp_val = hu_json_number_new(alloc, temperature);
     hu_json_object_set(alloc, root, "temperature", temp_val);
 
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                hu_json_array_push(
+                    alloc, stop_arr,
+                    hu_json_string_new(alloc, request->stop_sequences[i],
+                                       strlen(request->stop_sequences[i])));
+            }
+            hu_json_object_set(alloc, root, "stop", stop_arr);
+        }
+    }
+
     if (request->response_format && request->response_format_len > 0) {
         hu_json_value_t *rf_obj = hu_json_object_new(alloc);
         if (rf_obj) {
@@ -1024,6 +1037,19 @@ static hu_error_t openai_stream_chat(void *ctx, hu_allocator_t *alloc,
     hu_json_object_set(alloc, root, "model", hu_json_string_new(alloc, model, model_len));
     hu_json_object_set(alloc, root, "temperature", hu_json_number_new(alloc, temperature));
     hu_json_object_set(alloc, root, "stream", hu_json_bool_new(alloc, true));
+
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                hu_json_array_push(
+                    alloc, stop_arr,
+                    hu_json_string_new(alloc, request->stop_sequences[i],
+                                       strlen(request->stop_sequences[i])));
+            }
+            hu_json_object_set(alloc, root, "stop", stop_arr);
+        }
+    }
 
     if (request->response_format && request->response_format_len > 0) {
         hu_json_value_t *rf_obj = hu_json_object_new(alloc);

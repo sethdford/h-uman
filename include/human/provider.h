@@ -189,6 +189,8 @@ typedef struct hu_chat_request {
     bool include_completion_logprobs; /* OpenAI-compatible: logprobs + top_logprobs in request */
     const char *prompt_cache_id; /* provider-level cache ID for system prompt dedup; NULL = none */
     size_t prompt_cache_id_len;
+    const char *const *stop_sequences; /* optional; NULL = none */
+    size_t stop_sequences_count;
 } hu_chat_request_t;
 
 /* ──────────────────────────────────────────────────────────────────────────

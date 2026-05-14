@@ -21,6 +21,7 @@
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/self_rag.h"
 #include "human/agent/session_persist.h"
+#include "human/agent/stop_sequence_registry.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/tool_call_parser.h"
 #include "human/agent/validators/builtin.h"
@@ -1303,6 +1304,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         req.temperature = turn_temp;
         req.tools = (turn_needs_tools && agent->tool_specs_count > 0) ? agent->tool_specs : NULL;
         req.tools_count = turn_needs_tools ? agent->tool_specs_count : 0;
+        {
+            size_t prov_name_len = prov_name ? strlen(prov_name) : 0;
+            const char *const *stop_seqs = NULL;
+            size_t stop_seqs_count = 0;
+            hu_stop_sequence_registry_lookup(prov_name, prov_name_len, NULL, 0, &stop_seqs,
+                                             &stop_seqs_count);
+            req.stop_sequences = stop_seqs;
+            req.stop_sequences_count = stop_seqs_count;
+        }
 
         /* Buffer provider text until the final content clears guards. Tool
          * events still stream through stream_chunk_to_event_cb. */

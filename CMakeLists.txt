@@ -514,6 +514,7 @@ set(HU_CORE_SOURCES
     src/agent/outcomes.c
     src/agent/output_validator.c
     src/agent/output_validator_chain.c
+    src/agent/stop_sequence_registry.c
     src/agent/validators/response_guard_validator.c
     src/agent/validators/channel_tags_validator.c
     src/agent/validators/ai_phrases_validator.c
@@ -2930,6 +2931,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_adversarial_dos_protocol.c
     tests/test_adversarial_concurrency.c
     tests/test_adversarial_integration.c
+    tests/test_stop_sequences.c
 )
 
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)

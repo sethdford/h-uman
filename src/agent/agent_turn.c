@@ -1,6 +1,7 @@
 /* Core turn execution: hu_agent_turn and turn-local helpers */
 #include "agent_internal.h"
 #include "human/agent/humanness.h"
+#include "human/agent/stop_sequence_registry.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -4074,6 +4075,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     } else {
         req.tools = (agent->tool_specs_count > 0) ? agent->tool_specs : NULL;
         req.tools_count = agent->tool_specs_count;
+    }
+    {
+        const char *prov_name = (agent->provider.vtable && agent->provider.vtable->get_name)
+                                    ? agent->provider.vtable->get_name(agent->provider.ctx)
+                                    : NULL;
+        size_t prov_name_len = prov_name ? strlen(prov_name) : 0;
+        const char *const *stop_seqs = NULL;
+        size_t stop_seqs_count = 0;
+        hu_stop_sequence_registry_lookup(prov_name, prov_name_len, NULL, 0, &stop_seqs,
+                                         &stop_seqs_count);
+        req.stop_sequences = stop_seqs;
+        req.stop_sequences_count = stop_seqs_count;
     }
 
     uint32_t iter = 0;
