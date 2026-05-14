@@ -6,11 +6,13 @@
  *   - System crontab tick (load, match, execute)
  *   - Agent-type cron jobs (hu_service_run_agent_cron)
  */
-#include "human/core/log.h"
 #include "human/daemon_cron.h"
+#include "human/core/log.h"
 #include "human/daemon.h"
 
 #include "human/agent.h"
+#include "human/agent/output_validator_chain.h"
+#include "human/agent/validators/builtin.h"
 #include "human/context/conversation.h"
 #include "human/core/error.h"
 #include "human/core/process_util.h"
@@ -23,10 +25,10 @@
 #endif
 
 #ifdef HU_ENABLE_SQLITE
-#include "human/memory.h"
 #include "human/feeds/findings.h"
 #include "human/feeds/processor.h"
 #include "human/feeds/research.h"
+#include "human/memory.h"
 #ifdef HU_HAS_SKILLS
 #include "human/intelligence/cycle.h"
 #endif
@@ -179,7 +181,7 @@ void hu_daemon_cron_tick(hu_allocator_t *alloc) {
         hu_error_t run_err = hu_process_run(alloc, argv, NULL, 65536, &result);
         if (run_err != HU_OK)
             hu_log_error("human", NULL, "cron job failed: %s (err=%s)", entries[i].command,
-                    hu_error_string(run_err));
+                         hu_error_string(run_err));
         hu_run_result_free(alloc, &result);
 #endif
     }
@@ -283,7 +285,29 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                         channels[c].channel->vtable->name(channels[c].channel->ctx);
                     if (ch_name && strcmp(ch_name, ch_part) == 0) {
                         if (channels[c].channel->vtable->send) {
-                            response_len = hu_conversation_strip_ai_phrases(response, response_len);
+                            {
+                                hu_output_validator_chain_t *out_chain = NULL;
+                                if (hu_validators_build_default_outbound_chain(
+                                        alloc, NULL, 0, &out_chain) == HU_OK) {
+                                    hu_chain_result_t cr;
+                                    memset(&cr, 0, sizeof(cr));
+                                    if (hu_output_validator_chain_execute(out_chain, alloc, NULL,
+                                                                          response, response_len,
+                                                                          &cr) == HU_OK) {
+                                        if (cr.final_decision != HU_VALIDATOR_REJECT &&
+                                            cr.final_text) {
+                                            if (cr.final_text != response &&
+                                                cr.final_text_len <= response_len) {
+                                                memcpy(response, cr.final_text, cr.final_text_len);
+                                                response_len = cr.final_text_len;
+                                                response[response_len] = '\0';
+                                            }
+                                        }
+                                        hu_chain_result_free(alloc, &cr);
+                                    }
+                                    hu_output_validator_chain_destroy(out_chain);
+                                }
+                            }
                             response_len = hu_conversation_vary_complexity(response, response_len,
                                                                            (uint32_t)time(NULL));
                             if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&
@@ -302,10 +326,11 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                     hu_moderation_check(alloc, response, response_len, &mod_r);
                                 if (mod_err != HU_OK) {
                                     hu_log_error("human", NULL, "cron moderation check failed: %s",
-                                            hu_error_string(mod_err));
+                                                 hu_error_string(mod_err));
                                 } else if (mod_r.flagged) {
-                                    hu_log_info("human", NULL, "cron moderation flagged: v=%.2f sh=%.2f",
-                                            mod_r.violence_score, mod_r.self_harm_score);
+                                    hu_log_info("human", NULL,
+                                                "cron moderation flagged: v=%.2f sh=%.2f",
+                                                mod_r.violence_score, mod_r.self_harm_score);
                                 }
                             }
                             hu_error_t send_err = channels[c].channel->vtable->send(
@@ -313,7 +338,7 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                 response_len, NULL, 0);
                             if (send_err != HU_OK) {
                                 hu_log_error("human", NULL, "cron send failed: %s",
-                                        hu_error_string(send_err));
+                                             hu_error_string(send_err));
                             }
                         }
                         break;
@@ -329,7 +354,7 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                         hu_findings_parse_and_store(alloc, fdb, response, response_len);
                     if (parse_err != HU_OK && parse_err != HU_ERR_NOT_FOUND) {
                         hu_log_error("human", NULL, "cron findings parse failed: %s",
-                                hu_error_string(parse_err));
+                                     hu_error_string(parse_err));
                     }
 #ifdef HU_HAS_SKILLS
                     hu_intelligence_cycle_result_t cron_cycle = {0};
@@ -337,10 +362,10 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                     if (cycle_err == HU_OK &&
                         (cron_cycle.findings_actioned > 0 || cron_cycle.lessons_extracted > 0)) {
                         hu_log_info("human", NULL, "post-research cycle: %zu findings, %zu lessons",
-                                cron_cycle.findings_actioned, cron_cycle.lessons_extracted);
+                                    cron_cycle.findings_actioned, cron_cycle.lessons_extracted);
                     } else if (cycle_err != HU_OK) {
                         hu_log_error("human", NULL, "post-research cycle failed: %s",
-                                hu_error_string(cycle_err));
+                                     hu_error_string(cycle_err));
                     }
 #endif
                 }
@@ -349,7 +374,7 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
         }
 
         hu_error_t log_err = hu_cron_add_run(agent->scheduler, alloc, jobs[i].id, (int64_t)now,
-                                              err == HU_OK ? "success" : "failed", response);
+                                             err == HU_OK ? "success" : "failed", response);
         if (log_err != HU_OK) {
             hu_log_error("human", NULL, "cron add_run failed: %s", hu_error_string(log_err));
         }

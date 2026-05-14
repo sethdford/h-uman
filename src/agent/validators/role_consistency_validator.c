@@ -22,9 +22,16 @@
  * -------------------------------------------------------------------------- */
 
 static const char *const COLLAPSE_PATTERNS[] = {
-    "I'm all set",      "I hope that helps",    "Hope this helps",
-    "How can I help",   "Is there anything",    "Let me know if you",
-    "Feel free to ask", "Thank you for asking", "As an AI",
+    "I'm all set",
+    "I hope that helps",
+    "Hope this helps",
+    "How can I help",
+    "Is there anything I can help",
+    "Is there anything else I can help",
+    "Let me know if you have any other questions",
+    "Feel free to ask",
+    "Thank you for asking",
+    "As an AI",
 };
 static const size_t N_PATTERNS = sizeof(COLLAPSE_PATTERNS) / sizeof(COLLAPSE_PATTERNS[0]);
 
