@@ -35,6 +35,13 @@ hu_error_t hu_validator_assistant_closer_create(hu_allocator_t *alloc, hu_output
 /* F3: Detects turn-boundary mid-message (first "\n\n" followed by bot speech). */
 hu_error_t hu_validator_role_consistency_create(hu_allocator_t *alloc, hu_output_validator_t *out);
 
+/* Persona-fidelity classifier — STUB for the M3 LoRA workstream. Currently
+ * always PASSes. When M3 ships an on-device fidelity model this validator
+ * will score responses against the persona's example bank and REJECT below
+ * threshold. Wired into the chain now so the composition does not change
+ * when M3 lands. */
+hu_error_t hu_validator_persona_fidelity_create(hu_allocator_t *alloc, hu_output_validator_t *out);
+
 /* Build the default outbound chain in registration order:
  *   1. response_guard          (REWRITE or REJECT special-tokens/thinking/degen/bullet-CoT)
  *   2. channel_tags            (REWRITE stripping)

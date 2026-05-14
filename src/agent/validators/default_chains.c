@@ -34,6 +34,7 @@ hu_error_t hu_validators_build_default_outbound_chain(hu_allocator_t *alloc,
     ADD(hu_validator_assistant_closer_create(alloc, &v));
     ADD(hu_validator_persona_narrator_create(alloc, persona_name, persona_name_len, &v));
     ADD(hu_validator_role_consistency_create(alloc, &v));
+    ADD(hu_validator_persona_fidelity_create(alloc, &v));
 
 #undef ADD
 

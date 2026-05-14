@@ -147,7 +147,7 @@ static void default_chain_includes_F1_F2_F3(void) {
     hu_output_validator_chain_t *chain = NULL;
     HU_ASSERT_EQ(hu_validators_build_default_outbound_chain(&alloc, "Seth", 4, &chain), HU_OK);
     /* P1+P2 wired 4 validators. P3 adds 3 more. Expected: 7. */
-    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 7u);
+    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 8u);
     hu_output_validator_chain_destroy(chain);
 }
 

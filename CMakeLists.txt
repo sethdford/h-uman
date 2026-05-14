@@ -523,6 +523,7 @@ set(HU_CORE_SOURCES
     src/agent/validators/persona_narrator_validator.c
     src/agent/validators/assistant_closer_validator.c
     src/agent/validators/role_consistency_validator.c
+    src/agent/validators/persona_fidelity_validator.c
     src/agent/validators/default_chains.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
