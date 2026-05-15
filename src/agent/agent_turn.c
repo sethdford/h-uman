@@ -20,6 +20,7 @@
 #include "human/persona/micro_expression.h"
 #include "human/persona/narrative_self.h"
 #include "human/persona/somatic.h"
+#include "human/persona/voice_maturity.h"
 
 #include "human/agent/channel_trust.h"
 #include "human/agent/conv_goals.h"
@@ -1055,6 +1056,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
     char *somatic_ctx = NULL;
     size_t somatic_ctx_len = 0;
+    /* Sprint 6 US-14: voice maturity directive — static buffer, no allocation needed */
+    char voice_maturity_dir[256];
+    size_t voice_maturity_dir_len = 0;
     char *narrative_self_ctx = NULL;
     size_t narrative_self_ctx_len = 0;
     char *presence_ctx = NULL;
@@ -2853,6 +2857,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_somatic_build_context(agent->alloc, &agent->frontiers.somatic, &somatic_ctx,
                                  &somatic_ctx_len);
 
+        /* Sprint 6 US-14: Voice maturity directive — inject stage-specific guidance alongside
+         * somatic/mood context. The voice profile lives on agent->voice_profile; we compute
+         * the current stage and emit a concise directive tag for the LLM prompt. */
+#ifdef HU_ENABLE_PERSONA
+        if (agent->voice_profile_initialized) {
+            hu_voice_stage_t vm_stage = hu_voice_compute_stage(
+                agent->voice_profile.interaction_count, agent->voice_profile.emotional_exchanges,
+                agent->voice_profile.warmth_score);
+            voice_maturity_dir_len = hu_voice_maturity_build_directive(vm_stage, voice_maturity_dir,
+                                                                       sizeof(voice_maturity_dir));
+        }
+#endif /* HU_ENABLE_PERSONA */
+
         /* F8: Presence Gradient — derive from real relationship + vulnerability */
         float f8_vulnerability = 0.0f;
         uint32_t f8_rel_depth = 0;
@@ -3386,7 +3403,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         !narrative_self_ctx && !creative_voice_ctx && !growth_ctx && !boundary_ctx &&
         !rel_episode_ctx && !trust_ctx && !humor_dir && !syc_friction_ctx && !conv_goals_ctx &&
         !outcome_ctx && !intelligence_ctx && !acp_context && !plan_ctx && !instruction_ctx &&
-        !hu_personal_model_has_content(&agent->personal_model) &&
+        !voice_maturity_dir_len && !hu_personal_model_has_content(&agent->personal_model) &&
         !(agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0)) {
         err = hu_prompt_build_with_cache(agent->alloc, agent->cached_static_prompt,
                                          agent->cached_static_prompt_len, memory_ctx,
@@ -3647,6 +3664,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .personal_model_context_len = personal_model_ctx_len,
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
+            /* Sprint 6 US-14: voice maturity directive — stack buffer, valid for prompt lifetime */
+            .voice_maturity_directive = voice_maturity_dir_len ? voice_maturity_dir : NULL,
+            .voice_maturity_directive_len = voice_maturity_dir_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
         if (world_model_ctx) {

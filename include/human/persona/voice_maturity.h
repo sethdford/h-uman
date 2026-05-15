@@ -48,4 +48,11 @@ float hu_voice_vulnerability_from_content(const char *text, size_t text_len);
  * Decays vulnerability_level toward 0 at a rate proportional to elapsed time. */
 void hu_voice_vulnerability_decay(hu_voice_profile_t *profile, float hours_elapsed);
 
+/* Build a stage-specific directive string for injection into the LLM prompt.
+ * Writes into out_buf (NUL-terminated, truncated if necessary).
+ * Returns the number of bytes written (excluding NUL), or 0 on error.
+ * This is the enforcement-layer companion to hu_voice_build_guidance: it emits
+ * a concise directive tag suitable for inclusion alongside mood_ctx/somatic_ctx. */
+size_t hu_voice_maturity_build_directive(hu_voice_stage_t stage, char *out_buf, size_t buf_len);
+
 #endif

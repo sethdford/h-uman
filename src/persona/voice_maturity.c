@@ -122,6 +122,34 @@ void hu_voice_profile_update(hu_voice_profile_t *profile, bool had_emotional_con
                                             profile->emotional_exchanges, profile->warmth_score);
 }
 
+size_t hu_voice_maturity_build_directive(hu_voice_stage_t stage, char *out_buf, size_t buf_len) {
+    if (!out_buf || buf_len == 0)
+        return 0;
+
+    static const char *const directives[] = {
+        /* HU_VOICE_FORMAL */
+        "[VOICE STAGE: Early formal — keep replies measured. Don't presume familiarity.]",
+        /* HU_VOICE_WARM */
+        "[VOICE STAGE: Warm — friendly, attentive, gently personal. You're past pleasantries.]",
+        /* HU_VOICE_CANDID */
+        "[VOICE STAGE: Candid — speak directly. Trade pleasantries for honesty.]",
+        /* HU_VOICE_INTIMATE */
+        "[VOICE STAGE: Intimate — you've earned vulnerability. Reference shared history naturally; "
+        "don't perform warmth.]",
+    };
+
+    size_t idx = (size_t)stage;
+    if (idx >= sizeof(directives) / sizeof(directives[0]))
+        idx = 0;
+
+    const char *src = directives[idx];
+    size_t src_len = strlen(src);
+    size_t copy_len = src_len < buf_len - 1 ? src_len : buf_len - 1;
+    memcpy(out_buf, src, copy_len);
+    out_buf[copy_len] = '\0';
+    return copy_len;
+}
+
 static const char *stage_name(hu_voice_stage_t stage) {
     switch (stage) {
     case HU_VOICE_FORMAL:
