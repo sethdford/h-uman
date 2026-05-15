@@ -2675,6 +2675,7 @@ set(HU_TEST_SOURCES
     tests/test_validators_persona_safety.c
     tests/test_validator_telemetry.c
     tests/test_validator_chain_cache.c
+    tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c

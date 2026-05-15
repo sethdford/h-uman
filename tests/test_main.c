@@ -249,6 +249,7 @@ void run_pattern_c_paths_tests(void);
 void run_validators_persona_safety_tests(void);
 void run_validator_telemetry_tests(void);
 void run_validator_chain_cache_tests(void);
+void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
 void run_w6_e2e_adversarial_tests(void);
@@ -833,6 +834,7 @@ int main(int argc, char **argv) {
     run_validators_persona_safety_tests();
     run_validator_telemetry_tests();
     run_validator_chain_cache_tests();
+    run_daemon_e2e_validator_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
     run_w6_e2e_adversarial_tests();
