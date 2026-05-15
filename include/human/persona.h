@@ -449,9 +449,10 @@ typedef struct hu_persona {
     bool structured_output_enabled;
     /* Cached outbound validator chain built once at hu_persona_load_json() time.
      * Owned by the persona for its full lifetime; destroyed in hu_persona_deinit().
-     * NULL only when persona has zero validator rules or _load_json() failed before
-     * completion. Persona name is treated as immutable post-load — mutating
-     * persona->name after load does NOT re-derive the chain. */
+     * NULL only when chain build failed during persona load (e.g., out-of-memory).
+     * An empty rule set still produces a non-NULL chain that executes no validators.
+     * Persona name is treated as immutable post-load — mutating persona->name after
+     * load does NOT re-derive the chain. */
     hu_output_validator_chain_t *outbound_chain;
 } hu_persona_t;
 
