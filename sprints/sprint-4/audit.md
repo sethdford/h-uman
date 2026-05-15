@@ -62,4 +62,32 @@ Sprint is shippable with two follow-ups for Sprint 5:
 1. Wire `hu_observer_emit_validator_decision` at daemon.c sites 1077/1738/9301/10659/11699 OR add per-site carve-out comments.
 2. Rename `check-test-refs/bad.c` to a `tests/test_*.c` path so the negative case actually exits 1.
 
+## AC-5.2 follow-up (Sprint 5 US-11)
+
+The five `hu_output_validator_chain_execute` call sites in `src/daemon.c` that
+lack observer telemetry have been annotated with:
+
+```
+// telemetry: observer not in scope (architectural limit)
+```
+
+Site details (line numbers as of Sprint 5 US-11 commit):
+
+| Line | Function | Code path |
+|------|----------|-----------|
+| 1077 | `hu_service_run_proactive_checkins` | Scheduled-flush outbound validation |
+| 1739 | `hu_service_run_proactive_checkins` | Proactive check-in response validation |
+| 9304 | `hu_service_run` | Burst-message outbound validation loop |
+| 10664 | `hu_service_run` | Daemon outbound path (secondary response) |
+| 11706 | `hu_service_run` | Deferred-task response validation |
+
+Plumbing a `hu_observer_t *` into these sites is out of scope for Sprint 5
+because it would require threading the observer pointer through multiple layers
+of the daemon service loop — a structural refactor that crosses several
+subsystems. These paths still run the full validator chain; REJECT and REWRITE
+outcomes take effect. Only the `HU_OBSERVER_EVENT_VALIDATOR_DECISION` telemetry
+event is not emitted. A future architectural sprint should either add a global
+observer bus that these paths can reach without explicit pointer threading, or
+plumb the observer explicitly as part of a broader daemon refactor.
+
 RESULT_sprint-auditor=PASS_WITH_NOTES

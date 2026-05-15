@@ -1074,6 +1074,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         HU_OK) {
                         hu_chain_result_t cr;
                         memset(&cr, 0, sizeof(cr));
+                        // telemetry: observer not in scope (architectural limit)
                         if (hu_output_validator_chain_execute(out_chain, alloc, NULL, sched_msg,
                                                               sched_len, &cr) == HU_OK) {
                             if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
@@ -1735,6 +1736,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                                                            &out_chain) == HU_OK) {
                                 hu_chain_result_t cr;
                                 memset(&cr, 0, sizeof(cr));
+                                // telemetry: observer not in scope (architectural limit)
                                 if (hu_output_validator_chain_execute(out_chain, alloc, NULL,
                                                                       response, response_len,
                                                                       &cr) == HU_OK) {
@@ -9298,6 +9300,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 alloc, NULL, 0, &out_chain) == HU_OK) {
                                             hu_chain_result_t cr;
                                             memset(&cr, 0, sizeof(cr));
+                                            // clang-format off
+                                            // telemetry: observer not in scope (architectural limit)
+                                            // clang-format on
                                             if (hu_output_validator_chain_execute(
                                                     out_chain, alloc, NULL, burst_msgs[bi], bm_len,
                                                     &cr) == HU_OK) {
@@ -10656,6 +10661,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                        &out_chain) == HU_OK) {
                             hu_chain_result_t cr;
                             memset(&cr, 0, sizeof(cr));
+                            // telemetry: observer not in scope (architectural limit)
                             if (hu_output_validator_chain_execute(out_chain, alloc, NULL, response,
                                                                   response_len, &cr) == HU_OK) {
                                 if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
@@ -11696,6 +11702,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 alloc, NULL, 0, &out_chain) == HU_OK) {
                                             hu_chain_result_t cr;
                                             memset(&cr, 0, sizeof(cr));
+                                            // clang-format off
+                                            // telemetry: observer not in scope (architectural limit)
+                                            // clang-format on
                                             if (hu_output_validator_chain_execute(
                                                     out_chain, alloc, NULL, dt_resp, dt_resp_len,
                                                     &cr) == HU_OK) {
