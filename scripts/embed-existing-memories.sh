@@ -28,6 +28,8 @@
 set -euo pipefail
 
 DB_PATH="${HOME}/.human/memory.db"
+# Allow env override (CLI --db still takes priority; applied during arg parse).
+DB_PATH="${HU_MEMORY_DB:-$DB_PATH}"
 HELPER_BIN=""
 BATCH_SIZE=100
 EMBEDDER_VERSION="tfidf-local-v1"
@@ -140,7 +142,7 @@ log "using database: $DB_PATH"
 # different schemas; we try the most common ones in order. We require at
 # minimum a key/id column and a content column.
 detect_source() {
-    local pair table key_col content_col
+    local table key_col content_col
     while IFS='|' read -r table key_col content_col; do
         if sqlite3 "$DB_PATH" \
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$table' LIMIT 1" \
@@ -193,6 +195,7 @@ TOTAL_ROWS="${TOTAL_ROWS:-0}"
 # AC-3.4.4: empty memory.db (no scoped memories)
 if [[ "$TOTAL_ROWS" -eq 0 ]]; then
     log "nothing to embed: $SRC_TABLE has 0 rows with non-empty $SRC_CONTENT"
+    printf 'Embedded 0 memories\n'
     exit 0
 fi
 
@@ -268,6 +271,8 @@ SQL
 done <"$KEYS_TMP"
 
 log "done: processed=$PROCESSED inserted=$INSERTED skipped=$SKIPPED failed=$FAILED"
+# AC-3.4.2: stdout summary in the contract format.
+printf 'Embedded %d memories\n' "$INSERTED"
 if [[ "$FAILED" -gt 0 ]]; then
     exit 2
 fi
