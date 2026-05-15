@@ -1881,6 +1881,17 @@ endif()
 add_executable(human src/main.c src/bootstrap.c)
 target_link_libraries(human human_core)
 
+# --- Diagnostic helper: hu_embed_helper (US-3.4) ---
+# Minimal CLI over hu_embedder_local_create. Reads text from argv or stdin,
+# writes one-line JSON to stdout. DIAGNOSTIC tool only — daemon does not
+# consume its output.
+add_executable(hu_embed_helper scripts/hu-embed-helper.c)
+target_link_libraries(hu_embed_helper human_core)
+if(HU_ENABLE_ASAN)
+    target_compile_options(hu_embed_helper PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(hu_embed_helper PRIVATE -fsanitize=address)
+endif()
+
 # ──────────────────────────────────────────────────────────────────────────
 # P2E — Layer-direction topology check (memory v2 roadmap)
 #
