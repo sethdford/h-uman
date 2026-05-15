@@ -580,11 +580,108 @@ hu_error_t hu_channel_format_outbound(hu_allocator_t *alloc, const char *channel
 
     if (channel_name_eq(channel_name, channel_name_len, "discord", 7) ||
         channel_name_eq(channel_name, channel_name_len, "telegram", 8)) {
-        return dup_trim_trailing_ws(alloc, text, text_len, out, out_len);
+        /* Run outbound validator chain (Pattern C — closes assistant-closer
+         * escape path), then trim trailing whitespace. On REJECT, suppress
+         * (return empty string). On chain-build failure, fall back to legacy
+         * ai-phrase strip before the trim step. */
+        char *san = NULL;
+        size_t san_len = 0;
+        hu_error_t e = HU_OK;
+        {
+            hu_output_validator_chain_t *out_chain = NULL;
+            if (hu_validators_build_default_outbound_chain(alloc, NULL, 0, &out_chain) == HU_OK) {
+                hu_chain_result_t cr;
+                memset(&cr, 0, sizeof(cr));
+                if (hu_output_validator_chain_execute(out_chain, alloc, NULL, text, text_len,
+                                                      &cr) == HU_OK) {
+                    if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text &&
+                        cr.final_text_len > 0) {
+                        san_len = cr.final_text_len;
+                        san = (char *)alloc->alloc(alloc->ctx, san_len + 1);
+                        if (san) {
+                            memcpy(san, cr.final_text, san_len);
+                            san[san_len] = '\0';
+                        } else {
+                            hu_chain_result_free(alloc, &cr);
+                            hu_output_validator_chain_destroy(out_chain);
+                            return HU_ERR_OUT_OF_MEMORY;
+                        }
+                    }
+                    /* On REJECT: san stays NULL/0 — message suppressed. */
+                }
+                hu_chain_result_free(alloc, &cr);
+                hu_output_validator_chain_destroy(out_chain);
+            } else {
+                /* Chain build failed: fall back to legacy ai-phrase strip. */
+                e = hu_channel_strip_ai_phrases(alloc, text, text_len, &san, &san_len);
+            }
+        }
+        if (e != HU_OK)
+            return e;
+        if (!san || san_len == 0) {
+            *out = (char *)alloc->alloc(alloc->ctx, 1);
+            if (!*out)
+                return HU_ERR_OUT_OF_MEMORY;
+            (*out)[0] = '\0';
+            *out_len = 0;
+            return HU_OK;
+        }
+        hu_error_t trim_e = dup_trim_trailing_ws(alloc, san, san_len, out, out_len);
+        alloc->free(alloc->ctx, san, san_len + 1);
+        return trim_e;
     }
 
-    if (channel_name_eq(channel_name, channel_name_len, "slack", 5))
-        return slack_convert(text, text_len, alloc, out, out_len);
+    if (channel_name_eq(channel_name, channel_name_len, "slack", 5)) {
+        /* Run outbound validator chain (Pattern C — closes assistant-closer
+         * escape path), then apply Slack mrkdwn conversion. On REJECT,
+         * suppress (return empty string). On chain-build failure, fall back to
+         * legacy ai-phrase strip before Slack conversion. */
+        char *san = NULL;
+        size_t san_len = 0;
+        hu_error_t e = HU_OK;
+        {
+            hu_output_validator_chain_t *out_chain = NULL;
+            if (hu_validators_build_default_outbound_chain(alloc, NULL, 0, &out_chain) == HU_OK) {
+                hu_chain_result_t cr;
+                memset(&cr, 0, sizeof(cr));
+                if (hu_output_validator_chain_execute(out_chain, alloc, NULL, text, text_len,
+                                                      &cr) == HU_OK) {
+                    if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text &&
+                        cr.final_text_len > 0) {
+                        san_len = cr.final_text_len;
+                        san = (char *)alloc->alloc(alloc->ctx, san_len + 1);
+                        if (san) {
+                            memcpy(san, cr.final_text, san_len);
+                            san[san_len] = '\0';
+                        } else {
+                            hu_chain_result_free(alloc, &cr);
+                            hu_output_validator_chain_destroy(out_chain);
+                            return HU_ERR_OUT_OF_MEMORY;
+                        }
+                    }
+                    /* On REJECT: san stays NULL/0 — message suppressed. */
+                }
+                hu_chain_result_free(alloc, &cr);
+                hu_output_validator_chain_destroy(out_chain);
+            } else {
+                /* Chain build failed: fall back to legacy ai-phrase strip. */
+                e = hu_channel_strip_ai_phrases(alloc, text, text_len, &san, &san_len);
+            }
+        }
+        if (e != HU_OK)
+            return e;
+        if (!san || san_len == 0) {
+            *out = (char *)alloc->alloc(alloc->ctx, 1);
+            if (!*out)
+                return HU_ERR_OUT_OF_MEMORY;
+            (*out)[0] = '\0';
+            *out_len = 0;
+            return HU_OK;
+        }
+        hu_error_t conv_e = slack_convert(san, san_len, alloc, out, out_len);
+        alloc->free(alloc->ctx, san, san_len + 1);
+        return conv_e;
+    }
 
     if (channel_name_eq(channel_name, channel_name_len, "email", 5))
         return format_email_html(alloc, text, text_len, out, out_len);
