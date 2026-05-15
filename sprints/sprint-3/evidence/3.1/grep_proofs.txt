@@ -4,7 +4,7 @@
 72:            size_t klen = strlen(results[i].key);
 73:            entries[i].key = hu_strndup(alloc, results[i].key, klen);
 
-=== GREP PROOF 2: OLD bug code (key=hu_strndup(alloc, results[i].content, len)) absent in search_results_to_entries ===
+=== GREP PROOF 2: search_results_to_entries now uses results[i].key (not content-as-key) ===
 static hu_error_t search_results_to_entries(hu_allocator_t *alloc, const char *query,
                                             hu_search_result_t *results, size_t count, size_t limit,
                                             hu_retrieval_result_t *out) {
@@ -62,3 +62,15 @@ static hu_error_t search_results_to_entries(hu_allocator_t *alloc, const char *q
 70:    if (embedder && embedder->vtable && vector_store && vector_store->vtable) {
 79:        err = hu_hybrid_retrieve(alloc, mem, embedder, vector_store, /*graph=*/NULL, search_query,
 85:        /* hu_hybrid_retrieve allocates `scores` separately from `entries`; free the
+
+=== GREP PROOF 4 (AC-3.1.5): stub-embedder error-propagation test EXISTS in tests/test_memory_features.c ===
+247:static hu_error_t stub_embed_returns_not_supported(void *ctx, hu_allocator_t *alloc,
+268:static void contact_memory_recall_propagates_embedder_error(void) {
+281:        .embed = stub_embed_returns_not_supported,
+294:    /* The embedder failure must surface — recall MUST return HU_ERR_NOT_SUPPORTED
+765:    HU_RUN_TEST(contact_memory_recall_propagates_embedder_error);
+
+=== GREP PROOF 5 (AC-3.1.5): error-propagation code in contact_memory.c returns err from hu_hybrid_retrieve ===
+79:        err = hu_hybrid_retrieve(alloc, mem, embedder, vector_store, /*graph=*/NULL, search_query,
+81:        if (err != HU_OK)
+94:        if (err != HU_OK)

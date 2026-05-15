@@ -238,6 +238,69 @@ static void contact_memory_recall_routes_through_hybrid(void) {
         vstore.vtable->deinit(vstore.ctx, &alloc);
     mem.vtable->deinit(mem.ctx);
 }
+
+/* US-3.1 AC-3.1.5 error propagation: when the hybrid path is engaged
+ * (embedder + vector_store both non-NULL) and the embedder fails (here
+ * by returning HU_ERR_NOT_SUPPORTED from `embed`), `hu_memory_recall_for_contact`
+ * must propagate that error to the caller — NOT silently fall back to keyword
+ * mode and return HU_OK. */
+static hu_error_t stub_embed_returns_not_supported(void *ctx, hu_allocator_t *alloc,
+                                                   const char *text, size_t text_len,
+                                                   hu_embedding_t *out) {
+    (void)ctx;
+    (void)alloc;
+    (void)text;
+    (void)text_len;
+    (void)out;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+static size_t stub_embed_dimensions(void *ctx) {
+    (void)ctx;
+    return HU_EMBEDDING_DIM;
+}
+
+static void stub_embed_deinit(void *ctx, hu_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+}
+
+static void contact_memory_recall_propagates_embedder_error(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+
+    /* Seed at least one memory so the keyword side has a row to return — the
+     * failure must come from the embedder, not from an empty backend. */
+    HU_ASSERT_EQ(hu_memory_store_for_contact(&mem, "alice", 5, "pref", 4, "alice loves espresso",
+                                             20, NULL, "", 0),
+                 HU_OK);
+
+    /* Stubbed embedder whose `embed` vtable returns HU_ERR_NOT_SUPPORTED. */
+    static const hu_embedder_vtable_t stub_vtable = {
+        .embed = stub_embed_returns_not_supported,
+        .embed_batch = NULL,
+        .dimensions = stub_embed_dimensions,
+        .deinit = stub_embed_deinit,
+    };
+    hu_embedder_t failing_embedder = {.ctx = NULL, .vtable = &stub_vtable};
+    hu_vector_store_t vstore = hu_vector_store_mem_create(&alloc);
+    HU_ASSERT_NOT_NULL(vstore.vtable);
+
+    hu_memory_entry_t *entries = NULL;
+    size_t count = 0;
+    hu_error_t err = hu_memory_recall_for_contact(&mem, &alloc, &failing_embedder, &vstore, "alice",
+                                                  5, "espresso", 8, 5, "", 0, &entries, &count);
+    /* The embedder failure must surface — recall MUST return HU_ERR_NOT_SUPPORTED
+     * (not HU_OK with a silent fallback) and MUST NOT leak partial results. */
+    HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(count, 0u);
+    HU_ASSERT_NULL(entries);
+
+    if (vstore.vtable && vstore.vtable->deinit)
+        vstore.vtable->deinit(vstore.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
 #endif
 
 static void test_store_with_source_fallback(void) {
@@ -699,6 +762,7 @@ void run_memory_features_tests(void) {
     HU_RUN_TEST(contact_memory_store_and_recall);
     HU_RUN_TEST(contact_memory_cross_contact_isolation);
     HU_RUN_TEST(contact_memory_recall_routes_through_hybrid);
+    HU_RUN_TEST(contact_memory_recall_propagates_embedder_error);
 #endif
 
     HU_TEST_SUITE("memory_features — source citations");
