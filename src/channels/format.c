@@ -2,6 +2,8 @@
  * Per-channel outbound message formatting (plain text / mrkdwn / minimal HTML).
  */
 #include "human/channels/format.h"
+#include "human/agent/output_validator_chain.h"
+#include "human/agent/validators/builtin.h"
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -200,7 +202,7 @@ static hu_error_t cap_lines_at_300(hu_allocator_t *alloc, const char *text, size
 }
 
 static hu_error_t dup_trim_trailing_ws(hu_allocator_t *alloc, const char *text, size_t text_len,
-                                      char **out, size_t *out_len) {
+                                       char **out, size_t *out_len) {
     while (text_len > 0 && isspace((unsigned char)text[text_len - 1]))
         text_len--;
 
@@ -226,7 +228,8 @@ static hu_error_t buf_reserve(hu_allocator_t *alloc, char **buf, size_t *cap, si
         new_cap *= 2;
     }
     if (alloc->realloc) {
-        void *p = *buf ? alloc->realloc(alloc->ctx, *buf, *cap, new_cap) : alloc->alloc(alloc->ctx, new_cap);
+        void *p = *buf ? alloc->realloc(alloc->ctx, *buf, *cap, new_cap)
+                       : alloc->alloc(alloc->ctx, new_cap);
         if (!p)
             return HU_ERR_OUT_OF_MEMORY;
         *buf = (char *)p;
@@ -268,7 +271,8 @@ static hu_error_t slack_convert(const char *in, size_t in_len, hu_allocator_t *a
             size_t close_bracket = i + 1;
             while (close_bracket < in_len && in[close_bracket] != ']')
                 close_bracket++;
-            if (close_bracket + 1 < in_len && in[close_bracket] == ']' && in[close_bracket + 1] == '(') {
+            if (close_bracket + 1 < in_len && in[close_bracket] == ']' &&
+                in[close_bracket + 1] == '(') {
                 size_t close_paren = close_bracket + 2;
                 while (close_paren < in_len && in[close_paren] != ')')
                     close_paren++;
@@ -375,7 +379,7 @@ static void html_escape_into(const char *s, size_t n, char *dst, size_t *wi) {
 
 /* Apply **strong** and *em* within a span; assumes no nested markers of same kind. */
 static hu_error_t email_inline_format(hu_allocator_t *alloc, const char *para, size_t para_len,
-                                    char **out, size_t *out_len) {
+                                      char **out, size_t *out_len) {
     /* Worst case: each byte -> &quot; (6) plus inline tags. */
     size_t est = para_len * 12 + 256;
     if (est < para_len + 64)
@@ -487,12 +491,14 @@ static hu_error_t format_email_html(hu_allocator_t *alloc, const char *text, siz
 
     size_t para_start = 0;
     for (size_t i = 0; i <= text_len; i++) {
-        bool boundary = (i == text_len) || (i + 1 < text_len && text[i] == '\n' && text[i + 1] == '\n');
+        bool boundary =
+            (i == text_len) || (i + 1 < text_len && text[i] == '\n' && text[i + 1] == '\n');
         if (boundary) {
             size_t para_end = i;
             while (para_start < para_end && (text[para_start] == '\n' || text[para_start] == '\r'))
                 para_start++;
-            while (para_end > para_start && (text[para_end - 1] == '\n' || text[para_end - 1] == '\r'))
+            while (para_end > para_start &&
+                   (text[para_end - 1] == '\n' || text[para_end - 1] == '\r'))
                 para_end--;
 
             if (para_end > para_start) {
@@ -584,18 +590,64 @@ hu_error_t hu_channel_format_outbound(hu_allocator_t *alloc, const char *channel
         return format_email_html(alloc, text, text_len, out, out_len);
 
     if (channel_name_eq(channel_name, channel_name_len, "imessage", 8)) {
+        /* Step 1: strip markdown (formatting, not safety — kept as-is). */
         char *md = NULL;
         size_t md_len = 0;
         hu_error_t e = hu_channel_strip_markdown(alloc, text, text_len, &md, &md_len);
         if (e != HU_OK)
             return e;
 
+        /* Step 2: run the outbound validator chain instead of bare
+         * hu_channel_strip_ai_phrases.  This covers ai-phrase strip (F2
+         * assistant-closer), channel-tag strip, and future safety validators,
+         * closing the Pattern C escape path. On REJECT the message is
+         * suppressed (returns empty string); on PASS/REWRITE the cleaned text
+         * flows to the line-cap step below. */
         char *san = NULL;
         size_t san_len = 0;
-        e = hu_channel_strip_ai_phrases(alloc, md, md_len, &san, &san_len);
+        {
+            hu_output_validator_chain_t *out_chain = NULL;
+            if (hu_validators_build_default_outbound_chain(alloc, NULL, 0, &out_chain) == HU_OK) {
+                hu_chain_result_t cr;
+                memset(&cr, 0, sizeof(cr));
+                if (hu_output_validator_chain_execute(out_chain, alloc, NULL, md, md_len, &cr) ==
+                    HU_OK) {
+                    if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text &&
+                        cr.final_text_len > 0) {
+                        san_len = cr.final_text_len;
+                        san = (char *)alloc->alloc(alloc->ctx, san_len + 1);
+                        if (san) {
+                            memcpy(san, cr.final_text, san_len);
+                            san[san_len] = '\0';
+                        } else {
+                            hu_chain_result_free(alloc, &cr);
+                            hu_output_validator_chain_destroy(out_chain);
+                            alloc->free(alloc->ctx, md, md_len + 1);
+                            return HU_ERR_OUT_OF_MEMORY;
+                        }
+                    }
+                    /* On REJECT: san stays NULL/0 — message suppressed. */
+                }
+                hu_chain_result_free(alloc, &cr);
+                hu_output_validator_chain_destroy(out_chain);
+            } else {
+                /* Chain build failed: fall back to legacy ai-phrase strip. */
+                e = hu_channel_strip_ai_phrases(alloc, md, md_len, &san, &san_len);
+            }
+        }
         alloc->free(alloc->ctx, md, md_len + 1);
         if (e != HU_OK)
             return e;
+
+        if (!san || san_len == 0) {
+            /* Rejected or empty — return empty string. */
+            *out = (char *)alloc->alloc(alloc->ctx, 1);
+            if (!*out)
+                return HU_ERR_OUT_OF_MEMORY;
+            (*out)[0] = '\0';
+            *out_len = 0;
+            return HU_OK;
+        }
 
         char *capped = NULL;
         size_t capped_len = 0;

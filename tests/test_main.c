@@ -245,6 +245,7 @@ void run_verifier_metrics_tests(void);
 void run_output_validator_tests(void);
 void run_stop_sequences_tests(void);
 void run_validators_builtin_tests(void);
+void run_pattern_c_paths_tests(void);
 void run_validators_persona_safety_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
@@ -826,6 +827,7 @@ int main(int argc, char **argv) {
     run_output_validator_tests();
     run_stop_sequences_tests();
     run_validators_builtin_tests();
+    run_pattern_c_paths_tests();
     run_validators_persona_safety_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();

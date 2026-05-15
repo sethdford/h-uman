@@ -2017,6 +2017,7 @@ typedef struct hu_daemon_stream_ctx {
     hu_bus_t *bus;
     char channel[HU_BUS_CHANNEL_LEN];
     char id[HU_BUS_ID_LEN];
+    hu_allocator_t *alloc; /* optional; when non-NULL, stream text chunks run the outbound chain */
 } hu_daemon_stream_ctx_t;
 
 #ifndef HU_IS_TEST
@@ -2086,10 +2087,41 @@ static void daemon_stream_event_cb(const hu_agent_stream_event_t *event, void *c
         daemon_bus_set_message(&ev, event->data, event->data_len);
         {
             size_t slen = strnlen(ev.message, HU_BUS_MSG_LEN);
-            slen = hu_conversation_strip_channel_tags(ev.message, slen);
-            ev.message[slen] = '\0';
             if (slen == 0)
                 return;
+            if (sc->alloc) {
+                /* Run outbound validator chain (covers channel-tag strip, ai-phrase
+                 * strip, F2 assistant-closer, and safety validators). */
+                hu_output_validator_chain_t *out_chain = NULL;
+                if (hu_validators_build_default_outbound_chain(sc->alloc, NULL, 0, &out_chain) ==
+                    HU_OK) {
+                    hu_chain_result_t cr;
+                    memset(&cr, 0, sizeof(cr));
+                    if (hu_output_validator_chain_execute(out_chain, sc->alloc, NULL, ev.message,
+                                                          slen, &cr) == HU_OK) {
+                        if (cr.final_decision == HU_VALIDATOR_REJECT) {
+                            hu_chain_result_free(sc->alloc, &cr);
+                            hu_output_validator_chain_destroy(out_chain);
+                            return; /* drop rejected chunk */
+                        }
+                        if (cr.final_text && cr.final_text_len < HU_BUS_MSG_LEN) {
+                            memcpy(ev.message, cr.final_text, cr.final_text_len);
+                            slen = cr.final_text_len;
+                            ev.message[slen] = '\0';
+                        }
+                        hu_chain_result_free(sc->alloc, &cr);
+                    }
+                    hu_output_validator_chain_destroy(out_chain);
+                }
+                if (slen == 0)
+                    return;
+            } else {
+                /* Fallback: legacy channel-tag strip (no allocator available). */
+                slen = hu_conversation_strip_channel_tags(ev.message, slen);
+                ev.message[slen] = '\0';
+                if (slen == 0)
+                    return;
+            }
         }
         break;
     case HU_AGENT_STREAM_THINKING:
@@ -9350,6 +9382,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_daemon_stream_ctx_t stream_ctx;
                         memset(&stream_ctx, 0, sizeof(stream_ctx));
                         stream_ctx.bus = &daemon_outbound_bus;
+                        stream_ctx.alloc = alloc;
                         if (agent->active_channel && agent->active_channel_len > 0) {
                             size_t nc = agent->active_channel_len < HU_BUS_CHANNEL_LEN - 1
                                             ? agent->active_channel_len
