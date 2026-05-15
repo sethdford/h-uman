@@ -672,11 +672,19 @@ static hu_error_t impl_recall_prod(void *ctx, hu_allocator_t *alloc, const char 
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && count < limit) {
         read_entry_from_row(stmt, alloc, &entries[count]);
-        if (session_id && session_id_len > 0 && entries[count].session_id &&
-            (entries[count].session_id_len != session_id_len ||
-             memcmp(entries[count].session_id, session_id, session_id_len) != 0)) {
-            hu_memory_entry_free_fields(alloc, &entries[count]);
-            continue;
+        /* Scoped query: only return entries whose session_id exactly matches.
+         * Entries with NULL session_id (legacy unscoped writes) are NOT
+         * returned — they would otherwise leak as noise context into a
+         * per-contact recall (e.g., return unrelated experience:* rows
+         * about other contacts in this contact's prompt). The in-memory
+         * sibling impl at lines 206-208 / 249-251 already does this; the
+         * prod SQLite path was incorrectly permissive prior to this guard. */
+        if (session_id && session_id_len > 0) {
+            if (!entries[count].session_id || entries[count].session_id_len != session_id_len ||
+                memcmp(entries[count].session_id, session_id, session_id_len) != 0) {
+                hu_memory_entry_free_fields(alloc, &entries[count]);
+                continue;
+            }
         }
         count++;
     }
@@ -743,11 +751,19 @@ static hu_error_t impl_list_prod(void *ctx, hu_allocator_t *alloc,
             cap *= 2;
         }
         read_entry_from_row(stmt, alloc, &entries[count]);
-        if (session_id && session_id_len > 0 && entries[count].session_id &&
-            (entries[count].session_id_len != session_id_len ||
-             memcmp(entries[count].session_id, session_id, session_id_len) != 0)) {
-            hu_memory_entry_free_fields(alloc, &entries[count]);
-            continue;
+        /* Scoped query: only return entries whose session_id exactly matches.
+         * Entries with NULL session_id (legacy unscoped writes) are NOT
+         * returned — they would otherwise leak as noise context into a
+         * per-contact recall (e.g., return unrelated experience:* rows
+         * about other contacts in this contact's prompt). The in-memory
+         * sibling impl at lines 206-208 / 249-251 already does this; the
+         * prod SQLite path was incorrectly permissive prior to this guard. */
+        if (session_id && session_id_len > 0) {
+            if (!entries[count].session_id || entries[count].session_id_len != session_id_len ||
+                memcmp(entries[count].session_id, session_id, session_id_len) != 0) {
+                hu_memory_entry_free_fields(alloc, &entries[count]);
+                continue;
+            }
         }
         count++;
     }

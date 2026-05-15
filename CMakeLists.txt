@@ -516,6 +516,7 @@ set(HU_CORE_SOURCES
     src/agent/frontier_persist.c
     src/context/conversation.c
     src/context/filler_recency.c
+    src/context/contact_send_recency.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
     src/context/theory_of_mind.c
@@ -2444,6 +2445,10 @@ set(HU_TEST_SOURCES
     tests/test_personal_model_atomic_save.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
+    tests/test_contact_send_recency.c
+    tests/test_imessage_outbound_dedup.c
+    tests/test_config_identity_links.c
+    tests/test_memory_session_scoping.c
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
