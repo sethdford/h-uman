@@ -493,6 +493,7 @@ void run_plan_executor_tests(void);
 void run_planner_mcts_wiring_tests(void);
 void run_cdp_tests(void);
 void run_emotional_cognition_tests(void);
+void run_emotional_contagion_tests(void);
 void run_evolving_cognition_tests(void);
 void run_metacognition_tests(void);
 void run_humanness_frontiers_tests(void);
@@ -1071,6 +1072,7 @@ int main(int argc, char **argv) {
     run_planner_mcts_wiring_tests();
     run_cdp_tests();
     run_emotional_cognition_tests();
+    run_emotional_contagion_tests();
     run_evolving_cognition_tests();
     run_metacognition_tests();
     run_humanness_frontiers_tests();

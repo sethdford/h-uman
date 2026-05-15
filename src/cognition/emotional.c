@@ -18,7 +18,8 @@ static _Thread_local char s_emotional_dom_label[EMOTIONAL_DOM_LABEL_CAP];
 #define EMOTIONAL_MIN_PROMPT_INTENSITY                 0.1f
 
 void hu_emotional_cognition_init(hu_emotional_cognition_t *ec) {
-    if (!ec) return;
+    if (!ec)
+        return;
     memset(ec, 0, sizeof(*ec));
     ec->state.dominant_emotion = "neutral";
     ec->secondary_emotion = HU_EMOTION_NEUTRAL;
@@ -27,37 +28,58 @@ void hu_emotional_cognition_init(hu_emotional_cognition_t *ec) {
 /* Map hu_emotion_tag_t to valence estimate */
 static float emotion_tag_to_valence(hu_emotion_tag_t tag) {
     switch (tag) {
-    case HU_EMOTION_JOY:         return  0.8f;
-    case HU_EMOTION_EXCITEMENT:  return  0.7f;
-    case HU_EMOTION_SURPRISE:    return  0.1f;
-    case HU_EMOTION_NEUTRAL:     return  0.0f;
-    case HU_EMOTION_SADNESS:     return -0.6f;
-    case HU_EMOTION_FRUSTRATION: return -0.5f;
-    case HU_EMOTION_ANGER:       return -0.7f;
-    case HU_EMOTION_FEAR:        return -0.6f;
-    case HU_EMOTION_ANXIETY:     return -0.4f;
-    default:                     return  0.0f;
+    case HU_EMOTION_JOY:
+        return 0.8f;
+    case HU_EMOTION_EXCITEMENT:
+        return 0.7f;
+    case HU_EMOTION_SURPRISE:
+        return 0.1f;
+    case HU_EMOTION_NEUTRAL:
+        return 0.0f;
+    case HU_EMOTION_SADNESS:
+        return -0.6f;
+    case HU_EMOTION_FRUSTRATION:
+        return -0.5f;
+    case HU_EMOTION_ANGER:
+        return -0.7f;
+    case HU_EMOTION_FEAR:
+        return -0.6f;
+    case HU_EMOTION_ANXIETY:
+        return -0.4f;
+    default:
+        return 0.0f;
     }
 }
 
 static const char *emotion_tag_to_label(hu_emotion_tag_t tag) {
     switch (tag) {
-    case HU_EMOTION_JOY:         return "joy";
-    case HU_EMOTION_EXCITEMENT:  return "excitement";
-    case HU_EMOTION_SURPRISE:    return "surprise";
-    case HU_EMOTION_NEUTRAL:     return "neutral";
-    case HU_EMOTION_SADNESS:     return "sadness";
-    case HU_EMOTION_FRUSTRATION: return "frustration";
-    case HU_EMOTION_ANGER:       return "anger";
-    case HU_EMOTION_FEAR:        return "fear";
-    case HU_EMOTION_ANXIETY:     return "anxiety";
-    default:                     return "neutral";
+    case HU_EMOTION_JOY:
+        return "joy";
+    case HU_EMOTION_EXCITEMENT:
+        return "excitement";
+    case HU_EMOTION_SURPRISE:
+        return "surprise";
+    case HU_EMOTION_NEUTRAL:
+        return "neutral";
+    case HU_EMOTION_SADNESS:
+        return "sadness";
+    case HU_EMOTION_FRUSTRATION:
+        return "frustration";
+    case HU_EMOTION_ANGER:
+        return "anger";
+    case HU_EMOTION_FEAR:
+        return "fear";
+    case HU_EMOTION_ANXIETY:
+        return "anxiety";
+    default:
+        return "neutral";
     }
 }
 
 void hu_emotional_cognition_perceive(hu_emotional_cognition_t *ec,
                                      const hu_emotional_perception_t *p) {
-    if (!ec || !p) return;
+    if (!ec || !p)
+        return;
 
     float valence_sum = 0.0f;
     float intensity_sum = 0.0f;
@@ -76,7 +98,8 @@ void hu_emotional_cognition_perceive(hu_emotional_cognition_t *ec,
         intensity_sum += p->fast_capture->intensity * w;
         weight_sum += w;
         mask |= HU_EMOTION_SRC_FAST_CAPTURE;
-        if (p->fast_capture->concerning) concerning = true;
+        if (p->fast_capture->concerning)
+            concerning = true;
         if (p->fast_capture->intensity > dominant_intensity) {
             dominant_intensity = p->fast_capture->intensity;
         }
@@ -89,7 +112,8 @@ void hu_emotional_cognition_perceive(hu_emotional_cognition_t *ec,
         intensity_sum += p->conversation->intensity * w;
         weight_sum += w;
         mask |= HU_EMOTION_SRC_CONVERSATION;
-        if (p->conversation->concerning) concerning = true;
+        if (p->conversation->concerning)
+            concerning = true;
     }
 
     /* STM emotion history */
@@ -147,19 +171,26 @@ void hu_emotional_cognition_perceive(hu_emotional_cognition_t *ec,
     }
 
     /* Clamp */
-    if (fused_valence > 1.0f)  fused_valence = 1.0f;
-    if (fused_valence < -1.0f) fused_valence = -1.0f;
-    if (fused_intensity > 1.0f) fused_intensity = 1.0f;
-    if (fused_intensity < 0.0f) fused_intensity = 0.0f;
+    if (fused_valence > 1.0f)
+        fused_valence = 1.0f;
+    if (fused_valence < -1.0f)
+        fused_valence = -1.0f;
+    if (fused_intensity > 1.0f)
+        fused_intensity = 1.0f;
+    if (fused_intensity < 0.0f)
+        fused_intensity = 0.0f;
 
     /* Confidence: more sources and stronger agreement = higher confidence */
     int source_count = 0;
     for (int i = 0; i < HU_EMOTION_SRC_BIT_COUNT; i++) {
-        if (mask & (1 << i)) source_count++;
+        if (mask & (1 << i))
+            source_count++;
     }
     float conf = (float)source_count / (float)HU_EMOTION_SRC_BIT_COUNT;
-    if (fused_intensity > EMOTIONAL_CONFIDENCE_INTENSITY_BOOST_THRESHOLD) conf += 0.1f;
-    if (conf > 1.0f) conf = 1.0f;
+    if (fused_intensity > EMOTIONAL_CONFIDENCE_INTENSITY_BOOST_THRESHOLD)
+        conf += 0.1f;
+    if (conf > 1.0f)
+        conf = 1.0f;
 
     /* Determine dominant label from tag or fast_capture */
     const char *dom_label = "neutral";
@@ -183,15 +214,15 @@ void hu_emotional_cognition_perceive(hu_emotional_cognition_t *ec,
     ec->confidence = conf;
     ec->secondary_emotion = secondary;
     ec->needs_empathy_boost = (fused_intensity > EMOTIONAL_HIGH_INTENSITY_THRESHOLD && concerning);
-    ec->escalation_detected =
-        (fused_valence < EMOTIONAL_ESCALATION_VALENCE_THRESHOLD &&
-         fused_intensity > EMOTIONAL_ESCALATION_INTENSITY_THRESHOLD);
+    ec->escalation_detected = (fused_valence < EMOTIONAL_ESCALATION_VALENCE_THRESHOLD &&
+                               fused_intensity > EMOTIONAL_ESCALATION_INTENSITY_THRESHOLD);
 
     hu_emotional_cognition_update_trajectory(ec, fused_valence);
 }
 
 void hu_emotional_cognition_update_trajectory(hu_emotional_cognition_t *ec, float valence) {
-    if (!ec) return;
+    if (!ec)
+        return;
 
     ec->valence_history[ec->valence_idx] = valence;
     ec->valence_idx = (ec->valence_idx + 1) % HU_EMOTIONAL_TRAJECTORY_LEN;
@@ -226,10 +257,76 @@ void hu_emotional_cognition_update_trajectory(hu_emotional_cognition_t *ec, floa
     }
 }
 
+/* Sprint 6 US-17: Emotional contagion implementation. */
+hu_error_t hu_emotional_apply_contagion(hu_emotional_cognition_t *self,
+                                        hu_emotion_tag_t partner_emotion, float partner_intensity,
+                                        float contagion_fraction) {
+    if (!self)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Default fraction if caller passes 0 or negative */
+    if (contagion_fraction <= 0.0f)
+        contagion_fraction = 0.3f;
+
+    /* Map partner emotion to a valence influence */
+    float partner_valence;
+    switch (partner_emotion) {
+    case HU_EMOTION_SADNESS:
+        partner_valence = -0.7f;
+        break;
+    case HU_EMOTION_ANGER:
+        partner_valence = -0.5f;
+        break;
+    case HU_EMOTION_FEAR:
+        partner_valence = -0.5f;
+        break;
+    case HU_EMOTION_ANXIETY:
+        partner_valence = -0.5f;
+        break;
+    case HU_EMOTION_FRUSTRATION:
+        partner_valence = -0.5f;
+        break;
+    case HU_EMOTION_JOY:
+        partner_valence = 0.7f;
+        break;
+    case HU_EMOTION_EXCITEMENT:
+        partner_valence = 0.7f;
+        break;
+    case HU_EMOTION_SURPRISE:
+        partner_valence = 0.3f;
+        break;
+    case HU_EMOTION_NEUTRAL:
+    default:
+        partner_valence = 0.0f;
+        break;
+    }
+
+    /* Apply contagion delta to valence */
+    float delta_valence = partner_valence * partner_intensity * contagion_fraction;
+    float new_valence = self->state.valence + delta_valence;
+    if (new_valence > 1.0f)
+        new_valence = 1.0f;
+    if (new_valence < -1.0f)
+        new_valence = -1.0f;
+    self->state.valence = new_valence;
+
+    /* Arousal (intensity proxy) rises with partner energy */
+    float delta_arousal = partner_intensity * contagion_fraction * 0.5f;
+    float new_arousal = self->state.intensity + delta_arousal;
+    if (new_arousal > 1.0f)
+        new_arousal = 1.0f;
+    if (new_arousal < 0.0f)
+        new_arousal = 0.0f;
+    self->state.intensity = new_arousal;
+
+    return HU_OK;
+}
+
 hu_error_t hu_emotional_cognition_build_prompt(hu_allocator_t *alloc,
-                                               const hu_emotional_cognition_t *ec,
-                                               char **out, size_t *out_len) {
-    if (!alloc || !ec || !out || !out_len) return HU_ERR_INVALID_ARGUMENT;
+                                               const hu_emotional_cognition_t *ec, char **out,
+                                               size_t *out_len) {
+    if (!alloc || !ec || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
 
@@ -241,30 +338,28 @@ hu_error_t hu_emotional_cognition_build_prompt(hu_allocator_t *alloc,
 
     char buf[2048];
     size_t pos = 0;
+    pos = hu_buf_appendf(buf, sizeof(buf), pos, "## Emotional Context\n\n");
     pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                         "## Emotional Context\n\n");
-    pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                         "- Dominant emotion: **%s** (valence: %.2f, intensity: %.2f)\n",
-                         dominant, (double)ec->state.valence,
-                         (double)ec->state.intensity);
+                         "- Dominant emotion: **%s** (valence: %.2f, intensity: %.2f)\n", dominant,
+                         (double)ec->state.valence, (double)ec->state.intensity);
 
     if (ec->secondary_emotion != HU_EMOTION_NEUTRAL) {
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                             "- Secondary: %s\n",
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, "- Secondary: %s\n",
                              emotion_tag_to_label(ec->secondary_emotion));
     }
 
     if (ec->confidence > 0.0f) {
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                             "- Confidence: %.0f%%\n", (double)(ec->confidence * 100.0f));
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, "- Confidence: %.0f%%\n",
+                             (double)(ec->confidence * 100.0f));
     }
 
     if (ec->valence_count >= 3) {
         const char *trend = "stable";
-        if (ec->trajectory_slope > EMOTIONAL_TRAJECTORY_SLOPE_EPSILON) trend = "improving";
-        else if (ec->trajectory_slope < -EMOTIONAL_TRAJECTORY_SLOPE_EPSILON) trend = "declining";
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                             "- Trajectory: %s\n", trend);
+        if (ec->trajectory_slope > EMOTIONAL_TRAJECTORY_SLOPE_EPSILON)
+            trend = "improving";
+        else if (ec->trajectory_slope < -EMOTIONAL_TRAJECTORY_SLOPE_EPSILON)
+            trend = "declining";
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, "- Trajectory: %s\n", trend);
     }
 
     if (ec->needs_empathy_boost) {
@@ -273,16 +368,18 @@ hu_error_t hu_emotional_cognition_build_prompt(hu_allocator_t *alloc,
                              "Acknowledge their emotional state before addressing content.**\n");
     }
     if (ec->escalation_detected) {
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                             "\n**Warning: Emotional escalation detected. "
-                             "Use de-escalation techniques: validate, lower intensity, offer support.**\n");
+        pos = hu_buf_appendf(
+            buf, sizeof(buf), pos,
+            "\n**Warning: Emotional escalation detected. "
+            "Use de-escalation techniques: validate, lower intensity, offer support.**\n");
     }
 
     pos = hu_buf_appendf(buf, sizeof(buf), pos, "\n");
 
     size_t len = (size_t)pos;
     char *result = alloc->alloc(alloc->ctx, len + 1);
-    if (!result) return HU_ERR_OUT_OF_MEMORY;
+    if (!result)
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(result, buf, len);
     result[len] = '\0';
     *out = result;

@@ -1176,6 +1176,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
         hu_emotional_cognition_perceive(&agent->infra.emotional_cognition, &percep);
 
+        /* Sprint 6 US-17: emotional contagion. Partner's detected emotion modulates
+         * Seth's emotional cognition before the prompt is built. The dominant STM
+         * emotion from the most-recent inbound turn is treated as the partner signal;
+         * contagion is bounded to 30% so Seth is affected, not overwritten. */
+        if (stm_emo && stm_emo_count > 0) {
+            hu_emotion_tag_t partner_emotion = stm_emo[0].tag;
+            float partner_intensity = stm_emo[0].intensity;
+            (void)hu_emotional_apply_contagion(&agent->infra.emotional_cognition, partner_emotion,
+                                               partner_intensity, 0.3f);
+        }
+
         size_t recent_tools = 0;
         if (agent->history_count > 1) {
             for (size_t hi = agent->history_count - 1; hi > 0; hi--) {

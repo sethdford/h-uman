@@ -2804,6 +2804,7 @@ set(HU_TEST_SOURCES
     tests/test_planner_mcts_wiring.c
     tests/test_cdp.c
     tests/test_emotional_cognition.c
+    tests/test_emotional_contagion.c
     tests/test_evolving_cognition.c
     tests/test_metacognition.c
     tests/test_humanness_frontiers.c
