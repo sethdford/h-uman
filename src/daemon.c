@@ -2097,21 +2097,38 @@ static void daemon_stream_event_cb(const hu_agent_stream_event_t *event, void *c
                     HU_OK) {
                     hu_chain_result_t cr;
                     memset(&cr, 0, sizeof(cr));
-                    if (hu_output_validator_chain_execute(out_chain, sc->alloc, NULL, ev.message,
-                                                          slen, &cr) == HU_OK) {
+                    bool chain_ok = hu_output_validator_chain_execute(
+                                        out_chain, sc->alloc, NULL, ev.message, slen, &cr) == HU_OK;
+                    if (chain_ok) {
                         if (cr.final_decision == HU_VALIDATOR_REJECT) {
                             hu_chain_result_free(sc->alloc, &cr);
                             hu_output_validator_chain_destroy(out_chain);
                             return; /* drop rejected chunk */
                         }
-                        if (cr.final_text && cr.final_text_len < HU_BUS_MSG_LEN) {
-                            memcpy(ev.message, cr.final_text, cr.final_text_len);
-                            slen = cr.final_text_len;
+                        if (cr.final_text && cr.final_text_len > 0) {
+                            /* CRITICAL #1: truncate to HU_BUS_MSG_LEN-1 rather
+                             * than skipping entirely when output is oversize —
+                             * a 4095-byte chunk must not escape the chain
+                             * unmodified. */
+                            size_t copy_len = cr.final_text_len < HU_BUS_MSG_LEN
+                                                  ? cr.final_text_len
+                                                  : HU_BUS_MSG_LEN - 1;
+                            memcpy(ev.message, cr.final_text, copy_len);
+                            slen = copy_len;
                             ev.message[slen] = '\0';
                         }
                         hu_chain_result_free(sc->alloc, &cr);
                     }
                     hu_output_validator_chain_destroy(out_chain);
+                    if (!chain_ok) {
+                        /* MED #5: chain-execute failed (e.g. allocation error
+                         * mid-chain).  Fall back to legacy channel-tag strip so
+                         * the message is not published completely unfiltered. */
+                        slen = hu_conversation_strip_channel_tags(ev.message, slen);
+                        ev.message[slen] = '\0';
+                        if (slen == 0)
+                            return;
+                    }
                 }
                 if (slen == 0)
                     return;
