@@ -5,6 +5,7 @@
 
 #define HU_PERSONA_PROMPT_MAX_BYTES (24 * 1024) /* 24 KB cap for research-rich personas */
 
+#include "human/agent/output_validator_chain.h"
 #include "human/core/error.h"
 #include "human/persona/circadian.h"
 #include "human/persona/relationship.h"
@@ -446,6 +447,12 @@ typedef struct hu_persona {
      * of the three-layer output defense). Defaults to false; opt-in via JSON key
      * "structured_output_enabled": true. */
     bool structured_output_enabled;
+    /* Cached outbound validator chain built once at hu_persona_load_json() time.
+     * Owned by the persona for its full lifetime; destroyed in hu_persona_deinit().
+     * NULL only when persona has zero validator rules or _load_json() failed before
+     * completion. Persona name is treated as immutable post-load — mutating
+     * persona->name after load does NOT re-derive the chain. */
+    hu_output_validator_chain_t *outbound_chain;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).

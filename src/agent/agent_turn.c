@@ -5577,14 +5577,26 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 /* Last-mile output validation — response_guard + strip trio via
                  * the default outbound chain (P2.T12). Catches the class of
                  * failure that leaked `<|channel>thought` + a 200x quote loop
-                 * to a real human contact via iMessage on 2026-05-10. */
+                 * to a real human contact via iMessage on 2026-05-10.
+                 *
+                 * US-4: prefer the chain cached on the persona (built once at
+                 * load time) over per-message inline build. Fall back to inline
+                 * build when no persona or no cached chain. */
                 {
                     const char *persona_name =
                         (agent->persona && agent->persona->name) ? agent->persona->name : NULL;
                     size_t persona_name_len = persona_name ? strlen(persona_name) : 0;
-                    hu_output_validator_chain_t *out_chain = NULL;
-                    if (hu_validators_build_default_outbound_chain(
-                            agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK) {
+                    bool chain_owned = false;
+                    hu_output_validator_chain_t *out_chain =
+                        (agent->persona && agent->persona->outbound_chain)
+                            ? agent->persona->outbound_chain
+                            : NULL;
+                    if (!out_chain) {
+                        chain_owned =
+                            hu_validators_build_default_outbound_chain(
+                                agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK;
+                    }
+                    if (out_chain) {
                         hu_validator_context_t vctx = {0};
                         vctx.persona_name = persona_name;
                         vctx.persona_name_len = persona_name_len;
@@ -5648,7 +5660,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 hu_chain_result_free(agent->alloc, &cr);
                             }
                         }
-                        hu_output_validator_chain_destroy(out_chain);
+                        if (chain_owned)
+                            hu_output_validator_chain_destroy(out_chain);
                     }
                 }
                 hu_error_t hist_err = hu_agent_internal_append_history(
