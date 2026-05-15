@@ -1,4 +1,5 @@
 #include "human/agent.h"
+#include "human/agent/response_guard_retry.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/provider.h"
@@ -43,12 +44,11 @@ static hu_error_t retry_provider_chat(void *ctx, hu_allocator_t *alloc,
 
     const char *text = NULL;
     if (r->calls == 1) {
-        text =
-            "Like <|channel>thoughtThe user said said \"Here! \" \" \" \" \" \" \" \" \" \" \" "
-            "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-            "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-            "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-            "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" ";
+        text = "Like <|channel>thoughtThe user said said \"Here! \" \" \" \" \" \" \" \" \" \" \" "
+               "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+               "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+               "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+               "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" ";
     } else {
         text = "haha yeah, fair 😂";
     }
@@ -115,9 +115,9 @@ static void guard_reject_retry_produces_human_like_replacement(void) {
     hu_provider_t provider = retry_provider_create(&provider_ctx);
 
     hu_agent_t agent;
-    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL,
-                                          NULL, "test-model", 10, "retry_guard_mock", 16, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "retry_guard_mock", 16, 0.7, "/tmp", 4,
+                                          5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -145,9 +145,9 @@ static void stream_guard_reject_retry_produces_human_like_replacement(void) {
     hu_provider_t provider = retry_provider_create(&provider_ctx);
 
     hu_agent_t agent;
-    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL,
-                                          NULL, "test-model", 10, "retry_guard_mock", 16, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "retry_guard_mock", 16, 0.7, "/tmp", 4,
+                                          5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -193,9 +193,9 @@ static void stream_guard_buffers_raw_output_until_retry_passes(void) {
     hu_provider_t provider = retry_provider_create(&provider_ctx);
 
     hu_agent_t agent;
-    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL,
-                                          NULL, "test-model", 10, "retry_guard_mock", 16, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "retry_guard_mock", 16, 0.7, "/tmp", 4,
+                                          5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -221,9 +221,110 @@ static void stream_guard_buffers_raw_output_until_retry_passes(void) {
     hu_agent_deinit(&agent);
 }
 
+/* ── Anti-CoT slim-prompt inspection mock ──────────────────────────────────────
+ *
+ * This mock captures the system message from the first chat() call so that
+ * the test can assert the repair_instruction contains the required anti-CoT
+ * tokens (reasoning, third-person, closer).  No real network calls are made
+ * (HU_IS_TEST guard is not needed here — the test never reaches out). */
+
+typedef struct {
+    char system_msg[2048];
+    size_t system_msg_len;
+} slim_inspect_ctx_t;
+
+static const char *slim_inspect_provider_name(void *ctx) {
+    (void)ctx;
+    return "slim_inspect_mock";
+}
+
+static bool slim_inspect_provider_supports_native_tools(void *ctx) {
+    (void)ctx;
+    return false;
+}
+
+static bool slim_inspect_provider_supports_streaming(void *ctx) {
+    (void)ctx;
+    return false;
+}
+
+static void slim_inspect_provider_deinit(void *ctx, hu_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+}
+
+static hu_error_t slim_inspect_provider_chat(void *ctx, hu_allocator_t *alloc,
+                                             const hu_chat_request_t *request, const char *model,
+                                             size_t model_len, double temperature,
+                                             hu_chat_response_t *out) {
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    slim_inspect_ctx_t *ic = (slim_inspect_ctx_t *)ctx;
+
+    /* Capture system message (messages[0]) for inspection. */
+    if (request && request->messages_count >= 1 && request->messages[0].role == HU_ROLE_SYSTEM &&
+        request->messages[0].content) {
+        size_t n = request->messages[0].content_len;
+        if (n >= sizeof(ic->system_msg))
+            n = sizeof(ic->system_msg) - 1;
+        memcpy(ic->system_msg, request->messages[0].content, n);
+        ic->system_msg[n] = '\0';
+        ic->system_msg_len = n;
+    }
+
+    /* Return a clean reply so hu_response_guard_retry_slim exits HU_OK. */
+    const char *text = "ok";
+    out->content = hu_strndup(alloc, text, 2);
+    out->content_len = out->content ? 2 : 0;
+    out->tool_calls = NULL;
+    out->tool_calls_count = 0;
+    out->reasoning_content = NULL;
+    out->reasoning_content_len = 0;
+    return out->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+}
+
+static const hu_provider_vtable_t slim_inspect_vtable = {
+    .chat = slim_inspect_provider_chat,
+    .supports_native_tools = slim_inspect_provider_supports_native_tools,
+    .get_name = slim_inspect_provider_name,
+    .deinit = slim_inspect_provider_deinit,
+    .supports_streaming = slim_inspect_provider_supports_streaming,
+    .stream_chat = NULL,
+};
+
+/* AC-7.2: slim prompt contains anti-CoT tokens "reasoning", "third-person",
+ * and "closer" (or their phrase equivalents). Uses key-token check rather than
+ * verbatim match for robustness against future wording tweaks. */
+static void slim_prompt_contains_anti_cot_instructions(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    slim_inspect_ctx_t ic;
+    memset(&ic, 0, sizeof(ic));
+    hu_provider_t prov = {.ctx = &ic, .vtable = &slim_inspect_vtable};
+
+    char *out = NULL;
+    size_t out_len = 0;
+    const char *user_msg = "hey";
+    hu_error_t err = hu_response_guard_retry_slim(&alloc, NULL, NULL, &prov, "test-model", 10,
+                                                  user_msg, strlen(user_msg), &out, &out_len, NULL);
+
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT(ic.system_msg_len > 0);
+
+    /* AC-7.1 key-token checks: reasoning prose, third-person self-reference, closer */
+    HU_ASSERT(strstr(ic.system_msg, "reasoning") != NULL);
+    HU_ASSERT(strstr(ic.system_msg, "third-person") != NULL);
+    HU_ASSERT(strstr(ic.system_msg, "closer") != NULL ||
+              strstr(ic.system_msg, "anything else") != NULL);
+
+    if (out)
+        alloc.free(alloc.ctx, out, out_len + 1);
+}
+
 void run_response_guard_retry_tests(void) {
     HU_TEST_SUITE("Response Guard Retry");
     HU_RUN_TEST(guard_reject_retry_produces_human_like_replacement);
     HU_RUN_TEST(stream_guard_reject_retry_produces_human_like_replacement);
     HU_RUN_TEST(stream_guard_buffers_raw_output_until_retry_passes);
+    HU_RUN_TEST(slim_prompt_contains_anti_cot_instructions);
 }
