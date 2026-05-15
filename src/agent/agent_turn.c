@@ -20,6 +20,7 @@
 #include "human/persona/micro_expression.h"
 #include "human/persona/narrative_self.h"
 #include "human/persona/somatic.h"
+#include "human/persona/style_mirror.h"
 #include "human/persona/voice_maturity.h"
 
 #include "human/agent/channel_trust.h"
