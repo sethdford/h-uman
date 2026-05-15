@@ -311,18 +311,17 @@ static void slim_prompt_contains_anti_cot_instructions(void) {
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT(ic.system_msg_len > 0);
 
-    /* AC-7.1 key-token checks: reasoning prose, third-person self-reference, closer */
-    HU_ASSERT(strstr(ic.system_msg, "reasoning") != NULL);
-    HU_ASSERT(strstr(ic.system_msg, "third-person") != NULL);
-    HU_ASSERT(strstr(ic.system_msg, "closer") != NULL ||
-              strstr(ic.system_msg, "anything else") != NULL);
+    /* AC-7.1 verbatim phrase checks: must match the exact prohibition strings */
+    HU_ASSERT(strstr(ic.system_msg, "Do not think out loud or narrate your reasoning") != NULL);
+    HU_ASSERT(strstr(ic.system_msg, "Do not refer to yourself in third-person by name") != NULL);
+    HU_ASSERT(strstr(ic.system_msg, "Do not end with AI-helper closers") != NULL);
 
     if (out)
         alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 void run_response_guard_retry_tests(void) {
-    HU_TEST_SUITE("Response Guard Retry");
+    HU_TEST_SUITE("response_guard_retry");
     HU_RUN_TEST(guard_reject_retry_produces_human_like_replacement);
     HU_RUN_TEST(stream_guard_reject_retry_produces_human_like_replacement);
     HU_RUN_TEST(stream_guard_buffers_raw_output_until_retry_passes);

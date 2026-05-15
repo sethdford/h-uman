@@ -16,10 +16,19 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     hu_output_validator_chain_t *chain = NULL;
     if (hu_validators_build_default_outbound_chain(&alloc, "Seth", 4, &chain) != HU_OK)
         return 0;
+    /* First half — exercises ownership transitions from a partial input. */
+    size_t half = size / 2;
     hu_chain_result_t cr;
     memset(&cr, 0, sizeof(cr));
-    hu_output_validator_chain_execute(chain, &alloc, NULL, (const char *)data, size, &cr);
+    hu_output_validator_chain_execute(chain, &alloc, NULL, (const char *)data, half, &cr);
     hu_chain_result_free(&alloc, &cr);
+
+    /* Second half — reuses the same chain instance to cover REJECT/REWRITE across calls. */
+    memset(&cr, 0, sizeof(cr));
+    hu_output_validator_chain_execute(chain, &alloc, NULL, (const char *)data + half, size - half,
+                                      &cr);
+    hu_chain_result_free(&alloc, &cr);
+
     hu_output_validator_chain_destroy(chain);
     return 0;
 }
