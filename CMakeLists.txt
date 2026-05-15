@@ -418,6 +418,7 @@ set(HU_CORE_SOURCES
     src/observability/bth_metrics.c
     src/observability/otlp.c
     src/observability/background_registry.c
+    src/observability/validator_telemetry.c
     src/tunnel/none.c
     src/tunnel/root.c
     src/gateway/gateway.c
@@ -2672,6 +2673,7 @@ set(HU_TEST_SOURCES
     tests/test_validators_builtin.c
     tests/test_pattern_c_paths.c
     tests/test_validators_persona_safety.c
+    tests/test_validator_telemetry.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c

@@ -238,6 +238,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/memory/lifecycle/semantic_cache.h"
 #include "human/observability/bth_metrics.h"
 #include "human/observability/otlp.h"
+#include "human/observability/validator_telemetry.h"
 #include "human/tools/validation.h"
 #include <math.h>
 #ifdef HU_ENABLE_SQLITE
@@ -5592,6 +5593,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_error_t cerr = hu_output_validator_chain_execute(
                             out_chain, agent->alloc, &vctx, final_content, final_len, &cr);
                         if (cerr == HU_OK) {
+                            hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
+                                                                final_len);
                             if (cr.final_decision == HU_VALIDATOR_REJECT) {
                                 hu_log_error("agent_turn", agent->observer,
                                              "validator chain REJECT (via %s) — "

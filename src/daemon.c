@@ -73,6 +73,7 @@
 #include "human/agent/proactive_ext.h"
 #include "human/agent/validators/builtin.h"
 #include "human/context/self_awareness.h"
+#include "human/observability/validator_telemetry.h"
 #ifdef HU_HAS_CRON
 #include "human/cron.h"
 #include "human/crontab.h"
@@ -2100,6 +2101,8 @@ static void daemon_stream_event_cb(const hu_agent_stream_event_t *event, void *c
                     bool chain_ok = hu_output_validator_chain_execute(
                                         out_chain, sc->alloc, NULL, ev.message, slen, &cr) == HU_OK;
                     if (chain_ok) {
+                        /* Emit telemetry — stream ctx has no observer; NULL is safe. */
+                        hu_observer_emit_validator_decision(NULL, &cr, NULL, slen);
                         if (cr.final_decision == HU_VALIDATOR_REJECT) {
                             hu_chain_result_free(sc->alloc, &cr);
                             hu_output_validator_chain_destroy(out_chain);

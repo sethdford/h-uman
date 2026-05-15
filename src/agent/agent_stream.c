@@ -53,6 +53,7 @@
 #include "human/memory/fast_capture.h"
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/personal_model.h"
+#include "human/observability/validator_telemetry.h"
 #include "human/persona.h"
 #include "human/persona/creative_voice.h"
 #include "human/persona/delta_observer.h"
@@ -1432,6 +1433,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_error_t cerr = hu_output_validator_chain_execute(
                         out_chain, agent->alloc, &vctx, sresp.content, sresp.content_len, &cr);
                     if (cerr == HU_OK) {
+                        hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
+                                                            sresp.content_len);
                         if (cr.final_decision == HU_VALIDATOR_REJECT) {
                             hu_log_error("agent_stream", agent->observer,
                                          "validator chain REJECT (via %s) — retrying once with "
@@ -2152,6 +2155,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_error_t cerr = hu_output_validator_chain_execute(
                     out_chain, agent->alloc, &vctx, final_content, final_content_len, &cr);
                 if (cerr == HU_OK) {
+                    hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
+                                                        final_content_len);
                     if (cr.final_decision == HU_VALIDATOR_REJECT) {
                         hu_log_error("agent_stream", agent->observer,
                                      "validator chain REJECT (via %s) — retrying slim path",
