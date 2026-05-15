@@ -41,9 +41,33 @@ static size_t word_len_at(const char *buf, size_t buf_len, size_t pos) {
 }
 
 /*
+ * Allowlist of common English sentence-starter words that are safe to
+ * lowercase when the partner omits capitalisation.  Short proper nouns
+ * (Al, Mo, Jo, Ben, Sam, Tim, Amy, …) are intentionally absent so they
+ * are never silently downcased.
+ */
+static const char *COMMON_STARTERS[] = {
+    "The", "A",    "An",   "This", "That", "These", "Those", "I",    "It",  "She",
+    "He",  "They", "We",   "You",  "Hey",  "Hi",    "Hello", "Yeah", "Yes", "No",
+    "Ok",  "Okay", "Cool", "Nice", "Sure", "Maybe", "Well",  "So",   "But", "And",
+    "Or",  "If",   "When", "How",  "What", "Why",   "Where", "Now",  NULL};
+
+/* Return true when word (length wlen, at buf[pos]) is in COMMON_STARTERS. */
+static bool is_common_starter(const char *buf, size_t pos, size_t wlen) {
+    for (size_t i = 0; COMMON_STARTERS[i] != NULL; i++) {
+        const char *s = COMMON_STARTERS[i];
+        size_t slen = strlen(s);
+        if (slen == wlen && strncmp(buf + pos, s, wlen) == 0)
+            return true;
+    }
+    return false;
+}
+
+/*
  * Apply sentence-start lowercasing to buf.
- * Only lowercases the first letter of a sentence-start word if that word
- * is 1-3 characters long, which conservatively avoids proper nouns (4+ chars).
+ * Only lowercases the first letter of a sentence-start word when that word
+ * appears in COMMON_STARTERS.  This avoids silently lowercasing short proper
+ * nouns (e.g. "Al", "Mo", "Ben") that the old 1-3-char heuristic would touch.
  *
  * Sentence starts: position 0, or one character after '. ', '? ', '! '
  * followed immediately by an uppercase letter.
@@ -54,7 +78,7 @@ static size_t apply_lowercase_sentence_starts(char *buf, size_t len) {
     /* Position 0 */
     if (len > 0 && is_upper_alpha(buf[0])) {
         size_t wlen = word_len_at(buf, len, 0);
-        if (wlen >= 1 && wlen <= 3) {
+        if (is_common_starter(buf, 0, wlen)) {
             lowercase_char(&buf[0]);
             edits++;
         }
@@ -67,7 +91,7 @@ static size_t apply_lowercase_sentence_starts(char *buf, size_t len) {
         char next = buf[i + 1];
         if ((prev == '.' || prev == '?' || prev == '!') && sep == ' ' && is_upper_alpha(next)) {
             size_t wlen = word_len_at(buf, len, i + 1);
-            if (wlen >= 1 && wlen <= 3) {
+            if (is_common_starter(buf, i + 1, wlen)) {
                 lowercase_char(&buf[i + 1]);
                 edits++;
             }

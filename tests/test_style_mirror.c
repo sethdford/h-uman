@@ -145,6 +145,20 @@ static void mirror_does_not_strip_exclamation_mark(void) {
     HU_ASSERT_TRUE(len > 0 && buf[len - 1] == '!');
 }
 
+static void mirror_preserves_short_proper_nouns(void) {
+    /* Partner all lowercase → lowercase rule fires, but "Al" is NOT in the
+     * common-starter allowlist, so it must remain capitalised. */
+    const char *partner[] = {"hey", "yeah", "cool"};
+    char buf[64];
+    strncpy(buf, "Al said hi.", sizeof(buf) - 1);
+    size_t len = strlen(buf);
+
+    hu_style_mirror_apply(buf, &len, partner, 3, NULL);
+
+    /* "Al" is a short proper noun — must survive untouched. */
+    HU_ASSERT_TRUE(buf[0] == 'A');
+}
+
 /* ── report struct test ───────────────────────────────────────────── */
 
 static void mirror_report_populated_correctly(void) {
@@ -170,6 +184,7 @@ void run_style_mirror_tests(void) {
     HU_RUN_TEST(mirror_no_change_when_partner_capitalizes);
     HU_RUN_TEST(mirror_preserves_long_words_at_sentence_start);
     HU_RUN_TEST(mirror_lowercases_short_words_only);
+    HU_RUN_TEST(mirror_preserves_short_proper_nouns);
     HU_RUN_TEST(mirror_strips_periods_when_partner_skips);
     HU_RUN_TEST(mirror_preserves_periods_when_partner_uses_them);
     HU_RUN_TEST(mirror_does_not_strip_question_mark);

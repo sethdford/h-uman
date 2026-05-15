@@ -5725,6 +5725,37 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_arena_reset(agent->turn_arena);
                     return HU_ERR_OUT_OF_MEMORY;
                 }
+                /* Sprint 6 US-19: post-gen style mirroring (enforcement, not advice).
+                 * Mirrors the partner's case/punctuation patterns from their recent
+                 * inbound messages onto the outbound reply.  Operates in-place on the
+                 * already-allocated mutable copy so no realloc is needed (mirroring
+                 * only lowercases or shortens — never grows the buffer).
+                 * Skip silently when there is no partner signal (< 2 user turns). */
+                {
+                    const char *mirror_msgs[5];
+                    size_t mirror_count = 0;
+                    for (size_t mi = agent->history_count; mi > 0 && mirror_count < 5; mi--) {
+                        size_t hi = mi - 1;
+                        if (agent->history[hi].role == HU_ROLE_USER && agent->history[hi].content &&
+                            agent->history[hi].content_len > 0) {
+                            mirror_msgs[mirror_count++] = agent->history[hi].content;
+                        }
+                    }
+                    if (mirror_count >= 2) {
+                        size_t mirror_len = strlen(*response_out);
+                        hu_style_mirror_report_t mirror_report;
+                        memset(&mirror_report, 0, sizeof(mirror_report));
+                        hu_style_mirror_apply(*response_out, &mirror_len, mirror_msgs, mirror_count,
+                                              &mirror_report);
+                        if (mirror_report.edits > 0 && agent->observer) {
+                            hu_log_info("agent_turn", agent->observer,
+                                        "style_mirror: %zu edit(s) applied (lc=%d period=%d)",
+                                        mirror_report.edits, (int)mirror_report.lowercased_applied,
+                                        (int)mirror_report.periods_stripped);
+                        }
+                    }
+                }
+
                 /* hu_strndup stops at first '\0' within final_len — length must match allocation.
                  */
                 size_t response_effective_len = strlen(*response_out);
