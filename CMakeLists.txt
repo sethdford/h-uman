@@ -2448,6 +2448,7 @@ set(HU_TEST_SOURCES
     tests/test_contact_send_recency.c
     tests/test_imessage_outbound_dedup.c
     tests/test_config_identity_links.c
+    tests/integration/test_sprint3_hybrid_recall.c
     tests/test_memory_session_scoping.c
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c

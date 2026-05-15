@@ -528,6 +528,7 @@ void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
 void run_imessage_outbound_dedup_tests(void);
 void run_config_identity_links_tests(void);
+void run_sprint3_hybrid_recall_tests(void);
 void run_memory_session_scoping_tests(void);
 void run_filler_pctt_tests(void);
 void run_hallucination_guard_tests(void);
@@ -1102,6 +1103,7 @@ int main(int argc, char **argv) {
     run_contact_send_recency_tests();
     run_imessage_outbound_dedup_tests();
     run_config_identity_links_tests();
+    run_sprint3_hybrid_recall_tests();
     run_memory_session_scoping_tests();
     run_filler_pctt_tests();
     run_hallucination_guard_tests();
