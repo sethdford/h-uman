@@ -441,6 +441,11 @@ typedef struct hu_persona {
     bool calibrated;
     /* B16: optional chronotype for JITAI / quiet-hours alignment (JSON `chronotype`). */
     hu_chronotype_t chronotype;
+    /* When true, the agent sets response_format="json_schema" + response_schema on every
+     * outbound chat request so the provider enforces the canonical reply schema (Layer 1
+     * of the three-layer output defense). Defaults to false; opt-in via JSON key
+     * "structured_output_enabled": true. */
+    bool structured_output_enabled;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).

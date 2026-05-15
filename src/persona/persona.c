@@ -1211,6 +1211,9 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
         }
     }
 
+    /* structured_output_enabled — top-level opt-in for JSON-schema response enforcement */
+    out->structured_output_enabled = hu_json_get_bool(root, "structured_output_enabled", false);
+
     /* Parse inner_world */
     {
         hu_json_value_t *iw = hu_json_object_get(root, "inner_world");

@@ -60,6 +60,7 @@
 #include "human/persona/humor.h"
 #include "human/persona/narrative_self.h"
 #include "human/persona/somatic.h"
+#include "human/provider/structured_output.h"
 #include "human/security/moderation.h"
 #include "human/security/sycophancy_guard.h"
 #include "human/tool.h"
@@ -1312,6 +1313,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                              &stop_seqs_count);
             req.stop_sequences = stop_seqs;
             req.stop_sequences_count = stop_seqs_count;
+        }
+        if (agent->persona && agent->persona->structured_output_enabled) {
+            req.response_format = "json_schema";
+            req.response_format_len = 11; /* strlen("json_schema") */
+            req.response_schema = hu_structured_output_chat_reply_schema();
+            req.response_schema_len = hu_structured_output_chat_reply_schema_len();
         }
 
         /* Buffer provider text until the final content clears guards. Tool

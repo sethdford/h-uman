@@ -280,6 +280,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/permission.h"
 #include "human/persona.h"
 #include "human/provider.h"
+#include "human/provider/structured_output.h"
 #include "human/security.h"
 #include "human/security/causal_armor.h"
 #include "human/security/companion_safety.h"
@@ -4086,6 +4087,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_stop_sequence_registry_lookup(prov_name, prov_name_len, &stop_seqs, &stop_seqs_count);
         req.stop_sequences = stop_seqs;
         req.stop_sequences_count = stop_seqs_count;
+    }
+    if (agent->persona && agent->persona->structured_output_enabled) {
+        req.response_format = "json_schema";
+        req.response_format_len = 11; /* strlen("json_schema") */
+        req.response_schema = hu_structured_output_chat_reply_schema();
+        req.response_schema_len = hu_structured_output_chat_reply_schema_len();
     }
 
     uint32_t iter = 0;
