@@ -1,0 +1,87 @@
+Human Test Suite
+==================
+Suite filter: memory
+Test filter:  contact_memory
+  SKIP  wasm WASI syscall tests (build with wasm32-wasi to run)
+
+=== memory ===
+
+=== memory — api engine ===
+
+=== MemoryUtil ===
+
+=== Memory backend config ===
+
+=== Memory full - None backend ===
+
+=== Memory full - SQLite ===
+
+=== Tools (all) - Memory/Message ===
+
+=== MultimodalMemory ===
+
+=== memory_graph ===
+
+=== Memory subsystems ===
+
+=== Prompt and memory loader ===
+
+=== Memory new (registry, rollout, retrieval, diagnostics) ===
+
+=== Memory engines ext ===
+
+=== memory_poisoning ===
+
+=== memory_poisoning ===
+
+=== Modules coverage: Memory retrieval ===
+
+=== W7 memory facade - dispatcher + v1 backend ===
+
+=== W10 neural memory - KV cache + reasoning traces + blobs ===
+
+=== prospective_memory ===
+
+=== deep_memory ===
+
+=== memory_degradation ===
+  channel_monitor: 12/12 passed
+  doctor_fix: 10/10 passed
+  skill_scaffold: 12/12 passed
+  plugin_discovery: 7/7 passed
+  context_engine_rag: 10/10 passed
+
+=== memory_features — contact-scoped memory ===
+  PASS  contact_memory_store_and_recall
+  PASS  contact_memory_cross_contact_isolation
+  PASS  contact_memory_recall_routes_through_hybrid
+
+=== INTELLIGENCE SUBSYSTEM PROOF ===
+=== ALL INTELLIGENCE + STREAMING LOOPS PROVEN ===
+
+
+=== memory_features — source citations ===
+
+=== memory_features — connections ===
+
+=== memory_features — ingestion ===
+
+=== memory_features — inbox ===
+
+=== memory_features — insight category ===
+
+=== memory_features — audit fixes ===
+
+=== memory_features — integration hardening ===
+
+=== Memory Policy ===
+
+=== Memory Tiers ===
+
+=== Memory Forgetting ===
+
+=== Adversarial: Memory Safety ===
+
+=== Memory Session Scoping (regression for Mindy-context bug) ===
+
+--- Results: 3/3 passed, 10264 skipped ---

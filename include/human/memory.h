@@ -147,8 +147,7 @@ void hu_memory_entry_free_fields(hu_allocator_t *alloc, hu_memory_entry_t *e);
 /* Export all memory entries to a JSON file at `output_path`. Streams entries
  * so arbitrarily large stores don't materialise as a single string. Returns
  * HU_ERR_IO on file-open failure, or the error from vtable->list. */
-hu_error_t hu_memory_export_json(hu_memory_t *mem, hu_allocator_t *alloc,
-                                 const char *output_path);
+hu_error_t hu_memory_export_json(hu_memory_t *mem, hu_allocator_t *alloc, const char *output_path);
 
 /* Store with source provenance: uses store_ex if available, else falls back to store. */
 hu_error_t hu_memory_store_with_source(hu_memory_t *mem, const char *key, size_t key_len,
@@ -162,10 +161,17 @@ hu_error_t hu_memory_store_with_source(hu_memory_t *mem, const char *key, size_t
 hu_error_t hu_memory_store_for_contact(hu_memory_t *mem, const char *contact_id,
                                        size_t contact_id_len, const char *key, size_t key_len,
                                        const char *content, size_t content_len,
-                                       const hu_memory_category_t *category,
-                                       const char *session_id, size_t session_id_len);
+                                       const hu_memory_category_t *category, const char *session_id,
+                                       size_t session_id_len);
 
+/* Per-contact recall. Pass `embedder` AND `vector_store` (both non-NULL) to route
+ * through `hu_hybrid_retrieve` (keyword + semantic + RRF). Pass NULL for either or
+ * both to fall back to the backend's BM25/FTS recall path. */
+struct hu_embedder;
+struct hu_vector_store;
 hu_error_t hu_memory_recall_for_contact(hu_memory_t *mem, hu_allocator_t *alloc,
+                                        struct hu_embedder *embedder,
+                                        struct hu_vector_store *vector_store,
                                         const char *contact_id, size_t contact_id_len,
                                         const char *query, size_t query_len, size_t limit,
                                         const char *session_id, size_t session_id_len,
@@ -192,7 +198,7 @@ sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem);
  * is requested without a keystore. */
 struct hu_keystore;
 hu_error_t hu_sqlite_memory_attach_keystore(hu_memory_t *mem, struct hu_keystore *ks,
-                                             bool encrypt_at_rest);
+                                            bool encrypt_at_rest);
 hu_memory_t hu_markdown_memory_create(hu_allocator_t *alloc, const char *dir_path);
 
 #endif /* HU_MEMORY_H */

@@ -527,9 +527,78 @@ static void test_hybrid_retrieve_with_vector(void) {
 #endif
 }
 
+/* US-3.1 regression guard: when hu_hybrid_retrieve goes through the RRF round-trip
+ * (keyword + semantic both populated), the merged result must carry the ORIGINAL
+ * storage key — not a key fabricated from the content. Previously
+ * search_results_to_entries set entries[i].key = strdup(content), which silently
+ * broke downstream contact-prefix filtering. */
+static void hybrid_round_trip_preserves_original_key(void) {
+#ifdef HU_ENABLE_SQLITE
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    hu_embedder_t embedder = hu_embedder_local_create(&alloc);
+    hu_vector_store_t vstore = hu_vector_store_mem_create(&alloc);
+    HU_ASSERT_NOT_NULL(embedder.vtable);
+    HU_ASSERT_NOT_NULL(vstore.vtable);
+
+    /* Store one memory under a distinctive key whose text differs from the content. */
+    const char *key = "contact:alice:pref";
+    size_t key_len = strlen(key);
+    const char *content = "loves espresso in the morning";
+    size_t content_len = strlen(content);
+    hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key, key_len, content, content_len, &cat, NULL, 0),
+                 HU_OK);
+
+    /* Index the same content into the vector store under the SAME id (=key)
+     * so the semantic branch returns it and RRF merges keyword + semantic. */
+    hu_embedding_t emb = {0};
+    HU_ASSERT_EQ(embedder.vtable->embed(embedder.ctx, &alloc, content, content_len, &emb), HU_OK);
+    HU_ASSERT_EQ(
+        vstore.vtable->insert(vstore.ctx, &alloc, key, key_len, &emb, content, content_len), HU_OK);
+    hu_embedding_free(&alloc, &emb);
+
+    hu_retrieval_options_t opts = {
+        .mode = HU_RETRIEVAL_HYBRID,
+        .limit = 5,
+        .min_score = 0.0,
+        .use_reranking = true,
+        .temporal_decay_factor = 0.0,
+    };
+    hu_retrieval_result_t res = {0};
+    hu_error_t err =
+        hu_hybrid_retrieve(&alloc, &mem, &embedder, &vstore, NULL, "espresso", 8, &opts, &res);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(res.count >= 1);
+
+    /* The first result must carry the ORIGINAL storage key, not the content. */
+    bool found_key = false;
+    for (size_t i = 0; i < res.count; i++) {
+        if (res.entries[i].key && res.entries[i].key_len == key_len &&
+            memcmp(res.entries[i].key, key, key_len) == 0) {
+            found_key = true;
+            break;
+        }
+    }
+    HU_ASSERT_TRUE(found_key);
+
+    hu_retrieval_result_free(&alloc, &res);
+    if (embedder.vtable && embedder.vtable->deinit)
+        embedder.vtable->deinit(embedder.ctx, &alloc);
+    if (vstore.vtable && vstore.vtable->deinit)
+        vstore.vtable->deinit(vstore.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+#else
+    (void)0;
+#endif
+}
+
 void run_retrieval_tests(void) {
     HU_TEST_SUITE("retrieval");
     HU_RUN_TEST(test_semantic_returns_not_supported);
+    HU_RUN_TEST(hybrid_round_trip_preserves_original_key);
     HU_RUN_TEST(test_semantic_retrieve_with_local_embedder);
     HU_RUN_TEST(test_hybrid_retrieve_with_vector);
     HU_RUN_TEST(test_keyword_basic_match);

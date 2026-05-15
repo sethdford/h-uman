@@ -1,0 +1,64 @@
+=== GREP PROOF 1: new key-preservation code in hybrid.c ===
+29:        /* Preserve the original storage key so downstream consumers
+71:        if (results[i].key) {
+72:            size_t klen = strlen(results[i].key);
+73:            entries[i].key = hu_strndup(alloc, results[i].key, klen);
+
+=== GREP PROOF 2: OLD bug code (key=hu_strndup(alloc, results[i].content, len)) absent in search_results_to_entries ===
+static hu_error_t search_results_to_entries(hu_allocator_t *alloc, const char *query,
+                                            hu_search_result_t *results, size_t count, size_t limit,
+                                            hu_retrieval_result_t *out) {
+    out->entries = NULL;
+    out->count = 0;
+    out->scores = NULL;
+    if (count == 0)
+        return HU_OK;
+    size_t n = count > limit ? limit : count;
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_memory_entry_t));
+    double *scores = (double *)alloc->alloc(alloc->ctx, n * sizeof(double));
+    if (!entries || !scores) {
+        if (entries)
+            alloc->free(alloc->ctx, entries, n * sizeof(hu_memory_entry_t));
+        if (scores)
+            alloc->free(alloc->ctx, scores, n * sizeof(double));
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(entries, 0, n * sizeof(hu_memory_entry_t));
+    for (size_t i = 0; i < n; i++) {
+        if (results[i].content) {
+            size_t len = strlen(results[i].content);
+            entries[i].content = hu_strndup(alloc, results[i].content, len);
+            entries[i].content_len = len;
+        }
+        /* Prefer the original storage key preserved through RRF (US-3.1).
+         * Falls back to content only when no original key was carried over
+         * (e.g. synthesized graph-context entries lacking a real key). */
+        if (results[i].key) {
+            size_t klen = strlen(results[i].key);
+            entries[i].key = hu_strndup(alloc, results[i].key, klen);
+            entries[i].key_len = klen;
+            entries[i].id = entries[i].key;
+            entries[i].id_len = klen;
+        } else if (results[i].content) {
+            size_t len = strlen(results[i].content);
+            entries[i].key = hu_strndup(alloc, results[i].content, len);
+            entries[i].key_len = len;
+            entries[i].id = entries[i].key;
+            entries[i].id_len = len;
+        }
+        entries[i].score = (double)results[i].rerank_score;
+        scores[i] = (double)results[i].rerank_score;
+    }
+    (void)query;
+    out->entries = entries;
+    out->count = n;
+    out->scores = scores;
+    return HU_OK;
+}
+
+=== GREP PROOF 3: hybrid routing in contact_memory.c ===
+67:    /* Hybrid path: route through `hu_hybrid_retrieve` only when BOTH the embedder
+70:    if (embedder && embedder->vtable && vector_store && vector_store->vtable) {
+79:        err = hu_hybrid_retrieve(alloc, mem, embedder, vector_store, /*graph=*/NULL, search_query,
+85:        /* hu_hybrid_retrieve allocates `scores` separately from `entries`; free the

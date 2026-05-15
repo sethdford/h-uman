@@ -26,6 +26,11 @@ static hu_error_t entries_to_search_results(hu_allocator_t *alloc, const hu_memo
                                                                         : entries[i].key_len)
                     : 0;
         out[i].content = content && len > 0 ? hu_strndup(alloc, content, len) : NULL;
+        /* Preserve the original storage key so downstream consumers
+         * (contact-prefix filter, etc.) can identify the entry after RRF. */
+        out[i].key = (entries[i].key && entries[i].key_len > 0)
+                         ? hu_strndup(alloc, entries[i].key, entries[i].key_len)
+                         : NULL;
         out[i].score = (float)(scores && i < count ? scores[i] : 0.0);
         out[i].rerank_score = 0.0f;
         out[i].original_rank = i;
@@ -59,6 +64,18 @@ static hu_error_t search_results_to_entries(hu_allocator_t *alloc, const char *q
             size_t len = strlen(results[i].content);
             entries[i].content = hu_strndup(alloc, results[i].content, len);
             entries[i].content_len = len;
+        }
+        /* Prefer the original storage key preserved through RRF (US-3.1).
+         * Falls back to content only when no original key was carried over
+         * (e.g. synthesized graph-context entries lacking a real key). */
+        if (results[i].key) {
+            size_t klen = strlen(results[i].key);
+            entries[i].key = hu_strndup(alloc, results[i].key, klen);
+            entries[i].key_len = klen;
+            entries[i].id = entries[i].key;
+            entries[i].id_len = klen;
+        } else if (results[i].content) {
+            size_t len = strlen(results[i].content);
             entries[i].key = hu_strndup(alloc, results[i].content, len);
             entries[i].key_len = len;
             entries[i].id = entries[i].key;
@@ -75,9 +92,9 @@ static hu_error_t search_results_to_entries(hu_allocator_t *alloc, const char *q
 }
 
 hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_embedder_t *embedder,
-                              hu_vector_store_t *vector_store, hu_graph_t *graph,
-                              const char *query, size_t query_len,
-                              const hu_retrieval_options_t *opts, hu_retrieval_result_t *out) {
+                              hu_vector_store_t *vector_store, hu_graph_t *graph, const char *query,
+                              size_t query_len, const hu_retrieval_options_t *opts,
+                              hu_retrieval_result_t *out) {
     out->entries = NULL;
     out->count = 0;
     out->scores = NULL;
@@ -103,7 +120,7 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         char *graph_ctx = NULL;
         size_t graph_ctx_len = 0;
         if (hu_graph_build_context(graph, alloc, "", 0, query, query_len, 2, 2048, &graph_ctx,
-                                  &graph_ctx_len) == HU_OK &&
+                                   &graph_ctx_len) == HU_OK &&
             graph_ctx && graph_ctx_len > 0) {
             graph_result.entries =
                 (hu_memory_entry_t *)alloc->alloc(alloc->ctx, sizeof(hu_memory_entry_t));
@@ -191,9 +208,8 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         return HU_OK;
     }
 
-    size_t max_merged = (kw_count + sem_count + gr_count) > limit
-                            ? (kw_count + sem_count + gr_count)
-                            : limit;
+    size_t max_merged =
+        (kw_count + sem_count + gr_count) > limit ? (kw_count + sem_count + gr_count) : limit;
     if (max_merged > 128)
         max_merged = 128;
 

@@ -1,0 +1,29 @@
+Human Test Suite
+==================
+Suite filter: retrieval
+Test filter:  hybrid_round_trip
+  SKIP  wasm WASI syscall tests (build with wasm32-wasi to run)
+
+=== retrieval ===
+  PASS  hybrid_round_trip_preserves_original_key
+
+=== INTELLIGENCE SUBSYSTEM PROOF ===
+=== ALL INTELLIGENCE + STREAMING LOOPS PROVEN ===
+
+
+=== Multigraph Retrieval ===
+
+=== Memory new (registry, rollout, retrieval, diagnostics) ===
+
+=== Modules coverage: Memory retrieval ===
+
+=== W12 planner - goal-conditioned retrieval + HippoRAG PageRank ===
+  channel_monitor: 12/12 passed
+  doctor_fix: 10/10 passed
+  skill_scaffold: 12/12 passed
+  plugin_discovery: 7/7 passed
+  context_engine_rag: 10/10 passed
+
+=== VectorRetrievalRemote ===
+
+--- Results: 1/1 passed, 10266 skipped ---

@@ -6,6 +6,7 @@
 
 typedef struct hu_search_result {
     char *content;
+    char *key;          /* original storage key — preserved through RRF; may be NULL */
     float score;        /* original score (BM25 or cosine) */
     float rerank_score; /* after reranking */
     size_t original_rank;

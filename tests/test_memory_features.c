@@ -5,6 +5,7 @@
 #include "human/memory/consolidation.h"
 #include "human/memory/inbox.h"
 #include "human/memory/ingest.h"
+#include "human/memory/vector.h"
 #include "test_framework.h"
 #include <math.h>
 #include <string.h>
@@ -106,15 +107,14 @@ static void contact_memory_store_and_recall(void) {
 
     const char *contact_a = "user_a";
     size_t contact_a_len = 6;
-    hu_error_t err = hu_memory_store_for_contact(&mem, contact_a, contact_a_len,
-                                                  "pref", 4, "likes dark mode", 15,
-                                                  NULL, "", 0);
+    hu_error_t err = hu_memory_store_for_contact(&mem, contact_a, contact_a_len, "pref", 4,
+                                                 "likes dark mode", 15, NULL, "", 0);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, contact_a_len,
-                                       "dark", 4, 5, "", 0, &entries, &count);
+    err = hu_memory_recall_for_contact(&mem, &alloc, NULL, NULL, contact_a, contact_a_len, "dark",
+                                       4, 5, "", 0, &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count >= 1);
     HU_ASSERT_TRUE(entries[0].content && memcmp(entries[0].content, "likes dark mode", 15) == 0);
@@ -135,14 +135,16 @@ static void contact_memory_cross_contact_isolation(void) {
     size_t len_a = 6, len_b = 6;
 
     HU_ASSERT_EQ(hu_memory_store_for_contact(&mem, contact_a, len_a, "key_a", 5,
-                                             "alpha likes coffee", 18, NULL, "", 0), HU_OK);
+                                             "alpha likes coffee", 18, NULL, "", 0),
+                 HU_OK);
     HU_ASSERT_EQ(hu_memory_store_for_contact(&mem, contact_b, len_b, "key_b", 5,
-                                             "bravo prefers tea", 17, NULL, "", 0), HU_OK);
+                                             "bravo prefers tea", 17, NULL, "", 0),
+                 HU_OK);
 
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    hu_error_t err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, len_a,
-                                                   "coffee", 6, 5, "", 0, &entries, &count);
+    hu_error_t err = hu_memory_recall_for_contact(&mem, &alloc, NULL, NULL, contact_a, len_a,
+                                                  "coffee", 6, 5, "", 0, &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count >= 1);
     HU_ASSERT_TRUE(memcmp(entries[0].content, "alpha likes coffee", 18) == 0);
@@ -152,8 +154,8 @@ static void contact_memory_cross_contact_isolation(void) {
 
     entries = NULL;
     count = 0;
-    err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, len_a, "tea", 3,
-                                       5, "", 0, &entries, &count);
+    err = hu_memory_recall_for_contact(&mem, &alloc, NULL, NULL, contact_a, len_a, "tea", 3, 5, "",
+                                       0, &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 0u);
     if (entries) {
@@ -161,6 +163,79 @@ static void contact_memory_cross_contact_isolation(void) {
             hu_memory_entry_free_fields(&alloc, &entries[i]);
         alloc.free(alloc.ctx, entries, count * sizeof(hu_memory_entry_t));
     }
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* US-3.1: when both embedder AND vector_store are provided, the contact recall
+ * routes through hu_hybrid_retrieve. The contact-prefix filter must still apply
+ * (entries from other contacts must be excluded). */
+static void contact_memory_recall_routes_through_hybrid(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+
+    hu_embedder_t embedder = hu_embedder_local_create(&alloc);
+    hu_vector_store_t vstore = hu_vector_store_mem_create(&alloc);
+    HU_ASSERT_NOT_NULL(embedder.vtable);
+    HU_ASSERT_NOT_NULL(vstore.vtable);
+
+    /* Store memories for two contacts; index each under its prefixed storage key. */
+    const char *contact_a = "alice";
+    size_t len_a = 5;
+    const char *contact_b = "bob";
+    size_t len_b = 3;
+    HU_ASSERT_EQ(hu_memory_store_for_contact(&mem, contact_a, len_a, "pref", 4,
+                                             "alice loves espresso", 20, NULL, "", 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_memory_store_for_contact(&mem, contact_b, len_b, "pref", 4,
+                                             "bob prefers matcha tea", 22, NULL, "", 0),
+                 HU_OK);
+
+    /* Index the same content in the vector store under the SAME prefixed keys. */
+    const char *alice_key = "contact:alice:pref";
+    size_t alice_key_len = strlen(alice_key);
+    const char *bob_key = "contact:bob:pref";
+    size_t bob_key_len = strlen(bob_key);
+    const char *alice_content = "alice loves espresso";
+    size_t alice_content_len = strlen(alice_content);
+    const char *bob_content = "bob prefers matcha tea";
+    size_t bob_content_len = strlen(bob_content);
+
+    hu_embedding_t emb_a = {0}, emb_b = {0};
+    HU_ASSERT_EQ(
+        embedder.vtable->embed(embedder.ctx, &alloc, alice_content, alice_content_len, &emb_a),
+        HU_OK);
+    HU_ASSERT_EQ(embedder.vtable->embed(embedder.ctx, &alloc, bob_content, bob_content_len, &emb_b),
+                 HU_OK);
+    HU_ASSERT_EQ(vstore.vtable->insert(vstore.ctx, &alloc, alice_key, alice_key_len, &emb_a,
+                                       alice_content, alice_content_len),
+                 HU_OK);
+    HU_ASSERT_EQ(vstore.vtable->insert(vstore.ctx, &alloc, bob_key, bob_key_len, &emb_b,
+                                       bob_content, bob_content_len),
+                 HU_OK);
+    hu_embedding_free(&alloc, &emb_a);
+    hu_embedding_free(&alloc, &emb_b);
+
+    /* Query for alice's preference using the hybrid path. The contact-prefix filter
+     * must drop bob's entry even though it could surface from the semantic search. */
+    hu_memory_entry_t *entries = NULL;
+    size_t count = 0;
+    hu_error_t err = hu_memory_recall_for_contact(&mem, &alloc, &embedder, &vstore, contact_a,
+                                                  len_a, "espresso", 8, 5, "", 0, &entries, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(count >= 1);
+    for (size_t i = 0; i < count; i++) {
+        /* Every returned entry must be in alice's namespace. */
+        HU_ASSERT_TRUE(entries[i].key && entries[i].key_len >= alice_key_len);
+        HU_ASSERT_TRUE(memcmp(entries[i].key, "contact:alice:", 14) == 0);
+        hu_memory_entry_free_fields(&alloc, &entries[i]);
+    }
+    alloc.free(alloc.ctx, entries, count * sizeof(hu_memory_entry_t));
+
+    if (embedder.vtable && embedder.vtable->deinit)
+        embedder.vtable->deinit(embedder.ctx, &alloc);
+    if (vstore.vtable && vstore.vtable->deinit)
+        vstore.vtable->deinit(vstore.ctx, &alloc);
     mem.vtable->deinit(mem.ctx);
 }
 #endif
@@ -601,8 +676,7 @@ static void test_connection_pipeline_end_to_end(void) {
 static void test_ingest_file_with_provider_unknown_type(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    hu_error_t err =
-        hu_ingest_file_with_provider(&alloc, &mem, NULL, "data.xyz", 8, NULL, 0);
+    hu_error_t err = hu_ingest_file_with_provider(&alloc, &mem, NULL, "data.xyz", 8, NULL, 0);
     HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
     mem.vtable->deinit(mem.ctx);
 }
@@ -624,6 +698,7 @@ void run_memory_features_tests(void) {
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(contact_memory_store_and_recall);
     HU_RUN_TEST(contact_memory_cross_contact_isolation);
+    HU_RUN_TEST(contact_memory_recall_routes_through_hybrid);
 #endif
 
     HU_TEST_SUITE("memory_features — source citations");

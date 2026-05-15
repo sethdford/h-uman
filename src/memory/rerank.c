@@ -112,8 +112,24 @@ static hu_error_t rrf_merge_impl(hu_allocator_t *alloc, hu_search_result_t *keyw
                 merged[merged_n].content = hu_strdup(alloc, r->content);
                 if (!merged[merged_n].content) {
                     map_clear(buckets, alloc);
-                    for (size_t j = 0; j < merged_n; j++)
+                    for (size_t j = 0; j < merged_n; j++) {
                         alloc->free(alloc->ctx, merged[j].content, strlen(merged[j].content) + 1);
+                        if (merged[j].key)
+                            alloc->free(alloc->ctx, merged[j].key, strlen(merged[j].key) + 1);
+                    }
+                    return HU_ERR_OUT_OF_MEMORY;
+                }
+                /* Preserve original storage key for downstream filtering (US-3.1 fix). */
+                merged[merged_n].key = r->key ? hu_strdup(alloc, r->key) : NULL;
+                if (r->key && !merged[merged_n].key) {
+                    alloc->free(alloc->ctx, merged[merged_n].content,
+                                strlen(merged[merged_n].content) + 1);
+                    map_clear(buckets, alloc);
+                    for (size_t j = 0; j < merged_n; j++) {
+                        alloc->free(alloc->ctx, merged[j].content, strlen(merged[j].content) + 1);
+                        if (merged[j].key)
+                            alloc->free(alloc->ctx, merged[j].key, strlen(merged[j].key) + 1);
+                    }
                     return HU_ERR_OUT_OF_MEMORY;
                 }
                 merged[merged_n].score = r->score;
@@ -121,8 +137,11 @@ static hu_error_t rrf_merge_impl(hu_allocator_t *alloc, hu_search_result_t *keyw
                 merged[merged_n].original_rank = i;
                 if (!map_put(buckets, alloc, r->content, len, rrf_term, merged_n, r->score, i)) {
                     map_clear(buckets, alloc);
-                    for (size_t j = 0; j <= merged_n; j++)
+                    for (size_t j = 0; j <= merged_n; j++) {
                         alloc->free(alloc->ctx, merged[j].content, strlen(merged[j].content) + 1);
+                        if (merged[j].key)
+                            alloc->free(alloc->ctx, merged[j].key, strlen(merged[j].key) + 1);
+                    }
                     return HU_ERR_OUT_OF_MEMORY;
                 }
                 merged_n++;
@@ -140,13 +159,34 @@ static hu_error_t rrf_merge_impl(hu_allocator_t *alloc, hu_search_result_t *keyw
         rrf_node_t *node = map_find(buckets, r->content, len);
         if (node) {
             node->rrf_score += rrf_term;
+            /* If keyword list missed a key but vector list has one, adopt it. */
+            if (!merged[node->merged_idx].key && r->key) {
+                char *adopted = hu_strdup(alloc, r->key);
+                if (adopted)
+                    merged[node->merged_idx].key = adopted;
+            }
         } else {
             if (merged_n < merged_cap) {
                 merged[merged_n].content = hu_strdup(alloc, r->content);
                 if (!merged[merged_n].content) {
                     map_clear(buckets, alloc);
-                    for (size_t j = 0; j < merged_n; j++)
+                    for (size_t j = 0; j < merged_n; j++) {
                         alloc->free(alloc->ctx, merged[j].content, strlen(merged[j].content) + 1);
+                        if (merged[j].key)
+                            alloc->free(alloc->ctx, merged[j].key, strlen(merged[j].key) + 1);
+                    }
+                    return HU_ERR_OUT_OF_MEMORY;
+                }
+                merged[merged_n].key = r->key ? hu_strdup(alloc, r->key) : NULL;
+                if (r->key && !merged[merged_n].key) {
+                    alloc->free(alloc->ctx, merged[merged_n].content,
+                                strlen(merged[merged_n].content) + 1);
+                    map_clear(buckets, alloc);
+                    for (size_t j = 0; j < merged_n; j++) {
+                        alloc->free(alloc->ctx, merged[j].content, strlen(merged[j].content) + 1);
+                        if (merged[j].key)
+                            alloc->free(alloc->ctx, merged[j].key, strlen(merged[j].key) + 1);
+                    }
                     return HU_ERR_OUT_OF_MEMORY;
                 }
                 merged[merged_n].score = r->score;
@@ -154,8 +194,11 @@ static hu_error_t rrf_merge_impl(hu_allocator_t *alloc, hu_search_result_t *keyw
                 merged[merged_n].original_rank = i;
                 if (!map_put(buckets, alloc, r->content, len, rrf_term, merged_n, r->score, i)) {
                     map_clear(buckets, alloc);
-                    for (size_t j = 0; j <= merged_n; j++)
+                    for (size_t j = 0; j <= merged_n; j++) {
                         alloc->free(alloc->ctx, merged[j].content, strlen(merged[j].content) + 1);
+                        if (merged[j].key)
+                            alloc->free(alloc->ctx, merged[j].key, strlen(merged[j].key) + 1);
+                    }
                     return HU_ERR_OUT_OF_MEMORY;
                 }
                 merged_n++;
@@ -284,6 +327,10 @@ void hu_rerank_free_results(hu_search_result_t *results, size_t count) {
         if (results[i].content) {
             alloc.free(alloc.ctx, results[i].content, strlen(results[i].content) + 1);
             results[i].content = NULL;
+        }
+        if (results[i].key) {
+            alloc.free(alloc.ctx, results[i].key, strlen(results[i].key) + 1);
+            results[i].key = NULL;
         }
     }
 }

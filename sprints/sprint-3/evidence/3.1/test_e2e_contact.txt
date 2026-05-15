@@ -1,0 +1,1234 @@
+Human Test Suite
+==================
+Test filter:  e2e_contact
+
+=== allocator ===
+
+=== data_loader ===
+
+=== data_integration ===
+
+=== idempotency ===
+
+=== idempotency_hula_integration ===
+
+=== agent_modules ===
+
+=== agent_definition ===
+
+=== AgentGit ===
+
+=== task_store ===
+
+=== compaction_hierarchical ===
+
+=== tot_recursive ===
+
+=== Agent subsystems ===
+
+=== Crypto ===
+
+=== wasm ===
+  SKIP  wasm WASI syscall tests (build with wasm32-wasi to run)
+
+=== json ===
+
+=== string ===
+
+=== Core IO secure ===
+
+=== slice ===
+
+=== memory ===
+
+=== memory — api engine ===
+
+=== SQL Transaction Helper ===
+
+=== MemoryUtil ===
+
+=== tunnel ===
+
+=== gateway ===
+
+=== Auth — OAuth token lifecycle ===
+
+=== Auth — API key round-trip ===
+
+=== Auth — Credential save/load ===
+
+=== Auth — Edge cases ===
+
+=== Auth — Device flow (mock) ===
+
+=== Auth — Token refresh (mock) ===
+
+=== oauth ===
+
+=== Security Policy ===
+
+=== Pairing ===
+
+=== Audit ===
+
+=== Sandbox ===
+
+=== Sandbox — Seatbelt (macOS) ===
+
+=== Sandbox — Landlock (apply) ===
+
+=== Sandbox — seccomp-BPF ===
+
+=== Sandbox — WASI ===
+
+=== Sandbox — Firecracker ===
+
+=== Sandbox — Landlock+seccomp combined ===
+
+=== Sandbox — AppContainer (Windows) ===
+
+=== Sandbox — Network Proxy ===
+
+=== Sandbox — Seatbelt Profile ===
+
+=== Sandbox — Firejail Extra Args ===
+
+=== Sandbox — NULL Workspace Guards ===
+
+=== Sandbox — Backend Coverage ===
+
+=== Sandbox — Auto-detection & Apply ===
+
+=== Sandbox — hu_process_run_sandboxed ===
+
+=== Sandbox — hu_process_run_with_policy ===
+
+=== Network Proxy — Edge Cases ===
+
+=== Observer ===
+
+=== Secrets ===
+
+=== Sandbox — Docker ===
+
+=== Confusable Normalization ===
+
+=== Sensitivity ===
+
+=== vault ===
+
+=== Provider ===
+
+=== ProviderHttp ===
+
+=== Ensemble ===
+
+=== ApiKey ===
+
+=== Channel ===
+
+=== channel_class ===
+
+=== channel_format ===
+
+=== channel_rate_limit ===
+
+=== channel_http ===
+
+=== webhook_channel ===
+
+=== BackgroundRegistry ===
+
+=== ChannelEmbeds ===
+
+=== DeclarativeTools ===
+
+=== SkillTrust ===
+
+=== Tool ===
+
+=== webhook ===
+
+=== vtables ===
+
+=== peripheral ===
+
+=== peripheral_ctrl ===
+
+=== value_learning ===
+
+=== goal_engine ===
+
+=== dispatch ===
+
+=== policy_engine ===
+
+=== E2E ===
+
+=== integration ===
+
+=== e2e_conversation ===
+
+=== E2E Agent Loop ===
+  PASS  e2e_contact_scoped_memory_isolation
+
+=== Subsystems (skillforge, onboard, daemon, migration) ===
+
+=== Config parse ===
+
+=== Service loop ===
+
+=== Memory backend config ===
+
+=== Config serialize ===
+
+=== Config sandbox roundtrip ===
+
+=== Behavior thresholds ===
+
+=== Feeds config ===
+
+=== Voice config ===
+
+=== Adversarial - Path traversal ===
+
+=== Adversarial - Command injection ===
+
+=== Adversarial - Edge cases ===
+
+=== Adversarial - NULL safety ===
+
+=== Adversarial - Oversized inputs ===
+
+=== Adversarial - Empty inputs ===
+
+=== Adversarial - Boundary values ===
+
+=== Adversarial - Double-free safety ===
+
+=== Adversarial detect ===
+
+=== Adversarial deflection ===
+
+=== Adversarial build directive ===
+
+=== Adversarial probing risk ===
+
+=== Adversarial SQL ===
+
+=== Adversarial helpers ===
+
+=== Gateway HTTP ===
+
+=== Path Traversal ===
+
+=== Webhook Path ===
+
+=== CORS Origin ===
+
+=== Content-Length Parsing ===
+
+=== Memory full - None backend ===
+
+=== Memory full - SQLite ===
+
+=== Tools (all) - Shell/File ===
+
+=== Tools (all) - Web/Network ===
+
+=== Tools (all) - Memory/Message ===
+
+=== Tools (all) - Misc ===
+
+=== Tools (all) - Policy Wiring ===
+
+=== Tools (all) - Business Automation ===
+
+=== Tools (all) - Factory ===
+
+=== Tools (all) - send_message, agent_query, agent_spawn, apply_patch, database, notebook, canvas, pdf, diff ===
+
+=== Tools (all) - Media Generation ===
+
+=== RAG ===
+
+=== Multimodal ===
+
+=== MultimodalPipeline ===
+
+=== MultimodalMemory ===
+
+=== MultimodalAudio ===
+
+=== MultimodalVideo ===
+
+=== VoiceDuplex ===
+
+=== TurnSignal ===
+
+=== voice_rt_openai ===
+
+=== voice_provider ===
+
+=== voice_session ===
+
+=== Gemini Live ===
+
+=== Voice Factory E2E ===
+
+=== VoiceStreamingE2E ===
+
+=== MLX Local Voice ===
+
+=== Autonomy ===
+
+=== retrieval ===
+
+=== Multigraph Retrieval ===
+
+=== memory_graph ===
+
+=== vector ===
+
+=== Vector Full (embeddings, store, cache) ===
+
+=== Infrastructure (version, heartbeat, cost) ===
+
+=== Memory subsystems ===
+
+=== HTTP GET ===
+
+=== SSE client ===
+
+=== Streaming ===
+
+=== WebSocket ===
+
+=== ws_integration ===
+
+=== Net security ===
+
+=== Path security ===
+
+=== Process util ===
+
+=== Prompt and memory loader ===
+
+=== tool_search ===
+
+=== workspace_context ===
+
+=== Persona ===
+
+=== Affect Mirror Ceiling (PERSONA-001) ===
+
+=== circadian ===
+
+=== relationship ===
+
+=== replay ===
+
+=== replay — auto-tune ===
+
+=== style_clone ===
+
+=== life_sim ===
+
+=== persona_mood ===
+
+=== PersonaFeedback ===
+
+=== PersonaFillerRoundtrip ===
+
+=== PersonaCli ===
+
+=== VoiceMaturity ===
+
+=== VoiceVulnerability ===
+
+=== StyleLearner ===
+
+=== temporal ===
+
+=== inner_world ===
+
+=== persona_eval ===
+
+=== behavior_policy ===
+
+=== behavior_dialog_act ===
+
+=== behavior_affect ===
+
+=== behavior_change ===
+
+=== behavior_safety ===
+
+=== behavior_prompt ===
+
+=== behavior_support_strategy ===
+
+=== behavior_trust ===
+
+=== behavior_corpora ===
+
+=== user_sim ===
+
+=== tom_scenario ===
+
+=== behavior_trust_prompt ===
+
+=== behavior_pressure ===
+
+=== sycophancy_pack ===
+
+=== longmemeval ===
+
+=== user_sim_scenario ===
+
+=== chronotype ===
+
+=== Lifecycle ===
+
+=== Observer ===
+
+=== Session ===
+
+=== Bus ===
+
+=== Identity ===
+
+=== Channel manager ===
+
+=== New Modules ===
+
+=== Provider All ===
+
+=== Channel All ===
+
+=== Meta Common ===
+
+=== Channel Integration ===
+
+=== Config Extended ===
+
+=== Config getters ===
+
+=== Config validation ===
+
+=== JSON Extended ===
+
+=== Security Extended ===
+
+=== security_pipeline ===
+
+=== Core Extended ===
+
+=== Gateway Extended ===
+
+=== Control Protocol ===
+
+=== Event Bridge ===
+
+=== RPC Handlers ===
+
+=== WS Server Extended ===
+
+=== OpenAI Compat ===
+
+=== Gateway Auth ===
+
+=== Gateway voice ===
+
+=== gateway_hula_traces ===
+
+=== Pairing ===
+
+=== Agent Extended ===
+
+=== TUI ===
+
+=== Agent security ===
+
+=== agent teams (worktree + team config + mailbox + task list) ===
+
+=== delegation ===
+
+=== diagnostic slash commands parsing ===
+
+=== Skills ===
+
+=== Memory new (registry, rollout, retrieval, diagnostics) ===
+
+=== Ported Modules ===
+
+=== cron ===
+
+=== Cron Session Tools ===
+
+=== Subagent ===
+
+=== MCP Client ===
+
+=== MCP Engine (Server) ===
+
+=== MCP Manager ===
+
+=== MCP Resource Tools ===
+
+=== MCP Transport IO ===
+
+=== MCP Transport ===
+
+=== mcp_http_integration ===
+
+=== OTLP Traces ===
+
+=== MCP Audit ===
+
+=== Voice ===
+
+=== Vector Stores ===
+
+=== CLI Commands ===
+
+=== update ===
+
+=== Memory engines ext ===
+
+=== memory_poisoning ===
+
+=== minja ===
+
+=== memory_poisoning ===
+
+=== Runtime ===
+
+=== runtime_bundle ===
+
+=== channel_loop ===
+
+=== util_modules (status, state, http_util, json_util, util) ===
+
+=== Roadmap: Agent Pool (1A) ===
+
+=== Roadmap: Mailbox (1B) ===
+
+=== Roadmap: Thread Binding (1C) ===
+
+=== Roadmap: Agent Tools (1D+E) ===
+
+=== Roadmap: Agent Profiles (2) ===
+
+=== Roadmap: Power Tools (3) ===
+
+=== Roadmap: Policy Engine (4A) ===
+
+=== Roadmap: OTel + Tracing (4B) ===
+
+=== Roadmap: Action Replay (4D) ===
+
+=== Roadmap: Plugin System (5B) ===
+
+=== Roadmap: MCP Registry ===
+
+=== Roadmap: Stub Boundaries (6) ===
+
+=== Integration ===
+
+=== New Features - PDF ===
+
+=== New Features - Health ===
+
+=== New Features - Config ===
+
+=== Ollama integration ===
+
+=== tenant ===
+
+=== Gmail ===
+
+=== iMessage Extended ===
+
+=== iMessage ChatDB Fixture ===
+
+=== iMessage Human-Fidelity Fleet ===
+
+=== protective ===
+
+=== humor ===
+
+=== authentic ===
+
+=== rag_pipeline ===
+
+=== persona_training ===
+
+=== behavioral ===
+
+=== context_ext ===
+
+=== Untested modules ===
+
+=== Modules coverage: MCP ===
+
+=== Modules coverage: Tunnel ===
+
+=== Modules coverage: Daemon ===
+
+=== Modules coverage: Tools (diff, apply_patch, send_message) ===
+
+=== Modules coverage: Memory retrieval ===
+
+=== Modules coverage: Channel dispatch ===
+
+=== coverage_new ===
+
+=== Context ===
+
+=== QMD ===
+
+=== terminal ===
+
+=== Tavily web search ===
+
+=== Awareness ===
+
+=== entropy ===
+
+=== Episodic ===
+
+=== Reflection ===
+
+=== externalization ===
+
+=== Conversation Intelligence ===
+
+=== vision ===
+
+=== ab_response ===
+
+=== event_extract ===
+
+=== stm ===
+
+=== emotional_graph ===
+
+=== comfort_patterns ===
+
+=== emotional_moments ===
+
+=== contact_style_overlay ===
+
+=== graph ===
+
+=== W1 bitemporal foundation ===
+
+=== W2 autodream ===
+
+=== W3 multi-graph + case-based ===
+
+=== W4 verifier + provenance + erasure ===
+
+=== W5 persona deltas + evolver ===
+
+=== Persona delta observer (FIX 9) ===
+
+=== World-model bridge (FIX 12) ===
+
+=== Signal channel wire (FIX 14) ===
+
+=== DaemonHousekeeping ===
+
+=== OrphanChannelAudit ===
+
+=== VerifierMetrics ===
+
+=== Response Guard ===
+
+=== Response Guard Retry ===
+
+=== W6 E2E adversarial - all workstreams composed ===
+
+=== W7 memory facade - dispatcher + v1 backend ===
+
+=== W8 belief layer - hu_belief_t + hyperedges ===
+
+=== W9 world model - per-contact unified snapshot ===
+
+=== W10 neural memory - KV cache + reasoning traces + blobs ===
+
+=== W11 inline self-RAG with abstention ===
+
+=== W12 planner - goal-conditioned retrieval + HippoRAG PageRank ===
+
+=== W12 verifier loop (P0 #2) ===
+
+=== W13 learner - hu_learner_t vtable + CPU/MLX/ggml backends + signal builders ===
+
+=== W14 runners (P0 #4) ===
+
+=== W15 backup-restore (P1 #5) ===
+
+=== learner_bridge - signal collection from persona deltas + outcomes ===
+
+=== W14 scheduler - sleep-time compute scheduler hu_scheduler_t + counterfactual rehearsal ===
+
+=== W16 evaluation - continuous benchmark suite (locomo/longmem/dmr/minja/mab/frontier) ===
+
+=== w16_eval_cli ===
+
+=== W15 cryptographic keystore + audit log ===
+
+=== encrypted_store ===
+
+=== v2 E2E (W7-W16) Adversarial ===
+
+=== B11 cross-turn pressure history wiring ===
+
+=== b9 user_sim → agent_turn E2E ===
+
+=== personal_model contradicts ===
+
+=== channel_trust ===
+
+=== minja_guard ===
+
+=== frontier_prompt ===
+
+=== W11 abstain calibration ===
+
+=== fast_capture ===
+
+=== promotion ===
+
+=== consolidation ===
+
+=== verify_claim ===
+
+=== deep_extract ===
+
+=== commitment ===
+
+=== pattern_radar ===
+
+=== proactive ===
+
+=== inner_thoughts ===
+
+=== weather_awareness ===
+
+=== timing ===
+
+=== calibration ===
+
+=== behavioral_clone ===
+
+=== governor ===
+
+=== Model Router ===
+
+=== Humanness Context ===
+
+=== Adversarial Turing ===
+
+=== arbitrator ===
+
+=== planning ===
+
+=== rel_dynamics ===
+
+=== prospective ===
+
+=== prospective_mem
+=== INTELLIGENCE SUBSYSTEM PROOF ===
+=== ALL INTELLIGENCE + STREAMING LOOPS PROVEN ===
+
+ory ===
+
+=== emotional_residue ===
+
+=== consolidation_engine ===
+
+=== conv_goals ===
+
+=== knowledge ===
+
+=== cognitive ===
+
+=== deep_memory ===
+
+=== compression ===
+
+=== proactive_ext ===
+
+=== degradation ===
+
+=== memory_degradation ===
+
+=== self_awareness ===
+
+=== superhuman ===
+
+=== contact_graph ===
+
+=== tool_call_parser ===
+
+=== tool_router ===
+
+=== dag ===
+
+=== hula ===
+
+=== hula_golden ===
+
+=== Workflow Event Log ===
+
+=== sota_features ===
+
+=== frontier_integration ===
+
+=== mood ===
+
+=== style_tracker ===
+
+=== style_drift ===
+
+=== theory_of_mind ===
+
+=== anticipatory ===
+
+=== context_engine ===
+
+=== exec_env ===
+  channel_monitor: 12/12 passed
+  doctor_fix: 10/10 passed
+  skill_scaffold: 12/12 passed
+  plugin_discovery: 7/7 passed
+  context_engine_rag: 10/10 passed
+
+=== humanness ===
+
+=== opinions_persistence ===
+
+=== visual_content ===
+
+=== media_gen ===
+
+=== opinions ===
+
+=== life_chapters ===
+
+=== social_graph ===
+
+=== skill_system ===
+
+=== feeds ===
+
+=== apple feeds ===
+
+=== news_health_email ===
+
+=== google feeds ===
+
+=== music feeds ===
+
+=== research_feeds ===
+
+=== research_executor ===
+
+=== feed_processor ===
+
+=== feed_awareness ===
+
+=== forgetting_curve ===
+
+=== weather_fetch ===
+
+=== save_for_later ===
+
+=== intelligence_reflection ===
+
+=== intelligence_skills ===
+
+=== skill_unified ===
+
+=== intelligence_cycle ===
+
+=== reflection_advanced ===
+
+=== feedback ===
+
+=== privacy_audit ===
+
+=== collab_planning ===
+
+=== bth_e2e ===
+
+=== bth_metrics ===
+
+=== memory_features — contact-scoped memory ===
+
+=== memory_features — source citations ===
+
+=== memory_features — connections ===
+
+=== memory_features — ingestion ===
+
+=== memory_features — inbox ===
+
+=== memory_features — insight category ===
+
+=== memory_features — audit fixes ===
+
+=== memory_features — integration hardening ===
+
+=== agi_frontiers ===
+
+=== Orchestrator ===
+
+=== swarm_execution ===
+
+=== dynamic_decomposition ===
+
+=== agent_matching ===
+
+=== agent_communication ===
+
+=== mcts ===
+
+=== world_model_graph ===
+
+=== world_sim ===
+
+=== world_context ===
+
+=== agent_registry ===
+
+=== pwa_drivers ===
+
+=== pwa_registry ===
+
+=== pwa_escaping ===
+
+=== pwa_browser ===
+
+=== pwa_tabs ===
+
+=== pwa_actions ===
+
+=== pwa_context ===
+
+=== pwa_tool ===
+
+=== pwa_global_registry ===
+
+=== pwa_learner ===
+
+=== pwa_channel ===
+
+=== Music ===
+
+=== paperclip ===
+
+=== Cartesia ===
+
+=== Cartesia stream ===
+
+=== Transcript preprocessor ===
+
+=== Send voice message ===
+
+=== Voice message integration ===
+
+=== Voice clone ===
+
+=== Audio pipeline ===
+
+=== Voice decision ===
+
+=== Emotion map ===
+
+=== ml ===
+
+=== ml-cli-actually-trains ===
+
+=== dpo-judge-naming ===
+
+=== LoRA Adapter ===
+
+=== agent_trainer ===
+
+=== training_data ===
+
+=== training_data_extractor ===
+
+=== training_data_quality ===
+
+=== Experience Store ===
+
+=== Experience Engine ===
+
+=== intelligence_wiring ===
+
+=== prove_e2e ===
+
+=== anti_sycophancy ===
+
+=== mutual_tom ===
+
+=== opinion_history ===
+
+=== Self-Improve Closed Loop ===
+
+=== A2A Protocol ===
+
+=== GVR Pipeline ===
+
+=== Provider Degradation ===
+
+=== apple_provider ===
+
+=== ESCALATE Compliance ===
+
+=== Tool Validation ===
+
+=== Data Quality ===
+
+=== OTLP Observability ===
+
+=== Token Budget ===
+
+=== MAR Orchestration ===
+
+=== Memory Policy ===
+
+=== Prompt Optimizer ===
+
+=== Chaos Testing ===
+
+=== Checkpoint ===
+
+=== Scratchpad ===
+
+=== MCP Resources + Prompts ===
+
+=== Evaluation Harness ===
+
+=== Eval Judge ===
+
+=== eval_bench ===
+
+=== eval_runner ===
+
+=== Eval History Storage ===
+
+=== Corrective RAG ===
+
+=== Adaptive RAG ===
+
+=== Self RAG ===
+
+=== Memory Tiers ===
+
+=== Process Reward Model ===
+
+=== DPO Preference ===
+
+=== SOTA E2E ===
+
+=== SOTA Adversarial ===
+
+=== OpenTelemetry ===
+
+=== CoT Audit ===
+
+=== Content Moderation ===
+
+=== Word Boundary Matching ===
+
+=== Confusable Normalization ===
+
+=== Sexual Content Detection ===
+
+=== Crisis Detection (SHIELD-005) ===
+
+=== Crisis Response Builder (SHIELD-005) ===
+
+=== Graduated Severity (Venting vs Crisis) ===
+
+=== Relationship Stage Progression ===
+
+=== Companion Safety (SHIELD-001) ===
+
+=== Farewell Safety (SHIELD-001) ===
+
+=== Companion Safety Mitigation (SHIELD-001) ===
+
+=== Normalization (SHIELD-001) ===
+
+=== Adversarial Bypass (SHIELD-001) ===
+
+=== Vulnerability Assessment (SHIELD-007) ===
+
+=== Code Sandbox ===
+
+=== Computer Use Tool ===
+
+=== ImageGen ===
+
+=== VisualGrounding ===
+
+=== BrowserUse ===
+
+=== LocalVoice ===
+
+=== GUI Agent ===
+
+=== LSP Tool ===
+
+=== WebRTC Voice ===
+
+=== Embedded Provider ===
+
+=== Llamacpp Provider (W13 Bridge A scaffold) ===
+
+=== Memory Forgetting ===
+
+=== Bootstrap ===
+
+=== ThreadPool ===
+
+=== Weakness Analyzer ===
+
+=== trust ===
+
+=== SOTAHumanness ===
+
+=== Experience Distiller ===
+
+=== PlanExecutor ===
+
+=== Planner ===
+
+=== CDP ===
+
+=== EmotionalCognition ===
+
+=== EvolvingCognition ===
+
+=== Metacognition ===
+
+=== humanness_frontiers ===
+
+=== SkillRouting ===
+
+=== DualProcess ===
+
+=== SOTAResearch ===
+
+=== SOTA Wiring ===
+
+=== SOTA Live Wiring ===
+
+=== permission ===
+
+=== hook_pipeline ===
+
+=== session_persist ===
+
+=== compaction_structured ===
+
+=== InstructionDiscovery ===
+
+=== Adversarial: Memory Safety ===
+
+=== Adversarial: Injection ===
+
+=== Adversarial: DoS & Protocol ===
+
+=== adversarial_concurrency ===
+
+=== adversarial_integration ===
+
+=== config_reload ===
+
+=== plugin_hooks ===
+
+=== Task Manager ===
+
+=== Task Tools ===
+
+=== Tool ask_user ===
+
+=== approval_gate ===
+
+=== workflow_commands ===
+
+=== repair ===
+
+=== daemon_cron ===
+
+=== daemon_lifecycle ===
+
+=== daemon_routing ===
+
+=== daemon_proactive ===
+
+=== daemon_trust ===
+
+=== CpTasks ===
+
+=== cp_canvas ===
+
+=== VectorRetrievalRemote ===
+
+=== BackgroundRegistry2 ===
+
+=== consistency ===
+
+=== fact_extract ===
+
+=== PersonalModel ===
+
+=== personal-model-atomic-save ===
+
+=== persona_directive_channels ===
+
+=== Filler Recency LRU ===
+
+=== Contact Send Recency LRU ===
+
+=== iMessage Outbound Dedup ===
+
+=== Config: session.identity_links ===
+
+=== Memory Session Scoping (regression for Mindy-context bug) ===
+
+=== filler_pctt ===
+
+=== hallucination_guard ===
+
+=== humor_fw ===
+
+=== Self Improvement ===
+
+=== sycophancy_guard ===
+
+=== trust_calibration ===
+
+=== vision_ocr ===
+
+=== markdown_loader ===
+
+=== Inner Thoughts (Anticipatory State) ===
+
+=== CanvasTool ===
+
+=== canvas_e2e ===
+
+=== CanvasPersist ===
+
+=== CanvasRender ===
+
+--- Results: 16/16 passed, 10266 skipped ---

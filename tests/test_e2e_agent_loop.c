@@ -155,8 +155,8 @@ static void e2e_agent_turn_with_persona_and_contact(void) {
 
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    err = hu_memory_recall_for_contact(&mem, &alloc, "mindy", 5, "coffee", 6, 5, "", 0, &entries,
-                                       &count);
+    err = hu_memory_recall_for_contact(&mem, &alloc, NULL, NULL, "mindy", 5, "coffee", 6, 5, "", 0,
+                                       &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count >= 1);
     bool found_coffee = false;
@@ -190,8 +190,8 @@ static void e2e_contact_scoped_memory_isolation(void) {
 
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, len_a, "espresso", 8, 5, "", 0,
-                                       &entries, &count);
+    err = hu_memory_recall_for_contact(&mem, &alloc, NULL, NULL, contact_a, len_a, "espresso", 8, 5,
+                                       "", 0, &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count >= 1);
     HU_ASSERT_TRUE(entries[0].content && strstr(entries[0].content, "espresso") != NULL);
@@ -201,8 +201,8 @@ static void e2e_contact_scoped_memory_isolation(void) {
 
     entries = NULL;
     count = 0;
-    err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, len_a, "matcha", 6, 5, "", 0,
-                                       &entries, &count);
+    err = hu_memory_recall_for_contact(&mem, &alloc, NULL, NULL, contact_a, len_a, "matcha", 6, 5,
+                                       "", 0, &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 0u);
     if (entries) {
