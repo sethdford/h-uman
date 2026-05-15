@@ -53,10 +53,12 @@ fi
 
 # ── Determine which test files to check ───────────────────────────────────────
 
+EXPLICIT_FILES=false
 if [[ $# -gt 0 ]]; then
     # Explicit file list passed by caller (e.g. from the pre-commit hook for staged files,
-    # or manual spot-check runs).
+    # or manual spot-check runs such as smoke-testing fixture files).
     FILES=("$@")
+    EXPLICIT_FILES=true
 else
     # Default: all staged new/modified test files (pre-commit mode).
     mapfile -t FILES < <(git diff --cached --name-only --diff-filter=AM -- 'tests/test_*.c' 2>/dev/null || true)
@@ -123,11 +125,16 @@ for test_file in "${FILES[@]}"; do
     # Normalise to relative path from repo root
     test_file="${test_file#"$REPO_ROOT/"}"
 
-    # Only process test_*.c files in tests/
-    case "$test_file" in
-        tests/test_*.c) ;;
-        *) continue ;;
-    esac
+    # In default (pre-commit) mode only process test_*.c files in tests/.
+    # When files are passed explicitly the caller is being intentional — skip
+    # the path filter so fixture files (e.g. tests/fixtures/check-test-refs/bad.c)
+    # can be used for smoke-testing the script itself.
+    if [[ "$EXPLICIT_FILES" == "false" ]]; then
+        case "$test_file" in
+            tests/test_*.c) ;;
+            *) continue ;;
+        esac
+    fi
 
     if [[ ! -f "$test_file" ]]; then
         continue
