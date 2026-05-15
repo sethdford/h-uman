@@ -142,10 +142,18 @@ for test_file in "${FILES[@]}"; do
     prod_file="$(find_production_module "$test_file")"
 
     if [[ -z "$prod_file" ]]; then
-        # No matching source file found — warn but do not fail.  The test may be
-        # cross-module or testing only header-defined inline functions.
-        echo "WARN  $test_file: could not resolve implied production module — skipping symbol check." >&2
-        echo "      To suppress this warning, add '// @covers-none' to the test file." >&2
+        # No matching source file found by filename. Fall back to a content scan:
+        # the test must reference SOME hu_* symbol from production. This catches
+        # cross-module tests that genuinely exercise production code while still
+        # blocking tests with no production references at all (the original
+        # Sprint 3 "inline-copied logic with no production function call"
+        # anti-pattern). See sprints/sprint-4/critic.md MED finding.
+        if grep -qE 'hu_[a-z_][a-z_0-9]*[[:space:]]*\(' "$test_file"; then
+            continue
+        fi
+        echo "FAIL  $test_file: no production module found by filename and no hu_* symbol referenced." >&2
+        echo "      Add '// @covers-none' if this is intentionally standalone, or reference at least one production function." >&2
+        FAIL=1
         continue
     fi
 
