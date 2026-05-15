@@ -87,7 +87,7 @@ static void contagion_default_fraction_when_zero(void) {
 }
 
 void run_emotional_contagion_tests(void) {
-    HU_TEST_SUITE("EmotionalContagion");
+    HU_TEST_SUITE("emotional_contagion");
     HU_RUN_TEST(contagion_null_safe);
     HU_RUN_TEST(contagion_partner_neutral_no_change);
     HU_RUN_TEST(contagion_partner_sadness_drops_valence);

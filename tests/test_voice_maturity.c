@@ -424,7 +424,7 @@ void run_voice_maturity_tests(void) {
     HU_RUN_TEST(voice_build_guidance_candid_returns_ok);
     HU_RUN_TEST(voice_build_guidance_intimate_returns_ok);
 
-    HU_TEST_SUITE("VoiceMaturityDirective");
+    HU_TEST_SUITE("voice_maturity_directive");
     HU_RUN_TEST(voice_build_directive_null_buf_returns_zero);
     HU_RUN_TEST(voice_build_directive_zero_len_returns_zero);
     HU_RUN_TEST(voice_build_directive_all_stages_distinct_nonempty);

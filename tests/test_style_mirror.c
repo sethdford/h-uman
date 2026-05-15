@@ -176,7 +176,7 @@ static void mirror_report_populated_correctly(void) {
 }
 
 void run_style_mirror_tests(void) {
-    HU_TEST_SUITE("StyleMirror");
+    HU_TEST_SUITE("style_mirror");
     HU_RUN_TEST(mirror_null_buf_returns_invalid);
     HU_RUN_TEST(mirror_null_len_returns_invalid);
     HU_RUN_TEST(mirror_fewer_than_two_messages_is_noop);
