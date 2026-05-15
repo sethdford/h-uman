@@ -76,6 +76,13 @@ hu_error_t hu_preferences_store(hu_memory_t *memory, hu_allocator_t *alloc, cons
     klen += copy;
     key[klen] = '\0';
 
+    /* Preferences are intentionally user-global (session_id="", unscoped).
+     * A preference like "don't say 'great question'" applies to every contact,
+     * not just the one whose turn revealed it. Do NOT switch this to
+     * current_session_id without first redesigning preference-recall to merge
+     * global + scoped results. The post-2026-05-15 SQLite recall filter
+     * deliberately excludes NULL-session rows from scoped queries, so any
+     * future switch needs to also adjust that filter. */
     return memory->vtable->store(memory->ctx, key, klen, preference, preference_len, NULL, "", 0);
 }
 
