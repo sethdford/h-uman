@@ -2121,9 +2121,12 @@ static void daemon_stream_event_cb(const hu_agent_stream_event_t *event, void *c
                     }
                     hu_output_validator_chain_destroy(out_chain);
                     if (!chain_ok) {
-                        /* MED #5: chain-execute failed (e.g. allocation error
-                         * mid-chain).  Fall back to legacy channel-tag strip so
-                         * the message is not published completely unfiltered. */
+                        /* Defensive fallback (Sprint 3 US-2 / Sprint 4 US-9):
+                         * The primary outbound path uses hu_output_validator_chain_execute
+                         * above.  This strip survives only when the chain failed to
+                         * build/execute (e.g., allocation failure mid-stream).  Do not
+                         * remove without restoring an equivalent safety net — see audit
+                         * notes in sprints/sprint-4/notes-from-sprint-3.md. */
                         slen = hu_conversation_strip_channel_tags(ev.message, slen);
                         ev.message[slen] = '\0';
                         if (slen == 0)
@@ -2133,7 +2136,10 @@ static void daemon_stream_event_cb(const hu_agent_stream_event_t *event, void *c
                 if (slen == 0)
                     return;
             } else {
-                /* Fallback: legacy channel-tag strip (no allocator available). */
+                /* Defensive fallback (Sprint 3 US-2 / Sprint 4 US-9):
+                 * Same intent as the chain-failure arm above; see that comment.
+                 * This arm fires when no allocator is available (chain cannot be
+                 * built at all), not on chain-execute failure. */
                 slen = hu_conversation_strip_channel_tags(ev.message, slen);
                 ev.message[slen] = '\0';
                 if (slen == 0)

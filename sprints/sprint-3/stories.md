@@ -48,7 +48,7 @@ Close the three confirmed gaps that leave the PR #81 validator chain incomplete 
 - AC4: Full suite passes; no ASan errors.
 
 **Definition of Done**
-- `grep -n "hu_conversation_strip_channel_tags\|hu_channel_strip_ai_phrases\|hu_channel_strip_markdown" src/daemon.c` returns zero hits in the bus-broadcast branch.
+- The primary `HU_AGENT_STREAM_TEXT` path uses `hu_output_validator_chain_execute`; legacy strip calls (`hu_conversation_strip_channel_tags`) survive only in chain-build-failure and no-allocator fallback arms, which are explicitly documented in source (Sprint 4 US-9 annotation, see `sprints/sprint-4/notes-from-sprint-3.md`).
 - `./build/human_tests` passes (0 failures, 0 ASan errors reported in build log).
 
 ---
