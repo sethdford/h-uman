@@ -4083,8 +4083,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         size_t prov_name_len = prov_name ? strlen(prov_name) : 0;
         const char *const *stop_seqs = NULL;
         size_t stop_seqs_count = 0;
-        hu_stop_sequence_registry_lookup(prov_name, prov_name_len, NULL, 0, &stop_seqs,
-                                         &stop_seqs_count);
+        hu_stop_sequence_registry_lookup(prov_name, prov_name_len, &stop_seqs, &stop_seqs_count);
         req.stop_sequences = stop_seqs;
         req.stop_sequences_count = stop_seqs_count;
     }
