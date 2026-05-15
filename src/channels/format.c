@@ -7,6 +7,7 @@
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/observability/validator_telemetry.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -594,6 +595,7 @@ hu_error_t hu_channel_format_outbound(hu_allocator_t *alloc, const char *channel
                 memset(&cr, 0, sizeof(cr));
                 if (hu_output_validator_chain_execute(out_chain, alloc, NULL, text, text_len,
                                                       &cr) == HU_OK) {
+                    hu_observer_emit_validator_decision(NULL, &cr, NULL, text_len);
                     if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text &&
                         cr.final_text_len > 0) {
                         san_len = cr.final_text_len;
@@ -646,6 +648,7 @@ hu_error_t hu_channel_format_outbound(hu_allocator_t *alloc, const char *channel
                 memset(&cr, 0, sizeof(cr));
                 if (hu_output_validator_chain_execute(out_chain, alloc, NULL, text, text_len,
                                                       &cr) == HU_OK) {
+                    hu_observer_emit_validator_decision(NULL, &cr, NULL, text_len);
                     if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text &&
                         cr.final_text_len > 0) {
                         san_len = cr.final_text_len;
@@ -709,6 +712,7 @@ hu_error_t hu_channel_format_outbound(hu_allocator_t *alloc, const char *channel
                 memset(&cr, 0, sizeof(cr));
                 if (hu_output_validator_chain_execute(out_chain, alloc, NULL, md, md_len, &cr) ==
                     HU_OK) {
+                    hu_observer_emit_validator_decision(NULL, &cr, NULL, md_len);
                     if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text &&
                         cr.final_text_len > 0) {
                         san_len = cr.final_text_len;

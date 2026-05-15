@@ -9,6 +9,7 @@
 #include "human/daemon_cron.h"
 #include "human/core/log.h"
 #include "human/daemon.h"
+#include "human/observability/validator_telemetry.h"
 
 #include "human/agent.h"
 #include "human/agent/output_validator_chain.h"

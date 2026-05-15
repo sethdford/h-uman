@@ -9,6 +9,7 @@
 #include "human/core/log.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
+#include "human/observability/validator_telemetry.h"
 #ifndef HU_CODENAME
 #define HU_CODENAME "human"
 #endif
@@ -913,6 +914,7 @@ size_t imessage_sanitize_output(char *buf, size_t len) {
             memset(&cr, 0, sizeof(cr));
             if (hu_output_validator_chain_execute(out_chain, &local_alloc, NULL, buf, len, &cr) ==
                 HU_OK) {
+                hu_observer_emit_validator_decision(NULL, &cr, NULL, len);
                 if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
                     if (cr.final_text != buf && cr.final_text_len <= len) {
                         memcpy(buf, cr.final_text, cr.final_text_len);
