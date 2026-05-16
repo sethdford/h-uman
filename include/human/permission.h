@@ -68,4 +68,13 @@ void hu_permission_reset_escalation(struct hu_agent *agent);
  */
 const char *hu_permission_level_name(hu_permission_level_t level);
 
+/**
+ * Count duplicate tool_name entries in the static permission table. Returns 0
+ * for a healthy table. Exposed so a regression test can pin uniqueness — the
+ * lookup returns the first match, so a duplicate silently masks the later
+ * classification (audit 2026-05-16 found `persona` listed twice with
+ * conflicting tiers).
+ */
+size_t hu_permission_table_duplicate_count(void);
+
 #endif /* HU_PERMISSION_H */

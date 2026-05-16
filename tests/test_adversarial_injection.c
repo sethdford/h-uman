@@ -418,8 +418,10 @@ static void test_hook_env_sudo_askpass(void) {
 }
 
 /* 20. Permission: unknown tool returns HU_PERM_DENY — a sentinel above every
-   agent-assignable tier so no agent (even DANGER_FULL_ACCESS) can invoke it. */
-static void test_permission_unknown_tool_defaults_danger(void) {
+   agent-assignable tier so no agent (even DANGER_FULL_ACCESS) can invoke it.
+   (Renamed in audit follow-up; the old "defaults_danger" name described the
+   pre-DENY behavior and confused readers debugging failures.) */
+static void test_permission_unknown_tool_returns_deny(void) {
     hu_permission_level_t level = hu_permission_get_tool_level("totally_unknown_tool_xyz");
     HU_ASSERT_EQ(level, HU_PERM_DENY);
     HU_ASSERT_FALSE(hu_permission_check(HU_PERM_DANGER_FULL_ACCESS, level));
@@ -467,6 +469,6 @@ void run_adversarial_injection_tests(void) {
     HU_RUN_TEST(test_hook_env_sudo_askpass);
 
     /* Permission defaults */
-    HU_RUN_TEST(test_permission_unknown_tool_defaults_danger);
+    HU_RUN_TEST(test_permission_unknown_tool_returns_deny);
     HU_RUN_TEST(test_permission_null_tool_name);
 }

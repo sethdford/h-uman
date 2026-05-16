@@ -78,7 +78,8 @@ static const hu_tool_perm_entry_t HU_TOOL_PERMISSIONS[] = {
     {"spi", HU_PERM_WORKSPACE_WRITE},
     {"peripheral_ctrl", HU_PERM_WORKSPACE_WRITE},
     {"paperclip", HU_PERM_WORKSPACE_WRITE},
-    {"persona", HU_PERM_WORKSPACE_WRITE},
+    /* "persona" is classified DANGER below — personas drive system prompts,
+     * so a write here is a jailbreak surface, not workspace I/O. */
 
     /* ── DANGER_FULL_ACCESS: spawn agents, cron mutation, cloud services ── */
     {"agent_spawn", HU_PERM_DANGER_FULL_ACCESS},
@@ -98,19 +99,13 @@ static const hu_tool_perm_entry_t HU_TOOL_PERMISSIONS[] = {
     {"firebase", HU_PERM_DANGER_FULL_ACCESS},
     {"workflow", HU_PERM_DANGER_FULL_ACCESS},
 
-    /* ── Additional tools (previously missing from table) ── */
-    {"agent_query", HU_PERM_READ_ONLY},
-    {"agent_spawn", HU_PERM_DANGER_FULL_ACCESS},
-    {"database", HU_PERM_WORKSPACE_WRITE},
-    {"diff", HU_PERM_READ_ONLY},
-    {"facebook", HU_PERM_WORKSPACE_WRITE},
-    {"instagram", HU_PERM_WORKSPACE_WRITE},
+    /* ── Additional tools previously missing from the categorized sections.
+     * Duplicates that existed earlier in the table have been removed; the
+     * test_permission_table_no_duplicates regression test pins uniqueness.
+     * `persona` is DANGER (not WORKSPACE) — it drives system prompts, so
+     * write access is a jailbreak surface. */
     {"lsp", HU_PERM_READ_ONLY},
-    {"paperclip", HU_PERM_WORKSPACE_WRITE},
-    {"peripheral_ctrl", HU_PERM_WORKSPACE_WRITE},
     {"persona", HU_PERM_DANGER_FULL_ACCESS},
-    {"pwa", HU_PERM_WORKSPACE_WRITE},
-    {"twitter", HU_PERM_WORKSPACE_WRITE},
     {"voice_clone", HU_PERM_WORKSPACE_WRITE},
 };
 
@@ -140,6 +135,13 @@ hu_error_t hu_permission_escalate_temporary(struct hu_agent *agent, hu_permissio
                                             const char *tool_name) {
     if (!agent || !tool_name)
         return HU_ERR_INVALID_ARGUMENT;
+    /* DENY is a sentinel above every agent-assignable tier — never a valid
+     * escalation target. Without this guard, an agent at DANGER (2) could be
+     * escalated to DENY (3), after which hu_permission_check(DENY, DENY)
+     * returns true and unknown / unregistered tools become reachable —
+     * exactly the masquerading hole this PR aims to close. */
+    if ((int)new_level >= (int)HU_PERM_DENY)
+        return HU_ERR_INVALID_ARGUMENT;
     if ((int)new_level <= (int)agent->permission_level)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -155,6 +157,19 @@ void hu_permission_reset_escalation(struct hu_agent *agent) {
         agent->permission_level = agent->permission_base_level;
         agent->permission_escalated = false;
     }
+}
+
+size_t hu_permission_table_duplicate_count(void) {
+    size_t dups = 0;
+    for (size_t i = 0; i < HU_TOOL_PERMISSIONS_COUNT; i++) {
+        for (size_t j = i + 1; j < HU_TOOL_PERMISSIONS_COUNT; j++) {
+            if (strcmp(HU_TOOL_PERMISSIONS[i].tool_name, HU_TOOL_PERMISSIONS[j].tool_name) == 0) {
+                dups++;
+                break; /* count each later occurrence once per source entry */
+            }
+        }
+    }
+    return dups;
 }
 
 const char *hu_permission_level_name(hu_permission_level_t level) {
