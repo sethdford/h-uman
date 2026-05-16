@@ -1433,6 +1433,17 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         hu_validators_build_default_outbound_chain(
                             agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK;
                 }
+                if (!out_chain) {
+                    /* HIGH-5: chain BUILD failure was previously silent — safe_content
+                     * stays NULL, output is dropped at the line ~1491 guard. The drop
+                     * is the correct deny-by-default behavior (we can't prove the
+                     * content is safe without a chain), but the silence robbed
+                     * operators of the signal that anything went wrong. */
+                    hu_log_error("agent_stream", agent->observer,
+                                 "stream validator chain BUILD failed (persona=%s, len=%zu) "
+                                 "-- dropping send (deny-by-default)",
+                                 persona_name ? persona_name : "(none)", persona_name_len);
+                }
                 if (out_chain) {
                     hu_validator_context_t vctx = {0};
                     vctx.persona_name = persona_name;
@@ -1441,6 +1452,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     memset(&cr, 0, sizeof(cr));
                     hu_error_t cerr = hu_output_validator_chain_execute(
                         out_chain, agent->alloc, &vctx, sresp.content, sresp.content_len, &cr);
+                    if (cerr != HU_OK) {
+                        /* HIGH-5: execute failure was previously silent. Same
+                         * deny-by-default drop, now with an explicit signal. */
+                        hu_log_error("agent_stream", agent->observer,
+                                     "stream validator chain EXECUTE failed (err=%s) "
+                                     "-- dropping send (deny-by-default)",
+                                     hu_error_string(cerr));
+                        hu_chain_result_free(agent->alloc, &cr);
+                    }
                     if (cerr == HU_OK) {
                         hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
                                                             sresp.content_len);
