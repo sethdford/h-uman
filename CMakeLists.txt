@@ -2377,6 +2377,11 @@ add_library(human_core_test STATIC ${HU_CORE_SOURCES} ${HU_TEST_EXTRA_CHANNELS} 
 target_include_directories(human_core_test PUBLIC ${HU_ROOT}/include)
 target_include_directories(human_core_test PRIVATE ${HU_ROOT}/asm/generic)
 target_compile_definitions(human_core_test PRIVATE HU_IS_TEST=1)
+# Phase 6: lora_training_runner.c compiles hu_e2e_closed_loop_run under
+# HU_IS_TEST even when HU_ENABLE_RL_FULL is OFF (dev preset).  tests/include
+# must be visible to human_core_test, not only when RL_FULL is ON.
+target_include_directories(human_core_test PRIVATE ${HU_ROOT}/tests/include)
+target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/tests/_tmp")
 # W15 — wire libsodium into the test build to mirror production keystore.c.
 # We use PUBLIC link directives so that human_tests (which links the static
 # human_core_test library) inherits the libsodium link directory and library
