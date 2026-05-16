@@ -61,6 +61,51 @@ typedef struct hu_dpo_mine_stats {
     size_t pii_redactions;     /* total redactions performed (informational) */
 } hu_dpo_mine_stats_t;
 
+/* Ensure the parent directory of `file_path` exists, creating it (and any
+ * intermediate components) with mode 0700 if missing. Returns HU_OK on
+ * success, HU_ERR_INVALID_ARGUMENT for NULL/empty input, HU_ERR_IO for
+ * filesystem errors that aren't EEXIST.
+ *
+ * Exposed (rather than left static in dpo_miner.c) so the test suite can
+ * exercise the directory-creation logic without going through the CLI —
+ * the CLI itself short-circuits under HU_IS_TEST so this helper is the
+ * unit-test seam. Used by `human ml mine-corrections` before calling
+ * `hu_dpo_export_jsonl` so `~/.human/dpo/pairs.jsonl` lands cleanly even
+ * on a fresh install where `~/.human/dpo/` does not yet exist. */
+hu_error_t hu_dpo_miner_ensure_parent_dir(const char *file_path);
+
+/* Resolved export decision after parsing flags + applying defaults.
+ * `should_export` is true when the miner should write JSONL; otherwise the
+ * export step is skipped entirely. `export_path` (when non-NULL) is the
+ * absolute path that will be used, with `~` expanded via the supplied
+ * `home_dir`. */
+typedef struct hu_dpo_miner_export_decision {
+    int should_export;
+    char export_path[512];
+} hu_dpo_miner_export_decision_t;
+
+/* Resolve the export-path decision from the three CLI flag states:
+ *   `export_flag_path`         — value of --export-jsonl, NULL if unset.
+ *   `no_export_flag_set`       — non-zero if --no-export was passed.
+ *   `home_dir`                 — value of $HOME for default-path resolution.
+ *                                Pass NULL to simulate "HOME not set" — in
+ *                                that case the default path is unavailable
+ *                                and `should_export` will be 0 unless
+ *                                `export_flag_path` is set.
+ *
+ * Behavior matrix (test seam for HIGH-1 fix):
+ *   --no-export                       → should_export = 0
+ *   --export-jsonl X                  → should_export = 1, path = X
+ *   --export-jsonl X --no-export      → last-wins via flag order; the CLI
+ *                                       loop handles this. This helper
+ *                                       receives only the final state.
+ *   (neither flag)                    → should_export = 1, path = default
+ *
+ * Returns HU_OK on success, HU_ERR_INTERNAL if the default path overflows
+ * the 512-byte buffer. */
+hu_error_t hu_dpo_miner_resolve_export(const char *export_flag_path, int no_export_flag_set,
+                                       const char *home_dir, hu_dpo_miner_export_decision_t *out);
+
 #ifdef HU_ENABLE_SQLITE
 /* Mine correction pairs from the open SQLite handle.
  *

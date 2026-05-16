@@ -611,6 +611,10 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
     const char *export_jsonl_path = NULL;
     int correction_window_sec = 0;
     int want_export = 0;
+    /* HIGH-1 fix: third state to distinguish "user passed --no-export"
+     * from "user did not mention export". Without this, the default-
+     * enable block below silently re-enables export after --no-export. */
+    int export_disabled_explicitly = 0;
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--db");
         if (v) {
@@ -622,6 +626,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
         if (v) {
             export_jsonl_path = v;
             want_export = 1;
+            export_disabled_explicitly = 0;
             i++;
             continue;
         }
@@ -637,6 +642,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
         if (strcmp(argv[i], "--no-export") == 0) {
             want_export = 0;
             export_jsonl_path = NULL;
+            export_disabled_explicitly = 1;
             continue;
         }
         if (strcmp(argv[i], "--help") == 0) {
@@ -658,48 +664,41 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
     (void)export_jsonl_path;
     (void)correction_window_sec;
     (void)want_export;
+    (void)export_disabled_explicitly;
     printf("[mine-corrections] test mode: skipped\n");
     return HU_OK;
 #else
 #ifdef HU_ENABLE_SQLITE
+    /* HIGH-2 fix: was `static char default_db[512]` — reentrancy hazard
+     * with no upside since the buffer's lifetime is the call frame.
+     * Plain automatic storage is correct. */
+    char default_db[512];
     if (!db_path) {
         const char *home = getenv("HOME");
         if (!home) {
             fprintf(stderr, "[mine-corrections] HOME not set and --db not provided\n");
             return HU_ERR_INVALID_ARGUMENT;
         }
-        static char default_db[512];
         int n = snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
         if (n <= 0 || (size_t)n >= sizeof(default_db))
             return HU_ERR_INTERNAL;
         db_path = default_db;
     }
 
-    char default_export[512];
-    if (want_export && !export_jsonl_path) {
+    /* HIGH-1 fix: delegate the export-decision logic to the public
+     * helper so the CLI path matches the test seam exactly. */
+    hu_dpo_miner_export_decision_t decision;
+    {
         const char *home = getenv("HOME");
-        if (!home) {
-            fprintf(stderr, "[mine-corrections] HOME not set; pass --export-jsonl explicitly\n");
-            return HU_ERR_INVALID_ARGUMENT;
-        }
-        int n = snprintf(default_export, sizeof(default_export), "%s/.human/dpo/pairs.jsonl", home);
-        if (n <= 0 || (size_t)n >= sizeof(default_export))
-            return HU_ERR_INTERNAL;
-        export_jsonl_path = default_export;
-    } else if (!want_export && !export_jsonl_path) {
-        /* Even with no explicit flag, the default behavior is to export
-         * to the well-known path so US-7.1's `--from-corrections`
-         * succeeds. The user has to pass `--no-export` to disable. */
-        const char *home = getenv("HOME");
-        if (home) {
-            int n =
-                snprintf(default_export, sizeof(default_export), "%s/.human/dpo/pairs.jsonl", home);
-            if (n > 0 && (size_t)n < sizeof(default_export)) {
-                export_jsonl_path = default_export;
-                want_export = 1;
-            }
+        hu_error_t derr = hu_dpo_miner_resolve_export(export_jsonl_path, export_disabled_explicitly,
+                                                      home, &decision);
+        if (derr != HU_OK) {
+            fprintf(stderr, "[mine-corrections] export-path resolution failed: %d\n", derr);
+            return derr;
         }
     }
+    want_export = decision.should_export;
+    export_jsonl_path = decision.should_export ? decision.export_path : NULL;
 
     sqlite3 *db = NULL;
     if (sqlite3_open(db_path, &db) != SQLITE_OK) {
@@ -728,19 +727,38 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
     printf("[mine-corrections] pii redactions:   %zu\n", stats.pii_redactions);
 
     if (want_export && export_jsonl_path) {
+        /* HIGH-4 fix: ensure parent dir exists before export. Fresh
+         * installs do not have ~/.human/dpo/ on disk. */
+        hu_error_t dir_err = hu_dpo_miner_ensure_parent_dir(export_jsonl_path);
+        if (dir_err != HU_OK) {
+            /* HIGH-3 fix: propagate the failure — US-7.5's nightly cron
+             * checks the exit code to gate adapter promotion. */
+            fprintf(stderr, "[mine-corrections] cannot create parent dir for %s: %d\n",
+                    export_jsonl_path, dir_err);
+            sqlite3_close(db);
+            return dir_err;
+        }
+
         hu_dpo_collector_t collector;
         err = hu_dpo_collector_create(alloc, db, 100000, &collector);
-        if (err == HU_OK) {
-            size_t exported = 0;
-            err = hu_dpo_export_jsonl(&collector, export_jsonl_path, strlen(export_jsonl_path),
-                                      &exported);
-            if (err == HU_OK)
-                printf("[mine-corrections] exported %zu pair(s) to %s\n", exported,
-                       export_jsonl_path);
-            else
-                fprintf(stderr, "[mine-corrections] jsonl export failed: %d\n", err);
-            hu_dpo_collector_deinit(&collector);
+        if (err != HU_OK) {
+            /* HIGH-3 fix: collector creation failures used to be
+             * swallowed (function would still return HU_OK below). */
+            fprintf(stderr, "[mine-corrections] collector init failed: %d\n", err);
+            sqlite3_close(db);
+            return err;
         }
+        size_t exported = 0;
+        err = hu_dpo_export_jsonl(&collector, export_jsonl_path, strlen(export_jsonl_path),
+                                  &exported);
+        hu_dpo_collector_deinit(&collector);
+        if (err != HU_OK) {
+            /* HIGH-3 fix: export failures now propagate, not just printed. */
+            fprintf(stderr, "[mine-corrections] jsonl export failed: %d\n", err);
+            sqlite3_close(db);
+            return err;
+        }
+        printf("[mine-corrections] exported %zu pair(s) to %s\n", exported, export_jsonl_path);
     }
 
     sqlite3_close(db);
@@ -751,6 +769,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
     (void)export_jsonl_path;
     (void)correction_window_sec;
     (void)want_export;
+    (void)export_disabled_explicitly;
     fprintf(stderr, "mine-corrections requires HU_ENABLE_SQLITE\n");
     return HU_ERR_NOT_SUPPORTED;
 #endif

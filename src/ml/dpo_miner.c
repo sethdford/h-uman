@@ -16,8 +16,90 @@
 #include "human/ml/training_data_extractor.h"
 #include "human/ml/training_data_quality.h"
 
+#include <errno.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+
+/* Public test seam — see header. Resolves the should-export / export-path
+ * decision from the parsed CLI flag state. */
+hu_error_t hu_dpo_miner_resolve_export(const char *export_flag_path, int no_export_flag_set,
+                                       const char *home_dir, hu_dpo_miner_export_decision_t *out) {
+    if (!out)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+
+    /* HIGH-1 contract: --no-export is the highest-priority signal that
+     * overrides any default-enable. */
+    if (no_export_flag_set) {
+        out->should_export = 0;
+        return HU_OK;
+    }
+
+    if (export_flag_path && export_flag_path[0]) {
+        int n = snprintf(out->export_path, sizeof(out->export_path), "%s", export_flag_path);
+        if (n <= 0 || (size_t)n >= sizeof(out->export_path))
+            return HU_ERR_INTERNAL;
+        out->should_export = 1;
+        return HU_OK;
+    }
+
+    /* Default-enable: cross-story lock with US-7.1. Path requires HOME. */
+    if (!home_dir || !home_dir[0]) {
+        out->should_export = 0;
+        return HU_OK;
+    }
+    int n =
+        snprintf(out->export_path, sizeof(out->export_path), "%s/.human/dpo/pairs.jsonl", home_dir);
+    if (n <= 0 || (size_t)n >= sizeof(out->export_path))
+        return HU_ERR_INTERNAL;
+    out->should_export = 1;
+    return HU_OK;
+}
+
+/* Public test seam — see header. Creates the parent directory of
+ * `file_path` (and any intermediate components) if missing. Uses mode
+ * 0700 to match the secrets-class permission applied by `hu_io_secure_open`
+ * when writing pairs.jsonl. POSIX-only; on other platforms returns HU_OK
+ * without trying. */
+hu_error_t hu_dpo_miner_ensure_parent_dir(const char *file_path) {
+    if (!file_path || !file_path[0])
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Find the last '/' — anything before it is the parent dir. If there
+     * is no slash, the file is in the current dir and no mkdir is needed. */
+    const char *last_slash = strrchr(file_path, '/');
+    if (!last_slash || last_slash == file_path)
+        return HU_OK;
+
+    size_t parent_len = (size_t)(last_slash - file_path);
+    if (parent_len == 0 || parent_len >= 1024)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char parent[1024];
+    memcpy(parent, file_path, parent_len);
+    parent[parent_len] = '\0';
+
+    /* Walk components left-to-right, creating each prefix as needed. Skip
+     * the leading '/' so we always have a non-empty path to mkdir. */
+    for (size_t i = 1; i <= parent_len; i++) {
+        if (i == parent_len || parent[i] == '/') {
+            char saved = parent[i];
+            parent[i] = '\0';
+            if (mkdir(parent, 0700) != 0 && errno != EEXIST) {
+                /* Some platforms report EISDIR for an existing dir with
+                 * an unusual entry type; tolerate it the same as EEXIST. */
+                if (errno != EISDIR) {
+                    parent[i] = saved;
+                    return HU_ERR_IO;
+                }
+            }
+            parent[i] = saved;
+        }
+    }
+    return HU_OK;
+}
 
 #ifdef HU_ENABLE_SQLITE
 
