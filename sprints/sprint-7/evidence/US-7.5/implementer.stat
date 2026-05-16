@@ -1,0 +1,15 @@
+ CMakeLists.txt                                 |   4 +
+ include/human/agent/scheduler.h                |  38 +-
+ include/human/agent/world_model_bridge.h       |  74 ++--
+ include/human/ml/lora_retrain_runner.h         | 124 ++++++
+ src/agent/world_model_bridge.c                 | 329 +++++++++-------
+ src/daemon.c                                   |  57 +++
+ src/ml/lora_retrain_runner.c                   | 524 +++++++++++++++++++++++++
+ tests/fixtures/candidate_adapter_metadata.json |  16 +
+ tests/fixtures/check_lora_ab_fail.json         |   7 +
+ tests/fixtures/check_lora_ab_pass.json         |   7 +
+ tests/fixtures/check_lora_ab_skip.json         |   5 +
+ tests/test_main.c                              |   2 +
+ tests/test_ported_modules.c                    |  97 +++--
+ tests/test_w14_lora_retrain.c                  | 419 ++++++++++++++++++++
+ 14 files changed, 1471 insertions(+), 232 deletions(-)
