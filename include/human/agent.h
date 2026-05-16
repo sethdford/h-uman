@@ -184,6 +184,8 @@ typedef struct hu_agent_context_config {
     bool mcts_planner_enabled;
     bool tree_of_thought;
     bool constitutional_ai;
+    /* US-7.9: pure string-pattern style self-critique (post-gen). */
+    bool constitutional_style_rules_enabled;
     bool speculative_cache;
     bool tool_routing_enabled;
     bool multi_agent;
@@ -430,6 +432,10 @@ struct hu_agent {
     bool compaction_use_structured; /* use XML structured summaries in compaction */
 
     bool constitutional_enabled;
+    /* US-7.9: enables the pure-string style self-critique pass after
+     * each LLM generation (separate from the LLM-judge constitutional
+     * pass above).  Default false. */
+    bool style_rules_enabled;
     bool multi_agent_enabled;
     bool lean_prompt; /* strip heavy contexts for fast local-model texting */
 

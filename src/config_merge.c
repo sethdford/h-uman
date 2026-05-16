@@ -216,6 +216,7 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->agent.mcts_planner_enabled = false;
     cfg->agent.tree_of_thought = false;
     cfg->agent.constitutional_ai = false;
+    cfg->agent.constitutional_style_rules_enabled = false; /* US-7.9: default off */
     cfg->agent.speculative_cache = false;
     cfg->agent.tool_routing_enabled = false;
     cfg->agent.multi_agent = false;
