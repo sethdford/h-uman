@@ -51,7 +51,10 @@ MODEL_TARGETS = {
         "default_lr": 1e-6,
         "default_num_layers": 8,
         "default_max_seq_length": 2048,
-        "default_rank": 16,
+        # Sprint 7 / US-7.4: bumped from 16 -> 32. DPO benefits from
+        # higher-rank adapters that can represent the contrastive signal
+        # more expressively. e4b/e2b stay at 32 (out of scope per story).
+        "default_rank": 32,
         "adapter_suffix": "seth-lora",
     },
     "e4b": {
@@ -81,6 +84,41 @@ MODEL_TARGETS = {
 DEFAULT_TARGET = "31b"
 DEFAULT_DATA = str(Path.home() / ".human" / "training-data" / "finetune")
 MLX_SERVER_PORT = 8741
+
+# Sprint 7 / US-7.4 — default LoRA target modules.
+# QKVO (a small expansion from the previous auto-discovery default which
+# was effectively QV on Gemma's last-N blocks). When the user does not
+# pass --target-modules, this list is used to materialize the `keys`
+# field of `--lora-parameters`. Q+K+V+O are the conventional attention
+# projection names for Gemma/Llama/Qwen/Mistral; the wider set
+# (gate_proj,up_proj,down_proj for MLP) is opt-in via CLI.
+DEFAULT_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+
+def _build_lora_parameters_json(args) -> str:
+    """Build the single argv token after `--lora-parameters` for mlx-lm-lora.
+
+    Per Sprint 7 / US-7.4 design §0: target-module selection is passed to
+    mlx-lm-lora via the existing `--lora-parameters` JSON flag, not via a
+    dedicated `--target-modules` flag (no such flag exists on the mlx-lm
+    side). The JSON's `keys` field is what mlx-lm's `linear_to_lora_layers`
+    uses to override its auto-discovery. Stock `mlx_lm.lora` honors the
+    same JSON shape, so this helper is used by BOTH `run_sft()` (Phase 1,
+    stock mlx_lm) and `run_dpo()` (Phase 2, mlx-lm-lora fork).
+
+    The dict is serialised via `json.dumps` (NOT f-string concatenation)
+    so `subprocess.run` receives the whole JSON as a SINGLE argv slot. No
+    shell quoting needed — we never use `shell=True`.
+    """
+    target_modules = list(getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES)
+    rank = int(getattr(args, "rank", None) or 32)
+    payload = {
+        "rank": rank,
+        "dropout": 0.0,
+        "scale": 10.0,
+        "keys": target_modules,
+    }
+    return json.dumps(payload)
 
 
 def find_mlx_server_pid() -> int | None:
@@ -213,6 +251,9 @@ def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
         "--max-seq-length", str(args.max_seq_length),
         "--grad-checkpoint",
         "--optimizer", "adamw",
+        # Sprint 7 / US-7.4: emit the target-modules + rank to mlx_lm via
+        # --lora-parameters JSON. See _build_lora_parameters_json().
+        "--lora-parameters", _build_lora_parameters_json(args),
     ]
 
     if args.mask_prompt:
@@ -457,6 +498,10 @@ def run_dpo(args, adapter_dir: Path) -> int:
         "--num-layers", str(args.num_layers),
         "--max-seq-length", str(args.max_seq_length),
         "--grad-checkpoint",
+        # Sprint 7 / US-7.4: same JSON shape as SFT path. mlx-lm-lora
+        # accepts `--lora-parameters` and routes through the same
+        # `linear_to_lora_layers` discovery override.
+        "--lora-parameters", _build_lora_parameters_json(args),
     ]
 
     if getattr(args, "mask_prompt", False):
@@ -518,6 +563,11 @@ def run_speculative_draft_training(args):
         rank=draft_cfg["default_rank"],
         num_layers=draft_cfg["default_num_layers"],
         max_seq_length=draft_cfg["default_max_seq_length"],
+        # Sprint 7 / US-7.4: inherit the operator's target-module choice
+        # (or None to fall through to DEFAULT_TARGET_MODULES inside the
+        # helper). Without this, the draft model would silently fall back
+        # to an undefined attribute on the Namespace.
+        target_modules=getattr(args, "target_modules", None),
         steps_per_report=args.steps_per_report,
         steps_per_eval=args.steps_per_eval,
         save_every=args.save_every,
@@ -680,6 +730,13 @@ def run_finetune(args):
     print(f"  Iterations:  {args.iters}")
     print(f"  Batch size:  {args.batch_size}")
     print(f"  LoRA rank:   {args.rank}")
+    # Sprint 7 / US-7.4 risk #2: surface the resolved target modules so
+    # the operator can spot a typo (e.g. --target-modules q_proj that
+    # collapses the adapter to Q-only) before training starts.
+    _resolved_modules = list(
+        getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES
+    )
+    print(f"  Target mods: {','.join(_resolved_modules)}")
     print(f"  LoRA layers: {args.num_layers}")
     print(f"  LR:          {args.learning_rate}")
     print(f"  Seq length:  {args.max_seq_length}")
@@ -726,6 +783,14 @@ def run_finetune(args):
         "model": model,
         "adapter_path": str(adapter_dir),
         "rank": args.rank,
+        # Sprint 7 / US-7.4 (AC-7.4.5): record the resolved target
+        # modules alongside rank so a downstream consumer (e.g. the
+        # US-7.5 nightly cron's promotion gate or check-lora-ab.sh) can
+        # distinguish a true regression in size_mb from a deliberate
+        # config change.
+        "target_modules": list(
+            getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES
+        ),
         "iters": args.iters,
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
@@ -806,6 +871,9 @@ def run_train_all(args):
             rank=target_cfg["default_rank"],
             num_layers=target_cfg["default_num_layers"],
             max_seq_length=target_cfg["default_max_seq_length"],
+            # Sprint 7 / US-7.4: forward operator's target-module choice
+            # (or None for the QKVO default) into each per-target run.
+            target_modules=getattr(args, "target_modules", None),
             steps_per_report=args.steps_per_report,
             steps_per_eval=args.steps_per_eval,
             save_every=args.save_every,
@@ -872,6 +940,15 @@ Examples:
     parser.add_argument("--learning-rate", type=float, default=None,
                         help="Learning rate (default: auto from target)")
     parser.add_argument("--rank", type=int, default=None, help="LoRA rank (default: auto from target)")
+    # Sprint 7 / US-7.4: CSV of LoRA target module names. CSV is the
+    # friendliest input — we materialize it into the `keys` field of the
+    # `--lora-parameters` JSON token at subprocess-build time. The
+    # canonical set for Gemma/Llama/Qwen/Mistral attention is QKVO; the
+    # MLP set (gate_proj,up_proj,down_proj) is opt-in.
+    parser.add_argument("--target-modules", type=str, default=None,
+                        help="CSV of LoRA target module names "
+                             "(default: q_proj,k_proj,v_proj,o_proj). "
+                             "Passed via --lora-parameters JSON `keys` to mlx-lm/mlx-lm-lora.")
     parser.add_argument("--num-layers", type=int, default=None,
                         help="Number of layers to apply LoRA (default: auto from target)")
     parser.add_argument("--max-seq-length", type=int, default=None,
@@ -922,6 +999,16 @@ Examples:
         args.num_layers = target_cfg["default_num_layers"]
     if args.max_seq_length is None:
         args.max_seq_length = target_cfg["default_max_seq_length"]
+
+    # Sprint 7 / US-7.4: parse --target-modules CSV into list[str] exactly
+    # once, here in main(), so run_sft/run_dpo never re-parse and never see
+    # a None or a string. Default to QKVO.
+    if args.target_modules:
+        args.target_modules = [
+            s.strip() for s in args.target_modules.split(",") if s.strip()
+        ]
+    else:
+        args.target_modules = list(DEFAULT_TARGET_MODULES)
 
     if args.train_all:
         sys.exit(run_train_all(args))
