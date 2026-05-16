@@ -68,8 +68,10 @@
 #include "human/daemon_routing.h"
 
 #include "human/agent/governor.h"
+#include "human/agent/output_validator_chain.h"
 #include "human/agent/proactive.h"
 #include "human/agent/proactive_ext.h"
+#include "human/agent/validators/builtin.h"
 #include "human/context/self_awareness.h"
 #ifdef HU_HAS_CRON
 #include "human/cron.h"
@@ -1096,9 +1098,26 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 sched_now, sched_ch, strlen(sched_ch), sched_contact, sizeof(sched_contact),
                 sched_channel, sizeof(sched_channel), sched_msg, sizeof(sched_msg));
             if (sched_len > 0) {
-                sched_len = hu_conversation_strip_channel_tags(sched_msg, sched_len);
-                sched_len = hu_conversation_strip_ai_phrases(sched_msg, sched_len);
-                sched_len = hu_conversation_strip_formal_structure(sched_msg, sched_len);
+                {
+                    hu_output_validator_chain_t *out_chain = NULL;
+                    if (hu_validators_build_default_outbound_chain(alloc, NULL, 0, &out_chain) ==
+                        HU_OK) {
+                        hu_chain_result_t cr;
+                        memset(&cr, 0, sizeof(cr));
+                        if (hu_output_validator_chain_execute(out_chain, alloc, NULL, sched_msg,
+                                                              sched_len, &cr) == HU_OK) {
+                            if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
+                                if (cr.final_text != sched_msg && cr.final_text_len <= sched_len) {
+                                    memcpy(sched_msg, cr.final_text, cr.final_text_len);
+                                    sched_len = cr.final_text_len;
+                                    sched_msg[sched_len] = '\0';
+                                }
+                            }
+                            hu_chain_result_free(alloc, &cr);
+                        }
+                        hu_output_validator_chain_destroy(out_chain);
+                    }
+                }
                 sched_len =
                     hu_conversation_vary_complexity(sched_msg, sched_len, (uint32_t)time(NULL));
                 if (sched_len > 1 && sched_msg[0] >= 'A' && sched_msg[0] <= 'Z' &&
@@ -1740,10 +1759,28 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                                   strlen(cp->contact_id), "proactive", 9))
                         skip = true;
                     if (!skip && channels[c].channel->vtable->send) {
-                        response_len = hu_conversation_strip_channel_tags(response, response_len);
-                        response_len = hu_conversation_strip_ai_phrases(response, response_len);
-                        response_len =
-                            hu_conversation_strip_formal_structure(response, response_len);
+                        {
+                            hu_output_validator_chain_t *out_chain = NULL;
+                            if (hu_validators_build_default_outbound_chain(alloc, NULL, 0,
+                                                                           &out_chain) == HU_OK) {
+                                hu_chain_result_t cr;
+                                memset(&cr, 0, sizeof(cr));
+                                if (hu_output_validator_chain_execute(out_chain, alloc, NULL,
+                                                                      response, response_len,
+                                                                      &cr) == HU_OK) {
+                                    if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
+                                        if (cr.final_text != response &&
+                                            cr.final_text_len <= response_len) {
+                                            memcpy(response, cr.final_text, cr.final_text_len);
+                                            response_len = cr.final_text_len;
+                                            response[response_len] = '\0';
+                                        }
+                                    }
+                                    hu_chain_result_free(alloc, &cr);
+                                }
+                                hu_output_validator_chain_destroy(out_chain);
+                            }
+                        }
                         response_len =
                             hu_conversation_vary_complexity(response, response_len, (uint32_t)now);
                         if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&
@@ -9233,12 +9270,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             for (int bi = 0; bi < n; bi++) {
                                 if (burst_msgs[bi][0]) {
                                     size_t bm_len = strlen(burst_msgs[bi]);
-                                    bm_len =
-                                        hu_conversation_strip_channel_tags(burst_msgs[bi], bm_len);
-                                    bm_len =
-                                        hu_conversation_strip_ai_phrases(burst_msgs[bi], bm_len);
-                                    bm_len = hu_conversation_strip_formal_structure(burst_msgs[bi],
-                                                                                    bm_len);
+                                    {
+                                        hu_output_validator_chain_t *out_chain = NULL;
+                                        if (hu_validators_build_default_outbound_chain(
+                                                alloc, NULL, 0, &out_chain) == HU_OK) {
+                                            hu_chain_result_t cr;
+                                            memset(&cr, 0, sizeof(cr));
+                                            if (hu_output_validator_chain_execute(
+                                                    out_chain, alloc, NULL, burst_msgs[bi], bm_len,
+                                                    &cr) == HU_OK) {
+                                                if (cr.final_decision != HU_VALIDATOR_REJECT &&
+                                                    cr.final_text) {
+                                                    if (cr.final_text != burst_msgs[bi] &&
+                                                        cr.final_text_len <= bm_len) {
+                                                        memcpy(burst_msgs[bi], cr.final_text,
+                                                               cr.final_text_len);
+                                                        bm_len = cr.final_text_len;
+                                                        burst_msgs[bi][bm_len] = '\0';
+                                                    }
+                                                }
+                                                hu_chain_result_free(alloc, &cr);
+                                            }
+                                            hu_output_validator_chain_destroy(out_chain);
+                                        }
+                                    }
                                     bm_len = hu_conversation_vary_complexity(
                                         burst_msgs[bi], bm_len, burst_seed + (uint32_t)bi);
                                     if (bm_len > 1 && burst_msgs[bi][0] >= 'A' &&
@@ -10572,9 +10627,27 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     /* Strip pipeline + send buffer cursor: shared by prod and HU_IS_TEST so tests
                      * exercise the same outbound text shaping as production. */
                     char *send_buf_ack = NULL;
-                    response_len = hu_conversation_strip_channel_tags(response, response_len);
-                    response_len = hu_conversation_strip_ai_phrases(response, response_len);
-                    response_len = hu_conversation_strip_formal_structure(response, response_len);
+                    {
+                        hu_output_validator_chain_t *out_chain = NULL;
+                        if (hu_validators_build_default_outbound_chain(alloc, NULL, 0,
+                                                                       &out_chain) == HU_OK) {
+                            hu_chain_result_t cr;
+                            memset(&cr, 0, sizeof(cr));
+                            if (hu_output_validator_chain_execute(out_chain, alloc, NULL, response,
+                                                                  response_len, &cr) == HU_OK) {
+                                if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
+                                    if (cr.final_text != response &&
+                                        cr.final_text_len <= response_len) {
+                                        memcpy(response, cr.final_text, cr.final_text_len);
+                                        response_len = cr.final_text_len;
+                                        response[response_len] = '\0';
+                                    }
+                                }
+                                hu_chain_result_free(alloc, &cr);
+                            }
+                            hu_output_validator_chain_destroy(out_chain);
+                        }
+                    }
 
 #ifndef HU_IS_TEST
                     /* Apply typing quirks from persona overlay as post-processing.
@@ -11594,12 +11667,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 if (dt_err == HU_OK && dt_resp && dt_resp_len > 0 &&
                                     dt_resp_len < 200) {
                                     /* Post-process double-text through the same BTH pipeline */
-                                    dt_resp_len =
-                                        hu_conversation_strip_channel_tags(dt_resp, dt_resp_len);
-                                    dt_resp_len =
-                                        hu_conversation_strip_ai_phrases(dt_resp, dt_resp_len);
-                                    dt_resp_len = hu_conversation_strip_formal_structure(
-                                        dt_resp, dt_resp_len);
+                                    {
+                                        hu_output_validator_chain_t *out_chain = NULL;
+                                        if (hu_validators_build_default_outbound_chain(
+                                                alloc, NULL, 0, &out_chain) == HU_OK) {
+                                            hu_chain_result_t cr;
+                                            memset(&cr, 0, sizeof(cr));
+                                            if (hu_output_validator_chain_execute(
+                                                    out_chain, alloc, NULL, dt_resp, dt_resp_len,
+                                                    &cr) == HU_OK) {
+                                                if (cr.final_decision != HU_VALIDATOR_REJECT &&
+                                                    cr.final_text) {
+                                                    if (cr.final_text != dt_resp &&
+                                                        cr.final_text_len <= dt_resp_len) {
+                                                        memcpy(dt_resp, cr.final_text,
+                                                               cr.final_text_len);
+                                                        dt_resp_len = cr.final_text_len;
+                                                        dt_resp[dt_resp_len] = '\0';
+                                                    }
+                                                }
+                                                hu_chain_result_free(alloc, &cr);
+                                            }
+                                            hu_output_validator_chain_destroy(out_chain);
+                                        }
+                                    }
                                     dt_resp_len = hu_conversation_vary_complexity(
                                         dt_resp, dt_resp_len, dt_seed);
                                     if (dt_resp_len > 1 && dt_resp[0] >= 'A' && dt_resp[0] <= 'Z' &&

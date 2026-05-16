@@ -242,6 +242,10 @@ void run_signal_channel_wire_tests(void);
 void run_daemon_housekeeping_tests(void);
 void run_orphan_channel_audit_tests(void);
 void run_verifier_metrics_tests(void);
+void run_output_validator_tests(void);
+void run_stop_sequences_tests(void);
+void run_validators_builtin_tests(void);
+void run_validators_persona_safety_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
 void run_w6_e2e_adversarial_tests(void);
@@ -539,6 +543,7 @@ void run_sycophancy_guard_tests(void);
 void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
+void run_structured_output_tests(void);
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -824,6 +829,10 @@ int main(int argc, char **argv) {
     run_daemon_housekeeping_tests();
     run_orphan_channel_audit_tests();
     run_verifier_metrics_tests();
+    run_output_validator_tests();
+    run_stop_sequences_tests();
+    run_validators_builtin_tests();
+    run_validators_persona_safety_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
     run_w6_e2e_adversarial_tests();
@@ -1115,6 +1124,7 @@ int main(int argc, char **argv) {
     run_trust_calibration_tests();
     run_vision_ocr_tests();
     run_markdown_loader_tests();
+    run_structured_output_tests();
     run_anticipatory_state_tests();
     run_canvas_tool_tests();
     run_canvas_e2e_tests();

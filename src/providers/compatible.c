@@ -132,21 +132,25 @@ static hu_error_t compatible_build_chat_json(hu_allocator_t *alloc,
                 for (size_t p = 0; p < m->content_parts_count; p++) {
                     const hu_content_part_t *cp = &m->content_parts[p];
                     hu_json_value_t *part = hu_json_object_new(alloc);
-                    if (!part) break;
+                    if (!part)
+                        break;
                     if (cp->tag == HU_CONTENT_PART_TEXT) {
                         hu_json_object_set(alloc, part, "type",
                                            hu_json_string_new(alloc, "text", 4));
-                        hu_json_object_set(alloc, part, "text",
+                        hu_json_object_set(
+                            alloc, part, "text",
                             hu_json_string_new(alloc, cp->data.text.ptr, cp->data.text.len));
                     } else if (cp->tag == HU_CONTENT_PART_IMAGE_BASE64) {
                         hu_json_object_set(alloc, part, "type",
                                            hu_json_string_new(alloc, "image_url", 9));
                         char url_buf[64];
                         int ulen = snprintf(url_buf, sizeof(url_buf), "data:%.*s;base64,",
-                            (int)cp->data.image_base64.media_type_len,
-                            cp->data.image_base64.media_type);
-                        if (ulen < 0) ulen = 0;
-                        if ((size_t)ulen > sizeof(url_buf)) ulen = (int)sizeof(url_buf);
+                                            (int)cp->data.image_base64.media_type_len,
+                                            cp->data.image_base64.media_type);
+                        if (ulen < 0)
+                            ulen = 0;
+                        if ((size_t)ulen > sizeof(url_buf))
+                            ulen = (int)sizeof(url_buf);
                         size_t total = (size_t)ulen + cp->data.image_base64.data_len;
                         char *data_url = (char *)alloc->alloc(alloc->ctx, total + 1);
                         if (data_url) {
@@ -157,7 +161,7 @@ static hu_error_t compatible_build_chat_json(hu_allocator_t *alloc,
                             hu_json_value_t *iu = hu_json_object_new(alloc);
                             if (iu) {
                                 hu_json_object_set(alloc, iu, "url",
-                                    hu_json_string_new(alloc, data_url, total));
+                                                   hu_json_string_new(alloc, data_url, total));
                                 hu_json_object_set(alloc, part, "image_url", iu);
                             }
                             alloc->free(alloc->ctx, data_url, total + 1);
@@ -168,8 +172,8 @@ static hu_error_t compatible_build_chat_json(hu_allocator_t *alloc,
                         hu_json_value_t *iu = hu_json_object_new(alloc);
                         if (iu) {
                             hu_json_object_set(alloc, iu, "url",
-                                hu_json_string_new(alloc, cp->data.image_url.url,
-                                                   cp->data.image_url.url_len));
+                                               hu_json_string_new(alloc, cp->data.image_url.url,
+                                                                  cp->data.image_url.url_len));
                             hu_json_object_set(alloc, part, "image_url", iu);
                         }
                     }
@@ -272,6 +276,18 @@ static hu_error_t compatible_build_chat_json(hu_allocator_t *alloc,
     if (request->max_tokens > 0) {
         hu_json_object_set(alloc, root, "max_tokens",
                            hu_json_number_new(alloc, (double)request->max_tokens));
+    }
+
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                hu_json_array_push(alloc, stop_arr,
+                                   hu_json_string_new(alloc, request->stop_sequences[i],
+                                                      strlen(request->stop_sequences[i])));
+            }
+            hu_json_object_set(alloc, root, "stop", stop_arr);
+        }
     }
 
     /* HuLa compiler (`hu_hula_compiler_chat_compile_execute`) sets response_format to
@@ -403,9 +419,9 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
                 size_t tc_count = tc_arr->data.array.len;
                 if (tc_count > SIZE_MAX / sizeof(hu_tool_call_t))
                     tc_count = 0;
-                hu_tool_call_t *tcs = tc_count
-                    ? (hu_tool_call_t *)alloc->alloc(alloc->ctx, tc_count * sizeof(hu_tool_call_t))
-                    : NULL;
+                hu_tool_call_t *tcs = tc_count ? (hu_tool_call_t *)alloc->alloc(
+                                                     alloc->ctx, tc_count * sizeof(hu_tool_call_t))
+                                               : NULL;
                 if (tcs) {
                     memset(tcs, 0, tc_count * sizeof(hu_tool_call_t));
                     size_t valid = 0;
@@ -861,8 +877,8 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
         alloc->free(alloc->ctx, body, body_len);
         return err;
     }
-    hu_log_info("compatible", NULL, "stream_chat: url=%s model=%.*s body_len=%zu",
-                url_buf, (int)model_len, model, body_len);
+    hu_log_info("compatible", NULL, "stream_chat: url=%s model=%.*s body_len=%zu", url_buf,
+                (int)model_len, model, body_len);
     err = hu_http_post_json_stream(alloc, url_buf, auth, NULL, body, body_len,
                                    compatible_stream_write_cb, &sctx);
     hu_sse_parser_deinit(&sctx.parser);
