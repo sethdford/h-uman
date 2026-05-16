@@ -226,6 +226,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                 "  prepare                 Tokenize data for training\n"
                 "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                 "  dpo-train               Run DPO preference training step\n"
+                "  mine-corrections        Mine DPO pairs from chat.db correction triples\n"
                 "  lora-persona            Train LoRA adapter from persona examples\n"
                 "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
                 "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
@@ -246,6 +247,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_status(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "dpo-train") == 0)
         return hu_ml_cli_dpo_train(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "mine-corrections") == 0)
+        return hu_ml_cli_mine_corrections(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "prepare-conversations") == 0)
         return hu_ml_cli_prepare_conversations(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "lora-persona") == 0)
@@ -270,6 +273,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                "  prepare                 Tokenize data for training\n"
                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                "  dpo-train               Run DPO preference training step\n"
+               "  mine-corrections        Mine DPO pairs from chat.db correction triples\n"
                "  lora-persona            Train LoRA adapter from persona examples\n"
                "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
                "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
