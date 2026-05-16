@@ -258,8 +258,13 @@ hu_error_t hu_persona_fidelity_judge(hu_allocator_t *alloc, hu_provider_t *provi
     if (written < 0 || (size_t)written >= sizeof(question))
         return HU_ERR_INTERNAL;
 
+    /* eval_judge_check requires a non-NULL `expected`. For persona
+     * fidelity we don't have a ground-truth answer — we're comparing
+     * against the *persona description* itself. Pass the persona desc
+     * as expected so the prompt template renders meaningfully
+     * ("Expected answer: <persona description>") and the judge knows
+     * the target. Truncated to the same 1024-byte cap as above. */
     return hu_eval_judge_check(alloc, provider, model, model_len, question, (size_t)written,
-                               response, response_len,
-                               /* expected = */ NULL, /* expected_len = */ 0, rubric_text,
+                               response, response_len, persona_description, pd_len, rubric_text,
                                rubric_text_len, pass_threshold, cache, out);
 }
