@@ -60,6 +60,7 @@ jobs:
           END=$(date +%s%N)
           ELAPSED_MS=$(( (END - START) / 1000000 ))
           echo "## Startup: ${ELAPSED_MS}ms" >> $GITHUB_STEP_SUMMARY
+          echo "STARTUP_MS=${ELAPSED_MS}" >> "$GITHUB_ENV"
 
       - name: Measure peak RSS
         run: |
@@ -81,16 +82,41 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const body = `## Performance Benchmark
+            // Marker keeps a single canonical comment per PR; subsequent
+            // workflow runs update in place rather than spamming new comments.
+            const marker = '<!-- benchmark-workflow-comment -->';
+            const sizeKB = process.env.BINARY_SIZE_KB || 'N/A';
+            const startupMs = process.env.STARTUP_MS || 'N/A';
+            const body = `${marker}
+            ## Performance Benchmark
             | Metric | Value |
             |--------|-------|
-            | Binary Size | ${process.env.BINARY_SIZE_KB} KB |
-            | Startup | Measured in CI |
+            | Binary Size | ${sizeKB} KB |
+            | Startup | ${startupMs} ms |
 
-            _Automated by benchmark workflow_`;
-            github.rest.issues.createComment({
+            _Automated by benchmark workflow — updated in place per run._`;
+
+            const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body
+              per_page: 100,
             });
+            const existing = comments.find(
+              (c) => c.body && c.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                comment_id: existing.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
+            }

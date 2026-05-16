@@ -505,6 +505,7 @@ void run_sota_research_tests(void);
 void run_sota_wiring_tests(void);
 void run_sota_live_wiring_tests(void);
 void hu_test_permission(void);
+void run_shell_sandbox_tests(void);
 void test_session_persist(void);
 void run_adversarial_memory_safety_tests(void);
 void run_adversarial_injection_tests(void);
@@ -1086,6 +1087,7 @@ int main(int argc, char **argv) {
     run_sota_wiring_tests();
     run_sota_live_wiring_tests();
     hu_test_permission();
+    run_shell_sandbox_tests();
     run_hook_pipeline_tests();
     test_session_persist();
     run_compaction_structured_tests();
