@@ -2757,6 +2757,7 @@ set(HU_TEST_SOURCES
     tests/test_collab_planning.c
     tests/test_ml.c
     tests/test_ml_cli_actually_trains.c
+    tests/test_ml_fidelity_judgment.c
     tests/test_dpo_judge_naming.c
     tests/test_lora.c
     tests/test_training_data.c
