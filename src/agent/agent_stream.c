@@ -1459,11 +1459,52 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 &safe_content_len, &retry_report);
                             if (retry_err == HU_OK && safe_content && safe_content_len > 0) {
                                 hu_agent_m3_on_provider_success(agent);
-                                safe_owned = true;
-                                hu_log_warn("agent_stream", agent->observer,
-                                            "validator chain RECOVERED: stream retry passed "
-                                            "(len=%zu, stripped=%zu)",
-                                            safe_content_len, retry_report.bytes_stripped);
+                                /* Re-validate the retry output through the chain so a
+                                 * regenerated CoT or helper-closer cannot escape (Fix 3). */
+                                hu_chain_result_t retry_cr;
+                                memset(&retry_cr, 0, sizeof(retry_cr));
+                                hu_validator_context_t retry_vctx = {0};
+                                retry_vctx.persona_name = persona_name;
+                                retry_vctx.persona_name_len = persona_name_len;
+                                hu_error_t recheck_err = hu_output_validator_chain_execute(
+                                    out_chain, agent->alloc, &retry_vctx, safe_content,
+                                    safe_content_len, &retry_cr);
+                                if (recheck_err == HU_OK &&
+                                    retry_cr.final_decision == HU_VALIDATOR_REJECT) {
+                                    hu_log_error(
+                                        "agent_stream", agent->observer,
+                                        "validator chain stream retry REJECTED by chain (via %s)",
+                                        retry_cr.deciding_validator_name
+                                            ? retry_cr.deciding_validator_name
+                                            : "unknown");
+                                    hu_chain_result_free(agent->alloc, &retry_cr);
+                                    /* safe_content was written by retry_slim into *safe_content
+                                     * pointer; it is not yet marked safe_owned, so we free it. */
+                                    agent->alloc->free(agent->alloc->ctx, safe_content,
+                                                       safe_content_len + 1);
+                                    safe_content = NULL;
+                                    safe_content_len = 0;
+                                } else if (recheck_err == HU_OK && retry_cr.final_text_owned &&
+                                           retry_cr.final_text) {
+                                    agent->alloc->free(agent->alloc->ctx, safe_content,
+                                                       safe_content_len + 1);
+                                    safe_content = (char *)retry_cr.final_text;
+                                    safe_content_len = retry_cr.final_text_len;
+                                    retry_cr.final_text_owned = false;
+                                    safe_owned = true;
+                                    hu_chain_result_free(agent->alloc, &retry_cr);
+                                    hu_log_warn("agent_stream", agent->observer,
+                                                "validator chain RECOVERED: stream retry passed "
+                                                "chain (len=%zu, stripped=%zu)",
+                                                safe_content_len, retry_report.bytes_stripped);
+                                } else {
+                                    hu_chain_result_free(agent->alloc, &retry_cr);
+                                    safe_owned = true;
+                                    hu_log_warn("agent_stream", agent->observer,
+                                                "validator chain RECOVERED: stream retry passed "
+                                                "chain (len=%zu, stripped=%zu)",
+                                                safe_content_len, retry_report.bytes_stripped);
+                                }
                             } else {
                                 hu_log_error("agent_stream", agent->observer,
                                              "validator chain stream retry failed (err=%s)",
@@ -2201,12 +2242,50 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 tml, msg, msg_len, &retry_txt, &retry_txt_len, &rr);
                             if (rre == HU_OK && retry_txt && retry_txt_len > 0) {
                                 hu_agent_m3_on_provider_success(agent);
-                                final_content = retry_txt;
-                                final_content_len = retry_txt_len;
-                                hu_log_warn("agent_stream", agent->observer,
-                                            "validator chain RECOVERED: post-stream slim retry "
-                                            "(len=%zu)",
-                                            retry_txt_len);
+                                /* Re-validate the retry output through the chain so a
+                                 * regenerated CoT or helper-closer cannot escape (Fix 3). */
+                                hu_chain_result_t retry_cr2;
+                                memset(&retry_cr2, 0, sizeof(retry_cr2));
+                                hu_validator_context_t retry_vctx2 = {0};
+                                retry_vctx2.persona_name = persona_name;
+                                retry_vctx2.persona_name_len = persona_name_len;
+                                hu_error_t recheck2 = hu_output_validator_chain_execute(
+                                    out_chain, agent->alloc, &retry_vctx2, retry_txt, retry_txt_len,
+                                    &retry_cr2);
+                                if (recheck2 == HU_OK &&
+                                    retry_cr2.final_decision == HU_VALIDATOR_REJECT) {
+                                    hu_log_error(
+                                        "agent_stream", agent->observer,
+                                        "validator chain post-stream retry REJECTED by chain "
+                                        "(via %s) — suppressing send",
+                                        retry_cr2.deciding_validator_name
+                                            ? retry_cr2.deciding_validator_name
+                                            : "unknown");
+                                    hu_chain_result_free(agent->alloc, &retry_cr2);
+                                    agent->alloc->free(agent->alloc->ctx, retry_txt,
+                                                       retry_txt_len + 1);
+                                    /* final_content already freed above; leave NULL */
+                                } else if (recheck2 == HU_OK && retry_cr2.final_text_owned &&
+                                           retry_cr2.final_text) {
+                                    agent->alloc->free(agent->alloc->ctx, retry_txt,
+                                                       retry_txt_len + 1);
+                                    final_content = (char *)retry_cr2.final_text;
+                                    final_content_len = retry_cr2.final_text_len;
+                                    retry_cr2.final_text_owned = false;
+                                    hu_chain_result_free(agent->alloc, &retry_cr2);
+                                    hu_log_warn("agent_stream", agent->observer,
+                                                "validator chain RECOVERED: post-stream retry "
+                                                "passed chain (len=%zu)",
+                                                final_content_len);
+                                } else {
+                                    hu_chain_result_free(agent->alloc, &retry_cr2);
+                                    final_content = retry_txt;
+                                    final_content_len = retry_txt_len;
+                                    hu_log_warn("agent_stream", agent->observer,
+                                                "validator chain RECOVERED: post-stream retry "
+                                                "passed chain (len=%zu)",
+                                                final_content_len);
+                                }
                             }
                         }
                     } else if (cr.final_text_owned && cr.final_text) {

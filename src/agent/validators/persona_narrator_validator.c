@@ -60,7 +60,7 @@ static bool is_word_boundary_after(const char *buf, size_t buf_len, size_t end_p
     if (end_pos >= buf_len)
         return true;
     char c = buf[end_pos];
-    return (c == ' ' || c == '\n' || c == '\t' || c == '.' || c == ',');
+    return (c == ' ' || c == '\n' || c == '\t' || c == '.' || c == ',' || c == '\r');
 }
 
 /* Returns true if the response contains the persona's (lowercased) name as a
