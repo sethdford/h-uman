@@ -25,6 +25,7 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
+#include "human/ml/lora_retrain_runner.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
 #endif
@@ -2568,6 +2569,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_log_warn("human", agent->observer,
                                 "W14: training data runner registration failed: %d", (int)tde);
             }
+            /* US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess
+             * path). Sibling to the in-process learner runner above.
+             * Registration is best-effort — failure logs a warning and
+             * leaves the slot as a no-op rather than crashing the daemon. */
+            {
+                static hu_lora_retrain_ctx_t w14_lora_retrain_ctx;
+                static char retrain_candidate_dir[512];
+                static char retrain_current_symlink[512];
+                static char retrain_pidfile[512];
+                memset(&w14_lora_retrain_ctx, 0, sizeof(w14_lora_retrain_ctx));
+                const char *hm2 = getenv("HOME");
+                if (hm2 && hm2[0]) {
+                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
+                                   "%s/.human/ml/seth-lora-candidate", hm2);
+                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
+                                   "%s/.human/ml/seth-lora-current", hm2);
+                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
+                                   "%s/.human/lora_retrain.pid", hm2);
+                } else {
+                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
+                                   "/tmp/human_seth_lora_candidate");
+                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
+                                   "/tmp/human_seth_lora_current");
+                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
+                                   "/tmp/human_lora_retrain.pid");
+                }
+                w14_lora_retrain_ctx.candidate_dir = retrain_candidate_dir;
+                w14_lora_retrain_ctx.current_symlink = retrain_current_symlink;
+                w14_lora_retrain_ctx.pidfile_path = retrain_pidfile;
+                /* Defaults for argv pieces are set by the runner when NULL. */
+                hu_error_t rre = hu_w14_scheduler_register_lora_retrain_runner(
+                    agent->w14_scheduler, &w14_lora_retrain_ctx);
+                if (rre == HU_OK)
+                    hu_log_info("human", agent->observer,
+                                "W14: nightly LoRA retrain runner registered (candidate=%s)",
+                                retrain_candidate_dir);
+                else
+                    hu_log_warn("human", agent->observer,
+                                "W14: nightly LoRA retrain runner registration failed: %d",
+                                (int)rre);
+            }
         }
     }
 #endif /* HU_ENABLE_LEARNING — W14 LoRA + training data runner wiring */
@@ -3037,6 +3079,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     agent->w14_scheduler, now_ms, 120000);
                                 if (tde == HU_OK)
                                     last_td_extract_ms = now_ms;
+                            }
+                        }
+                        /* US-7.5: nightly LoRA retrain enqueue. Fires once
+                         * per 24h. The scheduler enforces idle + AC-power
+                         * gating per the W14 contract; the runner's PID-file
+                         * prevents overlapping retrains across ticks. */
+                        {
+                            static int64_t last_retrain_enqueue_ms = 0;
+                            bool retrain_due = (last_retrain_enqueue_ms == 0) ||
+                                               (now_ms - last_retrain_enqueue_ms >= 86400000LL);
+                            if (retrain_due) {
+                                hu_error_t rre = hu_w14_scheduler_enqueue_lora_retrain_nightly(
+                                    agent->w14_scheduler, now_ms, 0);
+                                if (rre == HU_OK)
+                                    last_retrain_enqueue_ms = now_ms;
                             }
                         }
                         hu_error_t te = hu_w14_scheduler_tick(agent->w14_scheduler, now_ms);

@@ -705,6 +705,9 @@ set(HU_CORE_SOURCES
     src/agent/response_guard_retry.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
+    # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
+    # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
+    src/ml/lora_retrain_runner.c
     # NOTE: src/agent/lora_training_runner.c and training_data_runner.c
     # are W13 learning-loop callers — they reference symbols defined only
     # when HU_ENABLE_LEARNING is on (hu_learner_pending_drain,
@@ -2690,6 +2693,7 @@ set(HU_TEST_SOURCES
     tests/test_w12_verifier_loop.c
     tests/test_w13_learner.c
     tests/test_w14_runners.c
+    tests/test_w14_lora_retrain.c
     tests/test_w15_backup_restore.c
     tests/test_learner_bridge.c
     tests/test_w14_scheduler.c
