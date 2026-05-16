@@ -54,6 +54,7 @@
 #include "human/ml/ml.h"
 #include "human/core/error.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -261,11 +262,37 @@ cleanup_pair:
 }
 
 static hu_error_t dpo_huml_save(void *vctx, hu_allocator_t *alloc, const char *path) {
-    if (!vctx || !alloc || !path) return HU_ERR_INVALID_ARGUMENT;
-    /* Reuse hu_lora_save when LoRA wraps the policy; for now save raw
-     * GPT checkpoint via existing API. Deferred to Phase 5 eval-gate
-     * integration. */
-    return HU_ERR_NOT_SUPPORTED;
+    if (!vctx || !alloc || !path)
+        return HU_ERR_INVALID_ARGUMENT;
+    dpo_huml_ctx_t *c = (dpo_huml_ctx_t *)vctx;
+    if (!c->initialized)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_ml_tensor_t *params = NULL;
+    size_t count = 0;
+    if (c->policy.vtable->get_params(c->policy.ctx, &params, &count) != HU_OK || count == 0)
+        return HU_ERR_IO;
+
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return HU_ERR_IO;
+    const char magic[4] = {'H', 'U', 'M', 'L'};
+    if (fwrite(magic, 1, 4, f) != 4) {
+        fclose(f);
+        return HU_ERR_IO;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (params[i].dtype != HU_ML_DTYPE_F32 || !params[i].data || params[i].size_bytes == 0)
+            continue;
+        size_t nfloats = params[i].size_bytes / sizeof(float);
+        if (fwrite(&nfloats, sizeof(size_t), 1, f) != 1 ||
+            fwrite(params[i].data, 1, params[i].size_bytes, f) != params[i].size_bytes) {
+            fclose(f);
+            return HU_ERR_IO;
+        }
+    }
+    fclose(f);
+    return HU_OK;
 }
 
 static const char *dpo_huml_name(void *vctx) { (void)vctx; return "dpo_huml"; }
@@ -321,3 +348,11 @@ hu_error_t hu_dpo_real_huml_create(hu_allocator_t *alloc,
     out->vtable = &dpo_huml_vtable;
     return HU_OK;
 }
+
+#if HU_IS_TEST
+const hu_model_t *hu_dpo_real_huml_policy_for_test(const hu_rl_trainer_t *trainer) {
+    if (!trainer || !trainer->ctx)
+        return NULL;
+    return &((dpo_huml_ctx_t *)trainer->ctx)->policy;
+}
+#endif

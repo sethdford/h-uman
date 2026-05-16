@@ -54,12 +54,14 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *event);
 void hu_reaction_handler_clear_turn(void);
 int  hu_reaction_handler_was_called_this_turn(void);
 
+/* Production + demo path: pre-register an assistant message before reactions
+ * are replayed (Phase 5 H8 / Phase 6 demo). */
+void hu_reaction_handler_register_assistant_message_for_production(
+    const char *channel, const char *thread, const char *msg_ref,
+    const char *prompt, const char *response);
+
 #if HU_IS_TEST
-/* Test seam: pre-register an assistant message so the handler has a lookup
- * target without spinning up the full daemon. NOT a production path —
- * production resolves via the daemon's existing assistant-message store
- * (deferred to Phase 5 daemon integration; for Phase 2 the test seam is
- * the only resolution path). */
+/* Test seam: same lookup store as production registration. */
 void hu_reaction_handler_register_assistant_message_for_test(
     const char *channel, const char *thread, const char *msg_ref,
     const char *prompt, const char *response);

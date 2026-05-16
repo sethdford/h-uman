@@ -199,6 +199,10 @@ static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv);
 #ifdef HU_ENABLE_ML
 static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv);
 #endif
+#ifdef HU_ENABLE_RL_FULL
+#include "human/ml/cli_demo.h"
+static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv);
+#endif
 
 /* Forward declarations for gateway→agent bridge (used by both service-loop and gateway) */
 typedef struct gw_agent_bridge {
@@ -305,6 +309,29 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
     }
     fprintf(stderr, "Unknown ml subcommand: %s\n", sub);
     return HU_ERR_INVALID_ARGUMENT;
+}
+#endif
+
+#ifdef HU_ENABLE_RL_FULL
+static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv) {
+    if (argc < 3 || strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "help") == 0) {
+        printf("Usage: human demo <subcommand>\n\n"
+               "Subcommands:\n"
+               "  rl-closed-loop   Run the Phase 6 RL closed-loop demo\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    const char *sub = argv[2];
+    if (strcmp(sub, "rl-closed-loop") != 0) {
+        fprintf(stderr, "demo: unknown subcommand: %s\n", sub);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_error_t err =
+        hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3), alloc);
+    if (err == HU_OK)
+        return HU_OK;
+    if (err == HU_ERR_PERMISSION_DENIED)
+        return HU_ERR_PERMISSION_DENIED;
+    return HU_ERR_PROVIDER_RESPONSE;
 }
 #endif
 
@@ -521,6 +548,9 @@ static const hu_command_t commands[] = {
 #endif
 #ifdef HU_ENABLE_ML
     {"ml", "Machine learning training and experiments", cmd_ml},
+#endif
+#ifdef HU_ENABLE_RL_FULL
+    {"demo", "Reproducible end-to-end demonstrations (RL closed loop)", cmd_demo},
 #endif
     {"version", "Show version information", cmd_version},
     {"help", "Show help information", cmd_help},

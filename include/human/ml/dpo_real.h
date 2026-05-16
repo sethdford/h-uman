@@ -22,6 +22,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/ml/model.h"
 #include "human/ml/rl_trainer.h"
 
 #ifdef __cplusplus
@@ -44,6 +45,11 @@ hu_error_t hu_dpo_real_huml_create(hu_allocator_t *alloc,
 hu_error_t hu_dpo_real_mlx_create(hu_allocator_t *alloc,
                                    const hu_rl_trainer_config_t *config,
                                    hu_rl_trainer_t *out);
+
+#if HU_IS_TEST
+/* Shared policy model for E2E mock provider wiring. */
+const hu_model_t *hu_dpo_real_huml_policy_for_test(const hu_rl_trainer_t *trainer);
+#endif
 
 #ifdef __cplusplus
 }

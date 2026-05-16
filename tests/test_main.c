@@ -631,6 +631,7 @@ extern void run_lora_ab_require_positive_tests(void);
 extern void run_runner_eval_gate_tests(void);
 extern void run_daemon_reaction_poll_tests(void);
 extern void run_proof_directory_tests(void);
+extern void run_e2e_closed_loop_tests(void);
 #endif
 
 static void print_usage(const char *prog) {
@@ -1260,6 +1261,7 @@ int main(int argc, char **argv) {
     run_runner_eval_gate_tests();
     run_daemon_reaction_poll_tests();
     run_proof_directory_tests();
+    run_e2e_closed_loop_tests();
 #endif
 
     HU_TEST_REPORT();

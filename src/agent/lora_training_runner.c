@@ -258,3 +258,178 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
     }
     return HU_OK;
 }
+
+#ifdef HU_IS_TEST
+#include "hu_e2e_closed_loop.h"
+#include "human/agent/reaction_handler.h"
+#include "human/channels/reaction_event.h"
+#include "human/ml/dpo.h"
+#include "human/provider.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#define HU_E2E_LOOP_IMPL_VERSION 1
+_Static_assert(HU_E2E_LOOP_IMPL_VERSION == 1,
+               "Bump HU_E2E_LOOP_IMPL_VERSION in cli_demo.c when changing loop logic.");
+
+static hu_error_t e2e_mkdir_p(const char *path) {
+    char tmp[512];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            (void)mkdir(tmp, 0755);
+            *p = '/';
+        }
+    }
+    return mkdir(tmp, 0755) == 0 ? HU_OK : HU_ERR_IO;
+}
+
+void hu_e2e_reaction_aux_free(hu_allocator_t *alloc, hu_e2e_reaction_aux_t *aux, size_t n) {
+    if (!alloc || !aux)
+        return;
+    for (size_t i = 0; i < n; i++) {
+        if (aux[i].prompt)
+            alloc->free(alloc->ctx, (void *)aux[i].prompt, strlen(aux[i].prompt) + 1);
+        if (aux[i].response_chosen)
+            alloc->free(alloc->ctx, (void *)aux[i].response_chosen,
+                        strlen(aux[i].response_chosen) + 1);
+        if (aux[i].response_rejected)
+            alloc->free(alloc->ctx, (void *)aux[i].response_rejected,
+                        strlen(aux[i].response_rejected) + 1);
+    }
+    alloc->free(alloc->ctx, aux, n * sizeof(hu_e2e_reaction_aux_t));
+}
+
+void hu_e2e_closed_loop_output_free(hu_allocator_t *alloc, hu_e2e_closed_loop_output_t *out) {
+    if (!alloc || !out)
+        return;
+    if (out->before_response) {
+        alloc->free(alloc->ctx, out->before_response, out->before_response_len + 1);
+        out->before_response = NULL;
+        out->before_response_len = 0;
+    }
+    if (out->after_response) {
+        alloc->free(alloc->ctx, out->after_response, out->after_response_len + 1);
+        out->after_response = NULL;
+        out->after_response_len = 0;
+    }
+}
+
+hu_error_t hu_e2e_closed_loop_run(const hu_e2e_closed_loop_input_t *in,
+                                  hu_allocator_t *alloc,
+                                  hu_e2e_closed_loop_output_t *out) {
+    if (!in || !alloc || !out || !in->provider || !in->provider->vtable || !in->trainer ||
+        !in->trainer->vtable || !in->collector || !in->reaction_events || !in->adapter_out_path ||
+        !in->adapter_id || !in->system_prompt || !in->user_message || !in->model)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    memset(out, 0, sizeof(*out));
+    int64_t t0 = hu_e2e_monotonic_ms();
+    hu_error_t err = HU_OK;
+    hu_dpo_export_t export_data = {0};
+
+    err = in->provider->vtable->chat_with_system(
+        in->provider->ctx, alloc, in->system_prompt, in->system_prompt_len, in->user_message,
+        in->user_message_len, in->model, in->model_len, in->temperature, &out->before_response,
+        &out->before_response_len);
+    if (err != HU_OK)
+        goto cleanup;
+
+    for (size_t i = 0; i < in->reaction_event_count; i++) {
+        const hu_reaction_event_t *e = &in->reaction_events[i];
+        const hu_e2e_reaction_aux_t *aux = in->reaction_aux ? &in->reaction_aux[i] : NULL;
+        if (!aux || !aux->prompt || !aux->response_chosen)
+            continue;
+        hu_reaction_handler_register_assistant_message_for_test(
+            e->channel_id, e->target_thread_id, e->target_message_ref, aux->prompt,
+            e->polarity == HU_REACTION_POSITIVE ? aux->response_chosen : aux->response_rejected);
+    }
+
+    hu_reaction_handler_set_collector(in->collector);
+    for (size_t i = 0; i < in->reaction_event_count; i++) {
+        err = hu_reaction_handler_handle_event(&in->reaction_events[i]);
+        if (err != HU_OK && err != HU_ERR_NOT_FOUND) {
+            hu_reaction_handler_set_collector(NULL);
+            goto cleanup;
+        }
+        err = HU_OK;
+    }
+    hu_reaction_handler_set_collector(NULL);
+
+    /* Supplement one-sided tapback rows with two-sided pairs for HUML DPO
+     * (toy trainer requires both chosen and rejected token sequences). */
+    if (in->reaction_aux) {
+        for (size_t i = 0; i < in->reaction_event_count; i++) {
+            const hu_e2e_reaction_aux_t *a = &in->reaction_aux[i];
+            if (!a->prompt || !a->response_chosen || !a->response_rejected)
+                continue;
+            size_t pl = strlen(a->prompt);
+            size_t cl = strlen(a->response_chosen);
+            size_t rl = strlen(a->response_rejected);
+            (void)hu_dpo_record_from_retry(in->collector, a->prompt, pl, a->response_rejected, rl,
+                                          a->response_chosen, cl);
+        }
+    }
+
+    size_t pair_count = 0;
+    (void)hu_dpo_pair_count(in->collector, &pair_count);
+    out->pairs_consumed = (double)pair_count;
+    if (pair_count < in->reaction_event_count) {
+        err = HU_ERR_INVALID_ARGUMENT;
+        goto cleanup;
+    }
+
+    err = hu_dpo_export(in->collector, alloc, &export_data);
+    if (err != HU_OK)
+        goto cleanup;
+
+    hu_rl_trainer_metrics_t metrics = {0};
+    err = in->trainer->vtable->step(in->trainer->ctx, alloc, export_data.pairs, export_data.count,
+                                    &metrics);
+    if (err != HU_OK)
+        goto cleanup;
+
+    {
+        char dir[1024];
+        snprintf(dir, sizeof(dir), "%s", in->adapter_out_path);
+        char *slash = strrchr(dir, '/');
+        if (slash) {
+            *slash = '\0';
+            (void)e2e_mkdir_p(dir);
+        }
+    }
+
+    err = in->trainer->vtable->save_adapter(in->trainer->ctx, alloc, in->adapter_out_path);
+    if (err != HU_OK)
+        goto cleanup;
+    snprintf(out->adapter_path, sizeof(out->adapter_path), "%s", in->adapter_out_path);
+
+    err = hu_provider_load_adapter(in->provider, alloc, in->adapter_out_path,
+                                   strlen(in->adapter_out_path), in->adapter_id,
+                                   strlen(in->adapter_id));
+    if (err != HU_OK)
+        goto cleanup;
+
+    err = in->provider->vtable->chat_with_system(
+        in->provider->ctx, alloc, in->system_prompt, in->system_prompt_len, in->user_message,
+        in->user_message_len, in->model, in->model_len, in->temperature, &out->after_response,
+        &out->after_response_len);
+    if (err != HU_OK)
+        goto cleanup;
+
+    out->responses_differ =
+        out->before_response && out->after_response &&
+        ((out->before_response_len != out->after_response_len) ||
+         memcmp(out->before_response, out->after_response, out->before_response_len) != 0);
+    out->elapsed_ms = hu_e2e_monotonic_ms() - t0;
+
+cleanup:
+    hu_dpo_export_free(alloc, &export_data);
+    if (err != HU_OK)
+        hu_e2e_closed_loop_output_free(alloc, out);
+    return err;
+}
+#endif /* HU_IS_TEST */

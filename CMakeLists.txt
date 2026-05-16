@@ -1488,6 +1488,7 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_CORE_SOURCES src/eval/cli_eval.c)
     list(APPEND HU_CORE_SOURCES src/agent/adapter_id.c)
     list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
+    list(APPEND HU_CORE_SOURCES src/ml/cli_demo.c)
 endif()
 
 # Deduplicate source lists to prevent parallel build races
@@ -3179,11 +3180,13 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_TEST_SOURCES tests/test_lora_training_runner_eval_gate.c)
     list(APPEND HU_TEST_SOURCES tests/test_daemon_reaction_poll_wiring.c)
     list(APPEND HU_TEST_SOURCES tests/test_lora_training_runner_proof_directory.c)
+    list(APPEND HU_TEST_SOURCES tests/test_e2e_rl_loop.c)
 endif()
 
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)
 target_link_libraries(human_tests human_core_test)
-target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/src/gateway
+target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests/include
+    ${HU_ROOT}/src/gateway
     ${HU_ROOT}/src/channels
     # Phase 4 Task 3 (RL SOTA): tests/test_grpo_loss.c needs
     # src/ml/grpo_loss_priv.h (private header — NOT exported via
@@ -3416,6 +3419,8 @@ if(HU_ENABLE_RL_FULL)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_RL_FULL=1)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_RL_FULL=1)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_tests PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/tests/_tmp")
+    target_include_directories(human_core_test PRIVATE ${HU_ROOT}/tests/include)
     target_compile_definitions(human_core PRIVATE HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=1)
     target_compile_definitions(human_core PRIVATE HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL=1)
     target_compile_definitions(human_core_test PRIVATE HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=1)

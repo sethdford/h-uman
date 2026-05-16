@@ -99,17 +99,32 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
     return hu_dpo_record_pair(s_collector, &pair);
 }
 
-#if HU_IS_TEST
-void hu_reaction_handler_register_assistant_message_for_test(
-    const char *channel, const char *thread, const char *msg_ref,
-    const char *prompt, const char *response) {
-    if (s_lookup_n >= LOOKUP_CAP) return;
+static void register_assistant_message(const char *channel, const char *thread,
+                                     const char *msg_ref, const char *prompt,
+                                     const char *response) {
+    if (!channel || !thread || !msg_ref || !prompt || !response)
+        return;
+    if (s_lookup_n >= LOOKUP_CAP)
+        return;
     snprintf(s_lookup[s_lookup_n].channel, sizeof(s_lookup[0].channel), "%s", channel);
     snprintf(s_lookup[s_lookup_n].thread, sizeof(s_lookup[0].thread), "%s", thread);
     snprintf(s_lookup[s_lookup_n].msg_ref, sizeof(s_lookup[0].msg_ref), "%s", msg_ref);
     snprintf(s_lookup[s_lookup_n].prompt, sizeof(s_lookup[0].prompt), "%s", prompt);
     snprintf(s_lookup[s_lookup_n].response, sizeof(s_lookup[0].response), "%s", response);
     s_lookup_n++;
+}
+
+void hu_reaction_handler_register_assistant_message_for_production(
+    const char *channel, const char *thread, const char *msg_ref,
+    const char *prompt, const char *response) {
+    register_assistant_message(channel, thread, msg_ref, prompt, response);
+}
+
+#if HU_IS_TEST
+void hu_reaction_handler_register_assistant_message_for_test(
+    const char *channel, const char *thread, const char *msg_ref,
+    const char *prompt, const char *response) {
+    register_assistant_message(channel, thread, msg_ref, prompt, response);
 }
 void hu_reaction_handler_reset_for_test(void) {
     s_lookup_n = 0;

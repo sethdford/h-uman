@@ -251,6 +251,90 @@ hu_error_t hu_dpo_export_jsonl(hu_dpo_collector_t *collector,
 #endif
 }
 
+hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
+                         hu_dpo_export_t *out) {
+    if (!collector || !alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    out->pairs = NULL;
+    out->count = 0;
+#ifdef HU_ENABLE_SQLITE
+    if (!collector->db)
+        return HU_OK;
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(collector->db,
+        "SELECT prompt, chosen, rejected, margin, source, timestamp "
+        "FROM dpo_pairs ORDER BY id",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+
+    size_t cap = collector->pair_count > 0 ? collector->pair_count : 8;
+    hu_preference_pair_t *pairs =
+        alloc->alloc(alloc->ctx, cap * sizeof(hu_preference_pair_t));
+    if (!pairs) {
+        sqlite3_finalize(stmt);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(pairs, 0, cap * sizeof(hu_preference_pair_t));
+
+    size_t n = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (n == cap) {
+            size_t old_cap = cap;
+            cap *= 2;
+            hu_preference_pair_t *grow =
+                alloc->alloc(alloc->ctx, cap * sizeof(hu_preference_pair_t));
+            if (!grow) {
+                alloc->free(alloc->ctx, pairs, old_cap * sizeof(hu_preference_pair_t));
+                sqlite3_finalize(stmt);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memset(grow, 0, cap * sizeof(hu_preference_pair_t));
+            memcpy(grow, pairs, n * sizeof(hu_preference_pair_t));
+            alloc->free(alloc->ctx, pairs, old_cap * sizeof(hu_preference_pair_t));
+            pairs = grow;
+        }
+        hu_preference_pair_t *p = &pairs[n];
+        const char *prompt = (const char *)sqlite3_column_text(stmt, 0);
+        const char *chosen = (const char *)sqlite3_column_text(stmt, 1);
+        const char *rejected = (const char *)sqlite3_column_text(stmt, 2);
+        const char *source = (const char *)sqlite3_column_text(stmt, 4);
+        if (prompt) {
+            size_t L = strnlen(prompt, sizeof(p->prompt) - 1);
+            memcpy(p->prompt, prompt, L);
+            p->prompt_len = L;
+        }
+        if (chosen) {
+            size_t L = strnlen(chosen, sizeof(p->chosen) - 1);
+            memcpy(p->chosen, chosen, L);
+            p->chosen_len = L;
+        }
+        if (rejected) {
+            size_t L = strnlen(rejected, sizeof(p->rejected) - 1);
+            memcpy(p->rejected, rejected, L);
+            p->rejected_len = L;
+        }
+        p->margin = sqlite3_column_double(stmt, 3);
+        p->timestamp = sqlite3_column_int64(stmt, 5);
+        if (source) {
+            size_t L = strnlen(source, sizeof(p->source) - 1);
+            memcpy(p->source, source, L);
+            p->source_len = L;
+        }
+        n++;
+    }
+    sqlite3_finalize(stmt);
+    out->pairs = pairs;
+    out->count = n;
+    return HU_OK;
+#else
+    (void)collector;
+    (void)alloc;
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+}
+
 hu_error_t hu_dpo_get_best_examples(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
                                     size_t max_examples, char **out_prompt_fragment,
                                     size_t *out_len) {
