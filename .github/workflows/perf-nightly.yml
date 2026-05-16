@@ -173,7 +173,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-${{ steps.validate.outputs.tag }}
           path: ${{ steps.validate.outputs.out }}
@@ -181,7 +181,7 @@ jobs:
 
       - name: Upload compare report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-compare-${{ steps.validate.outputs.tag }}
           path: /tmp/bench-compare.txt
@@ -191,7 +191,7 @@ jobs:
         if: steps.compare.outputs.regressed == 'true'
         env:
           BENCH_TAG: ${{ steps.validate.outputs.tag }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
