@@ -613,6 +613,13 @@ void run_markdown_loader_tests(void);
  * competitive harness; gated so default release/dev builds
  * (HU_ENABLE_RL_FULL=OFF) do not link the suite. */
 extern void run_bootstrap_ci_tests(void);
+/* Phase 5 Task 3 (RL SOTA): hu_eval_judge_external_t vtable + canned
+ * factory — pairwise external-LLM judge bridge for the eval gate
+ * (Task 5) and competitive harness (Task 9).  Pins canned cycle
+ * determinism, verdict round-trip through deep copy, zero-verdicts
+ * rejection, Apple FM (Task 7) + Gemini Nano (Task 8) stub
+ * HU_ERR_NOT_SUPPORTED, ASan leak-free deinit. */
+extern void run_eval_judge_external_tests(void);
 #endif
 
 static void print_usage(const char *prog) {
@@ -1229,6 +1236,8 @@ int main(int argc, char **argv) {
      * the RL-full gate is ON, so default release/dev builds are byte-
      * identical to the pre-Phase-5 test surface. */
     run_bootstrap_ci_tests();
+    /* Phase 5 Task 3 (RL SOTA): external-LLM judge vtable + canned. */
+    run_eval_judge_external_tests();
 #endif
 
     HU_TEST_REPORT();
