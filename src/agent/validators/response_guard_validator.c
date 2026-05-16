@@ -32,6 +32,8 @@ static hu_error_t response_guard_validate(void *ctx, hu_allocator_t *alloc,
         out->text_owned = true;
         return HU_OK;
     case HU_GUARD_REJECT: {
+        if (new_text)
+            alloc->free(alloc->ctx, new_text, new_len + 1);
         const char *msg = "response_guard rejected response (harmony/thinking/degen/bullet leak)";
         size_t mlen = strlen(msg);
         char *reason = (char *)alloc->alloc(alloc->ctx, mlen + 1);

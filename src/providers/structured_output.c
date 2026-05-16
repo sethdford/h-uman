@@ -81,12 +81,15 @@ hu_error_t hu_structured_output_extract_reply(hu_allocator_t *alloc, const char 
         if (reason_val && reason_val->type == HU_JSON_STRING) {
             size_t rslen = reason_val->data.string.len;
             char *rscopy = (char *)alloc->alloc(alloc->ctx, rslen + 1);
-            if (rscopy) {
-                memcpy(rscopy, reason_val->data.string.ptr, rslen);
-                rscopy[rslen] = '\0';
-                *out_reasoning = rscopy;
-                *out_reasoning_len = rslen;
+            if (!rscopy) {
+                alloc->free(alloc->ctx, rcopy, rlen + 1);
+                hu_json_free(alloc, root);
+                return HU_ERR_OUT_OF_MEMORY;
             }
+            memcpy(rscopy, reason_val->data.string.ptr, rslen);
+            rscopy[rslen] = '\0';
+            *out_reasoning = rscopy;
+            *out_reasoning_len = rslen;
         }
     }
 

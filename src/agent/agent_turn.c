@@ -5656,16 +5656,63 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     &retry_len, &retry_report);
                                 if (retry_err == HU_OK && retry_content && retry_len > 0) {
                                     hu_agent_m3_on_provider_success(agent);
-                                    hu_log_warn("agent_turn", agent->observer,
-                                                "validator chain RECOVERED: retry passed (len=%zu, "
-                                                "stripped=%zu)",
-                                                retry_len, retry_report.bytes_stripped);
-                                    if (ab_owned)
-                                        agent->alloc->free(agent->alloc->ctx, (void *)final_content,
-                                                           final_len + 1);
-                                    final_content = retry_content;
-                                    final_len = retry_len;
-                                    ab_owned = true;
+                                    /* Re-validate the retry output through the chain so a
+                                     * regenerated CoT or helper-closer cannot escape (Fix 3). */
+                                    hu_chain_result_t retry_cr;
+                                    memset(&retry_cr, 0, sizeof(retry_cr));
+                                    hu_validator_context_t retry_vctx = {0};
+                                    retry_vctx.persona_name = persona_name;
+                                    retry_vctx.persona_name_len = persona_name_len;
+                                    hu_error_t recheck_err = hu_output_validator_chain_execute(
+                                        out_chain, agent->alloc, &retry_vctx, retry_content,
+                                        retry_len, &retry_cr);
+                                    if (recheck_err == HU_OK &&
+                                        retry_cr.final_decision == HU_VALIDATOR_REJECT) {
+                                        hu_log_error(
+                                            "agent_turn", agent->observer,
+                                            "validator chain retry REJECTED by chain (via %s) — "
+                                            "suppressing send",
+                                            retry_cr.deciding_validator_name
+                                                ? retry_cr.deciding_validator_name
+                                                : "unknown");
+                                        hu_chain_result_free(agent->alloc, &retry_cr);
+                                        agent->alloc->free(agent->alloc->ctx, retry_content,
+                                                           retry_len + 1);
+                                        if (ab_owned)
+                                            agent->alloc->free(agent->alloc->ctx,
+                                                               (void *)final_content,
+                                                               final_len + 1);
+                                        final_content = NULL;
+                                        final_len = 0;
+                                        ab_owned = false;
+                                    } else {
+                                        size_t accepted_len =
+                                            (recheck_err == HU_OK && retry_cr.final_text_owned &&
+                                             retry_cr.final_text)
+                                                ? retry_cr.final_text_len
+                                                : retry_len;
+                                        hu_log_warn("agent_turn", agent->observer,
+                                                    "validator chain RECOVERED: retry passed chain "
+                                                    "(len=%zu, stripped=%zu)",
+                                                    accepted_len, retry_report.bytes_stripped);
+                                        if (ab_owned)
+                                            agent->alloc->free(agent->alloc->ctx,
+                                                               (void *)final_content,
+                                                               final_len + 1);
+                                        if (recheck_err == HU_OK && retry_cr.final_text_owned &&
+                                            retry_cr.final_text) {
+                                            final_content = retry_cr.final_text;
+                                            final_len = retry_cr.final_text_len;
+                                            retry_cr.final_text_owned = false;
+                                            agent->alloc->free(agent->alloc->ctx, retry_content,
+                                                               retry_len + 1);
+                                        } else {
+                                            final_content = retry_content;
+                                            final_len = retry_len;
+                                        }
+                                        ab_owned = true;
+                                        hu_chain_result_free(agent->alloc, &retry_cr);
+                                    }
                                 } else {
                                     hu_log_error(
                                         "agent_turn", agent->observer,
