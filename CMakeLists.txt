@@ -956,6 +956,7 @@ list(APPEND HU_CORE_SOURCES
     src/a2a.c
     src/eval.c
     src/eval/consistency.c
+    src/eval/persona_fidelity.c
     src/evaluation/evaluation.c
     src/evaluation/evaluation_dataset_loader.c
     src/evaluation/evaluation_locomo.c
@@ -2455,6 +2456,7 @@ set(HU_TEST_SOURCES
     tests/test_canvas_persist.c
     tests/test_canvas_tool.c
     tests/test_consistency.c
+    tests/test_persona_fidelity.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
