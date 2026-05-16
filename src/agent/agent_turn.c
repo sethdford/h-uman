@@ -5944,13 +5944,20 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     }
                 }
 
-                /* Store in semantic response cache for future lookups */
-                if (agent->infra.response_cache && final_len > 0) {
+                /* Store in semantic response cache for future lookups.
+                 * HIGH-3: must use *response_out (live, strdup'd at line 5705
+                 * and possibly mutated by self_rag) — final_content was freed
+                 * at line 5708 when ab_owned, so passing it here was a
+                 * use-after-free. *response_out + response_effective_len is
+                 * also semantically more correct: it's what the caller
+                 * actually receives, accounting for any post-validation
+                 * self_rag rewrites. */
+                if (agent->infra.response_cache && *response_out && response_effective_len > 0) {
                     const char *mname = agent->model_name ? agent->model_name : "";
                     size_t mname_len = agent->model_name ? agent->model_name_len : 0;
                     hu_semantic_cache_put(agent->infra.response_cache, agent->alloc, msg, msg_len,
-                                          mname, mname_len, final_content, final_len, 0, msg,
-                                          msg_len);
+                                          mname, mname_len, *response_out, response_effective_len,
+                                          0, msg, msg_len);
                 }
 
                 /* Speculative: predict follow-ups and pre-cache them */
