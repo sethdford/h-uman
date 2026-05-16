@@ -19,6 +19,15 @@ Usage:
 
 Prerequisites:
   pip install mlx-lm (already installed if mlx-server.py works)
+  pip install "mlx-lm-lora>=2.1.0,<3"  # required for the DPO preference pass
+
+DPO note:
+  Stock `mlx_lm` does NOT support DPO (no `--fine-tune-type dpo`; PR #794 closed,
+  PR #417 still open). The third-party fork `mlx-lm-lora` is a drop-in superset
+  that adds DPO/ORPO/CPO/KTO/GRPO behind `python3 -m mlx_lm_lora.train`. We pin
+  `mlx-lm-lora>=2.1.0,<3` and document the upgrade path: if upstream `mlx_lm`
+  lands native DPO, migrate back to stock by swapping the module and flag spelling
+  (`--train-mode dpo` -> `--fine-tune-type dpo`).
 """
 from __future__ import annotations
 
@@ -232,27 +241,59 @@ def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
     return result.returncode
 
 
-def find_dpo_data(data_dir: Path) -> Path | None:
-    """Look for DPO pairs in standard locations."""
+def find_dpo_data(data_dir: Path, from_corrections: bool = False) -> Path | None:
+    """Look for DPO pairs in standard locations.
+
+    Search order (first match wins):
+      1. If `from_corrections=True`: ~/.human/dpo/pairs.jsonl (LOCKED path —
+         this is where the US-7.2 outbound-corrections miner writes its
+         deduplicated, PII-redacted preference pairs).
+      2. ~/.human/dpo/pairs.jsonl is also probed unconditionally so a
+         miner-produced file is picked up even without the flag.
+      3. <data_dir>/dpo/pairs.jsonl
+      4. <data_dir>/dpo_pairs.jsonl
+      5. <data_dir>.parent/dpo/pairs.jsonl
+      6. Newest <repo>/convo-training*/dpo_pairs.db
+    """
     repo_root = Path(__file__).resolve().parent.parent
-    candidates = [
+    home_corrections = Path.home() / ".human" / "dpo" / "pairs.jsonl"
+
+    candidates: list[Path] = []
+    if from_corrections:
+        # Cross-story lock with US-7.2: the miner writes here.
+        candidates.append(home_corrections)
+    candidates.extend([
+        home_corrections,
         data_dir / "dpo" / "pairs.jsonl",
         data_dir / "dpo_pairs.jsonl",
         data_dir.parent / "dpo" / "pairs.jsonl",
-    ]
+    ])
     # Newest convo-training directory first (most recent DPO pairs win)
     for pattern in sorted(repo_root.glob("convo-training*/dpo_pairs.db"), reverse=True):
         candidates.append(pattern)
 
+    searched: list[str] = []
     for c in candidates:
+        searched.append(str(c))
         if c.exists():
             print(f"  DPO data found: {c}")
             return c
+    if from_corrections:
+        # Make the failure observable when the user explicitly asked for the
+        # corrections path — they should know which paths we probed.
+        print(f"  --from-corrections: no DPO file found. Searched:")
+        for s in searched:
+            print(f"    - {s}")
     return None
 
 
 def prepare_dpo_from_db(db_path: Path, output_dir: Path) -> Path | None:
-    """Convert DPO pairs from SQLite DB to JSONL format for mlx_lm DPO."""
+    """Convert DPO pairs from SQLite DB to JSONL format for mlx-lm-lora DPO.
+
+    Emits `{prompt, chosen, rejected}` lines into train.jsonl and valid.jsonl
+    inside `output_dir`. 90/10 split; if too few rows for a true split, the
+    valid file mirrors the first row so mlx-lm-lora's data loader is happy.
+    """
     import sqlite3
     try:
         conn = sqlite3.connect(str(db_path))
@@ -262,6 +303,7 @@ def prepare_dpo_from_db(db_path: Path, output_dir: Path) -> Path | None:
         print(f"  Could not read DPO DB {db_path}: {e}")
         return None
 
+    rows = [(p, c, r, m) for (p, c, r, m) in rows if p and c and r]
     if not rows:
         return None
 
@@ -270,14 +312,17 @@ def prepare_dpo_from_db(db_path: Path, output_dir: Path) -> Path | None:
     valid_path = output_dir / "valid.jsonl"
 
     import random
+    if os.environ.get("HU_DPO_DETERMINISTIC") == "1":
+        random.seed(0)
     random.shuffle(rows)
-    split = int(len(rows) * 0.9)
+    split = max(1, int(len(rows) * 0.9))
 
-    for path, data in [(train_path, rows[:split]), (valid_path, rows[split:])]:
+    train_rows = rows[:split]
+    valid_rows = rows[split:] if len(rows) > split else rows[:1]
+
+    for path, data in [(train_path, train_rows), (valid_path, valid_rows)]:
         with open(path, "w") as f:
-            for prompt, chosen, rejected, margin in data:
-                if not prompt or not chosen or not rejected:
-                    continue
+            for prompt, chosen, rejected, _margin in data:
                 entry = {
                     "prompt": prompt,
                     "chosen": chosen,
@@ -285,105 +330,149 @@ def prepare_dpo_from_db(db_path: Path, output_dir: Path) -> Path | None:
                 }
                 f.write(json.dumps(entry) + "\n")
 
-    print(f"  DPO data: {len(rows)} pairs ({split} train, {len(rows)-split} valid)")
+    print(f"  DPO data: {len(rows)} pairs ({len(train_rows)} train, {len(valid_rows)} valid)")
+    return output_dir
+
+
+def _prepare_dpo_from_jsonl(jsonl_path: Path, output_dir: Path) -> Path | None:
+    """Validate and stage a `{prompt, chosen, rejected}` JSONL into output_dir.
+
+    Required keys per line: prompt, chosen, rejected. Optional: system.
+    Writes `train.jsonl` (and an empty-but-valid `valid.jsonl` if needed) so
+    mlx-lm-lora's data loader is satisfied.
+    """
+    rows: list[dict] = []
+    try:
+        with open(jsonl_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not all(k in obj and obj[k] for k in ("prompt", "chosen", "rejected")):
+                    continue
+                rows.append(obj)
+    except OSError as e:
+        print(f"  Could not read DPO JSONL {jsonl_path}: {e}")
+        return None
+
+    if not rows:
+        print(f"  DPO JSONL {jsonl_path} had no valid {{prompt, chosen, rejected}} rows.")
+        return None
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    import random
+    if os.environ.get("HU_DPO_DETERMINISTIC") == "1":
+        random.seed(0)
+    random.shuffle(rows)
+    split = max(1, int(len(rows) * 0.9))
+
+    train_rows = rows[:split]
+    valid_rows = rows[split:] if len(rows) > split else rows[:1]
+
+    for path, data in [(output_dir / "train.jsonl", train_rows),
+                       (output_dir / "valid.jsonl", valid_rows)]:
+        with open(path, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+    print(f"  DPO data: {len(rows)} pairs ({len(train_rows)} train, {len(valid_rows)} valid)")
     return output_dir
 
 
 def run_dpo(args, adapter_dir: Path) -> int:
-    """Run a preference-refinement LoRA pass using chosen responses from DPO pairs.
+    """Run a genuine DPO preference pass via mlx-lm-lora.
 
-    mlx_lm does not support native DPO training.  Instead we convert DPO
-    pairs into chat-format SFT examples (system + prompt -> chosen response)
-    and run additional LoRA iterations at a lower learning rate to sharpen
-    the persona toward the preferred outputs.
+    Replaces the legacy SFT-on-chosen-only path. Stock `mlx_lm` does not
+    support DPO (see module docstring). We shell out to:
+
+        python3 -m mlx_lm_lora.train --train --train-mode dpo --train-type lora
+            --reference-model-path <base-model> --resume-adapter-file <sft>
+            --data <dir-with-{train,valid}.jsonl-of-{prompt,chosen,rejected}>
+            --beta 0.1 --dpo-cpo-loss-type sigmoid ...
+
+    Non-fatal if no preference data is found (AC-7.1.3): the SFT adapter
+    remains valid; we print a warning and return 0.
     """
     data_dir = Path(args.data)
+    from_corrections = bool(getattr(args, "from_corrections", False))
 
-    dpo_source = find_dpo_data(data_dir)
+    dpo_source = find_dpo_data(data_dir, from_corrections=from_corrections)
     if dpo_source is None:
-        print("  No DPO data found, skipping preference pass.")
+        # AC-7.1.3: clearly-labeled warning, non-fatal exit, SFT adapter retained.
+        print(
+            "  [dpo] no preference data found at any candidate path; "
+            "skipping (SFT adapter retained)"
+        )
         return 0
 
     dpo_data_dir = data_dir / "dpo_prepared"
 
-    if str(dpo_source).endswith(".db"):
-        import sqlite3
-        try:
-            conn = sqlite3.connect(str(dpo_source))
-            rows = conn.execute("SELECT prompt, chosen FROM dpo_pairs").fetchall()
-            conn.close()
-        except Exception as e:
-            print(f"  Could not read DPO DB: {e}")
+    src = str(dpo_source)
+    if src.endswith(".db"):
+        # SQLite source: prepare_dpo_from_db emits the correct
+        # {prompt, chosen, rejected} JSONL format with a 90/10 split.
+        prepared = prepare_dpo_from_db(dpo_source, dpo_data_dir)
+        if prepared is None:
+            print("  [dpo] DPO DB had no valid rows; skipping (SFT adapter retained)")
             return 0
-
-        if not rows:
-            print("  DPO DB was empty, skipping preference pass.")
+    elif src.endswith(".jsonl"):
+        prepared = _prepare_dpo_from_jsonl(dpo_source, dpo_data_dir)
+        if prepared is None:
+            print("  [dpo] DPO JSONL had no valid rows; skipping (SFT adapter retained)")
             return 0
-
-        dpo_data_dir.mkdir(parents=True, exist_ok=True)
-        import random
-        random.shuffle(rows)
-        split = max(1, int(len(rows) * 0.9))
-
-        sys_prompt = (
-            "You are Seth Ford, 45, texting on iMessage. Chief Architect at Vanguard. "
-            "Style: casual, warm, direct. Short messages. Lowercase. Abbreviate."
-        )
-
-        for path, data in [(dpo_data_dir / "train.jsonl", rows[:split]),
-                           (dpo_data_dir / "valid.jsonl", rows[split:])]:
-            with open(path, "w") as f:
-                for prompt, chosen in data:
-                    if not prompt or not chosen:
-                        continue
-                    entry = {"messages": [
-                        {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": prompt.strip()},
-                        {"role": "assistant", "content": chosen.strip()},
-                    ]}
-                    f.write(json.dumps(entry) + "\n")
-
-        print(f"  DPO->SFT data: {len(rows)} pairs ({split} train, {len(rows)-split} valid)")
-
-    elif str(dpo_source).endswith(".jsonl"):
-        dpo_data_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(dpo_source, dpo_data_dir / "train.jsonl")
     else:
-        print(f"  Unknown DPO format: {dpo_source}")
+        print(f"  [dpo] unknown DPO format: {dpo_source}; skipping")
         return 0
 
     dpo_iters = max(50, args.iters // 4)
     dpo_lr = args.learning_rate * 0.1
     model = resolve_model(args)
 
+    # mlx-lm-lora CLI. The flag spelling differs from stock mlx_lm:
+    #   --train-mode dpo       (selects the DPO loss head)
+    #   --train-type lora      (the fork's renamed --fine-tune-type)
+    # --reference-model-path MUST be set explicitly to the base model.
+    # If omitted, mlx-lm-lora defaults reference == policy after
+    # --resume-adapter-file, which produces a near-zero gradient on
+    # step 1 (design §5.3).
     cmd = [
-        sys.executable, "-m", "mlx_lm", "lora",
+        sys.executable, "-m", "mlx_lm_lora.train",
         "--model", model,
         "--train",
+        "--train-mode", "dpo",
+        "--train-type", "lora",
         "--data", str(dpo_data_dir),
-        "--fine-tune-type", "lora",
         "--adapter-path", str(adapter_dir),
         "--resume-adapter-file", str(adapter_dir / "adapters.safetensors"),
+        "--reference-model-path", model,
+        "--beta", "0.1",
+        "--dpo-cpo-loss-type", "sigmoid",
         "--iters", str(dpo_iters),
         "--batch-size", "1",
         "--learning-rate", str(dpo_lr),
         "--num-layers", str(args.num_layers),
         "--max-seq-length", str(args.max_seq_length),
         "--grad-checkpoint",
-        "--mask-prompt",
     ]
 
-    print(f"\n  Running preference SFT: {dpo_iters} iters, LR={dpo_lr}")
-    print(f"  (Sharpening persona with chosen responses from DPO pairs)\n")
+    if getattr(args, "mask_prompt", False):
+        cmd.append("--mask-prompt")
+
+    print(f"\n  Running DPO: {dpo_iters} iters, LR={dpo_lr}, beta=0.1 (sigmoid)")
+    print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)\n")
 
     t0 = time.time()
     result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent))
     elapsed = time.time() - t0
 
     if result.returncode == 0:
-        print(f"  Preference SFT complete! ({elapsed/60:.1f} minutes)")
+        print(f"  DPO complete! ({elapsed/60:.1f} minutes)")
     else:
-        print(f"  Preference SFT failed (exit code {result.returncode}, {elapsed:.0f}s)")
+        print(f"  DPO failed (exit code {result.returncode}, {elapsed:.0f}s)")
         print(f"  Primary SFT adapter is still valid — non-fatal.")
 
     return 0
@@ -436,6 +525,7 @@ def run_speculative_draft_training(args):
         resume=False,
         dpo=args.dpo,
         sft_only=args.sft_only,
+        from_corrections=getattr(args, "from_corrections", False),
         no_version=True,
         no_restart_server=True,
     )
@@ -723,6 +813,7 @@ def run_train_all(args):
             resume=False,
             dpo=args.dpo,
             sft_only=args.sft_only,
+            from_corrections=getattr(args, "from_corrections", False),
             no_version=False,
             no_restart_server=True,
             speculative_draft=False,
@@ -793,7 +884,14 @@ Examples:
     parser.add_argument("--no-mask-prompt", action="store_false", dest="mask_prompt")
     parser.add_argument("--dpo", action="store_true", default=True,
                         help="Run DPO pass after SFT if DPO data exists (default: true)")
-    parser.add_argument("--sft-only", action="store_true", help="Skip DPO even if data exists")
+    parser.add_argument("--no-dpo", action="store_false", dest="dpo",
+                        help="Disable the DPO pass entirely")
+    parser.add_argument("--sft-only", action="store_true",
+                        help="Skip DPO even if data exists (alias for --no-dpo intent; "
+                             "stronger because it also short-circuits the speculative-draft DPO pass)")
+    parser.add_argument("--from-corrections", action="store_true",
+                        help="Load DPO pairs from ~/.human/dpo/pairs.jsonl (LOCKED path; "
+                             "produced by the outbound-corrections miner — US-7.2)")
     parser.add_argument("--no-version", action="store_true", help="Don't version the adapter")
     parser.add_argument("--resume", action="store_true", help="Resume from existing adapter")
     parser.add_argument("--no-restart-server", action="store_true", help="Don't restart MLX server after training")
