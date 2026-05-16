@@ -1002,13 +1002,25 @@ Examples:
 
     # Sprint 7 / US-7.4: parse --target-modules CSV into list[str] exactly
     # once, here in main(), so run_sft/run_dpo never re-parse and never see
-    # a None or a string. Default to QKVO.
-    if args.target_modules:
-        args.target_modules = [
-            s.strip() for s in args.target_modules.split(",") if s.strip()
-        ]
-    else:
+    # a None or a string. Default to QKVO when the flag is absent.
+    if args.target_modules is None:
         args.target_modules = list(DEFAULT_TARGET_MODULES)
+    else:
+        # Operator passed --target-modules explicitly. Parse and reject an
+        # empty result outright: if the user typed `--target-modules ,` or
+        # `--target-modules " , "` the parsed list collapses to [], which
+        # would silently fall back to QKVO inside _build_lora_parameters_json
+        # via `or DEFAULT_TARGET_MODULES`. That fallback is fine as an
+        # internal guard for synthetic Namespaces (run_train_all,
+        # run_speculative_draft_training pass target_modules=None) but it
+        # MUST NOT mask an operator typo on the CLI — fail loudly (HIGH-1).
+        parsed = [s.strip() for s in args.target_modules.split(",") if s.strip()]
+        if not parsed:
+            sys.exit(
+                "ERROR: --target-modules produced an empty list after parsing; "
+                "check for stray commas"
+            )
+        args.target_modules = parsed
 
     if args.train_all:
         sys.exit(run_train_all(args))

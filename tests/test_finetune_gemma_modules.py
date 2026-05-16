@@ -247,6 +247,49 @@ def test_dpo_cmd_also_carries_lora_parameters(tmp_path, monkeypatch):
 
 
 # ────────────────────────────────────────────────────────────────────────
+# HIGH-1 fix — reject empty --target-modules CSV explicitly
+# ────────────────────────────────────────────────────────────────────────
+def test_empty_target_modules_csv_errors_out(tmp_path):
+    """HIGH-1 fix: a stray-comma CSV (e.g. `--target-modules ,` or
+    `--target-modules " , "`) collapses to [] after parsing. main() must
+    exit non-zero with a clear error rather than silently falling back to
+    QKVO via the helper's internal `or DEFAULT_TARGET_MODULES` guard.
+
+    The internal guard stays in place for synthetic Namespaces built by
+    run_train_all / run_speculative_draft_training (which pass
+    target_modules=None on purpose); only the CLI surface is hardened.
+    """
+    import subprocess as _sp
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    # Materialise a minimal train.jsonl so the script does not bail on
+    # missing-data before reaching our validation. (Defensive — main()
+    # actually validates target_modules before invoking run_finetune,
+    # but pinning the test to ONLY exercise the CSV-empty path keeps
+    # the assertion specific.)
+    (data_dir / "train.jsonl").write_text('{"messages": []}\n')
+
+    for bad_csv in (",", " , ", ",,,"):
+        proc = _sp.run(
+            ["python3", str(_SCRIPT),
+             "--target", "31b",
+             "--data", str(data_dir),
+             "--target-modules", bad_csv,
+             "--iters", "1"],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert proc.returncode != 0, (
+            f"expected non-zero exit for --target-modules={bad_csv!r}; "
+            f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+        )
+        combined = proc.stdout + proc.stderr
+        assert "empty list" in combined, (
+            f"expected 'empty list' in error for {bad_csv!r}; got: {combined!r}"
+        )
+
+
+# ────────────────────────────────────────────────────────────────────────
 # Regression guard — --lora-parameters is a SINGLE argv slot (design risk #3)
 # ────────────────────────────────────────────────────────────────────────
 def test_lora_parameters_is_single_argv_slot(tmp_path):

@@ -112,11 +112,45 @@ fi
 
 if awk -v d="$DELTA" -v f="$FLOOR" 'BEGIN { exit !(d+0 >= f+0) }'; then
   echo "[lora-ab-gate] PASS: fixture delta=$DELTA >= floor=$FLOOR"
+  VERDICT="pass"
 else
   echo "[lora-ab-gate] FAIL: fixture delta=$DELTA < floor=$FLOOR" >&2
   printf '%s\n' "$OUTPUT" >&2
   exit 1
 fi
+
+# ── Sprint 7 / US-7.4 AC-7.4.3 — emit JSON measurement line ──────────
+# AC-7.4.3 requires the script's output to carry both `delta` and
+# `size_mb` keys so a downstream consumer (US-7.5 nightly cron / lora-ab
+# JSON consumer) can read the result without scraping the plain-text
+# PASS line above. This is a MEASUREMENT, not a gate — exit code is
+# unchanged from the floor check.
+#
+# size_mb resolution:
+#   - LORA_AB_ADAPTER_PATH env var overrides everything (US-7.5 will
+#     pass the candidate adapter path here once it materialises real
+#     adapters; today, that path is unset and we emit null).
+#   - Otherwise the fixture-only invocation has no adapter on disk, so
+#     `size_mb` is JSON `null`. The KEY is still present per AC.
+SIZE_MB="null"
+if [ -n "${LORA_AB_ADAPTER_PATH:-}" ] && [ -e "$LORA_AB_ADAPTER_PATH" ]; then
+  # Sum bytes under the path (file or dir) and convert to MB via awk
+  # so we get a float, not the integer du -m would emit. wc -c works
+  # for both files and the contents of dirs after `find -type f`.
+  if [ -d "$LORA_AB_ADAPTER_PATH" ]; then
+    BYTES="$(find "$LORA_AB_ADAPTER_PATH" -type f -exec wc -c {} + 2>/dev/null \
+      | awk '/total/ {t=$1} END {print (t==""?0:t)}')"
+  else
+    BYTES="$(wc -c < "$LORA_AB_ADAPTER_PATH" 2>/dev/null || echo 0)"
+  fi
+  SIZE_MB="$(awk -v b="$BYTES" 'BEGIN { printf("%.3f", b/1048576.0) }')"
+fi
+
+# Emit the JSON measurement line on its own line so jq (and naive
+# grep/awk readers) can pick it out. The leading sentinel `[lora-ab-gate-json]`
+# is omitted from the JSON itself so the line IS valid JSON.
+printf '{"delta": %s, "size_mb": %s, "verdict": "%s"}\n' \
+  "$DELTA" "$SIZE_MB" "$VERDICT"
 
 # ── US-7.6 judgment-fidelity (INS-A) — optional, dormant in sprint 7 ──
 if [ "$JUDGMENT" -eq 1 ]; then
