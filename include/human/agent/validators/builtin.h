@@ -9,6 +9,7 @@
 #include "human/agent/output_validator_chain.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/observer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +58,41 @@ hu_error_t hu_validators_build_default_outbound_chain(hu_allocator_t *alloc,
                                                       const char *persona_name,
                                                       size_t persona_name_len,
                                                       hu_output_validator_chain_t **out);
+
+/* Outcome of hu_validator_chain_apply_default_in_place. */
+typedef enum {
+    HU_CHAIN_APPLY_KEPT,       /* PASS or rewrite-equal-to-input — buf unchanged. */
+    HU_CHAIN_APPLY_REWROTE,    /* Chain rewrote — buf overwritten in place,
+                                  *len_inout updated, NUL-terminated. Truncated
+                                  to cap-1 if rewrite was oversized. */
+    HU_CHAIN_APPLY_SUPPRESSED, /* REJECT — buf[0]='\0', *len_inout=0. Logged at
+                                  WARN with the supplied log_tag. */
+    HU_CHAIN_APPLY_SKIPPED,    /* Chain machinery failed (build or execute) —
+                                  buf unchanged. Logged at ERROR. Callers that
+                                  need deny-by-default should treat this the
+                                  same as SUPPRESSED; callers with a defensive
+                                  fallback (e.g. a strip pass) can keep the buf. */
+} hu_chain_apply_outcome_t;
+
+/* Build the default outbound chain, run it against (buf, *len_inout), and
+ * apply the result IN PLACE. Consolidates the six-step "build → execute →
+ * branch on decision → free → destroy" dance that was duplicated across
+ * src/daemon.c (×5), src/daemon_cron.c (×1), and other in-place callers.
+ *
+ * Args:
+ *   alloc, observer       — chain build + telemetry. observer may be NULL.
+ *   persona_name/len      — passed into hu_validator_context_t. May be NULL/0.
+ *   log_tag               — human-readable tag for log messages (e.g.
+ *                           "scheduled send", "cron send"). Required, non-NULL.
+ *   buf                   — in/out buffer.
+ *   len_inout             — current length, updated in place.
+ *   cap                   — buffer capacity in bytes (must be > 0; rewrites
+ *                           are truncated to cap-1 to preserve the NUL).
+ *
+ * Never returns an error code — failures result in HU_CHAIN_APPLY_SKIPPED. */
+hu_chain_apply_outcome_t hu_validator_chain_apply_default_in_place(
+    hu_allocator_t *alloc, hu_observer_t *observer, const char *persona_name,
+    size_t persona_name_len, const char *log_tag, char *buf, size_t *len_inout, size_t cap);
 
 #ifdef __cplusplus
 }
