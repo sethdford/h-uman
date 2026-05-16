@@ -100,23 +100,25 @@ static void test_eval_judge_canned_handles_zero_verdicts_gracefully(void) {
     HU_ASSERT_NULL(judge.ctx);
 }
 
+#if !defined(HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL)
 static void test_eval_judge_apple_fm_returns_not_supported_until_task_7(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_eval_judge_external_t judge = {0};
-    HU_ASSERT_EQ(hu_eval_judge_create_apple_fm(&alloc, &judge),
-                 HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(hu_eval_judge_create_apple_fm(&alloc, &judge), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(judge.vtable);
     HU_ASSERT_NULL(judge.ctx);
 }
+#endif
 
+#if !defined(HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL)
 static void test_eval_judge_gemini_nano_returns_not_supported_until_task_8(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_eval_judge_external_t judge = {0};
-    HU_ASSERT_EQ(hu_eval_judge_create_gemini_nano(&alloc, &judge),
-                 HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(hu_eval_judge_create_gemini_nano(&alloc, &judge), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(judge.vtable);
     HU_ASSERT_NULL(judge.ctx);
 }
+#endif
 
 static void test_eval_judge_canned_deinit_does_not_leak(void) {
     /* Mix NULL and non-NULL rationales to exercise both branches in
@@ -154,7 +156,11 @@ void run_eval_judge_external_tests(void) {
     HU_RUN_TEST(test_eval_judge_canned_cycles_through_verdicts);
     HU_RUN_TEST(test_eval_judge_canned_returns_verdict_struct_unchanged);
     HU_RUN_TEST(test_eval_judge_canned_handles_zero_verdicts_gracefully);
+#if !defined(HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL)
     HU_RUN_TEST(test_eval_judge_apple_fm_returns_not_supported_until_task_7);
+#endif
+#if !defined(HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL)
     HU_RUN_TEST(test_eval_judge_gemini_nano_returns_not_supported_until_task_8);
+#endif
     HU_RUN_TEST(test_eval_judge_canned_deinit_does_not_leak);
 }

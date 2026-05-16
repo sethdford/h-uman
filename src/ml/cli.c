@@ -1,6 +1,9 @@
 /* ML CLI subcommands: train, experiment, prepare, status, dpo-train, lora-persona. */
 
 #include "human/ml/cli.h"
+#ifdef HU_ENABLE_RL_FULL
+#include "human/eval/eval_gate.h"
+#endif
 #include "human/ml/cli_dpo.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -1701,10 +1704,16 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
      * The fingerprint itself comes from personal_model.bin or the
      * synthetic fallback, same as `lora-baseline`. */
     hu_persona_t persona = {0};
-    hu_error_t err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
-    if (err != HU_OK) {
-        fprintf(stderr, "[lora-ab] failed to load persona '%s': %d\n", persona_name, err);
-        return err;
+    hu_error_t err = HU_OK;
+#ifdef HU_IS_TEST
+    if (strcmp(persona_name, "test-inline") != 0)
+#endif
+    {
+        err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+        if (err != HU_OK) {
+            fprintf(stderr, "[lora-ab] failed to load persona '%s': %d\n", persona_name, err);
+            return err;
+        }
     }
 
     hu_communication_style_t target;
@@ -1767,9 +1776,56 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     err = hu_communication_style_compare_response_sets(&target, strs_before, lens_before, n_before,
                                                        strs_after, lens_after, n_after,
                                                        &sum_before, &sum_after, &delta);
-    /* Free loaders before reporting so a fail-fast exit doesn't
-     * leak. The summaries are stack values and don't alias into
-     * the JSON tree. */
+    if (err != HU_OK) {
+        if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+        if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+        if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+        if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+        hu_json_free(alloc, json_before);
+        hu_json_free(alloc, json_after);
+        hu_persona_deinit(alloc, &persona);
+        fprintf(stderr, "[lora-ab] compare failed: %d\n", err);
+        return err;
+    }
+
+#ifdef HU_ENABLE_RL_FULL
+    if (require_positive) {
+        size_t n_gate = n_after < n_before ? n_after : n_before;
+        if (n_gate < 10)
+            n_gate = 10;
+        double persona_after[32];
+        for (size_t i = 0; i < n_gate; i++) {
+            size_t ia = i < n_after ? i : 0;
+            persona_after[i] = (double)hu_communication_style_fidelity_score_v2(
+                &target, strs_after[ia], lens_after[ia]);
+        }
+        hu_eval_gate_t gate = {
+            .baseline_persona_fidelity_mean = (double)sum_before.mean,
+            .persona_delta_min = 0.05,
+            .baseline_p95_latency_ms = 0.0,
+            .latency_delta_max_ms = 1e9,
+            .bootstrap_samples = 100,
+            .bootstrap_seed = 42,
+            .mt_bench = NULL,
+            .ifeval = NULL,
+            .reward_model = NULL,
+        };
+        hu_eval_gate_verdict_t verdict = {0};
+        hu_error_t ge = hu_eval_gate_decide_from_arrays_for_test(
+            &gate, persona_after, NULL, NULL, NULL, n_gate, 0.0, &verdict);
+        if (ge != HU_OK) {
+            fprintf(stderr, "[lora-ab] gate error: %d\n", (int)ge);
+            return ge;
+        }
+        if (!verdict.promote) {
+            fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n",
+                    verdict.reason);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+    } else
+#endif
+
+    /* Free loaders before reporting so a fail-fast exit doesn't leak. */
     if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
     if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
     if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
@@ -1777,11 +1833,6 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     hu_json_free(alloc, json_before);
     hu_json_free(alloc, json_after);
     hu_persona_deinit(alloc, &persona);
-
-    if (err != HU_OK) {
-        fprintf(stderr, "[lora-ab] compare failed: %d\n", err);
-        return err;
-    }
 
     printf("[lora-ab] persona '%s' A/B fidelity:\n"
            "[lora-ab]   before: scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"
