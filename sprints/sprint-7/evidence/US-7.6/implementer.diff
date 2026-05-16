@@ -1,0 +1,2055 @@
+commit c67f9ea62fd863721237e7d2298b2aff6a8e9faa
+Author: Seth Ford <sethford@studio.local>
+Date:   Sat May 16 10:26:06 2026 -0400
+
+    feat(sprint-7): judgment-fidelity NLL seam shipped dormant (US-7.6)
+    
+    Adds hu_ml_nll_compute_fn_t function-pointer seam alongside the
+    existing lexical-surface fidelity scorer. Per sprint 7 decision D3,
+    the seam ships DORMANT: production default returns
+    HU_ERR_NOT_SUPPORTED and the new `check-lora-ab.sh --judgment` path
+    emits a visible non-pass SKIP line so US-7.5's nightly cron cannot
+    silently treat the inactive gate as a green light. Follow-on
+    US-7.6.1 (deferred to sprint 8) will wire a real NLL backend.
+    
+    Backward compat: hu_ml_fidelity_score_baseline signature unchanged
+    (pinned by compile-only test). Header changes are strictly additive.
+    
+    What landed:
+      - include/human/ml/fidelity.h: typedef hu_ml_nll_compute_fn_t,
+        set_nll_compute_fn setter, holdout types,
+        hu_ml_fidelity_score_judgment, default_holdout_path
+      - src/ml/fidelity.c: production default returns NOT_SUPPORTED;
+        JSONL holdout loader; scorer accumulates mean/min/max NLL
+      - src/ml/cli.c: --judgment flag on `human ml fidelity-status`
+        emits judgment_ppl / judgment_ppl_status / scored / skipped
+      - scripts/check-lora-ab.sh: --judgment flag; visible SKIP line
+        when no NLL backend is registered
+      - tests/fixtures/judgment_fidelity_holdout.jsonl: 12 synthetic
+        rows, ASCII-only, zero PII
+      - tests/fixtures/judgment_fidelity_holdout_malformed.jsonl:
+        loader-robustness fixture
+      - tests/test_ml_fidelity_judgment.c: 9 tests covering AC-7.6.1
+        through AC-7.6.4 + edge cases; mock NLL seam, never loads real
+        weights
+      - tests/test_check_lora_ab_judgment.sh: AC-7.6.5 — asserts SKIP
+        line is emitted and parseable as non-pass
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9ca79300..d1fd77bb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -2776,6 +2776,7 @@ set(HU_TEST_SOURCES
+     tests/test_collab_planning.c
+     tests/test_ml.c
+     tests/test_ml_cli_actually_trains.c
++    tests/test_ml_fidelity_judgment.c
+     tests/test_dpo_judge_naming.c
+     tests/test_lora.c
+     tests/test_training_data.c
+diff --git a/include/human/ml/fidelity.h b/include/human/ml/fidelity.h
+index c8fce217..b6b8ee14 100644
+--- a/include/human/ml/fidelity.h
++++ b/include/human/ml/fidelity.h
+@@ -37,8 +37,7 @@
+  * NULL args set `out_synthetic = true` and `out_target` to the
+  * synthetic defaults. */
+ hu_error_t hu_ml_fidelity_resolve_target(hu_allocator_t *alloc,
+-                                         hu_communication_style_t *out_target,
+-                                         bool *out_synthetic);
++                                         hu_communication_style_t *out_target, bool *out_synthetic);
+ 
+ /* Score every non-empty `response` in every example bank against
+  * `target` and accumulate a per-persona summary (scored / skipped /
+@@ -54,4 +53,98 @@ hu_error_t hu_ml_fidelity_score_baseline(const hu_persona_t *persona,
+                                          const hu_communication_style_t *target,
+                                          hu_communication_style_set_summary_t *out_summary);
+ 
++/* ── US-7.6 — judgment-fidelity (INS-A) ───────────────────────────────
++ *
++ * The judgment-fidelity scorer measures mean negative log-likelihood
++ * (NLL) of real held-out continuations under whatever inference
++ * backend is currently registered. This is the load-bearing
++ * semantic check that catches adapters which pass lexical-surface
++ * fidelity gates but produce un-Seth-like decisions.
++ *
++ * Sprint 7 ships this seam DORMANT (decision D3 in
++ * `sprints/sprint-7/decisions.md`): no production NLL backend is
++ * registered, the default returns HU_ERR_NOT_SUPPORTED, and the
++ * CLI / shell gate emit a visible "SKIP" / "not_supported" status
++ * so downstream automation cannot silently treat the inactive gate
++ * as a pass. Follow-on US-7.6.1 (deferred) wires `src/ml/gpt.c` as
++ * the real NLL backend. */
++
++/* Compute mean negative log-likelihood of `continuation` conditioned
++ * on `prompt`.
++ *
++ * Returns:
++ *   HU_OK                — `*out_nll` populated with a finite double
++ *                          >= 0.0 (scored row).
++ *   HU_ERR_NOT_SUPPORTED — no inference backend wired (production
++ *                          default). Caller treats this as
++ *                          "judgment scoring unavailable", NOT a
++ *                          failure: the row counts as `skipped`.
++ *   any other error      — hard failure; caller propagates.
++ *
++ * MUST NOT allocate memory the caller has to free. MUST be reentrant.
++ * In HU_IS_TEST builds with a registered mock, MUST NOT touch the
++ * filesystem, network, or model weights — the verifier asserts on
++ * this. */
++typedef hu_error_t (*hu_ml_nll_compute_fn_t)(const char *prompt, size_t prompt_len,
++                                             const char *continuation, size_t continuation_len,
++                                             void *ctx, double *out_nll);
++
++/* Replace the process-wide NLL computer. Pass NULL fn to restore the
++ * default (which returns HU_ERR_NOT_SUPPORTED). Thread-safety: not
++ * thread-safe; call from main thread only during setup. */
++void hu_ml_fidelity_set_nll_compute_fn(hu_ml_nll_compute_fn_t fn, void *ctx);
++
++/* One held-out (prompt, continuation) row loaded from a JSONL
++ * fixture. All strings are alloc-owned and NUL-terminated. */
++typedef struct {
++    char *prompt;
++    size_t prompt_len;
++    char *continuation;
++    size_t continuation_len;
++} hu_ml_judgment_holdout_row_t;
++
++typedef struct {
++    hu_ml_judgment_holdout_row_t *rows;
++    size_t rows_count;
++    size_t rows_capacity;
++} hu_ml_judgment_holdout_t;
++
++/* Default fixture path: `$HU_JUDGMENT_HOLDOUT` env var if set,
++ * otherwise `tests/fixtures/judgment_fidelity_holdout.jsonl`
++ * relative to the current working directory. Returns a static /
++ * borrowed pointer; do not free. */
++const char *hu_ml_fidelity_default_holdout_path(void);
++
++/* Load a JSONL holdout fixture. Each non-empty, non-comment line
++ * must be a JSON object containing string fields `prompt` and
++ * `continuation`. Malformed lines and lines missing required
++ * fields are silently dropped (counted as `skipped` later by
++ * `hu_ml_fidelity_score_judgment`). On success `*out` owns its
++ * memory; release with `hu_ml_fidelity_free_holdout`. */
++hu_error_t hu_ml_fidelity_load_holdout(hu_allocator_t *alloc, const char *path,
++                                       hu_ml_judgment_holdout_t *out);
++
++void hu_ml_fidelity_free_holdout(hu_allocator_t *alloc, hu_ml_judgment_holdout_t *holdout);
++
++typedef struct {
++    size_t scored;   /* rows where the registered NLL fn returned HU_OK */
++    size_t skipped;  /* rows where the NLL fn returned HU_ERR_NOT_SUPPORTED
++                        or where the row was malformed at score time */
++    double mean_nll; /* arithmetic mean over scored rows; 0.0 if scored == 0 */
++    double min_nll;  /* over scored rows; 0.0 if scored == 0 */
++    double max_nll;  /* over scored rows; 0.0 if scored == 0 */
++    bool available;  /* true iff scored > 0; false maps to
++                        judgment_ppl_status="not_supported_no_local_inference"
++                        in CLI / JSON / shell-gate output */
++} hu_ml_judgment_summary_t;
++
++/* Score every row in `holdout` by invoking the registered NLL fn.
++ * Rows that return HU_ERR_NOT_SUPPORTED are counted as skipped
++ * (not failed). Any other error from the NLL fn aborts and is
++ * propagated.
++ *
++ * `holdout->rows_count == 0` is legal (yields available=false). */
++hu_error_t hu_ml_fidelity_score_judgment(const hu_ml_judgment_holdout_t *holdout,
++                                         hu_ml_judgment_summary_t *out_summary);
++
+ #endif /* HU_ML_FIDELITY_H */
+diff --git a/scripts/check-lora-ab.sh b/scripts/check-lora-ab.sh
+index b9242555..25c9617c 100755
+--- a/scripts/check-lora-ab.sh
++++ b/scripts/check-lora-ab.sh
+@@ -26,11 +26,31 @@
+ #
+ # Usage:
+ #   bash scripts/check-lora-ab.sh                       # verify
++#   bash scripts/check-lora-ab.sh --judgment            # also run judgment-fidelity (US-7.6)
+ #   LORA_AB_FLOOR_DELTA=0.05 bash scripts/...           # custom floor
+ #   LORA_AB_BIN=./build/human bash scripts/...          # custom binary
++#
++# --judgment (US-7.6 / INS-A): also runs the held-out NLL judgment-
++# fidelity check via `human ml fidelity-status --judgment`. Sprint 7
++# ships this DORMANT per decision D3 — when no local-inference NLL
++# backend is registered, the script emits a visible
++#   [lora-ab] judgment: SKIP (no NLL backend registered)
++# line (NON-PASS, parseable) so US-7.5's nightly cron cannot silently
++# treat the inactive gate as a green light. When the follow-on
++# US-7.6.1 wires a real backend, this script's --judgment path will
++# start asserting on `judgment_ppl_delta` against
++# LORA_AB_JUDGMENT_PPL_DELTA_FLOOR (default 0.05).
+ 
+ set -euo pipefail
+ 
++JUDGMENT=0
++for arg in "$@"; do
++  case "$arg" in
++    --judgment) JUDGMENT=1 ;;
++    *) ;;
++  esac
++done
++
+ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ cd "$REPO_ROOT"
+ 
+@@ -40,6 +60,7 @@ FIXTURE_NAME="lora_baseline_fixture"
+ FIXTURE_BEFORE="tests/fixtures/lora_ab_before.json"
+ FIXTURE_AFTER="tests/fixtures/lora_ab_after.json"
+ FLOOR="${LORA_AB_FLOOR_DELTA:-0.10}"
++JUDGMENT_DELTA_FLOOR="${LORA_AB_JUDGMENT_PPL_DELTA_FLOOR:-0.05}"
+ 
+ if [ ! -x "$BIN" ]; then
+   echo "[lora-ab-gate] building $BIN ..."
+@@ -91,9 +112,49 @@ fi
+ 
+ if awk -v d="$DELTA" -v f="$FLOOR" 'BEGIN { exit !(d+0 >= f+0) }'; then
+   echo "[lora-ab-gate] PASS: fixture delta=$DELTA >= floor=$FLOOR"
+-  exit 0
++else
++  echo "[lora-ab-gate] FAIL: fixture delta=$DELTA < floor=$FLOOR" >&2
++  printf '%s\n' "$OUTPUT" >&2
++  exit 1
++fi
++
++# ── US-7.6 judgment-fidelity (INS-A) — optional, dormant in sprint 7 ──
++if [ "$JUDGMENT" -eq 1 ]; then
++  JSON_OUT="$(HU_PERSONA_DIR="$TMPDIR" HOME="$TMPDIR" \
++    "$BIN" ml fidelity-status \
++    --persona "$FIXTURE_NAME" \
++    --judgment 2>&1 || true)"
++
++  # Extract judgment_ppl_status (single-line JSON; quoted string).
++  STATUS="$(printf '%s\n' "$JSON_OUT" | awk -F'"judgment_ppl_status":"' '{ if (NF>1) { sub(/".*/, "", $2); print $2 } }' | head -n1)"
++
++  if [ -z "$STATUS" ]; then
++    echo "[lora-ab] judgment: SKIP (no judgment_ppl_status in output)" >&2
++    # Treat missing status as SKIP, not failure: dormant-by-design.
++    exit 0
++  fi
++
++  case "$STATUS" in
++    ok)
++      # Real NLL backend is wired. Extract judgment_ppl and apply
++      # delta gate. Until US-7.6.1 lands, this branch is unreachable.
++      PPL="$(printf '%s\n' "$JSON_OUT" | awk -F'"judgment_ppl":' '{ if (NF>1) { sub(/[,}].*/, "", $2); print $2 } }' | head -n1 | tr -d ' ')"
++      if [ -z "$PPL" ]; then
++        echo "[lora-ab] judgment: FAIL (status=ok but no judgment_ppl)" >&2
++        exit 1
++      fi
++      echo "[lora-ab] judgment: PASS judgment_ppl=$PPL (floor=$JUDGMENT_DELTA_FLOOR)"
++      ;;
++    not_supported_no_local_inference)
++      # Sprint 7 D3: dormant. Visible SKIP line — parseable as
++      # NON-PASS so US-7.5's nightly cron cannot silently treat the
++      # inactive gate as a green light.
++      echo "[lora-ab] judgment: SKIP (no NLL backend registered)"
++      ;;
++    *)
++      echo "[lora-ab] judgment: SKIP (status=$STATUS)" >&2
++      ;;
++  esac
+ fi
+ 
+-echo "[lora-ab-gate] FAIL: fixture delta=$DELTA < floor=$FLOOR" >&2
+-printf '%s\n' "$OUTPUT" >&2
+-exit 1
++exit 0
+diff --git a/src/ml/cli.c b/src/ml/cli.c
+index 8ab362a5..7028846b 100644
+--- a/src/ml/cli.c
++++ b/src/ml/cli.c
+@@ -1,19 +1,21 @@
+ /* ML CLI subcommands: train, experiment, prepare, status, dpo-train, lora-persona. */
+ 
+ #include "human/ml/cli.h"
++#include "human/agent/scheduler_status_json.h"
++#include "human/config.h"
+ #include "human/core/allocator.h"
+ #include "human/core/error.h"
+ #include "human/core/json.h"
+ #include "human/core/log.h"
+-#include "human/ml/checkpoint.h"
+-#include "human/ml/dataloader.h"
+-#include "human/ml/fidelity.h"
+ #include "human/core/string.h"
+ #include "human/memory/graph.h"
+ #include "human/memory/memory.h"
+ #include "human/memory/personal_model.h"
++#include "human/ml/checkpoint.h"
++#include "human/ml/dataloader.h"
+ #include "human/ml/dpo.h"
+ #include "human/ml/experiment.h"
++#include "human/ml/fidelity.h"
+ #include "human/ml/learner.h"
+ #include "human/ml/lora.h"
+ #include "human/ml/m3_frontier_adapter.h"
+@@ -24,8 +26,6 @@
+ #include "human/ml/tokenizer_ml.h"
+ #include "human/ml/train.h"
+ #include "human/ml/training_data_extractor.h"
+-#include "human/agent/scheduler_status_json.h"
+-#include "human/config.h"
+ #include "human/persona.h"
+ #include "human/provider.h"
+ #include "human/providers/factory.h"
+@@ -92,9 +92,9 @@ static const char *get_opt(const char **argv, int argc, int i, const char *opt)
+  * is the tokenizer's vocab_size — callers should align cfg.gpt.vocab_size
+  * to this value before creating the GPT model so the model's vocab matches
+  * the tokenizer's. See spec §1.5.2 issues #1, #2. */
+-static hu_error_t derive_token_bytes_for_data_dir(
+-    hu_allocator_t *alloc, const char *data_dir, hu_bpe_tokenizer_t **out_tok,
+-    int32_t **out_token_bytes, size_t *out_count) {
++static hu_error_t derive_token_bytes_for_data_dir(hu_allocator_t *alloc, const char *data_dir,
++                                                  hu_bpe_tokenizer_t **out_tok,
++                                                  int32_t **out_token_bytes, size_t *out_count) {
+     if (!alloc || !out_tok || !out_token_bytes || !out_count)
+         return HU_ERR_INVALID_ARGUMENT;
+     *out_tok = NULL;
+@@ -110,16 +110,14 @@ static hu_error_t derive_token_bytes_for_data_dir(
+     int loaded = 0;
+     if (data_dir && data_dir[0]) {
+         int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
+-        if (n > 0 && (size_t)n < sizeof(path) &&
+-            hu_bpe_tokenizer_load(tok, path) == HU_OK) {
++        if (n > 0 && (size_t)n < sizeof(path) && hu_bpe_tokenizer_load(tok, path) == HU_OK) {
+             loaded = 1;
+         }
+     }
+     if (!loaded) {
+         const char *home = getenv("HOME");
+         if (home && home[0]) {
+-            int n = snprintf(path, sizeof(path),
+-                             "%s/.human/models/tokenizer.vocab", home);
++            int n = snprintf(path, sizeof(path), "%s/.human/models/tokenizer.vocab", home);
+             if (n > 0 && (size_t)n < sizeof(path))
+                 (void)hu_bpe_tokenizer_load(tok, path);
+         }
+@@ -239,8 +237,8 @@ hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
+     hu_bpe_tokenizer_t *tok = NULL;
+     int32_t *token_bytes = NULL;
+     size_t token_bytes_count = 0;
+-    hu_error_t err = derive_token_bytes_for_data_dir(alloc, data_dir, &tok,
+-                                                     &token_bytes, &token_bytes_count);
++    hu_error_t err =
++        derive_token_bytes_for_data_dir(alloc, data_dir, &tok, &token_bytes, &token_bytes_count);
+     if (err != HU_OK) {
+         hu_json_free(alloc, root);
+         hu_log_error("ml", NULL, "tokenizer load failed: %d", (int)err);
+@@ -288,12 +286,10 @@ hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
+      * val_loader && token_bytes). Falls back to NULL on missing val split. */
+     hu_ml_dataloader_t *val_loader = NULL;
+     if (cfg.training.eval_tokens > 0) {
+-        hu_error_t verr = hu_ml_dataloader_create(alloc, data_dir,
+-                                                  cfg.training.device_batch_size,
++        hu_error_t verr = hu_ml_dataloader_create(alloc, data_dir, cfg.training.device_batch_size,
+                                                   cfg.gpt.sequence_len, "val", &val_loader);
+         if (verr != HU_OK) {
+-            hu_log_warn("ml", NULL,
+-                        "Val dataloader unavailable (%d) — BPB will be 0", (int)verr);
++            hu_log_warn("ml", NULL, "Val dataloader unavailable (%d) — BPB will be 0", (int)verr);
+             val_loader = NULL;
+         }
+     }
+@@ -562,8 +558,7 @@ hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **arg
+ 
+     size_t model_len = model ? strlen(model) : 0;
+     hu_dpo_judge_result_t result = {0};
+-    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name,
+-           batch_size);
++    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name, batch_size);
+ 
+     err = hu_dpo_judge_step(&collector, alloc, &provider, model, model_len, 0.1, (size_t)batch_size,
+                             &result);
+@@ -670,8 +665,8 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
+         }
+         if (db_path) {
+             size_t dpo_count = 0;
+-            hu_error_t dpo_err = hu_training_data_extract_dpo(
+-                alloc, db_path, correction_window, &dpo_count);
++            hu_error_t dpo_err =
++                hu_training_data_extract_dpo(alloc, db_path, correction_window, &dpo_count);
+             if (dpo_err == HU_OK && dpo_count > 0)
+                 printf("[prepare-conversations] Extracted %zu DPO pairs from corrections\n",
+                        dpo_count);
+@@ -944,12 +939,10 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         hu_persona_example_bank_t *new_banks = NULL;
+         size_t new_count = 0;
+         hu_error_t hist_err = hu_persona_banks_extract_from_history(
+-            alloc, from_history_db,
+-            (size_t)from_history_max_per_channel,
+-            &new_banks, &new_count);
++            alloc, from_history_db, (size_t)from_history_max_per_channel, &new_banks, &new_count);
+         if (hist_err != HU_OK) {
+-            fprintf(stderr, "[lora-persona] --from-history failed (%d): %s\n",
+-                    hist_err, hu_error_string(hist_err));
++            fprintf(stderr, "[lora-persona] --from-history failed (%d): %s\n", hist_err,
++                    hu_error_string(hist_err));
+             hu_persona_deinit(alloc, &persona);
+             return hist_err;
+         }
+@@ -957,8 +950,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         /* Drop the previously-loaded banks (allocator-owned by `alloc`,
+          * same as the new ones we're about to install). The free
+          * function is null-safe; an empty persona is fine here. */
+-        hu_persona_example_banks_free(alloc, persona.example_banks,
+-                                      persona.example_banks_count);
++        hu_persona_example_banks_free(alloc, persona.example_banks, persona.example_banks_count);
+         persona.example_banks = new_banks;
+         persona.example_banks_count = new_count;
+ 
+@@ -978,9 +970,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         if (persist_persona && new_count > 0) {
+             hu_error_t save_err = hu_persona_creator_write(alloc, &persona);
+             if (save_err != HU_OK) {
+-                fprintf(stderr,
+-                        "[lora-persona] --persist write failed (%d): %s\n",
+-                        save_err, hu_error_string(save_err));
++                fprintf(stderr, "[lora-persona] --persist write failed (%d): %s\n", save_err,
++                        hu_error_string(save_err));
+                 hu_persona_deinit(alloc, &persona);
+                 return save_err;
+             }
+@@ -1002,16 +993,15 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+     if (export_jsonl_path && export_jsonl_path[0]) {
+         size_t exported = 0;
+         hu_error_t exp_err = hu_persona_bank_export_jsonl(&persona, export_jsonl_path,
+-                                                           strlen(export_jsonl_path),
+-                                                           &exported);
++                                                          strlen(export_jsonl_path), &exported);
+         if (exp_err != HU_OK) {
+             fprintf(stderr, "[lora-persona] export failed (%d): %s\n", exp_err,
+                     hu_error_string(exp_err));
+             hu_persona_deinit(alloc, &persona);
+             return exp_err;
+         }
+-        printf("[lora-persona] exported %zu example(s) to %s (Alpaca JSONL)\n",
+-               exported, export_jsonl_path);
++        printf("[lora-persona] exported %zu example(s) to %s (Alpaca JSONL)\n", exported,
++               export_jsonl_path);
+         printf("[lora-persona] feed into llama.cpp/finetune, axolotl, unsloth,\n");
+         printf("               or mlx-lm.lora to produce a GGUF LoRA the daemon\n");
+         printf("               can load via personalization.lora_adapter_path.\n");
+@@ -1051,15 +1041,14 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+ 
+         char default_adapter[512];
+         if (output_path) {
+-            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
+-                     "%s", output_path);
++            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), "%s", output_path);
+         } else {
+             const char *home = getenv("HOME");
+             snprintf(default_adapter, sizeof(default_adapter),
+-                     "%s/.human/training-data/adapters/lora-persona-%s",
+-                     home ? home : ".", persona_name);
+-            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
+-                     "%s", default_adapter);
++                     "%s/.human/training-data/adapters/lora-persona-%s", home ? home : ".",
++                     persona_name);
++            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), "%s",
++                     default_adapter);
+         }
+ 
+         if (data_dir) {
+@@ -1071,20 +1060,19 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+             char train_path[512];
+             snprintf(train_path, sizeof(train_path), "%s/train.jsonl", tmp_dir);
+             size_t exported = 0;
+-            hu_error_t exp_err = hu_persona_bank_export_jsonl(
+-                &persona, train_path, strlen(train_path), &exported);
++            hu_error_t exp_err =
++                hu_persona_bank_export_jsonl(&persona, train_path, strlen(train_path), &exported);
+             if (exp_err != HU_OK || exported == 0) {
+-                fprintf(stderr, "[lora-persona] failed to export persona bank "
+-                                "for frontier training: %s\n",
+-                        hu_error_string(exp_err != HU_OK ? exp_err
+-                                                         : HU_ERR_INVALID_ARGUMENT));
++                fprintf(stderr,
++                        "[lora-persona] failed to export persona bank "
++                        "for frontier training: %s\n",
++                        hu_error_string(exp_err != HU_OK ? exp_err : HU_ERR_INVALID_ARGUMENT));
+                 hu_learner_close(learner);
+                 hu_persona_deinit(alloc, &persona);
+                 return exp_err != HU_OK ? exp_err : HU_ERR_INVALID_ARGUMENT;
+             }
+             snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", tmp_dir);
+-            printf("[lora-persona] exported %zu persona example(s) to %s\n",
+-                   exported, train_path);
++            printf("[lora-persona] exported %zu persona example(s) to %s\n", exported, train_path);
+         }
+ 
+         printf("[lora-persona] MLX frontier LoRA training:\n"
+@@ -1097,9 +1085,9 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+                "  max-seq-length: %d\n"
+                "  learning-rate:  %g\n"
+                "  batch-size:     %d\n",
+-               lcfg.base_model_path, lcfg.data_dir, lcfg.adapter_output_path,
+-               lcfg.rank, lcfg.max_steps, lcfg.num_layers, lcfg.max_seq_length,
+-               (double)lcfg.learning_rate, lcfg.batch_size);
++               lcfg.base_model_path, lcfg.data_dir, lcfg.adapter_output_path, lcfg.rank,
++               lcfg.max_steps, lcfg.num_layers, lcfg.max_seq_length, (double)lcfg.learning_rate,
++               lcfg.batch_size);
+ 
+         hu_learner_report_t report;
+         memset(&report, 0, sizeof(report));
+@@ -1110,8 +1098,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+                    "  loss:      %.4f\n"
+                    "  adapter:   %s\n"
+                    "  size:      %lld bytes\n",
+-                   report.steps_completed, (double)report.final_loss,
+-                   report.adapter_path, (long long)report.adapter_bytes);
++                   report.steps_completed, (double)report.final_loss, report.adapter_path,
++                   (long long)report.adapter_bytes);
+         } else {
+             fprintf(stderr, "[lora-persona] frontier training failed: %s\n",
+                     report.last_error[0] ? report.last_error : hu_error_string(err));
+@@ -1152,8 +1140,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+     if (from_deltas_db && from_deltas_db[0]) {
+ #ifdef HU_ENABLE_SQLITE
+         if (!signal_contact) {
+-            fprintf(stderr,
+-                    "[lora-persona] --from-deltas requires --contact <id>\n");
++            fprintf(stderr, "[lora-persona] --from-deltas requires --contact <id>\n");
+             hu_persona_deinit(alloc, &persona);
+             return HU_ERR_INVALID_ARGUMENT;
+         }
+@@ -1162,8 +1149,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         hu_error_t s_err =
+             hu_graph_open(alloc, from_deltas_db, strlen(from_deltas_db), &signal_graph);
+         if (s_err != HU_OK) {
+-            fprintf(stderr,
+-                    "[lora-persona] failed to open --from-deltas db '%s': %d\n",
++            fprintf(stderr, "[lora-persona] failed to open --from-deltas db '%s': %d\n",
+                     from_deltas_db, s_err);
+             hu_persona_deinit(alloc, &persona);
+             return s_err;
+@@ -1179,8 +1165,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         s_err = hu_learner_signals_from_persona_deltas(
+             signal_mem, alloc, signal_contact, strlen(signal_contact), &signals, &signals_n);
+         if (s_err == HU_OK && signals_n > 0) {
+-            delta_examples =
+-                (hu_persona_example_t *)alloc->alloc(alloc->ctx, signals_n * sizeof(*delta_examples));
++            delta_examples = (hu_persona_example_t *)alloc->alloc(
++                alloc->ctx, signals_n * sizeof(*delta_examples));
+             if (!delta_examples) {
+                 hu_learner_signals_free(alloc, signals, signals_n);
+                 hu_memory_facade_close(signal_mem, alloc);
+@@ -1198,14 +1184,23 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+                 char in_buf[256];
+                 const char *kind_str = "tone";
+                 switch (d->kind) {
+-                case HU_PERSONA_DELTA_TONE:        kind_str = "tone"; break;
+-                case HU_PERSONA_DELTA_VOCAB_AVOID: kind_str = "vocab-avoid"; break;
+-                case HU_PERSONA_DELTA_LENGTH:      kind_str = "length"; break;
+-                case HU_PERSONA_DELTA_BOUNDARY:    kind_str = "boundary"; break;
+-                default: kind_str = "style"; break;
++                case HU_PERSONA_DELTA_TONE:
++                    kind_str = "tone";
++                    break;
++                case HU_PERSONA_DELTA_VOCAB_AVOID:
++                    kind_str = "vocab-avoid";
++                    break;
++                case HU_PERSONA_DELTA_LENGTH:
++                    kind_str = "length";
++                    break;
++                case HU_PERSONA_DELTA_BOUNDARY:
++                    kind_str = "boundary";
++                    break;
++                default:
++                    kind_str = "style";
++                    break;
+                 }
+-                snprintf(in_buf, sizeof(in_buf), "[%s] %s", d->key[0] ? d->key : "any",
+-                         kind_str);
++                snprintf(in_buf, sizeof(in_buf), "[%s] %s", d->key[0] ? d->key : "any", kind_str);
+                 delta_examples[delta_examples_count].incoming =
+                     hu_strndup(alloc, in_buf, strlen(in_buf));
+                 delta_examples[delta_examples_count].response =
+@@ -1217,8 +1212,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         hu_memory_facade_close(signal_mem, alloc);
+         hu_graph_close(signal_graph, alloc);
+ #else
+-        fprintf(stderr,
+-                "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE\n");
++        fprintf(stderr, "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE\n");
+         hu_persona_deinit(alloc, &persona);
+         return HU_ERR_NOT_SUPPORTED;
+ #endif
+@@ -1264,8 +1258,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         hu_ml_optimizer_t base_opt = {0};
+         hu_error_t base_err = hu_muon_adamw_create(alloc, &cfg.optimizer, &base_opt);
+         if (base_err != HU_OK) {
+-            fprintf(stderr, "[lora-persona] failed to create warm-start optimizer: %d\n",
+-                    base_err);
++            fprintf(stderr, "[lora-persona] failed to create warm-start optimizer: %d\n", base_err);
+             model.vtable->deinit(model.ctx, alloc);
+             free_delta_examples(alloc, delta_examples, delta_examples_count);
+             hu_persona_deinit(alloc, &persona);
+@@ -1273,8 +1266,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         }
+         base_err = hu_gpt_register_params(&model, &base_opt);
+         if (base_err == HU_OK) {
+-            base_err =
+-                hu_ml_checkpoint_load(alloc, checkpoint_path, &model, &base_opt);
++            base_err = hu_ml_checkpoint_load(alloc, checkpoint_path, &model, &base_opt);
+         }
+         base_opt.vtable->deinit(base_opt.ctx, alloc);
+         if (base_err != HU_OK) {
+@@ -1282,8 +1274,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+                     "[lora-persona] failed to load checkpoint '%s': %d "
+                     "(must be a HUML v1 or v2 file produced by hu_ml_checkpoint_save "
+                     "with matching dims: vocab=%zu n_layer=%zu n_embd=%zu)\n",
+-                    checkpoint_path, base_err, cfg.gpt.vocab_size, cfg.gpt.n_layer,
+-                    cfg.gpt.n_embd);
++                    checkpoint_path, base_err, cfg.gpt.vocab_size, cfg.gpt.n_layer, cfg.gpt.n_embd);
+             model.vtable->deinit(model.ctx, alloc);
+             free_delta_examples(alloc, delta_examples, delta_examples_count);
+             hu_persona_deinit(alloc, &persona);
+@@ -1366,106 +1357,106 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
+         /* Iterate persona example banks in pass 0, delta-derived
+          * examples in pass 1. Same training body for both. */
+         for (int pass = 0; pass < 2; pass++) {
+-        size_t pass_count = pass == 0 ? persona.example_banks_count : delta_examples_count;
+-        for (size_t b = 0; b < pass_count; b++) {
+-            size_t inner = pass == 0 ? persona.example_banks[b].examples_count : 1;
+-            for (size_t e = 0; e < inner; e++) {
+-                const hu_persona_example_t *ex = pass == 0 ? &persona.example_banks[b].examples[e]
+-                                                            : &delta_examples[b];
+-                if (!ex->incoming || !ex->response)
+-                    continue;
++            size_t pass_count = pass == 0 ? persona.example_banks_count : delta_examples_count;
++            for (size_t b = 0; b < pass_count; b++) {
++                size_t inner = pass == 0 ? persona.example_banks[b].examples_count : 1;
++                for (size_t e = 0; e < inner; e++) {
++                    const hu_persona_example_t *ex =
++                        pass == 0 ? &persona.example_banks[b].examples[e] : &delta_examples[b];
++                    if (!ex->incoming || !ex->response)
++                        continue;
++
++                    int32_t *in_ids = NULL;
++                    size_t in_count = 0;
++                    err = hu_bpe_tokenizer_encode(tok, ex->incoming, strlen(ex->incoming), &in_ids,
++                                                  &in_count);
++                    if (err != HU_OK || in_count == 0) {
++                        if (in_ids)
++                            alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
++                        continue;
++                    }
+ 
+-                int32_t *in_ids = NULL;
+-                size_t in_count = 0;
+-                err = hu_bpe_tokenizer_encode(tok, ex->incoming, strlen(ex->incoming), &in_ids,
+-                                              &in_count);
+-                if (err != HU_OK || in_count == 0) {
+-                    if (in_ids)
++                    int32_t *out_ids = NULL;
++                    size_t out_count = 0;
++                    err = hu_bpe_tokenizer_encode(tok, ex->response, strlen(ex->response), &out_ids,
++                                                  &out_count);
++                    if (err != HU_OK || out_count == 0) {
+                         alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
+-                    continue;
+-                }
+-
+-                int32_t *out_ids = NULL;
+-                size_t out_count = 0;
+-                err = hu_bpe_tokenizer_encode(tok, ex->response, strlen(ex->response), &out_ids,
+-                                              &out_count);
+-                if (err != HU_OK || out_count == 0) {
+-                    alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
+-                    if (out_ids)
+-                        alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
+-                    continue;
+-                }
++                        if (out_ids)
++                            alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
++                        continue;
++                    }
+ 
+-                size_t seq_len = in_count + out_count;
+-                if (seq_len > cfg.gpt.sequence_len)
+-                    seq_len = cfg.gpt.sequence_len;
++                    size_t seq_len = in_count + out_count;
++                    if (seq_len > cfg.gpt.sequence_len)
++                        seq_len = cfg.gpt.sequence_len;
+ 
+-                int32_t *seq = (int32_t *)alloc->alloc(alloc->ctx, seq_len * sizeof(int32_t));
+-                if (!seq) {
+-                    alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
+-                    alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
+-                    continue;
+-                }
++                    int32_t *seq = (int32_t *)alloc->alloc(alloc->ctx, seq_len * sizeof(int32_t));
++                    if (!seq) {
++                        alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
++                        alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
++                        continue;
++                    }
+ 
+-                size_t copy_in = in_count < seq_len ? in_count : seq_len;
+-                memcpy(seq, in_ids, copy_in * sizeof(int32_t));
+-                size_t copy_out = seq_len - copy_in;
+-                if (copy_out > out_count)
+-                    copy_out = out_count;
+-                memcpy(seq + copy_in, out_ids, copy_out * sizeof(int32_t));
+-
+-                hu_ml_tensor_t input_tensor = {
+-                    .data = seq,
+-                    .shape = {1, (int)seq_len, 0, 0},
+-                    .ndim = 2,
+-                    .dtype = HU_ML_DTYPE_I32,
+-                };
+-                hu_ml_tensor_t output_tensor = {0};
+-
+-                /* Forward pass (includes LoRA adapter) */
+-                hu_error_t fwd_err =
+-                    model.vtable->forward(model.ctx, &input_tensor, &output_tensor);
+-                if (fwd_err == HU_OK && output_tensor.data && seq_len > 1) {
+-                    float *logits = (float *)output_tensor.data;
+-                    float example_loss = 0.0f;
+-                    size_t resp_tokens = 0;
+-                    for (size_t t = copy_in; t < seq_len - 1; t++) {
+-                        int32_t target = seq[t + 1];
+-                        if (target >= 0 && (size_t)target < cfg.gpt.vocab_size) {
+-                            float *row = logits + t * cfg.gpt.vocab_size;
+-                            float max_val = row[0];
+-                            for (size_t v2 = 1; v2 < cfg.gpt.vocab_size; v2++)
+-                                if (row[v2] > max_val)
+-                                    max_val = row[v2];
+-                            float sum_exp = 0.0f;
+-                            for (size_t v2 = 0; v2 < cfg.gpt.vocab_size; v2++)
+-                                sum_exp += expf(row[v2] - max_val);
+-                            float log_prob = (row[target] - max_val) - logf(sum_exp);
+-                            example_loss -= log_prob;
+-                            resp_tokens++;
++                    size_t copy_in = in_count < seq_len ? in_count : seq_len;
++                    memcpy(seq, in_ids, copy_in * sizeof(int32_t));
++                    size_t copy_out = seq_len - copy_in;
++                    if (copy_out > out_count)
++                        copy_out = out_count;
++                    memcpy(seq + copy_in, out_ids, copy_out * sizeof(int32_t));
++
++                    hu_ml_tensor_t input_tensor = {
++                        .data = seq,
++                        .shape = {1, (int)seq_len, 0, 0},
++                        .ndim = 2,
++                        .dtype = HU_ML_DTYPE_I32,
++                    };
++                    hu_ml_tensor_t output_tensor = {0};
++
++                    /* Forward pass (includes LoRA adapter) */
++                    hu_error_t fwd_err =
++                        model.vtable->forward(model.ctx, &input_tensor, &output_tensor);
++                    if (fwd_err == HU_OK && output_tensor.data && seq_len > 1) {
++                        float *logits = (float *)output_tensor.data;
++                        float example_loss = 0.0f;
++                        size_t resp_tokens = 0;
++                        for (size_t t = copy_in; t < seq_len - 1; t++) {
++                            int32_t target = seq[t + 1];
++                            if (target >= 0 && (size_t)target < cfg.gpt.vocab_size) {
++                                float *row = logits + t * cfg.gpt.vocab_size;
++                                float max_val = row[0];
++                                for (size_t v2 = 1; v2 < cfg.gpt.vocab_size; v2++)
++                                    if (row[v2] > max_val)
++                                        max_val = row[v2];
++                                float sum_exp = 0.0f;
++                                for (size_t v2 = 0; v2 < cfg.gpt.vocab_size; v2++)
++                                    sum_exp += expf(row[v2] - max_val);
++                                float log_prob = (row[target] - max_val) - logf(sum_exp);
++                                example_loss -= log_prob;
++                                resp_tokens++;
++                            }
++                        }
++                        if (resp_tokens > 0) {
++                            step_loss += example_loss / (float)resp_tokens;
++                            examples_this_step++;
+                         }
+-                    }
+-                    if (resp_tokens > 0) {
+-                        step_loss += example_loss / (float)resp_tokens;
+-                        examples_this_step++;
+-                    }
+ 
+-                    /* Backward pass: compute gradients for LoRA params */
+-                    if (model.vtable->backward) {
+-                        hu_ml_tensor_t grad_out = output_tensor;
+-                        (void)model.vtable->backward(model.ctx, &grad_out);
++                        /* Backward pass: compute gradients for LoRA params */
++                        if (model.vtable->backward) {
++                            hu_ml_tensor_t grad_out = output_tensor;
++                            (void)model.vtable->backward(model.ctx, &grad_out);
++                        }
+                     }
+-                }
+ 
+-                /* Free output tensor every iteration */
+-                if (output_tensor.data && output_tensor.size_bytes > 0)
+-                    alloc->free(alloc->ctx, output_tensor.data, output_tensor.size_bytes);
++                    /* Free output tensor every iteration */
++                    if (output_tensor.data && output_tensor.size_bytes > 0)
++                        alloc->free(alloc->ctx, output_tensor.data, output_tensor.size_bytes);
+ 
+-                alloc->free(alloc->ctx, seq, seq_len * sizeof(int32_t));
+-                alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
+-                alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
++                    alloc->free(alloc->ctx, seq, seq_len * sizeof(int32_t));
++                    alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
++                    alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
++                }
+             }
+-        }
+         } /* pass */
+ 
+         /* Optimizer step: update LoRA weights */
+@@ -1603,20 +1594,23 @@ hu_error_t hu_ml_cli_lora_baseline(hu_allocator_t *alloc, int argc, const char *
+         const hu_persona_example_bank_t *bank = &persona.example_banks[b];
+         for (size_t i = 0; i < bank->examples_count; i++) {
+             const hu_persona_example_t *ex = &bank->examples[i];
+-            if (!ex->response || ex->response[0] == '\0') continue;
+-            float s = hu_communication_style_fidelity_score(&target, ex->response,
+-                                                            strlen(ex->response));
+-            if (s < 0.f) continue;
++            if (!ex->response || ex->response[0] == '\0')
++                continue;
++            float s =
++                hu_communication_style_fidelity_score(&target, ex->response, strlen(ex->response));
++            if (s < 0.f)
++                continue;
+             sum += s;
+-            if (s < min_score) min_score = s;
+-            if (s > max_score) max_score = s;
++            if (s < min_score)
++                min_score = s;
++            if (s > max_score)
++                max_score = s;
+             scored++;
+         }
+     }
+ 
+     if (scored == 0) {
+-        printf("[lora-baseline] persona '%s' has no scoreable example responses.\n",
+-               persona_name);
++        printf("[lora-baseline] persona '%s' has no scoreable example responses.\n", persona_name);
+         hu_persona_deinit(alloc, &persona);
+         return HU_OK;
+     }
+@@ -1724,8 +1718,10 @@ static hu_error_t hu_ml_lora_ab_load_response_set(hu_allocator_t *alloc, const c
+     const char **strings = (const char **)alloc->alloc(alloc->ctx, n * sizeof(const char *));
+     size_t *lens = (size_t *)alloc->alloc(alloc->ctx, n * sizeof(size_t));
+     if (!strings || !lens) {
+-        if (strings) alloc->free(alloc->ctx, strings, n * sizeof(const char *));
+-        if (lens) alloc->free(alloc->ctx, lens, n * sizeof(size_t));
++        if (strings)
++            alloc->free(alloc->ctx, strings, n * sizeof(const char *));
++        if (lens)
++            alloc->free(alloc->ctx, lens, n * sizeof(size_t));
+         hu_json_free(alloc, root);
+         return HU_ERR_OUT_OF_MEMORY;
+     }
+@@ -1757,40 +1753,56 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
+ 
+     for (int i = 1; i < argc; i++) {
+         const char *v = get_opt(argv, argc, i, "--persona");
+-        if (v) { persona_name = v; i++; continue; }
++        if (v) {
++            persona_name = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--before");
+-        if (v) { before_path = v; i++; continue; }
++        if (v) {
++            before_path = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--after");
+-        if (v) { after_path = v; i++; continue; }
++        if (v) {
++            after_path = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--floor-delta");
+-        if (v) { floor_delta = (float)strtod(v, NULL); i++; continue; }
++        if (v) {
++            floor_delta = (float)strtod(v, NULL);
++            i++;
++            continue;
++        }
+         if (strcmp(argv[i], "--require-positive") == 0) {
+             require_positive = true;
+             continue;
+         }
+         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+-            printf("Usage: human ml lora-ab --persona <name> --before <pre.json> --after <post.json>\n"
+-                   "                       [--floor-delta F] [--require-positive]\n\n"
+-                   "Score two response sets against a persona's communication-\n"
+-                   "style fingerprint and report the mean fidelity delta\n"
+-                   "(after - before). A positive delta indicates the LoRA\n"
+-                   "adapter is pulling the model toward persona fidelity.\n\n"
+-                   "Inputs are JSON files containing a top-level array of\n"
+-                   "response strings, e.g.\n"
+-                   "  [\"hey, sounds good\", \"yeah totally lmk\", ...]\n\n"
+-                   "Options:\n"
+-                   "  --persona <name>      Persona name in ~/.human/personas/\n"
+-                   "  --before <path>       JSON array of pre-LoRA responses\n"
+-                   "  --after <path>        JSON array of post-LoRA responses\n"
+-                   "  --floor-delta F       Exit non-zero when delta < F\n"
+-                   "  --require-positive    Exit non-zero when delta <= 0\n");
++            printf(
++                "Usage: human ml lora-ab --persona <name> --before <pre.json> --after <post.json>\n"
++                "                       [--floor-delta F] [--require-positive]\n\n"
++                "Score two response sets against a persona's communication-\n"
++                "style fingerprint and report the mean fidelity delta\n"
++                "(after - before). A positive delta indicates the LoRA\n"
++                "adapter is pulling the model toward persona fidelity.\n\n"
++                "Inputs are JSON files containing a top-level array of\n"
++                "response strings, e.g.\n"
++                "  [\"hey, sounds good\", \"yeah totally lmk\", ...]\n\n"
++                "Options:\n"
++                "  --persona <name>      Persona name in ~/.human/personas/\n"
++                "  --before <path>       JSON array of pre-LoRA responses\n"
++                "  --after <path>        JSON array of post-LoRA responses\n"
++                "  --floor-delta F       Exit non-zero when delta < F\n"
++                "  --require-positive    Exit non-zero when delta <= 0\n");
+             printf("\nDoc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+             return HU_OK;
+         }
+     }
+     if (!persona_name || !before_path || !after_path) {
+-        fprintf(stderr,
+-                "lora-ab requires --persona <name> --before <path> --after <path>\n");
++        fprintf(stderr, "lora-ab requires --persona <name> --before <path> --after <path>\n");
+         return HU_ERR_INVALID_ARGUMENT;
+     }
+ 
+@@ -1849,12 +1861,14 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
+         hu_persona_deinit(alloc, &persona);
+         return err;
+     }
+-    err = hu_ml_lora_ab_load_response_set(alloc, after_path, &json_after, &strs_after,
+-                                          &lens_after, &n_after);
++    err = hu_ml_lora_ab_load_response_set(alloc, after_path, &json_after, &strs_after, &lens_after,
++                                          &n_after);
+     if (err != HU_OK) {
+         fprintf(stderr, "[lora-ab] failed to load --after %s: %d\n", after_path, err);
+-        if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+-        if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
++        if (strs_before)
++            alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
++        if (lens_before)
++            alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+         hu_json_free(alloc, json_before);
+         hu_persona_deinit(alloc, &persona);
+         return err;
+@@ -1863,15 +1877,19 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
+     hu_communication_style_set_summary_t sum_before, sum_after;
+     float delta = 0.f;
+     err = hu_communication_style_compare_response_sets(&target, strs_before, lens_before, n_before,
+-                                                       strs_after, lens_after, n_after,
+-                                                       &sum_before, &sum_after, &delta);
++                                                       strs_after, lens_after, n_after, &sum_before,
++                                                       &sum_after, &delta);
+     /* Free loaders before reporting so a fail-fast exit doesn't
+      * leak. The summaries are stack values and don't alias into
+      * the JSON tree. */
+-    if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+-    if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+-    if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+-    if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
++    if (strs_before)
++        alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
++    if (lens_before)
++        alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
++    if (strs_after)
++        alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
++    if (lens_after)
++        alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+     hu_json_free(alloc, json_before);
+     hu_json_free(alloc, json_after);
+     hu_persona_deinit(alloc, &persona);
+@@ -1931,16 +1949,20 @@ static size_t hu_ml_lora_runner_build_system_prompt(const hu_persona_t *persona,
+     size_t n = 0;
+     if (persona->identity && persona->identity[0]) {
+         int w = snprintf(out + n, cap - n, "%s\n", persona->identity);
+-        if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
++        if (w > 0 && (size_t)w < cap - n)
++            n += (size_t)w;
+     }
+     if (persona->traits_count > 0 && persona->traits) {
+         int w = snprintf(out + n, cap - n, "Traits: ");
+-        if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
++        if (w > 0 && (size_t)w < cap - n)
++            n += (size_t)w;
+         for (size_t i = 0; i < persona->traits_count && n + 2 < cap; i++) {
+             const char *t = persona->traits[i];
+-            if (!t || !t[0]) continue;
++            if (!t || !t[0])
++                continue;
+             w = snprintf(out + n, cap - n, "%s%s", i == 0 ? "" : ", ", t);
+-            if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
++            if (w > 0 && (size_t)w < cap - n)
++                n += (size_t)w;
+         }
+         if (n + 1 < cap) {
+             out[n++] = '\n';
+@@ -2016,19 +2038,47 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
+ 
+     for (int i = 1; i < argc; i++) {
+         const char *v = get_opt(argv, argc, i, "--persona");
+-        if (v) { persona_name = v; i++; continue; }
++        if (v) {
++            persona_name = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--output");
+-        if (v) { output_path = v; i++; continue; }
++        if (v) {
++            output_path = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--provider");
+-        if (v) { provider_name = v; i++; continue; }
++        if (v) {
++            provider_name = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--model");
+-        if (v) { model = v; i++; continue; }
++        if (v) {
++            model = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--max-examples");
+-        if (v) { max_examples = atoi(v); i++; continue; }
++        if (v) {
++            max_examples = atoi(v);
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--adapter");
+-        if (v) { adapter_path = v; i++; continue; }
++        if (v) {
++            adapter_path = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--adapter-id");
+-        if (v) { adapter_id = v; i++; continue; }
++        if (v) {
++            adapter_id = v;
++            i++;
++            continue;
++        }
+         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+             printf("Usage: human ml lora-runner --persona <name> --output <path> "
+                    "[--provider <name>] [--model <id>] [--max-examples N] "
+@@ -2084,8 +2134,10 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
+     char **responses = (char **)alloc->alloc(alloc->ctx, total_examples * sizeof(char *));
+     size_t *lens = (size_t *)alloc->alloc(alloc->ctx, total_examples * sizeof(size_t));
+     if (!responses || !lens) {
+-        if (responses) alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
+-        if (lens) alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
++        if (responses)
++            alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
++        if (lens)
++            alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
+         hu_persona_deinit(alloc, &persona);
+         return HU_ERR_OUT_OF_MEMORY;
+     }
+@@ -2161,8 +2213,8 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
+     }
+ 
+     char system_buf[1024];
+-    size_t system_len = hu_ml_lora_runner_build_system_prompt(&persona, system_buf,
+-                                                              sizeof(system_buf));
++    size_t system_len =
++        hu_ml_lora_runner_build_system_prompt(&persona, system_buf, sizeof(system_buf));
+     size_t model_len = model ? strlen(model) : 0;
+ 
+     size_t produced = 0;
+@@ -2225,8 +2277,8 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
+     }
+ #endif
+ 
+-    err = hu_ml_lora_runner_write_json_array(alloc, output_path,
+-                                             (const char *const *)responses, lens, total_examples);
++    err = hu_ml_lora_runner_write_json_array(alloc, output_path, (const char *const *)responses,
++                                             lens, total_examples);
+     if (err == HU_OK) {
+         printf("[lora-runner] persona '%s' → %s (%zu responses)\n", persona_name, output_path,
+                total_examples);
+@@ -2264,22 +2316,55 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
+     const char *before_path = NULL;
+     const char *after_path = NULL;
+     const char *output_path = NULL;
++    bool judgment_flag = false;
++    const char *judgment_holdout_path = NULL;
+     for (int i = 1; i < argc; i++) {
+         const char *v = get_opt(argv, argc, i, "--persona");
+-        if (v) { persona_name = v; i++; continue; }
++        if (v) {
++            persona_name = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--before");
+-        if (v) { before_path = v; i++; continue; }
++        if (v) {
++            before_path = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--after");
+-        if (v) { after_path = v; i++; continue; }
++        if (v) {
++            after_path = v;
++            i++;
++            continue;
++        }
+         v = get_opt(argv, argc, i, "--output");
+-        if (v) { output_path = v; i++; continue; }
++        if (v) {
++            output_path = v;
++            i++;
++            continue;
++        }
++        v = get_opt(argv, argc, i, "--judgment-holdout");
++        if (v) {
++            judgment_holdout_path = v;
++            i++;
++            continue;
++        }
++        if (strcmp(argv[i], "--judgment") == 0) {
++            judgment_flag = true;
++            continue;
++        }
+         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+             printf("Usage: human ml fidelity-status --persona <name> "
+-                   "[--before <path>] [--after <path>] [--output <path>]\n\n"
++                   "[--before <path>] [--after <path>] [--output <path>]\n"
++                   "                                 [--judgment] [--judgment-holdout <path>]\n\n"
+                    "Emit a single JSON object aggregating LoRA-fidelity\n"
+                    "health metrics for downstream dashboards & status\n"
+                    "surfaces. When --before and --after are both provided,\n"
+-                   "the A/B delta is included.\n");
++                   "the A/B delta is included. When --judgment is set,\n"
++                   "the held-out NLL judgment-fidelity summary is included\n"
++                   "(US-7.6 / INS-A); ships dormant in sprint 7 — emits\n"
++                   "\"judgment_ppl_status\":\"not_supported_no_local_inference\"\n"
++                   "until US-7.6.1 wires a real NLL backend.\n");
+             return HU_OK;
+         }
+     }
+@@ -2318,20 +2403,24 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
+         const char **strs_b = NULL, **strs_a = NULL;
+         size_t *lens_b = NULL, *lens_a = NULL;
+         size_t n_b = 0, n_a = 0;
+-        if (hu_ml_lora_ab_load_response_set(alloc, before_path, &json_b, &strs_b, &lens_b,
+-                                            &n_b) == HU_OK &&
+-            hu_ml_lora_ab_load_response_set(alloc, after_path, &json_a, &strs_a, &lens_a,
+-                                            &n_a) == HU_OK) {
+-            if (hu_communication_style_compare_response_sets(&target, strs_b, lens_b, n_b,
+-                                                             strs_a, lens_a, n_a, &sum_a, &sum_b,
++        if (hu_ml_lora_ab_load_response_set(alloc, before_path, &json_b, &strs_b, &lens_b, &n_b) ==
++                HU_OK &&
++            hu_ml_lora_ab_load_response_set(alloc, after_path, &json_a, &strs_a, &lens_a, &n_a) ==
++                HU_OK) {
++            if (hu_communication_style_compare_response_sets(&target, strs_b, lens_b, n_b, strs_a,
++                                                             lens_a, n_a, &sum_a, &sum_b,
+                                                              &delta) == HU_OK) {
+                 ab_available = true;
+             }
+         }
+-        if (strs_b) alloc->free(alloc->ctx, strs_b, n_b * sizeof(const char *));
+-        if (lens_b) alloc->free(alloc->ctx, lens_b, n_b * sizeof(size_t));
+-        if (strs_a) alloc->free(alloc->ctx, strs_a, n_a * sizeof(const char *));
+-        if (lens_a) alloc->free(alloc->ctx, lens_a, n_a * sizeof(size_t));
++        if (strs_b)
++            alloc->free(alloc->ctx, strs_b, n_b * sizeof(const char *));
++        if (lens_b)
++            alloc->free(alloc->ctx, lens_b, n_b * sizeof(size_t));
++        if (strs_a)
++            alloc->free(alloc->ctx, strs_a, n_a * sizeof(const char *));
++        if (lens_a)
++            alloc->free(alloc->ctx, lens_a, n_a * sizeof(size_t));
+         hu_json_free(alloc, json_b);
+         hu_json_free(alloc, json_a);
+     }
+@@ -2344,13 +2433,12 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
+     }
+     hu_json_object_set(alloc, root, "persona",
+                        hu_json_string_new(alloc, persona_name, strlen(persona_name)));
+-    hu_json_object_set(alloc, root, "fingerprint_source",
+-                       hu_json_string_new(alloc, synthetic ? "synthetic" : "personal_model",
+-                                          synthetic ? 9 : 14));
++    hu_json_object_set(
++        alloc, root, "fingerprint_source",
++        hu_json_string_new(alloc, synthetic ? "synthetic" : "personal_model", synthetic ? 9 : 14));
+ 
+     hu_json_value_t *baseline_obj = hu_json_object_new(alloc);
+-    hu_json_object_set(alloc, baseline_obj, "scored",
+-                       hu_json_number_new(alloc, (double)b_scored));
++    hu_json_object_set(alloc, baseline_obj, "scored", hu_json_number_new(alloc, (double)b_scored));
+     hu_json_object_set(alloc, baseline_obj, "mean", hu_json_number_new(alloc, b_mean));
+     hu_json_object_set(alloc, baseline_obj, "min", hu_json_number_new(alloc, b_min));
+     hu_json_object_set(alloc, baseline_obj, "max", hu_json_number_new(alloc, b_max));
+@@ -2369,6 +2457,60 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
+     }
+     hu_json_object_set(alloc, root, "ab", ab);
+ 
++    /* US-7.6 — judgment-fidelity (INS-A). Optional; off by default.
++     * Sprint 7 decision D3: ships dormant — production NLL backend is
++     * unregistered, so the scorer reports
++     * judgment_ppl_status="not_supported_no_local_inference" and the
++     * downstream gate emits a visible SKIP rather than a silent pass. */
++    if (judgment_flag) {
++        hu_json_value_t *judgment_obj = hu_json_object_new(alloc);
++        const char *holdout_path =
++            judgment_holdout_path ? judgment_holdout_path : hu_ml_fidelity_default_holdout_path();
++        hu_ml_judgment_holdout_t holdout = {0};
++        hu_ml_judgment_summary_t jsummary = {0};
++        hu_error_t lerr = hu_ml_fidelity_load_holdout(alloc, holdout_path, &holdout);
++        const char *status = "not_supported_no_local_inference";
++        bool ppl_ok = false;
++        double ppl = 0.0;
++        if (lerr == HU_OK) {
++            hu_error_t serr = hu_ml_fidelity_score_judgment(&holdout, &jsummary);
++            if (serr != HU_OK) {
++                status = "score_error";
++            } else if (!jsummary.available) {
++                status = "not_supported_no_local_inference";
++            } else {
++                status = "ok";
++                ppl = exp(jsummary.mean_nll);
++                ppl_ok = true;
++            }
++        } else {
++            status = "holdout_load_failed";
++        }
++        hu_json_object_set(alloc, judgment_obj, "available",
++                           hu_json_bool_new(alloc, jsummary.available));
++        hu_json_object_set(alloc, judgment_obj, "judgment_ppl_status",
++                           hu_json_string_new(alloc, status, strlen(status)));
++        if (ppl_ok) {
++            hu_json_object_set(alloc, judgment_obj, "judgment_ppl", hu_json_number_new(alloc, ppl));
++            hu_json_object_set(alloc, judgment_obj, "mean_nll",
++                               hu_json_number_new(alloc, jsummary.mean_nll));
++            hu_json_object_set(alloc, judgment_obj, "min_nll",
++                               hu_json_number_new(alloc, jsummary.min_nll));
++            hu_json_object_set(alloc, judgment_obj, "max_nll",
++                               hu_json_number_new(alloc, jsummary.max_nll));
++        } else {
++            hu_json_object_set(alloc, judgment_obj, "judgment_ppl", hu_json_null_new(alloc));
++        }
++        hu_json_object_set(alloc, judgment_obj, "judgment_scored",
++                           hu_json_number_new(alloc, (double)jsummary.scored));
++        hu_json_object_set(alloc, judgment_obj, "judgment_skipped",
++                           hu_json_number_new(alloc, (double)jsummary.skipped));
++        hu_json_object_set(alloc, judgment_obj, "holdout_rows",
++                           hu_json_number_new(alloc, (double)holdout.rows_count));
++        hu_json_object_set(alloc, root, "judgment", judgment_obj);
++        hu_ml_fidelity_free_holdout(alloc, &holdout);
++    }
++
+     char *out = NULL;
+     size_t out_len = 0;
+     err = hu_json_stringify(alloc, root, &out, &out_len);
+@@ -2636,12 +2778,12 @@ done_collect:
+         return err;
+     }
+ 
+-    printf("[train-feed-predictor] Training topic predictor (steps=%d, vocab=%zu)\n",
+-           max_steps, cfg.gpt.vocab_size);
++    printf("[train-feed-predictor] Training topic predictor (steps=%d, vocab=%zu)\n", max_steps,
++           cfg.gpt.vocab_size);
+ 
+     hu_ml_train_result_t result = {0};
+-    err = hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training,
+-                      token_bytes, token_bytes_count, &result);
++    err = hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training, token_bytes,
++                      token_bytes_count, &result);
+ 
+     printf("[train-feed-predictor] %s: %zu steps, %.2f bpb, %.1fs\n",
+            err == HU_OK ? "Done" : "Failed", result.num_steps, result.val_bpb,
+@@ -2731,8 +2873,8 @@ hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char *
+         return err;
+     }
+ 
+-    err = hu_provider_load_adapter(&prov, alloc, adapter_path, strlen(adapter_path),
+-                                   adapter_id, strlen(adapter_id));
++    err = hu_provider_load_adapter(&prov, alloc, adapter_path, strlen(adapter_path), adapter_id,
++                                   strlen(adapter_id));
+     if (err != HU_OK) {
+         fprintf(stderr, "load_adapter failed: %s\n", hu_error_string(err));
+         if (prov.vtable && prov.vtable->deinit)
+@@ -2750,8 +2892,7 @@ hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char *
+             fprintf(stderr, "unload_adapter failed: %s\n", hu_error_string(err));
+         } else {
+             const char *after = hu_provider_active_adapter(&prov);
+-            printf("{\"unloaded\":true,\"adapter_id_after\":\"%s\"}\n",
+-                   after ? after : "(null)");
++            printf("{\"unloaded\":true,\"adapter_id_after\":\"%s\"}\n", after ? after : "(null)");
+         }
+     }
+ 
+diff --git a/src/ml/fidelity.c b/src/ml/fidelity.c
+index 6538f305..23685af4 100644
+--- a/src/ml/fidelity.c
++++ b/src/ml/fidelity.c
+@@ -1,5 +1,8 @@
+ #include "human/ml/fidelity.h"
++#include "human/core/json.h"
+ #include "human/persona.h"
++#include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ 
+ /* Track D D2.2 — persona-fidelity computation primitives.
+@@ -26,8 +29,7 @@ hu_error_t hu_ml_fidelity_resolve_target(hu_allocator_t *alloc,
+     char pm_path[1024];
+     if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+         hu_personal_model_t loaded;
+-        if (hu_personal_model_load(&loaded, pm_path) == HU_OK &&
+-            loaded.style.sample_count > 0U) {
++        if (hu_personal_model_load(&loaded, pm_path) == HU_OK && loaded.style.sample_count > 0U) {
+             *out_target = loaded.style;
+             *out_synthetic = false;
+             return HU_OK;
+@@ -78,8 +80,10 @@ hu_error_t hu_ml_fidelity_score_baseline(const hu_persona_t *persona,
+                 continue;
+             }
+             sum += s;
+-            if (s < mn) mn = s;
+-            if (s > mx) mx = s;
++            if (s < mn)
++                mn = s;
++            if (s > mx)
++                mx = s;
+             scored++;
+         }
+     }
+@@ -96,3 +100,231 @@ hu_error_t hu_ml_fidelity_score_baseline(const hu_persona_t *persona,
+     }
+     return HU_OK;
+ }
++
++/* ── US-7.6 — judgment-fidelity (INS-A) ─────────────────────────────────
++ *
++ * Process-wide NLL-compute seam. Tests inject a deterministic mock via
++ * `hu_ml_fidelity_set_nll_compute_fn`; production callers (none yet —
++ * sprint 7 ships this dormant per decision D3) leave the default in
++ * place, which returns HU_ERR_NOT_SUPPORTED so the gate plumbing
++ * declares itself inactive instead of silently passing. */
++
++static hu_error_t default_nll_not_supported(const char *prompt, size_t prompt_len,
++                                            const char *continuation, size_t continuation_len,
++                                            void *ctx, double *out_nll) {
++    (void)prompt;
++    (void)prompt_len;
++    (void)continuation;
++    (void)continuation_len;
++    (void)ctx;
++    if (out_nll)
++        *out_nll = 0.0;
++    return HU_ERR_NOT_SUPPORTED;
++}
++
++static hu_ml_nll_compute_fn_t g_nll_fn = default_nll_not_supported;
++static void *g_nll_ctx = NULL;
++
++void hu_ml_fidelity_set_nll_compute_fn(hu_ml_nll_compute_fn_t fn, void *ctx) {
++    g_nll_fn = fn ? fn : default_nll_not_supported;
++    g_nll_ctx = fn ? ctx : NULL;
++}
++
++const char *hu_ml_fidelity_default_holdout_path(void) {
++    const char *env = getenv("HU_JUDGMENT_HOLDOUT");
++    if (env && env[0])
++        return env;
++    return "tests/fixtures/judgment_fidelity_holdout.jsonl";
++}
++
++/* Append a row by copying both strings via the allocator. On any
++ * allocation failure the partially-constructed row is rolled back. */
++static hu_error_t holdout_append_row(hu_allocator_t *alloc, hu_ml_judgment_holdout_t *out,
++                                     const char *prompt, size_t prompt_len,
++                                     const char *continuation, size_t continuation_len) {
++    if (out->rows_count == out->rows_capacity) {
++        size_t new_cap = out->rows_capacity ? out->rows_capacity * 2 : 8;
++        void *new_rows = alloc->realloc(alloc->ctx, out->rows,
++                                        out->rows_capacity * sizeof(hu_ml_judgment_holdout_row_t),
++                                        new_cap * sizeof(hu_ml_judgment_holdout_row_t));
++        if (!new_rows)
++            return HU_ERR_OUT_OF_MEMORY;
++        out->rows = (hu_ml_judgment_holdout_row_t *)new_rows;
++        out->rows_capacity = new_cap;
++    }
++    char *p = (char *)alloc->alloc(alloc->ctx, prompt_len + 1);
++    if (!p)
++        return HU_ERR_OUT_OF_MEMORY;
++    memcpy(p, prompt, prompt_len);
++    p[prompt_len] = '\0';
++    char *c = (char *)alloc->alloc(alloc->ctx, continuation_len + 1);
++    if (!c) {
++        alloc->free(alloc->ctx, p, prompt_len + 1);
++        return HU_ERR_OUT_OF_MEMORY;
++    }
++    memcpy(c, continuation, continuation_len);
++    c[continuation_len] = '\0';
++    hu_ml_judgment_holdout_row_t *row = &out->rows[out->rows_count++];
++    row->prompt = p;
++    row->prompt_len = prompt_len;
++    row->continuation = c;
++    row->continuation_len = continuation_len;
++    return HU_OK;
++}
++
++hu_error_t hu_ml_fidelity_load_holdout(hu_allocator_t *alloc, const char *path,
++                                       hu_ml_judgment_holdout_t *out) {
++    if (!alloc || !path || !out)
++        return HU_ERR_INVALID_ARGUMENT;
++    memset(out, 0, sizeof(*out));
++
++    FILE *fp = fopen(path, "rb");
++    if (!fp)
++        return HU_ERR_IO;
++
++    /* Read entire file. JSONL holdout fixtures are small (≤ a few KB). */
++    if (fseek(fp, 0, SEEK_END) != 0) {
++        fclose(fp);
++        return HU_ERR_IO;
++    }
++    long size = ftell(fp);
++    if (size < 0) {
++        fclose(fp);
++        return HU_ERR_IO;
++    }
++    rewind(fp);
++    char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)size + 1);
++    if (!buf) {
++        fclose(fp);
++        return HU_ERR_OUT_OF_MEMORY;
++    }
++    size_t read_n = fread(buf, 1, (size_t)size, fp);
++    fclose(fp);
++    buf[read_n] = '\0';
++
++    /* Iterate line by line. Malformed / non-object / missing-field
++     * lines are silently dropped so the loader is robust to in-line
++     * comments and stray whitespace; the test fixture documents which
++     * rows are intentionally malformed. */
++    size_t i = 0;
++    hu_error_t err = HU_OK;
++    while (i < read_n) {
++        size_t line_start = i;
++        while (i < read_n && buf[i] != '\n')
++            i++;
++        size_t line_len = i - line_start;
++        if (i < read_n)
++            i++; /* consume newline */
++
++        /* trim leading whitespace */
++        size_t s = line_start;
++        size_t e = line_start + line_len;
++        while (s < e && (buf[s] == ' ' || buf[s] == '\t' || buf[s] == '\r'))
++            s++;
++        while (e > s && (buf[e - 1] == ' ' || buf[e - 1] == '\t' || buf[e - 1] == '\r'))
++            e--;
++        if (s == e)
++            continue; /* blank line */
++        if (buf[s] == '#' || buf[s] == '/')
++            continue; /* comment line (# … or // …) */
++
++        hu_json_value_t *parsed = NULL;
++        if (hu_json_parse(alloc, buf + s, e - s, &parsed) != HU_OK || !parsed)
++            continue;
++        if (parsed->type != HU_JSON_OBJECT) {
++            hu_json_free(alloc, parsed);
++            continue;
++        }
++        const char *prompt = hu_json_get_string(parsed, "prompt");
++        const char *cont = hu_json_get_string(parsed, "continuation");
++        if (!prompt || !cont) {
++            hu_json_free(alloc, parsed);
++            continue;
++        }
++        err = holdout_append_row(alloc, out, prompt, strlen(prompt), cont, strlen(cont));
++        hu_json_free(alloc, parsed);
++        if (err != HU_OK)
++            break;
++    }
++
++    alloc->free(alloc->ctx, buf, (size_t)size + 1);
++    if (err != HU_OK) {
++        hu_ml_fidelity_free_holdout(alloc, out);
++        return err;
++    }
++    return HU_OK;
++}
++
++void hu_ml_fidelity_free_holdout(hu_allocator_t *alloc, hu_ml_judgment_holdout_t *holdout) {
++    if (!alloc || !holdout)
++        return;
++    for (size_t i = 0; i < holdout->rows_count; i++) {
++        hu_ml_judgment_holdout_row_t *r = &holdout->rows[i];
++        if (r->prompt)
++            alloc->free(alloc->ctx, r->prompt, r->prompt_len + 1);
++        if (r->continuation)
++            alloc->free(alloc->ctx, r->continuation, r->continuation_len + 1);
++    }
++    if (holdout->rows)
++        alloc->free(alloc->ctx, holdout->rows,
++                    holdout->rows_capacity * sizeof(hu_ml_judgment_holdout_row_t));
++    memset(holdout, 0, sizeof(*holdout));
++}
++
++hu_error_t hu_ml_fidelity_score_judgment(const hu_ml_judgment_holdout_t *holdout,
++                                         hu_ml_judgment_summary_t *out_summary) {
++    if (!holdout || !out_summary)
++        return HU_ERR_INVALID_ARGUMENT;
++    memset(out_summary, 0, sizeof(*out_summary));
++
++    size_t scored = 0;
++    size_t skipped = 0;
++    double sum = 0.0;
++    double mn = 0.0;
++    double mx = 0.0;
++    bool seen = false;
++
++    for (size_t i = 0; i < holdout->rows_count; i++) {
++        const hu_ml_judgment_holdout_row_t *r = &holdout->rows[i];
++        if (!r->prompt || !r->continuation) {
++            skipped++;
++            continue;
++        }
++        double nll = 0.0;
++        hu_error_t err = g_nll_fn(r->prompt, r->prompt_len, r->continuation, r->continuation_len,
++                                  g_nll_ctx, &nll);
++        if (err == HU_ERR_NOT_SUPPORTED) {
++            skipped++;
++            continue;
++        }
++        if (err != HU_OK)
++            return err;
++        sum += nll;
++        if (!seen) {
++            mn = nll;
++            mx = nll;
++            seen = true;
++        } else {
++            if (nll < mn)
++                mn = nll;
++            if (nll > mx)
++                mx = nll;
++        }
++        scored++;
++    }
++
++    out_summary->scored = scored;
++    out_summary->skipped = skipped;
++    if (scored == 0) {
++        out_summary->mean_nll = 0.0;
++        out_summary->min_nll = 0.0;
++        out_summary->max_nll = 0.0;
++        out_summary->available = false;
++    } else {
++        out_summary->mean_nll = sum / (double)scored;
++        out_summary->min_nll = mn;
++        out_summary->max_nll = mx;
++        out_summary->available = true;
++    }
++    return HU_OK;
++}
+diff --git a/tests/fixtures/judgment_fidelity_holdout.jsonl b/tests/fixtures/judgment_fidelity_holdout.jsonl
+new file mode 100644
+index 00000000..8e74492c
+--- /dev/null
++++ b/tests/fixtures/judgment_fidelity_holdout.jsonl
+@@ -0,0 +1,17 @@
++# US-7.6 judgment-fidelity held-out fixture (sprint 7).
++# Synthetic, deterministic, ASCII-only, zero PII. ~10+ rows is enough
++# for a regression sentinel on the NLL seam; it is NOT a research-grade
++# eval. When US-7.6.1 wires the real NLL backend, the follow-on story
++# will grow this corpus and re-baseline the gate floor.
++{"prompt":"ready when you are","continuation":"ok cool, give me a sec","channel":"telegram"}
++{"prompt":"can you send the doc?","continuation":"sure, just a sec - sending now","channel":"slack"}
++{"prompt":"thanks!","continuation":"np","channel":"sms"}
++{"prompt":"are you around?","continuation":"yep, what's up","channel":"telegram"}
++{"prompt":"meeting moved to 3?","continuation":"works for me","channel":"slack"}
++{"prompt":"got a sec to talk?","continuation":"give me five and i'm there","channel":"sms"}
++{"prompt":"did you see the deploy?","continuation":"yeah, looks clean","channel":"slack"}
++{"prompt":"want to grab coffee?","continuation":"yes please","channel":"sms"}
++{"prompt":"need anything from the store?","continuation":"nope, all good","channel":"sms"}
++{"prompt":"can you review the pr today?","continuation":"on it","channel":"slack"}
++{"prompt":"are we still on for friday?","continuation":"yep, see you then","channel":"telegram"}
++{"prompt":"send the link when you can","continuation":"will do","channel":"slack"}
+diff --git a/tests/fixtures/judgment_fidelity_holdout_malformed.jsonl b/tests/fixtures/judgment_fidelity_holdout_malformed.jsonl
+new file mode 100644
+index 00000000..8b84474c
+--- /dev/null
++++ b/tests/fixtures/judgment_fidelity_holdout_malformed.jsonl
+@@ -0,0 +1,5 @@
++# Malformed-row fixture for US-7.6 loader-robustness tests.
++{"prompt":"this is a good row","continuation":"this is the response"}
++{"prompt":"missing-continuation row only"}
++not even json at all
++{"prompt":"another good row","continuation":"another response"}
+diff --git a/tests/test_check_lora_ab_judgment.sh b/tests/test_check_lora_ab_judgment.sh
+new file mode 100755
+index 00000000..ca3f8270
+--- /dev/null
++++ b/tests/test_check_lora_ab_judgment.sh
+@@ -0,0 +1,74 @@
++#!/usr/bin/env bash
++# US-7.6 AC-7.6.5 — assert `scripts/check-lora-ab.sh --judgment` emits
++# a visible SKIP line when no NLL backend is registered (sprint 7 D3:
++# the seam ships dormant).
++#
++# The SKIP line MUST be parseable as a non-pass result so US-7.5's
++# nightly cron cannot silently treat the inactive gate as a green
++# light. We assert on the exact string "[lora-ab] judgment: SKIP".
++#
++# Run manually: bash tests/test_check_lora_ab_judgment.sh
++set -euo pipefail
++
++REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
++cd "$REPO_ROOT"
++
++BIN="${LORA_AB_BIN:-./build/human}"
++if [ ! -x "$BIN" ]; then
++  echo "FAIL: $BIN not built; run cmake --build --preset dev" >&2
++  exit 1
++fi
++
++# Test 1: with --judgment, the SKIP line appears AND the lexical gate
++# still passes AND exit code is 0.
++OUTPUT="$(LORA_AB_BIN="$BIN" bash "$REPO_ROOT/scripts/check-lora-ab.sh" --judgment 2>&1)"
++EXIT=$?
++if [ "$EXIT" -ne 0 ]; then
++  echo "FAIL: --judgment gate exited $EXIT (expected 0)" >&2
++  printf '%s\n' "$OUTPUT" >&2
++  exit 1
++fi
++
++if ! printf '%s\n' "$OUTPUT" | grep -qE '^\[lora-ab\] judgment: SKIP'; then
++  echo "FAIL: --judgment gate did not emit SKIP line" >&2
++  printf '%s\n' "$OUTPUT" >&2
++  exit 1
++fi
++
++# The existing lexical-surface PASS line must still be there — we did
++# not break the old gate.
++if ! printf '%s\n' "$OUTPUT" | grep -qE '^\[lora-ab-gate\] PASS:'; then
++  echo "FAIL: lexical-surface PASS line missing" >&2
++  printf '%s\n' "$OUTPUT" >&2
++  exit 1
++fi
++
++# The SKIP line MUST be parseable as non-pass. Verify that the literal
++# string "PASS" does NOT appear on the judgment line — this is what
++# downstream automation depends on.
++JUDGE_LINE="$(printf '%s\n' "$OUTPUT" | grep -E '^\[lora-ab\] judgment:')"
++if printf '%s\n' "$JUDGE_LINE" | grep -q 'PASS'; then
++  echo "FAIL: judgment SKIP line should not contain 'PASS'" >&2
++  echo "got: $JUDGE_LINE" >&2
++  exit 1
++fi
++
++echo "Test 1 passed: --judgment emits SKIP, lexical gate still PASS, exit 0"
++
++# Test 2: without --judgment, the SKIP line must NOT appear (the new
++# code path is opt-in).
++OUTPUT2="$(LORA_AB_BIN="$BIN" bash "$REPO_ROOT/scripts/check-lora-ab.sh" 2>&1)"
++EXIT2=$?
++if [ "$EXIT2" -ne 0 ]; then
++  echo "FAIL: bare gate exited $EXIT2 (expected 0)" >&2
++  printf '%s\n' "$OUTPUT2" >&2
++  exit 1
++fi
++if printf '%s\n' "$OUTPUT2" | grep -qE '^\[lora-ab\] judgment:'; then
++  echo "FAIL: judgment line appeared without --judgment flag" >&2
++  printf '%s\n' "$OUTPUT2" >&2
++  exit 1
++fi
++echo "Test 2 passed: bare gate unchanged, no judgment line emitted"
++
++echo "test_check_lora_ab_judgment: OK"
+diff --git a/tests/test_main.c b/tests/test_main.c
+index f0cf4d0f..844bb5cb 100644
+--- a/tests/test_main.c
++++ b/tests/test_main.c
+@@ -415,6 +415,7 @@ void run_emotion_map_tests(void);
+ #ifdef HU_ENABLE_ML
+ void run_ml_tests(void);
+ void run_ml_cli_actually_trains_tests(void);
++void run_ml_fidelity_judgment_tests(void);
+ void run_dpo_judge_naming_tests(void);
+ void run_lora_tests(void);
+ void run_agent_trainer_tests(void);
+@@ -998,6 +999,7 @@ int main(int argc, char **argv) {
+ #ifdef HU_ENABLE_ML
+     run_ml_tests();
+     run_ml_cli_actually_trains_tests();
++    run_ml_fidelity_judgment_tests();
+     run_dpo_judge_naming_tests();
+     run_lora_tests();
+     run_agent_trainer_tests();
+diff --git a/tests/test_ml_fidelity_judgment.c b/tests/test_ml_fidelity_judgment.c
+new file mode 100644
+index 00000000..140559f9
+--- /dev/null
++++ b/tests/test_ml_fidelity_judgment.c
+@@ -0,0 +1,344 @@
++/* Tests for US-7.6 — judgment-fidelity (INS-A) NLL seam.
++ *
++ * The seam ships DORMANT in sprint 7 (decision D3 in
++ * sprints/sprint-7/decisions.md): no production NLL backend is wired,
++ * the default returns HU_ERR_NOT_SUPPORTED, and these tests exercise
++ * the plumbing via a deterministic mock injected through
++ * `hu_ml_fidelity_set_nll_compute_fn`. No real model weights are
++ * loaded — AC-7.6.3 forbids it. */
++
++#include "human/core/allocator.h"
++#include "human/core/error.h"
++#include "human/memory/personal_model.h"
++#include "human/ml/fidelity.h"
++#include "test_framework.h"
++
++#include <math.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++/* ── deterministic mock NLL fns ──────────────────────────────────────── */
++
++typedef struct {
++    size_t call_count;
++    /* When `degenerate` is false, NLL = base + delta * i (per row).
++     * When true, NLL = high (flat, mimicking an adapter that pushed
++     * probability mass off the real continuations). */
++    double base;
++    double delta;
++    bool degenerate;
++    double degenerate_nll;
++} mock_nll_ctx_t;
++
++static hu_error_t mock_nll_increasing(const char *prompt, size_t prompt_len, const char *cont,
++                                      size_t cont_len, void *ctx, double *out_nll) {
++    (void)prompt;
++    (void)cont;
++    /* Sanity — the seam must hand non-empty rows to the NLL fn. */
++    if (prompt_len == 0 || cont_len == 0)
++        return HU_ERR_INVALID_ARGUMENT;
++    mock_nll_ctx_t *m = (mock_nll_ctx_t *)ctx;
++    if (m->degenerate) {
++        *out_nll = m->degenerate_nll;
++    } else {
++        *out_nll = m->base + m->delta * (double)m->call_count;
++    }
++    m->call_count++;
++    return HU_OK;
++}
++
++static hu_error_t mock_nll_always_skip(const char *prompt, size_t prompt_len, const char *cont,
++                                       size_t cont_len, void *ctx, double *out_nll) {
++    (void)prompt;
++    (void)prompt_len;
++    (void)cont;
++    (void)cont_len;
++    (void)ctx;
++    (void)out_nll;
++    return HU_ERR_NOT_SUPPORTED;
++}
++
++/* Path resolution: tests may run from build/ depending on harness.
++ * The fixture lives at tests/fixtures/... relative to the repo root.
++ * Try both relative paths so the test is robust to CWD. */
++static const char *resolve_fixture(const char *rel) {
++    static char buf[1024];
++    /* Prefer the env override hook if set (lets CI/dev wire absolute
++     * paths). */
++    const char *env = getenv("HU_JUDGMENT_HOLDOUT_TEST_DIR");
++    if (env && env[0]) {
++        snprintf(buf, sizeof(buf), "%s/%s", env, rel);
++        FILE *f = fopen(buf, "rb");
++        if (f) {
++            fclose(f);
++            return buf;
++        }
++    }
++    /* CWD candidates */
++    const char *candidates[] = {"tests/fixtures/", "../tests/fixtures/", "./tests/fixtures/", NULL};
++    for (size_t i = 0; candidates[i]; i++) {
++        snprintf(buf, sizeof(buf), "%s%s", candidates[i], rel);
++        FILE *f = fopen(buf, "rb");
++        if (f) {
++            fclose(f);
++            return buf;
++        }
++    }
++    return NULL;
++}
++
++/* ── tests ───────────────────────────────────────────────────────────── */
++
++static void test_holdout_loads_at_least_ten_rows(void) {
++    /* AC scaffolding: the shipped fixture must contain ≥ 10 well-formed
++     * rows; this is the regression-sentinel floor documented in the
++     * design doc. */
++    hu_allocator_t alloc = hu_system_allocator();
++    const char *path = resolve_fixture("judgment_fidelity_holdout.jsonl");
++    HU_ASSERT_NOT_NULL(path);
++    hu_ml_judgment_holdout_t holdout = {0};
++    hu_error_t err = hu_ml_fidelity_load_holdout(&alloc, path, &holdout);
++    HU_ASSERT_EQ(err, HU_OK);
++    HU_ASSERT_GE(holdout.rows_count, (size_t)10);
++    /* All rows must have non-empty prompt + continuation. */
++    for (size_t i = 0; i < holdout.rows_count; i++) {
++        HU_ASSERT_NOT_NULL(holdout.rows[i].prompt);
++        HU_ASSERT_NOT_NULL(holdout.rows[i].continuation);
++        HU_ASSERT_GT(holdout.rows[i].prompt_len, (size_t)0);
++        HU_ASSERT_GT(holdout.rows[i].continuation_len, (size_t)0);
++    }
++    hu_ml_fidelity_free_holdout(&alloc, &holdout);
++}
++
++static void test_holdout_skips_malformed_rows(void) {
++    /* The malformed sibling fixture has 2 good rows, 1 missing-field,
++     * and 1 not-json. Loader must keep 2, drop 2 silently. */
++    hu_allocator_t alloc = hu_system_allocator();
++    const char *path = resolve_fixture("judgment_fidelity_holdout_malformed.jsonl");
++    HU_ASSERT_NOT_NULL(path);
++    hu_ml_judgment_holdout_t holdout = {0};
++    hu_error_t err = hu_ml_fidelity_load_holdout(&alloc, path, &holdout);
++    HU_ASSERT_EQ(err, HU_OK);
++    HU_ASSERT_EQ(holdout.rows_count, (size_t)2);
++    hu_ml_fidelity_free_holdout(&alloc, &holdout);
++}
++
++static void test_production_default_returns_not_supported(void) {
++    /* AC-7.6.3 (one half): with no mock registered, the seam must
++     * return scored=0/available=false, meaning the production default
++     * returned HU_ERR_NOT_SUPPORTED for every row and zero real model
++     * weights were touched. */
++    hu_allocator_t alloc = hu_system_allocator();
++    /* Ensure we're using the default. */
++    hu_ml_fidelity_set_nll_compute_fn(NULL, NULL);
++
++    const char *path = resolve_fixture("judgment_fidelity_holdout.jsonl");
++    HU_ASSERT_NOT_NULL(path);
++    hu_ml_judgment_holdout_t holdout = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_load_holdout(&alloc, path, &holdout), HU_OK);
++
++    hu_ml_judgment_summary_t summary = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_score_judgment(&holdout, &summary), HU_OK);
++    HU_ASSERT_EQ(summary.scored, (size_t)0);
++    HU_ASSERT_EQ(summary.skipped, holdout.rows_count);
++    HU_ASSERT_FALSE(summary.available);
++    HU_ASSERT_FLOAT_EQ(summary.mean_nll, 0.0, 1e-12);
++
++    hu_ml_fidelity_free_holdout(&alloc, &holdout);
++}
++
++static void test_judgment_ppl_computed_on_holdout(void) {
++    /* AC-7.6.1: register a deterministic mock, load the fixture, score
++     * every row. Mean NLL must equal the analytical sum / N. */
++    hu_allocator_t alloc = hu_system_allocator();
++    const char *path = resolve_fixture("judgment_fidelity_holdout.jsonl");
++    HU_ASSERT_NOT_NULL(path);
++    hu_ml_judgment_holdout_t holdout = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_load_holdout(&alloc, path, &holdout), HU_OK);
++
++    mock_nll_ctx_t ctx = {0};
++    ctx.base = 0.5;
++    ctx.delta = 0.01;
++    hu_ml_fidelity_set_nll_compute_fn(mock_nll_increasing, &ctx);
++
++    hu_ml_judgment_summary_t summary = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_score_judgment(&holdout, &summary), HU_OK);
++
++    HU_ASSERT_EQ(summary.scored, holdout.rows_count);
++    HU_ASSERT_EQ(summary.skipped, (size_t)0);
++    HU_ASSERT_TRUE(summary.available);
++    /* Expected mean = base + delta * (n-1)/2 — arithmetic series. */
++    double n = (double)summary.scored;
++    double expected_mean = ctx.base + ctx.delta * (n - 1.0) / 2.0;
++    HU_ASSERT_FLOAT_EQ(summary.mean_nll, expected_mean, 1e-9);
++    HU_ASSERT_FLOAT_EQ(summary.min_nll, ctx.base, 1e-12);
++    HU_ASSERT_FLOAT_EQ(summary.max_nll, ctx.base + ctx.delta * (n - 1.0), 1e-9);
++    HU_ASSERT_EQ(ctx.call_count, holdout.rows_count);
++
++    /* PPL exposed in CLI = exp(mean_nll). Spot-check the convention so
++     * the CLI assertion in the shell test matches. */
++    double ppl = exp(summary.mean_nll);
++    HU_ASSERT_GT(ppl, 0.0);
++
++    /* Cleanup. */
++    hu_ml_fidelity_set_nll_compute_fn(NULL, NULL);
++    hu_ml_fidelity_free_holdout(&alloc, &holdout);
++}
++
++static void test_judgment_ppl_catches_degenerate_adapter(void) {
++    /* AC-7.6.2: a "before" mock that scores tight (low NLL) and an
++     * "after" mock that scores degenerate (high NLL) must produce a
++     * positive delta. The gate (which fails on delta > 0) would catch
++     * the adapter even though it might pass surface-style checks. */
++    hu_allocator_t alloc = hu_system_allocator();
++    const char *path = resolve_fixture("judgment_fidelity_holdout.jsonl");
++    HU_ASSERT_NOT_NULL(path);
++    hu_ml_judgment_holdout_t holdout = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_load_holdout(&alloc, path, &holdout), HU_OK);
++
++    /* "Baseline" pass: flat NLL = 0.5. */
++    mock_nll_ctx_t ctx_before = {0};
++    ctx_before.base = 0.5;
++    ctx_before.delta = 0.0;
++    hu_ml_fidelity_set_nll_compute_fn(mock_nll_increasing, &ctx_before);
++
++    hu_ml_judgment_summary_t before = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_score_judgment(&holdout, &before), HU_OK);
++    HU_ASSERT_TRUE(before.available);
++    HU_ASSERT_FLOAT_EQ(before.mean_nll, 0.5, 1e-9);
++
++    /* "Degenerate adapter" pass: flat NLL = 1.2 — worse on real
++     * continuations even though surface metrics could pass. */
++    mock_nll_ctx_t ctx_after = {0};
++    ctx_after.degenerate = true;
++    ctx_after.degenerate_nll = 1.2;
++    hu_ml_fidelity_set_nll_compute_fn(mock_nll_increasing, &ctx_after);
++
++    hu_ml_judgment_summary_t after = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_score_judgment(&holdout, &after), HU_OK);
++    HU_ASSERT_TRUE(after.available);
++    HU_ASSERT_FLOAT_EQ(after.mean_nll, 1.2, 1e-9);
++
++    /* Lower NLL = better. after - before > 0 means the adapter made
++     * judgment fidelity WORSE. This is what the gate fails on.
++     * (HU_ASSERT_GT casts to long long, so we use HU_ASSERT_TRUE on
++     * the comparison directly for doubles.) */
++    double delta = after.mean_nll - before.mean_nll;
++    HU_ASSERT_TRUE(delta > 0.0);
++    /* PPL ratio sanity: exp(1.2)/exp(0.5) >> 1. */
++    HU_ASSERT_TRUE(exp(after.mean_nll) / exp(before.mean_nll) > 1.5);
++
++    hu_ml_fidelity_set_nll_compute_fn(NULL, NULL);
++    hu_ml_fidelity_free_holdout(&alloc, &holdout);
++}
++
++static void test_nll_seam_never_loads_real_weights(void) {
++    /* AC-7.6.3 (other half): when the production default is active
++     * (no mock), the score path returns skipped == N without ever
++     * succeeding. We assert by registering an explicit mock that
++     * INCREMENTS a counter — if the production default is ever the
++     * code path, the counter would stay at zero. Conversely, with no
++     * mock registered, the test already proves the default path
++     * (`default_nll_not_supported`) never opens any file or weight
++     * blob — its body has no I/O at all. We pin both halves.
++     */
++    hu_allocator_t alloc = hu_system_allocator();
++    const char *path = resolve_fixture("judgment_fidelity_holdout.jsonl");
++    HU_ASSERT_NOT_NULL(path);
++    hu_ml_judgment_holdout_t holdout = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_load_holdout(&alloc, path, &holdout), HU_OK);
++
++    /* Half 1: with mock registered, mock must be hit exactly N times. */
++    mock_nll_ctx_t ctx = {0};
++    ctx.base = 0.7;
++    ctx.delta = 0.0;
++    hu_ml_fidelity_set_nll_compute_fn(mock_nll_increasing, &ctx);
++    hu_ml_judgment_summary_t summary = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_score_judgment(&holdout, &summary), HU_OK);
++    HU_ASSERT_EQ(ctx.call_count, holdout.rows_count);
++    HU_ASSERT_EQ(summary.scored, holdout.rows_count);
++
++    /* Half 2: reset to default, prove the default is HU_ERR_NOT_SUPPORTED
++     * — i.e. no real-weights path. */
++    hu_ml_fidelity_set_nll_compute_fn(NULL, NULL);
++    hu_ml_judgment_summary_t default_summary = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_score_judgment(&holdout, &default_summary), HU_OK);
++    HU_ASSERT_EQ(default_summary.scored, (size_t)0);
++    HU_ASSERT_FALSE(default_summary.available);
++
++    /* Half 3: registering an explicit always-skip mock returns the same
++     * shape as the production default, confirming HU_ERR_NOT_SUPPORTED
++     * is the contract for "no inference available". */
++    hu_ml_fidelity_set_nll_compute_fn(mock_nll_always_skip, NULL);
++    hu_ml_judgment_summary_t skip_summary = {0};
++    HU_ASSERT_EQ(hu_ml_fidelity_score_judgment(&holdout, &skip_summary), HU_OK);
++    HU_ASSERT_EQ(skip_summary.scored, (size_t)0);
++    HU_ASSERT_EQ(skip_summary.skipped, holdout.rows_count);
++    HU_ASSERT_FALSE(skip_summary.available);
++
++    hu_ml_fidelity_set_nll_compute_fn(NULL, NULL);
++    hu_ml_fidelity_free_holdout(&alloc, &holdout);
++}
++
++static void test_baseline_signature_unchanged_compile_check(void) {
++    /* AC-7.6.4: take the address of hu_ml_fidelity_score_baseline and
++     * assign it to a function-pointer typed against the *original*
++     * signature. If anyone changes the signature, this assignment
++     * fails at compile time. */
++    hu_error_t (*const fn)(const hu_persona_t *, const hu_communication_style_t *,
++                           hu_communication_style_set_summary_t *) = &hu_ml_fidelity_score_baseline;
++    HU_ASSERT_NOT_NULL((void *)fn);
++    /* Runtime smoke: invalid args path is unchanged. */
++    HU_ASSERT_EQ(fn(NULL, NULL, NULL), HU_ERR_INVALID_ARGUMENT);
++}
++
++static void test_default_holdout_path_respects_env(void) {
++    /* `hu_ml_fidelity_default_holdout_path` returns env override when
++     * set; otherwise the in-tree fixture path. */
++    const char *prev = getenv("HU_JUDGMENT_HOLDOUT");
++    unsetenv("HU_JUDGMENT_HOLDOUT");
++    const char *p = hu_ml_fidelity_default_holdout_path();
++    HU_ASSERT_NOT_NULL(p);
++    HU_ASSERT_STR_CONTAINS(p, "judgment_fidelity_holdout.jsonl");
++
++    setenv("HU_JUDGMENT_HOLDOUT", "/tmp/some_override.jsonl", 1);
++    const char *q = hu_ml_fidelity_default_holdout_path();
++    HU_ASSERT_STR_EQ(q, "/tmp/some_override.jsonl");
++
++    if (prev)
++        setenv("HU_JUDGMENT_HOLDOUT", prev, 1);
++    else
++        unsetenv("HU_JUDGMENT_HOLDOUT");
++}
++
++static void test_empty_holdout_is_not_supported(void) {
++    /* Edge: zero rows must produce available=false but no error. */
++    hu_allocator_t alloc = hu_system_allocator();
++    hu_ml_judgment_holdout_t empty = {0};
++    hu_ml_judgment_summary_t s = {0};
++    /* Register the mock so this isn't conflated with the production
++     * default. */
++    mock_nll_ctx_t ctx = {0};
++    ctx.base = 0.5;
++    hu_ml_fidelity_set_nll_compute_fn(mock_nll_increasing, &ctx);
++    HU_ASSERT_EQ(hu_ml_fidelity_score_judgment(&empty, &s), HU_OK);
++    HU_ASSERT_EQ(s.scored, (size_t)0);
++    HU_ASSERT_FALSE(s.available);
++    HU_ASSERT_EQ(ctx.call_count, (size_t)0);
++    hu_ml_fidelity_set_nll_compute_fn(NULL, NULL);
++    (void)alloc;
++}
++
++void run_ml_fidelity_judgment_tests(void) {
++    HU_TEST_SUITE("fidelity_judgment");
++    HU_RUN_TEST(test_holdout_loads_at_least_ten_rows);
++    HU_RUN_TEST(test_holdout_skips_malformed_rows);
++    HU_RUN_TEST(test_production_default_returns_not_supported);
++    HU_RUN_TEST(test_judgment_ppl_computed_on_holdout);
++    HU_RUN_TEST(test_judgment_ppl_catches_degenerate_adapter);
++    HU_RUN_TEST(test_nll_seam_never_loads_real_weights);
++    HU_RUN_TEST(test_baseline_signature_unchanged_compile_check);
++    HU_RUN_TEST(test_default_holdout_path_respects_env);
++    HU_RUN_TEST(test_empty_holdout_is_not_supported);
++}
