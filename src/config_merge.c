@@ -397,6 +397,9 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->personalization.lora_adapter_id = NULL;
     cfg->personalization.m3_adapter_probe_path = NULL;
     cfg->personalization.m3_adapter_disabled = false;
+    /* US-7.7 — best-of-N at inference. Defaults: disabled (n=1), no cap. */
+    cfg->inference.best_of_n = 1;
+    cfg->inference.best_of_n_cost_cap_ms = 0;
     cfg->behavior.consecutive_limit = 3;
     cfg->behavior.participation_pct = 40;
     cfg->behavior.max_response_chars = 300;

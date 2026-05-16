@@ -467,6 +467,7 @@ set(HU_CORE_SOURCES
     src/agent/agent_plan.c
     src/agent/agent_stream.c
     src/agent/agent_turn.c
+    src/agent/best_of_n.c
     src/agent/humanness.c
     src/agent/context.c
     src/agent/prompt.c
@@ -2911,6 +2912,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_llamacpp_decode.c
     tests/test_llamacpp_lora_hotswap.c
     tests/test_llamacpp_chat_metal.c
+    tests/test_llamacpp_best_of_n.c
+    tests/test_doctor_best_of_n_warning.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c

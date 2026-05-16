@@ -736,6 +736,27 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
         buf[n++] = it;
     }
 
+    /* US-7.7 (AC-7.7.3) — best-of-N cloud-provider misconfiguration warning.
+     *
+     * Mirrors the D4 one-shot pattern: the warning is gated by a static
+     * `s_best_of_n_warn_emitted` so the daemon-side log path (when it grows
+     * one) fires at most once per process. Doctor itself is the
+     * operator-visible signal and re-runs on demand, so it emits the
+     * diagnostic line every call — the one-shot only applies to runtime
+     * log emission, not doctor's diagnostic items. The reset shim is
+     * test-only (see `hu_doctor_best_of_n_warn_reset_for_test` below).
+     *
+     * The daemon best-of-N path silently no-ops on non-llamacpp providers
+     * (eligibility check at the agent_turn dispatch site), so doctor is
+     * the only place the operator hears about the misconfiguration. */
+    if (cfg->inference.best_of_n >= 2 && cfg->default_provider && cfg->default_provider[0] &&
+        hu_config_provider_requires_api_key(cfg->default_provider) && n < cap) {
+        it = (hu_diag_item_t){
+            HU_DIAG_WARN, hu_strdup(alloc, "config"),
+            hu_strdup(alloc, "[WARN] inference.best_of_n has no effect with cloud providers")};
+        buf[n++] = it;
+    }
+
     bool has_ch = hu_channel_catalog_has_any_configured(cfg, false);
     if (has_ch) {
         it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"),

@@ -74,17 +74,44 @@ typedef struct hu_personalization_config {
     bool m3_adapter_disabled;
 } hu_personalization_config_t;
 
+/* US-7.7 (Sprint 7, P1) — Test-time persona scoring (best-of-N at inference).
+ *
+ * When `best_of_n >= 2` AND the active provider is `llamacpp`, the agent's
+ * chat-dispatch site (src/agent/agent_turn.c) routes through the
+ * `hu_best_of_n_chat` decorator (src/agent/best_of_n.c). The decorator
+ * issues up to N completions, scores each via
+ * `hu_communication_style_fidelity_score` (frozen signature in
+ * include/human/memory/personal_model.h:535), and returns the candidate
+ * with the highest fidelity.
+ *
+ * Defaults:
+ *   - best_of_n        = 1   → behavior unchanged from current code
+ *                              (single chat call, no scoring).
+ *   - best_of_n_cost_cap_ms = 0 → no cap (run all N candidates to completion).
+ *
+ * The cap is a soft cap: it's checked after each completion returns, so the
+ * N-th completion that pushes us over the cap still runs to completion
+ * before we return the best-so-far. See src/agent/best_of_n.c for details.
+ *
+ * Cloud-provider misconfiguration (best_of_n >= 2 + cloud provider) emits a
+ * doctor warning per AC-7.7.3 (src/doctor.c). */
+typedef struct hu_inference_config {
+    uint32_t best_of_n;             /* default 1 (disabled); >=2 enables best-of-N */
+    uint32_t best_of_n_cost_cap_ms; /* default 0 (no cap); soft wall-clock cap */
+} hu_inference_config_t;
+
 typedef struct hu_behavior_config {
-    uint32_t consecutive_limit;      /* max consecutive messages from self before skip (default 3) */
-    uint32_t participation_pct;      /* max % of recent messages before skip (default 40) */
-    uint32_t max_response_chars;     /* max response length (default 300) */
-    uint32_t min_response_chars;     /* min response length (default 15) */
-    uint32_t decay_days;             /* memory decay window in days (default 30) */
-    uint32_t dedup_threshold;        /* memory dedup similarity % (default 70) */
-    uint32_t missed_msg_threshold_sec; /* seconds before acknowledging missed message (default 1800) */
-    uint32_t callback_window;          /* callback delay window in seconds (default 300) */
-    uint32_t pattern_threshold;        /* conversation pattern match threshold % (default 50) */
-    uint32_t tapback_skip_pct;         /* probability to skip tapback/reaction % (default 20) */
+    uint32_t consecutive_limit;  /* max consecutive messages from self before skip (default 3) */
+    uint32_t participation_pct;  /* max % of recent messages before skip (default 40) */
+    uint32_t max_response_chars; /* max response length (default 300) */
+    uint32_t min_response_chars; /* min response length (default 15) */
+    uint32_t decay_days;         /* memory decay window in days (default 30) */
+    uint32_t dedup_threshold;    /* memory dedup similarity % (default 70) */
+    uint32_t
+        missed_msg_threshold_sec; /* seconds before acknowledging missed message (default 1800) */
+    uint32_t callback_window;     /* callback delay window in seconds (default 300) */
+    uint32_t pattern_threshold;   /* conversation pattern match threshold % (default 50) */
+    uint32_t tapback_skip_pct;    /* probability to skip tapback/reaction % (default 20) */
 } hu_behavior_config_t;
 
 typedef enum hu_dm_scope {
@@ -110,13 +137,13 @@ typedef struct hu_named_agent_config {
     size_t enabled_tools_count;
     const char **enabled_skills;
     size_t enabled_skills_count;
-    const char *role;            /* lead, builder, reviewer, tester */
+    const char *role; /* lead, builder, reviewer, tester */
     uint8_t autonomy_level;
     double temperature;
     double budget_usd;
     uint32_t max_iterations;
-    const char *description;     /* human-readable, for orchestrator matching */
-    const char *capabilities;    /* comma-sep tags for orchestrator capability matching */
+    const char *description;  /* human-readable, for orchestrator matching */
+    const char *capabilities; /* comma-sep tags for orchestrator capability matching */
     bool is_default;
 } hu_named_agent_config_t;
 

@@ -3,6 +3,7 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -202,6 +203,34 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
      * and wins over this config value. */
     cfg->personalization.m3_adapter_disabled =
         hu_json_get_bool(obj, "m3_adapter_disabled", cfg->personalization.m3_adapter_disabled);
+    return HU_OK;
+}
+
+/* US-7.7 — `inference` block:
+ *   {
+ *     "best_of_n": 4,                  // default 1 (disabled); clamped 0..8
+ *     "best_of_n_cost_cap_ms": 1500    // default 0 (no cap); soft wall-clock cap
+ *   }
+ * The decorator (src/agent/best_of_n.c) only fires when best_of_n >= 2 AND
+ * the active provider is "llamacpp". Cloud-provider misconfiguration is
+ * surfaced by the doctor warning in src/doctor.c (AC-7.7.3). */
+static hu_error_t parse_inference(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {
+    (void)a;
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    double bon = hu_json_get_number(obj, "best_of_n", (double)cfg->inference.best_of_n);
+    if (bon < 0)
+        bon = 0;
+    else if (bon > 8)
+        bon = 8;
+    cfg->inference.best_of_n = (uint32_t)bon;
+    double cap = hu_json_get_number(obj, "best_of_n_cost_cap_ms",
+                                    (double)cfg->inference.best_of_n_cost_cap_ms);
+    if (cap < 0)
+        cap = 0;
+    if (cap > (double)UINT32_MAX)
+        cap = (double)UINT32_MAX;
+    cfg->inference.best_of_n_cost_cap_ms = (uint32_t)cap;
     return HU_OK;
 }
 
@@ -1214,6 +1243,11 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     hu_json_value_t *personalization_obj = hu_json_object_get(root, "personalization");
     if (personalization_obj)
         parse_personalization(a, cfg, personalization_obj);
+
+    /* US-7.7 — best-of-N at inference (top-level "inference" block). */
+    hu_json_value_t *inference_obj = hu_json_object_get(root, "inference");
+    if (inference_obj)
+        parse_inference(a, cfg, inference_obj);
 
     hu_json_value_t *rt_obj = hu_json_object_get(root, "runtime");
     if (rt_obj)
