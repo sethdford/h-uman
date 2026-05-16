@@ -133,9 +133,11 @@ size_t hu_voice_maturity_build_directive(hu_voice_stage_t stage, char *out_buf, 
         "[VOICE STAGE: Warm — friendly, attentive, gently personal. You're past pleasantries.]",
         /* HU_VOICE_CANDID */
         "[VOICE STAGE: Candid — speak directly. Trade pleasantries for honesty.]",
-        /* HU_VOICE_INTIMATE */
-        "[VOICE STAGE: Intimate — you've earned vulnerability. Reference shared history naturally; "
-        "don't perform warmth.]",
+        /* HU_VOICE_INTIMATE — clang-format off keeps the single-line literal that
+           -Wstring-concatenation requires */
+        /* clang-format off */
+        "[VOICE STAGE: Intimate — you've earned vulnerability. Reference shared history; don't perform warmth.]",
+        /* clang-format on */
     };
 
     size_t idx = (size_t)stage;
