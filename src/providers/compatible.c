@@ -877,7 +877,7 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
         alloc->free(alloc->ctx, body, body_len);
         return err;
     }
-    hu_log_info("compatible", NULL, "stream_chat: url=%s model=%.*s body_len=%zu", url_buf,
+    hu_log_info("compatible", NULL, "stream_chat: provider=compatible model=%.*s body_len=%zu",
                 (int)model_len, model, body_len);
     err = hu_http_post_json_stream(alloc, url_buf, auth, NULL, body, body_len,
                                    compatible_stream_write_cb, &sctx);
