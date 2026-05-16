@@ -883,6 +883,37 @@ void hu_daemon_trust_reset(void) {
 }
 #endif
 
+/* ── US-7.3 — Honesty gate: LoRA adapter ignored by cloud provider ───
+ *
+ * Per-process one-shot. Sprint-7 decision D4 binds:
+ *   - fire at most once per daemon process lifetime
+ *   - test-only reset shim, no production-side suppression key
+ *
+ * The literal substring "personalization adapter ignored" plus the
+ * provider name is what AC-7.3.1 pins. Do not change either without
+ * updating tests/test_provider_all.c. */
+static int s_personalization_warn_emitted = 0;
+
+void hu_daemon_personalization_warn_adapter_ignored(struct hu_observer *observer,
+                                                    const char *provider_name,
+                                                    const char *adapter_id) {
+    if (s_personalization_warn_emitted)
+        return;
+    s_personalization_warn_emitted = 1;
+    const char *pname = (provider_name && *provider_name) ? provider_name : "(unknown)";
+    const char *aid = (adapter_id && *adapter_id) ? adapter_id : "(unknown)";
+    hu_log_warn("human", observer,
+                "personalization adapter ignored: provider '%s' does not support LoRA adapters "
+                "(adapter '%s' will not be applied)",
+                pname, aid);
+}
+
+#ifdef HU_IS_TEST
+void hu_daemon_personalization_warn_reset_for_test(void) {
+    s_personalization_warn_emitted = 0;
+}
+#endif
+
 /* ── Proactive check-in (utilities now in daemon_proactive.c) ──────── */
 
 #ifndef HU_IS_TEST
@@ -2600,12 +2631,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         if (le == HU_OK)
             hu_log_info("human", agent->observer, "personalization: loaded adapter '%s' from %s",
                         adapter_id, adapter_path);
-        else if (le == HU_ERR_NOT_SUPPORTED)
-            hu_log_info("human", agent->observer,
-                        "personalization: provider does not support LoRA adapters; "
-                        "skipping '%s'",
-                        adapter_id);
-        else
+        else if (le == HU_ERR_NOT_SUPPORTED) {
+            /* US-7.3 (INS-B): cloud providers return HU_ERR_NOT_SUPPORTED
+             * from hu_provider_load_adapter. Surface as WARN with the
+             * literal "personalization adapter ignored" string so the
+             * operator is never silently misled. One-shot per process. */
+            const char *pname =
+                (agent->provider.vtable && agent->provider.vtable->get_name)
+                    ? agent->provider.vtable->get_name(agent->provider.ctx)
+                    : (config->default_provider ? config->default_provider : "(unknown)");
+            hu_daemon_personalization_warn_adapter_ignored(agent->observer, pname, adapter_id);
+        } else
             hu_log_warn("human", agent->observer,
                         "personalization: load_adapter('%s', %s) failed: %d", adapter_id,
                         adapter_path, (int)le);

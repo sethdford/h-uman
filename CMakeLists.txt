@@ -2892,6 +2892,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_channel_class.c
     tests/test_context_engine_rag.c
     tests/test_doctor_fix.c
+    tests/test_doctor_personalization_warning.c
     tests/test_humanness.c
     tests/test_opinions_persistence.c
     tests/test_plugin_discovery.c
