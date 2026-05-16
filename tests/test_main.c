@@ -254,6 +254,7 @@ void run_w12_planner_tests(void);
 void run_w12_verifier_loop_tests(void);
 void run_w13_learner_tests(void);
 void run_w14_runners_tests(void);
+void run_w14_lora_retrain_tests(void);
 void run_w15_backup_restore_tests(void);
 void run_learner_bridge_tests(void);
 void run_w14_scheduler_tests(void);
@@ -841,6 +842,7 @@ int main(int argc, char **argv) {
     run_w12_verifier_loop_tests();
     run_w13_learner_tests();
     run_w14_runners_tests();
+    run_w14_lora_retrain_tests();
     run_w15_backup_restore_tests();
     run_learner_bridge_tests();
     run_w14_scheduler_tests();

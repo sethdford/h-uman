@@ -98,8 +98,7 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                     char **out_text, size_t *out_len, const char *tom_premise,
                                     size_t tom_premise_len, const char *tom_question,
                                     size_t tom_question_len, const char *tom_category,
-                                    size_t tom_category_len,
-                                    const hu_personal_model_t *pm,
+                                    size_t tom_category_len, const hu_personal_model_t *pm,
                                     const hu_persona_context_t *persona_ctx);
 
 /* W11 self-RAG outcome enum, mirrored at the bridge layer so callers don't
@@ -131,8 +130,8 @@ typedef enum hu_w11_outcome {
  *
  * `now_ms == 0` means "use OS clock". */
 hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                  const char *contact_id, size_t contact_id_len,
-                                  const char *draft, size_t draft_len, int mode, int64_t now_ms,
+                                  const char *contact_id, size_t contact_id_len, const char *draft,
+                                  size_t draft_len, int mode, int64_t now_ms,
                                   hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
                                   size_t *out_claims_flagged, char **out_modified,
                                   size_t *out_modified_len);
@@ -145,13 +144,10 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
  * mode and only in non-test builds. When `provider` is NULL this
  * behaves identically to the providerless variant. */
 hu_error_t hu_w11_self_rag_verify_with_provider(
-    hu_w7_facade_t *facade, hu_allocator_t *alloc,
-    struct hu_provider *provider,
-    const char *contact_id, size_t contact_id_len,
-    const char *draft, size_t draft_len, int mode, int64_t now_ms,
-    hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
-    size_t *out_claims_flagged, char **out_modified,
-    size_t *out_modified_len);
+    hu_w7_facade_t *facade, hu_allocator_t *alloc, struct hu_provider *provider,
+    const char *contact_id, size_t contact_id_len, const char *draft, size_t draft_len, int mode,
+    int64_t now_ms, hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+    size_t *out_claims_flagged, char **out_modified, size_t *out_modified_len);
 
 /* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
  *
@@ -182,10 +178,8 @@ hu_error_t hu_w14_scheduler_tick(hu_w14_scheduler_t *s, int64_t now_ms);
 /* Enqueue a counterfactual-rehearsal job for `contact_id`. The runner
  * is registered automatically at open(); this is just an enqueue
  * helper that hides the hu_job_spec_t shape from the daemon. */
-hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
-                                                   const char *contact_id,
-                                                   size_t contact_id_len,
-                                                   int budget_ms);
+hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s, const char *contact_id,
+                                                   size_t contact_id_len, int budget_ms);
 
 /* Enqueue the three AutoDream phases (quarantine, community, decay) as
  * separate scheduler jobs. Mirrors what the legacy 3 AM cron in
@@ -194,8 +188,7 @@ hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
  *
  * `now_ms == 0` means "ASAP"; pass a unix-ms value to schedule for a
  * specific wall time (e.g. the next 3 AM boundary). */
-hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now_ms,
-                                              int budget_ms);
+hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now_ms, int budget_ms);
 
 /* Status snapshot for `human ml status` and friends. Always populates
  * the out fields even on partial probe failure. NULL output pointers
@@ -223,10 +216,9 @@ hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pendi
  * caller can fall back to the v1 recall path. Caller owns `*out_text`
  * and must free via `alloc->free`. */
 hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                 const char *contact_id, size_t contact_id_len,
-                                 const char *query, size_t query_len,
-                                 size_t limit, size_t max_chars,
-                                 char **out_text, size_t *out_len);
+                                 const char *contact_id, size_t contact_id_len, const char *query,
+                                 size_t query_len, size_t limit, size_t max_chars, char **out_text,
+                                 size_t *out_len);
 
 /* W12 — Planner recall with an explicit LLM provider. Uses the LLM
  * retrieval planner backend (`hu_planner_llm`) for plan emission when
@@ -239,33 +231,29 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
  *
  * Returns HU_OK on success (including the "no records" case where
  * `*out_text == NULL`, `*out_len == 0`). */
-hu_error_t hu_w12_planner_recall_with_provider(
-    hu_w7_facade_t *facade, hu_allocator_t *alloc,
-    struct hu_provider *provider, const char *model, size_t model_len,
-    const char *contact_id, size_t contact_id_len,
-    const char *query, size_t query_len,
-    size_t limit, size_t max_chars,
-    char **out_text, size_t *out_len);
+hu_error_t hu_w12_planner_recall_with_provider(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                               struct hu_provider *provider, const char *model,
+                                               size_t model_len, const char *contact_id,
+                                               size_t contact_id_len, const char *query,
+                                               size_t query_len, size_t limit, size_t max_chars,
+                                               char **out_text, size_t *out_len);
 
 /* Enqueue the persona evolver as a scheduler job. Mirrors the
  * AutoDream bridge pattern: when the scheduler is available the
  * daemon enqueues instead of running synchronously, so the work
  * is paced and battery-gated. `budget_ms` of 0 means unlimited. */
-hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
-                                                    int64_t now_ms,
+hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s, int64_t now_ms,
                                                     int budget_ms);
 
 /* Enqueue a LoRA training job. Mirrors the persona-evolver / AutoDream
  * enqueue helpers: callers pass timing + budget and the bridge hides the
  * hu_job_spec_t shape. */
-hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
-                                         int budget_ms);
+hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms, int budget_ms);
 
 /* Enqueue a training data extraction job. Extracts new conversations
  * into JSONL training data and generates auto-DPO pairs. The runner
  * auto-enqueues a LoRA training job when enough examples accumulate. */
-hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,
-                                                          int64_t now_ms,
+hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s, int64_t now_ms,
                                                           int budget_ms);
 
 /* W14 P0 #4 — runner registration helpers.
@@ -279,6 +267,7 @@ struct hu_lora_runner_ctx;
 struct hu_kv_cache_manager;
 struct hu_belief_reverify_ctx;
 struct hu_training_data_runner_ctx;
+struct hu_lora_retrain_ctx;
 struct hu_scheduler;
 
 hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s,
@@ -289,6 +278,18 @@ hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
                                                      struct hu_belief_reverify_ctx *ctx);
 hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
                                                           struct hu_training_data_runner_ctx *ctx);
+
+/* US-7.5: register the nightly LoRA retrain runner. The bridge stashes the
+ * ctx pointer so `hu_w14_scheduler_status_save` can serialize the
+ * `lora_retrain` block (last_run_ts, last_outcome, pairs_consumed). The
+ * caller owns the storage. */
+hu_error_t hu_w14_scheduler_register_lora_retrain_runner(hu_w14_scheduler_t *s,
+                                                         struct hu_lora_retrain_ctx *ctx);
+
+/* US-7.5: enqueue one nightly LoRA retrain job. Sets requires_idle=true,
+ * requires_ac_power=true, interval_sec=86400, budget_ms=90min default. */
+hu_error_t hu_w14_scheduler_enqueue_lora_retrain_nightly(hu_w14_scheduler_t *s, int64_t now_ms,
+                                                         int budget_ms);
 
 /* Surface the inner `hu_scheduler_t *` so callers can wire it into a
  * `hu_lora_runner_ctx_t::scheduler` (`struct hu_scheduler *`) for the follow-up KV-warm
@@ -322,9 +323,8 @@ bool hu_w14_scheduler_status_path(char *out_path, size_t cap);
  * These wrappers keep `human/security/audit_log.h` out of TUs that include
  * `human/agent.h` (which pulls in the legacy `human/memory.h`). */
 struct hu_audit_log;
-hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                const char *db_path, const char *contact_id,
-                                struct hu_audit_log **out);
+hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc, const char *db_path,
+                                const char *contact_id, struct hu_audit_log **out);
 void hu_w7_audit_log_close(struct hu_audit_log *log, hu_allocator_t *alloc);
 
 #ifdef __cplusplus
