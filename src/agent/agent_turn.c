@@ -5666,6 +5666,55 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     final_content = retry_content;
                                     final_len = retry_len;
                                     ab_owned = true;
+                                    /* HIGH-2: re-validate the retry result against the same chain.
+                                     * The slim retry calls the provider again with a repair prompt
+                                     * but can still emit F1/F3 artifacts (channel tokens, AI-phrase
+                                     * tells, runaway repetition). Without this pass, the very class
+                                     * of leak the chain caught the first time can escape on retry.
+                                     * One re-validation pass — no nested retry. */
+                                    hu_chain_result_t retry_cr;
+                                    memset(&retry_cr, 0, sizeof(retry_cr));
+                                    hu_error_t retry_cerr = hu_output_validator_chain_execute(
+                                        out_chain, agent->alloc, &vctx, final_content, final_len,
+                                        &retry_cr);
+                                    if (retry_cerr != HU_OK) {
+                                        hu_log_error(
+                                            "agent_turn", agent->observer,
+                                            "validator chain RE-EXECUTE on retry result failed "
+                                            "(err=%s) — suppressing send",
+                                            hu_error_string(retry_cerr));
+                                        hu_chain_result_free(agent->alloc, &retry_cr);
+                                        agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                                           final_len + 1);
+                                        final_content = NULL;
+                                        final_len = 0;
+                                        ab_owned = false;
+                                    } else if (retry_cr.final_decision == HU_VALIDATOR_REJECT) {
+                                        hu_log_error(
+                                            "agent_turn", agent->observer,
+                                            "validator chain RE-REJECT on retry (via %s) — "
+                                            "suppressing send (no second retry)",
+                                            retry_cr.deciding_validator_name
+                                                ? retry_cr.deciding_validator_name
+                                                : "unknown");
+                                        hu_chain_result_free(agent->alloc, &retry_cr);
+                                        agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                                           final_len + 1);
+                                        final_content = NULL;
+                                        final_len = 0;
+                                        ab_owned = false;
+                                    } else if (retry_cr.final_text_owned && retry_cr.final_text) {
+                                        /* Chain rewrote the retry result. */
+                                        agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                                           final_len + 1);
+                                        final_content = retry_cr.final_text;
+                                        final_len = retry_cr.final_text_len;
+                                        ab_owned = true;
+                                        retry_cr.final_text_owned = false; /* transferred */
+                                        hu_chain_result_free(agent->alloc, &retry_cr);
+                                    } else {
+                                        hu_chain_result_free(agent->alloc, &retry_cr);
+                                    }
                                 } else {
                                     hu_log_error(
                                         "agent_turn", agent->observer,
