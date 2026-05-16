@@ -382,6 +382,19 @@ static hu_error_t anthropic_chat(void *ctx, hu_allocator_t *alloc, const hu_chat
         }
     }
 
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                hu_json_array_push(
+                    alloc, stop_arr,
+                    hu_json_string_new(alloc, request->stop_sequences[i],
+                                       strlen(request->stop_sequences[i])));
+            }
+            hu_json_object_set(alloc, root, "stop_sequences", stop_arr);
+        }
+    }
+
     if (request->response_format && request->response_format_len > 0) {
         if ((request->response_format_len >= 11 &&
              memcmp(request->response_format, "json_object", 11) == 0) ||
@@ -1134,6 +1147,19 @@ static hu_error_t anthropic_stream_chat(void *ctx, hu_allocator_t *alloc,
                 hu_json_array_push(alloc, tools_arr, tool_obj);
             }
             hu_json_object_set(alloc, root, "tools", tools_arr);
+        }
+    }
+
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                hu_json_array_push(
+                    alloc, stop_arr,
+                    hu_json_string_new(alloc, request->stop_sequences[i],
+                                       strlen(request->stop_sequences[i])));
+            }
+            hu_json_object_set(alloc, root, "stop_sequences", stop_arr);
         }
     }
 

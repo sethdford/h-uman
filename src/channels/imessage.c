@@ -1,6 +1,9 @@
 #include "human/channels/imessage.h"
+#include "human/agent/output_validator_chain.h"
+#include "human/agent/validators/builtin.h"
 #include "human/channel_loop.h"
 #include "human/context/conversation.h"
+#include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
 #include "human/core/log.h"
@@ -975,13 +978,34 @@ static void imessage_stop(void *ctx) {
 
 #if (defined(__APPLE__) && defined(__MACH__)) || HU_IS_TEST
 
-/* Safety net: delegates to the canonical AI phrase stripper in conversation.c,
- * then collapses double spaces and trims whitespace. Modifies in-place. */
+/* Safety net: runs the full output-validator chain (assistant_closer +
+ * role_consistency + persona_narrator + …), then collapses double spaces and
+ * trims whitespace. Modifies in-place. */
 size_t imessage_sanitize_output(char *buf, size_t len) {
     if (!buf || len == 0)
         return 0;
 
-    len = hu_conversation_strip_ai_phrases(buf, len);
+    {
+        hu_allocator_t local_alloc = hu_system_allocator();
+        hu_output_validator_chain_t *out_chain = NULL;
+        if (hu_validators_build_default_outbound_chain(&local_alloc, NULL, 0, &out_chain) ==
+            HU_OK) {
+            hu_chain_result_t cr;
+            memset(&cr, 0, sizeof(cr));
+            if (hu_output_validator_chain_execute(out_chain, &local_alloc, NULL, buf, len, &cr) ==
+                HU_OK) {
+                if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
+                    if (cr.final_text != buf && cr.final_text_len <= len) {
+                        memcpy(buf, cr.final_text, cr.final_text_len);
+                        len = cr.final_text_len;
+                        buf[len] = '\0';
+                    }
+                }
+                hu_chain_result_free(&local_alloc, &cr);
+            }
+            hu_output_validator_chain_destroy(out_chain);
+        }
+    }
 
     /* Collapse double spaces */
     for (size_t i = 1; i < len; i++) {

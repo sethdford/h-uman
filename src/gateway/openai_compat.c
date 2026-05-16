@@ -1,11 +1,13 @@
-#include "human/core/log.h"
 #include "human/gateway/openai_compat.h"
 #include "../agent/agent_internal.h"
 #include "human/agent.h"
+#include "human/agent/output_validator_chain.h"
+#include "human/agent/validators/builtin.h"
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
@@ -617,9 +619,24 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
 
             /* Strip model artifacts before further processing */
             if (agent_err == HU_OK && response && response_len > 0) {
-                response_len = hu_conversation_strip_channel_tags(response, response_len);
-                response_len = hu_conversation_strip_ai_phrases(response, response_len);
-                response_len = hu_conversation_strip_formal_structure(response, response_len);
+                hu_output_validator_chain_t *out_chain = NULL;
+                if (hu_validators_build_default_outbound_chain(alloc, NULL, 0, &out_chain) ==
+                    HU_OK) {
+                    hu_chain_result_t cr;
+                    memset(&cr, 0, sizeof(cr));
+                    if (hu_output_validator_chain_execute(out_chain, alloc, NULL, response,
+                                                          response_len, &cr) == HU_OK) {
+                        if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
+                            if (cr.final_text != response && cr.final_text_len <= response_len) {
+                                memcpy(response, cr.final_text, cr.final_text_len);
+                                response_len = cr.final_text_len;
+                                response[response_len] = '\0';
+                            }
+                        }
+                        hu_chain_result_free(alloc, &cr);
+                    }
+                    hu_output_validator_chain_destroy(out_chain);
+                }
             }
 
             /* AI-tell filter: retry once if known robotic phrases detected */
