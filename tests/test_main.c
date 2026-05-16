@@ -416,7 +416,9 @@ void run_emotion_map_tests(void);
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
 void run_ml_cli_actually_trains_tests(void);
+void run_ml_cli_rl_train_tests(void);
 void run_dpo_judge_naming_tests(void);
+void run_rl_trainer_simpo_tests(void);
 void run_lora_tests(void);
 void run_agent_trainer_tests(void);
 void run_training_data_tests(void);
@@ -1000,7 +1002,9 @@ int main(int argc, char **argv) {
 #ifdef HU_ENABLE_ML
     run_ml_tests();
     run_ml_cli_actually_trains_tests();
+    run_ml_cli_rl_train_tests();
     run_dpo_judge_naming_tests();
+    run_rl_trainer_simpo_tests();
     run_lora_tests();
     run_agent_trainer_tests();
     run_training_data_tests();

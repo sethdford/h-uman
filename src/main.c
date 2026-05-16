@@ -232,6 +232,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                 "  lora-runner             Generate response set from persona via provider (D2.2)\n"
                 "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
                 "  train-feed-predictor    Train topic/trend predictor from feed data\n"
+                "  rl-train                Preference RL trainer (DPO/SimPO/ORPO/GRPO2 router)\n"
                 "  status                  Show experiment results\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
@@ -262,6 +263,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_train_feed_predictor(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "apply-adapter") == 0)
         return hu_ml_cli_apply_adapter(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "rl-train") == 0)
+        return hu_ml_cli_rl_train(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "--help") == 0 || strcmp(sub, "help") == 0) {
         printf("Usage: human ml <subcommand>\n\n"
                "Subcommands:\n"
