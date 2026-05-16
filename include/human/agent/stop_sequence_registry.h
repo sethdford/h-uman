@@ -10,8 +10,11 @@
 extern "C" {
 #endif
 
-/* Lookup stop sequences for a provider. Channel parameter is reserved
- * for future per-channel overrides; pass NULL/0 for now.
+/* Lookup stop sequences for a provider (provider-only lookup).
+ *
+ * Per-channel stop sequences are not implemented; provider-only lookup.
+ * If needed, add a separate `_lookup_by_channel` overload rather than
+ * re-adding parameters.
  *
  * Output:
  *   *out_seqs       — array of NUL-terminated strings; static storage;
@@ -20,7 +23,6 @@ extern "C" {
  *
  * Returns HU_OK always; missing entries return count == 0. */
 hu_error_t hu_stop_sequence_registry_lookup(const char *provider, size_t provider_len,
-                                            const char *channel, size_t channel_len,
                                             const char *const **out_seqs, size_t *out_seqs_count);
 
 #ifdef __cplusplus

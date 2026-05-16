@@ -9,6 +9,7 @@
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/observability/validator_telemetry.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
 #include <math.h>
@@ -618,6 +619,7 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                                                  &response, &response_len);
 
             /* Strip model artifacts before further processing */
+            bool validator_rejected = false;
             if (agent_err == HU_OK && response && response_len > 0) {
                 hu_output_validator_chain_t *out_chain = NULL;
                 if (hu_validators_build_default_outbound_chain(alloc, NULL, 0, &out_chain) ==
@@ -626,7 +628,18 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                     memset(&cr, 0, sizeof(cr));
                     if (hu_output_validator_chain_execute(out_chain, alloc, NULL, response,
                                                           response_len, &cr) == HU_OK) {
-                        if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
+                        hu_observer_emit_validator_decision(
+                            app_ctx->agent ? app_ctx->agent->observer : NULL, &cr, NULL,
+                            response_len);
+                        if (cr.final_decision == HU_VALIDATOR_REJECT) {
+                            /* Deny-by-default: block response from reaching the client. */
+                            hu_log_warn("openai-compat",
+                                        app_ctx->agent ? app_ctx->agent->observer : NULL,
+                                        "validator chain REJECT (via %s) — suppressing response",
+                                        cr.deciding_validator_name ? cr.deciding_validator_name
+                                                                   : "unknown");
+                            validator_rejected = true;
+                        } else if (cr.final_text) {
                             if (cr.final_text != response && cr.final_text_len <= response_len) {
                                 memcpy(response, cr.final_text, cr.final_text_len);
                                 response_len = cr.final_text_len;
@@ -637,6 +650,14 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                     }
                     hu_output_validator_chain_destroy(out_chain);
                 }
+            }
+            if (validator_rejected) {
+                if (response)
+                    app_ctx->agent->alloc->free(app_ctx->agent->alloc->ctx, response,
+                                                response_len + 1);
+                error_response(alloc, 422, "Content policy violation", out_status, out_body,
+                               out_body_len);
+                return;
             }
 
             /* AI-tell filter: retry once if known robotic phrases detected */

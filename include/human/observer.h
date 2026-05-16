@@ -26,6 +26,11 @@ typedef enum hu_observer_event_tag {
     HU_OBSERVER_EVENT_HULA_NODE_OUTPUT,
     HU_OBSERVER_EVENT_HULA_PROGRAM_END,
     HU_OBSERVER_EVENT_FRONTIER,
+    /* Emitted after hu_output_validator_chain_execute for REJECT or REWRITE
+     * outcomes only. PASS outcomes are suppressed to avoid per-token noise.
+     * All const char * fields are non-owning; caller guarantees lifetime
+     * through the synchronous record_event call. */
+    HU_OBSERVER_EVENT_VALIDATOR_DECISION,
 } hu_observer_event_tag_t;
 
 typedef struct hu_observer_event {
@@ -106,6 +111,20 @@ typedef struct hu_observer_event {
             const char *transition;
             float value;
         } frontier;
+        struct {
+            /* "reject" or "rewrite" — PASS is never emitted */
+            const char *decision;
+            /* Name of the deciding validator, or "<chain>" if unavailable */
+            const char *validator_name;
+            /* Channel context from hu_validator_context_t (may be NULL) */
+            const char *channel_id;
+            /* Persona name from hu_validator_context_t (may be NULL) */
+            const char *persona_name;
+            /* Original response_len passed to hu_output_validator_chain_execute */
+            size_t response_len;
+            /* Bytes stripped for REWRITE; 0 for REJECT */
+            size_t bytes_stripped;
+        } validator_decision;
     } data;
 } hu_observer_event_t;
 

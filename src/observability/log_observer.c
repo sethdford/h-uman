@@ -218,6 +218,28 @@ static void log_record_event(void *ctx, const hu_observer_event_t *event) {
     case HU_OBSERVER_EVENT_FRONTIER:
         fprintf(f, "frontier\"}\n");
         break;
+    case HU_OBSERVER_EVENT_VALIDATOR_DECISION:
+        fprintf(
+            f,
+            "\"validator.decision\","
+            "\"decision\":\"%s\","
+            "\"validator\":\"%s\","
+            "\"channel\":\"%s\","
+            "\"persona\":\"%s\","
+            "\"response_len\":%zu,"
+            "\"bytes_stripped\":%zu}\n",
+            event->data.validator_decision.decision ? event->data.validator_decision.decision : "",
+            event->data.validator_decision.validator_name
+                ? event->data.validator_decision.validator_name
+                : "",
+            event->data.validator_decision.channel_id ? event->data.validator_decision.channel_id
+                                                      : "",
+            event->data.validator_decision.persona_name
+                ? event->data.validator_decision.persona_name
+                : "",
+            event->data.validator_decision.response_len,
+            event->data.validator_decision.bytes_stripped);
+        break;
     }
 }
 

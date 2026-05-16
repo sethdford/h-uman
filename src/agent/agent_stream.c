@@ -53,6 +53,7 @@
 #include "human/memory/fast_capture.h"
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/personal_model.h"
+#include "human/observability/validator_telemetry.h"
 #include "human/persona.h"
 #include "human/persona/creative_voice.h"
 #include "human/persona/delta_observer.h"
@@ -60,6 +61,7 @@
 #include "human/persona/humor.h"
 #include "human/persona/narrative_self.h"
 #include "human/persona/somatic.h"
+#include "human/provider/structured_output.h"
 #include "human/security/moderation.h"
 #include "human/security/sycophancy_guard.h"
 #include "human/tool.h"
@@ -1308,10 +1310,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             size_t prov_name_len = prov_name ? strlen(prov_name) : 0;
             const char *const *stop_seqs = NULL;
             size_t stop_seqs_count = 0;
-            hu_stop_sequence_registry_lookup(prov_name, prov_name_len, NULL, 0, &stop_seqs,
+            hu_stop_sequence_registry_lookup(prov_name, prov_name_len, &stop_seqs,
                                              &stop_seqs_count);
             req.stop_sequences = stop_seqs;
             req.stop_sequences_count = stop_seqs_count;
+        }
+        if (agent->persona && agent->persona->structured_output_enabled) {
+            req.response_format = "json_schema";
+            req.response_format_len = 11; /* strlen("json_schema") */
+            req.response_schema = hu_structured_output_chat_reply_schema();
+            req.response_schema_len = hu_structured_output_chat_reply_schema_len();
         }
 
         /* Buffer provider text until the final content clears guards. Tool
@@ -1410,13 +1418,22 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             size_t safe_content_len = 0;
             bool safe_owned = false;
             if (sresp.content && sresp.content_len > 0) {
-                /* Run the default outbound chain: response_guard + strip trio (P2.T12). */
+                /* Run the default outbound chain: response_guard + strip trio (P2.T12).
+                 * US-4: prefer cached chain on persona; fall back to inline build. */
                 const char *persona_name =
                     (agent->persona && agent->persona->name) ? agent->persona->name : NULL;
                 size_t persona_name_len = persona_name ? strlen(persona_name) : 0;
-                hu_output_validator_chain_t *out_chain = NULL;
-                if (hu_validators_build_default_outbound_chain(
-                        agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK) {
+                bool chain_owned = false;
+                hu_output_validator_chain_t *out_chain =
+                    (agent->persona && agent->persona->outbound_chain)
+                        ? agent->persona->outbound_chain
+                        : NULL;
+                if (!out_chain) {
+                    chain_owned =
+                        hu_validators_build_default_outbound_chain(
+                            agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK;
+                }
+                if (out_chain) {
                     hu_validator_context_t vctx = {0};
                     vctx.persona_name = persona_name;
                     vctx.persona_name_len = persona_name_len;
@@ -1425,6 +1442,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_error_t cerr = hu_output_validator_chain_execute(
                         out_chain, agent->alloc, &vctx, sresp.content, sresp.content_len, &cr);
                     if (cerr == HU_OK) {
+                        hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
+                                                            sresp.content_len);
                         if (cr.final_decision == HU_VALIDATOR_REJECT) {
                             hu_log_error("agent_stream", agent->observer,
                                          "validator chain REJECT (via %s) — retrying once with "
@@ -1464,7 +1483,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                             hu_chain_result_free(agent->alloc, &cr);
                         }
                     }
-                    hu_output_validator_chain_destroy(out_chain);
+                    if (chain_owned)
+                        hu_output_validator_chain_destroy(out_chain);
                 }
             }
 
@@ -2129,14 +2149,22 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
 
     if (final_content) {
         /* Last-mile output validation — default outbound chain: response_guard
-         * + strip trio (P2.T12). Same protection as agent_turn.c post-stream. */
+         * + strip trio (P2.T12). Same protection as agent_turn.c post-stream.
+         * US-4: prefer cached chain on persona; fall back to inline build. */
         {
             const char *persona_name =
                 (agent->persona && agent->persona->name) ? agent->persona->name : NULL;
             size_t persona_name_len = persona_name ? strlen(persona_name) : 0;
-            hu_output_validator_chain_t *out_chain = NULL;
-            if (hu_validators_build_default_outbound_chain(agent->alloc, persona_name,
-                                                           persona_name_len, &out_chain) == HU_OK) {
+            bool chain_owned = false;
+            hu_output_validator_chain_t *out_chain =
+                (agent->persona && agent->persona->outbound_chain) ? agent->persona->outbound_chain
+                                                                   : NULL;
+            if (!out_chain) {
+                chain_owned = hu_validators_build_default_outbound_chain(agent->alloc, persona_name,
+                                                                         persona_name_len,
+                                                                         &out_chain) == HU_OK;
+            }
+            if (out_chain) {
                 hu_validator_context_t vctx = {0};
                 vctx.persona_name = persona_name;
                 vctx.persona_name_len = persona_name_len;
@@ -2145,6 +2173,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_error_t cerr = hu_output_validator_chain_execute(
                     out_chain, agent->alloc, &vctx, final_content, final_content_len, &cr);
                 if (cerr == HU_OK) {
+                    hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
+                                                        final_content_len);
                     if (cr.final_decision == HU_VALIDATOR_REJECT) {
                         hu_log_error("agent_stream", agent->observer,
                                      "validator chain REJECT (via %s) — retrying slim path",
@@ -2191,7 +2221,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         hu_chain_result_free(agent->alloc, &cr);
                     }
                 }
-                hu_output_validator_chain_destroy(out_chain);
+                if (chain_owned)
+                    hu_output_validator_chain_destroy(out_chain);
             }
         }
     }

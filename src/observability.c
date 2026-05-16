@@ -121,15 +121,13 @@ static void log_record_event(void *ctx, const hu_observer_event_t *event) {
                 (double)event->data.metacog_action.coherence);
         break;
     case HU_OBSERVER_EVENT_HULA_NODE_START:
-        fprintf(f, "hula.node_start id=%s op=%s\n",
-                HU_STR(event->data.hula_node_start.node_id),
+        fprintf(f, "hula.node_start id=%s op=%s\n", HU_STR(event->data.hula_node_start.node_id),
                 HU_STR(event->data.hula_node_start.op_name));
         break;
     case HU_OBSERVER_EVENT_HULA_NODE_END:
         fprintf(f, "hula.node_end id=%s op=%s status=%s elapsed_ms=%llu\n",
                 HU_STR(event->data.hula_node_end.node_id),
-                HU_STR(event->data.hula_node_end.op_name),
-                HU_STR(event->data.hula_node_end.status),
+                HU_STR(event->data.hula_node_end.op_name), HU_STR(event->data.hula_node_end.status),
                 (unsigned long long)event->data.hula_node_end.elapsed_ms);
         break;
     case HU_OBSERVER_EVENT_HULA_NODE_OUTPUT:
@@ -146,6 +144,17 @@ static void log_record_event(void *ctx, const hu_observer_event_t *event) {
         break;
     case HU_OBSERVER_EVENT_FRONTIER:
         fprintf(f, "frontier\n");
+        break;
+    case HU_OBSERVER_EVENT_VALIDATOR_DECISION:
+        fprintf(f,
+                "validator.decision decision=%s validator=%s channel=%s persona=%s "
+                "response_len=%zu bytes_stripped=%zu\n",
+                HU_STR(event->data.validator_decision.decision),
+                HU_STR(event->data.validator_decision.validator_name),
+                HU_STR(event->data.validator_decision.channel_id),
+                HU_STR(event->data.validator_decision.persona_name),
+                event->data.validator_decision.response_len,
+                event->data.validator_decision.bytes_stripped);
         break;
     }
 }

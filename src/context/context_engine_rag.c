@@ -94,15 +94,8 @@ static hu_error_t rag_ingest(void *ctx, hu_allocator_t *alloc,
             .tag = HU_MEMORY_CATEGORY_CUSTOM,
             .data.custom = {.name = mem_cat_name, .name_len = sizeof(mem_cat_name) - 1},
         };
-        /* Scope writes to the memory backend's current session_id so per-contact
-         * recall can find them. Without this, every message indexed by the RAG
-         * engine becomes a global (unscoped) memory and is invisible to
-         * hu_memory_recall_for_contact — the root cause of contacts feeling
-         * like the agent has no continuity with them. */
-        const char *sid = r->memory->current_session_id ? r->memory->current_session_id : "";
-        size_t sid_len = r->memory->current_session_id ? r->memory->current_session_id_len : 0;
         r->memory->vtable->store(r->memory->ctx, message->content, message->content_len,
-                                 message->content, message->content_len, &cat, sid, sid_len);
+                                 message->content, message->content_len, &cat, "", 0);
     }
 
     return HU_OK;

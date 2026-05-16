@@ -9,6 +9,7 @@
 #include "human/core/log.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
+#include "human/observability/validator_telemetry.h"
 #ifndef HU_CODENAME
 #define HU_CODENAME "human"
 #endif
@@ -42,11 +43,6 @@
 #define HU_IMESSAGE_SENT_PREFIX_LEN 256
 #define HU_IMESSAGE_ROWID_FILE      ".human/imessage.rowid"
 #define HU_IMESSAGE_STATUS_FILE     ".human/imessage.poll_status"
-/* Outbound dedup window — if the same exact text is sent to the same target
- * within this many seconds, the second send is dropped. Sized to cover
- * retry storms (imsg subprocess timeout + AppleScript fallback) and slow
- * daemon ticks, without false-dropping intentional rapid replies. */
-#define HU_IMESSAGE_OUTBOUND_DEDUP_WINDOW_S 120
 
 size_t hu_imessage_extract_attributed_body(const unsigned char *blob, size_t blob_len, char *out,
                                            size_t out_cap) {
@@ -180,23 +176,6 @@ typedef struct hu_imessage_ctx {
     char sent_ring[HU_IMESSAGE_SENT_RING_SIZE][HU_IMESSAGE_SENT_PREFIX_LEN];
     size_t sent_ring_len[HU_IMESSAGE_SENT_RING_SIZE];
     uint32_t sent_ring_hash[HU_IMESSAGE_SENT_RING_SIZE];
-    /* Outbound dedup: target hash + epoch second per ring slot.
-     * Used to drop exact-text re-sends to the same target within
-     * HU_IMESSAGE_OUTBOUND_DEDUP_WINDOW_S seconds. The existing
-     * sent_ring fields are reused for the message hash + content;
-     * these two arrays add the target identity and timestamp so
-     * we can distinguish "same text to a different person" (allowed)
-     * from "same text to the same person seconds apart" (dropped). */
-    uint32_t sent_ring_target_hash[HU_IMESSAGE_SENT_RING_SIZE];
-    int64_t sent_ring_ts[HU_IMESSAGE_SENT_RING_SIZE];
-    /* Full original message length, separate from the (capped) stored
-     * prefix length in sent_ring_len. Needed by the dedup gate: messages
-     * longer than HU_IMESSAGE_SENT_PREFIX_LEN-1 are stored truncated, so
-     * sent_ring_len alone can't distinguish a retry of a 300-char message
-     * (same full_len, same hash) from a different 300-char message (same
-     * stored prefix, different hash). The 32-bit hash already covers the
-     * latter; this field lets us verify length equality first. */
-    size_t sent_ring_full_len[HU_IMESSAGE_SENT_RING_SIZE];
     size_t sent_ring_idx;
     char typing_last_target[128];
     size_t typing_last_target_len;
@@ -532,8 +511,6 @@ static bool imcore_init(hu_imessage_ctx_t *c);
 static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
 static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
 
-#endif /* close: !HU_IS_TEST && __APPLE__ && __MACH__ — hash/record/dedup are unconditional */
-
 static uint32_t imessage_hash(const char *s, size_t len) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < len; i++)
@@ -541,10 +518,8 @@ static uint32_t imessage_hash(const char *s, size_t len) {
     return h;
 }
 
-static void imessage_record_sent(hu_imessage_ctx_t *c, const char *target, size_t target_len,
-                                 const char *msg, size_t msg_len) {
-    int64_t now = (int64_t)time(NULL);
-    c->last_ai_send_epoch = now;
+static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t msg_len) {
+    c->last_ai_send_epoch = (int64_t)time(NULL);
     size_t slot = c->sent_ring_idx % HU_IMESSAGE_SENT_RING_SIZE;
     size_t copy_len =
         msg_len < HU_IMESSAGE_SENT_PREFIX_LEN - 1 ? msg_len : HU_IMESSAGE_SENT_PREFIX_LEN - 1;
@@ -552,63 +527,8 @@ static void imessage_record_sent(hu_imessage_ctx_t *c, const char *target, size_
     c->sent_ring[slot][copy_len] = '\0';
     c->sent_ring_len[slot] = copy_len;
     c->sent_ring_hash[slot] = imessage_hash(msg, msg_len);
-    c->sent_ring_target_hash[slot] =
-        (target && target_len > 0) ? imessage_hash(target, target_len) : 0;
-    c->sent_ring_ts[slot] = now;
-    c->sent_ring_full_len[slot] = msg_len;
     c->sent_ring_idx++;
 }
-
-/* Outbound dedup check: returns true if the same exact text was sent to
- * the same target within HU_IMESSAGE_OUTBOUND_DEDUP_WINDOW_S seconds.
- * The window is the only knob; matching is by 32-bit hash + full memcmp on
- * the stored prefix (so different texts that happen to hash-collide are
- * still distinguished). target match is hash-only (handles can be long). */
-static bool imessage_outbound_recent_dupe(hu_imessage_ctx_t *c, const char *target,
-                                          size_t target_len, const char *msg, size_t msg_len) {
-    if (!c || !msg || msg_len == 0)
-        return false;
-    int64_t now = (int64_t)time(NULL);
-    uint32_t mh = imessage_hash(msg, msg_len);
-    uint32_t th = (target && target_len > 0) ? imessage_hash(target, target_len) : 0;
-    for (size_t i = 0; i < HU_IMESSAGE_SENT_RING_SIZE; i++) {
-        size_t slen = c->sent_ring_len[i];
-        if (slen == 0)
-            continue;
-        if (c->sent_ring_hash[i] != mh)
-            continue;
-        if (c->sent_ring_target_hash[i] != th)
-            continue;
-        int64_t age = now - c->sent_ring_ts[i];
-        if (age < 0 || age >= HU_IMESSAGE_OUTBOUND_DEDUP_WINDOW_S)
-            continue;
-        /* Hash + target + window all match. Now verify content equality.
-         *
-         * Use sent_ring_full_len (the original message length, possibly
-         * larger than the stored prefix) for the length check — NOT slen
-         * (which is capped at the prefix size). This way a retry of a
-         * 300-char message correctly dedupes against the prior 300-char
-         * send, while two DIFFERENT 300-char messages with the same first
-         * 255 chars don't (the 32-bit hash is computed over the full
-         * message, so distinct content yields distinct hashes and the
-         * earlier hash check already filtered them).
-         *
-         * For collision safety we still memcmp on the stored prefix: a
-         * spurious 32-bit hash collision plus an identical target plus a
-         * <120s window plus matching length plus matching prefix-content
-         * is astronomically improbable on natural-language messages. */
-        if (msg_len == 0)
-            continue;
-        if (c->sent_ring_full_len[i] != msg_len)
-            continue;
-        size_t cmp_len = slen < msg_len ? slen : msg_len;
-        if (cmp_len > 0 && memcmp(msg, c->sent_ring[i], cmp_len) == 0)
-            return true;
-    }
-    return false;
-}
-
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 
 #ifdef HU_ENABLE_SQLITE
 static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size_t text_len) {
@@ -994,7 +914,16 @@ size_t imessage_sanitize_output(char *buf, size_t len) {
             memset(&cr, 0, sizeof(cr));
             if (hu_output_validator_chain_execute(out_chain, &local_alloc, NULL, buf, len, &cr) ==
                 HU_OK) {
-                if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
+                hu_observer_emit_validator_decision(NULL, &cr, NULL, len);
+                if (cr.final_decision == HU_VALIDATOR_REJECT) {
+                    /* Deny-by-default: clear buffer so no unsanitized content reaches iMessage. */
+                    hu_log_warn("imessage", NULL,
+                                "validator chain REJECT (via %s) — suppressing iMessage send",
+                                cr.deciding_validator_name ? cr.deciding_validator_name
+                                                           : "unknown");
+                    buf[0] = '\0';
+                    len = 0;
+                } else if (cr.final_text) {
                     if (cr.final_text != buf && cr.final_text_len <= len) {
                         memcpy(buf, cr.final_text, cr.final_text_len);
                         len = cr.final_text_len;
@@ -1355,29 +1284,8 @@ static void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size
 static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
-    /* Outbound dedup gate — shared across test and production paths.
-     * Drops exact-text re-sends to the same target within
-     * HU_IMESSAGE_OUTBOUND_DEDUP_WINDOW_S seconds. Returns HU_OK so the
-     * caller sees an apparent success (idempotent). Skipped for media-only
-     * sends (message_len == 0) since the dedup key is the text. */
-    {
-        hu_imessage_ctx_t *c_pre = (hu_imessage_ctx_t *)ctx;
-        if (c_pre && message && message_len > 0) {
-            const char *dedup_tgt = (target && target_len > 0) ? target : c_pre->default_target;
-            size_t dedup_tgt_len = (target && target_len > 0)
-                                       ? target_len
-                                       : (c_pre->default_target ? c_pre->default_target_len : 0);
-            if (imessage_outbound_recent_dupe(c_pre, dedup_tgt, dedup_tgt_len, message,
-                                              message_len)) {
-                hu_log_info("imessage", NULL,
-                            "outbound dropped: duplicate text within %ds window (target_len=%zu, "
-                            "msg_len=%zu)",
-                            HU_IMESSAGE_OUTBOUND_DEDUP_WINDOW_S, dedup_tgt_len, message_len);
-                return HU_OK;
-            }
-        }
-    }
 #if HU_IS_TEST
+    (void)target;
     (void)target_len;
     {
         hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
@@ -1405,17 +1313,6 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             len = 0;
         c->last_message[len] = '\0';
         c->last_message_len = len;
-        /* Populate the outbound dedup ring so the gate at the top of this
-         * function fires on a second send of the same (target, message).
-         * Use the same target-resolution rule as the gate (fall back to
-         * default_target when caller passed NULL) so the keys match. */
-        if (message_len > 0) {
-            const char *rec_tgt = (target && target_len > 0) ? target : c->default_target;
-            size_t rec_tgt_len = (target && target_len > 0)
-                                     ? target_len
-                                     : (c->default_target ? c->default_target_len : 0);
-            imessage_record_sent(c, rec_tgt, rec_tgt_len, message, message_len);
-        }
         return HU_OK;
     }
 #elif !defined(__APPLE__) || !defined(__MACH__)
@@ -1529,7 +1426,7 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                     (imsg_err == HU_OK && imsg_result.success && imsg_result.exit_code == 0);
                 hu_run_result_free(c->alloc, &imsg_result);
                 if (imsg_ok) {
-                    imessage_record_sent(c, tgt, tgt_len, message, message_len);
+                    imessage_record_sent(c, message, message_len);
                     goto imsg_media;
                 }
                 if (getenv("HU_DEBUG"))
@@ -1594,7 +1491,7 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         }
 
         if (send_err == HU_OK)
-            imessage_record_sent(c, tgt, tgt_len, message, message_len);
+            imessage_record_sent(c, message, message_len);
     }
 
 #if !HU_IS_TEST
