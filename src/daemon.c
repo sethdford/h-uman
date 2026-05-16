@@ -26,6 +26,9 @@
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
 #include "human/ml/lora_retrain_runner.h"
+#ifdef HU_ENABLE_MOLORA
+#include "human/ml/molora.h"
+#endif
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
 #endif
@@ -2570,6 +2573,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         "personalization: load_adapter('%s', %s) failed: %d", adapter_id,
                         adapter_path, (int)le);
     }
+#ifdef HU_ENABLE_MOLORA
+    /* US-7.8 — Initialize the MoLoRA static per-channel router from config.
+     * Disabled-by-default; the agent-turn hook is a no-op until the router
+     * is enabled AND at least one channel adapter is mapped. The router
+     * borrows path pointers from `config->personalization.molora` — config
+     * shares the agent's bootstrap arena, so the lifetimes match. */
+    if (agent && config) {
+        hu_error_t mre = hu_molora_router_init(&agent->molora_router, config);
+        if (mre != HU_OK)
+            hu_log_warn("human", agent->observer, "molora: router init failed: %d", (int)mre);
+        else if (agent->molora_router.enabled)
+            hu_log_info("human", agent->observer,
+                        "molora: router enabled with %zu channel adapter(s)",
+                        agent->molora_router.count);
+    }
+#endif
     /* Initialize contact identity graph for cross-channel resolution */
     if (agent && agent->memory) {
         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
