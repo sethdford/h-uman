@@ -1029,6 +1029,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/auto_profile.c
     src/persona/auto_tune.c
     src/persona/voice_maturity.c
+    src/persona/style_critique.c
     src/persona/style_clone.c
     src/persona/training.c
     src/persona/life_sim.c
@@ -2445,6 +2446,8 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_style_critique_patterns.c
+    tests/test_style_self_critique.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
     tests/test_contact_send_recency.c

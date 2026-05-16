@@ -331,6 +331,7 @@ hu_error_t hu_agent_from_config(
         out->tool_routing_enabled = ctx_cfg->tool_routing_enabled;
         out->tree_of_thought_enabled = ctx_cfg->tree_of_thought;
         out->constitutional_enabled = ctx_cfg->constitutional_ai;
+        out->style_rules_enabled = ctx_cfg->constitutional_style_rules_enabled;
         out->multi_agent_enabled = ctx_cfg->multi_agent;
         out->hula_enabled = ctx_cfg->hula_enabled;
         out->compaction_use_structured = ctx_cfg->compaction_use_structured;

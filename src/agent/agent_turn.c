@@ -20,6 +20,7 @@
 #include "human/persona/micro_expression.h"
 #include "human/persona/narrative_self.h"
 #include "human/persona/somatic.h"
+#include "human/persona/style_critique.h"
 
 #include "human/agent/channel_trust.h"
 #include "human/agent/conv_goals.h"
@@ -5403,6 +5404,35 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hu_critique_result_free(agent->alloc, &critique);
                 }
 #endif
+
+                /* US-7.9: Constitutional style self-critique.  Pure
+                 * literal pattern matcher — no LLM judge call.  Runs
+                 * post-generation, sibling to the constitutional
+                 * block above.  One regen attempt max if a rule fires.
+                 *
+                 * Sequencing note (cross-story): when best-of-N
+                 * (US-7.7) lands, it picks the highest-fidelity sample
+                 * at the original chat call; this critique fires on
+                 * the chosen result. */
+                if (agent->style_rules_enabled && agent->persona && agent->persona->style_rules &&
+                    agent->persona->style_rules_count > 0) {
+                    char *regen_out = NULL;
+                    size_t regen_out_len = 0;
+                    if (hu_style_critique_run(agent->alloc, &agent->provider, agent->observer,
+                                              system_prompt, system_prompt_len, msg, msg_len,
+                                              agent->model_name, agent->model_name_len,
+                                              final_content, final_len, agent->persona->style_rules,
+                                              agent->persona->style_rules_count, &regen_out,
+                                              &regen_out_len) == HU_OK &&
+                        regen_out && regen_out_len > 0) {
+                        if (ab_owned)
+                            agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                               final_len + 1);
+                        final_content = regen_out;
+                        final_len = regen_out_len;
+                        ab_owned = true;
+                    }
+                }
 
                 /* Metacognition: bounded re-entry (same provider) + SQLite history */
                 if (agent->infra.metacognition.cfg.enabled) {

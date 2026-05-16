@@ -102,6 +102,10 @@ typedef struct hu_agent_config {
     bool tree_of_thought;
     bool constitutional_ai;
     char *constitutional_principles; /* formatted principle list for system prompt injection */
+    /* US-7.9: when true, persona->style_rules are enforced via a pure
+     * string-pattern self-critique pass after LLM generation.  Default
+     * false → zero effect on existing behavior. */
+    bool constitutional_style_rules_enabled;
     bool speculative_cache;
     bool multi_agent;
     bool compact_context;
