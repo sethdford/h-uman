@@ -620,6 +620,17 @@ extern void run_bootstrap_ci_tests(void);
  * rejection, Apple FM (Task 7) + Gemini Nano (Task 8) stub
  * HU_ERR_NOT_SUPPORTED, ASan leak-free deinit. */
 extern void run_eval_judge_external_tests(void);
+extern void run_leaderboard_tests(void);
+extern void run_eval_gate_tests(void);
+extern void run_stock_baseline_tests(void);
+extern void run_apple_fm_client_tests(void);
+extern void run_gemini_nano_client_tests(void);
+extern void run_competitive_harness_tests(void);
+extern void run_cli_eval_phase5_tests(void);
+extern void run_lora_ab_require_positive_tests(void);
+extern void run_runner_eval_gate_tests(void);
+extern void run_daemon_reaction_poll_tests(void);
+extern void run_proof_directory_tests(void);
 #endif
 
 static void print_usage(const char *prog) {
@@ -1238,6 +1249,17 @@ int main(int argc, char **argv) {
     run_bootstrap_ci_tests();
     /* Phase 5 Task 3 (RL SOTA): external-LLM judge vtable + canned. */
     run_eval_judge_external_tests();
+    run_leaderboard_tests();
+    run_eval_gate_tests();
+    run_stock_baseline_tests();
+    run_apple_fm_client_tests();
+    run_gemini_nano_client_tests();
+    run_competitive_harness_tests();
+    run_cli_eval_phase5_tests();
+    run_lora_ab_require_positive_tests();
+    run_runner_eval_gate_tests();
+    run_daemon_reaction_poll_tests();
+    run_proof_directory_tests();
 #endif
 
     HU_TEST_REPORT();

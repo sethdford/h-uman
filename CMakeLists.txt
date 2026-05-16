@@ -1475,10 +1475,19 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_CORE_SOURCES src/eval/bootstrap_ci.c)
     # Phase 5 Task 3 (RL SOTA) — hu_eval_judge_external_t vtable +
     # canned-response factory. Apple FM (Task 7) and Gemini Nano
-    # (Task 8) factories live in the same TU behind
-    # `HU_EVAL_JUDGE_HAVE_*_IMPL` #ifndef guards, so Tasks 7/8 fall
-    # the stub bodies out without touching Task 3 code.
+    # (Task 8) factories live in dedicated TUs; eval_judge_external.c
+    # keeps canned factory + #ifndef stubs when impl TUs are absent.
     list(APPEND HU_CORE_SOURCES src/eval/eval_judge_external.c)
+    list(APPEND HU_CORE_SOURCES src/eval/leaderboard.c)
+    list(APPEND HU_CORE_SOURCES src/eval/eval_gate.c)
+    list(APPEND HU_CORE_SOURCES src/eval/stock_baseline.c)
+    list(APPEND HU_CORE_SOURCES src/eval/external_judge_fixture.c)
+    list(APPEND HU_CORE_SOURCES src/eval/apple_fm_client.c)
+    list(APPEND HU_CORE_SOURCES src/eval/gemini_nano_client.c)
+    list(APPEND HU_CORE_SOURCES src/eval/competitive_harness.c)
+    list(APPEND HU_CORE_SOURCES src/eval/cli_eval.c)
+    list(APPEND HU_CORE_SOURCES src/agent/adapter_id.c)
+    list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
 endif()
 
 # Deduplicate source lists to prevent parallel build races
@@ -2269,6 +2278,9 @@ if(NOT UNIX OR APPLE)
 endif()
 if(NOT WIN32)
     list(APPEND HU_TEST_EXTRA_MODULES src/security/appcontainer.c)
+endif()
+if(HU_ENABLE_RL_FULL)
+    list(APPEND HU_TEST_EXTRA_MODULES src/providers/provider_test_seam.c)
 endif()
 if(NOT HU_ENABLE_TOOLS_BROWSER)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -3156,6 +3168,17 @@ if(HU_ENABLE_RL_FULL)
     # Apple FM / Gemini Nano stubs return HU_ERR_NOT_SUPPORTED, ASan
     # leak-free deinit). Same gating as Task 2.
     list(APPEND HU_TEST_SOURCES tests/test_eval_judge_external.c)
+    list(APPEND HU_TEST_SOURCES tests/test_leaderboard.c)
+    list(APPEND HU_TEST_SOURCES tests/test_eval_gate.c)
+    list(APPEND HU_TEST_SOURCES tests/test_stock_baseline.c)
+    list(APPEND HU_TEST_SOURCES tests/test_apple_fm_client.c)
+    list(APPEND HU_TEST_SOURCES tests/test_gemini_nano_client.c)
+    list(APPEND HU_TEST_SOURCES tests/test_competitive_harness.c)
+    list(APPEND HU_TEST_SOURCES tests/test_cli_eval_phase5.c)
+    list(APPEND HU_TEST_SOURCES tests/test_lora_ab_require_positive_forwards_to_gate.c)
+    list(APPEND HU_TEST_SOURCES tests/test_lora_training_runner_eval_gate.c)
+    list(APPEND HU_TEST_SOURCES tests/test_daemon_reaction_poll_wiring.c)
+    list(APPEND HU_TEST_SOURCES tests/test_lora_training_runner_proof_directory.c)
 endif()
 
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)
@@ -3393,6 +3416,12 @@ if(HU_ENABLE_RL_FULL)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_RL_FULL=1)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_RL_FULL=1)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_core PRIVATE HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=1)
+    target_compile_definitions(human_core PRIVATE HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL=1)
+    target_compile_definitions(human_core_test PRIVATE HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=1)
+    target_compile_definitions(human_core_test PRIVATE HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL=1)
+    target_compile_definitions(human_tests PRIVATE HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=1)
+    target_compile_definitions(human_tests PRIVATE HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL=1)
 endif()
 
 # Keep assert() active in tests even for Release/MinSizeRel builds (which define NDEBUG).
