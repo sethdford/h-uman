@@ -5,6 +5,7 @@
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/providers/api_key.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -714,16 +715,13 @@ void hu_config_apply_env_overrides(hu_config_t *cfg) {
     if (v)
         hu_config_apply_env_str(a, &cfg->api_key, v);
     else if (cfg->default_provider && !cfg->api_key) {
-        if (strcmp(cfg->default_provider, "openai") == 0)
-            v = getenv("OPENAI_API_KEY");
-        else if (strcmp(cfg->default_provider, "anthropic") == 0)
-            v = getenv("ANTHROPIC_API_KEY");
-        else if (strcmp(cfg->default_provider, "gemini") == 0 ||
-                 strcmp(cfg->default_provider, "google") == 0 ||
-                 strcmp(cfg->default_provider, "vertex") == 0)
-            v = getenv("GEMINI_API_KEY");
-        else if (strcmp(cfg->default_provider, "ollama") == 0)
-            v = getenv("OLLAMA_HOST");
+        /* Look up provider's canonical API-key env var via the centralized
+         * mapping in src/providers/api_key.c (audit 2026-05-16). Adding a
+         * new provider's env var no longer requires editing this file. */
+        const char *env_name = hu_provider_default_api_key_env_name(cfg->default_provider,
+                                                                    strlen(cfg->default_provider));
+        if (env_name)
+            v = getenv(env_name);
         if (v)
             hu_config_apply_env_str(a, &cfg->api_key, v);
     }
