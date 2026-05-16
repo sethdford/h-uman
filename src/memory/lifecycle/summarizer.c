@@ -131,12 +131,6 @@ hu_error_t hu_memory_summarize(hu_allocator_t *alloc, hu_memory_t *memory,
             }
             size_t key_len = strlen(key_buf);
             hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-            /* Summary spans multiple source entries that may have different
-             * session_ids — there is no single correct scope. Stored
-             * unscoped; the post-2026-05-15 SQLite recall filter excludes
-             * these from scoped per-contact recall by design. If you want
-             * per-contact summary memory, generate a separate summary per
-             * scope upstream and pass session_id through. */
             err = memory->vtable->store(memory->ctx, key_buf, key_len, summary, summary_len, &cat,
                                         NULL, 0);
             hu_str_free(alloc, key_buf);

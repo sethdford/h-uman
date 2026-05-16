@@ -20,6 +20,8 @@
 #include "human/persona/micro_expression.h"
 #include "human/persona/narrative_self.h"
 #include "human/persona/somatic.h"
+#include "human/persona/style_mirror.h"
+#include "human/persona/voice_maturity.h"
 
 #include "human/agent/channel_trust.h"
 #include "human/agent/conv_goals.h"
@@ -238,6 +240,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/memory/lifecycle/semantic_cache.h"
 #include "human/observability/bth_metrics.h"
 #include "human/observability/otlp.h"
+#include "human/observability/validator_telemetry.h"
 #include "human/tools/validation.h"
 #include <math.h>
 #ifdef HU_ENABLE_SQLITE
@@ -280,6 +283,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/permission.h"
 #include "human/persona.h"
 #include "human/provider.h"
+#include "human/provider/structured_output.h"
 #include "human/security.h"
 #include "human/security/causal_armor.h"
 #include "human/security/companion_safety.h"
@@ -1053,6 +1057,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
     char *somatic_ctx = NULL;
     size_t somatic_ctx_len = 0;
+    /* Sprint 6 US-14: voice maturity directive — static buffer, no allocation needed */
+    char voice_maturity_dir[256];
+    size_t voice_maturity_dir_len = 0;
     char *narrative_self_ctx = NULL;
     size_t narrative_self_ctx_len = 0;
     char *presence_ctx = NULL;
@@ -1169,6 +1176,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         percep.conversation = NULL;
 
         hu_emotional_cognition_perceive(&agent->infra.emotional_cognition, &percep);
+
+        /* Sprint 6 US-17: emotional contagion. Partner's detected emotion modulates
+         * Seth's emotional cognition before the prompt is built. The dominant STM
+         * emotion from the most-recent inbound turn is treated as the partner signal;
+         * contagion is bounded to 30% so Seth is affected, not overwritten. */
+        if (stm_emo && stm_emo_count > 0) {
+            hu_emotion_tag_t partner_emotion = stm_emo[0].tag;
+            float partner_intensity = stm_emo[0].intensity;
+            (void)hu_emotional_apply_contagion(&agent->infra.emotional_cognition, partner_emotion,
+                                               partner_intensity, 0.3f);
+        }
 
         size_t recent_tools = 0;
         if (agent->history_count > 1) {
@@ -2851,6 +2869,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_somatic_build_context(agent->alloc, &agent->frontiers.somatic, &somatic_ctx,
                                  &somatic_ctx_len);
 
+        /* Sprint 6 US-14: Voice maturity directive — inject stage-specific guidance alongside
+         * somatic/mood context. The voice profile lives on agent->voice_profile; we compute
+         * the current stage and emit a concise directive tag for the LLM prompt. */
+#ifdef HU_ENABLE_PERSONA
+        if (agent->voice_profile_initialized) {
+            hu_voice_stage_t vm_stage = hu_voice_compute_stage(
+                agent->voice_profile.interaction_count, agent->voice_profile.emotional_exchanges,
+                agent->voice_profile.warmth_score);
+            voice_maturity_dir_len = hu_voice_maturity_build_directive(vm_stage, voice_maturity_dir,
+                                                                       sizeof(voice_maturity_dir));
+        }
+#endif /* HU_ENABLE_PERSONA */
+
         /* F8: Presence Gradient — derive from real relationship + vulnerability */
         float f8_vulnerability = 0.0f;
         uint32_t f8_rel_depth = 0;
@@ -3384,7 +3415,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         !narrative_self_ctx && !creative_voice_ctx && !growth_ctx && !boundary_ctx &&
         !rel_episode_ctx && !trust_ctx && !humor_dir && !syc_friction_ctx && !conv_goals_ctx &&
         !outcome_ctx && !intelligence_ctx && !acp_context && !plan_ctx && !instruction_ctx &&
-        !hu_personal_model_has_content(&agent->personal_model) &&
+        !voice_maturity_dir_len && !hu_personal_model_has_content(&agent->personal_model) &&
         !(agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0)) {
         err = hu_prompt_build_with_cache(agent->alloc, agent->cached_static_prompt,
                                          agent->cached_static_prompt_len, memory_ctx,
@@ -3645,6 +3676,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .personal_model_context_len = personal_model_ctx_len,
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
+            /* Sprint 6 US-14: voice maturity directive — stack buffer, valid for prompt lifetime */
+            .voice_maturity_directive = voice_maturity_dir_len ? voice_maturity_dir : NULL,
+            .voice_maturity_directive_len = voice_maturity_dir_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
         if (world_model_ctx) {
@@ -4083,10 +4117,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         size_t prov_name_len = prov_name ? strlen(prov_name) : 0;
         const char *const *stop_seqs = NULL;
         size_t stop_seqs_count = 0;
-        hu_stop_sequence_registry_lookup(prov_name, prov_name_len, NULL, 0, &stop_seqs,
-                                         &stop_seqs_count);
+        hu_stop_sequence_registry_lookup(prov_name, prov_name_len, &stop_seqs, &stop_seqs_count);
         req.stop_sequences = stop_seqs;
         req.stop_sequences_count = stop_seqs_count;
+    }
+    if (agent->persona && agent->persona->structured_output_enabled) {
+        req.response_format = "json_schema";
+        req.response_format_len = 11; /* strlen("json_schema") */
+        req.response_schema = hu_structured_output_chat_reply_schema();
+        req.response_schema_len = hu_structured_output_chat_reply_schema_len();
     }
 
     uint32_t iter = 0;
@@ -5570,14 +5609,26 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 /* Last-mile output validation — response_guard + strip trio via
                  * the default outbound chain (P2.T12). Catches the class of
                  * failure that leaked `<|channel>thought` + a 200x quote loop
-                 * to a real human contact via iMessage on 2026-05-10. */
+                 * to a real human contact via iMessage on 2026-05-10.
+                 *
+                 * US-4: prefer the chain cached on the persona (built once at
+                 * load time) over per-message inline build. Fall back to inline
+                 * build when no persona or no cached chain. */
                 {
                     const char *persona_name =
                         (agent->persona && agent->persona->name) ? agent->persona->name : NULL;
                     size_t persona_name_len = persona_name ? strlen(persona_name) : 0;
-                    hu_output_validator_chain_t *out_chain = NULL;
-                    if (hu_validators_build_default_outbound_chain(
-                            agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK) {
+                    bool chain_owned = false;
+                    hu_output_validator_chain_t *out_chain =
+                        (agent->persona && agent->persona->outbound_chain)
+                            ? agent->persona->outbound_chain
+                            : NULL;
+                    if (!out_chain) {
+                        chain_owned =
+                            hu_validators_build_default_outbound_chain(
+                                agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK;
+                    }
+                    if (out_chain) {
                         hu_validator_context_t vctx = {0};
                         vctx.persona_name = persona_name;
                         vctx.persona_name_len = persona_name_len;
@@ -5586,6 +5637,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_error_t cerr = hu_output_validator_chain_execute(
                             out_chain, agent->alloc, &vctx, final_content, final_len, &cr);
                         if (cerr == HU_OK) {
+                            hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
+                                                                final_len);
                             if (cr.final_decision == HU_VALIDATOR_REJECT) {
                                 hu_log_error("agent_turn", agent->observer,
                                              "validator chain REJECT (via %s) — "
@@ -5639,7 +5692,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 hu_chain_result_free(agent->alloc, &cr);
                             }
                         }
-                        hu_output_validator_chain_destroy(out_chain);
+                        if (chain_owned)
+                            hu_output_validator_chain_destroy(out_chain);
                     }
                 }
                 hu_error_t hist_err = hu_agent_internal_append_history(
@@ -5671,6 +5725,37 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_arena_reset(agent->turn_arena);
                     return HU_ERR_OUT_OF_MEMORY;
                 }
+                /* Sprint 6 US-19: post-gen style mirroring (enforcement, not advice).
+                 * Mirrors the partner's case/punctuation patterns from their recent
+                 * inbound messages onto the outbound reply.  Operates in-place on the
+                 * already-allocated mutable copy so no realloc is needed (mirroring
+                 * only lowercases or shortens — never grows the buffer).
+                 * Skip silently when there is no partner signal (< 2 user turns). */
+                {
+                    const char *mirror_msgs[5];
+                    size_t mirror_count = 0;
+                    for (size_t mi = agent->history_count; mi > 0 && mirror_count < 5; mi--) {
+                        size_t hi = mi - 1;
+                        if (agent->history[hi].role == HU_ROLE_USER && agent->history[hi].content &&
+                            agent->history[hi].content_len > 0) {
+                            mirror_msgs[mirror_count++] = agent->history[hi].content;
+                        }
+                    }
+                    if (mirror_count >= 2) {
+                        size_t mirror_len = strlen(*response_out);
+                        hu_style_mirror_report_t mirror_report;
+                        memset(&mirror_report, 0, sizeof(mirror_report));
+                        hu_style_mirror_apply(*response_out, &mirror_len, mirror_msgs, mirror_count,
+                                              &mirror_report);
+                        if (mirror_report.edits > 0 && agent->observer) {
+                            hu_log_info("agent_turn", agent->observer,
+                                        "style_mirror: %zu edit(s) applied (lc=%d period=%d)",
+                                        mirror_report.edits, (int)mirror_report.lowercased_applied,
+                                        (int)mirror_report.periods_stripped);
+                        }
+                    }
+                }
+
                 /* hu_strndup stops at first '\0' within final_len — length must match allocation.
                  */
                 size_t response_effective_len = strlen(*response_out);

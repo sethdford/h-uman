@@ -354,6 +354,51 @@ static void voice_build_guidance_includes_vulnerability(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* ── Sprint 6 US-14: hu_voice_maturity_build_directive tests ─────────── */
+
+static void voice_build_directive_null_buf_returns_zero(void) {
+    size_t written = hu_voice_maturity_build_directive(HU_VOICE_FORMAL, NULL, 256);
+    HU_ASSERT_EQ(written, (size_t)0);
+}
+
+static void voice_build_directive_zero_len_returns_zero(void) {
+    char buf[256];
+    size_t written = hu_voice_maturity_build_directive(HU_VOICE_FORMAL, buf, 0);
+    HU_ASSERT_EQ(written, (size_t)0);
+}
+
+static void voice_build_directive_all_stages_distinct_nonempty(void) {
+    char formal[512], warm[512], candid[512], intimate[512];
+
+    size_t nf = hu_voice_maturity_build_directive(HU_VOICE_FORMAL, formal, sizeof(formal));
+    size_t nw = hu_voice_maturity_build_directive(HU_VOICE_WARM, warm, sizeof(warm));
+    size_t nc = hu_voice_maturity_build_directive(HU_VOICE_CANDID, candid, sizeof(candid));
+    size_t ni = hu_voice_maturity_build_directive(HU_VOICE_INTIMATE, intimate, sizeof(intimate));
+
+    /* All must produce a non-empty NUL-terminated string */
+    HU_ASSERT_GT(nf, (size_t)0);
+    HU_ASSERT_GT(nw, (size_t)0);
+    HU_ASSERT_GT(nc, (size_t)0);
+    HU_ASSERT_GT(ni, (size_t)0);
+
+    /* Each stage must produce a distinct directive */
+    HU_ASSERT_TRUE(strcmp(formal, warm) != 0);
+    HU_ASSERT_TRUE(strcmp(formal, candid) != 0);
+    HU_ASSERT_TRUE(strcmp(formal, intimate) != 0);
+    HU_ASSERT_TRUE(strcmp(warm, candid) != 0);
+    HU_ASSERT_TRUE(strcmp(warm, intimate) != 0);
+    HU_ASSERT_TRUE(strcmp(candid, intimate) != 0);
+}
+
+static void voice_build_directive_formal_differs_from_intimate(void) {
+    char formal[512], intimate[512];
+    hu_voice_maturity_build_directive(HU_VOICE_FORMAL, formal, sizeof(formal));
+    hu_voice_maturity_build_directive(HU_VOICE_INTIMATE, intimate, sizeof(intimate));
+    HU_ASSERT_TRUE(strlen(formal) > 0);
+    HU_ASSERT_TRUE(strlen(intimate) > 0);
+    HU_ASSERT_TRUE(strcmp(formal, intimate) != 0);
+}
+
 void run_voice_maturity_tests(void) {
     HU_TEST_SUITE("VoiceMaturity");
 
@@ -378,6 +423,12 @@ void run_voice_maturity_tests(void) {
     HU_RUN_TEST(voice_build_guidance_warm_returns_ok);
     HU_RUN_TEST(voice_build_guidance_candid_returns_ok);
     HU_RUN_TEST(voice_build_guidance_intimate_returns_ok);
+
+    HU_TEST_SUITE("voice_maturity_directive");
+    HU_RUN_TEST(voice_build_directive_null_buf_returns_zero);
+    HU_RUN_TEST(voice_build_directive_zero_len_returns_zero);
+    HU_RUN_TEST(voice_build_directive_all_stages_distinct_nonempty);
+    HU_RUN_TEST(voice_build_directive_formal_differs_from_intimate);
 
     HU_TEST_SUITE("VoiceVulnerability");
     HU_RUN_TEST(voice_vulnerability_from_content_null_returns_zero);

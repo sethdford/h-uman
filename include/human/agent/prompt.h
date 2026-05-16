@@ -133,6 +133,11 @@ typedef struct hu_prompt_config {
      * an empty model (callers skip injection). */
     const char *world_model_context;
     size_t world_model_context_len;
+    /* Sprint 6 US-14: Voice maturity stage directive.
+     * A concise [VOICE STAGE: ...] tag emitted by hu_voice_maturity_build_directive.
+     * NULL/empty when voice profile is uninitialised or persona is disabled. */
+    const char *voice_maturity_directive;
+    size_t voice_maturity_directive_len;
 } hu_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc. */
