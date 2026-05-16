@@ -2,8 +2,8 @@
  * PWA Learner — reads PWA tab content and stores it in persistent memory.
  * Runs in the service loop when the PWA channel polls and finds new content.
  */
-#include "human/pwa_learner.h"
 #include "human/core/string.h"
+#include "human/pwa_learner.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -11,7 +11,7 @@
 /* Built-in app names (same order as hu_pwa_drivers_all semantics).
  * We iterate via hu_pwa_driver_resolve to support custom registry overrides. */
 static const char *const PWA_LEARNER_APPS[] = {
-    "slack", "discord", "whatsapp", "gmail", "calendar",
+    "slack",  "discord", "whatsapp", "gmail",    "calendar",
     "notion", "twitter", "telegram", "linkedin", "facebook",
 };
 #define PWA_LEARNER_APP_COUNT (sizeof(PWA_LEARNER_APPS) / sizeof(PWA_LEARNER_APPS[0]))
@@ -23,8 +23,7 @@ static uint32_t hash_content(const char *content, size_t len) {
     return h;
 }
 
-hu_error_t hu_pwa_learner_init(hu_allocator_t *alloc, hu_pwa_learner_t *out,
-                               hu_memory_t *memory) {
+hu_error_t hu_pwa_learner_init(hu_allocator_t *alloc, hu_pwa_learner_t *out, hu_memory_t *memory) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -33,8 +32,7 @@ hu_error_t hu_pwa_learner_init(hu_allocator_t *alloc, hu_pwa_learner_t *out,
     out->memory = memory;
     out->app_count = PWA_LEARNER_APP_COUNT;
 
-    out->content_hashes =
-        (uint32_t *)alloc->alloc(alloc->ctx, out->app_count * sizeof(uint32_t));
+    out->content_hashes = (uint32_t *)alloc->alloc(alloc->ctx, out->app_count * sizeof(uint32_t));
     if (!out->content_hashes)
         return HU_ERR_OUT_OF_MEMORY;
     memset(out->content_hashes, 0, out->app_count * sizeof(uint32_t));
@@ -76,8 +74,12 @@ hu_error_t hu_pwa_learner_store(hu_pwa_learner_t *learner, const char *app_name,
         return HU_ERR_PARSE;
 
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_DAILY};
-    hu_error_t err = learner->memory->vtable->store(
-        learner->memory->ctx, key_buf, (size_t)n, content, content_len, &cat, NULL, 0);
+    /* PWA learning data is intentionally user-global (session_id=NULL). The
+     * key encodes the app_name; the content is ingested from web apps and
+     * is not tied to any iMessage/SMS contact. Recall paths for PWA data
+     * run unscoped. */
+    hu_error_t err = learner->memory->vtable->store(learner->memory->ctx, key_buf, (size_t)n,
+                                                    content, content_len, &cat, NULL, 0);
     if (err != HU_OK)
         return err;
 
@@ -106,8 +108,8 @@ hu_error_t hu_pwa_learner_scan(hu_pwa_learner_t *learner, size_t *ingested_count
 
         char *content = NULL;
         size_t content_len = 0;
-        hu_error_t err = hu_pwa_read_messages(learner->alloc, learner->browser,
-                                               app_name, &content, &content_len);
+        hu_error_t err = hu_pwa_read_messages(learner->alloc, learner->browser, app_name, &content,
+                                              &content_len);
         if (err != HU_OK || !content)
             continue;
 

@@ -10,14 +10,14 @@
 #include <time.h>
 #endif
 
-#define HU_EXP_MAX 64
-#define HU_EXP_TEXT_MAX 512
-#define HU_EXP_KEY_PREFIX "experience:"
+#define HU_EXP_MAX            64
+#define HU_EXP_TEXT_MAX       512
+#define HU_EXP_KEY_PREFIX     "experience:"
 #define HU_EXP_KEY_PREFIX_LEN 11
 #define HU_EXP_KEY_TASK_CHARS 16
-#define HU_EXP_RECALL_LIMIT 5
+#define HU_EXP_RECALL_LIMIT   5
 
-#define HU_EXP_CONTACT_PREFIX "[contact:"
+#define HU_EXP_CONTACT_PREFIX     "[contact:"
 #define HU_EXP_CONTACT_PREFIX_LEN 8
 
 typedef struct {
@@ -38,31 +38,39 @@ static size_t s_write_idx = 0;
 
 static size_t copy_truncated(char *dst, size_t dst_cap, const char *src, size_t src_len) {
     size_t n = src_len;
-    if (n >= dst_cap) n = dst_cap - 1;
+    if (n >= dst_cap)
+        n = dst_cap - 1;
     memcpy(dst, src, n);
     dst[n] = '\0';
     return n;
 }
 
-static size_t count_word_overlap(const char *query, size_t query_len,
-                                 const char *stored, size_t stored_len) {
+static size_t count_word_overlap(const char *query, size_t query_len, const char *stored,
+                                 size_t stored_len) {
     size_t overlap = 0;
     const char *q = query;
     const char *q_end = query + query_len;
     while (q < q_end) {
-        while (q < q_end && (isspace((unsigned char)*q) || !isalnum((unsigned char)*q))) q++;
-        if (q >= q_end) break;
+        while (q < q_end && (isspace((unsigned char)*q) || !isalnum((unsigned char)*q)))
+            q++;
+        if (q >= q_end)
+            break;
         const char *word_start = q;
-        while (q < q_end && (isalnum((unsigned char)*q) || *q == '_' || *q == '-')) q++;
+        while (q < q_end && (isalnum((unsigned char)*q) || *q == '_' || *q == '-'))
+            q++;
         size_t word_len = (size_t)(q - word_start);
-        if (word_len == 0) continue;
+        if (word_len == 0)
+            continue;
         const char *s = stored;
         const char *s_end = stored + stored_len;
         while (s < s_end) {
-            while (s < s_end && (isspace((unsigned char)*s) || !isalnum((unsigned char)*s))) s++;
-            if (s >= s_end) break;
+            while (s < s_end && (isspace((unsigned char)*s) || !isalnum((unsigned char)*s)))
+                s++;
+            if (s >= s_end)
+                break;
             const char *sw_start = s;
-            while (s < s_end && (isalnum((unsigned char)*s) || *s == '_' || *s == '-')) s++;
+            while (s < s_end && (isalnum((unsigned char)*s) || *s == '_' || *s == '-'))
+                s++;
             size_t sw_len = (size_t)(s - sw_start);
             if (sw_len == word_len && memcmp(word_start, sw_start, word_len) == 0) {
                 overlap++;
@@ -75,7 +83,8 @@ static size_t count_word_overlap(const char *query, size_t query_len,
 
 hu_error_t hu_experience_store_init(hu_allocator_t *alloc, hu_memory_t *memory,
                                     hu_experience_store_t *out) {
-    if (!alloc || !out) return HU_ERR_INVALID_ARGUMENT;
+    if (!alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
     out->alloc = alloc;
     out->memory = memory;
     out->embedder = NULL;
@@ -86,7 +95,8 @@ hu_error_t hu_experience_store_init(hu_allocator_t *alloc, hu_memory_t *memory,
     out->stored_count = 0;
     if (memory == NULL && s_entries == NULL) {
         s_entries = (exp_entry_t *)alloc->alloc(alloc->ctx, HU_EXP_MAX * sizeof(exp_entry_t));
-        if (!s_entries) return HU_ERR_OUT_OF_MEMORY;
+        if (!s_entries)
+            return HU_ERR_OUT_OF_MEMORY;
         s_capacity = HU_EXP_MAX;
         s_write_idx = 0;
     } else if (memory == NULL) {
@@ -96,18 +106,19 @@ hu_error_t hu_experience_store_init(hu_allocator_t *alloc, hu_memory_t *memory,
 }
 
 hu_error_t hu_experience_store_init_semantic(hu_allocator_t *alloc, hu_memory_t *memory,
-                                             hu_embedder_t *embedder,
-                                             hu_vector_store_t *vec_store,
+                                             hu_embedder_t *embedder, hu_vector_store_t *vec_store,
                                              hu_experience_store_t *out) {
     hu_error_t err = hu_experience_store_init(alloc, memory, out);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
     out->embedder = embedder;
     out->vec_store = vec_store;
     return HU_OK;
 }
 
 void hu_experience_store_deinit(hu_experience_store_t *store) {
-    if (!store) return;
+    if (!store)
+        return;
     hu_allocator_t *alloc = store->alloc;
     if (alloc && s_entries) {
         alloc->free(alloc->ctx, s_entries, s_capacity * sizeof(exp_entry_t));
@@ -125,11 +136,9 @@ void hu_experience_store_deinit(hu_experience_store_t *store) {
     store->stored_count = 0;
 }
 
-hu_error_t hu_experience_record(hu_experience_store_t *store,
-                                const char *task, size_t task_len,
-                                const char *actions, size_t actions_len,
-                                const char *outcome, size_t outcome_len,
-                                double score) {
+hu_error_t hu_experience_record(hu_experience_store_t *store, const char *task, size_t task_len,
+                                const char *actions, size_t actions_len, const char *outcome,
+                                size_t outcome_len, double score) {
     if (!store || !store->alloc || !task || !actions || !outcome)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -147,29 +156,33 @@ hu_error_t hu_experience_record(hu_experience_store_t *store,
             key_len += 5;
         }
         key_buf[key_len] = '\0';
-        size_t content_len = (size_t)snprintf(NULL, 0,
-                                            "Task: %.*s\nActions: %.*s\nOutcome: %.*s\nScore: %.4f",
-                                            (int)task_len, task,
-                                            (int)actions_len, actions,
-                                            (int)outcome_len, outcome,
-                                            score);
+        size_t content_len = (size_t)snprintf(
+            NULL, 0, "Task: %.*s\nActions: %.*s\nOutcome: %.*s\nScore: %.4f", (int)task_len, task,
+            (int)actions_len, actions, (int)outcome_len, outcome, score);
         char *content = (char *)store->alloc->alloc(store->alloc->ctx, content_len + 1);
-        if (!content) return HU_ERR_OUT_OF_MEMORY;
+        if (!content)
+            return HU_ERR_OUT_OF_MEMORY;
         (void)snprintf(content, content_len + 1,
-                      "Task: %.*s\nActions: %.*s\nOutcome: %.*s\nScore: %.4f",
-                      (int)task_len, task,
-                      (int)actions_len, actions,
-                      (int)outcome_len, outcome,
-                      score);
-        hu_error_t err = store->memory->vtable->store(store->memory->ctx, key_buf, key_len,
-                                                     content, content_len, NULL, "", 0);
+                       "Task: %.*s\nActions: %.*s\nOutcome: %.*s\nScore: %.4f", (int)task_len, task,
+                       (int)actions_len, actions, (int)outcome_len, outcome, score);
+        /* Scope to the current session if the memory backend has one set;
+         * otherwise fall through to global. Without this, per-contact recall
+         * (which keys on session_id) can't find these experiences and the
+         * model sees no continuity with the contact who triggered the write. */
+        const char *sid =
+            store->memory->current_session_id ? store->memory->current_session_id : "";
+        size_t sid_len =
+            store->memory->current_session_id ? store->memory->current_session_id_len : 0;
+        hu_error_t err = store->memory->vtable->store(store->memory->ctx, key_buf, key_len, content,
+                                                      content_len, NULL, sid, sid_len);
         store->alloc->free(store->alloc->ctx, content, content_len + 1);
         if (err == HU_OK)
             store->stored_count++;
         return err;
     }
 
-    if (!s_entries) return HU_ERR_INVALID_ARGUMENT;
+    if (!s_entries)
+        return HU_ERR_INVALID_ARGUMENT;
     size_t idx = s_write_idx % HU_EXP_MAX;
     exp_entry_t *e = &s_entries[idx];
     e->task_len = copy_truncated(e->task, sizeof(e->task), task, task_len);
@@ -203,20 +216,18 @@ hu_error_t hu_experience_record(hu_experience_store_t *store,
     if (store->embedder && store->embedder->vtable && store->embedder->vtable->embed &&
         store->vec_store && store->vec_store->vtable && store->vec_store->vtable->insert) {
         hu_embedding_t emb = {0};
-        if (store->embedder->vtable->embed(store->embedder->ctx, store->alloc,
-                                           task, task_len, &emb) == HU_OK) {
+        if (store->embedder->vtable->embed(store->embedder->ctx, store->alloc, task, task_len,
+                                           &emb) == HU_OK) {
             char id_buf[32];
             int id_len = snprintf(id_buf, sizeof(id_buf), "exp_%zu", store->stored_count);
             char content_buf[HU_EXP_TEXT_MAX * 3 + 64];
             int clen = snprintf(content_buf, sizeof(content_buf),
-                               "Task: %.*s\nActions: %.*s\nOutcome: %.*s\nScore: %.2f",
-                               (int)e->task_len, e->task,
-                               (int)e->actions_len, e->actions,
-                               (int)e->outcome_len, e->outcome, score);
-            (void)store->vec_store->vtable->insert(
-                store->vec_store->ctx, store->alloc,
-                id_buf, (size_t)id_len, &emb,
-                content_buf, clen > 0 ? (size_t)clen : 0);
+                                "Task: %.*s\nActions: %.*s\nOutcome: %.*s\nScore: %.2f",
+                                (int)e->task_len, e->task, (int)e->actions_len, e->actions,
+                                (int)e->outcome_len, e->outcome, score);
+            (void)store->vec_store->vtable->insert(store->vec_store->ctx, store->alloc, id_buf,
+                                                   (size_t)id_len, &emb, content_buf,
+                                                   clen > 0 ? (size_t)clen : 0);
             hu_embedding_free(store->alloc, &emb);
         }
     }
@@ -224,9 +235,8 @@ hu_error_t hu_experience_record(hu_experience_store_t *store,
     return HU_OK;
 }
 
-hu_error_t hu_experience_recall_similar(hu_experience_store_t *store,
-                                        const char *task, size_t task_len,
-                                        char **out_context, size_t *out_len) {
+hu_error_t hu_experience_recall_similar(hu_experience_store_t *store, const char *task,
+                                        size_t task_len, char **out_context, size_t *out_len) {
     if (!store || !store->alloc || !task || !out_context || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out_context = NULL;
@@ -235,9 +245,9 @@ hu_error_t hu_experience_recall_similar(hu_experience_store_t *store,
     if (store->memory && store->memory->vtable && store->memory->vtable->recall) {
         hu_memory_entry_t *entries = NULL;
         size_t count = 0;
-        hu_error_t err = store->memory->vtable->recall(store->memory->ctx, store->alloc,
-                                                      task, task_len, HU_EXP_RECALL_LIMIT,
-                                                      "", 0, &entries, &count);
+        hu_error_t err =
+            store->memory->vtable->recall(store->memory->ctx, store->alloc, task, task_len,
+                                          HU_EXP_RECALL_LIMIT, "", 0, &entries, &count);
         if (err != HU_OK || !entries || count == 0)
             return err;
 
@@ -290,12 +300,12 @@ hu_error_t hu_experience_recall_similar(hu_experience_store_t *store,
     if (store->embedder && store->embedder->vtable && store->embedder->vtable->embed &&
         store->vec_store && store->vec_store->vtable && store->vec_store->vtable->search) {
         hu_embedding_t q_emb = {0};
-        if (store->embedder->vtable->embed(store->embedder->ctx, store->alloc,
-                                           task, task_len, &q_emb) == HU_OK) {
+        if (store->embedder->vtable->embed(store->embedder->ctx, store->alloc, task, task_len,
+                                           &q_emb) == HU_OK) {
             hu_vector_entry_t *entries = NULL;
             size_t vcount = 0;
-            hu_error_t serr = store->vec_store->vtable->search(
-                store->vec_store->ctx, store->alloc, &q_emb, 3, &entries, &vcount);
+            hu_error_t serr = store->vec_store->vtable->search(store->vec_store->ctx, store->alloc,
+                                                               &q_emb, 3, &entries, &vcount);
             hu_embedding_free(store->alloc, &q_emb);
             if (serr == HU_OK && entries && vcount > 0) {
                 size_t total = 0;
@@ -303,7 +313,8 @@ hu_error_t hu_experience_recall_similar(hu_experience_store_t *store,
                     if (entries[i].content && entries[i].content_len > 0)
                         total += entries[i].content_len;
                 }
-                if (vcount > 1) total += (vcount - 1) * 5;
+                if (vcount > 1)
+                    total += (vcount - 1) * 5;
                 if (total > 0) {
                     char *buf = (char *)store->alloc->alloc(store->alloc->ctx, total + 1);
                     if (buf) {
@@ -330,7 +341,8 @@ hu_error_t hu_experience_recall_similar(hu_experience_store_t *store,
         }
     }
 
-    if (!s_entries || store->stored_count == 0) return HU_OK;
+    if (!s_entries || store->stored_count == 0)
+        return HU_OK;
     size_t count = store->stored_count < HU_EXP_MAX ? store->stored_count : HU_EXP_MAX;
     size_t best_idx = 0;
     size_t best_overlap = 0;
@@ -346,28 +358,24 @@ hu_error_t hu_experience_recall_similar(hu_experience_store_t *store,
         }
     }
     exp_entry_t *e = &s_entries[best_idx];
-    size_t need = (size_t)snprintf(NULL, 0,
-                                  "Previous experience: Task: %.*s, Actions: %.*s, Outcome: %.*s (score: %.2f)",
-                                  (int)e->task_len, e->task,
-                                  (int)e->actions_len, e->actions,
-                                  (int)e->outcome_len, e->outcome,
-                                  e->score);
+    size_t need = (size_t)snprintf(
+        NULL, 0, "Previous experience: Task: %.*s, Actions: %.*s, Outcome: %.*s (score: %.2f)",
+        (int)e->task_len, e->task, (int)e->actions_len, e->actions, (int)e->outcome_len, e->outcome,
+        e->score);
     char *buf = (char *)store->alloc->alloc(store->alloc->ctx, need + 1);
-    if (!buf) return HU_ERR_OUT_OF_MEMORY;
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
     (void)snprintf(buf, need + 1,
                    "Previous experience: Task: %.*s, Actions: %.*s, Outcome: %.*s (score: %.2f)",
-                   (int)e->task_len, e->task,
-                   (int)e->actions_len, e->actions,
-                   (int)e->outcome_len, e->outcome,
-                   e->score);
+                   (int)e->task_len, e->task, (int)e->actions_len, e->actions, (int)e->outcome_len,
+                   e->outcome, e->score);
     *out_context = buf;
     *out_len = need;
     return HU_OK;
 }
 
-hu_error_t hu_experience_build_prompt(hu_experience_store_t *store,
-                                      const char *current_task, size_t task_len,
-                                      char **out, size_t *out_len) {
+hu_error_t hu_experience_build_prompt(hu_experience_store_t *store, const char *current_task,
+                                      size_t task_len, char **out, size_t *out_len) {
     if (!store || !store->alloc || !current_task || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -375,10 +383,12 @@ hu_error_t hu_experience_build_prompt(hu_experience_store_t *store,
     char *ctx = NULL;
     size_t ctx_len = 0;
     hu_error_t err = hu_experience_recall_similar(store, current_task, task_len, &ctx, &ctx_len);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
     if (!ctx || ctx_len == 0) {
         char *empty = (char *)store->alloc->alloc(store->alloc->ctx, 1);
-        if (!empty) return HU_ERR_OUT_OF_MEMORY;
+        if (!empty)
+            return HU_ERR_OUT_OF_MEMORY;
         empty[0] = '\0';
         *out = empty;
         *out_len = 0;
@@ -403,25 +413,22 @@ hu_error_t hu_experience_build_prompt(hu_experience_store_t *store,
 hu_error_t hu_experience_init_tables(hu_allocator_t *alloc, sqlite3 *db) {
     if (!alloc || !db)
         return HU_ERR_INVALID_ARGUMENT;
-    const char *sql =
-        "CREATE TABLE IF NOT EXISTS experiences ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-        "task TEXT, outcome TEXT, score REAL, lessons TEXT, created_at INTEGER)";
+    const char *sql = "CREATE TABLE IF NOT EXISTS experiences ("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                      "task TEXT, outcome TEXT, score REAL, lessons TEXT, created_at INTEGER)";
     int rc = sqlite3_exec(db, sql, NULL, NULL, NULL);
     return (rc == SQLITE_OK) ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
-hu_error_t hu_experience_record_db(hu_allocator_t *alloc, sqlite3 *db,
-                                   const char *task, size_t task_len,
-                                   const char *outcome, size_t outcome_len,
+hu_error_t hu_experience_record_db(hu_allocator_t *alloc, sqlite3 *db, const char *task,
+                                   size_t task_len, const char *outcome, size_t outcome_len,
                                    double score, const char *lessons, size_t lessons_len) {
     (void)alloc;
     if (!db || !task || !outcome)
         return HU_ERR_INVALID_ARGUMENT;
 
-    const char *ins =
-        "INSERT INTO experiences (task, outcome, score, lessons, created_at) "
-        "VALUES (?1, ?2, ?3, ?4, ?5)";
+    const char *ins = "INSERT INTO experiences (task, outcome, score, lessons, created_at) "
+                      "VALUES (?1, ?2, ?3, ?4, ?5)";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, ins, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -457,10 +464,9 @@ hu_error_t hu_experience_record_db(hu_allocator_t *alloc, sqlite3 *db,
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
-hu_error_t hu_experience_recall_db(hu_allocator_t *alloc, sqlite3 *db,
-                                   const char *query, size_t query_len,
-                                   hu_experience_entry_t *results, size_t max_results,
-                                   size_t *out_count) {
+hu_error_t hu_experience_recall_db(hu_allocator_t *alloc, sqlite3 *db, const char *query,
+                                   size_t query_len, hu_experience_entry_t *results,
+                                   size_t max_results, size_t *out_count) {
     (void)alloc;
     if (!results || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -484,9 +490,8 @@ hu_error_t hu_experience_recall_db(hu_allocator_t *alloc, sqlite3 *db,
         pattern[2 + qlen] = '\0';
     }
 
-    const char *sel =
-        "SELECT id, task, outcome, score, lessons, created_at FROM experiences "
-        "WHERE task LIKE ?1 ORDER BY score DESC LIMIT ?2";
+    const char *sel = "SELECT id, task, outcome, score, lessons, created_at FROM experiences "
+                      "WHERE task LIKE ?1 ORDER BY score DESC LIMIT ?2";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sel, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -507,7 +512,8 @@ hu_error_t hu_experience_recall_db(hu_allocator_t *alloc, sqlite3 *db,
 
         if (t) {
             size_t tl = (size_t)sqlite3_column_bytes(stmt, 1);
-            if (tl > 511) tl = 511;
+            if (tl > 511)
+                tl = 511;
             memcpy(e->task, t, tl);
             e->task[tl] = '\0';
             e->task_len = tl;
@@ -517,7 +523,8 @@ hu_error_t hu_experience_recall_db(hu_allocator_t *alloc, sqlite3 *db,
         }
         if (o) {
             size_t ol = (size_t)sqlite3_column_bytes(stmt, 2);
-            if (ol > 511) ol = 511;
+            if (ol > 511)
+                ol = 511;
             memcpy(e->outcome, o, ol);
             e->outcome[ol] = '\0';
             e->outcome_len = ol;
@@ -527,7 +534,8 @@ hu_error_t hu_experience_recall_db(hu_allocator_t *alloc, sqlite3 *db,
         }
         if (l) {
             size_t ll = (size_t)sqlite3_column_bytes(stmt, 4);
-            if (ll > 1023) ll = 1023;
+            if (ll > 1023)
+                ll = 1023;
             memcpy(e->lessons, l, ll);
             e->lessons[ll] = '\0';
             e->lessons_len = ll;
