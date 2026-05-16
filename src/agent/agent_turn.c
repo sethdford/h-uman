@@ -5619,16 +5619,31 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         (agent->persona && agent->persona->name) ? agent->persona->name : NULL;
                     size_t persona_name_len = persona_name ? strlen(persona_name) : 0;
                     bool chain_owned = false;
+                    hu_error_t build_err = HU_OK;
                     hu_output_validator_chain_t *out_chain =
                         (agent->persona && agent->persona->outbound_chain)
                             ? agent->persona->outbound_chain
                             : NULL;
                     if (!out_chain) {
-                        chain_owned =
-                            hu_validators_build_default_outbound_chain(
-                                agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK;
+                        build_err = hu_validators_build_default_outbound_chain(
+                            agent->alloc, persona_name, persona_name_len, &out_chain);
+                        chain_owned = (build_err == HU_OK);
                     }
-                    if (out_chain) {
+                    /* HIGH-1: deny-by-default on chain machinery failure.
+                     * Validation is a security boundary; if the chain can't be
+                     * built or executed (OOM, persona misconfig, internal error),
+                     * suppress the send rather than let unvalidated content reach
+                     * the user. Matches the existing retry-failed branch's
+                     * "suppress send" semantics. */
+                    bool chain_unrunnable = false;
+                    if (!out_chain) {
+                        hu_log_error("agent_turn", agent->observer,
+                                     "validator chain BUILD failed (persona=%s, err=%s) "
+                                     "-- suppressing send (deny-by-default)",
+                                     persona_name ? persona_name : "(none)",
+                                     hu_error_string(build_err));
+                        chain_unrunnable = true;
+                    } else {
                         hu_validator_context_t vctx = {0};
                         vctx.persona_name = persona_name;
                         vctx.persona_name_len = persona_name_len;
@@ -5636,7 +5651,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         memset(&cr, 0, sizeof(cr));
                         hu_error_t cerr = hu_output_validator_chain_execute(
                             out_chain, agent->alloc, &vctx, final_content, final_len, &cr);
-                        if (cerr == HU_OK) {
+                        if (cerr != HU_OK) {
+                            hu_log_error("agent_turn", agent->observer,
+                                         "validator chain EXECUTE failed (err=%s) "
+                                         "-- suppressing send (deny-by-default)",
+                                         hu_error_string(cerr));
+                            hu_chain_result_free(agent->alloc, &cr);
+                            chain_unrunnable = true;
+                        } else {
                             hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
                                                                 final_len);
                             if (cr.final_decision == HU_VALIDATOR_REJECT) {
@@ -5741,6 +5763,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         }
                         if (chain_owned)
                             hu_output_validator_chain_destroy(out_chain);
+                    }
+                    if (chain_unrunnable) {
+                        if (ab_owned)
+                            agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                               final_len + 1);
+                        final_content = NULL;
+                        final_len = 0;
+                        ab_owned = false;
                     }
                 }
                 hu_error_t hist_err = hu_agent_internal_append_history(
