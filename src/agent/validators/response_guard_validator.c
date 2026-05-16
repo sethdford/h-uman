@@ -21,8 +21,15 @@ static hu_error_t response_guard_validate(void *ctx, hu_allocator_t *alloc,
     if (err != HU_OK)
         return err;
 
+    /* HIGH-4: hu_response_guard_check may allocate new_text even when
+     * outcome != HU_GUARD_REWROTE (e.g. on REJECT where rewrite was
+     * attempted but the result still tripped a hard tell). Only the
+     * REWROTE branch transfers ownership to the validator result;
+     * every other outcome must free new_text or leak it. */
     switch (outcome) {
     case HU_GUARD_OK:
+        if (new_text)
+            alloc->free(alloc->ctx, new_text, new_len + 1);
         out->decision = HU_VALIDATOR_PASS;
         return HU_OK;
     case HU_GUARD_REWROTE:
@@ -32,6 +39,8 @@ static hu_error_t response_guard_validate(void *ctx, hu_allocator_t *alloc,
         out->text_owned = true;
         return HU_OK;
     case HU_GUARD_REJECT: {
+        if (new_text)
+            alloc->free(alloc->ctx, new_text, new_len + 1);
         const char *msg = "response_guard rejected response (harmony/thinking/degen/bullet leak)";
         size_t mlen = strlen(msg);
         char *reason = (char *)alloc->alloc(alloc->ctx, mlen + 1);
@@ -45,6 +54,10 @@ static hu_error_t response_guard_validate(void *ctx, hu_allocator_t *alloc,
         return HU_OK;
     }
     }
+    /* Unknown outcome value — defensive: free any allocation, treat as PASS. */
+    if (new_text)
+        alloc->free(alloc->ctx, new_text, new_len + 1);
+    out->decision = HU_VALIDATOR_PASS;
     return HU_OK;
 }
 
