@@ -19,8 +19,12 @@
 #include "human/ml/dpo_miner.h"
 #include "test_framework.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -331,6 +335,111 @@ static void miner_null_db_returns_invalid(void) {
     HU_ASSERT_EQ(hu_dpo_mine_corrections(&alloc, NULL, NULL, NULL), HU_ERR_INVALID_ARGUMENT);
 }
 
+/* HIGH-1 critic fix: --no-export must override the default-enable block. */
+static void miner_no_export_flag_actually_disables_export(void) {
+    hu_dpo_miner_export_decision_t decision;
+
+    /* --no-export passed (no explicit path): export disabled. */
+    memset(&decision, 0, sizeof(decision));
+    HU_ASSERT_EQ(hu_dpo_miner_resolve_export(NULL, 1, "/tmp/fake-home", &decision), HU_OK);
+    HU_ASSERT_EQ(decision.should_export, 0);
+    HU_ASSERT_EQ(decision.export_path[0], 0);
+
+    /* Default behavior (no flags, HOME set): export enabled to the
+     * well-known cross-story path. */
+    memset(&decision, 0, sizeof(decision));
+    HU_ASSERT_EQ(hu_dpo_miner_resolve_export(NULL, 0, "/tmp/fake-home", &decision), HU_OK);
+    HU_ASSERT_EQ(decision.should_export, 1);
+    HU_ASSERT_STR_CONTAINS(decision.export_path, "/.human/dpo/pairs.jsonl");
+
+    /* Explicit path beats default and ignores --no-export-effect when
+     * the user has not actually passed --no-export. */
+    memset(&decision, 0, sizeof(decision));
+    HU_ASSERT_EQ(hu_dpo_miner_resolve_export("/tmp/custom.jsonl", 0, "/tmp/fake-home", &decision),
+                 HU_OK);
+    HU_ASSERT_EQ(decision.should_export, 1);
+    HU_ASSERT_STR_EQ(decision.export_path, "/tmp/custom.jsonl");
+
+    /* --no-export wins even if an explicit path was also given — the CLI
+     * loop drops the explicit path when --no-export fires, so the helper
+     * sees export_flag_path = NULL. We exercise the more-pessimistic
+     * case here: even if the path leaked through, --no-export still
+     * disables. */
+    memset(&decision, 0, sizeof(decision));
+    HU_ASSERT_EQ(hu_dpo_miner_resolve_export("/tmp/custom.jsonl", 1, "/tmp/fake-home", &decision),
+                 HU_OK);
+    HU_ASSERT_EQ(decision.should_export, 0);
+
+    /* HOME missing AND no explicit path: export disabled (no default
+     * available). The CLI surface still warns, but the helper just
+     * declines to export. */
+    memset(&decision, 0, sizeof(decision));
+    HU_ASSERT_EQ(hu_dpo_miner_resolve_export(NULL, 0, NULL, &decision), HU_OK);
+    HU_ASSERT_EQ(decision.should_export, 0);
+}
+
+/* HIGH-4 critic fix: ensure_parent_dir creates the directory tree if
+ * missing so hu_dpo_export_jsonl does not fail on a fresh install. */
+static void miner_creates_dpo_directory_if_missing(void) {
+    const char *tmpdir = getenv("TMPDIR");
+    if (!tmpdir || !tmpdir[0])
+        tmpdir = "/tmp";
+
+    /* Unique nested target that definitely does not exist yet. PID +
+     * time(NULL) avoids cross-test collisions even when the suite is
+     * re-run quickly. */
+    char target[512];
+    snprintf(target, sizeof(target), "%s/hu-dpo-miner-test-%ld-%ld/nested/dir/pairs.jsonl", tmpdir,
+             (long)getpid(), (long)time(NULL));
+
+    /* Sanity: the file's directory tree does not exist yet. */
+    char dir_only[512];
+    snprintf(dir_only, sizeof(dir_only), "%s/hu-dpo-miner-test-%ld-%ld/nested/dir", tmpdir,
+             (long)getpid(), (long)time(NULL));
+    struct stat st;
+    /* Best-effort: if it somehow exists, the test is still valid
+     * because mkdir+EEXIST is tolerated. */
+    (void)stat(dir_only, &st);
+
+    HU_ASSERT_EQ(hu_dpo_miner_ensure_parent_dir(target), HU_OK);
+
+    /* Now stat the parent dir of `target` — it must exist. */
+    char *last_slash = strrchr(target, '/');
+    HU_ASSERT_NOT_NULL(last_slash);
+    *last_slash = '\0';
+    HU_ASSERT_EQ(stat(target, &st), 0);
+    HU_ASSERT_TRUE(S_ISDIR(st.st_mode));
+
+    /* Calling a second time on the same path must succeed (EEXIST is
+     * tolerated). */
+    *last_slash = '/';
+    HU_ASSERT_EQ(hu_dpo_miner_ensure_parent_dir(target), HU_OK);
+
+    /* Clean up: rmdir the three levels we created. Best-effort — a
+     * failure does not fail the test (the temp dir gets cleared
+     * eventually anyway). */
+    *last_slash = '\0';
+    rmdir(target);
+    char *prev_slash = strrchr(target, '/');
+    if (prev_slash) {
+        *prev_slash = '\0';
+        rmdir(target);
+        prev_slash = strrchr(target, '/');
+        if (prev_slash) {
+            *prev_slash = '\0';
+            rmdir(target);
+        }
+    }
+}
+
+/* HIGH-4 guard: NULL / empty input rejected without touching the FS. */
+static void miner_ensure_parent_dir_null_returns_invalid(void) {
+    HU_ASSERT_EQ(hu_dpo_miner_ensure_parent_dir(NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_dpo_miner_ensure_parent_dir(""), HU_ERR_INVALID_ARGUMENT);
+    /* No slash → file in CWD → no mkdir needed → HU_OK. */
+    HU_ASSERT_EQ(hu_dpo_miner_ensure_parent_dir("pairs.jsonl"), HU_OK);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_dpo_miner_tests(void);
@@ -344,5 +453,8 @@ void run_dpo_miner_tests(void) {
     HU_RUN_TEST(miner_deduplicates_pairs);
     HU_RUN_TEST(miner_null_alloc_returns_invalid);
     HU_RUN_TEST(miner_null_db_returns_invalid);
+    HU_RUN_TEST(miner_no_export_flag_actually_disables_export);
+    HU_RUN_TEST(miner_creates_dpo_directory_if_missing);
+    HU_RUN_TEST(miner_ensure_parent_dir_null_returns_invalid);
 #endif
 }
