@@ -1,0 +1,17 @@
+# US-7.6 judgment-fidelity held-out fixture (sprint 7).
+# Synthetic, deterministic, ASCII-only, zero PII. ~10+ rows is enough
+# for a regression sentinel on the NLL seam; it is NOT a research-grade
+# eval. When US-7.6.1 wires the real NLL backend, the follow-on story
+# will grow this corpus and re-baseline the gate floor.
+{"prompt":"ready when you are","continuation":"ok cool, give me a sec","channel":"telegram"}
+{"prompt":"can you send the doc?","continuation":"sure, just a sec - sending now","channel":"slack"}
+{"prompt":"thanks!","continuation":"np","channel":"sms"}
+{"prompt":"are you around?","continuation":"yep, what's up","channel":"telegram"}
+{"prompt":"meeting moved to 3?","continuation":"works for me","channel":"slack"}
+{"prompt":"got a sec to talk?","continuation":"give me five and i'm there","channel":"sms"}
+{"prompt":"did you see the deploy?","continuation":"yeah, looks clean","channel":"slack"}
+{"prompt":"want to grab coffee?","continuation":"yes please","channel":"sms"}
+{"prompt":"need anything from the store?","continuation":"nope, all good","channel":"sms"}
+{"prompt":"can you review the pr today?","continuation":"on it","channel":"slack"}
+{"prompt":"are we still on for friday?","continuation":"yep, see you then","channel":"telegram"}
+{"prompt":"send the link when you can","continuation":"will do","channel":"slack"}
