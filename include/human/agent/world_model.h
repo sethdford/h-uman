@@ -34,6 +34,7 @@ extern "C" {
  * Definitions live in `human/persona.h` and `human/persona/persona_deltas.h`. */
 struct hu_persona;
 struct hu_persona_delta;
+struct hu_tool;
 
 /* An active goal the agent should keep in mind on every turn. */
 typedef struct hu_active_goal {
@@ -174,12 +175,21 @@ typedef struct hu_theory_of_mind {
  *                           model trust gradient and the persona's
  *                           identity completeness. Defaults 0.0 when
  *                           neither signal is present. */
+/* P5.2 / Story F.1 — capabilities[]/capabilities_count surface the
+ * agent's own usable-tool list so the planner does not have to walk
+ * `hu_agent_t::tools` (which it does not own a reference to here).
+ * Filled by `hu_world_model_merge_self_capabilities` from the tool
+ * registry passed in via `hu_persona_context_t`. Top-6 inline, each
+ * name truncated at 31 chars. Slab is zero-padded so unused slots
+ * are byte-clean. */
 typedef struct hu_self_model {
     char name[64];
     char focused_topics[200];
     char recent_drift_kind[32];
     char recent_drift_value[160];
     float confidence_in_self;
+    char capabilities[6][32];
+    size_t capabilities_count;
 } hu_self_model_t;
 
 /* P5.6 — multimodal context cells. Forward-looking seams that the
@@ -548,6 +558,23 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
                                   const char *channel, size_t channel_len,
                                   const struct hu_persona_delta *deltas,
                                   size_t deltas_count);
+
+/* P5.2 / Story F.1 — surface the agent's usable-tool list on
+ * `wm->self_model.capabilities`.
+ *
+ * Copies up to 6 tool names (truncated at 31 chars + NUL) from
+ * `tools[0..tools_count]` into the inline slab. Order is registration
+ * order; the planner can treat the first slot as "most preferred"
+ * because the agent loop registers in config-declared order. Idempotent
+ * — repeated calls overwrite the slab cleanly; safe with NULL/zero
+ * arguments (the slab is left zero-padded and capabilities_count = 0).
+ *
+ * Borrows nothing from `tools` — the name strings are copied into
+ * the inline slab so the world-model snapshot remains POD-safe
+ * across install/clone (no pointers into the agent's tool registry). */
+void hu_world_model_merge_self_capabilities(hu_world_model_t *wm,
+                                            const struct hu_tool *tools,
+                                            size_t tools_count);
 
 #ifdef __cplusplus
 }

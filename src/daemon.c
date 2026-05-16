@@ -7431,11 +7431,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (agent && agent->w7_facade) {
                         /* P1.1-P1.3: imessage batch path uses agent's persona
                          * + the iMessage channel name. */
-                        hu_persona_context_t batch_pctx;
+                        hu_persona_context_t batch_pctx = {0};
                         batch_pctx.persona = agent->persona;
                         batch_pctx.channel = "imessage";
                         batch_pctx.channel_len = 8;
                         batch_pctx.delta_limit = 8;
+                        batch_pctx.tools = agent->tools;
+                        batch_pctx.tools_count = agent->tools_count;
                         gerr = hu_w7_render_world_model(agent->w7_facade, alloc,
                                                         batch_key, key_len, 0,
                                                         &graph_ctx, &graph_ctx_len,

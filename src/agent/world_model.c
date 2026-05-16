@@ -22,6 +22,7 @@
 #include "human/memory/memory.h"
 #include "human/persona.h"
 #include "human/persona/persona_deltas.h"
+#include "human/tool.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -1470,6 +1471,52 @@ hu_error_t hu_world_model_rerank_for_goal(hu_world_model_t *wm,
     }
 
     return HU_OK;
+}
+
+void hu_world_model_merge_self_capabilities(hu_world_model_t *wm,
+                                            const struct hu_tool *tools,
+                                            size_t tools_count) {
+    /* Story F.1 — agent capabilities cell. Pulls tool names from the
+     * registry and parks them on `wm->self_model.capabilities` so the
+     * planner / LLM can answer "what can I do?" without re-reading the
+     * tool list. Defensive against every NULL we can spell — the world-
+     * model snapshot must remain renderable even when the caller forgot
+     * to wire tools (back-compat with all pre-F.1 callers). */
+    if (!wm) return;
+    /* Always zero the slab so a re-merge with zero tools cleans stale
+     * entries from a prior call. */
+    memset(wm->self_model.capabilities, 0, sizeof(wm->self_model.capabilities));
+    wm->self_model.capabilities_count = 0;
+    if (!tools || tools_count == 0) return;
+
+    size_t cap = sizeof(wm->self_model.capabilities) /
+                 sizeof(wm->self_model.capabilities[0]); /* 6 today */
+    size_t name_cap = sizeof(wm->self_model.capabilities[0]); /* 32 today */
+
+    for (size_t i = 0; i < tools_count && wm->self_model.capabilities_count < cap; i++) {
+        const hu_tool_t *t = &tools[i];
+        if (!t->vtable || !t->vtable->name) continue;
+        const char *nm = t->vtable->name(t->ctx);
+        if (!nm || !nm[0]) continue;
+
+        /* Dedup: skip names already present (some agent configurations
+         * register the same tool under a couple of aliases via different
+         * factories — the planner only needs the canonical name once). */
+        bool dup = false;
+        for (size_t j = 0; j < wm->self_model.capabilities_count; j++) {
+            if (strcmp(wm->self_model.capabilities[j], nm) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+
+        size_t nlen = strlen(nm);
+        if (nlen >= name_cap) nlen = name_cap - 1;
+        memcpy(wm->self_model.capabilities[wm->self_model.capabilities_count], nm, nlen);
+        wm->self_model.capabilities[wm->self_model.capabilities_count][nlen] = '\0';
+        wm->self_model.capabilities_count++;
+    }
 }
 
 void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm) {

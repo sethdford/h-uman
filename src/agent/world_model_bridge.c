@@ -211,6 +211,15 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
             hu_persona_delta_free(alloc, deltas, deltas_count);
     }
 
+    /* Story F.1 — agent capabilities. Independent of `persona` (the agent
+     * may have tools without a persona), so check separately. NULL/0
+     * tools → merge skipped (back-compat with all pre-F.1 callers
+     * which leave the new pctx fields zero-initialized). */
+    if (persona_ctx && persona_ctx->tools && persona_ctx->tools_count > 0) {
+        hu_world_model_merge_self_capabilities(wm, persona_ctx->tools,
+                                               persona_ctx->tools_count);
+    }
+
     /* If everything is empty, return NULL/0 -- callers skip injection.
      *
      * As of P2D the W9 builder synthesizes `dominant_emotion`, `valence`, and
@@ -392,24 +401,31 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         }
     }
 
-    /* Story E (sprint-4 follow-up) — render wm->self_model.
+    /* Story E + F.1 integration (sprint-4 follow-up) — render wm->self_model.
      *
      * `hu_world_model_merge_persona` already populates `name`,
      * `focused_topics`, `recent_drift_kind`, `recent_drift_value`, and
      * `confidence_in_self` every turn from persona identity + recent
-     * topics + applied persona deltas. Without this block the LLM never
-     * sees them — the planner gets the data via the C struct but the
-     * prompt is silent. Render conditionally per field so a fresh
-     * contact (no persona, no topics, no drift) does not get a section
-     * of blanks. Confidence is bucketed into high/medium/low so the
-     * LLM does not try to reason about float precision; <0.1 omits the
-     * line entirely to keep the section honest about low-signal
-     * cases. */
+     * topics + applied persona deltas. F.1 additionally populates
+     * `capabilities` from the tool registry threaded through
+     * `persona_ctx->tools`. Render every field conditionally so a fresh
+     * contact (no persona, no topics, no drift, no tools) does not get
+     * a section of blanks. Confidence is bucketed into high/medium/low
+     * so the LLM does not try to reason about float precision; <0.1 omits
+     * the confidence line entirely to keep the section honest about low-
+     * signal cases.
+     *
+     * Integration note: when F.1 shipped standalone on sprint-4 it
+     * rendered a separate "Self capabilities:" header. Now that Story E
+     * lives here too, capabilities folds inside the Self model block as
+     * a "- Capabilities I have: a, b, c" line — exactly as planned in
+     * docs/plans/2026-05-12-self-model-cell.md, "Story E + F.1 integration". */
     {
         bool self_signal = wm->self_model.name[0]
             || wm->self_model.focused_topics[0]
             || wm->self_model.recent_drift_kind[0]
-            || wm->self_model.confidence_in_self >= 0.1f;
+            || wm->self_model.confidence_in_self >= 0.1f
+            || wm->self_model.capabilities_count > 0;
         if (self_signal) {
             ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Self model:\n", 12);
             if (wm->self_model.name[0])
@@ -437,6 +453,17 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
             if (bucket)
                 ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
                                        "- Self-confidence: %s\n", bucket);
+            if (wm->self_model.capabilities_count > 0) {
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap,
+                                      "- Capabilities I have: ", 23);
+                for (size_t i = 0; i < wm->self_model.capabilities_count; i++) {
+                    if (i > 0)
+                        ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s",
+                                           wm->self_model.capabilities[i]);
+                }
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+            }
         }
     }
 
