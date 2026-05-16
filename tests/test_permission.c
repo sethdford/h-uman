@@ -1,7 +1,7 @@
-#include "test_framework.h"
-#include "human/permission.h"
 #include "human/agent.h"
 #include "human/core/allocator.h"
+#include "human/permission.h"
+#include "test_framework.h"
 #include <string.h>
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -56,13 +56,28 @@ static void test_get_tool_level_danger(void) {
     HU_ASSERT_EQ(hu_permission_get_tool_level("gcloud"), HU_PERM_DANGER_FULL_ACCESS);
 }
 
-static void test_get_tool_level_unknown_defaults_danger(void) {
-    HU_ASSERT_EQ(hu_permission_get_tool_level("totally_unknown_tool"), HU_PERM_DANGER_FULL_ACCESS);
-    HU_ASSERT_EQ(hu_permission_get_tool_level(""), HU_PERM_DANGER_FULL_ACCESS);
+static void test_get_tool_level_unknown_returns_deny(void) {
+    HU_ASSERT_EQ(hu_permission_get_tool_level("totally_unknown_tool"), HU_PERM_DENY);
+    HU_ASSERT_EQ(hu_permission_get_tool_level(""), HU_PERM_DENY);
 }
 
-static void test_get_tool_level_null_defaults_danger(void) {
-    HU_ASSERT_EQ(hu_permission_get_tool_level(NULL), HU_PERM_DANGER_FULL_ACCESS);
+static void test_get_tool_level_null_returns_deny(void) {
+    HU_ASSERT_EQ(hu_permission_get_tool_level(NULL), HU_PERM_DENY);
+}
+
+/* DENY tier sits strictly above every agent-assignable tier — so even an
+   agent at DANGER_FULL_ACCESS cannot satisfy a DENY required level. This
+   is the contract that keeps unknown / unregistered MCP tools unreachable. */
+static void test_unknown_tool_blocked_from_danger_agent(void) {
+    hu_permission_level_t required = hu_permission_get_tool_level("evil_mcp_tool");
+    HU_ASSERT_EQ(required, HU_PERM_DENY);
+    HU_ASSERT_FALSE(hu_permission_check(HU_PERM_DANGER_FULL_ACCESS, required));
+    HU_ASSERT_FALSE(hu_permission_check(HU_PERM_WORKSPACE_WRITE, required));
+    HU_ASSERT_FALSE(hu_permission_check(HU_PERM_READ_ONLY, required));
+}
+
+static void test_deny_strictly_above_danger(void) {
+    HU_ASSERT_TRUE((int)HU_PERM_DENY > (int)HU_PERM_DANGER_FULL_ACCESS);
 }
 
 /* ── hu_permission_level_name ── */
@@ -71,6 +86,7 @@ static void test_level_name(void) {
     HU_ASSERT_STR_EQ(hu_permission_level_name(HU_PERM_READ_ONLY), "ReadOnly");
     HU_ASSERT_STR_EQ(hu_permission_level_name(HU_PERM_WORKSPACE_WRITE), "WorkspaceWrite");
     HU_ASSERT_STR_EQ(hu_permission_level_name(HU_PERM_DANGER_FULL_ACCESS), "DangerFullAccess");
+    HU_ASSERT_STR_EQ(hu_permission_level_name(HU_PERM_DENY), "Deny");
     HU_ASSERT_STR_EQ(hu_permission_level_name((hu_permission_level_t)99), "Unknown");
 }
 
@@ -183,8 +199,10 @@ void hu_test_permission(void) {
     HU_RUN_TEST(test_get_tool_level_read_only);
     HU_RUN_TEST(test_get_tool_level_workspace_write);
     HU_RUN_TEST(test_get_tool_level_danger);
-    HU_RUN_TEST(test_get_tool_level_unknown_defaults_danger);
-    HU_RUN_TEST(test_get_tool_level_null_defaults_danger);
+    HU_RUN_TEST(test_get_tool_level_unknown_returns_deny);
+    HU_RUN_TEST(test_get_tool_level_null_returns_deny);
+    HU_RUN_TEST(test_unknown_tool_blocked_from_danger_agent);
+    HU_RUN_TEST(test_deny_strictly_above_danger);
     HU_RUN_TEST(test_level_name);
     HU_RUN_TEST(test_escalate_and_reset);
     HU_RUN_TEST(test_escalate_rejects_lower_level);

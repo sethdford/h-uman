@@ -2912,6 +2912,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_bootstrap.c
     tests/test_thread_pool.c
     tests/test_permission.c
+    tests/test_shell_sandbox.c
     tests/test_mcp_manager.c
     tests/test_compaction_structured.c
     tests/test_session_persist.c

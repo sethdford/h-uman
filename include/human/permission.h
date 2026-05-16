@@ -9,20 +9,26 @@
 struct hu_agent;
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Permission tiers: ReadOnly < WorkspaceWrite < DangerFullAccess
+ * Permission tiers: ReadOnly < WorkspaceWrite < DangerFullAccess < Deny
  *
  * Each tool is classified into exactly one tier. An agent has a current
  * permission level; tool execution is allowed only when
  *   agent->permission_level >= tool_required_level.
  *
+ * HU_PERM_DENY is a sentinel above the highest agent-assignable tier. No
+ * agent is ever constructed at DENY, so any tool whose required level is
+ * DENY is unreachable. Unknown tools (e.g. dynamically loaded MCP tools)
+ * are classified at DENY so they cannot run until explicitly registered.
+ *
  * Temporary escalation allows a single tool call at a higher tier,
- * resetting automatically after execution.
+ * resetting automatically after execution. Escalation to DENY is rejected.
  * ────────────────────────────────────────────────────────────────────────── */
 
 typedef enum hu_permission_level {
-    HU_PERM_READ_ONLY        = 0,  /* search, read, list, recall */
-    HU_PERM_WORKSPACE_WRITE  = 1,  /* file_write, shell, git, browser */
+    HU_PERM_READ_ONLY = 0,          /* search, read, list, recall */
+    HU_PERM_WORKSPACE_WRITE = 1,    /* file_write, shell, git, browser */
     HU_PERM_DANGER_FULL_ACCESS = 2, /* agent_spawn, delegate, cron, services */
+    HU_PERM_DENY = 3,               /* sentinel: unknown/unregistered tools */
 } hu_permission_level_t;
 
 /**
@@ -33,7 +39,10 @@ bool hu_permission_check(hu_permission_level_t current, hu_permission_level_t re
 
 /**
  * Look up the required permission level for a tool by name.
- * Unknown tools default to HU_PERM_DANGER_FULL_ACCESS (deny-by-default).
+ *
+ * Unknown or NULL tool names return HU_PERM_DENY — a sentinel above every
+ * agent-assignable tier — so unregistered tools (including dynamically
+ * loaded MCP tools) cannot satisfy hu_permission_check() for any caller.
  */
 hu_permission_level_t hu_permission_get_tool_level(const char *tool_name);
 
@@ -45,8 +54,7 @@ hu_permission_level_t hu_permission_get_tool_level(const char *tool_name);
  * Returns HU_ERR_INVALID_ARGUMENT if new_level <= agent's current level,
  * or if agent/tool_name is NULL.
  */
-hu_error_t hu_permission_escalate_temporary(struct hu_agent *agent,
-                                            hu_permission_level_t new_level,
+hu_error_t hu_permission_escalate_temporary(struct hu_agent *agent, hu_permission_level_t new_level,
                                             const char *tool_name);
 
 /**
