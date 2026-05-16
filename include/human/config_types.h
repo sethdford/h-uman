@@ -66,12 +66,56 @@ typedef struct hu_scheduler_config {
  * in production. Default false; the bridge stays opt-in via the
  * probe path config but kill-switchable independently.
  */
+/* US-7.8 — MoLoRA static per-channel router (Init #02 phase 1).
+ *
+ * `enabled` is independent of `personalization.enabled` at the config level,
+ * but the agent-turn hook in `src/agent/agent_turn.c` only consults the router
+ * when both flags are true AND `HU_ENABLE_MOLORA` is compiled in. When this
+ * block is absent from the JSON config, parser leaves `enabled = false` and
+ * `count = 0`, which `hu_molora_router_init` treats as the disabled state
+ * (identical to today's pre-story behavior).
+ *
+ * Channel ids are stored normalized (lowercase, no `:`-suffix, no whitespace)
+ * — the parser applies `hu_molora_router_normalize_channel` before insertion.
+ * Adapter paths are owned by this struct (parser strdups them); the router
+ * borrows the pointers and asserts the config outlives it.
+ *
+ * Schema (Phase 1, flat map per design Q1):
+ *   "molora": {
+ *     "enabled": true,
+ *     "channel_adapters": {
+ *       "telegram":  "~/.human/adapters/seth/telegram.lora",
+ *       "imessage":  "~/.human/adapters/seth/imessage.lora",
+ *       "slack":     "~/.human/adapters/seth/slack.lora",
+ *       "discord":   "~/.human/adapters/seth/discord.lora"
+ *     }
+ *   }
+ *
+ * Phase 2 will extend each entry to `{path, scale}` via a versioned schema
+ * bump — Phase 1 stays flat for forward-compat. */
+#define HU_MOLORA_CONFIG_MAX_CHANNELS     16
+#define HU_MOLORA_CONFIG_CHANNEL_NAME_MAX 32
+
+typedef struct hu_molora_channel_entry {
+    /* Normalized channel id (parser-normalized; null-terminated). */
+    char channel[HU_MOLORA_CONFIG_CHANNEL_NAME_MAX];
+    /* Adapter path; owned by this struct (parser-strdup, merge-free). */
+    char *adapter_path;
+} hu_molora_channel_entry_t;
+
+typedef struct hu_molora_config {
+    bool enabled;
+    size_t count;
+    hu_molora_channel_entry_t entries[HU_MOLORA_CONFIG_MAX_CHANNELS];
+} hu_molora_config_t;
+
 typedef struct hu_personalization_config {
     bool enabled;
     char *lora_adapter_path;
     char *lora_adapter_id;
     char *m3_adapter_probe_path;
     bool m3_adapter_disabled;
+    hu_molora_config_t molora;
 } hu_personalization_config_t;
 
 /* US-7.7 (Sprint 7, P1) — Test-time persona scoring (best-of-N at inference).

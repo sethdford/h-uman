@@ -38,6 +38,12 @@ option(HU_ENABLE_NEURAL_MEMORY "W10 neural memory placeholder (schema/ONNX path;
 # default OFF until the codecs meet the TVD < 1% / ≤ 2 ms / ≤ +40 KB binary
 # gates documented in docs/plans/2026-05-11-init-13-kv-compression.md.
 option(HU_ENABLE_KV_COMPRESSION "Init 13 KV-cache compression (DeltaKV + SWAN)" OFF)
+# US-7.8 (Sprint 7, Init #02 phase 1): MoLoRA static per-channel router.
+# Adds src/ml/molora.c + agent-turn hook calling hu_provider_load_adapter
+# from a channel->adapter map. Default OFF until per-channel adapter packs
+# from US-7.5's W14 nightly cron land. Binary-size budget: <= 8 KB delta
+# vs OFF build (AC-7.8.5, enforced by scripts/check-molora-binary-budget.sh).
+option(HU_ENABLE_MOLORA "US-7.8 MoLoRA static per-channel router (Init #02 phase 1)" OFF)
 # W13: learning loop (LoRA + DPO from W4/W5/W3 signals). Defaults follow ML.
 if(HU_ENABLE_ML)
     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" ON)
@@ -1410,6 +1416,11 @@ if(HU_ENABLE_KV_COMPRESSION)
     )
     target_compile_definitions(human_core PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
+# US-7.8 (Init #02 phase 1) — MoLoRA static per-channel router.
+if(HU_ENABLE_MOLORA)
+    target_sources(human_core PRIVATE src/ml/molora.c)
+    target_compile_definitions(human_core PUBLIC HU_ENABLE_MOLORA=1)
+endif()
 if(HU_ENABLE_MCP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_MCP=1)
 endif()
@@ -2280,6 +2291,10 @@ if(HU_ENABLE_KV_COMPRESSION)
     )
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
+if(HU_ENABLE_MOLORA)
+    target_sources(human_core_test PRIVATE src/ml/molora.c)
+    target_compile_definitions(human_core_test PUBLIC HU_ENABLE_MOLORA=1)
+endif()
 target_compile_options(human_core_test PRIVATE -UNDEBUG)
 if(Threads_FOUND)
     target_link_libraries(human_core_test PUBLIC Threads::Threads)
@@ -2896,6 +2911,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_process_reward.c
     tests/test_dpo.c
     tests/test_dpo_miner.c
+    tests/test_molora_router.c
     tests/test_sota_e2e.c
     tests/test_sota_adversarial.c
     tests/test_otel.c
@@ -2963,6 +2979,9 @@ if(HU_ENABLE_AUTHENTIC)
 endif()
 if(HU_ENABLE_KV_COMPRESSION)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_KV_COMPRESSION=1)
+endif()
+if(HU_ENABLE_MOLORA)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_MOLORA=1)
 endif()
 if(UNIX AND NOT WIN32)
     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)
