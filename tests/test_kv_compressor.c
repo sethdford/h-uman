@@ -1,5 +1,8 @@
 /* test_kv_compressor.c — Init 13 foundation tests.
  *
+ * Files under test: src/memory/kv_compressor.c, src/memory/kv_deltakv.c,
+ * src/memory/kv_swan.c.
+ *
  * Covers the codec-agnostic HUKV envelope helpers and the two phase-1 codec
  * factories (DeltaKV: lossy int8 round-trip; SWAN: NOT_SUPPORTED stub).
  *
@@ -30,8 +33,7 @@ static void test_kv_blob_header_round_trip(void) {
 
     hu_kv_codec_id_t codec = HU_KV_CODEC_NONE;
     uint32_t nl = 0, nh = 0, hd = 0, sl = 0;
-    hu_error_t err = hu_kv_blob_read_header(buf, sizeof(buf),
-                                            &codec, &nl, &nh, &hd, &sl);
+    hu_error_t err = hu_kv_blob_read_header(buf, sizeof(buf), &codec, &nl, &nh, &hd, &sl);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ((int)codec, (int)HU_KV_CODEC_DELTAKV);
     HU_ASSERT_EQ((int)nl, 28);
@@ -44,8 +46,7 @@ static void test_kv_blob_header_rejects_bad_magic(void) {
     uint8_t buf[HU_KV_BLOB_HEADER_SIZE];
     hu_kv_blob_write_header(buf, HU_KV_CODEC_DELTAKV, 1, 1, 1, 1);
     buf[0] = 0xAB; /* corrupt magic */
-    hu_error_t err = hu_kv_blob_read_header(buf, sizeof(buf),
-                                            NULL, NULL, NULL, NULL, NULL);
+    hu_error_t err = hu_kv_blob_read_header(buf, sizeof(buf), NULL, NULL, NULL, NULL, NULL);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
@@ -53,20 +54,18 @@ static void test_kv_blob_header_rejects_bad_version(void) {
     uint8_t buf[HU_KV_BLOB_HEADER_SIZE];
     hu_kv_blob_write_header(buf, HU_KV_CODEC_DELTAKV, 1, 1, 1, 1);
     buf[4] = (uint8_t)(HU_KV_BLOB_VERSION + 1); /* future version */
-    hu_error_t err = hu_kv_blob_read_header(buf, sizeof(buf),
-                                            NULL, NULL, NULL, NULL, NULL);
+    hu_error_t err = hu_kv_blob_read_header(buf, sizeof(buf), NULL, NULL, NULL, NULL, NULL);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
 static void test_kv_blob_header_rejects_truncated(void) {
     uint8_t buf[HU_KV_BLOB_HEADER_SIZE];
     hu_kv_blob_write_header(buf, HU_KV_CODEC_DELTAKV, 1, 1, 1, 1);
-    hu_error_t err = hu_kv_blob_read_header(buf, HU_KV_BLOB_HEADER_SIZE - 1,
-                                            NULL, NULL, NULL, NULL, NULL);
+    hu_error_t err =
+        hu_kv_blob_read_header(buf, HU_KV_BLOB_HEADER_SIZE - 1, NULL, NULL, NULL, NULL, NULL);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 
-    err = hu_kv_blob_read_header(NULL, HU_KV_BLOB_HEADER_SIZE,
-                                 NULL, NULL, NULL, NULL, NULL);
+    err = hu_kv_blob_read_header(NULL, HU_KV_BLOB_HEADER_SIZE, NULL, NULL, NULL, NULL, NULL);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
@@ -86,10 +85,8 @@ static void test_deltakv_factory_creates_vtable(void) {
 
 static void test_deltakv_rejects_null_args(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    HU_ASSERT_EQ(hu_kv_compressor_create_deltakv(NULL, NULL),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_kv_compressor_create_deltakv(&alloc, NULL),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_kv_compressor_create_deltakv(NULL, NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_kv_compressor_create_deltakv(&alloc, NULL), HU_ERR_INVALID_ARGUMENT);
 }
 
 /* Zero-input round trip is exact: encode quantizes all zeros to a single
@@ -109,16 +106,13 @@ static void test_deltakv_zero_round_trip_preserves_shape(void) {
 
     uint8_t *blob = NULL;
     size_t blob_len = 0;
-    HU_ASSERT_EQ(c.vtable->encode(c.ctx, &alloc, kv, nl, nh, hd, sl,
-                                  &blob, &blob_len),
-                 HU_OK);
+    HU_ASSERT_EQ(c.vtable->encode(c.ctx, &alloc, kv, nl, nh, hd, sl, &blob, &blob_len), HU_OK);
     HU_ASSERT_NOT_NULL(blob);
     HU_ASSERT_EQ(blob_len, HU_KV_BLOB_HEADER_SIZE + 16 + 2 * n_per_channel);
 
     float *kv_out = NULL;
     size_t onl = 0, onh = 0, ohd = 0, osl = 0;
-    HU_ASSERT_EQ(c.vtable->decode(c.ctx, &alloc, blob, blob_len,
-                                  &kv_out, &onl, &onh, &ohd, &osl),
+    HU_ASSERT_EQ(c.vtable->decode(c.ctx, &alloc, blob, blob_len, &kv_out, &onl, &onh, &ohd, &osl),
                  HU_OK);
     HU_ASSERT_EQ((int)onl, (int)nl);
     HU_ASSERT_EQ((int)onh, (int)nh);
@@ -146,8 +140,7 @@ static void test_deltakv_decode_rejects_wrong_codec(void) {
 
     float *kv_out = NULL;
     size_t a = 0, b = 0, d = 0, e = 0;
-    hu_error_t err = c.vtable->decode(c.ctx, &alloc, buf, sizeof(buf),
-                                      &kv_out, &a, &b, &d, &e);
+    hu_error_t err = c.vtable->decode(c.ctx, &alloc, buf, sizeof(buf), &kv_out, &a, &b, &d, &e);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_NULL(kv_out);
     c.vtable->deinit(c.ctx, &alloc);
@@ -165,8 +158,7 @@ static void test_deltakv_decode_rejects_truncated_payload(void) {
 
     float *kv_out = NULL;
     size_t a = 0, b = 0, d = 0, e = 0;
-    hu_error_t err = c.vtable->decode(c.ctx, &alloc, buf, sizeof(buf),
-                                      &kv_out, &a, &b, &d, &e);
+    hu_error_t err = c.vtable->decode(c.ctx, &alloc, buf, sizeof(buf), &kv_out, &a, &b, &d, &e);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_NULL(kv_out);
     c.vtable->deinit(c.ctx, &alloc);
@@ -182,14 +174,12 @@ static void test_swan_factory_stub(void) {
     uint8_t *blob = NULL;
     size_t blob_len = 0;
     float kv[8] = {0};
-    HU_ASSERT_EQ(c.vtable->encode(c.ctx, &alloc, kv, 1, 1, 1, 1,
-                                  &blob, &blob_len),
+    HU_ASSERT_EQ(c.vtable->encode(c.ctx, &alloc, kv, 1, 1, 1, 1, &blob, &blob_len),
                  HU_ERR_NOT_SUPPORTED);
 
     float *kv_out = NULL;
     size_t a = 0, b = 0, d = 0, e = 0;
-    HU_ASSERT_EQ(c.vtable->decode(c.ctx, &alloc, NULL, 0,
-                                  &kv_out, &a, &b, &d, &e),
+    HU_ASSERT_EQ(c.vtable->decode(c.ctx, &alloc, NULL, 0, &kv_out, &a, &b, &d, &e),
                  HU_ERR_NOT_SUPPORTED);
     c.vtable->deinit(c.ctx, &alloc);
 }
