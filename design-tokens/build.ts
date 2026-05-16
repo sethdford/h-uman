@@ -8,7 +8,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { execFileSync } from "child_process";
 import { generateDynamicColorCSS } from "./dynamic-color-lib.js";
 
 const REM_PX = 16;
@@ -394,21 +393,13 @@ function main() {
     : path.join(ROOT, "include", "human", "design_tokens.h");
   writeOutput(outdir, headerPath, "design_tokens.h", header);
 
-  try {
-    execFileSync("clang-format", ["-i", headerPath], { stdio: "ignore" });
-  } catch {
-    try {
-      execFileSync(
-        "/opt/homebrew/opt/llvm/bin/clang-format",
-        ["-i", headerPath],
-        {
-          stdio: "ignore",
-        },
-      );
-    } catch {
-      /* clang-format not available — skip */
-    }
-  }
+  /* The C header is intentionally NOT clang-formatted. Running clang-format
+   * here previously created false-positive drift on CI: macOS Homebrew
+   * clang-format and Ubuntu CI clang-format (or absence of clang-format)
+   * produced different output, while design-tokens/check-drift.sh diffs the
+   * raw committed file. See check-drift.sh:40-45 — the "no clang-format"
+   * comment there is the contract. The generated file is consumed by the C
+   * compiler, not read by humans, so formatting doesn't matter for it. */
 
   const refJson = generateDocsReference(tokens);
   const refPath = outdir
