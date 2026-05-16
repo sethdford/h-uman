@@ -449,7 +449,16 @@ hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_jo
         goto done;
     }
     long long pairs = retrain_parse_pairs(probe_result.stdout_buf);
-    if (pairs <= 0) {
+    /* FIX-2: distinguish probe parse-failure (-1, malformed JSON) from
+     * "zero pairs" (0). Parse failure routes to FAILED with a dedicated
+     * event; zero pairs routes to SKIPPED_NO_NEW_DATA as before. */
+    if (pairs < 0) {
+        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_FAILED;
+        ctx->last_exit_code = probe_result.exit_code;
+        retrain_emit(ctx, "lora_retrain_probe_failed", "{\"reason\":\"unparseable_pair_count\"}");
+        goto done;
+    }
+    if (pairs == 0) {
         ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA;
         ctx->last_pairs_consumed = 0;
         retrain_emit(ctx, "lora_retrain_skipped_no_new_data", "{\"pairs\":0}");
@@ -486,15 +495,29 @@ hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_jo
         retrain_emit(ctx, "lora_retrain_skipped", "{\"reason\":\"gate_subprocess_error\"}");
         goto done;
     }
-    /* D3 contract: PASS verdict required. exit_code is informational only;
-     * SKIP (US-7.6 dormant) must NOT promote. */
-    int pass = (gate_result.exit_code == 0) && retrain_verdict_is_pass(gate_result.stdout_buf);
-    if (!pass) {
+    /* FIX-3: distinguish gate-process failure (non-zero exit) from a
+     * gate that ran cleanly but returned a non-PASS verdict (SKIP/FAIL/missing).
+     *
+     *   - Non-zero exit  ⇒ outcome FAILED  (the gate itself errored).
+     *   - Zero exit + non-PASS verdict ⇒ outcome SKIPPED_GATE_FAIL (D3
+     *     contract: SKIP and FAIL are both "not pass"; current symlink
+     *     is preserved and the candidate is discarded). */
+    if (gate_result.exit_code != 0) {
+        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_FAILED;
+        ctx->last_exit_code = gate_result.exit_code;
+        const char *verdict = retrain_verdict_str(gate_result.stdout_buf);
+        snprintf(payload, sizeof(payload),
+                 "{\"step\":\"gate\",\"exit_code\":%d,\"verdict\":\"%s\"}", gate_result.exit_code,
+                 verdict);
+        retrain_emit(ctx, "lora_retrain_failed", payload);
+        goto done;
+    }
+    /* D3 contract: PASS verdict required on a clean gate run. */
+    if (!retrain_verdict_is_pass(gate_result.stdout_buf)) {
         ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL;
         const char *verdict = retrain_verdict_str(gate_result.stdout_buf);
         snprintf(payload, sizeof(payload),
-                 "{\"reason\":\"gate_fail\",\"verdict\":\"%s\",\"exit_code\":%d}", verdict,
-                 gate_result.exit_code);
+                 "{\"reason\":\"gate_fail\",\"verdict\":\"%s\",\"exit_code\":0}", verdict);
         retrain_emit(ctx, "lora_retrain_skipped", payload);
         goto done;
     }

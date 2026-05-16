@@ -5,6 +5,9 @@
  * `test_run_subprocess`; no real Python is ever forked. */
 
 #include "human/agent/scheduler.h"
+#include "human/agent/world_model_bridge.h"
+#include "human/core/allocator.h"
+#include "human/memory/graph.h"
 #include "human/ml/lora_retrain_runner.h"
 #include "test_framework.h"
 
@@ -203,8 +206,10 @@ static void test_retrain_promotes_on_pass_skips_on_fail(void) {
 
         queue_response(&cap, 0, "{\"pairs\":5}");
         queue_response(&cap, 0, "");
-        /* Gate returns exit 1 with verdict=FAIL. */
-        queue_response(&cap, 1, "{\"verdict\":\"FAIL\",\"delta\":-0.02}");
+        /* Gate ran cleanly (exit 0) but produced verdict=FAIL. Per FIX-3 this
+         * routes to SKIPPED_GATE_FAIL; non-zero gate exits route to FAILED
+         * and are covered by test_retrain_gate_exit_nonzero_routes_to_failed. */
+        queue_response(&cap, 0, "{\"verdict\":\"FAIL\",\"delta\":-0.02}");
 
         hu_job_spec_t spec;
         make_spec(&spec);
@@ -405,6 +410,185 @@ static void test_lora_retrain_status_parse_round_trip(void) {
     HU_ASSERT_STR_EQ(hu_lora_retrain_outcome_str(HU_LORA_RETRAIN_OUTCOME_FAILED), "failed");
 }
 
+/* ── FIX-2: probe parse failure routes to FAILED (not no-new-data) ────── */
+
+static void test_retrain_probe_malformed_routes_to_failed(void) {
+    subprocess_capture_t cap;
+    memset(&cap, 0, sizeof(cap));
+    event_capture_t ec;
+    memset(&ec, 0, sizeof(ec));
+    hu_lora_retrain_ctx_t ctx;
+    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_m", "/tmp/test_current_m");
+
+    /* Malformed probe stdout (no "pairs" key). retrain_parse_pairs → -1.
+     * Must route to FAILED with lora_retrain_probe_failed, NOT
+     * SKIPPED_NO_NEW_DATA. */
+    queue_response(&cap, 0, "{\"oops\":\"no pairs key\"}");
+    /* Queued downstream responses MUST NOT be consumed. */
+    queue_response(&cap, 0, "");
+    queue_response(&cap, 0, "{\"verdict\":\"PASS\"}");
+
+    hu_job_spec_t spec;
+    make_spec(&spec);
+    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
+    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_FAILED);
+    HU_ASSERT(event_seen(&ec, "lora_retrain_probe_failed"));
+    HU_ASSERT(!event_seen(&ec, "lora_retrain_skipped_no_new_data"));
+    /* Only the probe ran; finetune/gate must not have been invoked. */
+    HU_ASSERT_EQ(cap.n_calls, 1);
+
+    /* Sanity: a value of 0 still maps to SKIPPED_NO_NEW_DATA (the other
+     * branch of FIX-2). */
+    subprocess_capture_t cap2;
+    memset(&cap2, 0, sizeof(cap2));
+    event_capture_t ec2;
+    memset(&ec2, 0, sizeof(ec2));
+    hu_lora_retrain_ctx_t ctx2;
+    setup_ctx(&ctx2, &cap2, &ec2, "/tmp/test_candidate_z", "/tmp/test_current_z");
+    queue_response(&cap2, 0, "{\"pairs\":0}");
+    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx2), HU_OK);
+    HU_ASSERT_EQ(ctx2.last_outcome, HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA);
+    HU_ASSERT(event_seen(&ec2, "lora_retrain_skipped_no_new_data"));
+    HU_ASSERT(!event_seen(&ec2, "lora_retrain_probe_failed"));
+}
+
+/* ── FIX-3: gate non-zero exit routes to FAILED, not SKIPPED_GATE_FAIL ── */
+
+static void test_retrain_gate_exit_nonzero_routes_to_failed(void) {
+    subprocess_capture_t cap;
+    memset(&cap, 0, sizeof(cap));
+    event_capture_t ec;
+    memset(&ec, 0, sizeof(ec));
+    hu_lora_retrain_ctx_t ctx;
+    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_g", "/tmp/test_current_g");
+
+    queue_response(&cap, 0, "{\"pairs\":9}");
+    queue_response(&cap, 0, "");
+    /* Gate crashes with exit code 2; stdout content is irrelevant. */
+    queue_response(&cap, 2, "{\"verdict\":\"PASS\"}");
+
+    hu_job_spec_t spec;
+    make_spec(&spec);
+    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
+    /* Non-zero gate exit ⇒ FAILED with exit_code captured. */
+    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_FAILED);
+    HU_ASSERT_EQ(ctx.last_exit_code, 2);
+    HU_ASSERT(event_seen(&ec, "lora_retrain_failed"));
+    HU_ASSERT(!event_seen(&ec, "lora_retrain_skipped"));
+    HU_ASSERT(!event_seen(&ec, "lora_retrain_promoted"));
+
+    /* The failed event payload identifies the gate step and the exit code. */
+    int verified = 0;
+    for (int i = 0; i < ec.n_events; i++) {
+        if (strcmp(ec.names[i], "lora_retrain_failed") == 0) {
+            verified = 1;
+            HU_ASSERT_STR_CONTAINS(ec.payloads[i], "\"step\":\"gate\"");
+            HU_ASSERT_STR_CONTAINS(ec.payloads[i], "\"exit_code\":2");
+        }
+    }
+    HU_ASSERT(verified);
+
+    /* No symlink was created (no promote ran). */
+    char dummy[64];
+    HU_ASSERT_LT(readlink("/tmp/test_current_g", dummy, sizeof(dummy)), 0);
+}
+
+/* ── FIX-1: enqueue helper drives the scheduler with the correct spec ── */
+
+#ifdef HU_ENABLE_SQLITE
+
+static hu_allocator_t g_enq_alloc;
+static hu_allocator_t *enq_alloc(void) {
+    g_enq_alloc = hu_system_allocator();
+    return &g_enq_alloc;
+}
+
+/* Spec captured by the tick-time runner so the test can inspect what the
+ * scheduler actually dispatched (per AC-7.5.1). */
+typedef struct {
+    int invoked;
+    hu_job_spec_t spec;
+} enq_capture_t;
+
+static hu_error_t enq_capture_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
+                                     int64_t budget_ms, void *user_data) {
+    (void)m;
+    (void)budget_ms;
+    enq_capture_t *c = (enq_capture_t *)user_data;
+    if (!c)
+        return HU_OK;
+    c->invoked++;
+    c->spec = *spec;
+    return HU_OK;
+}
+
+static void test_enqueue_helper_sets_correct_spec(void) {
+    /* The scheduler's idle / AC probes honor these env vars under HU_IS_TEST. */
+    setenv("HU_TEST_LOAD_PCT", "10", 1);
+    setenv("HU_TEST_ON_AC", "1", 1);
+    setenv("HU_TEST_BATTERY_PCT", "100", 1);
+
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    HU_ASSERT_EQ(hu_graph_open(enq_alloc(), NULL, 0, &g), HU_OK);
+    HU_ASSERT_EQ(hu_w7_facade_open(g, enq_alloc(), &f), HU_OK);
+    hu_w14_scheduler_t *s = NULL;
+    HU_ASSERT_EQ(hu_w14_scheduler_open(f, enq_alloc(), &s), HU_OK);
+
+    /* Swap in a capturing runner for HU_JOB_LORA_RETRAIN_NIGHTLY. The bridge
+     * itself only registers the real runner when register_lora_retrain_runner
+     * is called; we deliberately skip that so our capture stays bound. */
+    enq_capture_t cap;
+    memset(&cap, 0, sizeof(cap));
+    HU_ASSERT_EQ(hu_scheduler_register_runner(hu_w14_scheduler_inner(s),
+                                              HU_JOB_LORA_RETRAIN_NIGHTLY, enq_capture_runner,
+                                              &cap),
+                 HU_OK);
+
+    /* Enqueue via the helper under test. */
+    int64_t now_ms = 5000;
+    HU_ASSERT_EQ(hu_w14_scheduler_enqueue_lora_retrain_nightly(s, now_ms, 0), HU_OK);
+
+    /* A pending job is now in the queue. */
+    size_t pending = 0;
+    HU_ASSERT_EQ(hu_w14_scheduler_status(s, &pending, NULL, NULL, NULL), HU_OK);
+    HU_ASSERT_GE(pending, (size_t)1);
+
+    /* Tick — the scheduler should dispatch our capture runner because the
+     * idle + AC probes return values that satisfy requires_idle and
+     * requires_ac_power. */
+    HU_ASSERT_EQ(hu_w14_scheduler_tick(s, now_ms + 100), HU_OK);
+
+    /* Verify dispatch happened and the dispatched spec matches the
+     * contract documented for `enqueue_lora_retrain_nightly`. (The
+     * scheduler clamps `budget_ms` against `HU_SCHED_TOTAL_BUDGET_MS`
+     * before dispatch, so we assert the semantic-spec fields that are
+     * preserved verbatim.) */
+    HU_ASSERT_EQ(cap.invoked, 1);
+    HU_ASSERT_EQ(cap.spec.kind, HU_JOB_LORA_RETRAIN_NIGHTLY);
+    HU_ASSERT(cap.spec.requires_idle);
+    HU_ASSERT(cap.spec.requires_ac_power);
+    HU_ASSERT_EQ(cap.spec.interval_sec, 86400);
+
+    /* NULL-arg defenses. */
+    HU_ASSERT_EQ(hu_w14_scheduler_enqueue_lora_retrain_nightly(NULL, 0, 0),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_w14_scheduler_register_lora_retrain_runner(NULL, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+
+    hu_w14_scheduler_close(s, enq_alloc());
+    hu_w7_facade_close(f, enq_alloc());
+    hu_graph_close(g, enq_alloc());
+}
+
+#else /* !HU_ENABLE_SQLITE */
+
+static void test_enqueue_helper_sets_correct_spec(void) {
+    /* W14 scheduler requires SQLite; skip on minimal builds. */
+}
+
+#endif
+
 /* ── Suite entry ─────────────────────────────────────────────────────── */
 
 void run_w14_lora_retrain_tests(void) {
@@ -416,4 +600,7 @@ void run_w14_lora_retrain_tests(void) {
     HU_RUN_TEST(test_retrain_skipped_on_empty_delta);
     HU_RUN_TEST(test_retrain_skipped_if_pidfile_held);
     HU_RUN_TEST(test_lora_retrain_status_parse_round_trip);
+    HU_RUN_TEST(test_retrain_probe_malformed_routes_to_failed);
+    HU_RUN_TEST(test_retrain_gate_exit_nonzero_routes_to_failed);
+    HU_RUN_TEST(test_enqueue_helper_sets_correct_spec);
 }
