@@ -158,6 +158,13 @@ test.describe("h-uman Control UI", () => {
 
   test("floating mic button is present", async ({ page }) => {
     await page.goto("/");
+    // Wait for the page DOM before querying — every other test in this file
+    // does the same, and skipping it caused a 5s-timeout flake under
+    // WebSocket-reconnect churn (Vite proxy ECONNRESET storms during cold
+    // start). Also wait for hu-app itself before drilling into its shadow
+    // tree so the locator doesn't race the custom-element upgrade.
+    await page.waitForLoadState("domcontentloaded");
+    await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
     const mic = page.locator("hu-app >> hu-floating-mic");
     await expect(mic).toBeAttached({ timeout: 5000 });
   });
