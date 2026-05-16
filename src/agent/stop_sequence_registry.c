@@ -27,10 +27,7 @@ static const provider_entry_t PROVIDER_TABLE[] = {
 static const size_t PROVIDER_TABLE_COUNT = sizeof(PROVIDER_TABLE) / sizeof(PROVIDER_TABLE[0]);
 
 hu_error_t hu_stop_sequence_registry_lookup(const char *provider, size_t provider_len,
-                                            const char *channel, size_t channel_len,
                                             const char *const **out_seqs, size_t *out_seqs_count) {
-    (void)channel;
-    (void)channel_len;
     if (!out_seqs || !out_seqs_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out_seqs = NULL;

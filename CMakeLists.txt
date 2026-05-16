@@ -418,6 +418,7 @@ set(HU_CORE_SOURCES
     src/observability/bth_metrics.c
     src/observability/otlp.c
     src/observability/background_registry.c
+    src/observability/validator_telemetry.c
     src/tunnel/none.c
     src/tunnel/root.c
     src/gateway/gateway.c
@@ -529,7 +530,6 @@ set(HU_CORE_SOURCES
     src/agent/frontier_persist.c
     src/context/conversation.c
     src/context/filler_recency.c
-    src/context/contact_send_recency.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
     src/context/theory_of_mind.c
@@ -1041,6 +1041,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/auto_profile.c
     src/persona/auto_tune.c
     src/persona/voice_maturity.c
+    src/persona/style_mirror.c
     src/persona/style_clone.c
     src/persona/training.c
     src/persona/life_sim.c
@@ -2459,10 +2460,6 @@ set(HU_TEST_SOURCES
     tests/test_personal_model_atomic_save.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
-    tests/test_contact_send_recency.c
-    tests/test_imessage_outbound_dedup.c
-    tests/test_config_identity_links.c
-    tests/test_memory_session_scoping.c
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
@@ -2675,7 +2672,12 @@ set(HU_TEST_SOURCES
     tests/test_verifier_metrics.c
     tests/test_output_validator.c
     tests/test_validators_builtin.c
+    tests/test_pattern_c_paths.c
     tests/test_validators_persona_safety.c
+    tests/test_validator_reject_discards.c
+    tests/test_validator_telemetry.c
+    tests/test_validator_chain_cache.c
+    tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c
@@ -2804,6 +2806,7 @@ set(HU_TEST_SOURCES
     tests/test_planner_mcts_wiring.c
     tests/test_cdp.c
     tests/test_emotional_cognition.c
+    tests/test_emotional_contagion.c
     tests/test_evolving_cognition.c
     tests/test_metacognition.c
     tests/test_humanness_frontiers.c
@@ -2815,7 +2818,7 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c)
 list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
@@ -3571,6 +3574,14 @@ if(HU_ENABLE_FUZZ)
     target_link_libraries(fuzz_session_deserialization PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_session_deserialization PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
     target_link_options(fuzz_session_deserialization PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+
+    add_executable(fuzz_output_validator_chain fuzz/fuzz_output_validator_chain.c)
+    set_target_properties(fuzz_output_validator_chain PROPERTIES LINKER_LANGUAGE CXX)
+    target_compile_definitions(fuzz_output_validator_chain PRIVATE HU_IS_TEST=1)
+    target_compile_options(fuzz_output_validator_chain PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(fuzz_output_validator_chain PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
+    target_compile_options(fuzz_output_validator_chain PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_output_validator_chain PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
 endif()
 
 # Benchmark suite (micro-benchmarks of core operations)

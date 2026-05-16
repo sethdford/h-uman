@@ -63,6 +63,10 @@ static void metrics_record_event(void *ctx, const hu_observer_event_t *event) {
         break;
     case HU_OBSERVER_EVENT_FRONTIER:
         break;
+    case HU_OBSERVER_EVENT_VALIDATOR_DECISION:
+        /* Not aggregated by the metrics observer; use the log observer for
+         * structured validator telemetry. */
+        break;
     }
 }
 
