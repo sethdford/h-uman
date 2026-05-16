@@ -230,16 +230,37 @@ def resolve_model(args) -> str:
 
 
 def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
-    """Run SFT LoRA fine-tuning. Returns exit code."""
+    """Run SFT LoRA fine-tuning. Returns exit code.
+
+    Sprint 8 US-8.6 fix: route through `mlx_lm_lora.train --train-mode sft`
+    so the `lora_parameters` block is honored. Both stock `mlx_lm.lora` and
+    `mlx_lm_lora.train` reject `--lora-parameters` as a CLI flag — it must
+    go through `-c <yaml>`. We write a temporary YAML config containing the
+    `lora_parameters` block and pass it via `-c`.
+    """
     adapter_dir.mkdir(parents=True, exist_ok=True)
+
+    # US-8.6: write lora_parameters to a YAML config file.
+    import json as _json
+    lora_params = _json.loads(_build_lora_parameters_json(args))
+    config_path = adapter_dir / "sft_train_config.yaml"
+    with open(config_path, "w") as cf:
+        cf.write("lora_parameters:\n")
+        cf.write(f"  rank: {lora_params['rank']}\n")
+        cf.write(f"  dropout: {lora_params['dropout']}\n")
+        cf.write(f"  scale: {lora_params['scale']}\n")
+        cf.write("  keys:\n")
+        for k in lora_params["keys"]:
+            cf.write(f"    - {k}\n")
 
     model = resolve_model(args)
     cmd = [
-        sys.executable, "-m", "mlx_lm", "lora",
+        sys.executable, "-m", "mlx_lm_lora.train",
         "--model", model,
         "--train",
+        "--train-mode", "sft",
+        "--train-type", "lora",
         "--data", str(data_dir),
-        "--fine-tune-type", "lora",
         "--adapter-path", str(adapter_dir),
         "--iters", str(args.iters),
         "--batch-size", str(args.batch_size),
@@ -251,9 +272,7 @@ def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
         "--max-seq-length", str(args.max_seq_length),
         "--grad-checkpoint",
         "--optimizer", "adamw",
-        # Sprint 7 / US-7.4: emit the target-modules + rank to mlx_lm via
-        # --lora-parameters JSON. See _build_lora_parameters_json().
-        "--lora-parameters", _build_lora_parameters_json(args),
+        "-c", str(config_path),
     ]
 
     if args.mask_prompt:
@@ -498,11 +517,22 @@ def run_dpo(args, adapter_dir: Path) -> int:
         "--num-layers", str(args.num_layers),
         "--max-seq-length", str(args.max_seq_length),
         "--grad-checkpoint",
-        # Sprint 7 / US-7.4: same JSON shape as SFT path. mlx-lm-lora
-        # accepts `--lora-parameters` and routes through the same
-        # `linear_to_lora_layers` discovery override.
-        "--lora-parameters", _build_lora_parameters_json(args),
+        # Sprint 8 US-8.6 fix: lora_parameters via -c <yaml>, not CLI flag.
+        # Reuse the SFT yaml if it exists (same params); write a fresh one
+        # if SFT was skipped.
+        "-c", str(adapter_dir / "dpo_train_config.yaml"),
     ]
+    # Write the DPO config YAML (same lora_parameters as SFT).
+    import json as _json
+    _lp = _json.loads(_build_lora_parameters_json(args))
+    with open(adapter_dir / "dpo_train_config.yaml", "w") as cf:
+        cf.write("lora_parameters:\n")
+        cf.write(f"  rank: {_lp['rank']}\n")
+        cf.write(f"  dropout: {_lp['dropout']}\n")
+        cf.write(f"  scale: {_lp['scale']}\n")
+        cf.write("  keys:\n")
+        for k in _lp["keys"]:
+            cf.write(f"    - {k}\n")
 
     if getattr(args, "mask_prompt", False):
         cmd.append("--mask-prompt")
