@@ -7415,13 +7415,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                 fprintf(
                                                     stderr,
                                                     "[agent_turn] tool args JSON parse failed\n");
-                                            if (orch_args && orch_tool->vtable->execute) {
-                                                orch_tool->vtable->execute(orch_tool->ctx,
-                                                                           agent->alloc, orch_args,
-                                                                           &orch_result);
-                                            }
-                                            if (orch_args)
+                                            if (orch_args) {
+                                                /* Spec 03: route through the hook-firing helper
+                                                 * so orchestrator-dispatched tools cannot bypass
+                                                 * the configured pre/post-tool pipeline. */
+                                                hu_agent_internal_dispatch_with_hooks(
+                                                    agent, orch_tool, task->description,
+                                                    task->description_len, calls[s].arguments,
+                                                    calls[s].arguments_len, orch_args,
+                                                    &orch_result);
                                                 hu_json_free(agent->alloc, orch_args);
+                                            }
                                         }
                                         if (orch_result.success) {
                                             hu_orchestrator_complete_task(
@@ -8034,9 +8038,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         }
                                         *result = hu_tool_result_fail("invalid arguments", 16);
                                         if (retry_args) {
-                                            if (tool->vtable->execute)
-                                                tool->vtable->execute(tool->ctx, agent->alloc,
-                                                                      retry_args, result);
+                                            /* Audit 2026-05-16 / Spec 03: even on approval-retry
+                                             * the hook pipeline must re-fire — a deny hook on
+                                             * shell `rm -rf` should deny the retry too. */
+                                            hu_agent_internal_dispatch_with_hooks(
+                                                agent, tool, call->name, call->name_len,
+                                                call->arguments,
+                                                call->arguments ? call->arguments_len : 0,
+                                                retry_args, result);
                                             hu_json_free(agent->alloc, retry_args);
                                         }
                                     }
@@ -8495,8 +8504,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     }
                                     result = hu_tool_result_fail("invalid arguments", 16);
                                     if (retry_args) {
-                                        tool->vtable->execute(tool->ctx, agent->alloc, retry_args,
-                                                              &result);
+                                        /* Spec 03: re-fire hook pipeline on approval-retry. See
+                                         * the early-path migration above. */
+                                        hu_agent_internal_dispatch_with_hooks(
+                                            agent, tool, call->name, call->name_len,
+                                            call->arguments,
+                                            call->arguments ? call->arguments_len : 0, retry_args,
+                                            &result);
                                         hu_json_free(agent->alloc, retry_args);
                                     }
                                 } else {

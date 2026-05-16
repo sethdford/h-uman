@@ -55,6 +55,7 @@ void run_skill_trust_tests(void);
 void run_tool_tests(void);
 void run_webhook_tests(void);
 void run_hook_pipeline_tests(void);
+void run_agent_dispatch_hooks_tests(void);
 void run_compaction_structured_tests(void);
 void run_instruction_discover_tests(void);
 void test_vtables_run(void);
@@ -1089,6 +1090,7 @@ int main(int argc, char **argv) {
     hu_test_permission();
     run_shell_sandbox_tests();
     run_hook_pipeline_tests();
+    run_agent_dispatch_hooks_tests();
     test_session_persist();
     run_compaction_structured_tests();
     run_instruction_discover_tests();
