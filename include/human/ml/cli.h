@@ -9,6 +9,10 @@ hu_error_t hu_ml_cli_experiment(hu_allocator_t *alloc, int argc, const char **ar
 hu_error_t hu_ml_cli_prepare(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_status(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **argv);
+/* Sprint 7 US-7.2 — mine DPO preference pairs from chat.db correction
+ * triples and (optionally) export to JSONL for the finetune-gemma.py DPO
+ * pass. See `human/ml/dpo_miner.h`. */
+hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **argv);
 /* Track D D2.2 — offline persona-fidelity baseline.

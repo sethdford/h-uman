@@ -14,6 +14,7 @@
 #include "human/ml/checkpoint.h"
 #include "human/ml/dataloader.h"
 #include "human/ml/dpo.h"
+#include "human/ml/dpo_miner.h"
 #include "human/ml/experiment.h"
 #include "human/ml/fidelity.h"
 #include "human/ml/learner.h"
@@ -585,6 +586,172 @@ hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **arg
     (void)model;
     (void)batch_size;
     fprintf(stderr, "dpo-train requires HU_ENABLE_SQLITE\n");
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+#endif
+}
+
+/* Sprint 7 US-7.2 — `human ml mine-corrections`.
+ *
+ * Walks the messages table in chat.db (or whichever DB --db points at),
+ * mines `user -> assistant -> user` correction triples within the
+ * correction window, PII-redacts each field, and inserts deduplicated
+ * preference pairs into `dpo_pairs` with `source = "outbound_edit"`.
+ *
+ * When `--export-jsonl` is set (default: `~/.human/dpo/pairs.jsonl`), the
+ * collected pairs are also exported as JSONL — US-7.1's
+ * `finetune-gemma.py --dpo --from-corrections` reads exactly that path.
+ * The default path keeps the cross-story handoff implicit and explicit at
+ * the same time.
+ *
+ * HU_IS_TEST short-circuits before any FS or DB I/O — exercised by the
+ * dpo_miner test suite via direct calls to `hu_dpo_mine_corrections`. */
+hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const char **argv) {
+    const char *db_path = NULL;
+    const char *export_jsonl_path = NULL;
+    int correction_window_sec = 0;
+    int want_export = 0;
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--db");
+        if (v) {
+            db_path = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--export-jsonl");
+        if (v) {
+            export_jsonl_path = v;
+            want_export = 1;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--correction-window-sec");
+        if (v) {
+            if (parse_int_arg(v, &correction_window_sec) != 0) {
+                hu_log_error("ml", NULL, "Invalid --correction-window-sec: %s", v);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--no-export") == 0) {
+            want_export = 0;
+            export_jsonl_path = NULL;
+            continue;
+        }
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: human ml mine-corrections [--db <path>] "
+                   "[--export-jsonl <path>] [--no-export] "
+                   "[--correction-window-sec <N>] [--help]\n"
+                   "\n"
+                   "Mine DPO preference pairs from chat.db user-correction triples.\n"
+                   "Inserts deduplicated pairs into dpo_pairs (source='outbound_edit').\n"
+                   "By default exports JSONL to ~/.human/dpo/pairs.jsonl for the\n"
+                   "finetune-gemma.py --dpo --from-corrections consumer.\n");
+            return HU_OK;
+        }
+    }
+
+#ifdef HU_IS_TEST
+    (void)alloc;
+    (void)db_path;
+    (void)export_jsonl_path;
+    (void)correction_window_sec;
+    (void)want_export;
+    printf("[mine-corrections] test mode: skipped\n");
+    return HU_OK;
+#else
+#ifdef HU_ENABLE_SQLITE
+    if (!db_path) {
+        const char *home = getenv("HOME");
+        if (!home) {
+            fprintf(stderr, "[mine-corrections] HOME not set and --db not provided\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        static char default_db[512];
+        int n = snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
+        if (n <= 0 || (size_t)n >= sizeof(default_db))
+            return HU_ERR_INTERNAL;
+        db_path = default_db;
+    }
+
+    char default_export[512];
+    if (want_export && !export_jsonl_path) {
+        const char *home = getenv("HOME");
+        if (!home) {
+            fprintf(stderr, "[mine-corrections] HOME not set; pass --export-jsonl explicitly\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        int n = snprintf(default_export, sizeof(default_export), "%s/.human/dpo/pairs.jsonl", home);
+        if (n <= 0 || (size_t)n >= sizeof(default_export))
+            return HU_ERR_INTERNAL;
+        export_jsonl_path = default_export;
+    } else if (!want_export && !export_jsonl_path) {
+        /* Even with no explicit flag, the default behavior is to export
+         * to the well-known path so US-7.1's `--from-corrections`
+         * succeeds. The user has to pass `--no-export` to disable. */
+        const char *home = getenv("HOME");
+        if (home) {
+            int n =
+                snprintf(default_export, sizeof(default_export), "%s/.human/dpo/pairs.jsonl", home);
+            if (n > 0 && (size_t)n < sizeof(default_export)) {
+                export_jsonl_path = default_export;
+                want_export = 1;
+            }
+        }
+    }
+
+    sqlite3 *db = NULL;
+    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+        fprintf(stderr, "[mine-corrections] Cannot open database: %s\n", db_path);
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    hu_dpo_mine_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.correction_window_sec = correction_window_sec;
+
+    hu_dpo_mine_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+    hu_error_t err = hu_dpo_mine_corrections(alloc, db, &opts, &stats);
+    if (err != HU_OK) {
+        fprintf(stderr, "[mine-corrections] miner failed: %d\n", err);
+        sqlite3_close(db);
+        return err;
+    }
+    printf("[mine-corrections] triples examined: %zu\n", stats.triples_examined);
+    printf("[mine-corrections] pairs recorded:   %zu\n", stats.pairs_recorded);
+    printf("[mine-corrections] pairs deduped:    %zu\n", stats.pairs_skipped_dup);
+    printf("[mine-corrections] pairs oversize:   %zu\n", stats.pairs_skipped_size);
+    printf("[mine-corrections] pii redactions:   %zu\n", stats.pii_redactions);
+
+    if (want_export && export_jsonl_path) {
+        hu_dpo_collector_t collector;
+        err = hu_dpo_collector_create(alloc, db, 100000, &collector);
+        if (err == HU_OK) {
+            size_t exported = 0;
+            err = hu_dpo_export_jsonl(&collector, export_jsonl_path, strlen(export_jsonl_path),
+                                      &exported);
+            if (err == HU_OK)
+                printf("[mine-corrections] exported %zu pair(s) to %s\n", exported,
+                       export_jsonl_path);
+            else
+                fprintf(stderr, "[mine-corrections] jsonl export failed: %d\n", err);
+            hu_dpo_collector_deinit(&collector);
+        }
+    }
+
+    sqlite3_close(db);
+    return HU_OK;
+#else
+    (void)alloc;
+    (void)db_path;
+    (void)export_jsonl_path;
+    (void)correction_window_sec;
+    (void)want_export;
+    fprintf(stderr, "mine-corrections requires HU_ENABLE_SQLITE\n");
     return HU_ERR_NOT_SUPPORTED;
 #endif
 #endif
