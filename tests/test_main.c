@@ -570,6 +570,9 @@ void run_consistency_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+/* Phase 5 Task 1 (RL SOTA): opt-in 4-axis fidelity scorer (v2).
+ * Additive — v1 scorer + v1 callers are byte-stable per BLOCKER-1. */
+void run_personal_model_fidelity_v2_tests(void);
 /* Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative advantage,
  * pessimistic PPO clip, KL-aware loss, analytical gradient.  Loss-only;
  * Task 5 lands the trainer step. */
@@ -1202,6 +1205,7 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_personal_model_fidelity_v2_tests();
     run_grpo_loss_tests();
     run_grpo_huml_tests();
     run_grpo_mlx_tests();

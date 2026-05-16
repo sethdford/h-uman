@@ -1415,6 +1415,268 @@ hu_error_t hu_communication_style_compare_response_sets(
     return HU_OK;
 }
 
+/* === Phase 5 Task 1 (RL SOTA) — v2 fidelity scorer (4th axis) ============
+ *
+ * Everything below this line is the OPT-IN v2 surface. No call site of the
+ * v1 scorer or the v1 comparator above is modified — round-1 BLOCKER-1
+ * pins v1 byte-stability. The v2 surface adds:
+ *   - a vocabulary-driven decision-style feature extractor
+ *   - a composite decision-style match against the target's EWMA-tracked
+ *     hedging / question / imperative ratios
+ *   - the 4-axis scorer (3 v1 axes + 1 new composite axis, equal weight)
+ *   - a per-set scorer + batch comparator that mirror the v1 comparator
+ *     contract on top of the v2 scorer (used by the Phase 5 Task 9
+ *     competitive harness for baseline-vs-policy comparison).
+ *
+ * Determinism: pure CPU, no allocations, no I/O. */
+
+typedef struct hu_pm_v2_vocab_entry {
+    const char *word;
+    size_t len;
+} hu_pm_v2_vocab_entry_t;
+
+/* Hedging vocabulary — words the user types when they want to soften a
+ * commitment ("maybe we could", "might be a good idea"). Deliberately
+ * excludes "try" because real text uses "try" in both hedging ("we could
+ * try X") and imperative ("try X now") positions; the imperative side of
+ * "try" is hard to disambiguate without a parser, so it stays out of both
+ * vocabularies and we lean on the dedicated word lists below. */
+static const hu_pm_v2_vocab_entry_t HU_PM_FIDELITY_HEDGES_V2[] = {
+    {"maybe", 5},   {"perhaps", 7},  {"possibly", 8}, {"possible", 8},
+    {"might", 5},   {"could", 5},    {"would", 5},    {"probably", 8},
+    {"somewhat", 8},{"kinda", 5},    {"sorta", 5},    {"likely", 6},
+    {"unlikely", 8},{"consider", 8}, {"seem", 4},     {"seems", 5},
+    {"seemed", 6},  {"appears", 7},  {"appear", 6},   {"suppose", 7},
+};
+#define HU_PM_FIDELITY_HEDGE_V2_COUNT \
+    (sizeof(HU_PM_FIDELITY_HEDGES_V2) / sizeof(HU_PM_FIDELITY_HEDGES_V2[0]))
+
+/* Imperative-verb vocabulary — words that, when they sit at sentence
+ * start, signal "do X now" framing. We score sentence-initial position
+ * only (not bag-of-words) so "I will fix it" doesn't get counted as
+ * imperative even though "fix" is in the table. */
+static const hu_pm_v2_vocab_entry_t HU_PM_FIDELITY_IMPERATIVES_V2[] = {
+    {"do", 2},      {"check", 5},   {"fix", 3},     {"stop", 4},
+    {"run", 3},     {"use", 3},     {"make", 4},    {"go", 2},
+    {"see", 3},     {"tell", 4},    {"call", 4},    {"send", 4},
+    {"ship", 4},    {"build", 5},   {"open", 4},    {"close", 5},
+    {"add", 3},     {"remove", 6},  {"set", 3},     {"get", 3},
+    {"pick", 4},    {"start", 5},   {"finish", 6},  {"save", 4},
+    {"load", 4},    {"read", 4},    {"write", 5},   {"print", 5},
+    {"log", 3},     {"pause", 5},   {"skip", 4},    {"merge", 5},
+    {"commit", 6},  {"push", 4},    {"pull", 4},    {"deploy", 6},
+    {"keep", 4},    {"drop", 4},    {"kill", 4},    {"ask", 3},
+    {"answer", 6},  {"reply", 5},   {"reach", 5},   {"focus", 5},
+};
+#define HU_PM_FIDELITY_IMPERATIVE_V2_COUNT \
+    (sizeof(HU_PM_FIDELITY_IMPERATIVES_V2) / sizeof(HU_PM_FIDELITY_IMPERATIVES_V2[0]))
+
+static bool pm_v2_word_in_vocab(const char *w, size_t wl,
+                                const hu_pm_v2_vocab_entry_t *vocab,
+                                size_t vocab_n) {
+    for (size_t i = 0; i < vocab_n; i++) {
+        if (vocab[i].len != wl)
+            continue;
+        size_t k = 0;
+        while (k < wl) {
+            unsigned char x = (unsigned char)w[k];
+            unsigned char y = (unsigned char)vocab[i].word[k];
+            if (x >= 'A' && x <= 'Z') x = (unsigned char)(x + 32);
+            if (y >= 'A' && y <= 'Z') y = (unsigned char)(y + 32);
+            if (x != y) break;
+            k++;
+        }
+        if (k == wl)
+            return true;
+    }
+    return false;
+}
+
+typedef struct hu_pm_v2_response_features {
+    /* v1 axes (mirror of hu_pm_response_features_t): */
+    float lowercase_ratio;
+    float abbreviation_ratio;
+    size_t byte_len;
+    /* v2 decision-style axes: */
+    float hedging_ratio;     /* hedge words / total words */
+    float question_ratio;    /* sentences ending in '?' / total sentences */
+    float imperative_ratio;  /* sentences whose first word is an imperative verb /
+                              * total sentences */
+} hu_pm_v2_response_features_t;
+
+/* Single-pass walker: extracts both v1 and v2 features. The v1 fields
+ * (lowercase_ratio, abbreviation_ratio, byte_len) are byte-identical to
+ * hu_pm_extract_response_features so v2 and v1 agree on their shared
+ * axes; the only difference is the additional decision-style counters. */
+static void hu_pm_extract_response_features_v2(const char *response, size_t response_len,
+                                               hu_pm_v2_response_features_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->byte_len = response_len;
+    if (!response || response_len == 0)
+        return;
+
+    size_t total_letters = 0, lower_letters = 0;
+    size_t total_words = 0, abbrev_words = 0, hedge_words = 0;
+    size_t total_sentences = 0, question_sentences = 0, imperative_sentences = 0;
+
+    /* Per-sentence state — reset on every '.', '?', or '!' boundary. */
+    bool sentence_has_content = false;
+    bool sentence_first_word_seen = false;
+    bool sentence_first_word_is_imperative = false;
+    bool sentence_terminated_by_question = false;
+
+    size_t i = 0;
+    while (i < response_len) {
+        unsigned char c = (unsigned char)response[i];
+        bool is_alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        if (is_alpha) {
+            size_t start = i;
+            while (i < response_len) {
+                unsigned char d = (unsigned char)response[i];
+                if (!((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')))
+                    break;
+                total_letters++;
+                if (d >= 'a' && d <= 'z') lower_letters++;
+                i++;
+            }
+            size_t wl = i - start;
+            total_words++;
+            sentence_has_content = true;
+            if (fidelity_word_is_abbrev(response + start, wl))
+                abbrev_words++;
+            if (pm_v2_word_in_vocab(response + start, wl,
+                                    HU_PM_FIDELITY_HEDGES_V2,
+                                    HU_PM_FIDELITY_HEDGE_V2_COUNT))
+                hedge_words++;
+            if (!sentence_first_word_seen) {
+                sentence_first_word_seen = true;
+                sentence_first_word_is_imperative = pm_v2_word_in_vocab(
+                    response + start, wl,
+                    HU_PM_FIDELITY_IMPERATIVES_V2,
+                    HU_PM_FIDELITY_IMPERATIVE_V2_COUNT);
+            }
+            continue;
+        }
+        if (c == '.' || c == '?' || c == '!') {
+            if (sentence_has_content) {
+                total_sentences++;
+                sentence_terminated_by_question = (c == '?');
+                if (sentence_terminated_by_question) question_sentences++;
+                if (sentence_first_word_is_imperative) imperative_sentences++;
+            }
+            sentence_has_content = false;
+            sentence_first_word_seen = false;
+            sentence_first_word_is_imperative = false;
+            sentence_terminated_by_question = false;
+        }
+        i++;
+    }
+    /* Trailing sentence without a terminator still counts so single-line
+     * responses ("ship it") are scored for imperative framing. Such a
+     * sentence cannot be a question (no '?' terminator). */
+    if (sentence_has_content) {
+        total_sentences++;
+        if (sentence_first_word_is_imperative) imperative_sentences++;
+    }
+
+    if (total_letters > 0)
+        out->lowercase_ratio = (float)lower_letters / (float)total_letters;
+    if (total_words > 0) {
+        out->abbreviation_ratio = (float)abbrev_words / (float)total_words;
+        out->hedging_ratio = (float)hedge_words / (float)total_words;
+    }
+    if (total_sentences > 0) {
+        out->question_ratio = (float)question_sentences / (float)total_sentences;
+        out->imperative_ratio = (float)imperative_sentences / (float)total_sentences;
+    }
+}
+
+/* Composite 4th-axis match. Mean of three triangular sub-axis matches
+ * against the target's EWMA-tracked decision-style ratios. When the
+ * target has no decision-style fingerprint (all three sub-axes are
+ * zero), the composite collapses to the neutral 0.5 so an
+ * un-fingerprinted target neither rewards nor penalises the response
+ * on this axis — the v2 score becomes essentially v1 + 0.5 averaged
+ * across 4 axes. */
+static float hu_pm_decision_style_match(const hu_pm_v2_response_features_t *f,
+                                        const hu_communication_style_t *target) {
+    const float eps = 1e-6f;
+    if (fabsf(target->hedging_ratio) < eps &&
+        fabsf(target->question_ratio) < eps &&
+        fabsf(target->imperative_ratio) < eps) {
+        return 0.5f;
+    }
+    float h = hu_pm_axis_match(f->hedging_ratio, target->hedging_ratio);
+    float q = hu_pm_axis_match(f->question_ratio, target->question_ratio);
+    float im = hu_pm_axis_match(f->imperative_ratio, target->imperative_ratio);
+    return (h + q + im) / 3.f;
+}
+
+float hu_communication_style_fidelity_score_v2(const hu_communication_style_t *target,
+                                               const char *response, size_t response_len) {
+    if (!target || !response || response_len == 0)
+        return -1.f;
+    if (target->sample_count == 0U)
+        return -1.f;
+
+    hu_pm_v2_response_features_t f;
+    hu_pm_extract_response_features_v2(response, response_len, &f);
+
+    float lower_match  = hu_pm_axis_match(f.lowercase_ratio, target->lowercase_ratio);
+    float abbrev_match = hu_pm_axis_match(f.abbreviation_ratio, target->abbreviation_ratio);
+    float length_match = hu_pm_length_match(f.byte_len, target->avg_message_length);
+    float decision_match = hu_pm_decision_style_match(&f, target);
+    return (lower_match + abbrev_match + length_match + decision_match) / 4.f;
+}
+
+static void hu_pm_score_response_set_v2(const hu_communication_style_t *target,
+                                        const char *const *set, const size_t *lens, size_t n,
+                                        hu_communication_style_set_summary_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->min_score = 1.f;
+    out->max_score = 0.f;
+    if (!set || n == 0)
+        return;
+    float sum = 0.f;
+    for (size_t i = 0; i < n; i++) {
+        const char *resp = set[i];
+        size_t resp_len = lens ? lens[i] : (resp ? strlen(resp) : 0);
+        if (!resp || resp_len == 0) {
+            out->skipped++;
+            continue;
+        }
+        float s = hu_communication_style_fidelity_score_v2(target, resp, resp_len);
+        if (s < 0.f) {
+            out->skipped++;
+            continue;
+        }
+        sum += s;
+        if (s < out->min_score) out->min_score = s;
+        if (s > out->max_score) out->max_score = s;
+        out->scored++;
+    }
+    if (out->scored == 0) {
+        out->mean = 0.f;
+        return;
+    }
+    out->mean = sum / (float)out->scored;
+}
+
+hu_error_t hu_communication_style_compare_response_sets_v2(
+    const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
+    size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
+    hu_communication_style_set_summary_t *out_a,
+    hu_communication_style_set_summary_t *out_b, float *out_delta) {
+    if (!target || !out_a || !out_b || !out_delta)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (target->sample_count == 0U)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_pm_score_response_set_v2(target, set_a, lens_a, n_a, out_a);
+    hu_pm_score_response_set_v2(target, set_b, lens_b, n_b, out_b);
+    *out_delta = out_b->mean - out_a->mean;
+    return HU_OK;
+}
+
 /* Case-insensitive whole-word search: does `msg` contain `word`
  * as a substring with non-letter bounds on either side? Used by
  * `hu_personal_model_touch_goals_in_message`. The bounds check
