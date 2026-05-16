@@ -220,12 +220,19 @@ static hu_error_t ollama_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
         if (opts) {
             hu_json_value_t *stop_arr = hu_json_array_new(alloc);
             if (stop_arr) {
-                for (size_t i = 0; i < request->stop_sequences_count; i++) {
-                    hu_json_array_push(alloc, stop_arr,
-                                       hu_json_string_new(alloc, request->stop_sequences[i],
-                                                          strlen(request->stop_sequences[i])));
+                bool stop_ok = true;
+                for (size_t i = 0; i < request->stop_sequences_count && stop_ok; i++) {
+                    hu_json_value_t *sv = hu_json_string_new(alloc, request->stop_sequences[i],
+                                                             strlen(request->stop_sequences[i]));
+                    if (!sv) {
+                        hu_json_free(alloc, stop_arr);
+                        stop_ok = false;
+                    } else {
+                        hu_json_array_push(alloc, stop_arr, sv);
+                    }
                 }
-                hu_json_object_set(alloc, opts, "stop", stop_arr);
+                if (stop_ok)
+                    hu_json_object_set(alloc, opts, "stop", stop_arr);
             }
             hu_json_object_set(alloc, root, "options", opts);
         }
