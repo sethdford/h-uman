@@ -3086,3 +3086,156 @@ hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char *
         prov.vtable->deinit(prov.ctx, alloc);
     return err;
 }
+
+/* US-7.10 — `human ml rl-train --algorithm <name>` router.
+ *
+ * AC-7.10.3 / 4 / 5: routes to SimPO factory, delegates `dpo` to the
+ * existing `hu_ml_cli_dpo_train` path (zero new code in the DPO body),
+ * and emits exit-code-2 "not yet implemented" stubs for ORPO and
+ * GRPO-2. The story explicitly forbids touching the DPO body in this
+ * change.
+ */
+#include "human/ml/rl_trainer.h"
+
+/* Strip the `--algorithm <value>` pair from argv and call
+ * `hu_ml_cli_dpo_train` with the remaining args. The DPO CLI sees a
+ * call shape indistinguishable from `human ml dpo-train ...`, so
+ * AC-7.10.4 holds (no behavior change). */
+static hu_error_t rl_train_delegate_to_dpo(hu_allocator_t *alloc, int argc, const char **argv,
+                                           int algo_flag_index) {
+    /* algo_flag_index points at "--algorithm"; algo_flag_index+1 at "dpo".
+     * Compose a fresh argv with those two slots removed; argv[0] must be
+     * preserved as the dpo subcommand name. */
+    const char **dpo_argv =
+        (const char **)alloc->alloc(alloc->ctx, (size_t)argc * sizeof(*dpo_argv));
+    if (!dpo_argv)
+        return HU_ERR_OUT_OF_MEMORY;
+    int dpo_argc = 0;
+    /* argv[0] is "rl-train"; rewrite to "dpo-train" so any error
+     * message from the DPO path names the command the user actually
+     * dispatched. */
+    dpo_argv[dpo_argc++] = "dpo-train";
+    for (int i = 1; i < argc; i++) {
+        if (i == algo_flag_index || i == algo_flag_index + 1)
+            continue;
+        dpo_argv[dpo_argc++] = argv[i];
+    }
+    hu_error_t err = hu_ml_cli_dpo_train(alloc, dpo_argc, dpo_argv);
+    alloc->free(alloc->ctx, dpo_argv, (size_t)argc * sizeof(*dpo_argv));
+    return err;
+}
+
+hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv) {
+    if (!alloc || argc < 1 || !argv)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *algorithm = NULL;
+    int algo_flag_index = -1;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: human ml rl-train --algorithm {dpo|simpo|orpo|grpo2} "
+                   "[other flags...]\n"
+                   "  --algorithm dpo    Delegate to existing DPO trainer\n"
+                   "  --algorithm simpo  Train via SimPO loss head (Init #06)\n"
+                   "  --algorithm orpo   (not yet implemented — exit 2)\n"
+                   "  --algorithm grpo2  (not yet implemented — exit 2)\n");
+            return HU_OK;
+        }
+        const char *v = get_opt(argv, argc, i, "--algorithm");
+        if (v) {
+            algorithm = v;
+            algo_flag_index = i;
+            i++;
+            continue;
+        }
+    }
+
+    if (!algorithm) {
+        fprintf(stderr, "rl-train: missing --algorithm flag (expected one of "
+                        "{dpo, simpo, orpo, grpo2})\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    if (strcmp(algorithm, "dpo") == 0) {
+        return rl_train_delegate_to_dpo(alloc, argc, argv, algo_flag_index);
+    }
+
+    if (strcmp(algorithm, "orpo") == 0 || strcmp(algorithm, "grpo2") == 0) {
+        fprintf(stderr,
+                "rl-train: algorithm '%s' not yet implemented (US-7.10 lands "
+                "SimPO only; ORPO and GRPO-2 are deferred)\n",
+                algorithm);
+        return HU_ERR_NOT_SUPPORTED;
+    }
+
+    if (strcmp(algorithm, "simpo") != 0) {
+        fprintf(stderr,
+                "rl-train: unknown algorithm '%s' (expected one of "
+                "{dpo, simpo, orpo, grpo2})\n",
+                algorithm);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* --algorithm simpo: instantiate SimPO factory and run one
+     * train_step against an empty pair (HU_IS_TEST mocks the model
+     * forward; non-test builds currently return HU_ERR_NOT_SUPPORTED
+     * because the full forward-pass wiring is a follow-up story). */
+    hu_simpo_config_t cfg = {
+        .beta = 0.1f,
+        .gamma = 0.5f,
+        .model = NULL,
+    };
+    /* Optional --beta / --gamma overrides for ergonomic CLI use. */
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--beta");
+        if (v) {
+            float b = 0.0f;
+            if (parse_float_arg(v, &b) != 0 || b <= 0.0f) {
+                fprintf(stderr, "rl-train: invalid --beta '%s'\n", v);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            cfg.beta = b;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--gamma");
+        if (v) {
+            float g = 0.0f;
+            if (parse_float_arg(v, &g) != 0 || g < 0.0f) {
+                fprintf(stderr, "rl-train: invalid --gamma '%s'\n", v);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            cfg.gamma = g;
+            i++;
+            continue;
+        }
+    }
+
+    hu_rl_trainer_t trainer = {0};
+    hu_error_t err = hu_rl_trainer_simpo_create(alloc, &cfg, &trainer);
+    if (err != HU_OK) {
+        fprintf(stderr, "rl-train: simpo factory failed: %s\n", hu_error_string(err));
+        return err;
+    }
+
+#ifdef HU_IS_TEST
+    /* AC-7.10.3: run train_step without crashing. In test mode the
+     * loss head returns a deterministic mock value and never touches
+     * the (NULL) model. */
+    hu_preference_pair_t pair = {0};
+    double loss = 0.0;
+    err = trainer.vtable->train_step(trainer.ctx, &pair, &loss);
+    if (err == HU_OK)
+        printf("[rl-train] simpo test mode: loss=%.4f\n", loss);
+    else
+        fprintf(stderr, "rl-train: train_step failed: %s\n", hu_error_string(err));
+#else
+    fprintf(stderr, "rl-train: simpo end-to-end train_step requires a model + "
+                    "tokenizer wiring not yet shipped (US-7.10 lands the vtable + "
+                    "loss head; the forward-pass integration is a follow-up).\n");
+    err = HU_ERR_NOT_SUPPORTED;
+#endif
+
+    hu_rl_trainer_deinit(&trainer);
+    return err;
+}

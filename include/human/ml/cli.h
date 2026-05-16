@@ -91,4 +91,18 @@ hu_error_t hu_ml_cli_train_feed_predictor(hu_allocator_t *alloc, int argc, const
  * pipeline is verifiable from a single CLI command. */
 hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char **argv);
 
+/* US-7.10 — `human ml rl-train --algorithm {dpo|simpo|orpo|grpo2}` router.
+ *
+ * `dpo`   → delegates to `hu_ml_cli_dpo_train` with the `--algorithm`
+ *           flag pair stripped from argv (no behavior change vs the
+ *           existing `human ml dpo-train` entry point — AC-7.10.4).
+ * `simpo` → instantiates `hu_rl_trainer_simpo_create` and runs a single
+ *           `train_step` against the supplied pair (AC-7.10.3). In
+ *           `HU_IS_TEST` builds the model forward is mocked.
+ * `orpo`  / `grpo2` → emit a "not yet implemented" message and return
+ *           `HU_ERR_NOT_SUPPORTED` (exit code 2 — AC-7.10.5).
+ *
+ * Missing `--algorithm` flag returns `HU_ERR_INVALID_ARGUMENT`. */
+hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv);
+
 #endif
