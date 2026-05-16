@@ -738,13 +738,12 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
 
     /* US-7.7 (AC-7.7.3) — best-of-N cloud-provider misconfiguration warning.
      *
-     * Mirrors the D4 one-shot pattern: the warning is gated by a static
-     * `s_best_of_n_warn_emitted` so the daemon-side log path (when it grows
-     * one) fires at most once per process. Doctor itself is the
-     * operator-visible signal and re-runs on demand, so it emits the
-     * diagnostic line every call — the one-shot only applies to runtime
-     * log emission, not doctor's diagnostic items. The reset shim is
-     * test-only (see `hu_doctor_best_of_n_warn_reset_for_test` below).
+     * Doctor fires this every call (intentional for diagnostic UX — operators
+     * re-run doctor on demand to confirm a misconfiguration is still active).
+     * No one-shot here. If a future runtime log path emits the same warning,
+     * THAT path should apply the D4 one-shot pattern (see canonical shape at
+     * src/daemon.c::s_personalization_warn_emitted), but the static and
+     * reset shim do NOT exist today — do not call them.
      *
      * The daemon best-of-N path silently no-ops on non-llamacpp providers
      * (eligibility check at the agent_turn dispatch site), so doctor is
