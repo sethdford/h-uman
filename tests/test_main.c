@@ -245,6 +245,7 @@ void run_orphan_channel_audit_tests(void);
 void run_verifier_metrics_tests(void);
 void run_output_validator_tests(void);
 void run_chain_failure_paths_tests(void);
+void run_agent_fail_path_regressions_tests(void);
 void run_stop_sequences_tests(void);
 void run_validators_builtin_tests(void);
 void run_pattern_c_paths_tests(void);
@@ -836,6 +837,7 @@ int main(int argc, char **argv) {
     run_verifier_metrics_tests();
     run_output_validator_tests();
     run_chain_failure_paths_tests();
+    run_agent_fail_path_regressions_tests();
     run_stop_sequences_tests();
     run_validators_builtin_tests();
     run_pattern_c_paths_tests();
