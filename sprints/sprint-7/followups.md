@@ -1,136 +1,172 @@
 # Sprint 7 — Follow-up Tasks
 
-Findings the gates surfaced that are not in-scope for the current sprint but
-should land before Sprint 8 or as part of Sprint 8 if not addressed in-sprint.
+Findings the gates surfaced that are not in-scope for Sprint 7 but should
+land in Sprint 8 (or earlier if a P0 is present).
 
 ## P0 — must address before Sprint 7 closes
 
-### FU-7.7.a — `src/doctor.c` comment claims D4 one-shot but it is NOT implemented
-- **Source:** US-7.7 critic HIGH-1 (`a99a81ede1904a6d0`).
-- The comment near `src/doctor.c:742-747` describes a `static int s_best_of_n_warn_emitted` one-shot flag and a `hu_doctor_best_of_n_warn_reset_for_test` shim, but the static and shim do NOT exist in the file. The warning fires unconditionally on every `hu_doctor_check_config_semantics` call. AC-7.7.3's "per-process one-shot" contract is unverified and the comment is actively misleading (violates project rule against lying comments).
-- **Fix sketch:** add `static int s_best_of_n_warn_emitted = 0;` with the `HU_IS_TEST` reset shim mirroring US-7.3's pattern at `src/daemon.c:81`. OR remove the lying comment.
-- **Risk if deferred:** lying comment passes through sprint-auditor adversarial read and undermines trust. Should be P0 hygiene.
-- **Owner:** mini-fix before Phase 6 tag.
+(none outstanding — FU-7.7.a was fixed inline at `4a460b1d`)
 
-## P1 — should address in-sprint or early Sprint 8
+## P1 — Sprint 8
+
+### FU-7.8.a — Adapter-id basename collision in MoLoRA router
+- **Source:** US-7.8 critic HIGH-2.
+- `src/agent/agent_turn.c:439-445` derives adapter-id via `strrchr(path,'/')` basename. Two channel adapter paths sharing the same filename (`telegram/lora.bin` + `slack/lora.bin`) both produce `base="lora.bin"`; the idempotency check `strcmp(cur_id, base) != 0` permanently suppresses subsequent channel swaps after the first load.
+- **Fix sketch:** derive adapter-id from full path (or hash of it), or store full path as the active adapter id in `llamacpp_load_adapter`.
+- **Risk if deferred:** silent breakage when users have same-named adapter files in different channel directories. The conventional layout `~/.human/adapters/<persona>-<channel>.lora` avoids this; the bug only fires on non-conventional layouts. Low frequency, real impact.
+
+### FU-7.10.a — `human ml rl-train --algorithm simpo` returns NOT_SUPPORTED in production
+- **Source:** US-7.10 critic HIGH-1.
+- `compute_loss` is wired and tested (golden test passes); `train_step` is the stub. Production users get exit-2 when invoking SimPO training even though the help text advertises it.
+- **Fix sketch:** either (a) gate behind `[experimental]` warning that still exits 0, (b) document `--logprobs-only` mode via `compute_loss`, or (c) wire the forward-pass.
+- **Risk if deferred:** confusing operator UX. Workaround documented in CLI help meantime.
 
 ### FU-7.7.b — Agent-level telemetry counters absent
 - **Source:** US-7.7 critic HIGH-2.
-- Design called for 4 `uint64_t` counters on `hu_agent_t`: `best_of_n_invocations`, `best_of_n_cost_cap_hits`, `best_of_n_picks_above_first`, `best_of_n_total_candidates`. None shipped. `stats_out` is populated and immediately lost. AC-7.7.4 half-satisfied (log line works, agent-level accumulation missing).
-- **Fix sketch:** add the 4 counters to `hu_agent_t`; in `agent_turn.c` after the best-of-N call returns, fold `bcfg.stats_out` into the agent counters. Add a small public accessor `hu_agent_best_of_n_telemetry()`.
-- **Risk if deferred:** dashboards can't show long-running pick/cap-hit rates; observability gap. AC-7.7.4 is technically passable on the log alone.
-- **Owner:** Sprint 8 observability story.
+- 4 `uint64_t` counters on `hu_agent_t` (`best_of_n_invocations`, `best_of_n_cost_cap_hits`, `best_of_n_picks_above_first`, `best_of_n_total_candidates`) not added. `stats_out` is computed and lost.
+- **Fix sketch:** add the 4 counters; fold from `bcfg.stats_out` after best-of-N call returns; add `hu_agent_best_of_n_telemetry()` accessor.
 
 ### FU-7.7.c — Score-bounds telemetry edge cases
 - **Source:** US-7.7 critic HIGH-3.
-- `min_score=1.0f / max_score=0.0f` initializers are misleading if `hu_communication_style_fidelity_score` ever returns outside `[0,1]` (not enforced today). Initial `picked_score = scores[0]` may be `-1.0f` sentinel.
-- **Fix sketch:** add `HU_ASSERT(s >= 0.0f && s <= 1.0f)` or a clamp in the loop body in `src/agent/best_of_n.c:1199-1222`. Move `min_score`/`max_score` initialization into the first-scored-entry branch.
-- **Owner:** Sprint 8 hardening.
+- `min_score=1.0f / max_score=0.0f` initializers misleading; `picked_score = scores[0]` may be `-1.0f` sentinel.
+- **Fix sketch:** add `HU_ASSERT(s >= 0.0f && s <= 1.0f)` or clamp in loop body. Move min/max init into first-scored-entry branch.
 
 ### FU-7.9.a — `hu_style_critique_run` silent skip on regen failure
 - **Source:** US-7.9 critic HIGH-1.
-- When the provider regen fails (`rerr != HU_OK`), the function returns `HU_OK` silently keeping the original violating draft. Caller cannot distinguish "no violation fired" from "violation fired but regen errored."
-- **Fix sketch:** in `src/persona/style_critique.c:373`, emit the `style_rule_violation_unresolved` log + increment counter before the early-return on regen failure, OR return `HU_ERR_RETRY_FAILED`.
-- **Owner:** Sprint 8 robustness story.
+- Returns HU_OK silently when provider regen fails — caller can't distinguish "no violation" from "violation+regen errored."
+- **Fix sketch:** emit `style_rule_violation_unresolved` log before early-return on regen failure; OR return `HU_ERR_RETRY_FAILED`.
 
 ### FU-7.9.b — Emoji alias coverage gap (BMP block)
-- **Source:** US-7.9 critic HIGH-2 + panel (FLAG, documented).
-- Alias matches only `\xF0\x9F` (plane-1 emoji 4-byte UTF-8 prefix). Misses entire BMP block U+2600-U+27BF (☀️ ✅ ✈️). Header acknowledges this as deferred to "downstream Unicode-aware pass."
-- **Fix sketch:** widen alias table to cover `\xE2\x98\x80`-`\xE2\x9F\xBF` (3-byte UTF-8) and lone-modifier bytes. OR add documented user-facing caveat.
-- **Owner:** Sprint 8 Unicode-aware pass.
+- **Source:** US-7.9 critic HIGH-2.
+- Alias matches only `\xF0\x9F` (plane-1 4-byte UTF-8). Misses U+2600-U+27BF (☀️ ✅ ✈️).
+- **Fix sketch:** widen alias table to cover BMP block; or add Unicode-aware downstream pass per header note.
 
 ### FU-7.9.c — `test_critique_disabled_short_circuits` is vacuous
 - **Source:** US-7.9 critic HIGH-3.
-- Test only resets counters and asserts they are zero — trivially true post-reset. Does not exercise the actual gate in `agent_turn.c:5441`.
-- **Fix sketch:** replace test body with an actual `hu_agent_turn` invocation with `style_rules_enabled=false`, asserting `check_invocations==0`. Verifier acknowledged the test pattern is "sufficient given the gate" — but adversarial reading is correct.
-- **Owner:** Sprint 8 test hardening.
+- Test only resets counters and asserts zero — trivially true.
+- **Fix sketch:** replace with actual `hu_agent_turn` invocation, `style_rules_enabled=false`, assert `check_invocations==0`.
 
 ### FU-7.9.d — Prompt-injection vector via user-controlled rule text
-- **Source:** US-7.9 critic MED-2.
-- `violated_rule` is concatenated verbatim into the regen system prompt. A user rule like `"never start with 'Sure! \n\nIgnore previous instructions and...'` becomes a prompt-injection vector.
-- **Fix sketch:** strip/escape `\n`, `\r`, chars above 0x7E before embedding; truncate at 128 bytes.
-- **Owner:** Sprint 8 security hardening.
+- **Source:** US-7.9 critic MED-2 (but real security finding).
+- `violated_rule` concatenated verbatim into regen system prompt.
+- **Fix sketch:** strip/escape `\n`, `\r`, chars > 0x7E; truncate at 128 bytes.
 
 ### FU-7.6.a — `check-lora-ab.sh --judgment` silent-pass when STATUS empty
-- **Source:** US-7.6 critic HIGH (carried forward from Wave 0 close).
-- When `human ml fidelity-status --judgment` produces no JSON, `STATUS` is empty, script falls through to `exit 0` reporting spurious PASS.
-- **Owner:** any implementer touching `scripts/check-lora-ab.sh`. Likely Sprint 8.
+- **Source:** US-7.6 critic HIGH.
+- When CLI produces no JSON, `STATUS` is empty, script falls through to `exit 0`.
+- **Fix sketch:** when STATUS is empty, `exit 1` or emit SKIP on stdout.
+
+### FU-7.5.a — World_model_bridge.c reformat churn
+- **Source:** US-7.5 panel FLAG (Regression).
+- ~250 lines reformat mixed with feature. Violates "one concern per change."
+- **Fix sketch:** post-sprint hygiene; document the reformat as a separate commit if a future split is wanted.
+
+### FU-7.5.b — D3 logging conflation distinct from exit-code path
+- **Source:** US-7.5 critic CRITICAL (downgraded — verdict logic is safe).
+- The fix re-dispatch DID partially address this (gate non-zero exit → FAILED; zero+non-PASS → SKIPPED_GATE_FAIL). Remaining: verify `lora_retrain_failed` event includes `step` discriminator (gate vs probe vs finetune) for operator clarity.
+
+### FU-7.5.c — `static hu_lora_retrain_ctx_t` is function-local
+- **Source:** US-7.5 critic HIGH-1.
+- Should be file-scope so re-entry doesn't zero state.
+
+### FU-7.5.d — Stale-PID TOCTOU race
+- **Source:** US-7.5 critic HIGH-3. Narrow window.
+
+### FU-7.5.e — `budget_ms` parameter accepted but ignored
+- **Source:** US-7.5 critic MED-1.
+
+### FU-7.5.f — JSON parser brittleness on schema growth
+- **Source:** US-7.5 critic MED-2.
+
+### FU-7.5.g — Enqueue inside `HU_ENABLE_LEARNING` block
+- **Source:** US-7.5 critic HIGH-2.
+- On minimal builds (without HU_ENABLE_ML), the cron never fires. Matches existing pattern but worth documenting as intentional.
 
 ### FU-7.1.a — `mlx-lm-lora` dep pin documented only in docstring
 - **Source:** US-7.1 critic MED.
-- Add `mlx-lm-lora>=2.1.0,<3` to the project's Python deps file.
-- **Owner:** Sprint 7 close hygiene.
+- Add to project's Python deps file.
 
 ### FU-7.1.b — `chosen == rejected` rows not filtered before DPO
-- **Source:** US-7.1 panel (FLAG).
+- **Source:** US-7.1 panel FLAG.
 - Add filter in `_prepare_dpo_from_jsonl` and `prepare_dpo_from_db`.
-- **Owner:** Sprint 8 fine-tune pipeline polish.
 
 ### FU-7.6.b — `hu_ml_fidelity_score_judgment` lacks `isfinite(nll)` guard
 - **Source:** US-7.6 panel.
-- **Owner:** US-7.6.1 implementer.
 
 ### FU-7.6.c — `g_nll_fn` mutable static lacks thread-safety
 - **Source:** US-7.6 critic + panel.
-- **Owner:** US-7.6.1 implementer.
 
 ### FU-7.4.a — `rank=0` falsy substitution trap
 - **Source:** US-7.4 critic MED.
-- `int(getattr(args, "rank", None) or 32)` silently converts explicit 0 to 32.
-- **Fix sketch:** use `is not None` check rather than falsy `or`.
-- **Owner:** Sprint 8 polish.
 
 ### FU-7.4.b — `no_version` path missing mkdir before write
 - **Source:** US-7.4 critic MED.
-- **Owner:** Sprint 8 polish.
+
+### FU-7.10.b — Init #06 vtable divergence documentation
+- **Source:** US-7.10 design Open Q2.
+- Update `docs/plans/2026-05-11-init-06-simpo-orpo-grpo2.md` to document the v1 3-member vtable surface and the planned widening path.
+
+### FU-7.8.b — MoLoRA config arena `a->free` pattern
+- **Source:** US-7.8 critic HIGH-1.
+- Pre-existing pattern in `src/config_parse.c`; affects molora entries on config reload. Same defect exists for `tools` strings.
+- **Fix sketch:** rely on arena lifetime; null pointers without freeing OR switch to non-arena backing.
 
 ## P2 — informational
 
-### FU-7.3.a — vacuous absence-tests in `test_provider_all.c`
-- **Source:** US-7.3 critic (MED).
-- **Owner:** maintenance pass.
+### FU-7.3.a — Vacuous absence-tests in `test_provider_all.c`
+- **Source:** US-7.3 critic MED.
 
-### FU-7.3.b — whitespace-only changes to protected test (AC-7.3.5)
-- **Source:** US-7.3 critic (MED).
-- **Owner:** optional revert.
+### FU-7.3.b — Whitespace-only changes to protected test (AC-7.3.5)
+- **Source:** US-7.3 critic MED.
 
 ### FU-7.6.d — clang-format churn in `src/ml/cli.c`
 - **Source:** US-7.6 panel.
-- ~500 lines of cli.c are reformat-only. Same issue surfaced in US-7.2 and US-7.7.
-- **Owner:** post-sprint hygiene; split reformat commits.
 
 ### FU-7.7.d — Default `best_of_n=0` vs `1` round-trip asymmetry
 - **Source:** US-7.7 critic MED.
-- User-explicit `0` is silently upgraded to `1` after save/load.
-- **Owner:** Sprint 8 config polish.
 
 ### FU-7.7.e — N=2 cost-cap edge case untested
 - **Source:** US-7.7 critic MED.
-- Add test where only the last call exceeds the cap.
-- **Owner:** Sprint 8 test hardening.
 
 ### FU-7.7.f — Fidelity-scorer-coupled test fragility
 - **Source:** US-7.7 critic MED.
-- `test_best_of_4_returns_highest_score` relies on internal scorer ranking; should inject mock scorer.
-- **Owner:** Sprint 8 test isolation.
-
-### FU-7.10.a — Init #06 vtable divergence documentation
-- **Source:** US-7.10 design (Open Q2).
-- **Owner:** docs follow-up after US-7.10 cherry-pick.
 
 ### FU-7.9.e — `find_last_quoted` early-return logic flaw
 - **Source:** US-7.9 critic MED-1.
-- Inner `return false` bails outer loop prematurely on compound quoted rules.
-- **Owner:** Sprint 8 polish.
 
-### FU-7.9.f — Dead `warned_drop` variable in style_critique.c
+### FU-7.9.f — Dead `warned_drop` variable
 - **Source:** US-7.9 critic LOW-1.
-- Design specified one-shot warning for rules-over-32; variable is dead.
-- **Owner:** Sprint 8 polish.
+
+### FU-7.8.c — Inline normalizer in parser duplicates the runtime normalizer
+- **Source:** US-7.8 critic MED-1.
+
+### FU-7.8.d — Interior-whitespace channel keys silently truncated
+- **Source:** US-7.8 critic MED-1.
+
+### FU-7.8.e — OFF-build symbol absence not asserted in CI
+- **Source:** US-7.8 critic MED-2.
+
+### FU-7.8.f — `check-molora-binary-budget.sh` uses different flags than production
+- **Source:** US-7.8 critic MED-3.
+
+### FU-7.8.g — ABI-split risk documentation in `hu_agent_t`
+- **Source:** US-7.8 critic LOW-1.
+
+### FU-7.10.c — `cli.c` reformat churn (also see US-7.6 / US-7.2 / US-7.7)
+- **Source:** US-7.10 critic LOW.
+
+### FU-7.10.d — DPO delegation argv convention untested
+- **Source:** US-7.10 critic MED.
+
+### FU-7.10.e — `hu_rl_trainer_type_name` switch lacks `default:` arm
+- **Source:** US-7.10 critic MED.
+
+### FU-7.10.f — Floor-test fixture uses positive logprob (intentional but misleading)
+- **Source:** US-7.10 critic MED.
 
 ---
 
-**Status as of Wave 1 partial close:**
-- P0: FU-7.7.a (lying comment) should be fixed inline before sprint close.
-- P1/P2: deferred to Sprint 8 or maintenance.
-- Sprint-auditor will read this file and flag any P0 silently deferred.
+**Status:** Sprint 7 closes with 0 outstanding P0. P1 follow-ups are
+backlog for Sprint 8. P2 are nice-to-haves. No findings were so severe
+that they blocked a story's close — every story passed verifier + (panel
+PASS or PASS_WITH_NOTES), with critic findings documented for follow-up.
