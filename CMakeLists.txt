@@ -2671,6 +2671,7 @@ set(HU_TEST_SOURCES
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
     tests/test_output_validator.c
+    tests/test_chain_failure_paths.c
     tests/test_validators_builtin.c
     tests/test_pattern_c_paths.c
     tests/test_validators_persona_safety.c
