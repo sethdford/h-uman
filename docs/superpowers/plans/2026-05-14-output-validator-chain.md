@@ -1,3 +1,8 @@
+---
+title: Output Validator Chain — Implementation Plan
+description: Refactor scattered output sanitizers into a composable validator-chain vtable; add F1/F2/F3 leak-prevention validators; plumb stop-sequences and structured-output contract through the provider vtable.
+---
+
 # Output Validator Chain — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
