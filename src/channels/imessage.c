@@ -915,7 +915,15 @@ size_t imessage_sanitize_output(char *buf, size_t len) {
             if (hu_output_validator_chain_execute(out_chain, &local_alloc, NULL, buf, len, &cr) ==
                 HU_OK) {
                 hu_observer_emit_validator_decision(NULL, &cr, NULL, len);
-                if (cr.final_decision != HU_VALIDATOR_REJECT && cr.final_text) {
+                if (cr.final_decision == HU_VALIDATOR_REJECT) {
+                    /* Deny-by-default: clear buffer so no unsanitized content reaches iMessage. */
+                    hu_log_warn("imessage", NULL,
+                                "validator chain REJECT (via %s) — suppressing iMessage send",
+                                cr.deciding_validator_name ? cr.deciding_validator_name
+                                                           : "unknown");
+                    buf[0] = '\0';
+                    len = 0;
+                } else if (cr.final_text) {
                     if (cr.final_text != buf && cr.final_text_len <= len) {
                         memcpy(buf, cr.final_text, cr.final_text_len);
                         len = cr.final_text_len;

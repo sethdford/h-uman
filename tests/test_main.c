@@ -247,6 +247,7 @@ void run_stop_sequences_tests(void);
 void run_validators_builtin_tests(void);
 void run_pattern_c_paths_tests(void);
 void run_validators_persona_safety_tests(void);
+void run_validator_reject_discards_tests(void);
 void run_validator_telemetry_tests(void);
 void run_validator_chain_cache_tests(void);
 void run_daemon_e2e_validator_tests(void);
@@ -835,6 +836,7 @@ int main(int argc, char **argv) {
     run_validators_builtin_tests();
     run_pattern_c_paths_tests();
     run_validators_persona_safety_tests();
+    run_validator_reject_discards_tests();
     run_validator_telemetry_tests();
     run_validator_chain_cache_tests();
     run_daemon_e2e_validator_tests();

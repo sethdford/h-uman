@@ -2674,6 +2674,7 @@ set(HU_TEST_SOURCES
     tests/test_validators_builtin.c
     tests/test_pattern_c_paths.c
     tests/test_validators_persona_safety.c
+    tests/test_validator_reject_discards.c
     tests/test_validator_telemetry.c
     tests/test_validator_chain_cache.c
     tests/test_daemon_e2e_validator.c

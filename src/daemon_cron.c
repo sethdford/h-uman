@@ -295,8 +295,17 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                     if (hu_output_validator_chain_execute(out_chain, alloc, NULL,
                                                                           response, response_len,
                                                                           &cr) == HU_OK) {
-                                        if (cr.final_decision != HU_VALIDATOR_REJECT &&
-                                            cr.final_text) {
+                                        if (cr.final_decision == HU_VALIDATOR_REJECT) {
+                                            /* Deny-by-default: suppress cron send. */
+                                            hu_log_warn("human", NULL,
+                                                        "validator chain REJECT (via %s) — "
+                                                        "suppressing cron send",
+                                                        cr.deciding_validator_name
+                                                            ? cr.deciding_validator_name
+                                                            : "unknown");
+                                            response[0] = '\0';
+                                            response_len = 0;
+                                        } else if (cr.final_text) {
                                             if (cr.final_text != response &&
                                                 cr.final_text_len <= response_len) {
                                                 memcpy(response, cr.final_text, cr.final_text_len);
@@ -309,6 +318,8 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                     hu_output_validator_chain_destroy(out_chain);
                                 }
                             }
+                            if (response_len == 0)
+                                break;
                             response_len = hu_conversation_vary_complexity(response, response_len,
                                                                            (uint32_t)time(NULL));
                             if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&

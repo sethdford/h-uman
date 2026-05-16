@@ -25,8 +25,20 @@ static hu_error_t formal_structure_validate(void *ctx, hu_allocator_t *alloc,
         return HU_OK;
     }
 
+    /* The strip narrowed the content in-place (new_len < response_len).
+     * Copy into a correctly-sized buffer so the caller can free with
+     * text_len + 1, then discard the over-sized working buffer. */
+    char *out_buf = (char *)alloc->alloc(alloc->ctx, new_len + 1);
+    if (!out_buf) {
+        alloc->free(alloc->ctx, buf, response_len + 1);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(out_buf, buf, new_len);
+    out_buf[new_len] = '\0';
+    alloc->free(alloc->ctx, buf, response_len + 1);
+
     out->decision = HU_VALIDATOR_REWRITE;
-    out->text = buf;
+    out->text = out_buf;
     out->text_len = new_len;
     out->text_owned = true;
     return HU_OK;
