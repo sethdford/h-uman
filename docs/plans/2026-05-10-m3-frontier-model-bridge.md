@@ -42,7 +42,7 @@ multi-month plan to close the gap honestly.
 | GPU acceleration (Metal / CUDA / MLX) | ❌ CPU only | ✅ on Apple Silicon |
 | HuggingFace / GGUF checkpoint loader | ❌ | ✅ |
 | Adapter inference at chat time (apply LoRA to chat provider) | ❌ | ✅ |
-| **D0.3 seam in-tree** — `hu_m3_frontier_adapter_*` fixture load + noop infer (tests) | ✅ `human/ml/m3_frontier_adapter.h` | ✅ **Chat wiring:** `hu_agent_m3_on_provider_success` after every successful frontier provider round in `agent_turn.c` + `agent_stream.c` (primary `chat` / `stream_chat`, GVR, constitutional, metacog regen `chat`, response-guard slim retries, streaming persona rethink) |
+| **D0.3 seam in-tree** — `hu_m3_frontier_adapter_*` fixture load + noop infer (tests) | ✅ `human/ml/m3_frontier_adapter.h`. **Honest caveat (audit 2026-05-16):** `hu_agent_m3_on_provider_success` is wired across 5 call sites, but invokes `hu_m3_frontier_adapter_noop_infer` which is `(void)adapter; return HU_OK` (`src/ml/m3_frontier_adapter.c:89`). No gradient accumulation, no signal capture — the seam exists structurally so the eventual tensor path doesn't need to re-touch call sites. Treat as plumbing, NOT as a working personalization signal. | ✅ **Chat wiring (plumbing only):** `hu_agent_m3_on_provider_success` after every successful frontier provider round in `agent_turn.c` + `agent_stream.c` (primary `chat` / `stream_chat`, GVR, constitutional, metacog regen `chat`, response-guard slim retries, streaming persona rethink) |
 | Bank-from-history one-command on-ramp | ✅ `hu_persona_banks_extract_from_history` + `--from-history` flag, PII-redacted, quality-filtered, dedup'd | ✅ |
 
 # Why this matters
@@ -437,6 +437,16 @@ fixture adapter at bootstrap (`hu_agent_m3_adapter_attach`), the runtime
 invokes `hu_m3_frontier_adapter_noop_infer` after each **successful** provider
 LLM interaction listed below (stub today; tensor path replaces noop later).
 
+> **AUDIT NOTE (2026-05-16):** `hu_m3_frontier_adapter_noop_infer` is
+> `(void)adapter; return HU_OK` at `src/ml/m3_frontier_adapter.c:89`.
+> It accumulates no gradient, captures no signal, persists no state.
+> The chat hot-path call sites exist *only* so the tensor path
+> doesn't need to re-edit them later. **Do not interpret "D0.3
+> wired" as "personalization signal flows."** Whether the tensor
+> path that replaces this no-op actually moves the persona-fidelity
+> metric (`hu_persona_fidelity_score_l1` + the L1/L2 stack in
+> `src/eval/persona_fidelity.c`) is the actual M3 success criterion.
+
 | Site | File |
 |------|------|
 | Primary `chat` + on-device→cloud fallback `chat` | `src/agent/agent_turn.c` |
@@ -475,7 +485,7 @@ Pick this up when ANY of these become true:
 |------|------|-------|
 | 2026-05-10 | 0 | FIX 15: `--checkpoint` honest, caveat printed, plan doc landed |
 | 2026-05-10 | 4.0 | FIX 20: huml chat-time LoRA merge — `hu_gpt_attach_lora` wired into provider load/unload; e2e disk-roundtrip test asserts forward-pass bias |
-| 2026-05-11 | D0.3 | `hu_agent_m3_on_provider_success` wired across turn + stream paths (GVR, constitutional, metacog regen, guard retry, stream_chat, rethink) |
+| 2026-05-11 | D0.3 | `hu_agent_m3_on_provider_success` wired across turn + stream paths (GVR, constitutional, metacog regen, guard retry, stream_chat, rethink). **AUDITED 2026-05-16:** the hook is structurally wired but invokes `hu_m3_frontier_adapter_noop_infer`, a `(void)adapter; return HU_OK` no-op (`src/ml/m3_frontier_adapter.c:89`). Status is "call sites exist," NOT "personalization signal flows." Do not cite this row as evidence that M3 has shipped. |
 | 2026-05-11 | Bridge A | `llamacpp` vtable: non-NULL `chat` (delegates to `chat_with_system` like `huml_chat`) + `supports_streaming` → false so `hu_agent_turn_stream` never derefs NULL |
 | 2026-05-11 | Bridge A | CMake: system libllama resolution — `find_package(Llama)` → pkg-config → Homebrew/Linux prefix probe; vendored `third_party/llama.cpp/` still preferred. Test build mirrors include-only (link rides on `human_core` PUBLIC). Coverage: `test_llamacpp_chat_rejects_null_args`. |
 | 2026-05-11 | Bridge A | `llamacpp.c` ported to **modern llama.cpp API (b3000+)**: `llama_model_load_from_file` / `llama_init_from_model` / `llama_model_free` (the `_load_model_from_file` / `_new_context_with_model` / `_free_model` spellings are `-Werror=deprecated` traps under recent libllama). Adapter API: `llama_adapter_lora_init` + `llama_set_adapters_lora(ctx, &a, 1, &scale)` (the modern API has no per-adapter remove; clear by setting an empty array). Linked path now compiles cleanly against Homebrew `llama.cpp@b6981+`. |

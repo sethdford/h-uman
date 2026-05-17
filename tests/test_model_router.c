@@ -1,7 +1,7 @@
-#include "test_framework.h"
 #include "human/agent/model_router.h"
-#include "human/provider.h"
 #include "human/core/allocator.h"
+#include "human/provider.h"
+#include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -42,7 +42,8 @@ static void normal_question_routes_higher(void) {
 
 static void emotional_heavy_routes_deep(void) {
     cfg = hu_model_router_default_config();
-    const char *msg = "I don't know what to do. Mom passed away last night and I'm terrified of what comes next";
+    const char *msg =
+        "I don't know what to do. Mom passed away last night and I'm terrified of what comes next";
     hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), "family", 6, 2, 5);
     HU_ASSERT(sel.tier >= HU_TIER_ANALYTICAL);
     HU_ASSERT(sel.thinking_budget >= 4096);
@@ -58,7 +59,8 @@ static void family_gets_upgraded(void) {
 
 static void advice_question_gets_analytical(void) {
     cfg = hu_model_router_default_config();
-    const char *msg = "should i take the job offer or stay where i am? what do you think about the trade-offs";
+    const char *msg =
+        "should i take the job offer or stay where i am? what do you think about the trade-offs";
     hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), "sister", 6, 20, 3);
     HU_ASSERT(sel.tier >= HU_TIER_ANALYTICAL);
     HU_ASSERT(sel.thinking_budget >= 4096);
@@ -87,7 +89,8 @@ static void null_cfg_returns_default(void) {
 
 static void frustrated_message_not_reflexive(void) {
     cfg = hu_model_router_default_config();
-    const char *msg = "ugh this budget is not working at all, the numbers are broken and i'm so frustrated with it";
+    const char *msg = "ugh this budget is not working at all, the numbers are broken and i'm so "
+                      "frustrated with it";
     hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), "family", 6, 10, 3);
     HU_ASSERT(sel.tier > HU_TIER_REFLEXIVE);
     HU_ASSERT(sel.thinking_budget > 0);
@@ -97,8 +100,8 @@ static void thinking_budget_scales_with_tier(void) {
     cfg = hu_model_router_default_config();
     hu_model_selection_t reflexive = hu_model_route(&cfg, "ok", 2, NULL, 0, 12, 0);
     hu_model_selection_t deep = hu_model_route(
-        &cfg, "I don't know what to do, I'm terrified and need help deciding about the divorce",
-        80, "family", 6, 2, 5);
+        &cfg, "I don't know what to do, I'm terrified and need help deciding about the divorce", 80,
+        "family", 6, 2, 5);
     HU_ASSERT(deep.thinking_budget > reflexive.thinking_budget);
 }
 
@@ -329,8 +332,15 @@ static void judge_system_prompt_not_null(void) {
 }
 
 static void route_populates_global_log(void) {
+    /* Reset the global log first. HU_ROUTE_LOG_SIZE=100 is a fixed
+     * circular buffer; if earlier tests in the suite filled it, the
+     * subsequent record cannot increase `count` because the buffer
+     * saturates at cap. CI failures on PR #104 traced to exactly this
+     * pollution. The test now owns its starting state. */
     hu_route_decision_log_t *log = hu_route_global_log();
+    hu_route_log_init(log);
     size_t before = hu_route_log_count(log);
+    HU_ASSERT(before == 0);
 
     hu_model_router_config_t c = hu_model_router_default_config();
     hu_model_route(&c, "hello there", 11, NULL, 0, 12, 0);
@@ -343,8 +353,8 @@ static void route_populates_global_log(void) {
 
 static void route_with_judge_null_provider_falls_through(void) {
     hu_model_router_config_t c = hu_model_router_default_config();
-    hu_model_selection_t sel = hu_model_route_with_judge(&c, "hello", 5, NULL, 0, 12, 0,
-                                                         NULL, NULL, 0, NULL, NULL);
+    hu_model_selection_t sel =
+        hu_model_route_with_judge(&c, "hello", 5, NULL, 0, 12, 0, NULL, NULL, 0, NULL, NULL);
     HU_ASSERT(sel.source == HU_ROUTE_HEURISTIC);
 }
 
@@ -356,9 +366,9 @@ static void route_with_judge_test_mode_returns_fallback(void) {
     hu_route_cache_t cache;
     hu_route_cache_init(&cache);
 
-    hu_model_selection_t sel = hu_model_route_with_judge(
-        &c, "explain quantum computing", 25, NULL, 0, 12, 0,
-        &dummy, "test-model", 10, &alloc, &cache);
+    hu_model_selection_t sel =
+        hu_model_route_with_judge(&c, "explain quantum computing", 25, NULL, 0, 12, 0, &dummy,
+                                  "test-model", 10, &alloc, &cache);
     HU_ASSERT(sel.source == HU_ROUTE_JUDGE_FALLBACK);
     HU_ASSERT(sel.model != NULL);
     HU_ASSERT(sel.model_len > 0);
@@ -375,9 +385,8 @@ static void route_with_judge_cache_hit_returns_cached(void) {
     int64_t now = (int64_t)time(NULL);
     hu_route_cache_put(&cache, "cached message", 14, now, HU_TIER_DEEP);
 
-    hu_model_selection_t sel = hu_model_route_with_judge(
-        &c, "cached message", 14, NULL, 0, 12, 0,
-        &dummy, "test-model", 10, &alloc, &cache);
+    hu_model_selection_t sel = hu_model_route_with_judge(&c, "cached message", 14, NULL, 0, 12, 0,
+                                                         &dummy, "test-model", 10, &alloc, &cache);
     HU_ASSERT(sel.source == HU_ROUTE_JUDGE_CACHED);
     HU_ASSERT(sel.tier == HU_TIER_DEEP);
 }
@@ -480,9 +489,8 @@ static void judge_cached_reflexive_uses_on_device(void) {
     int64_t now = (int64_t)time(NULL);
     hu_route_cache_put(&cache, "ok sounds good", 14, now, HU_TIER_REFLEXIVE);
 
-    hu_model_selection_t sel = hu_model_route_with_judge(
-        &c, "ok sounds good", 14, NULL, 0, 12, 0,
-        &dummy, "test-model", 10, &alloc, &cache);
+    hu_model_selection_t sel = hu_model_route_with_judge(&c, "ok sounds good", 14, NULL, 0, 12, 0,
+                                                         &dummy, "test-model", 10, &alloc, &cache);
     HU_ASSERT(sel.source == HU_ROUTE_JUDGE_CACHED);
     HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
     HU_ASSERT_STR_EQ(sel.model, c.on_device_model);
@@ -515,9 +523,9 @@ static void conversation_floor_applies_to_judge_fallback(void) {
     hu_model_router_config_t c = hu_model_router_default_config();
     c.conversation_floor = HU_TIER_CONVERSATIONAL;
     hu_allocator_t alloc = hu_system_allocator();
-    hu_provider_t dummy = { .vtable = NULL, .ctx = NULL };
-    hu_model_selection_t sel = hu_model_route_with_judge(
-        &c, "ok", 2, NULL, 0, 10, 0, &dummy, "test", 4, &alloc, NULL);
+    hu_provider_t dummy = {.vtable = NULL, .ctx = NULL};
+    hu_model_selection_t sel =
+        hu_model_route_with_judge(&c, "ok", 2, NULL, 0, 10, 0, &dummy, "test", 4, &alloc, NULL);
     HU_ASSERT(sel.tier >= HU_TIER_CONVERSATIONAL);
 }
 

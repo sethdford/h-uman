@@ -1,24 +1,24 @@
 #include "human/agent.h"
 #include "human/agent/approval_gate.h"
-#include "human/agent/response_verifier.h"
 #include "human/agent/awareness.h"
 #include "human/agent/commitment_store.h"
 #include "human/agent/humanness.h"
 #include "human/agent/idempotency.h"
 #include "human/agent/pattern_radar.h"
+#include "human/agent/response_verifier.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/superhuman_commitment.h"
 #include "human/agent/superhuman_emotional.h"
 #include "human/agent/superhuman_predictive.h"
 #include "human/agent/superhuman_silence.h"
 #include "human/agent/workflow_event.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/config.h"
 #include "human/core/log.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
 #include "human/memory/tiers.h"
 #include "human/webhook.h"
-#include "human/agent/world_model_bridge.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/scheduler.h"
 #include "human/cognition/db.h"
@@ -57,6 +57,7 @@
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/hook.h"
+#include "human/hook_pipeline.h"
 #include "human/memory/stm.h"
 #include "human/observer.h"
 #include "human/persona.h"
@@ -459,8 +460,7 @@ hu_error_t hu_agent_from_config(
         memcpy(out->personal_model.core.user_name, out->persona->name, n);
         out->personal_model.core.user_name[n] = '\0';
     }
-    if (out->persona && out->persona->identity &&
-        out->personal_model.core.user_bio[0] == '\0') {
+    if (out->persona && out->persona->identity && out->personal_model.core.user_bio[0] == '\0') {
         size_t n = strlen(out->persona->identity);
         if (n > sizeof(out->personal_model.core.user_bio) - 1)
             n = sizeof(out->personal_model.core.user_bio) - 1;
@@ -882,8 +882,7 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
         return;
     size_t path_len = strlen(path);
     hu_m3_frontier_adapter_t *opened = NULL;
-    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK &&
-        opened)
+    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK && opened)
         agent->m3_adapter = opened;
 }
 
@@ -934,8 +933,8 @@ void hu_agent_set_tom_scenario(hu_agent_t *agent, const char *premise, const cha
                                      sizeof(agent->tom_scenario_category), category);
 }
 
-hu_error_t hu_agent_self_rag_apply(hu_agent_t *agent, const char *draft, size_t draft_len,
-                                   int mode, char **swapped_out, size_t *swapped_len_out) {
+hu_error_t hu_agent_self_rag_apply(hu_agent_t *agent, const char *draft, size_t draft_len, int mode,
+                                   char **swapped_out, size_t *swapped_len_out) {
     if (!agent || !draft || draft_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
     if (!agent->w7_facade || !agent->memory_session_id || agent->memory_session_id_len == 0)
@@ -1016,8 +1015,7 @@ void hu_agent_deinit(hu_agent_t *agent) {
              * case of a long-running daemon that ingested signal hours
              * ago and is shutting down without another turn to trigger
              * the per-turn decay. Keeps the on-disk model bounded. */
-            (void)hu_personal_model_apply_decay(&agent->personal_model,
-                                                (int64_t)time(NULL));
+            (void)hu_personal_model_apply_decay(&agent->personal_model, (int64_t)time(NULL));
             (void)hu_personal_model_save(&agent->personal_model, pm_path);
         }
     }
@@ -1261,8 +1259,8 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
             char audit_path[512];
             int ap = snprintf(audit_path, sizeof(audit_path), "%s/.human/audit_log.db", home);
             if (ap > 0 && (size_t)ap < sizeof(audit_path)) {
-                hu_error_t ae = hu_w7_audit_log_open(agent->w7_facade, alloc,
-                                                     audit_path, NULL, &agent->w15_audit_log);
+                hu_error_t ae = hu_w7_audit_log_open(agent->w7_facade, alloc, audit_path, NULL,
+                                                     &agent->w15_audit_log);
                 if (ae != HU_OK)
                     hu_log_warn("agent", NULL, "W15 audit log open failed: %s",
                                 hu_error_string(ae));
@@ -1570,6 +1568,65 @@ hu_tool_t *hu_agent_internal_find_tool(hu_agent_t *agent, const char *name, size
         }
     }
     return NULL;
+}
+
+hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *tool,
+                                                 const char *tool_name, size_t tool_name_len,
+                                                 const char *args_json, size_t args_json_len,
+                                                 const hu_json_value_t *args_parsed,
+                                                 hu_tool_result_t *out) {
+    if (!agent || !tool || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Normalize hook-context args. Pre-hooks receive the JSON text the agent
+     * sent to the tool — NULL means "no args provided," which we represent
+     * to the hook as an empty string for predictable shell escaping. */
+    const char *hook_args = args_json ? args_json : "";
+    size_t hook_args_len = args_json ? args_json_len : 0;
+
+    /* Pre-tool hook. A DENY decision short-circuits the dispatch: the tool's
+     * execute() is NOT called and *out is populated with a failure result. */
+    if (agent->hook_registry) {
+        hu_hook_result_t pre_res;
+        memset(&pre_res, 0, sizeof(pre_res));
+        hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
+                                  hook_args, hook_args_len, &pre_res);
+        if (pre_res.decision == HU_HOOK_DENY) {
+            const char *deny_msg = pre_res.message ? pre_res.message : "denied by hook";
+            size_t deny_len = pre_res.message ? pre_res.message_len : 14;
+            char *deny_copy = hu_strndup(agent->alloc, deny_msg, deny_len);
+            hu_hook_result_free(agent->alloc, &pre_res);
+            *out = hu_tool_result_fail(deny_copy ? deny_copy : "denied by hook",
+                                       deny_copy ? deny_len : 14);
+            out->error_msg_owned = deny_copy != NULL;
+            return HU_OK;
+        }
+        hu_hook_result_free(agent->alloc, &pre_res);
+    }
+
+    /* Execute. The tool is responsible for populating *out; we treat a missing
+     * execute pointer as an empty-success no-op to match the historical
+     * behavior of the inline dispatch sites being replaced. */
+    if (tool->vtable && tool->vtable->execute) {
+        tool->vtable->execute(tool->ctx, agent->alloc, args_parsed, out);
+    } else {
+        *out = hu_tool_result_fail("tool has no execute method", 26);
+    }
+
+    /* Post-tool hook. Informational only — the result has already been
+     * produced. Post-hooks log / audit / scrub but cannot veto here. */
+    if (agent->hook_registry) {
+        hu_hook_result_t post_res;
+        memset(&post_res, 0, sizeof(post_res));
+        const char *output = out->output ? out->output : "";
+        size_t output_len = out->output ? out->output_len : 0;
+        hu_hook_pipeline_post_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
+                                   hook_args, hook_args_len, output, output_len, out->success,
+                                   &post_res);
+        hu_hook_result_free(agent->alloc, &post_res);
+    }
+
+    return HU_OK;
 }
 
 hu_error_t hu_agent_run_single(hu_agent_t *agent, const char *system_prompt,

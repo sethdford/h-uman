@@ -32,9 +32,9 @@ static hu_error_t apple_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_req
 
 static hu_error_t apple_chat_with_system(void *ctx, hu_allocator_t *alloc,
                                          const char *system_prompt, size_t system_prompt_len,
-                                         const char *message, size_t message_len,
-                                         const char *model, size_t model_len, double temperature,
-                                         char **out, size_t *out_len) {
+                                         const char *message, size_t message_len, const char *model,
+                                         size_t model_len, double temperature, char **out,
+                                         size_t *out_len) {
     hu_chat_message_t msgs[2];
     memset(msgs, 0, sizeof(msgs));
     size_t nmsg = 0;
@@ -211,6 +211,18 @@ static hu_error_t apple_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_req
         }
     }
 
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                hu_json_array_push(alloc, stop_arr,
+                                   hu_json_string_new(alloc, request->stop_sequences[i],
+                                                      strlen(request->stop_sequences[i])));
+            }
+            hu_json_object_set(alloc, root, "stop", stop_arr);
+        }
+    }
+
     char *body = NULL;
     size_t body_len = 0;
     hu_error_t err = hu_json_stringify(alloc, root, &body, &body_len);
@@ -360,7 +372,7 @@ typedef struct {
 } apple_stream_ctx_t;
 
 static void apple_sse_event_cb(const char *event_type, size_t event_type_len, const char *data,
-                                size_t data_len, void *userdata) {
+                               size_t data_len, void *userdata) {
     apple_stream_ctx_t *sctx = (apple_stream_ctx_t *)userdata;
     if (sctx->last_error != HU_OK)
         return;
@@ -429,8 +441,7 @@ static size_t apple_stream_write_cb(const char *chunk, size_t chunk_len, void *u
     apple_stream_ctx_t *sctx = (apple_stream_ctx_t *)userdata;
     if (sctx->last_error != HU_OK)
         return 0;
-    hu_error_t err =
-        hu_sse_parser_feed(&sctx->parser, chunk, chunk_len, apple_sse_event_cb, sctx);
+    hu_error_t err = hu_sse_parser_feed(&sctx->parser, chunk, chunk_len, apple_sse_event_cb, sctx);
     if (err != HU_OK)
         sctx->last_error = err;
     return chunk_len;
@@ -513,6 +524,18 @@ static hu_error_t apple_stream_chat(void *ctx, hu_allocator_t *alloc,
             hu_json_object_set(alloc, obj, "content",
                                hu_json_string_new(alloc, m->content, m->content_len));
         hu_json_array_push(alloc, msgs_arr, obj);
+    }
+
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            for (size_t i = 0; i < request->stop_sequences_count; i++) {
+                hu_json_array_push(alloc, stop_arr,
+                                   hu_json_string_new(alloc, request->stop_sequences[i],
+                                                      strlen(request->stop_sequences[i])));
+            }
+            hu_json_object_set(alloc, root, "stop", stop_arr);
+        }
     }
 
     char *body = NULL;

@@ -72,9 +72,12 @@
 #include "human/daemon_routing.h"
 
 #include "human/agent/governor.h"
+#include "human/agent/output_validator_chain.h"
 #include "human/agent/proactive.h"
 #include "human/agent/proactive_ext.h"
+#include "human/agent/validators/builtin.h"
 #include "human/context/self_awareness.h"
+#include "human/observability/validator_telemetry.h"
 #ifdef HU_HAS_CRON
 #include "human/cron.h"
 #include "human/crontab.h"
@@ -1100,9 +1103,11 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 sched_now, sched_ch, strlen(sched_ch), sched_contact, sizeof(sched_contact),
                 sched_channel, sizeof(sched_channel), sched_msg, sizeof(sched_msg));
             if (sched_len > 0) {
-                sched_len = hu_conversation_strip_channel_tags(sched_msg, sched_len);
-                sched_len = hu_conversation_strip_ai_phrases(sched_msg, sched_len);
-                sched_len = hu_conversation_strip_formal_structure(sched_msg, sched_len);
+                hu_validator_chain_apply_default_in_place(alloc, agent ? agent->observer : NULL,
+                                                          NULL, 0, "scheduled send", sched_msg,
+                                                          &sched_len, sizeof(sched_msg));
+                if (sched_len == 0)
+                    continue;
                 sched_len =
                     hu_conversation_vary_complexity(sched_msg, sched_len, (uint32_t)time(NULL));
                 if (sched_len > 1 && sched_msg[0] >= 'A' && sched_msg[0] <= 'Z' &&
@@ -1744,10 +1749,11 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                                   strlen(cp->contact_id), "proactive", 9))
                         skip = true;
                     if (!skip && channels[c].channel->vtable->send) {
-                        response_len = hu_conversation_strip_channel_tags(response, response_len);
-                        response_len = hu_conversation_strip_ai_phrases(response, response_len);
-                        response_len =
-                            hu_conversation_strip_formal_structure(response, response_len);
+                        hu_validator_chain_apply_default_in_place(
+                            alloc, agent ? agent->observer : NULL, NULL, 0, "proactive send",
+                            response, &response_len, response_len + 1);
+                        if (response_len == 0)
+                            skip = true;
                         response_len =
                             hu_conversation_vary_complexity(response, response_len, (uint32_t)now);
                         if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&
@@ -2015,6 +2021,7 @@ typedef struct hu_daemon_stream_ctx {
     hu_bus_t *bus;
     char channel[HU_BUS_CHANNEL_LEN];
     char id[HU_BUS_ID_LEN];
+    hu_allocator_t *alloc; /* optional; when non-NULL, stream text chunks run the outbound chain */
 } hu_daemon_stream_ctx_t;
 
 #ifndef HU_IS_TEST
@@ -2084,10 +2091,66 @@ static void daemon_stream_event_cb(const hu_agent_stream_event_t *event, void *c
         daemon_bus_set_message(&ev, event->data, event->data_len);
         {
             size_t slen = strnlen(ev.message, HU_BUS_MSG_LEN);
-            slen = hu_conversation_strip_channel_tags(ev.message, slen);
-            ev.message[slen] = '\0';
             if (slen == 0)
                 return;
+            if (sc->alloc) {
+                /* Run outbound validator chain (covers channel-tag strip, ai-phrase
+                 * strip, F2 assistant-closer, and safety validators). */
+                hu_output_validator_chain_t *out_chain = NULL;
+                if (hu_validators_build_default_outbound_chain(sc->alloc, NULL, 0, &out_chain) ==
+                    HU_OK) {
+                    hu_chain_result_t cr;
+                    memset(&cr, 0, sizeof(cr));
+                    bool chain_ok = hu_output_validator_chain_execute(
+                                        out_chain, sc->alloc, NULL, ev.message, slen, &cr) == HU_OK;
+                    if (chain_ok) {
+                        /* Emit telemetry — stream ctx has no observer; NULL is safe. */
+                        hu_observer_emit_validator_decision(NULL, &cr, NULL, slen);
+                        if (cr.final_decision == HU_VALIDATOR_REJECT) {
+                            hu_chain_result_free(sc->alloc, &cr);
+                            hu_output_validator_chain_destroy(out_chain);
+                            return; /* drop rejected chunk */
+                        }
+                        if (cr.final_text && cr.final_text_len > 0) {
+                            /* CRITICAL #1: truncate to HU_BUS_MSG_LEN-1 rather
+                             * than skipping entirely when output is oversize —
+                             * a 4095-byte chunk must not escape the chain
+                             * unmodified. */
+                            size_t copy_len = cr.final_text_len < HU_BUS_MSG_LEN
+                                                  ? cr.final_text_len
+                                                  : HU_BUS_MSG_LEN - 1;
+                            memcpy(ev.message, cr.final_text, copy_len);
+                            slen = copy_len;
+                            ev.message[slen] = '\0';
+                        }
+                        hu_chain_result_free(sc->alloc, &cr);
+                    }
+                    hu_output_validator_chain_destroy(out_chain);
+                    if (!chain_ok) {
+                        /* Defensive fallback (Sprint 3 US-2 / Sprint 4 US-9):
+                         * The primary outbound path uses hu_output_validator_chain_execute
+                         * above.  This strip survives only when the chain failed to
+                         * build/execute (e.g., allocation failure mid-stream).  Do not
+                         * remove without restoring an equivalent safety net — see audit
+                         * notes in sprints/sprint-4/notes-from-sprint-3.md. */
+                        slen = hu_conversation_strip_channel_tags(ev.message, slen);
+                        ev.message[slen] = '\0';
+                        if (slen == 0)
+                            return;
+                    }
+                }
+                if (slen == 0)
+                    return;
+            } else {
+                /* Defensive fallback (Sprint 3 US-2 / Sprint 4 US-9):
+                 * Same intent as the chain-failure arm above; see that comment.
+                 * This arm fires when no allocator is available (chain cannot be
+                 * built at all), not on chain-execute failure. */
+                slen = hu_conversation_strip_channel_tags(ev.message, slen);
+                ev.message[slen] = '\0';
+                if (slen == 0)
+                    return;
+            }
         }
         break;
     case HU_AGENT_STREAM_THINKING:
@@ -9309,12 +9372,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             for (int bi = 0; bi < n; bi++) {
                                 if (burst_msgs[bi][0]) {
                                     size_t bm_len = strlen(burst_msgs[bi]);
-                                    bm_len =
-                                        hu_conversation_strip_channel_tags(burst_msgs[bi], bm_len);
-                                    bm_len =
-                                        hu_conversation_strip_ai_phrases(burst_msgs[bi], bm_len);
-                                    bm_len = hu_conversation_strip_formal_structure(burst_msgs[bi],
-                                                                                    bm_len);
+                                    hu_validator_chain_apply_default_in_place(
+                                        alloc, agent ? agent->observer : NULL, NULL, 0, "burst msg",
+                                        burst_msgs[bi], &bm_len, sizeof(burst_msgs[bi]));
+                                    if (bm_len == 0)
+                                        continue;
                                     bm_len = hu_conversation_vary_complexity(
                                         burst_msgs[bi], bm_len, burst_seed + (uint32_t)bi);
                                     if (bm_len > 1 && burst_msgs[bi][0] >= 'A' &&
@@ -9407,6 +9469,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_daemon_stream_ctx_t stream_ctx;
                         memset(&stream_ctx, 0, sizeof(stream_ctx));
                         stream_ctx.bus = &daemon_outbound_bus;
+                        stream_ctx.alloc = alloc;
                         if (agent->active_channel && agent->active_channel_len > 0) {
                             size_t nc = agent->active_channel_len < HU_BUS_CHANNEL_LEN - 1
                                             ? agent->active_channel_len
@@ -10648,9 +10711,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     /* Strip pipeline + send buffer cursor: shared by prod and HU_IS_TEST so tests
                      * exercise the same outbound text shaping as production. */
                     char *send_buf_ack = NULL;
-                    response_len = hu_conversation_strip_channel_tags(response, response_len);
-                    response_len = hu_conversation_strip_ai_phrases(response, response_len);
-                    response_len = hu_conversation_strip_formal_structure(response, response_len);
+                    hu_validator_chain_apply_default_in_place(
+                        alloc, agent ? agent->observer : NULL, NULL, 0, "main response send",
+                        response, &response_len, response_len + 1);
 
 #ifndef HU_IS_TEST
                     /* Apply typing quirks from persona overlay as post-processing.
@@ -11670,30 +11733,29 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 if (dt_err == HU_OK && dt_resp && dt_resp_len > 0 &&
                                     dt_resp_len < 200) {
                                     /* Post-process double-text through the same BTH pipeline */
-                                    dt_resp_len =
-                                        hu_conversation_strip_channel_tags(dt_resp, dt_resp_len);
-                                    dt_resp_len =
-                                        hu_conversation_strip_ai_phrases(dt_resp, dt_resp_len);
-                                    dt_resp_len = hu_conversation_strip_formal_structure(
-                                        dt_resp, dt_resp_len);
-                                    dt_resp_len = hu_conversation_vary_complexity(
-                                        dt_resp, dt_resp_len, dt_seed);
-                                    if (dt_resp_len > 1 && dt_resp[0] >= 'A' && dt_resp[0] <= 'Z' &&
-                                        dt_resp[1] >= 'a' && dt_resp[1] <= 'z' &&
-                                        dt_resp[0] != 'I') {
-                                        dt_resp[0] = (char)(dt_resp[0] + 32);
+                                    hu_validator_chain_apply_default_in_place(
+                                        alloc, agent ? agent->observer : NULL, NULL, 0,
+                                        "double-text send", dt_resp, &dt_resp_len, dt_resp_len + 1);
+                                    if (dt_resp_len > 0) {
+                                        dt_resp_len = hu_conversation_vary_complexity(
+                                            dt_resp, dt_resp_len, dt_seed);
+                                        if (dt_resp_len > 1 && dt_resp[0] >= 'A' &&
+                                            dt_resp[0] <= 'Z' && dt_resp[1] >= 'a' &&
+                                            dt_resp[1] <= 'z' && dt_resp[0] != 'I') {
+                                            dt_resp[0] = (char)(dt_resp[0] + 32);
+                                        }
+                                        if (dt_resp_len > 1 && dt_resp[dt_resp_len - 1] == '.') {
+                                            dt_resp[dt_resp_len - 1] = '\0';
+                                            dt_resp_len--;
+                                        }
+                                        unsigned int dt_delay = 10000u + (dt_seed % 35000u);
+                                        usleep((useconds_t)(dt_delay * 1000u));
+                                        ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                                  send_target_len, dt_resp,
+                                                                  dt_resp_len, NULL, 0);
+                                        if (agent->bth_metrics)
+                                            agent->bth_metrics->double_texts++;
                                     }
-                                    if (dt_resp_len > 1 && dt_resp[dt_resp_len - 1] == '.') {
-                                        dt_resp[dt_resp_len - 1] = '\0';
-                                        dt_resp_len--;
-                                    }
-                                    unsigned int dt_delay = 10000u + (dt_seed % 35000u);
-                                    usleep((useconds_t)(dt_delay * 1000u));
-                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                              send_target_len, dt_resp, dt_resp_len,
-                                                              NULL, 0);
-                                    if (agent->bth_metrics)
-                                        agent->bth_metrics->double_texts++;
                                 }
                                 if (dt_resp)
                                     alloc->free(alloc->ctx, dt_resp, dt_resp_len + 1);

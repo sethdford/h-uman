@@ -97,3 +97,12 @@ if [ -x "scripts/check_no_yntp_holdout_staged.sh" ]; then
         exit 1
     fi
 fi
+
+# Check that staged test files reference at least one production symbol (Sprint 4 US-10)
+if [ -x "scripts/check-test-references.sh" ]; then
+    if ! scripts/check-test-references.sh; then
+        echo "Test-references check failed. See output above."
+        echo "Add '// @covers-none' to suppress for intentional standalone tests."
+        exit 1
+    fi
+fi

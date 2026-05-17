@@ -54,6 +54,7 @@ option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
 option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time LoRA merging (W13 Bridge A)" OFF)
+option(HU_ENABLE_MLX_PROVIDER "Enable MLX provider (M3 Bridge B) — stub when OFF, subprocess MLX runtime when ON" OFF)
 # Phase 1 (RL SOTA) — Metal GPU offload for the vendored llama.cpp build.
 # Defaults ON only on Apple platforms (the only OS llama.cpp ships Metal
 # for). Linux and other non-Apple targets default OFF; setting it ON
@@ -424,6 +425,7 @@ set(HU_CORE_SOURCES
     src/observability/bth_metrics.c
     src/observability/otlp.c
     src/observability/background_registry.c
+    src/observability/validator_telemetry.c
     src/tunnel/none.c
     src/tunnel/root.c
     src/gateway/gateway.c
@@ -519,6 +521,19 @@ set(HU_CORE_SOURCES
     src/agent/preferences.c
     src/agent/awareness.c
     src/agent/outcomes.c
+    src/agent/output_validator.c
+    src/agent/output_validator_chain.c
+    src/agent/stop_sequence_registry.c
+    src/agent/validators/response_guard_validator.c
+    src/agent/validators/channel_tags_validator.c
+    src/agent/validators/ai_phrases_validator.c
+    src/agent/validators/formal_structure_validator.c
+    src/agent/validators/cot_audit_validator.c
+    src/agent/validators/persona_narrator_validator.c
+    src/agent/validators/assistant_closer_validator.c
+    src/agent/validators/role_consistency_validator.c
+    src/agent/validators/persona_fidelity_validator.c
+    src/agent/validators/default_chains.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
@@ -630,6 +645,7 @@ set(HU_CORE_SOURCES
     src/providers/openai.c
     src/providers/anthropic.c
     src/providers/gemini.c
+    src/providers/structured_output.c
     src/providers/ollama.c
     src/providers/openrouter.c
     src/providers/compatible.c
@@ -952,6 +968,8 @@ list(APPEND HU_CORE_SOURCES
     src/a2a.c
     src/eval.c
     src/eval/consistency.c
+    src/eval/persona_fidelity.c
+    src/memory/fact_extract_llm.c
     src/evaluation/evaluation.c
     src/evaluation/evaluation_dataset_loader.c
     src/evaluation/evaluation_locomo.c
@@ -1007,6 +1025,7 @@ list(APPEND HU_CORE_SOURCES
     src/voice/semantic_eot.c
     src/providers/embedded.c
     src/providers/llamacpp.c
+    src/providers/mlx.c
     src/providers/llamacpp_sampling.c
     src/providers/llamacpp_kvcache.c
     src/providers/llamacpp_decode.c
@@ -1039,6 +1058,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/auto_tune.c
     src/persona/voice_maturity.c
     src/persona/style_critique.c
+    src/persona/style_mirror.c
     src/persona/style_clone.c
     src/persona/training.c
     src/persona/life_sim.c
@@ -1647,6 +1667,9 @@ set(HU_LLAMACPP_FOUND OFF CACHE INTERNAL "Whether llama.cpp was located")
 set(HU_LLAMACPP_INCLUDE_DIRS "" CACHE INTERNAL "")
 set(HU_LLAMACPP_LIBRARIES "" CACHE INTERNAL "")
 set(HU_LLAMACPP_LIBRARY_DIRS "" CACHE INTERNAL "")
+if(HU_ENABLE_MLX_PROVIDER)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_MLX_PROVIDER=1)
+endif()
 if(HU_ENABLE_LLAMACPP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_LLAMACPP=1)
     set(HU_LLAMACPP_FOUND ON CACHE INTERNAL "")
@@ -2472,6 +2495,13 @@ set(HU_TEST_SOURCES
     tests/test_canvas_persist.c
     tests/test_canvas_tool.c
     tests/test_consistency.c
+    tests/test_mlx_provider.c
+    tests/test_persona_fidelity.c
+    tests/test_persona_fidelity_cross.c
+    tests/test_persona_fidelity_judge.c
+    tests/test_persona_fidelity_validator.c
+    tests/test_fact_extract_llm.c
+    tests/test_dpo_extractor_integration.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
@@ -2479,10 +2509,6 @@ set(HU_TEST_SOURCES
     tests/test_style_self_critique.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
-    tests/test_contact_send_recency.c
-    tests/test_imessage_outbound_dedup.c
-    tests/test_config_identity_links.c
-    tests/test_memory_session_scoping.c
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
@@ -2693,6 +2719,16 @@ set(HU_TEST_SOURCES
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
+    tests/test_output_validator.c
+    tests/test_chain_failure_paths.c
+    tests/test_agent_fail_path_regressions.c
+    tests/test_validators_builtin.c
+    tests/test_pattern_c_paths.c
+    tests/test_validators_persona_safety.c
+    tests/test_validator_reject_discards.c
+    tests/test_validator_telemetry.c
+    tests/test_validator_chain_cache.c
+    tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c
@@ -2827,6 +2863,7 @@ set(HU_TEST_SOURCES
     tests/test_planner_mcts_wiring.c
     tests/test_cdp.c
     tests/test_emotional_cognition.c
+    tests/test_emotional_contagion.c
     tests/test_evolving_cognition.c
     tests/test_metacognition.c
     tests/test_humanness_frontiers.c
@@ -2838,7 +2875,7 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c)
 list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
@@ -2874,6 +2911,7 @@ list(APPEND HU_TEST_SOURCES tests/test_agent_registry.c)
 list(APPEND HU_TEST_SOURCES tests/test_pwa.c)
 list(APPEND HU_TEST_SOURCES tests/test_integration.c)
 list(APPEND HU_TEST_SOURCES tests/test_hook_pipeline.c)
+list(APPEND HU_TEST_SOURCES tests/test_agent_dispatch_hooks.c)
 list(APPEND HU_TEST_SOURCES tests/test_config_reload.c)
 list(APPEND HU_TEST_SOURCES tests/test_plugin_hooks.c)
 
@@ -2927,6 +2965,10 @@ list(APPEND HU_TEST_SOURCES
     tests/test_dpo.c
     tests/test_dpo_miner.c
     tests/test_molora_router.c
+    tests/test_memory_session_scoping.c
+    tests/test_contact_send_recency.c
+    tests/test_imessage_outbound_dedup.c
+    tests/test_config_identity_links.c
     tests/test_sota_e2e.c
     tests/test_sota_adversarial.c
     tests/test_otel.c
@@ -2957,6 +2999,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_bootstrap.c
     tests/test_thread_pool.c
     tests/test_permission.c
+    tests/test_shell_sandbox.c
     tests/test_mcp_manager.c
     tests/test_compaction_structured.c
     tests/test_session_persist.c
@@ -2966,6 +3009,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_adversarial_dos_protocol.c
     tests/test_adversarial_concurrency.c
     tests/test_adversarial_integration.c
+    tests/test_stop_sequences.c
+    tests/test_structured_output.c
 )
 
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)
@@ -3600,6 +3645,14 @@ if(HU_ENABLE_FUZZ)
     target_link_libraries(fuzz_session_deserialization PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_session_deserialization PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
     target_link_options(fuzz_session_deserialization PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+
+    add_executable(fuzz_output_validator_chain fuzz/fuzz_output_validator_chain.c)
+    set_target_properties(fuzz_output_validator_chain PROPERTIES LINKER_LANGUAGE CXX)
+    target_compile_definitions(fuzz_output_validator_chain PRIVATE HU_IS_TEST=1)
+    target_compile_options(fuzz_output_validator_chain PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(fuzz_output_validator_chain PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
+    target_compile_options(fuzz_output_validator_chain PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_output_validator_chain PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
 endif()
 
 # Benchmark suite (micro-benchmarks of core operations)

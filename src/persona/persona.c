@@ -1,4 +1,5 @@
 #include "human/persona.h"
+#include "human/agent/validators/builtin.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
@@ -187,6 +188,12 @@ static void free_contact_profile(hu_allocator_t *alloc, hu_contact_profile_t *cp
 void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona) {
     if (!alloc || !persona)
         return;
+
+    /* Destroy cached outbound validator chain (owned since load). */
+    if (persona->outbound_chain) {
+        hu_output_validator_chain_destroy(persona->outbound_chain);
+        persona->outbound_chain = NULL;
+    }
 
     if (persona->name) {
         alloc->free(alloc->ctx, persona->name, persona->name_len + 1);
@@ -1210,6 +1217,9 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
             out->calibrated = hu_json_get_bool(bc, "calibrated", true);
         }
     }
+
+    /* structured_output_enabled — top-level opt-in for JSON-schema response enforcement */
+    out->structured_output_enabled = hu_json_get_bool(root, "structured_output_enabled", false);
 
     /* Parse inner_world */
     {
@@ -2307,6 +2317,18 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
 
     if (oom_on_optional)
         hu_log_error("persona", NULL, "warning: some optional fields dropped due to OOM");
+
+    /* Build and cache the default outbound validator chain for this persona.
+     * The chain is keyed on persona->name for assistant_closer matching.
+     * Build failure is non-fatal — call sites fall back to inline build. */
+    {
+        const char *pname = out->name;
+        size_t pname_len = pname ? out->name_len : 0;
+        hu_output_validator_chain_t *chain = NULL;
+        if (hu_validators_build_default_outbound_chain(alloc, pname, pname_len, &chain) == HU_OK)
+            out->outbound_chain = chain;
+        /* else: out->outbound_chain stays NULL (zeroed by memset at top of function) */
+    }
 
     hu_json_free(alloc, root);
     return HU_OK;

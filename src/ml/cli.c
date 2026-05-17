@@ -8,6 +8,7 @@
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/eval/persona_fidelity.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
 #include "human/memory/personal_model.h"
@@ -840,9 +841,12 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
 
     /* Also run DPO pair extraction from user corrections. */
     {
+        /* default_db must live in the SAME scope as `db_path` — if it lives
+         * inside an inner block, `db_path = default_db` produces a dangling
+         * pointer once the block exits (CodeRabbit 2026-05-17 finding). */
+        char default_db[512] = {0};
         const char *db_path = memory_db ? memory_db : chat_db;
         if (!db_path) {
-            char default_db[512];
             const char *home = getenv("HOME");
             if (home) {
                 snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
@@ -1808,6 +1812,56 @@ hu_error_t hu_ml_cli_lora_baseline(hu_allocator_t *alloc, int argc, const char *
            "[lora-baseline]   min:             %.3f\n"
            "[lora-baseline]   max:             %.3f\n",
            persona_name, scored, mean, min_score, max_score);
+
+    /* Composite L1 — wraps the same scorer above and folds in trait
+     * coverage + turn-to-turn consistency. Reported alongside the
+     * single-axis number so a future M3 A/B has TWO comparable
+     * baselines: the single-axis style match (this CLI's historical
+     * output) and the weighted composite from src/eval/persona_fidelity.c.
+     * Building the response/length arrays here is N + 2 allocations
+     * (one for pointers, one for lengths) over every bank — fine at
+     * fixture scale; if a real persona ever exceeds a few hundred
+     * banked examples this loop should chunk. */
+    {
+        size_t total = 0;
+        for (size_t b = 0; b < persona.example_banks_count; b++)
+            total += persona.example_banks[b].examples_count;
+
+        if (total > 0) {
+            const char **resps = (const char **)alloc->alloc(alloc->ctx, total * sizeof(*resps));
+            size_t *lens = (size_t *)alloc->alloc(alloc->ctx, total * sizeof(*lens));
+            if (resps && lens) {
+                size_t k = 0;
+                for (size_t b = 0; b < persona.example_banks_count; b++) {
+                    const hu_persona_example_bank_t *bank = &persona.example_banks[b];
+                    for (size_t i = 0; i < bank->examples_count; i++) {
+                        const hu_persona_example_t *ex = &bank->examples[i];
+                        resps[k] = ex->response;
+                        lens[k] = (ex->response ? strlen(ex->response) : 0);
+                        k++;
+                    }
+                }
+                hu_persona_fidelity_score_t composite;
+                hu_error_t cerr = hu_persona_fidelity_score_l1(
+                    &target, resps, lens, total, (const char *const *)persona.traits,
+                    persona.traits_count, (const char *const *)persona.preferred_vocab,
+                    persona.preferred_vocab_count, (const char *const *)persona.avoided_vocab,
+                    persona.avoided_vocab_count, &composite);
+                if (cerr == HU_OK && composite.turns_scored > 0) {
+                    printf("[lora-baseline]   composite:       %.3f (style=%.3f traits=%.3f "
+                           "line=%.3f stderr=%.3f n=%zu)\n",
+                           composite.composite, composite.style_match_mean,
+                           composite.trait_coverage_mean, composite.line_consistency_mean,
+                           composite.composite_stderr, composite.turns_scored);
+                }
+            }
+            if (resps)
+                alloc->free(alloc->ctx, resps, total * sizeof(*resps));
+            if (lens)
+                alloc->free(alloc->ctx, lens, total * sizeof(*lens));
+        }
+    }
+
     printf("[lora-baseline] interpretation: scores in [0,1]; the mean is the\n"
            "[lora-baseline]   upper bound a frontier model can plausibly hit\n"
            "[lora-baseline]   without LoRA, since the bank's responses were\n"

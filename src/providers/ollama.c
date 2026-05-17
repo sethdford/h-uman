@@ -215,6 +215,29 @@ static hu_error_t ollama_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
     /* Ollama: skip native tool definitions since supports_native_tools=false.
        The agent injects tool descriptions via system prompt instead. */
 
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *opts = hu_json_object_new(alloc);
+        if (opts) {
+            hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+            if (stop_arr) {
+                bool stop_ok = true;
+                for (size_t i = 0; i < request->stop_sequences_count && stop_ok; i++) {
+                    hu_json_value_t *sv = hu_json_string_new(alloc, request->stop_sequences[i],
+                                                             strlen(request->stop_sequences[i]));
+                    if (!sv) {
+                        hu_json_free(alloc, stop_arr);
+                        stop_ok = false;
+                    } else {
+                        hu_json_array_push(alloc, stop_arr, sv);
+                    }
+                }
+                if (stop_ok)
+                    hu_json_object_set(alloc, opts, "stop", stop_arr);
+            }
+            hu_json_object_set(alloc, root, "options", opts);
+        }
+    }
+
     if (request->response_format && request->response_format_len > 0) {
         hu_json_value_t *rf_obj = hu_json_object_new(alloc);
         if (rf_obj) {
@@ -447,8 +470,7 @@ hu_error_t hu_ollama_create(hu_allocator_t *alloc, const char *api_key, size_t a
         }
         oc->base_url_len = base_url_len;
     } else {
-        oc->base_url = hu_strndup(alloc, HU_OLLAMA_DEFAULT_URL,
-                                  sizeof(HU_OLLAMA_DEFAULT_URL) - 1);
+        oc->base_url = hu_strndup(alloc, HU_OLLAMA_DEFAULT_URL, sizeof(HU_OLLAMA_DEFAULT_URL) - 1);
         if (!oc->base_url) {
             alloc->free(alloc->ctx, oc, sizeof(*oc));
             return HU_ERR_OUT_OF_MEMORY;

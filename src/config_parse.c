@@ -900,43 +900,8 @@ static hu_error_t parse_voice(hu_allocator_t *a, hu_config_t *cfg, const hu_json
     return HU_OK;
 }
 
-/* Parse a single identity_links entry:
- *   { "canonical": "+18018285260", "peers": ["mindy@icloud.com", ...] }
- * On success, populates *out with allocator-owned strings. Returns HU_OK
- * even when the entry is malformed (skip silently — strict parsing of a
- * convenience config is more annoying than helpful). */
-static hu_error_t parse_one_identity_link(hu_allocator_t *a, const hu_json_value_t *entry,
-                                          hu_identity_link_t *out) {
-    out->canonical = NULL;
-    out->peers = NULL;
-    out->peers_len = 0;
-    if (!entry || entry->type != HU_JSON_OBJECT)
-        return HU_OK;
-    const char *canonical = hu_json_get_string(entry, "canonical");
-    if (!canonical || !*canonical)
-        return HU_OK;
-    char *can_dup = hu_strdup(a, canonical);
-    if (!can_dup)
-        return HU_ERR_OUT_OF_MEMORY;
-    out->canonical = can_dup;
-
-    hu_json_value_t *peers_arr = hu_json_object_get(entry, "peers");
-    if (peers_arr && peers_arr->type == HU_JSON_ARRAY) {
-        char **list = NULL;
-        size_t list_len = 0;
-        hu_error_t err = parse_string_array(a, &list, &list_len, peers_arr);
-        if (err != HU_OK) {
-            hu_str_free(a, can_dup);
-            out->canonical = NULL;
-            return err;
-        }
-        out->peers = (const char **)list;
-        out->peers_len = list_len;
-    }
-    return HU_OK;
-}
-
 static hu_error_t parse_session(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {
+    (void)a;
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
     double im = hu_json_get_number(obj, "idle_minutes", cfg->session.idle_minutes);
@@ -952,39 +917,6 @@ static hu_error_t parse_session(hu_allocator_t *a, hu_config_t *cfg, const hu_js
             cfg->session.dm_scope = DirectScopePerChannelPeer;
         else if (strcmp(scope, "per_account_channel_peer") == 0)
             cfg->session.dm_scope = DirectScopePerAccountChannelPeer;
-    }
-
-    /* identity_links: an array of { canonical, peers[] } entries. Each entry
-     * declares that any handle in peers[] should resolve to canonical when
-     * building the session key. This is how Mindy's iPhone number, iCloud
-     * email, and Apple ID land in the same memory namespace. */
-    hu_json_value_t *il = hu_json_object_get(obj, "identity_links");
-    if (il && il->type == HU_JSON_ARRAY && il->data.array.len > 0) {
-        size_t n = il->data.array.len;
-        /* Soft cap — guards against ridiculous configs without erroring. */
-        if (n > 256)
-            n = 256;
-        hu_identity_link_t *links =
-            (hu_identity_link_t *)a->alloc(a->ctx, n * sizeof(hu_identity_link_t));
-        if (!links)
-            return HU_ERR_OUT_OF_MEMORY;
-        memset(links, 0, n * sizeof(hu_identity_link_t));
-        size_t filled = 0;
-        for (size_t i = 0; i < n; i++) {
-            hu_error_t err = parse_one_identity_link(a, il->data.array.items[i], &links[filled]);
-            if (err != HU_OK) {
-                /* Allocation failure: stop here, keep whatever filled successfully. */
-                break;
-            }
-            if (links[filled].canonical)
-                filled++;
-        }
-        if (filled > 0) {
-            cfg->session.identity_links = links;
-            cfg->session.identity_links_len = filled;
-        } else {
-            a->free(a->ctx, links, n * sizeof(hu_identity_link_t));
-        }
     }
     return HU_OK;
 }

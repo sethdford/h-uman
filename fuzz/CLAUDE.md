@@ -18,7 +18,7 @@ cmake --build build-fuzz -j$(nproc)
 - Keep harnesses small and focused — one entry point per file
 - New harnesses must be added to both `CMakeLists.txt` and CI (`ci.yml` fuzz job)
 
-## Existing Harnesses (21)
+## Existing Harnesses (22)
 
 | Harness                 | Target                                       |
 | ----------------------- | -------------------------------------------- |
@@ -43,3 +43,4 @@ cmake --build build-fuzz -j$(nproc)
 | `fuzz_adaptive_rag`     | Adaptive RAG feature extraction + selection  |
 | `fuzz_self_rag`         | Self-RAG retrieval decision + relevance      |
 | `fuzz_memory_tiers`     | Memory tiers prompt build + auto-tiering     |
+| `fuzz_output_validator_chain` | Output validator chain execute (ownership-transition + memory safety) |
