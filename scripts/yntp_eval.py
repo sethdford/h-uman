@@ -324,10 +324,16 @@ def evaluate(
 
     if mock_log_path is not None:
         mock_entries = load_mock_log(mock_log_path)
-        if len(mock_entries) < len(rows):
+        # Sprint 11 / US-11.6 critic-MED fix: must be strict equality, not
+        # `<`, because `zip` silently truncates the longer iterable. A
+        # 10-row fixture paired with a 5-row mock log would otherwise
+        # produce a result on only 5 pairs while reporting `n_pairs`
+        # consistent with whichever side won the truncation race — that
+        # is the exact silent-failure mode the gate is supposed to refuse.
+        if len(mock_entries) != len(rows):
             raise ValueError(
                 f"mock log has {len(mock_entries)} entries; fixture has "
-                f"{len(rows)} rows. Counts must match."
+                f"{len(rows)} rows. Counts must match exactly."
             )
         base_per_row: List[Tuple[float, int, bool]] = []
         adapter_per_row: List[Tuple[float, int, bool]] = []
