@@ -1633,10 +1633,18 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         size_t rendered_len = 0;
         if (message_len > 0) {
             const hu_persona_overlay_t *ov = NULL;
-            if (c->persona)
+            const char *contact_warmth = NULL;
+            if (c->persona) {
                 ov = hu_persona_find_overlay(c->persona, "imessage", 8);
-            hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
-                                                            &rendered, &rendered_len);
+                if (target && target_len > 0) {
+                    const hu_contact_profile_t *cp =
+                        hu_persona_find_contact(c->persona, target, target_len);
+                    if (cp && cp->warmth_level)
+                        contact_warmth = cp->warmth_level;
+                }
+            }
+            hu_error_t rerr = hu_persona_render_for_channel_with_warmth(
+                ov, contact_warmth, message, message_len, c->alloc, &rendered, &rendered_len);
             if (rerr != HU_OK)
                 return rerr;
             message = rendered;
@@ -1689,10 +1697,15 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
     size_t overlay_buf_len = 0;
     if (message_len > 0) {
         const hu_persona_overlay_t *ov = NULL;
-        if (c->persona)
+        const char *contact_warmth = NULL;
+        if (c->persona) {
             ov = hu_persona_find_overlay(c->persona, "imessage", 8);
-        hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
-                                                        &overlay_buf, &overlay_buf_len);
+            const hu_contact_profile_t *cp = hu_persona_find_contact(c->persona, tgt, tgt_len);
+            if (cp && cp->warmth_level)
+                contact_warmth = cp->warmth_level;
+        }
+        hu_error_t rerr = hu_persona_render_for_channel_with_warmth(
+            ov, contact_warmth, message, message_len, c->alloc, &overlay_buf, &overlay_buf_len);
         if (rerr != HU_OK)
             return rerr;
         message = overlay_buf;
@@ -2563,6 +2576,95 @@ hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const c
     return HU_OK;
 }
 #endif
+
+hu_error_t hu_imessage_find_unreplied_read(const char *contact_id, size_t contact_id_len,
+                                           int64_t *out_msg_id, uint64_t *out_read_at_ms) {
+    if (out_msg_id)
+        *out_msg_id = 0;
+    if (out_read_at_ms)
+        *out_read_at_ms = 0;
+    if (!contact_id || contact_id_len == 0 || !out_msg_id || !out_read_at_ms)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+    /* Find the most recent outbound to `contact_id`. Mirrors the structure
+     * of hu_imessage_build_read_receipt_context but returns structured data
+     * instead of an LLM prompt string. */
+    char db_path[512];
+    const char *home = getenv("HOME");
+    if (!home)
+        return HU_ERR_IO;
+    snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    const char *sql = "SELECT m.ROWID, m.date, m.date_read "
+                      "FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE h.id = ?1 AND m.is_from_me = 1 "
+                      "ORDER BY m.date DESC LIMIT 1";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    char contact_buf[128];
+    size_t clen =
+        contact_id_len < sizeof(contact_buf) - 1 ? contact_id_len : sizeof(contact_buf) - 1;
+    memcpy(contact_buf, contact_id, clen);
+    contact_buf[clen] = '\0';
+    sqlite3_bind_text(stmt, 1, contact_buf, (int)clen, SQLITE_STATIC);
+
+    int64_t msg_id = 0;
+    int64_t sent_date = 0;
+    int64_t read_date = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        msg_id = sqlite3_column_int64(stmt, 0);
+        sent_date = sqlite3_column_int64(stmt, 1);
+        read_date = sqlite3_column_int64(stmt, 2);
+    }
+    sqlite3_finalize(stmt);
+
+    if (msg_id == 0 || read_date <= 0) {
+        /* No outbound, or it hasn't been read yet — no follow-up to schedule. */
+        sqlite3_close(db);
+        return HU_OK;
+    }
+
+    /* Check for an inbound reply since the outbound. */
+    bool has_reply = false;
+    sqlite3_stmt *reply_stmt = NULL;
+    const char *reply_sql = "SELECT COUNT(*) FROM message m "
+                            "JOIN handle h ON m.handle_id = h.ROWID "
+                            "WHERE h.id = ?1 AND m.is_from_me = 0 AND m.date > ?2 "
+                            "AND m.associated_message_type = 0";
+    if (sqlite3_prepare_v2(db, reply_sql, -1, &reply_stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(reply_stmt, 1, contact_buf, (int)clen, SQLITE_STATIC);
+        sqlite3_bind_int64(reply_stmt, 2, sent_date);
+        if (sqlite3_step(reply_stmt) == SQLITE_ROW)
+            has_reply = sqlite3_column_int(reply_stmt, 0) > 0;
+        sqlite3_finalize(reply_stmt);
+    }
+    sqlite3_close(db);
+
+    if (has_reply)
+        return HU_OK;
+
+    /* Convert Apple's date_read (nanoseconds since 2001-01-01) to wall-clock ms. */
+    int64_t apple_epoch = 978307200LL;
+    int64_t read_unix_sec = apple_epoch + read_date / 1000000000LL;
+    *out_msg_id = msg_id;
+    *out_read_at_ms = (uint64_t)read_unix_sec * 1000ULL;
+    return HU_OK;
+#else
+    (void)contact_id_len;
+    return HU_OK; /* test / non-Apple / no-SQLite: no result */
+#endif
+}
 
 static hu_error_t imessage_get_response_constraints(void *ctx,
                                                     hu_channel_response_constraints_t *out) {

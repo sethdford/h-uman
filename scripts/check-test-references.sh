@@ -71,11 +71,23 @@ fi
 # ── Helper: derive the candidate production module from a test filename ────────
 #
 # Strategy: strip the "tests/test_" prefix and ".c" suffix, then try progressively
-# shorter prefixes until we find a matching src/**/<candidate>.c.
+# shorter prefixes until we find at least one matching src/**/<candidate>.c.
 # Example: tests/test_daemon_e2e_validator.c → tries "daemon_e2e_validator", then
 # "daemon_e2e", then "daemon" → finds src/daemon.c → uses daemon.
 #
-# Returns the base name (without extension) of the found file, or empty string.
+# Disambiguation when MULTIPLE candidates share a basename (e.g. both
+# src/channels/imessage.c and src/feeds/imessage.c exist): score each candidate
+# by how many of its exported hu_* symbols are referenced in the test file, and
+# pick the one with the highest score. Ties (including all-zero) broken
+# alphabetically by full path — deterministic across filesystems, unlike the
+# previous `find ... | head -1` which was filesystem-order-dependent.
+#
+# Why this matters: before the fix, a test legitimately covering
+# src/channels/imessage.c symbols could fail because `find` happened to return
+# src/feeds/imessage.c first, and the script demanded symbols from the wrong
+# module. Authors then over-used the @covers-none escape hatch.
+#
+# Returns the path of the picked file, or empty string.
 
 find_production_module() {
     local test_file="$1"
@@ -85,14 +97,44 @@ find_production_module() {
 
     local candidate="$base"
     while [[ -n "$candidate" ]]; do
-        # Search for src/**/<candidate>.c
-        local match
-        match="$(find src -name "${candidate}.c" -type f | head -1)"
-        if [[ -n "$match" ]]; then
-            echo "$match"
+        # Collect ALL matching src files, sorted by full path for deterministic
+        # tie-breaking. `sort` here means filesystem order can never affect the
+        # result.
+        local matches
+        mapfile -t matches < <(find src -name "${candidate}.c" -type f | sort)
+
+        if [[ ${#matches[@]} -eq 1 ]]; then
+            # Single candidate: fast path, no scoring needed.
+            echo "${matches[0]}"
             return
         fi
-        # Strip the last underscore segment and retry
+
+        if [[ ${#matches[@]} -gt 1 ]]; then
+            # Multiple candidates: score each by how many of its hu_* symbols
+            # appear in the test file. Highest score wins; ties broken by the
+            # alphabetical sort above. Score 0 for all = first alphabetical
+            # (preserves the prior fallback behavior).
+            local best=""
+            local best_score=-1
+            local m sym score
+            for m in "${matches[@]}"; do
+                score=0
+                while IFS= read -r sym; do
+                    if [[ -n "$sym" ]] && grep -qF "$sym" "$test_file" 2>/dev/null; then
+                        score=$((score + 1))
+                    fi
+                done < <(extract_production_symbols "$m")
+
+                if [[ $score -gt $best_score ]]; then
+                    best_score=$score
+                    best="$m"
+                fi
+            done
+            echo "$best"
+            return
+        fi
+
+        # No matches for this candidate — strip last underscore segment and retry.
         local shorter="${candidate%_*}"
         [[ "$shorter" == "$candidate" ]] && break
         candidate="$shorter"

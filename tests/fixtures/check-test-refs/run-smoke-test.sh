@@ -18,6 +18,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 SCRIPT="$REPO_ROOT/scripts/check-test-references.sh"
 GOOD="$SCRIPT_DIR/good.c"
 BAD="$SCRIPT_DIR/bad.c"
+DISAMBIG="$SCRIPT_DIR/test_imessage_disambig.c"
 
 FAIL=0
 
@@ -35,6 +36,23 @@ if bash "$SCRIPT" "$BAD" 2>/dev/null; then
     FAIL=1
 else
     echo "PASS  bad.c → exit 1 (expected)"
+fi
+
+# ── Check 3: multi-candidate disambiguation ───────────────────────────────────
+# The basename "imessage" matches both src/channels/imessage.c and
+# src/feeds/imessage.c. Before the 2026-05-17 fix, the script used
+# `find ... | head -1` and picked whichever filesystem order returned first.
+# That meant tests legitimately covering src/channels/imessage.c could fail
+# because the script checked for src/feeds/imessage.c symbols instead.
+#
+# The fixture references ONLY a channels/imessage.c symbol. With the fix,
+# the script scores both candidates and picks channels → pass. If the
+# disambiguation regresses, this fails with the wrong-module error.
+if bash "$SCRIPT" "$DISAMBIG"; then
+    echo "PASS  test_imessage_disambig.c → exit 0 (multi-candidate disambiguation works)"
+else
+    echo "FAIL  test_imessage_disambig.c → non-zero exit (multi-candidate disambiguation regressed)" >&2
+    FAIL=1
 fi
 
 if [[ $FAIL -gt 0 ]]; then
