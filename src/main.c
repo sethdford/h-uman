@@ -268,6 +268,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_apply_adapter(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "rl-train") == 0)
         return hu_ml_cli_rl_train(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "adapter-rollback") == 0)
+        return hu_ml_cli_adapter_rollback(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "--help") == 0 || strcmp(sub, "help") == 0) {
         printf("Usage: human ml <subcommand>\n\n"
                "Subcommands:\n"

@@ -44,6 +44,15 @@ typedef enum hu_lora_retrain_outcome {
     HU_LORA_RETRAIN_OUTCOME_FAILED,
     HU_LORA_RETRAIN_OUTCOME_PROMOTED,
     HU_LORA_RETRAIN_OUTCOME_PROMOTION_FAILED,
+    /* US-11.8 — dual fast/slow LoRA: KL drift exceeded tau on the
+     * probe set. Quarantine fast; preserve slow. */
+    HU_LORA_RETRAIN_OUTCOME_SKIPPED_KL_DRIFT,
+    /* US-11.8 — dual fast/slow LoRA: OLD-pairs NLL regressed beyond
+     * forget_tau_nll. Quarantine fast; preserve slow. */
+    HU_LORA_RETRAIN_OUTCOME_SKIPPED_FORGETTING,
+    /* US-11.8 — dual fast/slow LoRA: EMA compat-check failed
+     * (rank/target-modules/base-model mismatch). Preserve slow. */
+    HU_LORA_RETRAIN_OUTCOME_EMA_SKIPPED,
 } hu_lora_retrain_outcome_t;
 
 /* Subprocess result returned by the test/production exec hook. */
@@ -91,11 +100,63 @@ typedef struct hu_lora_retrain_ctx {
      * single-flight guard entirely (test convenience). */
     const char *pidfile_path;
 
+    /* ── US-11.8: dual fast/slow LoRA ─────────────────────────────── */
+
+    /* Feature flag — when 0, the runner behaves exactly as Sprint 7
+     * US-7.5 (single-adapter promotion via `gate_script`). When 1, the
+     * runner invokes `cascade_script` (US-11.7), performs the EMA
+     * promotion, runs the KL+forgetting sanity checks, and writes the
+     * versioned slow artifact. Defaults to 0 so existing tests and
+     * production paths are unchanged until the operator opts in. */
+    int dual_lora_enabled;
+
+    /* Path layout (all required when dual_lora_enabled is set):
+     *   slow_dir          → ~/.human/adapters/  (holds slow.safetensors.v{N})
+     *   quarantine_dir    → ~/.human/adapters/quarantine/
+     *   fast_path         → ~/.human/adapters/fast.safetensors
+     *   kl_probe_set      → tests/fixtures/kl_probe_200.jsonl (or prod equiv)
+     *   old_pairs_holdout → tests/fixtures/old_pairs_holdout.jsonl
+     *   base_model_path   → "" for the stubbed Sprint 11 path (no real KL) */
+    const char *slow_dir;
+    const char *quarantine_dir;
+    const char *fast_path;
+    const char *kl_probe_set;
+    const char *old_pairs_holdout;
+    const char *base_model_path;
+
+    /* US-11.7 cascade orchestrator — default "scripts/stage_cascade.py". */
+    const char *cascade_script;
+    /* EMA helper — default "scripts/lora_ema.py". */
+    const char *ema_script;
+    /* KL drift helper — default "scripts/compute_kl_drift.py". */
+    const char *kl_drift_script;
+    /* YNTP / OLD-pairs evaluator — default "scripts/yntp_eval.py". */
+    const char *yntp_eval_script;
+
+    /* Tunables. 0 selects HU_LORA_EMA_DEFAULT_ALPHA / *_DEFAULT_NATS /
+     * *_DEFAULT_NLL. */
+    double ema_alpha;
+    double kl_tau_nats;
+    double forget_tau_nll;
+
+    /* Fixed "today" stamp for quarantine filenames; format YYYY-MM-DD.
+     * When empty/NULL the runner derives this from time(NULL). Tests
+     * pin this for deterministic filenames. */
+    const char *today_yyyymmdd;
+
     /* Out — populated by the runner on exit. */
     hu_lora_retrain_outcome_t last_outcome;
     int64_t last_run_ts;
     unsigned long long last_pairs_consumed;
     int last_exit_code; /* exit code of the failing step on FAILED outcomes */
+
+    /* US-11.8 — extended status fields for AC-11.8.5. */
+    int last_slow_version;           /* N for slow.safetensors.v{N}; -1 if none */
+    int last_fast_version;           /* monotonic counter; ++ on each run */
+    double last_ema_alpha;           /* alpha used on the last promotion; 0 otherwise */
+    char last_gate_verdict[16];      /* "PROMOTE" | "DEFER" | "REJECT" | "" */
+    double last_kl_drift_nats;       /* KL on the last KL probe; -1.0 = not run */
+    double last_old_pairs_delta_nll; /* OLD-pairs ΔNLL; 0.0 = not run */
 } hu_lora_retrain_ctx_t;
 
 /* Runner entry point. `spec->kind` must be HU_JOB_LORA_RETRAIN_NIGHTLY.

@@ -108,4 +108,18 @@ hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char *
  * Missing `--algorithm` flag returns `HU_ERR_INVALID_ARGUMENT`. */
 hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv);
 
+/* US-11.8 — `human ml adapter-rollback`.
+ *
+ * Enumerates `<slow_dir>/slow.safetensors.v*`, picks `v{N}` = current
+ * target (highest) and `v{N-1}` = previous, then:
+ *   1. Quarantines `v{N}` to `<quarantine_dir>/<today>.safetensors`.
+ *   2. Atomically rewires `<current_symlink>` -> `v{N-1}`.
+ *
+ * Required flags: --slow-dir, --quarantine-dir, --current. Optional:
+ *   --today YYYY-MM-DD  (deterministic quarantine filename for tests)
+ *
+ * Fails with HU_ERR_TOOL_VALIDATION when there is no `v{N-1}` to roll
+ * back to (operator must inspect quarantine manually). */
+hu_error_t hu_ml_cli_adapter_rollback(hu_allocator_t *alloc, int argc, const char **argv);
+
 #endif

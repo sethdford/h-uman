@@ -1223,6 +1223,9 @@ if(HU_ENABLE_ML)
         src/ml/checkpoint.c
         src/ml/cli.c
         src/ml/lora.c
+        # US-11.8: dual fast/slow LoRA EMA helper + adapter rollback CLI.
+        src/ml/lora_ema.c
+        src/ml/cli_adapter_rollback.c
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
@@ -2212,7 +2215,8 @@ if(NOT HU_ENABLE_ML)
         src/ml/tokenizer_bpe.c src/ml/dataloader.c src/ml/prepare.c
         src/ml/evaluator.c src/ml/experiment.c src/ml/experiment_store.c src/ml/gpt.c
         src/ml/muon_adamw.c src/ml/train.c src/ml/checkpoint.c src/ml/cli.c
-        src/ml/lora.c src/ml/agent_trainer.c src/ml/m3_frontier_adapter.c
+        src/ml/lora.c src/ml/lora_ema.c src/ml/cli_adapter_rollback.c
+        src/ml/agent_trainer.c src/ml/m3_frontier_adapter.c
         src/ml/dpo_miner.c
         src/ml/rl_trainer.c src/ml/rl_trainer_simpo.c src/ml/rl_trainer_orpo.c
         src/ml/fidelity.c
@@ -2702,6 +2706,7 @@ set(HU_TEST_SOURCES
     tests/test_w13_learner.c
     tests/test_w14_runners.c
     tests/test_w14_lora_retrain.c
+    tests/test_w14_dual_lora.c
     tests/test_w15_backup_restore.c
     tests/test_learner_bridge.c
     tests/test_w14_scheduler.c
