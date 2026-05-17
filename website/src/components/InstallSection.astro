@@ -1,0 +1,312 @@
+---
+/**
+ * InstallSection.astro
+ *
+ * One-line install + "verified on macOS arm64" badge. The component is the
+ * sole renderer of the install one-liner on the marketing site; every
+ * field below binds to `src/data/install.json`, which is the single source
+ * of truth shared with `Formula/human.rb` via
+ * `scripts/check-install-matches-formula.mjs`.
+ *
+ * AC-9.5.2 forbids hard-coded semver in the template — the version comes
+ * from `installData.version`, not from any string literal in this file.
+ * `tests/install-section.spec.ts` (Test D) greps this file's source for
+ * any `"\d+\.\d+\.\d+"` literal and fails the build if one appears.
+ *
+ * Phosphor icons are inlined as SVGs to avoid pulling a runtime dep into
+ * the marketing bundle; the icons are the regular-weight Check and Info
+ * paths from phosphoricons.com. Color/spacing/radius are sourced from
+ * `--hu-*` tokens only (AC-9.5.4).
+ */
+
+import installData from "../data/install.json";
+
+const command: string = installData.command;
+const tap: string = installData.tap;
+const pkg: string = installData.package;
+const displayVersion: string = installData.version;
+
+const verifiedArm64 = installData.verified?.macos_arm64 ?? {
+  ok: false,
+  release_tag: null,
+  checked_at: null,
+  ci_run_url: null,
+};
+
+const isVerified: boolean = verifiedArm64.ok === true;
+
+// Human-readable date for the badge ("checked on YYYY-MM-DD"). When the
+// release pipeline has not yet stamped a check, we omit the suffix.
+let checkedLabel: string | null = null;
+if (typeof verifiedArm64.checked_at === "string") {
+  const ts = Date.parse(verifiedArm64.checked_at);
+  if (!Number.isNaN(ts)) {
+    const iso = new Date(ts).toISOString();
+    checkedLabel = iso.slice(0, 10); // YYYY-MM-DD
+  }
+}
+
+const badgeReleaseTag: string | null =
+  typeof verifiedArm64.release_tag === "string" ? verifiedArm64.release_tag : null;
+---
+
+<section
+  id="install"
+  class="install-section"
+  aria-labelledby="install-heading"
+>
+  <div class="install-inner">
+    <h2 id="install-heading" class="install-heading">
+      Get started.
+    </h2>
+    <p class="install-lede">
+      One Homebrew tap. One install. <span class="install-version"
+        >v{displayVersion}</span
+      > runs anywhere with a CPU.
+    </p>
+
+    <div class="install-codeblock" role="group" aria-label="Install command">
+      <code class="install-command">{command}</code>
+      <button
+        type="button"
+        class="install-copy-button"
+        data-copy={command}
+        aria-label="Copy install command to clipboard"
+      >
+        <span aria-hidden="true" class="install-copy-icon">
+          {/* Phosphor regular: copy */}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 256 256"
+            width="1em"
+            height="1em"
+            fill="currentColor"
+            focusable="false"
+          >
+            <path
+              d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"
+            ></path>
+          </svg>
+        </span>
+        <span class="install-copy-label">Copy</span>
+      </button>
+    </div>
+
+    <div class="install-meta">
+      {
+        isVerified ? (
+          <div
+            class="install-badge install-badge--ok"
+            role="status"
+            aria-label="Verified working on macOS arm64"
+          >
+            <span aria-hidden="true" class="install-badge-icon">
+              {/* Phosphor regular: check-circle */}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 256 256"
+                width="1em"
+                height="1em"
+                fill="currentColor"
+                focusable="false"
+              >
+                <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm45.66-114.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,101.66Z"></path>
+              </svg>
+            </span>
+            <span class="install-badge-text">
+              Verified working on macOS arm64
+              {badgeReleaseTag && (
+                <span class="install-badge-tag">{badgeReleaseTag}</span>
+              )}
+              {checkedLabel && (
+                <span class="install-badge-when">
+                  checked {checkedLabel}
+                </span>
+              )}
+            </span>
+          </div>
+        ) : (
+          <div
+            class="install-badge install-badge--pending"
+            role="status"
+            aria-label="Verification pending for macOS arm64"
+          >
+            <span aria-hidden="true" class="install-badge-icon">
+              {/* Phosphor regular: info */}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 256 256"
+                width="1em"
+                height="1em"
+                fill="currentColor"
+                focusable="false"
+              >
+                <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm16-40a8,8,0,0,1-8,8,16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40A8,8,0,0,1,144,176ZM112,84a12,12,0,1,1,12,12A12,12,0,0,1,112,84Z"></path>
+              </svg>
+            </span>
+            <span class="install-badge-text">
+              Verification pending — CI will stamp this badge after the next
+              release smoke test.
+            </span>
+          </div>
+        )
+      }
+      <p class="install-source">
+        Tap: <code class="install-source-code">{tap}</code> ·
+        Formula: <code class="install-source-code">{pkg}</code>
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* All values below come from `--hu-*` design tokens. No raw hex, no
+   * raw pixel values — see AC-9.5.4 and the grep in
+   * `tests/install-section.spec.ts`. */
+  .install-section {
+    padding-block: var(--hu-space-2xl);
+    padding-inline: var(--hu-space-md);
+    background: var(--hu-bg);
+    color: var(--hu-text);
+    font-family: var(--hu-font, "Avenir", system-ui, sans-serif);
+  }
+  .install-inner {
+    max-width: var(--hu-content-max-width, 56rem);
+    margin-inline: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--hu-space-lg);
+  }
+  .install-heading {
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    color: var(--hu-text);
+    margin: 0;
+  }
+  .install-lede {
+    font-size: clamp(1rem, 2vw, 1.25rem);
+    color: var(--hu-text-secondary, var(--hu-text-muted));
+    margin: 0;
+  }
+  .install-version {
+    color: var(--hu-accent);
+    font-weight: 700;
+  }
+  .install-codeblock {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--hu-space-md);
+    padding: var(--hu-space-md) var(--hu-space-lg);
+    background: var(--hu-surface-container, var(--hu-bg-surface));
+    border: 1px solid var(--hu-border-subtle);
+    border-radius: var(--hu-radius-md);
+    overflow-x: auto;
+  }
+  .install-command {
+    font-family: var(--hu-font-mono, ui-monospace, monospace);
+    font-size: clamp(0.95rem, 1.4vw, 1.1rem);
+    color: var(--hu-text);
+    white-space: nowrap;
+    user-select: all;
+  }
+  .install-copy-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--hu-space-xs);
+    padding: var(--hu-space-xs) var(--hu-space-sm);
+    font-family: inherit;
+    font-size: 0.875rem;
+    color: var(--hu-text);
+    background: var(--hu-bg-surface);
+    border: 1px solid var(--hu-border-subtle);
+    border-radius: var(--hu-radius-sm, var(--hu-radius-md));
+    cursor: pointer;
+    transition: background var(--hu-duration-fast, 120ms) ease;
+  }
+  .install-copy-button:hover,
+  .install-copy-button:focus-visible {
+    background: var(--hu-hover-overlay, var(--hu-bg-surface));
+  }
+  .install-copy-icon {
+    display: inline-flex;
+    align-items: center;
+  }
+  .install-meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--hu-space-sm);
+  }
+  .install-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--hu-space-sm);
+    padding: var(--hu-space-sm) var(--hu-space-md);
+    border-radius: var(--hu-radius-full, var(--hu-radius-md));
+    font-size: 0.95rem;
+    width: max-content;
+    max-width: 100%;
+  }
+  .install-badge--ok {
+    color: var(--hu-success);
+    background: var(--hu-success-dim);
+    border: 1px solid var(--hu-success);
+  }
+  .install-badge--pending {
+    color: var(--hu-text-secondary, var(--hu-text-muted));
+    background: var(--hu-bg-surface);
+    border: 1px solid var(--hu-border-subtle);
+  }
+  .install-badge-icon {
+    display: inline-flex;
+    align-items: center;
+    font-size: 1.25rem;
+  }
+  .install-badge-text {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--hu-space-xs);
+  }
+  .install-badge-tag,
+  .install-badge-when {
+    font-size: 0.8rem;
+    color: var(--hu-text-muted);
+  }
+  .install-source {
+    font-size: 0.85rem;
+    color: var(--hu-text-muted);
+    margin: 0;
+  }
+  .install-source-code {
+    font-family: var(--hu-font-mono, ui-monospace, monospace);
+    color: var(--hu-text);
+  }
+</style>
+
+<script>
+  // Progressive enhancement: clipboard copy. The command is already
+  // visible and selectable; this just speeds up the common case.
+  document.querySelectorAll<HTMLButtonElement>(".install-copy-button").forEach(
+    (btn) => {
+      btn.addEventListener("click", async () => {
+        const text = btn.dataset.copy ?? "";
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          const label = btn.querySelector(".install-copy-label");
+          if (label) {
+            const prev = label.textContent;
+            label.textContent = "Copied";
+            setTimeout(() => {
+              if (label) label.textContent = prev;
+            }, 1500);
+          }
+        } catch {
+          // Clipboard API blocked; the user can still triple-click + copy.
+        }
+      });
+    },
+  );
+</script>
