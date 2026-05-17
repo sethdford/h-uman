@@ -178,6 +178,66 @@ const char hu_starter_persona_json[] =
     "  ]\n"
     "}\n";
 
+/* US-9.2: Pure formatter for the post-wizard "What's next" block.
+ *
+ * Lives outside the HU_IS_TEST guard so unit tests
+ * (tests/test_onboard_nextstep.c) can link against it without crossing
+ * the wizard's interactive boundary. See sprints/sprint-9/designs/US-9.2.md
+ * for the full truth table and rationale.
+ *
+ * Pattern: .claude/rules/security-predicate-extraction.md applied to UX
+ * text — the "what message do we print?" decision is extracted into a
+ * pure function so we don't have to spawn a subprocess and parse stdout
+ * to test it. */
+hu_error_t hu_onboard_nextstep_format(const hu_onboard_nextstep_ctx_t *ctx, char *out,
+                                      size_t out_sz) {
+    if (!ctx || !out || out_sz == 0 || !ctx->config_path)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    int n = -1;
+    if (ctx->already_exists) {
+        if (ctx->platform_is_apple) {
+            n = snprintf(out, out_sz,
+                         "Config already exists at %s.\n"
+                         "Run 'human doctor' to check status, or 'human doctor imessage' to pair "
+                         "iMessage.\n",
+                         ctx->config_path);
+        } else {
+            n = snprintf(out, out_sz,
+                         "Config already exists at %s.\n"
+                         "Run 'human doctor' to check status.\n",
+                         ctx->config_path);
+        }
+    } else if (!ctx->parsed_ok) {
+        n = snprintf(out, out_sz,
+                     "Config written to %s.\n"
+                     "Warning: config written but failed to parse — run 'human doctor --fix' to "
+                     "repair\n",
+                     ctx->config_path);
+    } else if (ctx->platform_is_apple) {
+        n = snprintf(out, out_sz,
+                     "Config verified OK\n"
+                     "Config written to %s.\n"
+                     "What's next:\n"
+                     "  1. Pair iMessage:  human doctor imessage\n"
+                     "  2. Start the agent: human agent\n",
+                     ctx->config_path);
+    } else {
+        n = snprintf(out, out_sz,
+                     "Config verified OK\n"
+                     "Config written to %s.\n"
+                     "What's next:\n"
+                     "  1. Start the agent: human agent\n"
+                     "  (Tier-1 channels other than iMessage require manual config — see "
+                     "docs/guides/channels.md)\n",
+                     ctx->config_path);
+    }
+
+    if (n < 0 || (size_t)n >= out_sz)
+        return HU_ERR_IO;
+    return HU_OK;
+}
+
 #ifdef HU_IS_TEST
 hu_error_t hu_onboard_run(hu_allocator_t *alloc) {
     (void)alloc;
@@ -285,7 +345,23 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
         return HU_ERR_INVALID_ARGUMENT;
 
     if (!hu_onboard_check_first_run()) {
-        printf("Config already exists. Run 'human doctor' to check status.\n");
+        char existing_path[HU_MAX_PATH];
+        const char *path_str =
+            get_config_path(existing_path, sizeof(existing_path)) ? existing_path : "?";
+        hu_onboard_nextstep_ctx_t nctx = {
+            .config_path = path_str,
+            .provider = NULL,
+#if defined(__APPLE__)
+            .platform_is_apple = true,
+#else
+            .platform_is_apple = false,
+#endif
+            .already_exists = true,
+            .parsed_ok = false,
+        };
+        char nbuf[1024];
+        if (hu_onboard_nextstep_format(&nctx, nbuf, sizeof(nbuf)) == HU_OK)
+            fputs(nbuf, stdout);
         return HU_OK;
     }
 
@@ -489,11 +565,35 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
 
     alloc->free(alloc->ctx, ws_dir, strlen(ws_dir) + 1);
 
-    printf("\nConfig written to %s\n", config_path);
-    if (is_apple_provider(provider))
-        printf("Run 'human agent' to start chatting with Apple Intelligence.\n");
-    else
-        printf("Run 'human agent' to start chatting.\n");
-    return HU_OK;
+    /* US-9.2 AC-9.2.3: verify the freshly-written config parses cleanly.
+     * If it doesn't, we still warn the user but return HU_ERR_IO so a
+     * scripted caller can detect the bad-config state. */
+    bool parsed_ok = false;
+    {
+        hu_config_t check_cfg;
+        hu_error_t lerr = hu_config_load_from(alloc, config_path, &check_cfg);
+        if (lerr == HU_OK) {
+            parsed_ok = true;
+            hu_config_deinit(&check_cfg);
+        }
+    }
+
+    hu_onboard_nextstep_ctx_t nctx = {
+        .config_path = config_path,
+        .provider = provider,
+#if defined(__APPLE__)
+        .platform_is_apple = true,
+#else
+        .platform_is_apple = false,
+#endif
+        .already_exists = false,
+        .parsed_ok = parsed_ok,
+    };
+    printf("\n");
+    char nbuf[2048];
+    if (hu_onboard_nextstep_format(&nctx, nbuf, sizeof(nbuf)) == HU_OK)
+        fputs(nbuf, stdout);
+
+    return parsed_ok ? HU_OK : HU_ERR_IO;
 }
 #endif
