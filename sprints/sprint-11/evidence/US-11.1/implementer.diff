@@ -1,0 +1,761 @@
+commit b504302b7ad20dcd41e58a5e81a7f48be8642a6c
+Author: Seth Ford <sethford@studio.local>
+Date:   Sat May 16 21:51:15 2026 -0400
+
+    feat(sprint-11): US-11.1 vendor patch for DPO pad masking + length norm
+    
+    Sprint 11 Wave 0, P0. Eliminates the length-bias-into-pad-collapse
+    pathway that Sprint 8 smoke-run-3 surfaced (40% pad-leakage at the
+    best iter-60 checkpoint; 80% at iter-200).
+    
+    Root cause (mlx_lm_lora==2.1.0, trainer/dpo_trainer.py:50-52):
+    
+        def compute_score(scores, mask, loss_type):
+            token_count = mask.sum(-1)
+            return scores.sum(-1) / token_count \
+                   if loss_type == "ipo" else scores.sum(-1)
+    
+    For loss_type=="sigmoid" the per-token (pad-masked) log-probs are
+    SUMMED, never divided by non-pad count. The optimizer's cheapest move
+    is to shorten the rejected sequence by emitting pad early — textbook
+    length-bias-into-pad-collapse (SimPO §3, sota-dpo.md §4).
+    
+    Fix: vendor + monkey-patch, NOT upstream PR (Sprint 11 cannot block on
+    multi-week merge timeline).
+    
+      scripts/mlx_lora_patch.py    apply_length_norm_patch()
+                                   version-pinned to {"2.1.0"}, idempotent
+                                   replaces compute_score with
+                                     (scores * mask).sum(-1)
+                                       / mx.maximum(mask.sum(-1), 1.0)
+    
+      scripts/mlx_lora_entry.py    -m target wrapper; applies the patch then
+                                   dispatches to mlx_lm_lora.train.main()
+    
+      scripts/finetune-gemma.py    --length-normalize (default true) flag;
+                                   routes through scripts.mlx_lora_entry;
+                                   propagates HU_DPO_LENGTH_NORM env to the
+                                   subprocess; records length_normalize in
+                                   train_config.json
+    
+      tests/test_dpo_pad_masking.py
+                                   5 unit tests on patched compute_score:
+                                     - pad excluded from sum (AC-11.1.1)
+                                     - 10/50 length-norm (AC-11.1.2)
+                                     - IPO unchanged
+                                     - empty-mask no-div-by-zero
+                                     - idempotent + version pinned
+    
+      tests/test_pareto_pad_regression.py
+                                   4 Sprint 8 fixture regressions:
+                                     - iter-200 broken FAILS gate (AC-11.1.4)
+                                     - iter-60 best classified DEFER
+                                     - post-patch synthetic PROMOTE
+                                     - high-delta-alone REJECT guard
+    
+      tests/fixtures/sprint8_sweep.json
+                                   Transcribed from smoke-run-3.md table +
+                                   Smoke #2 iter-200 row. 5 checkpoints.
+    
+      tests/test_finetune_gemma_dpo.py
+                                   Updated -m assertion to scripts.mlx_lora_entry.
+                                   Added Path.home monkeypatch on the 2 tests
+                                   that find_dpo_data was leaking ~/.human into
+                                   (UnicodeDecodeError from real PII bytes).
+    
+    All 14 tests pass under HU_IS_TEST=1; no model weights loaded.
+    
+    Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+
+diff --git a/scripts/dpo_early_stop.py b/scripts/dpo_early_stop.py
+index 48cc0995..a14a7451 100644
+--- a/scripts/dpo_early_stop.py
++++ b/scripts/dpo_early_stop.py
+@@ -263,6 +263,7 @@ def run_with_early_stop(
+     sentinel_path: Optional[Path] = None,
+     event_log_path: Optional[Path] = None,
+     terminate_grace_sec: float = 10.0,
++    env: Optional[dict] = None,
+     _popen=subprocess.Popen,
+ ) -> Tuple[int, Optional[Decision]]:
+     """Run `cmd` and stream its stdout through `detector`.
+@@ -287,6 +288,7 @@ def run_with_early_stop(
+     proc = _popen(
+         cmd,
+         cwd=cwd,
++        env=env,
+         stdout=subprocess.PIPE,
+         stderr=subprocess.STDOUT,
+         text=True,
+diff --git a/scripts/finetune-gemma.py b/scripts/finetune-gemma.py
+index 8e0dd274..7f657412 100644
+--- a/scripts/finetune-gemma.py
++++ b/scripts/finetune-gemma.py
+@@ -524,8 +524,13 @@ def run_dpo(args, adapter_dir: Path) -> int:
+     # If omitted, mlx-lm-lora defaults reference == policy after
+     # --resume-adapter-file, which produces a near-zero gradient on
+     # step 1 (design §5.3).
++    # Sprint 11 US-11.1: route through `scripts.mlx_lora_entry`, which
++    # monkey-patches `mlx_lm_lora.trainer.dpo_trainer.compute_score` to
++    # length-normalize for ALL loss types (not just IPO) before calling
++    # `mlx_lm_lora.train.main()`. The downstream CLI shape is identical.
++    length_normalize = bool(getattr(args, "length_normalize", True))
+     cmd = [
+-        sys.executable, "-m", "mlx_lm_lora.train",
++        sys.executable, "-m", "scripts.mlx_lora_entry",
+         "--model", model,
+         "--train",
+         "--train-mode", "dpo",
+@@ -567,7 +572,19 @@ def run_dpo(args, adapter_dir: Path) -> int:
+         cmd.append("--mask-prompt")
+ 
+     print(f"\n  Running DPO: {dpo_iters} iters, LR={dpo_lr}, beta=0.1 (sigmoid)")
+-    print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)\n")
++    print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)")
++    print(f"  length_normalize={'true' if length_normalize else 'false'} "
++          f"(US-11.1: per-token avg log-prob, NOT summed)")
++    if length_normalize:
++        print(f"  NOTE: length normalization is active; if convergence is slow, "
++              f"try beta in [1.0, 5.0] (~50x the prior value); see SimPO §5.")
++
++    # Propagate the length-norm flag through the env so the child Python
++    # interpreter picks it up before `mlx_lm_lora.train.main()` runs. The
++    # entry wrapper also no-ops on this env var, so setting it to "0" is
++    # the explicit opt-out path.
++    child_env = os.environ.copy()
++    child_env["HU_DPO_LENGTH_NORM"] = "1" if length_normalize else "0"
+ 
+     # Sprint 11 / US-11.3 — chosen_r plateau-break early stopping.
+     # Default 'none' (NOT 'chosen_r') when args has no `early_stopping_signal`
+@@ -596,6 +613,7 @@ def run_dpo(args, adapter_dir: Path) -> int:
+             cwd=str(Path(__file__).parent.parent),
+             sentinel_path=sentinel,
+             event_log_path=event_log,
++            env=child_env,
+         )
+         if decision is not None:
+             print(
+@@ -606,7 +624,11 @@ def run_dpo(args, adapter_dir: Path) -> int:
+             print(f"  Promoted adapter: iter {decision.promoted_iter} (last save_every boundary)")
+         returncode = rc
+     else:
+-        result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent))
++        result = subprocess.run(
++            cmd,
++            cwd=str(Path(__file__).parent.parent),
++            env=child_env,
++        )
+         returncode = result.returncode
+     elapsed = time.time() - t0
+ 
+@@ -909,6 +931,11 @@ def run_finetune(args):
+         "learning_rate": args.learning_rate,
+         "max_seq_length": args.max_seq_length,
+         "dpo": args.dpo,
++        # Sprint 11 / US-11.1: record whether the run used length-normalized
++        # DPO loss (US-11.1 fix; default ON post-Sprint-11). Pre-Sprint-11
++        # `train_config.json` files do not have this field — `human ml
++        # lora-ab` should treat missing as `false` for historical compares.
++        "length_normalize": bool(getattr(args, "length_normalize", True)),
+         "data": str(data_dir),
+         "train_examples": train_count,
+         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+@@ -1096,6 +1123,17 @@ Examples:
+     parser.add_argument("--sft-only", action="store_true",
+                         help="Skip DPO even if data exists (alias for --no-dpo intent; "
+                              "stronger because it also short-circuits the speculative-draft DPO pass)")
++    # Sprint 11 / US-11.1: length normalization for the DPO loss. Default ON.
++    # When ON, the `mlx_lm_lora.trainer.dpo_trainer.compute_score` is
++    # monkey-patched to divide masked log-probabilities by the non-pad token
++    # count for ALL loss types (sigmoid/hinge/dpop/ipo), not just IPO.
++    parser.add_argument("--length-normalize", action="store_true", default=True,
++                        dest="length_normalize",
++                        help="DPO loss divides masked log-probs by non-pad token "
++                             "count (default: true; US-11.1 fix)")
++    parser.add_argument("--no-length-normalize", action="store_false",
++                        dest="length_normalize",
++                        help="Disable US-11.1 length normalization (pre-Sprint-11 behavior)")
+     parser.add_argument("--from-corrections", action="store_true",
+                         help="Load DPO pairs from ~/.human/dpo/pairs.jsonl (LOCKED path; "
+                              "produced by the outbound-corrections miner — US-7.2)")
+diff --git a/scripts/mlx_lora_entry.py b/scripts/mlx_lora_entry.py
+new file mode 100644
+index 00000000..1e19727f
+--- /dev/null
++++ b/scripts/mlx_lora_entry.py
+@@ -0,0 +1,48 @@
++"""Sprint 11 US-11.1 — Entry wrapper that applies the length-normalization
++patch and then dispatches to `mlx_lm_lora.train.main()`.
++
++This module replaces `python3 -m mlx_lm_lora.train` as the subprocess entry
++point used by `scripts/finetune-gemma.py`. The wrapper:
++
++  1. Imports `scripts.mlx_lora_patch` and calls `apply_length_norm_patch()`,
++     which monkey-patches `mlx_lm_lora.trainer.dpo_trainer.compute_score` to
++     length-normalize for ALL loss types (US-11.1 fix).
++  2. Re-exports `sys.argv` unchanged so `mlx_lm_lora.train` sees the same
++     CLI as before.
++  3. Calls `mlx_lm_lora.train.main()` (or `runpy.run_module` if `main` is
++     not exposed) so the upstream training loop runs end-to-end with the
++     patched loss.
++
++Invoke as::
++
++    python3 -m scripts.mlx_lora_entry --model ... --train --train-mode dpo ...
++
++The argv shape is identical to what would have been passed to
++`mlx_lm_lora.train` directly; only the `-m` target changes.
++"""
++from __future__ import annotations
++
++import os
++import runpy
++import sys
++
++
++def main() -> int:
++    # The patch module also auto-applies on import via the HU_DPO_LENGTH_NORM
++    # env flag; calling apply_length_norm_patch() here is the explicit-and-
++    # idempotent path that surfaces version errors loudly instead of swallowed.
++    os.environ.setdefault("HU_DPO_LENGTH_NORM", "1")
++    from scripts.mlx_lora_patch import apply_length_norm_patch, is_patched
++
++    apply_length_norm_patch()
++    assert is_patched(), "US-11.1 patch failed to apply; aborting before training"
++
++    # Dispatch to mlx_lm_lora.train as if invoked with `-m mlx_lm_lora.train`.
++    # `runpy.run_module` is the canonical way to do this and preserves
++    # `if __name__ == "__main__":` semantics for the target module.
++    runpy.run_module("mlx_lm_lora.train", run_name="__main__", alter_sys=True)
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/scripts/mlx_lora_patch.py b/scripts/mlx_lora_patch.py
+new file mode 100644
+index 00000000..267b4ba2
+--- /dev/null
++++ b/scripts/mlx_lora_patch.py
+@@ -0,0 +1,130 @@
++"""Sprint 11 US-11.1 — Monkey-patch mlx_lm_lora.trainer.dpo_trainer.compute_score
++so that ALL loss types (sigmoid/hinge/dpop/ipo) divide the masked per-token
++log-probability sum by the non-pad token count, not just the IPO path.
++
++Why this exists
++---------------
++Upstream `mlx_lm_lora==2.1.0` ships this `compute_score`::
++
++    def compute_score(scores, mask, loss_type):
++        token_count = mask.sum(-1)
++        return scores.sum(-1) / token_count if loss_type == "ipo" else scores.sum(-1)
++
++For `loss_type == "sigmoid"` (Sprint 8's configuration), the per-token
++(pad-masked) log-probabilities are summed without dividing by non-pad count.
++The DPO margin therefore compares total log-probability over the sequence,
++which is monotonically more negative for longer non-pad sequences. The
++optimizer's cheapest move is to make rejected sequences "effectively shorter"
++by pushing real tokens to near-zero and letting the pad mask zero them — which
++it learns by emitting EOS/pad early at generation time. This is the
++length-bias-into-pad-collapse pathway flagged by Meng et al. (SimPO §3) and
++the Sprint 11 SOTA-DPO synthesis (sota-dpo.md §4).
++
++The fix is a one-line change: divide by `mx.maximum(mask.sum(-1), 1.0)` for
++ALL loss types, not just IPO. We apply this via monkey-patch at import time
++rather than vendoring the whole library, so the unwind path is to delete this
++file.
++
++Tracking discipline
++-------------------
++- Pinned to `mlx_lm_lora.__version__ == "2.1.0"`. Bump the supported set in
++  `_SUPPORTED_VERSIONS` once we have tested newer upstream against the same
++  Sprint 8 regression fixture (US-11.1 AC-11.1.4).
++- The patch is idempotent: calling `apply_length_norm_patch()` twice is a
++  no-op the second time. A sentinel attribute `_hu_us_11_1_patched` on the
++  patched callable makes this safe under repeated imports.
++"""
++from __future__ import annotations
++
++import os
++from typing import Any, Optional
++
++_SUPPORTED_VERSIONS = {"2.1.0"}
++
++# Sentinel attribute name written onto the patched callable to make the patch
++# idempotent and externally inspectable (used by tests + diagnostics).
++_PATCH_SENTINEL = "_hu_us_11_1_patched"
++
++
++def _patched_compute_score(scores: Any, mask: Any, loss_type: str) -> Any:
++    """Length-normalized replacement for `compute_score`.
++
++    Behavior::
++
++        score = (scores * mask).sum(-1) / max(mask.sum(-1), 1.0)
++
++    Notes:
++      * Multiplying by `mask` explicitly is defensive — the upstream caller
++        (`get_token_scores`) already zeros pad positions, but doing it again
++        here guarantees the contract holds even if a future upstream change
++        leaks non-zero pad values into `scores`. The cost is one extra
++        elementwise multiply on a tensor that's already resident.
++      * `mx.maximum(token_count, 1.0)` floors the divisor at 1.0 to prevent
++        NaN on the degenerate empty-mask case. The test
++        `test_empty_mask_does_not_divide_by_zero` pins this.
++      * IPO's prior behavior (sum/count) is preserved exactly; the only
++        change is that sigmoid/hinge/dpop now also divide by count.
++    """
++    import mlx.core as mx  # type: ignore  # lazy import keeps test discovery fast
++
++    token_count = mask.sum(-1)
++    safe_count = mx.maximum(token_count, 1.0)
++    return (scores * mask).sum(-1) / safe_count
++
++
++def apply_length_norm_patch() -> None:
++    """Apply the length-normalization patch to `mlx_lm_lora.trainer.dpo_trainer`.
++
++    Raises:
++      RuntimeError: if `mlx_lm_lora.__version__` is not in the supported set.
++        This is fail-fast against silent upstream drift.
++
++    Idempotent: subsequent calls are no-ops.
++    """
++    try:
++        import mlx_lm_lora  # type: ignore
++    except ImportError as exc:  # pragma: no cover - exercised manually
++        raise RuntimeError(
++            "mlx_lm_lora is not installed; cannot apply US-11.1 patch. "
++            "Install it via `pip install mlx-lm-lora==2.1.0`."
++        ) from exc
++
++    version = getattr(mlx_lm_lora, "__version__", None)
++    if version not in _SUPPORTED_VERSIONS:
++        raise RuntimeError(
++            f"mlx_lm_lora version {version!r} is not in the US-11.1 supported "
++            f"set {_SUPPORTED_VERSIONS!r}. Re-validate the patch against the "
++            f"Sprint 8 fixture (tests/fixtures/sprint8_sweep.json) before "
++            f"bumping the supported set."
++        )
++
++    from mlx_lm_lora.trainer import dpo_trainer  # type: ignore
++
++    # Idempotency guard.
++    current = getattr(dpo_trainer, "compute_score", None)
++    if current is not None and getattr(current, _PATCH_SENTINEL, False):
++        return
++
++    # Tag the replacement so subsequent calls become no-ops.
++    setattr(_patched_compute_score, _PATCH_SENTINEL, True)
++    dpo_trainer.compute_score = _patched_compute_score
++
++
++def is_patched(module: Optional[Any] = None) -> bool:
++    """Return True iff `compute_score` on the target module has been patched."""
++    if module is None:
++        from mlx_lm_lora.trainer import dpo_trainer as module  # type: ignore
++    fn = getattr(module, "compute_score", None)
++    return bool(fn is not None and getattr(fn, _PATCH_SENTINEL, False))
++
++
++# Apply on import if the env flag is set — used by mlx_lora_entry.py so the
++# patch lands before mlx_lm_lora.train.main() runs.
++if os.environ.get("HU_DPO_LENGTH_NORM", "1") == "1":
++    try:
++        apply_length_norm_patch()
++    except Exception:  # noqa: BLE001 — surfaces in the entry wrapper
++        # We deliberately swallow here so `import scripts.mlx_lora_patch`
++        # from inside tests does not require mlx_lm_lora to be installed.
++        # The entry wrapper re-runs and surfaces the error.
++        pass
+diff --git a/tests/fixtures/sprint8_sweep.json b/tests/fixtures/sprint8_sweep.json
+new file mode 100644
+index 00000000..943ca84b
+--- /dev/null
++++ b/tests/fixtures/sprint8_sweep.json
+@@ -0,0 +1,36 @@
++{
++  "_provenance": "Transcribed verbatim from sprints/sprint-8/smoke-run-3.md table + Smoke #2 iter-200 row. Used by US-11.1 AC-11.1.3/AC-11.1.4 regression guard.",
++  "sft_dir": "seth-sft-iter80",
++  "checkpoints": [
++    {
++      "name": "iter20",
++      "fidelity_delta": -0.008,
++      "pad_failure_rate": 0.7333,
++      "n_total": 30
++    },
++    {
++      "name": "iter40",
++      "fidelity_delta": 0.003,
++      "pad_failure_rate": 0.7667,
++      "n_total": 30
++    },
++    {
++      "name": "iter60",
++      "fidelity_delta": 0.019,
++      "pad_failure_rate": 0.40,
++      "n_total": 30
++    },
++    {
++      "name": "iter80",
++      "fidelity_delta": -0.001,
++      "pad_failure_rate": 0.70,
++      "n_total": 30
++    },
++    {
++      "name": "iter200_broken",
++      "fidelity_delta": 0.046,
++      "pad_failure_rate": 0.80,
++      "n_total": 30
++    }
++  ]
++}
+diff --git a/tests/test_dpo_pad_masking.py b/tests/test_dpo_pad_masking.py
+new file mode 100644
+index 00000000..5a850007
+--- /dev/null
++++ b/tests/test_dpo_pad_masking.py
+@@ -0,0 +1,180 @@
++"""Sprint 11 US-11.1 — Unit tests for the patched `compute_score`.
++
++These tests run under `HU_IS_TEST=1` and never load real model weights.
++The patched callable is pure tensor math; all inputs are hand-crafted
++`mx.array` fixtures.
++
++AC coverage:
++  * AC-11.1.1 — pad positions excluded from the score sum
++  * AC-11.1.2 — length normalization: 10-vs-50 token batch divides by non-pad
++  * AC-11.1.5 — `HU_IS_TEST=1` short-circuits any real model load
++"""
++from __future__ import annotations
++
++import importlib
++import os
++import sys
++from pathlib import Path
++
++import pytest
++
++# Make `scripts.mlx_lora_patch` importable as a top-level package.
++_REPO_ROOT = Path(__file__).resolve().parent.parent
++if str(_REPO_ROOT) not in sys.path:
++    sys.path.insert(0, str(_REPO_ROOT))
++
++mx = pytest.importorskip("mlx.core")
++pytest.importorskip("mlx_lm_lora")
++
++from scripts import mlx_lora_patch  # noqa: E402
++
++
++# ── HU_IS_TEST discipline ────────────────────────────────────────────────
++@pytest.fixture(autouse=True)
++def _hu_is_test_env(monkeypatch):
++    """AC-11.1.5: tests run with HU_IS_TEST=1 and no real model load is reached."""
++    monkeypatch.setenv("HU_IS_TEST", "1")
++    # Defensive: if any code path tries to load a real model via mlx_lm.load,
++    # explode loudly so the test fails closed.
++    try:
++        import mlx_lm  # type: ignore
++
++        def _exploder(*_a, **_kw):
++            raise AssertionError(
++                "mlx_lm.load() called during HU_IS_TEST=1 — US-11.1 unit "
++                "tests must not load real model weights."
++            )
++
++        monkeypatch.setattr(mlx_lm, "load", _exploder, raising=False)
++    except ImportError:
++        pass
++
++
++# ── Patch application ────────────────────────────────────────────────────
++@pytest.fixture
++def patched_compute_score():
++    """Return the patched `compute_score` callable."""
++    mlx_lora_patch.apply_length_norm_patch()
++    from mlx_lm_lora.trainer import dpo_trainer  # type: ignore
++
++    return dpo_trainer.compute_score
++
++
++# ── AC-11.1.1: pad positions excluded from score sum ─────────────────────
++def test_pad_positions_excluded_from_score_sum(patched_compute_score):
++    """Sentinel-perturbation check: pad positions cannot influence the output.
++
++    We build a `scores` tensor with -999.0 at pad positions and finite values
++    at real positions, then perturb the pad positions by ±1e6 and confirm
++    the output is unchanged within 1e-7.
++    """
++    # Single-row batch: 6 positions, first 4 real, last 2 pad.
++    real = [-1.0, -2.0, -3.0, -4.0]
++    pad_a = [-999.0, -999.0]
++    pad_b = [+1e6, -1e6]  # perturbed pad values
++
++    scores_a = mx.array([real + pad_a])
++    scores_b = mx.array([real + pad_b])
++    mask = mx.array([[1.0, 1.0, 1.0, 1.0, 0.0, 0.0]])
++
++    out_a = patched_compute_score(scores_a, mask, "sigmoid")
++    out_b = patched_compute_score(scores_b, mask, "sigmoid")
++
++    # The result should equal mean(real) = -2.5, regardless of pad values.
++    expected = sum(real) / len(real)
++    assert abs(float(out_a[0]) - expected) < 1e-7
++    assert abs(float(out_b[0]) - expected) < 1e-7
++    # Perturbing pads did NOT change the result.
++    assert abs(float(out_a[0]) - float(out_b[0])) < 1e-7
++
++
++# ── AC-11.1.2: length normalization on 10-vs-50 token batch ──────────────
++def test_length_normalization_chosen10_rejected50(patched_compute_score):
++    """Chosen seq=10 real tokens, rejected seq=50 positions (10 real + 40 pad).
++
++    Per-token score is constant -2.0 on real positions, arbitrary garbage on
++    pad. After length-normalization the resulting margin should be 0 — the
++    margin is no longer biased toward the shorter sequence.
++    """
++    chosen_real = [-2.0] * 10
++    chosen_scores = mx.array([chosen_real])
++    chosen_mask = mx.array([[1.0] * 10])
++
++    rejected_real = [-2.0] * 10
++    rejected_pad = [+777.0] * 40  # garbage values that mask zeroes
++    rejected_scores = mx.array([rejected_real + rejected_pad])
++    rejected_mask = mx.array([[1.0] * 10 + [0.0] * 40])
++
++    chosen_score = patched_compute_score(chosen_scores, chosen_mask, "sigmoid")
++    rejected_score = patched_compute_score(rejected_scores, rejected_mask, "sigmoid")
++
++    # Both should equal -2.0 (per-token avg over real positions).
++    assert abs(float(chosen_score[0]) - (-2.0)) < 1e-5
++    assert abs(float(rejected_score[0]) - (-2.0)) < 1e-5
++
++    # And therefore the DPO margin (chosen - rejected) is 0, NOT length-biased.
++    margin = float(chosen_score[0]) - float(rejected_score[0])
++    assert abs(margin) < 1e-5
++
++
++# ── Regression: IPO path unchanged (already normalized upstream) ─────────
++def test_ipo_path_unchanged(patched_compute_score):
++    """The patch must not regress the IPO loss type, which was already
++    normalizing by non-pad count upstream. With our patch, the formula is the
++    same (sum/count); we verify the numerical result still matches expectation.
++    """
++    real = [-1.0, -2.0, -3.0]
++    pad = [-999.0]
++    scores = mx.array([real + pad])
++    mask = mx.array([[1.0, 1.0, 1.0, 0.0]])
++
++    out = patched_compute_score(scores, mask, "ipo")
++    expected = sum(real) / len(real)  # -2.0
++    assert abs(float(out[0]) - expected) < 1e-7
++
++
++# ── Safety: empty mask must not divide by zero ───────────────────────────
++def test_empty_mask_does_not_divide_by_zero(patched_compute_score):
++    """All-zero mask is degenerate (empty sequence). Output must be finite
++    (0.0 in this case) — never NaN/Inf — and must not raise.
++    """
++    scores = mx.array([[1.0, 2.0, 3.0]])
++    mask = mx.array([[0.0, 0.0, 0.0]])
++
++    out = patched_compute_score(scores, mask, "sigmoid")
++    val = float(out[0])
++    # Result is finite (could be 0.0 because we multiply scores by mask first).
++    assert val == val, f"NaN produced on empty mask: {val}"  # NaN != NaN
++    # Specifically, (scores * 0).sum() / max(0, 1.0) == 0 / 1 == 0
++    assert abs(val) < 1e-7
++
++
++# ── Safety: patch is idempotent and version-pinned ───────────────────────
++def test_patch_idempotent_and_version_pinned(monkeypatch):
++    """Calling `apply_length_norm_patch` twice is a no-op the second time.
++    Raises RuntimeError if `mlx_lm_lora.__version__` drifts off the supported set.
++    """
++    # First call applies; second call short-circuits via the sentinel.
++    mlx_lora_patch.apply_length_norm_patch()
++    assert mlx_lora_patch.is_patched()
++
++    from mlx_lm_lora.trainer import dpo_trainer  # type: ignore
++
++    first = dpo_trainer.compute_score
++    mlx_lora_patch.apply_length_norm_patch()
++    second = dpo_trainer.compute_score
++    assert first is second, "second apply_length_norm_patch() must be a no-op"
++
++    # Version pin: simulate an unsupported upstream by overwriting __version__.
++    import mlx_lm_lora  # type: ignore
++
++    monkeypatch.setattr(mlx_lm_lora, "__version__", "99.99.99", raising=False)
++    # Force re-application by clearing the sentinel and asking again.
++    monkeypatch.setattr(
++        dpo_trainer.compute_score,
++        mlx_lora_patch._PATCH_SENTINEL,
++        False,
++        raising=False,
++    )
++    with pytest.raises(RuntimeError, match="not in the US-11.1 supported"):
++        mlx_lora_patch.apply_length_norm_patch()
+diff --git a/tests/test_finetune_gemma_dpo.py b/tests/test_finetune_gemma_dpo.py
+index 4cc914e4..635e646f 100644
+--- a/tests/test_finetune_gemma_dpo.py
++++ b/tests/test_finetune_gemma_dpo.py
+@@ -110,6 +110,9 @@ def _stage_corrections_jsonl(tmp_path: pathlib.Path) -> pathlib.Path:
+ # ────────────────────────────────────────────────────────────────────────
+ def test_dpo_pass_invokes_real_dpo_subprocess(tmp_path, monkeypatch):
+     monkeypatch.setenv("HU_DPO_DETERMINISTIC", "1")
++    # Re-home `Path.home()` so `find_dpo_data` does not pick up the
++    # user's real `~/.human/dpo/pairs.jsonl` before the staged fixture.
++    monkeypatch.setattr(fg.Path, "home", classmethod(lambda cls: tmp_path))
+     _stage_jsonl_dpo(tmp_path)
+     args = _make_args(tmp_path)
+     adapter_dir = pathlib.Path(args.adapter_path)
+@@ -125,10 +128,12 @@ def test_dpo_pass_invokes_real_dpo_subprocess(tmp_path, monkeypatch):
+     cmd = mock_run.call_args.args[0]
+     assert isinstance(cmd, list)
+ 
+-    # Per Sprint 7 D1: argv contains `-m mlx_lm_lora.train --train-mode dpo
+-    # --train-type lora`. We assert each pair in adjacency.
++    # Per Sprint 7 D1 + Sprint 11 US-11.1: argv contains `-m
++    # scripts.mlx_lora_entry --train-mode dpo --train-type lora`. The entry
++    # wrapper applies the US-11.1 length-normalization patch and then
++    # dispatches to `mlx_lm_lora.train.main()`.
+     assert "-m" in cmd, f"cmd missing -m: {cmd}"
+-    assert cmd[cmd.index("-m") + 1] == "mlx_lm_lora.train", f"cmd: {cmd}"
++    assert cmd[cmd.index("-m") + 1] == "scripts.mlx_lora_entry", f"cmd: {cmd}"
+ 
+     assert "--train-mode" in cmd, f"cmd missing --train-mode: {cmd}"
+     assert cmd[cmd.index("--train-mode") + 1] == "dpo", f"cmd: {cmd}"
+@@ -267,6 +272,7 @@ def test_dpo_does_not_emit_stock_mlx_lm_flag(tmp_path, monkeypatch):
+     `mlx-lm-lora` fork, NOT stock `mlx_lm`. Asserting the negative protects
+     against regression to the broken pre-Sprint-7 behaviour."""
+     monkeypatch.setenv("HU_DPO_DETERMINISTIC", "1")
++    monkeypatch.setattr(fg.Path, "home", classmethod(lambda cls: tmp_path))
+     _stage_jsonl_dpo(tmp_path)
+     args = _make_args(tmp_path)
+     adapter_dir = pathlib.Path(args.adapter_path)
+diff --git a/tests/test_pareto_pad_regression.py b/tests/test_pareto_pad_regression.py
+new file mode 100644
+index 00000000..9308f549
+--- /dev/null
++++ b/tests/test_pareto_pad_regression.py
+@@ -0,0 +1,119 @@
++"""Sprint 11 US-11.1 — Sprint 8 regression guard for the Pareto gate.
++
++Confirms that:
++  * AC-11.1.4 (regression): Sprint 8's iter-200 "broken adapter" (pad_rate=80%
++    on a lexical delta of +0.046) is REJECTED by the gate, despite its
++    positive delta. This proves the Pareto multiplicative penalty cannot be
++    fooled by the broken-output-with-high-fingerprint failure mode that
++    Sprint 8 surfaced.
++  * AC-11.1.3 baseline: Sprint 8's iter-60 (the best empirical checkpoint,
++    delta=+0.019 with 40% pad) is classified as DEFER — not REJECT solely
++    due to pad rate. This pins the gate's calibration.
++  * AC-11.1.3 post-patch: a synthetic post-US-11.1 row (delta=+0.04,
++    pad_rate=0.05) is classified as PROMOTE. The synthetic row is the
++    operational signal that "the patch worked"; an actual training-loop
++    measurement is out of scope for US-11.1 (deferred to US-11.6).
++"""
++from __future__ import annotations
++
++import json
++import os
++import sys
++from pathlib import Path
++
++import pytest
++
++_REPO_ROOT = Path(__file__).resolve().parent.parent
++if str(_REPO_ROOT) not in sys.path:
++    sys.path.insert(0, str(_REPO_ROOT))
++
++# pareto_picker is a hyphen-free filename so a normal import works after
++# the sys.path manipulation above. We import from the `scripts` package.
++from scripts.pareto_picker import classify  # noqa: E402
++
++
++_FIXTURE = (
++    Path(__file__).resolve().parent / "fixtures" / "sprint8_sweep.json"
++)
++
++
++@pytest.fixture(autouse=True)
++def _hu_is_test_env(monkeypatch):
++    """AC-11.1.5: this is pure JSON+classify math; no model loading possible."""
++    monkeypatch.setenv("HU_IS_TEST", "1")
++
++
++@pytest.fixture
++def sweep():
++    with _FIXTURE.open() as f:
++        return json.load(f)
++
++
++def _row(sweep: dict, name: str) -> dict:
++    for r in sweep["checkpoints"]:
++        if r["name"] == name:
++            return r
++    raise KeyError(name)
++
++
++# ── AC-11.1.4: Sprint 8 iter-200 broken adapter must FAIL the gate ───────
++def test_sprint8_iter200_broken_adapter_fails_gate(sweep):
++    """Iter-200 has delta=+0.046 (crosses PROMOTE delta floor of +0.03) but
++    pad_rate=80% (far above the 10% PROMOTE ceiling AND the 50% DEFER ceiling).
++    The Pareto gate must REJECT it.
++    """
++    row = _row(sweep, "iter200_broken")
++    assert row["fidelity_delta"] >= 0.03, (
++        "fixture invariant: iter-200 delta must still be above the PROMOTE "
++        "floor; otherwise this test is no longer guarding the gameable case"
++    )
++    assert row["pad_failure_rate"] >= 0.5, (
++        "fixture invariant: iter-200 pad rate must still be above the DEFER "
++        "ceiling for this guard to be meaningful"
++    )
++
++    verdict = classify(row["fidelity_delta"], row["pad_failure_rate"])
++    assert verdict == "REJECT", (
++        f"Sprint 8 iter-200 broken adapter must be REJECTED by the Pareto "
++        f"gate (it has high delta but 80% pad). Got verdict={verdict!r}."
++    )
++
++
++# ── AC-11.1.3 baseline: iter-60 is DEFER (not REJECT solely due to pad) ──
++def test_sprint8_iter60_best_classified_as_defer_or_reject(sweep):
++    """Iter-60 (Smoke #3 best) has delta=+0.019 (in [0.01, 0.03)) and
++    pad_rate=40% (under 50% DEFER ceiling). Expected: DEFER.
++    Critically: NOT REJECT-solely-due-to-pad.
++    """
++    row = _row(sweep, "iter60")
++    verdict = classify(row["fidelity_delta"], row["pad_failure_rate"])
++    assert verdict == "DEFER", (
++        f"Sprint 8 iter-60 best checkpoint must be classified DEFER "
++        f"(delta=+0.019, pad=40%). Got verdict={verdict!r}."
++    )
++
++
++# ── AC-11.1.3 post-patch: simulated US-11.1+US-11.4 run promotes ────────
++def test_post_patch_simulated_run_promotes():
++    """A synthetic post-US-11.1 row (delta=+0.04, pad_rate=0.05) is the
++    operational signal that the length-normalization patch combined with
++    Wave 1's DPOP loss is on track. We don't actually train here (that's
++    US-11.6's job); we just assert the classifier wires through.
++    """
++    verdict = classify(0.04, 0.05)
++    assert verdict == "PROMOTE", (
++        f"A delta=+0.04 / pad=5% adapter must be PROMOTE. Got {verdict!r}."
++    )
++
++
++# ── Negative: a delta-only positive with no pad ceiling guard must NOT promote ──
++def test_high_delta_alone_does_not_promote_when_pad_high():
++    """Belt-and-braces: explicitly assert the Pareto gate's pad ceiling is
++    load-bearing. delta=+0.10 (5× promotion floor) with pad=60% must still
++    REJECT — pad ceiling is non-negotiable.
++    """
++    verdict = classify(0.10, 0.60)
++    assert verdict == "REJECT", (
++        f"delta alone cannot promote when pad rate exceeds the DEFER "
++        f"ceiling. Got verdict={verdict!r}."
++    )

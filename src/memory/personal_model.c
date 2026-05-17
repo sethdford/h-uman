@@ -21,7 +21,7 @@
  * SOTA-2026 init-09: v5 adds `hu_provenance_t` per fact + pending-facts
  * quarantine queue. On-disk struct size grew; the existing version-mismatch
  * path in the loader resets the model rather than partial-reads. */
-#define HU_PM_VERSION  5u
+#define HU_PM_VERSION 5u
 
 void hu_personal_model_init(hu_personal_model_t *model) {
     if (!model)
@@ -136,33 +136,20 @@ static const char *humor_directive(float receptivity) {
 #define HU_PM_CHRONOTYPE_MIN_SAMPLES 30U
 
 /* Negative-fact predicates — markers that "user <pred> <obj>" expresses
- * something to actively avoid recommending or doing. The fact extractor
- * preserves the predicate verbatim, so substring matching here pulls out
- * the same set the extractor already classifies as negation. Order is
- * intentionally specific-first ("i don't want") so a fact carrying
- * "i don't" doesn't get classified as the more general "don't". */
+ * something to actively avoid recommending or doing.
+ *
+ * P2-6 (2026-05-16): predicates are now stored as third-person paraphrases
+ * (see src/memory/fact_extract.c). Match the paraphrased forms. */
 static const char *kNegativeFactMarkers[] = {
-    "don't like", "don't want", "do not like",
-    "dislike", "hate", "can't stand",
-    "never", "please don't",
-    "not interested in", "allergic to",
+    "dislikes", "hates", "does not want",     "cannot stand",
+    "never",    "avoid", "not interested in", "allergic to",
 };
 
 static bool predicate_is_negative(const char *predicate) {
     if (!predicate || !*predicate)
         return false;
-    /* Predicates start with "i " from the extractor (e.g. "i don't like"); strip
-     * that prefix before matching so the markers above stay readable. */
-    const char *p = predicate;
-    if (strncasecmp(p, "i ", 2) == 0)
-        p += 2;
-    /* "please don't" is the one form that doesn't start with "i" — match the
-     * raw predicate too. */
     for (size_t i = 0; i < sizeof(kNegativeFactMarkers) / sizeof(kNegativeFactMarkers[0]); i++) {
-        const char *marker = kNegativeFactMarkers[i];
-        if (strcasecmp(p, marker) == 0)
-            return true;
-        if (strcasecmp(predicate, marker) == 0)
+        if (strcasecmp(predicate, kNegativeFactMarkers[i]) == 0)
             return true;
     }
     return false;
@@ -218,11 +205,9 @@ hu_chronotype_t hu_personal_model_infer_chronotype(const hu_personal_model_t *mo
     const float concentration_floor = 0.4f * (float)total;
     const float ratio = 1.5f;
 
-    if ((float)early >= ratio * (float)late &&
-        (float)early >= concentration_floor)
+    if ((float)early >= ratio * (float)late && (float)early >= concentration_floor)
         return HU_CHRONO_MORNING_LARK;
-    if ((float)late >= ratio * (float)early &&
-        (float)late >= concentration_floor)
+    if ((float)late >= ratio * (float)early && (float)late >= concentration_floor)
         return HU_CHRONO_EVENING_OWL;
     return HU_CHRONO_INTERMEDIATE;
 }
@@ -281,12 +266,12 @@ bool hu_personal_model_has_content(const hu_personal_model_t *model) {
  * a missed count under contention is preferable to a lock on
  * every agent turn. */
 #if defined(__GNUC__) || defined(__clang__)
-#define HU_DIRECTIVE_INC(ptr) __atomic_fetch_add((ptr), 1, __ATOMIC_RELAXED)
-#define HU_DIRECTIVE_LOAD(ptr) __atomic_load_n((ptr), __ATOMIC_RELAXED)
+#define HU_DIRECTIVE_INC(ptr)        __atomic_fetch_add((ptr), 1, __ATOMIC_RELAXED)
+#define HU_DIRECTIVE_LOAD(ptr)       __atomic_load_n((ptr), __ATOMIC_RELAXED)
 #define HU_DIRECTIVE_STORE(ptr, val) __atomic_store_n((ptr), (val), __ATOMIC_RELAXED)
 #else
-#define HU_DIRECTIVE_INC(ptr) ((*(ptr))++)
-#define HU_DIRECTIVE_LOAD(ptr) (*(ptr))
+#define HU_DIRECTIVE_INC(ptr)        ((*(ptr))++)
+#define HU_DIRECTIVE_LOAD(ptr)       (*(ptr))
 #define HU_DIRECTIVE_STORE(ptr, val) (*(ptr) = (val))
 #endif
 
@@ -311,12 +296,18 @@ void hu_personal_model_directive_telemetry_reset(void) {
 
 const char *hu_personal_model_directive_variant_label(hu_directive_variant_t v) {
     switch (v) {
-    case HU_DIRECTIVE_VARIANT_NULL_OVERLAY:    return "null_overlay";
-    case HU_DIRECTIVE_VARIANT_DEFAULT:         return "default";
-    case HU_DIRECTIVE_VARIANT_FORMAL_TERSE:    return "formal_terse";
-    case HU_DIRECTIVE_VARIANT_CASUAL_EMOJI:    return "casual_emoji";
-    case HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT: return "casual_or_short";
-    case HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI:  return "adaptive_emoji";
+    case HU_DIRECTIVE_VARIANT_NULL_OVERLAY:
+        return "null_overlay";
+    case HU_DIRECTIVE_VARIANT_DEFAULT:
+        return "default";
+    case HU_DIRECTIVE_VARIANT_FORMAL_TERSE:
+        return "formal_terse";
+    case HU_DIRECTIVE_VARIANT_CASUAL_EMOJI:
+        return "casual_emoji";
+    case HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT:
+        return "casual_or_short";
+    case HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI:
+        return "adaptive_emoji";
     case HU_DIRECTIVE_VARIANT__COUNT:
     default:
         return "unknown";
@@ -326,12 +317,14 @@ const char *hu_personal_model_directive_variant_label(hu_directive_variant_t v) 
 /* Decision logic broken out from `acknowledgment_directive_for_overlay`
  * so the variant tag is computed in one place — both the wording
  * and the telemetry counter agree on which branch fired. */
-static hu_directive_variant_t directive_variant_for_overlay(const struct hu_persona_overlay *overlay) {
+static hu_directive_variant_t
+directive_variant_for_overlay(const struct hu_persona_overlay *overlay) {
     if (!overlay)
         return HU_DIRECTIVE_VARIANT_NULL_OVERLAY;
     const char *form = overlay->formality && overlay->formality[0] ? overlay->formality : NULL;
     const char *length = overlay->avg_length && overlay->avg_length[0] ? overlay->avg_length : NULL;
-    const char *emoji = overlay->emoji_usage && overlay->emoji_usage[0] ? overlay->emoji_usage : NULL;
+    const char *emoji =
+        overlay->emoji_usage && overlay->emoji_usage[0] ? overlay->emoji_usage : NULL;
 
     bool short_length = false;
     if (length) {
@@ -451,8 +444,7 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
      *     register; same `now = updated_at` clock used elsewhere). */
     const int64_t pm_now = model->updated_at > 0 ? model->updated_at : 0;
     float style_freshness = hu_personal_communication_style_freshness(&model->style, pm_now);
-    if (model->style.sample_count >= HU_PM_DIRECTIVE_MIN_SAMPLES &&
-        style_freshness >= 0.3f) {
+    if (model->style.sample_count >= HU_PM_DIRECTIVE_MIN_SAMPLES && style_freshness >= 0.3f) {
         /* Blend toward neutral as freshness fades — this softens the
          * cliff at the 0.3 gate. At freshness=1.0 the blended struct
          * is identical to the raw EWMA; at freshness=0.3 the directive
@@ -464,10 +456,8 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
         char length_buf[64];
         const char *len_dir =
             length_directive(eff.avg_message_length, length_buf, sizeof(length_buf));
-        append_fmt(buf, cap, &n, "Mirror their style: %s, %s, %s, %s",
-                   len_dir,
-                   register_directive(eff.formality),
-                   emoji_directive(eff.emoji_frequency),
+        append_fmt(buf, cap, &n, "Mirror their style: %s, %s, %s, %s", len_dir,
+                   register_directive(eff.formality), emoji_directive(eff.emoji_frequency),
                    humor_directive(eff.humor_receptivity));
         /* Punctuation/case axes — only emit when the BLENDED ratio
          * crosses ~half so a single capitalized message in a casual
@@ -496,8 +486,7 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
     for (size_t g = 0; g < model->goal_count; g++) {
         if (!model->goals[g].active || model->goals[g].description[0] == '\0')
             continue;
-        if (hu_personal_goal_effective_priority(&model->goals[g], pm_now) <
-            HU_PM_FORGET_FLOOR)
+        if (hu_personal_goal_effective_priority(&model->goals[g], pm_now) < HU_PM_FORGET_FLOOR)
             continue;
         if (!any_goal) {
             append_fmt(buf, cap, &n, "Active goals: ");
@@ -582,8 +571,7 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
         size_t emitted = 0;
         for (size_t i = 0; i < model->fact_count && emitted < 8U; i++) {
             const hu_heuristic_fact_t *f = &model->facts[i];
-            if (hu_heuristic_fact_effective_confidence(f, now) <
-                HU_PM_FACT_PROMPT_MIN_CONFIDENCE)
+            if (hu_heuristic_fact_effective_confidence(f, now) < HU_PM_FACT_PROMPT_MIN_CONFIDENCE)
                 continue;
             if (!any_fact) {
                 append_fmt(buf, cap, &n, "Key facts: ");
@@ -617,8 +605,7 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
                 continue;
             if (f->object[0] == '\0')
                 continue;
-            if (hu_heuristic_fact_effective_confidence(f, now) <
-                HU_PM_FACT_PROMPT_MIN_CONFIDENCE)
+            if (hu_heuristic_fact_effective_confidence(f, now) < HU_PM_FACT_PROMPT_MIN_CONFIDENCE)
                 continue;
             if (!any_avoid) {
                 append_fmt(buf, cap, &n, "Avoid: ");
@@ -699,7 +686,7 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
         }
         if (engage_count > 0)
             append_fmt(buf, cap, &n, ".\n");
-    skip_topic_directive: ;
+    skip_topic_directive:;
     }
 
     /* Surface day-of-week activity pattern when enough data is present. */
@@ -1025,7 +1012,8 @@ hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
                 hu_heuristic_fact_t *existing = &model->facts[j];
                 if (ts > existing->last_seen_at)
                     existing->last_seen_at = ts;
-                float lifted = existing->confidence + 0.1f * (nf->confidence - existing->confidence);
+                float lifted =
+                    existing->confidence + 0.1f * (nf->confidence - existing->confidence);
                 if (lifted > 1.0f)
                     lifted = 1.0f;
                 if (lifted < 0.0f)
@@ -1063,8 +1051,7 @@ hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
 
 /* Find an index in pending_facts whose subject+predicate matches `nf`,
  * or HU_PM_MAX_PENDING_FACTS if not found. */
-static size_t pending_fact_index(const hu_personal_model_t *model,
-                                 const hu_heuristic_fact_t *nf) {
+static size_t pending_fact_index(const hu_personal_model_t *model, const hu_heuristic_fact_t *nf) {
     for (size_t i = 0; i < model->pending_fact_count; i++) {
         if (fact_key_dup(&model->pending_facts[i], nf))
             return i;
@@ -1075,8 +1062,8 @@ static size_t pending_fact_index(const hu_personal_model_t *model,
 /* Insert / corroborate a fact in the pending-facts quarantine queue.
  * Returns true when the fact was inserted (or its corroboration count
  * was bumped); false on overflow. */
-static bool pending_fact_admit(hu_personal_model_t *model,
-                               const hu_heuristic_fact_t *nf, int64_t ts) {
+static bool pending_fact_admit(hu_personal_model_t *model, const hu_heuristic_fact_t *nf,
+                               int64_t ts) {
     size_t idx = pending_fact_index(model, nf);
     if (idx < model->pending_fact_count) {
         /* Corroboration only when the new handle differs from the
@@ -1094,14 +1081,11 @@ static bool pending_fact_admit(hu_personal_model_t *model,
         /* Evict the lowest-corroboration entry to make room. */
         size_t victim = 0;
         for (size_t j = 1; j < model->pending_fact_count; j++) {
-            if (model->pending_corroboration_count[j] <
-                model->pending_corroboration_count[victim])
+            if (model->pending_corroboration_count[j] < model->pending_corroboration_count[victim])
                 victim = j;
         }
-        model->pending_facts[victim] =
-            model->pending_facts[model->pending_fact_count - 1];
-        model->pending_since[victim] =
-            model->pending_since[model->pending_fact_count - 1];
+        model->pending_facts[victim] = model->pending_facts[model->pending_fact_count - 1];
+        model->pending_since[victim] = model->pending_since[model->pending_fact_count - 1];
         model->pending_corroboration_count[victim] =
             model->pending_corroboration_count[model->pending_fact_count - 1];
         model->pending_fact_count--;
@@ -1122,8 +1106,7 @@ static void pending_fact_remove(hu_personal_model_t *model, size_t idx) {
     if (idx != last) {
         model->pending_facts[idx] = model->pending_facts[last];
         model->pending_since[idx] = model->pending_since[last];
-        model->pending_corroboration_count[idx] =
-            model->pending_corroboration_count[last];
+        model->pending_corroboration_count[idx] = model->pending_corroboration_count[last];
     }
     model->pending_fact_count--;
 }
@@ -1284,9 +1267,8 @@ const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_
 static float hu_pm_pow_half_lookup(float k) {
     /* Powers of 0.5, 0..10 — same slope as the fact decay table. */
     static const float pow_half[] = {
-        1.000000f, 0.500000f, 0.250000f, 0.125000f, 0.062500f,
-        0.031250f, 0.015625f, 0.007812f, 0.003906f, 0.001953f,
-        0.000977f,
+        1.000000f, 0.500000f, 0.250000f, 0.125000f, 0.062500f, 0.031250f,
+        0.015625f, 0.007812f, 0.003906f, 0.001953f, 0.000977f,
     };
     if (k <= 0.f)
         return 1.f;
@@ -1332,8 +1314,8 @@ float hu_personal_goal_effective_priority(const hu_personal_goal_t *goal, int64_
     return hu_pm_pow_half_lookup(k);
 }
 
-size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *model,
-                                                      int64_t now, char *buf, size_t cap) {
+size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *model, int64_t now,
+                                                     char *buf, size_t cap) {
     if (!buf || cap == 0)
         return 0;
     buf[0] = '\0';
@@ -1384,10 +1366,9 @@ size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *
     return written;
 }
 
-size_t hu_personal_model_get_recently_completed_goals(const hu_personal_model_t *model,
-                                                       int64_t now,
-                                                       const hu_personal_goal_t **out_buf,
-                                                       size_t out_cap) {
+size_t hu_personal_model_get_recently_completed_goals(const hu_personal_model_t *model, int64_t now,
+                                                      const hu_personal_goal_t **out_buf,
+                                                      size_t out_cap) {
     if (!model || !out_buf || out_cap == 0)
         return 0;
     size_t written = 0;
@@ -1440,8 +1421,9 @@ float hu_personal_communication_style_freshness(const hu_communication_style_t *
     return hu_pm_pow_half_lookup(k);
 }
 
-hu_communication_style_t hu_personal_communication_style_blend_with_freshness(
-    const hu_communication_style_t *style, int64_t now) {
+hu_communication_style_t
+hu_personal_communication_style_blend_with_freshness(const hu_communication_style_t *style,
+                                                     int64_t now) {
     hu_communication_style_t out;
     memset(&out, 0, sizeof(out));
     if (!style)
@@ -1456,13 +1438,14 @@ hu_communication_style_t hu_personal_communication_style_blend_with_freshness(
      * future change to the lookup table or a buggy fixture could land
      * outside the range. We don't want clamp surprises propagating
      * into the prompt. */
-    if (fr < 0.f) fr = 0.f;
-    if (fr > 1.f) fr = 1.f;
+    if (fr < 0.f)
+        fr = 0.f;
+    if (fr > 1.f)
+        fr = 1.f;
     const float drift_to_neutral = 1.f - fr;
     const float NEUTRAL = 0.5f;
 
-#define HU_PM_BLEND(field) \
-    out.field = style->field * fr + NEUTRAL * drift_to_neutral
+#define HU_PM_BLEND(field) out.field = style->field * fr + NEUTRAL * drift_to_neutral
     HU_PM_BLEND(formality);
     HU_PM_BLEND(verbosity);
     HU_PM_BLEND(emoji_frequency);
@@ -1498,17 +1481,22 @@ static bool fidelity_word_is_abbrev(const char *w, size_t wl) {
     for (size_t i = 0; i < HU_PM_FIDELITY_ABBREV_COUNT; i++) {
         const char *a = HU_PM_FIDELITY_ABBREVS[i];
         size_t al = strlen(a);
-        if (al != wl) continue;
+        if (al != wl)
+            continue;
         size_t k = 0;
         while (k < wl) {
             unsigned char x = (unsigned char)w[k];
             unsigned char y = (unsigned char)a[k];
-            if (x >= 'A' && x <= 'Z') x = (unsigned char)(x + 32);
-            if (y >= 'A' && y <= 'Z') y = (unsigned char)(y + 32);
-            if (x != y) break;
+            if (x >= 'A' && x <= 'Z')
+                x = (unsigned char)(x + 32);
+            if (y >= 'A' && y <= 'Z')
+                y = (unsigned char)(y + 32);
+            if (x != y)
+                break;
             k++;
         }
-        if (k == wl) return true;
+        if (k == wl)
+            return true;
     }
     return false;
 }
@@ -1536,7 +1524,8 @@ static void hu_pm_extract_response_features(const char *response, size_t respons
             if (!((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')))
                 break;
             total_letters++;
-            if (d >= 'a' && d <= 'z') lower_letters++;
+            if (d >= 'a' && d <= 'z')
+                lower_letters++;
             i++;
         }
         size_t wl = i - start;
@@ -1557,8 +1546,10 @@ static void hu_pm_extract_response_features(const char *response, size_t respons
  * easier to test. */
 static float hu_pm_axis_match(float observed, float target) {
     float diff = observed - target;
-    if (diff < 0.f) diff = -diff;
-    if (diff >= 1.f) return 0.f;
+    if (diff < 0.f)
+        diff = -diff;
+    if (diff >= 1.f)
+        return 0.f;
     return 1.f - diff;
 }
 
@@ -1573,9 +1564,11 @@ static float hu_pm_length_match(size_t observed, uint32_t target) {
     float t = (float)target;
     float o = (float)observed;
     float diff = o - t;
-    if (diff < 0.f) diff = -diff;
+    if (diff < 0.f)
+        diff = -diff;
     float rel = diff / t;
-    if (rel >= 1.f) return 0.f;
+    if (rel >= 1.f)
+        return 0.f;
     return 1.f - rel;
 }
 
@@ -1600,8 +1593,8 @@ float hu_communication_style_fidelity_score(const hu_communication_style_t *targ
 }
 
 /* Internal: score one response set, accumulating into `out`. */
-static void hu_pm_score_response_set(const hu_communication_style_t *target,
-                                     const char *const *set, const size_t *lens, size_t n,
+static void hu_pm_score_response_set(const hu_communication_style_t *target, const char *const *set,
+                                     const size_t *lens, size_t n,
                                      hu_communication_style_set_summary_t *out) {
     memset(out, 0, sizeof(*out));
     out->min_score = 1.f;
@@ -1622,8 +1615,10 @@ static void hu_pm_score_response_set(const hu_communication_style_t *target,
             continue;
         }
         sum += s;
-        if (s < out->min_score) out->min_score = s;
-        if (s > out->max_score) out->max_score = s;
+        if (s < out->min_score)
+            out->min_score = s;
+        if (s > out->max_score)
+            out->max_score = s;
         out->scored++;
     }
     if (out->scored == 0) {
@@ -1639,8 +1634,8 @@ static void hu_pm_score_response_set(const hu_communication_style_t *target,
 hu_error_t hu_communication_style_compare_response_sets(
     const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
     size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
-    hu_communication_style_set_summary_t *out_a,
-    hu_communication_style_set_summary_t *out_b, float *out_delta) {
+    hu_communication_style_set_summary_t *out_a, hu_communication_style_set_summary_t *out_b,
+    float *out_delta) {
     if (!target || !out_a || !out_b || !out_delta)
         return HU_ERR_INVALID_ARGUMENT;
     /* Refuse on a fingerprintless target — the fidelity scorer
@@ -1935,8 +1930,10 @@ static bool message_contains_word_ci(const char *msg, size_t msg_len, const char
         while (k < word_len) {
             unsigned char a = (unsigned char)msg[i + k];
             unsigned char b = (unsigned char)word[k];
-            if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + 32);
-            if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + 32);
+            if (a >= 'A' && a <= 'Z')
+                a = (unsigned char)(a + 32);
+            if (b >= 'A' && b <= 'Z')
+                b = (unsigned char)(b + 32);
             if (a != b)
                 break;
             k++;
@@ -1995,8 +1992,10 @@ static size_t find_word_ci_with_boundary(const char *hay, size_t hay_len, const 
         while (k < needle_len) {
             unsigned char a = (unsigned char)hay[i + k];
             unsigned char b = (unsigned char)needle[k];
-            if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + 32);
-            if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + 32);
+            if (a >= 'A' && a <= 'Z')
+                a = (unsigned char)(a + 32);
+            if (b >= 'A' && b <= 'Z')
+                b = (unsigned char)(b + 32);
             if (a != b)
                 break;
             k++;
@@ -2150,9 +2149,10 @@ size_t hu_personal_model_touch_goals_in_message(hu_personal_model_t *model, cons
     return bumped;
 }
 
-hu_personal_model_turn_tick_result_t
-hu_personal_model_per_turn_tick(hu_personal_model_t *model, const char *msg, size_t msg_len,
-                                bool from_user, int64_t now) {
+hu_personal_model_turn_tick_result_t hu_personal_model_per_turn_tick(hu_personal_model_t *model,
+                                                                     const char *msg,
+                                                                     size_t msg_len, bool from_user,
+                                                                     int64_t now) {
     hu_personal_model_turn_tick_result_t r;
     memset(&r, 0, sizeof(r));
     if (!model) {
@@ -2231,8 +2231,7 @@ size_t hu_personal_model_apply_decay(hu_personal_model_t *model, int64_t now) {
         if (kept < model->fact_count) {
             /* Zero out the now-vacant tails so save/load round-trips
              * don't carry ghost data in unused slots. */
-            memset(&model->facts[kept], 0,
-                   (model->fact_count - kept) * sizeof(model->facts[0]));
+            memset(&model->facts[kept], 0, (model->fact_count - kept) * sizeof(model->facts[0]));
             model->fact_count = kept;
         }
     }
@@ -2251,8 +2250,7 @@ size_t hu_personal_model_apply_decay(hu_personal_model_t *model, int64_t now) {
             kept++;
         }
         if (kept < model->topic_count) {
-            memset(&model->topics[kept], 0,
-                   (model->topic_count - kept) * sizeof(model->topics[0]));
+            memset(&model->topics[kept], 0, (model->topic_count - kept) * sizeof(model->topics[0]));
             model->topic_count = kept;
         }
     }
@@ -2278,8 +2276,7 @@ size_t hu_personal_model_apply_decay(hu_personal_model_t *model, int64_t now) {
             kept++;
         }
         if (kept < model->goal_count) {
-            memset(&model->goals[kept], 0,
-                   (model->goal_count - kept) * sizeof(model->goals[0]));
+            memset(&model->goals[kept], 0, (model->goal_count - kept) * sizeof(model->goals[0]));
             model->goal_count = kept;
         }
     }
@@ -2305,7 +2302,7 @@ size_t hu_personal_model_apply_decay(hu_personal_model_t *model, int64_t now) {
  * by this code — callers should pre-create `~/.human/personal_model/`
  * (the daemon's onboard wizard does this for the user). */
 
-#define HU_PM_MAGIC    0x4D505548u   /* "HUPM" little-endian */
+#define HU_PM_MAGIC 0x4D505548u /* "HUPM" little-endian */
 /* v1 → v2: hu_communication_style_t gained `lowercase_ratio` and
  *          `abbreviation_ratio` fields.
  * v2 → v3: hu_heuristic_fact_t gained `last_seen_at` for freshness
@@ -2322,7 +2319,7 @@ size_t hu_personal_model_apply_decay(hu_personal_model_t *model, int64_t now) {
 typedef struct hu_pm_header {
     uint32_t magic;
     uint32_t version;
-    uint64_t reserved;  /* always 0; reserved for future framing */
+    uint64_t reserved; /* always 0; reserved for future framing */
 } hu_pm_header_t;
 
 /* Best-effort `mkdir -p` for the parent of `path`.
@@ -2506,7 +2503,8 @@ static void hu_pm_migrate_v3_to_v4(const hu_pm_v3_model_t *v3, hu_personal_model
 }
 
 hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path) {
-    if (!model || !path || !*path) return HU_ERR_INVALID_ARGUMENT;
+    if (!model || !path || !*path)
+        return HU_ERR_INVALID_ARGUMENT;
     hu_pm_ensure_parent_dir(path);
 
     /* Phase 0 Task 7 — atomic write via tmp + fsync + rename. Crash safety:
@@ -2517,10 +2515,12 @@ hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *
      *     to the destination path. */
     char tmp[1024];
     int tn = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-    if (tn < 0 || (size_t)tn >= sizeof(tmp)) return HU_ERR_INVALID_ARGUMENT;
+    if (tn < 0 || (size_t)tn >= sizeof(tmp))
+        return HU_ERR_INVALID_ARGUMENT;
 
     FILE *fp = fopen(tmp, "wb");
-    if (!fp) return HU_ERR_IO;
+    if (!fp)
+        return HU_ERR_IO;
 
     hu_pm_header_t hdr;
     memset(&hdr, 0, sizeof(hdr));
@@ -2528,8 +2528,7 @@ hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *
     hdr.version = HU_PM_VERSION;
     hdr.reserved = 0;
 
-    if (fwrite(&hdr, sizeof(hdr), 1, fp) != 1 ||
-        fwrite(model, sizeof(*model), 1, fp) != 1) {
+    if (fwrite(&hdr, sizeof(hdr), 1, fp) != 1 || fwrite(model, sizeof(*model), 1, fp) != 1) {
         fclose(fp);
         (void)unlink(tmp);
         return HU_ERR_IO;
@@ -2562,10 +2561,12 @@ hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *
 }
 
 hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
-    if (!out || !path || !*path) return HU_ERR_INVALID_ARGUMENT;
+    if (!out || !path || !*path)
+        return HU_ERR_INVALID_ARGUMENT;
     hu_personal_model_init(out);
     FILE *fp = fopen(path, "rb");
-    if (!fp) return HU_ERR_NOT_FOUND;
+    if (!fp)
+        return HU_ERR_NOT_FOUND;
     hu_pm_header_t hdr;
     if (fread(&hdr, sizeof(hdr), 1, fp) != 1) {
         fclose(fp);
@@ -2590,9 +2591,12 @@ hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
         }
         fclose(fp);
         /* Defensive: clamp counts that could overflow on a corrupted file. */
-        if (tmp.fact_count > HU_PM_MAX_FACTS) tmp.fact_count = HU_PM_MAX_FACTS;
-        if (tmp.topic_count > HU_PM_MAX_TOPICS) tmp.topic_count = HU_PM_MAX_TOPICS;
-        if (tmp.goal_count > HU_PM_MAX_GOALS) tmp.goal_count = HU_PM_MAX_GOALS;
+        if (tmp.fact_count > HU_PM_MAX_FACTS)
+            tmp.fact_count = HU_PM_MAX_FACTS;
+        if (tmp.topic_count > HU_PM_MAX_TOPICS)
+            tmp.topic_count = HU_PM_MAX_TOPICS;
+        if (tmp.goal_count > HU_PM_MAX_GOALS)
+            tmp.goal_count = HU_PM_MAX_GOALS;
         *out = tmp;
         return HU_OK;
     }
@@ -2606,9 +2610,12 @@ hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
         }
         fclose(fp);
         /* Same defensive clamps the v4 path applies. */
-        if (v3.fact_count > HU_PM_MAX_FACTS) v3.fact_count = HU_PM_MAX_FACTS;
-        if (v3.topic_count > HU_PM_MAX_TOPICS) v3.topic_count = HU_PM_MAX_TOPICS;
-        if (v3.goal_count > HU_PM_MAX_GOALS) v3.goal_count = HU_PM_MAX_GOALS;
+        if (v3.fact_count > HU_PM_MAX_FACTS)
+            v3.fact_count = HU_PM_MAX_FACTS;
+        if (v3.topic_count > HU_PM_MAX_TOPICS)
+            v3.topic_count = HU_PM_MAX_TOPICS;
+        if (v3.goal_count > HU_PM_MAX_GOALS)
+            v3.goal_count = HU_PM_MAX_GOALS;
         hu_pm_migrate_v3_to_v4(&v3, out);
         return HU_OK;
     }

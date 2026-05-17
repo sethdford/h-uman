@@ -10,8 +10,7 @@
  * The local wrapper preserves the void-return signature this module's call
  * sites already expect; callers are intentionally not rewritten here so the
  * dedupe migration stays a one-line code change per file. */
-static void escape_sql_string(const char *s, size_t len, char *buf, size_t cap,
-                              size_t *out_len) {
+static void escape_sql_string(const char *s, size_t len, char *buf, size_t cap, size_t *out_len) {
     (void)hu_sql_quote_escape_into(s, len, buf, cap, out_len);
 }
 
@@ -81,10 +80,9 @@ hu_disclosure_action_t hu_disclosure_decide(double confidence, uint32_t seed) {
     return HU_DISCLOSE_SKIP;
 }
 
-hu_error_t hu_disclosure_build_prefix(hu_allocator_t *alloc,
-                                     hu_disclosure_action_t action,
-                                     const char *topic, size_t topic_len,
-                                     char **out, size_t *out_len) {
+hu_error_t hu_disclosure_build_prefix(hu_allocator_t *alloc, hu_disclosure_action_t action,
+                                      const char *topic, size_t topic_len, char **out,
+                                      size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -115,20 +113,24 @@ hu_error_t hu_disclosure_build_prefix(hu_allocator_t *alloc,
  * ───────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_curiosity_query_sql(const char *contact_id, size_t contact_id_len,
-                                 uint32_t max_age_days, char *buf, size_t cap,
-                                 size_t *out_len) {
+                                  uint32_t max_age_days, char *buf, size_t cap, size_t *out_len) {
     if (!contact_id || contact_id_len == 0 || !buf || !out_len || cap < 256)
         return HU_ERR_INVALID_ARGUMENT;
     char contact_esc[HU_PROACTIVE_EXT_ESCAPE_BUF];
     size_t ce_len;
-    escape_sql_string(contact_id, contact_id_len, contact_esc,
-                     sizeof(contact_esc), &ce_len);
+    escape_sql_string(contact_id, contact_id_len, contact_esc, sizeof(contact_esc), &ce_len);
     uint64_t cutoff_sec = (uint64_t)max_age_days * 86400u;
+    /* 2026-05-16 P4-1: also gate on last_checkin_sent_at < now - 86400 so the
+     * same topic doesn't re-fire a check-in every hour until last_mentioned
+     * ages out. NULL means "never checked-in" — that branch is always allowed. */
     int n = snprintf(buf, cap,
-                    "SELECT topic, last_mentioned FROM topic_baselines "
-                    "WHERE contact_id = '%s' AND last_mentioned > "
-                    "(strftime('%%s','now') - %llu) ORDER BY last_mentioned DESC",
-                    contact_esc, (unsigned long long)cutoff_sec);
+                     "SELECT topic, last_mentioned FROM topic_baselines "
+                     "WHERE contact_id = '%s' AND last_mentioned > "
+                     "(strftime('%%s','now') - %llu) "
+                     "AND (last_checkin_sent_at IS NULL OR last_checkin_sent_at < "
+                     "strftime('%%s','now') - 86400) "
+                     "ORDER BY last_mentioned DESC",
+                     contact_esc, (unsigned long long)cutoff_sec);
     if (n < 0 || (size_t)n >= cap)
         return HU_ERR_INVALID_ARGUMENT;
     *out_len = (size_t)n;
@@ -151,8 +153,7 @@ double hu_curiosity_score(uint32_t days_since_mentioned, uint32_t times_discusse
     return base;
 }
 
-void hu_curiosity_topic_deinit(hu_allocator_t *alloc,
-                               hu_curiosity_topic_t *t) {
+void hu_curiosity_topic_deinit(hu_allocator_t *alloc, hu_curiosity_topic_t *t) {
     if (!alloc || !t)
         return;
     hu_str_free(alloc, t->topic);
@@ -167,32 +168,28 @@ void hu_curiosity_topic_deinit(hu_allocator_t *alloc,
  * F31 — Callback Opportunities
  * ───────────────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_callback_query_sql(const char *contact_id, size_t contact_id_len,
-                                 uint64_t min_age_ms, uint64_t max_age_ms,
-                                 char *buf, size_t cap, size_t *out_len) {
+hu_error_t hu_callback_query_sql(const char *contact_id, size_t contact_id_len, uint64_t min_age_ms,
+                                 uint64_t max_age_ms, char *buf, size_t cap, size_t *out_len) {
     if (!contact_id || contact_id_len == 0 || !buf || !out_len || cap < 256)
         return HU_ERR_INVALID_ARGUMENT;
     char contact_esc[HU_PROACTIVE_EXT_ESCAPE_BUF];
     size_t ce_len;
-    escape_sql_string(contact_id, contact_id_len, contact_esc,
-                     sizeof(contact_esc), &ce_len);
+    escape_sql_string(contact_id, contact_id_len, contact_esc, sizeof(contact_esc), &ce_len);
     uint64_t min_sec = min_age_ms / 1000u;
     uint64_t max_sec = max_age_ms / 1000u;
     int n = snprintf(buf, cap,
-                    "SELECT fact, significance, created_at FROM micro_moments "
-                    "WHERE contact_id = '%s' AND created_at BETWEEN "
-                    "(strftime('%%s','now') - %llu) AND "
-                    "(strftime('%%s','now') - %llu) ORDER BY created_at DESC",
-                    contact_esc, (unsigned long long)max_sec,
-                    (unsigned long long)min_sec);
+                     "SELECT fact, significance, created_at FROM micro_moments "
+                     "WHERE contact_id = '%s' AND created_at BETWEEN "
+                     "(strftime('%%s','now') - %llu) AND "
+                     "(strftime('%%s','now') - %llu) ORDER BY created_at DESC",
+                     contact_esc, (unsigned long long)max_sec, (unsigned long long)min_sec);
     if (n < 0 || (size_t)n >= cap)
         return HU_ERR_INVALID_ARGUMENT;
     *out_len = (size_t)n;
     return HU_OK;
 }
 
-double hu_callback_score(uint32_t days_old, double emotional_weight,
-                         bool was_important) {
+double hu_callback_score(uint32_t days_old, double emotional_weight, bool was_important) {
     double base = 0.5;
     if (days_old >= 3 && days_old <= 7)
         base = 0.9;
@@ -206,8 +203,7 @@ double hu_callback_score(uint32_t days_old, double emotional_weight,
     return m;
 }
 
-void hu_callback_opportunity_deinit(hu_allocator_t *alloc,
-                                    hu_callback_opportunity_t *c) {
+void hu_callback_opportunity_deinit(hu_allocator_t *alloc, hu_callback_opportunity_t *c) {
     if (!alloc || !c)
         return;
     hu_str_free(alloc, c->topic);
@@ -222,10 +218,11 @@ void hu_callback_opportunity_deinit(hu_allocator_t *alloc,
  * Build prompt for curiosity/callback injection
  * ───────────────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_proactive_ext_build_prompt(
-    hu_allocator_t *alloc, const hu_curiosity_topic_t *curiosity,
-    size_t curiosity_count, const hu_callback_opportunity_t *callbacks,
-    size_t callback_count, char **out, size_t *out_len) {
+hu_error_t hu_proactive_ext_build_prompt(hu_allocator_t *alloc,
+                                         const hu_curiosity_topic_t *curiosity,
+                                         size_t curiosity_count,
+                                         const hu_callback_opportunity_t *callbacks,
+                                         size_t callback_count, char **out, size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -254,10 +251,8 @@ hu_error_t hu_proactive_ext_build_prompt(
         size_t topic_len = c->topic_len;
         const char *prompt = c->prompt ? c->prompt : "";
         size_t prompt_len = c->prompt_len;
-        int n = snprintf(buf + pos, cap - pos,
-                        "Curiosity: %.*s (relevance: %.2f) — \"%.*s\"\n",
-                        (int)topic_len, topic, c->relevance,
-                        (int)prompt_len, prompt);
+        int n = snprintf(buf + pos, cap - pos, "Curiosity: %.*s (relevance: %.2f) — \"%.*s\"\n",
+                         (int)topic_len, topic, c->relevance, (int)prompt_len, prompt);
         if (n < 0 || pos + (size_t)n >= cap) {
             alloc->free(alloc->ctx, buf, cap);
             return HU_ERR_INVALID_ARGUMENT;
@@ -270,8 +265,8 @@ hu_error_t hu_proactive_ext_build_prompt(
         const char *topic = cb->topic ? cb->topic : "(topic)";
         size_t topic_len = cb->topic_len;
         int n = snprintf(buf + pos, cap - pos,
-                        "Callback: %.*s (score: %.2f) — check in on the result\n",
-                        (int)topic_len, topic, cb->callback_score);
+                         "Callback: %.*s (score: %.2f) — check in on the result\n", (int)topic_len,
+                         topic, cb->callback_score);
         if (n < 0 || pos + (size_t)n >= cap) {
             alloc->free(alloc->ctx, buf, cap);
             return HU_ERR_INVALID_ARGUMENT;

@@ -86,6 +86,18 @@ if [ -n "$staged_ui_ts" ] && [ -x "ui/scripts/lint-raw-values.sh" ]; then
     fi
 fi
 
+# Sprint 11 / US-11.6 / D1: refuse to commit real YNTP holdout data into the
+# public repo. The synthetic-5 fixture is fine; the redacted sample-10 is
+# fine; the real 30-row holdout MUST stay in ~/.human/private/ on Seth's
+# machine only. See sprints/sprint-11/decisions.md D1.
+if [ -x "scripts/check_no_yntp_holdout_staged.sh" ]; then
+    bash scripts/check_no_yntp_holdout_staged.sh
+    if [ $? -ne 0 ]; then
+        echo "YNTP holdout guard failed (real chat-derived holdout must not land in repo)."
+        exit 1
+    fi
+fi
+
 # Check that staged test files reference at least one production symbol (Sprint 4 US-10)
 if [ -x "scripts/check-test-references.sh" ]; then
     if ! scripts/check-test-references.sh; then

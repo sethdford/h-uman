@@ -66,25 +66,96 @@ typedef struct hu_scheduler_config {
  * in production. Default false; the bridge stays opt-in via the
  * probe path config but kill-switchable independently.
  */
+/* US-7.8 — MoLoRA static per-channel router (Init #02 phase 1).
+ *
+ * `enabled` is independent of `personalization.enabled` at the config level,
+ * but the agent-turn hook in `src/agent/agent_turn.c` only consults the router
+ * when both flags are true AND `HU_ENABLE_MOLORA` is compiled in. When this
+ * block is absent from the JSON config, parser leaves `enabled = false` and
+ * `count = 0`, which `hu_molora_router_init` treats as the disabled state
+ * (identical to today's pre-story behavior).
+ *
+ * Channel ids are stored normalized (lowercase, no `:`-suffix, no whitespace)
+ * — the parser applies `hu_molora_router_normalize_channel` before insertion.
+ * Adapter paths are owned by this struct (parser strdups them); the router
+ * borrows the pointers and asserts the config outlives it.
+ *
+ * Schema (Phase 1, flat map per design Q1):
+ *   "molora": {
+ *     "enabled": true,
+ *     "channel_adapters": {
+ *       "telegram":  "~/.human/adapters/seth/telegram.lora",
+ *       "imessage":  "~/.human/adapters/seth/imessage.lora",
+ *       "slack":     "~/.human/adapters/seth/slack.lora",
+ *       "discord":   "~/.human/adapters/seth/discord.lora"
+ *     }
+ *   }
+ *
+ * Phase 2 will extend each entry to `{path, scale}` via a versioned schema
+ * bump — Phase 1 stays flat for forward-compat. */
+#define HU_MOLORA_CONFIG_MAX_CHANNELS     16
+#define HU_MOLORA_CONFIG_CHANNEL_NAME_MAX 32
+
+typedef struct hu_molora_channel_entry {
+    /* Normalized channel id (parser-normalized; null-terminated). */
+    char channel[HU_MOLORA_CONFIG_CHANNEL_NAME_MAX];
+    /* Adapter path; owned by this struct (parser-strdup, merge-free). */
+    char *adapter_path;
+} hu_molora_channel_entry_t;
+
+typedef struct hu_molora_config {
+    bool enabled;
+    size_t count;
+    hu_molora_channel_entry_t entries[HU_MOLORA_CONFIG_MAX_CHANNELS];
+} hu_molora_config_t;
+
 typedef struct hu_personalization_config {
     bool enabled;
     char *lora_adapter_path;
     char *lora_adapter_id;
     char *m3_adapter_probe_path;
     bool m3_adapter_disabled;
+    hu_molora_config_t molora;
 } hu_personalization_config_t;
 
+/* US-7.7 (Sprint 7, P1) — Test-time persona scoring (best-of-N at inference).
+ *
+ * When `best_of_n >= 2` AND the active provider is `llamacpp`, the agent's
+ * chat-dispatch site (src/agent/agent_turn.c) routes through the
+ * `hu_best_of_n_chat` decorator (src/agent/best_of_n.c). The decorator
+ * issues up to N completions, scores each via
+ * `hu_communication_style_fidelity_score` (frozen signature in
+ * include/human/memory/personal_model.h:535), and returns the candidate
+ * with the highest fidelity.
+ *
+ * Defaults:
+ *   - best_of_n        = 1   → behavior unchanged from current code
+ *                              (single chat call, no scoring).
+ *   - best_of_n_cost_cap_ms = 0 → no cap (run all N candidates to completion).
+ *
+ * The cap is a soft cap: it's checked after each completion returns, so the
+ * N-th completion that pushes us over the cap still runs to completion
+ * before we return the best-so-far. See src/agent/best_of_n.c for details.
+ *
+ * Cloud-provider misconfiguration (best_of_n >= 2 + cloud provider) emits a
+ * doctor warning per AC-7.7.3 (src/doctor.c). */
+typedef struct hu_inference_config {
+    uint32_t best_of_n;             /* default 1 (disabled); >=2 enables best-of-N */
+    uint32_t best_of_n_cost_cap_ms; /* default 0 (no cap); soft wall-clock cap */
+} hu_inference_config_t;
+
 typedef struct hu_behavior_config {
-    uint32_t consecutive_limit;      /* max consecutive messages from self before skip (default 3) */
-    uint32_t participation_pct;      /* max % of recent messages before skip (default 40) */
-    uint32_t max_response_chars;     /* max response length (default 300) */
-    uint32_t min_response_chars;     /* min response length (default 15) */
-    uint32_t decay_days;             /* memory decay window in days (default 30) */
-    uint32_t dedup_threshold;        /* memory dedup similarity % (default 70) */
-    uint32_t missed_msg_threshold_sec; /* seconds before acknowledging missed message (default 1800) */
-    uint32_t callback_window;          /* callback delay window in seconds (default 300) */
-    uint32_t pattern_threshold;        /* conversation pattern match threshold % (default 50) */
-    uint32_t tapback_skip_pct;         /* probability to skip tapback/reaction % (default 20) */
+    uint32_t consecutive_limit;  /* max consecutive messages from self before skip (default 3) */
+    uint32_t participation_pct;  /* max % of recent messages before skip (default 40) */
+    uint32_t max_response_chars; /* max response length (default 300) */
+    uint32_t min_response_chars; /* min response length (default 15) */
+    uint32_t decay_days;         /* memory decay window in days (default 30) */
+    uint32_t dedup_threshold;    /* memory dedup similarity % (default 70) */
+    uint32_t
+        missed_msg_threshold_sec; /* seconds before acknowledging missed message (default 1800) */
+    uint32_t callback_window;     /* callback delay window in seconds (default 300) */
+    uint32_t pattern_threshold;   /* conversation pattern match threshold % (default 50) */
+    uint32_t tapback_skip_pct;    /* probability to skip tapback/reaction % (default 20) */
 } hu_behavior_config_t;
 
 typedef enum hu_dm_scope {
@@ -110,13 +181,13 @@ typedef struct hu_named_agent_config {
     size_t enabled_tools_count;
     const char **enabled_skills;
     size_t enabled_skills_count;
-    const char *role;            /* lead, builder, reviewer, tester */
+    const char *role; /* lead, builder, reviewer, tester */
     uint8_t autonomy_level;
     double temperature;
     double budget_usd;
     uint32_t max_iterations;
-    const char *description;     /* human-readable, for orchestrator matching */
-    const char *capabilities;    /* comma-sep tags for orchestrator capability matching */
+    const char *description;  /* human-readable, for orchestrator matching */
+    const char *capabilities; /* comma-sep tags for orchestrator capability matching */
     bool is_default;
 } hu_named_agent_config_t;
 

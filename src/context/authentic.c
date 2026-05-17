@@ -13,29 +13,25 @@
 #define HU_AUTH_LCG_C 12345u
 #define HU_AUTH_LCG_M 0x80000000u
 
-static double lcg_normalize(uint32_t seed)
-{
+static double lcg_normalize(uint32_t seed) {
     uint32_t s = seed;
     s = (HU_AUTH_LCG_A * s + HU_AUTH_LCG_C) % HU_AUTH_LCG_M;
     return (double)s / (double)HU_AUTH_LCG_M;
 }
 
-static bool suppressed(hu_authentic_behavior_t b, double closeness, bool serious_topic)
-{
-    if (serious_topic && (b == HU_AUTH_GOSSIP || b == HU_AUTH_RANDOM_THOUGHT ||
-                          b == HU_AUTH_IMPERFECTION))
+static bool suppressed(hu_authentic_behavior_t b, double closeness, bool serious_topic) {
+    if (serious_topic &&
+        (b == HU_AUTH_GOSSIP || b == HU_AUTH_RANDOM_THOUGHT || b == HU_AUTH_IMPERFECTION))
         return true;
-    if (closeness < 0.5 && (b == HU_AUTH_EXISTENTIAL || b == HU_AUTH_GUILT ||
-                            b == HU_AUTH_EMBODIMENT))
+    if (closeness < 0.5 &&
+        (b == HU_AUTH_EXISTENTIAL || b == HU_AUTH_GUILT || b == HU_AUTH_EMBODIMENT))
         return true;
     if (b == HU_AUTH_RESISTANCE && closeness <= 0.7)
         return true;
     return false;
 }
 
-static double get_probability(const hu_authentic_config_t *config,
-                              hu_authentic_behavior_t b)
-{
+static double get_probability(const hu_authentic_config_t *config, hu_authentic_behavior_t b) {
     if (!config)
         return 0.0;
     switch (b) {
@@ -71,10 +67,8 @@ static double get_probability(const hu_authentic_config_t *config,
     return 0.0;
 }
 
-hu_authentic_behavior_t hu_authentic_select(const hu_authentic_config_t *config,
-                                            double closeness, bool serious_topic,
-                                            uint32_t seed)
-{
+hu_authentic_behavior_t hu_authentic_select(const hu_authentic_config_t *config, double closeness,
+                                            bool serious_topic, uint32_t seed) {
     if (!config)
         return HU_AUTH_NONE;
 
@@ -100,71 +94,57 @@ hu_authentic_behavior_t hu_authentic_select(const hu_authentic_config_t *config,
     return HU_AUTH_NONE;
 }
 
-static const char *directive_narration(void)
-{
+static const char *directive_narration(void) {
     return "[AUTHENTIC: Share something about your day naturally. "
            "Example: 'ugh just got back from the gym']";
 }
-static const char *directive_embodiment(void)
-{
+static const char *directive_embodiment(void) {
     return "[AUTHENTIC: Mention a physical state. Example: 'I'm freezing rn' "
            "or 'about to pass out I'm so tired']";
 }
-static const char *directive_imperfection(void)
-{
+static const char *directive_imperfection(void) {
     return "[AUTHENTIC: Get a minor detail wrong or express uncertainty. "
            "Example: 'wait was that Tuesday or Wednesday']";
 }
-static const char *directive_complaining(void)
-{
+static const char *directive_complaining(void) {
     return "[AUTHENTIC: Complain about something mundane. Traffic, weather, "
            "slow wifi, etc.]";
 }
-static const char *directive_gossip(void)
-{
+static const char *directive_gossip(void) {
     return "[AUTHENTIC: Mention something you heard. Keep it light and non-harmful.]";
 }
-static const char *directive_random_thought(void)
-{
+static const char *directive_random_thought(void) {
     return "[AUTHENTIC: Share a random thought. Example: "
            "'do you think dogs dream about chasing squirrels']";
 }
-static const char *directive_medium_aware(void)
-{
+static const char *directive_medium_aware(void) {
     return "[AUTHENTIC: Reference the medium. Example: 'typing this on the couch' "
            "or 'sorry voice to text']";
 }
-static const char *directive_resistance(void)
-{
+static const char *directive_resistance(void) {
     return "[AUTHENTIC: Express mild reluctance. Example: "
            "'not really in the mood to talk about that rn']";
 }
-static const char *directive_existential(void)
-{
+static const char *directive_existential(void) {
     return "[AUTHENTIC: Ask a deep question. Example: "
            "'do you ever think about what we'll be doing in 10 years']";
 }
-static const char *directive_contradiction(void)
-{
+static const char *directive_contradiction(void) {
     return "[AUTHENTIC: Express a contradictory view from a previous opinion. "
            "Humans are complex.]";
 }
-static const char *directive_guilt(void)
-{
+static const char *directive_guilt(void) {
     return "[AUTHENTIC: Express social obligation. Example: "
            "'I really need to call my mom' or 'I've been meaning to text Alex back']";
 }
-static const char *directive_bad_day(void)
-{
+static const char *directive_bad_day(void) {
     return "[AUTHENTIC: You're having a rough day. Be slightly less energetic, "
            "shorter messages, ok to vent briefly.]";
 }
 
-hu_error_t hu_authentic_build_directive(hu_allocator_t *alloc,
-                                        hu_authentic_behavior_t behavior,
-                                        const char *life_context, size_t ctx_len,
-                                        char **out, size_t *out_len)
-{
+hu_error_t hu_authentic_build_directive(hu_allocator_t *alloc, hu_authentic_behavior_t behavior,
+                                        const char *life_context, size_t ctx_len, char **out,
+                                        size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -212,9 +192,9 @@ hu_error_t hu_authentic_build_directive(hu_allocator_t *alloc,
     case HU_AUTH_LIFE_THREAD:
         if (life_context && ctx_len > 0) {
             char buf[1024];
-            int n = snprintf(buf, sizeof(buf),
-                             "[AUTHENTIC: Weave in your current life context: %.*s]",
-                             (int)(ctx_len < 512 ? ctx_len : 512), life_context);
+            int n =
+                snprintf(buf, sizeof(buf), "[AUTHENTIC: Weave in your current life context: %.*s]",
+                         (int)(ctx_len < 512 ? ctx_len : 512), life_context);
             if (n > 0 && (size_t)n < sizeof(buf)) {
                 *out = hu_strndup(alloc, buf, (size_t)n);
                 if (*out) {
@@ -243,16 +223,16 @@ hu_error_t hu_authentic_build_directive(hu_allocator_t *alloc,
     return HU_OK;
 }
 
-hu_error_t hu_life_thread_create_table_sql(char *buf, size_t cap, size_t *out_len)
-{
+hu_error_t hu_life_thread_create_table_sql(char *buf, size_t cap, size_t *out_len) {
     if (!buf || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
-    const char *sql =
-        "CREATE TABLE IF NOT EXISTS life_threads ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-        "thread TEXT NOT NULL, "
-        "timestamp INTEGER NOT NULL, "
-        "active INTEGER NOT NULL DEFAULT 1)";
+    /* P3-2 (2026-05-16) — scoped per-contact. */
+    const char *sql = "CREATE TABLE IF NOT EXISTS life_threads ("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                      "contact_id TEXT NOT NULL DEFAULT '', "
+                      "thread TEXT NOT NULL, "
+                      "timestamp INTEGER NOT NULL, "
+                      "active INTEGER NOT NULL DEFAULT 1)";
     size_t len = strlen(sql);
     if (len >= cap)
         return HU_ERR_INVALID_ARGUMENT;
@@ -268,15 +248,15 @@ static size_t escape_sql_string(char *out, size_t cap, const char *in, size_t in
     return n;
 }
 
-hu_error_t hu_life_thread_insert_sql(const char *thread, size_t thread_len,
-                                     uint64_t timestamp, char *buf, size_t cap,
-                                     size_t *out_len)
-{
+hu_error_t hu_life_thread_insert_sql(const char *contact_id, size_t contact_id_len,
+                                     const char *thread, size_t thread_len, uint64_t timestamp,
+                                     char *buf, size_t cap, size_t *out_len) {
     if (!buf || !out_len || !thread)
         return HU_ERR_INVALID_ARGUMENT;
-    /* Need space for: INSERT INTO life_threads (thread, timestamp, active) VALUES ('...', %llu, 1)
-     * Escaped thread can double in size. Reserve ~200 for prefix/suffix. */
-    size_t max_escaped = (cap > 300) ? (cap - 200) : 0;
+    /* Need space for: INSERT INTO life_threads (contact_id, thread, timestamp, active)
+     * VALUES ('...', '...', %llu, 1). Reserve ~256 for SQL prefix/suffix + escaped
+     * contact_id. */
+    size_t max_escaped = (cap > 400) ? (cap - 300) : 0;
     if (max_escaped == 0)
         return HU_ERR_INVALID_ARGUMENT;
     size_t to_escape = thread_len < max_escaped / 2 ? thread_len : max_escaped / 2;
@@ -284,42 +264,56 @@ hu_error_t hu_life_thread_insert_sql(const char *thread, size_t thread_len,
     size_t esc_cap = sizeof(escaped) < max_escaped ? sizeof(escaped) : max_escaped;
     size_t esc_len = escape_sql_string(escaped, esc_cap, thread, to_escape);
 
+    /* P3-2 — normalize and escape contact_id. */
+    const char *cid = contact_id ? contact_id : "";
+    size_t cid_len = contact_id ? contact_id_len : 0;
+    char cid_escaped[256];
+    size_t cid_esc_len =
+        escape_sql_string(cid_escaped, sizeof(cid_escaped), cid,
+                          cid_len < sizeof(cid_escaped) / 2 ? cid_len : sizeof(cid_escaped) / 2);
+
     int n = snprintf(buf, cap,
-                     "INSERT INTO life_threads (thread, timestamp, active) "
-                     "VALUES ('%.*s', %llu, 1)",
-                     (int)esc_len, escaped, (unsigned long long)timestamp);
+                     "INSERT INTO life_threads (contact_id, thread, timestamp, active) "
+                     "VALUES ('%.*s', '%.*s', %llu, 1)",
+                     (int)cid_esc_len, cid_escaped, (int)esc_len, escaped,
+                     (unsigned long long)timestamp);
     if (n < 0 || (size_t)n >= cap)
         return HU_ERR_INVALID_ARGUMENT;
     *out_len = (size_t)n;
     return HU_OK;
 }
 
-hu_error_t hu_life_thread_query_active_sql(char *buf, size_t cap, size_t *out_len)
-{
+hu_error_t hu_life_thread_query_active_sql(const char *contact_id, size_t contact_id_len, char *buf,
+                                           size_t cap, size_t *out_len) {
     if (!buf || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
-    const char *sql =
-        "SELECT id, thread, timestamp FROM life_threads WHERE active=1 "
-        "ORDER BY timestamp DESC";
-    size_t len = strlen(sql);
-    if (len >= cap)
+    /* P3-2 — scope by contact_id. */
+    const char *cid = contact_id ? contact_id : "";
+    size_t cid_len = contact_id ? contact_id_len : 0;
+    char cid_escaped[256];
+    size_t cid_esc_len =
+        escape_sql_string(cid_escaped, sizeof(cid_escaped), cid,
+                          cid_len < sizeof(cid_escaped) / 2 ? cid_len : sizeof(cid_escaped) / 2);
+
+    int n = snprintf(buf, cap,
+                     "SELECT id, thread, timestamp FROM life_threads "
+                     "WHERE active=1 AND contact_id='%.*s' ORDER BY timestamp DESC",
+                     (int)cid_esc_len, cid_escaped);
+    if (n < 0 || (size_t)n >= cap)
         return HU_ERR_INVALID_ARGUMENT;
-    memcpy(buf, sql, len + 1);
-    *out_len = len;
+    *out_len = (size_t)n;
     return HU_OK;
 }
 
-bool hu_authentic_is_bad_day(bool bad_day_active, uint64_t bad_day_start,
-                             uint64_t now_ms, uint32_t duration_hours)
-{
+bool hu_authentic_is_bad_day(bool bad_day_active, uint64_t bad_day_start, uint64_t now_ms,
+                             uint32_t duration_hours) {
     if (!bad_day_active)
         return false;
     uint64_t duration_ms = (uint64_t)duration_hours * 3600u * 1000u;
     return (now_ms - bad_day_start) < duration_ms;
 }
 
-hu_error_t hu_bad_day_build_directive(hu_allocator_t *alloc, char **out, size_t *out_len)
-{
+hu_error_t hu_bad_day_build_directive(hu_allocator_t *alloc, char **out, size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     const char *d = directive_bad_day();
@@ -331,8 +325,7 @@ hu_error_t hu_bad_day_build_directive(hu_allocator_t *alloc, char **out, size_t 
     return HU_OK;
 }
 
-const char *hu_authentic_behavior_str(hu_authentic_behavior_t b)
-{
+const char *hu_authentic_behavior_str(hu_authentic_behavior_t b) {
     switch (b) {
     case HU_AUTH_NONE:
         return "none";
@@ -366,8 +359,7 @@ const char *hu_authentic_behavior_str(hu_authentic_behavior_t b)
     return "unknown";
 }
 
-void hu_authentic_state_deinit(hu_allocator_t *alloc, hu_authentic_state_t *s)
-{
+void hu_authentic_state_deinit(hu_allocator_t *alloc, hu_authentic_state_t *s) {
     if (!alloc || !s)
         return;
     if (s->context) {
@@ -380,8 +372,7 @@ void hu_authentic_state_deinit(hu_allocator_t *alloc, hu_authentic_state_t *s)
 }
 
 /* F104: Physical Embodiment — schedule-based physical state */
-static bool is_exercise_day(const hu_physical_config_t *config, int day_of_week)
-{
+static bool is_exercise_day(const hu_physical_config_t *config, int day_of_week) {
     if (!config || !config->exercises || config->exercise_day_count <= 0)
         return false;
     for (int i = 0; i < config->exercise_day_count && i < 7; i++) {
@@ -391,9 +382,8 @@ static bool is_exercise_day(const hu_physical_config_t *config, int day_of_week)
     return false;
 }
 
-hu_physical_state_t hu_physical_state_from_schedule(
-    const hu_physical_config_t *config, time_t now)
-{
+hu_physical_state_t hu_physical_state_from_schedule(const hu_physical_config_t *config,
+                                                    time_t now) {
     struct tm tm_buf;
     struct tm *t = hu_platform_localtime_r(&now, &tm_buf);
     if (!t)
@@ -434,25 +424,33 @@ hu_physical_state_t hu_physical_state_from_schedule(
     return HU_PHYSICAL_NORMAL;
 }
 
-const char *hu_physical_state_name(hu_physical_state_t state)
-{
+const char *hu_physical_state_name(hu_physical_state_t state) {
     switch (state) {
-    case HU_PHYSICAL_NORMAL:     return "normal";
-    case HU_PHYSICAL_TIRED:      return "tired";
-    case HU_PHYSICAL_CAFFEINATED: return "caffeinated";
-    case HU_PHYSICAL_SORE:       return "sore";
-    case HU_PHYSICAL_HUNGRY:     return "hungry";
-    case HU_PHYSICAL_EATING:     return "eating";
-    case HU_PHYSICAL_SICK:      return "sick";
-    case HU_PHYSICAL_ENERGIZED:  return "energized";
-    case HU_PHYSICAL_COLD:      return "cold";
-    case HU_PHYSICAL_HOT:       return "hot";
+    case HU_PHYSICAL_NORMAL:
+        return "normal";
+    case HU_PHYSICAL_TIRED:
+        return "tired";
+    case HU_PHYSICAL_CAFFEINATED:
+        return "caffeinated";
+    case HU_PHYSICAL_SORE:
+        return "sore";
+    case HU_PHYSICAL_HUNGRY:
+        return "hungry";
+    case HU_PHYSICAL_EATING:
+        return "eating";
+    case HU_PHYSICAL_SICK:
+        return "sick";
+    case HU_PHYSICAL_ENERGIZED:
+        return "energized";
+    case HU_PHYSICAL_COLD:
+        return "cold";
+    case HU_PHYSICAL_HOT:
+        return "hot";
     }
     return "normal";
 }
 
-const char *hu_physical_state_prompt_hint(hu_physical_state_t state)
-{
+const char *hu_physical_state_prompt_hint(hu_physical_state_t state) {
     switch (state) {
     case HU_PHYSICAL_TIRED:
         return "[PHYSICAL: Tired. You might mention being sleepy or yawning.]";
@@ -479,13 +477,11 @@ const char *hu_physical_state_prompt_hint(hu_physical_state_t state)
 }
 
 /* F105: Imperfection — being wrong about minor things */
-bool hu_should_inject_error(float probability, uint32_t seed)
-{
+bool hu_should_inject_error(float probability, uint32_t seed) {
     return (int)(seed % 1000u) < (int)(probability * 1000.0f);
 }
 
-const char *hu_error_injection_prompt(void)
-{
+const char *hu_error_injection_prompt(void) {
     return "[IMPERFECTION: Casually misremember one minor factual detail — a street "
            "name, a date, a restaurant name. Sound confident, not uncertain. NEVER be "
            "wrong about: emotional content, relationship facts, important commitments, "
@@ -494,8 +490,7 @@ const char *hu_error_injection_prompt(void)
 
 /* F106: Mundane complaining */
 const char *hu_mundane_complaint_prompt(int hour, int day_of_week,
-    hu_physical_state_t physical_state, const char *weather)
-{
+                                        hu_physical_state_t physical_state, const char *weather) {
     if (physical_state == HU_PHYSICAL_SORE)
         return "[AUTHENTIC: Your body is sore from working out. You might grumble about it.]";
     if (weather && strcmp(weather, "hot") == 0)
@@ -503,26 +498,31 @@ const char *hu_mundane_complaint_prompt(int hour, int day_of_week,
     if (weather && strcmp(weather, "cold") == 0)
         return "[AUTHENTIC: It's freezing and you're complaining about it.]";
     if (day_of_week >= 1 && day_of_week <= 5 && hour >= 7 && hour <= 9)
-        return "[AUTHENTIC: You're slightly annoyed about morning traffic/commute. Vent briefly if natural, don't force it.]";
+        return "[AUTHENTIC: You're slightly annoyed about morning traffic/commute. Vent briefly if "
+               "natural, don't force it.]";
     if (hour >= 12 && hour < 13)
-        return "[AUTHENTIC: You're not thrilled with your lunch options. Brief food complaint if it fits.]";
+        return "[AUTHENTIC: You're not thrilled with your lunch options. Brief food complaint if "
+               "it fits.]";
     if (day_of_week >= 1 && day_of_week <= 5 && hour >= 14 && hour < 17)
         return "[AUTHENTIC: You just got out of a meeting. Brief work annoyance if natural.]";
     if (hour >= 19 && hour <= 21)
-        return "[AUTHENTIC: Something minor at home is bugging you — neighbors, a chore, etc. Mention briefly if natural.]";
+        return "[AUTHENTIC: Something minor at home is bugging you — neighbors, a chore, etc. "
+               "Mention briefly if natural.]";
     return NULL;
 }
 
 /* F109: Medium awareness */
-const char *hu_medium_awareness_prompt(bool was_typo, int burst_count,
-    int message_length, int wall_of_text_threshold)
-{
+const char *hu_medium_awareness_prompt(bool was_typo, int burst_count, int message_length,
+                                       int wall_of_text_threshold) {
     if (was_typo)
-        return "[META: You just noticed a typo. Say 'sorry autocorrect' or 'lol autocorrect' naturally.]";
+        return "[META: You just noticed a typo. Say 'sorry autocorrect' or 'lol autocorrect' "
+               "naturally.]";
     if (burst_count >= 4)
-        return "[META: You realize you've sent a lot of messages in a row. Briefly acknowledge it — 'sorry for the spam' or similar.]";
+        return "[META: You realize you've sent a lot of messages in a row. Briefly acknowledge it "
+               "— 'sorry for the spam' or similar.]";
     if (message_length > wall_of_text_threshold)
-        return "[META: You're aware that was a wall of text. Add 'sorry for the novel' or 'tl;dr' naturally.]";
+        return "[META: You're aware that was a wall of text. Add 'sorry for the novel' or 'tl;dr' "
+               "naturally.]";
     return NULL;
 }
 
@@ -531,10 +531,9 @@ static const char *const DISENGAGE_DEFER = "can we talk about this tomorrow? I'm
 static const char *const DISENGAGE_DEFLECT = "honestly I don't have an opinion on that";
 static const char *const DISENGAGE_BRIEF = "haha yeah";
 
-hu_disengage_decision_t hu_should_disengage(
-    float cognitive_capacity, float topic_interest,
-    bool is_emotional_context, const char *relationship_level)
-{
+hu_disengage_decision_t hu_should_disengage(float cognitive_capacity, float topic_interest,
+                                            bool is_emotional_context,
+                                            const char *relationship_level) {
     hu_disengage_decision_t out = {0};
     out.disengage_probability = 0.0f;
     out.disengage_style = NULL;
@@ -567,16 +566,12 @@ hu_disengage_decision_t hu_should_disengage(
 
 /* F111: Existential curiosity */
 static const char *const CURIOSITY_QUESTIONS[] = {
-    "are you happy? like actually happy?",
-    "what are you most afraid of right now?",
+    "are you happy? like actually happy?", "what are you most afraid of right now?",
     "what would you do if money wasn't a thing?",
-    "do you ever think about just... starting over somewhere?"
-};
+    "do you ever think about just... starting over somewhere?"};
 
-bool hu_existential_curiosity_check(
-    const char *relationship_level, int hour_of_day,
-    int days_since_last, hu_curiosity_candidate_t *out)
-{
+bool hu_existential_curiosity_check(const char *relationship_level, int hour_of_day,
+                                    int days_since_last, hu_curiosity_candidate_t *out) {
     if (!out)
         return false;
     if (!relationship_level)
@@ -595,10 +590,8 @@ bool hu_existential_curiosity_check(
 }
 
 /* F112: Contradiction tolerance */
-const char *hu_contradiction_select_position(
-    const hu_contradiction_t *contradiction,
-    float mood_valence, float cognitive_capacity)
-{
+const char *hu_contradiction_select_position(const hu_contradiction_t *contradiction,
+                                             float mood_valence, float cognitive_capacity) {
     if (!contradiction || !contradiction->position_a || !contradiction->position_b)
         return NULL;
     if (mood_valence > 0.5f)
@@ -607,15 +600,15 @@ const char *hu_contradiction_select_position(
         return contradiction->position_b;
     if (cognitive_capacity < 0.3f)
         return contradiction->expressed_a_count >= contradiction->expressed_b_count
-            ? contradiction->position_a : contradiction->position_b;
+                   ? contradiction->position_a
+                   : contradiction->position_b;
     return contradiction->position_a;
 }
 
 #ifdef HU_ENABLE_SQLITE
 
-hu_error_t hu_contradiction_record(sqlite3 *db, const char *topic,
-    const char *position_a, const char *position_b, int64_t now)
-{
+hu_error_t hu_contradiction_record(sqlite3 *db, const char *topic, const char *position_a,
+                                   const char *position_b, int64_t now) {
     if (!db || !topic || !position_a || !position_b)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;
@@ -636,9 +629,7 @@ hu_error_t hu_contradiction_record(sqlite3 *db, const char *topic,
 #define HU_CONTRADICTION_BUF 256
 
 /* Result valid until next call (static buffers, single-threaded only). */
-int hu_contradiction_get(sqlite3 *db, const char *topic,
-    hu_contradiction_t *out)
-{
+int hu_contradiction_get(sqlite3 *db, const char *topic, hu_contradiction_t *out) {
     if (!db || !topic || !out)
         return 0;
     static _Thread_local char topic_buf[HU_CONTRADICTION_BUF];
@@ -697,9 +688,8 @@ int hu_contradiction_get(sqlite3 *db, const char *topic,
 }
 
 /* F103: Spontaneous Life Narration */
-hu_error_t hu_narration_event_record(sqlite3 *db, const char *event_type,
-    const char *description, float shareability_score, int64_t now)
-{
+hu_error_t hu_narration_event_record(sqlite3 *db, const char *event_type, const char *description,
+                                     float shareability_score, int64_t now) {
     if (!db || !event_type || !description)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;
@@ -717,9 +707,7 @@ hu_error_t hu_narration_event_record(sqlite3 *db, const char *event_type,
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
 }
 
-int hu_narration_events_unsent(sqlite3 *db, float min_shareability,
-    int64_t *out_ids, int max_out)
-{
+int hu_narration_events_unsent(sqlite3 *db, float min_shareability, int64_t *out_ids, int max_out) {
     if (!db || !out_ids || max_out <= 0)
         return 0;
     sqlite3_stmt *stmt = NULL;
@@ -738,9 +726,8 @@ int hu_narration_events_unsent(sqlite3 *db, float min_shareability,
     return count;
 }
 
-hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id,
-    const char *contact_id, int64_t now)
-{
+hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id, const char *contact_id,
+                                          int64_t now) {
     if (!db || !contact_id)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;
@@ -757,8 +744,7 @@ hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id,
 }
 
 /* F107: Gossip — query feed_items for recent items about contacts other than current */
-int hu_gossip_check(sqlite3 *db, const char *contact_id, int max_out)
-{
+int hu_gossip_check(sqlite3 *db, const char *contact_id, int max_out) {
     if (!db || max_out <= 0)
         return 0;
     int64_t now_sec = (int64_t)time(NULL);
@@ -782,25 +768,23 @@ int hu_gossip_check(sqlite3 *db, const char *contact_id, int max_out)
 
 #define HU_GOSSIP_PROMPT_BUF 512
 
-const char *hu_gossip_prompt(const char *shared_contact, const char *observation)
-{
+const char *hu_gossip_prompt(const char *shared_contact, const char *observation) {
     static _Thread_local char buf[HU_GOSSIP_PROMPT_BUF];
     const char *sc = shared_contact ? shared_contact : "someone";
     const char *obs = observation ? observation : "";
     int n = snprintf(buf, sizeof(buf),
-                    "[GOSSIP: You noticed something about %s: %s. Share a brief, dry "
-                    "observation. STRICT: Never reveal private information from other "
-                    "conversations.]",
-                    sc, obs);
+                     "[GOSSIP: You noticed something about %s: %s. Share a brief, dry "
+                     "observation. STRICT: Never reveal private information from other "
+                     "conversations.]",
+                     sc, obs);
     if (n < 0 || (size_t)n >= sizeof(buf))
         buf[0] = '\0';
     return buf;
 }
 
 /* F108: Random thoughts */
-bool hu_random_thought_generate(int hour, int day_of_week,
-    int thoughts_this_week, hu_random_thought_t *out)
-{
+bool hu_random_thought_generate(int hour, int day_of_week, int thoughts_this_week,
+                                hu_random_thought_t *out) {
     (void)day_of_week;
     if (!out || thoughts_this_week >= 2)
         return false;
@@ -825,8 +809,7 @@ bool hu_random_thought_generate(int hour, int day_of_week,
 }
 
 /* F113: Guilt check — count of stale threads (7+ days, status=open) */
-int hu_guilt_check(sqlite3 *db, const char *contact_id, int max_out)
-{
+int hu_guilt_check(sqlite3 *db, const char *contact_id, int max_out) {
     if (!db || !contact_id || max_out <= 0)
         return 0;
     int64_t now_sec = (int64_t)time(NULL);
@@ -847,9 +830,7 @@ int hu_guilt_check(sqlite3 *db, const char *contact_id, int max_out)
 }
 
 /* F114: Thread management */
-hu_error_t hu_thread_open(sqlite3 *db, const char *contact_id,
-    const char *topic, int64_t now)
-{
+hu_error_t hu_thread_open(sqlite3 *db, const char *contact_id, const char *topic, int64_t now) {
     if (!db || !contact_id || !topic)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;
@@ -867,8 +848,7 @@ hu_error_t hu_thread_open(sqlite3 *db, const char *contact_id,
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
 }
 
-hu_error_t hu_thread_resolve(sqlite3 *db, int64_t thread_id)
-{
+hu_error_t hu_thread_resolve(sqlite3 *db, int64_t thread_id) {
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;
@@ -882,9 +862,7 @@ hu_error_t hu_thread_resolve(sqlite3 *db, int64_t thread_id)
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
 }
 
-int hu_thread_list_open(sqlite3 *db, const char *contact_id,
-    char topics[][128], int max_out)
-{
+int hu_thread_list_open(sqlite3 *db, const char *contact_id, char topics[][128], int max_out) {
     if (!db || !contact_id || !topics || max_out <= 0)
         return 0;
     sqlite3_stmt *stmt = NULL;
@@ -913,9 +891,8 @@ int hu_thread_list_open(sqlite3 *db, const char *contact_id,
     return count;
 }
 
-int hu_thread_needs_followup(sqlite3 *db, const char *contact_id,
-    int64_t min_age_sec, int64_t max_age_sec, int64_t now)
-{
+int hu_thread_needs_followup(sqlite3 *db, const char *contact_id, int64_t min_age_sec,
+                             int64_t max_age_sec, int64_t now) {
     if (!db || !contact_id)
         return 0;
     int64_t lo = now - max_age_sec;
@@ -937,9 +914,9 @@ int hu_thread_needs_followup(sqlite3 *db, const char *contact_id,
 }
 
 /* F115: Interaction quality */
-hu_error_t hu_interaction_quality_record(sqlite3 *db, const char *contact_id,
-    float quality_score, float cognitive_load, const char *mood_state, int64_t now)
-{
+hu_error_t hu_interaction_quality_record(sqlite3 *db, const char *contact_id, float quality_score,
+                                         float cognitive_load, const char *mood_state,
+                                         int64_t now) {
     if (!db || !contact_id)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;
@@ -961,9 +938,8 @@ hu_error_t hu_interaction_quality_record(sqlite3 *db, const char *contact_id,
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
 }
 
-int hu_interaction_quality_needs_recovery(sqlite3 *db, const char *contact_id,
-    float threshold, int64_t min_age_sec, int64_t max_age_sec, int64_t now)
-{
+int hu_interaction_quality_needs_recovery(sqlite3 *db, const char *contact_id, float threshold,
+                                          int64_t min_age_sec, int64_t max_age_sec, int64_t now) {
     if (!db || !contact_id)
         return 0;
     int64_t lo = now - max_age_sec;
@@ -986,9 +962,7 @@ int hu_interaction_quality_needs_recovery(sqlite3 *db, const char *contact_id,
     return count;
 }
 
-hu_error_t hu_interaction_quality_mark_recovered(sqlite3 *db,
-    const char *contact_id, int64_t now)
-{
+hu_error_t hu_interaction_quality_mark_recovered(sqlite3 *db, const char *contact_id, int64_t now) {
     if (!db || !contact_id)
         return HU_ERR_INVALID_ARGUMENT;
     sqlite3_stmt *stmt = NULL;

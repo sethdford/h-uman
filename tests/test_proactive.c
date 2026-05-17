@@ -4,7 +4,6 @@
 #include "human/agent/proactive.h"
 #include "human/agent/timing.h"
 #include "human/agent/weather_awareness.h"
-#include "human/visual/content.h"
 #include "human/context/authentic.h"
 #include "human/context/behavioral.h"
 #include "human/context/event_extract.h"
@@ -19,6 +18,7 @@
 #include "human/memory/knowledge.h"
 #include "human/memory/rag_pipeline.h"
 #include "human/persona.h"
+#include "human/visual/content.h"
 #include "test_framework.h"
 #include <string.h>
 #ifdef HU_ENABLE_SQLITE
@@ -330,6 +330,82 @@ static void proactive_starter_empty_memory(void) {
     HU_ASSERT_NULL(out);
     HU_ASSERT_EQ(out_len, 0);
 
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
+/* P2-4 regression (2026-05-16 incident): hu_proactive_build_starter used
+ * to memcpy raw entries[i].content into the prompt without ANY safety
+ * filter. Memory entries containing first-person confession-style content
+ * (e.g. "I confessed something terrible to my friend") were thus injected
+ * directly into outbound proactive prompts. The fix filters entries
+ * through a local safety predicate; unsafe entries are skipped. */
+static void proactive_starter_skips_first_person_confession_entry(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_p24";
+    static const char topic_cat[] = "conversation";
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = topic_cat, .name_len = sizeof(topic_cat) - 1},
+    };
+    /* Poisonous entry: a first-person confession fragment. */
+    const char *key1 = "topic:contact_p24:1";
+    const char *content1 = "recent topics activities interests: I confessed something terrible";
+    mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat, CONTACT,
+                      sizeof(CONTACT) - 1);
+    /* Clean entry mixed in. */
+    const char *key2 = "topic:contact_p24:2";
+    const char *content2 = "recent topics activities interests: pasta recipe weekend";
+    mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat, CONTACT,
+                      sizeof(CONTACT) - 1);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err =
+        hu_proactive_build_starter(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    if (out && out_len > 0) {
+        /* Confession content must NEVER appear. */
+        HU_ASSERT_NULL(strstr(out, "confessed something terrible"));
+        HU_ASSERT_NULL(strstr(out, "I confessed"));
+        /* Clean entry may appear. */
+        alloc.free(alloc.ctx, out, out_len + 1);
+    }
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
+static void proactive_starter_skips_emotion_keyword_entry(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_p24b";
+    static const char topic_cat[] = "conversation";
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = topic_cat, .name_len = sizeof(topic_cat) - 1},
+    };
+    const char *key = "topic:contact_p24b:1";
+    const char *content = "recent topics activities interests: feeling lonely and depressed";
+    mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat, CONTACT,
+                      sizeof(CONTACT) - 1);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err =
+        hu_proactive_build_starter(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    if (out && out_len > 0) {
+        HU_ASSERT_NULL(strstr(out, "lonely"));
+        HU_ASSERT_NULL(strstr(out, "depressed"));
+        alloc.free(alloc.ctx, out, out_len + 1);
+    }
     if (mem.vtable->deinit)
         mem.vtable->deinit(mem.ctx);
 }
@@ -656,7 +732,7 @@ static void proactive_important_dates_match_returns_true_and_message(void) {
     char msg_out[256];
     char type_out[32];
     bool ok = hu_proactive_check_important_dates(&persona, "min", 3, 7, 15, msg_out,
-                                                  sizeof(msg_out), type_out, sizeof(type_out));
+                                                 sizeof(msg_out), type_out, sizeof(type_out));
     HU_ASSERT_TRUE(ok);
     HU_ASSERT_STR_EQ(msg_out, "happy birthday!");
     HU_ASSERT_STR_EQ(type_out, "birthday");
@@ -675,7 +751,7 @@ static void proactive_important_dates_no_match_returns_false(void) {
 
     char msg_out[256];
     bool ok = hu_proactive_check_important_dates(&persona, "min", 3, 7, 16, msg_out,
-                                                  sizeof(msg_out), NULL, 0);
+                                                 sizeof(msg_out), NULL, 0);
     HU_ASSERT_FALSE(ok);
 }
 
@@ -686,7 +762,7 @@ static void proactive_important_dates_empty_returns_false(void) {
 
     char msg_out[256];
     bool ok = hu_proactive_check_important_dates(&persona, "min", 3, 7, 15, msg_out,
-                                                  sizeof(msg_out), NULL, 0);
+                                                 sizeof(msg_out), NULL, 0);
     HU_ASSERT_FALSE(ok);
 }
 
@@ -698,6 +774,171 @@ static void proactive_backoff_hours_returns_correct_thresholds(void) {
     HU_ASSERT_EQ(hu_proactive_backoff_hours(10), UINT32_MAX);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Regression suite for 2026-05-16 F25 incident.
+ *
+ * On 2026-05-16 the daemon shipped this exact string to three family
+ * members via F25 emotional check-in, because m->topic was populated
+ * with a raw 60–255-char window of one relative's emotional confession
+ * and daemon.c:1008 interpolated it verbatim into
+ *   "hey how are you doing with %s?"
+ *
+ * hu_proactive_topic_is_safe is the outbound safety predicate that the
+ * fix wires into daemon.c:1008. These tests pin every condition the
+ * predicate must catch — adding a positive test for clean noun phrases
+ * guards against the predicate being so strict it blocks all sends.
+ * ───────────────────────────────────────────────────────────────────── */
+
+static void proactive_topic_safe_rejects_null_or_empty(void) {
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe(NULL, 0));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("", 0));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("anything", 0));
+}
+
+static void proactive_topic_safe_rejects_2026_05_16_confession_parrot(void) {
+    /* The exact 60-char window that shipped to Mindy, Annie, and Betty. */
+    const char *toxic = "but boy I am just more lonely now than ever. I am skeptical";
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe(toxic, strlen(toxic)));
+}
+
+static void proactive_topic_safe_rejects_recall_format_string_leak(void) {
+    /* The "(last: %lld)" debug-format substring from superhuman.c:999. */
+    const char *toxic = "(last: 1774705881)";
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe(toxic, strlen(toxic)));
+}
+
+static void proactive_topic_safe_rejects_first_person_pronouns(void) {
+    /* First-person pronouns mean the "topic" is actually a confession,
+     * not a noun phrase about the contact's life. */
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("I confessed something terrible",
+                                               strlen("I confessed something terrible")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("me and my dog", strlen("me and my dog")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("my heartbreak", strlen("my heartbreak")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("i'm overwhelmed", strlen("i'm overwhelmed")));
+}
+
+static void proactive_topic_safe_rejects_emotion_keywords(void) {
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("feel lost", strlen("feel lost")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("more lonely now", strlen("more lonely now")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("crying again", strlen("crying again")));
+    HU_ASSERT_FALSE(
+        hu_proactive_topic_is_safe("skeptical about life", strlen("skeptical about life")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("depressed lately", strlen("depressed lately")));
+}
+
+static void proactive_topic_safe_rejects_format_chars_and_whitespace_chaos(void) {
+    HU_ASSERT_FALSE(
+        hu_proactive_topic_is_safe("topic\nwith newline", strlen("topic\nwith newline")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("topic\rwith cr", strlen("topic\rwith cr")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("has %s format", strlen("has %s format")));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("has %lld format", strlen("has %lld format")));
+}
+
+static void proactive_topic_safe_rejects_oversize(void) {
+    /* Anything beyond 60 chars is almost certainly a raw sentence, not a topic. */
+    static const char too_long[] =
+        "the time we drove to the mountains and saw that strange dog by the gas "
+        "station with the broken sign";
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe(too_long, sizeof(too_long) - 1));
+}
+
+static void proactive_topic_safe_accepts_clean_noun_phrases(void) {
+    /* Positive cases — the predicate must not over-block. */
+    HU_ASSERT_TRUE(hu_proactive_topic_is_safe("the new job", strlen("the new job")));
+    HU_ASSERT_TRUE(hu_proactive_topic_is_safe("the dogs", strlen("the dogs")));
+    HU_ASSERT_TRUE(hu_proactive_topic_is_safe("the garden", strlen("the garden")));
+    HU_ASSERT_TRUE(hu_proactive_topic_is_safe("Replay MCP", strlen("Replay MCP")));
+    HU_ASSERT_TRUE(hu_proactive_topic_is_safe("the loan", strlen("the loan")));
+    HU_ASSERT_TRUE(hu_proactive_topic_is_safe("the trip to Italy", strlen("the trip to Italy")));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Regression suite for 2026-05-16 cross-contact leak.
+ *
+ * On 2026-05-16, F25 routed Mindy's emotional moment to three contacts
+ * because daemon.c:975-984 had a fallback that matched the moment's
+ * contact_id against `proactive_channel` (whole and after-colon suffix).
+ * hu_proactive_contact_matches_moment must enforce strict-equality only.
+ * ───────────────────────────────────────────────────────────────────── */
+
+static void proactive_contact_match_strict_id_matches(void) {
+    HU_ASSERT_TRUE(hu_proactive_contact_matches_moment("alice", "alice"));
+    HU_ASSERT_TRUE(hu_proactive_contact_matches_moment("+18018285260", "+18018285260"));
+}
+
+static void proactive_contact_match_strict_id_mismatches(void) {
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("alice", "bob"));
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("mindy_handle", "betty_handle"));
+}
+
+static void proactive_contact_match_rejects_prefix_collision(void) {
+    /* "alice" is a prefix of "aliceford" but they are not the same contact. */
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("alice", "aliceford"));
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("aliceford", "alice"));
+}
+
+static void proactive_contact_match_rejects_case_collision(void) {
+    /* Contact IDs are case-sensitive identifiers — case-insensitive matching
+     * was one path that previously bridged contacts. */
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("alice", "Alice"));
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("BETTY", "betty"));
+}
+
+static void proactive_contact_match_handles_null_or_empty(void) {
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment(NULL, "alice"));
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("alice", NULL));
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment(NULL, NULL));
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("", "alice"));
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("alice", ""));
+    HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("", ""));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Regression suite for 2026-05-16 replay-insights cross-contact leak (RI-1).
+ *
+ * daemon.c stored/read replay-analysis blobs under the GLOBAL key
+ * "replay:latest" with a process-global static fallback, so every contact's
+ * prompt picked up the most recently analyzed conversation's insights from
+ * any other contact.  hu_proactive_build_replay_key forces the key into
+ * per-contact form.
+ * ───────────────────────────────────────────────────────────────────── */
+
+static void proactive_replay_key_builds_per_contact(void) {
+    char buf[128] = {0};
+    size_t out_len = 0;
+    HU_ASSERT_TRUE(
+        hu_proactive_build_replay_key("alice", strlen("alice"), buf, sizeof(buf), &out_len));
+    HU_ASSERT_STR_EQ(buf, "replay:alice:latest");
+    HU_ASSERT_EQ(out_len, strlen("replay:alice:latest"));
+}
+
+static void proactive_replay_key_two_contacts_produce_different_keys(void) {
+    char a[128] = {0};
+    char b[128] = {0};
+    size_t a_len = 0;
+    size_t b_len = 0;
+    HU_ASSERT_TRUE(hu_proactive_build_replay_key("mindy", strlen("mindy"), a, sizeof(a), &a_len));
+    HU_ASSERT_TRUE(hu_proactive_build_replay_key("betty", strlen("betty"), b, sizeof(b), &b_len));
+    HU_ASSERT_TRUE(strcmp(a, b) != 0);
+}
+
+static void proactive_replay_key_rejects_null_or_empty(void) {
+    char buf[128] = {0};
+    size_t out_len = 99;
+    HU_ASSERT_FALSE(hu_proactive_build_replay_key(NULL, 5, buf, sizeof(buf), &out_len));
+    HU_ASSERT_FALSE(hu_proactive_build_replay_key("alice", 0, buf, sizeof(buf), &out_len));
+    HU_ASSERT_FALSE(hu_proactive_build_replay_key("alice", 5, NULL, sizeof(buf), &out_len));
+    HU_ASSERT_FALSE(hu_proactive_build_replay_key("alice", 5, buf, 0, &out_len));
+}
+
+static void proactive_replay_key_rejects_too_small_buffer(void) {
+    char tiny[5] = {0};
+    size_t out_len = 0;
+    /* "replay:alice:latest" is 19 chars + NUL = 20 needed; 5 is far too small. */
+    HU_ASSERT_FALSE(
+        hu_proactive_build_replay_key("alice", strlen("alice"), tiny, sizeof(tiny), &out_len));
+}
+
 #ifdef HU_ENABLE_SQLITE
 static void proactive_curiosity_returns_message_from_micro_moment(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -707,8 +948,8 @@ static void proactive_curiosity_returns_message_from_micro_moment(void) {
     static const char CONTACT[] = "contact_curiosity";
     static const char FACT[] = "play the piano";
     static const char SIG[] = "musician";
-    HU_ASSERT_EQ(hu_superhuman_micro_moment_store(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
-                                                 FACT, sizeof(FACT) - 1, SIG, sizeof(SIG) - 1),
+    HU_ASSERT_EQ(hu_superhuman_micro_moment_store(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1, FACT,
+                                                  sizeof(FACT) - 1, SIG, sizeof(SIG) - 1),
                  HU_OK);
 
     char msg[384];
@@ -717,7 +958,8 @@ static void proactive_curiosity_returns_message_from_micro_moment(void) {
                                            sizeof(msg));
     HU_ASSERT_TRUE(ok);
     HU_ASSERT_TRUE(strlen(msg) > 20);
-    HU_ASSERT_TRUE(strstr(msg, "random question") != NULL || strstr(msg, "whatever happened") != NULL);
+    HU_ASSERT_TRUE(strstr(msg, "random question") != NULL ||
+                   strstr(msg, "whatever happened") != NULL);
     /* Message should reference the stored fact "play the piano" */
     HU_ASSERT_TRUE(strstr(msg, "play") != NULL || strstr(msg, "piano") != NULL ||
                    strstr(msg, "the") != NULL);
@@ -748,7 +990,7 @@ static void proactive_callbacks_returns_delayed_followup(void) {
     static const char TOPIC[] = "that dinner thing";
     int64_t past = 1000000;
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
-                                                        TOPIC, sizeof(TOPIC) - 1, past),
+                                                         TOPIC, sizeof(TOPIC) - 1, past),
                  HU_OK);
 
     char msg[512];
@@ -776,6 +1018,73 @@ static void proactive_callbacks_returns_false_without_due_items(void) {
 
     mem.vtable->deinit(mem.ctx);
 }
+
+/* 2026-05-16 P4-4: hu_proactive_check_callbacks_ex must expose the chosen
+ * followup id so the caller can mark_sent only on confirmed delivery. If the
+ * caller doesn't (e.g. send failed), the followup stays in the queue.
+ *
+ * This test reproduces the failure mode: pre-fix the followup id was hidden
+ * inside the function and never marked_sent, so list_due returned the same
+ * row every cycle. */
+static void proactive_callbacks_ex_exposes_followup_id_and_supports_retry(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_cb_p4_4";
+    static const char TOPIC[] = "loan paperwork";
+    int64_t past = 1000000;
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                         TOPIC, sizeof(TOPIC) - 1, past),
+                 HU_OK);
+
+    /* First retrieval — id is exposed. */
+    char msg[512];
+    int64_t followup_id = -999;
+    bool ok = hu_proactive_check_callbacks_ex(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+                                              sizeof(msg), &followup_id);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(followup_id > 0);
+    HU_ASSERT_TRUE(strstr(msg, "loan paperwork") != NULL);
+
+    /* SIMULATE SEND FAILURE: caller does NOT call mark_sent. The followup must
+     * remain in the queue for a future retry. */
+    char msg2[512];
+    int64_t followup_id2 = -999;
+    bool ok2 = hu_proactive_check_callbacks_ex(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg2,
+                                               sizeof(msg2), &followup_id2);
+    HU_ASSERT_TRUE(ok2);
+    HU_ASSERT_EQ(followup_id2, followup_id);
+
+    /* SIMULATE SEND SUCCESS: caller calls mark_sent. The followup must NOT
+     * re-surface on the next list_due. */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, followup_id), HU_OK);
+
+    char msg3[512];
+    int64_t followup_id3 = -999;
+    bool ok3 = hu_proactive_check_callbacks_ex(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg3,
+                                               sizeof(msg3), &followup_id3);
+    HU_ASSERT_FALSE(ok3);
+    HU_ASSERT_EQ(followup_id3, -1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Sanity: the wrapper hu_proactive_check_callbacks still works when caller
+ * doesn't care about the id (backward compat). */
+static void proactive_callbacks_wrapper_ignores_id(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    static const char CONTACT[] = "contact_wrap";
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                         "t", 1, 1000000),
+                 HU_OK);
+    char msg[256];
+    HU_ASSERT_TRUE(hu_proactive_check_callbacks(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+                                                sizeof(msg)));
+    mem.vtable->deinit(mem.ctx);
+}
 #endif
 
 static void proactive_build_context_handles_new_action_types(void) {
@@ -794,9 +1103,11 @@ static void proactive_build_context_handles_new_action_types(void) {
         {HU_PROACTIVE_CALLBACK, "CALLBACK: follow up on their question about Y"},
     };
 
-    for (size_t i = 0; i < sizeof(actions) / sizeof(actions[0]) && result.count < HU_PROACTIVE_MAX_ACTIONS; i++) {
+    for (size_t i = 0;
+         i < sizeof(actions) / sizeof(actions[0]) && result.count < HU_PROACTIVE_MAX_ACTIONS; i++) {
         result.actions[result.count].type = actions[i].type;
-        result.actions[result.count].message = hu_strndup(&alloc, actions[i].msg, strlen(actions[i].msg));
+        result.actions[result.count].message =
+            hu_strndup(&alloc, actions[i].msg, strlen(actions[i].msg));
         result.actions[result.count].message_len = strlen(actions[i].msg);
         result.actions[result.count].priority = 0.7;
         result.count++;
@@ -838,14 +1149,12 @@ static void daemon_authentic_select_and_build_directive_produces_valid_string(vo
         .bad_day_active = false,
         .bad_day_duration_hours = 8,
     };
-    hu_authentic_behavior_t behavior =
-        hu_authentic_select(&auth_cfg, 0.5, false, 42u);
+    hu_authentic_behavior_t behavior = hu_authentic_select(&auth_cfg, 0.5, false, 42u);
     HU_ASSERT_NEQ(behavior, HU_AUTH_NONE);
 
     char *auth_dir = NULL;
     size_t auth_len = 0;
-    hu_error_t err =
-        hu_authentic_build_directive(&alloc, behavior, NULL, 0, &auth_dir, &auth_len);
+    hu_error_t err = hu_authentic_build_directive(&alloc, behavior, NULL, 0, &auth_dir, &auth_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(auth_dir);
     HU_ASSERT_TRUE(auth_len > 0);
@@ -909,8 +1218,7 @@ static void daemon_collab_plan_build_prompt_works_with_empty_triggers_and_plans(
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err =
-        hu_collab_plan_build_prompt(&alloc, NULL, 0, NULL, 0, &out, &out_len);
+    hu_error_t err = hu_collab_plan_build_prompt(&alloc, NULL, 0, NULL, 0, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(out_len > 0);
@@ -943,11 +1251,11 @@ static void daemon_timezone_compute_and_build_directive_work(void) {
 
 static void daemon_governor_init_has_budget_and_record_sent(void) {
     hu_proactive_budget_t budget;
-    hu_proactive_budget_config_t cfg = {
-        .daily_max = 3, .weekly_max = 10,
-        .relationship_multiplier = 1.0,
-        .cool_off_after_unanswered = 2, .cool_off_hours = 72
-    };
+    hu_proactive_budget_config_t cfg = {.daily_max = 3,
+                                        .weekly_max = 10,
+                                        .relationship_multiplier = 1.0,
+                                        .cool_off_after_unanswered = 2,
+                                        .cool_off_hours = 72};
     HU_ASSERT_EQ(hu_governor_init(&cfg, &budget), HU_OK);
     uint64_t now_ms = 1700000000ULL * 1000;
     HU_ASSERT_TRUE(hu_governor_has_budget(&budget, now_ms));
@@ -1076,6 +1384,8 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_starter_with_memory);
     HU_RUN_TEST(proactive_starter_diverse_memories_produce_context);
     HU_RUN_TEST(proactive_starter_empty_memory);
+    HU_RUN_TEST(proactive_starter_skips_first_person_confession_entry);
+    HU_RUN_TEST(proactive_starter_skips_emotion_keyword_entry);
     HU_RUN_TEST(proactive_starter_null_memory);
     HU_RUN_TEST(proactive_event_follow_up);
     HU_RUN_TEST(proactive_event_yesterday_referenced_naturally);
@@ -1085,6 +1395,23 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_reminder_no_trigger_within_24h);
     HU_RUN_TEST(proactive_reminder_no_trigger_without_interests);
     HU_RUN_TEST(proactive_backoff_hours_returns_correct_thresholds);
+    HU_RUN_TEST(proactive_topic_safe_rejects_null_or_empty);
+    HU_RUN_TEST(proactive_topic_safe_rejects_2026_05_16_confession_parrot);
+    HU_RUN_TEST(proactive_topic_safe_rejects_recall_format_string_leak);
+    HU_RUN_TEST(proactive_topic_safe_rejects_first_person_pronouns);
+    HU_RUN_TEST(proactive_topic_safe_rejects_emotion_keywords);
+    HU_RUN_TEST(proactive_topic_safe_rejects_format_chars_and_whitespace_chaos);
+    HU_RUN_TEST(proactive_topic_safe_rejects_oversize);
+    HU_RUN_TEST(proactive_topic_safe_accepts_clean_noun_phrases);
+    HU_RUN_TEST(proactive_contact_match_strict_id_matches);
+    HU_RUN_TEST(proactive_contact_match_strict_id_mismatches);
+    HU_RUN_TEST(proactive_contact_match_rejects_prefix_collision);
+    HU_RUN_TEST(proactive_contact_match_rejects_case_collision);
+    HU_RUN_TEST(proactive_contact_match_handles_null_or_empty);
+    HU_RUN_TEST(proactive_replay_key_builds_per_contact);
+    HU_RUN_TEST(proactive_replay_key_two_contacts_produce_different_keys);
+    HU_RUN_TEST(proactive_replay_key_rejects_null_or_empty);
+    HU_RUN_TEST(proactive_replay_key_rejects_too_small_buffer);
     HU_RUN_TEST(proactive_important_dates_match_returns_true_and_message);
     HU_RUN_TEST(proactive_important_dates_no_match_returns_false);
     HU_RUN_TEST(proactive_important_dates_empty_returns_false);
@@ -1093,6 +1420,8 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_curiosity_returns_false_without_micro_moments);
     HU_RUN_TEST(proactive_callbacks_returns_delayed_followup);
     HU_RUN_TEST(proactive_callbacks_returns_false_without_due_items);
+    HU_RUN_TEST(proactive_callbacks_ex_exposes_followup_id_and_supports_retry);
+    HU_RUN_TEST(proactive_callbacks_wrapper_ignores_id);
 #endif
     HU_RUN_TEST(daemon_weather_awareness_build_directive_and_should_mention);
     HU_RUN_TEST(daemon_visual_should_share_decision);

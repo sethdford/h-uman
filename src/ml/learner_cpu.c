@@ -87,8 +87,8 @@ static float hash_to_unit(uint64_t h) {
 /* Build a per-weight target vector from the signals. Each signal contributes
  * to every weight slot via FNV(signal_content, weight_index). The mean target
  * is what SGD pulls the weights toward. */
-static void compute_targets(const hu_training_signal_t *signals, size_t n,
-                            float *targets, size_t n_weights) {
+static void compute_targets(const hu_training_signal_t *signals, size_t n, float *targets,
+                            size_t n_weights) {
     if (n == 0) {
         for (size_t i = 0; i < n_weights; i++)
             targets[i] = 0.0f;
@@ -100,9 +100,9 @@ static void compute_targets(const hu_training_signal_t *signals, size_t n,
             uint64_t base;
             switch (signals[i].kind) {
             case HU_TRAIN_DPO_PAIR: {
-                uint64_t hp = fnv1a64(signals[i].as.dpo.preferred,
-                                      strnlen(signals[i].as.dpo.preferred,
-                                              sizeof(signals[i].as.dpo.preferred)));
+                uint64_t hp = fnv1a64(
+                    signals[i].as.dpo.preferred,
+                    strnlen(signals[i].as.dpo.preferred, sizeof(signals[i].as.dpo.preferred)));
                 uint64_t hd = fnv1a64(signals[i].as.dpo.dispreferred,
                                       strnlen(signals[i].as.dpo.dispreferred,
                                               sizeof(signals[i].as.dpo.dispreferred)));
@@ -119,17 +119,14 @@ static void compute_targets(const hu_training_signal_t *signals, size_t n,
                 base = fnv1a64(signals[i].as.persona.delta.value,
                                strnlen(signals[i].as.persona.delta.value,
                                        sizeof(signals[i].as.persona.delta.value)));
-                acc += (double)hash_to_unit(base ^
-                                            ((uint64_t)w * 0x9E3779B97F4A7C15ULL));
+                acc += (double)hash_to_unit(base ^ ((uint64_t)w * 0x9E3779B97F4A7C15ULL));
                 continue;
             case HU_TRAIN_CASE_OUTCOME: {
                 uint64_t cid = (uint64_t)signals[i].as.case_outcome.case_id;
                 base = fnv1a64(&cid, sizeof(cid));
                 /* Reward in [0,1] → contribution scaled to [-1, 1]. */
                 float r = signals[i].as.case_outcome.reward * 2.0f - 1.0f;
-                acc += (double)(hash_to_unit(base ^
-                                             ((uint64_t)w * 0x9E3779B97F4A7C15ULL)) *
-                                r);
+                acc += (double)(hash_to_unit(base ^ ((uint64_t)w * 0x9E3779B97F4A7C15ULL)) * r);
                 continue;
             }
             default:
@@ -147,9 +144,8 @@ static int64_t now_ms_monotonic(void) {
     return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
 }
 
-static hu_error_t write_adapter_file(const char *path, const char *model_version,
-                                     uint32_t rank, const float *weights, size_t n_weights,
-                                     int64_t *out_bytes) {
+static hu_error_t write_adapter_file(const char *path, const char *model_version, uint32_t rank,
+                                     const float *weights, size_t n_weights, int64_t *out_bytes) {
     FILE *f = fopen(path, "wb");
     if (!f)
         return HU_ERR_IO;
@@ -227,7 +223,9 @@ io_err:
     return HU_ERR_IO;
 }
 
-static bool cpu_available(void) { return true; }
+static bool cpu_available(void) {
+    return true;
+}
 
 static void cpu_deinit(void *ctx) {
     hu_learner_cpu_ctx_t *c = (hu_learner_cpu_ctx_t *)ctx;
@@ -294,8 +292,8 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
     uint64_t prng = cfg->seed ? cfg->seed : 0xD1B54A32D192ED03ULL;
     /* Salt the seed with model_version so two adapters with different
      * model_version are not interchangeable. */
-    uint64_t mv_hash = fnv1a64(cfg->model_version,
-                               strnlen(cfg->model_version, sizeof(cfg->model_version)));
+    uint64_t mv_hash =
+        fnv1a64(cfg->model_version, strnlen(cfg->model_version, sizeof(cfg->model_version)));
     prng ^= mv_hash;
 
     for (size_t i = 0; i < n_weights; i++)
@@ -365,9 +363,10 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
 
     int64_t bytes = 0;
     hu_error_t e = write_adapter_file(cfg->adapter_output_path, cfg->model_version,
-                                       (uint32_t)cfg->rank, weights, n_weights, &bytes);
+                                      (uint32_t)cfg->rank, weights, n_weights, &bytes);
     if (e != HU_OK) {
-        /* adapter_output_path is up to 256 bytes; last_error is 128. */
+        /* adapter_output_path is up to 256 bytes; last_error is 128.
+         * GCC -Werror=format-truncation refuses unbounded %s. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
                  "failed to write adapter at %.90s", cfg->adapter_output_path);
     } else {
@@ -389,8 +388,7 @@ const hu_learner_vtable_t hu_learner_cpu_vtable = {
 hu_error_t hu_learner_cpu_open(hu_allocator_t *alloc, void **out_ctx) {
     if (!alloc || !out_ctx)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_learner_cpu_ctx_t *c =
-        (hu_learner_cpu_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+    hu_learner_cpu_ctx_t *c = (hu_learner_cpu_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
         return HU_ERR_OUT_OF_MEMORY;
     c->alloc = alloc;

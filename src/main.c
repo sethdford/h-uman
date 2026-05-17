@@ -75,8 +75,8 @@
 #ifdef HU_ENABLE_ML
 #include "human/ml/cli.h"
 #include "human/ml/cli_dpo.h"
-#include "human/ml/cli_kto.h"
 #include "human/ml/cli_grpo.h"
+#include "human/ml/cli_kto.h"
 #include "human/ml/cli_rm.h"
 #endif
 #ifdef HU_ENABLE_CURL
@@ -226,24 +226,29 @@ static bool svc_agent_on_message_locked(hu_bus_event_type_t type, const hu_bus_e
 #ifdef HU_ENABLE_ML
 static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: human ml <subcommand>\n\n"
-                        "Subcommands:\n"
-                        "  train                   Train a model from config\n"
-                        "  experiment              Run experiment loop\n"
-                        "  prepare                 Tokenize data for training\n"
-                        "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
-                        "  dpo-train               Run DPO preference training step\n"
-                        "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
-                        "  kto-train               Train a KTO trainer on one-sided preference signals\n"
-                        "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
-                        "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
-                        "  lora-persona            Train LoRA adapter from persona examples\n"
-                        "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
-                        "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
-                        "  lora-runner             Generate response set from persona via provider (D2.2)\n"
-                        "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
-                        "  train-feed-predictor    Train topic/trend predictor from feed data\n"
-                        "  status                  Show experiment results\n");
+        fprintf(
+            stderr,
+            "Usage: human ml <subcommand>\n\n"
+            "Subcommands:\n"
+            "  train                   Train a model from config\n"
+            "  experiment              Run experiment loop\n"
+            "  prepare                 Tokenize data for training\n"
+            "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
+            "  dpo-train               Run DPO preference training step\n"
+            "  dpo-judge               Score preference pairs with an LLM judge (legacy)\n"
+            "  kto-train               Train a KTO trainer on one-sided preference signals\n"
+            "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
+            "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
+            "  mine-corrections        Mine DPO pairs from chat.db correction triples\n"
+            "  lora-persona            Train LoRA adapter from persona examples\n"
+            "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
+            "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
+            "  lora-runner             Generate response set from persona via provider (D2.2)\n"
+            "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
+            "  train-feed-predictor    Train topic/trend predictor from feed data\n"
+            "  rl-train                Preference RL trainer (DPO/SimPO/ORPO/GRPO2 router)\n"
+            "  adapter-rollback        Rollback adapter symlink to v{N-1} (US-11.8)\n"
+            "  status                  Show experiment results\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
     const char *sub = argv[2];
@@ -269,6 +274,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_grpo_train(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "rm-train") == 0)
         return hu_ml_cli_rm_train(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "mine-corrections") == 0)
+        return hu_ml_cli_mine_corrections(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "prepare-conversations") == 0)
         return hu_ml_cli_prepare_conversations(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "lora-persona") == 0)
@@ -285,6 +292,10 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_train_feed_predictor(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "apply-adapter") == 0)
         return hu_ml_cli_apply_adapter(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "rl-train") == 0)
+        return hu_ml_cli_rl_train(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "adapter-rollback") == 0)
+        return hu_ml_cli_adapter_rollback(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "--help") == 0 || strcmp(sub, "help") == 0) {
         printf("Usage: human ml <subcommand>\n\n"
                "Subcommands:\n"
@@ -293,10 +304,11 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                "  prepare                 Tokenize data for training\n"
                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                "  dpo-train               Run DPO preference training step\n"
-               "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
+               "  dpo-judge               Score preference pairs with an LLM judge (legacy)\n"
                "  kto-train               Train a KTO trainer on one-sided preference signals\n"
                "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
                "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
+               "  mine-corrections        Mine DPO pairs from chat.db correction triples\n"
                "  lora-persona            Train LoRA adapter from persona examples\n"
                "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
                "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
@@ -325,8 +337,7 @@ static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "demo: unknown subcommand: %s\n", sub);
         return HU_ERR_INVALID_ARGUMENT;
     }
-    hu_error_t err =
-        hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3), alloc);
+    hu_error_t err = hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3), alloc);
     if (err == HU_OK)
         return HU_OK;
     if (err == HU_ERR_PERMISSION_DENIED)
@@ -1163,8 +1174,17 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
 #ifdef HU_HAS_CRON
     hu_log_info("human", NULL, "%zu channel(s) active, cron enabled", app_ctx.channel_count);
 
-    /* Register proactive engagement cron jobs from persona contacts */
-    if (app_ctx.agent && app_ctx.agent->persona && app_ctx.agent->scheduler) {
+    /* Register proactive engagement cron jobs from persona contacts.
+     *
+     * 2026-05-16 incident follow-up: this cron-based path is INDEPENDENT of
+     * hu_service_run_proactive_checkins (which has its own gate at the top).
+     * Discovered by local E2E on 2026-05-17 — the daemon was still
+     * registering cron jobs for Mindy/Betty/Annie at 10am even though the
+     * persona-level master kill switch (proactive.master_enabled) was off.
+     * Gate at registration time so cron entries never get created when
+     * proactive is disabled. */
+    if (app_ctx.agent && app_ctx.agent->persona && app_ctx.agent->scheduler &&
+        hu_persona_proactive_is_enabled(app_ctx.agent->persona)) {
         const hu_persona_t *persona = app_ctx.agent->persona;
         for (size_t ci = 0; ci < persona->contacts_count; ci++) {
             const hu_contact_profile_t *cp = &persona->contacts[ci];
@@ -2931,7 +2951,8 @@ int main(int argc, char *argv[]) {
     if (hu_onboard_check_first_run() && strcmp(cmd_name, "onboard") != 0 &&
         strcmp(cmd_name, "init") != 0 && strcmp(cmd_name, "help") != 0 &&
         strcmp(cmd_name, "version") != 0) {
-        fprintf(stderr, "No config found. Run 'human onboard' to set up.\n\n");
+        fprintf(stderr, "No config found. Run 'human onboard' for interactive setup,\n"
+                        "or 'human init' for a quick local start (Ollama, no API key).\n\n");
     }
 #endif
 

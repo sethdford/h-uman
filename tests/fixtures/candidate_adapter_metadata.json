@@ -1,0 +1,16 @@
+{
+  "adapter_id": "seth-lora-candidate-2026-05-16",
+  "model_target": "gemma-3-1b-it",
+  "rank": 32,
+  "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+  "training": {
+    "mode": "dpo",
+    "from_corrections": true,
+    "pairs_consumed": 42,
+    "epochs": 1,
+    "loss_final": 0.187
+  },
+  "produced_by": "finetune-gemma.py --dpo --from-corrections --no-restart-server --no-version",
+  "promotion_gate": "scripts/check-lora-ab.sh --judgment",
+  "fixture_purpose": "US-7.5 W14 nightly LoRA retrain — promotion gate simulation input."
+}

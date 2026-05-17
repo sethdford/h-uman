@@ -1,0 +1,11 @@
+ CMakeLists.txt                                     |   1 +
+ include/human/ml/fidelity.h                        |  97 +++-
+ scripts/check-lora-ab.sh                           |  69 ++-
+ src/ml/cli.c                                       | 645 +++++++++++++--------
+ src/ml/fidelity.c                                  | 240 +++++++-
+ tests/fixtures/judgment_fidelity_holdout.jsonl     |  17 +
+ .../judgment_fidelity_holdout_malformed.jsonl      |   5 +
+ tests/test_check_lora_ab_judgment.sh               |  74 +++
+ tests/test_main.c                                  |   2 +
+ tests/test_ml_fidelity_judgment.c                  | 344 +++++++++++
+ 10 files changed, 1232 insertions(+), 262 deletions(-)

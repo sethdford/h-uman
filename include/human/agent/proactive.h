@@ -86,4 +86,56 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
                                   const char *contact_id, size_t contact_id_len, uint32_t seed,
                                   char *message_out, size_t msg_cap);
 
+/* Build the per-contact replay-insights memory key.
+ *
+ * Returns true and writes "replay:<contact_id>:latest" (NUL-terminated) into
+ * out_buf, with the byte count (excluding NUL) at *out_len.  Returns false on
+ * NULL/empty inputs or if out_buf_cap is too small.
+ *
+ * Originated from the 2026-05-16 incident: src/daemon.c stored replay
+ * insights under the global key "replay:latest" with a process-global static
+ * fallback buffer, so every contact's prompt received every other contact's
+ * replay-analysis blob.  This helper makes the contact scope explicit and
+ * unit-testable.  Pinned by tests/test_proactive.c. */
+bool hu_proactive_build_replay_key(const char *contact_id, size_t contact_id_len, char *out_buf,
+                                   size_t out_buf_cap, size_t *out_len);
+
+/* Strict contact-match predicate for F25 emotional check-ins.  Pinned by
+ * tests/test_proactive.c.  Returns true iff the contact_ids are non-empty
+ * and exactly equal — the 2026-05-16 fallback that bridged moments across
+ * contacts is gone. */
+bool hu_proactive_contact_matches_moment(const char *cp_contact_id, const char *moment_contact_id);
+
+/* Outbound topic safety predicate. Returns true iff `topic` is acceptable to
+ * interpolate into a user-visible proactive message.
+ *
+ * Rejects (returns false) when topic is null/empty/oversized or contains any of:
+ *  - the recall debug-format substring "(last:"
+ *  - newlines, carriage returns, tabs, or printf format specifiers
+ *  - first-person pronouns (i, me, my, mine, i'm, i am)
+ *  - emotion/affect keywords that indicate the "topic" is actually a confession
+ *
+ * Phase 6 (P6-4) treats this predicate as its outbound-safety gate for
+ * silence-acknowledgments too — re-using it rather than authoring a
+ * separate output-safety check.  If output-only rules (markdown, em-dash)
+ * become important the caller should add them at the call site, not here.
+ *
+ * Extracted as a pure predicate so it can be unit-tested without crossing the
+ * F25 send boundary (see .claude/rules/security-predicate-extraction.md).
+ * Originated from the 2026-05-16 incident. */
+bool hu_proactive_topic_is_safe(const char *topic, size_t topic_len);
+
+/* 2026-05-16 P4-4: variant of hu_proactive_check_callbacks that exposes the
+ * id of the followup chosen (if any). When out_followup_id is non-NULL and
+ * the function returns true picking a delayed_followup, *out_followup_id is
+ * set to the row id; the caller MUST call
+ * hu_superhuman_delayed_followup_mark_sent(memory, *out_followup_id) AFTER
+ * the outbound send is confirmed. If a commitment was chosen instead of a
+ * delayed_followup, *out_followup_id is set to -1 and no mark_sent is needed.
+ * Pre-fix this id was hidden inside the function and never marked sent, so
+ * the followup re-fired on every proactive cycle. */
+bool hu_proactive_check_callbacks_ex(hu_allocator_t *alloc, hu_memory_t *memory,
+                                     const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                     char *message_out, size_t msg_cap, int64_t *out_followup_id);
+
 #endif /* HU_PROACTIVE_H */

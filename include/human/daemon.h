@@ -12,6 +12,7 @@
 
 struct hu_agent;
 struct hu_config;
+struct hu_observer;
 
 hu_error_t hu_daemon_start(void);
 hu_error_t hu_daemon_stop(void);
@@ -111,6 +112,34 @@ hu_error_t hu_daemon_set_trust_state(const char *contact_id, size_t cid_len,
 /* Test helpers for trust cache */
 size_t hu_daemon_trust_count(void);
 void hu_daemon_trust_reset(void);
+#endif
+
+/* US-7.3 — Surface the local-inference honesty gate (INS-B).
+ *
+ * Emit a WARN-level log line when the daemon's personalization
+ * bootstrap loads a LoRA adapter against a provider that does not
+ * implement the load_adapter vtable hook (cloud providers return
+ * HU_ERR_NOT_SUPPORTED). The emitted line contains the literal
+ * substring "personalization adapter ignored" and the provider name,
+ * so a user who configures personalization on a cloud provider is
+ * never silently misled into believing the adapter is active.
+ *
+ * Per-process one-shot: fires once per daemon lifetime to avoid
+ * log spam on reconnect or config reload. Tests that exercise the
+ * warn path more than once in a single test binary must call
+ * hu_daemon_personalization_warn_reset_for_test() between cases.
+ *
+ * provider_name may be NULL (treated as "(unknown)"). observer may
+ * also be NULL — falls back to fprintf(stderr) per hu_log_warn. */
+void hu_daemon_personalization_warn_adapter_ignored(struct hu_observer *observer,
+                                                    const char *provider_name,
+                                                    const char *adapter_id);
+
+#ifdef HU_IS_TEST
+/* Reset the per-process one-shot flag so a subsequent call to
+ * hu_daemon_personalization_warn_adapter_ignored() fires again.
+ * Test-only — production code must not depend on resetability. */
+void hu_daemon_personalization_warn_reset_for_test(void);
 #endif
 
 #endif /* HU_DAEMON_H */

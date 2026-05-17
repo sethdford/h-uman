@@ -2420,12 +2420,88 @@ bool hu_conversation_detect_inside_joke(const char *msg, size_t msg_len,
 
 /* ── Avoidance pattern detection (F21) ─────────────────────────────────── */
 
+/* P2-7 (2026-05-16 incident): expand the stopword list. The old list let
+ * "hey" through as a topic ("hey how are you doing" → topic "hey"), which
+ * F30's "How is the %s going?" template then rendered as "How is the hey
+ * going?" and shipped to family contacts. Also include first-person
+ * emotion KEYWORDS (feel/feeling/lost/lonely/sad/ok) because they are
+ * surfaced via the emotion channel of the same record — using them as
+ * "topic" is a redundant leakage path. */
 static const char *const topic_stopwords[] = {
-    "i",     "the",   "a",      "is",    "was", "that", "this", "it",    "to",  "and",  "but",
-    "so",    "just",  "really", "what",  "how", "why",  "when", "where", "who", "can",  "will",
-    "would", "could", "should", "have",  "has", "had",  "do",   "does",  "did", "am",   "are",
-    "were",  "be",    "been",   "being", "of",  "in",   "on",   "at",    "for", "with", "about",
-    "from",  "as",    "or",     "if",    "not", "no",   "yes",  "oh",    "um",  "like", NULL,
+    "i",
+    "the",
+    "a",
+    "is",
+    "was",
+    "that",
+    "this",
+    "it",
+    "to",
+    "and",
+    "but",
+    "so",
+    "just",
+    "really",
+    "what",
+    "how",
+    "why",
+    "when",
+    "where",
+    "who",
+    "can",
+    "will",
+    "would",
+    "could",
+    "should",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "am",
+    "are",
+    "were",
+    "be",
+    "been",
+    "being",
+    "of",
+    "in",
+    "on",
+    "at",
+    "for",
+    "with",
+    "about",
+    "from",
+    "as",
+    "or",
+    "if",
+    "not",
+    "no",
+    "yes",
+    "oh",
+    "um",
+    "like",
+    /* P2-7 additions — greetings, fillers, and emotion keywords that must
+     * never reach the topic slot. */
+    "hey",
+    "doing",
+    "you",
+    "me",
+    "my",
+    "feel",
+    "feeling",
+    "lost",
+    "lonely",
+    "sad",
+    "ok",
+    "omg",
+    "hi",
+    "hello",
+    "please",
+    "thanks",
+    "sorry",
+    NULL,
 };
 
 static bool is_stopword(const char *word, size_t len) {
@@ -2454,7 +2530,10 @@ static size_t extract_significant_topic(const char *text, size_t text_len, char 
         while (p < end && (isalnum((unsigned char)*p) || *p == '\'' || *p == '-'))
             p++;
         size_t wlen = (size_t)(p - start);
-        if (wlen >= 2 && !is_stopword(start, wlen)) {
+        /* P2-7 (2026-05-16): raise floor from 2 to 4 chars. Words like
+         * "ok", "hi", "yo" are too short to be meaningful topics; they
+         * were leaking into proactive prompts. */
+        if (wlen >= 4 && !is_stopword(start, wlen)) {
             if (pos > 0 && pos + 1 < cap) {
                 out[pos++] = ' ';
             }

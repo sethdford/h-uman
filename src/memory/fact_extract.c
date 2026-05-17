@@ -5,69 +5,77 @@
 
 /* ── Heuristic fact extraction patterns ──────────────────────────── */
 
+/* P2-6 (2026-05-16 incident): each marker carries a third-person paraphrase
+ * for its predicate. Without this, the predicate stored "i like" / "when
+ * i'm" / "i never" verbatim, and `hu_fact_format_for_store` rendered
+ * "user i like X" — still first-person and prone to leaking as a
+ * confession-style fragment when the memory was injected into outbound
+ * prompts. The paraphrase is what gets stored. */
 typedef struct fact_pattern {
     const char *marker;
+    const char *predicate; /* paraphrased third-person predicate */
     hu_knowledge_type_t type;
     float confidence;
 } fact_pattern_t;
 
 static const fact_pattern_t patterns[] = {
-    /* Propositional — user preferences and facts */
-    {"i like ", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
-    {"i love ", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
-    {"i hate ", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
-    {"i prefer ", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
-    {"my favorite ", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
-    {"i work at ", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
-    {"i live in ", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
-    {"i am a ", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
-    {"i'm a ", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
-    {"i have a ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my name is ", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
-    {"i enjoy ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    /* Propositional — user preferences and facts.
+     * Each pattern carries a third-person paraphrased predicate. */
+    {"i like ", "likes", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
+    {"i love ", "loves", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
+    {"i hate ", "hates", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
+    {"i prefer ", "prefers", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
+    {"my favorite ", "favorite", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
+    {"i work at ", "works at", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
+    {"i live in ", "lives in", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
+    {"i am a ", "is a", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
+    {"i'm a ", "is a", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
+    {"i have a ", "has a", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my name is ", "name is", HU_KNOWLEDGE_PROPOSITIONAL, 0.9f},
+    {"i enjoy ", "enjoys", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
     /* Prescriptive — behavioral patterns and preferences */
-    {"when i'm ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i usually ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i always ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i never ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"please don't ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i'd rather ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i tend to ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"when i'm ", "when", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i usually ", "usually", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i always ", "always", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i never ", "never", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"please don't ", "avoid", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i'd rather ", "would rather", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i tend to ", "tends to", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
     /* Expanded propositional patterns */
-    {"i'm not interested in ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i'm interested in ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i don't like ", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
-    {"i dislike ", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
-    {"i studied ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i went to ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i grew up in ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i'm from ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my job is ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i work as ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i majored in ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i speak ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my hobby is ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i'm allergic to ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i own a ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"i drive a ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my partner ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my wife ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my husband ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my kid ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my kids ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my dog ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
-    {"my cat ", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i'm not interested in ", "not interested in", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i'm interested in ", "interested in", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i don't like ", "dislikes", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
+    {"i dislike ", "dislikes", HU_KNOWLEDGE_PROPOSITIONAL, 0.8f},
+    {"i studied ", "studied", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i went to ", "went to", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i grew up in ", "grew up in", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i'm from ", "is from", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my job is ", "job is", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i work as ", "works as", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i majored in ", "majored in", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i speak ", "speaks", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my hobby is ", "hobby is", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i'm allergic to ", "allergic to", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i own a ", "owns a", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"i drive a ", "drives a", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my partner ", "partner", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my wife ", "wife", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my husband ", "husband", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my kid ", "kid", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my kids ", "kids", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my dog ", "dog", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
+    {"my cat ", "cat", HU_KNOWLEDGE_PROPOSITIONAL, 0.7f},
     /* Expanded prescriptive patterns */
-    {"i don't want ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i can't stand ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i'm trying to ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i need to ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i want to ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i should ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i'm working on ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"remind me to ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"don't forget ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
-    {"i'm looking for ", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i don't want ", "does not want", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i can't stand ", "cannot stand", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i'm trying to ", "is trying to", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i need to ", "needs to", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i want to ", "wants to", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i should ", "should", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i'm working on ", "is working on", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"remind me to ", "wants reminder to", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"don't forget ", "do not forget", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
+    {"i'm looking for ", "is looking for", HU_KNOWLEDGE_PRESCRIPTIVE, 0.7f},
 };
 static const size_t pattern_count = sizeof(patterns) / sizeof(patterns[0]);
 
@@ -90,20 +98,19 @@ static size_t find_end(const char *text, size_t start, size_t len) {
     return len;
 }
 
-static void extract_spo(const char *sentence, size_t sent_len, const char *marker,
-                        size_t marker_len, hu_heuristic_fact_t *fact) {
-    /* Subject: "User" for first-person statements */
+static void extract_spo(const char *sentence, size_t sent_len, const fact_pattern_t *pat,
+                        hu_heuristic_fact_t *fact) {
+    size_t marker_len = strlen(pat->marker);
+
+    /* Subject: "user" for first-person statements */
     strncpy(fact->subject, "user", sizeof(fact->subject) - 1);
 
-    /* Predicate: the marker verb/phrase */
-    size_t plen = marker_len;
-    if (plen > sizeof(fact->predicate) - 1)
-        plen = sizeof(fact->predicate) - 1;
-    memcpy(fact->predicate, marker, plen);
-    fact->predicate[plen] = '\0';
-    /* Trim trailing space from predicate */
-    while (plen > 0 && fact->predicate[plen - 1] == ' ')
-        fact->predicate[--plen] = '\0';
+    /* P2-6: predicate is the paraphrased third-person form, NOT the raw
+     * marker. "i like" → "likes"; "when i'm" → "when"; "i never" → "never".
+     * This prevents "user i like X" leaking as a first-person fragment. */
+    const char *predicate = pat->predicate ? pat->predicate : "noted";
+    strncpy(fact->predicate, predicate, sizeof(fact->predicate) - 1);
+    fact->predicate[sizeof(fact->predicate) - 1] = '\0';
 
     /* Object: rest of the sentence after marker */
     if (marker_len < sent_len) {
@@ -148,7 +155,7 @@ hu_error_t hu_fact_extract(const char *text, size_t text_len, hu_fact_extract_re
                 hu_heuristic_fact_t *f = &result->facts[result->fact_count];
                 f->type = patterns[p].type;
                 f->confidence = patterns[p].confidence;
-                extract_spo(text + pos, sent_len, patterns[p].marker, mlen, f);
+                extract_spo(text + pos, sent_len, &patterns[p], f);
                 snprintf(f->source_hint, sizeof(f->source_hint), "conversation");
 
                 result->fact_count++;
@@ -258,9 +265,8 @@ float hu_heuristic_fact_effective_confidence(const hu_heuristic_fact_t *fact, in
         return 0.f;
     /* Powers of 0.5 — pre-computed, no math.h. */
     static const float pow_half[] = {
-        1.000000f, 0.500000f, 0.250000f, 0.125000f, 0.062500f,
-        0.031250f, 0.015625f, 0.007812f, 0.003906f, 0.001953f,
-        0.000977f,
+        1.000000f, 0.500000f, 0.250000f, 0.125000f, 0.062500f, 0.031250f,
+        0.015625f, 0.007812f, 0.003906f, 0.001953f, 0.000977f,
     };
     int idx = (int)k;
     float frac = k - (float)idx;

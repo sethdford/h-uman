@@ -74,6 +74,20 @@ static void persona_directive_starter_persona_loads_four_tier1_overlays(void) {
     HU_ASSERT_NOT_NULL(find_overlay(&persona, "discord"));
     HU_ASSERT_NOT_NULL(find_overlay(&persona, "slack"));
     HU_ASSERT_NOT_NULL(find_overlay(&persona, "telegram"));
+    HU_ASSERT_NOT_NULL(find_overlay(&persona, "cli"));
+
+    hu_persona_deinit(&alloc, &persona);
+}
+
+static void persona_directive_starter_persona_has_five_example_banks(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+
+    hu_error_t err = hu_persona_load_json(&alloc, hu_starter_persona_json,
+                                          strlen(hu_starter_persona_json), &persona);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(persona.example_banks_count, 5u);
 
     hu_persona_deinit(&alloc, &persona);
 }
@@ -177,6 +191,7 @@ static void persona_directive_tier1_batch_yields_zero_null_overlay(void) {
 void run_persona_directive_channels_tests(void) {
     HU_TEST_SUITE("persona_directive_channels");
     HU_RUN_TEST(persona_directive_starter_persona_loads_four_tier1_overlays);
+    HU_RUN_TEST(persona_directive_starter_persona_has_five_example_banks);
     HU_RUN_TEST(persona_directive_discord_overlay_fires_casual_emoji);
     HU_RUN_TEST(persona_directive_imessage_overlay_fires_casual_emoji);
     HU_RUN_TEST(persona_directive_slack_overlay_fires_formal_terse);

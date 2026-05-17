@@ -171,6 +171,7 @@ static inline const char *hu__strcasestr(const char *haystack, const char *needl
                 printf("  PASS  %s\n", #fn);                            \
             } else if (hu__jr == 2) {                                   \
                 hu__skipped++;                                          \
+                hu__total--; /* HU_SKIP_IF: not counted in denominator */ \
             } else {                                                    \
                 hu__failed++;                                           \
             }                                                           \

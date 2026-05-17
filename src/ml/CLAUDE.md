@@ -20,6 +20,8 @@ muon_adamw.c       MuonAdamW optimizer: AdamW for scalars, Muon for matrices
 train.c            Time-budgeted training loop
 training_data.c    Training data management and loading
 dpo.c              Direct Preference Optimization
+rl_trainer.c       RL trainer vtable dispatcher (US-7.10, Init #06 phase 1)
+rl_trainer_simpo.c SimPO loss head registered behind hu_rl_trainer_t
 lora.c             Low-Rank Adaptation fine-tuning
 agent_trainer.c    Agent-driven training orchestration
 checkpoint.c       Model checkpoint save/load
