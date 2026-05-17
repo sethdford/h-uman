@@ -1,0 +1,2 @@
+--- tempdir leak check after 2x runs ---
+CLEAN: no tempdir leak

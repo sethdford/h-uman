@@ -132,8 +132,16 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc, const char *memory_db
         return HU_ERR_IO;
     }
 
-    /* Build system prompt from persona file or use default. */
-    const char *system_prompt = "You are a helpful personal AI assistant.";
+    /* Build system prompt from persona file or use default.
+     *
+     * Persona-first doctrine (2026-05-17): the LoRA training set is the
+     * artifact users will fine-tune their on-device model against. Seeding
+     * it with "You are a helpful personal AI assistant" poisons the
+     * adapter with the exact identity the digital twin is supposed to
+     * replace. Stay persona-neutral; the persona file (when supplied)
+     * overrides this. */
+    const char *system_prompt = "Respond naturally in your own voice. Do not announce yourself as "
+                                "an assistant or AI.";
     char persona_buf[2048];
     if (persona_path && persona_path[0]) {
         FILE *pf = fopen(persona_path, "r");

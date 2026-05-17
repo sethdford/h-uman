@@ -1,0 +1,9 @@
+18: *      tempdir into the file-local `g_sprint3_last_tempdir` BEFORE invoking
+149: * `g_sprint3_last_tempdir` is set by `make_sprint3_tempdir()` immediately
+159:static char g_sprint3_last_tempdir[256];
+171:    snprintf(g_sprint3_last_tempdir, sizeof(g_sprint3_last_tempdir), "%s", dir);
+175:    if (g_sprint3_last_tempdir[0] == '\0')
+179:    DIR *d = opendir(g_sprint3_last_tempdir);
+186:            snprintf(path, sizeof(path), "%s/%s", g_sprint3_last_tempdir, ent->d_name);
+191:    (void)rmdir(g_sprint3_last_tempdir);
+192:    g_sprint3_last_tempdir[0] = '\0';

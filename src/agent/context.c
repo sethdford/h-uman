@@ -1,13 +1,20 @@
-#include "human/core/log.h"
 #include "human/context.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define HU_CONTEXT_DEFAULT_SYSTEM "You are a helpful AI assistant."
+/* Persona-first doctrine (2026-05-17): the silent fallback used when no base
+ * prompt is supplied must not announce the model as an AI assistant. That
+ * framing leaks through to user-visible turns whenever a caller forgets to
+ * thread persona context, and it directly contradicts the digital-twin thesis.
+ * Stay persona-neutral; the configured persona (when present) overrides this. */
+#define HU_CONTEXT_DEFAULT_SYSTEM                                           \
+    "Respond naturally and personally. Match the energy and length of the " \
+    "message you're replying to. Do not announce yourself as an assistant or AI."
 
 /* Build system prompt. Caller owns returned string. */
 char *hu_context_build_system_prompt(hu_allocator_t *alloc, const char *base, size_t base_len,
@@ -117,14 +124,14 @@ bool hu_context_check_pressure(hu_context_pressure_t *p, float pressure_warn,
         p->warning_85_emitted = true;
 #ifndef HU_IS_TEST
         hu_log_info("agent", NULL, "Context pressure at %.0f%% — consider compacting",
-                p->pressure * 100.0f);
+                    p->pressure * 100.0f);
 #endif
     }
     if (p->pressure >= pressure_compact && !p->warning_95_emitted) {
         p->warning_95_emitted = true;
 #ifndef HU_IS_TEST
         hu_log_info("agent", NULL, "Context pressure at %.0f%% — auto-compacting oldest messages",
-                p->pressure * 100.0f);
+                    p->pressure * 100.0f);
 #endif
         return true;
     }

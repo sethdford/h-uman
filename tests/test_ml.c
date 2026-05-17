@@ -4752,6 +4752,14 @@ static void test_m3_frontier_adapter_fixture_roundtrip(void) {
     hu_m3_frontier_adapter_close(&alloc, a);
 }
 
+#ifdef HU_ENABLE_ML
+/* These two tests reach into hu_agent_t.m3_adapter, which is only a struct
+ * member when HU_ENABLE_ML is defined (see include/human/agent.h:389). Build
+ * configurations without ML (e.g. the Linux CI minimal/feature-flag matrix)
+ * compile hu_agent_t without that field, so guarding the tests at compile
+ * time keeps the test binary buildable in those configurations. The
+ * non-struct-field m3 helper tests below stay unconditional because they
+ * only call the no-op stubs declared in include/human/ml/m3_frontier_adapter.h. */
 static void test_agent_m3_adapter_attach_bad_path(void) {
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
@@ -4789,6 +4797,7 @@ static void test_agent_m3_adapter_attach_fixture_replace(void) {
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
 }
+#endif /* HU_ENABLE_ML */
 
 /* ─── Track D D1.3 — rollback flag ──────────────────────────────────── */
 
@@ -5514,8 +5523,11 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_frontier_adapter_null_args);
     HU_RUN_TEST(test_m3_frontier_adapter_bad_file);
     HU_RUN_TEST(test_m3_frontier_adapter_fixture_roundtrip);
+#ifdef HU_ENABLE_ML
+    /* hu_agent_t.m3_adapter only exists when HU_ENABLE_ML is on. */
     HU_RUN_TEST(test_agent_m3_adapter_attach_bad_path);
     HU_RUN_TEST(test_agent_m3_adapter_attach_fixture_replace);
+#endif
     /* Track D D1.3 — rollback flag */
     HU_RUN_TEST(test_m3_adapter_should_disable_default_false);
     HU_RUN_TEST(test_m3_adapter_should_disable_true_when_cfg_set);
