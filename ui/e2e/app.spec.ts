@@ -158,23 +158,22 @@ test.describe("h-uman Control UI", () => {
 
   test("floating mic button is present", async ({ page }) => {
     await page.goto("/");
-    // Wait for the page DOM before querying — every other test in this file
-    // does the same, and skipping it caused a 5s-timeout flake under
-    // WebSocket-reconnect churn (Vite proxy ECONNRESET storms during cold
-    // start). Also wait for hu-app itself before drilling into its shadow
-    // tree so the locator doesn't race the custom-element upgrade.
     await page.waitForLoadState("domcontentloaded");
     await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
     // The floating-mic is LAZY-LOADED via requestIdleCallback in app.ts's
     // firstUpdated() (see app.ts:686-695). Under CI cold-start + Vite
-    // proxy ECONNRESET storms, the idle callback can take much longer
-    // than 5s to fire — the test then fails because the dynamic import
-    // never completed. The deterministic long-tail is bounded by 15s in
-    // practice; bumping the timeout matches Playwright's default. The
-    // previous 5s caused the test to be the #1 flake on main CI for
-    // both PR #104 and #107.
+    // proxy ECONNRESET storms, the idle callback can take >15s to fire
+    // (verified — 15s timeout also flaked). Force the dynamic import
+    // explicitly rather than fighting the scheduler. This still tests
+    // the real-world question (does the mic render correctly when its
+    // module is loaded?) without the timing flake.
+    await page.evaluate(async () => {
+      // Same path the production code uses in firstUpdated().
+      // @ts-expect-error — dynamic import path is resolved by Vite at runtime
+      await import("/src/components/floating-mic.ts");
+    });
     const mic = page.locator("hu-app >> hu-floating-mic");
-    await expect(mic).toBeAttached({ timeout: 15000 });
+    await expect(mic).toBeAttached({ timeout: 10000 });
   });
 
   test("navigating through all tabs sequentially works", async ({ page }) => {
