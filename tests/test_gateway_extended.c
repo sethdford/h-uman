@@ -1,5 +1,6 @@
 /* Gateway edge cases + control protocol + event bridge tests. */
 #include "human/agent/model_router.h"
+#include "human/agent/response_guard.h"
 #include "human/bus.h"
 #include "human/config.h"
 #include "human/core/allocator.h"
@@ -1216,6 +1217,9 @@ static void test_rpc_models_decisions_returns_valid_json(void) {
     sel.model = "gemini-3-flash-preview";
     sel.model_len = 22;
     hu_route_decision_log_t *rlog = hu_route_global_log();
+    /* Sprint 38 — reset so this test does not depend on cumulative suite
+     * order (same contract as route_populates_global_log). */
+    hu_route_log_init(rlog);
     hu_route_global_log_lock();
     hu_route_log_record(rlog, &sel, 3, 1000);
     hu_route_global_log_unlock();
@@ -1464,6 +1468,39 @@ static void test_cp_admin_metrics_directive_telemetry_returns_counts(void) {
     hu_personal_model_directive_telemetry_reset();
 }
 
+static void test_cp_admin_metrics_guard_rejects_returns_counters(void) {
+    hu_guard_reject_stats_reset();
+    hu_guard_reject_stats_t bump = {0};
+    bump.semantic_leak = 3;
+    bump.length_anomaly = 7;
+    /* Snapshot reads atomics — increment via a real reject path is heavy;
+     * instead verify the handler returns the expected JSON shape with
+     * zeroed counters after reset. */
+    (void)bump;
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app;
+    hu_config_t cfg;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    app.config = &cfg;
+    app.alloc = &alloc;
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = cp_admin_metrics_guard_rejects(&alloc, &app, NULL, NULL, NULL, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "\"semantic_leak\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"length_anomaly\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"director_echo\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"persona_pii_echo\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "\"persona_identity_echo\"") != NULL);
+    HU_ASSERT_TRUE(strstr(out, ":0") != NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
 static void test_cp_admin_metrics_fidelity_returns_error_for_missing_persona(void) {
     char dir[256];
     cp_fidelity_setup_persona_dir(dir, sizeof(dir));
@@ -1554,6 +1591,7 @@ void run_gateway_extended_tests(void) {
     HU_RUN_TEST(test_cp_admin_metrics_fidelity_merges_ab_status_file);
     HU_RUN_TEST(test_cp_admin_metrics_fidelity_returns_error_for_missing_persona);
     HU_RUN_TEST(test_cp_admin_metrics_directive_telemetry_returns_counts);
+    HU_RUN_TEST(test_cp_admin_metrics_guard_rejects_returns_counters);
 
     HU_TEST_SUITE("Control Protocol");
     HU_RUN_TEST(test_control_protocol_init_deinit);

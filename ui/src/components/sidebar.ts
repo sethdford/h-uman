@@ -686,6 +686,7 @@ export class ScSidebar extends LitElement {
                 this._systemOpen = !this._systemOpen;
               }}
               aria-expanded=${this._systemOpen}
+              aria-label="System"
             >
               <span class="chevron ${this._systemOpen ? "open" : ""}">${icons.chevron}</span>
               <span>System</span>

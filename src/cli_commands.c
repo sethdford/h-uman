@@ -18,6 +18,9 @@
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/eval.h"
+#ifdef HU_ENABLE_RL_FULL
+#include "human/eval/cli_eval.h"
+#endif
 #include "human/eval/turing_adversarial.h"
 #include "human/eval_benchmarks.h"
 #include "human/eval_dashboard.h"
@@ -1254,6 +1257,15 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
     }
     const char *sub = argv[2];
 
+#ifdef HU_ENABLE_RL_FULL
+    if (strcmp(sub, "competitive") == 0)
+        return hu_eval_cli_competitive(alloc, argc - 2, argv + 2);
+    if (strcmp(sub, "leaderboard") == 0)
+        return hu_eval_cli_leaderboard(alloc, argc - 2, argv + 2);
+    if (strcmp(sub, "gate") == 0)
+        return hu_eval_cli_gate(alloc, argc - 2, argv + 2);
+#endif
+
     if (strcmp(sub, "--help") == 0 || strcmp(sub, "-h") == 0 || strcmp(sub, "help") == 0) {
         printf("Usage: human eval "
                "<run|baseline|validate|check-regression|list|compare|dashboard|history|trend|"
@@ -2224,8 +2236,23 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
             bench_type = HU_BENCHMARK_SWE_BENCH;
         else if (strcmp(bench_name, "tooluse") == 0)
             bench_type = HU_BENCHMARK_TOOL_USE;
+        else if (strcmp(bench_name, "liveagent") == 0)
+            bench_type = HU_BENCHMARK_LIVE_AGENT;
+        else if (strcmp(bench_name, "apex") == 0)
+            bench_type = HU_BENCHMARK_APEX;
+        else if (strcmp(bench_name, "longmemeval") == 0)
+            bench_type = HU_BENCHMARK_LONGMEMEVAL;
+        else if (strcmp(bench_name, "locomo") == 0)
+            bench_type = HU_BENCHMARK_LOCOMO;
+        else if (strcmp(bench_name, "knowu-bench") == 0)
+            bench_type = HU_BENCHMARK_KNOWU_BENCH;
+        else if (strcmp(bench_name, "empa") == 0)
+            bench_type = HU_BENCHMARK_EMPA;
+        else if (strcmp(bench_name, "proagentbench") == 0)
+            bench_type = HU_BENCHMARK_PROAGENTBENCH;
         else {
-            hu_log_error("eval", NULL, "Unknown benchmark: %s (expected gaia, swebench, tooluse)",
+            hu_log_error("eval", NULL,
+                         "Unknown benchmark: %s",
                          bench_name);
             return HU_ERR_INVALID_ARGUMENT;
         }

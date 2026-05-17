@@ -255,6 +255,14 @@ static void benchmark_type_name_includes_new_types(void) {
     HU_ASSERT_STR_EQ(hu_benchmark_type_name(HU_BENCHMARK_APEX), "apex");
 }
 
+static void benchmark_init14_type_names_correct(void) {
+    HU_ASSERT_STR_EQ(hu_benchmark_type_name(HU_BENCHMARK_LONGMEMEVAL), "longmemeval");
+    HU_ASSERT_STR_EQ(hu_benchmark_type_name(HU_BENCHMARK_LOCOMO), "locomo");
+    HU_ASSERT_STR_EQ(hu_benchmark_type_name(HU_BENCHMARK_KNOWU_BENCH), "knowu-bench");
+    HU_ASSERT_STR_EQ(hu_benchmark_type_name(HU_BENCHMARK_EMPA), "empa");
+    HU_ASSERT_STR_EQ(hu_benchmark_type_name(HU_BENCHMARK_PROAGENTBENCH), "proagentbench");
+}
+
 void run_eval_benchmarks_tests(void) {
     HU_TEST_SUITE("eval_bench");
     HU_RUN_TEST(benchmark_load_gaia_format);
@@ -280,4 +288,5 @@ void run_eval_benchmarks_tests(void) {
     HU_RUN_TEST(benchmark_apex_result_free_null);
     HU_RUN_TEST(benchmark_load_apex_format);
     HU_RUN_TEST(benchmark_type_name_includes_new_types);
+    HU_RUN_TEST(benchmark_init14_type_names_correct);
 }

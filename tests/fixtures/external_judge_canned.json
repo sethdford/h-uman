@@ -1,0 +1,20 @@
+{
+  "apple_fm": [
+    {
+      "prompt": "what is two plus two?",
+      "response": "four",
+      "prefer_a": 1,
+      "confidence": 0.95,
+      "rationale": "canned apple_fm"
+    }
+  ],
+  "gemini_nano": [
+    {
+      "prompt": "what is two plus two?",
+      "response": "four",
+      "prefer_a": 1,
+      "confidence": 0.90,
+      "rationale": "canned gemini_nano"
+    }
+  ]
+}

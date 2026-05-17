@@ -86,10 +86,8 @@ static const char *const LLM_SYS_PROMPT =
 
 /* ── World-model digest ────────────────────────────────────────────────── */
 
-#if !(defined(HU_IS_TEST) && HU_IS_TEST)
-
-/* Render a 6-line summary of the world model so the LLM has something to
- * ground the plan in. Bounded to ~512 bytes to keep the prompt small. */
+/* Render a compact world-model summary for the LLM planner (and tests).
+ * Bounded to ~1 KiB to keep the prompt small. */
 static char *render_wm_digest(hu_allocator_t *alloc, const hu_world_model_t *wm) {
     size_t cap = 1024;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
@@ -104,7 +102,7 @@ static char *render_wm_digest(hu_allocator_t *alloc, const hu_world_model_t *wm)
         if (n > 0) off += (size_t)n;
         size_t top = wm->entities_count < 5 ? wm->entities_count : 5;
         for (size_t i = 0; i < top && off + 80 < cap; i++) {
-            const hu_memory_entity_row_t *e = &wm->entities[i];
+            const hu_graph_entity_t *e = &wm->entities[i];
             n = snprintf(buf + off, cap - off, "%s%.40s",
                          i == 0 ? "" : ", ",
                          e->name ? e->name : "");
@@ -142,10 +140,63 @@ static char *render_wm_digest(hu_allocator_t *alloc, const hu_world_model_t *wm)
         if (off + 2 < cap) { buf[off++] = '\n'; }
     }
 
+    if (wm && wm->recent_changes_count > 0) {
+        size_t rc_top = wm->recent_changes_count < 3 ? wm->recent_changes_count : 3;
+        for (size_t i = 0; i < rc_top && off + 120 < cap; i++) {
+            const hu_world_recent_change_t *ch = &wm->recent_changes[i];
+            const char *kind =
+                ch->kind == HU_WORLD_CHANGE_SUPERSEDED ? "superseded"
+                : ch->kind == HU_WORLD_CHANGE_RETRACTED ? "retracted"
+                                                        : "changed";
+            n = snprintf(buf + off, cap - off,
+                         "Recent change: %s at %lld — %.60s\n", kind,
+                         (long long)ch->at_ms, ch->summary);
+            if (n > 0) off += (size_t)n;
+        }
+    }
+
+    if (wm && wm->hyperedges_count > 0) {
+        size_t he_top = wm->hyperedges_count < 3 ? wm->hyperedges_count : 3;
+        for (size_t i = 0; i < he_top && off + 120 < cap; i++) {
+            const hu_hyperedge_t *he = &wm->hyperedges[i];
+            n = snprintf(buf + off, cap - off, "Hyperedge: %.40s (%zu members)\n",
+                         he->relation_label, he->members_count);
+            if (n > 0) off += (size_t)n;
+        }
+    }
+
+    if (wm && (wm->self_model.name[0] || wm->self_model.focused_topics[0] ||
+               wm->self_model.capabilities_count > 0)) {
+        if (wm->self_model.name[0]) {
+            n = snprintf(buf + off, cap - off, "Self: %.40s\n", wm->self_model.name);
+            if (n > 0) off += (size_t)n;
+        }
+        if (wm->self_model.focused_topics[0]) {
+            n = snprintf(buf + off, cap - off, "Focused: %.80s\n",
+                         wm->self_model.focused_topics);
+            if (n > 0) off += (size_t)n;
+        }
+        if (wm->self_model.capabilities_count > 0) {
+            n = snprintf(buf + off, cap - off, "Capabilities: ");
+            if (n > 0) off += (size_t)n;
+            size_t cap_n = wm->self_model.capabilities_count < 4
+                               ? wm->self_model.capabilities_count
+                               : 4;
+            for (size_t i = 0; i < cap_n && off + 48 < cap; i++) {
+                n = snprintf(buf + off, cap - off, "%s%.24s",
+                             i == 0 ? "" : ", ", wm->self_model.capabilities[i]);
+                if (n > 0) off += (size_t)n;
+            }
+            if (off + 2 < cap) buf[off++] = '\n';
+        }
+    }
+
     if (off < cap) buf[off] = '\0';
     else buf[cap - 1] = '\0';
     return buf;
 }
+
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
 
 /* ── User message: goal + digest ───────────────────────────────────────── */
 
@@ -458,5 +509,11 @@ hu_error_t hu_planner_llm__test_parse_json(hu_allocator_t *alloc, const char *js
                                            size_t json_len, const hu_world_model_t *wm,
                                            hu_retrieval_plan_t *out) {
     return parse_plan_json(alloc, json, json_len, wm, out);
+}
+
+/* Test hook: render the world-model digest without provider I/O. */
+char *hu_planner_llm__test_render_wm_digest(hu_allocator_t *alloc,
+                                            const hu_world_model_t *wm) {
+    return render_wm_digest(alloc, wm);
 }
 #endif

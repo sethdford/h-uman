@@ -166,6 +166,31 @@ hu_error_t hu_experience_record(hu_experience_store_t *store,
         store->alloc->free(store->alloc->ctx, content, content_len + 1);
         if (err == HU_OK)
             store->stored_count++;
+#ifdef HU_ENABLE_SQLITE
+        /* Also persist to experience_log for distillation, even when
+         * the memory vtable handled semantic storage above. */
+        if (store->db) {
+            sqlite3_exec(store->db,
+                         "CREATE TABLE IF NOT EXISTS experience_log("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                         "task TEXT NOT NULL, actions TEXT, outcome TEXT, "
+                         "score REAL, recorded_at INTEGER)",
+                         NULL, NULL, NULL);
+            const char *xl =
+                "INSERT INTO experience_log (task, actions, outcome, score, recorded_at) "
+                "VALUES (?1, ?2, ?3, ?4, ?5)";
+            sqlite3_stmt *xs = NULL;
+            if (sqlite3_prepare_v2(store->db, xl, -1, &xs, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(xs, 1, task, (int)task_len, SQLITE_STATIC);
+                sqlite3_bind_text(xs, 2, actions, (int)actions_len, SQLITE_STATIC);
+                sqlite3_bind_text(xs, 3, outcome, (int)outcome_len, SQLITE_STATIC);
+                sqlite3_bind_double(xs, 4, score);
+                sqlite3_bind_int64(xs, 5, (int64_t)time(NULL));
+                sqlite3_step(xs);
+                sqlite3_finalize(xs);
+            }
+        }
+#endif
         return err;
     }
 

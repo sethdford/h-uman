@@ -214,6 +214,53 @@ static void dpo_empty_export_succeeds(void) {
     hu_dpo_collector_deinit(&col);
 }
 
+static void test_dpo_export_in_memory_roundtrip(void) {
+#ifdef HU_ENABLE_SQLITE
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 16, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    hu_preference_pair_t in = {0};
+    memcpy(in.prompt, "what should i do first?", 23);
+    in.prompt_len = 23;
+    memcpy(in.chosen, "ship the small fix.", 19);
+    in.chosen_len = 19;
+    memcpy(in.rejected, "perhaps consider.", 17);
+    in.rejected_len = 17;
+    in.margin = 0.7;
+    in.timestamp = 1715472000;
+    memcpy(in.source, "e2e_test", 8);
+    in.source_len = 8;
+    HU_ASSERT_EQ(hu_dpo_record_pair(&col, &in), HU_OK);
+
+    hu_dpo_export_t ex = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col, &alloc, &ex), HU_OK);
+    HU_ASSERT_EQ(ex.count, 1u);
+    HU_ASSERT_EQ(memcmp(ex.pairs[0].prompt, in.prompt, in.prompt_len), 0);
+    hu_dpo_export_free(&alloc, &ex);
+
+    sqlite3 *db2 = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db2), SQLITE_OK);
+    hu_dpo_collector_t col2 = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db2, 16, &col2), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col2), HU_OK);
+    hu_dpo_export_t ex2 = {0};
+    HU_ASSERT_EQ(hu_dpo_export(&col2, &alloc, &ex2), HU_OK);
+    HU_ASSERT_EQ(ex2.count, 0u);
+    hu_dpo_export_free(&alloc, &ex2);
+
+    hu_dpo_collector_deinit(&col);
+    hu_dpo_collector_deinit(&col2);
+    sqlite3_close(db);
+    sqlite3_close(db2);
+#else
+    HU_SKIP_IF(1, "SQLite required for hu_dpo_export");
+#endif
+}
+
 static void dpo_margin_reflects_confidence(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
@@ -246,4 +293,5 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_null_collector_returns_error);
     HU_RUN_TEST(dpo_empty_export_succeeds);
     HU_RUN_TEST(dpo_margin_reflects_confidence);
+    HU_RUN_TEST(test_dpo_export_in_memory_roundtrip);
 }

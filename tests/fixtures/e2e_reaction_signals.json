@@ -1,0 +1,758 @@
+{
+  "$schema": "https://human.dev/schemas/e2e-reaction-signals-v2.json",
+  "version": "2.0.0",
+  "source_tag": "e2e_synthetic",
+  "comment": "Synthetic reaction stream for Phase 6 deterministic E2E test.",
+  "events": [
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-001",
+      "sender_handle": "+15550100001",
+      "kind": "love",
+      "polarity": 1,
+      "timestamp_unix": 1715472000,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 1?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-002",
+      "sender_handle": "+15550100001",
+      "kind": "like",
+      "polarity": 1,
+      "timestamp_unix": 1715472001,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 2?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-003",
+      "sender_handle": "+15550100001",
+      "kind": "laugh",
+      "polarity": 1,
+      "timestamp_unix": 1715472002,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 3?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-004",
+      "sender_handle": "+15550100001",
+      "kind": "emphasize",
+      "polarity": 1,
+      "timestamp_unix": 1715472003,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 4?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-005",
+      "sender_handle": "+15550100001",
+      "kind": "love",
+      "polarity": 1,
+      "timestamp_unix": 1715472004,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 5?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-006",
+      "sender_handle": "+15550100001",
+      "kind": "like",
+      "polarity": 1,
+      "timestamp_unix": 1715472005,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 6?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-007",
+      "sender_handle": "+15550100001",
+      "kind": "laugh",
+      "polarity": 1,
+      "timestamp_unix": 1715472006,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 7?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-008",
+      "sender_handle": "+15550100001",
+      "kind": "emphasize",
+      "polarity": 1,
+      "timestamp_unix": 1715472007,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 8?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-009",
+      "sender_handle": "+15550100001",
+      "kind": "love",
+      "polarity": 1,
+      "timestamp_unix": 1715472008,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 9?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-010",
+      "sender_handle": "+15550100001",
+      "kind": "like",
+      "polarity": 1,
+      "timestamp_unix": 1715472009,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 10?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-011",
+      "sender_handle": "+15550100001",
+      "kind": "laugh",
+      "polarity": 1,
+      "timestamp_unix": 1715472010,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 11?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-012",
+      "sender_handle": "+15550100001",
+      "kind": "emphasize",
+      "polarity": 1,
+      "timestamp_unix": 1715472011,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 12?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-013",
+      "sender_handle": "+15550100001",
+      "kind": "love",
+      "polarity": 1,
+      "timestamp_unix": 1715472012,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 13?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-014",
+      "sender_handle": "+15550100001",
+      "kind": "like",
+      "polarity": 1,
+      "timestamp_unix": 1715472013,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 14?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-015",
+      "sender_handle": "+15550100001",
+      "kind": "laugh",
+      "polarity": 1,
+      "timestamp_unix": 1715472014,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 15?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-016",
+      "sender_handle": "+15550100001",
+      "kind": "emphasize",
+      "polarity": 1,
+      "timestamp_unix": 1715472015,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 16?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-017",
+      "sender_handle": "+15550100001",
+      "kind": "love",
+      "polarity": 1,
+      "timestamp_unix": 1715472016,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 17?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-018",
+      "sender_handle": "+15550100001",
+      "kind": "like",
+      "polarity": 1,
+      "timestamp_unix": 1715472017,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 18?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-019",
+      "sender_handle": "+15550100001",
+      "kind": "laugh",
+      "polarity": 1,
+      "timestamp_unix": 1715472018,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 19?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-020",
+      "sender_handle": "+15550100001",
+      "kind": "emphasize",
+      "polarity": 1,
+      "timestamp_unix": 1715472019,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 20?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-021",
+      "sender_handle": "+15550100001",
+      "kind": "love",
+      "polarity": 1,
+      "timestamp_unix": 1715472020,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 21?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-022",
+      "sender_handle": "+15550100001",
+      "kind": "like",
+      "polarity": 1,
+      "timestamp_unix": 1715472021,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 22?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-023",
+      "sender_handle": "+15550100001",
+      "kind": "laugh",
+      "polarity": 1,
+      "timestamp_unix": 1715472022,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 23?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-024",
+      "sender_handle": "+15550100001",
+      "kind": "emphasize",
+      "polarity": 1,
+      "timestamp_unix": 1715472023,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 24?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-025",
+      "sender_handle": "+15550100001",
+      "kind": "love",
+      "polarity": 1,
+      "timestamp_unix": 1715472024,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 25?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-026",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472025,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 26?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-027",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472026,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 27?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-028",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472027,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 28?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-029",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472028,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 29?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-030",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472029,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 30?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-031",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472030,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 31?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-032",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472031,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 32?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-033",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472032,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 33?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-034",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472033,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 34?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-035",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472034,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 35?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-036",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472035,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 36?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-037",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472036,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 37?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-038",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472037,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 38?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-039",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472038,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 39?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-040",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472039,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 40?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-041",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472040,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 41?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-042",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472041,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 42?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-043",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472042,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 43?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-044",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472043,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 44?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-045",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472044,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 45?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-046",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472045,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 46?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-047",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472046,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 47?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-048",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472047,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 48?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-049",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472048,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 49?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    },
+    {
+      "channel_id": "imessage",
+      "target_thread_id": "chat-synth-001",
+      "target_message_ref": "msg-synth-050",
+      "sender_handle": "+15550100001",
+      "kind": "dislike",
+      "polarity": -1,
+      "timestamp_unix": 1715472049,
+      "is_removal": 0,
+      "_aux": {
+        "prompt": "held out prompt 50?",
+        "response_chosen": "ship the small fix.",
+        "response_rejected": "perhaps consider exploring options."
+      }
+    }
+  ]
+}

@@ -24,6 +24,7 @@
 #include "human/agent/kv_cache.h"
 #include "human/core/allocator.h"
 #include "human/ml/learner.h"
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,7 @@ struct hu_scheduler;
 struct hu_memory_facade;
 struct hu_job_spec;
 struct hu_provider;
+struct hu_eval_gate;
 
 /* Optional clear-callback for an opaque semantic cache. We can't depend
  * on the lifecycle/semantic_cache.h type from this header (kept as a
@@ -57,10 +59,32 @@ typedef struct hu_lora_runner_ctx {
      * train so the new adapter is hot-loaded without daemon restart. */
     struct hu_provider *provider;   /* optional; NULL skips auto-load */
     const char *adapter_id;         /* optional; label for the loaded adapter */
+
+    /* Phase 5 — promotion gate before hot-load (NULL skips). */
+    struct hu_eval_gate *eval_gate;
+    const char *rl_method_name; /* e.g. "dpo"; used for proof dir adapter id */
+    size_t rl_step_index;
+
+    /* CF-4 — measured persona scores for the gate (after train).
+     * When non-NULL and gate_persona_n >= 10, passed to
+     * hu_eval_gate_decide_from_arrays_for_test. Otherwise scores are
+     * derived from hu_learner_report_t (signals_consumed, final_loss). */
+    const double *gate_persona_after_scores;
+    size_t gate_persona_after_n;
+    double gate_candidate_p95_ms; /* 0 → default 100 ms */
+
+    /* CF-4 (finish) — score persona example bank + post-adapter probes. */
+    const struct hu_persona *gate_persona; /* not owned */
+    const char *gate_model_name;
+    size_t gate_model_name_len;
 } hu_lora_runner_ctx_t;
 
 hu_error_t hu_lora_training_runner(struct hu_memory_facade *m, const struct hu_job_spec *spec,
                                    int64_t budget_ms, void *user_data);
+
+#ifdef HU_IS_TEST
+void hu_lora_runner_set_test_clock(time_t frozen);
+#endif
 
 #ifdef __cplusplus
 }
