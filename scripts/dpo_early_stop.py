@@ -263,6 +263,7 @@ def run_with_early_stop(
     sentinel_path: Optional[Path] = None,
     event_log_path: Optional[Path] = None,
     terminate_grace_sec: float = 10.0,
+    env: Optional[dict] = None,
     _popen=subprocess.Popen,
 ) -> Tuple[int, Optional[Decision]]:
     """Run `cmd` and stream its stdout through `detector`.
@@ -287,6 +288,7 @@ def run_with_early_stop(
     proc = _popen(
         cmd,
         cwd=cwd,
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
