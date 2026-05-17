@@ -259,7 +259,11 @@ def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
         "--model", model,
         "--train",
         "--train-mode", "sft",
-        "--train-type", "lora",
+        # US-11.2: operator-selectable adapter type. Defaults to "dora"
+        # (Sprint 11 baseline upgrade) but accepts "lora" for back-compat.
+        # getattr with default keeps synthesized Namespaces (older callers,
+        # tests that predate US-11.2) from crashing.
+        "--train-type", getattr(args, "train_type", "dora"),
         "--data", str(data_dir),
         "--adapter-path", str(adapter_dir),
         "--iters", str(args.iters),
@@ -504,7 +508,11 @@ def run_dpo(args, adapter_dir: Path) -> int:
         "--model", model,
         "--train",
         "--train-mode", "dpo",
-        "--train-type", "lora",
+        # US-11.2: must match the train_type used by run_sft (above) or
+        # the DPO pass will fail to load the SFT-produced adapter (shape
+        # mismatch). args.train_type is set once in main() and threaded
+        # through every Namespace; getattr default keeps older callers safe.
+        "--train-type", getattr(args, "train_type", "dora"),
         "--data", str(dpo_data_dir),
         "--adapter-path", str(adapter_dir),
         "--resume-adapter-file", str(adapter_dir / "adapters.safetensors"),
@@ -598,6 +606,11 @@ def run_speculative_draft_training(args):
         # helper). Without this, the draft model would silently fall back
         # to an undefined attribute on the Namespace.
         target_modules=getattr(args, "target_modules", None),
+        # Sprint 11 / US-11.2: forward operator's --train-type choice so
+        # the draft model uses the SAME adapter type as the target. If
+        # the target trains DoRA but the draft trains LoRA, speculative
+        # decode acceptance drops and downstream merge-back diverges.
+        train_type=getattr(args, "train_type", "dora"),
         steps_per_report=args.steps_per_report,
         steps_per_eval=args.steps_per_eval,
         save_every=args.save_every,
@@ -760,6 +773,9 @@ def run_finetune(args):
     print(f"  Iterations:  {args.iters}")
     print(f"  Batch size:  {args.batch_size}")
     print(f"  LoRA rank:   {args.rank}")
+    # Sprint 11 / US-11.2 observability: surface the active train_type
+    # so operators see at-a-glance whether DoRA or LoRA is in use.
+    print(f"  Train type:  {getattr(args, 'train_type', 'dora')}")
     # Sprint 7 / US-7.4 risk #2: surface the resolved target modules so
     # the operator can spot a typo (e.g. --target-modules q_proj that
     # collapses the adapter to Q-only) before training starts.
@@ -813,6 +829,12 @@ def run_finetune(args):
         "model": model,
         "adapter_path": str(adapter_dir),
         "rank": args.rank,
+        # Sprint 11 / US-11.2 (AC-11.2.5): record train_type so a
+        # downstream consumer can distinguish a DoRA-produced adapter
+        # from a LoRA-produced one without parsing the safetensors
+        # weights. Defaults to "dora" for runs predating the flag
+        # (synthesized Namespaces without train_type set).
+        "train_type": getattr(args, "train_type", "dora"),
         # Sprint 7 / US-7.4 (AC-7.4.5): record the resolved target
         # modules alongside rank so a downstream consumer (e.g. the
         # US-7.5 nightly cron's promotion gate or check-lora-ab.sh) can
@@ -904,6 +926,10 @@ def run_train_all(args):
             # Sprint 7 / US-7.4: forward operator's target-module choice
             # (or None for the QKVO default) into each per-target run.
             target_modules=getattr(args, "target_modules", None),
+            # Sprint 11 / US-11.2: forward --train-type so all three
+            # targets train with the same adapter type. Mixing DoRA and
+            # LoRA across the real-time stack would diverge magnitudes.
+            train_type=getattr(args, "train_type", "dora"),
             steps_per_report=args.steps_per_report,
             steps_per_eval=args.steps_per_eval,
             save_every=args.save_every,
@@ -970,6 +996,16 @@ Examples:
     parser.add_argument("--learning-rate", type=float, default=None,
                         help="Learning rate (default: auto from target)")
     parser.add_argument("--rank", type=int, default=None, help="LoRA rank (default: auto from target)")
+    # Sprint 11 / US-11.2: adapter training type. Defaults to "dora" —
+    # DoRA closes ~93% of the LoRA-to-full-FT quality gap at the same
+    # rank with no inference overhead after merge-back. Operators with
+    # prior LoRA adapters in adapters/ should either delete them or
+    # pass `--train-type lora` to keep the old shape.
+    parser.add_argument("--train-type", choices=["dora", "lora"], default="dora",
+                        help="Adapter type: dora (default, US-11.2) or lora "
+                             "for back-compat. DoRA closes ~93%% of the "
+                             "LoRA-to-full-FT quality gap at the same rank "
+                             "with no inference overhead.")
     # Sprint 7 / US-7.4: CSV of LoRA target module names. CSV is the
     # friendliest input — we materialize it into the `keys` field of the
     # `--lora-parameters` JSON token at subprocess-build time. The
