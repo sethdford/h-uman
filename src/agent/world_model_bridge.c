@@ -1202,15 +1202,25 @@ hu_error_t hu_w14_scheduler_status_save(hu_w14_scheduler_t *s) {
      * keys, so this is backward-compatible. */
     if (s->lora_retrain_ctx) {
         const hu_lora_retrain_ctx_t *rc = s->lora_retrain_ctx;
+        /* US-11.8 extends this block with five additional fields. Existing
+         * parsers (strstr-based) ignore unknown keys, so this is
+         * backward-compatible. */
         fprintf(f,
                 ",\n"
                 "  \"lora_retrain\": {\n"
                 "    \"last_run_ts\": %lld,\n"
                 "    \"last_outcome\": \"%s\",\n"
-                "    \"pairs_consumed\": %llu\n"
+                "    \"pairs_consumed\": %llu,\n"
+                "    \"fast_version\": %d,\n"
+                "    \"slow_version\": %d,\n"
+                "    \"last_ema_alpha\": %.4f,\n"
+                "    \"last_gate_verdict\": \"%s\",\n"
+                "    \"last_kl_drift_nats\": %.4f\n"
                 "  }",
                 (long long)rc->last_run_ts, hu_lora_retrain_outcome_str(rc->last_outcome),
-                rc->last_pairs_consumed);
+                rc->last_pairs_consumed, rc->last_fast_version, rc->last_slow_version,
+                rc->last_ema_alpha, rc->last_gate_verdict[0] ? rc->last_gate_verdict : "",
+                rc->last_kl_drift_nats);
     }
     fprintf(f, "\n}\n");
     fclose(f);
