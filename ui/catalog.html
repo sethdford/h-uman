@@ -106,6 +106,7 @@
       <a href="#hu-section-header">hu-section-header</a>
       <a href="#hu-metric-row">hu-metric-row</a>
       <a href="#hu-fidelity-tile">hu-fidelity-tile</a>
+      <a href="#hu-guard-rejects-tile">hu-guard-rejects-tile</a>
       <a href="#hu-timeline">hu-timeline</a>
       <a href="#hu-timeline-chart">hu-timeline-chart</a>
       <a href="#hu-sparkline-enhanced">hu-sparkline-enhanced</a>
@@ -1229,6 +1230,30 @@
           </div>
         </div>
         <div class="code-snippet"><code>&lt;hu-fidelity-tile .data=\${fidelityStatusJson}&gt;&lt;/hu-fidelity-tile&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="hu-guard-rejects-tile">
+        <h2>hu-guard-rejects-tile</h2>
+        <p>Response-guard reject telemetry tile. Surfaces cumulative REJECT counts per detector class (G1&ndash;G8 family) from <code>metrics.guard_rejects</code>.</p>
+        <div class="playground">
+          <div class="preview" style="width:100%" id="guard-rejects-tile-preview">
+            <hu-guard-rejects-tile id="guard-rejects-tile-demo"></hu-guard-rejects-tile>
+            <script type="module">
+              import "/src/components/hu-guard-rejects-tile.ts";
+              const t = document.getElementById("guard-rejects-tile-demo");
+              if (t) {
+                t.data = {
+                  semantic_leak: 12,
+                  length_anomaly: 47,
+                  director_echo: 3,
+                  persona_pii_echo: 0,
+                  persona_identity_echo: 1,
+                };
+              }
+            </script>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;hu-guard-rejects-tile .data=\${guardRejectsJson}&gt;&lt;/hu-guard-rejects-tile&gt;</code></div>
       </section>
 
       <section class="component-section" id="hu-timeline">

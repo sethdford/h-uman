@@ -56,8 +56,15 @@ void run_reaction_event_tests(void);
 void run_imessage_reactions_tests(void);
 /* Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch. */
 void run_slack_reactions_tests(void);
-/* Phase 2 Task 13 (RL SOTA): reaction_handler event → dpo_pairs row E2E. */
+/* Phase 2 Task 13 (RL SOTA): reaction_handler event → dpo_pairs row E2E.
+ * Test TU (tests/test_reaction_handler_e2e.c) calls sqlite3_* directly to
+ * seed the dpo_pairs collector, so the test source is gated by
+ * HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here so the
+ * forward decl + call site don't reference a missing symbol in
+ * minimal-build / no-sqlite / cross-arm64 variants. */
+#ifdef HU_ENABLE_SQLITE
 void run_reaction_handler_e2e_tests(void);
+#endif
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
 void run_tool_tests(void);
@@ -740,7 +747,9 @@ int main(int argc, char **argv) {
     run_reaction_event_tests();
     run_imessage_reactions_tests();
     run_slack_reactions_tests();
+#ifdef HU_ENABLE_SQLITE
     run_reaction_handler_e2e_tests();
+#endif
     run_declarative_tools_tests();
     run_skill_trust_tests();
     run_tool_tests();

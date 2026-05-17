@@ -697,11 +697,22 @@ export class ScApp extends LitElement {
     const ready = new Promise<void>((resolve) => {
       idle(() => {
         this._prefetchOnIdle();
-        void Promise.all([
+        // Use .finally so a failed dynamic import (HMR storm, network
+        // hiccup, missing chunk) still settles the readiness promise —
+        // otherwise the E2E test's `await window.__huReady` hangs to
+        // Playwright timeout with a cryptic message instead of failing
+        // fast on the real cause (Cursor Bugbot #f161a0bc).
+        Promise.all([
           import("./components/floating-mic.js"),
           import("./components/command-palette.js"),
           import("./components/hu-shortcut-overlay.js"),
-        ]).then(() => resolve());
+        ])
+          .catch((err) => {
+            // Surface the underlying failure to the console so test
+            // logs show WHAT failed to import, not just a timeout.
+            console.error("[hu-app] idle component imports failed:", err);
+          })
+          .finally(() => resolve());
       });
     });
     (window as unknown as { __huReady?: Promise<void> }).__huReady = ready;
