@@ -3137,7 +3137,7 @@ hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv
                    "[other flags...]\n"
                    "  --algorithm dpo    Delegate to existing DPO trainer\n"
                    "  --algorithm simpo  Train via SimPO loss head (Init #06)\n"
-                   "  --algorithm orpo   (not yet implemented — exit 2)\n"
+                   "  --algorithm orpo   Train via ORPO loss head (US-11.5)\n"
                    "  --algorithm grpo2  (not yet implemented — exit 2)\n");
             return HU_OK;
         }
@@ -3160,12 +3160,65 @@ hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv
         return rl_train_delegate_to_dpo(alloc, argc, argv, algo_flag_index);
     }
 
-    if (strcmp(algorithm, "orpo") == 0 || strcmp(algorithm, "grpo2") == 0) {
+    /* GRPO-2 remains stubbed (AC-11.5.5 keeps the boundary clean). */
+    if (strcmp(algorithm, "grpo2") == 0) {
         fprintf(stderr,
                 "rl-train: algorithm '%s' not yet implemented (US-7.10 lands "
-                "SimPO only; ORPO and GRPO-2 are deferred)\n",
+                "SimPO only; ORPO lands in US-11.5; GRPO-2 is deferred)\n",
                 algorithm);
         return HU_ERR_NOT_SUPPORTED;
+    }
+
+    /* US-11.5: --algorithm orpo — instantiate ORPO factory and run one
+     * train_step. HU_IS_TEST mocks the model forward; non-test builds
+     * currently return HU_ERR_NOT_SUPPORTED because the full forward-
+     * pass wiring is FU-11.5.a (mirror of FU-7.10.a for SimPO). */
+    if (strcmp(algorithm, "orpo") == 0) {
+        hu_orpo_config_t ocfg = {
+            .lambda = 0.1f,
+            .model = NULL,
+        };
+        /* Optional --lambda-orpo override (named per AC-11.5.1; no alias). */
+        for (int i = 1; i < argc; i++) {
+            const char *v = get_opt(argv, argc, i, "--lambda-orpo");
+            if (v) {
+                float l = 0.0f;
+                if (parse_float_arg(v, &l) != 0 || l <= 0.0f) {
+                    fprintf(stderr, "rl-train: invalid --lambda-orpo '%s'\n", v);
+                    return HU_ERR_INVALID_ARGUMENT;
+                }
+                ocfg.lambda = l;
+                i++;
+                continue;
+            }
+        }
+
+        hu_rl_trainer_t otrainer = {0};
+        hu_error_t oerr = hu_rl_trainer_orpo_create(alloc, &ocfg, &otrainer);
+        if (oerr != HU_OK) {
+            fprintf(stderr, "rl-train: orpo factory failed: %s\n", hu_error_string(oerr));
+            return oerr;
+        }
+
+#ifdef HU_IS_TEST
+        /* AC-11.5.1: run train_step without crashing. Loss head returns
+         * a deterministic mock value and never touches the (NULL) model. */
+        hu_preference_pair_t opair = {0};
+        double oloss = 0.0;
+        oerr = otrainer.vtable->train_step(otrainer.ctx, &opair, &oloss);
+        if (oerr == HU_OK)
+            printf("[rl-train] orpo test mode: loss=%.4f\n", oloss);
+        else
+            fprintf(stderr, "rl-train: train_step failed: %s\n", hu_error_string(oerr));
+#else
+        fprintf(stderr, "rl-train: orpo end-to-end train_step requires a model + "
+                        "tokenizer wiring not yet shipped (US-11.5 lands the vtable + "
+                        "loss head; the forward-pass integration is FU-11.5.a).\n");
+        oerr = HU_ERR_NOT_SUPPORTED;
+#endif
+
+        hu_rl_trainer_deinit(&otrainer);
+        return oerr;
     }
 
     if (strcmp(algorithm, "simpo") != 0) {

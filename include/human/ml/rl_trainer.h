@@ -91,6 +91,21 @@ typedef struct hu_simpo_config {
 hu_error_t hu_rl_trainer_simpo_create(hu_allocator_t *alloc, const hu_simpo_config_t *cfg,
                                       hu_rl_trainer_t *out);
 
+/* US-11.5 — ORPO factory config. λ is the single hyperparameter from
+ * Hong et al. arXiv:2403.07691 Eq. 7 (default 0.1 per the original
+ * paper; sprint-11 sota-dpo.md line 57 corroborates).
+ *
+ * ORPO has NO reference model (one of its main advantages over DPO);
+ * `model` is the policy model itself, nullable when only `compute_loss`
+ * is exercised (e.g. the golden-fixture test path). */
+typedef struct hu_orpo_config {
+    float lambda;
+    hu_model_t *model;
+} hu_orpo_config_t;
+
+hu_error_t hu_rl_trainer_orpo_create(hu_allocator_t *alloc, const hu_orpo_config_t *cfg,
+                                     hu_rl_trainer_t *out);
+
 /* Idempotent: calling twice is a no-op. After deinit `trainer->vtable`
  * is NULL and `trainer->ctx` is NULL. */
 void hu_rl_trainer_deinit(hu_rl_trainer_t *trainer);
