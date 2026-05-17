@@ -509,7 +509,18 @@ static void retrain_mkdir_p(const char *path) {
     (void)mkdir(buf, 0755);
 }
 
-/* Move file from src to dst (rename within same FS). Returns 0 on success. */
+/* Move file from src to dst (rename within same FS). Returns 0 on success.
+ *
+ * Sprint 11 / US-11.8 critic-HIGH #1 fix: the cross-FS fallback previously
+ * did `fread → fwrite → fclose(out) → unlink(src)` with no `fflush + fsync`
+ * between the writes and the close, and no fsync of the destination
+ * directory either. A crash between `fclose(out)` and the OS flushing
+ * dirty pages would leave the quarantine file truncated or zero-length
+ * AND the source file already unlinked — losing the fast adapter
+ * silently. This regressed the Phase 0 personal_model atomic-save lesson
+ * (`tmp + fflush + fsync + rename`). Now: explicit `fflush + fsync` on
+ * the destination before close, and we only `unlink` the source after
+ * the destination is durably on disk. */
 static int retrain_quarantine_move(const char *src, const char *dst_dir, const char *dst_path) {
     retrain_mkdir_p(dst_dir);
     /* If src does not exist, treat as success (test fixtures may not
@@ -519,7 +530,7 @@ static int retrain_quarantine_move(const char *src, const char *dst_dir, const c
         return 0;
     if (rename(src, dst_path) == 0)
         return 0;
-    /* Cross-FS fallback: copy + unlink. */
+    /* Cross-FS fallback: copy + fsync + unlink. */
     FILE *in = fopen(src, "rb");
     if (!in)
         return -1;
@@ -530,10 +541,28 @@ static int retrain_quarantine_move(const char *src, const char *dst_dir, const c
     }
     char buf[4096];
     size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
-        fwrite(buf, 1, n, out);
+    int copy_err = 0;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) {
+            copy_err = 1;
+            break;
+        }
+    }
+    if (ferror(in))
+        copy_err = 1;
+    /* Flush to OS, then fsync to disk, BEFORE unlinking the source. */
+    if (!copy_err) {
+        if (fflush(out) != 0)
+            copy_err = 1;
+        else if (fsync(fileno(out)) != 0)
+            copy_err = 1;
+    }
     fclose(in);
     fclose(out);
+    if (copy_err) {
+        (void)unlink(dst_path); /* clean up partial destination on failure */
+        return -1;
+    }
     (void)unlink(src);
     return 0;
 }
@@ -727,33 +756,70 @@ hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_jo
             goto done;
         }
 
-        /* STEP 3b: PROMOTE — KL drift sanity gate. */
+        /* STEP 3b: PROMOTE — KL drift sanity gate.
+         *
+         * Sprint 11 / US-11.8 critic-CRITICAL #1 fix: previously this block
+         * called `hu_lora_compute_kl_drift` and trusted any HU_OK return as
+         * "the gate ran successfully" — but the Python stub returns
+         * `{kl_nats: 0.0, source: "stub"}` whenever torch is unavailable
+         * (every production deployment until M3 frontier bridge lands).
+         * A stubbed 0.0 silently satisfied `kl > tau == false` and recorded
+         * `last_kl_drift_nats = 0.0` in the status JSON — indistinguishable
+         * from a real clean run. That made the KL safety gate a guaranteed
+         * no-op in production.
+         *
+         * Now we plumb `out_is_stub` through. On stub: set the sentinel
+         * `last_kl_drift_nats = -1.0` (gate disabled), emit
+         * `lora_retrain_kl_gate_stubbed` so dashboards can render it
+         * accurately, and proceed with promotion (Sprint 11 does not gate
+         * production on KL availability — that's FU-11.8.a). Operators get
+         * a clear "gate not run" signal instead of a fake clean PASS. */
         if (ctx->kl_probe_set && *ctx->kl_probe_set) {
             double kl = 0.0;
+            int is_stub = 0;
             const char *kl_script =
                 ctx->kl_drift_script ? ctx->kl_drift_script : "scripts/compute_kl_drift.py";
             hu_error_t kl_err = hu_lora_compute_kl_drift(
                 ctx->base_model_path ? ctx->base_model_path : "", ctx->fast_path, ctx->kl_probe_set,
-                kl_script, retrain_ema_subprocess_trampoline, ctx, &kl);
+                kl_script, retrain_ema_subprocess_trampoline, ctx, &kl, &is_stub);
             if (kl_err == HU_OK) {
-                ctx->last_kl_drift_nats = kl;
-                double tau =
-                    (ctx->kl_tau_nats > 0.0) ? ctx->kl_tau_nats : HU_LORA_KL_TAU_DEFAULT_NATS;
-                if (kl > tau) {
-                    char qpath[1024];
-                    (void)retrain_quarantine_path(qpath, sizeof(qpath), ctx->quarantine_dir,
-                                                  ctx->today_yyyymmdd);
-                    (void)retrain_quarantine_move(ctx->fast_path, ctx->quarantine_dir, qpath);
-                    ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_KL_DRIFT;
+                if (is_stub) {
+                    /* Gate did not actually run. Sentinel + observability event. */
+                    ctx->last_kl_drift_nats = -1.0;
                     snprintf(payload, sizeof(payload),
-                             "{\"kl_nats\":%.4f,\"tau\":%.4f,\"quarantine\":\"%s\"}", kl, tau,
-                             qpath);
-                    retrain_emit(ctx, "lora_retrain_kl_drift_rejected", payload);
-                    goto done;
+                             "{\"source\":\"stub\",\"reason\":\"torch_unavailable_or_stub_path\"}");
+                    retrain_emit(ctx, "lora_retrain_kl_gate_stubbed", payload);
+                    /* Proceed with promotion — see FU-11.8.a for the long-term
+                     * fix once real KL inference is wired. */
+                } else {
+                    ctx->last_kl_drift_nats = kl;
+                    double tau =
+                        (ctx->kl_tau_nats > 0.0) ? ctx->kl_tau_nats : HU_LORA_KL_TAU_DEFAULT_NATS;
+                    if (kl > tau) {
+                        char qpath[1024];
+                        (void)retrain_quarantine_path(qpath, sizeof(qpath), ctx->quarantine_dir,
+                                                      ctx->today_yyyymmdd);
+                        (void)retrain_quarantine_move(ctx->fast_path, ctx->quarantine_dir, qpath);
+                        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_KL_DRIFT;
+                        snprintf(payload, sizeof(payload),
+                                 "{\"kl_nats\":%.4f,\"tau\":%.4f,\"quarantine\":\"%s\"}", kl, tau,
+                                 qpath);
+                        retrain_emit(ctx, "lora_retrain_kl_drift_rejected", payload);
+                        goto done;
+                    }
                 }
+            } else {
+                /* Sprint 11 / US-11.8 critic-HIGH #2 fix: subprocess errors
+                 * were previously silently swallowed (comment said "log but
+                 * don't reject" — no log was emitted). Now emit a recoverable
+                 * event so the failure is visible, and use the sentinel
+                 * `-1.0` to make it discoverable in status JSON. */
+                ctx->last_kl_drift_nats = -1.0;
+                snprintf(payload, sizeof(payload),
+                         "{\"reason\":\"subprocess_failed\",\"error\":\"%s\"}",
+                         hu_error_string(kl_err));
+                retrain_emit(ctx, "lora_retrain_kl_gate_error", payload);
             }
-            /* On KL subprocess error, log but don't reject (Sprint 11 has
-             * no real KL infra; the stub returns 0.0 anyway). */
         }
 
         /* STEP 3c: PROMOTE — OLD-pairs forgetting check. */
@@ -827,7 +893,14 @@ hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_jo
             goto done;
         }
 
-        ctx->last_ema_alpha = ema.out_was_cold_start ? alpha : alpha;
+        /* Sprint 11 / US-11.8 critic-LOW fix: previous version was
+         * `ema.out_was_cold_start ? alpha : alpha` — both branches assigned
+         * the same value (no-op ternary). On cold start the alpha is
+         * recorded but is not numerically applied (slow_new := fast, no
+         * prior to blend against — see lora_ema.h cold-start contract).
+         * Surface that distinction with `0.0` to make it clear in status
+         * JSON that no blend happened. */
+        ctx->last_ema_alpha = ema.out_was_cold_start ? 0.0 : alpha;
         ctx->last_slow_version = new_v;
 
         /* STEP 3e: advance `current` symlink to slow.safetensors.v{new_v}. */

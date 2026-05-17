@@ -20,6 +20,26 @@ The design doc Risk 1 mitigation said "reordering requires editing the `_CASCADE
 Source: US-11.7 critic HIGH #1.
 The test asserted `verdict in ("DEFER", "REJECT")` which would silently accept a regression mapping Stage 2 ABSTAIN to REJECT. **FIX (inline this commit):** tightened to exact equality with DEFER + `exit_code == 1`, with a docstring explaining why DEFER is the contract (REJECT would mis-punish operator for a judge crash).
 
+### FU-11.8.a (RESOLVED inline) — KL drift gate silently disabled in production
+Source: US-11.8 critic CRITICAL #1.
+`scripts/compute_kl_drift.py` returns `{"kl_nats": 0.0, "source": "stub"}` whenever torch is unavailable (every production deployment until M3 frontier bridge). The C runner's `lora_ema_parse_kl` ignored the `"source"` field; with `kl_tau_nats = 0.5`, a stubbed 0.0 always satisfied `kl > tau == false` and recorded `last_kl_drift_nats = 0.0` in the status JSON — indistinguishable from a real clean run. The KL safety gate was a guaranteed no-op in production. **FIX (inline this commit):** added `int *out_is_stub` parameter to `hu_lora_compute_kl_drift`; runner now sets `last_kl_drift_nats = -1.0` (gate disabled sentinel) and emits `lora_retrain_kl_gate_stubbed` event when stub detected, so dashboards/operators see the gate is not actually running. Promotion proceeds (Sprint 11 does not gate production on KL availability), but the silent backdoor is closed.
+
+### FU-11.8.b (RESOLVED inline) — Cross-FS quarantine fallback missing `fflush + fsync`
+Source: US-11.8 critic HIGH #1.
+`retrain_quarantine_move` (and the identical pattern in `cli_adapter_rollback.c`) did `fread → fwrite → fclose(out) → unlink(src)` with no `fflush + fsync` between writes and close. A crash before the OS flushed dirty pages would leave the quarantine file truncated AND the source already unlinked, losing the fast adapter silently. Regressed the Phase 0 personal_model atomic-save lesson. **FIX (inline this commit):** explicit `fflush + fsync` on destination before unlinking source; on copy failure, partial destination is `unlink`'d for cleanup.
+
+### FU-11.8.c (RESOLVED inline) — KL subprocess error silently allowed promotion
+Source: US-11.8 critic HIGH #2.
+The runner's KL block had a comment "On KL subprocess error, log but don't reject" but emitted no log. Combined with the stub issue (FU-11.8.a), there were two independent silent backdoor paths. **FIX (inline this commit):** on `kl_err != HU_OK`, set `last_kl_drift_nats = -1.0` and emit `lora_retrain_kl_gate_error` event with the error code.
+
+### FU-11.8.d (RESOLVED inline) — Warm-path EMA write not fsync'd before rename
+Source: US-11.8 critic HIGH #3.
+`scripts/lora_ema.py` warm path did `save_file → os.rename` with no `os.fsync` between (despite the cold-start `_atomic_copy` doing it correctly). A crash after rename succeeds but before page flush would corrupt the next night's `slow.safetensors.v{N+1}`. **FIX (inline this commit):** explicit `os.fsync` on the tmp file descriptor before rename, matching the cold-start pattern.
+
+### FU-11.8.e (RESOLVED inline) — `HU_ERR_PRECONDITION` header doc / `last_ema_alpha` no-op ternary
+Source: US-11.8 critic MED #1 + LOW.
+Header `lora_ema.h` documented `HU_ERR_PRECONDITION` return code that doesn't exist in `error.h` (impl returns `HU_ERR_TOOL_VALIDATION`). `last_ema_alpha = ema.out_was_cold_start ? alpha : alpha` was a no-op ternary. **FIX (inline this commit):** corrected header doc; cold-start now records `last_ema_alpha = 0.0` (no blend happened) so status JSON distinguishes cold-start from warm EMA.
+
 ## P0 inline-resolved (this commit)
 
 - **US-11.5 cherry-pick attribution:** `dpo_miner.c` was incidentally added to the `NOT_HU_ENABLE_ML` test-extra-modules block in `CMakeLists.txt:2219` during Wave 1 conflict resolution. The addition is a forward-compatible fix (the minimal build was latently missing it for `test_dpo_miner.c` linkage), but the attribution belongs to neither US-11.5 (ORPO) nor US-11.6. Recorded here for sprint-auditor context.
@@ -95,6 +115,24 @@ Source: US-11.7 critic cross-agent regression risk.
 ### FU-11.7.j — `details["source"]` could emit `fixture:None` (LOW)
 Source: US-11.7 critic LOW.
 `scripts/cascade_stages/stage2_coherence.py:186-188` constructs source string from caller-supplied `fixture_path` without None check. Not reachable today but a refactor could expose it. Fix: assign `source` at resolution time in `_call_judge` and thread through.
+
+## P1 — Sprint 12 (US-11.8 follow-ups)
+
+### FU-11.8.f — Real KL drift inference (MED, blocks effective gate enforcement)
+Source: US-11.8 critic CRITICAL #1 (long-term fix).
+`scripts/compute_kl_drift.py` currently returns `source: "stub"` whenever torch is unavailable, and the C runner accepts that as "gate disabled, proceed." This makes the entire KL gate observability-only until real KL inference lands. Sprint 12 must implement real `KL(base || candidate)` computation against the 200-prompt probe set so production deployments actually enforce the `0.5 nats` tau.
+
+### FU-11.8.g — AC-11.8.5 status test self-asserts, doesn't exercise `hu_w14_scheduler_status_save` (MED)
+Source: US-11.8 critic MED #2.
+The status JSON test in `tests/test_w14_dual_lora.c` constructs the expected JSON manually and asserts `strstr` on itself — verifies nothing about the actual writer in `world_model_bridge.c`. A `%.4f` format change, field rename, or escaping bug would silently break the writer while all tests pass. Fix: drive `hu_w14_scheduler_status_save` with a populated context, read output, assert field values.
+
+### FU-11.8.h — `human ml adapter-rollback` has no PID lock (MED)
+Source: US-11.8 critic MED #3.
+Two concurrent `human ml adapter-rollback` invocations race on the same `slow.safetensors.v{N}` target. The second `rename` fails, the cross-FS fallback opens a non-existent path, `in == NULL` lacks a guard, code proceeds to `fclose(NULL)` — undefined behavior. The W14 cron itself holds a PID lock but the rollback CLI is a separate process. Fix: `flock` on `slow_dir` directory fd at entry; add `if (!in) return HU_ERR_IO;` guard.
+
+### FU-11.8.i — Cross-merge risk note (Sprint 12 hygiene)
+Source: US-11.8 critic cross-agent.
+`lora_retrain_runner.{c,h}` was modified by both US-11.7 (cascade_script field) and US-11.8 (dual-lora fields). Future cherry-picks or merges that touch `hu_lora_retrain_ctx_t` must reconcile both ancestors. Sprint 12 should normalize the struct layout if both stories grow further.
 
 ## P1 — Sprint 12 (US-11.6 follow-ups)
 

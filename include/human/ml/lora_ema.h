@@ -14,7 +14,11 @@
  *
  * Soundness contract (design §1 / Risk #1):
  *   slow_current and fast MUST share rank, lora_alpha, target modules,
- *   and base-model hash. Mismatch → return HU_ERR_PRECONDITION and emit
+ *   and base-model hash. Mismatch → return HU_ERR_TOOL_VALIDATION with
+ *   `out_reason` populated (Sprint 11 / US-11.8 critic-MED #1: header
+ *   previously said HU_ERR_PRECONDITION, which does not exist in
+ *   `human/core/error.h`; the implementation has always returned
+ *   HU_ERR_TOOL_VALIDATION with a discriminator reason string) and emit
  *   `lora_retrain_ema_skipped` (caller's responsibility); do NOT silently
  *   truncate or zero-pad.
  *
@@ -91,15 +95,29 @@ hu_error_t hu_lora_ema_apply(hu_lora_ema_ctx_t *ctx);
 
 /* KL drift computation. Spawns `scripts/compute_kl_drift.py
  * --base <base> --candidate <candidate_lora> --probe-set <probe.jsonl>`.
- * Parses `{"kl_nats": <float>, "n_prompts": <int>}` from stdout.
+ * Parses `{"kl_nats": <float>, "n_prompts": <int>, "source": "real"|"stub"}`
+ * from stdout.
+ *
+ * Sprint 11 / US-11.8 critic-CRITICAL #1 fix: the script returns
+ * `source: "stub"` and `kl_nats: 0.0` whenever torch is unavailable
+ * (every production deployment until the M3 frontier bridge lands).
+ * Previously the C side parsed only `kl_nats`, so a stubbed 0.0 always
+ * satisfied the `kl > tau` gate as "clean" — silently turning the KL
+ * safety gate into a no-op. Callers MUST inspect `out_is_stub` and
+ * treat `1` as "gate not run" (sentinel `last_kl_drift_nats = -1.0`,
+ * emit `lora_retrain_kl_gate_stubbed`) — never as a clean PASS.
  *
  * Returns:
  *   HU_OK with *out_kl_nats populated on success
- *   HU_ERR_IO on subprocess failure or unparseable output */
+ *     - *out_is_stub = 1 when the script reported `source: "stub"`
+ *     - *out_is_stub = 0 on real KL measurement
+ *   HU_ERR_IO on subprocess failure or unparseable output
+ *
+ * `out_is_stub` may be NULL when the caller doesn't care (tests). */
 hu_error_t hu_lora_compute_kl_drift(const char *base_path, const char *candidate_path,
                                     const char *probe_set_path, const char *script_path,
                                     hu_lora_ema_subprocess_fn run_subprocess, void *ud,
-                                    double *out_kl_nats);
+                                    double *out_kl_nats, int *out_is_stub);
 
 #ifdef __cplusplus
 }

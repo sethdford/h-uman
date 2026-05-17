@@ -160,6 +160,16 @@ def _ema_apply(slow_path: str, fast_path: str, alpha: float, out_path: str) -> i
             out_dir.mkdir(parents=True, exist_ok=True)
             tmp_path = str(out_dir / (Path(out_path).name + ".tmp"))
             save_file(out_tensors, tmp_path, metadata=meta)  # type: ignore
+            # Sprint 11 / US-11.8 critic-HIGH #3 fix: the warm-EMA path
+            # previously did `save_file → os.rename` with no fsync between.
+            # A crash after rename succeeds but before the OS commits dirty
+            # pages would leave a corrupt `slow.safetensors.v{N+1}` that
+            # the next night's run treats as a valid prior slow. Matches
+            # the `_atomic_copy` cold-start path (line 68) which already
+            # does this correctly. The Phase 0 personal_model atomic-save
+            # lesson is: `tmp + fflush + fsync + rename` is the contract.
+            with open(tmp_path, "rb+") as out_f:
+                os.fsync(out_f.fileno())
             os.rename(tmp_path, out_path)
         return _emit({"ok": True, "alpha": alpha})
     except Exception as e:

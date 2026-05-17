@@ -182,13 +182,39 @@ static int lora_ema_parse_kl(const char *json, double *out_kl) {
     return 1;
 }
 
+/* Sprint 11 / US-11.8 critic-CRITICAL #1: detect `"source": "stub"` in the
+ * KL JSON output so the C runner can distinguish "real measurement returned
+ * 0.0 nats" (genuine, clean PASS) from "torch unavailable, gate not run"
+ * (must be flagged to operator, must NOT silently pass the gate). Returns 1
+ * iff a `"source": "stub"` literal is present in the JSON. */
+static int lora_ema_parse_kl_is_stub(const char *json) {
+    if (!json)
+        return 0;
+    const char *p = strstr(json, "\"source\"");
+    if (!p)
+        return 0;
+    const char *colon = strchr(p, ':');
+    if (!colon)
+        return 0;
+    const char *q = strchr(colon, '"');
+    if (!q)
+        return 0;
+    const char *qe = strchr(q + 1, '"');
+    if (!qe)
+        return 0;
+    size_t n = (size_t)(qe - (q + 1));
+    return (n == 4 && memcmp(q + 1, "stub", 4) == 0) ? 1 : 0;
+}
+
 hu_error_t hu_lora_compute_kl_drift(const char *base_path, const char *candidate_path,
                                     const char *probe_set_path, const char *script_path,
                                     hu_lora_ema_subprocess_fn run_subprocess, void *ud,
-                                    double *out_kl_nats) {
+                                    double *out_kl_nats, int *out_is_stub) {
     if (!candidate_path || !*candidate_path || !probe_set_path || !*probe_set_path ||
         !run_subprocess || !out_kl_nats)
         return HU_ERR_INVALID_ARGUMENT;
+    if (out_is_stub)
+        *out_is_stub = 0;
     const char *script = script_path ? script_path : "scripts/compute_kl_drift.py";
     const char *base = (base_path && *base_path) ? base_path : "";
     const char *argv[] = {script,         "--base",      base,           "--candidate",
@@ -202,5 +228,7 @@ hu_error_t hu_lora_compute_kl_drift(const char *base_path, const char *candidate
         return HU_ERR_IO;
     if (!lora_ema_parse_kl(result.stdout_buf, out_kl_nats))
         return HU_ERR_IO;
+    if (out_is_stub)
+        *out_is_stub = lora_ema_parse_kl_is_stub(result.stdout_buf);
     return HU_OK;
 }

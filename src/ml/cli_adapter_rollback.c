@@ -129,17 +129,43 @@ hu_error_t hu_ml_cli_adapter_rollback(hu_allocator_t *alloc, int argc, const cha
     snprintf(qpath, sizeof(qpath), "%s/%s.safetensors", quarantine_dir, today);
     adapter_rollback_mkdir_p(quarantine_dir);
     if (rename(cur_path, qpath) != 0) {
-        /* Cross-FS fallback: copy + unlink. */
+        /* Cross-FS fallback: copy + fsync + unlink.
+         *
+         * Sprint 11 / US-11.8 critic-HIGH #1 fix: matches the fix in
+         * `retrain_quarantine_move` — explicit `fflush + fsync` on the
+         * destination before unlinking the source. Without this, a crash
+         * between `fclose(out)` and the OS flushing dirty pages would
+         * leave the quarantine file truncated AND the source symlink
+         * target already gone, breaking rollback recovery. */
         FILE *in = fopen(cur_path, "rb");
         if (in) {
             FILE *out = fopen(qpath, "wb");
             if (out) {
                 char buf[4096];
                 size_t n;
-                while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
-                    fwrite(buf, 1, n, out);
+                int copy_err = 0;
+                while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+                    if (fwrite(buf, 1, n, out) != n) {
+                        copy_err = 1;
+                        break;
+                    }
+                }
+                if (ferror(in))
+                    copy_err = 1;
+                if (!copy_err) {
+                    if (fflush(out) != 0)
+                        copy_err = 1;
+                    else if (fsync(fileno(out)) != 0)
+                        copy_err = 1;
+                }
                 fclose(out);
                 fclose(in);
+                if (copy_err) {
+                    (void)unlink(qpath); /* clean up partial destination */
+                    fprintf(stderr, "adapter-rollback: copy to quarantine %s failed mid-write\n",
+                            qpath);
+                    return HU_ERR_IO;
+                }
                 (void)unlink(cur_path);
             } else {
                 fclose(in);
