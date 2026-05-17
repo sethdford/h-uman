@@ -1,6 +1,7 @@
 /* Tests for ML subsystem: BPE tokenizer, dataloader, prepare, experiment. */
 
 #include "human/agent.h"
+#include "human/agent/scheduler_status_json.h"
 #include "human/agent/speculative.h"
 #include "human/context/anticipatory.h"
 #include "human/core/allocator.h"
@@ -12,22 +13,21 @@
 #include "human/ml/experiment.h"
 #include "human/ml/experiment_store.h"
 #include "human/ml/lora.h"
-#include "human/ml/ml.h"
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/ml/ml.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
 #include "human/ml/prepare.h"
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
 #include "human/providers/huml.h"
-#include "human/agent/scheduler_status_json.h"
 #include "test_framework.h"
 
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1482,9 +1482,8 @@ static void test_ml_cli_status_scheduler_file_e2e(void) {
     mkdir_p(humandir);
     char path[600];
     snprintf(path, sizeof(path), "%s/scheduler.status", humandir);
-    write_text_file(path,
-                     "{\"updated_epoch\":2000,\"jobs_pending\":11,\"on_ac_power\":false,"
-                     "\"battery_pct\":77,\"jobs_completed_today\":4}");
+    write_text_file(path, "{\"updated_epoch\":2000,\"jobs_pending\":11,\"on_ac_power\":false,"
+                          "\"battery_pct\":77,\"jobs_completed_today\":4}");
 
     HU_ASSERT_EQ(setenv("HOME", td, 1), 0);
 
@@ -1498,8 +1497,7 @@ static void test_ml_cli_status_scheduler_file_e2e(void) {
     unsigned long long jp = 0, jc = 0;
     long long bat = 0, ue = 0;
     char ac[16] = {0};
-    HU_ASSERT_EQ(
-        hu_scheduler_status_parse_json(body, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(body, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
     HU_ASSERT_EQ(jp, 11ULL);
     HU_ASSERT_EQ(jc, 4ULL);
     HU_ASSERT_EQ(bat, 77LL);
@@ -3293,8 +3291,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
 
     /* Build a non-trivial adapter (B != 0 so delta is nonzero), persist,
      * destroy in-process, load from disk, attach, verify forward differs. */
-    hu_lora_config_t lora_cfg = {.rank = 2, .alpha = 4.0f, .dropout = 0.0f,
-                                 .targets = HU_LORA_TARGET_QV};
+    hu_lora_config_t lora_cfg = {
+        .rank = 2, .alpha = 4.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_QV};
     hu_lora_adapter_t *src = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &lora_cfg, 8, 8, 1, &src), HU_OK);
     float A_vals[16];
@@ -3325,8 +3323,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
     HU_ASSERT_EQ(n_layers, (size_t)1);
 
     int32_t ids[4] = {0, 1, 2, 3};
-    hu_ml_tensor_t input = {.data = ids, .shape = {1, 4, 0, 0}, .ndim = 2,
-                            .dtype = HU_ML_DTYPE_I32, .size_bytes = 16};
+    hu_ml_tensor_t input = {
+        .data = ids, .shape = {1, 4, 0, 0}, .ndim = 2, .dtype = HU_ML_DTYPE_I32, .size_bytes = 16};
 
     hu_ml_tensor_t out_base = {0};
     HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &out_base), HU_OK);
@@ -3366,8 +3364,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
  * tolerate a NULL adapter without crashing. */
 static void test_lora_get_dims_round_trip(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 4, .alpha = 8.0f, .dropout = 0.0f,
-                            .targets = HU_LORA_TARGET_QV};
+    hu_lora_config_t cfg = {
+        .rank = 4, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_QV};
     hu_lora_adapter_t *a = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, /*in_dim=*/16, /*out_dim=*/24,
                                 /*n_layers=*/3, &a),
@@ -4606,7 +4604,7 @@ static void test_huml_provider_load_unload_adapter(void) {
     lora_cfg.targets = HU_LORA_TARGET_QV;
     hu_lora_adapter_t *adapter = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &lora_cfg, /*in_dim=*/8, /*out_dim=*/8,
-                                 /*n_layers=*/1, &adapter),
+                                /*n_layers=*/1, &adapter),
                  HU_OK);
 
     char path[] = "/tmp/hu_w13_apply_adapter_XXXXXX";
@@ -4621,8 +4619,7 @@ static void test_huml_provider_load_unload_adapter(void) {
 
     /* Load it under id "test_persona". */
     HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "test_persona", 12),
-        HU_OK);
+        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "test_persona", 12), HU_OK);
     const char *id = hu_provider_active_adapter(&provider);
     HU_ASSERT_NOT_NULL(id);
     HU_ASSERT_STR_EQ(id, "test_persona");
@@ -4636,10 +4633,10 @@ static void test_huml_provider_load_unload_adapter(void) {
     HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
 
     /* Re-loading should work; replacing an incumbent should also work. */
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "first", 5), HU_OK);
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "second", 6), HU_OK);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "first", 5),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "second", 6),
+                 HU_OK);
     HU_ASSERT_STR_EQ(hu_provider_active_adapter(&provider), "second");
 
     provider.vtable->deinit(provider.ctx, &alloc);
@@ -4652,8 +4649,7 @@ static void test_provider_adapter_helpers_not_supported(void) {
     /* Build a minimal provider with the triple NULL. We can't easily
      * do that without a non-test provider, so exercise the helper
      * NULL-check paths directly. */
-    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, "p", 1, "id", 2),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, "p", 1, "id", 2), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_provider_unload_adapter(NULL, "id", 2), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT(hu_provider_active_adapter(NULL) == NULL);
 
@@ -4662,8 +4658,7 @@ static void test_provider_adapter_helpers_not_supported(void) {
     hu_provider_vtable_t empty_vtable = {0};
     hu_provider_t empty = {.ctx = (void *)1, .vtable = &empty_vtable};
     hu_allocator_t alloc = hu_system_allocator();
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&empty, &alloc, "p", 1, "id", 2), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&empty, &alloc, "p", 1, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_EQ(hu_provider_unload_adapter(&empty, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT(hu_provider_active_adapter(&empty) == NULL);
 }
@@ -4725,11 +4720,13 @@ static void test_m3_frontier_adapter_null_args(void) {
 static void test_m3_frontier_adapter_bad_file(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_m3_frontier_adapter_t *a = NULL;
-    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_nonexistent_xyz_abc.bin", 40, &a),
-                 HU_ERR_IO);
+    HU_ASSERT_EQ(
+        hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_nonexistent_xyz_abc.bin", 40, &a),
+        HU_ERR_IO);
     HU_ASSERT_NULL(a);
     write_text_file("/tmp/hu_m3_bad_magic.txt", "not-a-stub");
-    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_bad_magic.txt", 26, &a), HU_ERR_IO);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_bad_magic.txt", 26, &a),
+                 HU_ERR_IO);
     HU_ASSERT_NULL(a);
 }
 
@@ -4755,6 +4752,14 @@ static void test_m3_frontier_adapter_fixture_roundtrip(void) {
     hu_m3_frontier_adapter_close(&alloc, a);
 }
 
+#ifdef HU_ENABLE_ML
+/* These two tests reach into hu_agent_t.m3_adapter, which is only a struct
+ * member when HU_ENABLE_ML is defined (see include/human/agent.h:389). Build
+ * configurations without ML (e.g. the Linux CI minimal/feature-flag matrix)
+ * compile hu_agent_t without that field, so guarding the tests at compile
+ * time keeps the test binary buildable in those configurations. The
+ * non-struct-field m3 helper tests below stay unconditional because they
+ * only call the no-op stubs declared in include/human/ml/m3_frontier_adapter.h. */
 static void test_agent_m3_adapter_attach_bad_path(void) {
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
@@ -4792,6 +4797,7 @@ static void test_agent_m3_adapter_attach_fixture_replace(void) {
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
 }
+#endif /* HU_ENABLE_ML */
 
 /* ─── Track D D1.3 — rollback flag ──────────────────────────────────── */
 
@@ -5037,8 +5043,8 @@ static void test_lora_runner_respects_max_examples(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/responses.json", tmpdir);
 
-    const char *argv[] = {"lora-runner",      "--persona",      "runner_max",
-                          "--output",         output,           "--max-examples", "1"};
+    const char *argv[] = {"lora-runner", "--persona",      "runner_max", "--output",
+                          output,        "--max-examples", "1"};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_lora_runner(&alloc, 7, argv);
     unsetenv("HU_PERSONA_DIR");
@@ -5182,9 +5188,8 @@ static void test_fidelity_status_includes_ab_when_files_provided(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/status.json", tmpdir);
 
-    const char *argv[] = {"fidelity-status", "--persona", "fidelity_ab",
-                          "--before",        before_path, "--after",
-                          after_path,        "--output",  output};
+    const char *argv[] = {"fidelity-status", "--persona", "fidelity_ab", "--before", before_path,
+                          "--after",         after_path,  "--output",    output};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_fidelity_status(&alloc, 9, argv);
     unsetenv("HU_PERSONA_DIR");
@@ -5372,8 +5377,11 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_frontier_adapter_null_args);
     HU_RUN_TEST(test_m3_frontier_adapter_bad_file);
     HU_RUN_TEST(test_m3_frontier_adapter_fixture_roundtrip);
+#ifdef HU_ENABLE_ML
+    /* hu_agent_t.m3_adapter only exists when HU_ENABLE_ML is on. */
     HU_RUN_TEST(test_agent_m3_adapter_attach_bad_path);
     HU_RUN_TEST(test_agent_m3_adapter_attach_fixture_replace);
+#endif
     /* Track D D1.3 — rollback flag */
     HU_RUN_TEST(test_m3_adapter_should_disable_default_false);
     HU_RUN_TEST(test_m3_adapter_should_disable_true_when_cfg_set);
