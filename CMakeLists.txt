@@ -2860,6 +2860,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_extended.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
+    tests/test_imessage_rich_link.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
