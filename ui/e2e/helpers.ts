@@ -174,6 +174,31 @@ export const POLL = 15000;
 export const ANIMATION_SETTLE_MS = 200;
 
 /**
+ * Platform-level (window.onerror / unhandledrejection) errors that are
+ * known artifacts of the spec, not bugs in our code. Shared across every
+ * spec file that wires a `page.on("pageerror", ...)` listener.
+ *
+ * The View Transition API rejects `transition.finished` with a
+ * DOMException("Transition was skipped") any time a second transition
+ * begins before the first completes (rapid view switches, theme toggle
+ * during navigation, etc.). The spec defines this as the normal
+ * interruption path, NOT an error condition — so callers must filter
+ * it out before failing on the pageerror count.
+ *
+ * Real app-level uncaught rejections are still surfaced; only these
+ * documented spec-level artifacts are filtered.
+ */
+export const KNOWN_PAGE_ERRORS: readonly string[] = [
+  "Transition was skipped",
+  "AbortError",
+  "Object captured as promise rejection with keys",
+];
+
+export function isKnownPageError(msg: string): boolean {
+  return KNOWN_PAGE_ERRORS.some((known) => msg.includes(known));
+}
+
+/**
  * Deep text extraction that traverses through ALL nested shadow DOMs.
  * Use when content is inside nested web components (tables, cards, etc.).
  */

@@ -85,6 +85,36 @@ typedef struct hu_communication_style {
      * (HU_PM_STYLE_OBSERVATION_HALF_LIFE_SEC). 0 means "never
      * observed" — callers should treat freshness as 0 in that case. */
     int64_t last_observed_at;
+    /* Phase 5 Task 1 (RL SOTA) — decision-style EWMA axes consumed
+     * ONLY by the opt-in v2 fidelity scorer (`_score_v2`). Appended
+     * at the END of the struct so:
+     *   - zero-init / `memset(&s, 0, sizeof(s))` callers still get
+     *     0.0 defaults across the new fields (legacy compatible);
+     *   - designated initializers (`{.lowercase_ratio=…}`) on the
+     *     v1 fields keep working byte-identically;
+     *   - the v1 scorer (`hu_communication_style_fidelity_score`)
+     *     never reads these fields — its 3-axis body is unchanged
+     *     per round-1 BLOCKER-1 (v2 is opt-in only, never replaces
+     *     v1, never modifies v1 callers in place).
+     *
+     * Semantics (all in [0, 1]):
+     *   - hedging_ratio:    EWMA fraction of user messages whose
+     *                       wording leans hedge-y ("maybe", "could",
+     *                       "perhaps", "might", "possibly", ...).
+     *   - question_ratio:   EWMA fraction of user messages framed
+     *                       as questions (terminator is `?`).
+     *   - imperative_ratio: EWMA fraction of user sentences that
+     *                       start with an imperative verb ("do",
+     *                       "check", "fix", "ship", "send", ...).
+     * Together these three sub-signals form the 4th composite
+     * "decision-style" axis in the v2 scorer; the user's documented
+     * decision style is reflected via this fingerprint rather than
+     * a free-form persona string so the scorer stays deterministic
+     * and side-effect-free. When all three target axes are 0 the
+     * v2 composite is the no-signal neutral (0.5). */
+    float hedging_ratio;
+    float question_ratio;
+    float imperative_ratio;
 } hu_communication_style_t;
 
 typedef struct hu_personal_model {
@@ -567,6 +597,56 @@ typedef struct hu_communication_style_set_summary {
  * Returns HU_ERR_INVALID_ARGUMENT on NULL `target`, `out_a`,
  * `out_b`, or `out_delta`, or when `target->sample_count == 0`. */
 hu_error_t hu_communication_style_compare_response_sets(
+    const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
+    size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
+    hu_communication_style_set_summary_t *out_a,
+    hu_communication_style_set_summary_t *out_b, float *out_delta);
+
+/* Phase 5 Task 1 (RL SOTA) — opt-in 4-axis fidelity scorer (v2).
+ *
+ * Identical contract to `hu_communication_style_fidelity_score`
+ * except the mean is over FOUR axes instead of three:
+ *
+ *   1. lowercase_ratio       (v1 axis — unchanged)
+ *   2. abbreviation_ratio    (v1 axis — unchanged)
+ *   3. length match          (v1 axis — unchanged)
+ *   4. decision-style match  (NEW)   — composite of hedging /
+ *      question / imperative sub-axes derived from the response
+ *      text and the target's EWMA-tracked `*_ratio` fields. When
+ *      all three target sub-axes are zero (no decision-style
+ *      fingerprint observed yet), the composite collapses to the
+ *      neutral 0.5 so an un-fingerprinted target neither rewards
+ *      nor penalises the response on this axis.
+ *
+ * Round-1 BLOCKER-1 contract: this is an ADDITIVE, OPT-IN symbol.
+ * The v1 entry point above is NEVER renamed, deprecated, or
+ * forwarded through a shim — its body remains byte-identical, so
+ * existing call sites (personal_model.c per-set scorer, ml/cli.c,
+ * ml/fidelity.c) continue to receive the 3-axis result they always
+ * did. Callers that want the 4th axis (eval gate, competitive
+ * harness in Phase 5 Tasks 5 + 9) opt in by calling `_score_v2`.
+ *
+ * Returns / failure modes are identical to v1:
+ *   - [0.0, 1.0] on success.
+ *   - -1.0f on NULL `target`, NULL/empty `response`, or
+ *     `target->sample_count == 0`. */
+float hu_communication_style_fidelity_score_v2(const hu_communication_style_t *target,
+                                               const char *response, size_t response_len);
+
+/* Phase 5 Task 1 (RL SOTA) — opt-in 4-axis batch comparator.
+ *
+ * Same shape and failure modes as
+ * `hu_communication_style_compare_response_sets`, but every
+ * response is scored through the v2 (4-axis) scorer rather than v1.
+ * Used by the Phase 5 Task 9 competitive harness to compare two
+ * response sets (baseline vs RL policy) under the decision-style-
+ * aware metric. A positive `*out_delta` indicates set B is closer
+ * to the target style than set A.
+ *
+ * The v1 comparator above stays byte-identical (per round-1
+ * BLOCKER-1: never modify v1 callers in place); this is a separate
+ * symbol with its own internal per-set scorer. */
+hu_error_t hu_communication_style_compare_response_sets_v2(
     const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
     size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
     hu_communication_style_set_summary_t *out_a,

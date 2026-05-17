@@ -235,7 +235,7 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
                                       cfg->rank, &bytes);
     if (e != HU_OK) {
         snprintf(out_report->last_error, sizeof(out_report->last_error),
-                 "failed to write test adapter at %s", cfg->adapter_output_path);
+                 "failed to write test adapter at %.90s", cfg->adapter_output_path);
         return e;
     }
     out_report->adapter_bytes = bytes;
@@ -250,7 +250,7 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
     hu_error_t we = write_training_jsonl(jsonl_path, signals, signals_count);
     if (we != HU_OK) {
         snprintf(out_report->last_error, sizeof(out_report->last_error),
-                 "failed to write training data at %s", jsonl_path);
+                 "failed to write training data at %.95s", jsonl_path);
         return we;
     }
 

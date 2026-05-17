@@ -49,8 +49,8 @@ Every mission below includes an honest difficulty assessment from code-level red
 
 | # | Mission | Honest Difficulty | Success Metric |
 |---|---------|------------------|----------------|
-| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays. `human onboard` exists (`src/onboard.c`, 499 LOC) and is auto-suggested on first run when no config exists. 10,000+ tests passing, 0 ASan errors. Remaining: A/B validation, expanded persona examples per channel. | Persona context in every agent turn ✅; starter persona on first run ✅; onboarding wizard ✅ |
-| **M2** | **Personal Model** — Unified model-of-the-person from memory | **Hard.** Single artifact (`hu_personal_model_t`, `src/memory/personal_model.c`); facts/topics/goals/style are accumulated per turn, summarized via `hu_personal_model_build_prompt`, and injected into every system prompt (commit d1d9b0ee — `tests/test_personal_model.c::personal_model_reaches_system_prompt_via_config`). Per-turn save call site landed in commit 3ee98ef9 (`feat(agent,memory): per-turn personal-model save for crash safety`); the underlying `hu_personal_model_save` was made **actually atomic** in Phase 0 (May 2026) via `tmp + fwrite + fflush + fsync + rename`, pinned by `tests/test_personal_model_atomic_save.c::test_personal_model_save_preserves_prior_state_when_tmp_blocked` — a deterministic adversary test that pre-blocks the `<path>.tmp` slot with a directory and confirms the prior file's contents survive a failed save. Fact extraction is still heuristic pattern matching ("i like", "i never"); learned-style adaptation lives only in the prompt summary, not in a model checkpoint. | Measurable adaptation in tone/timing after 50 conversations |
+| **M1** | **Persona-First** — Make persona always-on | **Done (Phase 1).** 100+ `#ifdef` guards removed. Persona fields unconditional in `hu_agent_t`. `human init` creates starter persona with channel overlays AND Tier-1 example banks (telegram / discord / imessage / slack — 12 neutral examples shipped in `hu_starter_persona_json`, Sprint 2b Story A', commit 71de40e6, pinned by `persona_directive_starter_persona_ships_tier1_example_banks` + `persona_directive_tier1_overlay_bank_coherence`). `human onboard` exists (`src/onboard.c`) and is auto-suggested on first run when no config exists. 9,800+ tests passing. Remaining: A/B validation. | Persona context in every agent turn ✅; starter persona on first run ✅; onboarding wizard ✅; Tier-1 example banks ✅ |
+| **M2** | **Personal Model** — Unified model-of-the-person from memory | **Hard.** Single artifact (`hu_personal_model_t`, `src/memory/personal_model.c`); facts/topics/goals/style are accumulated per turn, summarized via `hu_personal_model_build_prompt`, and injected into every system prompt (commit d1d9b0ee — `tests/test_personal_model.c::personal_model_reaches_system_prompt_via_config`). Per-turn save call site landed in commit 3ee98ef9 (`feat(agent,memory): per-turn personal-model save for crash safety`); the underlying `hu_personal_model_save` was made **actually atomic** in Phase 0 (May 2026) via `tmp + fwrite + fflush + fsync + rename`, pinned by `tests/test_personal_model_atomic_save.c::test_personal_model_save_preserves_prior_state_when_tmp_blocked` — a deterministic adversary test that pre-blocks the `<path>.tmp` slot with a directory and confirms the prior file's contents survive a failed save. Fact extraction has been upgraded to **typed propositional/prescriptive triples** via `hu_fact_extract` (`include/human/memory/fact_extract.h`): subject/predicate/object + confidence + per-fact provenance + trust tier + 90-day exponential half-life decay (`hu_heuristic_fact_effective_confidence`). Wired into `hu_personal_model_ingest` (`src/memory/personal_model.c:957`). Learned-style adaptation still lives only in the prompt summary, not in a model checkpoint — bridging that requires the M3 frontier-bridge to land. | Measurable adaptation in tone/timing after 50 conversations |
 | **M3** | **Private Learning** — On-device ML personalization | **Hardest. Bridge A daemon-pattern proven.** `lora-persona` trains a reference HUML GPT on persona example banks (not the frontier chat model). `--checkpoint` now actually warm-starts a HUML base via `hu_ml_checkpoint_load`; the CLI prints a clear caveat directing users to the bridge plan. The provider dispatcher safety contract is pinned: cloud providers return `HU_ERR_NOT_SUPPORTED` from `hu_provider_load_adapter` without crashing the daemon, and a new regression guard (`tests/test_provider_all.c::test_m3_daemon_pattern_cloud_provider_falls_through_to_base_chat`, commit 028f4544) proves the daemon's personalization auto-load falls through to base chat when the adapter isn't supported. CPU-only frontier model bridge (llama.cpp / MLX) is planned in `docs/plans/2026-05-10-m3-frontier-model-bridge.md`. | LoRA adapter that measurably improves persona fidelity on inference |
 | **M4** | **Ship to Users** — 100 DAU | **Medium.** `human onboard` exists (interactive setup wizard). First-run code path checks for missing config and points the user at the wizard. Persona defaults still need to be richer per channel; config still assumes cloud provider credentials. | 100 DAU with 30% day-7 retention |
 | **M5** | **HuLa as Platform** — Developer-facing SDK | **Hard.** Public SDK header lives at `include/human/hula_sdk.h` with semver macros (`HU_HULA_SDK_VERSION_STRING "0.1.0"`); JSON wire format is documented in the header. Still missing: language bindings (Python/Node), hosted docs, public examples gallery. | External devs write and run HuLa programs |
@@ -61,7 +61,7 @@ Every mission below includes an honest difficulty assessment from code-level red
 | Dimension | human | Gemini Agent | Claude Cowork | OpenClaw |
 |-----------|-------|-------------|---------------|----------|
 | Persona depth | **Deep** (27 compiled modules) | Basic (Personal Intelligence) | None | **Growing** (SOUL.md plugins, personality-dynamics) |
-| Personalization | Memory stack (heuristic) | **Google apps data** (Gmail, Photos, YouTube) | Chat memory | SOUL.md + MEMORY.md |
+| Personalization | Memory stack with typed propositional/prescriptive fact extraction + half-life decay | **Google apps data** (Gmail, Photos, YouTube) | Chat memory | SOUL.md + MEMORY.md |
 | On-device learning | Reference only (CPU, toy GPT) | No | No | No |
 | Privacy architecture | **Structural** (local-first) | Cloud (Google infra) | Cloud (Anthropic) | Self-hosted (Node.js) |
 | Tool orchestration | **HuLa IR** (compiled) | Prompt-chained | Prompt-chained | Prompt-chained |
@@ -79,7 +79,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (10,000+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (9,800+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -151,7 +151,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 10,000+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 9,800+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -176,9 +176,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (857 files, ~342K lines)                                 |
+| `src/`                            | All C source (~710 files, ~270K lines)                                |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 512 test files, 10,000+ tests                                 |
+| `tests/`                          | 504 test files, 9,800+ tests                                          |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |

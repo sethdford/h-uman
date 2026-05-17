@@ -124,7 +124,8 @@
       "inherits": "dev",
       "binaryDir": "${sourceDir}/build-rl-sota",
       "cacheVariables": {
-        "HU_ENABLE_LLAMACPP": "ON"
+        "HU_ENABLE_LLAMACPP": "ON",
+        "HU_ENABLE_RL_FULL": "ON"
       }
     }
   ],

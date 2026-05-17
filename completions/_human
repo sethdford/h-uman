@@ -27,6 +27,7 @@ _human() {
                 onboard:Interactive setup wizard
                 setup:Local / on-device model setup
                 doctor:Run system diagnostics
+                demo:Reproducible end-to-end demonstrations
                 cron:Manage scheduled tasks
                 channel:Channel management
                 calibrate:Analyze messaging patterns and calibrate persona
@@ -163,6 +164,11 @@ _human() {
                 paperclip)
                     _describe 'paperclip subcommand' '(
                         heartbeat:Send heartbeat
+                    )'
+                    ;;
+                demo)
+                    _describe 'demo subcommand' '(
+                        rl-closed-loop:Run Phase 6 RL closed-loop demo
                     )'
                     ;;
             esac

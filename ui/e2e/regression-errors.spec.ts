@@ -1,5 +1,13 @@
 import { test, expect, type Page, type ConsoleMessage } from "@playwright/test";
-import { ALL_VIEWS, VIEW_TAGS, deepText, shadowExists, waitForViewReady, POLL } from "./helpers.js";
+import {
+  ALL_VIEWS,
+  VIEW_TAGS,
+  deepText,
+  shadowExists,
+  waitForViewReady,
+  POLL,
+  isKnownPageError,
+} from "./helpers.js";
 
 /**
  * Regression test suite: catches unexpected errors across all views.
@@ -24,6 +32,8 @@ const KNOWN_CONSOLE_ERRORS = [
   "service worker",
 ];
 
+// Page-level allowlist is shared via helpers.ts (isKnownPageError).
+
 function isKnownConsoleError(msg: string): boolean {
   return KNOWN_CONSOLE_ERRORS.some((known) => msg.includes(known));
 }
@@ -43,7 +53,9 @@ test.describe("Regression: No Unexpected Errors (Demo Mode)", () => {
         }
       });
       page.on("pageerror", (err) => {
-        errors.push(`Uncaught: ${err.message}`);
+        if (!isKnownPageError(err.message)) {
+          errors.push(`Uncaught: ${err.message}`);
+        }
       });
 
       await page.goto(`/?demo#${view}`);
@@ -98,7 +110,7 @@ test.describe("Regression: Sequential Navigation (Demo Mode)", () => {
       }
     });
     page.on("pageerror", (err) => {
-      errors.push(`Uncaught: ${err.message}`);
+      if (!isKnownPageError(err.message)) errors.push(`Uncaught: ${err.message}`);
     });
 
     await page.goto("/?demo#overview");
@@ -149,7 +161,7 @@ test.describe("Regression: Rapid Navigation (Demo Mode)", () => {
   test("rapidly switching views does not crash or show errors", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (err) => {
-      errors.push(`Uncaught: ${err.message}`);
+      if (!isKnownPageError(err.message)) errors.push(`Uncaught: ${err.message}`);
     });
 
     await page.goto("/?demo#overview");

@@ -1,0 +1,50 @@
+{"prompt": "What time is it in Tokyo?", "chosen": "It's 9 PM JST.", "rejected": "I'm not sure.", "source": "synthetic"}
+{"prompt": "How do I install Python on macOS?", "chosen": "Run: brew install python@3.12", "rejected": "There are many ways.", "source": "synthetic"}
+{"prompt": "What's the capital of France?", "chosen": "Paris.", "rejected": "I can't say.", "source": "synthetic"}
+{"prompt": "How do I list files in a directory?", "chosen": "Use: ls -la", "rejected": "It depends on the OS.", "source": "synthetic"}
+{"prompt": "Convert 100 USD to EUR.", "chosen": "About 92 EUR at today's rate.", "rejected": "Currency rates change.", "source": "synthetic"}
+{"prompt": "What's 17 times 23?", "chosen": "391.", "rejected": "That's a math question.", "source": "synthetic"}
+{"prompt": "How do I check disk space on Linux?", "chosen": "Run: df -h", "rejected": "There are several tools.", "source": "synthetic"}
+{"prompt": "What language is git written in?", "chosen": "Mostly C, with shell and Perl.", "rejected": "Multiple languages.", "source": "synthetic"}
+{"prompt": "How do I exit vim?", "chosen": "Press Esc then type :wq", "rejected": "vim has many commands.", "source": "synthetic"}
+{"prompt": "What's the boiling point of water?", "chosen": "100 C at sea level.", "rejected": "It varies with conditions.", "source": "synthetic"}
+{"prompt": "Define HTTP.", "chosen": "HyperText Transfer Protocol.", "rejected": "HTTP, which stands for HyperText Transfer Protocol, is the foundational protocol used for transmitting hypermedia documents on the World Wide Web, designed in the 1990s...", "source": "synthetic"}
+{"prompt": "What is REST?", "chosen": "An architectural style for stateless APIs.", "rejected": "REST, an acronym standing for Representational State Transfer, is a comprehensive architectural style first articulated by Roy Fielding in his 2000 doctoral dissertation...", "source": "synthetic"}
+{"prompt": "What is JSON?", "chosen": "JavaScript Object Notation, a data format.", "rejected": "JSON, which is JavaScript Object Notation, is a lightweight, text-based, language-independent data interchange format derived from JavaScript object literal syntax...", "source": "synthetic"}
+{"prompt": "Define SQL injection.", "chosen": "Inserting hostile SQL via input fields.", "rejected": "SQL injection is a code injection technique that has been around since the late 1990s, exploiting security vulnerabilities in an application's software by inserting malicious...", "source": "synthetic"}
+{"prompt": "What is a hash function?", "chosen": "A one-way function mapping data to fixed-size digests.", "rejected": "A hash function, in the context of computer science and cryptography, is a sophisticated mathematical algorithm that transforms input data of arbitrary length...", "source": "synthetic"}
+{"prompt": "What is recursion?", "chosen": "A function that calls itself.", "rejected": "Recursion, in the context of programming and mathematics, is a powerful technique whereby a function or process invokes itself as part of its execution...", "source": "synthetic"}
+{"prompt": "Define encapsulation.", "chosen": "Bundling data and methods into one unit.", "rejected": "Encapsulation, one of the four fundamental pillars of object-oriented programming alongside inheritance, polymorphism, and abstraction, is the bundling...", "source": "synthetic"}
+{"prompt": "What is a thread?", "chosen": "A unit of execution within a process.", "rejected": "A thread, in computer science, represents a fundamental unit of CPU utilization and execution that exists within a process and shares its memory space...", "source": "synthetic"}
+{"prompt": "Define DNS.", "chosen": "Maps domain names to IP addresses.", "rejected": "DNS, which is the Domain Name System, is a hierarchical and decentralized naming system that has been the cornerstone of internet name resolution...", "source": "synthetic"}
+{"prompt": "What is a compiler?", "chosen": "Translates source code to machine code.", "rejected": "A compiler is a sophisticated software program that performs the critical task of translating source code written in a high-level programming language...", "source": "synthetic"}
+{"prompt": "Who invented the telephone?", "chosen": "Alexander Graham Bell, patented 1876.", "rejected": "Thomas Edison invented the telephone in 1885.", "source": "synthetic"}
+{"prompt": "What year did WW2 end?", "chosen": "1945.", "rejected": "1947.", "source": "synthetic"}
+{"prompt": "What's the speed of light?", "chosen": "Approximately 299,792 km/s in vacuum.", "rejected": "Approximately 200,000 km/s.", "source": "synthetic"}
+{"prompt": "Largest planet in our solar system?", "chosen": "Jupiter.", "rejected": "Saturn.", "source": "synthetic"}
+{"prompt": "Who wrote 1984?", "chosen": "George Orwell.", "rejected": "Aldous Huxley.", "source": "synthetic"}
+{"prompt": "What is H2O?", "chosen": "Water.", "rejected": "Hydrogen peroxide.", "source": "synthetic"}
+{"prompt": "Capital of Australia?", "chosen": "Canberra.", "rejected": "Sydney.", "source": "synthetic"}
+{"prompt": "Who painted the Mona Lisa?", "chosen": "Leonardo da Vinci.", "rejected": "Michelangelo.", "source": "synthetic"}
+{"prompt": "What year did the Berlin Wall fall?", "chosen": "1989.", "rejected": "1991.", "source": "synthetic"}
+{"prompt": "Currency of Japan?", "chosen": "Yen.", "rejected": "Yuan.", "source": "synthetic"}
+{"prompt": "How are you?", "chosen": "Doing well, thanks. What's on your mind?", "rejected": "I am an AI and do not have feelings.", "source": "synthetic"}
+{"prompt": "Got a minute?", "chosen": "Yep, what's up?", "rejected": "I am available to assist you with your inquiry.", "source": "synthetic"}
+{"prompt": "Quick question.", "chosen": "Shoot.", "rejected": "Please proceed with your question.", "source": "synthetic"}
+{"prompt": "Hey.", "chosen": "Hey, what's going on?", "rejected": "Greetings. How may I assist you today?", "source": "synthetic"}
+{"prompt": "Thanks!", "chosen": "No problem.", "rejected": "You are welcome. Is there anything else?", "source": "synthetic"}
+{"prompt": "That worked, sweet.", "chosen": "Glad it worked.", "rejected": "I am pleased my assistance was effective.", "source": "synthetic"}
+{"prompt": "Lol that's wild.", "chosen": "Yeah, surprised me too.", "rejected": "Indeed, that is an unusual occurrence.", "source": "synthetic"}
+{"prompt": "Brb getting coffee.", "chosen": "Take your time.", "rejected": "Acknowledged. I will await your return.", "source": "synthetic"}
+{"prompt": "That sucks.", "chosen": "Yeah, that's rough.", "rejected": "I am sorry to hear about your unfortunate situation.", "source": "synthetic"}
+{"prompt": "Nice work.", "chosen": "Thanks.", "rejected": "I appreciate your positive feedback regarding my work.", "source": "synthetic"}
+{"prompt": "What's the population of Bhutan in 2026?", "chosen": "I don't have current 2026 figures; recent estimates were ~780k.", "rejected": "1.2 million as of 2026.", "source": "synthetic"}
+{"prompt": "Will it rain in Paris tomorrow?", "chosen": "I can't check live weather. Try a weather app.", "rejected": "Yes, expect heavy rain in Paris tomorrow.", "source": "synthetic"}
+{"prompt": "What's Tesla's stock price right now?", "chosen": "I can't pull live quotes. Check your broker.", "rejected": "Tesla is trading at $234.50.", "source": "synthetic"}
+{"prompt": "Who won the 2025 World Cup?", "chosen": "I'm not certain about 2025 results \u2014 please verify.", "rejected": "Brazil won 3-1.", "source": "synthetic"}
+{"prompt": "Latest iPhone model?", "chosen": "I'd need to check current Apple announcements to be sure.", "rejected": "iPhone 17 Pro Max.", "source": "synthetic"}
+{"prompt": "Did the Lakers win last night?", "chosen": "I don't have last night's scores. Check ESPN.", "rejected": "Yes, they won 110-105.", "source": "synthetic"}
+{"prompt": "What's the current Bitcoin price?", "chosen": "I can't see live markets. Use a price tracker.", "rejected": "Bitcoin is at $73,000.", "source": "synthetic"}
+{"prompt": "Who is the current UK Prime Minister?", "chosen": "I'd need to verify the current officeholder.", "rejected": "Boris Johnson.", "source": "synthetic"}
+{"prompt": "What's trending on Twitter?", "chosen": "I can't browse live trends.", "rejected": "#AIRevolution and #ClimateAction.", "source": "synthetic"}
+{"prompt": "Best restaurant in your city?", "chosen": "I don't have a city or live restaurant data.", "rejected": "Try Joe's Pizza on 5th Street.", "source": "synthetic"}
