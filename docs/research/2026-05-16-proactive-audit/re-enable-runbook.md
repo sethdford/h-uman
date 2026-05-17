@@ -1,3 +1,10 @@
+---
+title: "Re-Enable Runbook — Post-2026-05-16 Proactive Messaging Incident"
+date: 2026-05-16
+status: closed-historical
+scope: proactive messaging re-enable procedure
+---
+
 # Re-Enable Runbook — Post-2026-05-16 Proactive Messaging Incident
 
 **Current branch:** `claude/friendly-bassi-8b438e`

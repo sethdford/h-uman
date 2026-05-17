@@ -113,8 +113,34 @@ def skip_href(raw: str) -> bool:
     return False
 
 
+_LINE_SUFFIX_RE = re.compile(r":\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$")
+
+
+def _strip_editor_line_suffix(path_part: str) -> str:
+    """Strip ":<line>", ":<start>-<end>", or ":<l1>,<l2>" suffixes used by the
+    standard editor convention to deep-link to a file location (e.g.
+    `src/daemon.c:975`, `src/foo.c:100-110`, `src/bar.c:1,5`). These are
+    semantic locators handled by every modern editor and IDE; the file on
+    disk has no `:digit` extension. Without this stripping, the link
+    checker rejects perfectly valid file-and-line refs and forces docs to
+    drop useful information. Standardized 2026-05-17 alongside the
+    ci-rot cleanup — same audit pass that produced docs/research/
+    2026-05-16-proactive-audit/findings.md, where the convention is used
+    extensively. """
+    return _LINE_SUFFIX_RE.sub("", path_part)
+
+
 def check_path(raw: str, parent: Path) -> str | None:
-    """Return failure reason, or None if OK / skipped."""
+    """Return failure reason, or None if OK / skipped.
+
+    Resolution order (2026-05-17): try the URL as parent-relative first
+    (Markdown's default), then fall back to repo-root-relative if it
+    doesn't start with `./`, `../`, or `/`. The fallback covers a common
+    convention in audit/research docs that write `src/daemon.c` as a
+    repo-root path the way every code-review tool, `gh`, and editor
+    `:line` link interprets it. Without this, every audit doc that
+    references source files has to use brittle `../../../src/...`
+    paths that break the moment the doc is moved. """
     raw = raw.strip()
     if skip_href(raw):
         return None
@@ -123,14 +149,34 @@ def check_path(raw: str, parent: Path) -> str | None:
     path_part = raw.split("#", 1)[0]
     if not path_part:
         return None
-    target = (parent / path_part).resolve()
-    try:
-        target.relative_to(ROOT)
-    except ValueError:
+    path_part = _strip_editor_line_suffix(path_part)
+    if not path_part:
+        return None
+
+    candidates: list[Path] = []
+    parent_relative = (parent / path_part).resolve()
+    candidates.append(parent_relative)
+
+    # If the URL doesn't look explicitly parent-relative (no leading dot
+    # or slash), also try resolving from repo root. Order matters — we
+    # prefer the explicit relative-to-parent interpretation when both
+    # files happen to exist.
+    if not path_part.startswith(("./", "../", "/")):
+        repo_root_relative = (ROOT / path_part).resolve()
+        candidates.append(repo_root_relative)
+
+    in_repo = False
+    for cand in candidates:
+        try:
+            cand.relative_to(ROOT)
+            in_repo = True
+        except ValueError:
+            continue
+        if cand.exists():
+            return None
+    if not in_repo:
         return "escapes repo root"
-    if not target.exists():
-        return "missing"
-    return None
+    return "missing"
 
 
 def extract_urls_from_file(text: str) -> list[str]:

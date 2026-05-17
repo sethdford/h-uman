@@ -29,6 +29,7 @@ jobs:
           enable-asan: "true"
           enable-curl: "true"
           enable-all-channels: "true"
+          extra-cmake-flags: -DHU_ENABLE_ML=ON -DHU_ENABLE_LEARNING=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SKILLS=ON -DHU_ENABLE_SQLITE=ON
       - uses: ./.github/actions/run-tests
         with:
           asan-options: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}

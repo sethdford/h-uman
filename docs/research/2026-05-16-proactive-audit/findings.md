@@ -1,3 +1,12 @@
+---
+title: "Proactive Messaging Incident — Unified Audit Findings"
+date: 2026-05-16
+severity: P0
+status: closed-historical
+scope: proactive messaging, daemon contact-scoping, family recipients
+note: line-number refs in this doc point to historical code locations; the link checker (scripts/check_markdown_relative_links.py) tolerates the path:line editor convention.
+---
+
 # Proactive Messaging Incident — Unified Audit Findings
 **Date:** 2026-05-16
 **Severity:** P0 — confirmed family-recipient data leak; 21 broken outbound messages shipped
