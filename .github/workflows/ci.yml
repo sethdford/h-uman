@@ -130,12 +130,23 @@ jobs:
         # contributor turns HU_ENABLE_LIBSODIUM=ON for arm64.
         run: |
           set -euo pipefail
-          # Restrict default Azure sources (only carries amd64) so apt
-          # doesn't try to fetch arm64 indices from them.
-          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list \
-            /etc/apt/sources.list.d/*.list 2>/dev/null || true
-          # Add ports.ubuntu.com for arm64 — Ubuntu codename varies by
-          # runner image, so source it from /etc/os-release.
+          # Restrict the main Ubuntu sources to amd64 only so apt-get
+          # update doesn't try to fetch arm64 from Azure. We touch ONLY
+          # /etc/apt/sources.list and /etc/apt/sources.list.d/ubuntu.sources
+          # — other entries (e.g. microsoft-prod.list, github_*.list)
+          # use deb822 or non-standard formats and breaking them with a
+          # naive `^deb ` sed corrupts apt entirely (round-25 hit this).
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            [ -f "$f" ] || continue
+            # deb-line format (one-liner): `deb URI codename ...`
+            sudo sed -i 's/^deb /deb [arch=amd64] /' "$f"
+            # deb822 format (ubuntu.sources): `Types: deb` then `URIs: ...`
+            # Add Architectures: amd64 if it's not already set.
+            if ! grep -q '^Architectures:' "$f"; then
+              sudo sed -i '/^Types: deb/a Architectures: amd64' "$f"
+            fi
+          done
+          # Add ports.ubuntu.com for arm64 — codename comes from os-release.
           . /etc/os-release
           sudo tee /etc/apt/sources.list.d/arm64-ports.list > /dev/null <<EOF
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${VERSION_CODENAME} main universe
