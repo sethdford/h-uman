@@ -686,12 +686,25 @@ export class ScApp extends LitElement {
   override firstUpdated(): void {
     const idle = (fn: () => void) =>
       "requestIdleCallback" in window ? requestIdleCallback(fn) : setTimeout(fn, 0);
-    idle(() => {
-      this._prefetchOnIdle();
-      import("./components/floating-mic.js");
-      import("./components/command-palette.js");
-      import("./components/hu-shortcut-overlay.js");
+    // Expose a test-only readiness promise that resolves once the
+    // idle-loaded components have imported. E2E tests under CI
+    // cold-start hit Vite WS ECONNRESET storms that delay
+    // requestIdleCallback past any reasonable timeout (see ui/e2e/app.spec.ts
+    // "floating mic" history on PRs #104/#107/#113). Awaiting this
+    // promise removes the timing race without changing production
+    // behavior — the requestIdleCallback path still runs for real users
+    // so first paint is unaffected.
+    const ready = new Promise<void>((resolve) => {
+      idle(() => {
+        this._prefetchOnIdle();
+        void Promise.all([
+          import("./components/floating-mic.js"),
+          import("./components/command-palette.js"),
+          import("./components/hu-shortcut-overlay.js"),
+        ]).then(() => resolve());
+      });
     });
+    (window as unknown as { __huReady?: Promise<void> }).__huReady = ready;
   }
 
   override disconnectedCallback(): void {

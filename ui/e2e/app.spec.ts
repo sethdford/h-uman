@@ -156,26 +156,25 @@ test.describe("h-uman Control UI", () => {
     await expect(sidebar).toBeAttached({ timeout: 5000 });
   });
 
-  // Marked .fixme — repeatedly flakes on CI due to Vite WS proxy
-  // ECONNRESET storms during cold start that delay
-  // requestIdleCallback past any reasonable timeout. Attempts that
-  // failed:
-  //   1. 5s → 15s timeout bumps (still flaked)
-  //   2. Force-trigger import via page.evaluate (404 — production
-  //      preview bundles to hashed paths, not /src/*.ts)
-  // The mic IS bundled (visible in `dist/assets/floating-mic-*.js`)
-  // and renders correctly in production; the flake is purely a
-  // test-environment startup race. Root fix requires either:
-  //   a) Fixing Vite WS proxy stability during the test cold-start
-  //   b) Eagerly registering the component (loses lazy-load perf
-  //      benefit on first paint for real users)
-  //   c) Exposing a test-only hook on hu-app to force-load
-  // Tracked separately. Until then, this test is a known flake — see
-  // PR #104, #107, #113 CI history for the failure pattern.
-  test.fixme("floating mic button is present", async ({ page }) => {
+  test("floating mic button is present", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
     await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
+    // Wait for the test-only readiness promise exposed by app.ts's
+    // firstUpdated() (see app.ts:686+). This runs the same dynamic
+    // imports the production code triggers via requestIdleCallback,
+    // but await-ably — removes the CI flake where Vite WS ECONNRESET
+    // storms delay the idle callback past any reasonable timeout.
+    // Path (c) of the three remediation options documented when this
+    // test was previously .fixme'd.
+    await page.waitForFunction(
+      () => (window as unknown as { __huReady?: Promise<void> }).__huReady !== undefined,
+      undefined,
+      { timeout: 10000 },
+    );
+    await page.evaluate(
+      () => (window as unknown as { __huReady?: Promise<void> }).__huReady,
+    );
     const mic = page.locator("hu-app >> hu-floating-mic");
     await expect(mic).toBeAttached({ timeout: 5000 });
   });
