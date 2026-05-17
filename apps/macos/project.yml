@@ -1,0 +1,50 @@
+name: Human
+options:
+  bundleIdPrefix: ai.humanlabs
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  groupSortPosition: top
+
+packages:
+  HumanKit:
+    path: ../shared/HumanKit
+
+targets:
+  Human:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources/HumanApp
+    dependencies:
+      - package: HumanKit
+        product: HumanClient
+      - package: HumanKit
+        product: HumanChatUI
+      - package: HumanKit
+        product: HumanProtocol
+      - package: HumanKit
+        product: HumanOnDevice
+      - package: HumanKit
+        product: HumanOnDeviceServer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.humanlabs.mac
+        PRODUCT_NAME: Human
+        MARKETING_VERSION: "1.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_LSUIElement: "NO"
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright Human Labs"
+        # CODE_SIGN_* deliberately unset here — CI passes them via xcodebuild
+        # flags (CODE_SIGN_STYLE=Manual, CODE_SIGN_IDENTITY="Apple Development",
+        # DEVELOPMENT_TEAM=<secret>). Local builds keep automatic signing.
+        # Info.plist + entitlements: US-14.6 will introduce
+        # apps/macos/Info.plist and apps/macos/Human.entitlements. Until then,
+        # GENERATE_INFOPLIST_FILE produces a minimal plist at build time.
+        # HumanKit sources are pulled in via the SwiftPM `packages` dependency
+        # above — listing them under `sources:` here would cause duplicate
+        # symbols at link time.

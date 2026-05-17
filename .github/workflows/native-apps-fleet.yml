@@ -151,6 +151,102 @@ jobs:
       - name: "Debug + release build (award-tier: ships clean on both configs)"
         run: cd apps/macos && swift build && swift build -c release
 
+  macos-app-archive:
+    name: macOS app · archive + dev-cert codesign
+    runs-on: macos-14
+    timeout-minutes: 30
+    # The cert-import step is the only one secrets-gated; if a fork PR (no
+    # access to repo secrets) triggers this workflow, the import step skips
+    # with an annotation and the archive runs unsigned for the smoke check.
+    # Verify-codesign is conditional on having signed.
+    env:
+      MACOS_DEV_CERT_P12_BASE64: ${{ secrets.MACOS_DEV_CERT_P12_BASE64 }}
+      MACOS_DEV_CERT_P12_PWD: ${{ secrets.MACOS_DEV_CERT_P12_PWD }}
+      MACOS_KEYCHAIN_PWD: ${{ secrets.MACOS_KEYCHAIN_PWD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache Homebrew downloads (XcodeGen)
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: ${{ runner.os }}-brew-macos-archive-${{ hashFiles('apps/macos/project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-brew-macos-archive-
+            ${{ runner.os }}-brew-
+
+      - name: Install XcodeGen
+        run: brew list --versions xcodegen >/dev/null 2>&1 || brew install xcodegen
+
+      - name: Generate Human.xcodeproj
+        working-directory: apps/macos
+        run: xcodegen generate
+
+      - name: Import Apple Development cert
+        id: import-cert
+        if: ${{ env.MACOS_DEV_CERT_P12_BASE64 != '' && env.MACOS_DEV_CERT_P12_PWD != '' && env.MACOS_KEYCHAIN_PWD != '' }}
+        run: bash scripts/ci/import-macos-cert.sh
+
+      - name: Annotate when cert secrets are unavailable
+        if: ${{ env.MACOS_DEV_CERT_P12_BASE64 == '' || env.MACOS_DEV_CERT_P12_PWD == '' || env.MACOS_KEYCHAIN_PWD == '' }}
+        run: echo "::warning::macOS dev-cert secrets unavailable (likely a fork PR). Running unsigned archive smoke only; codesign verify will be skipped."
+
+      - name: Archive (Release, signed)
+        if: ${{ steps.import-cert.outcome == 'success' }}
+        working-directory: apps/macos
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Human.xcodeproj \
+            -scheme Human \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -archivePath "$RUNNER_TEMP/Human.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Development" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            archive
+          test -d "$RUNNER_TEMP/Human.xcarchive/Products/Applications/Human.app"
+
+      - name: Archive (Release, unsigned smoke — fork PRs only)
+        if: ${{ steps.import-cert.outcome != 'success' }}
+        working-directory: apps/macos
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Human.xcodeproj \
+            -scheme Human \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -archivePath "$RUNNER_TEMP/Human.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive
+          test -d "$RUNNER_TEMP/Human.xcarchive/Products/Applications/Human.app"
+
+      - name: Verify codesign
+        if: ${{ steps.import-cert.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Human.xcarchive/Products/Applications/Human.app"
+          # --deep on verify only (per design Risk 3); never on signing.
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # Identity is name-pinned, not hash-pinned (per design Risk 1).
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee codesign-dv.txt
+          grep -E '^Authority=Apple Development' codesign-dv.txt
+
+      - name: Upload archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Human-macOS-xcarchive
+          path: ${{ runner.temp }}/Human.xcarchive
+          retention-days: 7
+          if-no-files-found: warn
+
   fleet-sota-gate:
     name: Fleet SOTA gate (award-tier)
     runs-on: ubuntu-latest
@@ -159,6 +255,7 @@ jobs:
       - ios-simulator-fleet
       - android-emulator-fleet
       - macos-app-build
+      - macos-app-archive
     if: always()
     steps:
       - name: Summarize + enforce all-green
@@ -167,6 +264,7 @@ jobs:
           IOS: ${{ needs.ios-simulator-fleet.result }}
           AND: ${{ needs.android-emulator-fleet.result }}
           MAC: ${{ needs.macos-app-build.result }}
+          MACARC: ${{ needs.macos-app-archive.result }}
         run: |
           {
             echo "## Native fleet — SOTA / award-tier gate"
@@ -179,14 +277,16 @@ jobs:
             echo "| iOS simulator matrix (XCUITest) | \`$IOS\` |"
             echo "| Android emulator matrix (Compose) | \`$AND\` |"
             echo "| macOS app (debug + release) | \`$MAC\` |"
+            echo "| macOS app (archive + dev-cert codesign) | \`$MACARC\` |"
             echo ""
             echo "### What this fleet proves"
             echo "- **Inclusivity**: Tab journeys + labeled controls exercised under automation (VoiceOver/TalkBack-oriented labels)."
             echo "- **Cross-device**: Multiple iPhone / iPad + API 29–34 emulators."
             echo "- **Reliability**: Xcode test retries + disabled emulator animations + Gradle caches."
+            echo "- **Distributable**: macOS \`.xcarchive\` produced under Release config and codesigned with an Apple Development identity (US-14.1)."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ]; then
+          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ] || [ "$MACARC" != success ]; then
             echo "::error::Fleet SOTA gate failed — every matrix job must be success."
             exit 1
           fi

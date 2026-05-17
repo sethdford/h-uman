@@ -65,6 +65,8 @@ apps/ios/.build/
 apps/ios/.swiftpm/
 apps/macos/.build/
 apps/macos/.swiftpm/
+# XcodeGen-generated project for macOS app (regenerate via `xcodegen generate`)
+apps/macos/Human.xcodeproj/
 apps/shared/.build/
 apps/shared/HumanKit/.build/
 
