@@ -171,10 +171,19 @@ static void life_thread_query_active_sql_valid(void) {
     HU_ASSERT_TRUE(strstr(buf, "contact_id='u-1'") != NULL);
 }
 
+#ifdef HU_ENABLE_SQLITE
 /* P3-2 (2026-05-16) regression: a life_thread inserted for contact A must
  * not surface in contact B's active-thread query. The audit found that
  * life_threads was global, so any narrative stored for any contact would
- * appear in every other contact's life-context prompt. */
+ * appear in every other contact's life-context prompt.
+ *
+ * The three life_thread + narration_event tests below directly drive the
+ * sqlite3 C API to set up an in-memory database, evaluate the SQL the
+ * production code emits, and assert the contact-scoping contract. They
+ * are guarded on HU_ENABLE_SQLITE alongside the <sqlite3.h> include at
+ * the top of this file — without the guard, minimal-build and feature-flag
+ * no-sqlite CI configurations fail with "unknown type name 'sqlite3'".
+ * See ci-queue-triage.md systemic-rot pattern (2026-05-17). */
 static int run_sql_(sqlite3 *db, const char *sql) {
     return sqlite3_exec(db, sql, NULL, NULL, NULL);
 }
@@ -238,6 +247,7 @@ static void test_life_thread_scoped_per_contact(void) {
 
     sqlite3_close(db);
 }
+#endif /* HU_ENABLE_SQLITE */
 
 static void is_bad_day_active_within_duration_returns_true(void) {
     uint64_t start = 1000000ull;
@@ -764,7 +774,9 @@ void run_authentic_tests(void) {
     HU_RUN_TEST(life_thread_insert_sql_valid);
     HU_RUN_TEST(life_thread_insert_sql_escapes_quotes);
     HU_RUN_TEST(life_thread_query_active_sql_valid);
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_life_thread_scoped_per_contact);
+#endif
     HU_RUN_TEST(is_bad_day_active_within_duration_returns_true);
     HU_RUN_TEST(is_bad_day_active_expired_returns_false);
     HU_RUN_TEST(is_bad_day_inactive_returns_false);

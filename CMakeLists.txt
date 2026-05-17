@@ -1064,6 +1064,12 @@ list(APPEND HU_CORE_SOURCES
     src/agent/process_reward.c
     src/ml/dpo.c
     src/ml/dpo_miner.c
+    # PII redactor + content-quality utility. Pure C, no SQLite. Called from
+    # persona/examples.c, ml/dpo_miner.c, and ml/training_data_extractor.c
+    # (the first two are unconditional, so this MUST be unconditional too).
+    # Moved out of the if(HU_ENABLE_ML) block on 2026-05-17 — see
+    # ci-queue-triage.md for the link-error history this fixed.
+    src/ml/training_data_quality.c
     src/security/cot_audit.c
     src/security/escalate.c
     src/security/normalize.c
@@ -1330,9 +1336,13 @@ if(HU_ENABLE_ML)
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
         src/ml/fidelity.c
-        # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
-        # continuous-learning training-data pipeline. Pure C, no SQLite.
-        src/ml/training_data_quality.c
+        # Phase A1.2 SOTA roadmap: quality filter for the continuous-learning
+        # training-data pipeline. NOTE: training_data_quality.c (which also
+        # defines hu_pii_redact) was moved OUT of this HU_ENABLE_ML guard
+        # below — the PII redactor is called from persona/examples.c and
+        # ml/dpo_miner.c (both unconditional in HU_CORE_SOURCES), so gating
+        # its definition by HU_ENABLE_ML caused link errors on every
+        # non-ML CI configuration. See ci-queue-triage.md (2026-05-17).
         src/providers/huml.c
         # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t vtable + factory.
         # Backends are stubbed at HU_ERR_NOT_SUPPORTED until Tasks 4
@@ -2964,8 +2974,13 @@ set(HU_TEST_SOURCES
     tests/test_w11_self_rag.c
     tests/test_w12_planner.c
     tests/test_w12_verifier_loop.c
-    tests/test_w13_learner.c
-    tests/test_w14_runners.c
+    # tests/test_w13_learner.c + tests/test_w14_runners.c are conditionally
+    # appended below under if(HU_ENABLE_LEARNING) because they reference
+    # hu_learner_* symbols only present when src/ml/learner*.c are
+    # compiled. The unconditional listings here previously broke every
+    # non-LEARNING CI configuration (nix, build-deb, cross-arm64,
+    # feature-flags*) with "undefined reference to hu_learner_*" link
+    # errors. See ci-queue-triage.md systemic-rot pattern (2026-05-17).
     tests/test_w14_lora_retrain.c
     tests/test_w14_dual_lora.c
     tests/test_w15_backup_restore.c
@@ -3051,15 +3066,13 @@ set(HU_TEST_SOURCES
     tests/test_reflection_advanced.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
-    tests/test_ml.c
-    tests/test_ml_cli_actually_trains.c
-    tests/test_ml_fidelity_judgment.c
-    tests/test_dpo_judge_naming.c
-    tests/test_lora.c
-    tests/test_training_data.c
-    tests/test_training_data_extractor.c
-    tests/test_training_data_quality.c
-    tests/test_agent_trainer.c
+    # ML-dependent tests are conditionally appended below under
+    # if(HU_ENABLE_ML). They reference hu_bpe_/hu_experiment_/hu_gpt_/
+    # hu_lora_/hu_huml_provider_/hu_m3_adapter_ symbols only present when
+    # src/ml/* are compiled. The unconditional listings here previously
+    # broke every non-ML CI configuration (minimal-build, no-sqlite,
+    # no-skills, kitchen-sink, llamacpp-on, cross-arm64) with link
+    # errors. See ci-queue-triage.md systemic-rot pattern (2026-05-17).
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c

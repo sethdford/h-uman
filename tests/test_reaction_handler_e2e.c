@@ -16,13 +16,17 @@
  *      Task 14's daemon dispatch) silently absorb this code, making the
  *      drop user-invisible. The per-turn flag is NOT set on a miss.
  */
-#include "test_framework.h"
 #include "human/agent/reaction_handler.h"
 #include "human/channels/reaction_event.h"
-#include "human/ml/dpo.h"
 #include "human/core/allocator.h"
-#include <sqlite3.h>
+#include "human/ml/dpo.h"
+#include "test_framework.h"
 
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+#endif
+
+#ifdef HU_ENABLE_SQLITE
 static void test_reaction_event_with_known_target_inserts_dpo_pair(void) {
     hu_allocator_t alloc = hu_system_allocator();
 
@@ -44,8 +48,7 @@ static void test_reaction_event_with_known_target_inserts_dpo_pair(void) {
         /*thread*/ "chat_xyz",
         /*msg_ref*/ "msg_abc",
         /*prompt*/ "What's the weather?",
-        /*response*/ "Sunny and 72."
-    );
+        /*response*/ "Sunny and 72.");
 
     hu_reaction_event_t e = {
         .channel_id = "imessage",
@@ -65,9 +68,10 @@ static void test_reaction_event_with_known_target_inserts_dpo_pair(void) {
 
     /* Verify content via direct SQL query (collector has no read-back API today) */
     sqlite3_stmt *stmt = NULL;
-    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
-        "SELECT prompt, chosen, rejected, source FROM dpo_pairs LIMIT 1",
-        -1, &stmt, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(db, "SELECT prompt, chosen, rejected, source FROM dpo_pairs LIMIT 1", -1,
+                           &stmt, NULL),
+        SQLITE_OK);
     HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
     HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 0), "What's the weather?");
     HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(stmt, 1), "Sunny and 72.");
@@ -84,6 +88,7 @@ static void test_reaction_event_with_known_target_inserts_dpo_pair(void) {
     sqlite3_close(db);
     hu_reaction_handler_reset_for_test();
 }
+#endif /* HU_ENABLE_SQLITE — first SQLite-using block */
 
 /* "Silently drops" here means: no DPO row inserted, no agent_turn side
  * effect (clear_turn flag stays false). The function still returns
@@ -94,9 +99,11 @@ static void test_reaction_event_with_known_target_inserts_dpo_pair(void) {
 static void test_reaction_event_with_unknown_target_drops_silently(void) {
     hu_reaction_handler_reset_for_test();
     hu_reaction_event_t e = {
-        .channel_id = "slack", .target_thread_id = "C_X",
+        .channel_id = "slack",
+        .target_thread_id = "C_X",
         .target_message_ref = "ts_does_not_exist",
-        .kind = HU_REACTION_LIKE, .polarity = HU_REACTION_POSITIVE,
+        .kind = HU_REACTION_LIKE,
+        .polarity = HU_REACTION_POSITIVE,
     };
     /* Return code carries the diagnostic; callers translate to silent drop. */
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_ERR_NOT_FOUND);
@@ -104,6 +111,7 @@ static void test_reaction_event_with_unknown_target_drops_silently(void) {
     HU_ASSERT_FALSE(hu_reaction_handler_was_called_this_turn());
 }
 
+#ifdef HU_ENABLE_SQLITE
 /* Phase 2 Task 14: lifecycle smoke for the per-turn flag. handle_event
  * sets it on success; clear_turn (called at the end of every successful
  * hu_agent_turn) resets it. Pinned here as a standalone smoke because
@@ -119,14 +127,15 @@ static void test_agent_turn_clear_turn_resets_called_flag(void) {
     hu_dpo_collector_create(&alloc, db, 1024, &col);
     hu_dpo_init_tables(&col);
     hu_reaction_handler_set_collector(&col);
-    hu_reaction_handler_register_assistant_message_for_test(
-        "imessage", "ct", "mr", "p", "r");
+    hu_reaction_handler_register_assistant_message_for_test("imessage", "ct", "mr", "p", "r");
 
     HU_ASSERT_FALSE(hu_reaction_handler_was_called_this_turn());
 
-    hu_reaction_event_t e = {.channel_id="imessage",.target_thread_id="ct",
-                             .target_message_ref="mr",.kind=HU_REACTION_LOVE,
-                             .polarity=HU_REACTION_POSITIVE};
+    hu_reaction_event_t e = {.channel_id = "imessage",
+                             .target_thread_id = "ct",
+                             .target_message_ref = "mr",
+                             .kind = HU_REACTION_LOVE,
+                             .polarity = HU_REACTION_POSITIVE};
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_OK);
     HU_ASSERT_TRUE(hu_reaction_handler_was_called_this_turn());
 
@@ -137,6 +146,7 @@ static void test_agent_turn_clear_turn_resets_called_flag(void) {
     sqlite3_close(db);
     hu_reaction_handler_reset_for_test();
 }
+#endif /* HU_ENABLE_SQLITE — second SQLite-using block */
 
 /* Pin the NULL-input guards in src/agent/reaction_handler.c:53. Adding this
  * regression test (cheap, no setup) so any future refactor that drops the
@@ -145,14 +155,18 @@ static void test_agent_turn_clear_turn_resets_called_flag(void) {
 static void test_reaction_handler_handle_event_null_returns_invalid_argument(void) {
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(NULL), HU_ERR_INVALID_ARGUMENT);
     /* Also pin: event with NULL channel_id */
-    hu_reaction_event_t e = {0};  /* channel_id NULL */
+    hu_reaction_event_t e = {0}; /* channel_id NULL */
     HU_ASSERT_EQ(hu_reaction_handler_handle_event(&e), HU_ERR_INVALID_ARGUMENT);
 }
 
 void run_reaction_handler_e2e_tests(void) {
     HU_TEST_SUITE("reaction_handler_e2e");
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_reaction_event_with_known_target_inserts_dpo_pair);
+#endif
     HU_RUN_TEST(test_reaction_event_with_unknown_target_drops_silently);
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_agent_turn_clear_turn_resets_called_flag);
+#endif
     HU_RUN_TEST(test_reaction_handler_handle_event_null_returns_invalid_argument);
 }
