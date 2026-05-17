@@ -55,6 +55,8 @@ def parse_cmake(path: str) -> dict[str, set[str]]:
     stack: list[set[str]] = []  # one set of required flags per nesting level
 
     if_re = re.compile(r"^\s*if\s*\(([^)]+)\)")
+    elseif_re = re.compile(r"^\s*elseif\s*\(([^)]+)\)")
+    else_re = re.compile(r"^\s*else\s*\(\s*\)")
     endif_re = re.compile(r"^\s*endif\s*\(")
     file_re = re.compile(r"(?:tests|src)/[A-Za-z0-9_./-]+\.c\b")
     # NOT_HU is meaningful (e.g., if(NOT HU_ENABLE_ML)). We ONLY track
@@ -78,6 +80,31 @@ def parse_cmake(path: str) -> dict[str, set[str]]:
                 else:
                     flags = extract_flags(cond)
                     stack.append(flags)
+                continue
+
+            # Bugbot 2cf6d7d2: handle elseif() — replaces the top of the
+            # condition stack with the new elseif's flags (the previous
+            # if() branch is no longer active). Without this, files listed
+            # in elseif() blocks inherit stale flags from the preceding if().
+            m = elseif_re.match(line)
+            if m:
+                cond = m.group(1)
+                if stack:
+                    if not_re.search(cond):
+                        stack[-1] = set()
+                    else:
+                        stack[-1] = extract_flags(cond)
+                continue
+
+            # else() — the top condition's flags no longer assert; this
+            # branch executes when the parent if/elseif chain was false.
+            # Conservative: clear the top frame so files listed here are
+            # NOT tagged as requiring the parent's flags (they actually
+            # compile when those flags are OFF, the opposite of what an
+            # uncorrected parser would record).
+            if else_re.match(line):
+                if stack:
+                    stack[-1] = set()
                 continue
 
             if endif_re.match(line):
