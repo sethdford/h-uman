@@ -245,3 +245,119 @@ hu_error_t hu_m3_frontier_adapter_snapshot_outcomes(const hu_m3_frontier_adapter
     *out_count = to_copy;
     return HU_OK;
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B3 v0 — JSONL serializer
+ *
+ * Each outcome becomes one line:
+ *   {"t":TS,"l":LAT,"ph":PHASH,"rh":RHASH,"ch":CHASH,"pt":PT,"ct":CT,
+ *    "m":MID,"a":AID,"g":GUARD,"k":KIND}
+ *
+ * Field names are abbreviated to keep the JSONL compact — for 4096
+ * outcomes the long-name version is ~1.5 MB, the short-name version
+ * is ~720 KB. The training script knows the schema.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* Worst-case bytes per outcome line, used to size the initial buffer.
+ * Each uint64 is at most 20 chars; uint32 at most 10; uint8 at most 3.
+ * 5 × 22 (uint64) + 2 × 12 (uint32) + 4 × 5 (uint16/uint8) + brackets
+ * + commas + field names ≈ 250 bytes/outcome. Round up to 320 for
+ * safety; cheap given the buffer is freed immediately. */
+#define HU_M3_OUTCOMES_JSONL_BYTES_PER_OUTCOME 320u
+
+hu_error_t hu_m3_outcomes_to_jsonl(hu_allocator_t *alloc, const hu_m3_frontier_adapter_t *adapter,
+                                   const hu_m3_outcomes_filter_t *filter, char **out_buf,
+                                   size_t *out_len, size_t *out_cap) {
+    if (!alloc || !out_buf || !out_len || !out_cap)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_buf = NULL;
+    *out_len = 0;
+    *out_cap = 0;
+
+    if (!adapter)
+        return HU_OK; /* No adapter → empty result is OK, not an error. */
+
+    /* Snapshot under the same path the public API uses so we don't
+     * duplicate the wrap-aware copy logic. */
+    size_t max_count =
+        (filter && filter->max_count > 0 && filter->max_count < HU_M3_OUTCOMES_RING_CAPACITY)
+            ? filter->max_count
+            : HU_M3_OUTCOMES_RING_CAPACITY;
+
+    hu_m3_inference_outcome_t *snap =
+        (hu_m3_inference_outcome_t *)alloc->alloc(alloc->ctx, sizeof(*snap) * max_count);
+    if (!snap)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    size_t snap_count = 0;
+    hu_error_t err =
+        hu_m3_frontier_adapter_snapshot_outcomes(adapter, snap, max_count, &snap_count);
+    if (err != HU_OK) {
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+        return err;
+    }
+    if (snap_count == 0) {
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+        return HU_OK; /* Empty result. */
+    }
+
+    /* Pre-size the output buffer for the worst case. We'll truncate the
+     * cap at the end if we want — but for a one-shot serialize-and-free
+     * pattern, slight over-allocation is fine. */
+    size_t cap = HU_M3_OUTCOMES_JSONL_BYTES_PER_OUTCOME * snap_count + 1u;
+    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!buf) {
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+
+    size_t off = 0;
+    size_t emitted = 0;
+    for (size_t i = 0; i < snap_count; i++) {
+        const hu_m3_inference_outcome_t *o = &snap[i];
+        /* Apply filters. */
+        if (filter && filter->turn_kind != 0 && o->turn_kind != filter->turn_kind)
+            continue;
+        if (filter && filter->since_ms != 0 && o->timestamp_unix_ms < filter->since_ms)
+            continue;
+
+        /* Emit one compact JSON object + newline. Field names are
+         * short (1-2 chars) — the training script knows the schema.
+         * Format strings use the most-permissive integer types so a
+         * future struct widening doesn't silently overflow. */
+        int n = snprintf(
+            buf + off, cap - off,
+            "%s{\"t\":%llu,\"l\":%llu,\"ph\":%llu,\"rh\":%llu,\"ch\":%llu,"
+            "\"pt\":%u,\"ct\":%u,\"m\":%u,\"a\":%u,\"g\":%u,\"k\":%u}",
+            emitted == 0 ? "" : "\n", (unsigned long long)o->timestamp_unix_ms,
+            (unsigned long long)o->latency_ms, (unsigned long long)o->prompt_hash,
+            (unsigned long long)o->response_hash, (unsigned long long)o->contact_id_hash,
+            (unsigned)o->prompt_tokens, (unsigned)o->completion_tokens, (unsigned)o->model_id,
+            (unsigned)o->adapter_id, (unsigned)o->guard_decision, (unsigned)o->turn_kind);
+        if (n < 0 || (size_t)n >= cap - off) {
+            /* Either snprintf reported an error or we'd overflow. The
+             * pre-sizing should make this unreachable, but bail safely
+             * if it ever happens (e.g. a future struct field is added
+             * without bumping HU_M3_OUTCOMES_JSONL_BYTES_PER_OUTCOME). */
+            alloc->free(alloc->ctx, buf, cap);
+            alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        off += (size_t)n;
+        emitted++;
+    }
+
+    alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+
+    if (emitted == 0) {
+        /* All snapshotted outcomes were filtered out. */
+        alloc->free(alloc->ctx, buf, cap);
+        return HU_OK;
+    }
+
+    buf[off] = '\0';
+    *out_buf = buf;
+    *out_len = off;
+    *out_cap = cap;
+    return HU_OK;
+}

@@ -170,6 +170,54 @@ hu_error_t hu_m3_frontier_adapter_snapshot_outcomes(const hu_m3_frontier_adapter
  * the daemon's hash module. */
 uint64_t hu_m3_outcome_hash_bytes(const void *data, size_t len);
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B3 v0 (2026-05-17 round 2): outcome export for the training loop
+ *
+ * The training loop runs in a separate process (Python typically). It
+ * needs to PULL outcomes from the running daemon. We expose them as
+ * JSONL (one outcome per line) — the natural shape for streaming
+ * ingest by ML pipelines.
+ *
+ * The HTTP endpoint at GET /v1/m3/outcomes wraps these helpers; tests
+ * exercise the serializer directly without needing the gateway.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* Filter passed to `hu_m3_outcomes_to_jsonl`. Each field has a "no
+ * filter" sentinel so callers can leave the field unset. */
+typedef struct hu_m3_outcomes_filter {
+    /* Maximum outcomes to include. 0 = no limit (return everything in
+     * the live ring). Capped at HU_M3_OUTCOMES_RING_CAPACITY. */
+    size_t max_count;
+    /* Only include outcomes with this turn_kind value. 0 = no filter
+     * (turn_kind 0 outcomes don't exist in production — turn_kind is
+     * set to 1/2/3 at record time). */
+    uint8_t turn_kind;
+    /* Only include outcomes with timestamp_unix_ms >= since_ms. 0 =
+     * no filter. */
+    uint64_t since_ms;
+} hu_m3_outcomes_filter_t;
+
+/* Serialize matching outcomes from the adapter's ring into a JSONL
+ * buffer (one JSON object per line, '\n' separator, no trailing
+ * newline). `*out_buf` is allocator-owned; free with
+ * `alloc->free(alloc->ctx, *out_buf, *out_cap)` using the returned
+ * capacity (NOT *out_len + 1 — the allocator contract requires the
+ * exact allocation size).
+ *
+ * Returns:
+ *   HU_OK with *out_len > 0 — one or more outcomes serialized.
+ *   HU_OK with *out_len == 0 — no outcomes matched the filter.
+ *   HU_ERR_INVALID_ARGUMENT on NULL alloc / out_buf / out_len /
+ *     out_cap.
+ *   HU_ERR_OUT_OF_MEMORY if the allocation fails.
+ *
+ * The adapter parameter may be NULL — in that case *out_len = 0,
+ * returns HU_OK. Lets the gateway expose the endpoint cleanly even
+ * when no adapter is attached. */
+hu_error_t hu_m3_outcomes_to_jsonl(hu_allocator_t *alloc, const hu_m3_frontier_adapter_t *adapter,
+                                   const hu_m3_outcomes_filter_t *filter, char **out_buf,
+                                   size_t *out_len, size_t *out_cap);
+
 #ifdef __cplusplus
 }
 #endif

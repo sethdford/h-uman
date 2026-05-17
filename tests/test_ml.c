@@ -5236,6 +5236,183 @@ static void test_m3_snapshot_outcomes_max_count_caps_output(void) {
     hu_m3_frontier_adapter_close(&alloc, a);
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B3 v0 — JSONL serializer tests
+ *
+ * The serializer produces newline-separated JSON objects, one per
+ * outcome. Filters drop outcomes; an empty match returns out_len=0
+ * with HU_OK (not an error). NULL adapter is also "no outcomes" not
+ * an error — the gateway endpoint relies on that to stay clean even
+ * before an agent attaches its adapter at boot.
+ * ───────────────────────────────────────────────────────────────── */
+
+static hu_m3_frontier_adapter_t *open_outcomes_fixture(hu_allocator_t *alloc, const char *path,
+                                                       size_t n_outcomes, uint8_t turn_kind) {
+    FILE *fp = fopen(path, "wb");
+    if (!fp)
+        return NULL;
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    if (fwrite(blob, 1, sizeof(blob), fp) != sizeof(blob)) {
+        fclose(fp);
+        return NULL;
+    }
+    fclose(fp);
+    hu_m3_frontier_adapter_t *a = NULL;
+    if (hu_m3_frontier_adapter_try_open(alloc, path, strlen(path), &a) != HU_OK)
+        return NULL;
+    hu_m3_inference_outcome_t o;
+    memset(&o, 0, sizeof(o));
+    o.turn_kind = turn_kind;
+    for (size_t i = 0; i < n_outcomes; i++) {
+        o.timestamp_unix_ms = 1700000000000ULL + (uint64_t)i;
+        o.latency_ms = (uint64_t)i;
+        hu_m3_frontier_adapter_record_outcome(a, &o);
+    }
+    return a;
+}
+
+static void test_m3_outcomes_to_jsonl_null_alloc_returns_invalid(void) {
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(NULL, NULL, NULL, &buf, &len, &cap),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_m3_outcomes_to_jsonl_null_adapter_returns_empty(void) {
+    /* The gateway endpoint relies on this contract — no adapter at
+     * daemon boot means /v1/m3/outcomes returns an empty body, not
+     * an error. */
+    hu_allocator_t alloc = hu_system_allocator();
+    char *buf = NULL;
+    size_t len = 999, cap = 999;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, NULL, NULL, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_TRUE(buf == NULL);
+    HU_ASSERT_EQ((unsigned long)len, 0ULL);
+}
+
+static void test_m3_outcomes_to_jsonl_emits_one_line_per_outcome(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_3.bin", 3, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, NULL, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_NOT_NULL(buf);
+    HU_ASSERT_TRUE(len > 0);
+    /* 3 outcomes → 2 newlines (no trailing newline). */
+    size_t newlines = 0;
+    for (size_t i = 0; i < len; i++)
+        if (buf[i] == '\n')
+            newlines++;
+    HU_ASSERT_EQ((unsigned long)newlines, 2ULL);
+    /* Each line starts with '{' and ends with '}'. */
+    HU_ASSERT_EQ(buf[0], '{');
+    HU_ASSERT_EQ(buf[len - 1], '}');
+    /* The turn_kind=1 field should appear in every line. */
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"k\":1"));
+    alloc.free(alloc.ctx, buf, cap);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_to_jsonl_filters_by_turn_kind(void) {
+    /* Mix turn_kind 1 and 2 in the same ring; filter on turn_kind=2
+     * should drop the kind=1 lines. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_mix.bin", 2, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+    hu_m3_inference_outcome_t o;
+    memset(&o, 0, sizeof(o));
+    o.turn_kind = 2;
+    o.timestamp_unix_ms = 1700000099000ULL;
+    o.latency_ms = 99;
+    hu_m3_frontier_adapter_record_outcome(a, &o);
+
+    hu_m3_outcomes_filter_t filter = {0};
+    filter.turn_kind = 2;
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, &filter, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_NOT_NULL(buf);
+    /* Exactly one line (the kind=2 record). */
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"k\":2"));
+    HU_ASSERT_TRUE(strstr(buf, "\"k\":1") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"l\":99") != NULL);
+    alloc.free(alloc.ctx, buf, cap);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_to_jsonl_filters_by_since_ms(void) {
+    /* 3 outcomes with timestamps 1700000000000, ...000001, ...000002.
+     * Filter since_ms = 1700000000001 should drop the first. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_since.bin", 3, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_outcomes_filter_t filter = {0};
+    filter.since_ms = 1700000000001ULL;
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, &filter, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_NOT_NULL(buf);
+    /* 2 lines remain → 1 newline. */
+    size_t newlines = 0;
+    for (size_t i = 0; i < len; i++)
+        if (buf[i] == '\n')
+            newlines++;
+    HU_ASSERT_EQ((unsigned long)newlines, 1ULL);
+    /* The dropped outcome had latency=0; the surviving two have 1 and 2. */
+    HU_ASSERT_TRUE(strstr(buf, "\"l\":1") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"l\":2") != NULL);
+    alloc.free(alloc.ctx, buf, cap);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_to_jsonl_max_count_caps_output(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_cap.bin", 10, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_outcomes_filter_t filter = {0};
+    filter.max_count = 3;
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, &filter, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_NOT_NULL(buf);
+    /* 3 lines → 2 newlines. */
+    size_t newlines = 0;
+    for (size_t i = 0; i < len; i++)
+        if (buf[i] == '\n')
+            newlines++;
+    HU_ASSERT_EQ((unsigned long)newlines, 2ULL);
+    alloc.free(alloc.ctx, buf, cap);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_to_jsonl_no_match_returns_empty(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_empty.bin", 3, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_outcomes_filter_t filter = {0};
+    filter.turn_kind = 3; /* nothing in the ring has turn_kind=3 */
+    char *buf = NULL;
+    size_t len = 999, cap = 999;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, &filter, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_TRUE(buf == NULL);
+    HU_ASSERT_EQ((unsigned long)len, 0ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
 /* ── Track D D2.1 — honest-gap caveat snapshot tests ──────────────────
  *
  * These tests pin the user-facing caveat strings that `human ml
@@ -5803,4 +5980,13 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_snapshot_outcomes_returns_oldest_first);
     HU_RUN_TEST(test_m3_snapshot_outcomes_drops_oldest_when_wrapped);
     HU_RUN_TEST(test_m3_snapshot_outcomes_max_count_caps_output);
+
+    /* Phase B3 v0 (2026-05-17 r2): JSONL serializer tests. */
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_null_alloc_returns_invalid);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_null_adapter_returns_empty);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_emits_one_line_per_outcome);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_filters_by_turn_kind);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_filters_by_since_ms);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_max_count_caps_output);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_no_match_returns_empty);
 }
