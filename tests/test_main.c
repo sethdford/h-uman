@@ -272,17 +272,21 @@ void run_w10_neural_memory_tests(void);
 void run_w11_self_rag_tests(void);
 void run_w12_planner_tests(void);
 void run_w12_verifier_loop_tests(void);
+#ifdef HU_ENABLE_LEARNING
 void run_w13_learner_tests(void);
 void run_w14_runners_tests(void);
-void run_w15_backup_restore_tests(void);
 void run_learner_bridge_tests(void);
+#endif
+void run_w15_backup_restore_tests(void);
 void run_w14_scheduler_tests(void);
 void run_w16_evaluation_tests(void);
 void run_w16_eval_cli_tests(void);
 void run_w15_keystore_tests(void);
 void run_encrypted_store_tests(void);
+#ifdef HU_ENABLE_LEARNING
 void run_v2_e2e_adversarial_tests(void);
 void run_v2_wiring_e2e_tests(void);
+#endif
 void run_b11_pressure_history_e2e_tests(void);
 void run_b9_user_sim_agent_turn_e2e_tests(void);
 void run_personal_model_contradicts_tests(void);
@@ -986,17 +990,21 @@ int main(int argc, char **argv) {
     run_w11_self_rag_tests();
     run_w12_planner_tests();
     run_w12_verifier_loop_tests();
+#ifdef HU_ENABLE_LEARNING
     run_w13_learner_tests();
     run_w14_runners_tests();
-    run_w15_backup_restore_tests();
     run_learner_bridge_tests();
+#endif
+    run_w15_backup_restore_tests();
     run_w14_scheduler_tests();
     run_w16_evaluation_tests();
     run_w16_eval_cli_tests();
     run_w15_keystore_tests();
     run_encrypted_store_tests();
+#ifdef HU_ENABLE_LEARNING
     run_v2_e2e_adversarial_tests();
     run_v2_wiring_e2e_tests();
+#endif
     run_b11_pressure_history_e2e_tests();
     run_b9_user_sim_agent_turn_e2e_tests();
     run_personal_model_contradicts_tests();

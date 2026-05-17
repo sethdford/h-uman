@@ -1550,8 +1550,10 @@ void run_gateway_extended_tests(void) {
     HU_RUN_TEST(test_ws_server_send_null_conn);
     HU_RUN_TEST(test_ws_server_broadcast_empty);
     HU_RUN_TEST(test_cp_admin_metrics_fidelity_returns_zero_state_without_persona);
+#ifdef HU_ENABLE_ML
     HU_RUN_TEST(test_cp_admin_metrics_fidelity_uses_params_persona);
     HU_RUN_TEST(test_cp_admin_metrics_fidelity_merges_ab_status_file);
+#endif
     HU_RUN_TEST(test_cp_admin_metrics_fidelity_returns_error_for_missing_persona);
     HU_RUN_TEST(test_cp_admin_metrics_directive_telemetry_returns_counts);
 
