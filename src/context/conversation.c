@@ -4220,10 +4220,14 @@ bool hu_conversation_classify_thinking(const hu_thinking_context_t *ctx, const c
         return false;
     memset(out, 0, sizeof(*out));
 
-    /* text_fast channels (iMessage/SMS): no thinking filler — speed wins */
+    /* Channel class shapes the delay AFTER the filler, not whether to use one.
+     * Earlier versions excluded TEXT_FAST channels (iMessage/SMS) entirely
+     * because they reused the TEXT_ASYNC 30–60 s delay, which feels broken on
+     * iMessage. Real human texting cadence sends "hm" instantly and follows
+     * with the substantive reply within 1–2 s. We now keep the filler bubble
+     * on TEXT_FAST and use a 400–1500 ms delay so the pause reads as natural
+     * thinking rather than dispreference. See the delay formula below. */
     hu_channel_class_t cls = hu_channel_class_for_name(ctx->channel_name);
-    if (cls == HU_CHANNEL_CLASS_TEXT_FAST)
-        return false;
 
     /* Persona and filler bank are required */
     if (!ctx->persona || !ctx->channel_name)
@@ -4280,13 +4284,19 @@ bool hu_conversation_classify_thinking(const hu_thinking_context_t *ctx, const c
     out->filler[flen] = '\0';
     out->filler_len = flen;
 
-    /* Channel-aware delay */
+    /* Channel-aware delay between the filler bubble and the substantive reply. */
     if (cls == HU_CHANNEL_CLASS_VOICE) {
 #ifdef HU_ENABLE_VOICE_VAD_TIMING
         out->delay_ms = 200 + ((state >> 8) % 301); /* 200-500ms uniform */
 #else
         out->delay_ms = 0; /* voice channel without VAD timing: no delay */
 #endif
+    } else if (cls == HU_CHANNEL_CLASS_TEXT_FAST) {
+        /* iMessage / SMS: 400-1500 ms uniform. Matches the real-human cadence
+         * of sending "hm" and following with the substantive reply within a
+         * second or two. Long enough to feel like genuine thought; short
+         * enough that the recipient doesn't read it as disengagement. */
+        out->delay_ms = 400 + ((state >> 8) % 1101);
     } else {
         /* TEXT_ASYNC / UNKNOWN: existing dynamic formula */
         uint32_t base = 30000, extra = 0;
@@ -7964,6 +7974,100 @@ size_t hu_conversation_split_into_texts(const char *response, size_t resp_len, s
         count++;
     }
     return count;
+}
+
+/* ── Channel-class-aware cadence splitter ────────────────────────────── */
+
+/* Counts sentence-ending punctuation (.!?) in [text, text+len).
+ * Used by the cadence splitter to decide whether short multi-sentence text
+ * is best burst as multiple bubbles. */
+static size_t count_sentence_ends(const char *text, size_t len) {
+    size_t n = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
+        if (c == '.' || c == '!' || c == '?')
+            n++;
+    }
+    return n;
+}
+
+/* Splits text at sentence boundaries (.!? followed by whitespace or EOS).
+ * Trims surrounding whitespace per chunk. Skips empty fragments. Caller
+ * supplies the chunks[][512] backing store. Returns chunk count. */
+static size_t split_by_sentence_boundaries(const char *text, size_t len, char chunks[][512],
+                                           size_t max_chunks) {
+    size_t count = 0;
+    size_t pos = 0;
+    while (pos < len && count < max_chunks) {
+        /* Skip leading whitespace */
+        while (pos < len && (text[pos] == ' ' || text[pos] == '\t'))
+            pos++;
+        if (pos >= len)
+            break;
+
+        size_t start = pos;
+        size_t end = pos;
+        while (end < len) {
+            char c = text[end];
+            if (c == '.' || c == '!' || c == '?') {
+                /* Include this punctuation; consume any run of the same kind. */
+                end++;
+                while (end < len && (text[end] == '.' || text[end] == '!' || text[end] == '?'))
+                    end++;
+                break;
+            }
+            end++;
+        }
+
+        size_t chunk_len = end - start;
+        if (chunk_len > 0) {
+            if (chunk_len > 511)
+                chunk_len = 511;
+            /* Trim trailing whitespace (rare here, but safe). */
+            while (chunk_len > 0 &&
+                   (text[start + chunk_len - 1] == ' ' || text[start + chunk_len - 1] == '\t'))
+                chunk_len--;
+            if (chunk_len > 0) {
+                memcpy(chunks[count], text + start, chunk_len);
+                chunks[count][chunk_len] = '\0';
+                count++;
+            }
+        }
+        pos = end;
+    }
+    return count;
+}
+
+size_t hu_conversation_split_for_cadence(const char *text, size_t text_len, hu_channel_class_t cls,
+                                         char chunks[][512], size_t max_chunks) {
+    if (!text || text_len == 0 || !chunks || max_chunks == 0)
+        return 0;
+
+    /* Explicit newlines from the LLM are intentional formatting; do not
+     * second-guess them by re-chunking. The caller sends the text as-is
+     * (one bubble) in this case. */
+    if (memchr(text, '\n', text_len))
+        return 0;
+
+    /* Long prose → chunk-based splitter (preserves existing >120-char
+     * behavior for every channel class, including TEXT_ASYNC). */
+    if (text_len > 120)
+        return hu_conversation_split_into_texts(text, text_len, 100, chunks, max_chunks);
+
+    /* TEXT_FAST burst cadence: short multi-sentence replies are bubbled
+     * one sentence per bubble. The 40-char floor avoids splitting one-line
+     * acknowledgements like "ok cool. see ya." into two trivial bubbles;
+     * the ≥2 sentence-ends rule avoids splitting single-statement replies
+     * like "sure thing." that happen to contain a period. */
+    if (cls == HU_CHANNEL_CLASS_TEXT_FAST && text_len >= 40) {
+        if (count_sentence_ends(text, text_len) >= 2) {
+            size_t n = split_by_sentence_boundaries(text, text_len, chunks, max_chunks);
+            return n >= 2 ? n : 0; /* one-bubble result is no-op */
+        }
+    }
+
+    /* Otherwise: single bubble. */
+    return 0;
 }
 
 /* ── Scheduled message queue ─────────────────────────────────────────── */

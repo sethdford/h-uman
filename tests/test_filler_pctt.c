@@ -7,8 +7,14 @@
  *   AC-7: emitted filler is NEVER byte-identical to the incoming message
  *         on triggering channels (the original failure mode preserved in
  *         data/eval_blinded_ab.json:300).
- *   AC-1: iMessage entries (text_fast class) NEVER trigger, regardless
- *         of message length or question shape.
+ *   AC-1: iMessage entries (text_fast class) DO trigger when the heuristic
+ *         fires, but with a fast 400–1500 ms delay instead of the TEXT_ASYNC
+ *         30–60 s delay. Superseded 2026-05-17 from the original "never
+ *         trigger" rule — the "speed wins, delays read as dispreference"
+ *         intuition lost out to the explicit humanness directive (humans
+ *         routinely send "hm" / "lemme think" before substantive replies on
+ *         iMessage). The fast delay is what makes the pause read as
+ *         thinking rather than disengagement.
  *
  * The corpus is the source-of-truth at data/eval_pctt.json. It is also
  * embedded here so the test runs without a file dependency. If the two
@@ -155,9 +161,26 @@ static void test_pctt_no_echo_across_corpus(void) {
     HU_ASSERT(triggered_count >= 5);
 }
 
-static void test_pctt_imessage_never_triggers(void) {
+static void test_pctt_imessage_triggers_with_fast_delay(void) {
+    /* AC-1 (revised 2026-05-17): text_fast channels DO trigger fillers when
+     * the heuristic fires; when they do, the delay must be in the fast
+     * 400–1500 ms band (not TEXT_ASYNC's 30–60 s band, which would feel
+     * broken on iMessage). Short / casual messages still don't trigger —
+     * the heuristic floor (msg_len > 35 AND words > 6 AND ?, or msg_len > 80
+     * AND words > 10) keeps casual texting from over-firing.
+     *
+     * Per-entry expectations (computed against the corpus, not hardcoded):
+     *   short / no-question / no-floor-clear  → must NOT trigger
+     *   long substantive question on iMessage → MUST trigger, fast delay
+     *
+     * We don't duplicate the heuristic in the test; instead we run the
+     * classifier and verify that (a) at least one iMessage entry triggers
+     * (corpus contains a long question), (b) every triggering iMessage
+     * call has a fast delay. Pin: if iMessage ever gets coupled to the
+     * 30s TEXT_ASYNC delay again, this fails loudly. */
     hu_filler_recency_t recency = {0};
     size_t imessage_seen = 0;
+    size_t imessage_triggers = 0;
     for (size_t i = 0; i < PCTT_CORPUS_SIZE; i++) {
         const pctt_entry_t *e = &g_corpus[i];
         if (strcmp(e->channel, "imessage") != 0)
@@ -179,11 +202,22 @@ static void test_pctt_imessage_never_triggers(void) {
         hu_thinking_response_t out = {0};
         bool ok = hu_conversation_classify_thinking(&ctx, e->incoming, strlen(e->incoming), NULL, 0,
                                                     &out);
-        /* AC-1: text_fast channels must never trigger, regardless of content. */
-        HU_ASSERT(!ok);
-        HU_ASSERT(out.filler_len == 0);
+        if (ok) {
+            imessage_triggers++;
+            /* When iMessage triggers, the contract is: filler from bank +
+             * fast 400-1500 ms delay. If either invariant fails, the new
+             * AC-1 was implemented incorrectly. */
+            HU_ASSERT(out.filler_len > 0);
+            HU_ASSERT(out.delay_ms >= 400);
+            HU_ASSERT(out.delay_ms <= 1500);
+        }
     }
     HU_ASSERT(imessage_seen >= 3); /* corpus must keep at least 3 iMessage entries */
+    /* Regression guard: if a future change silently re-disables iMessage filler
+     * (e.g. reintroduces the TEXT_FAST early-return), imessage_triggers drops
+     * to 0 and this fires. The corpus contains a long substantive question
+     * on iMessage specifically so this assertion holds. */
+    HU_ASSERT(imessage_triggers >= 1);
 }
 
 static void test_pctt_bank_rotation_under_recency(void) {
@@ -304,7 +338,7 @@ static void test_pctt_corpus_matches_json_fixture(void) {
 void run_filler_pctt_tests(void) {
     HU_TEST_SUITE("filler_pctt");
     HU_RUN_TEST(test_pctt_no_echo_across_corpus);
-    HU_RUN_TEST(test_pctt_imessage_never_triggers);
+    HU_RUN_TEST(test_pctt_imessage_triggers_with_fast_delay);
     HU_RUN_TEST(test_pctt_bank_rotation_under_recency);
     HU_RUN_TEST(test_pctt_corpus_matches_json_fixture);
 }
