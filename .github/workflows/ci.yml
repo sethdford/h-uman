@@ -112,7 +112,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install ARM64 cross-compiler
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        # libsodium-dev:arm64 needed because src/persona/persona_crypt.c
+        # hard-#errors at compile time when libsodium isn't found, and
+        # cross-arm64 builds human_core just like the host targets.
+        # dpkg multi-arch must be enabled before :arm64 packages resolve.
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libsodium-dev:arm64
       - name: Configure (ARM64 cross-compile)
         run: |
           cmake -B build-arm64 \
