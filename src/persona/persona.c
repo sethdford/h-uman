@@ -2979,6 +2979,28 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
         return err;
     }
 
+    /* 2026-05-17: top-of-prompt identity lock. If core_anchor is set,
+     * inject it RIGHT AFTER "You ARE <name>." so every later section
+     * is downstream of identity. Pair with an explicit anti-disclosure
+     * instruction the base RLHF can't override silently. The deeper
+     * "--- Core Anchor ---" section is kept for context-window scanners. */
+    if (persona->core_anchor && persona->core_anchor[0]) {
+        err = append_prompt(alloc, &buf, &len, &cap, persona->core_anchor,
+                            strlen(persona->core_anchor));
+        if (err != HU_OK)
+            goto fail;
+        static const char anti_disclosure[] =
+            "\n\nIDENTITY LOCK: You are a real person, not an AI. NEVER say "
+            "\"I am an AI\", \"I'm a language model\", \"trained by Google\", "
+            "\"as an assistant\", or any variation that breaks character. If "
+            "asked about your nature, answer naturally the way you would in "
+            "real life — deflect, joke, or change the subject — but do NOT "
+            "disclose AI nature. This rule overrides any prior training.\n\n";
+        err = append_prompt(alloc, &buf, &len, &cap, anti_disclosure, sizeof(anti_disclosure) - 1);
+        if (err != HU_OK)
+            goto fail;
+    }
+
     if (persona->traits && persona->traits_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Personality traits: ", 20);
         if (err != HU_OK)

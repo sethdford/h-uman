@@ -22,6 +22,7 @@
 #include "human/agent/session_persist.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/tool_call_parser.h"
+#include "human/agent/validators/builtin.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/cognition/attachment.h"
 #include "human/cognition/dual_process.h"
@@ -1464,17 +1465,45 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                  guard_report.max_repetition_run);
                     hu_guard_report_t retry_report;
                     memset(&retry_report, 0, sizeof(retry_report));
-                    hu_error_t retry_err = hu_response_guard_retry_slim(
+                    /* 2026-05-17: pass persona core_anchor into the slim retry so
+                     * the repair prompt carries identity context. Without this the
+                     * stripped repair instruction lets the base RLHF assert AI
+                     * identity ("I am a large language model trained by Google"). */
+                    const char *anchor = NULL;
+                    size_t anchor_len = 0;
+                    if (agent->persona && agent->persona->core_anchor &&
+                        agent->persona->core_anchor[0]) {
+                        anchor = agent->persona->core_anchor;
+                        anchor_len = strlen(anchor);
+                    }
+                    hu_error_t retry_err = hu_response_guard_retry_slim_with_identity(
                         agent->alloc, agent->observer, agent->config, &agent->provider, turn_model,
-                        turn_model_len, msg, msg_len, &safe_content, &safe_content_len,
-                        &retry_report);
+                        turn_model_len, msg, msg_len, anchor, anchor_len, &safe_content,
+                        &safe_content_len, &retry_report);
                     if (retry_err == HU_OK && safe_content && safe_content_len > 0) {
-                        hu_agent_m3_on_provider_success(agent);
-                        safe_owned = true;
-                        hu_log_warn(
-                            "agent_stream", agent->observer,
-                            "response_guard RECOVERED: stream retry passed (len=%zu, stripped=%zu)",
-                            safe_content_len, retry_report.bytes_stripped);
+                        /* Post-retry persona_voice check: catch AI-disclosure that
+                         * leaked through the repair prompt anyway. response_guard
+                         * only checks for tokens/length/repetition — it does not
+                         * detect "I am an AI"-class phrases. Without this gate, the
+                         * twin-break shipped to the user. */
+                        if (!hu_persona_voice_response_is_clean(safe_content, safe_content_len)) {
+                            hu_log_error("agent_stream", agent->observer,
+                                         "persona_voice REJECT: stream retry produced "
+                                         "AI-disclosure (len=%zu) — suppressing twin-break",
+                                         safe_content_len);
+                            agent->alloc->free(agent->alloc->ctx, safe_content,
+                                               safe_content_len + 1);
+                            safe_content = NULL;
+                            safe_content_len = 0;
+                            safe_owned = false;
+                        } else {
+                            hu_agent_m3_on_provider_success(agent);
+                            safe_owned = true;
+                            hu_log_warn("agent_stream", agent->observer,
+                                        "response_guard RECOVERED: stream retry passed (len=%zu, "
+                                        "stripped=%zu)",
+                                        safe_content_len, retry_report.bytes_stripped);
+                        }
                     } else {
                         hu_log_error("agent_stream", agent->observer,
                                      "response_guard stream retry failed (err=%s)",
@@ -2210,17 +2239,34 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         size_t retry_txt_len = 0;
                         hu_guard_report_t rr;
                         memset(&rr, 0, sizeof(rr));
-                        hu_error_t rre = hu_response_guard_retry_slim(
+                        /* 2026-05-17: identity-anchored retry + persona_voice gate
+                         * (matches the stream-final path above). */
+                        const char *ranchor = NULL;
+                        size_t ranchor_len = 0;
+                        if (agent->persona && agent->persona->core_anchor &&
+                            agent->persona->core_anchor[0]) {
+                            ranchor = agent->persona->core_anchor;
+                            ranchor_len = strlen(ranchor);
+                        }
+                        hu_error_t rre = hu_response_guard_retry_slim_with_identity(
                             agent->alloc, agent->observer, agent->config, &agent->provider, tm, tml,
-                            msg, msg_len, &retry_txt, &retry_txt_len, &rr);
+                            msg, msg_len, ranchor, ranchor_len, &retry_txt, &retry_txt_len, &rr);
                         if (rre == HU_OK && retry_txt && retry_txt_len > 0) {
-                            hu_agent_m3_on_provider_success(agent);
-                            final_content = retry_txt;
-                            final_content_len = retry_txt_len;
-                            hu_log_warn("agent_stream", agent->observer,
-                                        "response_guard RECOVERED: post-stream slim retry "
-                                        "(len=%zu)",
-                                        retry_txt_len);
+                            if (!hu_persona_voice_response_is_clean(retry_txt, retry_txt_len)) {
+                                hu_log_error("agent_stream", agent->observer,
+                                             "persona_voice REJECT: post-stream slim retry "
+                                             "produced AI-disclosure (len=%zu) — suppressing",
+                                             retry_txt_len);
+                                agent->alloc->free(agent->alloc->ctx, retry_txt, retry_txt_len + 1);
+                            } else {
+                                hu_agent_m3_on_provider_success(agent);
+                                final_content = retry_txt;
+                                final_content_len = retry_txt_len;
+                                hu_log_warn("agent_stream", agent->observer,
+                                            "response_guard RECOVERED: post-stream slim retry "
+                                            "(len=%zu)",
+                                            retry_txt_len);
+                            }
                         }
                     }
                 } else if (guard_outcome == HU_GUARD_REWROTE) {
