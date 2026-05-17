@@ -48,13 +48,18 @@ Header `lora_ema.h` documented `HU_ERR_PRECONDITION` return code that doesn't ex
 
 ## P1 — Sprint 12 (US-11.4 follow-ups)
 
-### FU-11.4.a — AC-11.4.2/3/4 numerical-golden tests missing (HIGH)
-Source: US-11.4 critic HIGH.
-Story AC requires THREE tests with numerical correctness against the upstream `dpop` loss formula:
-- AC-11.4.2: loss reduces to standard DPO when `delta = 0` AND chosen log-prob ≥ reference chosen log-prob.
-- AC-11.4.3: penalty term fires when `log π(chosen) < log π_ref(chosen)` (the DCR signature).
-- AC-11.4.4: penalty term is zero when chosen log-prob is above reference (healthy regime).
-Delivered: only argv-shape tests in `tests/test_dpop.py`. The design doc designates `tests/test_dpop_loss.py` with mlx-runtime golden fixtures (skip-on-no-mlx guard). Fix: add `tests/test_dpop_loss.py` per design §3.2.
+### FU-11.4.a — AC-11.4.2/3/4 numerical-golden tests **NOT_DELIVERED** (HIGH; sprint-auditor correction)
+Source: US-11.4 critic HIGH, sprint-auditor Section B finding #1.
+
+**CORRECTION from prior framing** (sprint-auditor Phase 4): I previously framed this as "deferred per design §1.4". That framing was **INCORRECT**. Design §1.4 is titled "Why no custom Python loss" — it argues against writing a Python wrapper for the loss; it does NOT defer the numerical tests. Design §3.2 (line 86, line 114) **EXPLICITLY MANDATES** `tests/test_dpop_loss.py` with three named golden tests:
+
+- `test_dpop_penalty_fires_on_dcr_condition` (AC-11.4.3)
+- `test_dpop_penalty_zero_on_healthy_chosen` (AC-11.4.4)
+- `test_sprint8_iter80_dcr_prevented_by_dpop` (Sprint 8 regression guard, AC-11.4.4)
+
+These tests were NOT WRITTEN. AC-11.4.2/3/4 are **NOT_DELIVERED**, not DEFERRED. There is no D-entry in `sprints/sprint-11/decisions.md` approving a deferral. The implementer's "out of scope per design §1.4" claim in their commit message + my review.md echo of it are **both wrong**.
+
+**Sprint 12 entry condition**: land `tests/test_dpop_loss.py` per design §3.2 OR add an explicit D-entry to `decisions.md` retroactively approving the deferral with stakeholder (Seth) sign-off. The sprint-auditor lists this as condition #1 for clean Sprint 12 entry.
 
 ### FU-11.4.b — `getattr` bypasses argparse `choices=` guard (MED)
 Source: US-11.4 critic MED.
