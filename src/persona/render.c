@@ -24,9 +24,30 @@
 
 /* --- Helpers --------------------------------------------------------------- */
 
-/* Lower-case ASCII compare, no allocation. Returns true if s contains
- * needle as a case-insensitive substring. NULL/empty s -> false. */
-static bool str_contains_ci(const char *s, const char *needle) {
+/* Word-boundary-aware case-insensitive contains. Matches `needle` in `s`
+ * only when the match is preceded by start-of-string OR a non-alphanumeric
+ * char AND followed by end-of-string OR a non-alphanumeric char.
+ *
+ * Use this for classifying user-supplied strings into mutually-exclusive
+ * buckets when any bucket-keyword could be a substring of a string with
+ * the OPPOSITE intent. This file previously shipped three latent bugs
+ * because a plain substring matcher matched:
+ *   "informal"       contained "formal"      → rendered as formal
+ *   "unprofessional" contained "professional" → rendered as formal
+ *   "lukewarm"       contained "warm"        → mis-tagged as close
+ *
+ * Examples of the word-boundary contract:
+ *   str_contains_word_ci("lukewarm",    "warm") → FALSE (no boundary)
+ *   str_contains_word_ci("warm friend", "warm") → TRUE  (start + space)
+ *   str_contains_word_ci("close-friend","close") → TRUE (start + hyphen)
+ *   str_contains_word_ci("informal",    "formal") → FALSE (no left bdy)
+ *
+ * Word-boundary chars: anything that is NOT [A-Za-z0-9]. So spaces,
+ * underscores, hyphens, commas, etc. all bound a word — the right shape
+ * for persona JSON values which are commonly snake_case or "two words".
+ *
+ * See ~/.claude/rules/substring-classifier-pitfalls.md for the pattern. */
+static bool str_contains_word_ci(const char *s, const char *needle) {
     if (!s || !needle || !*needle)
         return false;
     size_t nlen = strlen(needle);
@@ -34,7 +55,11 @@ static bool str_contains_ci(const char *s, const char *needle) {
     if (slen < nlen)
         return false;
     for (size_t i = 0; i + nlen <= slen; i++) {
-        if (strncasecmp(s + i, needle, nlen) == 0)
+        if (strncasecmp(s + i, needle, nlen) != 0)
+            continue;
+        bool left_ok = (i == 0) || !isalnum((unsigned char)s[i - 1]);
+        bool right_ok = (i + nlen == slen) || !isalnum((unsigned char)s[i + nlen]);
+        if (left_ok && right_ok)
             return true;
     }
     return false;
@@ -295,8 +320,11 @@ const char *hu_persona_effective_formality(const char *overlay_formality,
     if (!contact_warmth || !*contact_warmth)
         return overlay_formality;
 
-    bool close = str_contains_ci(contact_warmth, "close") ||
-                 str_contains_ci(contact_warmth, "high") || str_contains_ci(contact_warmth, "warm");
+    /* Word-boundary match: avoids "lukewarm" → close, "highly distant" → close,
+     * "unfriendly" → friend, etc. See str_contains_word_ci docstring above. */
+    bool close = str_contains_word_ci(contact_warmth, "close") ||
+                 str_contains_word_ci(contact_warmth, "high") ||
+                 str_contains_word_ci(contact_warmth, "warm");
     if (!close)
         return overlay_formality;
 
@@ -311,12 +339,12 @@ const char *hu_persona_effective_formality(const char *overlay_formality,
      * Regression-pinned by effective_formality_close_with_casual_overlay_unchanged. */
     if (!overlay_formality || !*overlay_formality)
         return "casual";
-    bool overlay_casual = str_contains_ci(overlay_formality, "casual") ||
-                          str_contains_ci(overlay_formality, "informal");
+    bool overlay_casual = str_contains_word_ci(overlay_formality, "casual") ||
+                          str_contains_word_ci(overlay_formality, "informal");
     if (overlay_casual)
         return overlay_formality;
-    bool overlay_formal = str_contains_ci(overlay_formality, "formal") ||
-                          str_contains_ci(overlay_formality, "professional");
+    bool overlay_formal = str_contains_word_ci(overlay_formality, "formal") ||
+                          str_contains_word_ci(overlay_formality, "professional");
     if (overlay_formal)
         return "casual";
 
@@ -381,10 +409,15 @@ hu_error_t hu_persona_render_for_channel_with_warmth(const hu_persona_overlay_t 
      * overlay to casual. See hu_persona_effective_formality. */
     const char *eff_formality = hu_persona_effective_formality(overlay->formality, contact_warmth);
     if (eff_formality && *eff_formality) {
-        bool make_formal = str_contains_ci(eff_formality, "formal") ||
-                           str_contains_ci(eff_formality, "professional");
-        bool make_casual = (!make_formal) && (str_contains_ci(eff_formality, "casual") ||
-                                              str_contains_ci(eff_formality, "informal"));
+        /* Word-boundary check fixes the pre-existing bug where ov.formality
+         * = "informal" silently rendered as FORMAL (via str_contains_ci's
+         * substring match on the embedded "formal"). Same shape catches
+         * "unprofessional" → professional. Casual check still ordered
+         * first as defense-in-depth. */
+        bool make_casual = str_contains_word_ci(eff_formality, "casual") ||
+                           str_contains_word_ci(eff_formality, "informal");
+        bool make_formal = (!make_casual) && (str_contains_word_ci(eff_formality, "formal") ||
+                                              str_contains_word_ci(eff_formality, "professional"));
         if (make_formal) {
             /* Formal overlay also strips emoji even if emoji_usage isn't
              * explicitly "none" — formal channels (Slack) never emit emoji.

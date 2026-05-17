@@ -355,6 +355,91 @@ static void render_with_warmth_distant_preserves_formal(void) {
     free(out);
 }
 
+/* ── Substring-classifier word-boundary contract ────────────────────────────
+ *
+ * Two latent bugs from the same substring-overlap hazard caught last turn:
+ *
+ *   1. effective_formality("informal", "warm") returned "casual" (the
+ *      warmth-renderer slice introduced this; was fixed by short-circuiting
+ *      casual first — but the structural fix is word-boundary matching).
+ *   2. Stage 2 of the renderer itself: an "informal" overlay flows through
+ *      str_contains_ci(eff_formality, "formal") which matches because
+ *      "informal" contains "formal" as a substring. The result: the
+ *      assistant renders the user's "informal" preference as FORMAL
+ *      (CASUAL_TO_FORMAL swaps + capitalize first letter). This bug has
+ *      lived in render.c since the overlay-rendering slice landed; was
+ *      never caught because no test ever passed overlay->formality =
+ *      "informal" through the substantive render path.
+ *
+ * Three more lurking near-misses on the warmth side ("lukewarm" → close
+ * via "warm"; "highly distant" → close via "high"; "unprofessional" → ...
+ * the unprofessional case doesn't fire here because effective_formality
+ * only looks at the CONTACT warmth, not the overlay; "unprofessional"
+ * could be an overlay setting and would still hit the formal branch in
+ * Stage 2. Pinned below.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+static void effective_formality_lukewarm_does_not_override(void) {
+    /* The "lukewarm" near-miss for warmth: contains "warm" as substring
+     * but the word means cool, not close. Must NOT downgrade a formal
+     * overlay to casual. */
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", "lukewarm"), "formal");
+}
+
+static void effective_formality_unfriendly_does_not_override(void) {
+    /* "unfriendly" should not match anything in the close set. The
+     * warmth keywords are "close" / "high" / "warm" — "unfriendly"
+     * doesn't share substrings with any of them, but a future change
+     * adding "friend" to the close set would re-introduce the bug.
+     * Pinning the desired behavior so a future regression is loud. */
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", "unfriendly"), "formal");
+}
+
+static void render_informal_overlay_renders_casual(void) {
+    /* Pre-existing Stage 2 bug: ov.formality = "informal" goes through
+     * str_contains_ci("informal", "formal") which is TRUE — so the formal
+     * branch fires and CASUAL_TO_FORMAL swaps are applied to text the user
+     * wanted casual. The fix (word-boundary matching) makes "informal"
+     * fall into the make_casual branch as intended.
+     *
+     * Concrete invariant: "gonna grab coffee" with formality="informal"
+     * must KEEP the contraction. Under the bug, "gonna" gets swapped to
+     * "going to" (CASUAL_TO_FORMAL) and the first letter is capitalized. */
+    setup_alloc();
+    hu_persona_overlay_t ov = {0};
+    ov.formality = "informal";
+    const char *in = "gonna grab coffee";
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err =
+        hu_persona_render_for_channel(&ov, in, strlen(in), &test_alloc, &out, &out_len);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    /* The contraction stays — casual swaps are no-ops here. */
+    HU_ASSERT_STR_CONTAINS(out, "gonna");
+    /* Lowercase first letter: casual path. Formal would have capitalized. */
+    HU_ASSERT(out[0] >= 'a' && out[0] <= 'z');
+    free(out);
+}
+
+static void render_unprofessional_overlay_renders_casual(void) {
+    /* Same shape: "unprofessional" contains "professional" as a substring.
+     * The semantic intent is "casual / not professional" but the substring
+     * match would tag it as formal/professional and apply formality swaps. */
+    setup_alloc();
+    hu_persona_overlay_t ov = {0};
+    ov.formality = "unprofessional";
+    const char *in = "gonna grab coffee";
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err =
+        hu_persona_render_for_channel(&ov, in, strlen(in), &test_alloc, &out, &out_len);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    /* Neither make_formal nor make_casual should fire — "unprofessional"
+     * is not a known keyword once we use word boundaries. Identity copy. */
+    HU_ASSERT_STR_CONTAINS(out, "gonna");
+    free(out);
+}
+
 void run_persona_overlay_render_tests(void);
 void run_persona_overlay_render_tests(void) {
     HU_TEST_SUITE("persona_overlay_render");
@@ -380,4 +465,9 @@ void run_persona_overlay_render_tests(void) {
     HU_RUN_TEST(render_with_warmth_close_downgrades_formal_overlay);
     HU_RUN_TEST(render_with_warmth_null_matches_original_render);
     HU_RUN_TEST(render_with_warmth_distant_preserves_formal);
+
+    HU_RUN_TEST(effective_formality_lukewarm_does_not_override);
+    HU_RUN_TEST(effective_formality_unfriendly_does_not_override);
+    HU_RUN_TEST(render_informal_overlay_renders_casual);
+    HU_RUN_TEST(render_unprofessional_overlay_renders_casual);
 }

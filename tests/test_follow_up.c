@@ -388,6 +388,65 @@ static void followup_dedup_overwrites_oldest_after_capacity(void) {
     HU_ASSERT_TRUE(hu_followup_dedup_seen(&d, 16));
 }
 
+/* ── Substring-classifier word-boundary contract ────────────────────────────
+ *
+ * The original hu_followup_warmth_from_string used naive case-insensitive
+ * substring matching. That makes any keyword fire on any string that
+ * happens to contain it as a substring — including words where the
+ * intent is the OPPOSITE of the keyword. Three lurking near-misses:
+ *
+ *   "lukewarm"      — means cool/distant, but contains "warm" → CLOSE  ❌
+ *   "unfriendly"    — means distant, but contains "friend" → FRIEND    ❌
+ *   "highly distant" — means distant, but contains "high" → CLOSE      ❌
+ *
+ * The fix is structural: match keywords only at word boundaries (start of
+ * string, end of string, or surrounded by non-alphanumeric characters).
+ * Same pattern, same hazard as the "informal" ⊃ "formal" bug found while
+ * writing the previous turn's warmth-renderer tests. Pinned as
+ * positive-contract assertions per .claude/rules/tests-that-pin-bugs.md.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+static void followup_warmth_lukewarm_must_not_map_to_close(void) {
+    /* "lukewarm" connotes distance, not closeness. The substring-matcher
+     * would otherwise fire on the embedded "warm" and produce a fast 60-min
+     * follow-up delay — totally inappropriate for a lukewarm contact. */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("lukewarm"), (int)HU_FOLLOWUP_WARMTH_NONE);
+}
+
+static void followup_warmth_unfriendly_must_not_map_to_friend(void) {
+    /* "unfriendly" is the antonym of friendly. The substring-matcher would
+     * otherwise fire on the embedded "friend" and schedule follow-ups to
+     * someone the user has explicitly labeled distant. */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("unfriendly"), (int)HU_FOLLOWUP_WARMTH_NONE);
+}
+
+static void followup_warmth_highly_distant_must_not_map_to_close(void) {
+    /* "highly distant" — the embedded "high" must NOT trigger CLOSE.
+     * The phrase explicitly disclaims closeness. */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("highly distant"),
+                 (int)HU_FOLLOWUP_WARMTH_NONE);
+}
+
+static void followup_warmth_close_friend_still_maps_to_close(void) {
+    /* Regression guard: the word-boundary fix MUST preserve the existing
+     * "close friend" → CLOSE mapping. Both words bounded, "close" wins
+     * over "friend" via order. If the fix is over-strict (e.g. requires
+     * exact equality), this fails first. */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("close friend"),
+                 (int)HU_FOLLOWUP_WARMTH_CLOSE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("warm friend"), (int)HU_FOLLOWUP_WARMTH_CLOSE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("high warmth"), (int)HU_FOLLOWUP_WARMTH_CLOSE);
+}
+
+static void followup_warmth_punctuation_boundaries_still_match(void) {
+    /* Underscores, hyphens, commas — all word-boundary chars. Real
+     * persona JSON often uses underscores ("close_friend"). */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("close_friend"),
+                 (int)HU_FOLLOWUP_WARMTH_CLOSE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("close-friend"),
+                 (int)HU_FOLLOWUP_WARMTH_CLOSE);
+}
+
 /* ── Registration ───────────────────────────────────────────────────────── */
 
 void run_follow_up_tests(void);
@@ -430,4 +489,10 @@ void run_follow_up_tests(void) {
     HU_RUN_TEST(followup_dedup_seen_on_empty_returns_false);
     HU_RUN_TEST(followup_dedup_null_handling);
     HU_RUN_TEST(followup_dedup_overwrites_oldest_after_capacity);
+
+    HU_RUN_TEST(followup_warmth_lukewarm_must_not_map_to_close);
+    HU_RUN_TEST(followup_warmth_unfriendly_must_not_map_to_friend);
+    HU_RUN_TEST(followup_warmth_highly_distant_must_not_map_to_close);
+    HU_RUN_TEST(followup_warmth_close_friend_still_maps_to_close);
+    HU_RUN_TEST(followup_warmth_punctuation_boundaries_still_match);
 }
