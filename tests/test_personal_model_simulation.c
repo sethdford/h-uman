@@ -177,8 +177,8 @@ static size_t sim_user_turns_through(size_t up_to) {
 
 /* Helper: find a fact whose predicate contains `pred` and object
  * contains `obj` (case-insensitive). Returns NULL on miss. */
-static const hu_heuristic_fact_t *sim_find_fact(const hu_personal_model_t *model,
-                                                const char *pred, const char *obj) {
+static const hu_heuristic_fact_t *sim_find_fact(const hu_personal_model_t *model, const char *pred,
+                                                const char *obj) {
     for (size_t i = 0; i < model->fact_count; i++) {
         const hu_heuristic_fact_t *f = &model->facts[i];
         const char *p = f->predicate;
@@ -226,11 +226,13 @@ static void simulation_b1_turn_1_initial_state(void) {
     sim_run_through(&m, 1);
 
     /* After turn 1 ("hi! my name is alex"): one user message, one
-     * fact extracted (my name is alex), one style sample. */
+     * fact extracted (name is alex), one style sample.
+     * NOTE: 2026-05-16 P2-6 paraphrased predicates to third-person for
+     * outbound safety, so "my name is" stores as "name is" etc. */
     HU_ASSERT_EQ((unsigned)m.interaction_count, 1U);
     HU_ASSERT_EQ((unsigned)m.style.sample_count, 1U);
     HU_ASSERT_TRUE(m.fact_count >= 1U);
-    const hu_heuristic_fact_t *name = sim_find_fact(&m, "my name is", "alex");
+    const hu_heuristic_fact_t *name = sim_find_fact(&m, "name is", "alex");
     HU_ASSERT_NOT_NULL(name);
     HU_ASSERT_TRUE(name->confidence >= 0.85f); /* 0.9 in pattern table */
 }
@@ -243,14 +245,14 @@ static void simulation_b1_turn_10_accumulating(void) {
     /* By turn 10 we expect: name, work, working-on (deck), love
      * (coffee), prefer (pour over), hate (mornings ~ "mornings"). */
     HU_ASSERT_EQ((unsigned)m.interaction_count, 10U);
-    HU_ASSERT_EQ((unsigned)m.style.sample_count,
-                 (unsigned)sim_user_turns_through(10));
+    HU_ASSERT_EQ((unsigned)m.style.sample_count, (unsigned)sim_user_turns_through(10));
 
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "my name is", "alex"));
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "i work at", "initech"));
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "i'm working on", NULL));
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "i love", "coffee"));
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "i hate", NULL));
+    /* Predicates use P2-6 third-person paraphrased forms. */
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "name is", "alex"));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "works at", "initech"));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "is working on", NULL));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "loves", "coffee"));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "hates", NULL));
     HU_ASSERT_TRUE(m.fact_count >= 4U);
 
     /* Topic accumulation kicked in (facts insert bumps topics). */
@@ -263,8 +265,7 @@ static void simulation_b1_turn_25_style_emerges(void) {
     sim_run_through(&m, 25);
 
     HU_ASSERT_EQ((unsigned)m.interaction_count, 25U);
-    HU_ASSERT_EQ((unsigned)m.style.sample_count,
-                 (unsigned)sim_user_turns_through(25));
+    HU_ASSERT_EQ((unsigned)m.style.sample_count, (unsigned)sim_user_turns_through(25));
 
     /* The fixture deliberately uses lowercase + chat abbreviations
      * for many user turns. After ~15 user samples the EWMA-tracked
@@ -290,7 +291,7 @@ static void simulation_b1_turn_25_style_emerges(void) {
      * since both observations had confidence 0.8, the lifted value
      * is still ~0.8 (no change). What we CAN check is that the
      * fact's last_seen_at moved forward past T7's wall clock. */
-    const hu_heuristic_fact_t *love = sim_find_fact(&m, "i love", NULL);
+    const hu_heuristic_fact_t *love = sim_find_fact(&m, "loves", NULL);
     HU_ASSERT_NOT_NULL(love);
     HU_ASSERT_TRUE(love->last_seen_at > SIM_T0 + 1LL * 86400LL);
 }
@@ -302,8 +303,7 @@ static void simulation_b1_turn_50_terminal_state(void) {
 
     /* Terminal-state contract. */
     HU_ASSERT_EQ((unsigned)m.interaction_count, 50U);
-    HU_ASSERT_EQ((unsigned)m.style.sample_count,
-                 (unsigned)sim_user_turns_through(50));
+    HU_ASSERT_EQ((unsigned)m.style.sample_count, (unsigned)sim_user_turns_through(50));
     HU_ASSERT_EQ((long long)m.style.last_observed_at, (long long)last_ts);
     HU_ASSERT_EQ((long long)m.updated_at, (long long)last_ts);
     HU_ASSERT_EQ((long long)m.created_at, (long long)(SIM_T0 + 9LL * 3600LL));
@@ -312,15 +312,15 @@ static void simulation_b1_turn_50_terminal_state(void) {
     HU_ASSERT_TRUE(m.fact_count <= (size_t)HU_PM_MAX_FACTS);
     HU_ASSERT_TRUE(m.topic_count <= (size_t)HU_PM_MAX_TOPICS);
 
-    /* Identity fact survived 50 turns. */
-    const hu_heuristic_fact_t *name = sim_find_fact(&m, "my name is", "alex");
+    /* Identity fact survived 50 turns. (P2-6 paraphrase) */
+    const hu_heuristic_fact_t *name = sim_find_fact(&m, "name is", "alex");
     HU_ASSERT_NOT_NULL(name);
 
-    /* "i work at initech" fact still present (single observation;
-     * the day-14 turn uses "i'm working on" / different predicate,
+    /* "works at initech" fact still present (single observation;
+     * the day-14 turn uses "is working on" / different predicate,
      * which is treated as a separate prescriptive fact, not a
-     * refresh of "i work at"). */
-    const hu_heuristic_fact_t *work = sim_find_fact(&m, "i work at", "initech");
+     * refresh of "works at"). */
+    const hu_heuristic_fact_t *work = sim_find_fact(&m, "works at", "initech");
     HU_ASSERT_NOT_NULL(work);
 
     /* The "i love" predicate, on the other hand, is hit multiple
@@ -329,7 +329,7 @@ static void simulation_b1_turn_50_terminal_state(void) {
      * last_seen_at. Verify the refresh ran — last_seen_at on the
      * single "i love" fact should be from the last love-mention,
      * not the first. */
-    const hu_heuristic_fact_t *love = sim_find_fact(&m, "i love", NULL);
+    const hu_heuristic_fact_t *love = sim_find_fact(&m, "loves", NULL);
     HU_ASSERT_NOT_NULL(love);
     /* T42 is on day 13 ("i love coffee"). last_seen_at should be at
      * or after that timestamp. */
@@ -364,7 +364,7 @@ static void simulation_b2_fact_decay_halves_at_sim_end_plus_one_half_life(void) 
     hu_personal_model_init(&m);
     sim_run_through(&m, k_simulation_50turns_count);
 
-    const hu_heuristic_fact_t *love = sim_find_fact(&m, "i love", NULL);
+    const hu_heuristic_fact_t *love = sim_find_fact(&m, "loves", NULL);
     HU_ASSERT_NOT_NULL(love);
     HU_ASSERT_TRUE(love->last_seen_at > 0);
 
@@ -433,8 +433,7 @@ static void simulation_b2_style_freshness_decays_after_long_silence(void) {
     sim_run_through(&m, k_simulation_50turns_count);
 
     HU_ASSERT_TRUE(m.style.last_observed_at > 0);
-    float fresh_now =
-        hu_personal_communication_style_freshness(&m.style, m.style.last_observed_at);
+    float fresh_now = hu_personal_communication_style_freshness(&m.style, m.style.last_observed_at);
     HU_ASSERT_FLOAT_EQ(fresh_now, 1.0f, 0.001f);
 
     int64_t two_hl = m.style.last_observed_at + 2 * HU_PM_STYLE_OBSERVATION_HALF_LIFE_SEC;
@@ -514,25 +513,22 @@ static const char *k_b3_templates[] = {
     "i'm working on {OBJ}",
     "i need to {OBJ}",
     "i'm trying to {OBJ}",
-    "u up?",                     /* doesn't match — exits early path */
-    "ok",                        /* short message — style sample */
-    "BTW THAT'S COOL",           /* uppercase — drives lowercase_ratio down */
-    "lol",                       /* abbreviation */
-    "ty",                        /* abbreviation */
-    "rn busy",                   /* abbreviation cluster */
+    "u up?",           /* doesn't match — exits early path */
+    "ok",              /* short message — style sample */
+    "BTW THAT'S COOL", /* uppercase — drives lowercase_ratio down */
+    "lol",             /* abbreviation */
+    "ty",              /* abbreviation */
+    "rn busy",         /* abbreviation cluster */
 };
-static const size_t k_b3_template_count =
-    sizeof(k_b3_templates) / sizeof(k_b3_templates[0]);
+static const size_t k_b3_template_count = sizeof(k_b3_templates) / sizeof(k_b3_templates[0]);
 
 static const char *k_b3_objects[] = {
-    "coffee", "tea", "hiking", "running", "cooking", "reading",
-    "portland", "seattle", "san francisco", "new york",
-    "initech", "globex", "soylent",
-    "the deck", "the launch", "the migration", "the runbook",
-    "ship today", "ship tomorrow", "draft the spec",
+    "coffee",        "tea",         "hiking",     "running",       "cooking",
+    "reading",       "portland",    "seattle",    "san francisco", "new york",
+    "initech",       "globex",      "soylent",    "the deck",      "the launch",
+    "the migration", "the runbook", "ship today", "ship tomorrow", "draft the spec",
 };
-static const size_t k_b3_object_count =
-    sizeof(k_b3_objects) / sizeof(k_b3_objects[0]);
+static const size_t k_b3_object_count = sizeof(k_b3_objects) / sizeof(k_b3_objects[0]);
 
 static void b3_render_message(unsigned int *seed, char *out, size_t cap) {
     /* rand_r is BSD/POSIX, available on macOS + Linux glibc. The
@@ -606,12 +602,10 @@ static void b3_assert_invariants(const hu_personal_model_t *m, int64_t now) {
     /* Style axes. */
     HU_ASSERT_TRUE(m->style.formality >= 0.0f && m->style.formality <= 1.0f + 0.001f);
     HU_ASSERT_TRUE(m->style.verbosity >= 0.0f && m->style.verbosity <= 1.0f + 0.001f);
-    HU_ASSERT_TRUE(m->style.emoji_frequency >= 0.0f &&
-                   m->style.emoji_frequency <= 1.0f + 0.001f);
+    HU_ASSERT_TRUE(m->style.emoji_frequency >= 0.0f && m->style.emoji_frequency <= 1.0f + 0.001f);
     HU_ASSERT_TRUE(m->style.humor_receptivity >= 0.0f &&
                    m->style.humor_receptivity <= 1.0f + 0.001f);
-    HU_ASSERT_TRUE(m->style.lowercase_ratio >= 0.0f &&
-                   m->style.lowercase_ratio <= 1.0f + 0.001f);
+    HU_ASSERT_TRUE(m->style.lowercase_ratio >= 0.0f && m->style.lowercase_ratio <= 1.0f + 0.001f);
     HU_ASSERT_TRUE(m->style.abbreviation_ratio >= 0.0f &&
                    m->style.abbreviation_ratio <= 1.0f + 0.001f);
 
@@ -678,12 +672,10 @@ static void simulation_b3_thousand_turn_save_load_after_stress(void) {
     hu_personal_model_init(&loaded);
     HU_ASSERT_EQ(hu_personal_model_load(&loaded, path), HU_OK);
 
-    HU_ASSERT_EQ((unsigned)loaded.interaction_count,
-                 (unsigned)m.interaction_count);
+    HU_ASSERT_EQ((unsigned)loaded.interaction_count, (unsigned)m.interaction_count);
     HU_ASSERT_EQ((unsigned)loaded.fact_count, (unsigned)m.fact_count);
     HU_ASSERT_EQ((unsigned)loaded.topic_count, (unsigned)m.topic_count);
-    HU_ASSERT_EQ((unsigned)loaded.style.sample_count,
-                 (unsigned)m.style.sample_count);
+    HU_ASSERT_EQ((unsigned)loaded.style.sample_count, (unsigned)m.style.sample_count);
 
     b3_assert_invariants(&loaded, last_ts);
 
@@ -706,8 +698,7 @@ static void b4_assert_models_equivalent(const hu_personal_model_t *a,
     HU_ASSERT_EQ((unsigned)a->style.sample_count, (unsigned)b->style.sample_count);
     HU_ASSERT_EQ((long long)a->created_at, (long long)b->created_at);
     HU_ASSERT_EQ((long long)a->updated_at, (long long)b->updated_at);
-    HU_ASSERT_EQ((long long)a->style.last_observed_at,
-                 (long long)b->style.last_observed_at);
+    HU_ASSERT_EQ((long long)a->style.last_observed_at, (long long)b->style.last_observed_at);
     HU_ASSERT_EQ((unsigned)a->version, (unsigned)b->version);
 
     for (size_t i = 0; i < a->fact_count; i++) {
@@ -747,10 +738,8 @@ static void simulation_b4_save_load_after_50_turns_round_trips_state(void) {
     /* Build prompt on both — must be byte-identical. */
     char prompt_source[8192];
     char prompt_loaded[8192];
-    size_t n_src = hu_personal_model_build_prompt(&source, prompt_source,
-                                                  sizeof(prompt_source));
-    size_t n_load = hu_personal_model_build_prompt(&loaded, prompt_loaded,
-                                                   sizeof(prompt_loaded));
+    size_t n_src = hu_personal_model_build_prompt(&source, prompt_source, sizeof(prompt_source));
+    size_t n_load = hu_personal_model_build_prompt(&loaded, prompt_loaded, sizeof(prompt_loaded));
     HU_ASSERT_EQ((unsigned)n_src, (unsigned)n_load);
     HU_ASSERT_STR_EQ(prompt_source, prompt_loaded);
 
@@ -794,8 +783,7 @@ static void simulation_b4_two_cycle_save_load_preserves_state(void) {
     HU_ASSERT_EQ((unsigned)cycle1_loaded.interaction_count, 100U);
     /* Style sample_count should also have ~doubled (only user turns
      * count). */
-    HU_ASSERT_TRUE(cycle1_loaded.style.sample_count >
-                   cycle1_source.style.sample_count);
+    HU_ASSERT_TRUE(cycle1_loaded.style.sample_count > cycle1_source.style.sample_count);
 
     /* Save the cycle-2 model and reload. */
     HU_ASSERT_EQ(hu_personal_model_save(&cycle1_loaded, path), HU_OK);
