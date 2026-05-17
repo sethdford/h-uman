@@ -5059,6 +5059,63 @@ static void test_lora_runner_respects_max_examples(void) {
     runner_test_cleanup(tmpdir);
 }
 
+/* M3 Bridge A Phase 1 — `lora-persona --export-jsonl <path>` envelope
+ * test. Confirms that the CLI loads a persona, walks its example banks,
+ * and writes one JSON object per example into the output JSONL. This is
+ * the unit-of-work that any external fine-tune toolchain
+ * (llama.cpp/finetune, axolotl, mlx-lm.lora) consumes as its training
+ * input — so a regression that silently empties the JSONL is a
+ * personalization-pipeline outage by another name. The HU_IS_TEST guard
+ * was loosened so this pure (load → write → exit) path runs through the
+ * test binary; the training paths below are still short-circuited. */
+static void test_lora_persona_export_jsonl_writes_alpaca_shape(void) {
+    char tmpdir[256];
+    if (!runner_test_setup_persona(tmpdir, sizeof(tmpdir), "export_jsonl_test"))
+        return;
+    setenv("HU_PERSONA_DIR", tmpdir, 1);
+
+    char output[1024];
+    snprintf(output, sizeof(output), "%s/train.jsonl", tmpdir);
+
+    const char *argv[] = {"lora-persona", "--persona",       "export_jsonl_test",
+                          "--export-jsonl", output};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_ml_cli_lora_persona(&alloc, 5, argv);
+    unsetenv("HU_PERSONA_DIR");
+
+    HU_ASSERT_EQ(err, HU_OK);
+
+    FILE *fp = fopen(output, "rb");
+    HU_ASSERT_NOT_NULL(fp);
+    char buf[2048] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    HU_ASSERT_TRUE(n > 0);
+    /* Alpaca shape: one JSON-line per example, each line has the
+     * triple instruction/input/output. The fixture has 3 examples
+     * across two banks (cli + telegram), so all three responses
+     * must appear in the output. */
+    HU_ASSERT_TRUE(strstr(buf, "\"instruction\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"input\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"output\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "hey") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "good u") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "ayy lmk") != NULL);
+
+    runner_test_cleanup(tmpdir);
+}
+
+/* Without `--persona` the export-jsonl path must reject (the underlying
+ * exporter needs a persona to walk). Catches a regression where the
+ * pure path under HU_IS_TEST accidentally falls through to a NULL
+ * persona name. */
+static void test_lora_persona_export_jsonl_without_persona_rejects(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"lora-persona", "--export-jsonl", "/tmp/should_not_be_written.jsonl"};
+    hu_error_t err = hu_ml_cli_lora_persona(&alloc, 3, argv);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+}
+
 static void test_fidelity_status_emits_json_with_baseline(void) {
     /* fidelity-status without --before/--after must still emit a
      * valid JSON object containing baseline metrics and ab.available
@@ -5330,6 +5387,9 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_lora_runner_writes_response_array_in_test_mode);
     HU_RUN_TEST(test_lora_runner_rejects_missing_args);
     HU_RUN_TEST(test_lora_runner_respects_max_examples);
+    /* M3 Bridge A Phase 1 — lora-persona --export-jsonl envelope */
+    HU_RUN_TEST(test_lora_persona_export_jsonl_writes_alpaca_shape);
+    HU_RUN_TEST(test_lora_persona_export_jsonl_without_persona_rejects);
     HU_RUN_TEST(test_fidelity_status_emits_json_with_baseline);
     HU_RUN_TEST(test_fidelity_status_includes_ab_when_files_provided);
     HU_RUN_TEST(test_lora_persona_caveat_block_disclaims_frontier);

@@ -806,27 +806,33 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         }
     }
 #ifdef HU_IS_TEST
-    (void)alloc;
-    (void)persona_name;
-    (void)checkpoint_path;
-    (void)output_path;
-    (void)rank;
-    (void)max_steps;
-    (void)export_jsonl_path;
-    (void)from_history_db;
-    (void)from_history_max_per_channel;
-    (void)persist_persona;
-    (void)backend;
-    (void)mlx_model;
-    (void)data_dir;
-    (void)num_layers;
-    (void)max_seq_length;
-    (void)save_every;
-    (void)learning_rate;
-    printf("[lora-persona] test mode: skipped\n");
-    printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
-    return HU_OK;
-#else
+    /* M3 Bridge A Phase 1 — the `--export-jsonl` path is pure (loads the
+     * persona, writes a JSONL, exits). No subprocess, no provider, no
+     * HUML training loop. Allow it through under HU_IS_TEST so the CLI
+     * envelope is testable end-to-end. The training paths below (huml,
+     * MLX subprocess) still short-circuit. */
+    if (!export_jsonl_path || !export_jsonl_path[0]) {
+        (void)alloc;
+        (void)persona_name;
+        (void)checkpoint_path;
+        (void)output_path;
+        (void)rank;
+        (void)max_steps;
+        (void)from_history_db;
+        (void)from_history_max_per_channel;
+        (void)persist_persona;
+        (void)backend;
+        (void)mlx_model;
+        (void)data_dir;
+        (void)num_layers;
+        (void)max_seq_length;
+        (void)save_every;
+        (void)learning_rate;
+        printf("[lora-persona] test mode: skipped\n");
+        printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+        return HU_OK;
+    }
+#endif
     if (!persona_name) {
         fprintf(stderr, "lora-persona requires --persona <name>\n");
         return HU_ERR_INVALID_ARGUMENT;
@@ -964,11 +970,32 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         if (data_dir) {
             snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", data_dir);
         } else {
-            char tmp_dir[256];
-            snprintf(tmp_dir, sizeof(tmp_dir), "/tmp/hu-lora-frontier-%d", (int)getpid());
-            mkdir(tmp_dir, 0755);
-            char train_path[512];
-            snprintf(train_path, sizeof(train_path), "%s/train.jsonl", tmp_dir);
+            /* M3 Bridge A Phase 1 — write the training JSONL into the
+             * adapter's output directory, not /tmp. Two wins:
+             *  (1) reproducibility — the JSONL survives the training run
+             *      and an operator can re-train the exact same data via
+             *      `--data-dir <adapter_output_path>` later.
+             *  (2) auditability — the inputs that produced an adapter
+             *      live alongside the adapter, not on a tmpfs that
+             *      cycles on reboot.
+             * Falls back to `/tmp/hu-lora-frontier-<pid>` only when the
+             * adapter dir cannot be created (read-only HOME, etc.). */
+            char train_path[1024];
+            const char *jsonl_dir = lcfg.adapter_output_path;
+            char fallback_dir[256];
+            if (mkdir(jsonl_dir, 0755) != 0 && errno != EEXIST) {
+                snprintf(fallback_dir, sizeof(fallback_dir),
+                         "/tmp/hu-lora-frontier-%d", (int)getpid());
+                mkdir(fallback_dir, 0755);
+                jsonl_dir = fallback_dir;
+                fprintf(stderr,
+                        "[lora-persona] note: adapter dir not writable, "
+                        "JSONL falling back to %s (training will succeed "
+                        "but the data file won't persist alongside the "
+                        "adapter).\n",
+                        jsonl_dir);
+            }
+            snprintf(train_path, sizeof(train_path), "%s/train.jsonl", jsonl_dir);
             size_t exported = 0;
             hu_error_t exp_err =
                 hu_persona_bank_export_jsonl(&persona, train_path, strlen(train_path), &exported);
@@ -981,7 +1008,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                 hu_persona_deinit(alloc, &persona);
                 return exp_err != HU_OK ? exp_err : HU_ERR_INVALID_ARGUMENT;
             }
-            snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", tmp_dir);
+            snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", jsonl_dir);
             printf("[lora-persona] exported %zu persona example(s) to %s\n", exported, train_path);
         }
 
@@ -1409,7 +1436,6 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     free_delta_examples(alloc, delta_examples, delta_examples_count);
     hu_persona_deinit(alloc, &persona);
     return err;
-#endif
 }
 
 /* Track D D2.2 — offline persona-fidelity baseline.
