@@ -4,12 +4,68 @@
 #include "human/agent/proactive.h"
 #include "human/core/string.h"
 #include "human/memory.h"
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* P2-4 (2026-05-16 incident): local outbound-safety predicate for memory
+ * entries that hu_proactive_build_starter is about to inject into the
+ * starter prompt. The previous code memcpy'd raw `entries[i].content` —
+ * which let "I confessed something terrible" reach a family contact.
+ *
+ * A memory entry is UNSAFE if it contains:
+ *   - first-person pronouns/contractions (i, i'm, i'll, my, me, mine)
+ *   - confession verbs (confessed, admitted, lied, cheated)
+ *   - bare emotion keywords (lonely, depressed, suicidal, anxious,
+ *     scared, terrible, dying, crying)
+ *   - format-specifier or newline injection
+ *
+ * Local rather than depending on the Phase 1 hu_proactive_topic_is_safe
+ * symbol — when that branch lands the two predicates can be reconciled. */
+static bool proactive_entry_content_is_safe(const char *content, size_t content_len) {
+    if (!content || content_len == 0)
+        return false;
+    char buf[256];
+    size_t copy = content_len < sizeof(buf) - 1 ? content_len : sizeof(buf) - 1;
+    for (size_t i = 0; i < copy; i++)
+        buf[i] = (char)tolower((unsigned char)content[i]);
+    buf[copy] = '\0';
+
+    static const char *first_person_tokens[] = {
+        " i ", " i'm", " i'll", "i'm ", "i'll ", " my ", " me ", " mine ", "myself", NULL,
+    };
+    for (const char **p = first_person_tokens; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+    /* Lone "i" at start. */
+    if (copy >= 2 && buf[0] == 'i' && (buf[1] == ' ' || buf[1] == '\''))
+        return false;
+
+    static const char *confession_verbs[] = {
+        "confessed", "admitted", "lied to", "cheated on", "betrayed", "secret", NULL,
+    };
+    for (const char **p = confession_verbs; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    static const char *charged_keywords[] = {
+        "lonely",     "depressed", "suicidal",  "scared",    "terrible",
+        "dying",      "crying",    "anxious",   "exhausted", "burnt out",
+        "burned out", "broken",    "miserable", "hopeless",  NULL,
+    };
+    for (const char **p = charged_keywords; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    if (strchr(buf, '%') || strchr(buf, '\n') || strchr(buf, '\r'))
+        return false;
+
+    return true;
+}
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/superhuman.h"
 #endif
@@ -552,6 +608,11 @@ hu_error_t hu_proactive_build_starter(hu_allocator_t *alloc, hu_memory_t *memory
     for (size_t i = 0; i < count; i++) {
         if (!entries[i].content || entries[i].content_len == 0)
             continue;
+        /* P2-4 (2026-05-16): skip unsafe entries before injecting them
+         * into the starter prompt. The previous code shipped confession
+         * fragments verbatim. */
+        if (!proactive_entry_content_is_safe(entries[i].content, entries[i].content_len))
+            continue;
         size_t show = entries[i].content_len > 100 ? 100 : entries[i].content_len;
         size_t need = len + 2 + show + 2; /* "- " + content + "\n" */
         while (need > cap) {
@@ -674,7 +735,7 @@ bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
     char *mm_json = NULL;
     size_t mm_len = 0;
     if (hu_superhuman_micro_moment_list(memory, alloc, contact_id, contact_id_len, 20, &mm_json,
-                                         &mm_len) != HU_OK ||
+                                        &mm_len) != HU_OK ||
         !mm_json || mm_len == 0)
         return false;
 
@@ -729,12 +790,10 @@ bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
     int n;
     if ((s >> 16u) % 2u == 0) {
         size_t show = fact_len > 80 ? 80 : fact_len;
-        n = snprintf(message_out, msg_cap, "random question — do you still %.*s?",
-                     (int)show, fact);
+        n = snprintf(message_out, msg_cap, "random question — do you still %.*s?", (int)show, fact);
     } else {
         size_t show = fact_len > 80 ? 80 : fact_len;
-        n = snprintf(message_out, msg_cap, "hey whatever happened with %.*s?",
-                     (int)show, fact);
+        n = snprintf(message_out, msg_cap, "hey whatever happened with %.*s?", (int)show, fact);
     }
 
     /* Free mm_json AFTER we've used the fact pointers */
@@ -797,13 +856,12 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
                                           &commitment_count) == HU_OK &&
         commitments && commitment_count > 0) {
         for (size_t i = 0; i < commitment_count; i++) {
-            size_t slen =
-                strnlen(commitments[i].contact_id, sizeof(commitments[i].contact_id) - 1);
+            size_t slen = strnlen(commitments[i].contact_id, sizeof(commitments[i].contact_id) - 1);
             if (slen != contact_id_len ||
                 memcmp(commitments[i].contact_id, contact_id, contact_id_len) != 0)
                 continue;
-            size_t desc_len = strnlen(commitments[i].description,
-                                      sizeof(commitments[i].description) - 1);
+            size_t desc_len =
+                strnlen(commitments[i].description, sizeof(commitments[i].description) - 1);
             if (desc_len == 0)
                 continue;
             if (desc_len > 200)
