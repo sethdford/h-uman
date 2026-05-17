@@ -1216,6 +1216,21 @@ hu_error_t hu_slack_on_webhook(void *channel_ctx, hu_allocator_t *alloc, const c
         return HU_OK;
     }
 
+    /* Phase 2 RL SOTA — Task 12. Reaction webhook branch lives in
+     * slack_reactions.c to avoid the hu_reaction_type_t (channel.h) ↔
+     * hu_reaction_kind_t (reaction_event.h) enumerator-name collision.
+     * See breadcrumb in that file. Must run BEFORE the event_type=="message"
+     * filter below — that filter early-returns HU_OK for any non-message
+     * event_type and would otherwise silently drop reaction_added /
+     * reaction_removed events. */
+    extern int hu_slack_handle_reaction_webhook(const char *body, size_t body_len,
+                                                hu_allocator_t *alloc,
+                                                const char *bot_user_id);
+    if (hu_slack_handle_reaction_webhook(body, body_len, alloc, c->bot_user_id)) {
+        hu_json_free(alloc, parsed);
+        return HU_OK;
+    }
+
     const char *event_type = hu_json_get_string(event, "type");
     if (!event_type || strcmp(event_type, "message") != 0) {
         hu_json_free(alloc, parsed);

@@ -233,6 +233,40 @@ struct hu_agent {
     size_t contact_context_len;
     const char *conversation_context;
     size_t conversation_context_len;
+    /* Active scene-direction text for this turn (e.g. "casual short, dry").
+     * Set by the daemon before hu_agent_turn / hu_agent_turn_stream_v2; not
+     * owned by the agent. The response_guard uses this as
+     * `hu_guard_context_t.director_text` to reject any verbatim quote of
+     * the directive in the model's reply (G6, Sprint 31).
+     * NULL / 0 = no signal — guard does not enforce G6 for this turn. */
+    const char *scene_direction_text;
+    size_t scene_direction_text_len;
+
+    /* Sprint 37 — Ring buffer of recent director strings (excluding the
+     * currently-active one in `scene_direction_text`). Owned by the
+     * agent, allocated/freed on `agent->alloc`. Each entry is a
+     * NUL-terminated copy of a past director string, truncated to
+     * HU_DIRECTOR_TEXT_CAP bytes. G6 iterates the buffer to catch
+     * cross-turn director echoes — model output that quotes a previous
+     * turn's director rather than the current one.
+     *
+     * Slot indexing: most-recent-first. Slot 0 = previous turn,
+     * slot 1 = two turns ago, etc.
+     *
+     * `director_history_count` is the number of valid slots, capped
+     * at HU_DIRECTOR_HISTORY_MAX. Push is idempotent on NULL or text
+     * shorter than HU_GUARD_DIRECTOR_ECHO_MIN_MATCH (30 bytes — would
+     * not trip G6 anyway). */
+#ifndef HU_DIRECTOR_HISTORY_MAX
+#define HU_DIRECTOR_HISTORY_MAX 4
+#endif
+#ifndef HU_DIRECTOR_TEXT_CAP
+#define HU_DIRECTOR_TEXT_CAP 256
+#endif
+    char *director_history[HU_DIRECTOR_HISTORY_MAX];
+    size_t director_history_lens[HU_DIRECTOR_HISTORY_MAX];
+    size_t director_history_count;
+
     uint32_t max_response_chars;
 
     /* Per-turn model override (set by daemon/CLI, not owned; NULL = use default) */

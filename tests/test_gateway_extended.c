@@ -1216,6 +1216,9 @@ static void test_rpc_models_decisions_returns_valid_json(void) {
     sel.model = "gemini-3-flash-preview";
     sel.model_len = 22;
     hu_route_decision_log_t *rlog = hu_route_global_log();
+    /* Sprint 38 — reset so this test does not depend on cumulative suite
+     * order (same contract as route_populates_global_log). */
+    hu_route_log_init(rlog);
     hu_route_global_log_lock();
     hu_route_log_record(rlog, &sel, 3, 1000);
     hu_route_global_log_unlock();

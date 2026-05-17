@@ -1,0 +1,25 @@
+# Weekly outbound iMessage leak signature audit (macOS only — reads chat.db).
+# Signature logic is also verified on every run via --self-test (no Messages access).
+name: iMessage leak audit
+
+on:
+  schedule:
+    - cron: "0 14 * * 1" # Mondays 14:00 UTC
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test audit script signatures
+        run: bash scripts/audit-imessage-leaks.sh --self-test
+
+      - name: Audit outbound iMessages (if chat.db readable)
+        run: |
+          if [[ -r "$HOME/Library/Messages/chat.db" ]]; then
+            bash scripts/audit-imessage-leaks.sh --since "$(date -v-7d +%Y-%m-%d)"
+          else
+            echo "chat.db not readable on runner — skipping live audit (self-test passed)"
+          fi

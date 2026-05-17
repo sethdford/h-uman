@@ -10,6 +10,7 @@
 /* Core daemon headers */
 #include "human/daemon.h"
 #include "human/agent.h"
+#include "agent/agent_internal.h"
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
@@ -23,6 +24,7 @@
 #include "human/agent/lora_runner.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/world_model_bridge.h"
+#include "human/daemon_reaction_poll.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
 #ifdef HU_ENABLE_ML
@@ -68,6 +70,8 @@
 #include "human/daemon_routing.h"
 
 #include "human/agent/governor.h"
+#include "human/agent/response_guard.h"
+#include <inttypes.h>
 #include "human/agent/proactive.h"
 #include "human/agent/proactive_ext.h"
 #include "human/context/self_awareness.h"
@@ -101,6 +105,33 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
 
 #define HU_DAEMON_PID_DIR  ".human"
 #define HU_DAEMON_PID_FILE "human.pid"
+
+/* Sprint 40 — last served contact/session key for cross-recipient hygiene. */
+static char g_daemon_last_batch_key[256];
+static size_t g_daemon_last_batch_key_len;
+
+static void daemon_contact_boundary_begin(hu_agent_t *agent, const char *batch_key,
+                                          size_t key_len) {
+    if (!agent || !batch_key || key_len == 0)
+        return;
+    if (key_len >= sizeof(g_daemon_last_batch_key))
+        key_len = sizeof(g_daemon_last_batch_key) - 1;
+
+    if (g_daemon_last_batch_key_len != key_len ||
+        memcmp(g_daemon_last_batch_key, batch_key, key_len) != 0) {
+        if (g_daemon_last_batch_key_len > 0) {
+            hu_log_info("daemon", agent->observer,
+                        "contact boundary: cleared cross-turn state (prev=%.*s new=%.*s)",
+                        (int)(g_daemon_last_batch_key_len < 24 ? g_daemon_last_batch_key_len : 24),
+                        g_daemon_last_batch_key,
+                        (int)(key_len < 24 ? key_len : 24), batch_key);
+            hu_agent_internal_reset_contact_boundary_state(agent);
+        }
+        memcpy(g_daemon_last_batch_key, batch_key, key_len);
+        g_daemon_last_batch_key[key_len] = '\0';
+        g_daemon_last_batch_key_len = key_len;
+    }
+}
 #define HU_MAX_PATH        1024
 
 /* Lightweight classification provider (e.g. Gemini Flash Lite) for hybrid routing.
@@ -2610,10 +2641,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     /* Phase 4: Style drift check counter (only with persona + sqlite) */
     static unsigned drift_check_counter = 0;
 #endif
-#if !defined(HU_ENABLE_SQLITE)
-    (void)daemon_turn_counter;
-#endif
-
     hu_inbox_watcher_t inbox_watcher = {0};
     static int64_t last_inbox_poll_ms = 0;
     if (agent && agent->memory) {
@@ -2660,6 +2687,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         }
     }
 #endif
+
+    /* CF-3: wire the reaction handler to the daemon-owned DPO collector
+     * once at startup, before any channel poll can fire. The handler
+     * resolves inbound reactions to (prompt, response) pairs and writes
+     * preference rows into this collector; without this call the
+     * production iMessage poll path silently no-ops (every event would
+     * land in a NULL collector and be discarded).
+     *
+     * Routed through hu_daemon_reaction_wire_collector to avoid pulling
+     * human/agent/reaction_handler.h into this TU (it transitively
+     * includes channels/reaction_event.h whose hu_reaction_kind_t enum
+     * collides with the legacy hu_reaction_type_t in human/channel.h). */
+    if (agent && agent->sota.dpo_collector.alloc) {
+        hu_daemon_reaction_wire_collector(
+            (struct hu_dpo_collector *)&agent->sota.dpo_collector);
+        hu_log_info("human", agent->observer,
+                    "reaction handler wired to DPO collector (CF-3)");
+    }
 
     while (!HU_STOP_FLAG) {
 #ifdef HU_HAS_CRON
@@ -3953,6 +3998,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 const char *batch_key = msgs[m].session_key;
                 size_t key_len = strlen(batch_key);
+                daemon_contact_boundary_begin(agent, batch_key, key_len);
 
                 /* For group chats, route sends to the chat_id (thread)
                  * rather than the sender's handle to avoid accidental DMs. */
@@ -9359,6 +9405,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 agent->conversation_context = convo_ctx;
                                 agent->conversation_context_len = convo_ctx_len;
                             }
+                            /* Sprint 34: tell the response_guard what the director
+                             * said, so any verbatim quote in the model's reply
+                             * triggers G6 → REJECT. The buffer
+                             * `director_result.direction` is stack-resident in
+                             * this scope — we clear scene_direction_text on the
+                             * agent before returning to the daemon main loop
+                             * (see clear-on-exit below). */
+                            agent->scene_direction_text = director_result.direction;
+                            agent->scene_direction_text_len = dn_len;
                         }
 
                         size_t saved_tools = 0;
@@ -9381,6 +9436,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             agent->tools_count = saved_tools;
                             agent->tool_specs_count = saved_specs;
                         }
+                        /* Sprint 37: push the about-to-go-stale director into
+                         * the agent's heap-owned ring buffer. This survives
+                         * across turns and lets G6 catch a model that quotes
+                         * the *previous* turn's director on the next turn.
+                         * Idempotent on NULL/short directors. Must run BEFORE
+                         * we clear scene_direction_text below. */
+                        hu_agent_internal_push_director_history(
+                            agent, agent->scene_direction_text,
+                            agent->scene_direction_text_len);
+
+                        /* Sprint 34: clear scene-direction pointer on the agent
+                         * before director_result goes out of scope. Without
+                         * this, a subsequent turn could read freed/stale
+                         * stack memory through hu_guard_context_t.director_text. */
+                        agent->scene_direction_text = NULL;
+                        agent->scene_direction_text_len = 0;
                     }
                     daemon_out_bus_bridge.active_turn = NULL;
                     hu_log_info("human", agent ? agent->observer : NULL,
@@ -9959,6 +10030,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* ── Phase 3 post-turn: increment turn counter for anti-sycophancy ── */
                 daemon_turn_counter++;
+
+                /* Sprint 39 — periodic guard REJECT telemetry for threshold tuning. */
+                if (daemon_turn_counter % 100u == 0u) {
+                    hu_guard_reject_stats_t gs = {0};
+                    hu_guard_reject_stats_snapshot(&gs);
+                    hu_log_info(
+                        "daemon", agent ? agent->observer : NULL,
+                        "guard_reject_stats turn=%u semantic=%" PRIu64 " length=%" PRIu64
+                        " director=%" PRIu64 " persona_pii=%" PRIu64 " persona_identity=%" PRIu64,
+                        daemon_turn_counter, gs.semantic_leak, gs.length_anomaly, gs.director_echo,
+                        gs.persona_pii_echo, gs.persona_identity_echo);
+                }
 
                 /* ── Phase 4 post-turn: style drift self-tracking ─────── */
 #ifdef HU_ENABLE_SQLITE
@@ -12229,6 +12312,39 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             }
         }
 #endif
+
+        /* CF-3: throttled iMessage reaction-tapback poll.
+         *
+         * The handler is wired at startup (above); this block walks
+         * chat.db for new reaction rows every 30 seconds and feeds them
+         * into the DPO collector via hu_reaction_handler_handle_event.
+         * The 30s cadence is borrowed from the imsg watchdog and is
+         * cheap (single SQLite read-only query over an indexed range);
+         * it scales independently of the per-tick interval because the
+         * heavy work happens only when chat.db actually has new rows.
+         *
+         * `since_unix` is monotonically advanced each tick, so the same
+         * reaction is never ingested twice (the imessage_reactions SQL
+         * is `m.date > ((? - 978307200) * 1e9)` -- strictly greater).
+         * On poll failure we keep the cursor where it was so a transient
+         * DB lock just delays ingestion rather than dropping events. */
+        {
+            static int64_t reaction_poll_next_epoch = 0;
+            static int64_t reaction_poll_since_unix = 0;
+            int64_t rp_now = (int64_t)time(NULL);
+            if (rp_now >= reaction_poll_next_epoch) {
+                reaction_poll_next_epoch = rp_now + 30;
+                size_t ingested = 0;
+                hu_error_t rp_e = hu_daemon_reaction_poll_tick(
+                    config, reaction_poll_since_unix, &ingested);
+                if (rp_e == HU_OK) {
+                    reaction_poll_since_unix = rp_now;
+                    if (ingested > 0 && agent)
+                        hu_log_info("human", agent->observer,
+                                    "reaction poll: ingested %zu events", ingested);
+                }
+            }
+        }
 
         struct timespec sleep_ts = {.tv_sec = tick_interval_ms / 1000,
                                     .tv_nsec = (long)(tick_interval_ms % 1000) * 1000000L};

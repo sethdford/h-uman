@@ -71,6 +71,10 @@ typedef struct hu_dpo_export {
     size_t count;
 } hu_dpo_export_t;
 
+/* In-memory companion to hu_dpo_export_jsonl. */
+hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
+                         hu_dpo_export_t *out);
+
 void hu_dpo_export_free(hu_allocator_t *alloc, hu_dpo_export_t *export_data);
 
 /* Build a prompt fragment from top-margin preference pairs (few-shot injection). */

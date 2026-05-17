@@ -22,6 +22,27 @@
 
 #include "human/agent/conv_goals.h"
 #include "human/agent/model_router.h"
+/* Phase 2 Task 14 (RL SOTA): forward-declare the two reaction-handler
+ * lifecycle hooks instead of including human/agent/reaction_handler.h.
+ *
+ * Why forward-decl, not #include:
+ *   reaction_handler.h transitively pulls in human/channels/reaction_event.h,
+ *   which redefines HU_REACTION_QUESTION and HU_REACTION_CUSTOM_EMOJI as
+ *   members of hu_reaction_kind_t. Those names are ALREADY defined as
+ *   members of hu_reaction_type_t in human/channel.h, which agent_turn.c
+ *   pulls in transitively via agent_internal.h -> human/agent.h:30. The
+ *   collision is a hard -Wpedantic -Werror compile error. The codebase
+ *   already documents this constraint in src/channels/slack_reactions.c
+ *   header comment ("Pulling both headers into the same translation unit
+ *   is a compile error"); the Phase 2 plan's Correction #4 told us to
+ *   #include the header but did not account for this collision.
+ *
+ * Forward-decl is safe here because both functions are pure (void) -> void
+ * and (void) -> int — no types from reaction_event.h cross the boundary.
+ * Resolving the collision properly (renaming one of the colliding enum
+ * values) is a separate, larger change tracked outside Task 14. */
+void hu_reaction_handler_clear_turn(void);
+int  hu_reaction_handler_was_called_this_turn(void);
 #include "human/cognition/trust.h"
 #include "human/context/contact_style_overlay.h"
 #include "human/context/humor.h"
@@ -5172,24 +5193,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             if (resp.content && resp.content_len > 0) {
-                /* PRM: score response reasoning chain for quality */
-                if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
-                    resp.content_len > 100) {
-                    hu_prm_result_t prm_res;
-                    if (hu_prm_score_chain(agent->alloc, &agent->sota.prm_config, resp.content,
-                                           resp.content_len, &prm_res) == HU_OK) {
-                        prm_turn_score = prm_res.aggregate_score;
-                        hu_prm_result_free(agent->alloc, &prm_res);
-                    }
-                }
-
-                /* PRM per-step: score response quality as a reasoning step */
+                /* ThinkPRM verifier: score response reasoning steps */
+                hu_prm_verify_result_t prm_verify = {0};
+                bool prm_verified = false;
                 if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
                     resp.content_len > 50) {
-                    double step_score = 0.0;
-                    hu_prm_score_step(agent->alloc, &agent->sota.prm_config, resp.content,
-                                      resp.content_len, msg, msg_len, &step_score);
-                    prm_turn_score = step_score;
+                    if (hu_prm_verify_reasoning(agent->alloc, &agent->sota.prm_config,
+                                                resp.content, resp.content_len,
+                                                msg, msg_len, &prm_verify) == HU_OK) {
+                        prm_turn_score = prm_verify.aggregate_score;
+                        prm_verified = true;
+                    }
                 }
 
                 /* Reflection: evaluate response quality and retry if needed */
@@ -5203,12 +5217,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                    resp.content, resp.content_len, quality);
                 }
 
-                /* PRM quality gate: low step-level score triggers retry */
-                if (prm_turn_score > 0.0 && prm_turn_score < 0.3 &&
+                if (prm_verified && prm_turn_score < 1.0)
+                    hu_log_info("agent_turn", NULL, "PRM reasoning score: %.3f (threshold %.3f)",
+                                prm_turn_score, agent->sota.prm_config.retry_threshold);
+
+                /* PRM quality gate: verification failure triggers retry */
+                if (prm_verified && !prm_verify.passed &&
                     quality == HU_QUALITY_ACCEPTABLE && agent->reflection.enabled &&
                     reflection_retries_left > 0) {
                     quality = HU_QUALITY_NEEDS_RETRY;
                 }
+                if (prm_verified)
+                    hu_prm_verify_result_free(agent->alloc, &prm_verify);
+                (void)prm_turn_score;
 
                 if (quality == HU_QUALITY_NEEDS_RETRY && agent->reflection.enabled &&
                     reflection_retries_left > 0 && iter < agent->max_tool_iterations - 1) {
@@ -5384,6 +5405,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 ab_result.candidates[bi].response = NULL;
                                 ab_result.candidates[bi].response_len = 0;
                                 ab_owned = true;
+                                hu_guard_log_selection_audit(
+                                    agent->observer, agent->active_channel,
+                                    agent->active_channel_len, ab_result.candidate_count, bi,
+                                    ab_result.candidates[bi].quality_score, final_len,
+                                    final_content, final_len);
                             }
                         }
                         hu_ab_result_deinit(&ab_result, agent->alloc);
@@ -5636,16 +5662,53 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
                     hu_guard_report_t guard_report;
                     memset(&guard_report, 0, sizeof(guard_report));
-                    hu_error_t guard_err = hu_response_guard_check(
-                        agent->alloc, final_content, final_len, &guard_out, &guard_out_len,
-                        &guard_outcome, &guard_report);
+                    hu_guard_context_t guard_ctx;
+                    memset(&guard_ctx, 0, sizeof(guard_ctx));
+                    guard_ctx.recent_avg_len =
+                        hu_agent_internal_recent_assistant_avg_len(agent, 5);
+                    guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
+                        agent->active_channel, agent->active_channel_len);
+                    guard_ctx.director_text = agent->scene_direction_text;
+                    guard_ctx.director_len = agent->scene_direction_text_len;
+                    guard_ctx.director_history =
+                        (const char *const *)agent->director_history;
+                    guard_ctx.director_history_lens = agent->director_history_lens;
+                    guard_ctx.director_history_count = agent->director_history_count;
+                    if (agent->persona) {
+                        if (agent->persona->name && agent->persona->name_len > 1) {
+                            guard_ctx.persona_name = agent->persona->name;
+                            guard_ctx.persona_name_len = agent->persona->name_len;
+                        }
+                        const char *id = agent->persona->identity
+                                             ? agent->persona->identity
+                                             : agent->persona->core_anchor;
+                        if (id) {
+                            guard_ctx.persona_identity = id;
+                            guard_ctx.persona_identity_len = strlen(id);
+                        }
+                        if (agent->persona->biography) {
+                            guard_ctx.persona_biography = agent->persona->biography;
+                            guard_ctx.persona_biography_len =
+                                strlen(agent->persona->biography);
+                        }
+                    }
+                    hu_error_t guard_err = hu_response_guard_check_ex(
+                        agent->alloc, final_content, final_len, &guard_ctx, &guard_out,
+                        &guard_out_len, &guard_outcome, &guard_report);
                     if (guard_err == HU_OK) {
                         if (guard_outcome == HU_GUARD_REJECT) {
                             hu_log_error(
                                 "agent_turn", agent->observer,
-                                "response_guard REJECT: degenerate output (run=%zu, len=%zu) — "
-                                "retrying once with repair prompt",
-                                guard_report.max_repetition_run, final_len);
+                                "response_guard REJECT: turn final (len=%zu, recent_avg=%zu) "
+                                "[semantic=%d length=%d director=%d persona=%d identity=%d "
+                                "repetition_run=%zu] - retrying once with repair prompt",
+                                final_len, guard_ctx.recent_avg_len,
+                                guard_report.detected_semantic_leak ? 1 : 0,
+                                guard_report.detected_length_anomaly ? 1 : 0,
+                                guard_report.detected_director_echo ? 1 : 0,
+                                guard_report.detected_persona_pii_echo ? 1 : 0,
+                                guard_report.detected_persona_identity_echo ? 1 : 0,
+                                guard_report.max_repetition_run);
                             char *retry_content = NULL;
                             size_t retry_len = 0;
                             hu_guard_report_t retry_report;
@@ -6164,16 +6227,29 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             (void)hu_value_learn_from_correction(&ve, "thoroughness", 12,
                                                                  "User prefers detailed responses",
                                                                  31, 0.2, now_vl);
-                        /* DPO: record user feedback as preference signal */
-                        if (agent->sota.sota_initialized && agent->history_count >= 2) {
-                            const char *last_resp =
-                                agent->history[agent->history_count - 2].content;
-                            size_t last_resp_len =
-                                agent->history[agent->history_count - 2].content_len;
-                            if (last_resp && last_resp_len > 0 && (is_positive || is_negative))
-                                hu_dpo_record_from_feedback(&agent->sota.dpo_collector, msg,
-                                                            msg_len, last_resp, last_resp_len,
-                                                            is_positive);
+                        /* DPO: record user feedback as preference signal.
+                         *
+                         * Phase 2 Task 14 (RL SOTA): if a real reaction event
+                         * (iMessage tapback / Slack reactji) already produced a
+                         * dpo_pair for this turn's assistant message via
+                         * hu_reaction_handler_handle_event, skip the
+                         * substring-heuristic record to avoid double-counting.
+                         * Value-learning calls above are independent and
+                         * continue to fire — only the DPO collector is gated.
+                         * The flag is consumed (cleared) at the end of
+                         * hu_agent_turn so each turn starts fresh. */
+                        if (!hu_reaction_handler_was_called_this_turn()) {
+                            if (agent->sota.sota_initialized && agent->history_count >= 2) {
+                                const char *last_resp =
+                                    agent->history[agent->history_count - 2].content;
+                                size_t last_resp_len =
+                                    agent->history[agent->history_count - 2].content_len;
+                                if (last_resp && last_resp_len > 0 &&
+                                    (is_positive || is_negative))
+                                    hu_dpo_record_from_feedback(
+                                        &agent->sota.dpo_collector, msg, msg_len, last_resp,
+                                        last_resp_len, is_positive);
+                            }
                         }
 
                         hu_value_engine_deinit(&ve);
@@ -6927,6 +7003,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_workflow_event_log_append(agent->infra.workflow_log, agent->alloc, &ev);
             }
 
+            /* Phase 2 Task 14 (RL SOTA): consume the per-turn reaction flag at
+             * the single point where the substring-heuristic DPO collector
+             * gating above could have been evaluated. This is the primary
+             * success exit of hu_agent_turn — the path that actually
+             * synthesised a response and ran the value-learning + DPO blocks
+             * inside the HU_ENABLE_SQLITE region. Other returns (early cache
+             * hits, error/cancel/timeout/OOM paths) bypass the substring block
+             * entirely, so leaving the flag set there is harmless: the next
+             * turn that reaches this point will still see it. Clearing here
+             * means each turn that consulted the gate consumes the signal
+             * exactly once. If the daemon ever gains concurrent turn dispatch,
+             * move the flag onto hu_agent_t (see header). */
+            hu_reaction_handler_clear_turn();
             return HU_OK;
         }
 

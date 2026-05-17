@@ -1433,15 +1433,52 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
                 hu_guard_report_t guard_report;
                 memset(&guard_report, 0, sizeof(guard_report));
-                hu_error_t guard_err = hu_response_guard_check(
-                    agent->alloc, sresp.content, sresp.content_len, &guard_out, &guard_out_len,
-                    &guard_outcome, &guard_report);
+                hu_guard_context_t guard_ctx;
+                memset(&guard_ctx, 0, sizeof(guard_ctx));
+                guard_ctx.recent_avg_len =
+                    hu_agent_internal_recent_assistant_avg_len(agent, 5);
+                guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
+                    agent->active_channel, agent->active_channel_len);
+                guard_ctx.director_text = agent->scene_direction_text;
+                guard_ctx.director_len = agent->scene_direction_text_len;
+                /* Sprint 37 — cross-turn director history. */
+                guard_ctx.director_history = (const char *const *)agent->director_history;
+                guard_ctx.director_history_lens = agent->director_history_lens;
+                guard_ctx.director_history_count = agent->director_history_count;
+                if (agent->persona) {
+                    if (agent->persona->name && agent->persona->name_len > 1) {
+                        guard_ctx.persona_name = agent->persona->name;
+                        guard_ctx.persona_name_len = agent->persona->name_len;
+                    }
+                    /* Prefer `identity` (full biographical string); fall
+                     * back to `core_anchor` (one-line bio). */
+                    const char *id = agent->persona->identity ? agent->persona->identity
+                                                              : agent->persona->core_anchor;
+                    if (id) {
+                        guard_ctx.persona_identity = id;
+                        guard_ctx.persona_identity_len = strlen(id);
+                    }
+                    if (agent->persona->biography) {
+                        guard_ctx.persona_biography = agent->persona->biography;
+                        guard_ctx.persona_biography_len = strlen(agent->persona->biography);
+                    }
+                }
+                hu_error_t guard_err = hu_response_guard_check_ex(
+                    agent->alloc, sresp.content, sresp.content_len, &guard_ctx, &guard_out,
+                    &guard_out_len, &guard_outcome, &guard_report);
                 if (guard_err == HU_OK && guard_outcome == HU_GUARD_REJECT) {
                     hu_log_error(
                         "agent_stream", agent->observer,
-                        "response_guard REJECT: degenerate stream output (run=%zu, len=%zu) — "
-                        "retrying once with repair prompt",
-                        guard_report.max_repetition_run, sresp.content_len);
+                        "response_guard REJECT: stream final (len=%zu, recent_avg=%zu) "
+                        "[semantic=%d length=%d director=%d persona=%d identity=%d "
+                        "repetition_run=%zu] — retrying once with repair prompt",
+                        sresp.content_len, guard_ctx.recent_avg_len,
+                        guard_report.detected_semantic_leak ? 1 : 0,
+                        guard_report.detected_length_anomaly ? 1 : 0,
+                        guard_report.detected_director_echo ? 1 : 0,
+                        guard_report.detected_persona_pii_echo ? 1 : 0,
+                        guard_report.detected_persona_identity_echo ? 1 : 0,
+                        guard_report.max_repetition_run);
                     hu_guard_report_t retry_report;
                     memset(&retry_report, 0, sizeof(retry_report));
                     hu_error_t retry_err = hu_response_guard_retry_slim(
@@ -2164,16 +2201,50 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
             hu_guard_report_t guard_report;
             memset(&guard_report, 0, sizeof(guard_report));
-            hu_error_t guard_err = hu_response_guard_check(
-                agent->alloc, final_content, final_content_len, &guard_out, &guard_out_len,
-                &guard_outcome, &guard_report);
+            hu_guard_context_t guard_ctx;
+            memset(&guard_ctx, 0, sizeof(guard_ctx));
+            guard_ctx.recent_avg_len =
+                hu_agent_internal_recent_assistant_avg_len(agent, 5);
+            guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
+                agent->active_channel, agent->active_channel_len);
+            guard_ctx.director_text = agent->scene_direction_text;
+            guard_ctx.director_len = agent->scene_direction_text_len;
+            guard_ctx.director_history = (const char *const *)agent->director_history;
+            guard_ctx.director_history_lens = agent->director_history_lens;
+            guard_ctx.director_history_count = agent->director_history_count;
+            if (agent->persona) {
+                if (agent->persona->name && agent->persona->name_len > 1) {
+                    guard_ctx.persona_name = agent->persona->name;
+                    guard_ctx.persona_name_len = agent->persona->name_len;
+                }
+                const char *id = agent->persona->identity ? agent->persona->identity
+                                                          : agent->persona->core_anchor;
+                if (id) {
+                    guard_ctx.persona_identity = id;
+                    guard_ctx.persona_identity_len = strlen(id);
+                }
+                if (agent->persona->biography) {
+                    guard_ctx.persona_biography = agent->persona->biography;
+                    guard_ctx.persona_biography_len = strlen(agent->persona->biography);
+                }
+            }
+            hu_error_t guard_err = hu_response_guard_check_ex(
+                agent->alloc, final_content, final_content_len, &guard_ctx, &guard_out,
+                &guard_out_len, &guard_outcome, &guard_report);
             if (guard_err == HU_OK) {
                 if (guard_outcome == HU_GUARD_REJECT) {
                     hu_log_error(
                         "agent_stream", agent->observer,
-                        "response_guard REJECT: degenerate stream output (run=%zu, len=%zu) — "
-                        "retrying slim path",
-                        guard_report.max_repetition_run, final_content_len);
+                        "response_guard REJECT: post-stream final (len=%zu, recent_avg=%zu) "
+                        "[semantic=%d length=%d director=%d persona=%d identity=%d "
+                        "repetition_run=%zu] — retrying slim path",
+                        final_content_len, guard_ctx.recent_avg_len,
+                        guard_report.detected_semantic_leak ? 1 : 0,
+                        guard_report.detected_length_anomaly ? 1 : 0,
+                        guard_report.detected_director_echo ? 1 : 0,
+                        guard_report.detected_persona_pii_echo ? 1 : 0,
+                        guard_report.detected_persona_identity_echo ? 1 : 0,
+                        guard_report.max_repetition_run);
                     agent->alloc->free(agent->alloc->ctx, (void *)final_content,
                                        final_content_len + 1);
                     final_content = NULL;
