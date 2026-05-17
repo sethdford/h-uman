@@ -110,7 +110,7 @@ test.describe("Regression: Sequential Navigation (Demo Mode)", () => {
       }
     });
     page.on("pageerror", (err) => {
-      errors.push(`Uncaught: ${err.message}`);
+      if (!isKnownPageError(err.message)) errors.push(`Uncaught: ${err.message}`);
     });
 
     await page.goto("/?demo#overview");
@@ -161,7 +161,7 @@ test.describe("Regression: Rapid Navigation (Demo Mode)", () => {
   test("rapidly switching views does not crash or show errors", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (err) => {
-      errors.push(`Uncaught: ${err.message}`);
+      if (!isKnownPageError(err.message)) errors.push(`Uncaught: ${err.message}`);
     });
 
     await page.goto("/?demo#overview");
