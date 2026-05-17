@@ -797,6 +797,45 @@ static void extract_topic_rejects_full_first_person_sentence(void) {
     HU_ASSERT_TRUE(len < 64);
 }
 
+/* P2-7 regression (2026-05-16 incident): the extractor's stopword list was
+ * too permissive. "hey how are you doing" yielded "hey", which then leaked
+ * into proactive prompts as a topic. Expand the stopword list to include
+ * greetings/fillers and raise the min-word-length bar. */
+static void extract_topic_filters_greeting_filler_words(void) {
+    char buf[64] = {0};
+    size_t len = hu_conversation_extract_topic("hey how are you doing", 21, buf, sizeof(buf));
+    /* "hey", "how", "are", "you", "doing" must all be stopwords. */
+    HU_ASSERT_EQ(len, 0u);
+    HU_ASSERT_EQ(buf[0], '\0');
+}
+
+static void extract_topic_filters_bare_emotion_words(void) {
+    char buf[64] = {0};
+    /* "feel", "feeling", "lost", "lonely", "sad" must all be stopwords —
+     * they are emotion KEYWORDS, not topics. F25/F30 paths handle emotion
+     * separately. Storing them as topics produced "How is the sad going?" */
+    size_t len =
+        hu_conversation_extract_topic("i feel lost and lonely and sad", 30, buf, sizeof(buf));
+    HU_ASSERT_EQ(len, 0u);
+}
+
+static void extract_topic_rejects_short_single_words(void) {
+    char buf[64] = {0};
+    /* "ok" (2), "hi" (2) — words under 4 chars are too noisy to use as
+     * topics. The previous bar was 2 chars, which let "ok" leak. */
+    size_t len = hu_conversation_extract_topic("ok hi", 5, buf, sizeof(buf));
+    HU_ASSERT_EQ(len, 0u);
+}
+
+static void extract_topic_keeps_real_nouns_after_expansion(void) {
+    char buf[64] = {0};
+    /* Ensure we didn't over-filter. Real topics still come through. */
+    size_t len =
+        hu_conversation_extract_topic("the project deadline is tight", 30, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_TRUE(strstr(buf, "project") != NULL || strstr(buf, "deadline") != NULL);
+}
+
 /* ── Escalation detection tests (F14) ─────────────────────────────────── */
 
 static void escalation_three_negative_escalating(void) {
@@ -4077,6 +4116,10 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(tone_extract_topic_returns_significant_words);
     HU_RUN_TEST(extract_topic_rejects_raw_confession);
     HU_RUN_TEST(extract_topic_rejects_full_first_person_sentence);
+    HU_RUN_TEST(extract_topic_filters_greeting_filler_words);
+    HU_RUN_TEST(extract_topic_filters_bare_emotion_words);
+    HU_RUN_TEST(extract_topic_rejects_short_single_words);
+    HU_RUN_TEST(extract_topic_keeps_real_nouns_after_expansion);
 
     /* Inside joke detection (F19) */
     HU_RUN_TEST(detect_inside_joke_remember_when_true);
