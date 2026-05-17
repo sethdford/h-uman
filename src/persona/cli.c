@@ -212,6 +212,26 @@ hu_error_t hu_persona_cli_parse(int argc, const char **argv, hu_persona_cli_args
             return HU_ERR_INVALID_ARGUMENT;
         if (out->action == HU_PERSONA_ACTION_FILLER_ADD && !out->filler_text)
             return HU_ERR_INVALID_ARGUMENT;
+    } else if (strcmp(action, "export-bank") == 0) {
+        /* `human persona export-bank <name> [--output <path>]` — emit
+         * Alpaca JSONL from the persona's example bank, for downstream
+         * LoRA/QLoRA toolchains (llama.cpp/finetune, axolotl, MLX).
+         * Sits in the persona namespace because it is the persona's
+         * voice that is being exported; `ml lora-persona` retains the
+         * `--export-jsonl` shortcut for the train-or-export workflow. */
+        out->action = HU_PERSONA_ACTION_EXPORT_BANK;
+        if (argc < 4)
+            return HU_ERR_INVALID_ARGUMENT;
+        out->name = argv[3];
+        for (int i = 4; i < argc; i++) {
+            if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
+                out->output_path = argv[i + 1];
+                i++;
+            } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+                out->output_path = argv[i + 1];
+                i++;
+            }
+        }
     } else {
         return HU_ERR_INVALID_ARGUMENT;
     }
@@ -814,6 +834,82 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         fprintf(stderr, "Persona import requires POSIX\n");
         return HU_ERR_NOT_SUPPORTED;
 #endif
+    }
+    case HU_PERSONA_ACTION_EXPORT_BANK: {
+        /* `human persona export-bank <name> [--output <path>]`
+         *
+         * Streams the persona's example bank as Alpaca-shaped JSONL —
+         * the same wire format consumed by llama.cpp/finetune,
+         * axolotl, and MLX-LM. With `--output`, writes directly to
+         * the named file. Without it, exports to a tempfile and
+         * streams it to stdout (so the caller can pipe it into a
+         * trainer).
+         *
+         * Returns:
+         *   HU_OK on success — `exported` count is reported on stderr
+         *   HU_ERR_NOT_FOUND if the persona JSON cannot be loaded
+         *   HU_ERR_INVALID_ARGUMENT if the persona has no examples
+         *   HU_ERR_IO on filesystem failure
+         */
+        if (!args->name || !args->name[0]) {
+            fprintf(stderr, "Persona name required for export-bank\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        hu_persona_t persona = {0};
+        hu_error_t lerr = hu_persona_load(alloc, args->name, strlen(args->name), &persona);
+        if (lerr != HU_OK) {
+            fprintf(stderr, "Persona not found: %s\n", args->name);
+            return lerr;
+        }
+        const char *target = args->output_path;
+        char tmp_path[HU_PERSONA_PATH_MAX];
+        bool to_stdout = (target == NULL || target[0] == '\0');
+        if (to_stdout) {
+            /* Allocate a deterministic tempfile inside the persona
+             * directory (we already trust this path enough to write
+             * the persona JSON itself). Avoids depending on tmpfile()
+             * which is not portable across all CI sandboxes. */
+            char dir_buf[HU_PERSONA_PATH_MAX];
+            const char *dir = persona_dir_path(dir_buf, sizeof(dir_buf));
+            if (!dir) {
+                hu_persona_deinit(alloc, &persona);
+                fprintf(stderr, "Could not resolve persona directory\n");
+                return HU_ERR_NOT_FOUND;
+            }
+            int tn = snprintf(tmp_path, sizeof(tmp_path), "%s/.%s.bank.jsonl.tmp", dir,
+                              args->name);
+            if (tn <= 0 || (size_t)tn >= sizeof(tmp_path)) {
+                hu_persona_deinit(alloc, &persona);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            target = tmp_path;
+        }
+        size_t exported = 0;
+        hu_error_t eerr =
+            hu_persona_bank_export_jsonl(&persona, target, strlen(target), &exported);
+        hu_persona_deinit(alloc, &persona);
+        if (eerr != HU_OK) {
+            if (to_stdout)
+                (void)remove(target);
+            fprintf(stderr, "Failed to export persona bank: %s\n", hu_error_string(eerr));
+            return eerr;
+        }
+        if (to_stdout) {
+            FILE *fp = fopen(target, "rb");
+            if (!fp) {
+                (void)remove(target);
+                return HU_ERR_IO;
+            }
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
+                (void)fwrite(buf, 1, n, stdout);
+            fclose(fp);
+            (void)remove(target);
+        }
+        fprintf(stderr, "persona export-bank: %zu example%s -> %s\n", exported,
+                exported == 1 ? "" : "s", to_stdout ? "(stdout)" : target);
+        return HU_OK;
     }
     case HU_PERSONA_ACTION_EVAL: {
         if (!args->name || !args->name[0]) {
