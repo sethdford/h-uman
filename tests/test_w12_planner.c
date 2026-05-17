@@ -7,6 +7,7 @@
 #include "human/agent/world_model.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
+#include "human/memory/hyperedge.h"
 #include "human/memory/memory.h"
 #include "human/memory/pagerank.h"
 #include "human/provider.h"
@@ -422,10 +423,12 @@ static void test_w12_llm_planner_configure_idempotent(void) {
     hu_planner_close(&p);
 }
 
-/* Test hook into the LLM planner's JSON parser. */
+/* Test hooks into the LLM planner (HU_IS_TEST only). */
 extern hu_error_t hu_planner_llm__test_parse_json(hu_allocator_t *alloc, const char *json,
                                                   size_t json_len, const hu_world_model_t *wm,
                                                   hu_retrieval_plan_t *out);
+extern char *hu_planner_llm__test_render_wm_digest(hu_allocator_t *alloc,
+                                                   const hu_world_model_t *wm);
 
 static void test_w12_llm_parse_well_formed_plan(void) {
     const char *json =
@@ -654,6 +657,162 @@ static void test_w12_llm_entity_name_plan_executes_end_to_end(void) {
 
     hu_planner_records_free(A(), out, n);
     close_facade_(g, m);
+}
+
+/* ── W12 world-model cell wiring (recent_changes / hyperedges / self_model) */
+
+static void test_w12_heuristic_recent_changes_bounds_temporal_window(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t carol = 0, dawn = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rc", 4, "Carol", 5, HU_ENTITY_PERSON,
+                                          NULL, &carol), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rc", 4, "Dawn", 4, HU_ENTITY_ORGANIZATION,
+                                          NULL, &dawn), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(
+                     g, "u-rc", 4, carol, dawn, HU_REL_WORKS_AT, 1.0f,
+                     1735000000000LL, 1735500000000LL, 0.9f, 0.01f, NULL, 0, NULL, 0,
+                     NULL), HU_OK);
+
+    hu_world_model_t *wm = load_wm(m, "u-rc");
+    HU_ASSERT(wm->recent_changes_count >= 1);
+
+    hu_planner_t p;
+    HU_ASSERT_EQ(hu_planner_heuristic(&p), HU_OK);
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_plan(&p, "when did Carol stop working at Dawn?", 36, wm, &plan),
+                 HU_OK);
+
+    bool found_window = false;
+    for (size_t i = 0; i < plan.steps_count; i++) {
+        if (plan.steps[i].kind != HU_MEM_RELATION) continue;
+        if (plan.steps[i].query.as.window.from_ts > 0) {
+            found_window = true;
+            HU_ASSERT(plan.steps[i].query.as.window.from_ts <=
+                      wm->recent_changes[0].at_ms);
+        }
+    }
+    HU_ASSERT(found_window);
+
+    hu_planner_close(&p);
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w12_heuristic_hyperedges_add_member_neighbor_steps(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t alice = add_entity(g, "u-he12", "Alice", HU_ENTITY_PERSON);
+    int64_t bob   = add_entity(g, "u-he12", "Bob",   HU_ENTITY_PERSON);
+    int64_t acme  = add_entity(g, "u-he12", "Acme",  HU_ENTITY_ORGANIZATION);
+    add_relation(g, "u-he12", alice, acme, HU_REL_WORKS_AT);
+
+    hu_hyperedge_t he;
+    memset(&he, 0, sizeof(he));
+    snprintf(he.relation_label, sizeof(he.relation_label), "met_at");
+    hu_hyperedge_member_t members[3];
+    memset(members, 0, sizeof(members));
+    members[0].entity_id = alice;
+    members[1].entity_id = bob;
+    members[2].entity_id = acme;
+    he.members = members;
+    he.members_count = 3;
+    he.belief.mean = 0.8f;
+    int64_t he_id = 0;
+    HU_ASSERT_EQ(hu_hyperedge_upsert(m, "u-he12", 6, &he, &he_id), HU_OK);
+
+    hu_world_model_t *wm = load_wm(m, "u-he12");
+    HU_ASSERT(wm->hyperedges_count >= 1);
+
+    hu_planner_t p;
+    HU_ASSERT_EQ(hu_planner_heuristic(&p), HU_OK);
+    hu_retrieval_plan_t plan;
+    const char *goal = "when did Alice and Bob meet at Acme?";
+    HU_ASSERT_EQ(hu_planner_plan(&p, goal, strlen(goal), wm, &plan), HU_OK);
+
+    size_t neighbor_steps = 0;
+    bool has_acme_expansion = false;
+    for (size_t i = 0; i < plan.steps_count; i++) {
+        if (plan.steps[i].kind != HU_MEM_ENTITY) continue;
+        neighbor_steps++;
+        if (plan.steps[i].query.as.neighbors.entity_id == acme) has_acme_expansion = true;
+    }
+    HU_ASSERT(neighbor_steps >= 3);
+    HU_ASSERT(has_acme_expansion);
+
+    hu_planner_close(&p);
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w12_heuristic_self_model_focused_topics_prefers_entity(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t alice  = add_entity(g, "u-sm", "Alice", HU_ENTITY_PERSON);
+    int64_t budget = add_entity(g, "u-sm", "Budget", HU_ENTITY_TOPIC);
+    (void)alice;
+    add_relation(g, "u-sm", budget, alice, HU_REL_RELATED_TO);
+
+    hu_world_model_t *wm = load_wm(m, "u-sm");
+    snprintf(wm->self_model.focused_topics, sizeof(wm->self_model.focused_topics),
+             "Budget; travel");
+
+    hu_planner_t p;
+    HU_ASSERT_EQ(hu_planner_heuristic(&p), HU_OK);
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_plan(&p, "what changed about Budget recently?", 35, wm, &plan),
+                 HU_OK);
+
+    HU_ASSERT(plan.steps_count > 0);
+    HU_ASSERT_EQ(plan.steps[0].kind, HU_MEM_ENTITY);
+    HU_ASSERT_EQ(plan.steps[0].query.as.neighbors.entity_id, budget);
+
+    hu_planner_close(&p);
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w12_llm_wm_digest_includes_world_model_cells(void) {
+    hu_world_model_t wm;
+    memset(&wm, 0, sizeof(wm));
+    snprintf(wm.contact_id, sizeof(wm.contact_id), "u-digest");
+    snprintf(wm.self_model.name, sizeof(wm.self_model.name), "Aria");
+    snprintf(wm.self_model.focused_topics, sizeof(wm.self_model.focused_topics),
+             "budget; travel");
+    snprintf(wm.self_model.capabilities[0], sizeof(wm.self_model.capabilities[0]),
+             "memory_search");
+    wm.self_model.capabilities_count = 1;
+
+    wm.recent_changes_count = 1;
+    hu_world_recent_change_t ch;
+    memset(&ch, 0, sizeof(ch));
+    ch.kind = HU_WORLD_CHANGE_RETRACTED;
+    ch.at_ms = 1735500000000LL;
+    snprintf(ch.summary, sizeof(ch.summary), "rel retracted");
+    wm.recent_changes = &ch;
+
+    wm.hyperedges_count = 1;
+    hu_hyperedge_t he;
+    memset(&he, 0, sizeof(he));
+    snprintf(he.relation_label, sizeof(he.relation_label), "met_at");
+    he.members_count = 2;
+
+    wm.hyperedges = &he;
+
+    char *digest = hu_planner_llm__test_render_wm_digest(A(), &wm);
+    HU_ASSERT_NOT_NULL(digest);
+    HU_ASSERT_NOT_NULL(strstr(digest, "Recent change:"));
+    HU_ASSERT_NOT_NULL(strstr(digest, "Hyperedge:"));
+    HU_ASSERT_NOT_NULL(strstr(digest, "Self: Aria"));
+    HU_ASSERT_NOT_NULL(strstr(digest, "Focused:"));
+    HU_ASSERT_NOT_NULL(strstr(digest, "memory_search"));
+    A()->free(A()->ctx, digest, 1024);
 }
 
 /* ── PageRank ───────────────────────────────────────────────────────────── */
@@ -947,6 +1106,10 @@ void run_w12_planner_tests(void) {
     HU_RUN_TEST(test_w12_llm_parse_nonprintable_entity_name_downgrades);
     HU_RUN_TEST(test_w12_llm_parse_entity_name_ignored_on_relation_kind);
     HU_RUN_TEST(test_w12_llm_entity_name_plan_executes_end_to_end);
+    HU_RUN_TEST(test_w12_heuristic_recent_changes_bounds_temporal_window);
+    HU_RUN_TEST(test_w12_heuristic_hyperedges_add_member_neighbor_steps);
+    HU_RUN_TEST(test_w12_heuristic_self_model_focused_topics_prefers_entity);
+    HU_RUN_TEST(test_w12_llm_wm_digest_includes_world_model_cells);
     HU_RUN_TEST(test_w12_pagerank_top_k_matches_expected_subgraph);
     HU_RUN_TEST(test_w12_pagerank_deterministic_repeated_calls);
     HU_RUN_TEST(test_w12_pagerank_zero_seeds_returns_empty);
