@@ -10,6 +10,7 @@
 /* Core daemon headers */
 #include "human/daemon.h"
 #include "human/agent.h"
+#include "human/channel.h"
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
@@ -12401,58 +12402,38 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (search_err == HU_OK &&
                                         (song.track_view_url ||
                                          (has_spotify && spotify_song.track_view_url))) {
-                                        char share_text[512];
-                                        size_t casual_len = strlen(casual_msg);
-                                        size_t st_len = hu_music_build_share_text(
-                                            link_song, casual_len > 0 ? casual_msg : NULL,
-                                            casual_len, share_text, sizeof(share_text));
+                                        /* Rich-link mode: when the channel auto-unfurls bare URLs
+                                         * (iMessage, Telegram, Discord, Slack, WhatsApp, Signal),
+                                         * send the URL alone in its own bubble. The platform
+                                         * renders the full rich card — album art, title, artist,
+                                         * play button — from the URL. No .m4a download, no JPG
+                                         * download, no caption (caption inline kills the unfurl).
+                                         *
+                                         * INVARIANT: the URL bubble body must be exactly the URL
+                                         * bytes — no preamble, no trailing whitespace, no caption.
+                                         * Pinned by tests/test_imessage_rich_link.c. */
+                                        bool rich_link =
+                                            hu_channel_supports_link_unfurl(ch->channel) &&
+                                            link_song->track_view_url != NULL;
 
-                                        /* Download 30s preview (always from iTunes) */
-                                        char preview_path[256] = {0};
-                                        bool has_preview = false;
-                                        if (song.preview_url) {
-                                            has_preview = hu_music_download_preview(
-                                                              alloc, song.preview_url, preview_path,
-                                                              sizeof(preview_path)) == HU_OK;
-                                        }
+                                        if (rich_link) {
+                                            const char *url = link_song->track_view_url;
+                                            size_t url_len = strlen(url);
 
-                                        /* Download album artwork */
-                                        char artwork_path[256] = {0};
-                                        bool has_artwork = false;
-                                        const char *art_url = link_song->artwork_url
-                                                                  ? link_song->artwork_url
-                                                                  : song.artwork_url;
-                                        if (art_url) {
-                                            has_artwork = hu_music_download_artwork(
-                                                              alloc, art_url, artwork_path,
-                                                              sizeof(artwork_path)) == HU_OK;
-                                        }
+                                            /* Same human-pacing delay as the legacy path so the
+                                             * share lands in a natural conversational rhythm. */
+                                            usleep(3000000 + (music_seed % 4000000));
 
-                                        usleep(3000000 + (music_seed % 4000000));
-
-                                        /* Send with up to 2 attachments: preview + artwork */
-                                        if (st_len > 0) {
-                                            int media_count = 0;
-                                            const char *media[2];
-                                            if (has_preview)
-                                                media[media_count++] = preview_path;
-                                            if (has_artwork)
-                                                media[media_count++] = artwork_path;
-
-                                            ch->channel->vtable->send(
-                                                ch->channel->ctx, batch_key, key_len, share_text,
-                                                st_len, media_count > 0 ? media : NULL,
-                                                (size_t)media_count);
+                                            ch->channel->vtable->send(ch->channel->ctx, batch_key,
+                                                                      key_len, url, url_len, NULL,
+                                                                      0);
 
                                             hu_log_info("human", agent ? agent->observer : NULL,
-                                                        "sent music %s: %s - %s [%s%s]",
-                                                        has_preview ? "preview" : "link",
+                                                        "sent music rich-link: %s - %s [%s]",
                                                         song.artist_name ? song.artist_name : "?",
                                                         song.track_name ? song.track_name : "?",
-                                                        has_spotify ? "spotify" : "itunes",
-                                                        has_artwork ? "+art" : "");
+                                                        has_spotify ? "spotify" : "itunes");
 
-                                            /* Record for taste learning + periodic save */
                                             hu_music_taste_record_send(batch_key, key_len,
                                                                        song.artist_name,
                                                                        song.track_name);
@@ -12472,12 +12453,88 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     }
                                                 }
                                             }
-                                        }
+                                        } else {
+                                            /* Legacy: channel doesn't unfurl URLs (SMS etc.).
+                                             * Build a text caption and attach the .m4a preview
+                                             * + JPG artwork so the recipient still gets media. */
+                                            char share_text[512];
+                                            size_t casual_len = strlen(casual_msg);
+                                            size_t st_len = hu_music_build_share_text(
+                                                link_song, casual_len > 0 ? casual_msg : NULL,
+                                                casual_len, share_text, sizeof(share_text));
 
-                                        if (has_preview)
-                                            (void)unlink(preview_path);
-                                        if (has_artwork)
-                                            (void)unlink(artwork_path);
+                                            char preview_path[256] = {0};
+                                            bool has_preview = false;
+                                            if (song.preview_url) {
+                                                has_preview =
+                                                    hu_music_download_preview(
+                                                        alloc, song.preview_url, preview_path,
+                                                        sizeof(preview_path)) == HU_OK;
+                                            }
+
+                                            char artwork_path[256] = {0};
+                                            bool has_artwork = false;
+                                            const char *art_url = link_song->artwork_url
+                                                                      ? link_song->artwork_url
+                                                                      : song.artwork_url;
+                                            if (art_url) {
+                                                has_artwork = hu_music_download_artwork(
+                                                                  alloc, art_url, artwork_path,
+                                                                  sizeof(artwork_path)) == HU_OK;
+                                            }
+
+                                            usleep(3000000 + (music_seed % 4000000));
+
+                                            if (st_len > 0) {
+                                                int media_count = 0;
+                                                const char *media[2];
+                                                if (has_preview)
+                                                    media[media_count++] = preview_path;
+                                                if (has_artwork)
+                                                    media[media_count++] = artwork_path;
+
+                                                ch->channel->vtable->send(
+                                                    ch->channel->ctx, batch_key, key_len,
+                                                    share_text, st_len,
+                                                    media_count > 0 ? media : NULL,
+                                                    (size_t)media_count);
+
+                                                hu_log_info("human", agent ? agent->observer : NULL,
+                                                            "sent music %s: %s - %s [%s%s]",
+                                                            has_preview ? "preview" : "link",
+                                                            song.artist_name ? song.artist_name
+                                                                             : "?",
+                                                            song.track_name ? song.track_name : "?",
+                                                            has_spotify ? "spotify" : "itunes",
+                                                            has_artwork ? "+art" : "");
+
+                                                hu_music_taste_record_send(batch_key, key_len,
+                                                                           song.artist_name,
+                                                                           song.track_name);
+                                                {
+                                                    static uint64_t last_taste_save_ms;
+                                                    uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
+                                                    if (tnow - last_taste_save_ms > 30000) {
+                                                        last_taste_save_ms = tnow;
+                                                        const char *th = getenv("HOME");
+                                                        if (th) {
+                                                            char tp[512];
+                                                            int tn2 = snprintf(
+                                                                tp, sizeof(tp),
+                                                                "%s/.human/music_taste.json", th);
+                                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
+                                                                hu_music_taste_save(tp,
+                                                                                    (size_t)tn2);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (has_preview)
+                                                (void)unlink(preview_path);
+                                            if (has_artwork)
+                                                (void)unlink(artwork_path);
+                                        }
                                     } else {
                                         hu_log_info("human", agent ? agent->observer : NULL,
                                                     "music search failed for: %s", search_query);

@@ -3317,6 +3317,15 @@ static hu_error_t imessage_stop_typing(void *ctx, const char *recipient, size_t 
 #endif
 }
 
+/* iMessage natively renders Apple Music / Spotify / YouTube Music URLs as
+ * rich playable previews (album art, title, artist, play button) when the URL
+ * is alone in its bubble. The music-share path uses this capability to send
+ * a bare URL instead of downloading + attaching a 30s .m4a preview + JPG. */
+static bool imessage_supports_link_unfurl(void *ctx) {
+    (void)ctx;
+    return true;
+}
+
 static const hu_channel_vtable_t imessage_vtable = {
     .start = imessage_start,
     .stop = imessage_stop,
@@ -3335,6 +3344,7 @@ static const hu_channel_vtable_t imessage_vtable = {
     .build_reaction_context = imessage_vt_build_reaction_context,
     .build_read_receipt_context = imessage_vt_build_read_receipt_context,
     .mark_read = imessage_mark_read,
+    .supports_link_unfurl = imessage_supports_link_unfurl,
 };
 
 hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
