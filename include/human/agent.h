@@ -652,6 +652,28 @@ hu_error_t hu_agent_run_single(hu_agent_t *agent, const char *system_prompt,
                                size_t user_message_len, char **response_out,
                                size_t *response_len_out);
 
+/* Canonical tool-dispatch helper.
+ *
+ * Wraps every tool invocation in the agent's hook pipeline:
+ *   1. Pre-tool hook (if a registry is configured). A DENY decision skips
+ *      execution AND short-circuits *out with a "denied by hook" failure.
+ *   2. Tool execute() (only if the pre-hook did NOT deny).
+ *   3. Post-tool hook (if a registry is configured). Fires UNCONDITIONALLY
+ *      — including on the pre-deny path — so auditors observe every
+ *      dispatch attempt regardless of outcome.
+ *
+ * This is the single canonical entry point for tool dispatch. New call sites
+ * MUST go through this helper; the audit on 2026-05-16 documented multiple
+ * scattered hook-and-execute call sites in src/agent/agent_turn.c and
+ * src/agent/agent_stream.c that are progressively migrating to it.
+ *
+ * Returns HU_OK for normal completion (including hook-denied dispatch).
+ * HU_ERR_INVALID_ARGUMENT if agent/tool/out is NULL. The caller frees *out
+ * via hu_tool_result_free. */
+hu_error_t hu_agent_dispatch_tool(hu_agent_t *agent, hu_tool_t *tool, const char *tool_name,
+                                  size_t tool_name_len, const char *args_json, size_t args_json_len,
+                                  const hu_json_value_t *args_parsed, hu_tool_result_t *out);
+
 void hu_agent_clear_history(hu_agent_t *agent);
 
 /* Handle slash commands: /help, /quit, /clear, /model, /status.
