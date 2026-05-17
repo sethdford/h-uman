@@ -1,7 +1,8 @@
 ---
 title: "Plan documents audit report"
 created: 2026-03-11
-status: archived
+status: complete
+last_audit: 2026-05-17
 ---
 
 # Plan Documents Audit Report

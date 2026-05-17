@@ -1,7 +1,8 @@
 ---
 title: "Dual-process cognition: System 1 / System 2 mode switching"
 created: 2026-03-21
-status: proposed
+status: complete
+last_audit: 2026-05-17
 ---
 
 # Dual-process cognition: System 1 / System 2 mode switching

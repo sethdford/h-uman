@@ -1,7 +1,8 @@
 ---
 title: "Metacognitive control loop: self-monitoring and adaptive strategy switching"
 created: 2026-03-21
-status: in-progress
+status: complete
+last_audit: 2026-05-17
 ---
 
 ## V2 (2026-03-21) — shipped in tree

@@ -1,13 +1,14 @@
 ---
 title: "W5 — Agent-Writable Persona + Procedural Memory"
 created: 2026-05-10
-status: proposed
+status: complete
 parent: 2026-05-10-memory-roadmap-overview.md
 depends_on:
   - 2026-05-10-w1-bitemporal-foundation.md
   - 2026-05-10-w4-self-rag-provenance.md
 risk: high
 scope: src/persona/, src/agent/, include/human/, ui/
+last_audit: 2026-05-17
 ---
 
 # W5 — Agent-Writable Persona + Procedural Memory

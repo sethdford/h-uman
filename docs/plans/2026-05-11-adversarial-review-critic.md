@@ -1,3 +1,8 @@
+---
+status: complete
+last_audit: 2026-05-17
+---
+
 # Adversarial Review — SOTA-2026 Initiative Designs
 
 **Reviewer**: critic subagent  

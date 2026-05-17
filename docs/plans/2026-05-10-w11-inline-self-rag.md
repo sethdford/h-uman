@@ -1,10 +1,11 @@
 ---
 title: "W11 — Inline Self-RAG with Abstention: hu_self_rag_t vtable, control tokens, refusal head"
 created: 2026-05-10
-status: proposed
+status: complete
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: high
 scope: include/human/agent/, src/agent/, src/providers/
+last_audit: 2026-05-17
 ---
 
 # W11 — Inline Self-RAG with Abstention

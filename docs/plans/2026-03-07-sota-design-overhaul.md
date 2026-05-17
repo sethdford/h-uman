@@ -1,5 +1,6 @@
 ---
-status: superseded
+status: complete
+last_audit: 2026-05-17
 ---
 
 # SOTA Design Overhaul — Approved Design
