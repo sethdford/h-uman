@@ -3216,6 +3216,23 @@ target_compile_options(human_core PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wfo
 target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror)
 target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
 
+# Per-file warning exceptions.
+#
+# src/onboard.c contains hu_starter_persona_json — an inline 4.3 KB JSON
+# literal that exceeds the 4095-byte ISO C99 minimum for string literals
+# (and so trips -Wpedantic -> -Werror=overlength-strings on Linux GCC). The
+# literal is legitimately large configuration data, not a bug; Apple Clang
+# on macOS accepts it, but GCC enforces the standard's minimum. Splitting
+# the literal would require changing hu_starter_persona_json's public type
+# (array -> pointer) and touching 7+ callers across src/ and tests/, which
+# is out of scope for a content-only doctrine change. The proper long-term
+# fix is to migrate the JSON into the data/ + embed-data.sh pipeline (same
+# pattern used for data/prompts/safety_rules.txt). Until then, silence the
+# warning for this single file. Tracked: TODO move hu_starter_persona_json
+# into data/personas/starter.json.
+set_source_files_properties(src/onboard.c PROPERTIES
+    COMPILE_FLAGS "-Wno-overlength-strings")
+
 # Synthetic pressure tests (requires libcurl for real HTTP)
 option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)
 if(HU_ENABLE_SYNTHETIC)
