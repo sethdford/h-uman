@@ -329,6 +329,7 @@ void run_tool_router_tests(void);
 void run_dag_tests(void);
 void run_hula_tests(void);
 void run_hula_golden_tests(void);
+void run_hula_sdk_v2_tests(void);
 void run_workflow_event_tests(void);
 void run_sota_features_tests(void);
 void run_mood_tests(void);
@@ -923,6 +924,7 @@ int main(int argc, char **argv) {
     run_dag_tests();
     run_hula_tests();
     run_hula_golden_tests();
+    run_hula_sdk_v2_tests();
     run_workflow_event_tests();
     run_sota_features_tests();
     run_mood_tests();

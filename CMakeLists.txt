@@ -490,6 +490,7 @@ set(HU_CORE_SOURCES
     src/agent/dag.c
     src/agent/dag_executor.c
     src/agent/hula.c
+    src/agent/hula_sdk.c
     src/agent/idempotency.c
     src/agent/hula_compiler.c
     src/agent/hula_emergence.c
@@ -1338,6 +1339,8 @@ list(REMOVE_DUPLICATES HU_CORE_SOURCES)
 
 # --- Core static library ---
 add_library(human_core STATIC ${HU_CORE_SOURCES} ${HU_CRYPTO_SOURCES} ${HU_ASM_SOURCES})
+# PIC so the SDK shared library (libhuman_hula) can link this archive.
+set_target_properties(human_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(human_core PUBLIC ${HU_ROOT}/include)
 if(Threads_FOUND)
     target_link_libraries(human_core PUBLIC Threads::Threads)
@@ -1360,6 +1363,63 @@ endif()
 target_include_directories(human_core PRIVATE ${HU_ROOT}/asm/generic ${HU_ROOT}/src/agent ${HU_ROOT}/src/gateway)
 ## HU_IS_TEST is intentionally NOT set here — human_core is the production library.
 ## Tests link against human_core_test (below) which defines HU_IS_TEST=1.
+
+# --- HuLa SDK shared library (libhuman_hula.{so,dylib}) ---
+# Built so Python ctypes / TypeScript N-API / etc. have a single dlsym target
+# for the v0.2.0 SDK surface (hu_hula_ctx_*, hu_hula_error_string, and the
+# underlying hu_hula_* IR). Bindings (US-10.2, US-10.3) load this library at
+# runtime and bind to these signatures via FFI — there is NO compile-time
+# check across the FFI boundary, so the ABI of these symbols is fixed.
+#
+# Implementation: a SHARED export TU (generated at configure time) that
+# explicitly anchors every hu_hula_* function the bindings will dlsym, plus
+# a normal link against human_core. Functions referenced from this TU are
+# retained in the resulting .so/.dylib; the anchor list IS the binding ABI
+# contract — add to it when bindings need a new SDK symbol.
+#
+# Whole-archive linking is intentionally NOT used because it pulls in TUs
+# that reference symbols only the `human` executable defines (e.g.
+# hu_app_bootstrap from src/bootstrap.c), which would fail to link into a
+# freestanding shared library.
+set(HU_HULA_EXPORT_STUB ${CMAKE_BINARY_DIR}/hula_sdk_export.c)
+file(WRITE ${HU_HULA_EXPORT_STUB}
+    "/* Auto-generated. Anchors public HuLa SDK symbols into libhuman_hula. */\n"
+    "#include \"human/hula_sdk.h\"\n"
+    "#include \"human/agent/hula.h\"\n"
+    "\n"
+    "/* The references below are taken via function-pointer cast so the\n"
+    " * linker keeps the corresponding TUs from human_core. Edit this list\n"
+    " * when bindings need a new SDK symbol. */\n"
+    "const void *hu_hula_sdk_v2_export_anchor(void);\n"
+    "const void *hu_hula_sdk_v2_export_anchor(void) {\n"
+    "    static const void *const refs[] = {\n"
+    "        /* v0.2.0 surface */\n"
+    "        (const void *)&hu_hula_ctx_create,\n"
+    "        (const void *)&hu_hula_ctx_destroy,\n"
+    "        (const void *)&hu_hula_error_string,\n"
+    "        /* HuLa IR — bindings invoke these via dlsym */\n"
+    "        (const void *)&hu_hula_program_init,\n"
+    "        (const void *)&hu_hula_program_deinit,\n"
+    "        (const void *)&hu_hula_parse_json,\n"
+    "        (const void *)&hu_hula_to_json,\n"
+    "        (const void *)&hu_hula_validate,\n"
+    "        (const void *)&hu_hula_validation_deinit,\n"
+    "        (const void *)&hu_hula_exec_init,\n"
+    "        (const void *)&hu_hula_exec_run,\n"
+    "        (const void *)&hu_hula_exec_deinit,\n"
+    "        (const void *)&hu_hula_exec_result,\n"
+    "    };\n"
+    "    return refs;\n"
+    "}\n"
+)
+add_library(human_hula SHARED ${HU_HULA_EXPORT_STUB})
+set_target_properties(human_hula PROPERTIES
+    OUTPUT_NAME human_hula
+    POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(human_hula PUBLIC ${HU_ROOT}/include)
+target_link_libraries(human_hula PRIVATE human_core)
+add_dependencies(human_hula human_core)
 
 # --- Compile definitions for module groups ---
 if(HU_ENABLE_PERIPHERALS)
@@ -1890,6 +1950,8 @@ endif()
 if(HU_ENABLE_ASAN)
     target_compile_options(human_core PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(human_core PRIVATE -fsanitize=address)
+    target_compile_options(human_hula PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(human_hula PRIVATE -fsanitize=address)
 endif()
 
 # --- Main executable ---
@@ -2747,6 +2809,7 @@ set(HU_TEST_SOURCES
     tests/test_dag.c
     tests/test_hula.c
     tests/test_hula_golden.c
+    tests/test_hula_sdk_v2.c
     tests/test_workflow_event.c
     tests/test_sota_features.c
     tests/test_mood.c

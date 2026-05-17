@@ -65,11 +65,78 @@
 
 /* SDK version — follows semver. Bump MAJOR for breaking changes to this file. */
 #define HU_HULA_SDK_VERSION_MAJOR  0
-#define HU_HULA_SDK_VERSION_MINOR  1
+#define HU_HULA_SDK_VERSION_MINOR  2
 #define HU_HULA_SDK_VERSION_PATCH  0
-#define HU_HULA_SDK_VERSION_STRING "0.1.0"
+#define HU_HULA_SDK_VERSION_STRING "0.2.0"
 
-/* ── Ergonomic helpers ──────────────────────────────────────────────────── */
+/* ── v0.2.0 binding-friendly surface (additive) ─────────────────────────── */
+
+/**
+ * Opaque per-binding context handle.
+ *
+ * Bindings (Python ctypes / TypeScript N-API / etc.) instantiate one of
+ * these per "HulaContext"-style object and attach a finalizer that calls
+ * hu_hula_ctx_destroy(). The internal layout is intentionally hidden so it
+ * can evolve in v0.3+ without breaking the FFI ABI: bindings only ever see
+ * the typedef and pass `hu_hula_ctx_t *` opaquely.
+ *
+ * Stable in v0.2.x. Changes to this typedef or to the functions below bump
+ * HU_HULA_SDK_VERSION_MAJOR.
+ *
+ * Not thread-safe in v0.2.0 — concurrent use of a single ctx from multiple
+ * threads is undefined behavior. Out of scope per the v0.2.0 story; bindings
+ * that need concurrency should create one ctx per thread.
+ */
+typedef struct hu_hula_ctx hu_hula_ctx_t;
+
+/**
+ * Allocate and initialize a new HuLa SDK context.
+ *
+ * The context stores a copy of `*alloc` by value; the allocator vtable
+ * itself need not outlive the context, but `alloc->ctx` (if any) must
+ * remain valid until hu_hula_ctx_destroy() returns.
+ *
+ * Returns HU_OK on success and writes the new handle into `*out`.
+ * On HU_ERR_INVALID_ARGUMENT (NULL `alloc` or NULL `out`) and on
+ * HU_ERR_OUT_OF_MEMORY, `*out` is left unmodified — callers may pre-seed
+ * `*out` with a sentinel and trust it survives.
+ *
+ * Stable in v0.2.x.
+ */
+hu_error_t hu_hula_ctx_create(hu_allocator_t *alloc, hu_hula_ctx_t **out);
+
+/**
+ * Destroy a context allocated by hu_hula_ctx_create().
+ *
+ * NULL-safe: passing NULL is a no-op (binding finalizers may run twice on
+ * a torn-down object, and that must not crash).
+ *
+ * Stable in v0.2.x.
+ */
+void hu_hula_ctx_destroy(hu_hula_ctx_t *ctx);
+
+/**
+ * Map an `hu_error_t` value to a human-readable, NUL-terminated ASCII string.
+ *
+ * For known codes (HU_OK and every HU_ERR_* declared in
+ * `human/core/error.h`) returns the C identifier as a string literal, e.g.
+ * "HU_ERR_INVALID_ARGUMENT". Distinct codes return distinct strings.
+ *
+ * For any value not covered by the switch (future codes, garbage, deliberate
+ * fuzz input) returns the sentinel literal "HU_ERR_UNKNOWN".
+ *
+ * The returned pointer is to a static string literal and remains valid for
+ * the lifetime of the program. Callers must not free it. Never NULL.
+ *
+ * Bindings render exception messages via this function. Implemented as an
+ * extern symbol (not `static inline`) so FFI/ctypes/N-API have a single
+ * dlsym target.
+ *
+ * Stable in v0.2.x.
+ */
+const char *hu_hula_error_string(hu_error_t err);
+
+/* ── Ergonomic helpers (v0.1.0 — unchanged) ─────────────────────────────── */
 
 /**
  * Build a minimal program whose root is a single CALL node.
