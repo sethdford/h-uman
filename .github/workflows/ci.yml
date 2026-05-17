@@ -92,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure
         run: |
           cmake -B build-integ \
@@ -131,7 +131,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure
         run: cmake --preset minimal
       - name: Build
@@ -169,7 +169,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure (${{ matrix.name }})
         run: cmake -B build ${{ matrix.flags }}
       - name: Build
@@ -285,7 +285,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build gateway
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHU_BUILD_TESTS=OFF -DHU_ENABLE_CURL=ON
@@ -336,7 +336,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build gateway
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHU_BUILD_TESTS=OFF -DHU_ENABLE_CURL=ON
@@ -410,7 +410,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake gcc libsqlite3-dev libcurl4-openssl-dev \
+          sudo apt-get install -y build-essential cmake gcc libsqlite3-dev libsodium-dev libcurl4-openssl-dev \
             debhelper devscripts fakeroot
       - name: Build .deb package
         run: bash scripts/build-deb.sh
@@ -446,7 +446,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libsqlite3-dev
+          sudo apt-get install -y libcurl4-openssl-dev libsqlite3-dev libsodium-dev
           sudo apt-get install -y clang-format-18 || sudo apt-get install -y clang-format
           if command -v clang-format-18 >/dev/null; then
             sudo ln -sf $(which clang-format-18) /usr/local/bin/clang-format
@@ -620,7 +620,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
       - name: Start Ollama server
@@ -670,7 +670,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install build deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build
         run: |
           cmake -B build -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SKILLS=ON
@@ -723,7 +723,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install Clang and build deps
-        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev libsodium-dev
       - name: Configure (fuzz)
         env:
           CC: clang
@@ -790,7 +790,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsqlite3-dev libcurl4-openssl-dev libssl-dev binutils
+          sudo apt-get install -y cmake ninja-build libsqlite3-dev libsodium-dev libcurl4-openssl-dev libssl-dev binutils
       - name: Install macOS build deps
         if: matrix.os == 'macos-latest'
         run: |
