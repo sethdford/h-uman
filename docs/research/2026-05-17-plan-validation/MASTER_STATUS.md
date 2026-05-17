@@ -1,3 +1,9 @@
+---
+title: Master Status
+date: 2026-05-17
+status: audit
+---
+
 # Master Plan-Validation Status
 
 **Audit date:** 2026-05-17

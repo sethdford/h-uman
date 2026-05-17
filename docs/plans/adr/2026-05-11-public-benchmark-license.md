@@ -77,7 +77,7 @@ Accepted with addendum (2026-05-17). Bookkeeping work (LICENSE files, headers, C
 
 This ADR's decision table (row "Reference implementation") includes the parenthetical "Repo at large is currently unlicensed → add LICENSE at the root before publication." **That parenthetical is factually incorrect.** The repo has carried an **MIT License** at `LICENSE` since the original nullclaw commit (`a58a0ef3`, 2026-02-16), three months before this ADR was written. The MIT license is also asserted in:
 
-- `README.md` (license badge + "License: MIT — see [LICENSE](LICENSE)")
+- `README.md` (license badge + "License: MIT — see [LICENSE](../../../LICENSE)")
 - `CONTRIBUTING.md` ("Human is an autonomous AI assistant runtime written in C11. MIT License.")
 - `npm/package.json` (`"license": "MIT"`)
 - `npm/README.md` (License: MIT)
