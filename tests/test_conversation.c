@@ -3649,6 +3649,36 @@ static void leave_on_read_custom_threshold(void) {
     HU_ASSERT_FALSE(r2);
 }
 
+/* ── Leave-on-read decision predicate (F46 state machine) ─────────────────── */
+
+static void leave_on_read_decide_groups_always_respond(void) {
+    /* In group chats we never leave-on-read, regardless of the helper or
+     * an active 1:1 period (the daemon scopes the ring buffer per chat). */
+    HU_ASSERT_EQ(hu_leave_on_read_decide(true, false, false), HU_LOR_RESPOND);
+    HU_ASSERT_EQ(hu_leave_on_read_decide(true, false, true), HU_LOR_RESPOND);
+    HU_ASSERT_EQ(hu_leave_on_read_decide(true, true, false), HU_LOR_RESPOND);
+    HU_ASSERT_EQ(hu_leave_on_read_decide(true, true, true), HU_LOR_RESPOND);
+}
+
+static void leave_on_read_decide_active_period_returns_already(void) {
+    HU_ASSERT_EQ(hu_leave_on_read_decide(false, true, false), HU_LOR_ALREADY_IN_PERIOD);
+}
+
+static void leave_on_read_decide_helper_trigger_returns_trigger_new(void) {
+    HU_ASSERT_EQ(hu_leave_on_read_decide(false, false, true), HU_LOR_TRIGGER_NEW);
+}
+
+static void leave_on_read_decide_no_signals_responds_normally(void) {
+    HU_ASSERT_EQ(hu_leave_on_read_decide(false, false, false), HU_LOR_RESPOND);
+}
+
+static void leave_on_read_decide_active_period_beats_helper(void) {
+    /* When both fire, prefer ALREADY over TRIGGER_NEW so an existing silence
+     * isn't extended by re-rolling. Pins the daemon's branch ordering at
+     * src/daemon.c:4413-4424 — active-period check precedes the trigger roll. */
+    HU_ASSERT_EQ(hu_leave_on_read_decide(false, true, true), HU_LOR_ALREADY_IN_PERIOD);
+}
+
 /* ── Call escalation (F49) ────────────────────────────────────────────────── */
 
 static void call_escalation_crisis_keywords_returns_true(void) {
@@ -4452,6 +4482,11 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(leave_on_read_whatever_seed_under_2_returns_true);
     HU_RUN_TEST(leave_on_read_ok_seed_over_2_returns_false);
     HU_RUN_TEST(leave_on_read_custom_threshold);
+    HU_RUN_TEST(leave_on_read_decide_groups_always_respond);
+    HU_RUN_TEST(leave_on_read_decide_active_period_returns_already);
+    HU_RUN_TEST(leave_on_read_decide_helper_trigger_returns_trigger_new);
+    HU_RUN_TEST(leave_on_read_decide_no_signals_responds_normally);
+    HU_RUN_TEST(leave_on_read_decide_active_period_beats_helper);
 
     /* Call escalation (F49) */
     HU_RUN_TEST(call_escalation_crisis_keywords_returns_true);

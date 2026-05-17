@@ -1,0 +1,4 @@
+ scripts/finetune-gemma.py          | 232 +++++++++++++++++++++---------
+ tests/fixtures/dpo_pairs_min.jsonl |   3 +
+ tests/test_finetune_gemma_dpo.py   | 286 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 454 insertions(+), 67 deletions(-)

@@ -84,6 +84,7 @@ typedef struct hu_contact_profile {
     char *attachment_style;
     char *dunbar_layer;
     float affect_mirror_ceiling; /* per-contact ceiling override. 0 = use stage default */
+    uint8_t leave_on_read_pct;   /* per-contact override (0-100). 0 = use overlay/default */
 } hu_contact_profile_t;
 
 /* Motivation — the character's core drive (anti-drift anchor) */
@@ -658,6 +659,14 @@ hu_error_t hu_contact_profile_build_context(hu_allocator_t *alloc,
  * Returns 0.7 if no stage is set. */
 float hu_affect_mirror_ceiling(const hu_contact_profile_t *contact,
                                const hu_persona_overlay_t *overlay);
+
+/* Effective leave-on-read percentage: per-contact > per-channel-overlay > 0.
+ * 0 signals "use classifier default (10%)" — callers pass the return value to
+ * hu_conversation_should_leave_on_read where 0 triggers the default. NULL-safe
+ * for both parameters. Mirrors hu_affect_mirror_ceiling's layered-lookup
+ * shape so the per-contact override behaves the same way across overlay axes. */
+uint8_t hu_leave_on_read_pct_effective(const hu_contact_profile_t *contact,
+                                       const hu_persona_overlay_t *overlay);
 
 /* Apply affect mirror ceiling to emotional intensity.
  * If intensity > ceiling, returns the ceiling value.

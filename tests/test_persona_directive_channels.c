@@ -66,8 +66,9 @@ static void persona_directive_starter_persona_loads_four_tier1_overlays(void) {
     hu_persona_t persona;
     memset(&persona, 0, sizeof(persona));
 
-    hu_error_t err = hu_persona_load_json(&alloc, hu_starter_persona_json,
-                                          strlen(hu_starter_persona_json), &persona);
+    size_t starter_len = 0;
+    const char *starter_json = hu_starter_persona_get(&starter_len);
+    hu_error_t err = hu_persona_load_json(&alloc, starter_json, starter_len, &persona);
     HU_ASSERT_EQ(err, HU_OK);
 
     HU_ASSERT_NOT_NULL(find_overlay(&persona, "imessage"));
@@ -84,8 +85,9 @@ static void persona_directive_starter_persona_has_five_example_banks(void) {
     hu_persona_t persona;
     memset(&persona, 0, sizeof(persona));
 
-    hu_error_t err = hu_persona_load_json(&alloc, hu_starter_persona_json,
-                                          strlen(hu_starter_persona_json), &persona);
+    size_t starter_len = 0;
+    const char *starter_json = hu_starter_persona_get(&starter_len);
+    hu_error_t err = hu_persona_load_json(&alloc, starter_json, starter_len, &persona);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(persona.example_banks_count, 5u);
 

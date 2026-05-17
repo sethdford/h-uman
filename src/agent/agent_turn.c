@@ -1,10 +1,15 @@
 /* Core turn execution: hu_agent_turn and turn-local helpers */
 #include "agent_internal.h"
+#include "human/agent/best_of_n.h"
 #include "human/agent/humanness.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
+#ifdef HU_ENABLE_MOLORA
+#include "human/ml/molora.h"
+#include "human/provider.h"
+#endif
 
 #include "human/agent/choreography.h"
 #include "human/agent/frontier_persist.h"
@@ -19,6 +24,9 @@
 #include "human/persona/micro_expression.h"
 #include "human/persona/narrative_self.h"
 #include "human/persona/somatic.h"
+#include "human/persona/style_critique.h"
+#include "human/persona/style_mirror.h"
+#include "human/persona/voice_maturity.h"
 
 #include "human/agent/conv_goals.h"
 #include "human/agent/model_router.h"
@@ -4847,8 +4855,75 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             resp = degrade_result.response;
             degrade_strategy = degrade_result.strategy_used;
         } else {
-            err = agent->provider.vtable->chat(agent->provider.ctx, agent->alloc, &req, turn_model,
-                                               turn_model_len, turn_temp, &resp);
+#ifdef HU_ENABLE_MOLORA
+            /* US-7.8 — MoLoRA static per-channel router. Hooks the agent's
+             * single chat-dispatch site BEFORE best-of-N so all N candidates
+             * draw from the channel-correct adapter. Lazy swap: only loads
+             * when the router-selected path differs from the provider's
+             * currently-active adapter. Failures log a warning and proceed
+             * with whatever adapter was previously active (or no adapter)
+             * — never blocks the turn. */
+            if (agent->molora_router.enabled && agent->provider.vtable) {
+                const char *molora_path = hu_molora_router_select(
+                    &agent->molora_router, agent->active_channel, agent->active_channel_len);
+                if (molora_path && molora_path[0]) {
+                    const char *cur_id = hu_provider_active_adapter(&agent->provider);
+                    /* Derive the adapter id from the path basename (same
+                     * convention as the daemon bootstrap at daemon.c:2543). */
+                    const char *base = strrchr(molora_path, '/');
+                    base = base ? base + 1 : molora_path;
+                    /* Skip the swap when the active adapter id already matches
+                     * the basename — intra-channel turns pay zero swap cost. */
+                    if (!cur_id || strcmp(cur_id, base) != 0) {
+                        hu_error_t mle =
+                            hu_provider_load_adapter(&agent->provider, agent->alloc, molora_path,
+                                                     strlen(molora_path), base, strlen(base));
+                        if (mle == HU_ERR_NOT_SUPPORTED) {
+                            /* Cloud provider — no-op; turn proceeds. Silenced
+                             * because it would fire every turn on cloud
+                             * providers (US-7.3 doctor warning handles the
+                             * once-per-startup operator notification). */
+                            (void)mle;
+                        } else if (mle != HU_OK) {
+                            hu_log_warn("agent_turn", agent->observer,
+                                        "molora: load_adapter('%s') failed: %d", molora_path,
+                                        (int)mle);
+                        }
+                    }
+                }
+            }
+#endif /* HU_ENABLE_MOLORA */
+            /* US-7.7 — Best-of-N at inference. Gate: cfg->inference.best_of_n >= 2
+             * AND active provider is "llamacpp" AND persona fingerprint exists
+             * (style.sample_count > 0; cold-start agents skip best-of-N since
+             * every candidate would score -1.0). MoLoRA adapter selection
+             * (US-7.8, when enabled) fires BEFORE this decorator: the router
+             * picks the adapter, then best-of-N samples N completions against
+             * it. Single chat-dispatch site. */
+            bool best_of_n_eligible = false;
+            if (agent->config && agent->config->inference.best_of_n >= 2 &&
+                agent->provider.vtable && agent->provider.vtable->chat &&
+                agent->provider.vtable->get_name && agent->personal_model.style.sample_count > 0) {
+                const char *pname = agent->provider.vtable->get_name(agent->provider.ctx);
+                if (pname && strcmp(pname, "llamacpp") == 0)
+                    best_of_n_eligible = true;
+            }
+            if (best_of_n_eligible) {
+                hu_best_of_n_config_t bcfg = {0};
+                bcfg.provider = &agent->provider;
+                bcfg.style = &agent->personal_model.style;
+                bcfg.request = &req;
+                bcfg.model = turn_model;
+                bcfg.model_len = turn_model_len;
+                bcfg.temperature = turn_temp;
+                bcfg.n = agent->config->inference.best_of_n;
+                bcfg.cost_cap_ms = agent->config->inference.best_of_n_cost_cap_ms;
+                bcfg.observer = agent->observer;
+                err = hu_best_of_n_chat(&bcfg, agent->alloc, &resp);
+            } else {
+                err = agent->provider.vtable->chat(agent->provider.ctx, agent->alloc, &req,
+                                                   turn_model, turn_model_len, turn_temp, &resp);
+            }
         }
 
         /* On-device → cloud fallback: if on-device model failed, retry with cloud reflexive */
@@ -5464,6 +5539,35 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hu_critique_result_free(agent->alloc, &critique);
                 }
 #endif
+
+                /* US-7.9: Constitutional style self-critique.  Pure
+                 * literal pattern matcher — no LLM judge call.  Runs
+                 * post-generation, sibling to the constitutional
+                 * block above.  One regen attempt max if a rule fires.
+                 *
+                 * Sequencing note (cross-story): when best-of-N
+                 * (US-7.7) lands, it picks the highest-fidelity sample
+                 * at the original chat call; this critique fires on
+                 * the chosen result. */
+                if (agent->style_rules_enabled && agent->persona && agent->persona->style_rules &&
+                    agent->persona->style_rules_count > 0) {
+                    char *regen_out = NULL;
+                    size_t regen_out_len = 0;
+                    if (hu_style_critique_run(agent->alloc, &agent->provider, agent->observer,
+                                              system_prompt, system_prompt_len, msg, msg_len,
+                                              agent->model_name, agent->model_name_len,
+                                              final_content, final_len, agent->persona->style_rules,
+                                              agent->persona->style_rules_count, &regen_out,
+                                              &regen_out_len) == HU_OK &&
+                        regen_out && regen_out_len > 0) {
+                        if (ab_owned)
+                            agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                               final_len + 1);
+                        final_content = regen_out;
+                        final_len = regen_out_len;
+                        ab_owned = true;
+                    }
+                }
 
                 /* Metacognition: bounded re-entry (same provider) + SQLite history */
                 if (agent->infra.metacognition.cfg.enabled) {

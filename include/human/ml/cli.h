@@ -9,6 +9,10 @@ hu_error_t hu_ml_cli_experiment(hu_allocator_t *alloc, int argc, const char **ar
 hu_error_t hu_ml_cli_prepare(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_status(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **argv);
+/* Sprint 7 US-7.2 — mine DPO preference pairs from chat.db correction
+ * triples and (optionally) export to JSONL for the finetune-gemma.py DPO
+ * pass. See `human/ml/dpo_miner.h`. */
+hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, const char **argv);
 hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **argv);
 /* Track D D2.2 — offline persona-fidelity baseline.
@@ -86,5 +90,36 @@ hu_error_t hu_ml_cli_train_feed_predictor(hu_allocator_t *alloc, int argc, const
  * "trained adapter on disk → loaded by provider runtime" so the W13
  * pipeline is verifiable from a single CLI command. */
 hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char **argv);
+
+/* US-7.10 + US-11.5 — `human ml rl-train --algorithm {dpo|simpo|orpo|grpo2}` router.
+ *
+ * `dpo`   → delegates to `hu_ml_cli_dpo_train` with the `--algorithm`
+ *           flag pair stripped from argv (no behavior change vs the
+ *           existing `human ml dpo-train` entry point — AC-7.10.4).
+ * `simpo` → instantiates `hu_rl_trainer_simpo_create` and runs a single
+ *           `train_step` against the supplied pair (AC-7.10.3). In
+ *           `HU_IS_TEST` builds the model forward is mocked.
+ * `orpo`  → instantiates `hu_rl_trainer_orpo_create` and runs a single
+ *           `train_step` against the supplied pair (US-11.5 / AC-11.5.1).
+ *           In `HU_IS_TEST` builds the model forward is mocked.
+ * `grpo2` → emits a "not yet implemented" message and returns
+ *           `HU_ERR_NOT_SUPPORTED` (exit code 2 — AC-7.10.5).
+ *
+ * Missing `--algorithm` flag returns `HU_ERR_INVALID_ARGUMENT`. */
+hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv);
+
+/* US-11.8 — `human ml adapter-rollback`.
+ *
+ * Enumerates `<slow_dir>/slow.safetensors.v*`, picks `v{N}` = current
+ * target (highest) and `v{N-1}` = previous, then:
+ *   1. Quarantines `v{N}` to `<quarantine_dir>/<today>.safetensors`.
+ *   2. Atomically rewires `<current_symlink>` -> `v{N-1}`.
+ *
+ * Required flags: --slow-dir, --quarantine-dir, --current. Optional:
+ *   --today YYYY-MM-DD  (deterministic quarantine filename for tests)
+ *
+ * Fails with HU_ERR_TOOL_VALIDATION when there is no `v{N-1}` to roll
+ * back to (operator must inspect quarantine manually). */
+hu_error_t hu_ml_cli_adapter_rollback(hu_allocator_t *alloc, int argc, const char **argv);
 
 #endif

@@ -20,12 +20,12 @@
 #include <string.h>
 
 #ifdef _WIN32
-#define hu_popen(cmd, mode)  _popen(cmd, mode)
-#define hu_pclose(f)         _pclose(f)
+#define hu_popen(cmd, mode) _popen(cmd, mode)
+#define hu_pclose(f)        _pclose(f)
 #else
 #include <unistd.h>
-#define hu_popen(cmd, mode)  popen(cmd, mode)
-#define hu_pclose(f)         pclose(f)
+#define hu_popen(cmd, mode) popen(cmd, mode)
+#define hu_pclose(f)        pclose(f)
 #endif
 
 typedef struct hu_learner_mlx_ctx {
@@ -65,8 +65,7 @@ static uint64_t mlx_fnv1a(const void *data, size_t len) {
 /* Write signals as JSONL training data. Each signal becomes one or more
  * {"prompt": "...", "completion": "..."} lines. Returns HU_OK on
  * success, HU_ERR_IO on write failure. */
-static hu_error_t write_training_jsonl(const char *path,
-                                       const hu_training_signal_t *signals,
+static hu_error_t write_training_jsonl(const char *path, const hu_training_signal_t *signals,
                                        size_t n) {
     FILE *f = fopen(path, "w");
     if (!f)
@@ -85,13 +84,11 @@ static hu_error_t write_training_jsonl(const char *path,
             fprintf(f,
                     "{\"prompt\": \"[persona-delta kind=%d key=%s]\", "
                     "\"completion\": \"%s\"}\n",
-                    (int)signals[i].as.persona.delta.kind,
-                    signals[i].as.persona.delta.key,
+                    (int)signals[i].as.persona.delta.kind, signals[i].as.persona.delta.key,
                     signals[i].as.persona.delta.value);
             break;
         case HU_TRAIN_CASE_OUTCOME: {
-            const char *label =
-                signals[i].as.case_outcome.reward >= 0.5f ? "positive" : "negative";
+            const char *label = signals[i].as.case_outcome.reward >= 0.5f ? "positive" : "negative";
             fprintf(f,
                     "{\"prompt\": \"[case %lld]\", "
                     "\"completion\": \"%s (reward=%.2f)\"}\n",
@@ -113,8 +110,8 @@ static hu_error_t write_training_jsonl(const char *path,
 #if defined(HU_IS_TEST) && HU_IS_TEST
 /* Write a fake HLAD adapter file for HU_IS_TEST mode. Mirrors the
  * format from learner_cpu.c so the rest of the stack can round-trip. */
-static hu_error_t write_fake_adapter(const char *path, const char *model_version,
-                                     int rank, int64_t *out_bytes) {
+static hu_error_t write_fake_adapter(const char *path, const char *model_version, int rank,
+                                     int64_t *out_bytes) {
     FILE *f = fopen(path, "wb");
     if (!f)
         return HU_ERR_IO;
@@ -208,16 +205,16 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
     /* Compute a model_version hash from training data for KV-cache
      * invalidation. Combines the configured version with a hash of the
      * signal contents. */
-    uint64_t data_hash = mlx_fnv1a(cfg->model_version,
-                                   strnlen(cfg->model_version, sizeof(cfg->model_version)));
+    uint64_t data_hash =
+        mlx_fnv1a(cfg->model_version, strnlen(cfg->model_version, sizeof(cfg->model_version)));
     for (size_t i = 0; i < signals_count; i++) {
         uint64_t sh = mlx_fnv1a(&signals[i], sizeof(signals[i]));
         data_hash ^= sh;
     }
     /* Same truncation pattern as learner_ggml.c — width-bound the prefix
      * so GCC -Wformat-truncation=2 stays quiet under -Werror. */
-    snprintf(out_report->model_version, sizeof(out_report->model_version),
-             "%.46s-%016llx", cfg->model_version, (unsigned long long)data_hash);
+    snprintf(out_report->model_version, sizeof(out_report->model_version), "%.46s-%016llx",
+             cfg->model_version, (unsigned long long)data_hash);
 
     if (cfg->budget_ms == 0) {
         out_report->steps_completed = 0;
@@ -231,9 +228,12 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
 #if defined(HU_IS_TEST) && HU_IS_TEST
     /* Test mode: write a fake adapter, skip subprocess. */
     int64_t bytes = 0;
-    hu_error_t e = write_fake_adapter(cfg->adapter_output_path, out_report->model_version,
-                                      cfg->rank, &bytes);
+    hu_error_t e =
+        write_fake_adapter(cfg->adapter_output_path, out_report->model_version, cfg->rank, &bytes);
     if (e != HU_OK) {
+        /* PR #115 / Ubuntu CI fix: match learner_ggml.c's `%.90s` width-
+         * bound. cfg->adapter_output_path is up to 256 bytes; last_error
+         * is 128. GCC -Werror=format-truncation refuses unbounded %s. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
                  "failed to write test adapter at %.90s", cfg->adapter_output_path);
         return e;
@@ -266,9 +266,8 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
              "--lora-rank %d "
              "--learning-rate %g "
              "2>&1",
-             cfg->base_model_path, jsonl_path, cfg->adapter_output_path,
-             cfg->max_steps, cfg->batch_size, cfg->rank,
-             (double)cfg->learning_rate);
+             cfg->base_model_path, jsonl_path, cfg->adapter_output_path, cfg->max_steps,
+             cfg->batch_size, cfg->rank, (double)cfg->learning_rate);
 
     FILE *fp = hu_popen(cmd, "r");
     if (!fp) {
@@ -319,12 +318,14 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
                  "    import safetensors.numpy as stn;\n"
                  "    for f in glob.glob(os.path.join(adir, '*.safetensors')):\n"
                  "        tensors = dict(stn.load_file(f));\n"
-                 "        noised = {k: v + np.random.normal(0, sigma, v.shape).astype(v.dtype) for k, v in tensors.items()};\n"
+                 "        noised = {k: v + np.random.normal(0, sigma, v.shape).astype(v.dtype) for "
+                 "k, v in tensors.items()};\n"
                  "        stn.save_file(noised, f)\n"
                  "except ImportError:\n"
                  "    for f in glob.glob(os.path.join(adir, '*.npz')):\n"
                  "        d = dict(np.load(f));\n"
-                 "        noised = {k: v + np.random.normal(0, sigma, v.shape).astype(v.dtype) for k, v in d.items()};\n"
+                 "        noised = {k: v + np.random.normal(0, sigma, v.shape).astype(v.dtype) for "
+                 "k, v in d.items()};\n"
                  "        np.savez(f, **noised)\n"
                  "\" 2>&1",
                  cfg->adapter_output_path, (double)noise_sigma);
@@ -336,9 +337,10 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
             }
             int dp_status = hu_pclose(dp_fp);
             if (dp_status != 0) {
-                fprintf(stderr, "[mlx-dp] warning: post-hoc DP noise injection "
-                                "failed (status %d); adapter may not satisfy "
-                                "dp_epsilon=%.2f\n",
+                fprintf(stderr,
+                        "[mlx-dp] warning: post-hoc DP noise injection "
+                        "failed (status %d); adapter may not satisfy "
+                        "dp_epsilon=%.2f\n",
                         dp_status, (double)cfg->dp_epsilon);
             }
         }
@@ -346,8 +348,8 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
 
     /* Measure adapter directory size (approximate — sum of regular files). */
     char size_cmd[512];
-    snprintf(size_cmd, sizeof(size_cmd),
-             "du -sb \"%s\" 2>/dev/null | cut -f1", cfg->adapter_output_path);
+    snprintf(size_cmd, sizeof(size_cmd), "du -sb \"%s\" 2>/dev/null | cut -f1",
+             cfg->adapter_output_path);
     FILE *sfp = hu_popen(size_cmd, "r");
     if (sfp) {
         char sbuf[64];
@@ -380,8 +382,7 @@ hu_error_t hu_learner_mlx_open(hu_allocator_t *alloc, void **out_ctx) {
         return HU_ERR_INVALID_ARGUMENT;
 #if (defined(HU_IS_TEST) && HU_IS_TEST && defined(__APPLE__) && defined(__aarch64__)) || \
     (defined(__APPLE__) && defined(__aarch64__))
-    hu_learner_mlx_ctx_t *c =
-        (hu_learner_mlx_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+    hu_learner_mlx_ctx_t *c = (hu_learner_mlx_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
         return HU_ERR_OUT_OF_MEMORY;
     c->alloc = alloc;

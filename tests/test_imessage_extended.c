@@ -10,8 +10,7 @@
 #if (defined(__APPLE__) && defined(__MACH__)) || HU_IS_TEST
 extern size_t escape_for_applescript(char *out, size_t out_cap, const char *in, size_t in_len);
 extern size_t imessage_sanitize_output(char *buf, size_t len);
-extern size_t imessage_build_attach_script(char *out, size_t out_cap,
-                                           const char *target_escaped,
+extern size_t imessage_build_attach_script(char *out, size_t out_cap, const char *target_escaped,
                                            const char *path_escaped);
 #endif
 
@@ -167,8 +166,7 @@ static void test_imessage_custom_emoji_react_records(void) {
     hu_imessage_create(&alloc, "+15551234567", 11, NULL, 0, &ch);
     HU_ASSERT_NOT_NULL(ch.vtable->react);
 
-    hu_error_t err =
-        ch.vtable->react(ch.ctx, "+15551234567", 11, 42, HU_REACTION_CUSTOM_EMOJI);
+    hu_error_t err = ch.vtable->react(ch.ctx, "+15551234567", 11, 42, HU_REACTION_CUSTOM_EMOJI);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_reaction_type_t out_reaction = HU_REACTION_NONE;
@@ -232,6 +230,94 @@ static void test_imessage_guid_lookup_stub_returns_not_supported(void) {
     HU_ASSERT_EQ(out_len, 0u);
 }
 
+#if HU_IS_TEST
+static void test_inline_reply_hint_for_batch_renders_original_when_lookup_hits(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_imessage_test_clear_guid_lookups();
+    hu_imessage_test_set_guid_lookup("ORIG-DINNER", "are we still on for dinner tonight?");
+
+    hu_channel_loop_msg_t msgs[1] = {0};
+    strncpy(msgs[0].reply_to_guid, "ORIG-DINNER", sizeof(msgs[0].reply_to_guid) - 1);
+
+    char buf[512];
+    size_t n = hu_imessage_build_inline_reply_hint_for_batch(&alloc, msgs, 1, buf, sizeof(buf));
+
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "INLINE REPLY") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "dinner tonight") != NULL);
+
+    hu_imessage_test_clear_guid_lookups();
+}
+
+static void test_inline_reply_hint_for_batch_returns_zero_when_no_reply_in_batch(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_imessage_test_clear_guid_lookups();
+
+    hu_channel_loop_msg_t msgs[2] = {0};
+    /* No reply_to_guid set on either message. */
+
+    char buf[256];
+    size_t n = hu_imessage_build_inline_reply_hint_for_batch(&alloc, msgs, 2, buf, sizeof(buf));
+
+    HU_ASSERT_EQ(n, 0u);
+}
+
+static void test_inline_reply_hint_for_batch_returns_zero_when_lookup_misses(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_imessage_test_clear_guid_lookups();
+    /* Register some unrelated guid; the batch refers to a different one. */
+    hu_imessage_test_set_guid_lookup("OTHER-GUID", "not relevant");
+
+    hu_channel_loop_msg_t msgs[1] = {0};
+    strncpy(msgs[0].reply_to_guid, "UNKNOWN-GUID", sizeof(msgs[0].reply_to_guid) - 1);
+
+    char buf[256];
+    size_t n = hu_imessage_build_inline_reply_hint_for_batch(&alloc, msgs, 1, buf, sizeof(buf));
+
+    HU_ASSERT_EQ(n, 0u);
+    hu_imessage_test_clear_guid_lookups();
+}
+
+static void test_inline_reply_hint_for_batch_uses_first_reply_in_batch(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_imessage_test_clear_guid_lookups();
+    hu_imessage_test_set_guid_lookup("ORIG-FIRST", "first message text");
+    hu_imessage_test_set_guid_lookup("ORIG-SECOND", "second message text");
+
+    /* Batch: msg[0] has no reply, msg[1] replies to ORIG-FIRST, msg[2] replies to
+     * ORIG-SECOND. Helper must surface the FIRST reply seen (matches daemon
+     * inline-reply branch at src/daemon.c:8819-8826). */
+    hu_channel_loop_msg_t msgs[3] = {0};
+    strncpy(msgs[1].reply_to_guid, "ORIG-FIRST", sizeof(msgs[1].reply_to_guid) - 1);
+    strncpy(msgs[2].reply_to_guid, "ORIG-SECOND", sizeof(msgs[2].reply_to_guid) - 1);
+
+    char buf[512];
+    size_t n = hu_imessage_build_inline_reply_hint_for_batch(&alloc, msgs, 3, buf, sizeof(buf));
+
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "first message text") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "second message text") == NULL);
+
+    hu_imessage_test_clear_guid_lookups();
+}
+
+static void test_inline_reply_hint_for_batch_handles_null_and_zero_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_loop_msg_t msgs[1] = {0};
+    char buf[64];
+
+    HU_ASSERT_EQ(hu_imessage_build_inline_reply_hint_for_batch(NULL, msgs, 1, buf, sizeof(buf)),
+                 0u);
+    HU_ASSERT_EQ(hu_imessage_build_inline_reply_hint_for_batch(&alloc, NULL, 1, buf, sizeof(buf)),
+                 0u);
+    HU_ASSERT_EQ(hu_imessage_build_inline_reply_hint_for_batch(&alloc, msgs, 0, buf, sizeof(buf)),
+                 0u);
+    HU_ASSERT_EQ(hu_imessage_build_inline_reply_hint_for_batch(&alloc, msgs, 1, NULL, sizeof(buf)),
+                 0u);
+    HU_ASSERT_EQ(hu_imessage_build_inline_reply_hint_for_batch(&alloc, msgs, 1, buf, 0), 0u);
+}
+#endif
+
 static void test_imessage_loop_msg_unsent_field(void) {
     hu_channel_loop_msg_t msg = {0};
     HU_ASSERT_EQ(msg.was_unsent, false);
@@ -293,7 +379,6 @@ static void test_imessage_allow_from_filter_no_crash(void) {
     HU_ASSERT_EQ(err, HU_OK);
     hu_imessage_destroy(&ch);
 }
-
 
 /* -- imessage_sanitize_output tests -- */
 
@@ -363,9 +448,8 @@ static void test_sanitize_null_safe(void) {
 
 static void test_build_attach_script_basic(void) {
     char out[1024];
-    size_t len = imessage_build_attach_script(out, sizeof(out),
-                                              "+15551234567",
-                                              "/tmp/human_img_test.png");
+    size_t len =
+        imessage_build_attach_script(out, sizeof(out), "+15551234567", "/tmp/human_img_test.png");
     HU_ASSERT(len > 0);
     HU_ASSERT(strstr(out, "POSIX file") != NULL);
     HU_ASSERT(strstr(out, "/tmp/human_img_test.png") != NULL);
@@ -376,9 +460,7 @@ static void test_build_attach_script_basic(void) {
 
 static void test_build_attach_script_small_buf_fails(void) {
     char out[32];
-    size_t len = imessage_build_attach_script(out, sizeof(out),
-                                              "+15551234567",
-                                              "/tmp/img.png");
+    size_t len = imessage_build_attach_script(out, sizeof(out), "+15551234567", "/tmp/img.png");
     HU_ASSERT_EQ(len, 0u);
 }
 
@@ -447,6 +529,11 @@ void run_imessage_extended_tests(void) {
     HU_RUN_TEST(test_imessage_typing_cache_field_exists);
     HU_RUN_TEST(test_imessage_react_test_records);
     HU_RUN_TEST(test_imessage_custom_emoji_react_records);
+    HU_RUN_TEST(test_inline_reply_hint_for_batch_renders_original_when_lookup_hits);
+    HU_RUN_TEST(test_inline_reply_hint_for_batch_returns_zero_when_no_reply_in_batch);
+    HU_RUN_TEST(test_inline_reply_hint_for_batch_returns_zero_when_lookup_misses);
+    HU_RUN_TEST(test_inline_reply_hint_for_batch_uses_first_reply_in_batch);
+    HU_RUN_TEST(test_inline_reply_hint_for_batch_handles_null_and_zero_args);
 #endif
 }
 #else

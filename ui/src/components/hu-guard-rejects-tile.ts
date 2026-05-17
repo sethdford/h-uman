@@ -281,7 +281,10 @@ export class HuGuardRejectsTile extends LitElement {
             <div
               class="segment segment--${KEY_CLASS[s.key]}"
               role="listitem"
-              aria-label="${KEY_LABEL[s.key]}: ${s.count} rejects (${formatPercent(s.count, total)})"
+              aria-label="${KEY_LABEL[s.key]}: ${s.count} rejects (${formatPercent(
+                s.count,
+                total,
+              )})"
               style="flex-grow: ${s.count}"
             ></div>
           `,
