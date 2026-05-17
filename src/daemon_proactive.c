@@ -504,9 +504,32 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
                            ? strlen(rules)
                            : sizeof(HU_DEFAULT_PROACTIVE_RULES) - 1;
 
-    char base_buf[256];
-    int w = snprintf(base_buf, sizeof(base_buf), "You're initiating a casual check-in text to %s. ",
+    /* P6-2: relationship_type + dunbar_layer give the LLM the register
+     * it should write in — texting a sister (dunbar 1) is not the same
+     * as texting a coworker (dunbar 3). Format only the fields present;
+     * fall through to the prior generic shape if neither is set. */
+    char base_buf[512];
+    int w;
+    if (cp->relationship_type && cp->relationship_type[0] && cp->dunbar_layer &&
+        cp->dunbar_layer[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s. "
+                     "You are texting your %s (dunbar layer %s). ",
+                     cp->name ? cp->name : "this person", cp->relationship_type, cp->dunbar_layer);
+    } else if (cp->relationship_type && cp->relationship_type[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s. "
+                     "You are texting your %s. ",
+                     cp->name ? cp->name : "this person", cp->relationship_type);
+    } else if (cp->dunbar_layer && cp->dunbar_layer[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s "
+                     "(dunbar layer %s). ",
+                     cp->name ? cp->name : "this person", cp->dunbar_layer);
+    } else {
+        w = snprintf(base_buf, sizeof(base_buf), "You're initiating a casual check-in text to %s. ",
                      cp->name ? cp->name : "this person");
+    }
     size_t base_len = (w > 0 && (size_t)w < sizeof(base_buf)) ? (size_t)w : 0;
 
     size_t total = base_len + rules_len;
