@@ -151,6 +151,63 @@ jobs:
       - name: "Debug + release build (award-tier: ships clean on both configs)"
         run: cd apps/macos && swift build && swift build -c release
 
+  ios-archive:
+    # US-14.3 — Release-config archive + App Store IPA export for the HumaniOS scheme.
+    # Gating: the workflow itself only runs on apps-path changes, schedule, or manual
+    # dispatch (see `on:` block at the top of the file), so this job inherits that
+    # gate without needing a per-job `if:`. macOS-14 runner; no real signing secrets
+    # required in CI — we fall through to SKIP_EXPORT=1 (archive only) when the
+    # provisioning secret is unset.
+    name: iOS · Archive + IPA export (HumaniOS)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify ExportOptions.plist has no leaked provisioning identifiers
+        run: ./scripts/check-no-provisioning-leak.sh
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Archive (and optionally export) HumaniOS
+        env:
+          # When IOS_PROVISIONING_UUID is unset (typical for PRs without signing
+          # secrets), the script runs SKIP_EXPORT=1 (archive only). Operators
+          # configure these secrets to enable the export step.
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_PROVISIONING_UUID: ${{ secrets.IOS_PROVISIONING_UUID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${IOS_PROVISIONING_UUID:-}" ]; then
+            echo "ios-archive: no IOS_PROVISIONING_UUID secret — archive-only (SKIP_EXPORT=1)"
+            SKIP_EXPORT=1 ./scripts/ios-archive-export.sh
+          else
+            ./scripts/ios-archive-export.sh
+          fi
+
+      - name: Upload IPA artifact (if produced)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HumaniOS-ipa
+          path: /tmp/export/HumaniOS.ipa
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload xcarchive on failure (for diagnostics)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: HumaniOS-xcarchive
+          path: /tmp/HumaniOS.xcarchive
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Verify ExportOptions.plist is restored (placeholders intact)
+        if: always()
+        run: ./scripts/check-no-provisioning-leak.sh
+
   fleet-sota-gate:
     name: Fleet SOTA gate (award-tier)
     runs-on: ubuntu-latest
@@ -159,6 +216,7 @@ jobs:
       - ios-simulator-fleet
       - android-emulator-fleet
       - macos-app-build
+      - ios-archive
     if: always()
     steps:
       - name: Summarize + enforce all-green
@@ -167,6 +225,7 @@ jobs:
           IOS: ${{ needs.ios-simulator-fleet.result }}
           AND: ${{ needs.android-emulator-fleet.result }}
           MAC: ${{ needs.macos-app-build.result }}
+          IOS_ARCHIVE: ${{ needs.ios-archive.result }}
         run: |
           {
             echo "## Native fleet — SOTA / award-tier gate"
@@ -179,14 +238,16 @@ jobs:
             echo "| iOS simulator matrix (XCUITest) | \`$IOS\` |"
             echo "| Android emulator matrix (Compose) | \`$AND\` |"
             echo "| macOS app (debug + release) | \`$MAC\` |"
+            echo "| iOS IPA archive (US-14.3) | \`$IOS_ARCHIVE\` |"
             echo ""
             echo "### What this fleet proves"
             echo "- **Inclusivity**: Tab journeys + labeled controls exercised under automation (VoiceOver/TalkBack-oriented labels)."
             echo "- **Cross-device**: Multiple iPhone / iPad + API 29–34 emulators."
             echo "- **Reliability**: Xcode test retries + disabled emulator animations + Gradle caches."
+            echo "- **Shippable**: Release-config archive + App Store IPA export validates the TestFlight pipeline."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ]; then
+          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ] || [ "$IOS_ARCHIVE" != success ]; then
             echo "::error::Fleet SOTA gate failed — every matrix job must be success."
             exit 1
           fi

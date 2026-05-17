@@ -107,6 +107,23 @@ if [ -x "scripts/check-test-references.sh" ]; then
     fi
 fi
 
+# US-14.3 (Sprint 14): block commits that introduce a real provisioning UUID or
+# Apple Team ID into apps/ios/ExportOptions.plist. The committed file must always
+# retain its placeholder tokens; the wrapper script scripts/ios-archive-export.sh
+# substitutes them at run time and restores the placeholders from .bak on EXIT.
+# See scripts/check-no-provisioning-leak.sh for the regex.
+staged_export_options=$(git diff --cached --name-only --diff-filter=ACM -- \
+    'apps/ios/ExportOptions.plist')
+if [ -n "$staged_export_options" ] && [ -x "scripts/check-no-provisioning-leak.sh" ]; then
+    if ! scripts/check-no-provisioning-leak.sh; then
+        echo ""
+        echo "Pre-commit blocked: apps/ios/ExportOptions.plist appears to contain"
+        echo "a real provisioning UUID or Apple Team ID. Restore the placeholder"
+        echo "tokens (__PROVISIONING_PROFILE_UUID__, __TEAM_ID__) before committing."
+        exit 1
+    fi
+fi
+
 # Test/source gate-symmetry check — added after PR #113 hit the same
 # systemic failure 6+ times across 13 rounds. Fires when a staged change
 # touches CMakeLists.txt OR a tests/test_*.c file, since those are the

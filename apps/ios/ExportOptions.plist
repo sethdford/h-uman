@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ExportOptions.plist — drives `xcodebuild -exportArchive` for the HumaniOS scheme.
+
+  This file SHIPS WITH PLACEHOLDER TOKENS. The real team ID and provisioning-profile
+  UUID are NEVER committed to this repo. At export time, scripts/ios-archive-export.sh
+  sed-substitutes the placeholders into a `.bak` copy and passes the `.bak` copy to
+  xcodebuild, restoring the in-repo file on exit.
+
+  Required env vars when invoking scripts/ios-archive-export.sh:
+    APPLE_TEAM_ID            — 10-char Apple Developer team ID
+    IOS_PROVISIONING_UUID    — 36-char provisioning profile UUID for ai.human.ios
+
+  Pre-commit guard `scripts/check-no-provisioning-leak.sh` blocks commits that
+  introduce a 36-char UUID pattern into this file. Don't bypass it.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store</string>
+	<key>teamID</key>
+	<string>__TEAM_ID__</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>ai.human.ios</key>
+		<string>__PROVISIONING_PROFILE_UUID__</string>
+		<key>ai.human.ios.widget</key>
+		<string>__PROVISIONING_PROFILE_UUID__</string>
+	</dict>
+	<key>stripSwiftSymbols</key>
+	<true/>
+	<key>uploadSymbols</key>
+	<false/>
+	<key>compileBitcode</key>
+	<false/>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>
