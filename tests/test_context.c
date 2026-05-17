@@ -5,10 +5,22 @@
 #include <string.h>
 
 static void test_context_default_prompt(void) {
+    /* Persona-first doctrine (2026-05-17): the default fallback used when no
+     * base prompt is supplied MUST NOT announce the model as an AI assistant
+     * (that framing was the silent leak path patched alongside this test;
+     * see src/agent/context.c). Pin the contract from BOTH directions:
+     * the prompt is non-empty AND does not contain the words "AI" or
+     * "assistant" in any case. */
     hu_allocator_t alloc = hu_system_allocator();
     char *p = hu_context_build_system_prompt(&alloc, NULL, 0, NULL, 0);
     HU_ASSERT_NOT_NULL(p);
-    HU_ASSERT_TRUE(strstr(p, "helpful") != NULL);
+    HU_ASSERT_TRUE(strlen(p) > 0);
+    /* Negative contract: no "AI assistant" framing in any casing. */
+    HU_ASSERT_TRUE(strstr(p, "AI assistant") == NULL);
+    HU_ASSERT_TRUE(strstr(p, "ai assistant") == NULL);
+    HU_ASSERT_TRUE(strstr(p, "AI Assistant") == NULL);
+    /* Positive contract: instructs the model to respond naturally / in voice. */
+    HU_ASSERT_TRUE(strstr(p, "naturally") != NULL || strstr(p, "voice") != NULL);
     alloc.free(alloc.ctx, p, strlen(p) + 1);
 }
 

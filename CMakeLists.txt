@@ -526,6 +526,7 @@ set(HU_CORE_SOURCES
     src/agent/validators/assistant_closer_validator.c
     src/agent/validators/role_consistency_validator.c
     src/agent/validators/persona_fidelity_validator.c
+    src/agent/validators/persona_voice_validator.c
     src/agent/validators/default_chains.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
@@ -2468,6 +2469,7 @@ set(HU_TEST_SOURCES
     tests/test_persona_fidelity_cross.c
     tests/test_persona_fidelity_judge.c
     tests/test_persona_fidelity_validator.c
+    tests/test_persona_voice_validator.c
     tests/test_fact_extract_llm.c
     tests/test_dpo_extractor_integration.c
     tests/test_fact_extract.c

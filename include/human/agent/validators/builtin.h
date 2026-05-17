@@ -11,6 +11,9 @@
 #include "human/core/error.h"
 #include "human/observer.h"
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -43,6 +46,22 @@ hu_error_t hu_validator_role_consistency_create(hu_allocator_t *alloc, hu_output
  * when M3 lands. */
 hu_error_t hu_validator_persona_fidelity_create(hu_allocator_t *alloc, hu_output_validator_t *out);
 
+/* persona_voice — REJECTs responses containing hard AI-identity disclosure
+ * (e.g. "I'm a language model", "I don't have feelings") that the stripping
+ * validators upstream cannot repair. Wired AFTER the strippers so prefixable
+ * tells like "As an AI, " get cleaned in place; this validator only fires
+ * on disclosure that is the substance of the message. See
+ * src/agent/validators/persona_voice_validator.c for the doctrine note. */
+hu_error_t hu_validator_persona_voice_create(hu_allocator_t *alloc, hu_output_validator_t *out);
+
+/* Pure predicate factored out of the validator per
+ * .claude/rules/security-predicate-extraction.md. Returns true when the
+ * response is free of AI-identity disclosure as judged by
+ * hu_conversation_check_ai_disclosure (the single source of truth for the
+ * pattern list). Tests pin the truth table by calling this directly without
+ * constructing an output-validator context. */
+bool hu_persona_voice_response_is_clean(const char *response, size_t response_len);
+
 /* Build the default outbound chain in registration order:
  *   1. response_guard          (REWRITE or REJECT special-tokens/thinking/degen/bullet-CoT)
  *   2. channel_tags            (REWRITE stripping)
@@ -51,9 +70,15 @@ hu_error_t hu_validator_persona_fidelity_create(hu_allocator_t *alloc, hu_output
  *   5. assistant_closer        (REWRITE stripping — F2)
  *   6. persona_narrator        (REJECT on third-person narration — F1)
  *   7. role_consistency        (REJECT on mid-message role collapse — F3)
+ *   8. persona_voice           (REJECT on hard AI-identity disclosure — 2026-05-17)
+ *   9. persona_fidelity        (STUB; REJECT on low M3 fidelity score when wired)
  *
  * Note: cot_audit_validator is NOT wired in this default chain — it
- * operates on `reasoning_content`, not on the main reply content. */
+ * operates on `reasoning_content`, not on the main reply content.
+ *
+ * persona_voice runs AFTER all strippers so prefixable tells like
+ * "As an AI, " get cleaned in place before this validator sees them; it
+ * only fires when disclosure is the substance of the response. */
 hu_error_t hu_validators_build_default_outbound_chain(hu_allocator_t *alloc,
                                                       const char *persona_name,
                                                       size_t persona_name_len,
