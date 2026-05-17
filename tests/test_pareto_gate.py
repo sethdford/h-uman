@@ -144,6 +144,39 @@ def test_coherence_judge_rejects_pad_outputs():
     assert result["details"]["pad_rate"] == pytest.approx(1.0)
 
 
+def test_coherence_judge_rejects_mismatched_pad_outputs_length():
+    """PR #115 Bugbot HIGH regression guard.
+
+    Previously `pad_rate` was computed as `count(True in pad_outputs) / n`
+    where `n = len(scores)`. If `pad_outputs` had fewer entries than
+    `scores`, the denominator was inflated and `pad_rate` was silently
+    diluted below the 50% REJECT threshold — letting an adapter with
+    heavy pad-token leakage slip past the exact Sprint 8 regression
+    guard this stage is supposed to enforce.
+
+    Contract: mismatched arrays must ABSTAIN, not silently compute a
+    wrong rate. (Empty pad_outputs is still legitimate → pad_rate=0.0,
+    no signal available — covered by other tests.)
+    """
+    # 5 scores, only 2 pad_outputs (both True). Under the old bug:
+    # pad_rate = 2/5 = 0.40 < 0.50 → would NOT trigger REJECT despite
+    # 100% of available pad signal indicating leakage. New behavior:
+    # ABSTAIN because the arrays disagree on cardinality.
+    mock = json.dumps({
+        "scores": [0.85, 0.86, 0.84, 0.87, 0.85],
+        "pad_outputs": [True, True],
+    })
+    with _env(HU_CASCADE_STAGE2_MOCK=mock):
+        result = stage2_coherence.run()
+    assert result["status"] == "ABSTAIN", (
+        f"Mismatched pad_outputs length should ABSTAIN, got {result['status']!r}. "
+        f"Reason: {result.get('reason')!r}"
+    )
+    assert "mismatched" in result["reason"].lower() or "length" in result["reason"].lower()
+    assert result["details"]["n_scores"] == 5
+    assert result["details"]["n_pad_outputs"] == 2
+
+
 def test_coherence_judge_rejects_low_mean_score():
     """Mean coherence < 0.70 → REJECT (design §6 OQ-4)."""
     mock = json.dumps({"scores": [0.3, 0.4, 0.5, 0.4, 0.3], "pad_outputs": [False] * 5})

@@ -84,12 +84,21 @@ if [ "$CASCADE" -eq 1 ]; then
     echo "[cascade] FAIL: fixture missing at $CASCADE_FIXTURE" >&2
     exit 1
   fi
-  echo "[cascade] running stage_cascade.py --fixture $CASCADE_FIXTURE"
+  # Sprint 11 PR #115 / Bugbot LOW fix: don't prepend $REPO_ROOT if the
+  # caller passed an absolute path. Existence check at line ~83 already
+  # accepts either; the cascade invocation must do the same or paths like
+  # `--cascade-fixture /abs/path/foo.json` become `/repo/root//abs/path/...`
+  # and the cascade silently fails with a fixture-not-found inside.
+  case "$CASCADE_FIXTURE" in
+    /*) CASCADE_FIXTURE_ABS="$CASCADE_FIXTURE" ;;
+    *)  CASCADE_FIXTURE_ABS="$REPO_ROOT/$CASCADE_FIXTURE" ;;
+  esac
+  echo "[cascade] running stage_cascade.py --fixture $CASCADE_FIXTURE_ABS"
   CASCADE_TMP="$(mktemp -t human-cascade-XXXXXX).json"
   trap 'rm -f "$CASCADE_TMP"' EXIT
   set +e
   python3 "$REPO_ROOT/scripts/stage_cascade.py" \
-    --fixture "$REPO_ROOT/$CASCADE_FIXTURE" \
+    --fixture "$CASCADE_FIXTURE_ABS" \
     --output "$CASCADE_TMP"
   CASCADE_RC=$?
   set -e

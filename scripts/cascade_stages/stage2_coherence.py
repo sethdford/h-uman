@@ -180,7 +180,41 @@ def run(
             }
 
     mean_score = sum(scores) / n
-    pad_rate = (sum(1 for p in pad_outputs if p) / n) if pad_outputs else 0.0
+    # Sprint 11 PR #115 / Bugbot HIGH fix: pad_rate denominator must be
+    # len(pad_outputs), not n (=len(scores)). When pad_outputs has fewer
+    # entries than scores, dividing by n silently dilutes the rate below
+    # the 50% PAD_RATE_REJECT_THRESHOLD — letting an adapter with heavy
+    # pad-token leakage pass the exact Sprint 8 regression-guard fixture
+    # this gate is supposed to catch.
+    #
+    # Semantics:
+    # - len(pad_outputs) == 0: no pad signal (array-form env mock, or
+    #   fixture without pad column). Honest "no signal" → 0.0.
+    # - len(pad_outputs) == n: full signal, compute rate normally.
+    # - 0 < len(pad_outputs) < n: data integrity bug. ABSTAIN — refuse to
+    #   compute a rate from mismatched arrays.
+    if not pad_outputs:
+        pad_rate = 0.0
+    elif len(pad_outputs) != n:
+        return {
+            "stage": 2,
+            "name": "coherence",
+            "status": "ABSTAIN",
+            "score": None,
+            "reason": (
+                f"pad_outputs length {len(pad_outputs)} != scores length {n}; "
+                f"refusing to compute pad_rate from mismatched arrays"
+            ),
+            "details": {
+                "n_scores": n,
+                "n_pad_outputs": len(pad_outputs),
+                "source": "env:HU_CASCADE_STAGE2_MOCK"
+                if os.environ.get("HU_CASCADE_STAGE2_MOCK")
+                else f"fixture:{fixture_path}",
+            },
+        }
+    else:
+        pad_rate = sum(1 for p in pad_outputs if p) / len(pad_outputs)
 
     details = {
         "source": "env:HU_CASCADE_STAGE2_MOCK"
