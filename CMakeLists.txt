@@ -2744,6 +2744,7 @@ set(HU_TEST_SOURCES
     tests/test_personal_model_fidelity_v2.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
+    tests/integration/test_sprint3_hybrid_recall.c
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
