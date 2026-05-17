@@ -173,6 +173,86 @@ static void test_kto_loss_finite_diff_matches_analytical(void) {
     trainer.vtable->deinit(trainer.ctx, &alloc);
 }
 
+static void test_kto_loss_analytical_grad_matches_finite_diff_per_param(void) {
+    extern hu_error_t kto_compute_loss_only_for_test(void *ctx,
+                          const hu_preference_pair_t *p, double *out_loss);
+    extern hu_error_t kto_compute_grad_scalar_for_test(void *ctx,
+                          const hu_preference_pair_t *p, double *out_grad_scalar);
+    extern hu_error_t kto_compute_logprob_pol_for_test(void *ctx,
+                          const hu_preference_pair_t *p, double *out_logprob);
+    extern hu_error_t kto_get_huml_lm_head_param_for_test(void *ctx,
+                          size_t row, size_t col, float **out_param_ptr);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_rl_trainer_config_t cfg = {
+        .backend = HU_DPO_BACKEND_HUML,
+        .beta = 0.1,
+        .learning_rate = 0.0,
+        .max_iters = 1,
+        .lambda_d = 1.0,
+        .lambda_u = 1.0,
+    };
+    srand(42);
+    hu_rl_trainer_t trainer = {0};
+    HU_ASSERT_EQ(hu_rl_trainer_create_kto(&alloc, &cfg, &trainer), HU_OK);
+
+    hu_preference_pair_t desirable = {0};
+    memcpy(desirable.prompt, "1 2", 3);
+    desirable.prompt_len = 3;
+    memcpy(desirable.chosen, "3 4", 3);
+    desirable.chosen_len = 3;
+
+    double grad_scalar = 0.0;
+    HU_ASSERT_EQ(kto_compute_grad_scalar_for_test(trainer.ctx, &desirable, &grad_scalar), HU_OK);
+
+    const size_t vocab = 32, embd = 16;
+    const float eps = 1e-3f;
+    size_t passed = 0, total = vocab * embd;
+
+    for (size_t row = 0; row < vocab; row++) {
+        for (size_t col = 0; col < embd; col++) {
+            float *theta_ptr = NULL;
+            HU_ASSERT_EQ(kto_get_huml_lm_head_param_for_test(trainer.ctx, row, col, &theta_ptr),
+                         HU_OK);
+            HU_ASSERT_NOT_NULL(theta_ptr);
+            const float saved = *theta_ptr;
+
+            *theta_ptr = saved + eps;
+            double L_plus = 0.0;
+            HU_ASSERT_EQ(kto_compute_loss_only_for_test(trainer.ctx, &desirable, &L_plus), HU_OK);
+
+            *theta_ptr = saved - eps;
+            double L_minus = 0.0;
+            HU_ASSERT_EQ(kto_compute_loss_only_for_test(trainer.ctx, &desirable, &L_minus), HU_OK);
+
+            *theta_ptr = saved;
+            const double numerical = (L_plus - L_minus) / (2.0 * (double)eps);
+
+            *theta_ptr = saved + eps;
+            double lp_plus = 0.0;
+            HU_ASSERT_EQ(kto_compute_logprob_pol_for_test(trainer.ctx, &desirable, &lp_plus),
+                         HU_OK);
+            *theta_ptr = saved - eps;
+            double lp_minus = 0.0;
+            HU_ASSERT_EQ(kto_compute_logprob_pol_for_test(trainer.ctx, &desirable, &lp_minus),
+                         HU_OK);
+            *theta_ptr = saved;
+
+            const double dlogpi = (lp_plus - lp_minus) / (2.0 * (double)eps);
+            const double analytical = grad_scalar * dlogpi;
+            const double denom = fmax(fabs(numerical), fabs(analytical));
+            if (denom < 1e-4)
+                continue;
+            const double rel_err = fabs(numerical - analytical) / denom;
+            if (rel_err < 0.05)
+                passed++;
+        }
+    }
+
+    HU_ASSERT_GE(passed, (size_t)(total * 99 / 100));
+    trainer.vtable->deinit(trainer.ctx, &alloc);
+}
+
 static void test_kto_huml_50_signal_e2e_chosen_delta_increases_over_iters(void) {
     srand(42);
     hu_allocator_t alloc = hu_system_allocator();
@@ -322,6 +402,7 @@ void run_kto_loss_tests(void) {
     HU_RUN_TEST(test_kto_rl_trainer_vtable_fields_all_populated);
     HU_RUN_TEST(test_kto_loss_sign_of_gradient_increases_chosen_decreases_rejected);
     HU_RUN_TEST(test_kto_loss_finite_diff_matches_analytical);
+    HU_RUN_TEST(test_kto_loss_analytical_grad_matches_finite_diff_per_param);
     HU_RUN_TEST(test_kto_huml_50_signal_e2e_chosen_delta_increases_over_iters);
     HU_RUN_TEST(test_kto_mlx_subprocess_produces_safetensors);
     HU_RUN_TEST(test_kto_mlx_dummy_adapter_in_test_mode);

@@ -32,6 +32,8 @@
 #ifdef HU_ENABLE_RL_FULL
 #include "human/agent/adapter_id.h"
 #include "human/eval/eval_gate.h"
+#include "human/eval/persona_rollout.h"
+#include "human/memory/personal_model.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -104,13 +106,148 @@ static hu_error_t write_proof_bundle(const char *proof_dir, bool promote,
     return HU_OK;
 }
 
+static hu_error_t resolve_eval_target(const hu_lora_runner_ctx_t *ctx,
+                                      hu_communication_style_t *out_target) {
+    if (!out_target)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out_target, 0, sizeof(*out_target));
+    if (ctx->eval_target && ctx->eval_target->sample_count > 0) {
+        *out_target = *ctx->eval_target;
+        return HU_OK;
+    }
+    char pm_path[1024];
+    if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+        hu_personal_model_t loaded;
+        if (hu_personal_model_load(&loaded, pm_path) == HU_OK && loaded.style.sample_count > 0U) {
+            *out_target = loaded.style;
+            return HU_OK;
+        }
+    }
+    out_target->sample_count = 1;
+    out_target->lowercase_ratio = 0.7f;
+    out_target->avg_message_length = 80.f;
+    return HU_OK;
+}
+
 static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
+                                     const hu_learner_report_t *report,
                                      hu_eval_gate_verdict_t *verdict) {
-    double persona[20];
-    for (int i = 0; i < 20; i++)
-        persona[i] = 0.75;
-    return hu_eval_gate_decide_from_arrays_for_test(ctx->eval_gate, persona, NULL, NULL, NULL, 20,
-                                                    100.0, verdict);
+    if (!ctx || !ctx->eval_gate || !verdict)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    double persona[64];
+    size_t n = 0;
+    double p95 = ctx->gate_candidate_p95_ms > 0.0 ? ctx->gate_candidate_p95_ms : 100.0;
+
+    if (ctx->gate_persona_after_scores && ctx->gate_persona_after_n >= 10) {
+        n = ctx->gate_persona_after_n;
+        if (n > sizeof(persona) / sizeof(persona[0]))
+            n = sizeof(persona) / sizeof(persona[0]);
+        for (size_t i = 0; i < n; i++)
+            persona[i] = ctx->gate_persona_after_scores[i];
+    }
+#ifdef HU_IS_TEST
+    else if (ctx->eval_use_synthetic_for_test) {
+        n = 20;
+        for (size_t i = 0; i < n; i++)
+            persona[i] = 0.75;
+    }
+#endif
+    else {
+        if (!ctx->eval_provider)
+            return HU_ERR_INVALID_ARGUMENT;
+
+        hu_allocator_t *alloc = ctx->alloc;
+        hu_allocator_t sys;
+        if (!alloc) {
+            sys = hu_system_allocator();
+            alloc = &sys;
+        }
+
+        const char *fixture = ctx->eval_prompt_fixture_path;
+        char default_fixture[512];
+        if (!fixture || !fixture[0]) {
+            const char *home = getenv("HOME");
+            snprintf(default_fixture, sizeof(default_fixture), "%s/.human/eval/persona_prompts.txt",
+                     home && home[0] ? home : "/tmp");
+            fixture = default_fixture;
+        }
+
+        char **prompts = NULL;
+        size_t prompt_n = 0;
+        hu_error_t pe = hu_persona_rollout_load_prompt_fixture(alloc, fixture, &prompts, &prompt_n);
+        if (pe != HU_OK)
+            return pe;
+
+        size_t want = ctx->eval_n_prompts > 0 ? ctx->eval_n_prompts : 20;
+        if (prompt_n > want)
+            prompt_n = want;
+        if (prompt_n < 10) {
+            for (size_t i = 0; i < prompt_n; i++)
+                alloc->free(alloc->ctx, prompts[i], strlen(prompts[i]) + 1);
+            alloc->free(alloc->ctx, prompts, prompt_n * sizeof(char *));
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+
+        hu_communication_style_t target;
+        hu_error_t te = resolve_eval_target(ctx, &target);
+        if (te != HU_OK) {
+            for (size_t i = 0; i < prompt_n; i++)
+                alloc->free(alloc->ctx, prompts[i], strlen(prompts[i]) + 1);
+            alloc->free(alloc->ctx, prompts, prompt_n * sizeof(char *));
+            return te;
+        }
+
+        int64_t timeout = ctx->eval_timeout_ms > 0 ? ctx->eval_timeout_ms : 5000;
+        const char *adapter = (report && report->adapter_path[0]) ? report->adapter_path : NULL;
+
+        hu_persona_rollout_config_t rcfg = {
+            .provider = ctx->eval_provider,
+            .adapter_path = adapter,
+            .target = &target,
+            .prompts = (const char **)prompts,
+            .n_prompts = prompt_n,
+            .timeout_ms_per_prompt = timeout,
+            .capture_responses = false,
+        };
+        hu_persona_rollout_result_t rr = {0};
+        hu_error_t re = hu_persona_rollout_run(alloc, &rcfg, &rr);
+        for (size_t i = 0; i < prompt_n; i++)
+            alloc->free(alloc->ctx, prompts[i], strlen(prompts[i]) + 1);
+        alloc->free(alloc->ctx, prompts, prompt_n * sizeof(char *));
+        if (re != HU_OK) {
+            hu_persona_rollout_result_free(alloc, &rr);
+            return re;
+        }
+
+        n = rr.n_scored;
+        if (n > sizeof(persona) / sizeof(persona[0]))
+            n = sizeof(persona) / sizeof(persona[0]);
+        for (size_t i = 0; i < n; i++)
+            persona[i] = rr.persona_scores[i];
+        if (rr.p95_ms > 0.0)
+            p95 = rr.p95_ms;
+        hu_persona_rollout_result_free(alloc, &rr);
+
+        if (n < 10) {
+            memset(verdict, 0, sizeof(*verdict));
+            verdict->promote = false;
+            snprintf(verdict->reason, sizeof(verdict->reason),
+                     "insufficient persona score count for gate (%zu < 10)", n);
+            return HU_OK;
+        }
+    }
+
+    if (n < 10) {
+        memset(verdict, 0, sizeof(*verdict));
+        verdict->promote = false;
+        snprintf(verdict->reason, sizeof(verdict->reason),
+                 "insufficient persona score count for gate (%zu < 10)", n);
+        return HU_OK;
+    }
+
+    return hu_eval_gate_decide_from_arrays_for_test(ctx->eval_gate, persona, NULL, NULL, NULL, n,
+                                                    p95, verdict);
 }
 #endif /* HU_ENABLE_RL_FULL */
 
@@ -171,7 +308,7 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
     memset(&gate_verdict, 0, sizeof(gate_verdict));
     if (ctx->eval_gate) {
         promote_adapter = false;
-        if (run_promotion_gate(ctx, &gate_verdict) == HU_OK)
+        if (run_promotion_gate(ctx, &report, &gate_verdict) == HU_OK)
             promote_adapter = gate_verdict.promote;
 
         char adapter_id[128];

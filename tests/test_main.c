@@ -671,10 +671,13 @@ extern void run_stock_baseline_tests(void);
 extern void run_apple_fm_client_tests(void);
 extern void run_gemini_nano_client_tests(void);
 extern void run_competitive_harness_tests(void);
+extern void run_persona_rollout_tests(void);
 extern void run_cli_eval_phase5_tests(void);
+extern void run_cli_demo_evidence_tests(void);
 extern void run_lora_ab_require_positive_tests(void);
 extern void run_runner_eval_gate_tests(void);
 extern void run_daemon_reaction_poll_tests(void);
+extern void run_daemon_reaction_poll_production_tests(void);
 extern void run_proof_directory_tests(void);
 extern void run_e2e_closed_loop_tests(void);
 #endif
@@ -1345,10 +1348,13 @@ int main(int argc, char **argv) {
     run_apple_fm_client_tests();
     run_gemini_nano_client_tests();
     run_competitive_harness_tests();
+    run_persona_rollout_tests();
     run_cli_eval_phase5_tests();
+    run_cli_demo_evidence_tests();
     run_lora_ab_require_positive_tests();
     run_runner_eval_gate_tests();
     run_daemon_reaction_poll_tests();
+    run_daemon_reaction_poll_production_tests();
     run_proof_directory_tests();
     run_e2e_closed_loop_tests();
 #endif

@@ -1,7 +1,5 @@
 #include "human/eval/competitive_harness.h"
 
-#include "human/core/json.h"
-
 #include <stdio.h>
 #include <string.h>
 
@@ -33,29 +31,75 @@ hu_error_t hu_competitive_harness_run_with_test_judges(
     out->n_available = avail;
 
     size_t min_avail = cfg->min_available > 0 ? cfg->min_available : 1;
-    snprintf(out->summary, sizeof(out->summary),
-             "Run summary: %zu of %zu competitors available", avail, n_judges);
 
-    char md[16384];
-    size_t off = 0;
-    off += (size_t)snprintf(md + off, sizeof(md) - off, "# Competitive scorecard\n\n%s\n\n",
-                            out->summary);
-    off += (size_t)snprintf(md + off, sizeof(md) - off,
-                            "| column | persona_fidelity | status |\n");
-    off += (size_t)snprintf(md + off, sizeof(md) - off, "|--------|------------------|--------|\n");
+    double baseline_lo = 0.0;
+    double baseline_hi = 0.0;
+    double candidate_lo = 0.0;
+    double candidate_hi = 0.0;
+    bool have_baseline = false;
+    bool have_candidate = false;
+    const char *candidate_name = NULL;
 
     for (size_t i = 0; judges && i < n_judges; i++) {
         const hu_competitive_harness_judge_slot_t *j = &judges[i];
-        if (j->available) {
-            off += (size_t)snprintf(md + off, sizeof(md) - off, "| %s | (v2 scorer) | ok |\n",
+        if (!j->available || !j->has_persona_metrics)
+            continue;
+        if (j->is_baseline) {
+            baseline_lo = j->ci_lower;
+            baseline_hi = j->ci_upper;
+            have_baseline = true;
+        } else {
+            candidate_lo = j->ci_lower;
+            candidate_hi = j->ci_upper;
+            have_candidate = true;
+            candidate_name = j->column_name;
+        }
+    }
+
+    bool win_met = have_baseline && have_candidate && candidate_lo > baseline_hi;
+    char rationale[512];
+    if (win_met && candidate_name) {
+        snprintf(rationale, sizeof(rationale),
+                 "persona_fidelity: %s CI [%.3f, %.3f] vs baseline [%.3f, %.3f]; "
+                 "candidate lower > baseline upper",
+                 candidate_name, candidate_lo, candidate_hi, baseline_lo, baseline_hi);
+    } else if (have_baseline && have_candidate && candidate_name) {
+        snprintf(rationale, sizeof(rationale),
+                 "win condition not met: %s CI [%.3f, %.3f] vs baseline [%.3f, %.3f]",
+                 candidate_name, candidate_lo, candidate_hi, baseline_lo, baseline_hi);
+    } else {
+        snprintf(rationale, sizeof(rationale),
+                 "win condition not met (need candidate ci_lower > baseline ci_upper)");
+    }
+
+    snprintf(out->summary, sizeof(out->summary),
+             "Run summary: %zu of %zu competitors available; win_condition_met=%s", avail,
+             n_judges, win_met ? "true" : "false");
+
+    char md[16384];
+    size_t off = 0;
+    off += (size_t)snprintf(md + off, sizeof(md) - off, "# Competitive scorecard\n\n%s\n\n%s\n\n",
+                            out->summary, rationale);
+    off += (size_t)snprintf(md + off, sizeof(md) - off,
+                            "| column | persona_fidelity | CI | status |\n");
+    off += (size_t)snprintf(md + off, sizeof(md) - off, "|--------|------------------|-----|--------|\n");
+
+    for (size_t i = 0; judges && i < n_judges; i++) {
+        const hu_competitive_harness_judge_slot_t *j = &judges[i];
+        if (j->available && j->has_persona_metrics) {
+            off += (size_t)snprintf(md + off, sizeof(md) - off,
+                                    "| %s | %.3f | [%.3f, %.3f] | ok |\n",
+                                    j->column_name ? j->column_name : "?",
+                                    j->persona_fidelity, j->ci_lower, j->ci_upper);
+        } else if (j->available) {
+            off += (size_t)snprintf(md + off, sizeof(md) - off, "| %s | (v2 scorer) | — | ok |\n",
                                     j->column_name ? j->column_name : "?");
         } else {
             const char *reason =
                 j->unavailable_reason ? j->unavailable_reason : "unavailable";
             off += (size_t)snprintf(md + off, sizeof(md) - off,
-                                    "| %s | — | %s: %s |\n",
-                                    j->column_name ? j->column_name : "?",
-                                    j->column_name ? j->column_name : "judge", reason);
+                                    "| %s | — | — | %s |\n",
+                                    j->column_name ? j->column_name : "?", reason);
         }
     }
 
@@ -66,10 +110,47 @@ hu_error_t hu_competitive_harness_run_with_test_judges(
     }
 
     if (cfg->out_json) {
-        char json[4096];
-        snprintf(json, sizeof(json),
-                 "{\"summary\":\"%s\",\"available\":%zu,\"columns\":%zu}\n", out->summary, avail,
-                 n_judges);
+        char json[16384];
+        size_t joff = 0;
+        joff += (size_t)snprintf(json + joff, sizeof(json) - joff,
+                                "{\"summary\":\"%s\",\"available\":%zu,\"n_columns\":%zu,"
+                                "\"win_condition_met\":%s,\"win_condition_rationale\":\"%s\","
+                                "\"columns\":[",
+                                out->summary, avail, n_judges, win_met ? "true" : "false",
+                                rationale);
+        for (size_t i = 0; judges && i < n_judges; i++) {
+            const hu_competitive_harness_judge_slot_t *j = &judges[i];
+            joff += (size_t)snprintf(json + joff, sizeof(json) - joff, "%s{\"name\":\"%s\","
+                                    "\"available\":%s",
+                                    i ? "," : "", j->column_name ? j->column_name : "?",
+                                    j->available ? "true" : "false");
+            if (!j->available) {
+                const char *reason =
+                    j->unavailable_reason ? j->unavailable_reason : "unavailable";
+                joff += (size_t)snprintf(json + joff, sizeof(json) - joff,
+                                        ",\"unavailable_reason\":\"%s\"}", reason);
+                continue;
+            }
+            if (j->has_persona_metrics) {
+                joff += (size_t)snprintf(
+                    json + joff, sizeof(json) - joff,
+                    ",\"persona_fidelity\":%.6f,\"ci_lower\":%.6f,\"ci_upper\":%.6f,"
+                    "\"n_samples\":%zu,\"p95_ms\":%.3f,\"is_baseline\":%s",
+                    j->persona_fidelity, j->ci_lower, j->ci_upper, j->n_samples, j->p95_ms,
+                    j->is_baseline ? "true" : "false");
+                if (!j->is_baseline && have_baseline) {
+                    joff += (size_t)snprintf(json + joff, sizeof(json) - joff,
+                                            ",\"delta_vs_baseline\":%.6f,"
+                                            "\"delta_ci_lower\":%.6f,\"delta_ci_upper\":%.6f",
+                                            j->delta_vs_baseline, j->delta_ci_lower,
+                                            j->delta_ci_upper);
+                }
+                joff += (size_t)snprintf(json + joff, sizeof(json) - joff, "}");
+            } else {
+                joff += (size_t)snprintf(json + joff, sizeof(json) - joff, "}");
+            }
+        }
+        joff += (size_t)snprintf(json + joff, sizeof(json) - joff, "]}\n");
         hu_error_t e = write_text_file(cfg->out_json, json);
         if (e != HU_OK)
             return e;

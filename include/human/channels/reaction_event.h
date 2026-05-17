@@ -17,8 +17,8 @@ typedef enum {
     HU_REACTION_DISLIKE,
     HU_REACTION_LAUGH,
     HU_REACTION_EMPHASIZE,
-    HU_REACTION_QUESTION,
-    HU_REACTION_CUSTOM_EMOJI,   /* iMessage code 2006 — Apple Sticker / custom emoji */
+    HU_REACTION_KIND_QUESTION,
+    HU_REACTION_KIND_CUSTOM_EMOJI, /* iMessage code 2006 — Apple Sticker / custom emoji */
 } hu_reaction_kind_t;
 
 typedef enum {

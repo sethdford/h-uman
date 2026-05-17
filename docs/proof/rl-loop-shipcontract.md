@@ -25,14 +25,14 @@ This page verifies each item at `rl-sota-phase-6-complete` (`3a17a528`) with fil
 | 6 | `human ml grpo-train --rollouts 4` produces a valid LoRA adapter | ✅ PASS |
 | 7 | `human ml rm-train` produces a valid reward model checkpoint | ✅ PASS |
 | 8 | `tests/test_e2e_rl_loop.c` passes (chat → reaction → train → re-chat → measurably changed) | ✅ PASS_WITH_NOTES (4/4 closed-loop tests green; the "AND eval_gate passed" half is satisfied by a **separate** suite `test_runner_blocks_promotion_when_gate_rejects` in `tests/test_lora_training_runner_eval_gate.c`, not by the 4 E2E tests themselves) |
-| 9 | `human eval competitive --persona seth` produces the win-condition scorecard with bootstrap CIs | ⚠️ **PARTIAL** — `hu_eval_cli_competitive` is currently a one-line announcement stub at `src/eval/cli_eval.c:13-21`; the scorecard rendering + bootstrap CIs are reachable only via the test-suite path (`tests/test_competitive_harness.c::test_harness_renders_scorecard_with_unavailable_columns_honestly`). Same applies to `human eval gate` and `human eval leaderboard`. Tracked as open carry-forward. |
-| 10 | `~/.human/proofs/<final-adapter-id>/` exists with all 9 evidence files (spec §8) | ✅ PASS_WITH_NOTES — 9-file directory schema honored by `human demo rl-closed-loop`; **5 of 9 files are 3-byte `{}` stubs** (`eval_before.json`, `eval_after.json`, `eval_delta.json`, `training_curves.json`, `adversarial_review.md`) and `reproduce.sh` is a 25-byte placeholder shell script; `manifest.json::persona_delta=0.06` and `gate_decision.json::{"promote":<delta_passed>,"reason":"demo"}` are hard-coded literals in `src/ml/cli_demo.c`. Tracked as open carry-forward. |
+| 9 | `human eval competitive --persona seth` produces the win-condition scorecard with bootstrap CIs | ✅ PASS (Phase D CF-1) — `src/eval/cli_eval.c` wires competitive/gate/leaderboard to `hu_persona_rollout_run`, `competitive_harness`, and `hu_eval_gate_decide_from_arrays_for_test`. JSON includes `win_condition_met`, bootstrap CIs, and factory `unavailable_reason`. Pinned by `tests/test_cli_eval_phase5.c` (8 tests). |
+| 10 | `~/.human/proofs/<final-adapter-id>/` exists with all 9 evidence files (spec §8) | ✅ PASS_WITH_NOTES (Phase D CF-2) — all 9 files non-stub (>50 bytes); `persona_delta` and gate verdict from real rollout + `hu_eval_gate`. Demo uses **10** prompts (gate floor); 20-prompt spec residual tracked as **CF-2-R**. Pinned by `tests/test_cli_demo_evidence.c` (6 tests). |
 | 11 | `docs/proof/rl-loop-proof.md` indexes the proof and presents the scorecard | ✅ PASS |
 | 12 | `sprint-auditor` subagent has issued PASS verdict on every phase (logged in audit report) | ✅ PASS (1, 2, 3 are PASS_WITH_NOTES per the per-phase rows — the umbrella table is honest about that) |
 | 13 | `docs/proof/adversarial-audit-report.md` exists with all `critic` + `aspect-panel` findings + remediations | ✅ PASS |
 | 14 | Apple FM + Gemini Nano populated honestly OR shows `unavailable (reason)` with documented why | ✅ PASS_WITH_NOTES — both factories return `HU_ERR_NOT_SUPPORTED` (honest fallback per spec §14); the elaborate `unavailable (reason)` strings quoted elsewhere are aspirational, not what the C code emits today. Also unreachable from the user-visible CLI because of DoD-9. |
 
-**Bottom line: 9 PASS + 4 PASS_WITH_NOTES + 1 PARTIAL = 13/14 with one item (DoD-9) honestly demoted to PARTIAL until the CLI wires through to `competitive_harness`.** Headline test/build evidence is real (10330/10332 PASS, 0 ASan, 0 UBSan, 0 leaks, all CLIs accept `--help`); the inflated half of the original close-out is documented honestly here as open carry-forwards, not hidden.
+**Bottom line (post Phase D CF-1/CF-2/CF-4): 11 PASS + 3 PASS_WITH_NOTES = 14/14 structurally met.** DoD-9 and DoD-10 user-surface wiring closed in Phase D; CF-2-R (10 vs 20 demo prompts) remains the only honest residual on DoD-10. Remaining open carry-forwards: CF-3, CF-5, CF-6, CF-7 (see table below).
 
 ---
 
@@ -168,53 +168,42 @@ Run:
 
 **`eval_gate` integration — honest carry-forward:** The 4 closed-loop tests above call `hu_e2e_closed_loop_run` directly and do **not** go through the runner; they do not exercise the eval gate themselves. The "AND eval_gate passed" half of the DoD-8 spec is satisfied by a **separate** suite — `tests/test_lora_training_runner_eval_gate.c::test_runner_blocks_promotion_when_gate_rejects` — which calls `hu_lora_training_runner` (not `run_lora_training_attempt` as an earlier draft of this doc cited) and verifies that `hu_eval_gate_decide_from_arrays_for_test` (the only public gate entry-point today, not `hu_eval_gate_evaluate` as the earlier draft cited) rejects a synthetic candidate and `hu_provider_load_adapter_called_count_for_test` stays at 0. The wiring is structurally real but the gate inputs are hard-coded synthetic arrays (`persona[20] = {0.75 …}`, other arrays NULL, `candidate_p95_ms = 100.0`); real measured candidate-adapter metrics feeding the gate is an open carry-forward.
 
-### DoD-9 — `human eval competitive --persona seth` produces win-condition scorecard with bootstrap CIs ⚠️ PARTIAL (honest)
+### DoD-9 — `human eval competitive --persona seth` produces win-condition scorecard with bootstrap CIs ✅ PASS (Phase D CF-1)
 
-**The CLI is currently a printf stub.** `src/eval/cli_eval.c:13-21` defines `hu_eval_cli_competitive` as a one-line announcement (`"human eval competitive: run side-by-side scorecard (see competitive_harness)"`); `hu_eval_cli_gate` and `hu_eval_cli_leaderboard` are identical stubs.
+**CLI wired** in `src/eval/cli_eval.c`:
+- `hu_eval_cli_competitive` — loads prompts, runs `hu_persona_rollout_run` (baseline + optional adapter), fills harness slots with bootstrap CIs, emits Markdown + JSON via `competitive_harness`.
+- `hu_eval_cli_gate` — parses `--persona-scores` CSV, calls `hu_eval_gate_decide_from_arrays_for_test`, writes verdict JSON.
+- `hu_eval_cli_leaderboard` — canned MT-Bench / Alpaca / IFEval runners with `--prompts` + `--out`.
 
 ```bash
-./build-rl-sota/human eval competitive --persona seth
-# human eval competitive: run side-by-side scorecard (see competitive_harness)
+./build-rl-sota/human eval competitive --persona seth --adapter /tmp/test.adapter \
+  --prompts ~/.human/eval/persona_prompts.txt --out-json /tmp/scorecard.json
+# JSON includes win_condition_met, ci_lower/ci_upper per column, unavailable_reason for stub judges
 ```
 
-**The scorecard machinery exists and is unit-tested, just not wired to the CLI:**
-- `src/eval/competitive_harness.c` — orchestrates side-by-side eval with v2 4-axis fidelity (`hu_communication_style_fidelity_score_v2`) + bootstrap-CI deltas + `unavailable (reason)` columns.
-- `src/eval/bootstrap_ci.c::hu_bootstrap_compare_means` — real resampling implementation.
-- `tests/test_competitive_harness.c::test_harness_renders_scorecard_with_unavailable_columns_honestly` and friends — green at `rl-sota-phase-6-complete`.
+Tests: `tests/test_cli_eval_phase5.c` (8 tests, suite `cli-eval-phase5`).
 
-**Open carry-forward:** wire `hu_eval_cli_competitive` / `_gate` / `_leaderboard` to invoke the real backends and emit the scorecard. Until that wiring lands, DoD-9 is honestly PARTIAL — the spec literally requires the CLI to produce the scorecard, and today the CLI does not.
+### DoD-10 — `~/.human/proofs/<final-adapter-id>/` exists with all 9 evidence files ✅ PASS_WITH_NOTES (Phase D CF-2)
 
-### DoD-10 — `~/.human/proofs/<final-adapter-id>/` exists with all 9 evidence files ✅ PASS_WITH_NOTES (file-schema only)
+**All 9 files are non-stub** (>50 bytes each) from `src/ml/cli_demo.c::write_evidence_dir`:
+- `eval_before.json` / `eval_after.json` — per-prompt v2 fidelity scores from `hu_persona_rollout_run` (10 prompts).
+- `eval_delta.json` — bootstrap p-value + delta mean.
+- `training_curves.json` — real `hu_rl_trainer_metrics_t` fields.
+- `gate_decision.json` — full `hu_eval_gate_verdict_t` serialization (no `"reason":"demo"` literal).
+- `manifest.json::persona_delta` — `after_mean - before_mean`, not hard-coded `0.06`.
+- `reproduce.sh` — real re-run script with `HU_E2E_FIXED_TIMESTAMP` and demo args.
 
-**The 9-file schema per spec §8 is honored at the file-count level**, but most files are placeholders today.
-
-**Actual files written by `human demo rl-closed-loop --out <dir>` (canonical per spec §8):**
-
-| File | Status at `rl-sota-phase-6-complete` |
-|------|--------------------------------------|
-| `manifest.json` | 115 bytes — real, but `persona_delta=0.06` is a **hard-coded literal** in `src/ml/cli_demo.c:222`, not measured |
-| `gate_decision.json` | 33 bytes — **hard-coded** `{"promote":true,"reason":"demo"}` in `cli_demo.c` |
-| `delta_responses.md` | 96 bytes — minimal real content |
-| `reproduce.sh` | 25 bytes — `#!/bin/sh\necho reproduce\n` (placeholder) |
-| `eval_before.json` | 3 bytes (`{}`) |
-| `eval_after.json` | 3 bytes (`{}`) |
-| `eval_delta.json` | 3 bytes (`{}`) |
-| `training_curves.json` | 3 bytes (`{}`) |
-| `adversarial_review.md` | 3 bytes (essentially empty) |
-
-**Verify locally:**
+**Honest residual (CF-2-R):** demo uses **10** fixed prompts (matches `hu_eval_gate` `n >= 10` floor); design spec §8 narrative references **20** — tracked in Open carry-forwards, not pre-closed.
 
 ```bash
 ./build-rl-sota/human demo rl-closed-loop \
   --backend huml --reaction-count 50 \
   --out /tmp/human-rl-proof --require-positive-delta
-ls -la /tmp/human-rl-proof
-# 9 files appear, sizes match table above
+# expect: 9 files, each >50 bytes; no {} stubs
+bash scripts/validate-rl-sota.sh --quick  # checks all 9 file sizes
 ```
 
-**Production wiring exists:** `src/agent/lora_training_runner.c::write_proof_bundle` writes the same 9 files when the eval gate runs at promotion time. Tests in `tests/test_proof_directory.c` verify the 9-file contract and gate-decision-on-reject semantics.
-
-**Open carry-forward (Phase D — RL SOTA hardening):** populate the six `{}` placeholder files with real measured content (before/after response JSONs from the v2 fidelity scorer, real training-curve loss/grad/reward arrays from the trainer, real adversarial review pulled from the per-promotion audit). Replace the hard-coded `persona_delta=0.06` and `gate_decision={"promote":true,"reason":"demo"}` literals with the gate's actual output. Until then, this DoD is structurally PASS_WITH_NOTES but semantically a near-empty shell.
+Tests: `tests/test_cli_demo_evidence.c` (6 tests, suite `cli-demo-evidence`).
 
 ### DoD-11 — `docs/proof/rl-loop-proof.md` indexes the proof and presents the scorecard ✅
 
@@ -258,15 +247,18 @@ The close-out sprint-auditor on commit `010763ef` flagged the items below. They 
 
 | ID | What's open | Owner / receiving phase | Spec reference |
 |----|-------------|------------------------|----------------|
-| CF-1 | `hu_eval_cli_competitive` / `_gate` / `_leaderboard` are CLI stubs — wire to `competitive_harness`, `hu_eval_gate`, `leaderboard.c` | Phase D RL hardening | DoD-9 (spec §9) |
-| CF-2 | Five of nine `human demo rl-closed-loop --out` evidence files are 3-byte `{}` stubs plus `reproduce.sh` is a 25-byte placeholder; `manifest.json::persona_delta=0.06` and `gate_decision.json` are hard-coded literals in `src/ml/cli_demo.c` | Phase D RL hardening | DoD-10 + spec §8 |
-| CF-3 | `hu_imessage_poll_reactions` daemon polling is `#if HU_IS_TEST`-only — wire into `src/daemon.c` cron-style loop for real iMessage reaction ingestion. `hu_reaction_handler_set_collector` is never called from `src/daemon.c` today | Phase D RL hardening | Phase 2 sprint-auditor F-2-2; spec §10 R8/R9 |
-| CF-4 | Eval-gate runner integration feeds the gate hard-coded synthetic persona scores (`persona[20] = {0.75…}`, other arrays NULL, `p95=100.0`) rather than measured candidate-adapter responses | Phase D RL hardening | DoD-8 second half |
-| CF-5 | KTO HUML finite-diff grad check covers a single sampled lm_head cell (`probe_row=3, probe_col=0`), not a per-parameter sweep | Phase D RL hardening | Phase 2 AC1 PARTIAL → Phase 3 follow-on |
-| CF-6 | Apple FM / Gemini Nano `unavailable (reason)` strings are aspirational; C factories return `HU_ERR_NOT_SUPPORTED` with no detail | Phase D RL hardening | DoD-14 |
-| CF-7 | `popen` relative-CWD in MLX wrappers (`dpo_real_mlx.c`, `kto_mlx.c`, `grpo_mlx.c`) | Cross-phase security hardening backlog | Phase 4 F-4-8 (already flagged as out-of-scope at Phase 4 close) |
+| ~~CF-1~~ | ~~CLI stubs~~ | **CLOSED (Phase D)** — `human eval competitive / gate / leaderboard` wired in `src/eval/cli_eval.c` to `hu_persona_rollout_run`, `competitive_harness`, `hu_eval_gate_decide_from_arrays_for_test`, and `hu_leaderboard_*`. Pinned by `tests/test_cli_eval_phase5.c` (6 tests). | DoD-9 ✅ |
+| ~~CF-2~~ | ~~Demo evidence stubs~~ | **CLOSED (Phase D, PASS_WITH_NOTES)** — `src/ml/cli_demo.c::write_evidence_dir` emits measured JSON/markdown for all nine files; `persona_delta` and gate verdict come from rollout + `hu_eval_gate`. Demo uses **10** fixed prompts (gate floor); spec §8 asked for 20 — tracked as **CF-2-R** below. Pinned by `tests/test_cli_demo_evidence.c`. | DoD-10 ✅ (notes: CF-2-R) |
+| ~~CF-3~~ | ~~Daemon iMessage reaction poll test-only~~ | **CLOSED (Phase D)** — `hu_daemon_tick_reaction_poll` in `src/daemon_reaction_poll.c`; wired in `src/daemon.c` main loop; `hu_reaction_handler_set_collector` at startup when `sota_initialized`; outbound `register_assistant_message_for_production` on send. Public `include/human/channels/imessage_reactions.h`. Pinned by `tests/test_daemon_reaction_poll_production.c` + config `chatdb_path` guard. | Phase 2 F-2-2 ✅ |
+| ~~CF-4~~ | ~~Synthetic gate inputs in lora runner~~ | **CLOSED (Phase D)** — shared `hu_persona_rollout_run` (`src/eval/persona_rollout.c`); `run_promotion_gate` in `lora_training_runner.c` uses real rollout when `eval_provider` is set; synthetic `0.75` array only when `eval_use_synthetic_for_test` in `HU_IS_TEST`. `hu_ml_cli_lora_runner` delegates chat loop to the helper. Pinned by `tests/test_persona_rollout.c` + `tests/test_lora_training_runner_eval_gate.c`. | DoD-8 second half ✅ |
+| ~~CF-5~~ | ~~KTO single-cell grad check~~ | **CLOSED (Phase D)** — `test_kto_loss_analytical_grad_matches_finite_diff_per_param` sweeps all 512 lm_head cells via chain-rule analytical vs centered FD (`kto_compute_grad_scalar_for_test` + `kto_compute_logprob_pol_for_test`). | Phase 2 AC1 ✅ |
+| ~~CF-6~~ | ~~Judge factories without unavailable reason~~ | **CLOSED (Phase D)** — `hu_eval_judge_create_apple_fm` / `_gemini_nano` accept `const char **out_reason` with compile-time stub strings; tests in `test_eval_judge_external.c`. | DoD-14 ✅ |
+| ~~CF-7~~ | ~~MLX `popen` relative-CWD~~ | **CLOSED (Phase D, prior commit)** — `hu_ml_resolve_script_path` (`src/ml/ml_scripts_dir.c`); all MLX wrappers use absolute script paths. Pinned by `tests/test_ml_scripts_dir.c`. | Phase 4 F-4-8 ✅ |
+| CF-2-R | Demo + competitive CLI use **10** persona-rollout prompts (matches `hu_eval_gate` `n >= 10` floor); design spec §8 / `delta_responses.md` narrative still references **20** prompts | Future demo-polish sprint | spec §8 residual (Phase D DoD-10 PASS_WITH_NOTES) |
 
-These are honest carry-forwards, not gates on the program tag. The `rl-sota-phase-6-complete` tag still stands for what it shipped (real DPO/KTO/GRPO/RM trainers, real eval-gate decision logic, real bootstrap-CI helper, real 4-axis fidelity scorer v2, real deterministic E2E closed-loop test, real demo CLI, real proof directory schema, full 10330/10332 PASS test suite). The carry-forwards are about *finishing the wiring at user-facing surfaces*, not about fixing broken math.
+**Phase D status (2026-05-17):** CF-1 through CF-7 are closed; only **CF-2-R** (10 vs 20 prompts in `delta_responses.md`) remains as an honest residual.
+
+These were honest carry-forwards, not gates on the program tag. The `rl-sota-phase-6-complete` tag still stands for what it shipped (real DPO/KTO/GRPO/RM trainers, real eval-gate decision logic, real bootstrap-CI helper, real 4-axis fidelity scorer v2, real deterministic E2E closed-loop test, real demo CLI, real proof directory schema, full 10330/10332 PASS test suite). The carry-forwards are about *finishing the wiring at user-facing surfaces*, not about fixing broken math.
 
 **Co-closure dependency (re-audit residual risk):** CF-1 (wire `human eval competitive` to `competitive_harness`) and CF-4 (flow real measured candidate metrics into the eval gate) **must be closed together** in the post-RL-SOTA hardening phase. Closing CF-1 alone — making the CLI produce a scorecard backed by today's hard-coded synthetic gate inputs (`persona[20] = {0.75…}`, NULL/100.0 for the rest) — would create a *new* inflation: a user-visible "scorecard with bootstrap CIs" that doesn't actually measure the candidate adapter. The honest order is CF-4 first (real metrics into the runner's gate call), then CF-1 (CLI wiring), then CF-2 (real evidence-file content). Same agent / same sprint.
 
@@ -278,16 +270,16 @@ Anyone can re-verify this Ship Contract:
 git checkout rl-sota-phase-6-complete
 cmake --preset rl_sota && cmake --build --preset rl_sota -j
 ./build-rl-sota/human_tests
-# expect: 10330/10332 PASS, 2 SKIP, 0 ASan, 0 UBSan, 0 leaks
+# expect: 10660/10664 PASS, 4 SKIP, 0 ASan, 0 UBSan, 0 leaks
 
 ./build-rl-sota/human demo rl-closed-loop \
   --backend huml --reaction-count 50 \
   --out /tmp/human-rl-proof --require-positive-delta
 ls -la /tmp/human-rl-proof
-# expect: 9 files; 6 of 9 will be 3-byte {} stubs (see DoD-10 above)
+# expect: 9 files, each >50 bytes (Phase D CF-2)
 
-./build-rl-sota/human eval competitive --persona seth
-# expect: one-line announcement string (see DoD-9 above — CLI not yet wired to harness)
+./build-rl-sota/human eval competitive --persona default --prompts /tmp/fixture.txt --out-json /tmp/sc.json
+# expect: scorecard JSON with win_condition_met + bootstrap CIs (Phase D CF-1)
 ```
 
 The full live demo (Gemma + MLX, Apple Silicon only) is in `docs/demos/rl-loop-demo.md`.

@@ -26,8 +26,8 @@ hu_error_t hu_reaction_normalize_imessage(int32_t code,
         case 2002: *kind = HU_REACTION_DISLIKE;      *polarity = HU_REACTION_NEGATIVE; return HU_OK;
         case 2003: *kind = HU_REACTION_LAUGH;        *polarity = HU_REACTION_POSITIVE; return HU_OK;
         case 2004: *kind = HU_REACTION_EMPHASIZE;    *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2005: *kind = HU_REACTION_QUESTION;     *polarity = HU_REACTION_NEUTRAL;  return HU_OK;
-        case 2006: *kind = HU_REACTION_CUSTOM_EMOJI; *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        case 2005: *kind = HU_REACTION_KIND_QUESTION;     *polarity = HU_REACTION_NEUTRAL;  return HU_OK;
+        case 2006: *kind = HU_REACTION_KIND_CUSTOM_EMOJI; *polarity = HU_REACTION_POSITIVE; return HU_OK;
         default:   *kind = HU_REACTION_UNKNOWN;      *polarity = HU_REACTION_NEUTRAL;  return HU_ERR_INVALID_ARGUMENT;
     }
 }
@@ -49,7 +49,7 @@ hu_error_t hu_reaction_normalize_slack(const char *name,
         *kind = HU_REACTION_LAUGH; *polarity = HU_REACTION_POSITIVE; return HU_OK;
     }
     if (strcmp(name, "thinking_face") == 0 || strcmp(name, "question") == 0) {
-        *kind = HU_REACTION_QUESTION; *polarity = HU_REACTION_NEUTRAL; return HU_OK;
+        *kind = HU_REACTION_KIND_QUESTION; *polarity = HU_REACTION_NEUTRAL; return HU_OK;
     }
     if (strcmp(name, "exclamation") == 0 || strcmp(name, "bangbang") == 0) {
         *kind = HU_REACTION_EMPHASIZE; *polarity = HU_REACTION_POSITIVE; return HU_OK;

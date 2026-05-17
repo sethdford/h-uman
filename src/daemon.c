@@ -66,6 +66,10 @@
 #include "human/daemon_lifecycle.h"
 #include "human/daemon_proactive.h"
 #include "human/daemon_routing.h"
+#if defined(HU_ENABLE_RL_FULL)
+#include "human/agent/reaction_handler.h"
+#include "human/daemon_reaction_poll.h"
+#endif
 
 #include "human/agent/governor.h"
 #include "human/agent/output_validator_chain.h"
@@ -2262,6 +2266,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     hu_outcome_tracker_init(&daemon_outcomes, true);
     if (agent && !agent->outcomes)
         hu_agent_set_outcomes(agent, &daemon_outcomes);
+
+#if defined(HU_ENABLE_RL_FULL)
+    if (config && config->reaction_collection.enabled && agent &&
+        agent->sota.sota_initialized) {
+        hu_reaction_handler_set_collector(&agent->sota.dpo_collector);
+    }
+#endif
 
     /* Hybrid routing: create a lightweight cloud provider for classification/scoring
      * when the primary provider is a slow local model (llm_decides mode). */
@@ -11360,6 +11371,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     ch->channel->vtable->send(
                                         ch->channel->ctx, batch_key, key_len, fragments[f].text,
                                         fragments[f].text_len, pv_ptr, pv_cnt);
+#if defined(HU_ENABLE_RL_FULL)
+                                if (config && config->reaction_collection.enabled && f == 0 &&
+                                    fragments[f].text && fragments[f].text_len > 0 &&
+                                    ch->channel->vtable->name) {
+                                    const char *ch_name =
+                                        ch->channel->vtable->name(ch->channel->ctx);
+                                    if (ch_name) {
+                                        char msg_ref[96];
+                                        snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
+                                                 (long long)time(NULL));
+                                        hu_reaction_handler_register_assistant_message_for_production(
+                                            ch_name, batch_key, msg_ref,
+                                            combined[0] ? combined : "", fragments[f].text);
+                                    }
+                                }
+#endif
                                 if (pv_cnt > 0) {
                                     uint64_t pv_rec = (uint64_t)time(NULL) * 1000ULL;
                                     hu_visual_proactive_media_governor_record(pv_rec);
@@ -12270,6 +12297,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         }
 #endif
 
+#if defined(HU_ENABLE_RL_FULL) && defined(HU_HAS_IMESSAGE) && defined(__APPLE__) && \
+    defined(HU_ENABLE_SQLITE)
+        if (config && config->reaction_collection.enabled) {
+            static int64_t reaction_watermark = 0;
+            static int64_t reaction_last_poll_unix = 0;
+            int64_t now_unix = (int64_t)time(NULL);
+            if (reaction_watermark == 0)
+                reaction_watermark = now_unix;
+            (void)hu_daemon_tick_reaction_poll(&config->reaction_collection, now_unix,
+                                               &reaction_last_poll_unix, &reaction_watermark);
+        }
+#endif
+
         struct timespec sleep_ts = {.tv_sec = tick_interval_ms / 1000,
                                     .tv_nsec = (long)(tick_interval_ms % 1000) * 1000000L};
         nanosleep(&sleep_ts, NULL);
@@ -12293,6 +12333,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     /* FIX 13: close W14 scheduler BEFORE W7 facade. The scheduler borrows
      * the facade's hu_memory_t handle for its SQLite job queue, so the
      * facade must outlive every tick the scheduler will ever run. */
+#if defined(HU_ENABLE_RL_FULL)
+    hu_reaction_handler_set_collector(NULL);
+#endif
     if (agent && agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, alloc);
         agent->w14_scheduler = NULL;

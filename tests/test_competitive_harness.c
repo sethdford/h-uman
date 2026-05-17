@@ -16,7 +16,7 @@ static void test_harness_renders_scorecard_with_unavailable_columns_honestly(voi
     hu_eval_judge_verdict_t v = {.prefer_a = 1, .confidence = 0.9, .rationale = NULL};
     hu_eval_judge_canned_config_t canned = {.verdicts = &v, .n_verdicts = 1};
     HU_ASSERT_EQ(hu_eval_judge_create_canned(&alloc, &canned, &stock), HU_OK);
-    HU_ASSERT_EQ(hu_eval_judge_create_apple_fm(&alloc, &apple), HU_OK);
+    HU_ASSERT_EQ(hu_eval_judge_create_apple_fm(&alloc, &apple, NULL), HU_OK);
 
     hu_competitive_harness_judge_slot_t judges[] = {
         {.column_name = "stock", .judge = stock, .available = true},

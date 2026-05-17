@@ -48,9 +48,13 @@ OUT="/tmp/human-rl-validate-$$"
     --reaction-count 50 \
     --out "${OUT}" \
     --require-positive-delta
-test -f "${OUT}/manifest.json" || fail "demo evidence dir missing manifest.json"
-test -f "${OUT}/gate_decision.json" || fail "demo evidence dir missing gate_decision.json"
-pass "human demo rl-closed-loop (huml)"
+for f in manifest.json training_curves.json eval_before.json eval_after.json \
+    eval_delta.json delta_responses.md gate_decision.json adversarial_review.md reproduce.sh; do
+    test -f "${OUT}/${f}" || fail "demo evidence dir missing ${f}"
+    sz=$(wc -c <"${OUT}/${f}" | tr -d ' ')
+    test "${sz}" -gt 50 || fail "demo evidence ${f} too small (${sz} bytes)"
+done
+pass "human demo rl-closed-loop (huml, 9 non-stub files)"
 
 info "DRY_RUN demo script"
 DRY_RUN=1 bash scripts/demo-rl-loop.sh

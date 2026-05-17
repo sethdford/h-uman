@@ -42,7 +42,7 @@ static void test_reaction_event_imessage_tapback_2005_is_question(void) {
     hu_reaction_kind_t kind = HU_REACTION_UNKNOWN;
     hu_reaction_polarity_t pol = HU_REACTION_NEUTRAL;
     HU_ASSERT_EQ(hu_reaction_normalize_imessage(2005, &kind, &pol), HU_OK);
-    HU_ASSERT_EQ(kind, HU_REACTION_QUESTION);
+    HU_ASSERT_EQ(kind, HU_REACTION_KIND_QUESTION);
     HU_ASSERT_EQ(pol, HU_REACTION_NEUTRAL);
 }
 /* Code 2006 = custom emoji / Apple Sticker tapback (added in macOS 14+).
@@ -52,7 +52,7 @@ static void test_reaction_event_imessage_tapback_2006_is_custom_emoji(void) {
     hu_reaction_kind_t kind = HU_REACTION_UNKNOWN;
     hu_reaction_polarity_t pol = HU_REACTION_NEUTRAL;
     HU_ASSERT_EQ(hu_reaction_normalize_imessage(2006, &kind, &pol), HU_OK);
-    HU_ASSERT_EQ(kind, HU_REACTION_CUSTOM_EMOJI);
+    HU_ASSERT_EQ(kind, HU_REACTION_KIND_CUSTOM_EMOJI);
     HU_ASSERT_EQ(pol, HU_REACTION_POSITIVE);
 }
 /* Removal codes: 3000-3006 (offset +1000). 3003 should still resolve to LAUGH. */

@@ -5,7 +5,7 @@
 static void test_gemini_nano_create_returns_canned_judge_in_test_mode(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_eval_judge_external_t judge = {0};
-    HU_ASSERT_EQ(hu_eval_judge_create_gemini_nano(&alloc, &judge), HU_OK);
+    HU_ASSERT_EQ(hu_eval_judge_create_gemini_nano(&alloc, &judge, NULL), HU_OK);
     HU_ASSERT_STR_EQ(judge.vtable->name(&judge), "canned");
     judge.vtable->deinit(&judge);
 }
