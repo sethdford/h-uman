@@ -64,6 +64,12 @@ typedef struct hu_lora_runner_ctx {
     struct hu_eval_gate *eval_gate;
     const char *rl_method_name; /* e.g. "dpo"; used for proof dir adapter id */
     size_t rl_step_index;
+
+    /* CF-4 — persona example bank used to score the candidate adapter
+     * through `hu_communication_style_fidelity_score_v2` before promotion.
+     * Required when `eval_gate` is non-NULL. */
+    const char *persona_name;
+    const char *gate_model; /* optional provider model id for gate eval chats */
 } hu_lora_runner_ctx_t;
 
 hu_error_t hu_lora_training_runner(struct hu_memory_facade *m, const struct hu_job_spec *spec,
@@ -71,6 +77,13 @@ hu_error_t hu_lora_training_runner(struct hu_memory_facade *m, const struct hu_j
 
 #ifdef HU_IS_TEST
 void hu_lora_runner_set_test_clock(time_t frozen);
+
+/* Last measured gate inputs fed to `hu_eval_gate_decide_from_arrays_for_test`
+ * (CF-4). NULL / zero count when the runner has not run a gate yet. */
+void hu_lora_runner_gate_capture_reset_for_test(void);
+size_t hu_lora_runner_gate_capture_n_for_test(void);
+double hu_lora_runner_gate_capture_persona_score_for_test(size_t index);
+double hu_lora_runner_gate_capture_p95_ms_for_test(void);
 #endif
 
 #ifdef __cplusplus
