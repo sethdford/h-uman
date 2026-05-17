@@ -2593,7 +2593,19 @@ target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/t
 # We use PUBLIC link directives so that human_tests (which links the static
 # human_core_test library) inherits the libsodium link directory and library
 # without needing to repeat the discovery dance.
+#
+# Also pulls in src/persona/persona_crypt.c — that source hard-#errors when
+# HU_HAS_LIBSODIUM is undefined, so it MUST be gated here and cannot live in
+# the unconditional HU_CORE_SOURCES list (see persona_crypt.c top comment +
+# Sprint-7 merge-regression that re-broke this once before).
+#
+# NOTE: tests/test_persona_encryption.c is registered AFTER the
+# `set(HU_TEST_SOURCES ...)` at line ~2834 (which would otherwise discard
+# an append done here). See the matching `if(HU_LIBSODIUM_FOUND)` block in
+# the gated test-sources section near line ~3440. Bugbot 8b687b9c caught
+# this set-after-append silent loss.
 if(HU_LIBSODIUM_FOUND)
+    target_sources(human_core_test PRIVATE src/persona/persona_crypt.c)
     target_include_directories(human_core_test PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
     target_link_libraries(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARIES})
     if(HU_LIBSODIUM_LIBRARY_DIRS)
@@ -2628,24 +2640,8 @@ endif()
 if(HU_ENABLE_COREML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_COREML=1)
 endif()
-# Mirror the HU_LIBSODIUM_FOUND block above for human_core_test so
-# persona_crypt tests can link. See CMakeLists.txt:2097 for the
-# production-side wiring + the rationale comment on why this is
-# gated rather than the previous "unconditional with #error" pattern.
-if(HU_LIBSODIUM_FOUND)
-    target_sources(human_core_test PRIVATE src/persona/persona_crypt.c)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_LIBSODIUM=1)
-    target_include_directories(human_core_test PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
-    target_link_libraries(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARIES})
-    if(HU_LIBSODIUM_LIBRARY_DIRS)
-        target_link_directories(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
-    endif()
-    # NOTE: test_persona_encryption.c registration is appended AFTER
-    # the `set(HU_TEST_SOURCES ...)` at line ~2834 (which would otherwise
-    # discard an append done here). See the matching `if(HU_LIBSODIUM_FOUND)`
-    # block near line ~3370 in the gated test-sources section.
-    # Bugbot 8b687b9c caught this set-after-append silent loss.
-endif()
+# (Note: libsodium wiring for human_core_test was previously duplicated here;
+#  merged into the single block above per Bugbot 31c0a7dc.)
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_FEEDS=1)
 endif()
