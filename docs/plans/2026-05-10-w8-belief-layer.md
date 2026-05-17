@@ -1,10 +1,11 @@
 ---
 title: "W8 — Belief Layer: hu_belief_t posteriors, semantic conflict via LLM-judge, hyperedges"
 created: 2026-05-10
-status: proposed
+status: complete
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: high
 scope: include/human/memory/, src/memory/, every consumer of `confidence: float`
+last_audit: 2026-05-17
 ---
 
 # W8 — Belief Layer

@@ -1,11 +1,12 @@
 ---
 title: "W3 — Multi-Graph Topology + Case-Based Planning"
 created: 2026-05-10
-status: proposed
+status: complete
 parent: 2026-05-10-memory-roadmap-overview.md
 depends_on: 2026-05-10-w1-bitemporal-foundation.md
 risk: medium
 scope: src/memory/, include/human/memory/, src/agent/
+last_audit: 2026-05-17
 ---
 
 # W3 — Multi-Graph Topology + Case-Based Planning

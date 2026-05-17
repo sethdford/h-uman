@@ -54,7 +54,7 @@ Operational rules:
   - Privacy claims in the methodology paper must match the threat model in `docs/standards/security/threat-model.md`.
 - **License headers** in source files (`scripts/bench-gemma-perf.py` and any new harness code) before publication.
 - **CITATION.cff** at repo root pointing reviewers/users at the canonical citation form.
-- **Repo LICENSE file** lands before Phase A6.3 publication. Use Apache-2.0 for code at the repo root unless a strong reason emerges to fork.
+- **Repo LICENSE file** lands before Phase A6.3 publication. ~~Use Apache-2.0 for code at the repo root unless a strong reason emerges to fork.~~ **Superseded by the 2026-05-17 addendum below**: the repo has been MIT-licensed since `a58a0ef3` (2026-02-16); MIT is retained at the root, and the benchmark reference implementation declares Apache-2.0 per-file via SPDX headers.
 
 What this does NOT cover:
 
@@ -71,4 +71,27 @@ What this does NOT cover:
 
 ## Status
 
-Accepted. Bookkeeping work (LICENSE files, headers, CITATION.cff) lands in Phase E2 along with the suite directory structure. Legal review request goes out at month 5, paired with the beta-cohort review.
+Accepted with addendum (2026-05-17). Bookkeeping work (LICENSE files, headers, CITATION.cff) lands in Phase E2 along with the suite directory structure. Legal review request goes out at month 5, paired with the beta-cohort review.
+
+## Addendum (2026-05-17): Repo-root LICENSE clarification
+
+This ADR's decision table (row "Reference implementation") includes the parenthetical "Repo at large is currently unlicensed → add LICENSE at the root before publication." **That parenthetical is factually incorrect.** The repo has carried an **MIT License** at `LICENSE` since the original nullclaw commit (`a58a0ef3`, 2026-02-16), three months before this ADR was written. The MIT license is also asserted in:
+
+- `README.md` (license badge + "License: MIT — see [LICENSE](LICENSE)")
+- `CONTRIBUTING.md` ("Human is an autonomous AI assistant runtime written in C11. MIT License.")
+- `npm/package.json` (`"license": "MIT"`)
+- `npm/README.md` (License: MIT)
+
+**Resolution:** the repo-root LICENSE remains MIT. Re-licensing the entire repo from MIT to Apache-2.0 would require contributor sign-off across every author since 2026-02-16, has no compelling benefit for the runtime code (MIT is permissive and well-understood), and would disrupt downstream consumers who have already vendored or depended on the MIT-licensed runtime.
+
+**The ADR's per-artifact license assignments remain in force:**
+
+- Eval scenarios → CC-BY-4.0 (in `eval_suites/` with explicit per-directory `LICENSE.md`)
+- Methodology paper → CC-BY-SA-4.0 (license stated in its frontmatter)
+- Reference benchmark implementation (`scripts/bench-gemma-perf.py`, judge harness, runner code) → **Apache-2.0** declared via SPDX header in each file (`// SPDX-License-Identifier: Apache-2.0`). This is permitted alongside an MIT repo root because the benchmark code is a self-contained artifact whose license is asserted at the file level; the repo root MIT covers everything not otherwise marked.
+- Judge prompts → CC-BY-4.0 (per-file frontmatter)
+- Bench result artifacts → CDLA-Permissive-2.0 (per-directory `LICENSE.md`)
+
+**Rationale for the split-license approach:** projects like Linux (GPL kernel + permissive userspace headers), CPython (PSF + Apache for some modules), and Hugging Face Transformers (Apache repo with CC-BY model cards) all carry per-artifact licenses inside a single repo. The SPDX-Identifier convention makes this unambiguous to legal tooling.
+
+**What this addendum closes:** the reconciliation work in task 10 of the 2026-05-17 plan-validation backlog. There is no longer a discrepancy: the repo root is MIT by deliberate retention, and the benchmark per-artifact licenses are declared via SPDX headers when those artifacts ship.

@@ -1,7 +1,8 @@
 ---
 title: SOTA AI Agent Assessment — March 2026
 date: 2026-03-19
-status: draft
+status: obsolete
+last_audit: 2026-05-17
 ---
 
 # State-of-the-Art AI Agent Assessment — March 2026

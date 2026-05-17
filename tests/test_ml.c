@@ -4868,6 +4868,152 @@ static void test_m3_on_provider_success_noop_when_unattached(void) {
 }
 #endif /* HU_ENABLE_ML */
 
+/* ── M3 first-slice probe-counter tests (2026-05-17) ─────────────────────
+ *
+ * These tests are the verifier-provable evidence for the first slice of
+ * the M3 frontier-model bridge. Before this slice,
+ * `hu_m3_frontier_adapter_noop_infer` was literally `(void)adapter;
+ * return HU_OK;` — so the 11 chat-path call sites in agent_turn.c +
+ * agent_stream.c (via `hu_agent_m3_on_provider_success`) were
+ * undetectable from the test layer. A regression that dropped one or
+ * all of them would still see green.
+ *
+ * The slice converts the noop into a `probe_infer` that increments an
+ * internal counter on the adapter, and exposes the counter via
+ * `hu_m3_frontier_adapter_probe_count`. Now a test can:
+ *   1. Open a fixture adapter.
+ *   2. Attach it to an agent.
+ *   3. Call `hu_agent_m3_on_provider_success` (the exact entry point
+ *      every chat-path site uses).
+ *   4. Read the probe count back and assert it advanced.
+ *
+ * That proves the seam end-to-end: agent → on_provider_success → noop
+ * compat shim → probe_infer → counter mutates → counter observable.
+ *
+ * Not a model. No tensors. No learning. The MLX/llama.cpp tensor work
+ * is planned in docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md.
+ * What this DOES prove is that when that work lands and slots into
+ * `probe_infer`, the call sites are already firing. */
+
+static void test_m3_probe_count_starts_at_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_probe_zero_start.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_m3_frontier_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &a), HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+    /* A freshly-opened adapter has not been probed. */
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 0);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_probe_infer_increments_counter(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_probe_increments.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_m3_frontier_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &a), HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+
+    /* The direct probe API. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 1);
+
+    /* The backwards-compat shim — `noop_infer` — must route to the
+     * same counter so the existing 11 chat-path call sites become
+     * observable without re-editing them. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 2);
+
+    /* And repeats keep advancing — no saturation, no debounce. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(a), HU_OK);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 4);
+
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_probe_count_null_safe(void) {
+    /* NULL adapter — the probe APIs are on the hot chat path; they must
+     * be safe to call when nothing is attached. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(NULL), HU_OK);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(NULL), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
+}
+
+static void test_m3_agent_on_provider_success_advances_probe_count(void) {
+    /* This is the headline first-slice assertion. It pins the
+     * end-to-end seam:
+     *
+     *   agent has m3 adapter attached
+     *     -> hu_agent_m3_on_provider_success(agent)
+     *       -> hu_m3_frontier_adapter_noop_infer(adapter)  [legacy name]
+     *         -> hu_m3_frontier_adapter_probe_infer(adapter)
+     *           -> adapter->probe_count++
+     *
+     * Before this slice, the bottom three steps collapsed to a single
+     * `(void)return;` and the test below was not expressible — there
+     * was no observable for it. Now if a refactor drops the call site
+     * the assertion goes red. */
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_agent_provider_success.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_agent_m3_adapter_attach(&agent, path);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 0);
+
+    /* The exact call the 11 chat-path sites use. */
+    hu_agent_m3_on_provider_success(&agent);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 1);
+
+    hu_agent_m3_on_provider_success(&agent);
+    hu_agent_m3_on_provider_success(&agent);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 3);
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    /* When ML is disabled, the hook is a no-op and there is no adapter
+     * to read a counter from. The test passes by construction — this
+     * is the documented stub return. */
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
+#endif
+}
+
 /* ── Track D D2.1 — honest-gap caveat snapshot tests ──────────────────
  *
  * These tests pin the user-facing caveat strings that `human ml
@@ -5088,8 +5234,8 @@ static void test_lora_persona_export_jsonl_writes_alpaca_shape(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/train.jsonl", tmpdir);
 
-    const char *argv[] = {"lora-persona", "--persona",       "export_jsonl_test",
-                          "--export-jsonl", output};
+    const char *argv[] = {"lora-persona", "--persona", "export_jsonl_test", "--export-jsonl",
+                          output};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_lora_persona(&alloc, 5, argv);
     unsetenv("HU_PERSONA_DIR");

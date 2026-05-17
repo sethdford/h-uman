@@ -1,3 +1,8 @@
+---
+status: obsolete
+last_audit: 2026-05-17
+---
+
 # 2026-05-10 — iMessage Private-API Feasibility (Tier B)
 
 > Design doc only. Nothing in this document is implemented. The "Decision"

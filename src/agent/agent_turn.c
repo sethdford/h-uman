@@ -8014,21 +8014,22 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     }
                                 }
 
-                                /* 2. Pre-hook pipeline SECOND */
-                                if (agent->hook_registry) {
-                                    hu_hook_result_t dhook_res;
-                                    memset(&dhook_res, 0, sizeof(dhook_res));
+                                /* 2. Pre-hook pipeline SECOND (centralized via
+                                 *    hu_agent_internal_pre_hook_check). On DENY we mark the
+                                 *    dispatcher slot disallowed and free the scratch result; the
+                                 *    real result slot is populated by the post-dispatch loop. */
+                                {
                                     const char *dargs_str =
                                         dcall->arguments ? dcall->arguments : "";
-                                    hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc,
-                                                              dn_buf, dn, dargs_str,
-                                                              strlen(dargs_str), &dhook_res);
-                                    if (dhook_res.decision == HU_HOOK_DENY) {
+                                    hu_tool_result_t pre_scratch = {0};
+                                    bool dproceed = hu_agent_internal_pre_hook_check(
+                                        agent, dn_buf, dn, dargs_str, strlen(dargs_str),
+                                        &pre_scratch);
+                                    if (!dproceed) {
                                         dispatch_allowed[dci] = false;
-                                        hu_hook_result_free(agent->alloc, &dhook_res);
+                                        hu_tool_result_free(agent->alloc, &pre_scratch);
                                         continue;
                                     }
-                                    hu_hook_result_free(agent->alloc, &dhook_res);
                                 }
 
                                 dispatch_allowed_count++;
@@ -8132,25 +8133,22 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 }
                             }
 
-                            if (agent->hook_registry) {
-                                hu_hook_result_t hook_res;
-                                memset(&hook_res, 0, sizeof(hook_res));
-                                hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc,
-                                                          tn_buf, tn, args_str, strlen(args_str),
-                                                          &hook_res);
-                                if (hook_res.decision == HU_HOOK_DENY) {
+                            /* Pre-hook pipeline (centralized via hu_agent_internal_pre_hook_check).
+                             * Note: *result already holds the dispatcher's output. We can't
+                             * pass it directly because the helper would overwrite on DENY and
+                             * leak the prior payload. Use a scratch result; if denied, free the
+                             * prior *result and move the scratch into place. */
+                            {
+                                hu_tool_result_t pre_scratch = {0};
+                                bool proceed = hu_agent_internal_pre_hook_check(
+                                    agent, tn_buf, tn, args_str, strlen(args_str), &pre_scratch);
+                                if (!proceed) {
                                     hu_tool_result_free(agent->alloc, result);
-                                    const char *deny_src =
-                                        hook_res.message ? hook_res.message : "denied by hook";
-                                    size_t deny_len = hook_res.message ? hook_res.message_len : 14;
-                                    char *deny_copy = hu_strndup(agent->alloc, deny_src, deny_len);
-                                    hu_hook_result_free(agent->alloc, &hook_res);
-                                    *result = hu_tool_result_fail(deny_copy ? deny_copy
-                                                                            : "denied by hook",
-                                                                  deny_copy ? deny_len : 14);
-                                    result->error_msg_owned = true;
+                                    *result = pre_scratch;
                                     goto dispatch_tool_done;
                                 }
+                                /* Proceeded: helper did NOT touch pre_scratch (no registry or
+                                 * ALLOW), so nothing to free. */
                             }
 
                             /* ESCALATE enforcement: check approval matrix */
@@ -8489,20 +8487,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                                 result->output_len, ttl);
                             }
 
-                            /* Post-hook pipeline: annotate result */
-                            if (agent->hook_registry) {
-                                const char *tool_output =
-                                    result->success ? result->output : result->error_msg;
-                                size_t tool_output_len =
-                                    result->success ? result->output_len : result->error_msg_len;
-                                hu_hook_result_t post_res;
-                                memset(&post_res, 0, sizeof(post_res));
-                                hu_hook_pipeline_post_tool(agent->hook_registry, agent->alloc,
-                                                           tn_buf, tn, args_str, strlen(args_str),
-                                                           tool_output, tool_output_len,
-                                                           result->success, &post_res);
-                                hu_hook_result_free(agent->alloc, &post_res);
-                            }
+                            /* Post-hook pipeline (centralized via
+                             * hu_agent_internal_post_hook_fire). */
+                            hu_agent_internal_post_hook_fire(agent, tn_buf, tn, args_str,
+                                                             strlen(args_str), result);
 
                         dispatch_tool_done:
                             (void)0;
@@ -8633,26 +8621,31 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 }
                             }
 
-                            /* Pre-hook pipeline (sequential path) */
-                            if (agent->hook_registry) {
-                                hu_hook_result_t seq_hook_res;
-                                memset(&seq_hook_res, 0, sizeof(seq_hook_res));
+                            /* Pre-hook pipeline (sequential path, centralized via
+                             * hu_agent_internal_pre_hook_check). On DENY: append the deny
+                             * message to history AND fire the post-hook so auditors observe
+                             * the blocked attempt, then skip to next tool call. */
+                            {
                                 const char *pre_hook_args = call->arguments ? call->arguments : "";
-                                hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc,
-                                                          pol_tn, pol_tn_len, pre_hook_args,
-                                                          strlen(pre_hook_args), &seq_hook_res);
-                                if (seq_hook_res.decision == HU_HOOK_DENY) {
-                                    const char *dm = seq_hook_res.message ? seq_hook_res.message
-                                                                          : "denied by hook";
+                                hu_tool_result_t pre_scratch = {0};
+                                bool seq_proceed = hu_agent_internal_pre_hook_check(
+                                    agent, pol_tn, pol_tn_len, pre_hook_args, strlen(pre_hook_args),
+                                    &pre_scratch);
+                                if (!seq_proceed) {
+                                    const char *dm = pre_scratch.error_msg ? pre_scratch.error_msg
+                                                                           : "denied by hook";
                                     size_t dl =
-                                        seq_hook_res.message ? seq_hook_res.message_len : 14;
+                                        pre_scratch.error_msg ? pre_scratch.error_msg_len : 14;
                                     hu_agent_internal_append_history(agent, HU_ROLE_TOOL, dm, dl,
                                                                      call->name, call->name_len,
                                                                      call->id, call->id_len);
-                                    hu_hook_result_free(agent->alloc, &seq_hook_res);
+                                    /* Post-hook fires even on deny per AC-3 contract. */
+                                    hu_agent_internal_post_hook_fire(
+                                        agent, pol_tn, pol_tn_len, pre_hook_args,
+                                        strlen(pre_hook_args), &pre_scratch);
+                                    hu_tool_result_free(agent->alloc, &pre_scratch);
                                     continue;
                                 }
-                                hu_hook_result_free(agent->alloc, &seq_hook_res);
                             }
 
                             hu_policy_action_t pa = hu_agent_internal_evaluate_tool_policy(
@@ -8800,20 +8793,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 }
                             }
 
-                            /* Post-hook pipeline (sequential path) */
-                            if (agent->hook_registry) {
-                                const char *seq_out =
-                                    result.success ? result.output : result.error_msg;
-                                size_t seq_out_len =
-                                    result.success ? result.output_len : result.error_msg_len;
-                                hu_hook_result_t seq_post;
-                                memset(&seq_post, 0, sizeof(seq_post));
+                            /* Post-hook pipeline (sequential path, centralized via
+                             * hu_agent_internal_post_hook_fire). */
+                            {
                                 const char *seq_args2 = call->arguments ? call->arguments : "";
-                                hu_hook_pipeline_post_tool(agent->hook_registry, agent->alloc,
-                                                           pol_tn, pol_tn_len, seq_args2,
-                                                           strlen(seq_args2), seq_out, seq_out_len,
-                                                           result.success, &seq_post);
-                                hu_hook_result_free(agent->alloc, &seq_post);
+                                hu_agent_internal_post_hook_fire(agent, pol_tn, pol_tn_len,
+                                                                 seq_args2, strlen(seq_args2),
+                                                                 &result);
                             }
 
                             const char *res_content =

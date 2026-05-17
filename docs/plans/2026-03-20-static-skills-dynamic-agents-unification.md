@@ -1,8 +1,9 @@
 ---
 title: "Static skills + dynamic agents — unified behavior"
 created: 2026-03-20
-status: implemented
+status: complete
 scope: skillforge, prompt injection, skill_run, agent_spawn, orchestrator, inheritance, retrieval, tests
+last_audit: 2026-05-17
 ---
 
 # Plan: Static skills + dynamic agents — unified behavior

@@ -1,10 +1,11 @@
 ---
 title: "W16 — Continuous Evaluation Suite"
 created: 2026-05-10
-status: proposed
+status: complete
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: medium
 scope: include/human/evaluation/, src/evaluation/, tests/evaluation/, .github/workflows/evaluation.yml, eval_suites/
+last_audit: 2026-05-17
 ---
 
 # W16 — Continuous Evaluation Suite

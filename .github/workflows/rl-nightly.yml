@@ -1,0 +1,250 @@
+name: RL Nightly (closed-loop validation)
+
+# Runs the full RL SOTA validation stack (Phases 0-6) on a nightly cadence
+# to continuously verify the "self-improvement" claim. Wraps
+# scripts/validate-rl-sota.sh, which exercises the rl_sota preset, the
+# E2E-closed-loop test suite, Phase 5 eval suites, the v1 fidelity +
+# LoRA baseline guard, and the human demo rl-closed-loop CLI.
+#
+# Plan reference:
+#   docs/research/2026-05-17-plan-validation/by-plan/2026-05-11-rl-loop-phase-2-dpo-reactions.md
+# Validation script:
+#   scripts/validate-rl-sota.sh
+# Build preset:
+#   rl_sota (inherits dev, enables HU_ENABLE_LLAMACPP + HU_ENABLE_RL_FULL)
+#
+# Triggers:
+#   - schedule: 08:07 UTC daily (off-the-hour per CI rules)
+#   - workflow_dispatch: manual run with optional --quick mode
+#
+# Artifacts uploaded for review:
+#   - rl-validate-log:    full stdout/stderr of the validation run
+#   - rl-demo-evidence:   contents of the demo CLI output directory
+#                         (manifest.json, training_curves.json, eval_*,
+#                         delta_responses.md, gate_decision.json,
+#                         adversarial_review.md, reproduce.sh)
+#
+# On failure: opens a tracking issue tagged `rl-nightly`, `rl-regression`
+# (skipped on fork PRs since they lack `issues: write`).
+#
+# Security note: workflow_dispatch input flows through env: only and is
+# validated against an allowlist before being passed downstream. All other
+# `${{ }}` references are GitHub-controlled context (run id, repo, fork
+# flag), not user-controlled strings.
+
+on:
+  schedule:
+    - cron: "7 8 * * *"
+  workflow_dispatch:
+    inputs:
+      quick:
+        description: "Skip full test suite (faster validation)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: rl-nightly
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate RL SOTA stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      INPUT_QUICK: ${{ github.event.inputs.quick }}
+      DEMO_OUT_DIR: /tmp/human-rl-nightly-evidence
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: Debug
+          enable-curl: "true"
+          enable-all-channels: "true"
+
+      - name: Resolve quick-mode flag
+        id: mode
+        env:
+          RAW_QUICK: ${{ env.INPUT_QUICK }}
+        run: |
+          set -euo pipefail
+          QUICK="${RAW_QUICK:-false}"
+          if [ "$QUICK" != "true" ] && [ "$QUICK" != "false" ]; then
+            echo "::error::Invalid quick input: $QUICK (allowed: true|false)"
+            exit 1
+          fi
+          echo "quick=${QUICK}" >> "$GITHUB_OUTPUT"
+
+      - name: Run RL SOTA validation
+        id: validate
+        env:
+          QUICK: ${{ steps.mode.outputs.quick }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rl-nightly-logs
+          if [ "$QUICK" = "true" ]; then
+            ARGS=(--quick)
+          else
+            ARGS=()
+          fi
+          set +e
+          bash scripts/validate-rl-sota.sh "${ARGS[@]}" \
+            2>&1 | tee /tmp/rl-nightly-logs/validate.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=${STATUS}" >> "$GITHUB_OUTPUT"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::error::scripts/validate-rl-sota.sh failed with exit ${STATUS}"
+            exit "$STATUS"
+          fi
+
+      - name: Capture demo evidence for upload
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "${DEMO_OUT_DIR}"
+          if [ -x ./build-rl-sota/human ]; then
+            ./build-rl-sota/human demo rl-closed-loop \
+              --backend huml \
+              --reaction-count 50 \
+              --out "${DEMO_OUT_DIR}" \
+              --require-positive-delta \
+              2>&1 | tee /tmp/rl-nightly-logs/demo.log || \
+              echo "::warning::demo CLI exited non-zero; uploading whatever evidence was produced"
+          else
+            echo "::warning::./build-rl-sota/human not present; skipping demo capture"
+          fi
+          ls -la "${DEMO_OUT_DIR}" || true
+
+      - name: Summarize result
+        if: always()
+        env:
+          STATUS: ${{ steps.validate.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          STATUS="${STATUS:-unknown}"
+          {
+            echo "## RL Nightly result"
+            echo ""
+            if [ "$STATUS" = "0" ]; then
+              echo "**PASS** -- scripts/validate-rl-sota.sh completed without errors."
+            else
+              echo "**FAIL** -- scripts/validate-rl-sota.sh exited with code ${STATUS}."
+            fi
+            echo ""
+            echo "### Validation phases exercised"
+            echo "- E2E closed-loop suite"
+            echo "- Phase 5 eval suites (bootstrap, eval_judge_external, leaderboard, eval-gate)"
+            echo "- personal-model-fidelity-v2 + LoRA baseline guard"
+            echo "- Full test suite (skipped in --quick mode)"
+            echo "- human demo rl-closed-loop CLI (HUML backend, 9-file evidence dir)"
+            echo "- scripts/demo-rl-loop.sh DRY_RUN"
+            echo ""
+            echo "### Artifacts"
+            echo "- rl-validate-log: full validation script output"
+            echo "- rl-demo-evidence: demo CLI output directory"
+            echo ""
+            echo "Proof index: docs/proof/rl-loop-proof.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validation log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rl-validate-log
+          path: /tmp/rl-nightly-logs/
+          retention-days: 30
+
+      - name: Upload demo evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rl-demo-evidence
+          path: ${{ env.DEMO_OUT_DIR }}
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Open or update tracking issue on failure
+        if: failure() && github.event.pull_request.head.repo.fork != true
+        uses: actions/github-script@v8
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const runUrl = process.env.RUN_URL;
+            const date = new Date().toISOString().slice(0, 10);
+            const title = `rl-nightly: validation FAIL on ${date}`;
+            let log = '';
+            try {
+              log = fs.readFileSync('/tmp/rl-nightly-logs/validate.log', 'utf8');
+              const lines = log.split('\n');
+              if (lines.length > 80) {
+                log = ['...(truncated, see artifact rl-validate-log)...', ...lines.slice(-80)].join('\n');
+              }
+            } catch (_) {
+              log = '(no log captured -- check the workflow run directly)';
+            }
+            const body = [
+              '## RL nightly failed',
+              '',
+              'Run: ' + runUrl,
+              'Date: ' + date,
+              'Script: `scripts/validate-rl-sota.sh`',
+              '',
+              'This workflow continuously verifies the closed-loop RL stack',
+              '(Phases 0-6, tag `rl-sota-phase-6-complete`). A failure here',
+              'indicates regression in one of:',
+              '',
+              '- E2E closed-loop suite',
+              '- Phase 5 eval suites (bootstrap, eval_judge_external, leaderboard, eval-gate)',
+              '- personal-model-fidelity-v2 + LoRA baseline',
+              '- `human demo rl-closed-loop` CLI evidence generation',
+              '- `scripts/demo-rl-loop.sh` DRY_RUN',
+              '',
+              '### Tail of validate.log',
+              '```',
+              log,
+              '```',
+              '',
+              'See `docs/proof/rl-loop-proof.md` for the proof index and',
+              '`docs/research/2026-05-17-plan-validation/by-plan/2026-05-11-rl-loop-phase-2-dpo-reactions.md`',
+              'for the governing plan.'
+            ].join('\n');
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'rl-nightly,rl-regression',
+              per_page: 10,
+            });
+            if (existing.length > 0) {
+              const issue = existing[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body,
+              });
+              core.notice('Commented on existing tracking issue #' + issue.number);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['rl-nightly', 'rl-regression'],
+              });
+              core.notice('Opened tracking issue #' + created.data.number);
+            }

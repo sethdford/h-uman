@@ -5,6 +5,7 @@ sprint: SOTA-2026-01
 slice: W0b
 status: complete
 risk: low
+last_audit: 2026-05-17
 ---
 
 # W0b — MCP type rename precondition report

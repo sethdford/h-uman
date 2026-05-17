@@ -62,6 +62,21 @@ jobs:
           fi
       - name: Synthetic iMessage offline gates
         run: python3 scripts/eval_synthetic_imessage_offline.py
+      - name: Channel + synthetic harness smoke (Task #5 2026-05-17)
+        # Both harnesses now build by default (HU_ENABLE_CHANNEL_TESTS=ON,
+        # HU_ENABLE_SYNTHETIC=ON, gated on HU_ENABLE_CURL). The --smoke mode
+        # parses argv, walks the channel registry, and exits 0 without
+        # requiring GEMINI_API_KEY or network. CI exercises the binaries on
+        # every push; full Gemini-driven runs still require credentials and
+        # are intentionally NOT wired here.
+        env:
+          ASAN_OPTIONS: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}
+        run: |
+          set -euo pipefail
+          test -x ./build/human_synthetic || { echo "::error::human_synthetic binary missing"; exit 1; }
+          test -x ./build/human_channel_tests || { echo "::error::human_channel_tests binary missing"; exit 1; }
+          ./build/human_synthetic --smoke
+          ./build/human_channel_tests --smoke
       - name: Check for untested modules
         run: scripts/check-untested.sh
       - name: Test/source gate-symmetry
@@ -756,3 +771,34 @@ jobs:
             echo "::error::One or more fuzz harnesses found crashes"
             exit 1
           fi
+
+  # US-8.3: Reproducible Binary Builds.
+  # Verifies that two independent builds from the same source with the
+  # same SOURCE_DATE_EPOCH produce bytewise-identical `human` binaries
+  # (modulo documented carve-outs: ELF build-id, Mach-O LC_UUID,
+  # ad-hoc code signature on Darwin).
+  # Required check; NO continue-on-error (rules/quality-gates.md AP-1).
+  # No untrusted input is interpolated in any run: step.
+  reproducible-build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Linux build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsqlite3-dev libcurl4-openssl-dev libssl-dev binutils
+      - name: Install macOS build deps
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install cmake ninja || true
+      - name: Lint gate — no __DATE__/__TIME__ in src or include
+        run: scripts/check-no-date-time-macros.sh
+      - name: Build gate — two-shot build + bytewise diff
+        env:
+          SOURCE_DATE_EPOCH: "1700000000"
+        run: scripts/check-reproducible-build.sh

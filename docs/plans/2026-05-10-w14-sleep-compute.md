@@ -1,10 +1,11 @@
 ---
 title: "W14 — Sleep-Time Compute Scheduler: hosts learning, KV-warming, counterfactual rehearsal"
 created: 2026-05-10
-status: proposed
+status: complete
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: medium
 scope: include/human/agent/, src/agent/, src/daemon.c, src/ml/
+last_audit: 2026-05-17
 ---
 
 # W14 — Sleep-Time Compute Scheduler

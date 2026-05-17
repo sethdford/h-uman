@@ -15,3 +15,11 @@ design-tokens/ @sethdford
 .github/ @sethdford
 .githooks/ @sethdford
 scripts/ @sethdford
+
+# Website install one-liner + verified-badge state (US-9.5).
+# install.json is the single source of truth shared with Formula/human.rb.
+# `verified.macos_arm64.ok` must only flip to true via the release.yml
+# pipeline after check-formula-install.sh succeeds — manual edits MUST be
+# reviewed so the badge cannot lie about a verification that never ran.
+website/src/data/install.json @sethdford
+website/scripts/check-install-matches-formula.mjs @sethdford

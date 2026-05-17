@@ -1,12 +1,13 @@
 ---
 title: "Memory + Graphs Roadmap — Overview"
 created: 2026-05-10
-status: proposed
+status: complete
 parent: 2026-03-08-better-than-human.md
 related:
   - 2026-03-10-human-fidelity-phase3-superhuman-memory.md
   - 2026-03-10-human-fidelity-phase7-deep-memory.md
   - 2026-03-21-elastic-memory-episodic.md
+last_audit: 2026-05-17
 ---
 
 # Memory + Graphs Roadmap — Overview

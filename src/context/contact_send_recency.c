@@ -120,3 +120,9 @@ bool hu_contact_send_recency_reactive_within(const hu_contact_send_recency_t *r,
     }
     return (now - e->last_send_ts) >= 0 && (now - e->last_send_ts) < window_s;
 }
+
+bool hu_daemon_proactive_should_defer(const hu_contact_send_recency_t *r, const char *chat_id,
+                                      size_t chat_id_len, int64_t now) {
+    return hu_contact_send_recency_reactive_within(r, chat_id, chat_id_len, now,
+                                                   HU_DAEMON_REACTIVE_GATE_WINDOW_S);
+}

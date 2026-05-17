@@ -1,6 +1,13 @@
 # typed: false
 # frozen_string_literal: true
 
+# tap: humanlabs/human
+# The line above is the canonical tap path. It is parsed verbatim by
+# website/scripts/check-install-matches-formula.mjs to enforce that the
+# install one-liner rendered on h-uman.ai never drifts from this formula.
+# Do not change without updating website/src/data/install.json in the
+# same PR — the drift detector test will fail by design otherwise.
+
 class Human < Formula
   desc "The smallest fully autonomous AI assistant infrastructure"
   homepage "https://h-uman.ai"
@@ -24,6 +31,13 @@ class Human < Formula
       sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
+
+  # TODO(US-8.4): once codesigning + notarization ships, add a `bottle do` block
+  # so users get a pre-compiled, ABI-relocatable tarball instead of the raw
+  # pre-built binary downloaded via `url`. Bottling an *unsigned* binary makes
+  # tamper attribution worse (the bottle SHA covers the tarball, not the inner
+  # binary), so this stays deferred until signing lands. See US-9.1 design doc
+  # (sprints/sprint-9/designs/US-9.1.md, "Bottle vs build-from-source").
 
   # Build from source (HEAD or when pre-built binary unavailable)
   head "https://github.com/sethdford/h-uman.git", branch: "main"

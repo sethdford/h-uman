@@ -235,8 +235,7 @@ void hu_agent_internal_clear_scene_direction(hu_agent_t *agent) {
  *   7. Increment count, saturating at MAX. */
 #define HU_DIRECTOR_PUSH_MIN_LEN 30 /* same as HU_GUARD_DIRECTOR_ECHO_MIN_MATCH */
 
-void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
-                                              size_t text_len) {
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text, size_t text_len) {
     if (!agent || !agent->alloc || !text || text_len < HU_DIRECTOR_PUSH_MIN_LEN)
         return;
 
@@ -249,8 +248,7 @@ void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text
 
     /* Free oldest slot if buffer is full. */
     if (agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1]) {
-        agent->alloc->free(agent->alloc->ctx,
-                           agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1],
+        agent->alloc->free(agent->alloc->ctx, agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1],
                            agent->director_history_lens[HU_DIRECTOR_HISTORY_MAX - 1] + 1);
         agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1] = NULL;
         agent->director_history_lens[HU_DIRECTOR_HISTORY_MAX - 1] = 0;
@@ -1702,6 +1700,60 @@ hu_tool_t *hu_agent_internal_find_tool(hu_agent_t *agent, const char *name, size
     return NULL;
 }
 
+bool hu_agent_internal_pre_hook_check(hu_agent_t *agent, const char *tool_name,
+                                      size_t tool_name_len, const char *args_json,
+                                      size_t args_json_len, hu_tool_result_t *out) {
+    if (!agent || !out)
+        return true;
+    if (!agent->hook_registry)
+        return true;
+
+    const char *hook_args = args_json ? args_json : "";
+    size_t hook_args_len = args_json ? args_json_len : 0;
+
+    hu_hook_result_t pre_res;
+    memset(&pre_res, 0, sizeof(pre_res));
+    hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
+                              hook_args, hook_args_len, &pre_res);
+    if (pre_res.decision == HU_HOOK_DENY) {
+        const char *deny_msg = pre_res.message ? pre_res.message : "denied by hook";
+        size_t deny_len = pre_res.message ? pre_res.message_len : 14;
+        char *deny_copy = hu_strndup(agent->alloc, deny_msg, deny_len);
+        hu_hook_result_free(agent->alloc, &pre_res);
+        *out = hu_tool_result_fail(deny_copy ? deny_copy : "denied by hook",
+                                   deny_copy ? deny_len : 14);
+        out->error_msg_owned = deny_copy != NULL;
+        return false;
+    }
+    hu_hook_result_free(agent->alloc, &pre_res);
+    return true;
+}
+
+void hu_agent_internal_post_hook_fire(hu_agent_t *agent, const char *tool_name,
+                                      size_t tool_name_len, const char *args_json,
+                                      size_t args_json_len, const hu_tool_result_t *result) {
+    if (!agent || !result)
+        return;
+    if (!agent->hook_registry)
+        return;
+
+    const char *hook_args = args_json ? args_json : "";
+    size_t hook_args_len = args_json ? args_json_len : 0;
+
+    /* Mirror scattered-site convention: report error_msg on failure so
+     * post-hooks see the actual reason rather than an empty output. */
+    const char *output = result->success ? (result->output ? result->output : "")
+                                         : (result->error_msg ? result->error_msg : "");
+    size_t output_len = result->success ? (result->output ? result->output_len : 0)
+                                        : (result->error_msg ? result->error_msg_len : 0);
+    hu_hook_result_t post_res;
+    memset(&post_res, 0, sizeof(post_res));
+    hu_hook_pipeline_post_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
+                               hook_args, hook_args_len, output, output_len, result->success,
+                               &post_res);
+    hu_hook_result_free(agent->alloc, &post_res);
+}
+
 hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *tool,
                                                  const char *tool_name, size_t tool_name_len,
                                                  const char *args_json, size_t args_json_len,
@@ -1710,55 +1762,42 @@ hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *t
     if (!agent || !tool || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /* Normalize hook-context args. Pre-hooks receive the JSON text the agent
-     * sent to the tool — NULL means "no args provided," which we represent
-     * to the hook as an empty string for predictable shell escaping. */
-    const char *hook_args = args_json ? args_json : "";
-    size_t hook_args_len = args_json ? args_json_len : 0;
-
     /* Pre-tool hook. A DENY decision short-circuits the dispatch: the tool's
-     * execute() is NOT called and *out is populated with a failure result. */
-    if (agent->hook_registry) {
-        hu_hook_result_t pre_res;
-        memset(&pre_res, 0, sizeof(pre_res));
-        hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
-                                  hook_args, hook_args_len, &pre_res);
-        if (pre_res.decision == HU_HOOK_DENY) {
-            const char *deny_msg = pre_res.message ? pre_res.message : "denied by hook";
-            size_t deny_len = pre_res.message ? pre_res.message_len : 14;
-            char *deny_copy = hu_strndup(agent->alloc, deny_msg, deny_len);
-            hu_hook_result_free(agent->alloc, &pre_res);
-            *out = hu_tool_result_fail(deny_copy ? deny_copy : "denied by hook",
-                                       deny_copy ? deny_len : 14);
-            out->error_msg_owned = deny_copy != NULL;
-            return HU_OK;
-        }
-        hu_hook_result_free(agent->alloc, &pre_res);
-    }
+     * execute() is NOT called and *out is populated with a failure result.
+     * Per the audit-followup contract, the post-hook STILL fires below so
+     * auditors observe every tool dispatch regardless of outcome. */
+    bool proceed = hu_agent_internal_pre_hook_check(agent, tool_name, tool_name_len, args_json,
+                                                    args_json_len, out);
 
     /* Execute. The tool is responsible for populating *out; we treat a missing
      * execute pointer as an empty-success no-op to match the historical
-     * behavior of the inline dispatch sites being replaced. */
-    if (tool->vtable && tool->vtable->execute) {
-        tool->vtable->execute(tool->ctx, agent->alloc, args_parsed, out);
-    } else {
-        *out = hu_tool_result_fail("tool has no execute method", 26);
+     * behavior of the inline dispatch sites being replaced. Skipped if the
+     * pre-hook denied — that's the security gate the helper exists for. */
+    if (proceed) {
+        if (tool->vtable && tool->vtable->execute) {
+            tool->vtable->execute(tool->ctx, agent->alloc, args_parsed, out);
+        } else {
+            *out = hu_tool_result_fail("tool has no execute method", 26);
+        }
     }
 
-    /* Post-tool hook. Informational only — the result has already been
-     * produced. Post-hooks log / audit / scrub but cannot veto here. */
-    if (agent->hook_registry) {
-        hu_hook_result_t post_res;
-        memset(&post_res, 0, sizeof(post_res));
-        const char *output = out->output ? out->output : "";
-        size_t output_len = out->output ? out->output_len : 0;
-        hu_hook_pipeline_post_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
-                                   hook_args, hook_args_len, output, output_len, out->success,
-                                   &post_res);
-        hu_hook_result_free(agent->alloc, &post_res);
-    }
+    /* Post-tool hook. Fires unconditionally whenever a registry is configured,
+     * including when the pre-hook denied the call: auditors get full visibility. */
+    hu_agent_internal_post_hook_fire(agent, tool_name, tool_name_len, args_json, args_json_len,
+                                     out);
 
     return HU_OK;
+}
+
+/* Public alias — same signature, same behavior, exposed in include/human/agent.h
+ * so callers outside the agent module can dispatch through the canonical
+ * pre/post-hook envelope without including agent_internal.h. The internal name
+ * is retained for back-compat with existing call sites. */
+hu_error_t hu_agent_dispatch_tool(hu_agent_t *agent, hu_tool_t *tool, const char *tool_name,
+                                  size_t tool_name_len, const char *args_json, size_t args_json_len,
+                                  const hu_json_value_t *args_parsed, hu_tool_result_t *out) {
+    return hu_agent_internal_dispatch_with_hooks(agent, tool, tool_name, tool_name_len, args_json,
+                                                 args_json_len, args_parsed, out);
 }
 
 hu_error_t hu_agent_run_single(hu_agent_t *agent, const char *system_prompt,

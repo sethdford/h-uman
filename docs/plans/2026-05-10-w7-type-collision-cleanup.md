@@ -1,8 +1,9 @@
 ---
 title: W7 type collision cleanup
-status: resolved (Option A — facade rename landed 2026-05-10)
+status: complete
 owner: memory subsystem
 created: 2026-05-10
+last_audit: 2026-05-17
 ---
 
 # Background

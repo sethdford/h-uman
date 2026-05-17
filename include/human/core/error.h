@@ -70,6 +70,12 @@ typedef enum hu_error {
     HU_ERR_FLEET_SPAWN_CAP,
     HU_ERR_FLEET_BUDGET_EXCEEDED,
 
+    /* US-8.2 — persona encryption-at-rest */
+    HU_ERR_LEGACY_REFUSED, /* refuse-path loader saw encrypted file post-migration */
+    HU_ERR_INVALID_FORMAT, /* on-disk bytes do not match any recognized persona format */
+    HU_ERR_IO_BUSY,        /* atomic write target slot already exists (concurrent migration) */
+    HU_ERR_DECRYPT_FAILED, /* libsodium MAC verification failed (wrong key or tampered) */
+
     HU_ERR_COUNT
 } hu_error_t;
 
