@@ -1,0 +1,5 @@
+{"row_id": 1, "base_logprob_sum": -28.4, "base_n_tokens": 14, "adapter_logprob_sum": -22.1, "adapter_n_tokens": 14, "adapter_generated": "Try Misty or Smokey for the color.", "has_pad": false, "note": "good adapter assigns higher prob to true continuation"}
+{"row_id": 2, "base_logprob_sum": -32.7, "base_n_tokens": 18, "adapter_logprob_sum": -25.3, "adapter_n_tokens": 18, "adapter_generated": "Yeah, just say I'll be there in 15.", "has_pad": false}
+{"row_id": 3, "base_logprob_sum": -30.1, "base_n_tokens": 16, "adapter_logprob_sum": -23.8, "adapter_n_tokens": 16, "adapter_generated": "Section 3.2 is where it clicks.", "has_pad": false}
+{"row_id": 4, "base_logprob_sum": -25.8, "base_n_tokens": 12, "adapter_logprob_sum": -19.4, "adapter_n_tokens": 12, "adapter_generated": "Day-two pasta is best.", "has_pad": false}
+{"row_id": 5, "base_logprob_sum": -34.2, "base_n_tokens": 17, "adapter_logprob_sum": -27.1, "adapter_n_tokens": 17, "adapter_generated": "Rust if parsing is hot, Go for I/O.", "has_pad": false}
