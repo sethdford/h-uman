@@ -2276,6 +2276,22 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
             if (s)
                 PERSONA_STRDUP_OPT(cp->dunbar_layer, s);
 
+            /* affect_mirror_ceiling: per-contact emotional-mirroring cap.
+             * 0 leaves the layered lookup (hu_affect_mirror_ceiling) free to
+             * fall back to the overlay or stage default. Field was declared on
+             * hu_contact_profile_t and read by hu_affect_mirror_ceiling but
+             * never parsed for contacts, so the per-contact override was
+             * silently dead from disk-loaded personas. */
+            hu_json_value_t *amc = hu_json_object_get(cval, "affect_mirror_ceiling");
+            if (amc && amc->type == HU_JSON_NUMBER) {
+                double v = amc->data.number;
+                if (v < 0.0)
+                    v = 0.0;
+                if (v > 1.0)
+                    v = 1.0;
+                cp->affect_mirror_ceiling = (float)v;
+            }
+
             count++;
         }
         out->contacts = contacts;

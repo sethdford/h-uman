@@ -3862,6 +3862,71 @@ static void test_affect_ceiling_stranger(void) {
     HU_ASSERT_TRUE(c >= 0.69f && c <= 0.71f); /* 0.7 */
 }
 
+static void test_contact_json_parses_affect_mirror_ceiling(void) {
+    /* Regression: hu_contact_profile_t.affect_mirror_ceiling was declared on the
+     * struct and read by hu_affect_mirror_ceiling, but never parsed from the
+     * "contacts" object in persona JSON. Disk-loaded personas saw 0 (sentinel)
+     * and the per-contact ceiling override was silently dead in production. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{"
+                       "  \"version\": 1,"
+                       "  \"name\": \"jordan\","
+                       "  \"core\": {"
+                       "    \"identity\": \"x\","
+                       "    \"traits\": [\"warm\"]"
+                       "  },"
+                       "  \"contacts\": {"
+                       "    \"+15555550100\": {"
+                       "      \"name\": \"casey\","
+                       "      \"relationship_type\": \"friend\","
+                       "      \"relationship_stage\": \"friend\","
+                       "      \"affect_mirror_ceiling\": 0.42"
+                       "    }"
+                       "  }"
+                       "}";
+
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    HU_ASSERT_EQ(p.contacts_count, 1u);
+
+    const hu_contact_profile_t *cp =
+        hu_persona_find_contact(&p, "+15555550100", strlen("+15555550100"));
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_TRUE(cp->affect_mirror_ceiling >= 0.41f && cp->affect_mirror_ceiling <= 0.43f);
+
+    /* Layered lookup honors the parsed override (0.42) rather than the stage default
+     * for "friend" (which would be 0.85). */
+    float effective = hu_affect_mirror_ceiling(cp, NULL);
+    HU_ASSERT_TRUE(effective >= 0.41f && effective <= 0.43f);
+
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_contact_json_clamps_affect_mirror_ceiling_out_of_range(void) {
+    /* Sanity: values outside [0,1] are clamped so a typo in JSON cannot disable the
+     * affect-apply cap (>1.0) or invert the sentinel semantics (<0). */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json_high =
+        "{\"version\":1,\"name\":\"a\",\"core\":{\"identity\":\"x\",\"traits\":[\"t\"]},"
+        "\"contacts\":{\"u\":{\"affect_mirror_ceiling\":2.5}}}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json_high, strlen(json_high), &p), HU_OK);
+    const hu_contact_profile_t *cp = hu_persona_find_contact(&p, "u", 1);
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_TRUE(cp->affect_mirror_ceiling <= 1.0f);
+    hu_persona_deinit(&alloc, &p);
+
+    const char *json_low =
+        "{\"version\":1,\"name\":\"a\",\"core\":{\"identity\":\"x\",\"traits\":[\"t\"]},"
+        "\"contacts\":{\"u\":{\"affect_mirror_ceiling\":-0.5}}}";
+    hu_persona_t p2 = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json_low, strlen(json_low), &p2), HU_OK);
+    const hu_contact_profile_t *cp2 = hu_persona_find_contact(&p2, "u", 1);
+    HU_ASSERT_NOT_NULL(cp2);
+    HU_ASSERT_TRUE(cp2->affect_mirror_ceiling >= 0.0f);
+    hu_persona_deinit(&alloc, &p2);
+}
+
 /* ── Lean Prompt E2E Fleet ────────────────────────────────────────────── */
 
 static const char lean_test_persona_json[] =
@@ -5086,6 +5151,8 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_affect_ceiling_trusted_confidant);
     HU_RUN_TEST(test_affect_ceiling_inner_circle);
     HU_RUN_TEST(test_affect_ceiling_stranger);
+    HU_RUN_TEST(test_contact_json_parses_affect_mirror_ceiling);
+    HU_RUN_TEST(test_contact_json_clamps_affect_mirror_ceiling_out_of_range);
 
     HU_RUN_TEST(test_proactive_master_disabled_by_default_on_minimal_persona);
     HU_RUN_TEST(test_proactive_master_disabled_when_object_missing);
