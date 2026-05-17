@@ -1325,6 +1325,10 @@ if(HU_ENABLE_ML)
         # The C-side ORPO production wiring is a Sprint 12 followup
         # (FU-11.5.a re-targeted at main's new framework).
         src/ml/rl_trainer.c
+        # Sprint 8 US-8.1: DP-SGD with RDP accountant (verifiable privacy).
+        # Pure-math privacy accounting + per-sample-clipped noisy SGD;
+        # links inside HU_ENABLE_ML=ON alongside the other learners.
+        src/ml/dp_sgd.c
         # Track D D2.2: persona-fidelity compute primitives shared by
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
@@ -3053,6 +3057,7 @@ set(HU_TEST_SOURCES
     tests/test_ml_cli_actually_trains.c
     tests/test_ml_fidelity_judgment.c
     tests/test_dpo_judge_naming.c
+    tests/test_dp_sgd.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c

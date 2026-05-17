@@ -442,6 +442,7 @@ void run_ml_fidelity_judgment_tests(void);
  * architecture rework — files deleted, declarations removed. Sprint 12
  * FU-11.5.a will re-target against main's new framework. */
 void run_dpo_judge_naming_tests(void);
+void run_dp_sgd_tests(void);
 void run_lora_tests(void);
 void run_agent_trainer_tests(void);
 void run_training_data_tests(void);
@@ -1147,6 +1148,7 @@ int main(int argc, char **argv) {
      * per-trainer factory pattern, orphaned by main's RL architecture
      * rework. See declaration block at ~line 441. */
     run_dpo_judge_naming_tests();
+    run_dp_sgd_tests();
     run_lora_tests();
     run_agent_trainer_tests();
     run_training_data_tests();

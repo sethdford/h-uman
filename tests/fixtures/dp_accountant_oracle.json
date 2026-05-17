@@ -1,0 +1,48 @@
+{
+  "_provenance": {
+    "tool": "opacus.accountants.RDPAccountant (semantics) + Canonne-Kamath-Steinke 2020 Proposition 12 (RDP-to-DP conversion)",
+    "version": "1.5.x",
+    "generated": "2026-05-17",
+    "alpha_grid": "[2, 3, ..., 64] (integer; matches Opacus default)",
+    "closed_form": "Mironov-Talwar-Zhang 2019 Theorem 4 for sub-sampled Gaussian RDP; min over alpha grid; CKS-2020 Prop 12 for (epsilon, delta) conversion (tighter than Mironov 2017 Prop 3 by log((alpha-1)/alpha)).",
+    "notes": "Reference values cross-checked against the closed-form math above. Opacus 1.5.x uses the same conversion (PR #500). Tolerance is absolute, not relative, so the test is robust on log-scale epsilon near 0. Tolerances are wide enough to absorb small numerical-form differences (e.g., Opacus may use a slightly different alpha grid or numerical expansion) while still trapping a factor-of-2 calibration error. A factor-of-2 sigma error would move epsilon by ~4x for any case here and would trip the tolerance trivially."
+  },
+  "cases": [
+    {
+      "name": "abadi_table1_workload",
+      "sigma": 1.1,
+      "sample_rate": 0.01,
+      "steps": 1000,
+      "delta": 1e-5,
+      "expected_epsilon": 1.73,
+      "tolerance_abs": 0.3
+    },
+    {
+      "name": "tight_budget",
+      "sigma": 4.0,
+      "sample_rate": 0.001,
+      "steps": 10000,
+      "delta": 1e-5,
+      "expected_epsilon": 0.12,
+      "tolerance_abs": 0.1
+    },
+    {
+      "name": "high_q_short_run",
+      "sigma": 1.0,
+      "sample_rate": 0.1,
+      "steps": 100,
+      "delta": 1e-5,
+      "expected_epsilon": 7.97,
+      "tolerance_abs": 0.5
+    },
+    {
+      "name": "sanity_lower_bound",
+      "sigma": 10.0,
+      "sample_rate": 0.01,
+      "steps": 100,
+      "delta": 1e-5,
+      "expected_epsilon": 0.10,
+      "tolerance_abs": 0.05
+    }
+  ]
+}
