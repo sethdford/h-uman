@@ -1,12 +1,30 @@
 import SwiftUI
 
+/// Glass-style background modifier with three intensity tiers.
+///
+/// Falls back to a solid `HUTokens` surface fill when Reduce Transparency is
+/// enabled, the `glassEffect` material on iOS 26 / macOS 26, or the
+/// corresponding `Material` on earlier OS versions.
+@available(macOS 14.0, iOS 17.0, *)
 public struct SCGlassModifier: ViewModifier {
-    public enum Tier { case subtle, standard, prominent }
+    /// Glass intensity tier; controls both material density and corner radius.
+    public enum Tier {
+        /// Lightest glass over `surfaceContainer`.
+        case subtle
+        /// Default glass over `surfaceContainerHigh`.
+        case standard
+        /// Densest glass over `surfaceContainerHighest`.
+        case prominent
+    }
     let tier: Tier
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Build the modified view body.
+    ///
+    /// - Parameter content: The content the modifier is applied to.
+    /// - Returns: A glass-backed (or solid-backed) view.
     public func body(content: Content) -> some View {
         Group {
             if reduceTransparency {
@@ -60,7 +78,12 @@ public struct SCGlassModifier: ViewModifier {
     }
 }
 
+@available(macOS 14.0, iOS 17.0, *)
 public extension View {
+    /// Apply the `SCGlassModifier` at the given tier.
+    ///
+    /// - Parameter tier: Intensity tier (defaults to `.standard`).
+    /// - Returns: The view backed by the glass material.
     func scGlass(_ tier: SCGlassModifier.Tier = .standard) -> some View {
         modifier(SCGlassModifier(tier: tier))
     }

@@ -17,17 +17,20 @@ let package = Package(
     targets: [
         .target(
             name: "HumanProtocol",
-            path: "Sources/HumanProtocol"
+            path: "Sources/HumanProtocol",
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
         .target(
             name: "HumanClient",
             dependencies: ["HumanProtocol"],
-            path: "Sources/HumanClient"
+            path: "Sources/HumanClient",
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
         .target(
             name: "HumanChatUI",
             dependencies: ["HumanProtocol"],
-            path: "Sources/HumanChatUI"
+            path: "Sources/HumanChatUI",
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
         .target(
             name: "HumanOnDevice",

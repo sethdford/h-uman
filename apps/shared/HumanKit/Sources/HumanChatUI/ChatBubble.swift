@@ -1,18 +1,32 @@
 import SwiftUI
 
 /// Chat message bubble with user vs assistant styling and basic Markdown rendering.
-/// Supports: **bold**, *italic*, `inline code`, ```code blocks```, [links](url).
+///
+/// Supports `**bold**`, `*italic*`, `` `inline code` ``, fenced code blocks, and
+/// `[link](url)` syntax. Colors come from `HUTokens`, light or dark mode chosen
+/// from the SwiftUI environment.
+@available(macOS 14.0, iOS 17.0, *)
 public struct ChatBubble: View {
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Speaker role rendered by the bubble.
     public enum Role {
+        /// Outgoing message from the local user.
         case user
+        /// Incoming message from the assistant.
         case assistant
     }
 
+    /// Message text. Markdown syntax is rendered inline.
     public let text: String
+    /// Speaker role; controls alignment, color, and accessibility label.
     public let role: Role
 
+    /// Build a bubble for a single message.
+    ///
+    /// - Parameters:
+    ///   - text: Message text (Markdown allowed).
+    ///   - role: Whether the user or assistant authored the message.
     public init(text: String, role: Role) {
         self.text = text
         self.role = role
@@ -61,6 +75,7 @@ public struct ChatBubble: View {
 
     // MARK: - Body
 
+    /// SwiftUI body for the bubble.
     public var body: some View {
         HStack(alignment: .bottom, spacing: HUTokens.spaceSm) {
             if role == .user { Spacer(minLength: HUTokens.space2xl) }

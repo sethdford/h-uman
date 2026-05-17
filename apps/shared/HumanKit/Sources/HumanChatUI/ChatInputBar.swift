@@ -1,14 +1,32 @@
 import SwiftUI
 
-/// Text field and send button for chat input.
+/// Text field plus send button for chat input.
+///
+/// Wraps a vertically-resizing `TextField` (1–6 lines) and a circular send
+/// button. The button is disabled while `text` is whitespace-only. Pass a
+/// `FocusState` binding to drive keyboard focus from the parent view.
+@available(macOS 14.0, iOS 17.0, *)
 public struct ChatInputBar: View {
     @Environment(\.colorScheme) private var colorScheme
+    /// Two-way binding to the message text being composed.
     @Binding public var text: String
+    /// Invoked when the user taps Send or submits the field.
     public let onSend: () -> Void
+    /// Placeholder string shown when the field is empty.
     public var placeholder: String = "Message"
+    /// Monotonic counter the parent increments to trigger the send-button bounce animation.
     public var sendTrigger: Int = 0
+    /// Optional focus binding letting the parent drive keyboard focus.
     public var focusBinding: FocusState<Bool>.Binding?
 
+    /// Build a chat input bar.
+    ///
+    /// - Parameters:
+    ///   - text: Two-way binding to the composed message.
+    ///   - onSend: Action invoked when the user taps Send or submits.
+    ///   - placeholder: Placeholder for the empty field (defaults to `"Message"`).
+    ///   - sendTrigger: Monotonic counter to trigger the bounce animation.
+    ///   - focus: Optional focus binding (defaults to `nil`).
     public init(
         text: Binding<String>,
         onSend: @escaping () -> Void,
@@ -37,6 +55,7 @@ public struct ChatInputBar: View {
         }
     }
 
+    /// SwiftUI body for the input bar.
     public var body: some View {
         HStack(spacing: HUTokens.spaceMd) {
             inputField

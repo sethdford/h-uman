@@ -2,22 +2,32 @@ import Foundation
 import HumanProtocol
 
 /// WebSocket client for the Human gateway control protocol.
-/// Uses URLSessionWebSocketTask with reconnection support.
+///
+/// Uses `URLSessionWebSocketTask` with automatic exponential-backoff
+/// reconnection and a 25 s keepalive ping. Send-side methods are safe
+/// to call from any thread; per-request continuations are guarded by an
+/// internal lock.
+@available(macOS 14.0, iOS 17.0, *)
 public final class HumanConnection: @unchecked Sendable {
+    /// Current state of the underlying WebSocket task.
     public enum ConnectionState: Equatable {
+        /// No WebSocket task is active.
         case disconnected
+        /// A task has been created but the `hello-ok` handshake hasn't completed.
         case connecting
+        /// The handshake completed and the channel is ready for RPCs.
         case connected
     }
 
+    /// Latest observed connection state. Setting this value notifies `stateHandler`.
     public private(set) var state: ConnectionState = .disconnected {
         didSet { stateHandler?(state) }
     }
 
-    /// Called when connection state changes.
+    /// Invoked on every state transition with the new state.
     public var stateHandler: ((ConnectionState) -> Void)?
 
-    /// Called when an event frame is received.
+    /// Invoked once per server-pushed event frame with `(event, payload)`.
     public var eventHandler: ((String, [String: AnyCodable]?) -> Void)?
 
     private var task: URLSessionWebSocketTask?
@@ -30,28 +40,36 @@ public final class HumanConnection: @unchecked Sendable {
     private let pendingLock = NSLock()
     private var reconnectAttempt: UInt = 0
     private var pingWorkItem: DispatchWorkItem?
-    /// RPC wait timeout (matches web client default).
+    /// RPC wait timeout in seconds (matches web client default).
     public static var requestTimeoutSeconds: TimeInterval = 10
     private static let maxReconnectDelay: TimeInterval = 30
     private static let baseReconnectDelay: TimeInterval = 3
 
+    /// Build a connection bound to a fully-formed gateway WebSocket URL.
+    ///
+    /// - Parameter url: WebSocket endpoint (e.g. `wss://host:3000/ws`).
     public init(url: URL) {
         self.url = url
     }
 
+    /// Convenience initializer parsing a string URL, falling back to
+    /// `wss://localhost:3000/ws` if the string is malformed.
+    ///
+    /// - Parameter urlString: Candidate WebSocket endpoint.
     public convenience init(urlString: String) {
         let url = URL(string: urlString) ?? URL(string: "wss://localhost:3000/ws")!
         self.init(url: url)
     }
 
-    /// Connect to the gateway WebSocket endpoint.
+    /// Open the WebSocket task and begin the `connect` handshake.
     public func connect() {
         queue.async { [weak self] in
             self?._connect()
         }
     }
 
-    /// Disconnect and cancel reconnection.
+    /// Tear down the WebSocket task, cancel any scheduled reconnect, and
+    /// fail any in-flight RPCs with `HumanConnectionError.disconnected`.
     public func disconnect() {
         queue.async { [weak self] in
             self?.cancelPingSchedule()
@@ -65,13 +83,17 @@ public final class HumanConnection: @unchecked Sendable {
         }
     }
 
-    /// Send a raw JSON message without waiting for response.
+    /// Send a raw JSON message without waiting for a response.
+    ///
+    /// - Parameter json: Pre-encoded JSON text. Caller is responsible for shape.
     public func sendMessage(_ json: String) {
         guard state == .connected else { return }
         task?.send(.string(json)) { _ in }
     }
 
     /// Register a push token with the gateway for push notifications.
+    ///
+    /// - Parameter token: APNs or FCM device token.
     public func registerPushToken(token: String) {
         let id = "push-\(UUID().uuidString)"
         let params: [String: AnyCodable] = [
@@ -85,6 +107,8 @@ public final class HumanConnection: @unchecked Sendable {
     }
 
     /// Unregister a push token from the gateway.
+    ///
+    /// - Parameter token: The token previously passed to `registerPushToken`.
     public func unregisterPushToken(token: String) {
         let id = "pushu-\(UUID().uuidString)"
         let params: [String: AnyCodable] = ["token": AnyCodable(token)]
@@ -94,7 +118,17 @@ public final class HumanConnection: @unchecked Sendable {
         sendMessage(text)
     }
 
-    /// Send an RPC request and wait for the response.
+    /// Send an RPC request and asynchronously await the matching response.
+    ///
+    /// - Parameters:
+    ///   - method: RPC method name (see `Methods`).
+    ///   - params: Method parameters (defaults to `nil`).
+    /// - Returns: The decoded `ControlResponse` correlated by request ID.
+    /// - Throws: `HumanConnectionError.notConnected` if not currently connected,
+    ///   `HumanConnectionError.encodingFailed` if the request can't be encoded,
+    ///   `HumanConnectionError.timeout` if no response arrives within
+    ///   `requestTimeoutSeconds`, or `HumanConnectionError.disconnected` if the
+    ///   socket closes while the request is pending.
     public func request(method: String, params: [String: AnyCodable]? = nil) async throws -> ControlResponse {
         guard state == .connected else {
             throw HumanConnectionError.notConnected
@@ -284,9 +318,15 @@ public final class HumanConnection: @unchecked Sendable {
     }
 }
 
+/// Errors surfaced by `HumanConnection.request(method:params:)` and related calls.
+@available(macOS 14.0, iOS 17.0, *)
 public enum HumanConnectionError: Error {
+    /// A request was attempted while the connection state was not `.connected`.
     case notConnected
+    /// The request body could not be encoded to JSON text.
     case encodingFailed
+    /// The socket closed before the response arrived.
     case disconnected
+    /// No response was received within `HumanConnection.requestTimeoutSeconds`.
     case timeout
 }
