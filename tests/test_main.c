@@ -446,6 +446,7 @@ void run_emotion_map_tests(void);
 #endif
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
+void run_mlx_admin_tests(void);
 void run_ml_cli_actually_trains_tests(void);
 void run_ml_fidelity_judgment_tests(void);
 /* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
@@ -1170,6 +1171,7 @@ int main(int argc, char **argv) {
 #endif
 #ifdef HU_ENABLE_ML
     run_ml_tests();
+    run_mlx_admin_tests();
     run_ml_cli_actually_trains_tests();
     run_ml_fidelity_judgment_tests();
     /* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +

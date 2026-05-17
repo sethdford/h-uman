@@ -1408,6 +1408,7 @@ if(HU_ENABLE_ML)
         # lora_retrain_runner.c.
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
+        src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
         # RL architecture rework — main moved to a shared-config-struct
@@ -3397,6 +3398,7 @@ list(APPEND HU_TEST_SOURCES
 if(HU_ENABLE_ML)
     list(APPEND HU_TEST_SOURCES
         tests/test_ml.c
+        tests/test_mlx_admin.c
         tests/test_ml_cli_actually_trains.c
         tests/test_ml_fidelity_judgment.c
         tests/test_dp_sgd.c
