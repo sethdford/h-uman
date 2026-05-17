@@ -10,6 +10,7 @@
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "human/memory/personal_model.h"
+#include "human/persona.h"
 #include "test_framework.h"
 #include <stdlib.h>
 
@@ -482,6 +483,1089 @@ static void w14_autodream_rejects_null_args(void) {
     HU_ASSERT_EQ(hu_w14_scheduler_enqueue_autodream(NULL, 0, 100), HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story B (sprint-4 follow-up) — persona_ctx threading.
+ *
+ * Pin that hu_w7_render_world_model calls `hu_world_model_merge_persona` IFF
+ * the caller passes a non-NULL persona_ctx. Without that merge, the channel-
+ * aware pragmatics digest (`tom.interaction_style`) is populated by the
+ * persona system but never reaches the rendered prompt block — which was the
+ * bug before this story.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Helper: build a minimal hu_persona_t with a "discord" overlay whose
+ * `formality` field is unique enough to grep for in the rendered output. The
+ * struct is stack-allocated; we deliberately reuse string literals so the
+ * persona itself owns no heap (matches the borrow contract documented on
+ * `hu_world_model_t::persona`). */
+static void story_b_make_persona(hu_persona_t *p, hu_persona_overlay_t *ov) {
+    memset(p, 0, sizeof(*p));
+    memset(ov, 0, sizeof(*ov));
+    p->name = (char *)"story-b-test";
+    p->identity = (char *)"story-b-witness";
+    ov->channel = (char *)"discord";
+    ov->formality = (char *)"casual-direct";
+    ov->avg_length = (char *)"short";
+    p->overlays = ov;
+    p->overlays_count = 1;
+}
+
+/* Helper: seed a negative so the world-model snapshot has *something* to
+ * render. Without a non-empty snapshot the bridge returns NULL/0 and we
+ * never reach the merge step. */
+static void story_b_seed_negative(hu_graph_t *g, const char *contact_id, size_t cid_len) {
+    hu_negative_memory_t nm = {0};
+    snprintf(nm.text, sizeof(nm.text), "topic seed for story-b");
+    snprintf(nm.scope, sizeof(nm.scope), "topic");
+    nm.belief = hu_belief_init(0.95f, "test", 1700000000000LL);
+    nm.created_at = 1700000000000LL;
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add(g, contact_id, cid_len, &nm, &id), HU_OK);
+    HU_ASSERT(id > 0);
+}
+
+static void bridge_render_with_persona_ctx_emits_interaction_style(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyb_with";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 8;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    /* Persona merge wrote the overlay's formality token into
+     * `tom.interaction_style`; the bridge renders it as
+     * "Interaction style: ..." inside the ToM block. */
+    HU_ASSERT_NOT_NULL(strstr(txt, "Interaction style"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "casual-direct"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_without_persona_ctx_omits_interaction_style(void) {
+    /* Regression guard: passing NULL persona_ctx must NOT cause the merge
+     * to run. This is the pre-Story-B behavior — we keep it exactly so
+     * callers that haven't migrated yet are byte-for-byte unchanged. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyb_without";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    /* No persona merge happened → no Interaction style line. */
+    HU_ASSERT(strstr(txt, "Interaction style") == NULL);
+    HU_ASSERT(strstr(txt, "casual-direct") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_with_persona_no_overlay_falls_back_to_identity_only(void) {
+    /* Persona is set, but the active channel has no overlay. The merge
+     * should still populate `user_thinks_we_are` from persona identity
+     * without crashing and without injecting an Interaction-style line. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyb_no_overlay";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "telegram"; /* persona only has a "discord" overlay */
+    pctx.channel_len = strlen("telegram");
+    pctx.delta_limit = 8;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    /* Identity merge still happens → "story-b-witness" should appear in the
+     * ToM block under "User thinks we are". */
+    HU_ASSERT_NOT_NULL(strstr(txt, "story-b-witness"));
+    /* But no overlay → no Interaction style line. */
+    HU_ASSERT(strstr(txt, "casual-direct") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_with_persona_ctx_null_persona_skips_merge(void) {
+    /* Defensive: caller passes a non-NULL hu_persona_context_t but with
+     * pctx.persona = NULL. The bridge must treat this as "no persona"
+     * (back-compat path) rather than dereferencing NULL. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyb_nullp";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = NULL;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 8;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid), 1700000000000LL + 1000,
+                                          &txt, &tlen, NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Interaction style") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story F.1 (sprint-4 follow-up) — render wm->self_model.capabilities.
+ *
+ * `hu_world_model_merge_self_capabilities` walks `persona_ctx->tools`
+ * and copies the first N tool names into `wm->self_model.capabilities`
+ * (top-6, 31-char limit). The bridge renders a `Self capabilities:`
+ * section with a single `- I can use: a, b, c` line. These tests
+ * exercise: (1) tools present → line emitted with all names in order;
+ * (2) no tools threaded → section omitted entirely; (3) dedup +
+ * truncation paths so registry weirdness doesn't crash render.
+ * ────────────────────────────────────────────────────────────────────── */
+
+#include "human/tool.h"
+
+/* Inline fake tool: vtable returns a static name, no execute. We never
+ * call execute() in these tests — the bridge only reads vtable->name(). */
+typedef struct story_f1_fake_tool_ctx {
+    const char *name;
+} story_f1_fake_tool_ctx_t;
+
+static const char *story_f1_fake_tool_name(void *ctx) {
+    return ctx ? ((story_f1_fake_tool_ctx_t *)ctx)->name : NULL;
+}
+
+static const hu_tool_vtable_t story_f1_fake_vtable = {
+    .name = story_f1_fake_tool_name,
+};
+
+static void story_f1_make_tool(hu_tool_t *out, story_f1_fake_tool_ctx_t *ctx,
+                               const char *name) {
+    ctx->name = name;
+    out->ctx = ctx;
+    out->vtable = &story_f1_fake_vtable;
+}
+
+static void bridge_render_with_self_capabilities_emits_section(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf1_emit";
+    /* Need a non-empty snapshot so we reach the render path. */
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    story_f1_fake_tool_ctx_t ctxs[3];
+    hu_tool_t tools[3];
+    story_f1_make_tool(&tools[0], &ctxs[0], "shell");
+    story_f1_make_tool(&tools[1], &ctxs[1], "web_search");
+    story_f1_make_tool(&tools[2], &ctxs[2], "memory_query");
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    pctx.tools = tools;
+    pctx.tools_count = 3;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    /* Story E + F.1 integration: capabilities folds inside the Self model
+     * section as a `- Capabilities I have: a, b, c` line. Story F.1's
+     * original standalone `Self capabilities:` header is intentionally
+     * not emitted any more — the planner only sees one self-knowledge
+     * block. */
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "Capabilities I have:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "shell"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "web_search"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "memory_query"));
+    HU_ASSERT(strstr(txt, "Self capabilities:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_without_tools_omits_capabilities_section(void) {
+    /* Persona ctx is set but `tools` is NULL → merge_self_capabilities
+     * is skipped and capabilities_count stays 0 → no `Capabilities I
+     * have:` line in the prompt. Pin this so callers that only want
+     * persona (Story B path) don't accidentally get an empty
+     * capabilities line, and that the legacy `Self capabilities:`
+     * header (pre-integration) never reappears. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf1_omit";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    /* pctx.tools stays NULL, pctx.tools_count stays 0 by {0}-init. */
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Self capabilities:") == NULL);
+    HU_ASSERT(strstr(txt, "Capabilities I have:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_capabilities_dedups_and_caps_at_six(void) {
+    /* Registry has 8 tools, two of which are duplicates ("shell" appears
+     * twice). Verify: (1) dedup keeps only one "shell", (2) hard cap at
+     * 6 entries means the 7th and 8th unique names never make it in.
+     * Together these prove the slab is bounded and the count truthful. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf1_caps";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_b_make_persona(&persona, &overlay);
+
+    /* 8 entries: shell, web_search, shell (dup), memory_query, edit_file,
+     * read_file, run_python, fetch_url. After dedup: 7 unique. After
+     * cap-at-6: only the first 6 unique names survive. */
+    story_f1_fake_tool_ctx_t ctxs[8];
+    hu_tool_t tools[8];
+    story_f1_make_tool(&tools[0], &ctxs[0], "shell");
+    story_f1_make_tool(&tools[1], &ctxs[1], "web_search");
+    story_f1_make_tool(&tools[2], &ctxs[2], "shell"); /* dup */
+    story_f1_make_tool(&tools[3], &ctxs[3], "memory_query");
+    story_f1_make_tool(&tools[4], &ctxs[4], "edit_file");
+    story_f1_make_tool(&tools[5], &ctxs[5], "read_file");
+    story_f1_make_tool(&tools[6], &ctxs[6], "run_python");
+    story_f1_make_tool(&tools[7], &ctxs[7], "fetch_url");
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    pctx.tools = tools;
+    pctx.tools_count = 8;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    /* Story E + F.1 integration: header is "Self model:" and the
+     * capabilities line lives inside that section. */
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "Capabilities I have:"));
+    /* First 6 unique names should render. */
+    HU_ASSERT_NOT_NULL(strstr(txt, "shell"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "web_search"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "memory_query"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "edit_file"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "read_file"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "run_python"));
+    /* 7th unique (fetch_url) MUST NOT appear — slab capped at 6. */
+    HU_ASSERT(strstr(txt, "fetch_url") == NULL);
+    /* Dedup proof: walk the "- Capabilities I have:" body and count
+     * "shell" occurrences. Note: tool name "shell" is a prefix of
+     * nothing else in the registry above; the substring scan is safe. */
+    const char *body = strstr(txt, "Capabilities I have:");
+    HU_ASSERT_NOT_NULL(body);
+    const char *line_end = strchr(body, '\n');
+    HU_ASSERT_NOT_NULL(line_end);
+    int shell_count = 0;
+    for (const char *p = body; p < line_end; p++) {
+        if (strncmp(p, "shell", 5) == 0) shell_count++;
+    }
+    HU_ASSERT_EQ(shell_count, 1);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+#include "human/memory/hyperedge.h"
+#include "human/memory/memory.h"
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story C (sprint-4 follow-up) — render wm->recent_changes.
+ *
+ * hu_world_model_load already derives up to 8 SUPERSEDED/RETRACTED relations
+ * per snapshot (src/agent/world_model.c P4.3 block), but until this story
+ * they were never rendered into the prompt. The render section joins
+ * `recent_changes` to the relation rows (already in `wm->relations`) so the
+ * line looks like "alice works_at globex (updated)" instead of the
+ * mechanical "rel #4 supersedes #7".
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Helper: open graph + w7 facade (existing pattern). Returns a fresh
+ * contact_id seeded with two entities. */
+static void story_c_seed_two_entities(hu_graph_t *g, const char *cid, size_t cid_len,
+                                       int64_t *out_a, int64_t *out_b) {
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, cid_len, "alice", 5, HU_ENTITY_PERSON, NULL, out_a),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, cid_len, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, out_b),
+        HU_OK);
+}
+
+static void bridge_render_with_recent_changes_emits_section(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyc_yes";
+    int64_t alice = 0, acme = 0, globex = 0;
+    story_c_seed_two_entities(g, cid, strlen(cid), &alice, &acme);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "globex", 6,
+                                HU_ENTITY_ORGANIZATION, NULL, &globex),
+        HU_OK);
+
+    /* Insert relation A (alice works_at acme), then B (alice works_at globex)
+     * with a later event_start. The bitemporal conflict resolver should
+     * supersede A with B, leaving A retracted and B carrying
+     * supersedes_id = A.id. Both feed wm->recent_changes. */
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                     1735689600000LL, 0, 1.0f, "ctx-a", 5, "imessage", 8),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, globex, HU_REL_WORKS_AT, 1.0f,
+                                     1735776000000LL, 0, 1.0f, "ctx-b", 5, "imessage", 8),
+        HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1735776100000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Recent changes:"));
+    HU_ASSERT(strstr(txt, "globex") != NULL || strstr(txt, "acme") != NULL);
+    HU_ASSERT(strstr(txt, "(updated)") != NULL || strstr(txt, "(no longer holds)") != NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_with_no_recent_changes_omits_section(void) {
+    /* Regression guard: a contact with only fresh (non-superseded, non-
+     * retracted) relations must NOT cause the "Recent changes:" header to
+     * appear. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyc_no";
+    int64_t alice = 0, acme = 0;
+    story_c_seed_two_entities(g, cid, strlen(cid), &alice, &acme);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                     1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
+        HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1735689700000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Recent changes:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_recent_changes_caps_at_five(void) {
+    /* Insert 6 relations, each superseding the previous, so wm->recent_changes
+     * carries 6 entries. The render section must cap at 5 (configurable in
+     * world_model_bridge.c). We verify by counting "- " bullets between
+     * "Recent changes:" and the next section header. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyc_cap";
+    int64_t alice = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+
+    for (int i = 0; i < 7; i++) {
+        char org_name[16];
+        snprintf(org_name, sizeof(org_name), "org%d", i);
+        int64_t org = 0;
+        HU_ASSERT_EQ(hu_graph_upsert_entity(g, cid, strlen(cid), org_name,
+                                              strlen(org_name), HU_ENTITY_ORGANIZATION,
+                                              NULL, &org),
+                     HU_OK);
+        int64_t event_start = 1735689600000LL + (int64_t)i * 86400000LL;
+        HU_ASSERT_EQ(
+            hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, org, HU_REL_WORKS_AT,
+                                         1.0f, event_start, 0, 1.0f, "c", 1, "imessage", 8),
+            HU_OK);
+    }
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1735776100000LL + 700000000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+
+    const char *header = strstr(txt, "Recent changes:");
+    HU_ASSERT_NOT_NULL(header);
+    const char *scan = header + strlen("Recent changes:");
+    size_t bullets = 0;
+    while (*scan) {
+        if (scan[0] == '\n' && scan[1] == '-' && scan[2] == ' ') {
+            bullets++;
+            scan += 3;
+        } else if (scan[0] == '\n' && scan[1] != '-') {
+            break;
+        } else {
+            scan++;
+        }
+    }
+    HU_ASSERT(bullets <= 5);
+    HU_ASSERT(bullets > 0);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story D (sprint-4 follow-up) — render wm->hyperedges.
+ *
+ * hu_world_model_load already pulls up to 16 deduped hyperedges per snapshot
+ * (src/agent/world_model.c P4.2 block). Render produces
+ * "- label: name[role], name[role], ..." lines.
+ *
+ * Hyperedge writes go through the memory_facade (hu_hyperedge_upsert), so
+ * these tests open both the graph (for entities) and a memory_facade (for
+ * the hyperedge), then point the W7 facade at the same graph for render.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+static void story_d_open_all(hu_graph_t **g, hu_memory_facade_t **m, hu_w7_facade_t **f) {
+    setenv("HU_WORLD_MODEL_TTL_MS", "0", 1);
+    HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), *g, m), HU_OK);
+    HU_ASSERT_EQ(hu_w7_facade_open(*g, A(), f), HU_OK);
+}
+
+static void story_d_cleanup_all(hu_graph_t *g, hu_memory_facade_t *m, hu_w7_facade_t *f) {
+    if (f) hu_w7_facade_close(f, A());
+    if (m) hu_memory_facade_close(m, A());
+    if (g) hu_graph_close(g, A());
+}
+
+static void bridge_render_with_hyperedges_emits_multi_entity_section(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_w7_facade_t *f = NULL;
+    story_d_open_all(&g, &m, &f);
+
+    const char *cid = "ut_storyd_yes";
+    int64_t alice = 0, bob = 0, acme = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "bob", 3, HU_ENTITY_PERSON, NULL, &bob),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+        HU_OK);
+
+    hu_hyperedge_member_t members[3];
+    memset(members, 0, sizeof(members));
+    members[0].entity_id = alice;
+    memcpy(members[0].role, "subject", 7);
+    members[1].entity_id = bob;
+    memcpy(members[1].role, "subject", 7);
+    members[2].entity_id = acme;
+    memcpy(members[2].role, "location", 8);
+
+    hu_hyperedge_t he;
+    memset(&he, 0, sizeof(he));
+    memcpy(he.relation_label, "met_at", 6);
+    he.members = members;
+    he.members_count = 3;
+    he.belief = hu_belief_init(0.9f, "imessage", 5000LL);
+    he.event_start = 5000LL;
+
+    int64_t edge_id = 0;
+    HU_ASSERT_EQ(hu_hyperedge_upsert(m, cid, strlen(cid), &he, &edge_id), HU_OK);
+    HU_ASSERT_GT(edge_id, 0);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Multi-entity facts:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "met_at"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "alice[subject]"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "acme[location]"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    story_d_cleanup_all(g, m, f);
+}
+
+static void bridge_render_with_no_hyperedges_omits_section(void) {
+    /* Regression guard: a contact with entities/relations but no hyperedges
+     * must NOT cause the "Multi-entity facts:" header to appear. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_w7_facade_t *f = NULL;
+    story_d_open_all(&g, &m, &f);
+
+    const char *cid = "ut_storyd_no";
+    int64_t alice = 0, acme = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_ex(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                     1700000000000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
+        HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000001000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Multi-entity facts:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    story_d_cleanup_all(g, m, f);
+}
+
+static void bridge_render_hyperedge_member_not_in_entities_renders_id_fallback(void) {
+    /* If a hyperedge references an entity id that did not make it into the
+     * snapshot's top-K wm->entities window, the bridge falls back to
+     * "ent#<id>[role]" rather than crashing or dropping the member. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_w7_facade_t *f = NULL;
+    story_d_open_all(&g, &m, &f);
+
+    const char *cid = "ut_storyd_fb";
+    int64_t alice = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+
+    hu_hyperedge_member_t members[2];
+    memset(members, 0, sizeof(members));
+    members[0].entity_id = alice;
+    memcpy(members[0].role, "subject", 7);
+    members[1].entity_id = 999999LL; /* not in graph */
+    memcpy(members[1].role, "object", 6);
+
+    hu_hyperedge_t he;
+    memset(&he, 0, sizeof(he));
+    memcpy(he.relation_label, "discussed", 9);
+    he.members = members;
+    he.members_count = 2;
+    he.belief = hu_belief_init(0.8f, "imessage", 1000LL);
+    he.event_start = 1000LL;
+
+    int64_t edge_id = 0;
+    HU_ASSERT_EQ(hu_hyperedge_upsert(m, cid, strlen(cid), &he, &edge_id), HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000001000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Multi-entity facts:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "discussed"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "alice[subject]"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "ent#999999[object]"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    story_d_cleanup_all(g, m, f);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story E (sprint-4 follow-up) — render wm->self_model.
+ *
+ * `hu_world_model_merge_persona` already fills self_model.name from
+ * persona->name, focused_topics from the first three entries of
+ * wm->recent_topics, and confidence_in_self from persona identity
+ * completeness (0.5 with name, 0.85 with name+identity). Before Story E
+ * the LLM never saw any of those fields — the prompt block silently
+ * skipped them. These tests pin that the Self model section renders
+ * exactly when there is signal and never when there is not.
+ *
+ * Note: recent_drift_kind/recent_drift_value require APPLIED persona
+ * deltas which the bridge pulls from the memory facade. Bridge-driven
+ * tests of the drift line are intentionally out of scope here; the
+ * underlying merge populator is already covered in test_w9_world_model.c
+ * (search HU_DELTA_STATUS_APPLIED). ────────────────────────────────────── */
+
+static void story_e_make_full_persona(hu_persona_t *p, hu_persona_overlay_t *ov) {
+    /* Name AND identity → confidence_in_self = 0.85 → bucket "high". */
+    memset(p, 0, sizeof(*p));
+    memset(ov, 0, sizeof(*ov));
+    p->name = (char *)"story-e-self";
+    p->identity = (char *)"story-e-witness";
+    ov->channel = (char *)"discord";
+    ov->formality = (char *)"casual-direct";
+    p->overlays = ov;
+    p->overlays_count = 1;
+}
+
+static void story_e_make_name_only_persona(hu_persona_t *p, hu_persona_overlay_t *ov) {
+    /* Name only → confidence_in_self = 0.5 → bucket "medium". */
+    memset(p, 0, sizeof(*p));
+    memset(ov, 0, sizeof(*ov));
+    p->name = (char *)"story-e-medium";
+    /* identity left NULL on purpose. */
+    ov->channel = (char *)"discord";
+    p->overlays = ov;
+    p->overlays_count = 1;
+}
+
+static void bridge_render_with_self_model_emits_section(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storye_full";
+    /* Seed two entities so wm->recent_topics has signal, which seeds
+     * self_model.focused_topics (top-3 ';'-joined). */
+    int64_t a = 0, b = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "tea-house", 9, HU_ENTITY_PLACE,
+                                NULL, &a),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "ringo-bell", 10, HU_ENTITY_PERSON,
+                                NULL, &b),
+        HU_OK);
+    /* Give the snapshot a render-trigger so we reach the merge step. */
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_full_persona(&persona, &overlay);
+
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0; /* drift line intentionally out of scope here */
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "I am: story-e-self"));
+    /* focused_topics is the recent_topics digest; both entity names should
+     * appear on the Tracking line (order/separator handled by populator). */
+    HU_ASSERT_NOT_NULL(strstr(txt, "Tracking:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: high"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_with_empty_self_model_omits_section(void) {
+    /* No persona context → merge_persona never runs → self_model stays
+     * zero across all five fields → the Self model section must not
+     * appear, even though the snapshot itself has signal (a negative
+     * memory) and produces other render sections. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storye_empty";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT(strstr(txt, "Self model:") == NULL);
+    HU_ASSERT(strstr(txt, "Self-confidence:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_self_confidence_bucket_high_vs_medium(void) {
+    /* The populator clamps confidence_in_self to 0.85 (name+identity)
+     * or 0.5 (name only) or 0.0 (neither). Verify both reachable
+     * buckets render the right adjective so the LLM doesn't see a
+     * raw float. */
+
+    /* Case A: name + identity → high. */
+    {
+        hu_graph_t *g = NULL;
+        hu_w7_facade_t *f = NULL;
+        open_graph_and_facade(&g, &f);
+        const char *cid = "ut_storye_high";
+        story_b_seed_negative(g, cid, strlen(cid));
+
+        hu_persona_t persona;
+        hu_persona_overlay_t overlay;
+        story_e_make_full_persona(&persona, &overlay);
+        hu_persona_context_t pctx = {0};
+        pctx.persona = &persona;
+        pctx.channel = "discord";
+        pctx.channel_len = strlen("discord");
+        pctx.delta_limit = 0;
+
+        char *txt = NULL;
+        size_t tlen = 0;
+        HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                              1700000000000LL + 1000, &txt, &tlen,
+                                              NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                     HU_OK);
+        HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: high"));
+        HU_ASSERT(strstr(txt, "Self-confidence: medium") == NULL);
+        A()->free(A()->ctx, txt, tlen + 1);
+        cleanup(g, f);
+    }
+
+    /* Case B: name only → medium. */
+    {
+        hu_graph_t *g = NULL;
+        hu_w7_facade_t *f = NULL;
+        open_graph_and_facade(&g, &f);
+        const char *cid = "ut_storye_medium";
+        story_b_seed_negative(g, cid, strlen(cid));
+
+        hu_persona_t persona;
+        hu_persona_overlay_t overlay;
+        story_e_make_name_only_persona(&persona, &overlay);
+        hu_persona_context_t pctx = {0};
+        pctx.persona = &persona;
+        pctx.channel = "discord";
+        pctx.channel_len = strlen("discord");
+        pctx.delta_limit = 0;
+
+        char *txt = NULL;
+        size_t tlen = 0;
+        HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                              1700000000000LL + 1000, &txt, &tlen,
+                                              NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                     HU_OK);
+        HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: medium"));
+        HU_ASSERT(strstr(txt, "Self-confidence: high") == NULL);
+        A()->free(A()->ctx, txt, tlen + 1);
+        cleanup(g, f);
+    }
+}
+
+static void bridge_render_self_model_partial_fields_renders_only_present(void) {
+    /* Persona name only + NO entities seeded → wm->recent_topics is empty
+     * → focused_topics stays "" → the Tracking line must be omitted.
+     * The "I am:" line and the medium-confidence line are still rendered
+     * because both have real signal. This pins that per-field rendering
+     * is conditional, not all-or-nothing. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storye_partial";
+    /* story_b_seed_negative inserts a scope="topic" negative, NOT a
+     * graph entity. Negatives feed wm->negatives, not wm->entities, so
+     * recent_topics stays empty for this contact. */
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_name_only_persona(&persona, &overlay);
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(tlen > 0);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "I am: story-e-medium"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self-confidence: medium"));
+    HU_ASSERT(strstr(txt, "Tracking:") == NULL);
+    HU_ASSERT(strstr(txt, "Most recent shift:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story F.2 (sprint-4 follow-up) — self_model drift history, emotional
+ * register, and recently-used tools inside the Self model block.
+ * ────────────────────────────────────────────────────────────────────── */
+
+#include "human/memory/emotional_residue.h"
+#include <sqlite3.h>
+
+static void story_f2_ensure_emotional_residue_table_(struct sqlite3 *db) {
+    static const char *kCreate =
+        "CREATE TABLE IF NOT EXISTS emotional_residue("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "episode_id INTEGER,"
+        "contact_id TEXT NOT NULL,"
+        "valence REAL NOT NULL,"
+        "intensity REAL NOT NULL,"
+        "decay_rate REAL DEFAULT 0.1,"
+        "created_at INTEGER NOT NULL)";
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, kCreate, -1, &stmt, NULL), 0);
+    HU_ASSERT_EQ(sqlite3_step(stmt), 101);
+    sqlite3_finalize(stmt);
+}
+
+static void bridge_render_self_model_f2_recent_tools_emits_line(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf2_tools";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_name_only_persona(&persona, &overlay);
+
+    const char *used[] = {"shell", "memory_query"};
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    pctx.recent_tools_used = used;
+    pctx.recent_tools_used_count = 2;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "Tools I've used recently:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "shell"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "memory_query"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_self_model_f2_emotional_register_emits_line(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf2_emo";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_NOT_NULL(db);
+    story_f2_ensure_emotional_residue_table_(db);
+    int64_t rid = 0;
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, cid, strlen(cid), -0.9, 0.9, 0.05, &rid),
+                 HU_OK);
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_name_only_persona(&persona, &overlay);
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "How I've been showing up:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "distressed"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_self_model_f2_omit_when_no_f2_signal(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf2_omit";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(strstr(txt, "Tools I've used recently:") == NULL);
+    HU_ASSERT(strstr(txt, "How I've been showing up:") == NULL);
+    HU_ASSERT(strstr(txt, "Shift history:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_self_model_f2_partial_tools_only(void) {
+    /* Recent tools without capabilities registry — only the used-tools
+     * line should appear among F.2 fields. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf2_partial";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_name_only_persona(&persona, &overlay);
+
+    const char *used[] = {"web_search"};
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    pctx.recent_tools_used = used;
+    pctx.recent_tools_used_count = 1;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Tools I've used recently:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "web_search"));
+    HU_ASSERT(strstr(txt, "Capabilities I have:") == NULL);
+    HU_ASSERT(strstr(txt, "Shift history:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_world_model_bridge_tests(void) {
@@ -506,5 +1590,32 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(w14_scheduler_enqueue_then_tick_drains_job);
     HU_RUN_TEST(w14_autodream_phases_drain_through_scheduler);
     HU_RUN_TEST(w14_autodream_rejects_null_args);
+    /* sprint-4 follow-up Story B — persona_ctx threading. */
+    HU_RUN_TEST(bridge_render_with_persona_ctx_emits_interaction_style);
+    HU_RUN_TEST(bridge_render_without_persona_ctx_omits_interaction_style);
+    HU_RUN_TEST(bridge_render_with_persona_no_overlay_falls_back_to_identity_only);
+    HU_RUN_TEST(bridge_render_with_persona_ctx_null_persona_skips_merge);
+    /* sprint-4 follow-up Story F.1 — render wm->self_model.capabilities. */
+    HU_RUN_TEST(bridge_render_with_self_capabilities_emits_section);
+    HU_RUN_TEST(bridge_render_without_tools_omits_capabilities_section);
+    HU_RUN_TEST(bridge_render_capabilities_dedups_and_caps_at_six);
+    /* sprint-4 follow-up Story C — render wm->recent_changes. */
+    HU_RUN_TEST(bridge_render_with_recent_changes_emits_section);
+    HU_RUN_TEST(bridge_render_with_no_recent_changes_omits_section);
+    HU_RUN_TEST(bridge_render_recent_changes_caps_at_five);
+    /* sprint-4 follow-up Story D — render wm->hyperedges. */
+    HU_RUN_TEST(bridge_render_with_hyperedges_emits_multi_entity_section);
+    HU_RUN_TEST(bridge_render_with_no_hyperedges_omits_section);
+    HU_RUN_TEST(bridge_render_hyperedge_member_not_in_entities_renders_id_fallback);
+    /* sprint-4 follow-up Story E — render wm->self_model. */
+    HU_RUN_TEST(bridge_render_with_self_model_emits_section);
+    HU_RUN_TEST(bridge_render_with_empty_self_model_omits_section);
+    HU_RUN_TEST(bridge_render_self_confidence_bucket_high_vs_medium);
+    HU_RUN_TEST(bridge_render_self_model_partial_fields_renders_only_present);
+    /* sprint-4 follow-up Story F.2 — self_model extended fields. */
+    HU_RUN_TEST(bridge_render_self_model_f2_recent_tools_emits_line);
+    HU_RUN_TEST(bridge_render_self_model_f2_emotional_register_emits_line);
+    HU_RUN_TEST(bridge_render_self_model_f2_omit_when_no_f2_signal);
+    HU_RUN_TEST(bridge_render_self_model_f2_partial_tools_only);
 #endif
 }

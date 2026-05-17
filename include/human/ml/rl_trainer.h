@@ -1,121 +1,134 @@
-/* US-7.10 — RL trainer vtable (Init #06 phase 1).
+/* include/human/ml/rl_trainer.h
  *
- * Minimal 3-member vtable behind which SimPO, ORPO, and GRPO-2 live.
- * Sprint 7 lands only the vtable surface and one loss head (SimPO);
- * ORPO and GRPO-2 are stubbed at the CLI router level and return
- * exit code 2 with a "not yet implemented" message.
+ * Phase 2 Task 1: new abstraction for RL training (DPO now, KTO in
+ * Phase 3, GRPO in Phase 4). Factory dispatches to either an in-process
+ * HUML backend (cross-platform, toy GPT, gradient-checked) or an MLX
+ * subprocess backend (Apple-only, real Gemma adapters via the
+ * third-party `mlx-lm-lora` PyPI package, .safetensors output).
  *
- * The shape of the vtable is the contract from AC-7.10.1: exactly
- * three function pointers (`compute_loss`, `train_step`, `deinit`) and
- * the `hu_rl_trainer_type_t` enum. Future stories may widen the vtable
- * (e.g. add `prepare`, `save_adapter`) without breaking AC-7.10.1 —
- * the AC asserts only that those three exist, not that they're the
- * only ones.
+ * Both backends are stubbed at HU_ERR_NOT_SUPPORTED in this commit;
+ * Tasks 4 and 6 fill them in. The factory's auto/huml/mlx selection
+ * logic is real and tested here.
  *
- * Design doc: `sprints/sprint-7/designs/US-7.10.md`.
+ * Plan deviation note: the canonical plan snippet (lines 308–372) shows
+ * `#include "human/allocator.h"` / `"human/error.h"`. Those headers do
+ * not exist in this repo — the real paths are `human/core/allocator.h`
+ * and `human/core/error.h`. Using the real paths so this file compiles.
  */
 #ifndef HU_ML_RL_TRAINER_H
 #define HU_ML_RL_TRAINER_H
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/ml/dpo.h"   /* hu_preference_pair_t */
-#include "human/ml/model.h" /* hu_model_t */
-
+#include "human/ml/dpo.h"  /* hu_preference_pair_t */
 #include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Trainer type tags. Values are stable wire-level identifiers; do not
- * renumber without bumping a major version. */
 typedef enum {
-    HU_RL_TRAINER_DPO = 0,
-    HU_RL_TRAINER_SIMPO = 1,
-    HU_RL_TRAINER_ORPO = 2,
-    HU_RL_TRAINER_GRPO2 = 3,
-} hu_rl_trainer_type_t;
+    HU_DPO_BACKEND_AUTO = 0,
+    HU_DPO_BACKEND_HUML = 1,
+    HU_DPO_BACKEND_MLX  = 2,
+} hu_dpo_backend_t;
 
-/* Logprob-injection seam for the golden test (AC-7.10.2) and for any
- * future caller that already holds tokenized logprobs (e.g. an MLX
- * bridge). The fields are `double` so the analytical fixture can be
- * computed in float64 in Python or by hand against the canonical
- * SimPO formula and matched in C without precision-loss flake. */
-typedef struct hu_pref_pair_logprobs {
-    double chosen_logprob_sum;
-    size_t chosen_token_count;
-    double rejected_logprob_sum;
-    size_t rejected_token_count;
-} hu_pref_pair_logprobs_t;
+typedef struct {
+    hu_dpo_backend_t backend;
+    double beta;            /* DPO temperature; default 0.1 */
+    double learning_rate;   /* default 1e-5 (HUML) or ignored (MLX) */
+    size_t max_iters;       /* default 100 */
+    const char *model_id;   /* MLX: HF id like "mlx-community/gemma-3-4b-it-bf16"; HUML: ignored */
+    const char *adapter_out_dir; /* MLX: writes adapters.safetensors here; HUML: ignored */
+    double lambda_d;   /* KTO weight for desirable signal; 0.0 treated as 1.0. DPO+GRPO impls IGNORE. */
+    double lambda_u;   /* KTO weight for undesirable signal; 0.0 treated as 1.0. DPO+GRPO impls IGNORE. */
+    /* Phase 4 Task 0 (RL SOTA) — GRPO-only fields. DPO+KTO impls IGNORE
+     * them (the dispatcher just forwards the whole config struct, and the
+     * step functions of those backends never read these fields).  Zero
+     * defaults are safe for existing callers. */
+    size_t n_rollouts;     /* GRPO rollouts per prompt; 0 treated as default 4
+                            * (umbrella §5 ship contract; deviation from trl's
+                            * default of 8 — D6 rationale in the Phase 4 plan). */
+    double clip_eps;       /* GRPO PPO ratio clip ε; 0.0 treated as default 0.2
+                            * (trl/grpo_config.py convention). */
+    /* GRPO KL penalty coefficient β (Phase 4 critic R3 MED-1 contract):
+     *   kl_beta <  0  → use default 0.04  (DeepSeek R1; umbrella §11 Q10)
+     *   kl_beta == 0  → KL penalty DISABLED (R4 escape valve; Task 6
+     *                                        finite-diff grad-check uses
+     *                                        this to isolate the policy
+     *                                        gradient from the KL term)
+     *   kl_beta >  0  → use literal value
+     * The negative sentinel is required because 0.0 is the canonical
+     * "feature off" value used by ablation tests; without the sentinel
+     * we'd lose the ability to express "I want the literature default"
+     * vs "I want the KL term gone". */
+    double kl_beta;
+    /* SimPO fields (reference-free DPO). DPO+KTO+GRPO impls IGNORE. */
+    double gamma;        /* SimPO reward margin; 0.0 treated as default 0.5 */
+    bool length_norm;    /* SimPO length normalization; default false */
+    /* ORPO fields (odds-ratio preference optimization). DPO+KTO+GRPO+SimPO impls IGNORE. */
+    double lambda_or;    /* ORPO odds-ratio weight; 0.0 treated as default 0.1 */
+    double odds_clip;    /* ORPO odds-ratio clip; 0.0 treated as default 10.0 */
+} hu_rl_trainer_config_t;
 
-/* Vtable — exactly the three members named by AC-7.10.1. */
+typedef struct {
+    double final_loss;
+    size_t iters_completed;
+    double chosen_logprob_delta;  /* HUML only; MLX leaves 0 */
+    double rejected_logprob_delta;
+    char adapter_path[512];       /* MLX writes here; HUML leaves empty */
+} hu_rl_trainer_metrics_t;
+
 typedef struct hu_rl_trainer_vtable {
-    /* Compute the loss for a pre-tokenized pair whose logprobs are
-     * already known. Pure-double precision; no model forward pass. */
-    hu_error_t (*compute_loss)(void *ctx, const hu_pref_pair_logprobs_t *lp, double *out_loss);
-
-    /* End-to-end step: run the bound model's forward pass on
-     * (prompt+chosen) and (prompt+rejected), sum + length-normalize
-     * logprobs, hand off to `compute_loss`. v1 has no backward pass;
-     * a later story will add one. In `HU_IS_TEST` builds the
-     * implementation may accept a NULL model and emit a fixed mock
-     * loss so CLI tests don't need to boot a real GPT. */
-    hu_error_t (*train_step)(void *ctx, const hu_preference_pair_t *pair, double *out_loss);
-
-    /* Release the head's internal state. Must be safe to call once.
-     * The owning `hu_rl_trainer_deinit` helper additionally guards
-     * against double-deinit by NULLing the vtable pointer. */
-    void (*deinit)(void *ctx);
+    hu_error_t (*step)(void *ctx, hu_allocator_t *alloc,
+                       const hu_preference_pair_t *pairs, size_t n_pairs,
+                       hu_rl_trainer_metrics_t *out);
+    hu_error_t (*save_adapter)(void *ctx, hu_allocator_t *alloc, const char *path);
+    const char *(*name)(void *ctx);
+    void (*deinit)(void *ctx, hu_allocator_t *alloc);
 } hu_rl_trainer_vtable_t;
 
-typedef struct hu_rl_trainer {
+typedef struct {
     void *ctx;
     const hu_rl_trainer_vtable_t *vtable;
-    hu_rl_trainer_type_t type;
 } hu_rl_trainer_t;
 
-/* SimPO factory config. β and γ are the algorithm hyperparameters
- * (defaults in `sprints/sprint-7/designs/US-7.10.md`: β=0.1, γ=0.5).
- * `model` is nullable; required only when `train_step` is called
- * outside of `HU_IS_TEST`. */
-typedef struct hu_simpo_config {
-    float beta;
-    float gamma;
-    hu_model_t *model;
-} hu_simpo_config_t;
-
-/* AC-7.10.1 factory name (per the story; `hu_<module>_<algo>_<action>` is
- * a documented variant of the global naming standard for vtable-family
- * factories — see `src/ml/CLAUDE.md`). */
-hu_error_t hu_rl_trainer_simpo_create(hu_allocator_t *alloc, const hu_simpo_config_t *cfg,
-                                      hu_rl_trainer_t *out);
-
-/* US-11.5 — ORPO factory config. λ is the single hyperparameter from
- * Hong et al. arXiv:2403.07691 Eq. 7 (default 0.1 per the original
- * paper; sprint-11 sota-dpo.md line 57 corroborates).
- *
- * ORPO has NO reference model (one of its main advantages over DPO);
- * `model` is the policy model itself, nullable when only `compute_loss`
- * is exercised (e.g. the golden-fixture test path). */
-typedef struct hu_orpo_config {
-    float lambda;
-    hu_model_t *model;
-} hu_orpo_config_t;
-
-hu_error_t hu_rl_trainer_orpo_create(hu_allocator_t *alloc, const hu_orpo_config_t *cfg,
+hu_error_t hu_rl_trainer_create_dpo(hu_allocator_t *alloc,
+                                     const hu_rl_trainer_config_t *config,
                                      hu_rl_trainer_t *out);
 
-/* Idempotent: calling twice is a no-op. After deinit `trainer->vtable`
- * is NULL and `trainer->ctx` is NULL. */
-void hu_rl_trainer_deinit(hu_rl_trainer_t *trainer);
+/* Construct a KTO trainer. Like _create_dpo but consumes one-sided
+ * preference pairs (chosen_len > 0 XOR rejected_len > 0). Two-sided
+ * pairs are silently skipped at step time. The same backend enum
+ * (HUML / MLX / AUTO) gates dispatch. */
+hu_error_t hu_rl_trainer_create_kto(hu_allocator_t *alloc,
+                                     const hu_rl_trainer_config_t *config,
+                                     hu_rl_trainer_t *out);
 
-/* Human-readable name (`"dpo"`, `"simpo"`, `"orpo"`, `"grpo2"`, or
- * `"unknown"`). Returned pointer points to static storage. */
-const char *hu_rl_trainer_type_name(hu_rl_trainer_type_t type);
+/* Phase 4 (RL SOTA): Construct a GRPO trainer (Group Relative Policy
+ * Optimization, Shao et al. 2024 — DeepSeekMath §4.1.2). Like
+ * _create_dpo / _create_kto but uses multi-rollout group-relative
+ * baseline + PPO-clipped ratio + optional KL penalty against a frozen
+ * reference. Consumes hu_preference_pair_t rows for the PROMPT only —
+ * chosen/rejected text is IGNORED because rollouts are sampled from the
+ * live policy via hu_rollout_t.
+ *
+ * Dispatches to hu_grpo_huml_create (HUML in-process toy GPT, Phase 4
+ * Task 5) or hu_grpo_mlx_create (MLX subprocess wrapping
+ * scripts/grpo_mlx_train.py, Phase 4 Task 8) based on
+ * config->backend. AUTO probes mlx-lm-lora's GRPO trainer at runtime
+ * and falls back to HUML when unavailable. */
+hu_error_t hu_rl_trainer_create_grpo(hu_allocator_t *alloc,
+                                      const hu_rl_trainer_config_t *config,
+                                      hu_rl_trainer_t *out);
+
+#if HU_IS_TEST
+/* Test hooks for inspecting last-resolved backend without spawning a subprocess. */
+hu_dpo_backend_t hu_rl_trainer_last_resolved_backend_for_test(void);
+void hu_rl_trainer_reset_for_test(void);
+#endif
 
 #ifdef __cplusplus
 }
 #endif
-
 #endif /* HU_ML_RL_TRAINER_H */

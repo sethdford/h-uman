@@ -1,149 +1,79 @@
-/* molora — Sprint 7 US-7.8 (Init #02 Phase 1): MoLoRA static per-channel router.
+/* include/human/ml/molora.h -- MoLoRA per-channel persona routing.
  *
- * Phase 1 is **static dispatch only**: a small router struct that maps a
- * normalized channel id ("telegram" / "imessage" / "slack" / "discord" / ...)
- * to a LoRA adapter path, plus one hook in the agent's pre-chat dispatch site
- * (`src/agent/agent_turn.c`) that consults the router and calls the existing
- * `hu_provider_load_adapter` path when the selected adapter differs from the
- * currently-active one.
+ * Mixture-of-LoRA-Experts routing for per-channel persona adaptation.
+ * Maps (channel, message_class, macro_mode) to a sparse mixture of
+ * LoRA adapter slots. Phase 1 uses a channel-to-slot lookup table;
+ * a learned MLP router replaces it once labelled turn data accumulates.
  *
- * No learned MLP, no message-class classifier, no scoring network — those
- * land in later Init #02 phases. The router state is initialized once from
- * `config.personalization.molora.channel_adapters` at agent construction and
- * is read-only thereafter.
- *
- * Compile-guarded by `HU_ENABLE_MOLORA` (CMake option, default OFF). When the
- * option is OFF, this header is not included in any TU and the symbols are
- * absent from the binary entirely (verified by AC-7.8.5 binary-size delta).
- *
- * AC traceability (see `sprints/sprint-7/stories.md` and
- * `sprints/sprint-7/designs/US-7.8.md`):
- *   AC-7.8.1 → `hu_molora_router_select` returns channel-specific adapter
- *   AC-7.8.2 → falls back to `default_adapter_path` when channel absent
- *   AC-7.8.3 → disabled-by-default; gated behind HU_ENABLE_MOLORA
- *   AC-7.8.4 → struct is zero-initializable; `(hu_molora_router_t){0}` is
- *              a valid disabled router
- *   AC-7.8.5 → enforced by `scripts/check-molora-binary-budget.sh`
- *
- * Lifecycle: the router borrows pointers from `hu_personalization_config_t`.
- * `hu_molora_router_init` does NOT copy strings — it stores the borrowed
- * pointers and asserts that the config outlives the router. The router
- * itself owns no heap memory and `hu_molora_router_select` never allocates,
- * making it safe to call on every turn at the inference hot path.
+ * Slot 0 is reserved for the persona macro-mode baseline adapter
+ * (always present in the mixture at >= macro_mode_floor weight).
+ * Slots 1..6 are channel experts. Slot 7 is reserved for
+ * verifier-driven TTT.
  */
-
 #ifndef HU_ML_MOLORA_H
 #define HU_ML_MOLORA_H
 
-#ifdef HU_ENABLE_MOLORA
-
+#include "human/core/allocator.h"
 #include "human/core/error.h"
-#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Phase 1 cap: 16 channels covers the 4 Tier-1 channels (telegram, imessage,
- * slack, discord) plus the 12-channel headroom Init #02 phase 1 budgeted for.
- * Init #02 phase 2 (learned routing) may revisit this. */
-#define HU_MOLORA_MAX_CHANNELS 16
+#define HU_MOLORA_MAX_SLOTS  8
+#define HU_MOLORA_MAX_ACTIVE 3
 
-/* Normalized channel id buffer size. Covers all 31 known channel modules
- * (longest current: "mattermost" at 10 chars) with 21 chars of slack for
- * future channels. Strings longer than this are truncated by the normalizer
- * (the truncated form still matches because router entries are normalized
- * the same way). */
-#define HU_MOLORA_CHANNEL_NAME_MAX 32
-
-typedef struct hu_molora_entry {
-    /* Normalized channel id (lowercase, no `:` suffix, no whitespace).
-     * Always null-terminated in the buffer. */
-    char channel[HU_MOLORA_CHANNEL_NAME_MAX];
-    /* Adapter path — BORROWED from hu_personalization_config_t.molora.
-     * Not owned by the router; caller must keep config alive. */
+/* Maps a logical slot id to an on-disk adapter path. */
+typedef struct hu_molora_slot {
+    uint8_t     id;
     const char *adapter_path;
-} hu_molora_entry_t;
+    size_t      adapter_path_len;
+} hu_molora_slot_t;
 
-typedef struct hu_molora_router {
-    bool enabled;
-    size_t count;
-    hu_molora_entry_t entries[HU_MOLORA_MAX_CHANNELS];
-    /* Fallback adapter when no channel entry matches.
-     * Borrowed from `personalization.lora_adapter_path` (NULL allowed). */
-    const char *default_adapter_path;
-} hu_molora_router_t;
+/* Sparse mixture: up to MAX_ACTIVE (slot, weight) pairs.
+ * Weights sum to 1.0 when n > 0. */
+typedef struct hu_molora_mixture {
+    uint8_t slots[HU_MOLORA_MAX_ACTIVE];
+    float   weights[HU_MOLORA_MAX_ACTIVE];
+    size_t  n;
+} hu_molora_mixture_t;
 
-/* Forward declaration — full definition in human/config_types.h. We accept
- * an opaque pointer to avoid pulling the full config header into the ML
- * include tree (config_types.h includes security/sandbox.h transitively). */
-struct hu_config;
+/* Router configuration. Pass NULL to hu_molora_router_create for
+ * defaults (macro_mode_floor = 0.3). */
+typedef struct hu_molora_router_config {
+    float macro_mode_floor; /* slot-0 weight floor; clamped [0.0, 0.8] */
+} hu_molora_router_config_t;
 
-/* Initialize the router from a fully-parsed config. The config must outlive
- * the router (the router stores borrowed adapter-path pointers).
- *
- * If `cfg == NULL` or `cfg->personalization.molora.enabled == false`, the
- * router is initialized to the disabled state (a `{0}` struct also produces
- * a valid disabled router — see AC-7.8.4).
- *
- * Returns:
- *   HU_OK on success (including the disabled case)
- *   HU_ERR_INVALID_ARGUMENT if `r == NULL`
- */
-hu_error_t hu_molora_router_init(hu_molora_router_t *r, const struct hu_config *cfg);
+typedef struct hu_molora_router hu_molora_router_t;
 
-/* Select the adapter path for the given channel id.
- *
- * The lookup is O(N) over `r->entries` where N <= HU_MOLORA_MAX_CHANNELS.
- * NEVER allocates. Safe to call from the inference hot path.
- *
- * Channel id normalization is applied internally to both the stored entries
- * (during `_init`) and the lookup key (during `_select`), so callers can pass
- * the raw `agent->active_channel` / `agent->active_channel_len` pair without
- * pre-processing. The normalizer:
- *   - lowercases ASCII letters
- *   - strips everything from the first `:` onward (so "telegram:42" → "telegram")
- *   - trims leading/trailing ASCII whitespace
- *   - truncates to HU_MOLORA_CHANNEL_NAME_MAX - 1 chars
- *
- * Returns:
- *   - The matching `entry->adapter_path` if the channel is in the map.
- *   - `r->default_adapter_path` if no entry matches and a default is set.
- *   - NULL if the router is disabled, the channel id is empty, or no entry
- *     matches AND `default_adapter_path` is NULL. Callers must tolerate NULL
- *     (fall through to today's "no adapter swap" behavior).
- *
- * Calling on a `{0}` router (disabled, no entries) is safe and returns NULL.
- */
-const char *hu_molora_router_select(const hu_molora_router_t *r, const char *channel,
-                                    size_t channel_len);
+/* Create a router from config (or defaults when config is NULL).
+ * Phase 1: channel-to-slot lookup table with FNV-1a hashing.
+ * Returns HU_ERR_INVALID_ARGUMENT on NULL alloc or NULL out. */
+hu_error_t hu_molora_router_create(hu_allocator_t *alloc,
+                                   const hu_molora_router_config_t *config,
+                                   hu_molora_router_t **out);
 
-/* Normalize a channel id into `out`. Public so tests can exercise the
- * normalization table directly.
+/* Compute a sparse mixture for the given turn context.
+ * channel_name: channel identifier (e.g. "telegram", "imessage").
+ * message_class: heuristic tag [0..7] (ack, chitchat, question, ...).
+ * macro_mode: persona macro-mode [0..7] (default, playful, ...).
  *
- *   in       — pointer to channel id chars (need not be null-terminated)
- *   in_len   — number of bytes to read from `in`
- *   out      — destination buffer (always null-terminated on return)
- *   out_cap  — capacity of `out` in bytes (must be >= 1)
- *
- * Returns the length of the normalized string (excluding the terminator).
- * Returns 0 if `out_cap == 0`, `out == NULL`, or the input is empty after
- * trimming. On overflow the output is truncated to `out_cap - 1` bytes.
- *
- * Examples (assuming out_cap >= HU_MOLORA_CHANNEL_NAME_MAX):
- *   "telegram"       -> "telegram" (returns 8)
- *   "telegram:42"    -> "telegram" (returns 8)
- *   "Telegram"       -> "telegram" (returns 8)
- *   " Telegram \t"   -> "telegram" (returns 8)
- *   ""               -> ""         (returns 0)
- *   ":42"            -> ""         (returns 0; prefix is empty)
- */
-size_t hu_molora_router_normalize_channel(const char *in, size_t in_len, char *out, size_t out_cap);
+ * Always succeeds when router and out are non-NULL. On NULL router
+ * returns a degenerate mixture (slot 0 at weight 1.0). */
+hu_error_t hu_molora_router_route(const hu_molora_router_t *router,
+                                  const char *channel_name,
+                                  size_t channel_name_len,
+                                  uint8_t message_class,
+                                  uint8_t macro_mode,
+                                  hu_molora_mixture_t *out);
+
+/* Free all router resources. Safe to call with NULL router. */
+void hu_molora_router_deinit(hu_molora_router_t *router,
+                             hu_allocator_t *alloc);
 
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* HU_ENABLE_MOLORA */
 #endif /* HU_ML_MOLORA_H */

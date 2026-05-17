@@ -1,145 +1,93 @@
-/* molora.c — Sprint 7 US-7.8 (Init #02 Phase 1): static per-channel router.
+/* src/ml/molora.c — MoLoRA per-channel persona routing (Phase 1).
  *
- * See include/human/ml/molora.h for the contract. This TU is only compiled
- * when HU_ENABLE_MOLORA is defined (gated in CMakeLists.txt). The header
- * itself is also fully guarded so callers in an OFF build see no symbols.
- *
- * Allocation discipline: the router owns no heap. `_init` only copies the
- * borrowed `adapter_path` pointers from the config; `_select` runs an
- * in-place stack-buffer normalization and a linear scan. This is safe to
- * call on every agent turn (the hot path). */
-
-#ifdef HU_ENABLE_MOLORA
+ * Phase 1 uses a static channel-to-slot lookup table with FNV-1a hashing.
+ * Known channels get a dedicated expert slot (1–6); unknown channels fall
+ * back to the baseline slot 0.  The mixture always includes slot 0 at
+ * >= macro_mode_floor weight, plus the channel expert. */
 
 #include "human/ml/molora.h"
-
-#include "human/config_types.h"
-#include "human/core/error.h"
-
-#include <ctype.h>
-#include <stdbool.h>
-#include <stddef.h>
 #include <string.h>
 
-/* Forward declaration of the full config struct. We only touch the
- * personalization sub-struct here, which is part of hu_config_t in
- * config.h — including config_types.h above gives us the inner types
- * but the outer hu_config_t is defined in human/config.h. We accept it
- * as the `struct hu_config` opaque type and reach in via casting. */
-#include "human/config.h"
+struct hu_molora_router {
+    float macro_mode_floor;
+};
 
-/* ── Normalizer ─────────────────────────────────────────────────────────── */
-
-size_t hu_molora_router_normalize_channel(const char *in, size_t in_len, char *out,
-                                          size_t out_cap) {
-    if (!out || out_cap == 0)
-        return 0;
-    out[0] = '\0';
-    if (!in || in_len == 0)
-        return 0;
-
-    /* Trim leading whitespace. */
-    size_t start = 0;
-    while (start < in_len && isspace((unsigned char)in[start]))
-        start++;
-
-    /* Determine effective end: first ':' or trailing whitespace, whichever
-     * comes first, after start. */
-    size_t end = start;
-    while (end < in_len && in[end] != ':' && !isspace((unsigned char)in[end]))
-        end++;
-
-    if (end <= start)
-        return 0;
-
-    size_t copy_len = end - start;
-    /* Truncate to out_cap - 1 so we always have room for the terminator. */
-    if (copy_len >= out_cap)
-        copy_len = out_cap - 1;
-
-    for (size_t i = 0; i < copy_len; i++) {
-        unsigned char ch = (unsigned char)in[start + i];
-        out[i] = (char)tolower(ch);
+/* FNV-1a 32-bit hash for channel name lookup. */
+static uint32_t fnv1a(const char *s, size_t len) {
+    uint32_t h = 0x811c9dc5u;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (uint8_t)s[i];
+        h *= 0x01000193u;
     }
-    out[copy_len] = '\0';
-    return copy_len;
+    return h;
 }
 
-/* ── Init ───────────────────────────────────────────────────────────────── */
+/* Phase 1 channel-to-slot mapping.  Returns 0 (baseline) for unknown. */
+static uint8_t channel_to_slot(const char *name, size_t len) {
+    uint32_t h = fnv1a(name, len);
+    /* Pre-computed FNV-1a hashes for tier-1 channels. */
+    switch (h) {
+    case 0xa98e2f16u: return 1; /* "telegram" */
+    case 0x0f7e7a32u: return 2; /* "discord" */
+    case 0x13e4aa54u: return 3; /* "imessage" */
+    case 0x993107f2u: return 4; /* "slack" */
+    case 0x0b87f4f6u: return 5; /* "cli" */
+    case 0x99316b42u: return 6; /* "email" */
+    default:          return 0;
+    }
+}
 
-hu_error_t hu_molora_router_init(hu_molora_router_t *r, const struct hu_config *cfg) {
-    if (!r)
-        return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_molora_router_create(hu_allocator_t *alloc,
+                                   const hu_molora_router_config_t *config,
+                                   hu_molora_router_t **out) {
+    if (!alloc || !out) return HU_ERR_INVALID_ARGUMENT;
 
-    /* Zero out unconditionally — any prior state is replaced. A `{0}`
-     * struct is the disabled state (AC-7.8.4). */
-    memset(r, 0, sizeof(*r));
+    hu_molora_router_t *r = alloc->alloc(alloc->ctx, sizeof(*r));
+    if (!r) return HU_ERR_OUT_OF_MEMORY;
 
-    if (!cfg)
-        return HU_OK;
+    float floor = config ? config->macro_mode_floor : 0.3f;
+    if (floor < 0.0f) floor = 0.0f;
+    if (floor > 0.8f) floor = 0.8f;
+    r->macro_mode_floor = floor;
 
-    const hu_personalization_config_t *p = &cfg->personalization;
-    r->default_adapter_path = p->lora_adapter_path; /* may be NULL */
+    *out = r;
+    return HU_OK;
+}
 
-    if (!p->molora.enabled)
-        return HU_OK;
+hu_error_t hu_molora_router_route(const hu_molora_router_t *router,
+                                  const char *channel_name,
+                                  size_t channel_name_len,
+                                  uint8_t message_class,
+                                  uint8_t macro_mode,
+                                  hu_molora_mixture_t *out) {
+    (void)message_class;
+    (void)macro_mode;
 
-    /* Per design Q2: when personalization itself is disabled, molora stays
-     * disabled too (router enabled flag remains false). The chat-time hook
-     * checks `r->enabled` before calling _select, so this honors the gate
-     * without needing extra branching at the call site. */
-    if (!p->enabled)
-        return HU_OK;
+    if (!out) return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
 
-    r->enabled = true;
+    float floor = router ? router->macro_mode_floor : 0.3f;
 
-    size_t want = p->molora.count;
-    if (want > HU_MOLORA_MAX_CHANNELS)
-        want = HU_MOLORA_MAX_CHANNELS;
+    uint8_t slot = 0;
+    if (channel_name && channel_name_len > 0)
+        slot = channel_to_slot(channel_name, channel_name_len);
 
-    for (size_t i = 0; i < want; i++) {
-        const hu_molora_channel_entry_t *src = &p->molora.entries[i];
-        if (!src->adapter_path || src->channel[0] == '\0')
-            continue;
-        hu_molora_entry_t *dst = &r->entries[r->count];
-        /* Re-normalize defensively. Parser already normalized but a
-         * config-mutator round-trip could in theory bypass that path,
-         * and the cost is one strncpy + tolower per startup entry. */
-        size_t n = hu_molora_router_normalize_channel(src->channel, strlen(src->channel),
-                                                      dst->channel, sizeof(dst->channel));
-        if (n == 0)
-            continue;
-        dst->adapter_path = src->adapter_path;
-        r->count++;
+    if (slot == 0) {
+        out->slots[0]   = 0;
+        out->weights[0] = 1.0f;
+        out->n          = 1;
+    } else {
+        out->slots[0]   = 0;
+        out->weights[0] = floor;
+        out->slots[1]   = slot;
+        out->weights[1] = 1.0f - floor;
+        out->n          = 2;
     }
     return HU_OK;
 }
 
-/* ── Select ─────────────────────────────────────────────────────────────── */
-
-const char *hu_molora_router_select(const hu_molora_router_t *r, const char *channel,
-                                    size_t channel_len) {
-    if (!r)
-        return NULL;
-    /* Disabled router → caller falls through to today's behavior. AC-7.8.4
-     * also exercises this path with a `{0}` struct. */
-    if (!r->enabled)
-        return NULL;
-
-    char key[HU_MOLORA_CHANNEL_NAME_MAX];
-    size_t key_len = hu_molora_router_normalize_channel(channel, channel_len, key, sizeof(key));
-    /* Empty channel id → no per-channel match; surface default. */
-    if (key_len == 0)
-        return r->default_adapter_path;
-
-    for (size_t i = 0; i < r->count; i++) {
-        const hu_molora_entry_t *e = &r->entries[i];
-        if (e->channel[0] == '\0' || !e->adapter_path)
-            continue;
-        if (strncmp(e->channel, key, sizeof(e->channel)) == 0)
-            return e->adapter_path;
-    }
-    return r->default_adapter_path;
+void hu_molora_router_deinit(hu_molora_router_t *router,
+                             hu_allocator_t *alloc) {
+    if (router && alloc)
+        alloc->free(alloc->ctx, router, sizeof(*router));
 }
-
-#endif /* HU_ENABLE_MOLORA */

@@ -24,6 +24,8 @@
 #include "human/agent/kv_cache.h"
 #include "human/core/allocator.h"
 #include "human/ml/learner.h"
+#include <stdbool.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +38,9 @@ struct hu_scheduler;
 struct hu_memory_facade;
 struct hu_job_spec;
 struct hu_provider;
+struct hu_eval_gate;
+struct hu_communication_style;
+struct hu_persona;
 
 /* Optional clear-callback for an opaque semantic cache. We can't depend
  * on the lifecycle/semantic_cache.h type from this header (kept as a
@@ -57,10 +62,41 @@ typedef struct hu_lora_runner_ctx {
      * train so the new adapter is hot-loaded without daemon restart. */
     struct hu_provider *provider;   /* optional; NULL skips auto-load */
     const char *adapter_id;         /* optional; label for the loaded adapter */
+
+    /* Phase 5 — promotion gate before hot-load (NULL skips). */
+    struct hu_eval_gate *eval_gate;
+    const char *rl_method_name; /* e.g. "dpo"; used for proof dir adapter id */
+    size_t rl_step_index;
+
+    /* CF-4 — measured persona scores for the gate (after train).
+     * When non-NULL and gate_persona_after_n >= 10, used instead of rollout. */
+    const double *gate_persona_after_scores;
+    size_t gate_persona_after_n;
+    double gate_candidate_p95_ms; /* 0 → use rollout p95 or default 100 ms */
+
+    /* CF-4 — real rollout measurement (required when eval_gate is set in
+     * production unless gate_persona_after_scores is pre-filled). */
+    struct hu_provider *eval_provider;
+    const char *eval_prompt_fixture_path;
+    const struct hu_communication_style *eval_target;
+    size_t eval_n_prompts;   /* default 20 when 0 */
+    int64_t eval_timeout_ms; /* per-chat budget; default 5000 when 0 */
+
+    /* CF-4 (finish) — score persona example bank + post-adapter probes. */
+    const struct hu_persona *gate_persona; /* not owned */
+    const char *gate_model_name;
+    size_t gate_model_name_len;
+#ifdef HU_IS_TEST
+    bool eval_use_synthetic_for_test; /* explicit 0.75 array; never in production */
+#endif
 } hu_lora_runner_ctx_t;
 
 hu_error_t hu_lora_training_runner(struct hu_memory_facade *m, const struct hu_job_spec *spec,
                                    int64_t budget_ms, void *user_data);
+
+#ifdef HU_IS_TEST
+void hu_lora_runner_set_test_clock(time_t frozen);
+#endif
 
 #ifdef __cplusplus
 }

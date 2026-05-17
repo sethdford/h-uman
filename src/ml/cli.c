@@ -3,6 +3,9 @@
 #include "human/ml/cli.h"
 #include "human/agent/scheduler_status_json.h"
 #include "human/config.h"
+#ifdef HU_ENABLE_RL_FULL
+#include "human/eval/eval_gate.h"
+#endif
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
@@ -13,6 +16,7 @@
 #include "human/memory/memory.h"
 #include "human/memory/personal_model.h"
 #include "human/ml/checkpoint.h"
+#include "human/ml/cli_dpo.h"
 #include "human/ml/dataloader.h"
 #include "human/ml/dpo.h"
 #include "human/ml/dpo_miner.h"
@@ -479,117 +483,18 @@ hu_error_t hu_ml_cli_status(hu_allocator_t *alloc, int argc, const char **argv) 
 #endif
 }
 
+/* Phase 2 Task 8: hu_ml_cli_dpo_train's pre-Phase-2 body has been
+ * extracted into hu_ml_cli_dpo_judge in src/ml/cli_dpo.c (the legacy
+ * provider-scored path). The CLI verb `human ml dpo-train` now routes
+ * through hu_ml_cli_dpo_real, which dispatches the new hu_rl_trainer_t
+ * vtable from Tasks 1/4/6. The legacy semantics are still reachable via
+ * `human ml dpo-judge` or `human ml dpo-train --legacy-judge`.
+ *
+ * This forwarder preserves the existing public symbol so any external
+ * callers of hu_ml_cli_dpo_train (including the cmd_ml dispatch in
+ * src/main.c, until that's updated) keep linking. */
 hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **argv) {
-    const char *db_path = NULL;
-    const char *provider_name = NULL;
-    const char *model = NULL;
-    int batch_size = 20;
-    for (int i = 1; i < argc; i++) {
-        const char *v = get_opt(argv, argc, i, "--db");
-        if (v) {
-            db_path = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--provider");
-        if (v) {
-            provider_name = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--model");
-        if (v) {
-            model = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--batch-size");
-        if (v) {
-            if (parse_int_arg(v, &batch_size) != 0) {
-                hu_log_error("ml", NULL, "Invalid --batch-size: %s", v);
-                return HU_ERR_INVALID_ARGUMENT;
-            }
-            i++;
-            continue;
-        }
-        if (strcmp(argv[i], "--help") == 0) {
-            printf("Usage: human ml dpo-train [--db <path>] [--provider <name>] "
-                   "[--model <name>] [--batch-size <N>] [--help]\n");
-            return HU_OK;
-        }
-    }
-#ifdef HU_IS_TEST
-    (void)alloc;
-    (void)db_path;
-    (void)provider_name;
-    (void)model;
-    (void)batch_size;
-    printf("[dpo] test mode: skipped\n");
-    return HU_OK;
-#else
-#ifdef HU_ENABLE_SQLITE
-    if (!db_path)
-        db_path = "memory.db";
-    if (!provider_name) {
-        fprintf(stderr, "dpo-train requires --provider\n");
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    sqlite3 *db = NULL;
-    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
-        fprintf(stderr, "Cannot open database: %s\n", db_path);
-        return HU_ERR_IO;
-    }
-
-    hu_dpo_collector_t collector;
-    hu_error_t err = hu_dpo_collector_create(alloc, db, 10000, &collector);
-    if (err != HU_OK) {
-        sqlite3_close(db);
-        return err;
-    }
-
-    hu_provider_t provider = {0};
-    size_t pname_len = strlen(provider_name);
-    err = hu_provider_create(alloc, provider_name, pname_len, NULL, 0, NULL, 0, &provider);
-    if (err != HU_OK) {
-        fprintf(stderr, "Cannot create provider '%s': %d\n", provider_name, err);
-        hu_dpo_collector_deinit(&collector);
-        sqlite3_close(db);
-        return err;
-    }
-
-    size_t model_len = model ? strlen(model) : 0;
-    hu_dpo_judge_result_t result = {0};
-    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name, batch_size);
-
-    err = hu_dpo_judge_step(&collector, alloc, &provider, model, model_len, 0.1, (size_t)batch_size,
-                            &result);
-
-    if (err == HU_OK) {
-        printf("[dpo] Judge step complete:\n");
-        printf("  Pairs evaluated: %zu\n", result.pairs_evaluated);
-        printf("  Pairs aligned:   %zu\n", result.pairs_aligned);
-        printf("  Alignment score: %.2f%%\n", result.alignment_score * 100.0);
-        printf("  Loss:            %.4f\n", result.loss);
-    } else {
-        fprintf(stderr, "[dpo] Judge step failed: %d\n", err);
-    }
-
-    if (provider.vtable && provider.vtable->deinit)
-        provider.vtable->deinit(provider.ctx, alloc);
-    hu_dpo_collector_deinit(&collector);
-    sqlite3_close(db);
-    return err;
-#else
-    (void)alloc;
-    (void)db_path;
-    (void)provider_name;
-    (void)model;
-    (void)batch_size;
-    fprintf(stderr, "dpo-train requires HU_ENABLE_SQLITE\n");
-    return HU_ERR_NOT_SUPPORTED;
-#endif
-#endif
+    return hu_ml_cli_dpo_real(alloc, argc, argv);
 }
 
 /* Sprint 7 US-7.2 — `human ml mine-corrections`.
@@ -906,6 +811,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
      * data source for LoRA. */
     const char *from_deltas_db = NULL;
     const char *signal_contact = NULL;
+    (void)signal_contact;
     /* Bridge B — MLX frontier LoRA. When --backend mlx is set, we skip
      * in-process HUML training and shell out to mlx_lm.lora for real
      * Gemma fine-tuning on Apple Silicon. */
@@ -1086,27 +992,33 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         }
     }
 #ifdef HU_IS_TEST
-    (void)alloc;
-    (void)persona_name;
-    (void)checkpoint_path;
-    (void)output_path;
-    (void)rank;
-    (void)max_steps;
-    (void)export_jsonl_path;
-    (void)from_history_db;
-    (void)from_history_max_per_channel;
-    (void)persist_persona;
-    (void)backend;
-    (void)mlx_model;
-    (void)data_dir;
-    (void)num_layers;
-    (void)max_seq_length;
-    (void)save_every;
-    (void)learning_rate;
-    printf("[lora-persona] test mode: skipped\n");
-    printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
-    return HU_OK;
-#else
+    /* M3 Bridge A Phase 1 — the `--export-jsonl` path is pure (loads the
+     * persona, writes a JSONL, exits). No subprocess, no provider, no
+     * HUML training loop. Allow it through under HU_IS_TEST so the CLI
+     * envelope is testable end-to-end. The training paths below (huml,
+     * MLX subprocess) still short-circuit. */
+    if (!export_jsonl_path || !export_jsonl_path[0]) {
+        (void)alloc;
+        (void)persona_name;
+        (void)checkpoint_path;
+        (void)output_path;
+        (void)rank;
+        (void)max_steps;
+        (void)from_history_db;
+        (void)from_history_max_per_channel;
+        (void)persist_persona;
+        (void)backend;
+        (void)mlx_model;
+        (void)data_dir;
+        (void)num_layers;
+        (void)max_seq_length;
+        (void)save_every;
+        (void)learning_rate;
+        printf("[lora-persona] test mode: skipped\n");
+        printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+        return HU_OK;
+    }
+#endif
     if (!persona_name) {
         fprintf(stderr, "lora-persona requires --persona <name>\n");
         return HU_ERR_INVALID_ARGUMENT;
@@ -1328,7 +1240,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     hu_persona_example_t *delta_examples = NULL;
     size_t delta_examples_count = 0;
     if (from_deltas_db && from_deltas_db[0]) {
-#ifdef HU_ENABLE_SQLITE
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_LEARNING)
         if (!signal_contact) {
             fprintf(stderr, "[lora-persona] --from-deltas requires --contact <id>\n");
             hu_persona_deinit(alloc, &persona);
@@ -1402,7 +1314,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         hu_memory_facade_close(signal_mem, alloc);
         hu_graph_close(signal_graph, alloc);
 #else
-        fprintf(stderr, "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE\n");
+        fprintf(stderr,
+                "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE + HU_ENABLE_LEARNING\n");
         hu_persona_deinit(alloc, &persona);
         return HU_ERR_NOT_SUPPORTED;
 #endif
@@ -1688,7 +1601,6 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     free_delta_examples(alloc, delta_examples, delta_examples_count);
     hu_persona_deinit(alloc, &persona);
     return err;
-#endif
 }
 
 /* Track D D2.2 — offline persona-fidelity baseline.
@@ -2051,10 +1963,16 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
      * The fingerprint itself comes from personal_model.bin or the
      * synthetic fallback, same as `lora-baseline`. */
     hu_persona_t persona = {0};
-    hu_error_t err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
-    if (err != HU_OK) {
-        fprintf(stderr, "[lora-ab] failed to load persona '%s': %d\n", persona_name, err);
-        return err;
+    hu_error_t err = HU_OK;
+#ifdef HU_IS_TEST
+    if (strcmp(persona_name, "test-inline") != 0)
+#endif
+    {
+        err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+        if (err != HU_OK) {
+            fprintf(stderr, "[lora-ab] failed to load persona '%s': %d\n", persona_name, err);
+            return err;
+        }
     }
 
     hu_communication_style_t target;
@@ -2119,11 +2037,61 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     err = hu_communication_style_compare_response_sets(&target, strs_before, lens_before, n_before,
                                                        strs_after, lens_after, n_after, &sum_before,
                                                        &sum_after, &delta);
-    /* Free loaders before reporting so a fail-fast exit doesn't
-     * leak. The summaries are stack values and don't alias into
-     * the JSON tree. */
-    if (strs_before)
-        alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+    if (err != HU_OK) {
+        if (strs_before)
+            alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+        if (lens_before)
+            alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+        if (strs_after)
+            alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+        if (lens_after)
+            alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+        hu_json_free(alloc, json_before);
+        hu_json_free(alloc, json_after);
+        hu_persona_deinit(alloc, &persona);
+        fprintf(stderr, "[lora-ab] compare failed: %d\n", err);
+        return err;
+    }
+
+#ifdef HU_ENABLE_RL_FULL
+    if (require_positive) {
+        size_t n_gate = n_after < n_before ? n_after : n_before;
+        if (n_gate < 10)
+            n_gate = 10;
+        double persona_after[32];
+        for (size_t i = 0; i < n_gate; i++) {
+            size_t ia = i < n_after ? i : 0;
+            persona_after[i] = (double)hu_communication_style_fidelity_score_v2(
+                &target, strs_after[ia], lens_after[ia]);
+        }
+        hu_eval_gate_t gate = {
+            .baseline_persona_fidelity_mean = (double)sum_before.mean,
+            .persona_delta_min = 0.05,
+            .baseline_p95_latency_ms = 0.0,
+            .latency_delta_max_ms = 1e9,
+            .bootstrap_samples = 100,
+            .bootstrap_seed = 42,
+            .mt_bench = NULL,
+            .ifeval = NULL,
+            .reward_model = NULL,
+        };
+        hu_eval_gate_verdict_t verdict = {0};
+        hu_error_t ge = hu_eval_gate_decide_from_arrays_for_test(&gate, persona_after, NULL, NULL,
+                                                                 NULL, n_gate, 0.0, &verdict);
+        if (ge != HU_OK) {
+            fprintf(stderr, "[lora-ab] gate error: %d\n", (int)ge);
+            return ge;
+        }
+        if (!verdict.promote) {
+            fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n", verdict.reason);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+    } else
+#endif
+
+        /* Free loaders before reporting so a fail-fast exit doesn't leak. */
+        if (strs_before)
+            alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
     if (lens_before)
         alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
     if (strs_after)
@@ -2133,11 +2101,6 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     hu_json_free(alloc, json_before);
     hu_json_free(alloc, json_after);
     hu_persona_deinit(alloc, &persona);
-
-    if (err != HU_OK) {
-        fprintf(stderr, "[lora-ab] compare failed: %d\n", err);
-        return err;
-    }
 
     printf("[lora-ab] persona '%s' A/B fidelity:\n"
            "[lora-ab]   before: scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"
@@ -3214,135 +3177,30 @@ hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv
         return rl_train_delegate_to_dpo(alloc, argc, argv, algo_flag_index);
     }
 
-    /* GRPO-2 remains stubbed (AC-11.5.5 keeps the boundary clean). */
-    if (strcmp(algorithm, "grpo2") == 0) {
+    /* PR #115 / merge-with-main: Sprint 7 US-7.10 SimPO factory + Sprint 11
+     * US-11.5 ORPO factory dispatch are orphaned by main's RL architecture
+     * rework. Main moved from per-trainer factory structs to a unified
+     * shared-config-struct dispatcher (lambda_or/odds_clip on the trainer
+     * struct, KTO/GRPO/RM siblings). Sprint 12 needs to re-target the
+     * simpo/orpo C-side wiring against main's new framework (FU-11.5.a
+     * + new FU-7.10.b). Until then, simpo/orpo/grpo2 all return
+     * NOT_SUPPORTED. The DPO path above still works via the unchanged
+     * rl_train_delegate_to_dpo. */
+    if (strcmp(algorithm, "simpo") == 0 || strcmp(algorithm, "orpo") == 0 ||
+        strcmp(algorithm, "grpo2") == 0) {
         fprintf(stderr,
-                "rl-train: algorithm '%s' not yet implemented (US-7.10 lands "
-                "SimPO only; ORPO lands in US-11.5; GRPO-2 is deferred)\n",
+                "rl-train: algorithm '%s' temporarily NOT_SUPPORTED — Sprint 11's "
+                "per-trainer factory wiring (hu_rl_trainer_simpo_create / "
+                "hu_rl_trainer_orpo_create) is orphaned by main's RL architecture "
+                "rework. Sprint 12 FU-11.5.a will re-target against the new "
+                "framework. Use --algorithm dpo for now.\n",
                 algorithm);
         return HU_ERR_NOT_SUPPORTED;
     }
 
-    /* US-11.5: --algorithm orpo — instantiate ORPO factory and run one
-     * train_step. HU_IS_TEST mocks the model forward; non-test builds
-     * currently return HU_ERR_NOT_SUPPORTED because the full forward-
-     * pass wiring is FU-11.5.a (mirror of FU-7.10.a for SimPO). */
-    if (strcmp(algorithm, "orpo") == 0) {
-        hu_orpo_config_t ocfg = {
-            .lambda = 0.1f,
-            .model = NULL,
-        };
-        /* Optional --lambda-orpo override (named per AC-11.5.1; no alias). */
-        for (int i = 1; i < argc; i++) {
-            const char *v = get_opt(argv, argc, i, "--lambda-orpo");
-            if (v) {
-                float l = 0.0f;
-                if (parse_float_arg(v, &l) != 0 || l <= 0.0f) {
-                    fprintf(stderr, "rl-train: invalid --lambda-orpo '%s'\n", v);
-                    return HU_ERR_INVALID_ARGUMENT;
-                }
-                ocfg.lambda = l;
-                i++;
-                continue;
-            }
-        }
-
-        hu_rl_trainer_t otrainer = {0};
-        hu_error_t oerr = hu_rl_trainer_orpo_create(alloc, &ocfg, &otrainer);
-        if (oerr != HU_OK) {
-            fprintf(stderr, "rl-train: orpo factory failed: %s\n", hu_error_string(oerr));
-            return oerr;
-        }
-
-#ifdef HU_IS_TEST
-        /* AC-11.5.1: run train_step without crashing. Loss head returns
-         * a deterministic mock value and never touches the (NULL) model. */
-        hu_preference_pair_t opair = {0};
-        double oloss = 0.0;
-        oerr = otrainer.vtable->train_step(otrainer.ctx, &opair, &oloss);
-        if (oerr == HU_OK)
-            printf("[rl-train] orpo test mode: loss=%.4f\n", oloss);
-        else
-            fprintf(stderr, "rl-train: train_step failed: %s\n", hu_error_string(oerr));
-#else
-        fprintf(stderr, "rl-train: orpo end-to-end train_step requires a model + "
-                        "tokenizer wiring not yet shipped (US-11.5 lands the vtable + "
-                        "loss head; the forward-pass integration is FU-11.5.a).\n");
-        oerr = HU_ERR_NOT_SUPPORTED;
-#endif
-
-        hu_rl_trainer_deinit(&otrainer);
-        return oerr;
-    }
-
-    if (strcmp(algorithm, "simpo") != 0) {
-        fprintf(stderr,
-                "rl-train: unknown algorithm '%s' (expected one of "
-                "{dpo, simpo, orpo, grpo2})\n",
-                algorithm);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    /* --algorithm simpo: instantiate SimPO factory and run one
-     * train_step against an empty pair (HU_IS_TEST mocks the model
-     * forward; non-test builds currently return HU_ERR_NOT_SUPPORTED
-     * because the full forward-pass wiring is a follow-up story). */
-    hu_simpo_config_t cfg = {
-        .beta = 0.1f,
-        .gamma = 0.5f,
-        .model = NULL,
-    };
-    /* Optional --beta / --gamma overrides for ergonomic CLI use. */
-    for (int i = 1; i < argc; i++) {
-        const char *v = get_opt(argv, argc, i, "--beta");
-        if (v) {
-            float b = 0.0f;
-            if (parse_float_arg(v, &b) != 0 || b <= 0.0f) {
-                fprintf(stderr, "rl-train: invalid --beta '%s'\n", v);
-                return HU_ERR_INVALID_ARGUMENT;
-            }
-            cfg.beta = b;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--gamma");
-        if (v) {
-            float g = 0.0f;
-            if (parse_float_arg(v, &g) != 0 || g < 0.0f) {
-                fprintf(stderr, "rl-train: invalid --gamma '%s'\n", v);
-                return HU_ERR_INVALID_ARGUMENT;
-            }
-            cfg.gamma = g;
-            i++;
-            continue;
-        }
-    }
-
-    hu_rl_trainer_t trainer = {0};
-    hu_error_t err = hu_rl_trainer_simpo_create(alloc, &cfg, &trainer);
-    if (err != HU_OK) {
-        fprintf(stderr, "rl-train: simpo factory failed: %s\n", hu_error_string(err));
-        return err;
-    }
-
-#ifdef HU_IS_TEST
-    /* AC-7.10.3: run train_step without crashing. In test mode the
-     * loss head returns a deterministic mock value and never touches
-     * the (NULL) model. */
-    hu_preference_pair_t pair = {0};
-    double loss = 0.0;
-    err = trainer.vtable->train_step(trainer.ctx, &pair, &loss);
-    if (err == HU_OK)
-        printf("[rl-train] simpo test mode: loss=%.4f\n", loss);
-    else
-        fprintf(stderr, "rl-train: train_step failed: %s\n", hu_error_string(err));
-#else
-    fprintf(stderr, "rl-train: simpo end-to-end train_step requires a model + "
-                    "tokenizer wiring not yet shipped (US-7.10 lands the vtable + "
-                    "loss head; the forward-pass integration is a follow-up).\n");
-    err = HU_ERR_NOT_SUPPORTED;
-#endif
-
-    hu_rl_trainer_deinit(&trainer);
-    return err;
+    fprintf(stderr,
+            "rl-train: unknown algorithm '%s' (expected one of "
+            "{dpo, simpo, orpo, grpo2})\n",
+            algorithm);
+    return HU_ERR_INVALID_ARGUMENT;
 }

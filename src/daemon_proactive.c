@@ -24,6 +24,7 @@
 #include "human/agent/weather_fetch.h"
 #include "human/config.h"
 #include "human/context/protective.h"
+#include "human/context/self_awareness.h"
 #include "human/core/string.h"
 #include "human/feeds/awareness.h"
 #include "human/feeds/processor.h"
@@ -40,8 +41,64 @@
 #endif
 
 #include "human/core/debug.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+
+/* P2-5 (2026-05-16 incident): public outbound-safety predicate for memory
+ * entries that hu_daemon_build_callback_context is about to inject into a
+ * proactive prompt. The previous code memcpy'd raw entries[i].content
+ * bytes — which let "I confessed something terrible" reach family
+ * contacts via F25/F30 paths.
+ *
+ * A memory entry is UNSAFE if it contains:
+ *   - first-person pronouns/contractions (i, i'm, i'll, my, me, mine)
+ *   - confession verbs (confessed/admitted/lied/cheated/betrayed/secret)
+ *   - bare emotion keywords (lonely/depressed/suicidal/anxious/...)
+ *   - format-specifier or newline injection
+ *
+ * Made non-static so tests can pin the predicate directly. Local to this
+ * TU rather than depending on the Phase 1 hu_proactive_topic_is_safe so
+ * this commit doesn't depend on Phase 1's merge order. */
+bool hu_daemon_callback_content_is_safe(const char *content, size_t content_len) {
+    if (!content || content_len == 0)
+        return false;
+    char buf[256];
+    size_t copy = content_len < sizeof(buf) - 1 ? content_len : sizeof(buf) - 1;
+    for (size_t i = 0; i < copy; i++)
+        buf[i] = (char)tolower((unsigned char)content[i]);
+    buf[copy] = '\0';
+
+    static const char *first_person_tokens[] = {
+        " i ", " i'm", " i'll", "i'm ", "i'll ", " my ", " me ", " mine ", "myself", NULL,
+    };
+    for (const char **p = first_person_tokens; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+    if (copy >= 2 && buf[0] == 'i' && (buf[1] == ' ' || buf[1] == '\''))
+        return false;
+
+    static const char *confession_verbs[] = {
+        "confessed", "admitted", "lied to", "cheated on", "betrayed", "secret", "regret", NULL,
+    };
+    for (const char **p = confession_verbs; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    static const char *charged_keywords[] = {
+        "lonely",     "depressed", "suicidal",  "scared",    "terrible",
+        "dying",      "crying",    "anxious",   "exhausted", "burnt out",
+        "burned out", "broken",    "miserable", "hopeless",  NULL,
+    };
+    for (const char **p = charged_keywords; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    if (strchr(buf, '%') || strchr(buf, '\n') || strchr(buf, '\r'))
+        return false;
+
+    return true;
+}
 
 /* ── Contact activity LRU cache ─────────────────────────────────────── */
 
@@ -224,23 +281,25 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t
             !hu_protective_memory_ok(alloc, memory, session_id, session_id_len, entries[i].content,
                                      entries[i].content_len, 0.0f, hour_local))
             continue;
+        /* P2-5 (2026-05-16): skip entries whose raw content is unsafe to
+         * inject into an outbound prompt. The previous code memcpy'd the
+         * raw bytes regardless of content, which let "I confessed
+         * something terrible" reach a family contact via this path. */
+        if (!hu_daemon_callback_content_is_safe(entries[i].content, entries[i].content_len))
+            continue;
+        /* P2-11 (2026-05-16): memory degradation is a UX-of-recall concept
+         * (mimics human forgetting in interactive recall). The previous
+         * code applied it to content about to be injected into an OUTBOUND
+         * proactive prompt — corrupting the text the LLM would then send
+         * verbatim. Disable degradation on this path. The seed/rate locals
+         * remain for the future-when-recall-display-is-separate flow. */
+        (void)deg_rate;
         const char *content = entries[i].content;
         size_t content_len = entries[i].content_len;
-        char *degraded = NULL;
-        size_t degraded_len = 0;
-        uint32_t seed = (uint32_t)now * 1103515245u + 12345u + (uint32_t)i;
-        degraded =
-            hu_memory_degradation_apply(alloc, content, content_len, seed, deg_rate, &degraded_len);
-        if (degraded && degraded_len > 0) {
-            content = degraded;
-            content_len = degraded_len;
-        }
         size_t show = content_len;
         if (show > 200)
             show = 200;
         w = snprintf(buf + pos, sizeof(buf) - pos, "%.*s\n", (int)show, content);
-        if (degraded)
-            alloc->free(alloc->ctx, degraded, degraded_len + 1);
         if (w > 0 && pos + (size_t)w < sizeof(buf)) {
             pos += (size_t)w;
             usable++;
@@ -273,8 +332,8 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t
 /* ── Proactive prompt builder ──────────────────────────────────────── */
 
 char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *agent,
-                                             hu_legacy_memory_t *memory, const hu_contact_profile_t *cp,
-                                             size_t *out_len) {
+                                             hu_legacy_memory_t *memory,
+                                             const hu_contact_profile_t *cp, size_t *out_len) {
     char *starter = NULL;
     size_t starter_len = 0;
     if (memory && cp->contact_id) {
@@ -414,6 +473,91 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     }
 #endif /* HU_ENABLE_SQLITE feed awareness */
 
+    /* 2026-05-16 P1-8: self-awareness directive (topic-repeat suppression). */
+    char *self_aware_ctx = NULL;
+    size_t self_aware_ctx_len = 0;
+#ifdef HU_ENABLE_SQLITE
+    if (memory && cp->contact_id) {
+        (void)hu_self_awareness_build_directive_from_memory(
+            alloc, memory, cp->contact_id, strlen(cp->contact_id), (int64_t)time(NULL),
+            &self_aware_ctx, &self_aware_ctx_len);
+    }
+#endif
+
+    /* P6-1: per-channel overlay directives — mirror the reactive path in
+     * src/agent/agent_stream.c so proactive prompts carry the same
+     * formality/length/emoji/pragmatic guidance the LLM gets when it
+     * responds to an inbound message.  Channel name derived from
+     * cp->proactive_channel ("imessage:+1234567890" → "imessage"). */
+    char *overlay_ctx = NULL;
+    size_t overlay_ctx_len = 0;
+    if (agent && agent->persona && cp->proactive_channel) {
+        const char *ch_name = cp->proactive_channel;
+        size_t ch_name_len = strlen(ch_name);
+        const char *colon = strchr(ch_name, ':');
+        if (colon)
+            ch_name_len = (size_t)(colon - ch_name);
+        if (ch_name_len > 0) {
+            const hu_persona_overlay_t *ov =
+                hu_persona_find_overlay(agent->persona, ch_name, ch_name_len);
+            if (ov) {
+                char obuf[1024];
+                size_t opos = 0;
+                int n = snprintf(obuf + opos, sizeof(obuf) - opos, "\nChannel style:");
+                if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                    opos += (size_t)n;
+                if (ov->formality) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " %s.", ov->formality);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->avg_length) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Length: %s.", ov->avg_length);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->emoji_usage) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Emoji: %s.", ov->emoji_usage);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->directness) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Directness: %s.",
+                                 ov->directness);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->face_saving) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Face-saving: %s.",
+                                 ov->face_saving);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->disagreement_style) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Disagreement: %s.",
+                                 ov->disagreement_style);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                for (size_t i = 0; i < ov->style_notes_count; i++) {
+                    if (ov->style_notes[i]) {
+                        n = snprintf(obuf + opos, sizeof(obuf) - opos, " %s.", ov->style_notes[i]);
+                        if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                            opos += (size_t)n;
+                    }
+                }
+                if (opos > 0) {
+                    overlay_ctx = (char *)alloc->alloc(alloc->ctx, opos + 1);
+                    if (overlay_ctx) {
+                        memcpy(overlay_ctx, obuf, opos);
+                        overlay_ctx[opos] = '\0';
+                        overlay_ctx_len = opos;
+                    }
+                }
+            }
+        }
+    }
+
     static const char HU_DEFAULT_PROACTIVE_RULES[] =
         "\nRules: "
         "1. One short natural message (not 'hey how are you' — too generic). "
@@ -430,12 +574,45 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
                            ? strlen(rules)
                            : sizeof(HU_DEFAULT_PROACTIVE_RULES) - 1;
 
-    char base_buf[256];
-    int w = snprintf(base_buf, sizeof(base_buf), "You're initiating a casual check-in text to %s. ",
+    /* P6-2: relationship_type + dunbar_layer give the LLM the register
+     * it should write in — texting a sister (dunbar 1) is not the same
+     * as texting a coworker (dunbar 3). Format only the fields present;
+     * fall through to the prior generic shape if neither is set. */
+    char base_buf[512];
+    int w;
+    if (cp->relationship_type && cp->relationship_type[0] && cp->dunbar_layer &&
+        cp->dunbar_layer[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s. "
+                     "You are texting your %s (dunbar layer %s). ",
+                     cp->name ? cp->name : "this person", cp->relationship_type, cp->dunbar_layer);
+    } else if (cp->relationship_type && cp->relationship_type[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s. "
+                     "You are texting your %s. ",
+                     cp->name ? cp->name : "this person", cp->relationship_type);
+    } else if (cp->dunbar_layer && cp->dunbar_layer[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s "
+                     "(dunbar layer %s). ",
+                     cp->name ? cp->name : "this person", cp->dunbar_layer);
+    } else {
+        w = snprintf(base_buf, sizeof(base_buf), "You're initiating a casual check-in text to %s. ",
                      cp->name ? cp->name : "this person");
+    }
     size_t base_len = (w > 0 && (size_t)w < sizeof(base_buf)) ? (size_t)w : 0;
 
+    /* P6-5: shared absolute-rules block — same source of truth as the
+     * reactive path (src/agent/agent_stream.c). Last-position weight. */
+    char absolute_rules_buf[2048];
+    size_t absolute_rules_len = 0;
+    if (hu_persona_build_absolute_rules(agent ? agent->persona : NULL, absolute_rules_buf,
+                                        sizeof(absolute_rules_buf), &absolute_rules_len) != HU_OK)
+        absolute_rules_len = 0;
+
     size_t total = base_len + rules_len;
+    if (self_aware_ctx && self_aware_ctx_len > 0)
+        total += self_aware_ctx_len + 2; /* prepended with trailing "\n\n" */
     if (starter && starter_len > 0)
         total += 2 + starter_len;
     if (mem_ctx && mem_ctx_len > 0)
@@ -448,9 +625,15 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 #endif
     if (calendar_ctx && calendar_ctx_len > 0)
         total += 2 + calendar_ctx_len;
+    if (overlay_ctx && overlay_ctx_len > 0)
+        total += 2 + overlay_ctx_len;
+    if (absolute_rules_len > 0)
+        total += absolute_rules_len;
 
     char *result = (char *)alloc->alloc(alloc->ctx, total + 1);
     if (!result) {
+        if (self_aware_ctx)
+            alloc->free(alloc->ctx, self_aware_ctx, self_aware_ctx_len + 1);
         if (starter)
             alloc->free(alloc->ctx, starter, starter_len + 1);
         if (mem_ctx)
@@ -463,13 +646,23 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 #endif
         if (calendar_ctx)
             alloc->free(alloc->ctx, calendar_ctx, calendar_ctx_len + 1);
+        if (overlay_ctx)
+            alloc->free(alloc->ctx, overlay_ctx, overlay_ctx_len + 1);
         *out_len = 0;
         return NULL;
     }
 
     size_t pos = 0;
-    memcpy(result, base_buf, base_len);
-    pos = base_len;
+    /* 2026-05-16 P1-8: prepend self-awareness directive. */
+    if (self_aware_ctx && self_aware_ctx_len > 0) {
+        memcpy(result + pos, self_aware_ctx, self_aware_ctx_len);
+        pos += self_aware_ctx_len;
+        result[pos++] = '\n';
+        result[pos++] = '\n';
+        alloc->free(alloc->ctx, self_aware_ctx, self_aware_ctx_len + 1);
+    }
+    memcpy(result + pos, base_buf, base_len);
+    pos += base_len;
 
     if (starter && starter_len > 0) {
         result[pos++] = '\n';
@@ -508,9 +701,20 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
         pos += calendar_ctx_len;
         alloc->free(alloc->ctx, calendar_ctx, calendar_ctx_len + 1);
     }
+    if (overlay_ctx && overlay_ctx_len > 0) {
+        result[pos++] = '\n';
+        result[pos++] = '\n';
+        memcpy(result + pos, overlay_ctx, overlay_ctx_len);
+        pos += overlay_ctx_len;
+        alloc->free(alloc->ctx, overlay_ctx, overlay_ctx_len + 1);
+    }
 
     memcpy(result + pos, rules, rules_len);
     pos += rules_len;
+    if (absolute_rules_len > 0) {
+        memcpy(result + pos, absolute_rules_buf, absolute_rules_len);
+        pos += absolute_rules_len;
+    }
     result[pos] = '\0';
     *out_len = pos;
     return result;

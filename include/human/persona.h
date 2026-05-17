@@ -454,6 +454,17 @@ typedef struct hu_persona {
      * Persona name is treated as immutable post-load — mutating persona->name after
      * load does NOT re-derive the chain. */
     hu_output_validator_chain_t *outbound_chain;
+
+    /* Global proactive-messaging kill switch.  When false, the daemon must NOT
+     * generate or send ANY proactive message (F25 emotional check-ins, F30
+     * curiosity, F31 callbacks, F23 topic absence, F12 bookend, scheduled
+     * good-morning, etc.) regardless of per-contact `proactive_checkin` flags.
+     *
+     * Defaults to false (kill-switch ON) so a freshly loaded persona is safe
+     * until the operator explicitly opts in via "proactive.master_enabled":
+     * true in the persona JSON.  Pinned by the 2026-05-16 incident — see
+     * docs/research/2026-05-16-proactive-audit/findings.md (P1-1). */
+    bool proactive_master_enabled;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).
@@ -482,9 +493,32 @@ hu_error_t hu_persona_examples_bank_from_array(hu_allocator_t *alloc, const char
 
 void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona);
 
+/* Returns true iff proactive messaging is GLOBALLY enabled for this persona.
+ * Safe to call with persona == NULL (returns false).  Wraps the
+ * `proactive_master_enabled` field so the daemon never bypasses the gate.
+ * See 2026-05-16 incident — by default the gate is OFF, so a freshly loaded
+ * persona will not send proactive messages until the operator explicitly
+ * sets "proactive": { "master_enabled": true } in the persona JSON. */
+bool hu_persona_proactive_is_enabled(const hu_persona_t *persona);
+
 hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *persona,
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len);
+
+/* P6-5: shared absolute-rules block. Writes the highest-weight
+ * formatting/identity instructions ("You are HUMAN", lowercase, no
+ * markdown, etc.) into the caller's buffer. Called from BOTH the
+ * reactive path (src/agent/agent_stream.c) and the proactive path
+ * (src/daemon_proactive.c) so the two paths cannot drift.
+ *
+ * `persona` is currently unused but accepted so future per-persona
+ * overrides don't break the call site.
+ *
+ * Returns HU_OK on success with *out_len set; HU_ERR_INVALID_ARGUMENT
+ * on NULL buf or zero cap; HU_ERR_OUT_OF_MEMORY if the static block
+ * would exceed cap. */
+hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
+                                           size_t *out_len);
 
 hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *channel,
                                       size_t channel_len, const char *topic, size_t topic_len,
@@ -714,6 +748,7 @@ typedef enum {
     HU_PERSONA_ACTION_MERGE,
     HU_PERSONA_ACTION_IMPORT,
     HU_PERSONA_ACTION_EVAL,
+    HU_PERSONA_ACTION_EXPORT_BANK,  /* human persona export-bank <name> [--output <path>] */
     HU_PERSONA_ACTION_FILLER_ADD,   /* human persona filler add --channel <ch> "<text>" */
     HU_PERSONA_ACTION_FILLER_LIST,  /* human persona filler list --channel <ch> */
     HU_PERSONA_ACTION_FILLER_REMOVE /* human persona filler remove --channel <ch> --index N */
@@ -737,6 +772,11 @@ typedef struct hu_persona_cli_args {
     const char *filler_channel; /* --channel <name> for filler subcommands */
     const char *filler_text;    /* positional "<text>" for filler add */
     int filler_index;           /* --index <n> for filler remove; -1 = not set */
+    /* --output <path> for export-bank action; NULL means stdout. The
+     * underlying exporter (`hu_persona_bank_export_jsonl`) requires a
+     * path, so a NULL value resolves to an in-process temp file that
+     * we read back and stream to stdout. */
+    const char *output_path;
 } hu_persona_cli_args_t;
 
 hu_error_t hu_persona_cli_parse(int argc, const char **argv, hu_persona_cli_args_t *out);

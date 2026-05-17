@@ -45,11 +45,12 @@ typedef struct hu_delayed_followup {
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_superhuman_inside_joke_store(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, const char *context, size_t context_len,
-    const char *punchline, size_t punchline_len);
+                                           const char *contact_id, size_t contact_id_len,
+                                           const char *context, size_t context_len,
+                                           const char *punchline, size_t punchline_len);
 hu_error_t hu_superhuman_inside_joke_list(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, size_t limit,
-    hu_inside_joke_t **out, size_t *out_count);
+                                          const char *contact_id, size_t contact_id_len,
+                                          size_t limit, hu_inside_joke_t **out, size_t *out_count);
 hu_error_t hu_superhuman_inside_joke_reference(void *sqlite_ctx, int64_t id);
 void hu_superhuman_inside_joke_free(hu_allocator_t *alloc, hu_inside_joke_t *arr, size_t count);
 
@@ -58,36 +59,42 @@ void hu_superhuman_inside_joke_free(hu_allocator_t *alloc, hu_inside_joke_t *arr
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, const char *description, size_t desc_len,
-    const char *who, size_t who_len, int64_t deadline);
+                                          const char *contact_id, size_t contact_id_len,
+                                          const char *description, size_t desc_len, const char *who,
+                                          size_t who_len, int64_t deadline);
 hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
-    int64_t now_ts, size_t limit, hu_superhuman_commitment_t **out, size_t *out_count);
+                                             int64_t now_ts, size_t limit,
+                                             hu_superhuman_commitment_t **out, size_t *out_count);
 hu_error_t hu_superhuman_commitment_mark_followed_up(void *sqlite_ctx, int64_t id);
 void hu_superhuman_commitment_free(hu_allocator_t *alloc, hu_superhuman_commitment_t *arr,
-    size_t count);
+                                   size_t count);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Temporal patterns
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_superhuman_temporal_record(void *sqlite_ctx, const char *contact_id,
-    size_t contact_id_len, int day_of_week, int hour, int64_t response_time_ms);
+                                         size_t contact_id_len, int day_of_week, int hour,
+                                         int64_t response_time_ms);
 hu_error_t hu_superhuman_temporal_get_quiet_hours(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, int *out_day, int *out_hour_start,
-    int *out_hour_end);
+                                                  const char *contact_id, size_t contact_id_len,
+                                                  int *out_day, int *out_hour_start,
+                                                  int *out_hour_end);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Delayed follow-ups
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, const char *topic, size_t topic_len,
-    int64_t scheduled_at);
+                                                   const char *contact_id, size_t contact_id_len,
+                                                   const char *topic, size_t topic_len,
+                                                   int64_t scheduled_at);
 hu_error_t hu_superhuman_delayed_followup_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
-    int64_t now_ts, hu_delayed_followup_t **out, size_t *out_count);
+                                                   int64_t now_ts, hu_delayed_followup_t **out,
+                                                   size_t *out_count);
 hu_error_t hu_superhuman_delayed_followup_mark_sent(void *sqlite_ctx, int64_t id);
 void hu_superhuman_delayed_followup_free(hu_allocator_t *alloc, hu_delayed_followup_t *arr,
-    size_t count);
+                                         size_t count);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Micro-moments
@@ -96,60 +103,77 @@ void hu_superhuman_delayed_followup_free(hu_allocator_t *alloc, hu_delayed_follo
 /* Formatted list strings: *out_len is content length (bytes before NUL). Free with *out_len + 1. */
 
 hu_error_t hu_superhuman_micro_moment_store(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, const char *fact, size_t fact_len,
-    const char *significance, size_t sig_len);
+                                            const char *contact_id, size_t contact_id_len,
+                                            const char *fact, size_t fact_len,
+                                            const char *significance, size_t sig_len);
 hu_error_t hu_superhuman_micro_moment_list(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, size_t limit, char **out_json, size_t *out_len);
+                                           const char *contact_id, size_t contact_id_len,
+                                           size_t limit, char **out_json, size_t *out_len);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Avoidance patterns
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_superhuman_avoidance_record(void *sqlite_ctx, const char *contact_id,
-    size_t contact_id_len, const char *topic, size_t topic_len, bool topic_changed_quickly);
+                                          size_t contact_id_len, const char *topic,
+                                          size_t topic_len, bool topic_changed_quickly);
 hu_error_t hu_superhuman_avoidance_list(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, char **out_json, size_t *out_len);
+                                        const char *contact_id, size_t contact_id_len,
+                                        char **out_json, size_t *out_len);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Topic baselines
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_superhuman_topic_baseline_record(void *sqlite_ctx, const char *contact_id,
-    size_t contact_id_len, const char *topic, size_t topic_len);
+                                               size_t contact_id_len, const char *topic,
+                                               size_t topic_len);
 hu_error_t hu_superhuman_topic_absence_list(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, int64_t now_ts, int64_t absence_days,
-    char **out_json, size_t *out_len);
+                                            const char *contact_id, size_t contact_id_len,
+                                            int64_t now_ts, int64_t absence_days, char **out_json,
+                                            size_t *out_len);
+
+/* 2026-05-16 P4-1: mark a topic_baselines row as "we sent a check-in about
+ * this topic to this contact at this time" so the F30 curiosity SELECT
+ * doesn't re-pick it for 24h. */
+hu_error_t hu_superhuman_topic_baseline_mark_checkin_sent(void *sqlite_ctx, const char *contact_id,
+                                                          size_t contact_id_len, const char *topic,
+                                                          size_t topic_len, int64_t now_ts);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Growth milestones
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_superhuman_growth_store(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, const char *topic, size_t topic_len,
-    const char *before_state, size_t before_len, const char *after_state, size_t after_len);
+                                      const char *contact_id, size_t contact_id_len,
+                                      const char *topic, size_t topic_len, const char *before_state,
+                                      size_t before_len, const char *after_state, size_t after_len);
 hu_error_t hu_superhuman_growth_list_recent(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, size_t limit, char **out_json, size_t *out_len);
+                                            const char *contact_id, size_t contact_id_len,
+                                            size_t limit, char **out_json, size_t *out_len);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Pattern observations
  * ────────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_superhuman_pattern_record(void *sqlite_ctx, const char *contact_id,
-    size_t contact_id_len, const char *topic, size_t topic_len, const char *tone, size_t tone_len,
-    int day_of_week, int hour);
+                                        size_t contact_id_len, const char *topic, size_t topic_len,
+                                        const char *tone, size_t tone_len, int day_of_week,
+                                        int hour);
 hu_error_t hu_superhuman_pattern_list(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, size_t limit, char **out_json, size_t *out_len);
+                                      const char *contact_id, size_t contact_id_len, size_t limit,
+                                      char **out_json, size_t *out_len);
 
 hu_error_t hu_superhuman_memory_build_context(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, bool include_avoidance,
-    char **out, size_t *out_len);
+                                              const char *contact_id, size_t contact_id_len,
+                                              bool include_avoidance, char **out, size_t *out_len);
 
 /* Extraction pipeline — post-turn storage (Task 18) */
 hu_error_t hu_superhuman_extract_and_store(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len,
-    const char *user_msg, size_t user_len,
-    const char *assistant_msg, size_t assistant_len,
-    const char *history, size_t history_len);
+                                           const char *contact_id, size_t contact_id_len,
+                                           const char *user_msg, size_t user_len,
+                                           const char *assistant_msg, size_t assistant_len,
+                                           const char *history, size_t history_len);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Per-contact style evolution — tracks how communication adapts over time
@@ -159,19 +183,20 @@ typedef struct hu_contact_style_stats {
     char contact_id[128];
     uint32_t message_count;
     double avg_response_length;
-    double formality_score;     /* 0.0 = casual, 1.0 = formal */
-    double emoji_frequency;     /* emoji per message */
-    double question_rate;       /* fraction of messages ending with ? */
+    double formality_score; /* 0.0 = casual, 1.0 = formal */
+    double emoji_frequency; /* emoji per message */
+    double question_rate;   /* fraction of messages ending with ? */
     int64_t last_interaction;
     int64_t first_interaction;
 } hu_contact_style_stats_t;
 
 hu_error_t hu_superhuman_style_record(void *sqlite_ctx, const char *contact_id,
-    size_t contact_id_len, size_t response_length, double formality,
-    bool used_emoji, bool asked_question);
-hu_error_t hu_superhuman_style_get(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, hu_contact_style_stats_t *out);
+                                      size_t contact_id_len, size_t response_length,
+                                      double formality, bool used_emoji, bool asked_question);
+hu_error_t hu_superhuman_style_get(void *sqlite_ctx, hu_allocator_t *alloc, const char *contact_id,
+                                   size_t contact_id_len, hu_contact_style_stats_t *out);
 hu_error_t hu_superhuman_style_build_guidance(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, char **out, size_t *out_len);
+                                              const char *contact_id, size_t contact_id_len,
+                                              char **out, size_t *out_len);
 
 #endif /* HU_MEMORY_SUPERHUMAN_H */

@@ -9,7 +9,7 @@ _human() {
 
     # Global flags (before or as first argument)
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W '--version -v --help -h --mcp agent agents auth calibrate capabilities channel config cron doctor eval evaluation feed gateway hardware help hula init mcp memory migrate ml models onboard paperclip persona plugins pwa research sandbox schedule service service-loop setup skills status update version voice workspace' -- "$cur"))
+        COMPREPLY=($(compgen -W '--version -v --help -h --mcp agent agents auth calibrate capabilities channel config cron demo doctor eval evaluation feed gateway hardware help hula init mcp memory migrate ml models onboard paperclip persona plugins pwa research sandbox schedule service service-loop setup skills status update version voice workspace' -- "$cur"))
         return
     fi
 
@@ -84,6 +84,11 @@ _human() {
         paperclip)
             if [[ $COMP_CWORD -eq 2 ]]; then
                 COMPREPLY=($(compgen -W 'heartbeat' -- "$cur"))
+            fi
+            ;;
+        demo)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=($(compgen -W 'rl-closed-loop' -- "$cur"))
             fi
             ;;
         *)

@@ -2,7 +2,6 @@
 #include "agent_internal.h"
 #include "human/agent/best_of_n.h"
 #include "human/agent/humanness.h"
-#include "human/agent/stop_sequence_registry.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
@@ -29,14 +28,36 @@
 #include "human/persona/style_mirror.h"
 #include "human/persona/voice_maturity.h"
 
-#include "human/agent/channel_trust.h"
 #include "human/agent/conv_goals.h"
 #include "human/agent/model_router.h"
+/* Phase 2 Task 14 (RL SOTA): forward-declare the two reaction-handler
+ * lifecycle hooks instead of including human/agent/reaction_handler.h.
+ *
+ * Why forward-decl, not #include:
+ *   reaction_handler.h transitively pulls in human/channels/reaction_event.h,
+ *   which redefines HU_REACTION_QUESTION and HU_REACTION_CUSTOM_EMOJI as
+ *   members of hu_reaction_kind_t. Those names are ALREADY defined as
+ *   members of hu_reaction_type_t in human/channel.h, which agent_turn.c
+ *   pulls in transitively via agent_internal.h -> human/agent.h:30. The
+ *   collision is a hard -Wpedantic -Werror compile error. The codebase
+ *   already documents this constraint in src/channels/slack_reactions.c
+ *   header comment ("Pulling both headers into the same translation unit
+ *   is a compile error"); the Phase 2 plan's Correction #4 told us to
+ *   #include the header but did not account for this collision.
+ *
+ * Forward-decl is safe here because both functions are pure (void) -> void
+ * and (void) -> int — no types from reaction_event.h cross the boundary.
+ * Resolving the collision properly (renaming one of the colliding enum
+ * values) is a separate, larger change tracked outside Task 14. */
+void hu_reaction_handler_clear_turn(void);
+int hu_reaction_handler_was_called_this_turn(void);
+#include "human/agent/channel_trust.h"
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/response_guard.h"
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/response_verifier.h"
 #include "human/agent/validators/builtin.h"
+#include "human/agent/world_model.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/behavior/policy.h"
 #include "human/behavior/pressure.h"
@@ -51,8 +72,10 @@
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/neural_memory.h"
 #include "human/memory/personal_model.h"
+#include "human/observability/validator_telemetry.h"
 #include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
+#include "human/provider/structured_output.h"
 #include "human/security/sycophancy_guard.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
@@ -129,6 +152,32 @@ static void at_free_patterns(hu_allocator_t *alloc, const char **arr, const char
         i++;
     }
     alloc->free(alloc->ctx, (void *)arr, slot_count * sizeof(const char *));
+}
+
+/* Story F.2 — collect HU_ROLE_TOOL names from recent history (newest first). */
+static size_t at_collect_recent_tool_names_(const hu_agent_t *agent, const char **out_names,
+                                            size_t out_cap) {
+    if (!agent || !out_names || out_cap == 0 || agent->history_count <= 1)
+        return 0;
+    size_t n = 0;
+    for (size_t hi = agent->history_count; hi > 0 && n < out_cap; hi--) {
+        const hu_owned_message_t *m = &agent->history[hi - 1];
+        if (m->role != HU_ROLE_TOOL)
+            continue;
+        if (!m->name || m->name_len == 0)
+            continue;
+        bool dup = false;
+        for (size_t j = 0; j < n; j++) {
+            if (strcmp(out_names[j], m->name) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup)
+            continue;
+        out_names[n++] = m->name;
+    }
+    return n;
 }
 
 hu_error_t hu_agent_turn_data_init(hu_allocator_t *alloc) {
@@ -246,7 +295,6 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/memory/lifecycle/semantic_cache.h"
 #include "human/observability/bth_metrics.h"
 #include "human/observability/otlp.h"
-#include "human/observability/validator_telemetry.h"
 #include "human/tools/validation.h"
 #include <math.h>
 #ifdef HU_ENABLE_SQLITE
@@ -289,7 +337,6 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/permission.h"
 #include "human/persona.h"
 #include "human/provider.h"
-#include "human/provider/structured_output.h"
 #include "human/security.h"
 #include "human/security/causal_armor.h"
 #include "human/security/companion_safety.h"
@@ -1063,9 +1110,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
     char *somatic_ctx = NULL;
     size_t somatic_ctx_len = 0;
-    /* Sprint 6 US-14: voice maturity directive — static buffer, no allocation needed */
-    char voice_maturity_dir[256];
-    size_t voice_maturity_dir_len = 0;
     char *narrative_self_ctx = NULL;
     size_t narrative_self_ctx_len = 0;
     char *presence_ctx = NULL;
@@ -1182,17 +1226,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         percep.conversation = NULL;
 
         hu_emotional_cognition_perceive(&agent->infra.emotional_cognition, &percep);
-
-        /* Sprint 6 US-17: emotional contagion. Partner's detected emotion modulates
-         * Seth's emotional cognition before the prompt is built. The dominant STM
-         * emotion from the most-recent inbound turn is treated as the partner signal;
-         * contagion is bounded to 30% so Seth is affected, not overwritten. */
-        if (stm_emo && stm_emo_count > 0) {
-            hu_emotion_tag_t partner_emotion = stm_emo[0].tag;
-            float partner_intensity = stm_emo[0].intensity;
-            (void)hu_emotional_apply_contagion(&agent->infra.emotional_cognition, partner_emotion,
-                                               partner_intensity, 0.3f);
-        }
 
         size_t recent_tools = 0;
         if (agent->history_count > 1) {
@@ -1407,6 +1440,24 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                               cognition_budget.max_memory_chars);
         hu_memory_loader_set_facade(&loader, agent->w7_facade);
         hu_memory_loader_set_personal_model(&loader, &agent->personal_model);
+        /* Story B (sprint-4 follow-up): bind persona context so the loader's
+         * supplementary graph render runs with persona-grounded ToM and the
+         * channel-aware pragmatics digest. */
+        hu_persona_context_t loader_pctx = {0};
+        if (agent->persona) {
+            const char *loader_recent_tools[HU_SELF_RECENT_TOOLS];
+            size_t loader_recent_tools_n =
+                at_collect_recent_tool_names_(agent, loader_recent_tools, HU_SELF_RECENT_TOOLS);
+            loader_pctx.persona = agent->persona;
+            loader_pctx.channel = agent->active_channel;
+            loader_pctx.channel_len = agent->active_channel_len;
+            loader_pctx.delta_limit = 8;
+            loader_pctx.tools = agent->tools;
+            loader_pctx.tools_count = agent->tools_count;
+            loader_pctx.recent_tools_used = loader_recent_tools_n ? loader_recent_tools : NULL;
+            loader_pctx.recent_tools_used_count = loader_recent_tools_n;
+            hu_memory_loader_set_persona_context(&loader, &loader_pctx);
+        }
         hu_error_t load_err = hu_memory_loader_load(
             &loader, msg, msg_len, agent->memory_session_id ? agent->memory_session_id : "",
             agent->memory_session_id ? agent->memory_session_id_len : 0, &memory_ctx,
@@ -2111,51 +2162,43 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             {
                 hu_self_improve_t si;
                 if (hu_self_improve_create(agent->alloc, intel_db, &si) == HU_OK) {
-                    /* Both self-improve helpers return HU_OK + a 1-byte
-                     * empty string on the "no rows" path (self_improve.c:442
-                     * and :500). The previous gate freed only on len > 0,
-                     * leaking the empty buffer every turn — PR55 ASan ran
-                     * caught 4 such 1-byte chains. Free whenever the helper
-                     * returns HU_OK and the pointer is non-NULL; keep
-                     * len > 0 as the gate for appending to the prompt. */
                     char *patches = NULL;
                     size_t patches_len = 0;
-                    if (hu_self_improve_get_prompt_patches(&si, &patches, &patches_len) == HU_OK) {
-                        if (patches && patches_len > 0) {
-                            int n = snprintf(parts + pos, sizeof(parts) - pos,
-                                             "### Learned Behaviors\n%.*s\n", (int)patches_len,
-                                             patches);
-                            if (n > 0 && pos + (size_t)n < sizeof(parts))
-                                pos += (size_t)n;
-                        }
-                        if (patches)
-                            agent->alloc->free(agent->alloc->ctx, patches, patches_len + 1);
+                    if (hu_self_improve_get_prompt_patches(&si, &patches, &patches_len) == HU_OK &&
+                        patches && patches_len > 0) {
+                        int n =
+                            snprintf(parts + pos, sizeof(parts) - pos,
+                                     "### Learned Behaviors\n%.*s\n", (int)patches_len, patches);
+                        if (n > 0 && pos + (size_t)n < sizeof(parts))
+                            pos += (size_t)n;
+                        agent->alloc->free(agent->alloc->ctx, patches, patches_len + 1);
                     }
                     char *tool_prefs = NULL;
                     size_t tool_prefs_len = 0;
                     if (hu_self_improve_get_tool_prefs_prompt(&si, &tool_prefs, &tool_prefs_len) ==
-                        HU_OK) {
-                        if (tool_prefs && tool_prefs_len > 0) {
-                            int n =
-                                snprintf(parts + pos, sizeof(parts) - pos, "\n%s\n", tool_prefs);
-                            if (n > 0 && pos + (size_t)n < sizeof(parts))
-                                pos += (size_t)n;
-                        }
-                        if (tool_prefs)
-                            agent->alloc->free(agent->alloc->ctx, tool_prefs, tool_prefs_len + 1);
+                            HU_OK &&
+                        tool_prefs && tool_prefs_len > 0) {
+                        int n = snprintf(parts + pos, sizeof(parts) - pos, "\n%s\n", tool_prefs);
+                        if (n > 0 && pos + (size_t)n < sizeof(parts))
+                            pos += (size_t)n;
+                        agent->alloc->free(agent->alloc->ctx, tool_prefs, tool_prefs_len + 1);
                     }
                     hu_self_improve_deinit(&si);
                 }
             }
 
-            /* Goals: active goals context */
+            /* Goals: active goals context — P3-1 scopes per-contact via memory_session_id. */
             {
                 hu_goal_engine_t ge;
                 if (hu_goal_engine_create(agent->alloc, intel_db, &ge) == HU_OK) {
                     char *gctx = NULL;
                     size_t gctx_len = 0;
-                    if (hu_goal_build_context(&ge, &gctx, &gctx_len) == HU_OK && gctx &&
-                        gctx_len > 0) {
+                    const char *goal_cid = agent->memory_session_id ? agent->memory_session_id : "";
+                    size_t goal_cid_len =
+                        agent->memory_session_id ? agent->memory_session_id_len : 0;
+                    if (hu_goal_build_context(&ge, goal_cid, goal_cid_len, &gctx, &gctx_len) ==
+                            HU_OK &&
+                        gctx && gctx_len > 0) {
                         int n = snprintf(parts + pos, sizeof(parts) - pos, "### %.*s\n",
                                          (int)gctx_len, gctx);
                         if (n > 0 && pos + (size_t)n < sizeof(parts))
@@ -2875,19 +2918,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_somatic_build_context(agent->alloc, &agent->frontiers.somatic, &somatic_ctx,
                                  &somatic_ctx_len);
 
-        /* Sprint 6 US-14: Voice maturity directive — inject stage-specific guidance alongside
-         * somatic/mood context. The voice profile lives on agent->voice_profile; we compute
-         * the current stage and emit a concise directive tag for the LLM prompt. */
-#ifdef HU_ENABLE_PERSONA
-        if (agent->voice_profile_initialized) {
-            hu_voice_stage_t vm_stage = hu_voice_compute_stage(
-                agent->voice_profile.interaction_count, agent->voice_profile.emotional_exchanges,
-                agent->voice_profile.warmth_score);
-            voice_maturity_dir_len = hu_voice_maturity_build_directive(vm_stage, voice_maturity_dir,
-                                                                       sizeof(voice_maturity_dir));
-        }
-#endif /* HU_ENABLE_PERSONA */
-
         /* F8: Presence Gradient — derive from real relationship + vulnerability */
         float f8_vulnerability = 0.0f;
         uint32_t f8_rel_depth = 0;
@@ -3421,7 +3451,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         !narrative_self_ctx && !creative_voice_ctx && !growth_ctx && !boundary_ctx &&
         !rel_episode_ctx && !trust_ctx && !humor_dir && !syc_friction_ctx && !conv_goals_ctx &&
         !outcome_ctx && !intelligence_ctx && !acp_context && !plan_ctx && !instruction_ctx &&
-        !voice_maturity_dir_len && !hu_personal_model_has_content(&agent->personal_model) &&
+        !hu_personal_model_has_content(&agent->personal_model) &&
         !(agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0)) {
         err = hu_prompt_build_with_cache(agent->alloc, agent->cached_static_prompt,
                                          agent->cached_static_prompt_len, memory_ctx,
@@ -3526,10 +3556,29 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             size_t tom_p_len = tom_p[0] ? strlen(tom_p) : 0;
             size_t tom_q_len = tom_q[0] ? strlen(tom_q) : 0;
             size_t tom_c_len = tom_c[0] ? strlen(tom_c) : 0;
+            /* Story B (sprint-4 follow-up): thread persona context so the
+             * bridge's persona-merge runs and interaction_style reaches the
+             * rendered prompt. Previously this passed NULL → merge skipped. */
+            hu_persona_context_t pctx = {0};
+            const hu_persona_context_t *pctx_p = NULL;
+            if (agent->persona) {
+                const char *recent_tool_names[HU_SELF_RECENT_TOOLS];
+                size_t recent_tool_names_n =
+                    at_collect_recent_tool_names_(agent, recent_tool_names, HU_SELF_RECENT_TOOLS);
+                pctx.persona = agent->persona;
+                pctx.channel = agent->active_channel;
+                pctx.channel_len = agent->active_channel_len;
+                pctx.delta_limit = 8;
+                pctx.tools = agent->tools;
+                pctx.tools_count = agent->tools_count;
+                pctx.recent_tools_used = recent_tool_names_n ? recent_tool_names : NULL;
+                pctx.recent_tools_used_count = recent_tool_names_n;
+                pctx_p = &pctx;
+            }
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                      agent->memory_session_id_len, 0, &world_model_ctx,
                                      &world_model_ctx_len, tom_p, tom_p_len, tom_q, tom_q_len,
-                                     tom_c, tom_c_len, &agent->personal_model, NULL);
+                                     tom_c, tom_c_len, &agent->personal_model, pctx_p);
             if (world_model_ctx_len > 0)
                 agent->world_model_loads++;
         }
@@ -3682,9 +3731,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .personal_model_context_len = personal_model_ctx_len,
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
-            /* Sprint 6 US-14: voice maturity directive — stack buffer, valid for prompt lifetime */
-            .voice_maturity_directive = voice_maturity_dir_len ? voice_maturity_dir : NULL,
-            .voice_maturity_directive_len = voice_maturity_dir_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
         if (world_model_ctx) {
@@ -4116,20 +4162,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         req.tools = (agent->tool_specs_count > 0) ? agent->tool_specs : NULL;
         req.tools_count = agent->tool_specs_count;
     }
-    {
-        const char *prov_name = (agent->provider.vtable && agent->provider.vtable->get_name)
-                                    ? agent->provider.vtable->get_name(agent->provider.ctx)
-                                    : NULL;
-        size_t prov_name_len = prov_name ? strlen(prov_name) : 0;
-        const char *const *stop_seqs = NULL;
-        size_t stop_seqs_count = 0;
-        hu_stop_sequence_registry_lookup(prov_name, prov_name_len, &stop_seqs, &stop_seqs_count);
-        req.stop_sequences = stop_seqs;
-        req.stop_sequences_count = stop_seqs_count;
-    }
     if (agent->persona && agent->persona->structured_output_enabled) {
         req.response_format = "json_schema";
-        req.response_format_len = 11; /* strlen("json_schema") */
+        req.response_format_len = 11;
         req.response_schema = hu_structured_output_chat_reply_schema();
         req.response_schema_len = hu_structured_output_chat_reply_schema_len();
     }
@@ -5226,24 +5261,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             if (resp.content && resp.content_len > 0) {
-                /* PRM: score response reasoning chain for quality */
-                if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
-                    resp.content_len > 100) {
-                    hu_prm_result_t prm_res;
-                    if (hu_prm_score_chain(agent->alloc, &agent->sota.prm_config, resp.content,
-                                           resp.content_len, &prm_res) == HU_OK) {
-                        prm_turn_score = prm_res.aggregate_score;
-                        hu_prm_result_free(agent->alloc, &prm_res);
-                    }
-                }
-
-                /* PRM per-step: score response quality as a reasoning step */
+                /* ThinkPRM verifier: score response reasoning steps */
+                hu_prm_verify_result_t prm_verify = {0};
+                bool prm_verified = false;
                 if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
                     resp.content_len > 50) {
-                    double step_score = 0.0;
-                    hu_prm_score_step(agent->alloc, &agent->sota.prm_config, resp.content,
-                                      resp.content_len, msg, msg_len, &step_score);
-                    prm_turn_score = step_score;
+                    if (hu_prm_verify_reasoning(agent->alloc, &agent->sota.prm_config, resp.content,
+                                                resp.content_len, msg, msg_len,
+                                                &prm_verify) == HU_OK) {
+                        prm_turn_score = prm_verify.aggregate_score;
+                        prm_verified = true;
+                    }
                 }
 
                 /* Reflection: evaluate response quality and retry if needed */
@@ -5257,12 +5285,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                    resp.content, resp.content_len, quality);
                 }
 
-                /* PRM quality gate: low step-level score triggers retry */
-                if (prm_turn_score > 0.0 && prm_turn_score < 0.3 &&
-                    quality == HU_QUALITY_ACCEPTABLE && agent->reflection.enabled &&
-                    reflection_retries_left > 0) {
+                if (prm_verified && prm_turn_score < 1.0)
+                    hu_log_info("agent_turn", NULL, "PRM reasoning score: %.3f (threshold %.3f)",
+                                prm_turn_score, agent->sota.prm_config.retry_threshold);
+
+                /* PRM quality gate: verification failure triggers retry */
+                if (prm_verified && !prm_verify.passed && quality == HU_QUALITY_ACCEPTABLE &&
+                    agent->reflection.enabled && reflection_retries_left > 0) {
                     quality = HU_QUALITY_NEEDS_RETRY;
                 }
+                if (prm_verified)
+                    hu_prm_verify_result_free(agent->alloc, &prm_verify);
+                (void)prm_turn_score;
 
                 if (quality == HU_QUALITY_NEEDS_RETRY && agent->reflection.enabled &&
                     reflection_retries_left > 0 && iter < agent->max_tool_iterations - 1) {
@@ -5438,6 +5472,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 ab_result.candidates[bi].response = NULL;
                                 ab_result.candidates[bi].response_len = 0;
                                 ab_owned = true;
+                                hu_guard_log_selection_audit(agent->observer, agent->active_channel,
+                                                             agent->active_channel_len,
+                                                             ab_result.candidate_count, bi,
+                                                             ab_result.candidates[bi].quality_score,
+                                                             final_len, final_content, final_len);
                             }
                         }
                         hu_ab_result_deinit(&ab_result, agent->alloc);
@@ -5875,6 +5914,128 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         ab_owned = false;
                     }
                 }
+                /* Turn-local guard (G5–G8) after outbound chain — check_ex with guard_ctx. */
+                /* Last-mile response guard — strips Harmony / ChatML special
+                 * tokens and rejects degenerate model output (runaway
+                 * repetition). Catches the class of failure that leaked
+                 * `<|channel>thought` + a 200x quote loop to a real human
+                 * contact via iMessage on 2026-05-10. */
+                {
+                    char *guard_out = NULL;
+                    size_t guard_out_len = 0;
+                    hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
+                    hu_guard_report_t guard_report;
+                    memset(&guard_report, 0, sizeof(guard_report));
+                    hu_guard_context_t guard_ctx;
+                    memset(&guard_ctx, 0, sizeof(guard_ctx));
+                    guard_ctx.recent_avg_len = hu_agent_internal_recent_assistant_avg_len(agent, 5);
+                    guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
+                        agent->active_channel, agent->active_channel_len);
+                    guard_ctx.director_text = agent->scene_direction_text;
+                    guard_ctx.director_len = agent->scene_direction_text_len;
+                    guard_ctx.director_history = (const char *const *)agent->director_history;
+                    guard_ctx.director_history_lens = agent->director_history_lens;
+                    guard_ctx.director_history_count = agent->director_history_count;
+                    if (agent->persona) {
+                        if (agent->persona->name && agent->persona->name_len > 1) {
+                            guard_ctx.persona_name = agent->persona->name;
+                            guard_ctx.persona_name_len = agent->persona->name_len;
+                        }
+                        const char *id = agent->persona->identity ? agent->persona->identity
+                                                                  : agent->persona->core_anchor;
+                        if (id) {
+                            guard_ctx.persona_identity = id;
+                            guard_ctx.persona_identity_len = strlen(id);
+                        }
+                        if (agent->persona->biography) {
+                            guard_ctx.persona_biography = agent->persona->biography;
+                            guard_ctx.persona_biography_len = strlen(agent->persona->biography);
+                        }
+                    }
+                    hu_error_t guard_err = hu_response_guard_check_ex(
+                        agent->alloc, final_content, final_len, &guard_ctx, &guard_out,
+                        &guard_out_len, &guard_outcome, &guard_report);
+                    if (guard_err == HU_OK) {
+                        if (guard_outcome == HU_GUARD_REJECT) {
+                            hu_log_error(
+                                "agent_turn", agent->observer,
+                                "response_guard REJECT: turn final (len=%zu, recent_avg=%zu) "
+                                "[semantic=%d length=%d director=%d persona=%d identity=%d "
+                                "repetition_run=%zu] - retrying once with repair prompt",
+                                final_len, guard_ctx.recent_avg_len,
+                                guard_report.detected_semantic_leak ? 1 : 0,
+                                guard_report.detected_length_anomaly ? 1 : 0,
+                                guard_report.detected_director_echo ? 1 : 0,
+                                guard_report.detected_persona_pii_echo ? 1 : 0,
+                                guard_report.detected_persona_identity_echo ? 1 : 0,
+                                guard_report.max_repetition_run);
+                            char *retry_content = NULL;
+                            size_t retry_len = 0;
+                            hu_guard_report_t retry_report;
+                            memset(&retry_report, 0, sizeof(retry_report));
+                            hu_error_t retry_err = hu_response_guard_retry_slim(
+                                agent->alloc, agent->observer, agent->config, &agent->provider,
+                                turn_model, turn_model_len, msg, msg_len, &retry_content,
+                                &retry_len, &retry_report);
+                            if (retry_err == HU_OK && retry_content && retry_len > 0) {
+                                hu_agent_m3_on_provider_success(agent);
+                                hu_log_warn("agent_turn", agent->observer,
+                                            "response_guard RECOVERED: retry passed (len=%zu, "
+                                            "stripped=%zu)",
+                                            retry_len, retry_report.bytes_stripped);
+                                if (ab_owned)
+                                    agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                                       final_len + 1);
+                                final_content = retry_content;
+                                final_len = retry_len;
+                                ab_owned = true;
+                            } else {
+                                hu_log_error(
+                                    "agent_turn", agent->observer,
+                                    "response_guard retry failed (err=%s) — suppressing send",
+                                    hu_error_string(retry_err));
+                                if (ab_owned)
+                                    agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                                       final_len + 1);
+                                final_content = NULL;
+                                final_len = 0;
+                                ab_owned = false;
+                            }
+                        } else if (guard_outcome == HU_GUARD_REWROTE) {
+                            hu_log_warn(
+                                "agent_turn", agent->observer,
+                                "response_guard REWROTE: stripped %zu bytes (harmony=%d think=%d)",
+                                guard_report.bytes_stripped,
+                                guard_report.stripped_harmony_tokens ? 1 : 0,
+                                guard_report.stripped_thinking_block ? 1 : 0);
+                            if (ab_owned)
+                                agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                                   final_len + 1);
+                            final_content = guard_out;
+                            final_len = guard_out_len;
+                            ab_owned = true; /* guard allocation is allocator-owned */
+                        }
+                    }
+                }
+                /* Strip AI phrases and formal structure so the model's
+                 * history matches the wire text the user actually sees. */
+                if (final_content && final_len > 0) {
+                    if (!ab_owned) {
+                        char *copy = hu_strndup(agent->alloc, final_content, final_len);
+                        if (copy) {
+                            final_content = copy;
+                            ab_owned = true;
+                        }
+                    }
+                    if (ab_owned) {
+                        final_len =
+                            hu_conversation_strip_channel_tags((char *)final_content, final_len);
+                        final_len =
+                            hu_conversation_strip_ai_phrases((char *)final_content, final_len);
+                        final_len = hu_conversation_strip_formal_structure((char *)final_content,
+                                                                           final_len);
+                    }
+                }
                 hu_error_t hist_err = hu_agent_internal_append_history(
                     agent, HU_ROLE_ASSISTANT, final_content ? final_content : "", final_len, NULL,
                     0, NULL, 0);
@@ -5904,37 +6065,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_arena_reset(agent->turn_arena);
                     return HU_ERR_OUT_OF_MEMORY;
                 }
-                /* Sprint 6 US-19: post-gen style mirroring (enforcement, not advice).
-                 * Mirrors the partner's case/punctuation patterns from their recent
-                 * inbound messages onto the outbound reply.  Operates in-place on the
-                 * already-allocated mutable copy so no realloc is needed (mirroring
-                 * only lowercases or shortens — never grows the buffer).
-                 * Skip silently when there is no partner signal (< 2 user turns). */
-                {
-                    const char *mirror_msgs[5];
-                    size_t mirror_count = 0;
-                    for (size_t mi = agent->history_count; mi > 0 && mirror_count < 5; mi--) {
-                        size_t hi = mi - 1;
-                        if (agent->history[hi].role == HU_ROLE_USER && agent->history[hi].content &&
-                            agent->history[hi].content_len > 0) {
-                            mirror_msgs[mirror_count++] = agent->history[hi].content;
-                        }
-                    }
-                    if (mirror_count >= 2) {
-                        size_t mirror_len = strlen(*response_out);
-                        hu_style_mirror_report_t mirror_report;
-                        memset(&mirror_report, 0, sizeof(mirror_report));
-                        hu_style_mirror_apply(*response_out, &mirror_len, mirror_msgs, mirror_count,
-                                              &mirror_report);
-                        if (mirror_report.edits > 0 && agent->observer) {
-                            hu_log_info("agent_turn", agent->observer,
-                                        "style_mirror: %zu edit(s) applied (lc=%d period=%d)",
-                                        mirror_report.edits, (int)mirror_report.lowercased_applied,
-                                        (int)mirror_report.periods_stripped);
-                        }
-                    }
-                }
-
                 /* hu_strndup stops at first '\0' within final_len — length must match allocation.
                  */
                 size_t response_effective_len = strlen(*response_out);
@@ -6046,14 +6176,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     }
                 }
 
-                /* Store in semantic response cache for future lookups.
-                 * HIGH-3: must use *response_out (live, strdup'd at line 5705
-                 * and possibly mutated by self_rag) — final_content was freed
-                 * at line 5708 when ab_owned, so passing it here was a
-                 * use-after-free. *response_out + response_effective_len is
-                 * also semantically more correct: it's what the caller
-                 * actually receives, accounting for any post-validation
-                 * self_rag rewrites. */
+                /* Store in semantic response cache for future lookups */
                 if (agent->infra.response_cache && *response_out && response_effective_len > 0) {
                     const char *mname = agent->model_name ? agent->model_name : "";
                     size_t mname_len = agent->model_name ? agent->model_name_len : 0;
@@ -6357,16 +6480,28 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             (void)hu_value_learn_from_correction(&ve, "thoroughness", 12,
                                                                  "User prefers detailed responses",
                                                                  31, 0.2, now_vl);
-                        /* DPO: record user feedback as preference signal */
-                        if (agent->sota.sota_initialized && agent->history_count >= 2) {
-                            const char *last_resp =
-                                agent->history[agent->history_count - 2].content;
-                            size_t last_resp_len =
-                                agent->history[agent->history_count - 2].content_len;
-                            if (last_resp && last_resp_len > 0 && (is_positive || is_negative))
-                                hu_dpo_record_from_feedback(&agent->sota.dpo_collector, msg,
-                                                            msg_len, last_resp, last_resp_len,
-                                                            is_positive);
+                        /* DPO: record user feedback as preference signal.
+                         *
+                         * Phase 2 Task 14 (RL SOTA): if a real reaction event
+                         * (iMessage tapback / Slack reactji) already produced a
+                         * dpo_pair for this turn's assistant message via
+                         * hu_reaction_handler_handle_event, skip the
+                         * substring-heuristic record to avoid double-counting.
+                         * Value-learning calls above are independent and
+                         * continue to fire — only the DPO collector is gated.
+                         * The flag is consumed (cleared) at the end of
+                         * hu_agent_turn so each turn starts fresh. */
+                        if (!hu_reaction_handler_was_called_this_turn()) {
+                            if (agent->sota.sota_initialized && agent->history_count >= 2) {
+                                const char *last_resp =
+                                    agent->history[agent->history_count - 2].content;
+                                size_t last_resp_len =
+                                    agent->history[agent->history_count - 2].content_len;
+                                if (last_resp && last_resp_len > 0 && (is_positive || is_negative))
+                                    hu_dpo_record_from_feedback(&agent->sota.dpo_collector, msg,
+                                                                msg_len, last_resp, last_resp_len,
+                                                                is_positive);
+                            }
                         }
 
                         hu_value_engine_deinit(&ve);
@@ -6407,22 +6542,30 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 }
             }
 #ifdef HU_ENABLE_SQLITE
-            /* Goal progress: advance active goals based on turn output */
+            /* Goal progress: advance active goals based on turn output. P3-1
+             * scopes per-contact using memory_session_id. */
             if (agent->memory) {
                 sqlite3 *goal_db = hu_sqlite_memory_get_db(agent->memory);
                 if (goal_db) {
                     hu_goal_engine_t ge;
                     if (hu_goal_engine_create(agent->alloc, goal_db, &ge) == HU_OK) {
+                        const char *goal_cid =
+                            agent->memory_session_id ? agent->memory_session_id : "";
+                        size_t goal_cid_len =
+                            agent->memory_session_id ? agent->memory_session_id_len : 0;
                         hu_goal_t active_goal;
                         bool gfound = false;
-                        if (hu_goal_select_next(&ge, &active_goal, &gfound) == HU_OK && gfound) {
+                        if (hu_goal_select_next(&ge, goal_cid, goal_cid_len, &active_goal,
+                                                &gfound) == HU_OK &&
+                            gfound) {
                             double pdelta = (turn_tool_results_count > 0)
                                                 ? 0.15 + 0.05 * (double)turn_tool_results_count
                                                 : 0.1;
                             double nprog = active_goal.progress + pdelta;
                             if (nprog > 1.0)
                                 nprog = 1.0;
-                            (void)hu_goal_update_progress(&ge, active_goal.id, nprog,
+                            (void)hu_goal_update_progress(&ge, goal_cid, goal_cid_len,
+                                                          active_goal.id, nprog,
                                                           (int64_t)time(NULL));
                         }
                         hu_goal_engine_deinit(&ge);
@@ -7117,6 +7260,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_workflow_event_log_append(agent->infra.workflow_log, agent->alloc, &ev);
             }
 
+            /* Phase 2 Task 14 (RL SOTA): consume the per-turn reaction flag at
+             * the single point where the substring-heuristic DPO collector
+             * gating above could have been evaluated. This is the primary
+             * success exit of hu_agent_turn — the path that actually
+             * synthesised a response and ran the value-learning + DPO blocks
+             * inside the HU_ENABLE_SQLITE region. Other returns (early cache
+             * hits, error/cancel/timeout/OOM paths) bypass the substring block
+             * entirely, so leaving the flag set there is harmless: the next
+             * turn that reaches this point will still see it. Clearing here
+             * means each turn that consulted the gate consumes the signal
+             * exactly once. If the daemon ever gains concurrent turn dispatch,
+             * move the flag onto hu_agent_t (see header). */
+            hu_reaction_handler_clear_turn();
             return HU_OK;
         }
 
@@ -7554,17 +7710,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                 fprintf(
                                                     stderr,
                                                     "[agent_turn] tool args JSON parse failed\n");
-                                            if (orch_args) {
-                                                /* Spec 03: route through the hook-firing helper
-                                                 * so orchestrator-dispatched tools cannot bypass
-                                                 * the configured pre/post-tool pipeline. */
-                                                hu_agent_internal_dispatch_with_hooks(
-                                                    agent, orch_tool, task->description,
-                                                    task->description_len, calls[s].arguments,
-                                                    calls[s].arguments_len, orch_args,
-                                                    &orch_result);
-                                                hu_json_free(agent->alloc, orch_args);
+                                            if (orch_args && orch_tool->vtable->execute) {
+                                                orch_tool->vtable->execute(orch_tool->ctx,
+                                                                           agent->alloc, orch_args,
+                                                                           &orch_result);
                                             }
+                                            if (orch_args)
+                                                hu_json_free(agent->alloc, orch_args);
                                         }
                                         if (orch_result.success) {
                                             hu_orchestrator_complete_task(
@@ -8177,14 +8329,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         }
                                         *result = hu_tool_result_fail("invalid arguments", 16);
                                         if (retry_args) {
-                                            /* Audit 2026-05-16 / Spec 03: even on approval-retry
-                                             * the hook pipeline must re-fire — a deny hook on
-                                             * shell `rm -rf` should deny the retry too. */
-                                            hu_agent_internal_dispatch_with_hooks(
-                                                agent, tool, call->name, call->name_len,
-                                                call->arguments,
-                                                call->arguments ? call->arguments_len : 0,
-                                                retry_args, result);
+                                            if (tool->vtable->execute)
+                                                tool->vtable->execute(tool->ctx, agent->alloc,
+                                                                      retry_args, result);
                                             hu_json_free(agent->alloc, retry_args);
                                         }
                                     }
@@ -8643,13 +8790,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     }
                                     result = hu_tool_result_fail("invalid arguments", 16);
                                     if (retry_args) {
-                                        /* Spec 03: re-fire hook pipeline on approval-retry. See
-                                         * the early-path migration above. */
-                                        hu_agent_internal_dispatch_with_hooks(
-                                            agent, tool, call->name, call->name_len,
-                                            call->arguments,
-                                            call->arguments ? call->arguments_len : 0, retry_args,
-                                            &result);
+                                        tool->vtable->execute(tool->ctx, agent->alloc, retry_args,
+                                                              &result);
                                         hu_json_free(agent->alloc, retry_args);
                                     }
                                 } else {

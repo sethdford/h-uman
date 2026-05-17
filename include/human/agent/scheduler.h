@@ -110,8 +110,26 @@ hu_error_t hu_scheduler_enqueue(hu_scheduler_t *s, const hu_job_spec_t *job);
 /* Run one scheduling pass.  Dispatches up to `HU_SCHED_MAX_JOBS_PER_TICK`
  * eligible jobs in priority order, respecting the total per-tick budget
  * (`HU_SCHED_TOTAL_BUDGET_MS`).  `now_ms` is used as the wall-clock
- * reference so tests can pin time. */
+ * reference so tests can pin time.
+ *
+ * Legacy entrypoint: dispatches only contact_id='' (global) jobs.  Per-
+ * contact rows stay pending until a caller passes their contact_id via
+ * `hu_scheduler_tick_for`. */
 hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms);
+
+/* 2026-05-16 P3-5: like `hu_scheduler_tick`, but only dispatches jobs whose
+ * stored contact_id is either '' (global) or exactly equal to
+ * `target_contact_id`.  Equality is enforced in SQL — no LIKE / prefix match.
+ *
+ * - `target_contact_id == NULL` or `target_contact_id_len == 0`: dispatch
+ *   only contact_id='' rows (conservative; equivalent to the legacy tick).
+ * - `target_contact_id == "X"`: dispatch contact_id='' OR contact_id='X'.
+ *
+ * A job enqueued for "alice" must never run when the scheduler is ticking
+ * for "bob" — pinned by tests/test_w14_scheduler.c::
+ * test_w14_scheduler_dispatch_scoped_to_target_contact. */
+hu_error_t hu_scheduler_tick_for(hu_scheduler_t *s, int64_t now_ms, const char *target_contact_id,
+                                 size_t target_contact_id_len);
 
 /* Snapshot scheduler + system state.  Always populates `out` even on
  * partial probe failure. */

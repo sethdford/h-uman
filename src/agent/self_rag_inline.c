@@ -145,6 +145,31 @@ static bool inline_wm_entity_in_claim(const hu_world_model_t *wm,
     return false;
 }
 
+/* W11 negative-memory check — does the world-model's negative-memory list
+ * contain an item whose text appears as a substring in the claim?
+ *
+ * Case-insensitive substring match mirroring inline_wm_entity_in_claim.
+ * Returns the matching negative_memory item (for provenance tagging) or
+ * NULL. When a match is found, the critique score is forced to 0 and
+ * fabricated is set — the caller can then trigger NEGATIVE_MEMORY_MATCH
+ * refusal in STRICT mode. */
+static const hu_negative_memory_t *inline_wm_negative_match(
+    const hu_world_model_t *wm, const char *claim, size_t claim_len) {
+    if (!wm || !claim || claim_len == 0 || !wm->negatives)
+        return NULL;
+    for (size_t i = 0; i < wm->negatives_count; i++) {
+        const hu_negative_memory_t *nm = &wm->negatives[i];
+        size_t nl = strlen(nm->text);
+        if (nl < 2 || nl > claim_len)
+            continue;
+        for (size_t j = 0; j + nl <= claim_len; j++) {
+            if (strncasecmp(claim + j, nm->text, nl) == 0)
+                return nm;
+        }
+    }
+    return NULL;
+}
+
 /* Real scoring for `<critique>` claims.
  *
  * Wraps the claim into a single-sentence "draft" and runs it through the v1
@@ -159,6 +184,11 @@ static bool inline_wm_entity_in_claim(const hu_world_model_t *wm,
  * already-loaded WM artifact instead of issuing a second round-trip for
  * entity discovery. The bump is monotone — never lowers the SQL score —
  * so existing supported claims remain supported.
+ *
+ * W11 negative-memory gate: after the v1 score, check whether any of the
+ * world model's negative-memory items match the claim text. If so, force
+ * score=0 / fabricated=true and tag the source as "inline-negative-mem".
+ * This blocks the claim from being emitted in STRICT mode.
  *
  * Side note on `c->prov.source`: callers downstream (the channel renderer,
  * routing tests) rely on `prov.source` carrying the **tag kind** so they
@@ -211,12 +241,29 @@ static void inline_score_critique(hu_allocator_t *alloc, hu_memory_facade_t *m,
         wm_lifted = true;
     }
 
+    /* W11: negative-memory gate. If the claim matches a world-model
+     * negative-memory item, override the score to 0 and mark fabricated
+     * regardless of the SQL/WM result. This is a hard veto. */
+    const hu_negative_memory_t *neg_match =
+        inline_wm_negative_match(wm, c->text, strlen(c->text));
+    if (neg_match) {
+        score = 0.0f;
+        c->support = hu_belief_init(0.0f, "inline-negative-mem", now);
+        c->fabricated = true;
+        if (c->support.prov_count < 4) {
+            hu_provenance_atom_t *p = &c->support.prov[c->support.prov_count++];
+            snprintf(p->source, sizeof(p->source), "neg:%.*s",
+                       (int)(sizeof(p->source) - sizeof("neg:")),
+                       neg_match->scope);
+            p->observed_at = neg_match->created_at;
+            p->weight = 0.0f;
+        }
+        return;
+    }
+
     c->support = hu_belief_init(score, wm_lifted ? "inline-wm-lift" : "inline-graph", now);
     c->fabricated = score < cfg.confidence_threshold;
 
-    /* Add the receipt source as a second provenance atom on the belief
-     * (capacity is 4; init populated atom 0 with "inline-graph" or
-     * "inline-wm-lift"). */
     if (report.claims[0].receipt.source[0] && c->support.prov_count < 4) {
         hu_provenance_atom_t *p = &c->support.prov[c->support.prov_count++];
         snprintf(p->source, sizeof(p->source), "%s",
@@ -467,12 +514,22 @@ static hu_error_t inline_verify(void *vctx, hu_allocator_t *alloc,
     if (req->mode == HU_VERIFY_STRICT && req->abstain_threshold > 0.0f &&
         resp->claims_count > 0) {
         size_t fabricated = 0;
+        bool has_negative_mem = false;
         for (size_t k = 0; k < resp->claims_count; k++) {
-            if (resp->claims[k].fabricated) fabricated++;
+            if (resp->claims[k].fabricated) {
+                fabricated++;
+                if (resp->claims[k].support.prov_count > 0 &&
+                    strncmp(resp->claims[k].support.prov[0].source,
+                            "inline-negative-mem", 19) == 0)
+                    has_negative_mem = true;
+            }
         }
         float ratio = (float)fabricated / (float)resp->claims_count;
         if (ratio >= req->abstain_threshold) {
-            hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE,
+            hu_refusal_reason_t reason = has_negative_mem
+                ? HU_REFUSAL_NEGATIVE_MEMORY_MATCH
+                : HU_REFUSAL_LOW_CONFIDENCE;
+            hu_self_rag_render_refusal(reason,
                                        resp->refusal_text,
                                        sizeof(resp->refusal_text));
             resp->outcome = HU_SELF_RAG_ABSTAINED;

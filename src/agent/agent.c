@@ -1,4 +1,5 @@
 #include "human/agent.h"
+#include "agent_internal.h"
 #include "human/agent/approval_gate.h"
 #include "human/agent/awareness.h"
 #include "human/agent/commitment_store.h"
@@ -199,6 +200,133 @@ void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *us
         if (usage_err != HU_OK)
             hu_log_error("agent", NULL, "usage tracking failed: %s", hu_error_string(usage_err));
     }
+}
+
+void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len) {
+    if (!agent)
+        return;
+    if (!text || text_len == 0) {
+        agent->scene_direction_text = NULL;
+        agent->scene_direction_text_len = 0;
+        return;
+    }
+    agent->scene_direction_text = text;
+    agent->scene_direction_text_len = text_len;
+}
+
+void hu_agent_internal_clear_scene_direction(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    agent->scene_direction_text = NULL;
+    agent->scene_direction_text_len = 0;
+}
+
+/* Sprint 37 — Director history ring buffer.
+ *
+ * The buffer is a small fixed-size array (HU_DIRECTOR_HISTORY_MAX = 4)
+ * of heap-owned NUL-terminated copies. Push:
+ *   1. Reject NULL or text shorter than 30 bytes (G6's threshold —
+ *      below it, the entry would be useless).
+ *   2. Truncate to HU_DIRECTOR_TEXT_CAP bytes if longer.
+ *   3. Allocate a NUL-terminated copy.
+ *   4. If buffer is full, free the oldest (slot MAX-1).
+ *   5. Shift all entries down one slot (slot K → slot K+1).
+ *   6. Place the new copy in slot 0.
+ *   7. Increment count, saturating at MAX. */
+#define HU_DIRECTOR_PUSH_MIN_LEN 30 /* same as HU_GUARD_DIRECTOR_ECHO_MIN_MATCH */
+
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
+                                              size_t text_len) {
+    if (!agent || !agent->alloc || !text || text_len < HU_DIRECTOR_PUSH_MIN_LEN)
+        return;
+
+    size_t copy_len = text_len < HU_DIRECTOR_TEXT_CAP ? text_len : HU_DIRECTOR_TEXT_CAP;
+    char *copy = (char *)agent->alloc->alloc(agent->alloc->ctx, copy_len + 1);
+    if (!copy)
+        return;
+    memcpy(copy, text, copy_len);
+    copy[copy_len] = '\0';
+
+    /* Free oldest slot if buffer is full. */
+    if (agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1]) {
+        agent->alloc->free(agent->alloc->ctx,
+                           agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1],
+                           agent->director_history_lens[HU_DIRECTOR_HISTORY_MAX - 1] + 1);
+        agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1] = NULL;
+        agent->director_history_lens[HU_DIRECTOR_HISTORY_MAX - 1] = 0;
+    }
+    /* Shift entries down (slot K → K+1). */
+    for (size_t i = HU_DIRECTOR_HISTORY_MAX - 1; i > 0; i--) {
+        agent->director_history[i] = agent->director_history[i - 1];
+        agent->director_history_lens[i] = agent->director_history_lens[i - 1];
+    }
+    /* Place new entry at slot 0 (most recent). */
+    agent->director_history[0] = copy;
+    agent->director_history_lens[0] = copy_len;
+    if (agent->director_history_count < HU_DIRECTOR_HISTORY_MAX)
+        agent->director_history_count++;
+}
+
+void hu_agent_internal_free_director_history(hu_agent_t *agent) {
+    if (!agent || !agent->alloc)
+        return;
+    for (size_t i = 0; i < HU_DIRECTOR_HISTORY_MAX; i++) {
+        if (agent->director_history[i]) {
+            agent->alloc->free(agent->alloc->ctx, agent->director_history[i],
+                               agent->director_history_lens[i] + 1);
+            agent->director_history[i] = NULL;
+            agent->director_history_lens[i] = 0;
+        }
+    }
+    agent->director_history_count = 0;
+}
+
+void hu_agent_internal_reset_contact_boundary_state(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    hu_agent_internal_clear_scene_direction(agent);
+    hu_agent_internal_free_director_history(agent);
+}
+
+size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n) {
+    if (!agent || !agent->history || agent->history_count == 0 || max_n == 0)
+        return 0;
+
+    /* Collect assistant lengths oldest → newest among the last `max_n`
+     * turns so we can apply EWMA forward in time. */
+    size_t lens[16];
+    if (max_n > sizeof(lens) / sizeof(lens[0]))
+        max_n = sizeof(lens) / sizeof(lens[0]);
+
+    size_t collected = 0;
+    size_t i = agent->history_count;
+    while (i > 0 && collected < max_n) {
+        i--;
+        const hu_owned_message_t *m = &agent->history[i];
+        if (m->role != HU_ROLE_ASSISTANT)
+            continue;
+        if (!m->content || m->content_len == 0)
+            continue;
+        lens[collected++] = m->content_len;
+    }
+    if (collected == 0)
+        return 0;
+
+    /* Reverse to chronological order (oldest first). */
+    for (size_t a = 0, b = collected - 1; a < b; a++, b--) {
+        size_t tmp = lens[a];
+        lens[a] = lens[b];
+        lens[b] = tmp;
+    }
+
+    double ewma = (double)lens[0];
+    const double alpha = HU_GUARD_ASSISTANT_LEN_EWMA_ALPHA;
+    for (size_t k = 1; k < collected; k++)
+        ewma = alpha * (double)lens[k] + (1.0 - alpha) * ewma;
+
+    if (ewma < 1.0)
+        return 1;
+    return (size_t)ewma;
 }
 
 #define HU_AGENT_HISTORY_INIT_CAP 16
@@ -1000,6 +1128,10 @@ void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64
 void hu_agent_deinit(hu_agent_t *agent) {
     if (!agent)
         return;
+    /* Sprint 37 — free director history ring buffer first (heap-owned
+     * copies, leaks otherwise). Idempotent on agents with no history. */
+    hu_agent_internal_free_director_history(agent);
+
     /* M2 — persist the user-specific model so the next process start can
      * resume with the accumulated facts/topics/style. Best-effort: any IO
      * failure is silently swallowed (the in-memory model still got the

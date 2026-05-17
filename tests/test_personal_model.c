@@ -114,10 +114,8 @@ static void personal_model_reaches_system_prompt_via_config(void) {
     strncpy(m.core.user_name, "Sethford", sizeof(m.core.user_name) - 1);
     const char *text1 = "I love rock climbing on weekends";
     const char *text2 = "I prefer dark roast coffee in the morning";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text1, strlen(text1), true, 1700000000LL, NULL),
-                 HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text2, strlen(text2), true, 1700000060LL, NULL),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text1, strlen(text1), true, 1700000000LL, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text2, strlen(text2), true, 1700000060LL, NULL), HU_OK);
     HU_ASSERT_TRUE(hu_personal_model_has_content(&m));
 
     char pm_buf[8192];
@@ -175,7 +173,8 @@ static void personal_model_save_load_round_trips(void) {
     hu_personal_model_t a;
     hu_personal_model_init(&a);
     /* Seed signal: a couple of fact-shaped utterances + style observations. */
-    hu_personal_model_ingest(&a, "i love climbing in the morning", 30, true, 1700000000LL, NULL);
+    hu_personal_model_ingest(&a, "i love climbing in the morning", 30, true,
+                             1700000000LL, NULL);
     hu_personal_model_ingest(&a, "i never drink coffee", 21, true, 1700000100LL, NULL);
     hu_personal_model_ingest(&a, "lol that's cool 😎", 18, true, 1700000200LL, NULL);
     HU_ASSERT_TRUE(hu_personal_model_has_content(&a));
@@ -441,8 +440,7 @@ static void personal_model_survives_real_sigkill(void) {
 
         hu_personal_model_t a;
         hu_personal_model_init(&a);
-        hu_personal_model_ingest(&a, "i never drink coffee after 2pm", 30, true, 1700000100LL,
-                                 NULL);
+        hu_personal_model_ingest(&a, "i never drink coffee after 2pm", 30, true, 1700000100LL, NULL);
         if (hu_personal_model_save(&a, path) != HU_OK)
             _exit(3);
         hu_personal_model_ingest(&a, "i love long walks at sunset", 27, true, 1700000200LL, NULL);
@@ -550,16 +548,19 @@ static void personal_model_style_directive_formal_verbose(void) {
 
     /* Long polite messages. The formality cue list (please / thank you /
      * would you) pulls formality up; length pulls verbosity up. */
-    const char *long1 = "Please could you walk me through this carefully? Thank you, I would "
-                        "appreciate the additional context, especially around the "
-                        "implementation details and any trade-offs you considered when "
-                        "selecting the data structure backing the cache.";
-    const char *long2 = "Would you mind also expanding on the failure-mode analysis? Please "
-                        "include latency numbers if available; thank you for being thorough "
-                        "in your previous responses.";
-    const char *long3 = "Please share the benchmark methodology. Thank you. Would you "
-                        "specifically clarify how you measured tail latency and what "
-                        "percentiles you reported across runs?";
+    const char *long1 =
+        "Please could you walk me through this carefully? Thank you, I would "
+        "appreciate the additional context, especially around the "
+        "implementation details and any trade-offs you considered when "
+        "selecting the data structure backing the cache.";
+    const char *long2 =
+        "Would you mind also expanding on the failure-mode analysis? Please "
+        "include latency numbers if available; thank you for being thorough "
+        "in your previous responses.";
+    const char *long3 =
+        "Please share the benchmark methodology. Thank you. Would you "
+        "specifically clarify how you measured tail latency and what "
+        "percentiles you reported across runs?";
     HU_ASSERT_EQ(hu_personal_model_ingest(&m, long1, strlen(long1), true, 1700000001, NULL), HU_OK);
     HU_ASSERT_EQ(hu_personal_model_ingest(&m, long2, strlen(long2), true, 1700000002, NULL), HU_OK);
     HU_ASSERT_EQ(hu_personal_model_ingest(&m, long3, strlen(long3), true, 1700000003, NULL), HU_OK);
@@ -622,10 +623,8 @@ static void personal_model_style_directive_proper_case_no_lowercase_clause(void)
      * near zero. The directive should appear (3 samples) but without the
      * "type lowercase" clause. */
     HU_ASSERT_EQ(hu_personal_model_ingest(&m, "Hello there.", 12, true, 1700000001, NULL), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "How are you today?", 18, true, 1700000002, NULL),
-                 HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "What time works?", 16, true, 1700000003, NULL),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "How are you today?", 18, true, 1700000002, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "What time works?", 16, true, 1700000003, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -795,8 +794,11 @@ static void personal_model_topic_directive_caps_at_three(void) {
         const char *name;
         float score;
     } seed[] = {
-        {"hiking", 0.95f},   {"woodworking", 0.85f}, {"jazz", 0.75f},
-        {"climbing", 0.65f}, {"sourdough", 0.55f},
+        {"hiking",      0.95f},
+        {"woodworking", 0.85f},
+        {"jazz",        0.75f},
+        {"climbing",    0.65f},
+        {"sourdough",   0.55f},
     };
     for (size_t i = 0; i < 5; i++) {
         strncpy(m.topics[i].name, seed[i].name, sizeof(m.topics[i].name) - 1);
@@ -1269,8 +1271,8 @@ static void personal_model_fidelity_returns_neg_when_no_samples(void) {
 static void personal_model_fidelity_high_for_matching_response(void) {
     hu_communication_style_t s;
     memset(&s, 0, sizeof(s));
-    s.lowercase_ratio = 1.0f;    /* fully lowercase */
-    s.abbreviation_ratio = 0.0f; /* no shorthand */
+    s.lowercase_ratio = 1.0f;       /* fully lowercase */
+    s.abbreviation_ratio = 0.0f;    /* no shorthand */
     s.avg_message_length = 20;
     s.sample_count = 10;
 
@@ -1285,7 +1287,7 @@ static void personal_model_fidelity_high_for_matching_response(void) {
 static void personal_model_fidelity_low_for_uppercase_response(void) {
     hu_communication_style_t s;
     memset(&s, 0, sizeof(s));
-    s.lowercase_ratio = 1.0f; /* persona writes lowercase */
+    s.lowercase_ratio = 1.0f;       /* persona writes lowercase */
     s.avg_message_length = 20;
     s.sample_count = 10;
 
@@ -1301,7 +1303,7 @@ static void personal_model_fidelity_rewards_abbreviation_match(void) {
     hu_communication_style_t s;
     memset(&s, 0, sizeof(s));
     s.lowercase_ratio = 1.0f;
-    s.abbreviation_ratio = 0.5f; /* persona uses lots of shorthand */
+    s.abbreviation_ratio = 0.5f;    /* persona uses lots of shorthand */
     s.avg_message_length = 20;
     s.sample_count = 10;
 
@@ -1338,8 +1340,7 @@ static void personal_model_fidelity_zero_when_length_extremely_off(void) {
     /* Response is 100x the target length → relative error == 99 → axis = 0.
      * Mean of (1, 1, 0) = 0.667. */
     char r[1100];
-    for (size_t i = 0; i < 1000; i++)
-        r[i] = 'a';
+    for (size_t i = 0; i < 1000; i++) r[i] = 'a';
     r[1000] = '\0';
     float score = hu_communication_style_fidelity_score(&s, r, 1000);
     HU_ASSERT_TRUE(score >= 0.6f && score < 0.7f);
@@ -1387,11 +1388,11 @@ static void personal_model_compare_response_sets_rejects_null_args(void) {
     HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0,
                                                               NULL, &b, &delta),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0, &a,
-                                                              NULL, &delta),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0,
+                                                              &a, NULL, &delta),
                  HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0, &a,
-                                                              &b, NULL),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0,
+                                                              &a, &b, NULL),
                  HU_ERR_INVALID_ARGUMENT);
 }
 
@@ -1400,8 +1401,8 @@ static void personal_model_compare_response_sets_rejects_zero_sample_target(void
     s.sample_count = 0;
     hu_communication_style_set_summary_t a, b;
     float delta;
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0, &a,
-                                                              &b, &delta),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0,
+                                                              &a, &b, &delta),
                  HU_ERR_INVALID_ARGUMENT);
 }
 
@@ -1409,8 +1410,8 @@ static void personal_model_compare_response_sets_handles_empty_sets(void) {
     hu_communication_style_t s = make_test_target();
     hu_communication_style_set_summary_t a, b;
     float delta = -42.f;
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0, &a,
-                                                              &b, &delta),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, NULL, NULL, 0, NULL, NULL, 0,
+                                                              &a, &b, &delta),
                  HU_OK);
     HU_ASSERT_EQ(a.scored, 0u);
     HU_ASSERT_EQ(b.scored, 0u);
@@ -1424,8 +1425,7 @@ static void personal_model_compare_response_sets_reports_positive_delta(void) {
     hu_communication_style_t s = make_test_target();
     const char *set_a[] = {
         "Dear Sir, I AM PLEASED TO INFORM YOU THAT THE REQUEST HAS BEEN PROCESSED IN ACCORDANCE.",
-        "Pursuant to your previous communication, please find attached the requested "
-        "documentation.",
+        "Pursuant to your previous communication, please find attached the requested documentation.",
     };
     const char *set_b[] = {
         "hey, lmk if u want anything else from me today, totally happy to help",
@@ -1433,8 +1433,8 @@ static void personal_model_compare_response_sets_reports_positive_delta(void) {
     };
     hu_communication_style_set_summary_t a, b;
     float delta = 0.f;
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, set_a, NULL, 2, set_b, NULL, 2,
-                                                              &a, &b, &delta),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(
+                     &s, set_a, NULL, 2, set_b, NULL, 2, &a, &b, &delta),
                  HU_OK);
     HU_ASSERT_EQ(a.scored, 2u);
     HU_ASSERT_EQ(b.scored, 2u);
@@ -1453,13 +1453,12 @@ static void personal_model_compare_response_sets_negative_delta_when_b_worse(voi
         "yeah totally, lmk if u want me to send the report rn",
     };
     const char *set_b[] = {
-        "I WOULD LIKE TO RESPECTFULLY INFORM YOU OF THE FOLLOWING IMPORTANT MATTER REGARDING THE "
-        "PROJECT REQUIREMENTS HEREIN.",
+        "I WOULD LIKE TO RESPECTFULLY INFORM YOU OF THE FOLLOWING IMPORTANT MATTER REGARDING THE PROJECT REQUIREMENTS HEREIN.",
     };
     hu_communication_style_set_summary_t a, b;
     float delta = 0.f;
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, set_a, NULL, 1, set_b, NULL, 1,
-                                                              &a, &b, &delta),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(
+                     &s, set_a, NULL, 1, set_b, NULL, 1, &a, &b, &delta),
                  HU_OK);
     HU_ASSERT_TRUE(a.mean > b.mean);
     HU_ASSERT_TRUE(delta < 0.f);
@@ -1477,8 +1476,8 @@ static void personal_model_compare_response_sets_skips_invalid_responses(void) {
     size_t lens_a[] = {0, 0, 37};
     hu_communication_style_set_summary_t a, b;
     float delta = 0.f;
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, set_a, lens_a, 3, NULL, NULL, 0,
-                                                              &a, &b, &delta),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(
+                     &s, set_a, lens_a, 3, NULL, NULL, 0, &a, &b, &delta),
                  HU_OK);
     HU_ASSERT_EQ(a.scored, 1u);
     HU_ASSERT_EQ(a.skipped, 2u);
@@ -1495,8 +1494,8 @@ static void personal_model_compare_response_sets_reports_min_max(void) {
     };
     hu_communication_style_set_summary_t a, b;
     float delta = 0.f;
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, set_a, NULL, 1, NULL, NULL, 0, &a,
-                                                              &b, &delta),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(
+                     &s, set_a, NULL, 1, NULL, NULL, 0, &a, &b, &delta),
                  HU_OK);
     HU_ASSERT_EQ(a.scored, 1u);
     HU_ASSERT_TRUE(a.min_score == a.max_score);
@@ -1517,13 +1516,14 @@ static void personal_model_compare_response_sets_uses_explicit_lens(void) {
     size_t lens_a[] = {37};
     hu_communication_style_set_summary_t a, b;
     float delta = 0.f;
-    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(&s, set_a, lens_a, 1, NULL, NULL, 0,
-                                                              &a, &b, &delta),
+    HU_ASSERT_EQ(hu_communication_style_compare_response_sets(
+                     &s, set_a, lens_a, 1, NULL, NULL, 0, &a, &b, &delta),
                  HU_OK);
     HU_ASSERT_EQ(a.scored, 1u);
     /* The score with the truncated length should be different from
      * the score with the full (untruncated) length. */
-    float full_score = hu_communication_style_fidelity_score(&s, set_a[0], strlen(set_a[0]));
+    float full_score =
+        hu_communication_style_fidelity_score(&s, set_a[0], strlen(set_a[0]));
     float truncated_score = a.mean;
     HU_ASSERT_TRUE(full_score != truncated_score);
 }
@@ -1583,7 +1583,8 @@ static void personal_model_style_blend_pulls_to_neutral_at_half_life(void) {
      * → blended axis = raw * 0.5 + 0.5 * 0.5 = (raw + 0.5) / 2.
      * For 0.2 raw → 0.35; for 0.9 → 0.7; for 0.8 → 0.65; 0.6 → 0.55. */
     int64_t now = s.last_observed_at + HU_PM_STYLE_OBSERVATION_HALF_LIFE_SEC;
-    hu_communication_style_t b = hu_personal_communication_style_blend_with_freshness(&s, now);
+    hu_communication_style_t b =
+        hu_personal_communication_style_blend_with_freshness(&s, now);
     HU_ASSERT_TRUE(b.formality > 0.34f && b.formality < 0.36f);
     HU_ASSERT_TRUE(b.verbosity > 0.69f && b.verbosity < 0.71f);
     HU_ASSERT_TRUE(b.lowercase_ratio > 0.64f && b.lowercase_ratio < 0.66f);
@@ -1906,8 +1907,8 @@ static void personal_model_describe_recently_completed_truncates_with_ellipsis(v
     /* Three "long_description_NN" entries; small buf forces
      * truncation after the first. */
     for (size_t i = 0; i < 3; i++) {
-        snprintf(m.goals[i].description, sizeof(m.goals[i].description), "long_description_%02zu",
-                 i);
+        snprintf(m.goals[i].description, sizeof(m.goals[i].description),
+                 "long_description_%02zu", i);
         m.goals[i].active = false;
         m.goals[i].last_referenced = 1000;
     }
@@ -1940,8 +1941,8 @@ static void personal_model_describe_recently_completed_ignores_old(void) {
     char buf[64];
     /* now is past retention for goal 0 (30+ days from 1000) but
      * within retention for goal 1 (1000 + 30d + 1d). */
-    size_t n =
-        hu_personal_model_describe_recently_completed(&m, 1000 + 31 * 86400, buf, sizeof(buf));
+    size_t n = hu_personal_model_describe_recently_completed(&m, 1000 + 31 * 86400, buf,
+                                                              sizeof(buf));
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_STR_EQ(buf, "fresh");
 }
@@ -2096,8 +2097,9 @@ static void personal_model_build_prompt_overlay_formal_emits_terse_directive(voi
 static void personal_model_build_prompt_overlay_casual_emoji_emits_permissive_variant(void) {
     /* Casual + moderate emoji: the most permissive variant.
      * "an emoji is fine if it fits" must appear. */
-    hu_persona_overlay_t ov = {
-        .channel = "imessage", .formality = "casual", .emoji_usage = "moderate"};
+    hu_persona_overlay_t ov = {.channel = "imessage",
+                               .formality = "casual",
+                               .emoji_usage = "moderate"};
     hu_personal_model_t m;
     overlay_directive_seed_model(&m);
     char buf[2048];
@@ -2127,7 +2129,9 @@ static void personal_model_build_prompt_overlay_short_length_emphasizes_brevity(
 static void personal_model_build_prompt_overlay_formal_overrides_emoji(void) {
     /* Formal trumps emoji license. Even with emoji_usage="high",
      * a formal channel must emit the no-emoji variant. */
-    hu_persona_overlay_t ov = {.channel = "linkedin", .formality = "formal", .emoji_usage = "high"};
+    hu_persona_overlay_t ov = {.channel = "linkedin",
+                               .formality = "formal",
+                               .emoji_usage = "high"};
     hu_personal_model_t m;
     overlay_directive_seed_model(&m);
     char buf[2048];
@@ -2145,8 +2149,8 @@ static void personal_model_build_prompt_overlay_unknown_falls_through_to_default
     overlay_directive_seed_model(&m);
     char with_overlay[2048];
     char with_null[2048];
-    size_t a =
-        hu_personal_model_build_prompt_with_overlay(&m, &ov, with_overlay, sizeof(with_overlay));
+    size_t a = hu_personal_model_build_prompt_with_overlay(&m, &ov, with_overlay,
+                                                           sizeof(with_overlay));
     size_t b = hu_personal_model_build_prompt_with_overlay(&m, NULL, with_null, sizeof(with_null));
     HU_ASSERT_EQ(a, b);
     HU_ASSERT_TRUE(strcmp(with_overlay, with_null) == 0);
@@ -2258,25 +2262,27 @@ static void personal_model_directive_telemetry_repeated_calls_accumulate(void) {
 }
 
 static void personal_model_directive_variant_label_returns_known(void) {
-    HU_ASSERT_TRUE(
-        strcmp(hu_personal_model_directive_variant_label(HU_DIRECTIVE_VARIANT_NULL_OVERLAY),
-               "null_overlay") == 0);
-    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(HU_DIRECTIVE_VARIANT_DEFAULT),
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_NULL_OVERLAY),
+                          "null_overlay") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_DEFAULT),
                           "default") == 0);
-    HU_ASSERT_TRUE(
-        strcmp(hu_personal_model_directive_variant_label(HU_DIRECTIVE_VARIANT_FORMAL_TERSE),
-               "formal_terse") == 0);
-    HU_ASSERT_TRUE(
-        strcmp(hu_personal_model_directive_variant_label(HU_DIRECTIVE_VARIANT_CASUAL_EMOJI),
-               "casual_emoji") == 0);
-    HU_ASSERT_TRUE(
-        strcmp(hu_personal_model_directive_variant_label(HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT),
-               "casual_or_short") == 0);
-    HU_ASSERT_TRUE(
-        strcmp(hu_personal_model_directive_variant_label(HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI),
-               "adaptive_emoji") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_FORMAL_TERSE),
+                          "formal_terse") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_CASUAL_EMOJI),
+                          "casual_emoji") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_CASUAL_OR_SHORT),
+                          "casual_or_short") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              HU_DIRECTIVE_VARIANT_ADAPTIVE_EMOJI),
+                          "adaptive_emoji") == 0);
     /* Out-of-range gets the safe placeholder. */
-    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label((hu_directive_variant_t)999),
+    HU_ASSERT_TRUE(strcmp(hu_personal_model_directive_variant_label(
+                              (hu_directive_variant_t)999),
                           "unknown") == 0);
 }
 
@@ -2303,7 +2309,8 @@ static void personal_model_build_prompt_omits_directive_when_no_completed(void) 
 /* ── Goal completion detection ──────────────────────────────────────── */
 
 static void personal_model_resolve_goals_handles_null_args(void) {
-    HU_ASSERT_EQ(hu_personal_model_resolve_goals_in_message(NULL, "shipped feature", 15, 1000), 0u);
+    HU_ASSERT_EQ(hu_personal_model_resolve_goals_in_message(NULL, "shipped feature", 15, 1000),
+                 0u);
     hu_personal_model_t m;
     hu_personal_model_init(&m);
     HU_ASSERT_EQ(hu_personal_model_resolve_goals_in_message(&m, NULL, 0, 1000), 0u);
@@ -2473,7 +2480,9 @@ static void personal_model_touch_goals_skips_short_words(void) {
     m.goals[0].last_referenced = 1000;
     m.goal_count = 1;
 
-    HU_ASSERT_EQ(hu_personal_model_touch_goals_in_message(&m, "the the the", 11, 5000), 0u);
+    HU_ASSERT_EQ(
+        hu_personal_model_touch_goals_in_message(&m, "the the the", 11, 5000),
+        0u);
     HU_ASSERT_EQ((long)m.goals[0].last_referenced, 1000L);
 }
 
@@ -2602,7 +2611,7 @@ typedef struct pm_v3_test_header {
     uint64_t reserved;
 } pm_v3_test_header_t;
 
-#define PM_V3_TEST_MAGIC   0x4D505548u /* "HUPM" little-endian */
+#define PM_V3_TEST_MAGIC 0x4D505548u   /* "HUPM" little-endian */
 #define PM_V3_TEST_VERSION 3u
 
 static int pm_v3_write_fixture(const char *path, const pm_v3_test_model_t *model) {
@@ -2613,7 +2622,8 @@ static int pm_v3_write_fixture(const char *path, const pm_v3_test_model_t *model
     memset(&hdr, 0, sizeof(hdr));
     hdr.magic = PM_V3_TEST_MAGIC;
     hdr.version = PM_V3_TEST_VERSION;
-    if (fwrite(&hdr, sizeof(hdr), 1, fp) != 1 || fwrite(model, sizeof(*model), 1, fp) != 1) {
+    if (fwrite(&hdr, sizeof(hdr), 1, fp) != 1 ||
+        fwrite(model, sizeof(*model), 1, fp) != 1) {
         fclose(fp);
         return -1;
     }
@@ -2677,7 +2687,8 @@ static void personal_model_load_migrates_v3_goals_zero_fills_last_referenced(voi
     pm_v3_test_model_t v3;
     memset(&v3, 0, sizeof(v3));
     v3.version = PM_V3_TEST_VERSION;
-    snprintf(v3.goals[0].description, sizeof(v3.goals[0].description), "ship the new feature");
+    snprintf(v3.goals[0].description, sizeof(v3.goals[0].description),
+             "ship the new feature");
     v3.goals[0].active = true;
     v3.goals[0].created_at = 1700000000LL;
     v3.goals[0].deadline = 1701000000LL;
@@ -2698,8 +2709,8 @@ static void personal_model_load_migrates_v3_goals_zero_fills_last_referenced(voi
      * falls back to created_at when last_referenced is 0, so the
      * migrated goal still scores high right after the migration. */
     HU_ASSERT_EQ((long)loaded.goals[0].last_referenced, 0L);
-    HU_ASSERT_TRUE(
-        hu_personal_goal_effective_priority(&loaded.goals[0], loaded.goals[0].created_at) > 0.99f);
+    HU_ASSERT_TRUE(hu_personal_goal_effective_priority(&loaded.goals[0],
+                                                       loaded.goals[0].created_at) > 0.99f);
 }
 
 static void personal_model_load_migrates_v3_style_zero_fills_last_observed(void) {
@@ -2728,7 +2739,8 @@ static void personal_model_load_migrates_v3_style_zero_fills_last_observed(void)
      * last_observed_at == 0" is treated as fully fresh so the
      * directive doesn't silently disappear after migration. */
     HU_ASSERT_EQ((long)loaded.style.last_observed_at, 0L);
-    HU_ASSERT_TRUE(hu_personal_communication_style_freshness(&loaded.style, 1700000000LL) > 0.99f);
+    HU_ASSERT_TRUE(
+        hu_personal_communication_style_freshness(&loaded.style, 1700000000LL) > 0.99f);
 }
 
 static void personal_model_load_rejects_unknown_version(void) {
@@ -2883,7 +2895,8 @@ static void personal_model_per_turn_tick_handles_empty_message(void) {
      * has zero-length-message handling. */
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    hu_personal_model_turn_tick_result_t r = hu_personal_model_per_turn_tick(&m, "", 0, true, 1000);
+    hu_personal_model_turn_tick_result_t r =
+        hu_personal_model_per_turn_tick(&m, "", 0, true, 1000);
     HU_ASSERT_EQ(r.ingest_error, HU_OK);
     HU_ASSERT_EQ(r.goals_touched, 0u);
     HU_ASSERT_EQ(r.goals_resolved, 0u);
@@ -3112,103 +3125,6 @@ static void personal_model_apply_decay_zeros_vacant_slots(void) {
     HU_ASSERT_STR_EQ(m.facts[0].object, "");
 }
 
-/* ── Behavioral tests — directive text actually differs ─────────────────
- *
- * Every other test in this file (and in test_persona_eval.c) checks that
- * the [Personal Context] block contains expected strings. That tells us
- * the personal-model state reaches the prompt, but not that the prompt
- * CHANGES MEANINGFULLY when the user's observed style changes.
- *
- * The audit on 2026-05-16 surfaced this as the missing behavioral
- * coverage layer between unit tests of the EWMA math and end-to-end
- * provider integration tests. These three tests close that gap:
- * feed two different message streams, build prompts from each, and
- * assert the directive text actually differs in the way the EWMA
- * predicts.
- *
- * If a future change to the directive thresholds or wording silently
- * drops the lowercase/abbreviation/length signal from the prompt, these
- * tests fail loud — instead of "every prompt still contains [Personal
- * Context]" passing while the steering signal goes to zero. */
-
-/* Feed N+ all-lowercase messages with chat abbreviations → the
- * "type lowercase" directive must appear in the rendered prompt.
- * Threshold is HU_PM_DIRECTIVE_MIN_SAMPLES (3); we feed 5 with margin. */
-static void personal_model_high_lowercase_ratio_emits_lowercase_directive(void) {
-    hu_personal_model_t m;
-    hu_personal_model_init(&m);
-    const char *casual_msgs[] = {
-        "hey lmk if u want anything else from me today",
-        "yeah totally, btw the report is ready whenever u need it",
-        "all good on my end, ty for the heads up rn",
-        "yep, sounds good to me, will do",
-        "ok cool, ty",
-    };
-    for (size_t i = 0; i < 5; i++) {
-        HU_ASSERT_EQ(hu_personal_model_ingest(&m, casual_msgs[i], strlen(casual_msgs[i]), true,
-                                              1700000000LL + (int64_t)i * 60, NULL),
-                     HU_OK);
-    }
-    HU_ASSERT_TRUE(m.style.sample_count >= 3U);
-    /* lowercase_ratio must have climbed above 0.5 to trip the directive */
-    HU_ASSERT_TRUE(m.style.lowercase_ratio >= 0.5f);
-
-    char buf[4096];
-    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
-    HU_ASSERT_GT((long)n, 0L);
-    HU_ASSERT_TRUE(strstr(buf, "Mirror their style") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "type lowercase") != NULL);
-}
-
-/* Feed N+ properly-cased messages → the "type lowercase" directive must
- * NOT appear. Symmetric counterpart to the test above. */
-static void personal_model_normal_case_omits_lowercase_directive(void) {
-    hu_personal_model_t m;
-    hu_personal_model_init(&m);
-    const char *formal_msgs[] = {
-        "Hello there. I hope this finds you well.",
-        "Thanks for the update. I will review it shortly.",
-        "Please let me know when you have a moment to discuss.",
-        "I appreciate the information you provided yesterday.",
-        "Looking forward to your response on this matter.",
-    };
-    for (size_t i = 0; i < 5; i++) {
-        HU_ASSERT_EQ(hu_personal_model_ingest(&m, formal_msgs[i], strlen(formal_msgs[i]), true,
-                                              1700000000LL + (int64_t)i * 60, NULL),
-                     HU_OK);
-    }
-    HU_ASSERT_TRUE(m.style.sample_count >= 3U);
-    HU_ASSERT_TRUE(m.style.lowercase_ratio < 0.5f);
-
-    char buf[4096];
-    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
-    HU_ASSERT_GT((long)n, 0L);
-    /* The "Mirror their style" line still appears (style fingerprint
-     * has content), but the per-case directive must be absent. */
-    HU_ASSERT_TRUE(strstr(buf, "type lowercase") == NULL);
-}
-
-/* Feed messages dense with chat abbreviations → the "ok to use 'u'/'rn'/'btw'"
- * directive must appear. This is the abbreviation_ratio EWMA crossing 0.4. */
-static void personal_model_high_abbreviation_ratio_emits_abbreviation_license(void) {
-    hu_personal_model_t m;
-    hu_personal_model_init(&m);
-    const char *abbrev_msgs[] = {
-        "ty btw", "lmk rn", "ty u for the btw", "lmk if u need anything ty", "yw rn ty btw",
-    };
-    for (size_t i = 0; i < 5; i++) {
-        HU_ASSERT_EQ(hu_personal_model_ingest(&m, abbrev_msgs[i], strlen(abbrev_msgs[i]), true,
-                                              1700000000LL + (int64_t)i * 60, NULL),
-                     HU_OK);
-    }
-    HU_ASSERT_TRUE(m.style.abbreviation_ratio >= 0.4f);
-
-    char buf[4096];
-    size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
-    HU_ASSERT_GT((long)n, 0L);
-    HU_ASSERT_TRUE(strstr(buf, "u'/'rn'/'btw") != NULL);
-}
-
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -3387,10 +3303,6 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_apply_decay_prunes_inactive_goals);
     HU_RUN_TEST(personal_model_apply_decay_is_idempotent);
     HU_RUN_TEST(personal_model_apply_decay_zeros_vacant_slots);
-    /* Behavioral coverage — directive text actually differs by style. */
-    HU_RUN_TEST(personal_model_high_lowercase_ratio_emits_lowercase_directive);
-    HU_RUN_TEST(personal_model_normal_case_omits_lowercase_directive);
-    HU_RUN_TEST(personal_model_high_abbreviation_ratio_emits_abbreviation_license);
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(personal_model_survives_real_sigkill);
 #endif

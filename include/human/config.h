@@ -232,6 +232,18 @@ typedef struct hu_imap_channel_config {
     char *from_address;
 } hu_imap_channel_config_t;
 
+#define HU_REACTION_COLLECTION_CHANNELS_MAX 4
+
+typedef struct hu_reaction_collection_config {
+    bool enabled;
+    char channels[HU_REACTION_COLLECTION_CHANNELS_MAX][32];
+    size_t channel_count;
+    int poll_interval_seconds;
+    /* Optional override for iMessage chat.db. If empty: HU_CHATDB env, then
+     * $HOME/Library/Messages/chat.db. Must be absolute when set. */
+    char chatdb_path[256];
+} hu_reaction_collection_config_t;
+
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
@@ -666,6 +678,7 @@ typedef struct hu_config {
     hu_policy_config_t policy;
     hu_plugins_config_t plugins;
     hu_feeds_config_t feeds;
+    hu_reaction_collection_config_t reaction_collection;
     char *auto_update;                    /* "off" (default), "check", or "apply" */
     uint32_t update_check_interval_hours; /* default 24; 0 = use default */
     hu_arena_t *arena;

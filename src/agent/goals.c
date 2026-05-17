@@ -20,8 +20,7 @@
  * the symbol is defined in src/agent/world_model.c. */
 extern void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
 
-hu_error_t hu_goal_engine_create(hu_allocator_t *alloc, sqlite3 *db,
-                                 hu_goal_engine_t *out) {
+hu_error_t hu_goal_engine_create(hu_allocator_t *alloc, sqlite3 *db, hu_goal_engine_t *out) {
     if (!alloc || !db || !out)
         return HU_ERR_INVALID_ARGUMENT;
     out->alloc = alloc;
@@ -40,11 +39,13 @@ hu_error_t hu_goal_init_tables(hu_goal_engine_t *engine) {
     if (!engine || !engine->db)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* P3-1 (2026-05-16) — goals scoped per-contact. */
     const char *sql =
         "CREATE TABLE IF NOT EXISTS goals("
         "id INTEGER PRIMARY KEY, description TEXT, status INTEGER DEFAULT 0, "
         "priority REAL DEFAULT 0.5, progress REAL DEFAULT 0.0, parent_id INTEGER DEFAULT 0, "
-        "created_at INTEGER, updated_at INTEGER, deadline INTEGER DEFAULT 0)";
+        "created_at INTEGER, updated_at INTEGER, deadline INTEGER DEFAULT 0, "
+        "contact_id TEXT NOT NULL DEFAULT '')";
 
     char *err = NULL;
     int rc = sqlite3_exec(engine->db, sql, NULL, NULL, &err);
@@ -54,24 +55,48 @@ hu_error_t hu_goal_init_tables(hu_goal_engine_t *engine) {
         }
         return HU_ERR_MEMORY_BACKEND;
     }
+
+    /* Migration for legacy schemas that pre-date P3-1: add the
+     * contact_id column if missing. ALTER TABLE on an already-migrated
+     * table fails with "duplicate column name" which we treat as
+     * success. */
+    const char *alter = "ALTER TABLE goals ADD COLUMN contact_id TEXT NOT NULL DEFAULT ''";
+    err = NULL;
+    (void)sqlite3_exec(engine->db, alter, NULL, NULL, &err);
+    if (err)
+        sqlite3_free(err);
     return HU_OK;
 }
 
-hu_error_t hu_goal_create(hu_goal_engine_t *engine,
-                          const char *description, size_t desc_len,
-                          double priority, int64_t parent_id,
-                          int64_t deadline, int64_t now_ts,
-                          int64_t *out_id) {
+/* Helper: normalize contact_id (NULL/zero == empty scope ""). */
+static void normalize_contact(const char *contact_id, size_t cid_len, const char **out_ptr,
+                              size_t *out_len) {
+    if (!contact_id || cid_len == 0) {
+        *out_ptr = "";
+        *out_len = 0;
+    } else {
+        *out_ptr = contact_id;
+        *out_len = cid_len;
+    }
+}
+
+hu_error_t hu_goal_create(hu_goal_engine_t *engine, const char *contact_id, size_t contact_id_len,
+                          const char *description, size_t desc_len, double priority,
+                          int64_t parent_id, int64_t deadline, int64_t now_ts, int64_t *out_id) {
     if (!engine || !engine->db || !out_id)
         return HU_ERR_INVALID_ARGUMENT;
     if (!description || desc_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
+    const char *cid = NULL;
+    size_t cid_len = 0;
+    normalize_contact(contact_id, contact_id_len, &cid, &cid_len);
+
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(engine->db,
                                 "INSERT INTO goals(description, status, priority, progress, "
-                                "parent_id, created_at, updated_at, deadline) "
-                                "VALUES(?, 0, ?, 0.0, ?, ?, ?, ?)",
+                                "parent_id, created_at, updated_at, deadline, contact_id) "
+                                "VALUES(?, 0, ?, 0.0, ?, ?, ?, ?, ?)",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
@@ -82,6 +107,7 @@ hu_error_t hu_goal_create(hu_goal_engine_t *engine,
     sqlite3_bind_int64(stmt, 4, now_ts);
     sqlite3_bind_int64(stmt, 5, now_ts);
     sqlite3_bind_int64(stmt, 6, deadline);
+    sqlite3_bind_text(stmt, 7, cid, (int)cid_len, SQLITE_STATIC);
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -89,46 +115,59 @@ hu_error_t hu_goal_create(hu_goal_engine_t *engine,
         return HU_ERR_MEMORY_BACKEND;
 
     *out_id = sqlite3_last_insert_rowid(engine->db);
-    /* P2.2 — drop all cached snapshots; goals appear in every wm.goals[]. */
-    hu_world_model_invalidate(NULL, 0);
+    /* P3-1 — invalidate only the affected contact's cached snapshot. */
+    hu_world_model_invalidate(cid, cid_len);
     return HU_OK;
 }
 
-hu_error_t hu_goal_update_status(hu_goal_engine_t *engine, int64_t goal_id,
+hu_error_t hu_goal_update_status(hu_goal_engine_t *engine, const char *contact_id,
+                                 size_t contact_id_len, int64_t goal_id,
                                  hu_auto_goal_status_t status, int64_t now_ts) {
     if (!engine || !engine->db)
         return HU_ERR_INVALID_ARGUMENT;
 
+    const char *cid = NULL;
+    size_t cid_len = 0;
+    normalize_contact(contact_id, contact_id_len, &cid, &cid_len);
+
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(engine->db,
-                                "UPDATE goals SET status=?, updated_at=? WHERE id=?",
-                                -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(
+        engine->db, "UPDATE goals SET status=?, updated_at=? WHERE id=? AND contact_id=?", -1,
+        &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
     sqlite3_bind_int(stmt, 1, (int)status);
     sqlite3_bind_int64(stmt, 2, now_ts);
     sqlite3_bind_int64(stmt, 3, goal_id);
+    sqlite3_bind_text(stmt, 4, cid, (int)cid_len, SQLITE_STATIC);
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_BACKEND;
-    /* P2.2 — status flip moves a goal in/out of wm.goals (active filter). */
-    hu_world_model_invalidate(NULL, 0);
+    /* P3-1 — invalidate only this contact's cache. */
+    hu_world_model_invalidate(cid, cid_len);
     return HU_OK;
 }
 
-hu_error_t hu_goal_update_progress(hu_goal_engine_t *engine, int64_t goal_id,
-                                   double progress, int64_t now_ts) {
+hu_error_t hu_goal_update_progress(hu_goal_engine_t *engine, const char *contact_id,
+                                   size_t contact_id_len, int64_t goal_id, double progress,
+                                   int64_t now_ts) {
     if (!engine || !engine->db)
         return HU_ERR_INVALID_ARGUMENT;
 
-    hu_auto_goal_status_t new_status = (progress >= 1.0) ? HU_AUTO_GOAL_COMPLETED : HU_AUTO_GOAL_ACTIVE;
+    const char *cid = NULL;
+    size_t cid_len = 0;
+    normalize_contact(contact_id, contact_id_len, &cid, &cid_len);
+
+    hu_auto_goal_status_t new_status =
+        (progress >= 1.0) ? HU_AUTO_GOAL_COMPLETED : HU_AUTO_GOAL_ACTIVE;
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(engine->db,
-                                "UPDATE goals SET progress=?, updated_at=?, status=? WHERE id=?",
-                                -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(
+        engine->db,
+        "UPDATE goals SET progress=?, updated_at=?, status=? WHERE id=? AND contact_id=?", -1,
+        &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -136,13 +175,14 @@ hu_error_t hu_goal_update_progress(hu_goal_engine_t *engine, int64_t goal_id,
     sqlite3_bind_int64(stmt, 2, now_ts);
     sqlite3_bind_int(stmt, 3, (int)new_status);
     sqlite3_bind_int64(stmt, 4, goal_id);
+    sqlite3_bind_text(stmt, 5, cid, (int)cid_len, SQLITE_STATIC);
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_BACKEND;
-    /* P2.2 — progress mutates wm.goals[i].progress and may flip status. */
-    hu_world_model_invalidate(NULL, 0);
+    /* P3-1 — invalidate only this contact's cache. */
+    hu_world_model_invalidate(cid, cid_len);
     return HU_OK;
 }
 
@@ -170,7 +210,8 @@ static hu_error_t load_goal_from_row(sqlite3_stmt *stmt, hu_goal_t *out) {
     const char *c = (const char *)sqlite3_column_text(stmt, 1);
     if (c) {
         size_t len = (size_t)sqlite3_column_bytes(stmt, 1);
-        copy_str_to_field(out->description, sizeof(out->description), c, len, &out->description_len);
+        copy_str_to_field(out->description, sizeof(out->description), c, len,
+                          &out->description_len);
     }
 
     out->status = (hu_auto_goal_status_t)sqlite3_column_int(stmt, 2);
@@ -180,21 +221,35 @@ static hu_error_t load_goal_from_row(sqlite3_stmt *stmt, hu_goal_t *out) {
     out->created_at = sqlite3_column_int64(stmt, 6);
     out->updated_at = sqlite3_column_int64(stmt, 7);
     out->deadline = sqlite3_column_int64(stmt, 8);
+
+    /* Column 9 = contact_id (when present in SELECT). */
+    if (sqlite3_column_count(stmt) > 9) {
+        const char *cc = (const char *)sqlite3_column_text(stmt, 9);
+        if (cc) {
+            size_t len = (size_t)sqlite3_column_bytes(stmt, 9);
+            copy_str_to_field(out->contact_id, sizeof(out->contact_id), cc, len,
+                              &out->contact_id_len);
+        }
+    }
     return HU_OK;
 }
 
-hu_error_t hu_goal_decompose(hu_goal_engine_t *engine, int64_t parent_id,
-                             const char **descriptions, const size_t *desc_lens,
-                             size_t count, int64_t now_ts,
+hu_error_t hu_goal_decompose(hu_goal_engine_t *engine, const char *contact_id,
+                             size_t contact_id_len, int64_t parent_id, const char **descriptions,
+                             const size_t *desc_lens, size_t count, int64_t now_ts,
                              int64_t *out_ids) {
     if (!engine || !engine->db || !descriptions || !desc_lens || !out_ids || count == 0)
         return HU_ERR_INVALID_ARGUMENT;
+
+    const char *cid = NULL;
+    size_t cid_len = 0;
+    normalize_contact(contact_id, contact_id_len, &cid, &cid_len);
 
     double parent_priority = 0.5;
     if (parent_id > 0) {
         hu_goal_t parent = {0};
         bool found = false;
-        hu_error_t err = hu_goal_get(engine, parent_id, &parent, &found);
+        hu_error_t err = hu_goal_get(engine, cid, cid_len, parent_id, &parent, &found);
         if (err != HU_OK)
             return err;
         if (found)
@@ -210,8 +265,8 @@ hu_error_t hu_goal_decompose(hu_goal_engine_t *engine, int64_t parent_id,
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(engine->db,
                                 "INSERT INTO goals(description, status, priority, progress, "
-                                "parent_id, created_at, updated_at, deadline) "
-                                "VALUES(?, 0, ?, 0.0, ?, ?, ?, 0)",
+                                "parent_id, created_at, updated_at, deadline, contact_id) "
+                                "VALUES(?, 0, ?, 0.0, ?, ?, ?, 0, ?)",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
@@ -228,6 +283,7 @@ hu_error_t hu_goal_decompose(hu_goal_engine_t *engine, int64_t parent_id,
         sqlite3_bind_int64(stmt, 3, parent_id);
         sqlite3_bind_int64(stmt, 4, now_ts);
         sqlite3_bind_int64(stmt, 5, now_ts);
+        sqlite3_bind_text(stmt, 6, cid, (int)cid_len, SQLITE_STATIC);
 
         rc = sqlite3_step(stmt);
         if (rc != SQLITE_DONE) {
@@ -237,29 +293,34 @@ hu_error_t hu_goal_decompose(hu_goal_engine_t *engine, int64_t parent_id,
         out_ids[i] = sqlite3_last_insert_rowid(engine->db);
     }
     sqlite3_finalize(stmt);
-    /* P2.2 — decompose inserts N child goals; same invalidation rule. */
-    hu_world_model_invalidate(NULL, 0);
+    /* P3-1 — invalidate this contact's cache. */
+    hu_world_model_invalidate(cid, cid_len);
     return HU_OK;
 }
 
-hu_error_t hu_goal_select_next(hu_goal_engine_t *engine, hu_goal_t *out,
-                               bool *found) {
+hu_error_t hu_goal_select_next(hu_goal_engine_t *engine, const char *contact_id,
+                               size_t contact_id_len, hu_goal_t *out, bool *found) {
     if (!engine || !engine->db || !out || !found)
         return HU_ERR_INVALID_ARGUMENT;
 
     *found = false;
     memset(out, 0, sizeof(*out));
 
+    const char *cid = NULL;
+    size_t cid_len = 0;
+    normalize_contact(contact_id, contact_id_len, &cid, &cid_len);
+
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(engine->db,
-                               "SELECT id, description, status, priority, progress, "
-                               "parent_id, created_at, updated_at, deadline "
-                               "FROM goals WHERE status IN (0, 1) "
-                               "ORDER BY priority DESC, created_at ASC LIMIT 1",
-                               -1, &stmt, NULL);
+                                "SELECT id, description, status, priority, progress, "
+                                "parent_id, created_at, updated_at, deadline, contact_id "
+                                "FROM goals WHERE status IN (0, 1) AND contact_id=? "
+                                "ORDER BY priority DESC, created_at ASC LIMIT 1",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
+    sqlite3_bind_text(stmt, 1, cid, (int)cid_len, SQLITE_STATIC);
     rc = sqlite3_step(stmt);
     if (rc == SQLITE_ROW) {
         load_goal_from_row(stmt, out);
@@ -269,22 +330,29 @@ hu_error_t hu_goal_select_next(hu_goal_engine_t *engine, hu_goal_t *out,
     return HU_OK;
 }
 
-hu_error_t hu_goal_list_active(hu_goal_engine_t *engine,
-                               hu_goal_t **out, size_t *out_count) {
+hu_error_t hu_goal_list_active(hu_goal_engine_t *engine, const char *contact_id,
+                               size_t contact_id_len, hu_goal_t **out, size_t *out_count) {
     if (!engine || !engine->db || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
 
     *out = NULL;
     *out_count = 0;
 
+    const char *cid = NULL;
+    size_t cid_len = 0;
+    normalize_contact(contact_id, contact_id_len, &cid, &cid_len);
+
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(engine->db,
                                 "SELECT id, description, status, priority, progress, "
-                                "parent_id, created_at, updated_at, deadline "
-                                "FROM goals WHERE status IN (0, 1) ORDER BY priority DESC",
+                                "parent_id, created_at, updated_at, deadline, contact_id "
+                                "FROM goals WHERE status IN (0, 1) AND contact_id=? "
+                                "ORDER BY priority DESC",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
+
+    sqlite3_bind_text(stmt, 1, cid, (int)cid_len, SQLITE_STATIC);
 
     size_t cap = 0;
     size_t n = 0;
@@ -294,9 +362,7 @@ hu_error_t hu_goal_list_active(hu_goal_engine_t *engine,
         if (n >= cap) {
             size_t new_cap = cap == 0 ? 8 : cap * 2;
             hu_goal_t *new_arr = (hu_goal_t *)engine->alloc->realloc(
-                engine->alloc->ctx, arr,
-                cap * sizeof(hu_goal_t),
-                new_cap * sizeof(hu_goal_t));
+                engine->alloc->ctx, arr, cap * sizeof(hu_goal_t), new_cap * sizeof(hu_goal_t));
             if (!new_arr) {
                 sqlite3_finalize(stmt);
                 hu_goal_free(engine->alloc, arr, n);
@@ -317,24 +383,29 @@ hu_error_t hu_goal_list_active(hu_goal_engine_t *engine,
     return HU_OK;
 }
 
-hu_error_t hu_goal_get(hu_goal_engine_t *engine, int64_t goal_id,
-                       hu_goal_t *out, bool *found) {
+hu_error_t hu_goal_get(hu_goal_engine_t *engine, const char *contact_id, size_t contact_id_len,
+                       int64_t goal_id, hu_goal_t *out, bool *found) {
     if (!engine || !engine->db || !out || !found)
         return HU_ERR_INVALID_ARGUMENT;
 
     *found = false;
     memset(out, 0, sizeof(*out));
 
+    const char *cid = NULL;
+    size_t cid_len = 0;
+    normalize_contact(contact_id, contact_id_len, &cid, &cid_len);
+
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(engine->db,
                                 "SELECT id, description, status, priority, progress, "
-                                "parent_id, created_at, updated_at, deadline "
-                                "FROM goals WHERE id=?",
+                                "parent_id, created_at, updated_at, deadline, contact_id "
+                                "FROM goals WHERE id=? AND contact_id=?",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
     sqlite3_bind_int64(stmt, 1, goal_id);
+    sqlite3_bind_text(stmt, 2, cid, (int)cid_len, SQLITE_STATIC);
     rc = sqlite3_step(stmt);
     if (rc == SQLITE_ROW) {
         load_goal_from_row(stmt, out);
@@ -344,15 +415,22 @@ hu_error_t hu_goal_get(hu_goal_engine_t *engine, int64_t goal_id,
     return HU_OK;
 }
 
-hu_error_t hu_goal_count(hu_goal_engine_t *engine, size_t *out) {
+hu_error_t hu_goal_count(hu_goal_engine_t *engine, const char *contact_id, size_t contact_id_len,
+                         size_t *out) {
     if (!engine || !engine->db || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
+    const char *cid = NULL;
+    size_t cid_len = 0;
+    normalize_contact(contact_id, contact_id_len, &cid, &cid_len);
+
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(engine->db, "SELECT COUNT(*) FROM goals", -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(engine->db, "SELECT COUNT(*) FROM goals WHERE contact_id=?", -1,
+                                &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
+    sqlite3_bind_text(stmt, 1, cid, (int)cid_len, SQLITE_STATIC);
     *out = 0;
     if (sqlite3_step(stmt) == SQLITE_ROW)
         *out = (size_t)sqlite3_column_int64(stmt, 0);
@@ -360,8 +438,8 @@ hu_error_t hu_goal_count(hu_goal_engine_t *engine, size_t *out) {
     return HU_OK;
 }
 
-hu_error_t hu_goal_build_context(hu_goal_engine_t *engine,
-                                 char **out, size_t *out_len) {
+hu_error_t hu_goal_build_context(hu_goal_engine_t *engine, const char *contact_id,
+                                 size_t contact_id_len, char **out, size_t *out_len) {
     if (!engine || !engine->db || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -370,7 +448,7 @@ hu_error_t hu_goal_build_context(hu_goal_engine_t *engine,
 
     hu_goal_t *goals = NULL;
     size_t count = 0;
-    hu_error_t err = hu_goal_list_active(engine, &goals, &count);
+    hu_error_t err = hu_goal_list_active(engine, contact_id, contact_id_len, &goals, &count);
     if (err != HU_OK)
         return err;
 
@@ -408,10 +486,8 @@ hu_error_t hu_goal_build_context(hu_goal_engine_t *engine,
         if (pct > 100)
             pct = 100;
 
-        n = snprintf(buf + pos, est - pos, "%zu. [%.2f] %.*s (%d%%)\n",
-                     i + 1, goals[i].priority,
-                     (int)goals[i].description_len, goals[i].description,
-                     pct);
+        n = snprintf(buf + pos, est - pos, "%zu. [%.2f] %.*s (%d%%)\n", i + 1, goals[i].priority,
+                     (int)goals[i].description_len, goals[i].description, pct);
         if (n > 0 && (size_t)n < est - pos)
             pos += (size_t)n;
     }
@@ -453,20 +529,20 @@ void hu_goal_free(hu_allocator_t *alloc, hu_goal_t *goals, size_t count) {
     alloc->free(alloc->ctx, goals, count * sizeof(hu_goal_t));
 }
 
-void hu_goal_engine_record_turn_progress(hu_goal_engine_t *engine,
-                                         size_t tool_results_count) {
+void hu_goal_engine_record_turn_progress(hu_goal_engine_t *engine, const char *contact_id,
+                                         size_t contact_id_len, size_t tool_results_count) {
     if (!engine || !engine->db)
         return;
     hu_goal_t active_goal;
     bool found = false;
-    if (hu_goal_select_next(engine, &active_goal, &found) != HU_OK || !found)
+    if (hu_goal_select_next(engine, contact_id, contact_id_len, &active_goal, &found) != HU_OK ||
+        !found)
         return;
-    double pdelta =
-        (tool_results_count > 0) ? 0.15 + 0.05 * (double)tool_results_count : 0.1;
+    double pdelta = (tool_results_count > 0) ? 0.15 + 0.05 * (double)tool_results_count : 0.1;
     double nprog = active_goal.progress + pdelta;
     if (nprog > 1.0)
         nprog = 1.0;
-    (void)hu_goal_update_progress(engine, active_goal.id, nprog,
+    (void)hu_goal_update_progress(engine, contact_id, contact_id_len, active_goal.id, nprog,
                                   (int64_t)time(NULL));
 }
 

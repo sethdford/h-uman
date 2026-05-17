@@ -365,9 +365,8 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
     hu_error_t e = write_adapter_file(cfg->adapter_output_path, cfg->model_version,
                                       (uint32_t)cfg->rank, weights, n_weights, &bytes);
     if (e != HU_OK) {
-        /* PR #115 / Ubuntu CI fix: match learner_ggml.c's `%.90s` width-
-         * bound. cfg->adapter_output_path is up to 256 bytes; last_error
-         * is 128. GCC -Werror=format-truncation refuses unbounded %s. */
+        /* adapter_output_path is up to 256 bytes; last_error is 128.
+         * GCC -Werror=format-truncation refuses unbounded %s. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
                  "failed to write adapter at %.90s", cfg->adapter_output_path);
     } else {

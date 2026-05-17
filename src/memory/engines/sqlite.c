@@ -118,33 +118,47 @@ static const char *const schema_parts[] = {
     "CREATE INDEX IF NOT EXISTS idx_delayed_followups_contact ON delayed_followups(contact_id)",
     "CREATE INDEX IF NOT EXISTS idx_delayed_followups_scheduled ON delayed_followups(scheduled_at) "
     "WHERE sent=0",
+    /* 2026-05-16 P4-5: last_surfaced suppresses re-injection of the same
+     * avoidance pattern within a 7-day window. */
     "CREATE TABLE IF NOT EXISTS avoidance_patterns("
     "contact_id TEXT NOT NULL,"
     "topic TEXT NOT NULL,"
     "mention_count INTEGER DEFAULT 0,"
     "change_count INTEGER DEFAULT 0,"
     "last_mentioned INTEGER,"
+    "last_surfaced INTEGER,"
     "PRIMARY KEY (contact_id, topic))",
+    /* 2026-05-16 P4-1: last_checkin_sent_at gates F30 curiosity re-fires so
+     * the same topic doesn't trigger a check-in every hour until last_mentioned
+     * ages out. NULL means "never checked-in on this topic for this contact". */
     "CREATE TABLE IF NOT EXISTS topic_baselines("
     "contact_id TEXT NOT NULL,"
     "topic TEXT NOT NULL,"
     "mention_count INTEGER DEFAULT 0,"
     "last_mentioned INTEGER,"
+    "last_checkin_sent_at INTEGER,"
     "PRIMARY KEY (contact_id, topic))",
+    /* 2026-05-16 P4-2: UNIQUE(contact_id, fact) + last_surfaced. Suppress
+     * re-surfacing of the same micro-moment within a 24h window. */
     "CREATE TABLE IF NOT EXISTS micro_moments("
     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "contact_id TEXT NOT NULL,"
     "fact TEXT NOT NULL,"
     "significance TEXT,"
-    "created_at INTEGER NOT NULL)",
+    "created_at INTEGER NOT NULL,"
+    "last_surfaced INTEGER,"
+    "UNIQUE(contact_id, fact) ON CONFLICT REPLACE)",
     "CREATE INDEX IF NOT EXISTS idx_micro_moments_contact ON micro_moments(contact_id)",
+    /* 2026-05-16 P4-3: celebrated_at suppresses re-celebration of the same
+     * growth event. */
     "CREATE TABLE IF NOT EXISTS growth_milestones("
     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "contact_id TEXT NOT NULL,"
     "topic TEXT NOT NULL,"
     "before_state TEXT,"
     "after_state TEXT,"
-    "created_at INTEGER NOT NULL)",
+    "created_at INTEGER NOT NULL,"
+    "celebrated_at INTEGER)",
     "CREATE INDEX IF NOT EXISTS idx_growth_milestones_contact ON growth_milestones(contact_id)",
     "CREATE TABLE IF NOT EXISTS pattern_observations("
     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -519,9 +533,8 @@ static const char *category_to_string(const hu_memory_category_t *cat) {
  * `hu_strndup` path. We never lose data: a decrypt failure on a
  * wrapped row falls through too so the envelope bytes are surfaced
  * verbatim instead of dropping the row silently. */
-static bool maybe_decrypt_content(hu_sqlite_memory_t *self, hu_allocator_t *alloc,
-                                  const void *raw, size_t raw_len,
-                                  char **out_content, size_t *out_len) {
+static bool maybe_decrypt_content(hu_sqlite_memory_t *self, hu_allocator_t *alloc, const void *raw,
+                                  size_t raw_len, char **out_content, size_t *out_len) {
     if (!self || !self->keystore || !self->encrypt_at_rest)
         return false;
     if (!hu_encrypted_store_is_encrypted(raw, raw_len))
@@ -541,8 +554,7 @@ static bool maybe_decrypt_content(hu_sqlite_memory_t *self, hu_allocator_t *allo
 }
 
 static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
-                                      hu_sqlite_memory_t *self,
-                                      hu_memory_entry_t *out) {
+                                      hu_sqlite_memory_t *self, hu_memory_entry_t *out) {
     const char *id_p = (const char *)sqlite3_column_text(stmt, 0);
     const char *key_p = (const char *)sqlite3_column_text(stmt, 1);
     /* Use _blob accessors for `content` so the W15 envelope (which
@@ -568,14 +580,12 @@ static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
 
     char *decrypted = NULL;
     size_t decrypted_len = 0;
-    if (maybe_decrypt_content(self, alloc, content_blob, content_len,
-                              &decrypted, &decrypted_len)) {
+    if (maybe_decrypt_content(self, alloc, content_blob, content_len, &decrypted, &decrypted_len)) {
         out->content = decrypted;
         out->content_len = decrypted_len;
     } else {
-        out->content = content_blob ? hu_strndup(alloc, (const char *)content_blob,
-                                                 content_len)
-                                    : NULL;
+        out->content =
+            content_blob ? hu_strndup(alloc, (const char *)content_blob, content_len) : NULL;
         out->content_len = content_len;
     }
     out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
@@ -637,8 +647,8 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     const char *bind_content = content;
     int bind_content_len = (int)content_len;
     if (self->encrypt_at_rest && self->keystore && content) {
-        hu_error_t enc_err = hu_encrypted_store_wrap(
-            self->keystore, self->alloc, content, content_len, &wrapped, &wrapped_len);
+        hu_error_t enc_err = hu_encrypted_store_wrap(self->keystore, self->alloc, content,
+                                                     content_len, &wrapped, &wrapped_len);
         if (enc_err != HU_OK) {
             hu_str_free(self->alloc, id);
             return enc_err;
@@ -1038,8 +1048,7 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
                             }
                             count = wp;
                         }
-                        alloc->free(alloc->ctx, echunks,
-                                    echunks_count * sizeof(hu_memory_chunk_t));
+                        alloc->free(alloc->ctx, echunks, echunks_count * sizeof(hu_memory_chunk_t));
                     }
                 }
 
@@ -1434,26 +1443,57 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
     }
     {
         char *e = NULL;
-        sqlite3_exec(db, "ALTER TABLE memories ADD COLUMN provenance TEXT",
-                     NULL, NULL, &e);
+        sqlite3_exec(db, "ALTER TABLE memories ADD COLUMN provenance TEXT", NULL, NULL, &e);
         if (e)
             sqlite3_free(e);
     }
     /* sec 2.11 upgrade-on-positive-identification audit. Idempotent. */
     {
-        const char *audit_q1 =
-            "UPDATE memories SET trust_tier = 4 "
-            "WHERE source IN ('cli','stdin','telegram_dm','discord_dm',"
-            "'slack_dm','imessage_dm') AND trust_tier = 1";
+        const char *audit_q1 = "UPDATE memories SET trust_tier = 4 "
+                               "WHERE source IN ('cli','stdin','telegram_dm','discord_dm',"
+                               "'slack_dm','imessage_dm') AND trust_tier = 1";
         const char *audit_q2 =
             "UPDATE memories SET trust_tier = 2 "
             "WHERE source IN ('human','tool:human','self_email','calendar_self') "
             "AND trust_tier = 1";
         char *e = NULL;
         sqlite3_exec(db, audit_q1, NULL, NULL, &e);
-        if (e) { sqlite3_free(e); e = NULL; }
+        if (e) {
+            sqlite3_free(e);
+            e = NULL;
+        }
         sqlite3_exec(db, audit_q2, NULL, NULL, &e);
-        if (e) sqlite3_free(e);
+        if (e)
+            sqlite3_free(e);
+    }
+
+    /* 2026-05-16 P4-1 / P4-2 / P4-3 / P4-5: backfill new columns on existing
+     * databases. ALTER ... ADD COLUMN is idempotent if errors are ignored, so
+     * a fresh schema (CREATE already includes these) just no-ops here. */
+    {
+        char *e = NULL;
+        sqlite3_exec(db, "ALTER TABLE topic_baselines ADD COLUMN last_checkin_sent_at INTEGER",
+                     NULL, NULL, &e);
+        if (e) {
+            sqlite3_free(e);
+            e = NULL;
+        }
+        sqlite3_exec(db, "ALTER TABLE micro_moments ADD COLUMN last_surfaced INTEGER", NULL, NULL,
+                     &e);
+        if (e) {
+            sqlite3_free(e);
+            e = NULL;
+        }
+        sqlite3_exec(db, "ALTER TABLE growth_milestones ADD COLUMN celebrated_at INTEGER", NULL,
+                     NULL, &e);
+        if (e) {
+            sqlite3_free(e);
+            e = NULL;
+        }
+        sqlite3_exec(db, "ALTER TABLE avoidance_patterns ADD COLUMN last_surfaced INTEGER", NULL,
+                     NULL, &e);
+        if (e)
+            sqlite3_free(e);
     }
 
     hu_sqlite_memory_t *self =
@@ -1478,7 +1518,7 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
 }
 
 hu_error_t hu_sqlite_memory_attach_keystore(hu_memory_t *mem, hu_keystore_t *ks,
-                                             bool encrypt_at_rest) {
+                                            bool encrypt_at_rest) {
     if (!mem || !mem->ctx || !mem->vtable)
         return HU_ERR_INVALID_ARGUMENT;
     const char *n = mem->vtable->name(mem->ctx);

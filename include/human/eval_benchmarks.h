@@ -10,6 +10,11 @@ typedef enum {
     HU_BENCHMARK_TOOL_USE,
     HU_BENCHMARK_LIVE_AGENT,
     HU_BENCHMARK_APEX,
+    HU_BENCHMARK_LONGMEMEVAL,
+    HU_BENCHMARK_LOCOMO,
+    HU_BENCHMARK_KNOWU_BENCH,
+    HU_BENCHMARK_EMPA,
+    HU_BENCHMARK_PROAGENTBENCH,
 } hu_benchmark_type_t;
 
 hu_error_t hu_benchmark_load(hu_allocator_t *alloc, hu_benchmark_type_t type, const char *json,
