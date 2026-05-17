@@ -458,16 +458,28 @@ hu_error_t hu_training_data_extract_dpo_from_db(sqlite3 *db, int correction_wind
         if (rc != SQLITE_DONE)
             continue;
 
-        /* Mark this assistant message as processed. */
+        /* Mark this assistant message as processed. CRITICAL: if the
+         * marker write fails, we MUST NOT increment count — the dpo_pair
+         * was inserted but the message isn't recorded as processed, so
+         * the next run would re-emit the same pair (dpo_pairs has no
+         * uniqueness constraint). Fail fast on marker error rather than
+         * silently breaking idempotency. CodeRabbit 2026-05-17 critical
+         * finding. */
         sqlite3_stmt *mark = NULL;
         const char *mark_sql = "INSERT OR IGNORE INTO dpo_auto_extractions(msg_id, extracted_at) "
                                "VALUES(?, ?)";
         rc = sqlite3_prepare_v2(db, mark_sql, -1, &mark, NULL);
-        if (rc == SQLITE_OK) {
-            sqlite3_bind_int64(mark, 1, assistant_msg_id);
-            sqlite3_bind_int64(mark, 2, (int64_t)time(NULL));
-            sqlite3_step(mark);
-            sqlite3_finalize(mark);
+        if (rc != SQLITE_OK) {
+            sqlite3_finalize(stmt);
+            return HU_ERR_IO;
+        }
+        sqlite3_bind_int64(mark, 1, assistant_msg_id);
+        sqlite3_bind_int64(mark, 2, (int64_t)time(NULL));
+        int mark_rc = sqlite3_step(mark);
+        sqlite3_finalize(mark);
+        if (mark_rc != SQLITE_DONE) {
+            sqlite3_finalize(stmt);
+            return HU_ERR_IO;
         }
         count++;
     }

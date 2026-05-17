@@ -106,15 +106,21 @@ static void lens_of(const char *const *arr, size_t n, size_t *out) {
         out[i] = arr[i] ? strlen(arr[i]) : 0;
 }
 
+/* Compile-time bank sizes derived from the actual arrays — using literal
+ * counts (5) drifts silently if either bank grows or shrinks. CodeRabbit
+ * 2026-05-17 nitpick. */
+#define HU_CASUAL_RESPONSE_COUNT (sizeof(casual_responses) / sizeof(casual_responses[0]))
+#define HU_FORMAL_RESPONSE_COUNT (sizeof(formal_responses) / sizeof(formal_responses[0]))
+
 /* The headline test: each persona's responses must score higher against
  * its OWN target than against the OTHER persona's target. */
 static void persona_fidelity_cross_discriminates_two_personas(void) {
     hu_communication_style_t casual = casual_style_target();
     hu_communication_style_t formal = formal_style_target();
 
-    size_t lc[5], lf[5];
-    lens_of(casual_responses, 5, lc);
-    lens_of(formal_responses, 5, lf);
+    size_t lc[HU_CASUAL_RESPONSE_COUNT], lf[HU_FORMAL_RESPONSE_COUNT];
+    lens_of(casual_responses, HU_CASUAL_RESPONSE_COUNT, lc);
+    lens_of(formal_responses, HU_FORMAL_RESPONSE_COUNT, lf);
 
     /* No persona vocab passed — keep this test focused on the style +
      * line-consistency axes. With NULL traits the trait_coverage axis
@@ -126,17 +132,21 @@ static void persona_fidelity_cross_discriminates_two_personas(void) {
     hu_persona_fidelity_score_t formal_vs_casual;
     hu_persona_fidelity_score_t formal_vs_formal;
 
-    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&casual, casual_responses, lc, 5, NULL, 0, NULL, 0,
-                                              NULL, 0, &casual_vs_casual),
+    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&casual, casual_responses, lc,
+                                              HU_CASUAL_RESPONSE_COUNT, NULL, 0, NULL, 0, NULL, 0,
+                                              &casual_vs_casual),
                  HU_OK);
-    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&formal, casual_responses, lc, 5, NULL, 0, NULL, 0,
-                                              NULL, 0, &casual_vs_formal),
+    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&formal, casual_responses, lc,
+                                              HU_CASUAL_RESPONSE_COUNT, NULL, 0, NULL, 0, NULL, 0,
+                                              &casual_vs_formal),
                  HU_OK);
-    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&casual, formal_responses, lf, 5, NULL, 0, NULL, 0,
-                                              NULL, 0, &formal_vs_casual),
+    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&casual, formal_responses, lf,
+                                              HU_FORMAL_RESPONSE_COUNT, NULL, 0, NULL, 0, NULL, 0,
+                                              &formal_vs_casual),
                  HU_OK);
-    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&formal, formal_responses, lf, 5, NULL, 0, NULL, 0,
-                                              NULL, 0, &formal_vs_formal),
+    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&formal, formal_responses, lf,
+                                              HU_FORMAL_RESPONSE_COUNT, NULL, 0, NULL, 0, NULL, 0,
+                                              &formal_vs_formal),
                  HU_OK);
 
     /* Each persona's responses must outscore the cross-persona case.
@@ -163,22 +173,24 @@ static void persona_fidelity_cross_each_persona_scores_above_floor(void) {
     hu_communication_style_t casual = casual_style_target();
     hu_communication_style_t formal = formal_style_target();
 
-    size_t lc[5], lf[5];
-    lens_of(casual_responses, 5, lc);
-    lens_of(formal_responses, 5, lf);
+    size_t lc[HU_CASUAL_RESPONSE_COUNT], lf[HU_FORMAL_RESPONSE_COUNT];
+    lens_of(casual_responses, HU_CASUAL_RESPONSE_COUNT, lc);
+    lens_of(formal_responses, HU_FORMAL_RESPONSE_COUNT, lf);
 
     hu_persona_fidelity_score_t casual_self, formal_self;
-    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&casual, casual_responses, lc, 5, NULL, 0, NULL, 0,
-                                              NULL, 0, &casual_self),
+    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&casual, casual_responses, lc,
+                                              HU_CASUAL_RESPONSE_COUNT, NULL, 0, NULL, 0, NULL, 0,
+                                              &casual_self),
                  HU_OK);
-    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&formal, formal_responses, lf, 5, NULL, 0, NULL, 0,
-                                              NULL, 0, &formal_self),
+    HU_ASSERT_EQ(hu_persona_fidelity_score_l1(&formal, formal_responses, lf,
+                                              HU_FORMAL_RESPONSE_COUNT, NULL, 0, NULL, 0, NULL, 0,
+                                              &formal_self),
                  HU_OK);
 
     HU_ASSERT_TRUE(casual_self.composite >= 0.35f);
     HU_ASSERT_TRUE(formal_self.composite >= 0.35f);
-    HU_ASSERT_EQ((long)casual_self.turns_scored, 5L);
-    HU_ASSERT_EQ((long)formal_self.turns_scored, 5L);
+    HU_ASSERT_EQ((long)casual_self.turns_scored, (long)HU_CASUAL_RESPONSE_COUNT);
+    HU_ASSERT_EQ((long)formal_self.turns_scored, (long)HU_FORMAL_RESPONSE_COUNT);
 }
 
 void run_persona_fidelity_cross_tests(void) {
