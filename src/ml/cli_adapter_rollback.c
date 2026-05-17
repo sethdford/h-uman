@@ -115,8 +115,14 @@ hu_error_t hu_ml_cli_adapter_rollback(hu_allocator_t *alloc, int argc, const cha
     snprintf(cur_path, sizeof(cur_path), "%s/slow.safetensors.v%d", slow_dir, cur_v);
     snprintf(prev_path, sizeof(prev_path), "%s/slow.safetensors.v%d", slow_dir, prev_v);
 
-    /* Quarantine the current version. */
-    char today_buf[16];
+    /* Quarantine the current version.
+     *
+     * PR #115 / Ubuntu CI fix: same pattern as lora_retrain_runner.c
+     * fix at 6f98ba8e. GCC -Werror=format-truncation refuses
+     * char[16] for `%04d-%02d-%02d` because tm_year+1900 could
+     * theoretically be multi-digit beyond YYYY. char[32] leaves
+     * headroom and silences the warning. */
+    char today_buf[32];
     if (!today || !*today) {
         time_t t = time(NULL);
         struct tm tmv;
