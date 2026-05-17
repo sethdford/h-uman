@@ -4,6 +4,7 @@ import {
   shadowCount,
   shadowCountIn,
   shadowExists,
+  shadowExistsIn,
   shadowElementText,
   shadowText,
   shadowTextIn,
@@ -141,10 +142,13 @@ test.describe("Models (Demo)", () => {
     await waitForViewReady(page, "hu-models-view");
   });
 
-  test("shows 5 provider cards", async ({ page }) => {
+  test("shows 6 provider cards", async ({ page }) => {
+    // openrouter, anthropic, openai, ollama, gemini, apple
+    // (apple added when Apple Intelligence shipped as default on Mac;
+    // see demo-gateway.ts:1495 models.list)
     await expect(async () => {
       const count = await page.evaluate(shadowCount("hu-models-view", ".grid hu-card"));
-      expect(count).toBe(5);
+      expect(count).toBe(6);
     }).toPass({ timeout: POLL });
   });
 
@@ -157,13 +161,16 @@ test.describe("Models (Demo)", () => {
   });
 
   test("shows API key status on cards", async ({ page }) => {
+    // Of the 6 providers in demo mode: openrouter/anthropic/ollama/gemini
+    // have keys; openai + apple are missing (intentional — Apple FM is
+    // on-device, doesn't need a remote key; openai is the "missing" demo).
     await expect(async () => {
       const hasKeyCount = await page.evaluate(shadowCount("hu-models-view", ".key-status.has"));
       expect(hasKeyCount).toBe(4);
       const missingCount = await page.evaluate(
         shadowCount("hu-models-view", ".key-status.missing"),
       );
-      expect(missingCount).toBe(1);
+      expect(missingCount).toBe(2);
     }).toPass({ timeout: POLL });
   });
 
@@ -176,7 +183,7 @@ test.describe("Models (Demo)", () => {
 
   test("search filters providers", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowCount("hu-models-view", ".grid hu-card"))).toBe(5);
+      expect(await page.evaluate(shadowCount("hu-models-view", ".grid hu-card"))).toBe(6);
     }).toPass({ timeout: POLL });
 
     await page.evaluate(`
@@ -551,8 +558,14 @@ test.describe("Voice (Demo)", () => {
   });
 
   test("shows empty conversation state", async ({ page }) => {
+    // hu-empty-state is rendered INSIDE the nested hu-voice-conversation
+    // shadow root, not directly in hu-voice-view (see voice-view.ts:1447
+    // + hu-voice-conversation.ts:65). Use shadowExistsIn to traverse the
+    // nested boundary.
     await expect(async () => {
-      const hasEmptyState = await page.evaluate(shadowExists("hu-voice-view", "hu-empty-state"));
+      const hasEmptyState = await page.evaluate(
+        shadowExistsIn("hu-voice-view", "hu-voice-conversation", "hu-empty-state"),
+      );
       expect(hasEmptyState).toBe(true);
     }).toPass({ timeout: POLL });
   });
