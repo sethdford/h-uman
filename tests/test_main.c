@@ -539,6 +539,8 @@ void run_mlx_provider_tests(void);
 void run_persona_fidelity_tests(void);
 void run_persona_fidelity_judge_tests(void);
 void run_persona_fidelity_validator_tests(void);
+void run_persona_fidelity_cross_tests(void);
+void run_dpo_extractor_integration_tests(void);
 void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
@@ -1130,6 +1132,8 @@ int main(int argc, char **argv) {
     run_persona_fidelity_tests();
     run_persona_fidelity_judge_tests();
     run_persona_fidelity_validator_tests();
+    run_persona_fidelity_cross_tests();
+    run_dpo_extractor_integration_tests();
     run_fact_extract_llm_tests();
     run_fact_extract_tests();
     run_personal_model_tests();

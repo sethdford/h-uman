@@ -2464,9 +2464,11 @@ set(HU_TEST_SOURCES
     tests/test_consistency.c
     tests/test_mlx_provider.c
     tests/test_persona_fidelity.c
+    tests/test_persona_fidelity_cross.c
     tests/test_persona_fidelity_judge.c
     tests/test_persona_fidelity_validator.c
     tests/test_fact_extract_llm.c
+    tests/test_dpo_extractor_integration.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
