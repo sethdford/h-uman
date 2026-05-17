@@ -218,6 +218,20 @@ hu_error_t hu_m3_outcomes_to_jsonl(hu_allocator_t *alloc, const hu_m3_frontier_a
                                    const hu_m3_outcomes_filter_t *filter, char **out_buf,
                                    size_t *out_len, size_t *out_cap);
 
+/* Process-global accessor used by the gateway endpoint.
+ *
+ * The daemon registers its agent's M3 adapter once at boot (after
+ * `hu_agent_m3_adapter_attach` succeeds) so the gateway endpoint can
+ * snapshot outcomes without holding an agent pointer. Single adapter
+ * per process — there's only ever one M3 personalization loop active.
+ *
+ * Pass NULL to clear (e.g. on agent teardown). Reads are
+ * atomic-enough for the gateway's single-writer/many-reader pattern;
+ * a stale pointer at teardown returns no outcomes rather than crashes
+ * because the serializer treats NULL adapter as "no outcomes". */
+void hu_m3_outcomes_register_global_adapter(hu_m3_frontier_adapter_t *adapter);
+hu_m3_frontier_adapter_t *hu_m3_outcomes_global_adapter(void);
+
 #ifdef __cplusplus
 }
 #endif

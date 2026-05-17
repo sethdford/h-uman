@@ -938,6 +938,65 @@ static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *meth
         return;
     }
 
+    /* B3 v0 (2026-05-17 r2): M3 inference outcome export. Localhost-only by
+     * default (the auth_token gate matches the /v1/ pattern). Query params:
+     *   ?limit=N      — return at most N most-recent outcomes (default = all)
+     *   ?turn_kind=K  — only outcomes with turn_kind == K
+     *   ?since_ms=T   — only outcomes with timestamp_unix_ms >= T
+     *
+     * Response: JSONL, one outcome object per line. Empty body (HTTP 200,
+     * Content-Length: 0) when no adapter is registered or no outcomes match.
+     * Training scripts pull via curl and pipe directly into their consumers. */
+    if (path_is(path, "/v1/m3/outcomes") && method && strcmp(method, "GET") == 0) {
+        if (!v1_auth_ok(&gw->config, auth_header)) {
+            (void)send_json(fd, 401, "{\"error\":\"unauthorized\"}");
+            return;
+        }
+        hu_allocator_t a = hu_system_allocator();
+        hu_m3_outcomes_filter_t filter = {0};
+        /* Parse query params if present. The path here is the raw path
+         * including any "?key=val&..." suffix. */
+        const char *q = strchr(path, '?');
+        if (q) {
+            const char *limit_p = strstr(q, "limit=");
+            if (limit_p) {
+                long v = strtol(limit_p + 6, NULL, 10);
+                if (v > 0)
+                    filter.max_count = (size_t)v;
+            }
+            const char *tk_p = strstr(q, "turn_kind=");
+            if (tk_p) {
+                long v = strtol(tk_p + 10, NULL, 10);
+                if (v > 0 && v < 256)
+                    filter.turn_kind = (uint8_t)v;
+            }
+            const char *since_p = strstr(q, "since_ms=");
+            if (since_p) {
+                long long v = strtoll(since_p + 9, NULL, 10);
+                if (v > 0)
+                    filter.since_ms = (uint64_t)v;
+            }
+        }
+        char *body_buf = NULL;
+        size_t body_len_out = 0;
+        size_t body_cap = 0;
+        hu_m3_frontier_adapter_t *adapter = hu_m3_outcomes_global_adapter();
+        hu_error_t err =
+            hu_m3_outcomes_to_jsonl(&a, adapter, &filter, &body_buf, &body_len_out, &body_cap);
+        if (err != HU_OK) {
+            (void)send_json(fd, 500, "{\"error\":\"outcome serialize failed\"}");
+            return;
+        }
+        if (!body_buf || body_len_out == 0) {
+            /* Empty result is a valid 200 — content-length 0. */
+            (void)send_response(fd, 200, "application/x-ndjson", "", 0, 0);
+            return;
+        }
+        (void)send_response(fd, 200, "application/x-ndjson", body_buf, body_len_out, 0);
+        a.free(a.ctx, body_buf, body_cap);
+        return;
+    }
+
     /* OpenAI-compatible API — require auth when auth_token is configured */
     if (path_is(path, "/v1/chat/completions") && method && strcmp(method, "POST") == 0) {
         if (!v1_auth_ok(&gw->config, auth_header)) {

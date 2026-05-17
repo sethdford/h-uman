@@ -1003,13 +1003,22 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
     if (agent->m3_adapter) {
         hu_m3_frontier_adapter_close(agent->alloc, agent->m3_adapter);
         agent->m3_adapter = NULL;
+        /* Clear the global accessor before freeing so the gateway
+         * endpoint doesn't read a freed pointer in the small window
+         * between close() and the next attach. */
+        hu_m3_outcomes_register_global_adapter(NULL);
     }
     if (!path || path[0] == '\0')
         return;
     size_t path_len = strlen(path);
     hu_m3_frontier_adapter_t *opened = NULL;
-    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK && opened)
+    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK &&
+        opened) {
         agent->m3_adapter = opened;
+        /* B3 v0 (2026-05-17 r2): publish the freshly-opened adapter to
+         * the global accessor so /v1/m3/outcomes can read it. */
+        hu_m3_outcomes_register_global_adapter(opened);
+    }
 }
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {

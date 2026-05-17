@@ -258,6 +258,20 @@ hu_error_t hu_m3_frontier_adapter_snapshot_outcomes(const hu_m3_frontier_adapter
  * is ~720 KB. The training script knows the schema.
  * ───────────────────────────────────────────────────────────────── */
 
+/* Global accessor: single pointer set by the daemon at boot, read by
+ * the gateway endpoint. Single-writer / many-reader pattern; a `volatile`
+ * qualifier is enough for x86_64 + arm64 word-sized loads/stores under
+ * the C memory model assumptions we make elsewhere in the codebase. */
+static hu_m3_frontier_adapter_t *volatile s_global_outcomes_adapter = NULL;
+
+void hu_m3_outcomes_register_global_adapter(hu_m3_frontier_adapter_t *adapter) {
+    s_global_outcomes_adapter = adapter;
+}
+
+hu_m3_frontier_adapter_t *hu_m3_outcomes_global_adapter(void) {
+    return s_global_outcomes_adapter;
+}
+
 /* Worst-case bytes per outcome line, used to size the initial buffer.
  * Each uint64 is at most 20 chars; uint32 at most 10; uint8 at most 3.
  * 5 × 22 (uint64) + 2 × 12 (uint32) + 4 × 5 (uint16/uint8) + brackets
