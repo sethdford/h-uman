@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "core/error.h" /* hu_error_t */
+#include "human/core/error.h" /* hu_error_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,7 +67,7 @@ typedef struct {
     /* thread state */
     bool thread_is_continuation;
     bool topic_still_open;
-    char topic_hint[128];
+    char topic_hint[128]; /* empty string = no topic inferred */
 
     /* their style (computed from last N inbound messages) */
     int their_avg_length_words;
