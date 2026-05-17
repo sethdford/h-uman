@@ -52,12 +52,23 @@ CASCADE_FIXTURE=""
 # cascade path at ~line 98 and the lora-ab path at ~line 149 each
 # registered their own `trap '...' EXIT`, and bash's single-EXIT-trap
 # rule meant the second registration silently discarded the first —
-# leaking CASCADE_TMP if control flow ever reached both paths. Now
-# both variables start empty; the trap uses `:-` defaults so cleanup
+# leaking CASCADE_TMP if control flow ever reached both paths.
+#
+# Sprint 11 PR #115 / Bugbot LOW fix #3 (FU-11.7.g): use mktemp -d for
+# the cascade scratch dir instead of `$(mktemp).json` concatenation.
+# Previously `mktemp -t human-cascade-XXXXXX` created /tmp/...abc123
+# (a real file) but the variable stored /tmp/...abc123.json (a
+# concatenated path that mktemp never created) — the original mktemp
+# file leaked forever, defeating mktemp's atomic-create guarantee.
+# Now: mktemp -d gives us a directory we own; cascade.json lives
+# inside it; cleanup is rm -rf which handles both the dir and any
+# files inside.
+#
+# Both variables start empty; the trap uses `:-` defaults so cleanup
 # is a no-op when a path was never taken.
-CASCADE_TMP=""
+CASCADE_TMP_DIR=""
 TMPDIR=""
-trap 'rm -f "${CASCADE_TMP:-}"; rm -rf "${TMPDIR:-}"' EXIT
+trap 'rm -rf "${CASCADE_TMP_DIR:-}"; rm -rf "${TMPDIR:-}"' EXIT
 
 i=1
 # Manual parse so we can pull --cascade-fixture's value (the cascade-fixture
@@ -117,9 +128,12 @@ if [ "$CASCADE" -eq 1 ]; then
     *)  CASCADE_FIXTURE_ABS="$REPO_ROOT/$CASCADE_FIXTURE" ;;
   esac
   echo "[cascade] running stage_cascade.py --fixture $CASCADE_FIXTURE_ABS"
-  CASCADE_TMP="$(mktemp -t human-cascade-XXXXXX).json"
+  # mktemp -d (not -f + .json suffix) so we don't break mktemp's
+  # atomic-create guarantee. The trap at script top rm -rf's the dir.
+  CASCADE_TMP_DIR="$(mktemp -d -t human-cascade-XXXXXX)"
+  CASCADE_TMP="$CASCADE_TMP_DIR/cascade.json"
   # NOTE: unified EXIT trap at script top handles cleanup of both
-  # CASCADE_TMP and TMPDIR; do not register a second `trap '...' EXIT`
+  # CASCADE_TMP_DIR and TMPDIR; do not register a second `trap '...' EXIT`
   # here — it would silently override the unified handler.
   set +e
   python3 "$REPO_ROOT/scripts/stage_cascade.py" \
