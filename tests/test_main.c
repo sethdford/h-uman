@@ -627,6 +627,7 @@ extern void run_apple_fm_client_tests(void);
 extern void run_gemini_nano_client_tests(void);
 extern void run_competitive_harness_tests(void);
 extern void run_cli_eval_phase5_tests(void);
+extern void run_cli_demo_evidence_tests(void);
 extern void run_lora_ab_require_positive_tests(void);
 extern void run_runner_eval_gate_tests(void);
 extern void run_daemon_reaction_poll_tests(void);
@@ -1257,6 +1258,7 @@ int main(int argc, char **argv) {
     run_gemini_nano_client_tests();
     run_competitive_harness_tests();
     run_cli_eval_phase5_tests();
+    run_cli_demo_evidence_tests();
     run_lora_ab_require_positive_tests();
     run_runner_eval_gate_tests();
     run_daemon_reaction_poll_tests();
