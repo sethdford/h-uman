@@ -444,7 +444,7 @@ static void va_etm_derive_mac_key(const uint8_t key[HU_VAULT_AEAD_KEY_LEN],
                    out_mac_key);
 }
 
-static hu_error_t va_encrypt_v3(hu_allocator_t *alloc, const uint8_t key[HU_VAULT_AEAD_KEY_LEN],
+__attribute__((unused)) static hu_error_t va_encrypt_v3(hu_allocator_t *alloc, const uint8_t key[HU_VAULT_AEAD_KEY_LEN],
                                 const uint8_t *aad, size_t aad_len, const uint8_t *pt,
                                 size_t pt_len, uint8_t **out, size_t *out_len) {
     size_t env_len = 1u + VA_CHACHA_NONCE_LEN + pt_len + VA_HMAC_LEN;
