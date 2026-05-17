@@ -20,6 +20,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #ifdef HU_ENABLE_MLX_PROVIDER
@@ -29,14 +30,24 @@
 #endif
 
 typedef struct mlx_ctx {
-    /* Owned copies so the caller's config struct can be freed after create. */
+    /* Owned copies so the caller's config struct can be freed after create.
+     * Length is stored alongside the pointer so deinit frees the EXACT
+     * allocation size (alloc->free contract requires it). Using strlen
+     * at free time would break for embedded NULs or after any mutation. */
     char *model_path_owned;
+    size_t model_path_owned_len;
     char *adapter_path_owned;
+    size_t adapter_path_owned_len;
     int max_tokens;
 } mlx_ctx_t;
 
 static char *dup_with_len(hu_allocator_t *alloc, const char *src, size_t len) {
     if (!src || len == 0)
+        return NULL;
+    /* Guard the `len + 1` from overflow. SIZE_MAX would wrap to 0,
+     * producing a 0-byte allocation that then memcpy's len bytes
+     * (CodeRabbit 2026-05-17 finding). */
+    if (len > SIZE_MAX - 1)
         return NULL;
     char *out = (char *)alloc->alloc(alloc->ctx, len + 1);
     if (!out)
@@ -103,9 +114,9 @@ static void mlx_deinit(void *ctx, hu_allocator_t *alloc) {
     if (!c)
         return;
     if (c->model_path_owned)
-        alloc->free(alloc->ctx, c->model_path_owned, strlen(c->model_path_owned) + 1);
+        alloc->free(alloc->ctx, c->model_path_owned, c->model_path_owned_len + 1);
     if (c->adapter_path_owned)
-        alloc->free(alloc->ctx, c->adapter_path_owned, strlen(c->adapter_path_owned) + 1);
+        alloc->free(alloc->ctx, c->adapter_path_owned, c->adapter_path_owned_len + 1);
     alloc->free(alloc->ctx, c, sizeof(*c));
 }
 
@@ -176,7 +187,9 @@ hu_error_t hu_mlx_provider_create(hu_allocator_t *alloc, const hu_mlx_config_t *
 
     if (config) {
         c->model_path_owned = dup_with_len(alloc, config->model_path, config->model_path_len);
+        c->model_path_owned_len = c->model_path_owned ? config->model_path_len : 0;
         c->adapter_path_owned = dup_with_len(alloc, config->adapter_path, config->adapter_path_len);
+        c->adapter_path_owned_len = c->adapter_path_owned ? config->adapter_path_len : 0;
         c->max_tokens = config->max_tokens;
         /* If the caller asked for a model/adapter but allocation failed,
          * surface OOM rather than silently dropping the request. */

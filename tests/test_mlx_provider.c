@@ -90,8 +90,12 @@ static void mlx_provider_load_adapter_returns_not_supported(void) {
     hu_provider_t p = {0};
     HU_ASSERT_EQ(hu_mlx_provider_create(&alloc, &cfg, &p), HU_OK);
     HU_ASSERT_NOT_NULL(p.vtable->load_adapter);
+    HU_ASSERT_NOT_NULL(p.vtable->unload_adapter); /* CodeRabbit 2026-05-17 — pin
+                                                     the third member of the
+                                                     adapter triple too. */
     HU_ASSERT_EQ(p.vtable->load_adapter(p.ctx, &alloc, "/tmp/x.safetensors", 18, "id", 2),
                  HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(p.vtable->unload_adapter(p.ctx, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(p.vtable->active_adapter(p.ctx));
     p.vtable->deinit(p.ctx, &alloc);
 }

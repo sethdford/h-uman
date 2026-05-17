@@ -131,58 +131,69 @@ hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
     if (n < 0 || (size_t)n >= sizeof(user_msg))
         return HU_ERR_INTERNAL;
 
+    /* Multi-allocation function — use the goto-cleanup pattern per the
+     * project convention (multiple-allocation rule, see src dir
+     * CLAUDE.md). Frees in reverse allocation order at the single
+     * `cleanup:` label. CodeRabbit 2026-05-17 refactor request. */
+    hu_error_t ret = HU_OK;
     char *response = NULL;
     size_t response_len = 0;
+    hu_json_value_t *root = NULL;
+
     hu_error_t err = provider->vtable->chat_with_system(
         provider->ctx, alloc, HU_FACT_LLM_SYS, strlen(HU_FACT_LLM_SYS), user_msg, (size_t)n, model,
         model_len, 0.0, &response, &response_len);
     if (err != HU_OK) {
-        if (response)
-            alloc->free(alloc->ctx, response, response_len + 1);
-        return err;
+        ret = err;
+        goto cleanup;
     }
     if (!response || response_len == 0) {
-        if (response)
-            alloc->free(alloc->ctx, response, response_len + 1);
-        return HU_OK; /* soft fail: provider returned empty */
+        /* soft fail: provider returned empty */
+        goto cleanup;
     }
 
     /* Locate JSON body inside response (strip ```json fences / prose). */
-    const char *json_start = find_json_start(response, response_len);
-    size_t json_end_off = find_json_end(response, response_len);
-    if (!json_start || json_end_off == 0 || (size_t)(json_start - response) >= json_end_off) {
-        alloc->free(alloc->ctx, response, response_len + 1);
-        return HU_OK; /* soft fail: no JSON body */
-    }
-    size_t json_len = json_end_off - (size_t)(json_start - response);
+    {
+        const char *json_start = find_json_start(response, response_len);
+        size_t json_end_off = find_json_end(response, response_len);
+        if (!json_start || json_end_off == 0 || (size_t)(json_start - response) >= json_end_off) {
+            /* soft fail: no JSON body */
+            goto cleanup;
+        }
+        size_t json_len = json_end_off - (size_t)(json_start - response);
 
-    hu_json_value_t *root = NULL;
-    hu_error_t perr = hu_json_parse(alloc, json_start, json_len, &root);
-    if (perr != HU_OK || !root) {
-        alloc->free(alloc->ctx, response, response_len + 1);
-        return HU_OK; /* soft fail: malformed JSON */
-    }
-
-    /* Accept either {"facts":[...]} or a bare array [...]. */
-    const hu_json_value_t *arr = root;
-    if (root->type == HU_JSON_OBJECT) {
-        arr = hu_json_object_get(root, "facts");
-    }
-    if (!arr || arr->type != HU_JSON_ARRAY) {
-        hu_json_free(alloc, root);
-        alloc->free(alloc->ctx, response, response_len + 1);
-        return HU_OK; /* soft fail: structure not matched */
-    }
-
-    for (size_t i = 0; i < arr->data.array.len && result->fact_count < HU_FACT_EXTRACT_MAX; i++) {
-        if (fact_from_json_obj(arr->data.array.items[i], now_ts,
-                               &result->facts[result->fact_count])) {
-            result->propositional_count++;
-            result->fact_count++;
+        hu_error_t perr = hu_json_parse(alloc, json_start, json_len, &root);
+        if (perr != HU_OK || !root) {
+            /* soft fail: malformed JSON */
+            goto cleanup;
         }
     }
 
-    hu_json_free(alloc, root);
-    alloc->free(alloc->ctx, response, response_len + 1);
-    return HU_OK;
+    /* Accept either {"facts":[...]} or a bare array [...]. */
+    {
+        const hu_json_value_t *arr = root;
+        if (root->type == HU_JSON_OBJECT) {
+            arr = hu_json_object_get(root, "facts");
+        }
+        if (!arr || arr->type != HU_JSON_ARRAY) {
+            /* soft fail: structure not matched */
+            goto cleanup;
+        }
+
+        for (size_t i = 0; i < arr->data.array.len && result->fact_count < HU_FACT_EXTRACT_MAX;
+             i++) {
+            if (fact_from_json_obj(arr->data.array.items[i], now_ts,
+                                   &result->facts[result->fact_count])) {
+                result->propositional_count++;
+                result->fact_count++;
+            }
+        }
+    }
+
+cleanup:
+    if (root)
+        hu_json_free(alloc, root);
+    if (response)
+        alloc->free(alloc->ctx, response, response_len + 1);
+    return ret;
 }

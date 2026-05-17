@@ -2683,6 +2683,8 @@ set(HU_TEST_SOURCES
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
     tests/test_output_validator.c
+    tests/test_chain_failure_paths.c
+    tests/test_agent_fail_path_regressions.c
     tests/test_validators_builtin.c
     tests/test_pattern_c_paths.c
     tests/test_validators_persona_safety.c
@@ -2866,6 +2868,7 @@ list(APPEND HU_TEST_SOURCES tests/test_agent_registry.c)
 list(APPEND HU_TEST_SOURCES tests/test_pwa.c)
 list(APPEND HU_TEST_SOURCES tests/test_integration.c)
 list(APPEND HU_TEST_SOURCES tests/test_hook_pipeline.c)
+list(APPEND HU_TEST_SOURCES tests/test_agent_dispatch_hooks.c)
 list(APPEND HU_TEST_SOURCES tests/test_config_reload.c)
 list(APPEND HU_TEST_SOURCES tests/test_plugin_hooks.c)
 
@@ -2944,6 +2947,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_bootstrap.c
     tests/test_thread_pool.c
     tests/test_permission.c
+    tests/test_shell_sandbox.c
     tests/test_mcp_manager.c
     tests/test_compaction_structured.c
     tests/test_session_persist.c

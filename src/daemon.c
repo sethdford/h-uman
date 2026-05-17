@@ -1068,37 +1068,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 sched_now, sched_ch, strlen(sched_ch), sched_contact, sizeof(sched_contact),
                 sched_channel, sizeof(sched_channel), sched_msg, sizeof(sched_msg));
             if (sched_len > 0) {
-                {
-                    hu_output_validator_chain_t *out_chain = NULL;
-                    if (hu_validators_build_default_outbound_chain(alloc, NULL, 0, &out_chain) ==
-                        HU_OK) {
-                        hu_chain_result_t cr;
-                        memset(&cr, 0, sizeof(cr));
-                        // telemetry: observer not in scope (architectural limit)
-                        if (hu_output_validator_chain_execute(out_chain, alloc, NULL, sched_msg,
-                                                              sched_len, &cr) == HU_OK) {
-                            if (cr.final_decision == HU_VALIDATOR_REJECT) {
-                                /* Deny-by-default: suppress unsanitized scheduled send. */
-                                hu_log_warn("human", agent ? agent->observer : NULL,
-                                            "validator chain REJECT (via %s) — suppressing "
-                                            "scheduled send",
-                                            cr.deciding_validator_name ? cr.deciding_validator_name
-                                                                       : "unknown");
-                                sched_msg[0] = '\0';
-                                sched_len = 0;
-                            } else if (cr.final_text) {
-                                if (cr.final_text != sched_msg &&
-                                    cr.final_text_len <= sizeof(sched_msg) - 1) {
-                                    memcpy(sched_msg, cr.final_text, cr.final_text_len);
-                                    sched_len = cr.final_text_len;
-                                    sched_msg[sched_len] = '\0';
-                                }
-                            }
-                            hu_chain_result_free(alloc, &cr);
-                        }
-                        hu_output_validator_chain_destroy(out_chain);
-                    }
-                }
+                hu_validator_chain_apply_default_in_place(alloc, agent ? agent->observer : NULL,
+                                                          NULL, 0, "scheduled send", sched_msg,
+                                                          &sched_len, sizeof(sched_msg));
                 if (sched_len == 0)
                     continue;
                 sched_len =
@@ -1742,38 +1714,11 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                                   strlen(cp->contact_id), "proactive", 9))
                         skip = true;
                     if (!skip && channels[c].channel->vtable->send) {
-                        {
-                            hu_output_validator_chain_t *out_chain = NULL;
-                            if (hu_validators_build_default_outbound_chain(alloc, NULL, 0,
-                                                                           &out_chain) == HU_OK) {
-                                hu_chain_result_t cr;
-                                memset(&cr, 0, sizeof(cr));
-                                // telemetry: observer not in scope (architectural limit)
-                                if (hu_output_validator_chain_execute(out_chain, alloc, NULL,
-                                                                      response, response_len,
-                                                                      &cr) == HU_OK) {
-                                    if (cr.final_decision == HU_VALIDATOR_REJECT) {
-                                        /* Deny-by-default: suppress unsanitized proactive send. */
-                                        hu_log_warn("human", agent ? agent->observer : NULL,
-                                                    "validator chain REJECT (via %s) — suppressing "
-                                                    "proactive send",
-                                                    cr.deciding_validator_name
-                                                        ? cr.deciding_validator_name
-                                                        : "unknown");
-                                        skip = true;
-                                    } else if (cr.final_text) {
-                                        if (cr.final_text != response &&
-                                            cr.final_text_len <= response_len) {
-                                            memcpy(response, cr.final_text, cr.final_text_len);
-                                            response_len = cr.final_text_len;
-                                            response[response_len] = '\0';
-                                        }
-                                    }
-                                    hu_chain_result_free(alloc, &cr);
-                                }
-                                hu_output_validator_chain_destroy(out_chain);
-                            }
-                        }
+                        hu_validator_chain_apply_default_in_place(
+                            alloc, agent ? agent->observer : NULL, NULL, 0, "proactive send",
+                            response, &response_len, response_len + 1);
+                        if (response_len == 0)
+                            skip = true;
                         response_len =
                             hu_conversation_vary_complexity(response, response_len, (uint32_t)now);
                         if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&
@@ -9315,44 +9260,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             for (int bi = 0; bi < n; bi++) {
                                 if (burst_msgs[bi][0]) {
                                     size_t bm_len = strlen(burst_msgs[bi]);
-                                    {
-                                        hu_output_validator_chain_t *out_chain = NULL;
-                                        if (hu_validators_build_default_outbound_chain(
-                                                alloc, NULL, 0, &out_chain) == HU_OK) {
-                                            hu_chain_result_t cr;
-                                            memset(&cr, 0, sizeof(cr));
-                                            // clang-format off
-                                            // telemetry: observer not in scope (architectural limit)
-                                            // clang-format on
-                                            if (hu_output_validator_chain_execute(
-                                                    out_chain, alloc, NULL, burst_msgs[bi], bm_len,
-                                                    &cr) == HU_OK) {
-                                                if (cr.final_decision == HU_VALIDATOR_REJECT) {
-                                                    /* Deny-by-default: suppress this burst msg. */
-                                                    hu_log_warn("human",
-                                                                agent ? agent->observer : NULL,
-                                                                "validator chain REJECT (via %s) — "
-                                                                "suppressing burst msg [%d]",
-                                                                cr.deciding_validator_name
-                                                                    ? cr.deciding_validator_name
-                                                                    : "unknown",
-                                                                bi);
-                                                    burst_msgs[bi][0] = '\0';
-                                                    bm_len = 0;
-                                                } else if (cr.final_text) {
-                                                    if (cr.final_text != burst_msgs[bi] &&
-                                                        cr.final_text_len <= bm_len) {
-                                                        memcpy(burst_msgs[bi], cr.final_text,
-                                                               cr.final_text_len);
-                                                        bm_len = cr.final_text_len;
-                                                        burst_msgs[bi][bm_len] = '\0';
-                                                    }
-                                                }
-                                                hu_chain_result_free(alloc, &cr);
-                                            }
-                                            hu_output_validator_chain_destroy(out_chain);
-                                        }
-                                    }
+                                    hu_validator_chain_apply_default_in_place(
+                                        alloc, agent ? agent->observer : NULL, NULL, 0, "burst msg",
+                                        burst_msgs[bi], &bm_len, sizeof(burst_msgs[bi]));
                                     if (bm_len == 0)
                                         continue;
                                     bm_len = hu_conversation_vary_complexity(
@@ -10689,38 +10599,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     /* Strip pipeline + send buffer cursor: shared by prod and HU_IS_TEST so tests
                      * exercise the same outbound text shaping as production. */
                     char *send_buf_ack = NULL;
-                    {
-                        hu_output_validator_chain_t *out_chain = NULL;
-                        if (hu_validators_build_default_outbound_chain(alloc, NULL, 0,
-                                                                       &out_chain) == HU_OK) {
-                            hu_chain_result_t cr;
-                            memset(&cr, 0, sizeof(cr));
-                            // telemetry: observer not in scope (architectural limit)
-                            if (hu_output_validator_chain_execute(out_chain, alloc, NULL, response,
-                                                                  response_len, &cr) == HU_OK) {
-                                if (cr.final_decision == HU_VALIDATOR_REJECT) {
-                                    /* Deny-by-default: suppress unsanitized main response. */
-                                    hu_log_warn("human", agent ? agent->observer : NULL,
-                                                "validator chain REJECT (via %s) — suppressing "
-                                                "main response send",
-                                                cr.deciding_validator_name
-                                                    ? cr.deciding_validator_name
-                                                    : "unknown");
-                                    response[0] = '\0';
-                                    response_len = 0;
-                                } else if (cr.final_text) {
-                                    if (cr.final_text != response &&
-                                        cr.final_text_len <= response_len) {
-                                        memcpy(response, cr.final_text, cr.final_text_len);
-                                        response_len = cr.final_text_len;
-                                        response[response_len] = '\0';
-                                    }
-                                }
-                                hu_chain_result_free(alloc, &cr);
-                            }
-                            hu_output_validator_chain_destroy(out_chain);
-                        }
-                    }
+                    hu_validator_chain_apply_default_in_place(
+                        alloc, agent ? agent->observer : NULL, NULL, 0, "main response send",
+                        response, &response_len, response_len + 1);
 
 #ifndef HU_IS_TEST
                     /* Apply typing quirks from persona overlay as post-processing.
@@ -11740,44 +11621,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 if (dt_err == HU_OK && dt_resp && dt_resp_len > 0 &&
                                     dt_resp_len < 200) {
                                     /* Post-process double-text through the same BTH pipeline */
-                                    bool dt_rejected = false;
-                                    {
-                                        hu_output_validator_chain_t *out_chain = NULL;
-                                        if (hu_validators_build_default_outbound_chain(
-                                                alloc, NULL, 0, &out_chain) == HU_OK) {
-                                            hu_chain_result_t cr;
-                                            memset(&cr, 0, sizeof(cr));
-                                            // clang-format off
-                                            // telemetry: observer not in scope (architectural limit)
-                                            // clang-format on
-                                            if (hu_output_validator_chain_execute(
-                                                    out_chain, alloc, NULL, dt_resp, dt_resp_len,
-                                                    &cr) == HU_OK) {
-                                                if (cr.final_decision == HU_VALIDATOR_REJECT) {
-                                                    /* Deny-by-default: suppress double-text. */
-                                                    hu_log_warn("human",
-                                                                agent ? agent->observer : NULL,
-                                                                "validator chain REJECT (via %s) — "
-                                                                "suppressing double-text send",
-                                                                cr.deciding_validator_name
-                                                                    ? cr.deciding_validator_name
-                                                                    : "unknown");
-                                                    dt_rejected = true;
-                                                } else if (cr.final_text) {
-                                                    if (cr.final_text != dt_resp &&
-                                                        cr.final_text_len <= dt_resp_len) {
-                                                        memcpy(dt_resp, cr.final_text,
-                                                               cr.final_text_len);
-                                                        dt_resp_len = cr.final_text_len;
-                                                        dt_resp[dt_resp_len] = '\0';
-                                                    }
-                                                }
-                                                hu_chain_result_free(alloc, &cr);
-                                            }
-                                            hu_output_validator_chain_destroy(out_chain);
-                                        }
-                                    }
-                                    if (!dt_rejected) {
+                                    hu_validator_chain_apply_default_in_place(
+                                        alloc, agent ? agent->observer : NULL, NULL, 0,
+                                        "double-text send", dt_resp, &dt_resp_len, dt_resp_len + 1);
+                                    if (dt_resp_len > 0) {
                                         dt_resp_len = hu_conversation_vary_complexity(
                                             dt_resp, dt_resp_len, dt_seed);
                                         if (dt_resp_len > 1 && dt_resp[0] >= 'A' &&

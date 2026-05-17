@@ -24,7 +24,7 @@ respond.
 [src/eval/consistency.c:60-127](../../src/eval/consistency.c#L60)
 weights three sub-scores:
 
-```
+```text
 prompt_alignment = trait_score * 0.4 + vocab_score * 0.4 + (1 - avoid_penalty) * 0.2
 ```
 
@@ -54,7 +54,7 @@ unmeasurable by substring match.
 Add 6 `preferred_vocab` entries that DO appear in the bank's responses
 (`lmk btw rn ty yeah yep`) and re-run:
 
-```
+```text
 [lora-baseline]   composite:       0.646 (style=0.923 traits=0.307 line=0.459 stderr=0.003 n=5)
 ```
 

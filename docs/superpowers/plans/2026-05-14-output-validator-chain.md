@@ -1,5 +1,6 @@
 ---
-title: Output Validator Chain Implementation Plan
+title: Output Validator Chain — Implementation Plan
+description: Refactor scattered output sanitizers into a composable validator-chain vtable; add F1/F2/F3 leak-prevention validators; plumb stop-sequences and structured-output contract through the provider vtable.
 ---
 
 # Output Validator Chain — Implementation Plan

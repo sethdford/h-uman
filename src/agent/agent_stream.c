@@ -1433,6 +1433,17 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         hu_validators_build_default_outbound_chain(
                             agent->alloc, persona_name, persona_name_len, &out_chain) == HU_OK;
                 }
+                if (!out_chain) {
+                    /* HIGH-5: chain BUILD failure was previously silent — safe_content
+                     * stays NULL, output is dropped at the line ~1491 guard. The drop
+                     * is the correct deny-by-default behavior (we can't prove the
+                     * content is safe without a chain), but the silence robbed
+                     * operators of the signal that anything went wrong. */
+                    hu_log_error("agent_stream", agent->observer,
+                                 "stream validator chain BUILD failed (persona=%s, len=%zu) "
+                                 "-- dropping send (deny-by-default)",
+                                 persona_name ? persona_name : "(none)", persona_name_len);
+                }
                 if (out_chain) {
                     hu_validator_context_t vctx = {0};
                     vctx.persona_name = persona_name;
@@ -1441,6 +1452,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     memset(&cr, 0, sizeof(cr));
                     hu_error_t cerr = hu_output_validator_chain_execute(
                         out_chain, agent->alloc, &vctx, sresp.content, sresp.content_len, &cr);
+                    if (cerr != HU_OK) {
+                        /* HIGH-5: execute failure was previously silent. Same
+                         * deny-by-default drop, now with an explicit signal. */
+                        hu_log_error("agent_stream", agent->observer,
+                                     "stream validator chain EXECUTE failed (err=%s) "
+                                     "-- dropping send (deny-by-default)",
+                                     hu_error_string(cerr));
+                        hu_chain_result_free(agent->alloc, &cr);
+                    }
                     if (cerr == HU_OK) {
                         hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
                                                             sresp.content_len);
@@ -2200,12 +2220,26 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             hu_output_validator_chain_t *out_chain =
                 (agent->persona && agent->persona->outbound_chain) ? agent->persona->outbound_chain
                                                                    : NULL;
+            hu_error_t build_err = HU_OK;
             if (!out_chain) {
-                chain_owned = hu_validators_build_default_outbound_chain(agent->alloc, persona_name,
-                                                                         persona_name_len,
-                                                                         &out_chain) == HU_OK;
+                build_err = hu_validators_build_default_outbound_chain(
+                    agent->alloc, persona_name, persona_name_len, &out_chain);
+                chain_owned = (build_err == HU_OK);
             }
-            if (out_chain) {
+            /* HIGH-7: deny-by-default on chain machinery failure in the
+             * stream-finalization path. Mirrors HIGH-1's fix in agent_turn.c.
+             * Validation is a security boundary; if the chain can't be built
+             * or executed, final_content (already the full assembled stream
+             * response at this point) must NOT pass through to the consumer
+             * unvalidated. Log and suppress. */
+            bool chain_unrunnable = false;
+            if (!out_chain) {
+                hu_log_error("agent_stream", agent->observer,
+                             "post-stream validator chain BUILD failed (persona=%s, err=%s) "
+                             "-- suppressing send (deny-by-default)",
+                             persona_name ? persona_name : "(none)", hu_error_string(build_err));
+                chain_unrunnable = true;
+            } else {
                 hu_validator_context_t vctx = {0};
                 vctx.persona_name = persona_name;
                 vctx.persona_name_len = persona_name_len;
@@ -2213,7 +2247,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 memset(&cr, 0, sizeof(cr));
                 hu_error_t cerr = hu_output_validator_chain_execute(
                     out_chain, agent->alloc, &vctx, final_content, final_content_len, &cr);
-                if (cerr == HU_OK) {
+                if (cerr != HU_OK) {
+                    hu_log_error("agent_stream", agent->observer,
+                                 "post-stream validator chain EXECUTE failed (err=%s) "
+                                 "-- suppressing send (deny-by-default)",
+                                 hu_error_string(cerr));
+                    hu_chain_result_free(agent->alloc, &cr);
+                    chain_unrunnable = true;
+                } else if (cerr == HU_OK) {
                     hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
                                                         final_content_len);
                     if (cr.final_decision == HU_VALIDATOR_REJECT) {
@@ -2302,6 +2343,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 }
                 if (chain_owned)
                     hu_output_validator_chain_destroy(out_chain);
+            }
+            if (chain_unrunnable) {
+                if (final_content)
+                    agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                       final_content_len + 1);
+                final_content = NULL;
+                final_content_len = 0;
             }
         }
     }

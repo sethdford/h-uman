@@ -48,9 +48,19 @@ typedef struct hu_mlx_config {
     int max_tokens;
 } hu_mlx_config_t;
 
-/* Create an MLX provider. Always succeeds when `out` is non-NULL — the
- * vtable methods return HU_ERR_NOT_SUPPORTED until the runtime is
- * linked. Caller owns `out->ctx`; release with `out->vtable->deinit`. */
+/* Create an MLX provider.
+ *
+ * Returns:
+ *   - HU_OK on success. Caller owns `out->ctx`; release with
+ *     `out->vtable->deinit`. The vtable methods themselves may still
+ *     return HU_ERR_NOT_SUPPORTED until the MLX runtime is linked.
+ *   - HU_ERR_INVALID_ARGUMENT when `alloc` or `out` is NULL.
+ *   - HU_ERR_OUT_OF_MEMORY on allocator failure (either the context
+ *     struct itself, or the owned config-string copies).
+ *
+ * The earlier comment promised "always succeeds when `out` is non-NULL,"
+ * which was wrong on both NULL-alloc and OOM paths. CodeRabbit
+ * 2026-05-17 finding. */
 hu_error_t hu_mlx_provider_create(hu_allocator_t *alloc, const hu_mlx_config_t *config,
                                   hu_provider_t *out);
 

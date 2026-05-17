@@ -149,7 +149,34 @@ hu_error_t hu_output_validator_chain_execute(const hu_output_validator_chain_t *
         return HU_OK;
     }
 
-    out->final_decision = current_owned ? HU_VALIDATOR_REWRITE : HU_VALIDATOR_PASS;
+    /* HIGH-6: the final decision must be driven by "did anyone rewrite?"
+     * (rewrite_count > 0), not by whether the current buffer happens to be
+     * owned. A validator can legitimately return REWRITE with text_owned=false
+     * (e.g. a slice of the input — a "strip trailing whitespace" optimization
+     * that avoids allocation). Previously the chain reported PASS for that
+     * case, and downstream consumers that key on final_text_owned silently
+     * discarded the rewrite — the very class of leak the chain exists to
+     * prevent could slip through if it was caught by a non-allocating
+     * validator.
+     *
+     * Additionally, ensure final_text is OWNED on REWRITE so consumers have
+     * a stable lifetime contract. We copy if the last validator's rewrite
+     * was non-owned. Costs O(n) memcpy only in the rare non-owning-rewrite
+     * case; usual REWRITE path is already owned. */
+    if (out->rewrite_count > 0) {
+        if (!current_owned) {
+            char *copy = (char *)alloc->alloc(alloc->ctx, current_len + 1);
+            if (!copy)
+                return HU_ERR_OUT_OF_MEMORY;
+            memcpy(copy, current, current_len);
+            copy[current_len] = '\0';
+            current = copy;
+            current_owned = true;
+        }
+        out->final_decision = HU_VALIDATOR_REWRITE;
+    } else {
+        out->final_decision = HU_VALIDATOR_PASS;
+    }
     out->final_text = current;
     out->final_text_len = current_len;
     out->final_text_owned = current_owned;

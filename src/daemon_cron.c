@@ -286,38 +286,14 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                         channels[c].channel->vtable->name(channels[c].channel->ctx);
                     if (ch_name && strcmp(ch_name, ch_part) == 0) {
                         if (channels[c].channel->vtable->send) {
-                            {
-                                hu_output_validator_chain_t *out_chain = NULL;
-                                if (hu_validators_build_default_outbound_chain(
-                                        alloc, NULL, 0, &out_chain) == HU_OK) {
-                                    hu_chain_result_t cr;
-                                    memset(&cr, 0, sizeof(cr));
-                                    if (hu_output_validator_chain_execute(out_chain, alloc, NULL,
-                                                                          response, response_len,
-                                                                          &cr) == HU_OK) {
-                                        if (cr.final_decision == HU_VALIDATOR_REJECT) {
-                                            /* Deny-by-default: suppress cron send. */
-                                            hu_log_warn("human", NULL,
-                                                        "validator chain REJECT (via %s) — "
-                                                        "suppressing cron send",
-                                                        cr.deciding_validator_name
-                                                            ? cr.deciding_validator_name
-                                                            : "unknown");
-                                            response[0] = '\0';
-                                            response_len = 0;
-                                        } else if (cr.final_text) {
-                                            if (cr.final_text != response &&
-                                                cr.final_text_len <= response_len) {
-                                                memcpy(response, cr.final_text, cr.final_text_len);
-                                                response_len = cr.final_text_len;
-                                                response[response_len] = '\0';
-                                            }
-                                        }
-                                        hu_chain_result_free(alloc, &cr);
-                                    }
-                                    hu_output_validator_chain_destroy(out_chain);
-                                }
-                            }
+                            /* Run outbound validator chain in place. Pre-MED-3 this
+                             * was ~30 lines of build/execute/branch/destroy boilerplate
+                             * duplicated across 6 sites; pre-MED-2 the rewrite path also
+                             * silently dropped oversized rewrites. The helper truncates
+                             * to cap-1 instead. */
+                            hu_validator_chain_apply_default_in_place(
+                                alloc, NULL, NULL, 0, "cron send", response, &response_len,
+                                response_len + 1);
                             if (response_len == 0)
                                 break;
                             response_len = hu_conversation_vary_complexity(response, response_len,

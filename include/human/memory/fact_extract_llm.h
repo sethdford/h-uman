@@ -72,8 +72,14 @@ extern "C" {
  * Hard errors (NULL args, provider returned non-OK, OOM during parse)
  * propagate as their respective error codes.
  *
- * Returns HU_OK on success or soft failure; HU_ERR_INVALID_ARGUMENT,
- * HU_ERR_PROVIDER_RESPONSE, or HU_ERR_OUT_OF_MEMORY otherwise. */
+ * Returns HU_OK on success or soft failure. On hard failure, returns
+ * either HU_ERR_INVALID_ARGUMENT (NULL args / no vtable->chat_with_system),
+ * HU_ERR_OUT_OF_MEMORY, or any provider-specific error code propagated
+ * UNCHANGED from `provider->vtable->chat_with_system` (e.g.
+ * HU_ERR_PROVIDER_RATE_LIMITED, HU_ERR_PROVIDER_AUTH, etc.). Callers
+ * should handle the full provider-error surface, not just
+ * HU_ERR_PROVIDER_RESPONSE. CodeRabbit 2026-05-17 finding clarified
+ * this contract. */
 hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
                                size_t model_len, const char *text, size_t text_len, int64_t now_ts,
                                hu_fact_extract_result_t *result);

@@ -655,9 +655,12 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
 
     /* Also run DPO pair extraction from user corrections. */
     {
+        /* default_db must live in the SAME scope as `db_path` — if it lives
+         * inside an inner block, `db_path = default_db` produces a dangling
+         * pointer once the block exits (CodeRabbit 2026-05-17 finding). */
+        char default_db[512] = {0};
         const char *db_path = memory_db ? memory_db : chat_db;
         if (!db_path) {
-            char default_db[512];
             const char *home = getenv("HOME");
             if (home) {
                 snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);

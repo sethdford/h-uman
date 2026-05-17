@@ -62,6 +62,12 @@ hu_error_t hu_persona_fidelity_score_l1(const hu_communication_style_t *target,
 
     if (!target || !out || !responses || !lens || n == 0)
         return HU_ERR_INVALID_ARGUMENT;
+    /* Reject NULL+non-zero count combinations to fail fast at the API
+     * boundary rather than passing NULL into the sub-scorer (CodeRabbit
+     * 2026-05-17 finding). */
+    if ((traits_count > 0 && !traits) || (preferred_count > 0 && !preferred_vocab) ||
+        (avoided_count > 0 && !avoided_vocab))
+        return HU_ERR_INVALID_ARGUMENT;
     if (target->sample_count == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -92,9 +98,15 @@ hu_error_t hu_persona_fidelity_score_l1(const hu_communication_style_t *target,
 
         float t = 0.0f;
         if (traits_count > 0 || preferred_count > 0 || avoided_count > 0) {
-            (void)hu_consistency_score_prompt_alignment(responses[i], lens[i], traits, traits_count,
-                                                        preferred_vocab, preferred_count,
-                                                        avoided_vocab, avoided_count, &t);
+            /* Propagate sub-scorer errors rather than silently zeroing
+             * the axis. A failure here would otherwise depress the
+             * composite without surfacing the bug (CodeRabbit
+             * 2026-05-17 finding). */
+            hu_error_t terr = hu_consistency_score_prompt_alignment(
+                responses[i], lens[i], traits, traits_count, preferred_vocab, preferred_count,
+                avoided_vocab, avoided_count, &t);
+            if (terr != HU_OK)
+                return terr;
         } else {
             /* No persona lexical fingerprint provided — neutral score
              * rather than zero so this axis doesn't drag the composite
@@ -105,7 +117,10 @@ hu_error_t hu_persona_fidelity_score_l1(const hu_communication_style_t *target,
 
         float line = 0.5f;
         if (prev) {
-            (void)hu_consistency_score_line(prev, prev_len, responses[i], lens[i], &line);
+            hu_error_t lerr =
+                hu_consistency_score_line(prev, prev_len, responses[i], lens[i], &line);
+            if (lerr != HU_OK)
+                return lerr;
             line = clamp01(line);
         }
 
@@ -169,6 +184,12 @@ hu_error_t hu_persona_fidelity_ab_score(const hu_communication_style_t *target,
                                         hu_persona_fidelity_ab_t *out) {
 
     if (!target || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Reject negative thresholds. A negative stderr-multiplier flips
+     * the `improved` predicate so it returns true for non-extreme
+     * NEGATIVE deltas — silently inverting the gate's meaning
+     * (CodeRabbit 2026-05-17 finding). */
+    if (min_improvement_stderr < 0.0f)
         return HU_ERR_INVALID_ARGUMENT;
     if (target->sample_count == 0)
         return HU_ERR_INVALID_ARGUMENT;
