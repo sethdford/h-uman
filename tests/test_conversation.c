@@ -408,8 +408,27 @@ static void thinking_filler_varies_by_seed(void) {
     HU_ASSERT_FALSE(same);
 }
 
-static void thinking_text_fast_returns_false(void) {
-    /* iMessage is text_fast — should always return false regardless of persona/content */
+/* ── TEXT_FAST (iMessage/SMS) thinking-filler contract ──────────────────────
+ *
+ * Earlier this code returned false unconditionally for TEXT_FAST channels, on
+ * the theory that any delay on iMessage reads as dispreference. The result
+ * was that iMessage never sent "hm" / "wait" / "lemme think" bubbles — the
+ * single most distinctive humanness signal in casual texting. This was a
+ * humanness-thesis violation pinned by a test asserting the bug as intent.
+ *
+ * New contract:
+ *   - TEXT_FAST channels DO produce a thinking filler when the trigger heuristic
+ *     fires (substantive message: long enough or question with ≥6 words).
+ *   - The delay AFTER the filler is 400–1500 ms uniform — matches the real
+ *     human pause-think-continue cadence; does not read as dispreference.
+ *   - TEXT_ASYNC keeps its 30–60 s delay (Slack/Discord pauses are tolerated).
+ *
+ * If any of these three invariants break, this suite fails first.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+static void thinking_text_fast_imessage_emits_filler(void) {
+    /* Regression guard for the "speed wins" bug: iMessage MUST produce a
+     * filler on a substantive question, not return false. */
     const char *msg =
         "What do you think about moving to a new city? I've been going back and forth on it for "
         "weeks and I'm not sure what the right call is";
@@ -419,12 +438,83 @@ static void thinking_text_fast_returns_false(void) {
     hu_filler_recency_t recency;
     hu_thinking_context_t ctx;
     make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 42);
-    /* Override channel to iMessage (text_fast) */
     ctx.channel_name = "imessage";
     overlay.channel = "imessage";
     hu_thinking_response_t out = {0};
     bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
-    HU_ASSERT_FALSE(ok);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(out.filler_len > 0);
+    bool valid = (strcmp(out.filler, "hmm") == 0 || strcmp(out.filler, "let me think") == 0 ||
+                  strcmp(out.filler, "one sec") == 0);
+    HU_ASSERT_TRUE(valid);
+}
+
+static void thinking_text_fast_imessage_uses_fast_delay(void) {
+    /* THE invariant: the delay between filler and substantive reply must be
+     * in the human pause-think range (400–1500 ms), NOT the 30–60 s
+     * TEXT_ASYNC range. If this ever fails high, fillers on iMessage have
+     * been silently coupled to the wrong delay formula and the recipient
+     * will sit watching "hm" for a half-minute. */
+    const char *msg =
+        "What do you think about moving to a new city? I've been going back and forth on it for "
+        "weeks and I'm not sure what the right call is";
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    char *bank[3];
+    hu_filler_recency_t recency;
+    hu_thinking_context_t ctx;
+    make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 42);
+    ctx.channel_name = "imessage";
+    overlay.channel = "imessage";
+    hu_thinking_response_t out = {0};
+    bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(out.delay_ms >= 400);
+    HU_ASSERT_TRUE(out.delay_ms <= 1500);
+}
+
+static void thinking_text_fast_sms_also_gets_fast_delay(void) {
+    /* SMS shares the TEXT_FAST class with iMessage — same cadence contract.
+     * Catches the case where a future change special-cases iMessage but
+     * forgets SMS, leaving SMS bouncing back to the 30 s TEXT_ASYNC delay. */
+    const char *msg =
+        "What do you think about moving to a new city? I've been going back and forth on it for "
+        "weeks and I'm not sure what the right call is";
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    char *bank[3];
+    hu_filler_recency_t recency;
+    hu_thinking_context_t ctx;
+    make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 42);
+    ctx.channel_name = "sms";
+    overlay.channel = "sms";
+    hu_thinking_response_t out = {0};
+    bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(out.delay_ms >= 400);
+    HU_ASSERT_TRUE(out.delay_ms <= 1500);
+}
+
+static void thinking_text_async_keeps_long_delay(void) {
+    /* Slack/Discord/Telegram (TEXT_ASYNC) cadence is genuinely slower —
+     * pauses are tolerated and even expected. Pin the 30–60 s contract so
+     * a future iMessage-aimed change doesn't accidentally accelerate them
+     * into iMessage's range. */
+    const char *msg =
+        "What do you think about moving to a new city? I've been going back and forth on it for "
+        "weeks and I'm not sure what the right call is";
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    char *bank[3];
+    hu_filler_recency_t recency;
+    hu_thinking_context_t ctx;
+    make_test_thinking_ctx(&persona, &overlay, bank, &recency, &ctx, 42);
+    /* default channel from make_test_thinking_ctx is "slack" (TEXT_ASYNC) */
+    hu_thinking_response_t out = {0};
+    bool ok = hu_conversation_classify_thinking(&ctx, msg, strlen(msg), NULL, 0, &out);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(out.delay_ms >= 30000);
+    HU_ASSERT_TRUE(out.delay_ms <= 60000);
 }
 
 static void thinking_no_consecutive_duplicates_with_3_bank(void) {
@@ -3009,6 +3099,99 @@ static void split_into_texts_respects_max_chunks(void) {
     HU_ASSERT_EQ(2, (int)n);
 }
 
+/* ── hu_conversation_split_for_cadence — channel-class-aware burst splitter ──
+ *
+ * Real human iMessage cadence bursts SHORT multi-sentence replies into
+ * separate bubbles. The old splitter only triggered on long (>120 char) prose,
+ * so the agent always sent compact replies as one cold bubble. This suite
+ * locks the new contract: TEXT_FAST gets sentence-level bursts; TEXT_ASYNC
+ * keeps single-bubble behavior unless prose is genuinely long.
+ *
+ * If any of these invariants regress, the assistant stops "feeling like
+ * iMessage" — the texture is the test.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+static void split_for_cadence_text_fast_bursts_multi_sentence(void) {
+    /* Canonical iMessage burst pattern: 3 short sentences, total ~73 chars,
+     * no newlines. Today's old gate (>120 chars) would NOT split. The new
+     * contract: TEXT_FAST sees ≥2 sentence boundaries, splits into one
+     * bubble per sentence. */
+    const char *msg = "sure that sounds great. what time? might be a few mins late.";
+    char chunks[4][512];
+    size_t n =
+        hu_conversation_split_for_cadence(msg, strlen(msg), HU_CHANNEL_CLASS_TEXT_FAST, chunks, 4);
+    HU_ASSERT_EQ(3, (int)n);
+    HU_ASSERT(strstr(chunks[0], "sure that sounds great") != NULL);
+    HU_ASSERT(strstr(chunks[1], "what time?") != NULL);
+    HU_ASSERT(strstr(chunks[2], "might be a few mins late") != NULL);
+}
+
+static void split_for_cadence_text_fast_single_sentence_stays_one(void) {
+    /* Single-statement replies must NOT split even on iMessage. "sure thing."
+     * is ONE intent, one bubble. The ≥2-sentence-ends gate prevents this
+     * from over-splitting. */
+    const char *msg = "sure that sounds good let me know when you're free.";
+    char chunks[4][512];
+    size_t n =
+        hu_conversation_split_for_cadence(msg, strlen(msg), HU_CHANNEL_CLASS_TEXT_FAST, chunks, 4);
+    HU_ASSERT_EQ(0, (int)n); /* 0 = caller sends as a single bubble */
+}
+
+static void split_for_cadence_text_fast_below_floor_stays_one(void) {
+    /* Two-sentence reply under the 40-char floor: still one bubble. Splitting
+     * "ok cool. see ya." into two micro-bubbles feels robotic, not casual. */
+    const char *msg = "ok cool. see ya.";
+    char chunks[4][512];
+    size_t n =
+        hu_conversation_split_for_cadence(msg, strlen(msg), HU_CHANNEL_CLASS_TEXT_FAST, chunks, 4);
+    HU_ASSERT_EQ(0, (int)n);
+}
+
+static void split_for_cadence_text_async_short_stays_one(void) {
+    /* Slack/Discord (TEXT_ASYNC) tolerates longer single bubbles. The same
+     * multi-sentence reply that bursts on iMessage must NOT burst on Slack —
+     * different cadence cultures. */
+    const char *msg = "sure that sounds great. what time? might be a few mins late.";
+    char chunks[4][512];
+    size_t n =
+        hu_conversation_split_for_cadence(msg, strlen(msg), HU_CHANNEL_CLASS_TEXT_ASYNC, chunks, 4);
+    HU_ASSERT_EQ(0, (int)n);
+}
+
+static void split_for_cadence_long_prose_still_chunks_on_any_class(void) {
+    /* The original >120 char prose path is preserved for every channel class,
+     * delegating to hu_conversation_split_into_texts. Regression guard: a
+     * future "TEXT_ASYNC = always single bubble" mistake would break this. */
+    const char *msg = "ok so i was thinking about the trip and there's a few options we could try. "
+                      "first one is the cabin by the lake which is great if you want quiet time. "
+                      "second one is the place downtown which would be more social.";
+    char chunks[4][512];
+    size_t n =
+        hu_conversation_split_for_cadence(msg, strlen(msg), HU_CHANNEL_CLASS_TEXT_ASYNC, chunks, 4);
+    HU_ASSERT(n >= 2);
+}
+
+static void split_for_cadence_explicit_newlines_inhibit_split(void) {
+    /* If the LLM inserted explicit newlines, that's intentional formatting —
+     * the splitter must not second-guess it. Returning 0 means the caller
+     * sends the text as a single bubble preserving the LLM's structure. */
+    const char *msg = "sure that sounds great.\nwhat time?\nmight be late.";
+    char chunks[4][512];
+    size_t n =
+        hu_conversation_split_for_cadence(msg, strlen(msg), HU_CHANNEL_CLASS_TEXT_FAST, chunks, 4);
+    HU_ASSERT_EQ(0, (int)n);
+}
+
+static void split_for_cadence_null_inputs_return_zero(void) {
+    char chunks[4][512];
+    HU_ASSERT_EQ(
+        (int)hu_conversation_split_for_cadence(NULL, 0, HU_CHANNEL_CLASS_TEXT_FAST, chunks, 4), 0);
+    HU_ASSERT_EQ(
+        (int)hu_conversation_split_for_cadence("hi", 2, HU_CHANNEL_CLASS_TEXT_FAST, NULL, 4), 0);
+    HU_ASSERT_EQ(
+        (int)hu_conversation_split_for_cadence("hi", 2, HU_CHANNEL_CLASS_TEXT_FAST, chunks, 0), 0);
+}
+
 /* ── GIF cal JSON escaping test ──────────────────────────────────────── */
 
 static void gif_cal_save_escapes_quotes(void) {
@@ -4070,7 +4253,10 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(thinking_no_trigger_simple_message);
     HU_RUN_TEST(thinking_triggers_on_advice);
     HU_RUN_TEST(thinking_filler_varies_by_seed);
-    HU_RUN_TEST(thinking_text_fast_returns_false);
+    HU_RUN_TEST(thinking_text_fast_imessage_emits_filler);
+    HU_RUN_TEST(thinking_text_fast_imessage_uses_fast_delay);
+    HU_RUN_TEST(thinking_text_fast_sms_also_gets_fast_delay);
+    HU_RUN_TEST(thinking_text_async_keeps_long_delay);
     HU_RUN_TEST(thinking_no_consecutive_duplicates_with_3_bank);
 
     /* Quality evaluator */
@@ -4583,6 +4769,13 @@ void run_conversation_tests(void) {
     /* Split edge cases */
     HU_RUN_TEST(split_into_texts_exact_boundary);
     HU_RUN_TEST(split_into_texts_respects_max_chunks);
+    HU_RUN_TEST(split_for_cadence_text_fast_bursts_multi_sentence);
+    HU_RUN_TEST(split_for_cadence_text_fast_single_sentence_stays_one);
+    HU_RUN_TEST(split_for_cadence_text_fast_below_floor_stays_one);
+    HU_RUN_TEST(split_for_cadence_text_async_short_stays_one);
+    HU_RUN_TEST(split_for_cadence_long_prose_still_chunks_on_any_class);
+    HU_RUN_TEST(split_for_cadence_explicit_newlines_inhibit_split);
+    HU_RUN_TEST(split_for_cadence_null_inputs_return_zero);
 
     /* GIF cal JSON escaping */
     HU_RUN_TEST(gif_cal_save_escapes_quotes);

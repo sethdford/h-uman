@@ -11672,17 +11672,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 size_t pv_cnt =
                                     (f == 0 && all_send_media_cnt > 0) ? all_send_media_cnt : 0;
 
-                                /* Double-text: split long fragments into
-                                 * sentence-level messages for a more human
-                                 * texting cadence (>120 chars, no newlines). */
+                                /* Burst cadence: split fragments into separate
+                                 * bubbles for a more human texting feel. The
+                                 * decision is channel-class-aware:
+                                 *   - TEXT_FAST (iMessage/SMS): split short
+                                 *     multi-sentence replies one sentence per
+                                 *     bubble, AND chunk long prose (>120 chars)
+                                 *   - TEXT_ASYNC and others: only chunk >120
+                                 *     char prose (existing behavior)
+                                 * See hu_conversation_split_for_cadence in
+                                 * src/context/conversation.c for the full rules. */
                                 bool did_double_text = false;
 #ifndef HU_IS_TEST
-                                if (fragments[f].text_len > 120 &&
-                                    !memchr(fragments[f].text, '\n', fragments[f].text_len)) {
+                                {
+                                    const char *cad_ch_name =
+                                        ch->channel->vtable->name
+                                            ? ch->channel->vtable->name(ch->channel->ctx)
+                                            : NULL;
+                                    hu_channel_class_t cad_cls =
+                                        cad_ch_name ? hu_channel_class_for_name(cad_ch_name)
+                                                    : HU_CHANNEL_CLASS_UNKNOWN;
                                     char dt_chunks[4][512];
-                                    size_t dt_n = hu_conversation_split_into_texts(
-                                        fragments[f].text, fragments[f].text_len, 100, dt_chunks,
-                                        4);
+                                    size_t dt_n = hu_conversation_split_for_cadence(
+                                        fragments[f].text, fragments[f].text_len, cad_cls,
+                                        dt_chunks, 4);
                                     if (dt_n >= 2) {
                                         did_double_text = true;
                                         for (size_t dt = 0; dt < dt_n; dt++) {
