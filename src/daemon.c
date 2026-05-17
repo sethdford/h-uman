@@ -73,6 +73,7 @@
 #if defined(HU_ENABLE_RL_FULL)
 #include "human/agent/reaction_handler.h"
 #include "human/daemon_reaction_poll.h"
+#include "human/channels/imessage_reactions.h"
 #endif
 
 #include "human/agent/governor.h"
@@ -11479,8 +11480,36 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         ch->channel->vtable->name(ch->channel->ctx);
                                     if (ch_name) {
                                         char msg_ref[96];
-                                        snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
-                                                 (long long)time(NULL));
+                                        msg_ref[0] = '\0';
+                                        if (strcmp(ch_name, "imessage") == 0) {
+                                            const char *db = NULL;
+                                            if (config->reaction_collection.chatdb_path[0])
+                                                db = config->reaction_collection.chatdb_path;
+                                            else {
+                                                const char *env = getenv("HU_CHATDB");
+                                                if (env && env[0])
+                                                    db = env;
+                                            }
+                                            if (!db) {
+                                                static char home_db[512];
+                                                const char *hm = getenv("HOME");
+                                                if (hm && hm[0]) {
+                                                    snprintf(home_db, sizeof(home_db),
+                                                             "%s/Library/Messages/chat.db", hm);
+                                                    db = home_db;
+                                                }
+                                            }
+                                            if (db &&
+                                                hu_imessage_lookup_latest_sent_guid(
+                                                    db, batch_key, fragments[f].text, msg_ref,
+                                                    sizeof(msg_ref)) != HU_OK) {
+                                                snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
+                                                         (long long)time(NULL));
+                                            }
+                                        } else {
+                                            snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
+                                                     (long long)time(NULL));
+                                        }
                                         hu_reaction_handler_register_assistant_message_for_production(
                                             ch_name, batch_key, msg_ref,
                                             combined[0] ? combined : "", fragments[f].text);

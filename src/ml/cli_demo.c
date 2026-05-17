@@ -22,6 +22,7 @@
 #include "human/core/error.h"
 #include "human/eval/bootstrap_ci.h"
 #include "human/eval/eval_gate.h"
+#include "human/eval/leaderboard.h"
 #include "human/eval/persona_rollout.h"
 #include "human/memory/personal_model.h"
 #include "human/provider.h"
@@ -511,6 +512,7 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
         .prompts = prompts,
         .n_prompts = score_n,
         .timeout_ms_per_prompt = 5000,
+        .capture_responses = true,
     };
     hu_persona_rollout_result_t base_rr = {0}, cand_rr = {0};
     (void)hu_persona_rollout_run(alloc, &base_cfg, &base_rr);
@@ -566,16 +568,73 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
 
     /* Real eval-gate verdict when n satisfies the bootstrap floor. */
     if (score_n >= 10) {
+        hu_leaderboard_runner_t mt_runner = {0}, if_runner = {0};
+        static char canned_lb[512];
+        const char *lb_env = getenv("HU_EVAL_LEADERBOARD_CANNED");
+        if (lb_env && lb_env[0]) {
+            snprintf(canned_lb, sizeof(canned_lb), "%s", lb_env);
+        } else {
+            const char *lb_tries[] = {
+                "tests/fixtures/leaderboard_canned_20.json",
+                "../tests/fixtures/leaderboard_canned_20.json",
+                NULL,
+            };
+            canned_lb[0] = '\0';
+            for (size_t li = 0; lb_tries[li]; li++) {
+                FILE *lf = fopen(lb_tries[li], "r");
+                if (lf) {
+                    fclose(lf);
+                    snprintf(canned_lb, sizeof(canned_lb), "%s", lb_tries[li]);
+                    break;
+                }
+            }
+        }
+        hu_leaderboard_config_t lbc = {.canned_path = canned_lb[0] ? canned_lb : NULL,
+                                       .seed = 42};
+        (void)hu_leaderboard_create_mt_bench(alloc, &lbc, &mt_runner);
+        (void)hu_leaderboard_create_ifeval(alloc, &lbc, &if_runner);
+
+        double mt_scores[64], if_scores[64];
+        const double *mt_ptr = NULL;
+        const double *if_ptr = NULL;
+        const char *const *resp_for_lb = NULL;
+        size_t lb_n = 0;
+        if (cand_rr.responses && cand_rr.n_scored > 0) {
+            resp_for_lb = (const char *const *)cand_rr.responses;
+            lb_n = cand_rr.n_scored;
+        } else if (base_rr.responses && base_rr.n_scored > 0) {
+            resp_for_lb = (const char *const *)base_rr.responses;
+            lb_n = base_rr.n_scored;
+        }
+        if (lb_n > score_n)
+            lb_n = score_n;
+        if (mt_runner.vtable && resp_for_lb && lb_n > 0) {
+            if (mt_runner.vtable->run(&mt_runner, alloc, prompts, resp_for_lb, lb_n, mt_scores) ==
+                HU_OK)
+                mt_ptr = mt_scores;
+        }
+        if (if_runner.vtable && resp_for_lb && lb_n > 0) {
+            if (if_runner.vtable->run(&if_runner, alloc, prompts, resp_for_lb, lb_n,
+                                      if_scores) == HU_OK)
+                if_ptr = if_scores;
+        }
+
         hu_eval_gate_t gate = {
             .baseline_persona_fidelity_mean = run->before_mean,
+            .baseline_mt_bench_mean = 0.55,
+            .baseline_ifeval_mean = 0.60,
             .baseline_p95_latency_ms = 100.0,
             .persona_delta_min = 0.05,
+            .mt_bench_regression_max = -0.01,
+            .ifeval_regression_max = -0.02,
             .latency_delta_max_ms = 50.0,
             .bootstrap_samples = 500,
             .bootstrap_seed = 42,
+            .mt_bench = (mt_runner.vtable && mt_ptr) ? &mt_runner : NULL,
+            .ifeval = (if_runner.vtable && if_ptr) ? &if_runner : NULL,
         };
         hu_eval_gate_verdict_t verdict = {0};
-        if (hu_eval_gate_decide_from_arrays_for_test(&gate, run->after_scores, NULL, NULL,
+        if (hu_eval_gate_decide_from_arrays_for_test(&gate, run->after_scores, mt_ptr, if_ptr,
                                                      NULL, score_n, 100.0, &verdict) == HU_OK) {
             run->gate_ran = true;
             run->gate_promote = verdict.promote;
@@ -584,6 +643,10 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
             snprintf(run->gate_reason, sizeof(run->gate_reason), "%s",
                      verdict.reason);
         }
+        if (mt_runner.vtable && mt_runner.vtable->deinit)
+            mt_runner.vtable->deinit(&mt_runner, alloc);
+        if (if_runner.vtable && if_runner.vtable->deinit)
+            if_runner.vtable->deinit(&if_runner, alloc);
     }
 
     snprintf(run->before_response, sizeof(run->before_response), "before_%s", args->prompt);

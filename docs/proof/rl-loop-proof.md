@@ -45,7 +45,7 @@ export HU_E2E_TMP_ROOT="$(pwd)/build-rl-sota/tests/_tmp"
 
 Expected: **4/4 pass** — chat → reactions → DPO pairs → train → adapter swap → re-chat differs; adapter SHA deterministic.
 
-**Full suite at `rl-sota-phase-6-complete`:** **10330/10332 PASS, 2 SKIP, 0 FAIL, 0 ASan, 0 UBSan, 0 leaks.**
+**Full suite (2026-05-17, branch `rl-sota-phase-6`):** **10668/10672 PASS, 4 SKIP, 0 FAIL, 0 ASan.**
 
 ### Test skips (documented, expected)
 
@@ -120,15 +120,28 @@ Evidence lands in `~/.human/proofs/<YYYY-MM-DD>-<method>-step-<pid>/`.
 | Item | Status |
 |------|--------|
 | 7 phase tags exist + all green | ✅ `rl-sota-phase-0-complete` … `rl-sota-phase-6-complete` |
-| Full rl_sota suite | ✅ 10330/10332 PASS, 2 SKIP, 0 ASan, 0 UBSan, 0 leaks |
+| Full rl_sota suite | ✅ 10668/10672 PASS, 4 SKIP, 0 ASan (local macOS aarch64) |
 | Ship Contract DoD (14 items) | ✅ 9 PASS + 4 PASS_WITH_NOTES + 1 PARTIAL — DoD-9 honestly demoted; see [`rl-loop-shipcontract.md`](rl-loop-shipcontract.md) |
 | Per-phase adversarial audit gates | ✅ Every gate fired at every applicable boundary, every finding remediated |
 | Program-level close-out audit | ✅ NEEDS-REWORK on first close-out draft → all 7 inflations corrected (CO-1 through CO-7); see [`adversarial-audit-report.md`](adversarial-audit-report.md) |
 | Umbrella status table | ✅ Up to date (per-phase rows with auditor verdicts + remediations, Phase 5 row corrected to honest 2-of-3 production wiring) |
 | Master Track D row | ✅ Phase D3 subsection added with sub-phase table |
-| Open carry-forwards | ⚪ 7 items (CF-1 through CF-7) tracked honestly in [`rl-loop-shipcontract.md`](rl-loop-shipcontract.md) — receiving phase is post-RL-SOTA hardening |
+| Open carry-forwards | ⚪ CF-2-R + runner MT/IFEval + iMessage GUID closed on branch; live Gemma win table + Apple FM/Gemini Nano bridges remain | in [`rl-loop-shipcontract.md`](rl-loop-shipcontract.md) — receiving phase is post-RL-SOTA hardening |
 
 **The full SOTA RL improvement loop is shipped at `rl-sota-phase-6-complete` with the math, trainers, eval gate, deterministic E2E, demo CLI, and proof-directory schema all real and green. The user-facing CLI wrappers (`human eval competitive` etc.), six of the nine demo evidence files, the iMessage daemon poll, and per-parameter grad sweep are honestly tracked as carry-forwards CF-1 through CF-7 rather than claimed as shipped.**
+
+
+## SOTA proof sprint (2026-05-17)
+
+| Deliverable | Status |
+|-------------|--------|
+| CF-2-R 20-prompt fixture + demo | ✅ `persona_rollout_prompts_20.txt`, `leaderboard_canned_20.json` |
+| Runner gate MT-Bench / IFEval | ✅ `lora_training_runner.c` + daemon W14 `eval_gate` |
+| iMessage outbound GUID | ✅ `hu_imessage_lookup_latest_sent_guid` + daemon registration |
+| CI linker fix | ✅ `hu_training_data_extract_dpo_from_db` synced from main |
+| Live Gemma scorecard | ⚪ Run `bash scripts/demo-rl-loop.sh` on Apple Silicon; publish numbers here |
+
+Local HUML demo (no Gemma download): `human demo rl-closed-loop --backend huml --reaction-count 20 --out /tmp/human-rl-proof` — writes 20-prompt manifest + real `gate_decision.json` from `hu_eval_gate`.
 
 ## Out of scope on this branch
 

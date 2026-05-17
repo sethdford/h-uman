@@ -97,3 +97,58 @@ hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
     return HU_OK;
 #endif
 }
+
+hu_error_t hu_imessage_lookup_latest_sent_guid(const char *db_path, const char *chat_guid,
+                                              const char *text_prefix, char *out_guid,
+                                              size_t out_cap) {
+    if (!db_path || !chat_guid || !out_guid || out_cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    out_guid[0] = '\0';
+#if HU_IS_TEST || !defined(__APPLE__) || !defined(__MACH__) || !defined(HU_ENABLE_SQLITE)
+    (void)text_prefix;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+    const char *sql =
+        "SELECT m.guid FROM message m "
+        "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+        "JOIN chat c ON c.ROWID = cmj.chat_id "
+        "WHERE c.guid = ? AND m.is_from_me = 1 "
+        "  AND (? IS NULL OR m.text LIKE ? || '%') "
+        "ORDER BY m.date DESC LIMIT 1";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+    sqlite3_bind_text(stmt, 1, chat_guid, -1, SQLITE_STATIC);
+    if (text_prefix && text_prefix[0]) {
+        sqlite3_bind_text(stmt, 2, text_prefix, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 3, text_prefix, -1, SQLITE_STATIC);
+    } else {
+        sqlite3_bind_null(stmt, 2);
+        sqlite3_bind_null(stmt, 3);
+    }
+    hu_error_t err = HU_ERR_NOT_FOUND;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *g = sqlite3_column_text(stmt, 0);
+        if (g) {
+            size_t glen = strlen((const char *)g);
+            if (glen + 1 <= out_cap) {
+                memcpy(out_guid, g, glen + 1);
+                err = HU_OK;
+            } else {
+                err = HU_ERR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return err;
+#endif
+}

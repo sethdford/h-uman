@@ -3201,6 +3201,7 @@ if(HU_ENABLE_ML)
         tests/test_training_data.c
         tests/test_training_data_extractor.c
         tests/test_training_data_quality.c
+        tests/test_dpo_extractor_integration.c
         tests/test_agent_trainer.c)
 endif()
 
