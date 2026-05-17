@@ -587,6 +587,7 @@ set(HU_CORE_SOURCES
     src/agent/pattern_radar.c
     src/agent/proactive.c
     src/agent/proactive_ext.c
+    src/agent/proactive_throttle.c
     src/agent/inner_thoughts.c
     src/agent/weather_awareness.c
     src/agent/weather_fetch.c
@@ -2671,6 +2672,7 @@ set(HU_TEST_SOURCES
     tests/test_emotional_graph.c
     tests/test_comfort_patterns.c
     tests/test_emotional_moments.c
+    tests/test_emotional_state.c
     tests/test_contact_style_overlay.c
     tests/test_graph.c
     tests/test_w1_bitemporal.c
@@ -2730,6 +2732,7 @@ set(HU_TEST_SOURCES
     tests/test_commitment.c
     tests/test_pattern_radar.c
     tests/test_proactive.c
+    tests/test_proactive_throttle.c
     tests/test_inner_thoughts.c
     tests/test_weather_awareness.c
     tests/test_timing.c

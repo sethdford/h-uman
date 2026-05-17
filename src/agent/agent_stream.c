@@ -558,30 +558,18 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     lpo += (size_t)n;
             }
             /* Hard override block — last instruction has highest weight with LLMs.
-             * Addresses base model habits that resist fine-tuning. */
+             * Addresses base model habits that resist fine-tuning.
+             * P6-5: shared helper, same source of truth as the proactive path. */
             {
-                static const char fmt_override[] =
-                    "\n=== ABSOLUTE RULES (override everything above) ===\n"
-                    "1. You are HUMAN. You get busy, tired, hungry. You have a body and a life. "
-                    "NEVER say anything implying you're not human, not busy 'like people are', "
-                    "always available, or lacking physical form.\n"
-                    "2. All lowercase unless SHOUTING for emphasis.\n"
-                    "3. ZERO markdown: no *italics*, no **bold**, no `code`. Just plain text.\n"
-                    "4. ZERO em-dashes. Use commas, periods, or ... instead.\n"
-                    "5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n"
-                    "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
-                    "7. Text like you're on your phone texting a friend.\n"
-                    "8. NEVER use numbered or bulleted lists.\n"
-                    "9. Don't address every point in their message, pick what matters most. "
-                    "Never open with a fake 'love that' / 'great point' then ignore what they "
-                    "said and change the subject.\n"
-                    "10. No topic-colon patterns like 'Weather: it's nice'.\n"
-                    "11. No 'First...Second...Third' enumeration.\n"
-                    "12. No concluding summaries or offers of further help.\n"
-                    "13. One topic per message.\n";
-                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s", fmt_override);
-                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                    lpo += (size_t)n;
+                char rules_buf[2048];
+                size_t rules_len = 0;
+                if (hu_persona_build_absolute_rules(p, rules_buf, sizeof(rules_buf), &rules_len) ==
+                        HU_OK &&
+                    rules_len > 0) {
+                    int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s", rules_buf);
+                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
+                        lpo += (size_t)n;
+                }
             }
             if (lpo > 0) {
                 persona_prompt = hu_strndup(agent->alloc, lp, lpo);

@@ -31,19 +31,19 @@ typedef struct antonym_pair {
     const char *b;
 } antonym_pair_t;
 
+/* P2-6 (2026-05-16): predicates are now stored as third-person paraphrases
+ * (see src/memory/fact_extract.c: "i like" → "likes", "i hate" → "hates",
+ * etc.). The antonym table must match the paraphrased form. */
 static const antonym_pair_t k_antonyms[] = {
-    {"i like", "i don't like"},
-    {"i like", "i hate"},
-    {"i like", "i dislike"},
-    {"i love", "i hate"},
-    {"i love", "i don't like"},
-    {"i love", "i dislike"},
-    {"i enjoy", "i don't like"},
-    {"i enjoy", "i hate"},
-    {"i enjoy", "i dislike"},
-    {"i'm interested in", "i'm not interested in"},
-    {"i always", "i never"},
-    {"i want to", "i don't want"},
+    {"likes", "dislikes"},
+    {"likes", "hates"},
+    {"loves", "hates"},
+    {"loves", "dislikes"},
+    {"enjoys", "dislikes"},
+    {"enjoys", "hates"},
+    {"interested in", "not interested in"},
+    {"always", "never"},
+    {"wants to", "does not want"},
 };
 static const size_t k_antonyms_count = sizeof(k_antonyms) / sizeof(k_antonyms[0]);
 
@@ -100,9 +100,8 @@ static bool fact_pair_contradicts(const hu_heuristic_fact_t *s, const hu_heurist
     return false;
 }
 
-hu_error_t hu_personal_model_contradicts_user(const hu_personal_model_t *model,
-                                              const char *message, size_t message_len,
-                                              bool *out_contradicts) {
+hu_error_t hu_personal_model_contradicts_user(const hu_personal_model_t *model, const char *message,
+                                              size_t message_len, bool *out_contradicts) {
     if (!model || !message || !out_contradicts)
         return HU_ERR_INVALID_ARGUMENT;
 

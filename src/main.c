@@ -1110,8 +1110,17 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
 #ifdef HU_HAS_CRON
     hu_log_info("human", NULL, "%zu channel(s) active, cron enabled", app_ctx.channel_count);
 
-    /* Register proactive engagement cron jobs from persona contacts */
-    if (app_ctx.agent && app_ctx.agent->persona && app_ctx.agent->scheduler) {
+    /* Register proactive engagement cron jobs from persona contacts.
+     *
+     * 2026-05-16 incident follow-up: this cron-based path is INDEPENDENT of
+     * hu_service_run_proactive_checkins (which has its own gate at the top).
+     * Discovered by local E2E on 2026-05-17 — the daemon was still
+     * registering cron jobs for Mindy/Betty/Annie at 10am even though the
+     * persona-level master kill switch (proactive.master_enabled) was off.
+     * Gate at registration time so cron entries never get created when
+     * proactive is disabled. */
+    if (app_ctx.agent && app_ctx.agent->persona && app_ctx.agent->scheduler &&
+        hu_persona_proactive_is_enabled(app_ctx.agent->persona)) {
         const hu_persona_t *persona = app_ctx.agent->persona;
         for (size_t ci = 0; ci < persona->contacts_count; ci++) {
             const hu_contact_profile_t *cp = &persona->contacts[ci];

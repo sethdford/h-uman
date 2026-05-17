@@ -40,7 +40,7 @@ static void pm_stamp_fact(hu_personal_model_t *m, const char *subject, const cha
 static void contradicts_same_predicate_different_object(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    pm_stamp_fact(&m, "user", "i work at", "Acme", 0.9f);
+    pm_stamp_fact(&m, "user", "works at", "Acme", 0.9f);
 
     bool c = false;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "I work at Initech.", 18, &c), HU_OK);
@@ -51,7 +51,7 @@ static void contradicts_same_predicate_different_object(void) {
 static void contradicts_same_predicate_same_object_does_not_fire(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    pm_stamp_fact(&m, "user", "i work at", "Acme", 0.9f);
+    pm_stamp_fact(&m, "user", "works at", "Acme", 0.9f);
 
     bool c = true;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "I work at Acme.", 15, &c), HU_OK);
@@ -62,7 +62,7 @@ static void contradicts_same_predicate_same_object_does_not_fire(void) {
 static void contradicts_antonym_like_vs_hate(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    pm_stamp_fact(&m, "user", "i like", "coffee", 0.8f);
+    pm_stamp_fact(&m, "user", "likes", "coffee", 0.8f);
 
     bool c = false;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "I hate coffee.", 14, &c), HU_OK);
@@ -74,7 +74,7 @@ static void contradicts_antonym_like_vs_hate(void) {
 static void contradicts_near_synonym_like_vs_love_does_not_fire(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    pm_stamp_fact(&m, "user", "i like", "coffee", 0.8f);
+    pm_stamp_fact(&m, "user", "likes", "coffee", 0.8f);
 
     bool c = true;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "I love coffee.", 14, &c), HU_OK);
@@ -87,7 +87,7 @@ static void contradicts_near_synonym_like_vs_love_does_not_fire(void) {
 static void contradicts_antonym_different_object_does_not_fire(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    pm_stamp_fact(&m, "user", "i like", "coffee", 0.8f);
+    pm_stamp_fact(&m, "user", "likes", "coffee", 0.8f);
 
     bool c = true;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "I hate tea.", 11, &c), HU_OK);
@@ -99,7 +99,7 @@ static void contradicts_antonym_different_object_does_not_fire(void) {
 static void contradicts_low_confidence_stored_fact_is_ignored(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    pm_stamp_fact(&m, "user", "i work at", "Acme", 0.4f);
+    pm_stamp_fact(&m, "user", "works at", "Acme", 0.4f);
 
     bool c = true;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "I work at Initech.", 18, &c), HU_OK);
@@ -120,7 +120,7 @@ static void contradicts_empty_model_returns_false(void) {
 static void contradicts_empty_message_returns_false(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    pm_stamp_fact(&m, "user", "i like", "coffee", 0.8f);
+    pm_stamp_fact(&m, "user", "likes", "coffee", 0.8f);
 
     bool c = true;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "", 0, &c), HU_OK);
@@ -141,9 +141,9 @@ static void contradicts_null_args_rejected(void) {
 static void contradicts_finds_match_in_multiple_facts(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    pm_stamp_fact(&m, "user", "i live in", "Berlin", 0.9f);
-    pm_stamp_fact(&m, "user", "i work at", "Acme", 0.9f);
-    pm_stamp_fact(&m, "user", "i like", "coffee", 0.8f);
+    pm_stamp_fact(&m, "user", "lives in", "Berlin", 0.9f);
+    pm_stamp_fact(&m, "user", "works at", "Acme", 0.9f);
+    pm_stamp_fact(&m, "user", "likes", "coffee", 0.8f);
 
     bool c = false;
     HU_ASSERT_EQ(hu_personal_model_contradicts_user(&m, "I work at Initech.", 18, &c), HU_OK);

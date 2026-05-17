@@ -90,26 +90,22 @@ static void busyness_multiplier_combined(void) {
 }
 
 static void disclosure_decide_ambiguous_ask(void) {
-    hu_disclosure_action_t a =
-        hu_disclosure_decide(0.5, 0);
+    hu_disclosure_action_t a = hu_disclosure_decide(0.5, 0);
     HU_ASSERT_EQ(a, HU_DISCLOSE_ASK_FIRST);
 }
 
 static void disclosure_decide_ambiguous_tell(void) {
-    hu_disclosure_action_t a =
-        hu_disclosure_decide(0.5, 42);
+    hu_disclosure_action_t a = hu_disclosure_decide(0.5, 42);
     HU_ASSERT_EQ(a, HU_DISCLOSE_TELL_NATURALLY);
 }
 
 static void disclosure_decide_ambiguous_skip(void) {
-    hu_disclosure_action_t a =
-        hu_disclosure_decide(0.5, 123);
+    hu_disclosure_action_t a = hu_disclosure_decide(0.5, 123);
     HU_ASSERT_EQ(a, HU_DISCLOSE_SKIP);
 }
 
 static void disclosure_decide_clear_confidence(void) {
-    hu_disclosure_action_t a =
-        hu_disclosure_decide(0.9, 0);
+    hu_disclosure_action_t a = hu_disclosure_decide(0.9, 0);
     HU_ASSERT_EQ(a, HU_DISCLOSE_TELL_NATURALLY);
 }
 
@@ -117,8 +113,8 @@ static void disclosure_build_prefix_ask(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_disclosure_build_prefix(&alloc, HU_DISCLOSE_ASK_FIRST,
-                                                "new job", 7, &out, &out_len);
+    hu_error_t err =
+        hu_disclosure_build_prefix(&alloc, HU_DISCLOSE_ASK_FIRST, "new job", 7, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "wait did I tell you about") != NULL);
@@ -131,8 +127,8 @@ static void disclosure_build_prefix_skip(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_disclosure_build_prefix(&alloc, HU_DISCLOSE_SKIP,
-                                                "topic", 5, &out, &out_len);
+    hu_error_t err =
+        hu_disclosure_build_prefix(&alloc, HU_DISCLOSE_SKIP, "topic", 5, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NULL(out);
     HU_ASSERT_EQ(out_len, 0);
@@ -141,14 +137,25 @@ static void disclosure_build_prefix_skip(void) {
 static void curiosity_query_sql_valid(void) {
     char buf[512];
     size_t len = 0;
-    hu_error_t err =
-        hu_curiosity_query_sql("user_a", 6, 14, buf, sizeof(buf), &len);
+    hu_error_t err = hu_curiosity_query_sql("user_a", 6, 14, buf, sizeof(buf), &len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(len > 0);
     HU_ASSERT_TRUE(strstr(buf, "SELECT") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "topic_baselines") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "user_a") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "contact_id") != NULL);
+}
+
+/* 2026-05-16 P4-1: the F30 curiosity SELECT must gate on last_checkin_sent_at
+ * (NULL OR < now-86400) so the same topic doesn't re-fire a check-in every
+ * hour. Pre-fix the SELECT had no such gate. */
+static void curiosity_query_sql_gates_on_last_checkin(void) {
+    char buf[512];
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_curiosity_query_sql("user_a", 6, 14, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_TRUE(strstr(buf, "last_checkin_sent_at IS NULL") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "last_checkin_sent_at <") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "86400") != NULL);
 }
 
 static void curiosity_score_optimal_range(void) {
@@ -165,10 +172,9 @@ static void curiosity_score_too_recent(void) {
 static void callback_query_sql_valid(void) {
     char buf[512];
     size_t len = 0;
-    uint64_t min_ms = 86400ULL * 1000;   /* 1 day */
+    uint64_t min_ms = 86400ULL * 1000;      /* 1 day */
     uint64_t max_ms = 14ULL * 86400 * 1000; /* 14 days */
-    hu_error_t err = hu_callback_query_sql("user_a", 6, min_ms, max_ms, buf,
-                                           sizeof(buf), &len);
+    hu_error_t err = hu_callback_query_sql("user_a", 6, min_ms, max_ms, buf, sizeof(buf), &len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(len > 0);
     HU_ASSERT_TRUE(strstr(buf, "SELECT") != NULL);
@@ -203,8 +209,8 @@ static void proactive_ext_build_prompt_with_data(void) {
     };
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_proactive_ext_build_prompt(
-        &alloc, &curiosity, 1, &callback, 1, &out, &out_len);
+    hu_error_t err =
+        hu_proactive_ext_build_prompt(&alloc, &curiosity, 1, &callback, 1, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "FOLLOW-UP OPPORTUNITIES") != NULL);
@@ -238,6 +244,7 @@ void run_proactive_ext_tests(void) {
     HU_RUN_TEST(disclosure_build_prefix_ask);
     HU_RUN_TEST(disclosure_build_prefix_skip);
     HU_RUN_TEST(curiosity_query_sql_valid);
+    HU_RUN_TEST(curiosity_query_sql_gates_on_last_checkin);
     HU_RUN_TEST(curiosity_score_optimal_range);
     HU_RUN_TEST(curiosity_score_too_recent);
     HU_RUN_TEST(callback_query_sql_valid);

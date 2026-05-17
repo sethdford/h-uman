@@ -23,11 +23,11 @@
  * src/agent/world_model_bridge.c.  See the FIX 13 wire-up comment in
  * daemon.c near the autodream cron block. */
 
-#define HU_SCHED_MAX_JOBS_PER_TICK 32
-#define HU_SCHED_TOTAL_BUDGET_MS 10000
+#define HU_SCHED_MAX_JOBS_PER_TICK     32
+#define HU_SCHED_TOTAL_BUDGET_MS       10000
 #define HU_SCHED_DEFAULT_JOB_BUDGET_MS 60000
-#define HU_SCHED_IDLE_LOAD_MAX 60
-#define HU_SCHED_EMERGENCY_PRIORITY 2
+#define HU_SCHED_IDLE_LOAD_MAX         60
+#define HU_SCHED_EMERGENCY_PRIORITY    2
 
 typedef struct runner_slot {
     hu_job_runner_fn fn;
@@ -75,9 +75,8 @@ static hu_error_t default_noop_runner(hu_memory_facade_t *m, const hu_job_spec_t
  * still tracked by ASan because the system allocator is what every
  * other agent-layer module also passes.
  */
-static hu_error_t run_autodream_phase(hu_memory_facade_t *m, int64_t budget_ms,
-                                      bool quarantine, bool communities,
-                                      bool reweight, bool derived) {
+static hu_error_t run_autodream_phase(hu_memory_facade_t *m, int64_t budget_ms, bool quarantine,
+                                      bool communities, bool reweight, bool derived) {
     if (!m)
         return HU_OK;
     if (!hu_memory_facade_graph_handle(m))
@@ -95,31 +94,29 @@ static hu_error_t run_autodream_phase(hu_memory_facade_t *m, int64_t budget_ms,
 }
 
 static hu_error_t default_autodream_quarantine_runner(hu_memory_facade_t *m,
-                                                      const hu_job_spec_t *spec,
-                                                      int64_t budget_ms, void *user_data) {
+                                                      const hu_job_spec_t *spec, int64_t budget_ms,
+                                                      void *user_data) {
     (void)spec;
     (void)user_data;
     return run_autodream_phase(m, budget_ms, true, false, false, false);
 }
 
 static hu_error_t default_autodream_community_runner(hu_memory_facade_t *m,
-                                                     const hu_job_spec_t *spec,
-                                                     int64_t budget_ms, void *user_data) {
+                                                     const hu_job_spec_t *spec, int64_t budget_ms,
+                                                     void *user_data) {
     (void)spec;
     (void)user_data;
     return run_autodream_phase(m, budget_ms, false, true, false, false);
 }
 
-static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m,
-                                                 const hu_job_spec_t *spec,
+static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                                  int64_t budget_ms, void *user_data) {
     (void)spec;
     (void)user_data;
     return run_autodream_phase(m, budget_ms, false, false, true, true);
 }
 
-static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m,
-                                                 const hu_job_spec_t *spec,
+static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                                  int64_t budget_ms, void *user_data) {
     (void)user_data;
     if (!m)
@@ -136,8 +133,8 @@ static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m,
 }
 #else
 static hu_error_t default_autodream_quarantine_runner(hu_memory_facade_t *m,
-                                                      const hu_job_spec_t *spec,
-                                                      int64_t budget_ms, void *user_data) {
+                                                      const hu_job_spec_t *spec, int64_t budget_ms,
+                                                      void *user_data) {
     (void)m;
     (void)spec;
     (void)budget_ms;
@@ -145,16 +142,15 @@ static hu_error_t default_autodream_quarantine_runner(hu_memory_facade_t *m,
     return HU_OK;
 }
 static hu_error_t default_autodream_community_runner(hu_memory_facade_t *m,
-                                                     const hu_job_spec_t *spec,
-                                                     int64_t budget_ms, void *user_data) {
+                                                     const hu_job_spec_t *spec, int64_t budget_ms,
+                                                     void *user_data) {
     (void)m;
     (void)spec;
     (void)budget_ms;
     (void)user_data;
     return HU_OK;
 }
-static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m,
-                                                 const hu_job_spec_t *spec,
+static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                                  int64_t budget_ms, void *user_data) {
     (void)m;
     (void)spec;
@@ -162,8 +158,7 @@ static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m,
     (void)user_data;
     return HU_OK;
 }
-static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m,
-                                                 const hu_job_spec_t *spec,
+static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
                                                  int64_t budget_ms, void *user_data) {
     (void)m;
     (void)spec;
@@ -270,8 +265,8 @@ void hu_scheduler_close(hu_scheduler_t *s, hu_allocator_t *alloc) {
         a->free(a->ctx, s, sizeof(*s));
 }
 
-hu_error_t hu_scheduler_register_runner(hu_scheduler_t *s, hu_job_kind_t kind,
-                                        hu_job_runner_fn fn, void *user_data) {
+hu_error_t hu_scheduler_register_runner(hu_scheduler_t *s, hu_job_kind_t kind, hu_job_runner_fn fn,
+                                        void *user_data) {
     if (!s)
         return HU_ERR_INVALID_ARGUMENT;
     if ((int)kind < 0 || kind >= HU_JOB_KIND_MAX)
@@ -345,13 +340,15 @@ typedef struct dispatch_row {
     int requires_idle;
     int requires_ac_power;
     int64_t latest_at;
+    /* 2026-05-16 P3-5: contact scope.  Empty string = global job. */
+    char contact_id[64];
+    size_t contact_id_len;
 } dispatch_row_t;
 
 static void mark_expired(struct sqlite3 *db, int64_t now_ms) {
     sqlite3_stmt *st = NULL;
-    static const char *const sql =
-        "UPDATE scheduler_jobs SET status = 'expired' "
-        "WHERE status = 'pending' AND latest_at > 0 AND latest_at < ?";
+    static const char *const sql = "UPDATE scheduler_jobs SET status = 'expired' "
+                                   "WHERE status = 'pending' AND latest_at > 0 AND latest_at < ?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
         return;
     sqlite3_bind_int64(st, 1, now_ms);
@@ -359,9 +356,8 @@ static void mark_expired(struct sqlite3 *db, int64_t now_ms) {
     sqlite3_finalize(st);
 }
 
-static int update_status(struct sqlite3 *db, int64_t job_id, const char *status,
-                         const char *err, int64_t last_run_ms,
-                         int interval_sec, int64_t now_ms) {
+static int update_status(struct sqlite3 *db, int64_t job_id, const char *status, const char *err,
+                         int64_t last_run_ms, int interval_sec, int64_t now_ms) {
     /* Repeating jobs (interval_sec > 0) re-enter the queue with
      * status='pending' and a new earliest_at. One-shot jobs land on the
      * terminal status. */
@@ -376,9 +372,8 @@ static int update_status(struct sqlite3 *db, int64_t job_id, const char *status,
         sqlite3_bind_int64(st, 2, now_ms + (int64_t)interval_sec * 1000);
         sqlite3_bind_int64(st, 3, job_id);
     } else {
-        static const char *const sql =
-            "UPDATE scheduler_jobs SET status = ?, last_run_at = ?, "
-            "last_error = ? WHERE id = ?";
+        static const char *const sql = "UPDATE scheduler_jobs SET status = ?, last_run_at = ?, "
+                                       "last_error = ? WHERE id = ?";
         if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
             return -1;
         sqlite3_bind_text(st, 1, status, -1, SQLITE_STATIC);
@@ -396,8 +391,7 @@ static int update_status(struct sqlite3 *db, int64_t job_id, const char *status,
 
 static int set_running(struct sqlite3 *db, int64_t job_id) {
     sqlite3_stmt *st = NULL;
-    static const char *const sql =
-        "UPDATE scheduler_jobs SET status = 'running' WHERE id = ?";
+    static const char *const sql = "UPDATE scheduler_jobs SET status = 'running' WHERE id = ?";
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
         return -1;
     sqlite3_bind_int64(st, 1, job_id);
@@ -408,9 +402,8 @@ static int set_running(struct sqlite3 *db, int64_t job_id) {
 
 /* Decide whether a job is allowed to run under current system state.
  * `*reason_out` receives a short human-readable reason when blocked. */
-static bool job_eligible(const dispatch_row_t *row, int load_pct, int battery_pct,
-                         bool on_ac, bool quiet,
-                         const char **reason_out) {
+static bool job_eligible(const dispatch_row_t *row, int load_pct, int battery_pct, bool on_ac,
+                         bool quiet, const char **reason_out) {
     (void)battery_pct;
     if (quiet && row->priority < HU_SCHED_EMERGENCY_PRIORITY) {
         *reason_out = "quiet hours";
@@ -428,7 +421,36 @@ static bool job_eligible(const dispatch_row_t *row, int load_pct, int battery_pc
     return true;
 }
 
+static hu_error_t scheduler_tick_impl(hu_scheduler_t *s, int64_t now_ms,
+                                      const char *target_contact_id, size_t target_contact_id_len,
+                                      bool scoped);
+
 hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
+    /* Legacy entrypoint: drains every pending job regardless of contact_id.
+     * Used by the daemon-wide background scheduler for tasks like autodream
+     * phases, LoRA training, and counterfactual rehearsal — none of which
+     * fire outbound user messages, and all of which carry their own
+     * contact_id forward through `hu_job_spec_t` to the runner.
+     *
+     * 2026-05-16 P3-5: callers that DO drive outbound user-facing work
+     * (proactive sends, per-contact dispatch decisions) MUST use
+     * `hu_scheduler_tick_for(s, now, contact_id, len)` so that a job
+     * enqueued for "alice" cannot fire on "bob"'s turn. */
+    return scheduler_tick_impl(s, now_ms, NULL, 0, /*scoped=*/false);
+}
+
+hu_error_t hu_scheduler_tick_for(hu_scheduler_t *s, int64_t now_ms, const char *target_contact_id,
+                                 size_t target_contact_id_len) {
+    /* Scoped variant — see header doc.  When target is NULL/"", dispatch
+     * only contact_id='' rows.  When non-empty, dispatch contact_id=''
+     * OR contact_id=target (exact match, no prefix). */
+    return scheduler_tick_impl(s, now_ms, target_contact_id, target_contact_id_len,
+                               /*scoped=*/true);
+}
+
+static hu_error_t scheduler_tick_impl(hu_scheduler_t *s, int64_t now_ms,
+                                      const char *target_contact_id, size_t target_contact_id_len,
+                                      bool scoped) {
     if (!s)
         return HU_ERR_INVALID_ARGUMENT;
     struct sqlite3 *db = get_db(s->m);
@@ -445,20 +467,39 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
     bool on_ac = hu_scheduler_probe_on_ac_power();
     bool quiet = hu_scheduler_probe_quiet_hours(now_ms, s->persona);
 
+    /* 2026-05-16 P3-5: when scoped, filter by contact_id at the SQL layer.
+     * Equality match — never LIKE / prefix, to dodge the prefix-match class.
+     * Legacy `hu_scheduler_tick` skips the filter (scoped=false) so daemon-
+     * wide background drains keep working for autodream/lora/counterfactual. */
+    const char *cid = target_contact_id ? target_contact_id : "";
+    int cid_len = target_contact_id ? (int)target_contact_id_len : 0;
+
     /* Snapshot the eligible set first, then dispatch — keeping the SELECT
      * statement open across runner calls would block schema use by the
      * runners themselves. */
-    static const char *const sel_sql =
+    static const char *const sel_sql_legacy =
         "SELECT id, kind, priority, budget_ms, interval_sec, "
-        "requires_idle, requires_ac_power, latest_at "
+        "requires_idle, requires_ac_power, latest_at, contact_id "
         "FROM scheduler_jobs "
         "WHERE status = 'pending' AND (earliest_at = 0 OR earliest_at <= ?) "
         "ORDER BY priority DESC, earliest_at ASC, id ASC LIMIT ?";
+    static const char *const sel_sql_scoped =
+        "SELECT id, kind, priority, budget_ms, interval_sec, "
+        "requires_idle, requires_ac_power, latest_at, contact_id "
+        "FROM scheduler_jobs "
+        "WHERE status = 'pending' AND (earliest_at = 0 OR earliest_at <= ?) "
+        "  AND (contact_id = '' OR contact_id = ?) "
+        "ORDER BY priority DESC, earliest_at ASC, id ASC LIMIT ?";
+    const char *sel_sql = scoped ? sel_sql_scoped : sel_sql_legacy;
     sqlite3_stmt *sel = NULL;
     if (sqlite3_prepare_v2(db, sel_sql, -1, &sel, NULL) != SQLITE_OK)
         return HU_ERR_IO;
     sqlite3_bind_int64(sel, 1, now_ms);
-    sqlite3_bind_int(sel, 2, HU_SCHED_MAX_JOBS_PER_TICK);
+    int next_bind = 2;
+    if (scoped) {
+        sqlite3_bind_text(sel, next_bind++, cid, cid_len, SQLITE_STATIC);
+    }
+    sqlite3_bind_int(sel, next_bind, HU_SCHED_MAX_JOBS_PER_TICK);
 
     dispatch_row_t rows[HU_SCHED_MAX_JOBS_PER_TICK];
     size_t nrows = 0;
@@ -472,6 +513,13 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
         r->requires_idle = sqlite3_column_int(sel, 5);
         r->requires_ac_power = sqlite3_column_int(sel, 6);
         r->latest_at = sqlite3_column_int64(sel, 7);
+        /* Pull contact_id for the spec we pass to the runner. */
+        const unsigned char *row_cid = sqlite3_column_text(sel, 8);
+        const char *row_cid_s = row_cid ? (const char *)row_cid : "";
+        size_t row_cid_n = strnlen(row_cid_s, sizeof(r->contact_id) - 1);
+        memcpy(r->contact_id, row_cid_s, row_cid_n);
+        r->contact_id[row_cid_n] = '\0';
+        r->contact_id_len = row_cid_n;
     }
     sqlite3_finalize(sel);
 
@@ -481,8 +529,8 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
 
     if (nrows > 0)
         hu_log_info("scheduler", NULL,
-                      "tick: %zu pending job(s) eligible for dispatch (load=%d%% ac=%d quiet=%d)",
-                      nrows, load_pct, on_ac ? 1 : 0, quiet ? 1 : 0);
+                    "tick: %zu pending job(s) eligible for dispatch (load=%d%% ac=%d quiet=%d)",
+                    nrows, load_pct, on_ac ? 1 : 0, quiet ? 1 : 0);
 
     for (size_t i = 0; i < nrows; i++) {
         dispatch_row_t *r = &rows[i];
@@ -490,23 +538,21 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
             break; /* respect total tick budget across all runners */
 
         if (r->kind < 0 || r->kind >= HU_JOB_KIND_MAX) {
-            update_status(db, r->id, "failed", "invalid kind",
-                          (int64_t)time(NULL) * 1000, 0, now_ms);
+            update_status(db, r->id, "failed", "invalid kind", (int64_t)time(NULL) * 1000, 0,
+                          now_ms);
             continue;
         }
 
         const char *reason = NULL;
         if (!job_eligible(r, load_pct, battery_pct, on_ac, quiet, &reason)) {
-            hu_log_info("scheduler", NULL,
-                          "job id=%lld kind=%d deferred: %s (load=%d%%)",
-                          (long long)r->id, r->kind, reason ? reason : "?", load_pct);
+            hu_log_info("scheduler", NULL, "job id=%lld kind=%d deferred: %s (load=%d%%)",
+                        (long long)r->id, r->kind, reason ? reason : "?", load_pct);
             /* Don't change status: leave job pending so a later tick
              * (under different system conditions) can pick it up.  We
              * record the reason as a transient note via last_error so
              * status snapshots have something to surface. */
             sqlite3_stmt *up = NULL;
-            static const char *const usql =
-                "UPDATE scheduler_jobs SET last_error = ? WHERE id = ?";
+            static const char *const usql = "UPDATE scheduler_jobs SET last_error = ? WHERE id = ?";
             if (sqlite3_prepare_v2(db, usql, -1, &up, NULL) == SQLITE_OK) {
                 sqlite3_bind_text(up, 1, reason, -1, SQLITE_STATIC);
                 sqlite3_bind_int64(up, 2, r->id);
@@ -530,9 +576,16 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
         spec.requires_idle = r->requires_idle != 0;
         spec.requires_ac_power = r->requires_ac_power != 0;
         spec.latest_at = r->latest_at;
+        /* 2026-05-16 P3-5: propagate the stored contact_id to the runner so
+         * downstream consumers (persona evolver, autodream phases) see the
+         * scope the job was enqueued for, not the active turn's contact. */
+        if (r->contact_id_len > 0) {
+            spec.contact_id = r->contact_id;
+            spec.contact_id_len = r->contact_id_len;
+        }
 
         hu_log_info("scheduler", NULL, "dispatch job id=%lld kind=%d budget_ms=%lld",
-                      (long long)r->id, r->kind, (long long)job_budget);
+                    (long long)r->id, r->kind, (long long)job_budget);
         set_running(db, r->id);
         int64_t job_start = scheduler_now_ms();
         hu_error_t rc = slot.fn ? slot.fn(s->m, &spec, job_budget, slot.user_data)
@@ -546,8 +599,8 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
             status_str = "failed";
             err = hu_error_string(rc);
             hu_log_warn("scheduler", NULL, "job id=%lld kind=%d finished %s (%s) elapsed_ms=%lld",
-                          (long long)r->id, r->kind, status_str, err ? err : "?",
-                          (long long)job_elapsed);
+                        (long long)r->id, r->kind, status_str, err ? err : "?",
+                        (long long)job_elapsed);
         } else if (job_elapsed > job_budget + 5 /* small grace */) {
             /* Runner overran its declared budget. We can't preempt
              * already-returned C code, but we can record the violation
@@ -555,13 +608,13 @@ hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
             status_str = "failed";
             err = "budget_exceeded";
             hu_log_warn("scheduler", NULL, "job id=%lld kind=%d budget_exceeded elapsed_ms=%lld",
-                          (long long)r->id, r->kind, (long long)job_elapsed);
+                        (long long)r->id, r->kind, (long long)job_elapsed);
         } else {
             hu_log_info("scheduler", NULL, "job id=%lld kind=%d completed ok elapsed_ms=%lld",
-                          (long long)r->id, r->kind, (long long)job_elapsed);
+                        (long long)r->id, r->kind, (long long)job_elapsed);
         }
-        update_status(db, r->id, status_str, err,
-                      (int64_t)time(NULL) * 1000, r->interval_sec, now_ms);
+        update_status(db, r->id, status_str, err, (int64_t)time(NULL) * 1000, r->interval_sec,
+                      now_ms);
     }
 
     return HU_OK;
@@ -574,16 +627,16 @@ hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out) {
     out->system_load_pct = hu_scheduler_probe_load_pct();
     out->battery_pct = hu_scheduler_probe_battery_pct();
     out->on_ac_power = hu_scheduler_probe_on_ac_power();
-    out->quiet_hours_active = hu_scheduler_probe_quiet_hours((int64_t)time(NULL) * 1000, s->persona);
+    out->quiet_hours_active =
+        hu_scheduler_probe_quiet_hours((int64_t)time(NULL) * 1000, s->persona);
 
     struct sqlite3 *db = get_db(s->m);
     if (!db)
         return HU_OK;
 
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db,
-                            "SELECT COUNT(*) FROM scheduler_jobs WHERE status = 'pending'",
-                            -1, &st, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM scheduler_jobs WHERE status = 'pending'", -1,
+                           &st, NULL) == SQLITE_OK) {
         if (sqlite3_step(st) == SQLITE_ROW)
             out->jobs_pending = (size_t)sqlite3_column_int64(st, 0);
         sqlite3_finalize(st);
@@ -592,9 +645,9 @@ hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out) {
     /* "Today" = last 24 hours, simplest definition. */
     int64_t cutoff = (int64_t)time(NULL) * 1000 - 24LL * 3600 * 1000;
     if (sqlite3_prepare_v2(db,
-                            "SELECT COUNT(*) FROM scheduler_jobs "
-                            "WHERE status = 'done' AND last_run_at > ?",
-                            -1, &st, NULL) == SQLITE_OK) {
+                           "SELECT COUNT(*) FROM scheduler_jobs "
+                           "WHERE status = 'done' AND last_run_at > ?",
+                           -1, &st, NULL) == SQLITE_OK) {
         sqlite3_bind_int64(st, 1, cutoff);
         if (sqlite3_step(st) == SQLITE_ROW)
             out->jobs_completed_today = (size_t)sqlite3_column_int64(st, 0);
@@ -613,6 +666,14 @@ hu_error_t hu_scheduler_enqueue(hu_scheduler_t *s, const hu_job_spec_t *job) {
 hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms) {
     (void)s;
     (void)now_ms;
+    return HU_ERR_NOT_SUPPORTED;
+}
+hu_error_t hu_scheduler_tick_for(hu_scheduler_t *s, int64_t now_ms, const char *target_contact_id,
+                                 size_t target_contact_id_len) {
+    (void)s;
+    (void)now_ms;
+    (void)target_contact_id;
+    (void)target_contact_id_len;
     return HU_ERR_NOT_SUPPORTED;
 }
 hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out) {
