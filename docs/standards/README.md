@@ -84,6 +84,7 @@ AGENTS.md                <- Full engineering protocol
 | [config-schema.md](engineering/config-schema.md)             | Config schema design, parsing, validation, upgrade paths        | Config changes, schema evolution  |
 | [gateway-events.md](engineering/gateway-events.md)           | Gateway event naming, payload schemas, WebSocket/webhook design | Gateway events, control protocol  |
 | [memory-lifecycle.md](engineering/memory-lifecycle.md)       | Memory tiers, consolidation, forgetting curve, RAG safety       | Memory system changes             |
+| [reproducible-builds.md](engineering/reproducible-builds.md) | Bytewise-reproducible binary contract, carve-outs, CI gate      | CMake / build flag changes; release |
 
 ## Quality
 

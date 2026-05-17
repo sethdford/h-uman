@@ -4,6 +4,74 @@ project(human C ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# --- US-8.3: Reproducible Binary Builds -------------------------------------
+#
+# Goal: two independent builds from the same source tree, with the same
+# toolchain and the same SOURCE_DATE_EPOCH, produce bytewise-identical
+# `human` binaries (modulo ELF build-id and Mach-O LC_UUID, which carry
+# host-derived randomness and are carved out by check-reproducible-build.sh).
+#
+# Design: sprints/sprint-8/designs/US-8.3.md
+# Standard: docs/standards/engineering/reproducible-builds.md
+#
+# These flags are applied UNCONDITIONALLY (not gated on SOURCE_DATE_EPOCH)
+# because a contract that is only checked sometimes is not a contract
+# (rules/quality-gates.md: "no silent failures"). SOURCE_DATE_EPOCH, when
+# set, gives the compiler a fixed value for any __DATE__/__TIME__ that
+# slips through; -Werror=date-time additionally fails the build on any
+# new use. Together they are belt-and-suspenders.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    # Strip absolute build-path prefixes from __FILE__, debug info, and
+    # assertion strings. Maps source dir and build dir to canonical "." so
+    # two builds from /tmp/build-a and /tmp/build-b yield the same bytes.
+    add_compile_options(
+        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+        "-ffile-prefix-map=${CMAKE_BINARY_DIR}=.")
+    # Promote any future __DATE__/__TIME__ macro usage from a warning to a
+    # hard error. Design note AP-4: the story text said -Wno-date-time but
+    # a suppressed warning is not a contract. AC-8.3.3 is still satisfied
+    # because -Wdate-time IS emitted; we additionally fail the build.
+    add_compile_options(-Werror=date-time)
+endif()
+
+# Deterministic archive creation: -D modifier zeroes mtime/uid/gid/mode in
+# archive headers. Only GNU ar and llvm-ar accept it; Darwin's BSD ar does
+# not. Darwin's libtool is invoked via CMAKE_C_CREATE_STATIC_LIBRARY by
+# default and already produces deterministic archives in modern Xcode
+# (since Xcode 10, archives use zerofill metadata). Probe -D once.
+include(CheckSourceCompiles)
+execute_process(
+    COMMAND ${CMAKE_AR} -D --version
+    OUTPUT_VARIABLE _hu_ar_d_probe
+    ERROR_QUIET
+    RESULT_VARIABLE _hu_ar_d_result)
+if(_hu_ar_d_result EQUAL 0)
+    set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcD <TARGET> <OBJECTS>")
+    set(CMAKE_C_ARCHIVE_APPEND "<CMAKE_AR> qD  <TARGET> <OBJECTS>")
+    set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_AR> -D <TARGET>")
+    message(STATUS "Reproducible builds: ar supports -D (deterministic mode)")
+else()
+    message(STATUS "Reproducible builds: ar -D not supported (Darwin BSD ar); relying on platform default determinism")
+endif()
+
+# Linker-level nondeterminism. ELF build-id and Mach-O LC_UUID embed
+# host-derived randomness; suppress them so two builds match byte-for-byte.
+# Linux: --build-id=none (binutils ld + lld). Darwin: -no_uuid (ld64).
+#
+# IMPORTANT: only apply to the shipped `human` binary, NOT to test
+# binaries. On Darwin, dyld + ASan require LC_UUID for symbolication —
+# `human_tests` will refuse to load without it. The reproducibility
+# contract only covers the shipped binary, so the test binaries can
+# keep their UUIDs. Applied later via target_link_options on `human`
+# (search for "US-8.3 per-target" in this file).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # On Linux, the BuildId is purely metadata and removing it from
+    # test binaries is harmless — leave globally applied.
+    add_link_options("LINKER:--build-id=none")
+endif()
+# Darwin handling moved to the `human` target only (see below).
+# --- end US-8.3 -------------------------------------------------------------
+
 option(HU_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(HU_ENABLE_SQLITE "Enable SQLite memory backend" ON)
 option(HU_ENABLE_POSTGRES "Enable PostgreSQL memory backend" OFF)
@@ -1131,6 +1199,12 @@ list(APPEND HU_CORE_SOURCES
     src/persona/creative_voice.c
     src/persona/genuine_boundaries.c
     src/tools/persona.c
+    # US-8.2 — Persona Encryption-at-Rest.  Hard-requires libsodium; the
+    # TU itself emits #error if HU_HAS_LIBSODIUM is not defined, so this
+    # entry intentionally has no compile-time gate — a misconfigured build
+    # fails loudly at compile time rather than silently dropping the
+    # crypto layer.
+    src/persona/persona_crypt.c
     src/context/theory_of_mind.c
     src/context/self_awareness.c
     src/context/anticipatory.c
@@ -1322,6 +1396,10 @@ if(HU_ENABLE_ML)
         # The C-side ORPO production wiring is a Sprint 12 followup
         # (FU-11.5.a re-targeted at main's new framework).
         src/ml/rl_trainer.c
+        # Sprint 8 US-8.1: DP-SGD with RDP accountant (verifiable privacy).
+        # Pure-math privacy accounting + per-sample-clipped noisy SGD;
+        # links inside HU_ENABLE_ML=ON alongside the other learners.
+        src/ml/dp_sgd.c
         # Track D D2.2: persona-fidelity compute primitives shared by
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
@@ -2148,15 +2226,12 @@ set_source_files_properties(src/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlen
 add_executable(human src/main.c src/bootstrap.c)
 target_link_libraries(human human_core)
 
-# --- Diagnostic helper: hu_embed_helper (US-3.4) ---
-# Minimal CLI over hu_embedder_local_create. Reads text from argv or stdin,
-# writes one-line JSON to stdout. DIAGNOSTIC tool only — daemon does not
-# consume its output.
-add_executable(hu_embed_helper scripts/hu-embed-helper.c)
-target_link_libraries(hu_embed_helper human_core)
-if(HU_ENABLE_ASAN)
-    target_compile_options(hu_embed_helper PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-    target_link_options(hu_embed_helper PRIVATE -fsanitize=address)
+# US-8.3 per-target: Mach-O LC_UUID embeds host-derived randomness; zero
+# it on the shipped binary only. Test binaries keep their UUID because
+# dyld + ASan require it for symbolication. See
+# docs/standards/engineering/reproducible-builds.md.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_link_options(human PRIVATE "LINKER:-no_uuid")
 endif()
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -2730,6 +2805,7 @@ set(HU_TEST_SOURCES
     tests/test_channel_overlay_apply.c
     tests/test_personal_model_simulation.c
     tests/test_personal_model_fidelity_v2.c
+    tests/test_persona_encryption.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
     tests/integration/test_sprint3_hybrid_recall.c
@@ -3052,13 +3128,16 @@ set(HU_TEST_SOURCES
     tests/test_reflection_advanced.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
-    # ML-coupled tests (test_ml.c, test_ml_cli_actually_trains.c,
-    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c, test_lora.c,
-    # test_training_data*.c, test_agent_trainer.c) are added below in
-    # the if(HU_ENABLE_ML) gate (CMakeLists.txt:3265+). Keeping them
-    # here would break minimal-build / no-sqlite / cross-arm64 builds
-    # because the tests reference hu_agent_t fields like m3_adapter
-    # that only exist when HU_ENABLE_ML is on (agent.h:428-435).
+    tests/test_ml.c
+    tests/test_ml_cli_actually_trains.c
+    tests/test_ml_fidelity_judgment.c
+    tests/test_dpo_judge_naming.c
+    tests/test_dp_sgd.c
+    tests/test_lora.c
+    tests/test_training_data.c
+    tests/test_training_data_extractor.c
+    tests/test_training_data_quality.c
+    tests/test_agent_trainer.c
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
