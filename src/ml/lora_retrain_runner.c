@@ -220,8 +220,19 @@ static int retrain_pid_lock(const char *path) {
     }
     char buf[32];
     int n = snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
-    if (n > 0)
-        (void)write(fd, buf, (size_t)n);
+    if (n > 0) {
+        /* PR #115 / cross-arm64 + minimal-build CI fix:
+         * glibc's _FORTIFY_SOURCE-fortified write() carries
+         * warn_unused_result that (void)-cast doesn't always suppress
+         * (Linux GCC strict configs trip -Werror=unused-result).
+         * The write is best-effort — the PID file content is
+         * informational only (the lock itself is the flock on fd) —
+         * but we now explicitly check + discard so the attribute is
+         * satisfied. macOS Clang didn't enforce this; local builds
+         * passed silently. */
+        ssize_t written = write(fd, buf, (size_t)n);
+        (void)written;
+    }
     close(fd);
     return 1;
 }

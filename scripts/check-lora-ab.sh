@@ -66,9 +66,16 @@ CASCADE_FIXTURE=""
 #
 # Both variables start empty; the trap uses `:-` defaults so cleanup
 # is a no-op when a path was never taken.
+# Sprint 11 PR #115 / Bugbot MED: don't clobber the standard POSIX
+# TMPDIR env var. The previous trap-unification commit (22e3d406)
+# used the bare name TMPDIR for the lora-ab scratch directory,
+# overwriting the system's TMPDIR which mktemp -t consults for
+# fallback temp placement. Empty TMPDIR can cause mktemp -t to use
+# CWD on some GNU/Linux configs, and child Python processes inherit
+# the empty value. Renamed to LORA_AB_TMP_DIR to avoid the shadow.
 CASCADE_TMP_DIR=""
-TMPDIR=""
-trap 'rm -rf "${CASCADE_TMP_DIR:-}"; rm -rf "${TMPDIR:-}"' EXIT
+LORA_AB_TMP_DIR=""
+trap 'rm -rf "${CASCADE_TMP_DIR:-}"; rm -rf "${LORA_AB_TMP_DIR:-}"' EXIT
 
 i=1
 # Manual parse so we can pull --cascade-fixture's value (the cascade-fixture
@@ -133,8 +140,9 @@ if [ "$CASCADE" -eq 1 ]; then
   CASCADE_TMP_DIR="$(mktemp -d -t human-cascade-XXXXXX)"
   CASCADE_TMP="$CASCADE_TMP_DIR/cascade.json"
   # NOTE: unified EXIT trap at script top handles cleanup of both
-  # CASCADE_TMP_DIR and TMPDIR; do not register a second `trap '...' EXIT`
-  # here — it would silently override the unified handler.
+  # CASCADE_TMP_DIR and LORA_AB_TMP_DIR; do not register a second
+  # `trap '...' EXIT` here — it would silently override the unified
+  # handler.
   set +e
   python3 "$REPO_ROOT/scripts/stage_cascade.py" \
     --fixture "$CASCADE_FIXTURE_ABS" \
@@ -184,15 +192,15 @@ done
 # user's real ~/.human/personas, and so the synthetic-fingerprint
 # path triggers reliably. The before/after fixtures are passed as
 # absolute paths (the CLI accepts arbitrary file paths for those).
-TMPDIR="$(mktemp -d -t human-lora-ab-XXXXXX)"
+LORA_AB_TMP_DIR="$(mktemp -d -t human-lora-ab-XXXXXX)"
 # NOTE: unified EXIT trap at script top handles cleanup. Do not register
 # a second `trap '...' EXIT` here — it would silently override the
 # unified handler and leak CASCADE_TMP if both paths are ever taken in
 # the same invocation.
 
-cp "$FIXTURE_PERSONA" "$TMPDIR/${FIXTURE_NAME}.json"
+cp "$FIXTURE_PERSONA" "$LORA_AB_TMP_DIR/${FIXTURE_NAME}.json"
 
-OUTPUT="$(HU_PERSONA_DIR="$TMPDIR" HOME="$TMPDIR" \
+OUTPUT="$(HU_PERSONA_DIR="$LORA_AB_TMP_DIR" HOME="$LORA_AB_TMP_DIR" \
   "$BIN" ml lora-ab \
   --persona "$FIXTURE_NAME" \
   --before "$REPO_ROOT/$FIXTURE_BEFORE" \
@@ -262,7 +270,7 @@ printf '{"delta": %s, "size_mb": %s, "verdict": "%s"}\n' \
 
 # ── US-7.6 judgment-fidelity (INS-A) — optional, dormant in sprint 7 ──
 if [ "$JUDGMENT" -eq 1 ]; then
-  JSON_OUT="$(HU_PERSONA_DIR="$TMPDIR" HOME="$TMPDIR" \
+  JSON_OUT="$(HU_PERSONA_DIR="$LORA_AB_TMP_DIR" HOME="$LORA_AB_TMP_DIR" \
     "$BIN" ml fidelity-status \
     --persona "$FIXTURE_NAME" \
     --judgment 2>&1 || true)"

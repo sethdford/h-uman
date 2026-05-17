@@ -52,8 +52,27 @@ def _count_prompts(probe_path: str) -> int:
 
 
 def _try_real_kl(base: str, candidate: str, probe_path: str) -> Any:
-    """Best-effort real KL inference. Returns a dict with kl_nats on
-    success, or None if the dependencies are not available."""
+    """Best-effort real KL inference.
+
+    Returns:
+      None if the dependencies (torch, transformers) are not available
+        — the caller falls through to the stub path emitting
+        `source: "stub"`.
+      Raises NotImplementedError if dependencies ARE available but the
+        real inference path is not yet built — this matches
+        `scripts/yntp_eval.py::_real_compute_logprob` and surfaces the
+        scope gap loudly to operators who DO have torch installed.
+
+    Sprint 11 PR #115 / Bugbot MED fix: previously this function
+    silently returned None even when torch+transformers imported
+    successfully, masking the scope gap. An operator with torch
+    installed would see `source: "stub"` (the dependency-missing
+    label) and infer the gate was working — but it was actually a
+    fall-through, not a measurement.
+
+    Sprint 12 US-12.3 closes this gap by implementing the real
+    `KL(base || candidate)` path against the 200-prompt probe set.
+    """
     try:
         # Import lazily so the script can be invoked without the heavy
         # ML stack present (test paths, CI).
@@ -62,13 +81,22 @@ def _try_real_kl(base: str, candidate: str, probe_path: str) -> Any:
         torch = importlib.import_module("torch")  # noqa: F841
         transformers = importlib.import_module("transformers")  # noqa: F841
     except Exception:
+        # Honest "no signal" — caller emits source: stub for the C-side
+        # gate-stubbed event path.
         return None
-    # Real inference would go here; intentionally not implemented in
-    # Sprint 11 — see design doc §1 KL drift / "Out of scope". The
-    # presence of the import guard ensures we can still run this script
-    # in environments where torch/transformers ARE installed without it
-    # actually trying to load a 2B model.
-    return None
+    # Dependencies present but real inference not yet wired. Sprint 12
+    # US-12.3 will implement this. Raising NotImplementedError makes
+    # the runner's subprocess hit `lora_retrain_kl_gate_error` (non-zero
+    # exit) rather than silently falling through to the stub path —
+    # operators with torch installed see the real status.
+    raise NotImplementedError(
+        "Real KL drift inference is not yet wired. Sprint 12 US-12.3 "
+        "will implement KL(base || candidate) against the 200-prompt "
+        "probe set. Until then, this script emits `source: stub` only "
+        "in environments without torch/transformers; environments with "
+        "those packages installed will hit this NotImplementedError to "
+        "make the scope gap visible."
+    )
 
 
 def main(argv=None) -> int:
@@ -83,15 +111,36 @@ def main(argv=None) -> int:
         return _emit({"ok": False, "reason": "probe_set_empty",
                       "kl_nats": 0.0, "n_prompts": 0}, exit_code=1)
 
-    real = _try_real_kl(args.base, args.candidate, args.probe_set)
+    try:
+        real = _try_real_kl(args.base, args.candidate, args.probe_set)
+    except NotImplementedError as exc:
+        # Sprint 11 PR #115 / Bugbot MED: torch+transformers available
+        # but real path not yet wired (Sprint 12 US-12.3). Emit a
+        # distinct `source: "not_implemented"` JSON + non-zero exit so
+        # the C runner records `lora_retrain_kl_gate_error` instead of
+        # silently treating us as stubbed. The kl_nats: 0.0 keeps the
+        # JSON parseable; the runner's sentinel + event surfaces the
+        # gap.
+        return _emit(
+            {
+                "ok": False,
+                "kl_nats": 0.0,
+                "n_prompts": n_prompts,
+                "source": "not_implemented",
+                "reason": str(exc),
+            },
+            exit_code=2,
+        )
+
     if real is not None and isinstance(real, dict) and "kl_nats" in real:
         return _emit({"ok": True, "kl_nats": float(real["kl_nats"]),
                       "n_prompts": n_prompts, "source": "real"})
 
-    # Sprint 11 stub path: emit 0.0 nats so the C side can parse a
-    # well-formed JSON object. The C-side test seam never reaches this
-    # script; in manual smoke runs an operator inspecting the
-    # `source: stub` field knows the gate is not yet hardened.
+    # Stub path: torch/transformers NOT installed. Emit 0.0 nats with
+    # source: stub so the C side's lora_ema_parse_kl_is_stub() detection
+    # fires and records `lora_retrain_kl_gate_stubbed`. Operators on
+    # production deployments without the ML stack see "gate disabled"
+    # in dashboards rather than a fake clean PASS.
     return _emit({"ok": True, "kl_nats": 0.0, "n_prompts": n_prompts,
                   "source": "stub"})
 
