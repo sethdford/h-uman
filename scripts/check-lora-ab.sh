@@ -44,15 +44,72 @@
 set -euo pipefail
 
 JUDGMENT=0
-for arg in "$@"; do
+CASCADE=0
+CASCADE_FIXTURE=""
+i=1
+# Manual parse so we can pull --cascade-fixture's value (the cascade-fixture
+# JSON path) without dragging in getopt. We tolerate other flags so
+# existing callers (e.g. CI passing --judgment) keep working.
+while [ "$i" -le "$#" ]; do
+  arg="${!i}"
   case "$arg" in
     --judgment) JUDGMENT=1 ;;
+    --cascade) CASCADE=1 ;;
+    --cascade-fixture)
+      i=$((i + 1))
+      CASCADE_FIXTURE="${!i:-}"
+      ;;
     *) ;;
   esac
+  i=$((i + 1))
 done
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# ── Sprint 11 / US-11.7 — 4-stage cascade integration (AC-11.7.6) ───────
+# When `--cascade` is passed, invoke `scripts/stage_cascade.py` with the
+# cascade fixture (default: tests/fixtures/cascade/sprint8_iter200.json,
+# which AC-11.7.3 asserts must REJECT). Emits the per-stage JSON breakdown
+# on stdout and forwards the exit code (0/1/2 = PROMOTE/DEFER/REJECT).
+#
+# This integration is independent of the legacy lora-ab path below — it
+# does NOT require ./build/human to exist, so CI on a clean checkout can
+# exercise the gate cascade end-to-end.
+if [ "$CASCADE" -eq 1 ]; then
+  if [ -z "$CASCADE_FIXTURE" ]; then
+    CASCADE_FIXTURE="tests/fixtures/cascade/sprint8_iter200.json"
+  fi
+  if [ ! -f "$CASCADE_FIXTURE" ]; then
+    echo "[cascade] FAIL: fixture missing at $CASCADE_FIXTURE" >&2
+    exit 1
+  fi
+  echo "[cascade] running stage_cascade.py --fixture $CASCADE_FIXTURE"
+  CASCADE_TMP="$(mktemp -t human-cascade-XXXXXX).json"
+  trap 'rm -f "$CASCADE_TMP"' EXIT
+  set +e
+  python3 "$REPO_ROOT/scripts/stage_cascade.py" \
+    --fixture "$REPO_ROOT/$CASCADE_FIXTURE" \
+    --output "$CASCADE_TMP"
+  CASCADE_RC=$?
+  set -e
+  if [ ! -s "$CASCADE_TMP" ]; then
+    echo "[cascade] FAIL: stage_cascade.py produced no output" >&2
+    exit 1
+  fi
+  cat "$CASCADE_TMP"
+  # Surface a parseable per-stage line, mirroring the convention
+  # `--judgment` already established.
+  python3 - "$CASCADE_TMP" <<'PY' || true
+import json, sys
+with open(sys.argv[1]) as fp:
+    payload = json.load(fp)
+for s in payload.get("stages", []):
+    print(f"[cascade] stage{s['stage']}: {s['status']} ({s.get('name','?')})")
+print(f"[cascade] final: {payload.get('final_verdict','?')}")
+PY
+  exit "$CASCADE_RC"
+fi
 
 BIN="${LORA_AB_BIN:-./build/human}"
 FIXTURE_PERSONA="tests/fixtures/lora_baseline_persona.json"

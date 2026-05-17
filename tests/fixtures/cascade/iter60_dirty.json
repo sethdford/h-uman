@@ -1,0 +1,13 @@
+{
+  "name": "iter60_dirty",
+  "description": "Sprint 8 iter-60 best-of-Pareto: passes PPL (1.2x base), passes coherence judge, but pad_rate=0.40 makes it DEFER at Stage 4.",
+  "lexical_delta": 0.019,
+  "pad_rate": 0.40,
+  "base_ppl": 12.0,
+  "adapter_ppl": 14.4,
+  "ppl_ratio": 1.2,
+  "coherence_scores": [0.75, 0.78, 0.72, 0.80, 0.70],
+  "coherence_pad_outputs": [false, false, true, false, true],
+  "expected_stage_reject": null,
+  "expected_verdict": "DEFER"
+}
