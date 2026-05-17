@@ -1,0 +1,5 @@
+{"prompt": "Q1", "options": {"A": "alpha", "B": "beta", "C": "gamma", "D": "delta"}, "seth_answer": "A", "metadata": {"synthetic_5q": true}}
+{"prompt": "Q2", "options": {"A": "alpha", "B": "beta", "C": "gamma", "D": "delta"}, "seth_answer": "B", "metadata": {"synthetic_5q": true}}
+{"prompt": "Q3", "options": {"A": "alpha", "B": "beta", "C": "gamma", "D": "delta"}, "seth_answer": "C", "metadata": {"synthetic_5q": true}}
+{"prompt": "Q4", "options": {"A": "alpha", "B": "beta", "C": "gamma", "D": "delta"}, "seth_answer": "D", "metadata": {"synthetic_5q": true}}
+{"prompt": "Q5", "options": {"A": "alpha", "B": "beta", "C": "gamma", "D": "delta"}, "seth_answer": "A", "metadata": {"synthetic_5q": true}}
