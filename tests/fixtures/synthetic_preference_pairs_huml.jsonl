@@ -1,0 +1,50 @@
+{"prompt": "13 0 14 28 1 24", "chosen": "17 8 15 31", "rejected": "6 7 20", "source": "synthetic"}
+{"prompt": "31 3 17 24 19 16 27", "chosen": "21 24 16 15", "rejected": "0 0 5 2", "source": "synthetic"}
+{"prompt": "15 28 31 20 7", "chosen": "31 7", "rejected": "13 2 16", "source": "synthetic"}
+{"prompt": "9 5 27 9 11 22 10 24", "chosen": "1 4 1", "rejected": "0 1 20 9 4", "source": "synthetic"}
+{"prompt": "3 14 5 22 20", "chosen": "17 28 6 23 0 18", "rejected": "24 1 6", "source": "synthetic"}
+{"prompt": "28 16 31 25", "chosen": "29 26", "rejected": "17 10 11 24", "source": "synthetic"}
+{"prompt": "7 14 26 19 11 31 3 6", "chosen": "5 10 5", "rejected": "15 21 4 20", "source": "synthetic"}
+{"prompt": "22 18 30 9 28 11", "chosen": "31 7 28 13 16 9", "rejected": "4 9", "source": "synthetic"}
+{"prompt": "25 7 3 23 26", "chosen": "31 10 25 22 16", "rejected": "24 18 25 20", "source": "synthetic"}
+{"prompt": "24 17 12 9 3 26", "chosen": "8 22 31 4 25", "rejected": "26 7 4 3", "source": "synthetic"}
+{"prompt": "8 4", "chosen": "20 30 3", "rejected": "11 1 4 16 26 27 1 24 27 26 19 19 9 26 30 14", "source": "synthetic"}
+{"prompt": "5 8 20", "chosen": "30 29 9 12 30 12", "rejected": "11 13 31 8 26 6 7 7 0 17 22 19 30 29 8 22", "source": "synthetic"}
+{"prompt": "23 24 2", "chosen": "3 14 30 10 7 20", "rejected": "12 14 0 25 23 31 24 13 18 3 23 4 1 12 26 29", "source": "synthetic"}
+{"prompt": "26 9 19", "chosen": "1 30 1 27 6 22", "rejected": "29 22 3 12 29 19 23 20 9 2 7 15 15 1 31 22", "source": "synthetic"}
+{"prompt": "31 31 12 3 25", "chosen": "0 26 31 8 31 1 13 14", "rejected": "20 9 0 7 0 2 14 17 20 10 19 17 31 18 31 0", "source": "synthetic"}
+{"prompt": "20 20 13", "chosen": "12 10 2 8 17", "rejected": "13 15 0 16 25 9 4 10 29 20 17 15 3 24 30 29", "source": "synthetic"}
+{"prompt": "29 24", "chosen": "14 21 9 18 30 22 6", "rejected": "9 28 9 20 8 21 14 21 4 26 19 0 19 9 3 0", "source": "synthetic"}
+{"prompt": "16 25 16 14", "chosen": "5 10 3 27 25 13 26", "rejected": "3 28 24 30 3 0 15 0 3 28 27 26 20 0 17 9", "source": "synthetic"}
+{"prompt": "29 22", "chosen": "9 26 25 29 21 15", "rejected": "21 17 18 27 9 18 10 17 23 26 13 7 13 8 31 13", "source": "synthetic"}
+{"prompt": "16 9 10 31", "chosen": "0 22 11 24 20 22", "rejected": "29 19 10 4 28 2 25 26 29 29 10 8 14 24 13 16", "source": "synthetic"}
+{"prompt": "28 6 15 12", "chosen": "24 23 23 29 18", "rejected": "26 15 22 28 28 29 18", "source": "synthetic"}
+{"prompt": "31 3 14 22 27", "chosen": "17 4", "rejected": "29 1", "source": "synthetic"}
+{"prompt": "24 7 2 0 24", "chosen": "19 15 10 23 24", "rejected": "15 3 18", "source": "synthetic"}
+{"prompt": "3 19 25 16 20 16", "chosen": "20 22", "rejected": "14 9", "source": "synthetic"}
+{"prompt": "15 20 9", "chosen": "2 10", "rejected": "19 26", "source": "synthetic"}
+{"prompt": "26 6 1", "chosen": "6 20", "rejected": "13 31", "source": "synthetic"}
+{"prompt": "3 23 3", "chosen": "5 8", "rejected": "13 29", "source": "synthetic"}
+{"prompt": "14 30 6 17 8", "chosen": "29 10 2", "rejected": "17 18", "source": "synthetic"}
+{"prompt": "6 27 3 16 15 29 5", "chosen": "9 8", "rejected": "10 16", "source": "synthetic"}
+{"prompt": "22 30 20", "chosen": "12 29", "rejected": "19 4", "source": "synthetic"}
+{"prompt": "26 21 8", "chosen": "31 20 30 27 2 4 20", "rejected": "6 19 13 1 12 20 30 5 6", "source": "synthetic"}
+{"prompt": "30 17 28", "chosen": "12 1 2", "rejected": "12 5 12 13 1 25 25 26 20", "source": "synthetic"}
+{"prompt": "31 18", "chosen": "10 20", "rejected": "11 19 9 11 5", "source": "synthetic"}
+{"prompt": "27 29", "chosen": "17 7 13 19", "rejected": "24 23 9 26 30 4 15", "source": "synthetic"}
+{"prompt": "1 21", "chosen": "21 23", "rejected": "8 16 25 26 2 6 4", "source": "synthetic"}
+{"prompt": "22 6 22", "chosen": "22 31 25", "rejected": "2 8 14 17 8 24 8", "source": "synthetic"}
+{"prompt": "8 9 21", "chosen": "1 2 15 28", "rejected": "20 8 4 6 18 27", "source": "synthetic"}
+{"prompt": "5 11 28", "chosen": "6 27 30", "rejected": "14 23 13 15 26 0", "source": "synthetic"}
+{"prompt": "3 5", "chosen": "9 8 0", "rejected": "7 28 13 13 29 22 4 0 13", "source": "synthetic"}
+{"prompt": "15 13", "chosen": "29 29", "rejected": "4 17 6 23 0 27 8 18", "source": "synthetic"}
+{"prompt": "27 8 17 21 14 3 11", "chosen": "19 13 19 22 9 19 7 12 31 13", "rejected": "3 29 8 27 3", "source": "synthetic"}
+{"prompt": "25 27 30 13 23 10", "chosen": "3 28 19 20 30 29 12 18 26", "rejected": "21 5 30 1 4 22 23", "source": "synthetic"}
+{"prompt": "4 28 19 6 19 30", "chosen": "14 2 30 19 8 24 11 23", "rejected": "23 9 0 16 3", "source": "synthetic"}
+{"prompt": "18 30 26 4 18 25", "chosen": "16 21 25 20 1 8 28 16 8", "rejected": "8 18 11", "source": "synthetic"}
+{"prompt": "25 2 28", "chosen": "2 22 11 6 31 5 10 26 24 19", "rejected": "11 1 14 22", "source": "synthetic"}
+{"prompt": "31 22 17 8 21 16", "chosen": "14 31 6 27 5 24 25 6", "rejected": "3 13 15 3", "source": "synthetic"}
+{"prompt": "21 28 17 19 1", "chosen": "22 2 11 8 25 14 29 25 18", "rejected": "8 22 27 7", "source": "synthetic"}
+{"prompt": "8 19 12 15 3 3 28", "chosen": "26 24 31 8 21 0 11", "rejected": "18 29", "source": "synthetic"}
+{"prompt": "4 10 11 16", "chosen": "8 30 5 20 29", "rejected": "8 29 26", "source": "synthetic"}
+{"prompt": "7 7 6 23 13", "chosen": "3 4 1 5 21 14 12 27 14", "rejected": "15 26 16 19 9 13", "source": "synthetic"}

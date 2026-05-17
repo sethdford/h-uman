@@ -49,6 +49,35 @@ option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
 option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time LoRA merging (W13 Bridge A)" OFF)
 option(HU_ENABLE_MLX_PROVIDER "Enable MLX provider (M3 Bridge B) — stub when OFF, subprocess MLX runtime when ON" OFF)
+# Phase 2 Task 6 (RL SOTA) — gate the mlx-lm-lora DPO subprocess
+# integration test. OFF by default keeps CI hermetic; flipping ON
+# locally activates the heavyweight Gemma download in
+# tests/test_dpo_real_mlx.c (Task 7 territory). The actual
+# target_compile_definitions wiring lives after both human_core and
+# human_tests targets are declared (alongside HU_ENABLE_LLAMACPP's
+# test wiring); CMake forbids defining symbols on a target before
+# the target exists.
+option(HU_HAVE_MLX_LM "Enable mlx-lm-lora DPO subprocess integration tests" OFF)
+option(HU_HAVE_MLX_LM_KTO "Enable mlx-lm-lora KTO subprocess integration tests" OFF)
+# Phase 4 Task 0 (RL SOTA) — mirrors HU_HAVE_MLX_LM_KTO. Default OFF; user
+# opts in explicitly after verifying that `python3 -c "from
+# mlx_lm_lora.trainer.grpo_trainer import train_grpo"` (or the fallback
+# `python3 -m mlx_lm_lora.train --train-mode grpo`) succeeds on their box.
+# No auto-detection in CMake — keeps configure output deterministic across
+# Apple/Linux dev boxes that may or may not have the third-party package
+# installed.
+option(HU_HAVE_MLX_LM_GRPO "Enable mlx-lm-lora GRPO subprocess integration tests" OFF)
+# Phase 5 Task 0 (RL SOTA) — master gate for the Phase 5 + Phase 6 RL
+# evaluation infrastructure (competitive harness, gold-judge leaderboard,
+# external-judge bridges, eval gate). OFF by default keeps the default
+# release / dev build a zero-byte delta versus Phase 4 close-out; the
+# rl_sota preset flips this ON so subsequent Phase 5 tasks can land code
+# behind the flag without changing default builds. The actual
+# target_compile_definitions wiring lives after the human / human_core /
+# human_core_test / human_tests targets are declared (alongside
+# HU_HAVE_MLX_LM_GRPO's wiring); CMake forbids defining symbols on a
+# target before the target exists.
+option(HU_ENABLE_RL_FULL "Enable RL evaluation infrastructure (Phase 5 + 6)" OFF)
 # Phase 1 (RL SOTA) — Metal GPU offload for the vendored llama.cpp build.
 # Defaults ON only on Apple platforms (the only OS llama.cpp ships Metal
 # for). Linux and other non-Apple targets default OFF; setting it ON
@@ -195,6 +224,12 @@ if(HU_ENABLE_DISCORD)
 endif()
 if(HU_ENABLE_SLACK)
     list(APPEND CHANNEL_SOURCES src/channels/slack.c)
+    # Phase 2 Task 12 (RL SOTA): reaction_added/removed webhook branch.
+    # Lives in its own TU to avoid an enum-name collision between
+    # human/channels/reaction_event.h (Task 10) and human/channel.h
+    # (HU_REACTION_QUESTION / HU_REACTION_CUSTOM_EMOJI redefinition).
+    # Same pattern as Task 11's imessage_reactions.c.
+    list(APPEND CHANNEL_SOURCES src/channels/slack_reactions.c)
 endif()
 if(HU_ENABLE_WHATSAPP)
     list(APPEND CHANNEL_SOURCES src/channels/whatsapp.c)
@@ -237,6 +272,12 @@ if(HU_ENABLE_IMAP)
 endif()
 if(HU_ENABLE_IMESSAGE)
     list(APPEND CHANNEL_SOURCES src/channels/imessage.c)
+    # Phase 2 Task 11 (RL SOTA): tapback inbound poll. Lives in its own TU
+    # to avoid an enum-name collision between human/channels/reaction_event.h
+    # (Task 10) and human/channel.h (HU_REACTION_QUESTION /
+    # HU_REACTION_CUSTOM_EMOJI redefinition). See the navigation comment
+    # in src/channels/imessage.c near hu_imessage_poll for the full story.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -593,6 +634,7 @@ set(HU_CORE_SOURCES
     src/agent/workspace_context.c
     src/agent/timing.c
     src/agent/governor.c
+    src/agent/activation_steering.c
     src/agent/relationship_dynamics.c
     src/agent/arbitrator.c
     src/agent/planning.c
@@ -952,6 +994,17 @@ endif()
 # WASI sandbox is cross-platform
 list(APPEND HU_CORE_SOURCES src/security/wasi_sandbox.c)
 
+# Channel-agnostic reaction event normalizer (Phase 2 Task 10).
+list(APPEND HU_CORE_SOURCES src/channels/reaction_event.c)
+
+# Phase 2 Task 13 (RL SOTA): reaction event → dpo_pairs row handler.
+# Writes into the daemon-owned hu_dpo_collector_t set via
+# hu_reaction_handler_set_collector at startup. Same TU split rationale
+# as Tasks 11/12: lives in src/agent/ rather than src/channels/ so it
+# can include human/channels/reaction_event.h without colliding with
+# human/channel.h's older hu_reaction_type_t enum.
+list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
+
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
     src/a2a.c
@@ -1240,6 +1293,112 @@ if(HU_ENABLE_ML)
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
         src/providers/huml.c
+        # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t vtable + factory.
+        # Backends are stubbed at HU_ERR_NOT_SUPPORTED until Tasks 4
+        # (HUML, in-process DPO + gradient check) and 6 (MLX subprocess
+        # via the third-party mlx-lm-lora package).
+        src/ml/rl_trainer.c
+        src/ml/dpo_real_huml.c
+        src/ml/dpo_real_mlx.c
+        # Phase 3 Task 4 (RL SOTA): KTO (Kahneman-Tversky Optimization)
+        # HUML backend + MLX stub. One-sided preference signals.
+        src/ml/kto.c
+        # Phase 3 Task 7 (RL SOTA): KTO MLX subprocess backend.
+        src/ml/kto_mlx.c
+        # Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection
+        # (score = W . h + b) — trainable surface on top of frozen
+        # backbones in the reward-model composition (Task 2) and
+        # Bradley-Terry RM training loop (Task 3).
+        src/ml/value_head.c
+        # Phase 2 Task 2 (RL SOTA): teacher-forced log π(y|x) on hu_model_t.
+        # Used by hu_dpo_real_huml in Task 4 and (paired with reference_model
+        # from Task 3) the log π_ref counterparts that drive the DPO loss.
+        src/ml/policy_logprobs.c
+        # Phase 2 Task 3 (RL SOTA): frozen π_ref clone via deep-copy of params.
+        # Used by hu_dpo_real_huml in Task 4 to anchor the policy-vs-reference
+        # log-ratio in the DPO loss.
+        src/ml/reference_model.c
+        # Phase 4 Task 2 (RL SOTA): hu_rollout_t — sample N completions per
+        # prompt from a hu_model_t. HUML backend uses xorshift64 PRNG seeded
+        # per-rollout via splitmix64(seed XOR rollout_index) (R13: cross-
+        # platform-deterministic; libc rand() / rand_r() differ across
+        # glibc / Apple libc). MLX backend stubs at HU_ERR_NOT_SUPPORTED
+        # until Task 8 wires scripts/grpo_mlx_train.py sampling mode.
+        src/ml/rollout.c
+        # Phase 2 Task 8 (RL SOTA): split `human ml dpo-train` into
+        # hu_ml_cli_dpo_judge (legacy provider-scored path) +
+        # hu_ml_cli_dpo_real (Phase 2 real-DPO via hu_rl_trainer_t).
+        src/ml/cli_dpo.c
+        # Phase 3 Task 2 (RL SOTA): hu_reward_model_t — vtable + HUML
+        # factory (toy GPT backbone + Task 1 value head on last-position
+        # logits) + M3 NaN contract for one-sided KTO pairs. MLX factory
+        # stubs at HU_ERR_NOT_SUPPORTED until Task 8 wires
+        # scripts/rm_mlx_train.py. The HUML ctx layout lives in
+        # src/ml/reward_model_priv.h (plan H2 fix) so Task 3's
+        # reward_model_train.c can access the value head for the SGD
+        # step without a HU_IS_TEST accessor.
+        src/ml/reward_model.c
+        # Phase 3 Task 8 (RL SOTA): hu_reward_model_create_mlx — Apple-only
+        # MLX subprocess backend. Delegates inference to
+        # scripts/rm_mlx_train.py --infer via popen().
+        src/ml/reward_model_mlx.c
+        # Phase 3 Task 3 (RL SOTA): hu_reward_model_train — Bradley-Terry
+        # mini-batch SGD on the value head (W, b); backbone is frozen
+        # (Christiano 2017 §2.2). One-sided KTO pairs are skipped + counted
+        # in metrics.skipped_count (KTO unpaired loss is Task 4). MLX path
+        # returns HU_ERR_NOT_SUPPORTED — MLX-side RM training lives in
+        # scripts/rm_mlx_train.py (Task 8). The HU_IS_TEST seams expose a
+        # forward-only BT-loss helper + direct W[] pointer so AC-6's
+        # finite-difference grad check can perturb the same storage the
+        # SGD step writes (no test/prod gradient gap).
+        src/ml/reward_model_train.c
+        # Phase 3 Tasks 9-10: CLI handlers for kto-train and rm-train.
+        src/ml/cli_kto.c
+        src/ml/cli_rm.c
+        # Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler.
+        # Mirrors the cli_kto.c / cli_dpo.c structural pattern: argv
+        # parser (R12 strict integer parse for --rollouts), JSONL prompt
+        # extraction (chosen/rejected ignored — GRPO samples rollouts
+        # from the live policy), trainer creation via
+        # hu_rl_trainer_create_grpo, step loop, final save_adapter.
+        # Validation gates per umbrella §10: R9 reward-hacking (explicit
+        # --reward-fn beats convenient default), R12 group-baseline
+        # degeneracy (N<2 / N>1024), Phase 3 cli_rm precedent (--backend
+        # mlx demands --backbone-path).
+        src/ml/cli_grpo.c
+        # Phase 4 Task 1 (RL SOTA): KL divergence estimators (k1/k2/k3) +
+        # k3 analytical backward grad. Pure C leaf math primitive — no
+        # model coupling, no allocator. Used by the GRPO trainer
+        # (Task 5) for the beta * KL penalty term in the loss.
+        # Reference: Schulman 2020 "Approximating KL Divergence".
+        src/ml/kl_divergence.c
+        # Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative
+        # advantage with std-floor (D7/R6), pessimistic PPO ratio clip
+        # min (R8/F3), KL-aware loss (MED-1 kl_beta=0 disables; <0 →
+        # default 0.04), log-ratio overflow clamp (D8), analytical
+        # log-ratio gradient with finite-diff agreement to 5% (H4).
+        # Loss-only — no model coupling.  Task 5 lands the trainer step
+        # (hu_rl_trainer_t vtable wiring sampling + scoring + backward).
+        # Defines HU_GRPO_HAVE_HUML_IMPL=1 so Task 0's #ifndef stub in
+        # src/ml/rl_trainer.c for hu_grpo_huml_create falls out of the
+        # link; the placeholder at the bottom of grpo.c returns
+        # HU_ERR_NOT_SUPPORTED until Task 5 lands the real impl.
+        src/ml/grpo.c
+        # Phase 4 Task 8 (RL SOTA): GRPO MLX subprocess wrapper around
+        # scripts/grpo_mlx_train.py.  Apple-only at runtime (the create
+        # path returns HU_ERR_NOT_SUPPORTED on non-Apple); the M7 probe
+        # short-circuit under HU_IS_TEST keeps the test suite hermetic.
+        # Defines HU_GRPO_HAVE_MLX_IMPL=1 so Task 0's #ifndef stub in
+        # src/ml/rl_trainer.c for hu_grpo_mlx_create falls out of the
+        # link.  Real subprocess execution gated by HU_HAVE_MLX_LM_GRPO.
+        src/ml/grpo_mlx.c
+        # Phase 4 Task 4 (RL SOTA): hu_reward_source_t leaf vtable — three
+        # backends (synthetic token-counting fn, Phase 3 hu_reward_model_t
+        # composition, Phase 5 llm-judge stub). Used by the GRPO trainer
+        # (Task 5) to attach a scalar reward to each rollout, and by the
+        # CLI (Task 9) to dispatch on --reward-fn vs --reward-model
+        # (R9 reward-hacking pin — no implicit default).
+        src/ml/reward_source.c
     )
     if(HU_ENABLE_SQLITE)
         list(APPEND HU_CORE_SOURCES
@@ -1336,6 +1495,32 @@ endif()
 set(HU_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${HU_ROOT}/include)
 include_directories(${HU_ROOT}/asm/generic)
+
+# Phase 5 Task 2 (RL SOTA) — bootstrap CI helper.  Gated behind
+# HU_ENABLE_RL_FULL so default release/dev builds pay zero binary cost.
+# Consumed by Task 5 hu_eval_gate_decide (LoRA promotion gate) and Task
+# 9 competitive harness.  Subsequent Phase 5 tasks (judge external,
+# leaderboard runners, eval gate, competitive harness) will append
+# their TUs into this same gated block to keep the wiring uniform.
+if(HU_ENABLE_RL_FULL)
+    list(APPEND HU_CORE_SOURCES src/eval/bootstrap_ci.c)
+    # Phase 5 Task 3 (RL SOTA) — hu_eval_judge_external_t vtable +
+    # canned-response factory. Apple FM (Task 7) and Gemini Nano
+    # (Task 8) factories live in dedicated TUs; eval_judge_external.c
+    # keeps canned factory + #ifndef stubs when impl TUs are absent.
+    list(APPEND HU_CORE_SOURCES src/eval/eval_judge_external.c)
+    list(APPEND HU_CORE_SOURCES src/eval/leaderboard.c)
+    list(APPEND HU_CORE_SOURCES src/eval/eval_gate.c)
+    list(APPEND HU_CORE_SOURCES src/eval/stock_baseline.c)
+    list(APPEND HU_CORE_SOURCES src/eval/external_judge_fixture.c)
+    list(APPEND HU_CORE_SOURCES src/eval/apple_fm_client.c)
+    list(APPEND HU_CORE_SOURCES src/eval/gemini_nano_client.c)
+    list(APPEND HU_CORE_SOURCES src/eval/competitive_harness.c)
+    list(APPEND HU_CORE_SOURCES src/eval/cli_eval.c)
+    list(APPEND HU_CORE_SOURCES src/agent/adapter_id.c)
+    list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
+    list(APPEND HU_CORE_SOURCES src/ml/cli_demo.c)
+endif()
 
 # Deduplicate source lists to prevent parallel build races
 list(REMOVE_DUPLICATES HU_CORE_SOURCES)
@@ -2123,6 +2308,9 @@ endif()
 if(NOT HU_ENABLE_GOOGLE_RCS)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/google_rcs.c)
 endif()
+if(NOT HU_ENABLE_SLACK)
+    list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/slack.c src/channels/slack_reactions.c)
+endif()
 # Tests always compile all optional modules so test suites don't break
 set(HU_TEST_EXTRA_MODULES)
 if(NOT HU_ENABLE_PERIPHERALS)
@@ -2152,6 +2340,9 @@ if(NOT UNIX OR APPLE)
 endif()
 if(NOT WIN32)
     list(APPEND HU_TEST_EXTRA_MODULES src/security/appcontainer.c)
+endif()
+if(HU_ENABLE_RL_FULL)
+    list(APPEND HU_TEST_EXTRA_MODULES src/providers/provider_test_seam.c)
 endif()
 if(NOT HU_ENABLE_TOOLS_BROWSER)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -2216,7 +2407,17 @@ if(NOT HU_ENABLE_ML)
         src/ml/fidelity.c
         src/ml/training_data.c src/ml/training_data_extractor.c
         src/ml/training_data_quality.c
-        src/providers/huml.c)
+        src/providers/huml.c
+        src/ml/rl_trainer.c src/ml/dpo_real_huml.c src/ml/dpo_real_mlx.c
+        src/ml/kto.c src/ml/kto_mlx.c src/ml/grpo_mlx.c
+        src/ml/value_head.c src/ml/policy_logprobs.c src/ml/reference_model.c
+        src/ml/cli_dpo.c src/ml/reward_model.c src/ml/reward_model_mlx.c
+        src/ml/reward_model_train.c
+        src/ml/cli_kto.c src/ml/cli_rm.c src/ml/cli_grpo.c
+        # Phase 4 Task 2 (RL SOTA): hu_rollout_t. Mirror the ML-disabled
+        # fallback for the other Phase 2/3 RL TUs above so symbol resolution
+        # still works in minimal builds.
+        src/ml/rollout.c)
 endif()
 if(NOT HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -2237,6 +2438,11 @@ add_library(human_core_test STATIC ${HU_CORE_SOURCES} ${HU_TEST_EXTRA_CHANNELS} 
 target_include_directories(human_core_test PUBLIC ${HU_ROOT}/include)
 target_include_directories(human_core_test PRIVATE ${HU_ROOT}/asm/generic)
 target_compile_definitions(human_core_test PRIVATE HU_IS_TEST=1)
+# Phase 6: lora_training_runner.c compiles hu_e2e_closed_loop_run under
+# HU_IS_TEST even when HU_ENABLE_RL_FULL is OFF (dev preset).  tests/include
+# must be visible to human_core_test, not only when RL_FULL is ON.
+target_include_directories(human_core_test PRIVATE ${HU_ROOT}/tests/include)
+target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/tests/_tmp")
 # W15 — wire libsodium into the test build to mirror production keystore.c.
 # We use PUBLIC link directives so that human_tests (which links the static
 # human_core_test library) inherits the libsodium link directory and library
@@ -2472,6 +2678,8 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_personal_model_simulation.c
+    tests/test_personal_model_fidelity_v2.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
     tests/test_filler_pctt.c
@@ -2736,6 +2944,7 @@ set(HU_TEST_SOURCES
     tests/test_calibration.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
+    tests/test_activation_steering.c
     tests/test_relationship_dynamics.c
     tests/test_arbitrator.c
     tests/test_planning.c
@@ -2793,6 +3002,87 @@ set(HU_TEST_SOURCES
     tests/test_ml.c
     tests/test_ml_cli_actually_trains.c
     tests/test_dpo_judge_naming.c
+    # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t factory dispatch pin.
+    tests/test_rl_trainer.c
+    # Phase 2 Task 2 (RL SOTA): hu_policy_logprobs sanity + determinism + null-arg.
+    tests/test_policy_logprobs.c
+    # Phase 2 Task 3 (RL SOTA): hu_reference_model_create_from clone + freeze.
+    tests/test_reference_model.c
+    # Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient.
+    tests/test_dpo_real_loss.c
+    # Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs.
+    tests/test_dpo_real_e2e.c
+    # Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper — JSONL export +
+    # dummy-adapter shortcut without HU_HAVE_MLX_LM; real Gemma DPO with it.
+    tests/test_dpo_real_mlx.c
+    # Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + backward grad
+    # check (analytical vs finite-diff) + save/load round trip.
+    tests/test_value_head.c
+    # Phase 2 Task 8 (RL SOTA): pins surface contract for the post-split
+    # hu_ml_cli_dpo_judge / hu_ml_cli_dpo_real CLI handlers.
+    tests/test_cli_dpo.c
+    # Phase 3 Task 2 (RL SOTA): hu_reward_model_t HUML composition smoke
+    # test + M3 NaN contract pin for one-sided KTO pairs. Task 3 will
+    # APPEND Bradley-Terry convergence + finite-diff grad-check tests to
+    # tests/test_reward_model_train.c (same suite, same runner).
+    tests/test_reward_model_train.c
+    # Phase 3 Task 8 (RL SOTA): RM inference latency tests — HUML
+    # (sub-50ms Release) + MLX (gated by HU_HAVE_MLX_LM + Qwen GGUF).
+    tests/test_reward_model_inference.c
+    # Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
+    # grad check + vtable contract.
+    tests/test_kto_loss.c
+    # Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 forward + k3 backward grad
+    # check + v=0 graceful zero-return. Pins the math primitive that
+    # backs the GRPO KL penalty (Task 5).
+    tests/test_kl_divergence.c
+    # Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative
+    # advantage with std-floor (D7/R6), pessimistic PPO ratio clip
+    # min (R8/F3), KL-aware loss (MED-1 kl_beta=0 disables; <0 →
+    # default 0.04), log-ratio overflow clamp (D8), analytical
+    # log-ratio gradient with finite-diff agreement to 5% (H4).
+    # Loss-only — no model coupling; Task 5 lands the trainer step.
+    tests/test_grpo_loss.c
+    # Phase 4 Task 8 (RL SOTA): GRPO MLX subprocess wrapper — JSONL
+    # secure-perms (H2: O_EXCL + 0600) + factory probe short-circuit
+    # (M7) + dummy-adapter Python shortcut (HU_E2E_TEST_MODE).  The
+    # real-subprocess test is gated by HU_HAVE_MLX_LM_GRPO (L1 — compile
+    # time, not HU_SKIP_IF).
+    tests/test_grpo_mlx.c
+    # Phase 4 Task 5 (RL SOTA): GRPO HUML trainer — full
+    # hu_rl_trainer_t vtable impl composing rollout (Task 2) +
+    # reward_source (Task 4) + KL k3 (Task 1) + GRPO loss math
+    # (Task 3) + structural backward on lm_head.  Pins factory shape,
+    # R12 n_rollouts bounds [2, 1024], MED-1 kl_beta=0 skips reference
+    # forward, step_count advancement, and 50-step ASan leak check
+    # (R10 / F6 single-cleanup-label contract).
+    tests/test_grpo_huml.c
+    # Phase 4 Task 7 (RL SOTA): GRPO HUML synthetic-reward N=4 E2E
+    # multi-step convergence proof — umbrella §5 row 4 ship-contract
+    # gate.  50 iters × 20-prompt fixture; asserts (1) final_loss vs
+    # initial_loss change signal (loss inc. via KL penalty growth in
+    # this impl — see test docstring), (2) mean log-prob of good
+    # tokens 1..5 at iter 50 > iter 0 via shadow-GPT + save_adapter
+    # byte injection, (3) mean KL(π_θ || π_ref) < 2.0 nats with
+    # kl_beta = 0.04 (R5).  MLX subprocess test gated #if defined(
+    # HU_HAVE_MLX_LM_GRPO) per round-3 critic L1 (compile-time, not
+    # HU_SKIP_IF).
+    tests/test_grpo_e2e.c
+    # Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML factory — multinomial
+    # sampling determinism (xorshift64 + per-rollout splitmix64 seed),
+    # n_rollouts honoured, max_new_tokens cap, cross-platform pin (R13).
+    tests/test_rollout.c
+    # Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic
+    # token-counting backend (good=1..5, bad=26..30 convention), Phase 3
+    # hu_reward_model_t composition smoke, Phase 5 judge stub pin.
+    tests/test_reward_source.c
+    # Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI surface contract —
+    # 5 argument-rejection cases (R9 reward-hacking, R12 N<2 bounds,
+    # --reward-fn rm requires --reward-model, --backend mlx requires
+    # --backbone-path) + 2 HUML synthetic-reward e2e smokes (5 iters
+    # writes a non-empty adapter file; --kl-beta 0 disables KL flows
+    # through the CLI per MED-1 escape valve).
+    tests/test_cli_grpo.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
@@ -2873,6 +3163,19 @@ list(APPEND HU_TEST_SOURCES tests/test_hook_pipeline.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_dispatch_hooks.c)
 list(APPEND HU_TEST_SOURCES tests/test_config_reload.c)
 list(APPEND HU_TEST_SOURCES tests/test_plugin_hooks.c)
+# Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers.
+list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
+# Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll.
+# Default-skipped stub; opt in to the real chat.db path with -DHU_HAVE_CHATDB=1
+# (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
+list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
+# Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
+# (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
+list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
+# Phase 2 Task 13 (RL SOTA): hu_reaction_handler_handle_event — event ⇒
+# dpo_pairs row + per-turn signal flag (consumed by Task 14's agent_turn
+# substring-heuristic guard).
+list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
 
 # SOTA capability tests
 list(APPEND HU_TEST_SOURCES
@@ -2963,10 +3266,43 @@ list(APPEND HU_TEST_SOURCES
     tests/test_structured_output.c
 )
 
+# Phase 5 Task 2 (RL SOTA) — bootstrap_ci tests live in the same gated
+# bucket as the impl above.  Mirrored guard so the test TU is only
+# compiled when HU_ENABLE_RL_FULL is ON (default release/dev keep the
+# pre-Phase-5 test surface untouched).
+if(HU_ENABLE_RL_FULL)
+    list(APPEND HU_TEST_SOURCES tests/test_bootstrap_ci.c)
+    # Phase 5 Task 3 (RL SOTA) — hu_eval_judge_external_t tests
+    # (canned cycle, verdict round-trip, zero-verdicts rejection,
+    # Apple FM / Gemini Nano stubs return HU_ERR_NOT_SUPPORTED, ASan
+    # leak-free deinit). Same gating as Task 2.
+    list(APPEND HU_TEST_SOURCES tests/test_eval_judge_external.c)
+    list(APPEND HU_TEST_SOURCES tests/test_leaderboard.c)
+    list(APPEND HU_TEST_SOURCES tests/test_eval_gate.c)
+    list(APPEND HU_TEST_SOURCES tests/test_stock_baseline.c)
+    list(APPEND HU_TEST_SOURCES tests/test_apple_fm_client.c)
+    list(APPEND HU_TEST_SOURCES tests/test_gemini_nano_client.c)
+    list(APPEND HU_TEST_SOURCES tests/test_competitive_harness.c)
+    list(APPEND HU_TEST_SOURCES tests/test_cli_eval_phase5.c)
+    list(APPEND HU_TEST_SOURCES tests/test_cli_demo_evidence.c)
+    list(APPEND HU_TEST_SOURCES tests/test_lora_ab_require_positive_forwards_to_gate.c)
+    list(APPEND HU_TEST_SOURCES tests/test_lora_training_runner_eval_gate.c)
+    list(APPEND HU_TEST_SOURCES tests/test_daemon_reaction_poll_wiring.c)
+    list(APPEND HU_TEST_SOURCES tests/test_lora_training_runner_proof_directory.c)
+    list(APPEND HU_TEST_SOURCES tests/test_e2e_rl_loop.c)
+endif()
+
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/bootstrap.c)
 target_link_libraries(human_tests human_core_test)
-target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/src/gateway
-    ${HU_ROOT}/src/channels)
+target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests/include
+    ${HU_ROOT}/src/gateway
+    ${HU_ROOT}/src/channels
+    # Phase 4 Task 3 (RL SOTA): tests/test_grpo_loss.c needs
+    # src/ml/grpo_loss_priv.h (private header — NOT exported via
+    # include/ to keep the public surface lean).  Same pattern used by
+    # src/ml/reward_model.c + src/ml/reward_model_train.c for the
+    # Phase 3 reward_model_priv.h (H2 fix).
+    ${HU_ROOT}/src/ml)
 target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
@@ -3134,6 +3470,76 @@ if(HU_ENABLE_LLAMACPP)
     elseif(HU_LLAMACPP_LIBRARIES)
         target_link_libraries(human_tests ${HU_LLAMACPP_LIBRARIES})
     endif()
+endif()
+
+# Phase 2 Task 6 (RL SOTA) — propagate HU_HAVE_MLX_LM into human_core and
+# human_tests. Plan body (lines 1838–1844) shows a single block "near
+# HU_ENABLE_LLAMACPP option"; structurally that block has to live AFTER
+# both targets are declared (mirroring HU_ENABLE_LLAMACPP's own split:
+# option at line 46, target_compile_definitions on human_tests right
+# above this comment). The flag is OFF by default; flipping it ON
+# bypasses the dummy-adapter shortcut in src/ml/dpo_real_mlx.c and
+# activates the real Gemma DPO test path (Task 7).
+if(HU_HAVE_MLX_LM)
+    target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM=1)
+    target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM=1)
+    target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM=1)
+endif()
+
+# Phase 3 Task 7 (RL SOTA) — propagate HU_HAVE_MLX_LM_KTO into targets.
+# OFF by default; flipping ON bypasses the dummy-adapter shortcut in
+# src/ml/kto_mlx.c and activates the real MLX KTO subprocess path.
+if(HU_HAVE_MLX_LM_KTO)
+    target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM_KTO=1)
+    target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM_KTO=1)
+    target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM_KTO=1)
+endif()
+
+# Phase 4 Task 8 (RL SOTA) — propagate HU_GRPO_HAVE_HUML_IMPL and
+# HU_GRPO_HAVE_MLX_IMPL globally so Task 0's #ifndef-guarded stubs in
+# src/ml/rl_trainer.c fall out of EVERY TU, not just the TUs that
+# define the macro source-locally (grpo.c and grpo_mlx.c).  Without
+# this, the macros are TU-local: rl_trainer.c still compiles both
+# stubs and the linker hits duplicate-symbol against the strong impls
+# in grpo.c (Task 5) and grpo_mlx.c (Task 8).  This is the canonical
+# Phase 4 fix for round-3 critic L3 (strict C11, no __attribute__((weak)));
+# the source-level #defines remain as documentation but are now
+# redundant with these target_compile_definitions.
+target_compile_definitions(human_core PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+target_compile_definitions(human_core_test PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+target_compile_definitions(human_tests PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+
+# Phase 4 Task 0 (RL SOTA) — propagate HU_HAVE_MLX_LM_GRPO into targets.
+# OFF by default; flipping ON activates the real MLX GRPO subprocess path
+# (scripts/grpo_mlx_train.py — landed by Task 8). When unset, the GRPO
+# MLX backend ships with HU_ERR_NOT_SUPPORTED and gated tests skip cleanly.
+if(HU_HAVE_MLX_LM_GRPO)
+    target_compile_definitions(human_core PRIVATE HU_HAVE_MLX_LM_GRPO=1)
+    target_compile_definitions(human_core_test PRIVATE HU_HAVE_MLX_LM_GRPO=1)
+    target_compile_definitions(human_tests PRIVATE HU_HAVE_MLX_LM_GRPO=1)
+endif()
+
+# Phase 5 Task 0 (RL SOTA) — propagate HU_ENABLE_RL_FULL into targets.
+# OFF by default keeps default release / dev builds a zero-byte delta vs
+# Phase 4 close-out; the rl_sota preset flips this ON so Tasks 1-13 can
+# land code (and #ifdef-gated cmd_eval subcommands per Task 10) behind
+# the flag without changing the default build surface. The macro is
+# defined on both the library (human_core / human_core_test) and the
+# executables (human / human_tests) so that source files in either
+# stage of the build graph can use it.
+if(HU_ENABLE_RL_FULL)
+    target_compile_definitions(human PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_RL_FULL=1)
+    target_compile_definitions(human_tests PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/tests/_tmp")
+    target_include_directories(human_core_test PRIVATE ${HU_ROOT}/tests/include)
+    target_compile_definitions(human_core PRIVATE HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=1)
+    target_compile_definitions(human_core PRIVATE HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL=1)
+    target_compile_definitions(human_core_test PRIVATE HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=1)
+    target_compile_definitions(human_core_test PRIVATE HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL=1)
+    target_compile_definitions(human_tests PRIVATE HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=1)
+    target_compile_definitions(human_tests PRIVATE HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL=1)
 endif()
 
 # Keep assert() active in tests even for Release/MinSizeRel builds (which define NDEBUG).

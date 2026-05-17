@@ -44,7 +44,7 @@ This document is the **umbrella program** for everything that should happen *aft
 | **A** | W10 KV — real reuse or explicit defer | Measurable latency/cost win **or** zero ambiguity in product/docs | W7 facade stable |
 | **B** | `hu_memory_query_t.variant` audit | No silent mis-routing via zeroed queries | Track A schema clarity for KV paths |
 | **C** | Evidence index + plan hygiene | Every W exit maps to tests/CI; drift visible in one place | None |
-| **D** | M3 — frontier learner bridge | Chat path can load **one** proven adapter checkpoint (fixture-first) | W13 / ML CMake, provider surface |
+| **D** | M3 — frontier learner bridge **+ RL SOTA closed loop** | Chat path loads adapter checkpoint (fixture-first); **Phase 2 ✅ shipped — full reaction → DPO/KTO/GRPO → adapter hot-swap → eval-gated promotion → measurably-changed response** (see [`docs/plans/2026-05-11-full-sota-rl-improvement-loop.md`](2026-05-11-full-sota-rl-improvement-loop.md) Phases 0–6 all complete; tag `rl-sota-phase-6-complete`) | W13 / ML CMake, provider surface |
 | **E** | Security / gateway / tools pass | Threat-aligned review + tests on changed surfaces | None (parallel) |
 | **F** | CI & verification automation | Baseline drift impossible to miss; `verify-all` reliable | None |
 
@@ -166,6 +166,24 @@ Continuous Track F (after every merge that touches tests or presets)
 |------|------|--------|
 | D2.1 | Update user-facing caveat strings in `human ml` output | Snapshot or golden test |
 | D2.2 | A/B or offline eval **optional**; document “not yet” if not done | `human ml lora-baseline --persona <name>` ships a deterministic offline scorer (`hu_communication_style_fidelity_score`) and prints mean/min/max persona-fidelity in [0,1]. The reported mean is the upper bound a frontier model can plausibly hit without LoRA; a post-LoRA mean above this number indicates the adapter is actively personalizing. 8 unit tests + CLI smoke-tested. `done` |
+
+### Phase D3 — RL SOTA closed loop (Track D Phase 2) ✅
+
+The full Phase D vertical slice (D0 → D2) only got the chat path to *load* a checkpoint. **Phase D3** closes the **closed loop** — reaction events feed real DPO/KTO/GRPO training, the resulting adapter is statistically gated, hot-swapped at chat time, and the response measurably changes.
+
+Detailed plan: [`docs/plans/2026-05-11-full-sota-rl-improvement-loop.md`](2026-05-11-full-sota-rl-improvement-loop.md) (umbrella) + per-phase plans `2026-05-11-rl-loop-phase-{0..6}-*.md`.
+
+| Sub-phase | Status | What shipped | Tag |
+|-----------|--------|--------------|-----|
+| Phase 0 — Honesty pass | ✅ 2026-05-11 | Atomic personal-model save, scoped audit baseline, removed false claims | `rl-sota-phase-0-complete` |
+| Phase 1 — llama.cpp Metal | ✅ 2026-05-11 | Vendored llama.cpp Metal, real `chat_with_system` + KV cache + `vtable.load_adapter`, Gemma-3-4B-it Q4_K_M auto-fetch, sanity gate 20/20 | `rl-sota-phase-1-complete` |
+| Phase 2 — Real DPO + reactions | ✅ 2026-05-12 | `hu_rl_trainer_t` vtable + DPO HUML in-process + DPO MLX subprocess; `hu_reaction_event_t` + iMessage tapback poll + Slack `reactions.added/removed` webhook + handler writing `dpo_pairs` rows | `rl-sota-phase-2-complete` |
+| Phase 3 — KTO + reward model | ✅ 2026-05-12 | KTO HUML (gradient-checked) + KTO MLX subprocess; `hu_reward_model_t` = backbone + linear value head + Bradley-Terry SGD; `hu_reward_model_load` round-trip; Qwen-2.5-0.5B-Instruct GGUF fetch | `rl-sota-phase-3-complete` |
+| Phase 4 — GRPO + multi-rollout | ✅ 2026-05-12 | KL divergence module (Schulman k3); `hu_rollout_t` vtable (deterministic on seed); `hu_reward_source_t` vtable; GRPO loss with group-relative advantages + PPO clip + KL penalty; `human ml grpo-train` CLI | `rl-sota-phase-4-complete` |
+| Phase 5 — Eval gate + competitive harness | ✅ 2026-05-16 | 4-axis fidelity scorer v2; bootstrap-CI helper; `hu_eval_gate_t`; external judge vtable (Apple FM + Gemini Nano); competitive harness; `human eval gate \| competitive \| leaderboard` CLIs; production wiring of Phase 2's 3 deferrals (eval-gate-before-`load_adapter`, daemon iMessage poll, proof directory contract) | `rl-sota-phase-5-complete` |
+| Phase 6 — E2E proof + demo | ✅ 2026-05-16 | Deterministic `test_e2e_closed_loop_*` (4 tests, run1 = run2 bit-exact); `human demo rl-closed-loop`; `~/.human/proofs/<adapter-id>/` evidence directory; proof index at [`docs/proof/rl-loop-proof.md`](../proof/rl-loop-proof.md); Ship Contract DoD verification at [`docs/proof/rl-loop-shipcontract.md`](../proof/rl-loop-shipcontract.md) | `rl-sota-phase-6-complete` |
+
+**End-state:** Full rl_sota suite **10330/10332 PASS, 2 SKIP, 0 ASan, 0 UBSan, 0 leaks** at `rl-sota-phase-6-complete` (`3a17a528`). Every phase cleared `critic` + `dead-code-finder` + `sprint-auditor` (Phases 2/4/5 also cleared the mandatory 5-verifier `aspect-panel` per spec §7). Independent close-out audit dispatched at `rl-sota-program-close`.
 
 ---
 

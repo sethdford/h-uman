@@ -1508,8 +1508,11 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
 
     score.total = score.brevity + score.validation + score.warmth + score.naturalness;
 
-    /* needs_revision only on gross mismatches (10x length, etc.) */
-    bool gross_length = (ratio > 10.0 || (ratio < 0.1 && response_len > 5));
+    /* needs_revision on gross length mismatch. Sprint 39: 5× threshold
+     * (was 10×) aligns with G5's 8× guard and post-mortem action item —
+     * the 2026-05-12 leak was ~22× rolling avg but still slipped through
+     * when quality only fired at 10×. */
+    bool gross_length = (ratio > 5.0 || (ratio < 0.1 && response_len > 5));
     bool gross_structural = (score.warmth < 5 || score.naturalness < 5);
     score.needs_revision = gross_length || gross_structural;
 

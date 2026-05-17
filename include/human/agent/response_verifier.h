@@ -94,6 +94,58 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
                               size_t contact_id_len, const char *draft, size_t draft_len,
                               const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report);
 
+/* sprint-2c Story A — verify against both the W7 facade AND a loaded world
+ * model. When `wm` is non-NULL the verifier also walks `wm->negatives` and
+ * shapes the outcome by the negative's `source` tag:
+ *
+ *   USER_EXPLICIT    (`[hard]`)    → ABSTAIN, refusal cites the user's prior request
+ *   SYSTEM_POLICY    (`[policy]`)  → ABSTAIN, refusal cites the safety policy
+ *   SELF_RAG_ABSTAIN (`[soft]`)    → HEDGED,  hedge cites prior low confidence
+ *   AUTO_EXTRACT     (`[confirm]`) → HEDGED,  hedge asks the user to re-confirm
+ *
+ * Strictness lattice (ABSTAIN > HEDGED > SUPPORTED) — when multiple negatives
+ * match a draft, the strictest wins.
+ *
+ * When `wm` is NULL the behavior is byte-identical to `hu_response_verify`.
+ *
+ * `wm` is BORROWED — caller owns lifetime and must keep it alive across this
+ * call. Forward-declared so callers that don't need this entry point don't
+ * pay the world_model.h include cost. */
+struct hu_world_model;
+hu_error_t hu_response_verify_against_world_model(
+    hu_allocator_t *alloc, hu_memory_facade_t *memory,
+    const struct hu_world_model *wm,
+    const char *contact_id, size_t contact_id_len,
+    const char *draft, size_t draft_len,
+    const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report);
+
+/* sprint-2c Story A — scan one claim against `wm->negatives` and return the
+ * strictest implied outcome (ABSTAIN > HEDGED > SUPPORTED).
+ *
+ * Matcher: tokenize the negative into ≥5-char non-stopword lowercase tokens
+ * (the denominator), then count how many appear as substrings of the
+ * lowercased claim. Hit when `hits ≥ 0.3 × negative_tokens` — catches a
+ * single topic-keyword tripwire in a short negative ("never discuss the
+ * merger" hit by "The merger talks are going well") while keeping benign
+ * claims with zero topic-word overlap below threshold.
+ *
+ * When a match exists, the matching negative's refusal text is written into
+ * `out_refusal` (ABSTAIN class) or `out_hedge` (HEDGED class). Either buffer
+ * may be NULL to skip rendering. When `out_policy_hit` is non-NULL and the
+ * strictest match was a `HU_NEGATIVE_SOURCE_SYSTEM_POLICY` negative,
+ * `*out_policy_hit` is set to `true` so callers can emit audit-log entries.
+ *
+ * `wm == NULL` or `wm->negatives_count == 0` returns SUPPORTED with no
+ * writes to the output buffers.
+ *
+ * Shared by `response_verifier.c` and `self_rag_atomic.c` so both backends
+ * use the same matcher and source-tag mapping. */
+hu_verifier_outcome_t hu_negatives_scan_claim(const struct hu_world_model *wm,
+                                              const char *claim,
+                                              char *out_refusal, size_t refusal_cap,
+                                              char *out_hedge, size_t hedge_cap,
+                                              bool *out_policy_hit);
+
 /* Pure helper: render a relation's bitemporal attribution into a 1-line
  * receipt string. Used by the verifier and by the response renderer. */
 void hu_provenance_render(const hu_memory_relation_row_t *rel, char *buf, size_t cap);

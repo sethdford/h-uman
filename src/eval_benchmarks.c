@@ -14,6 +14,16 @@ static const char *prefix_for_type(hu_benchmark_type_t type) {
         return "live-agent-";
     case HU_BENCHMARK_APEX:
         return "apex-";
+    case HU_BENCHMARK_LONGMEMEVAL:
+        return "longmemeval-";
+    case HU_BENCHMARK_LOCOMO:
+        return "locomo-";
+    case HU_BENCHMARK_KNOWU_BENCH:
+        return "knowu-bench-";
+    case HU_BENCHMARK_EMPA:
+        return "empa-";
+    case HU_BENCHMARK_PROAGENTBENCH:
+        return "proagentbench-";
     }
     return "";
 }
@@ -55,6 +65,16 @@ const char *hu_benchmark_type_name(hu_benchmark_type_t type) {
         return "live-agent";
     case HU_BENCHMARK_APEX:
         return "apex";
+    case HU_BENCHMARK_LONGMEMEVAL:
+        return "longmemeval";
+    case HU_BENCHMARK_LOCOMO:
+        return "locomo";
+    case HU_BENCHMARK_KNOWU_BENCH:
+        return "knowu-bench";
+    case HU_BENCHMARK_EMPA:
+        return "empa";
+    case HU_BENCHMARK_PROAGENTBENCH:
+        return "proagentbench";
     }
     return "unknown";
 }

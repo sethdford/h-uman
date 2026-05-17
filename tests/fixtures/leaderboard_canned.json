@@ -1,0 +1,16 @@
+{
+  "mt_bench": {
+    "explain recursion": 8.2,
+    "what is bm25": 7.0,
+    "summarize einstein": 6.5
+  },
+  "alpaca_eval": {
+    "explain recursion": 0.82,
+    "what is bm25": 0.71,
+    "summarize einstein": 0.68
+  },
+  "ifeval": {
+    "write a haiku": 0.95,
+    "list five primes": 1.0
+  }
+}

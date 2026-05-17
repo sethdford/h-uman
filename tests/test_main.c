@@ -50,6 +50,14 @@ void run_channel_http_tests(void);
 void run_webhook_channel_tests(void);
 void run_bg_registry_tests(void);
 void run_channel_embeds_tests(void);
+/* Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers. */
+void run_reaction_event_tests(void);
+/* Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll. */
+void run_imessage_reactions_tests(void);
+/* Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch. */
+void run_slack_reactions_tests(void);
+/* Phase 2 Task 13 (RL SOTA): reaction_handler event → dpo_pairs row E2E. */
+void run_reaction_handler_e2e_tests(void);
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
 void run_tool_tests(void);
@@ -296,6 +304,7 @@ void run_timing_tests(void);
 void run_calibration_tests(void);
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
+void run_activation_steering_tests(void);
 void run_relationship_dynamics_tests(void);
 void run_model_router_tests(void);
 void run_humanness_context_tests(void);
@@ -424,6 +433,54 @@ void run_agent_trainer_tests(void);
 void run_training_data_tests(void);
 void run_training_data_extractor_tests(void);
 void run_training_data_quality_tests(void);
+/* Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t factory dispatch pin. */
+void run_rl_trainer_tests(void);
+/* Phase 2 Task 2 (RL SOTA): hu_policy_logprobs sanity + determinism + null-arg. */
+void run_policy_logprobs_tests(void);
+/* Phase 2 Task 3 (RL SOTA): hu_reference_model_create_from clone + freeze. */
+void run_reference_model_tests(void);
+/* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
+void run_dpo_real_loss_tests(void);
+/* Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs. */
+void run_dpo_real_e2e_tests(void);
+/* Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper — JSONL export
+ * + dummy-adapter shortcut without HU_HAVE_MLX_LM; real Gemma DPO with it. */
+void run_dpo_real_mlx_tests(void);
+/* Phase 2 Task 8 (RL SOTA): pins surface contract for the post-split
+ * hu_ml_cli_dpo_judge / hu_ml_cli_dpo_real CLI handlers. */
+void run_cli_dpo_tests(void);
+/* Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + backward grad
+ * check + save/load round trip. */
+void run_value_head_tests(void);
+/* Phase 3 Task 2 (RL SOTA): hu_reward_model_t HUML composition smoke +
+ * M3 NaN contract for one-sided KTO pairs. Task 3 will APPEND
+ * Bradley-Terry convergence + FD grad check to the same runner. */
+void run_reward_model_train_tests(void);
+/* Phase 3 Task 8 (RL SOTA): RM inference latency — HUML under budget +
+ * MLX gated by HU_HAVE_MLX_LM + Qwen GGUF presence. */
+void run_reward_model_inference_tests(void);
+/* Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
+ * grad check + vtable contract. */
+void run_kto_loss_tests(void);
+/* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 estimators + k3 analytical
+ * backward grad — pure C leaf math primitive used by the GRPO
+ * trainer (Task 5) for the KL penalty term. */
+void run_kl_divergence_tests(void);
+/* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML factory — sample N
+ * completions per prompt with cross-platform-deterministic xorshift64
+ * + per-rollout splitmix64 seed (R13). Used by GRPO trainer (Task 5)
+ * to gather (token_ids, sum_logprob) for the PPO ratio clip. */
+void run_rollout_tests(void);
+/* Phase 4 Task 4 (RL SOTA): hu_reward_source_t leaf vtable — synthetic
+ * token-counting backend (+1 per token in [1..5], -1 per token in
+ * [26..30]) + Phase 3 hu_reward_model_t composition smoke + Phase 5
+ * judge factory NOT_SUPPORTED pin. */
+void run_reward_source_tests(void);
+/* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler surface
+ * contract — argument validation (R9, R12, --reward-fn/-model pairing,
+ * --backend mlx demands --backbone-path) + HUML synthetic-reward e2e
+ * smokes (adapter file written; --kl-beta 0 disables KL via CLI). */
+void run_cli_grpo_tests(void);
 #endif
 void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
@@ -545,6 +602,14 @@ void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+void run_personal_model_simulation_tests(void);
+#ifdef HU_ENABLE_RL_FULL
+void run_personal_model_fidelity_v2_tests(void);
+void run_grpo_loss_tests(void);
+void run_grpo_mlx_tests(void);
+void run_grpo_huml_tests(void);
+void run_grpo_e2e_tests(void);
+#endif
 void run_persona_directive_channels_tests(void);
 void run_filler_recency_tests(void);
 void run_filler_pctt_tests(void);
@@ -556,6 +621,23 @@ void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
 void run_structured_output_tests(void);
+#ifdef HU_ENABLE_RL_FULL
+extern void run_bootstrap_ci_tests(void);
+extern void run_eval_judge_external_tests(void);
+extern void run_leaderboard_tests(void);
+extern void run_eval_gate_tests(void);
+extern void run_stock_baseline_tests(void);
+extern void run_apple_fm_client_tests(void);
+extern void run_gemini_nano_client_tests(void);
+extern void run_competitive_harness_tests(void);
+extern void run_cli_eval_phase5_tests(void);
+extern void run_cli_demo_evidence_tests(void);
+extern void run_lora_ab_require_positive_tests(void);
+extern void run_runner_eval_gate_tests(void);
+extern void run_daemon_reaction_poll_tests(void);
+extern void run_proof_directory_tests(void);
+extern void run_e2e_closed_loop_tests(void);
+#endif
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -649,6 +731,10 @@ int main(int argc, char **argv) {
     run_webhook_channel_tests();
     run_bg_registry_tests();
     run_channel_embeds_tests();
+    run_reaction_event_tests();
+    run_imessage_reactions_tests();
+    run_slack_reactions_tests();
+    run_reaction_handler_e2e_tests();
     run_declarative_tools_tests();
     run_skill_trust_tests();
     run_tool_tests();
@@ -895,6 +981,7 @@ int main(int argc, char **argv) {
     run_calibration_tests();
     run_behavioral_clone_tests();
     run_governor_tests();
+    run_activation_steering_tests();
     run_relationship_dynamics_tests();
     run_model_router_tests();
     run_humanness_context_tests();
@@ -1017,6 +1104,48 @@ int main(int argc, char **argv) {
     run_training_data_tests();
     run_training_data_extractor_tests();
     run_training_data_quality_tests();
+    /* Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t factory dispatch pin. */
+    run_rl_trainer_tests();
+    /* Phase 2 Task 2 (RL SOTA): hu_policy_logprobs sanity + determinism + null-arg. */
+    run_policy_logprobs_tests();
+    /* Phase 2 Task 3 (RL SOTA): hu_reference_model_create_from clone + freeze. */
+    run_reference_model_tests();
+    /* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
+    run_dpo_real_loss_tests();
+#ifdef HU_ENABLE_RL_FULL
+    /* Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs. */
+    run_dpo_real_e2e_tests();
+    /* Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper test (skip stub
+     * by default; real Gemma DPO when HU_HAVE_MLX_LM=1). */
+    run_dpo_real_mlx_tests();
+    /* Phase 2 Task 8 (RL SOTA): post-split CLI handler surface contract. */
+    run_cli_dpo_tests();
+#endif
+    /* Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection — forward,
+     * backward (analytical + finite-diff grad check), save/load round trip. */
+    run_value_head_tests();
+    /* Phase 3 Task 2 (RL SOTA): hu_reward_model_t vtable + HUML factory
+     * (toy GPT + Task 1 value head). Smoke score-returns-finite + M3
+     * NaN contract for one-sided KTO pairs in score_batch. */
+    run_reward_model_train_tests();
+    /* Phase 3 Task 8 (RL SOTA): RM inference latency tests. */
+    run_reward_model_inference_tests();
+#ifdef HU_ENABLE_RL_FULL
+    /* Phase 3 Task 5 (RL SOTA): KTO loss. */
+    run_kto_loss_tests();
+#endif
+    /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 + k3 backward grad. */
+    run_kl_divergence_tests();
+    /* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML — sampling determinism
+     * + per-rollout splitmix64 PRNG (R13 cross-platform pin). */
+    run_rollout_tests();
+    /* Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic token
+     * counting + Phase 3 RM composition + Phase 5 judge stub pin. */
+    run_reward_source_tests();
+#ifdef HU_ENABLE_RL_FULL
+    /* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler. */
+    run_cli_grpo_tests();
+#endif
 #endif
 
     run_experience_tests();
@@ -1138,6 +1267,14 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_personal_model_simulation_tests();
+#ifdef HU_ENABLE_RL_FULL
+    run_personal_model_fidelity_v2_tests();
+    run_grpo_loss_tests();
+    run_grpo_huml_tests();
+    run_grpo_mlx_tests();
+    run_grpo_e2e_tests();
+#endif
     run_persona_directive_channels_tests();
     run_filler_recency_tests();
     run_filler_pctt_tests();
@@ -1154,6 +1291,27 @@ int main(int argc, char **argv) {
     run_canvas_e2e_tests();
     run_canvas_persist_tests();
     run_canvas_render_tests();
+#ifdef HU_ENABLE_RL_FULL
+    /* Phase 5 Task 2 (RL SOTA): bootstrap CI suite — only linked when
+     * the RL-full gate is ON, so default release/dev builds are byte-
+     * identical to the pre-Phase-5 test surface. */
+    run_bootstrap_ci_tests();
+    /* Phase 5 Task 3 (RL SOTA): external-LLM judge vtable + canned. */
+    run_eval_judge_external_tests();
+    run_leaderboard_tests();
+    run_eval_gate_tests();
+    run_stock_baseline_tests();
+    run_apple_fm_client_tests();
+    run_gemini_nano_client_tests();
+    run_competitive_harness_tests();
+    run_cli_eval_phase5_tests();
+    run_cli_demo_evidence_tests();
+    run_lora_ab_require_positive_tests();
+    run_runner_eval_gate_tests();
+    run_daemon_reaction_poll_tests();
+    run_proof_directory_tests();
+    run_e2e_closed_loop_tests();
+#endif
 
     HU_TEST_REPORT();
     HU_TEST_EXIT();

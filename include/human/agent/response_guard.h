@@ -29,6 +29,7 @@
 #include "human/core/error.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,11 +52,147 @@ typedef struct {
     bool stripped_harmony_tokens;
     bool stripped_thinking_block;
     bool detected_degenerate_repetition;
+    /* Sprint 29 — semantic leak class. Set when the response was rejected
+     * because it contained a chain-of-thought / prompt-context dump that
+     * earlier phases couldn't catch (no markup, no repetition):
+     *   G1. Numbered analytical-list dump (≥ 3 long numbered items).
+     *   G2. Model self-talk / scene-direction echo ("the prompt says",
+     *       "Wait, the prompt", "I should still maintain", etc.).
+     *   G3. Third-person-about-the-user double-pattern ("[Name] is a
+     *       [profession]", "He's talking to ...", "lives alone with ...",
+     *       etc. — ≥ 2 distinct hits).
+     * Sprint 30 added:
+     *   G4. Prompt-template label leak ("Persona:", "Scene Direction:",
+     *       "User: \"", "Rules: All lowercase", etc.).
+     * See `docs/postmortems/2026-05-12-cot-leak.md`. */
+    bool detected_semantic_leak;
+    /* Sprint 31 — context-aware detections. These ONLY fire when the
+     * caller used `hu_response_guard_check_ex` with a non-NULL context.
+     *
+     * G5. Length anomaly. Set when response_len > recent_avg_len *
+     *     HU_GUARD_LENGTH_ANOMALY_MULT (default 8x). Caught the
+     *     2026-05-12 Brea leak (979 chars vs 44 char rolling avg = 22x)
+     *     post-hoc.
+     * G6. Director echo. Set when a 30+ char substring of the
+     *     director's scene-direction text appears verbatim in the
+     *     response. Caught the same Brea leak (which quoted
+     *     "Professional, slightly skeptical, ask for clarification
+     *     on why they"). */
+    bool detected_length_anomaly;
+    bool detected_director_echo;
+    /* Sprint 35 — persona PII echo. Set when `ctx->persona_name` is
+     * non-NULL and the response contains the persona name in a
+     * third-person profile construct (e.g. `"<Name> is a"`,
+     * `"<Name>'s job"`, `"<Name> lives"`, `"<Name> works"`). Catches
+     * the 2026-05-11 leak class where the model echoed the operator's
+     * loaded persona name back to the recipient. */
+    bool detected_persona_pii_echo;
+    /* Sprint 36 — persona identity / core-anchor echo. Set when
+     * `ctx->persona_identity` is non-NULL (≥ 25 bytes) and a 25-byte
+     * verbatim substring of it appears in the response (case-
+     * insensitively). Catches first-person identity leaks like
+     * `"i'm a Chief Architect at Pure Health Solutions"` that G7
+     * cannot catch (no name in third-person construct). */
+    bool detected_persona_identity_echo;
     /* If rejected, the longest run length that triggered rejection. */
     size_t max_repetition_run;
     /* Number of bytes removed by sanitization (0 if rejected outright). */
     size_t bytes_stripped;
 } hu_guard_report_t;
+
+/* Sprint 31 — optional per-turn context for context-aware leak
+ * detections. Pass to `hu_response_guard_check_ex`. NULL means "no
+ * context available" — the function behaves identically to
+ * `hu_response_guard_check`. */
+typedef struct {
+    /* Rolling average reply length from the recipient over the last
+     * N messages. The guard rejects if `response_len >
+     * recent_avg_len * length_anomaly_mult` (default 8x; compact
+     * channels 6x). 0 disables the check (e.g. no chat history yet). */
+    size_t recent_avg_len;
+
+    /* Sprint 39 — per-channel G5 multiplier. 0 = use default (8).
+     * Compact channels (imessage, cli, sms) should pass 6 from
+     * `hu_guard_length_anomaly_mult_for_channel`. */
+    unsigned length_anomaly_mult;
+
+    /* The director's / scene-direction text for this turn (the
+     * upstream prompt fragment that drove tone/style decisions).
+     * The guard rejects if a 30+ char substring of director_text
+     * appears verbatim (case-insensitively) in the response. NULL
+     * or director_len < 30 disables the check. */
+    const char *director_text;
+    size_t director_len;
+
+    /* Sprint 37 — past-turn director history (most-recent-first). G6
+     * iterates these after the current `director_text` to catch model
+     * output that quotes a *previous* turn's director rather than the
+     * current one. Same 30-byte minimum match. NULL or
+     * director_history_count == 0 disables the cross-turn check. */
+    const char *const *director_history;
+    const size_t *director_history_lens;
+    size_t director_history_count;
+
+    /* Sprint 35 — loaded persona's name (e.g. `"Seth"`). The guard
+     * rejects if this name appears in a third-person profile
+     * construct (e.g. `"<Name> is a"`, `"<Name>'s job"`,
+     * `"<Name> lives"`). NULL or persona_name_len < 2 disables
+     * the check. Word-boundary aware — `"Bethseth"` does NOT match
+     * `"Seth"`. */
+    const char *persona_name;
+    size_t persona_name_len;
+
+    /* Sprint 36 — loaded persona's `identity` (or `core_anchor` as
+     * fallback). Free-form biographical string, e.g. `"51-year-old
+     * technical professional, lives alone with a cat"`. The guard
+     * rejects if any contiguous 25-byte substring of this string
+     * appears verbatim (case-insensitively) in the response.
+     * Catches first-person identity leaks where the model quotes
+     * persona context back to the recipient without using the
+     * name. NULL or persona_identity_len < 25 disables the check. */
+    const char *persona_identity;
+    size_t persona_identity_len;
+
+    /* Sprint 38 — loaded persona's `biography` (long-form backstory).
+     * Same 25-byte verbatim substring rule as `persona_identity`.
+     * Checked independently so a leak quoting only biography (no
+     * identity/core_anchor overlap) still trips G8. NULL or
+     * persona_biography_len < 25 disables this source. */
+    const char *persona_biography;
+    size_t persona_biography_len;
+} hu_guard_context_t;
+
+/* Sprint 38 — cumulative REJECT counts by detector (process-wide).
+ * Incremented atomically when `hu_response_guard_check_ex` returns
+ * HU_GUARD_REJECT. Use `hu_guard_reject_stats_reset()` in tests
+ * that assert on absolute counts. */
+typedef struct {
+    uint64_t semantic_leak;
+    uint64_t length_anomaly;
+    uint64_t director_echo;
+    uint64_t persona_pii_echo;
+    uint64_t persona_identity_echo;
+} hu_guard_reject_stats_t;
+
+void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out);
+void hu_guard_reject_stats_reset(void);
+
+/* Default G5 multiplier (8×). Compact messaging channels use 6×. */
+#define HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT 8u
+#define HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT 6u
+
+/* Channel-aware G5 threshold. imessage / cli / sms → 6×; else 8×. */
+unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t channel_len);
+
+/* Sprint 40 — selection-step audit helpers (observability only).
+ * Log when A/B or multi-candidate paths ship a response that would trip
+ * G1/G2 so post-mortems can trace *why* a numbered candidate list leaked. */
+bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len);
+bool hu_guard_audit_self_talk_leak(const char *s, size_t len);
+void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
+                                  size_t contact_key_len, size_t candidate_count,
+                                  size_t best_idx, int best_quality, size_t response_len,
+                                  const char *response, size_t response_text_len);
 
 /* Run the guard over a response.
  *
@@ -85,6 +222,26 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc,
                                    char **out_response, size_t *out_len,
                                    hu_guard_outcome_t *out_outcome,
                                    hu_guard_report_t *report);
+
+/* Context-aware variant. Same as `hu_response_guard_check` but accepts
+ * an optional `ctx` with rolling-average reply length and the director's
+ * scene-direction text. Enables Sprint 31's context-aware detections:
+ *
+ *   G5 (length anomaly): if `ctx->recent_avg_len > 0` and `response_len
+ *       > ctx->recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT` (default
+ *       8x), REJECT.
+ *   G6 (director echo): if `ctx->director_text` is non-NULL and at
+ *       least 30 chars long, scan the response for a verbatim 30+ char
+ *       substring of director_text. If found, REJECT.
+ *
+ * `ctx == NULL` is identical to `hu_response_guard_check` — no
+ * context-aware detections run. */
+hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc,
+                                      const char *response, size_t response_len,
+                                      const hu_guard_context_t *ctx,
+                                      char **out_response, size_t *out_len,
+                                      hu_guard_outcome_t *out_outcome,
+                                      hu_guard_report_t *report);
 
 /* Lower-level helpers, exposed for testing. ────────────────────────────── */
 
