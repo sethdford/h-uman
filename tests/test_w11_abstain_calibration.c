@@ -16,11 +16,15 @@
  *   - global rate     — abstentions / |all prompts|
  *
  * What we pin (at the canonical default threshold 0.5):
- *   - global abstention rate ≥ 30 % (the W11 success-metric floor)
- *   - recall on weak-evidence prompts ≥ 50 %
- *   - precision ≥ 75 % (false positives must stay rare; a noisy
+ *   - global abstention rate ≥ 75 % (the W11 success-metric floor
+ *     was 30 %; current heuristic measures 87 % so we ratchet to 75 %
+ *     and leave 12 % headroom for future prompt-mix changes).
+ *   - recall on weak-evidence prompts ≥ 90 % (current 100 %; the
+ *     headroom catches drop-one-fact regressions while leaving room
+ *     for the inevitable edge case).
+ *   - precision ≥ 80 % (false positives must stay rare; a noisy
  *     refuser is itself a sycophancy-class regression — it teaches
- *     users the assistant doesn't trust its own answers).
+ *     users the assistant doesn't trust its own answers. Current 85 %).
  *
  * Across thresholds we additionally pin monotonicity:
  *   - lowering the threshold can only increase or preserve recall
@@ -117,10 +121,15 @@ static void run_pack_at_threshold(hu_self_rag_t *r, float threshold,
         if (hu_self_rag_verify(r, CAL(), &req, &resp) != HU_OK)
             continue;
         if (resp.outcome == HU_SELF_RAG_ABSTAINED) {
-            if (k_pack[i].expected_abstain)
+            if (k_pack[i].expected_abstain) {
                 out->weak_abstained++;
-            else
+            } else {
                 out->safe_abstained++;
+                /* Name the false positives so a regression in heuristic
+                 * tuning surfaces the offending prompt, not just a count. */
+                fprintf(stderr, "[w11-cal] FP @ %.2f: \"%s\"\n",
+                        (double)threshold, k_pack[i].text);
+            }
         }
     }
 }
@@ -158,21 +167,33 @@ static void w11_cal_default_threshold_meets_floor(void) {
                              ? pct(mt.weak_abstained, total_abstained)
                              : 100u;
 
+    /* Surface the measured numbers in CI logs so we can ratchet the
+     * floors below as the heuristic improves, instead of silently
+     * leaving headroom on the table. */
+    fprintf(stderr,
+            "[w11-cal] threshold=0.50 recall=%u%% (%zu/%zu) "
+            "precision=%u%% (TP=%zu FP=%zu) global=%u%% (%zu/%zu)\n",
+            recall, mt.weak_abstained, mt.weak_total,
+            precision, mt.weak_abstained, mt.safe_abstained,
+            global_rate, total_abstained, k_pack_n);
+
     /* Three gates with diagnostic messages so a regression names the
-     * actual measured number rather than just "an assert failed." */
-    if (global_rate < 30u) {
+     * actual measured number rather than just "an assert failed."
+     * Floors ratcheted 2026-05-16: measured 100/85/87 against the
+     * 16-prompt pack; pinned at 90/80/75 with intentional headroom. */
+    if (global_rate < 75u) {
         HU_FAIL("W11 abstain calibration regressed: global abstention rate "
-                "%u%% < 30%% floor (weak %zu/%zu, safe %zu/%zu).",
+                "%u%% < 75%% floor (weak %zu/%zu, safe %zu/%zu).",
                 global_rate, mt.weak_abstained, mt.weak_total,
                 mt.safe_abstained, mt.safe_total);
     }
-    if (recall < 50u) {
+    if (recall < 90u) {
         HU_FAIL("W11 abstain calibration regressed: recall on weak-evidence "
-                "%u%% < 50%% floor (%zu/%zu).",
+                "%u%% < 90%% floor (%zu/%zu).",
                 recall, mt.weak_abstained, mt.weak_total);
     }
-    if (precision < 75u) {
-        HU_FAIL("W11 abstain calibration regressed: precision %u%% < 75%% "
+    if (precision < 80u) {
+        HU_FAIL("W11 abstain calibration regressed: precision %u%% < 80%% "
                 "floor (TP=%zu, FP=%zu, total abstained=%zu). Noisy refusals "
                 "are a sycophancy-class regression.",
                 precision, mt.weak_abstained, mt.safe_abstained,
