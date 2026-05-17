@@ -1,4 +1,7 @@
+#include "human/agent/proactive.h"
+#include "human/core/string.h"
 #include "human/humanness.h"
+#include "human/persona.h"
 #include "test_framework.h"
 #include <stdlib.h>
 #include <string.h>
@@ -490,6 +493,79 @@ static void imperfect_genuinely_unsure(void) {
     alloc.free(alloc.ctx, d, len + 1);
 }
 
+/* ── P6-4: silence-ack routed through persona+channel context ───────── */
+/*
+ * The legacy hu_silence_build_acknowledgment returns hardcoded
+ * "I'm here." / "I hear you." with no persona context. P6-4 adds a
+ * sibling, hu_silence_build_acknowledgment_for_persona, that accepts
+ * persona+channel+context and applies hu_proactive_topic_is_safe on
+ * its output. LLM routing is deferred behind a TODO (bridge work);
+ * what matters now is that the persona/channel signal reaches the
+ * builder and the safety predicate runs unconditionally.
+ */
+/* P6-4 acknowledgment-safety tests removed on merge.
+ *
+ * Phase 6 authored these against an OUTPUT-safety semantics for
+ * hu_proactive_topic_is_safe (reject markdown / em-dash / AI disclaimers;
+ * accept "i hear you").  Phase 1 had already shipped the same symbol with
+ * INPUT-safety semantics (reject pronouns / emotion keywords / format
+ * specifiers / oversize) wired into F25, F30, F31 + 22 regression tests.
+ * The Phase 1 semantics are load-bearing across four production call
+ * sites, so they win at merge.
+ *
+ * The replacement output-safety predicate, if needed, should live under
+ * a different name (e.g. hu_humanness_output_is_safe) so the two concerns
+ * don't collide on a single symbol.  See findings.md deferred-work
+ * section.  Test deletion preserves the suite's invariant that names are
+ * claims; "p6_4_topic_safe_accepts_safe" of "i hear you" cannot be true
+ * under Phase 1 semantics because "i" is a first-person pronoun.
+ */
+static void p6_4_persona_ack_full_response_returns_null(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t out_len = 99;
+    char *ack = hu_silence_build_acknowledgment_for_persona(&alloc, HU_SILENCE_FULL_RESPONSE, NULL,
+                                                            NULL, 0, NULL, 0, &out_len);
+    HU_ASSERT_NULL(ack);
+    HU_ASSERT_EQ(out_len, 0);
+}
+
+/* ── P6-3: emotional-tone gate before proactive trigger ──────────────── */
+/*
+ * Pure predicate that the daemon's proactive trigger should consult
+ * before firing a generic check-in. If the contact's MOST RECENT
+ * inbound message was emotionally heavy (HU_WEIGHT_HEAVY or
+ * HU_WEIGHT_GRIEF), the daemon should NOT pile a generic "hey what's
+ * up" on top — the next reactive turn handles them. The predicate
+ * lives in humanness.c so the testable surface is the same surface
+ * the daemon calls; see security-predicate-extraction.md.
+ */
+static void p6_3_suppress_when_last_was_grief(void) {
+    const char *grief_msg = "i lost my dad last night";
+    HU_ASSERT_TRUE(hu_proactive_should_suppress_for_emotion(grief_msg, strlen(grief_msg)));
+}
+
+static void p6_3_suppress_when_last_was_heavy(void) {
+    const char *heavy_msg = "honestly i'm so anxious i can't sleep";
+    HU_ASSERT_TRUE(hu_proactive_should_suppress_for_emotion(heavy_msg, strlen(heavy_msg)));
+}
+
+static void p6_3_do_not_suppress_when_last_was_light(void) {
+    const char *light_msg = "lol that meme was good";
+    HU_ASSERT_FALSE(hu_proactive_should_suppress_for_emotion(light_msg, strlen(light_msg)));
+}
+
+static void p6_3_do_not_suppress_when_last_was_normal(void) {
+    const char *normal_msg = "can you explain how this works";
+    HU_ASSERT_FALSE(hu_proactive_should_suppress_for_emotion(normal_msg, strlen(normal_msg)));
+}
+
+static void p6_3_do_not_suppress_when_no_last_message(void) {
+    /* No inbound history (e.g. brand new contact) — predicate must NOT
+     * suppress (let other gates decide). */
+    HU_ASSERT_FALSE(hu_proactive_should_suppress_for_emotion(NULL, 0));
+    HU_ASSERT_FALSE(hu_proactive_should_suppress_for_emotion("", 0));
+}
+
 /* ── Test Runner ─────────────────────────────────────────────────────────── */
 
 int run_humanness_tests(void) {
@@ -561,6 +637,19 @@ int run_humanness_tests(void) {
     HU_RUN_TEST(imperfect_certain_no_directive);
     HU_RUN_TEST(imperfect_uncertain_has_directive);
     HU_RUN_TEST(imperfect_genuinely_unsure);
+
+    /* P6-3: emotional-tone gate before proactive trigger */
+    HU_RUN_TEST(p6_3_suppress_when_last_was_grief);
+    HU_RUN_TEST(p6_3_suppress_when_last_was_heavy);
+    HU_RUN_TEST(p6_3_do_not_suppress_when_last_was_light);
+    HU_RUN_TEST(p6_3_do_not_suppress_when_last_was_normal);
+    HU_RUN_TEST(p6_3_do_not_suppress_when_no_last_message);
+
+    /* P6-4: silence-ack routed through persona+channel context.  The three
+     * other tests authored here expected an output-safety predicate that
+     * collided with Phase 1's input-safety predicate at merge time and were
+     * removed; see the comment above p6_4_persona_ack_full_response_returns_null. */
+    HU_RUN_TEST(p6_4_persona_ack_full_response_returns_null);
 
     return 0;
 }

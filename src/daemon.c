@@ -15,6 +15,7 @@
 #include "human/core/log.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
+#include "human/humanness.h"
 
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
@@ -1261,6 +1262,12 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             /* Build combined text from user messages for event extraction */
             char combined[4096];
             size_t combined_len = 0;
+            /* P6-3: also capture the MOST RECENT inbound text for the
+             * emotional-tone gate below. Entries are id-ascending, so
+             * the last !from_me entry is the latest. */
+            char last_inbound_buf[1024];
+            size_t last_inbound_len = 0;
+            last_inbound_buf[0] = '\0';
             if (entries && entry_count > 0) {
                 for (size_t e = 0; e < entry_count; e++) {
                     if (entries[e].from_me)
@@ -1268,12 +1275,18 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     size_t tlen = strlen(entries[e].text);
                     if (tlen == 0)
                         continue;
-                    if (combined_len + tlen + 2 >= sizeof(combined))
-                        break;
-                    if (combined_len > 0)
-                        combined[combined_len++] = '\n';
-                    memcpy(combined + combined_len, entries[e].text, tlen);
-                    combined_len += tlen;
+                    if (combined_len + tlen + 2 < sizeof(combined)) {
+                        if (combined_len > 0)
+                            combined[combined_len++] = '\n';
+                        memcpy(combined + combined_len, entries[e].text, tlen);
+                        combined_len += tlen;
+                    }
+                    size_t copy = tlen;
+                    if (copy >= sizeof(last_inbound_buf))
+                        copy = sizeof(last_inbound_buf) - 1;
+                    memcpy(last_inbound_buf, entries[e].text, copy);
+                    last_inbound_buf[copy] = '\0';
+                    last_inbound_len = copy;
                 }
                 combined[combined_len] = '\0';
             }
@@ -1379,6 +1392,20 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 }
             }
 #endif
+
+            /* P6-3: emotional-tone gate. If the contact's most-recent
+             * inbound message was heavy/grief, skip the generic
+             * proactive check-in — the next reactive turn will
+             * respond. Generic "hey what's up" on top of a vulnerable
+             * message reads as oblivious. */
+            if (should_checkin &&
+                hu_proactive_should_suppress_for_emotion(last_inbound_buf, last_inbound_len)) {
+                hu_log_info(
+                    "daemon", agent ? agent->observer : NULL,
+                    "proactive: suppressing check-in for %s — last inbound emotionally heavy",
+                    cp->contact_id);
+                should_checkin = false;
+            }
 
             if (!should_checkin)
                 break;

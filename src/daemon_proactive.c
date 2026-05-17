@@ -473,12 +473,7 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     }
 #endif /* HU_ENABLE_SQLITE feed awareness */
 
-    /* 2026-05-16 P1-8: self-awareness directive (topic-repeat suppression).
-     * Previously this function existed (src/context/self_awareness.c) and was
-     * called only from the reactive turn path — proactive sends had no way to
-     * know they were repeating themselves, which is how "how'd it go with the
-     * loan?" fired 4x to Mindy. Inject the directive at the TOP of the prompt
-     * (system-level steering) so the LLM sees it before any context. */
+    /* 2026-05-16 P1-8: self-awareness directive (topic-repeat suppression). */
     char *self_aware_ctx = NULL;
     size_t self_aware_ctx_len = 0;
 #ifdef HU_ENABLE_SQLITE
@@ -488,6 +483,80 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
             &self_aware_ctx, &self_aware_ctx_len);
     }
 #endif
+
+    /* P6-1: per-channel overlay directives — mirror the reactive path in
+     * src/agent/agent_stream.c so proactive prompts carry the same
+     * formality/length/emoji/pragmatic guidance the LLM gets when it
+     * responds to an inbound message.  Channel name derived from
+     * cp->proactive_channel ("imessage:+1234567890" → "imessage"). */
+    char *overlay_ctx = NULL;
+    size_t overlay_ctx_len = 0;
+    if (agent && agent->persona && cp->proactive_channel) {
+        const char *ch_name = cp->proactive_channel;
+        size_t ch_name_len = strlen(ch_name);
+        const char *colon = strchr(ch_name, ':');
+        if (colon)
+            ch_name_len = (size_t)(colon - ch_name);
+        if (ch_name_len > 0) {
+            const hu_persona_overlay_t *ov =
+                hu_persona_find_overlay(agent->persona, ch_name, ch_name_len);
+            if (ov) {
+                char obuf[1024];
+                size_t opos = 0;
+                int n = snprintf(obuf + opos, sizeof(obuf) - opos, "\nChannel style:");
+                if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                    opos += (size_t)n;
+                if (ov->formality) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " %s.", ov->formality);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->avg_length) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Length: %s.", ov->avg_length);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->emoji_usage) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Emoji: %s.", ov->emoji_usage);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->directness) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Directness: %s.",
+                                 ov->directness);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->face_saving) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Face-saving: %s.",
+                                 ov->face_saving);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->disagreement_style) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Disagreement: %s.",
+                                 ov->disagreement_style);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                for (size_t i = 0; i < ov->style_notes_count; i++) {
+                    if (ov->style_notes[i]) {
+                        n = snprintf(obuf + opos, sizeof(obuf) - opos, " %s.", ov->style_notes[i]);
+                        if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                            opos += (size_t)n;
+                    }
+                }
+                if (opos > 0) {
+                    overlay_ctx = (char *)alloc->alloc(alloc->ctx, opos + 1);
+                    if (overlay_ctx) {
+                        memcpy(overlay_ctx, obuf, opos);
+                        overlay_ctx[opos] = '\0';
+                        overlay_ctx_len = opos;
+                    }
+                }
+            }
+        }
+    }
 
     static const char HU_DEFAULT_PROACTIVE_RULES[] =
         "\nRules: "
@@ -505,10 +574,41 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
                            ? strlen(rules)
                            : sizeof(HU_DEFAULT_PROACTIVE_RULES) - 1;
 
-    char base_buf[256];
-    int w = snprintf(base_buf, sizeof(base_buf), "You're initiating a casual check-in text to %s. ",
+    /* P6-2: relationship_type + dunbar_layer give the LLM the register
+     * it should write in — texting a sister (dunbar 1) is not the same
+     * as texting a coworker (dunbar 3). Format only the fields present;
+     * fall through to the prior generic shape if neither is set. */
+    char base_buf[512];
+    int w;
+    if (cp->relationship_type && cp->relationship_type[0] && cp->dunbar_layer &&
+        cp->dunbar_layer[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s. "
+                     "You are texting your %s (dunbar layer %s). ",
+                     cp->name ? cp->name : "this person", cp->relationship_type, cp->dunbar_layer);
+    } else if (cp->relationship_type && cp->relationship_type[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s. "
+                     "You are texting your %s. ",
+                     cp->name ? cp->name : "this person", cp->relationship_type);
+    } else if (cp->dunbar_layer && cp->dunbar_layer[0]) {
+        w = snprintf(base_buf, sizeof(base_buf),
+                     "You're initiating a casual check-in text to %s "
+                     "(dunbar layer %s). ",
+                     cp->name ? cp->name : "this person", cp->dunbar_layer);
+    } else {
+        w = snprintf(base_buf, sizeof(base_buf), "You're initiating a casual check-in text to %s. ",
                      cp->name ? cp->name : "this person");
+    }
     size_t base_len = (w > 0 && (size_t)w < sizeof(base_buf)) ? (size_t)w : 0;
+
+    /* P6-5: shared absolute-rules block — same source of truth as the
+     * reactive path (src/agent/agent_stream.c). Last-position weight. */
+    char absolute_rules_buf[2048];
+    size_t absolute_rules_len = 0;
+    if (hu_persona_build_absolute_rules(agent ? agent->persona : NULL, absolute_rules_buf,
+                                        sizeof(absolute_rules_buf), &absolute_rules_len) != HU_OK)
+        absolute_rules_len = 0;
 
     size_t total = base_len + rules_len;
     if (self_aware_ctx && self_aware_ctx_len > 0)
@@ -525,6 +625,10 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 #endif
     if (calendar_ctx && calendar_ctx_len > 0)
         total += 2 + calendar_ctx_len;
+    if (overlay_ctx && overlay_ctx_len > 0)
+        total += 2 + overlay_ctx_len;
+    if (absolute_rules_len > 0)
+        total += absolute_rules_len;
 
     char *result = (char *)alloc->alloc(alloc->ctx, total + 1);
     if (!result) {
@@ -542,6 +646,8 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 #endif
         if (calendar_ctx)
             alloc->free(alloc->ctx, calendar_ctx, calendar_ctx_len + 1);
+        if (overlay_ctx)
+            alloc->free(alloc->ctx, overlay_ctx, overlay_ctx_len + 1);
         *out_len = 0;
         return NULL;
     }
@@ -595,9 +701,20 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
         pos += calendar_ctx_len;
         alloc->free(alloc->ctx, calendar_ctx, calendar_ctx_len + 1);
     }
+    if (overlay_ctx && overlay_ctx_len > 0) {
+        result[pos++] = '\n';
+        result[pos++] = '\n';
+        memcpy(result + pos, overlay_ctx, overlay_ctx_len);
+        pos += overlay_ctx_len;
+        alloc->free(alloc->ctx, overlay_ctx, overlay_ctx_len + 1);
+    }
 
     memcpy(result + pos, rules, rules_len);
     pos += rules_len;
+    if (absolute_rules_len > 0) {
+        memcpy(result + pos, absolute_rules_buf, absolute_rules_len);
+        pos += absolute_rules_len;
+    }
     result[pos] = '\0';
     *out_len = pos;
     return result;

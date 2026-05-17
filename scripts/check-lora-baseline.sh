@@ -79,12 +79,66 @@ if ! [[ "$MEAN" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
   exit 1
 fi
 
+# Composite floor — the multi-axis L1 score from
+# `hu_persona_fidelity_score_l1` reported alongside the single-axis mean
+# (added 2026-05-16 in src/ml/cli.c).
+#
+# 2026-05-16 baseline measured composite=0.614. Floor of 0.55 leaves
+# ~10% headroom for legitimate scoring nudges (weight retunes, axis
+# refinements) without flagging them as regressions, while still
+# catching a broken composite (zero / NaN / always-pass).
+#
+# See docs/eval/baseline-2026-05-16.md for the rationale and retake protocol.
+COMPOSITE_FLOOR="${LORA_BASELINE_COMPOSITE_FLOOR:-0.55}"
+COMPOSITE_LINE="$(printf '%s\n' "$OUTPUT" | grep -E '^\[lora-baseline\]\s+composite:' || true)"
+
+# Composite line is optional for backwards compat — older binaries
+# (without the 2026-05-16 src/ml/cli.c change) emit only the
+# single-axis mean. Warn and skip rather than fail so a CI matrix
+# pinned to an older release of `${LORA_BASELINE_BIN}` keeps working.
+if [ -z "$COMPOSITE_LINE" ]; then
+  echo "[lora-baseline-gate] WARN: no composite line in output — older binary?"
+  COMPOSITE=""
+else
+  # Line shape:
+  #   [lora-baseline]   composite:       0.614 (style=... traits=... line=... stderr=... n=...)
+  # Field 3 (1-indexed after awk's space split) is the bare composite value.
+  COMPOSITE="$(printf '%s\n' "$COMPOSITE_LINE" | awk '{print $3}')"
+  if ! [[ "$COMPOSITE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "[lora-baseline-gate] FAIL: composite '$COMPOSITE' is not a number" >&2
+    printf '%s\n' "$OUTPUT" >&2
+    exit 1
+  fi
+fi
+
 # Use awk for float comparison — bash arithmetic only handles ints.
+MEAN_PASS=0
 if awk -v m="$MEAN" -v f="$FLOOR" 'BEGIN { exit !(m+0 >= f+0) }'; then
-  echo "[lora-baseline-gate] PASS: fixture mean=$MEAN >= floor=$FLOOR"
+  MEAN_PASS=1
+fi
+
+COMPOSITE_PASS=1
+if [ -n "$COMPOSITE" ]; then
+  COMPOSITE_PASS=0
+  if awk -v m="$COMPOSITE" -v f="$COMPOSITE_FLOOR" 'BEGIN { exit !(m+0 >= f+0) }'; then
+    COMPOSITE_PASS=1
+  fi
+fi
+
+if [ "$MEAN_PASS" = 1 ] && [ "$COMPOSITE_PASS" = 1 ]; then
+  if [ -n "$COMPOSITE" ]; then
+    echo "[lora-baseline-gate] PASS: mean=$MEAN >= $FLOOR, composite=$COMPOSITE >= $COMPOSITE_FLOOR"
+  else
+    echo "[lora-baseline-gate] PASS: fixture mean=$MEAN >= floor=$FLOOR (composite skipped)"
+  fi
   exit 0
 fi
 
-echo "[lora-baseline-gate] FAIL: fixture mean=$MEAN < floor=$FLOOR" >&2
+if [ "$MEAN_PASS" != 1 ]; then
+  echo "[lora-baseline-gate] FAIL: fixture mean=$MEAN < floor=$FLOOR" >&2
+fi
+if [ "$COMPOSITE_PASS" != 1 ]; then
+  echo "[lora-baseline-gate] FAIL: composite=$COMPOSITE < floor=$COMPOSITE_FLOOR" >&2
+fi
 printf '%s\n' "$OUTPUT" >&2
 exit 1

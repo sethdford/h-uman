@@ -505,6 +505,21 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len);
 
+/* P6-5: shared absolute-rules block. Writes the highest-weight
+ * formatting/identity instructions ("You are HUMAN", lowercase, no
+ * markdown, etc.) into the caller's buffer. Called from BOTH the
+ * reactive path (src/agent/agent_stream.c) and the proactive path
+ * (src/daemon_proactive.c) so the two paths cannot drift.
+ *
+ * `persona` is currently unused but accepted so future per-persona
+ * overrides don't break the call site.
+ *
+ * Returns HU_OK on success with *out_len set; HU_ERR_INVALID_ARGUMENT
+ * on NULL buf or zero cap; HU_ERR_OUT_OF_MEMORY if the static block
+ * would exceed cap. */
+hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
+                                           size_t *out_len);
+
 hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *channel,
                                       size_t channel_len, const char *topic, size_t topic_len,
                                       const hu_persona_example_t **out, size_t *out_count,
