@@ -4,6 +4,74 @@ project(human C ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# --- US-8.3: Reproducible Binary Builds -------------------------------------
+#
+# Goal: two independent builds from the same source tree, with the same
+# toolchain and the same SOURCE_DATE_EPOCH, produce bytewise-identical
+# `human` binaries (modulo ELF build-id and Mach-O LC_UUID, which carry
+# host-derived randomness and are carved out by check-reproducible-build.sh).
+#
+# Design: sprints/sprint-8/designs/US-8.3.md
+# Standard: docs/standards/engineering/reproducible-builds.md
+#
+# These flags are applied UNCONDITIONALLY (not gated on SOURCE_DATE_EPOCH)
+# because a contract that is only checked sometimes is not a contract
+# (rules/quality-gates.md: "no silent failures"). SOURCE_DATE_EPOCH, when
+# set, gives the compiler a fixed value for any __DATE__/__TIME__ that
+# slips through; -Werror=date-time additionally fails the build on any
+# new use. Together they are belt-and-suspenders.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    # Strip absolute build-path prefixes from __FILE__, debug info, and
+    # assertion strings. Maps source dir and build dir to canonical "." so
+    # two builds from /tmp/build-a and /tmp/build-b yield the same bytes.
+    add_compile_options(
+        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+        "-ffile-prefix-map=${CMAKE_BINARY_DIR}=.")
+    # Promote any future __DATE__/__TIME__ macro usage from a warning to a
+    # hard error. Design note AP-4: the story text said -Wno-date-time but
+    # a suppressed warning is not a contract. AC-8.3.3 is still satisfied
+    # because -Wdate-time IS emitted; we additionally fail the build.
+    add_compile_options(-Werror=date-time)
+endif()
+
+# Deterministic archive creation: -D modifier zeroes mtime/uid/gid/mode in
+# archive headers. Only GNU ar and llvm-ar accept it; Darwin's BSD ar does
+# not. Darwin's libtool is invoked via CMAKE_C_CREATE_STATIC_LIBRARY by
+# default and already produces deterministic archives in modern Xcode
+# (since Xcode 10, archives use zerofill metadata). Probe -D once.
+include(CheckSourceCompiles)
+execute_process(
+    COMMAND ${CMAKE_AR} -D --version
+    OUTPUT_VARIABLE _hu_ar_d_probe
+    ERROR_QUIET
+    RESULT_VARIABLE _hu_ar_d_result)
+if(_hu_ar_d_result EQUAL 0)
+    set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcD <TARGET> <OBJECTS>")
+    set(CMAKE_C_ARCHIVE_APPEND "<CMAKE_AR> qD  <TARGET> <OBJECTS>")
+    set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_AR> -D <TARGET>")
+    message(STATUS "Reproducible builds: ar supports -D (deterministic mode)")
+else()
+    message(STATUS "Reproducible builds: ar -D not supported (Darwin BSD ar); relying on platform default determinism")
+endif()
+
+# Linker-level nondeterminism. ELF build-id and Mach-O LC_UUID embed
+# host-derived randomness; suppress them so two builds match byte-for-byte.
+# Linux: --build-id=none (binutils ld + lld). Darwin: -no_uuid (ld64).
+#
+# IMPORTANT: only apply to the shipped `human` binary, NOT to test
+# binaries. On Darwin, dyld + ASan require LC_UUID for symbolication —
+# `human_tests` will refuse to load without it. The reproducibility
+# contract only covers the shipped binary, so the test binaries can
+# keep their UUIDs. Applied later via target_link_options on `human`
+# (search for "US-8.3 per-target" in this file).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # On Linux, the BuildId is purely metadata and removing it from
+    # test binaries is harmless — leave globally applied.
+    add_link_options("LINKER:--build-id=none")
+endif()
+# Darwin handling moved to the `human` target only (see below).
+# --- end US-8.3 -------------------------------------------------------------
+
 option(HU_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(HU_ENABLE_SQLITE "Enable SQLite memory backend" ON)
 option(HU_ENABLE_POSTGRES "Enable PostgreSQL memory backend" OFF)
@@ -1895,6 +1963,14 @@ endif()
 # --- Main executable ---
 add_executable(human src/main.c src/bootstrap.c)
 target_link_libraries(human human_core)
+
+# US-8.3 per-target: Mach-O LC_UUID embeds host-derived randomness; zero
+# it on the shipped binary only. Test binaries keep their UUID because
+# dyld + ASan require it for symbolication. See
+# docs/standards/engineering/reproducible-builds.md.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_link_options(human PRIVATE "LINKER:-no_uuid")
+endif()
 
 # ──────────────────────────────────────────────────────────────────────────
 # P2E — Layer-direction topology check (memory v2 roadmap)
