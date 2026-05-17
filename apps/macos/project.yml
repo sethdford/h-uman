@@ -48,3 +48,19 @@ targets:
         # HumanKit sources are pulled in via the SwiftPM `packages` dependency
         # above — listing them under `sources:` here would cause duplicate
         # symbols at link time.
+
+  HumanUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: HumanUITests
+    dependencies:
+      - target: Human
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.humanlabs.mac.uitests
+        SWIFT_VERSION: "5.9"
+        TEST_TARGET_NAME: Human
+        CODE_SIGNING_ALLOWED: NO
+        MACOSX_DEPLOYMENT_TARGET: "14.0"

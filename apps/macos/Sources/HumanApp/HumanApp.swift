@@ -8,12 +8,32 @@ private let springMotion9 = Animation.spring(response: 0.35, dampingFraction: 0.
 @main
 struct HumanApp: App {
     @StateObject private var status = StatusViewModel()
+    @StateObject private var onboarding = OnboardingState()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup("h-uman Dashboard") {
             DashboardView()
                 .environmentObject(status)
+                .environmentObject(onboarding)
                 .frame(minWidth: 600, minHeight: 400)
+                // First-run OnboardingSheet (US-14.5). `shouldShow` is `false`
+                // when the `-uitestSkipOnboarding` launch arg is set, when the
+                // daemon binary is already on PATH, or when the user previously
+                // tapped Skip / Install. See `OnboardingState.recheck()`.
+                .sheet(isPresented: Binding(
+                    get: { onboarding.shouldShow },
+                    set: { newValue in
+                        if !newValue { onboarding.markCompleted() }
+                    }
+                )) {
+                    OnboardingSheet(state: onboarding)
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    // Re-evaluate when window regains focus so the sheet
+                    // auto-dismisses after a mid-session install.
+                    if phase == .active { onboarding.recheck() }
+                }
         }
         .defaultSize(width: 900, height: 600)
         .commands {
