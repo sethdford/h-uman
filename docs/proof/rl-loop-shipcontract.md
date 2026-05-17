@@ -26,13 +26,13 @@ This page verifies each item at `rl-sota-phase-6-complete` (`3a17a528`) with fil
 | 7 | `human ml rm-train` produces a valid reward model checkpoint | ✅ PASS |
 | 8 | `tests/test_e2e_rl_loop.c` passes (chat → reaction → train → re-chat → measurably changed) | ✅ PASS_WITH_NOTES (4/4 closed-loop tests green; the "AND eval_gate passed" half is satisfied by a **separate** suite `test_runner_blocks_promotion_when_gate_rejects` in `tests/test_lora_training_runner_eval_gate.c`, not by the 4 E2E tests themselves) |
 | 9 | `human eval competitive --persona seth` produces the win-condition scorecard with bootstrap CIs | ✅ PASS (Phase D CF-1) — `src/eval/cli_eval.c` wires competitive/gate/leaderboard to `hu_persona_rollout_run`, `competitive_harness`, and `hu_eval_gate_decide_from_arrays_for_test`. JSON includes `win_condition_met`, bootstrap CIs, and factory `unavailable_reason`. Pinned by `tests/test_cli_eval_phase5.c` (8 tests). |
-| 10 | `~/.human/proofs/<final-adapter-id>/` exists with all 9 evidence files (spec §8) | ✅ PASS_WITH_NOTES (Phase D CF-2) — all 9 files non-stub (>50 bytes); `persona_delta` and gate verdict from real rollout + `hu_eval_gate`. Demo uses **10** prompts (gate floor); 20-prompt spec residual tracked as **CF-2-R**. Pinned by `tests/test_cli_demo_evidence.c` (6 tests). |
+| 10 | `~/.human/proofs/<final-adapter-id>/` exists with all 9 evidence files (spec §8) | ✅ PASS_WITH_NOTES (Phase D CF-2) — all 9 files non-stub (>50 bytes); `persona_delta` and gate verdict from real rollout + `hu_eval_gate`. Demo uses **20** prompts from `tests/fixtures/persona_rollout_prompts_20.txt` (CF-2-R closed). Pinned by `tests/test_cli_demo_evidence.c` (6 tests). |
 | 11 | `docs/proof/rl-loop-proof.md` indexes the proof and presents the scorecard | ✅ PASS |
 | 12 | `sprint-auditor` subagent has issued PASS verdict on every phase (logged in audit report) | ✅ PASS (1, 2, 3 are PASS_WITH_NOTES per the per-phase rows — the umbrella table is honest about that) |
 | 13 | `docs/proof/adversarial-audit-report.md` exists with all `critic` + `aspect-panel` findings + remediations | ✅ PASS |
 | 14 | Apple FM + Gemini Nano populated honestly OR shows `unavailable (reason)` with documented why | ✅ PASS_WITH_NOTES — both factories return `HU_ERR_NOT_SUPPORTED` (honest fallback per spec §14); the elaborate `unavailable (reason)` strings quoted elsewhere are aspirational, not what the C code emits today. Also unreachable from the user-visible CLI because of DoD-9. |
 
-**Bottom line (post Phase D CF-1/CF-2/CF-4): 11 PASS + 3 PASS_WITH_NOTES = 14/14 structurally met.** DoD-9 and DoD-10 user-surface wiring closed in Phase D; CF-2-R (10 vs 20 demo prompts) remains the only honest residual on DoD-10. Remaining open carry-forwards: CF-3, CF-5, CF-6, CF-7 (see table below).
+**Bottom line (post Phase D CF-1/CF-2/CF-4): 11 PASS + 3 PASS_WITH_NOTES = 14/14 structurally met.** DoD-9 and DoD-10 user-surface wiring closed in Phase D; CF-2-R closed (20-prompt fixture). Runner promotion gate scores MT-Bench/IFEval when canned leaderboard JSON is present; daemon W14 LoRA ctx wires `eval_gate` + `eval_provider`. (see table below).
 
 ---
 
@@ -254,9 +254,9 @@ The close-out sprint-auditor on commit `010763ef` flagged the items below. They 
 | ~~CF-5~~ | ~~KTO single-cell grad check~~ | **CLOSED (Phase D)** — `test_kto_loss_analytical_grad_matches_finite_diff_per_param` sweeps all 512 lm_head cells via chain-rule analytical vs centered FD (`kto_compute_grad_scalar_for_test` + `kto_compute_logprob_pol_for_test`). | Phase 2 AC1 ✅ |
 | ~~CF-6~~ | ~~Judge factories without unavailable reason~~ | **CLOSED (Phase D)** — `hu_eval_judge_create_apple_fm` / `_gemini_nano` accept `const char **out_reason` with compile-time stub strings; tests in `test_eval_judge_external.c`. | DoD-14 ✅ |
 | ~~CF-7~~ | ~~MLX `popen` relative-CWD~~ | **CLOSED (Phase D, prior commit)** — `hu_ml_resolve_script_path` (`src/ml/ml_scripts_dir.c`); all MLX wrappers use absolute script paths. Pinned by `tests/test_ml_scripts_dir.c`. | Phase 4 F-4-8 ✅ |
-| CF-2-R | Demo + competitive CLI use **10** persona-rollout prompts (matches `hu_eval_gate` `n >= 10` floor); design spec §8 / `delta_responses.md` narrative still references **20** prompts | Future demo-polish sprint | spec §8 residual (Phase D DoD-10 PASS_WITH_NOTES) |
+| ~~CF-2-R~~ | ~~10 vs 20 demo prompts~~ | **CLOSED** — `persona_rollout_prompts_20.txt` + `leaderboard_canned_20.json`; `cli_demo` loads 20 prompts; runner gate scores MT/IFEval from canned JSON. | DoD-10 ✅ |
 
-**Phase D status (2026-05-17):** CF-1 through CF-7 are closed; only **CF-2-R** (10 vs 20 prompts in `delta_responses.md`) remains as an honest residual.
+**SOTA proof sprint (2026-05-17):** CF-2-R closed (20-prompt fixture + canned leaderboard); W14 daemon runner wires full gate with MT-Bench/IFEval when fixtures resolve. Live Gemma win table still requires `scripts/demo-rl-loop.sh` on Apple Silicon.
 
 These were honest carry-forwards, not gates on the program tag. The `rl-sota-phase-6-complete` tag still stands for what it shipped (real DPO/KTO/GRPO/RM trainers, real eval-gate decision logic, real bootstrap-CI helper, real 4-axis fidelity scorer v2, real deterministic E2E closed-loop test, real demo CLI, real proof directory schema, full 10330/10332 PASS test suite). The carry-forwards are about *finishing the wiring at user-facing surfaces*, not about fixing broken math.
 

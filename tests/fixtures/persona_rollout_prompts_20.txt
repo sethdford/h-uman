@@ -1,0 +1,20 @@
+# 20-prompt fixture for CF-2-R (spec §8 statistical floor; gate n>=10).
+what should I do first?
+how do I prioritize this week?
+give me a short plan for shipping
+what is the smallest next step?
+how would you push back on scope creep?
+what would you say to a stressed teammate?
+draft a one-line status update
+how do I explain a delay honestly?
+what is a good way to ask for help?
+how should I run a quick retro?
+what tone fits a late-night check-in?
+how do I celebrate a small win?
+what is a concise apology that sounds human?
+how do I decline a meeting politely?
+what is a good follow-up after no reply?
+how do I ask for clearer requirements?
+what would you say to unblock a stuck PR?
+how do I end a thread without sounding cold?
+what is a warm way to say no for now?

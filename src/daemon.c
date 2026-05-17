@@ -20,6 +20,10 @@
 #include "human/agent/autodream.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
+#ifdef HU_ENABLE_RL_FULL
+#include "human/eval/eval_gate.h"
+#include "human/eval/leaderboard.h"
+#endif
 #include "human/agent/training_data_runner.h"
 #include "human/agent/verifier_metrics.h"
 #include "human/agent/world_model_bridge.h"
@@ -2462,6 +2466,102 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             w14_lora_ctx.kv_cache = agent->infra.kv_cache;
             w14_lora_ctx.provider = &agent->provider;
             w14_lora_ctx.adapter_id = "w14_learner";
+#if defined(HU_ENABLE_RL_FULL)
+            {
+                static hu_eval_gate_t w14_eval_gate;
+                static hu_leaderboard_runner_t w14_mt_runner;
+                static hu_leaderboard_runner_t w14_ifeval_runner;
+                static bool w14_eval_gate_ready;
+                static char w14_canned_lb_path[512];
+                static char w14_prompt_fixture_path[512];
+
+                if (!w14_eval_gate_ready) {
+                    const char *lb_env = getenv("HU_EVAL_LEADERBOARD_CANNED");
+                    if (lb_env && lb_env[0]) {
+                        (void)snprintf(w14_canned_lb_path, sizeof(w14_canned_lb_path), "%s",
+                                       lb_env);
+                    } else {
+                        const char *lb_tries[] = {
+                            "tests/fixtures/leaderboard_canned_20.json",
+                            "../tests/fixtures/leaderboard_canned_20.json",
+                            NULL,
+                        };
+                        w14_canned_lb_path[0] = '\0';
+                        for (size_t li = 0; lb_tries[li]; li++) {
+                            FILE *lf = fopen(lb_tries[li], "r");
+                            if (lf) {
+                                fclose(lf);
+                                (void)snprintf(w14_canned_lb_path, sizeof(w14_canned_lb_path),
+                                               "%s", lb_tries[li]);
+                                break;
+                            }
+                        }
+                        if (w14_canned_lb_path[0] == '\0') {
+                            const char *hm = getenv("HOME");
+                            (void)snprintf(w14_canned_lb_path, sizeof(w14_canned_lb_path),
+                                           "%s/.human/eval/leaderboard_canned_20.json",
+                                           hm && hm[0] ? hm : "/tmp");
+                        }
+                    }
+
+                    hu_leaderboard_config_t lbc = {.canned_path = w14_canned_lb_path, .seed = 42};
+                    if (hu_leaderboard_create_mt_bench(alloc, &lbc, &w14_mt_runner) == HU_OK &&
+                        hu_leaderboard_create_ifeval(alloc, &lbc, &w14_ifeval_runner) == HU_OK) {
+                        memset(&w14_eval_gate, 0, sizeof(w14_eval_gate));
+                        w14_eval_gate.baseline_persona_fidelity_mean = 0.50;
+                        w14_eval_gate.baseline_mt_bench_mean = 0.55;
+                        w14_eval_gate.baseline_ifeval_mean = 0.60;
+                        w14_eval_gate.persona_delta_min = 0.05;
+                        w14_eval_gate.mt_bench_regression_max = -0.01;
+                        w14_eval_gate.ifeval_regression_max = -0.02;
+                        w14_eval_gate.baseline_p95_latency_ms = 8000.0;
+                        w14_eval_gate.latency_delta_max_ms = 4000.0;
+                        w14_eval_gate.bootstrap_samples = 500;
+                        w14_eval_gate.bootstrap_seed = 42;
+                        w14_eval_gate.mt_bench = &w14_mt_runner;
+                        w14_eval_gate.ifeval = &w14_ifeval_runner;
+                        w14_eval_gate_ready = true;
+                    }
+                }
+
+                if (w14_eval_gate_ready) {
+                    w14_lora_ctx.eval_gate = &w14_eval_gate;
+                    w14_lora_ctx.eval_provider = &agent->provider;
+                    w14_lora_ctx.eval_n_prompts = 20;
+
+                    const char *pf_env = getenv("HU_PERSONA_ROLLOUT_FIXTURE");
+                    if (pf_env && pf_env[0]) {
+                        (void)snprintf(w14_prompt_fixture_path, sizeof(w14_prompt_fixture_path),
+                                       "%s", pf_env);
+                    } else {
+                        const char *pf_tries[] = {
+                            "tests/fixtures/persona_rollout_prompts_20.txt",
+                            "../tests/fixtures/persona_rollout_prompts_20.txt",
+                            NULL,
+                        };
+                        w14_prompt_fixture_path[0] = '\0';
+                        for (size_t pi = 0; pf_tries[pi]; pi++) {
+                            FILE *pf = fopen(pf_tries[pi], "r");
+                            if (pf) {
+                                fclose(pf);
+                                (void)snprintf(w14_prompt_fixture_path,
+                                               sizeof(w14_prompt_fixture_path), "%s",
+                                               pf_tries[pi]);
+                                break;
+                            }
+                        }
+                        if (w14_prompt_fixture_path[0] == '\0') {
+                            const char *hm = getenv("HOME");
+                            (void)snprintf(w14_prompt_fixture_path,
+                                           sizeof(w14_prompt_fixture_path),
+                                           "%s/.human/eval/persona_prompts.txt",
+                                           hm && hm[0] ? hm : "/tmp");
+                        }
+                    }
+                    w14_lora_ctx.eval_prompt_fixture_path = w14_prompt_fixture_path;
+                }
+            }
+#endif
             w14_lora_ctx.config_template = hu_learner_default_config();
             {
                 const char *hm = getenv("HOME");

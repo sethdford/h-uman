@@ -32,6 +32,7 @@
 #ifdef HU_ENABLE_RL_FULL
 #include "human/agent/adapter_id.h"
 #include "human/eval/eval_gate.h"
+#include "human/eval/leaderboard.h"
 #include "human/eval/persona_rollout.h"
 #include "human/memory/personal_model.h"
 #include <stdio.h>
@@ -208,10 +209,40 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
             .prompts = (const char **)prompts,
             .n_prompts = prompt_n,
             .timeout_ms_per_prompt = timeout,
-            .capture_responses = false,
+            .capture_responses = true,
         };
         hu_persona_rollout_result_t rr = {0};
         hu_error_t re = hu_persona_rollout_run(alloc, &rcfg, &rr);
+
+        double mt_scores[64];
+        double if_scores[64];
+        const double *mt_ptr = NULL;
+        const double *if_ptr = NULL;
+        size_t score_n = 0;
+
+        if (re == HU_OK) {
+            score_n = rr.n_scored;
+            if (score_n > prompt_n)
+                score_n = prompt_n;
+            if (score_n > sizeof(mt_scores) / sizeof(mt_scores[0]))
+                score_n = sizeof(mt_scores) / sizeof(mt_scores[0]);
+
+            if (ctx->eval_gate->mt_bench && rr.responses && score_n > 0) {
+                if (ctx->eval_gate->mt_bench->vtable->run(ctx->eval_gate->mt_bench, alloc,
+                                                            (const char *const *)prompts,
+                                                            (const char *const *)rr.responses,
+                                                            score_n, mt_scores) == HU_OK)
+                    mt_ptr = mt_scores;
+            }
+            if (ctx->eval_gate->ifeval && rr.responses && score_n > 0) {
+                if (ctx->eval_gate->ifeval->vtable->run(ctx->eval_gate->ifeval, alloc,
+                                                        (const char *const *)prompts,
+                                                        (const char *const *)rr.responses,
+                                                        score_n, if_scores) == HU_OK)
+                    if_ptr = if_scores;
+            }
+        }
+
         for (size_t i = 0; i < prompt_n; i++)
             alloc->free(alloc->ctx, prompts[i], strlen(prompts[i]) + 1);
         alloc->free(alloc->ctx, prompts, prompt_n * sizeof(char *));
@@ -236,6 +267,9 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
                      "insufficient persona score count for gate (%zu < 10)", n);
             return HU_OK;
         }
+
+        return hu_eval_gate_decide_from_arrays_for_test(ctx->eval_gate, persona, mt_ptr, if_ptr,
+                                                        NULL, n, p95, verdict);
     }
 
     if (n < 10) {

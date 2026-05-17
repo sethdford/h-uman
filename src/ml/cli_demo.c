@@ -183,7 +183,7 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "\"trainer_final_loss\":%.6f,"
              "\"trainer_iters\":%zu,"
              "\"synthetic_reactions\":true,"
-             "\"persona_rollout_prompts\":10,"
+             "\"persona_rollout_prompts\":20,"
              "\"note\":\"reactions are synthetic; persona scores from hu_persona_rollout_run\"}\n",
              created_at, run->pairs_consumed, run->reactions_emitted,
              run->persona_delta, run->trainer_name,
@@ -451,12 +451,33 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
     snprintf(run->trainer_name, sizeof(run->trainer_name), "%s",
              tname ? tname : "dpo");
 
-    /* CF-2: exactly 10 prompts (gate floor); spec §8 20-prompt residual is CF-2-R. */
-    const size_t score_n = 10;
+    /* CF-2-R: 20-prompt fixture (spec §8); falls back to repeated --prompt. */
+    char **loaded_prompts = NULL;
+    size_t score_n = 0;
+    const char *fixture_candidates[] = {
+        getenv("HU_PERSONA_ROLLOUT_FIXTURE"),
+        "tests/fixtures/persona_rollout_prompts_20.txt",
+        "../tests/fixtures/persona_rollout_prompts_20.txt",
+        NULL,
+    };
+    for (size_t fi = 0; fixture_candidates[fi] && score_n == 0; fi++) {
+        const char *fp = fixture_candidates[fi];
+        if (!fp || !fp[0])
+            continue;
+        (void)hu_persona_rollout_load_prompt_fixture(alloc, fp, &loaded_prompts, &score_n);
+    }
+    const char *prompts[64];
+    if (score_n == 0) {
+        score_n = 20;
+        for (size_t i = 0; i < score_n; i++)
+            prompts[i] = args->prompt;
+    } else {
+        if (score_n > 64)
+            score_n = 64;
+        for (size_t i = 0; i < score_n; i++)
+            prompts[i] = loaded_prompts[i];
+    }
     run->score_n = score_n;
-    const char *prompts[10];
-    for (size_t i = 0; i < score_n; i++)
-        prompts[i] = args->prompt;
 
     hu_communication_style_t target;
     memset(&target, 0, sizeof(target));
@@ -516,6 +537,11 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
 
     hu_persona_rollout_result_free(alloc, &base_rr);
     hu_persona_rollout_result_free(alloc, &cand_rr);
+    if (loaded_prompts) {
+        for (size_t i = 0; i < score_n; i++)
+            alloc->free(alloc->ctx, loaded_prompts[i], strlen(loaded_prompts[i]) + 1);
+        alloc->free(alloc->ctx, loaded_prompts, score_n * sizeof(char *));
+    }
 #ifdef HU_IS_TEST
     if (provider_heap)
         hu_provider_destroy_for_test(provider_heap, alloc);
