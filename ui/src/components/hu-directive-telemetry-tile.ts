@@ -139,7 +139,7 @@ export class HuDirectiveTelemetryTile extends LitElement {
 
     .bar {
       display: flex;
-      gap: 2px;
+      gap: var(--hu-space-2xs);
       height: 1.25rem;
       width: 100%;
       border-radius: var(--hu-radius-sm);
@@ -207,7 +207,7 @@ export class HuDirectiveTelemetryTile extends LitElement {
       display: inline-block;
       width: 0.5rem;
       height: 0.5rem;
-      border-radius: 2px;
+      border-radius: var(--hu-radius-sm);
     }
 
     .legend-count {
@@ -263,9 +263,7 @@ export class HuDirectiveTelemetryTile extends LitElement {
     return html`
       <div class="header">
         <div class="title">Acknowledgment-directive variants</div>
-        <div class="total-readout">
-          <span class="total-value">${total}</span> total fires
-        </div>
+        <div class="total-readout"><span class="total-value">${total}</span> total fires</div>
       </div>
     `;
   }
@@ -281,17 +279,10 @@ export class HuDirectiveTelemetryTile extends LitElement {
   }
 
   private renderBar(data: DirectiveTelemetry) {
-    const variantSum = DIRECTIVE_VARIANTS.reduce(
-      (acc, key) => acc + safeCount(data, key),
-      0,
-    );
+    const variantSum = DIRECTIVE_VARIANTS.reduce((acc, key) => acc + safeCount(data, key), 0);
 
     if (variantSum === 0) {
-      return html`<div
-        class="bar-empty"
-        role="status"
-        aria-label="No variants fired yet"
-      >
+      return html`<div class="bar-empty" role="status" aria-label="No variants fired yet">
         no variants fired yet
       </div>`;
     }
@@ -322,10 +313,7 @@ export class HuDirectiveTelemetryTile extends LitElement {
   }
 
   private renderLegend(data: DirectiveTelemetry) {
-    const variantSum = DIRECTIVE_VARIANTS.reduce(
-      (acc, key) => acc + safeCount(data, key),
-      0,
-    );
+    const variantSum = DIRECTIVE_VARIANTS.reduce((acc, key) => acc + safeCount(data, key), 0);
     return html`
       <div class="legend" aria-hidden="true">
         ${DIRECTIVE_VARIANTS.map((key) => {

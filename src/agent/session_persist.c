@@ -1,5 +1,6 @@
 #include "human/agent/session_persist.h"
 #include "human/agent.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include <dirent.h>
@@ -194,8 +195,12 @@ hu_error_t hu_session_persist_save(hu_allocator_t *alloc, const hu_agent_t *agen
     snprintf(tmp_path, sizeof(tmp_path), "%s/.tmp_%s.json", session_dir, sid);
     snprintf(final_path, sizeof(final_path), "%s/%s.json", session_dir, sid);
 
-    FILE *f = fopen(tmp_path, "wb");
-    if (!f) {
+    /* Session JSON contains conversation history — not secrets per se,
+     * but PII (user names, addresses, anything they typed) that should
+     * not be world-readable. Use HU_IO_PERM_SECRET (0600) for the same
+     * reasoning we apply to OAuth tokens. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(tmp_path, HU_IO_PERM_SECRET, "wb", &f) != HU_OK || !f) {
         alloc->free(alloc->ctx, json_str, json_len + 1);
         return HU_ERR_IO;
     }

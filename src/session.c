@@ -1,4 +1,5 @@
 #include "human/session.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/util.h"
@@ -277,8 +278,10 @@ static void json_esc(FILE *f, const char *s) {
 hu_error_t hu_session_save(hu_session_manager_t *mgr, const char *path) {
     if (!mgr || !path)
         return HU_ERR_INVALID_ARGUMENT;
-    FILE *f = fopen(path, "w");
-    if (!f)
+    /* Session map — keyed by session ID, holds per-session metadata.
+     * Treated as PII (session names, channels) — 0600. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path, HU_IO_PERM_SECRET, "w", &f) != HU_OK || !f)
         return HU_ERR_IO;
     fputs("[", f);
     bool first_s = true;

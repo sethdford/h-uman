@@ -1,4 +1,5 @@
 #include "human/state.h"
+#include "human/core/io_secure.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -150,8 +151,12 @@ hu_error_t hu_state_save(hu_state_manager_t *mgr) {
         return HU_OK;
     char tmp_path[512];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", mgr->state_path);
-    FILE *f = fopen(tmp_path, "wb");
-    if (!f)
+    /* State file at ~/.human/state.json — last channel, last memory
+     * profile, etc. Not strictly secret but reveals usage patterns;
+     * 0644 is fine here since the contents are written nowhere a
+     * remote attacker could read. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(tmp_path, HU_IO_PERM_USER, "wb", &f) != HU_OK || !f)
         return HU_ERR_IO;
     fprintf(f, "{\n  \"last_channel\": ");
     if (mgr->data.last_channel[0])

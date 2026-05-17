@@ -84,6 +84,7 @@
       <a href="#hu-activity-feed">hu-activity-feed</a>
       <a href="#hu-welcome">hu-welcome</a>
       <a href="#hu-welcome-card">hu-welcome-card</a>
+      <a href="#hu-directive-telemetry-tile">hu-directive-telemetry-tile</a>
       <a href="#hu-error-boundary">hu-error-boundary</a>
       <a href="#hu-thinking">hu-thinking</a>
       <a href="#hu-tool-result">hu-tool-result</a>
@@ -127,6 +128,7 @@
       <a href="#hu-delivery-status">hu-delivery-status</a>
       <a href="#hu-link-preview">hu-link-preview</a>
       <a href="#hu-message-thread">hu-message-thread</a>
+      <a href="#hu-directive-telemetry-tile">hu-directive-telemetry-tile</a>
       <a href="#hu-branch-tree">hu-branch-tree</a>
       <a href="#hu-message-group">hu-message-group</a>
       <a href="#hu-skill-card">hu-skill-card</a>
@@ -970,6 +972,16 @@
 &lt;hu-welcome-card .userName=${"Alex"}&gt;&lt;/hu-welcome-card&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="hu-directive-telemetry-tile">
+        <h2>hu-directive-telemetry-tile</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 400px;">
+            <hu-directive-telemetry-tile></hu-directive-telemetry-tile>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;hu-directive-telemetry-tile&gt;&lt;/hu-directive-telemetry-tile&gt;</code></pre></div>
+      </section>
+
       <section class="component-section" id="hu-error-boundary">
         <h2>hu-error-boundary</h2>
         <div class="playground">
@@ -1520,6 +1532,17 @@
         <div class="code-snippet"><pre><code>&lt;hu-message-thread .items=${items} .isWaiting=${false} .hasEarlierMessages=${false}&gt;&lt;/hu-message-thread&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="hu-directive-telemetry-tile">
+        <h2>hu-directive-telemetry-tile</h2>
+        <p>Compact telemetry card that reports a single agent directive's pre-tool / post-tool / final-message status, latency, and any guard verdict.</p>
+        <div class="playground">
+          <div class="preview">
+            <hu-directive-telemetry-tile id="catalog-directive-telemetry-tile"></hu-directive-telemetry-tile>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;hu-directive-telemetry-tile .telemetry=${entry}&gt;&lt;/hu-directive-telemetry-tile&gt;</code></pre></div>
+      </section>
+
       <section class="component-section" id="hu-branch-tree">
         <h2>hu-branch-tree</h2>
         <p>Vertical timeline/tree for conversation branches with collapsible subtrees.</p>
@@ -1871,6 +1894,7 @@
       import "/src/components/hu-activity-feed.js";
       import "/src/components/hu-welcome.js";
       import "/src/components/hu-welcome-card.js";
+      import "/src/components/hu-directive-telemetry-tile.js";
       import "/src/components/hu-error-boundary.js";
       import "/src/components/hu-thinking.js";
       import "/src/components/hu-tool-result.js";
@@ -1917,6 +1941,7 @@
       import "/src/components/hu-delivery-status.js";
       import "/src/components/hu-link-preview.js";
       import "/src/components/hu-message-thread.js";
+      import "/src/components/hu-directive-telemetry-tile.js";
       import "/src/components/hu-message-group.js";
       import "/src/components/hu-skill-card.js";
       import "/src/components/hu-skill-detail.js";

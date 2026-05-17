@@ -18,27 +18,46 @@ static void trim(const char *s, size_t len, size_t *start_out, size_t *end_out) 
     *end_out = end;
 }
 
+/* Single source of truth: provider name → canonical API-key env var.
+ * Aliases (e.g. "google" / "vertex" → "GEMINI_API_KEY") live here so every
+ * caller agrees. Audit 2026-05-16 expanded this table with aliases that
+ * had previously only existed inside config_merge.c's strcmp ladder. */
+static const struct {
+    const char *key;
+    size_t klen;
+    const char *env;
+} HU_PROVIDER_API_KEY_MAP[] = {
+    {"anthropic", 9, "ANTHROPIC_API_KEY"},
+    {"openai", 6, "OPENAI_API_KEY"},
+    {"openrouter", 10, "OPENROUTER_API_KEY"},
+    {"gemini", 6, "GEMINI_API_KEY"},
+    {"google", 6, "GEMINI_API_KEY"},
+    {"vertex", 6, "GEMINI_API_KEY"},
+    {"groq", 4, "GROQ_API_KEY"},
+    {"ollama", 6, "OLLAMA_HOST"},
+    {"codex-cli", 9, "OPENAI_API_KEY"},
+    {"claude_cli", 10, "ANTHROPIC_API_KEY"},
+};
+
+const char *hu_provider_default_api_key_env_name(const char *provider_name,
+                                                 size_t provider_name_len) {
+    if (!provider_name || provider_name_len == 0)
+        return NULL;
+    for (size_t i = 0; i < sizeof(HU_PROVIDER_API_KEY_MAP) / sizeof(HU_PROVIDER_API_KEY_MAP[0]);
+         i++) {
+        if (provider_name_len == HU_PROVIDER_API_KEY_MAP[i].klen &&
+            memcmp(provider_name, HU_PROVIDER_API_KEY_MAP[i].key, provider_name_len) == 0)
+            return HU_PROVIDER_API_KEY_MAP[i].env;
+    }
+    return NULL;
+}
+
 static const char *provider_env(const char *name, size_t name_len, char *buf, size_t buf_size) {
-    static const struct {
-        const char *key;
-        size_t klen;
-        const char *env;
-    } map[] = {
-        {"anthropic", 9, "ANTHROPIC_API_KEY"},
-        {"openai", 6, "OPENAI_API_KEY"},
-        {"openrouter", 10, "OPENROUTER_API_KEY"},
-        {"gemini", 6, "GEMINI_API_KEY"},
-        {"groq", 4, "GROQ_API_KEY"},
-        {"ollama", 6, "API_KEY"},
-        {"codex-cli", 9, "OPENAI_API_KEY"},
-        {"claude_cli", 10, "ANTHROPIC_API_KEY"},
-    };
-    for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
-        if (name_len == map[i].klen && memcmp(name, map[i].key, name_len) == 0) {
-            const char *v = getenv_safe(map[i].env);
-            if (v && strlen(v) > 0)
-                return v;
-        }
+    const char *env_name = hu_provider_default_api_key_env_name(name, name_len);
+    if (env_name) {
+        const char *v = getenv_safe(env_name);
+        if (v && strlen(v) > 0)
+            return v;
     }
     const char *v = getenv_safe("HUMAN_API_KEY");
     if (v && strlen(v) > 0)

@@ -1,0 +1,240 @@
+diff --git a/src/agent/agent_stream.c b/src/agent/agent_stream.c
+index 773615cf..3cb2cad1 100644
+--- a/src/agent/agent_stream.c
++++ b/src/agent/agent_stream.c
+@@ -199,6 +199,14 @@ hu_error_t hu_agent_turn_stream(hu_agent_t *agent, const char *msg, size_t msg_l
+     }
+ #endif
+ 
++    /* Prefer per-turn model/temperature from model router when set */
++    const char *eff_model = (agent->turn_model && agent->turn_model_len > 0)
++                                ? agent->turn_model : agent->model_name;
++    size_t eff_model_len = (agent->turn_model && agent->turn_model_len > 0)
++                               ? agent->turn_model_len : agent->model_name_len;
++    double eff_temperature = (agent->turn_temperature > 0.0)
++                                 ? agent->turn_temperature : agent->temperature;
++
+     char *system_prompt = NULL;
+     size_t system_prompt_len = 0;
+     if (agent->cached_static_prompt && !persona_prompt && !awareness_ctx) {
+@@ -215,8 +223,8 @@ hu_error_t hu_agent_turn_stream(hu_agent_t *agent, const char *msg, size_t msg_l
+         hu_prompt_config_t cfg = {
+             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
+             .provider_name_len = 0,
+-            .model_name = agent->model_name,
+-            .model_name_len = agent->model_name_len,
++            .model_name = eff_model,
++            .model_name_len = eff_model_len,
+             .workspace_dir = agent->workspace_dir,
+             .workspace_dir_len = agent->workspace_dir_len,
+             .tools = agent->tools,
+@@ -302,9 +310,9 @@ hu_error_t hu_agent_turn_stream(hu_agent_t *agent, const char *msg, size_t msg_l
+     memset(&req, 0, sizeof(req));
+     req.messages = msgs;
+     req.messages_count = msgs_count;
+-    req.model = agent->model_name;
+-    req.model_len = agent->model_name_len;
+-    req.temperature = agent->temperature;
++    req.model = eff_model;
++    req.model_len = eff_model_len;
++    req.temperature = eff_temperature;
+     req.tools = (agent->tool_specs_count > 0) ? agent->tool_specs : NULL;
+     req.tools_count = agent->tool_specs_count;
+ 
+@@ -313,8 +321,8 @@ hu_error_t hu_agent_turn_stream(hu_agent_t *agent, const char *msg, size_t msg_l
+         hu_stream_chat_result_t sresp;
+         memset(&sresp, 0, sizeof(sresp));
+         err = agent->provider.vtable->stream_chat(
+-            agent->provider.ctx, agent->alloc, &req, agent->model_name, agent->model_name_len,
+-            agent->temperature, stream_chunk_to_token_cb, &wrap, &sresp);
++            agent->provider.ctx, agent->alloc, &req, eff_model, eff_model_len,
++            eff_temperature, stream_chunk_to_token_cb, &wrap, &sresp);
+         if (msgs)
+             agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(hu_chat_message_t));
+         if (system_prompt)
+@@ -460,6 +468,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
+     }
+ #endif
+ 
++    /* Prefer per-turn model/temperature from model router when set */
++    const char *v2_model = (agent->turn_model && agent->turn_model_len > 0)
++                               ? agent->turn_model : agent->model_name;
++    size_t v2_model_len = (agent->turn_model && agent->turn_model_len > 0)
++                              ? agent->turn_model_len : agent->model_name_len;
++    double v2_temperature = (agent->turn_temperature > 0.0)
++                                ? agent->turn_temperature : agent->temperature;
++
+     char *system_prompt = NULL;
+     size_t system_prompt_len = 0;
+     if (agent->cached_static_prompt && !persona_prompt && !awareness_ctx) {
+@@ -476,8 +492,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
+         hu_prompt_config_t cfg = {
+             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
+             .provider_name_len = 0,
+-            .model_name = agent->model_name,
+-            .model_name_len = agent->model_name_len,
++            .model_name = v2_model,
++            .model_name_len = v2_model_len,
+             .workspace_dir = agent->workspace_dir,
+             .workspace_dir_len = agent->workspace_dir_len,
+             .tools = agent->tools,
+@@ -567,9 +583,9 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
+         memset(&req, 0, sizeof(req));
+         req.messages = all_msgs;
+         req.messages_count = total_msgs;
+-        req.model = agent->model_name;
+-        req.model_len = agent->model_name_len;
+-        req.temperature = agent->temperature;
++        req.model = v2_model;
++        req.model_len = v2_model_len;
++        req.temperature = v2_temperature;
+         req.tools = (agent->tool_specs_count > 0) ? agent->tool_specs : NULL;
+         req.tools_count = agent->tool_specs_count;
+ 
+@@ -578,8 +594,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
+         hu_stream_chat_result_t sresp;
+         memset(&sresp, 0, sizeof(sresp));
+         err = agent->provider.vtable->stream_chat(
+-            agent->provider.ctx, agent->alloc, &req, agent->model_name, agent->model_name_len,
+-            agent->temperature, stream_chunk_to_event_cb, &wrap, &sresp);
++            agent->provider.ctx, agent->alloc, &req, v2_model, v2_model_len,
++            v2_temperature, stream_chunk_to_event_cb, &wrap, &sresp);
+ 
+         agent->alloc->free(agent->alloc->ctx, all_msgs, total_msgs * sizeof(hu_chat_message_t));
+ 
+diff --git a/src/agent/agent_turn.c b/src/agent/agent_turn.c
+index 3d82c3ff..afabc2b3 100644
+--- a/src/agent/agent_turn.c
++++ b/src/agent/agent_turn.c
+@@ -4898,7 +4898,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
+                             }
+ #endif
+ 
+-<<<<<<< HEAD
+                             /* TTL cache: store successful tool results */
+                             if (ttl_cache && result->success && result->output &&
+                                 result->output_len > 0 && !(ttl_hits && ttl_hits[tc]) &&
+@@ -5028,7 +5027,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
+                             if (agent->hook_registry) {
+                                 hu_hook_result_t seq_hook_res;
+                                 memset(&seq_hook_res, 0, sizeof(seq_hook_res));
+-                                const char *seq_args = call->arguments ? call->arguments : "";
+                                 hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc,
+                                                          pol_tn, pol_tn_len, seq_args, strlen(seq_args),
+                                                          &seq_hook_res);
+diff --git a/src/main.c b/src/main.c
+index 1328c2a0..ea0b823b 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -16,6 +16,7 @@
+ #include "human/agent/awareness.h"
+ #include "human/agent/cli.h"
+ #include "human/agent/episodic.h"
++#include "human/agent/model_router.h"
+ #include "human/agent/outcomes.h"
+ #include "human/agent/registry.h"
+ #include "human/agent/spawn.h"
+@@ -2371,18 +2372,91 @@ static bool gw_agent_on_message(hu_bus_event_type_t type, const hu_bus_event_t *
+     if (!msg || !msg[0])
+         return true;
+ 
++    hu_agent_t *agent = b->agent;
++    hu_allocator_t *alloc = agent->alloc;
++
+     char *reply = NULL;
+     size_t reply_len = 0;
+-    b->agent->active_channel = "gateway";
+-    b->agent->active_channel_len = 8;
++    agent->active_channel = "gateway";
++    agent->active_channel_len = 8;
++
++    /* Build conversation history entries from agent history for awareness */
++    size_t hist_cap = agent->history_count < 20 ? agent->history_count : 20;
++    hu_channel_history_entry_t *hist_entries = NULL;
++    size_t hist_count = 0;
++    if (hist_cap > 0) {
++        hist_entries = (hu_channel_history_entry_t *)alloc->alloc(
++            alloc->ctx, hist_cap * sizeof(hu_channel_history_entry_t));
++        if (hist_entries) {
++            size_t start = agent->history_count > hist_cap
++                               ? agent->history_count - hist_cap : 0;
++            for (size_t i = start; i < agent->history_count; i++) {
++                const hu_owned_message_t *m = &agent->history[i];
++                if (m->role != HU_ROLE_USER && m->role != HU_ROLE_ASSISTANT)
++                    continue;
++                if (!m->content || m->content_len == 0)
++                    continue;
++                hu_channel_history_entry_t *e = &hist_entries[hist_count];
++                e->from_me = (m->role == HU_ROLE_ASSISTANT);
++                size_t copy = m->content_len < sizeof(e->text) - 1
++                                  ? m->content_len : sizeof(e->text) - 1;
++                memcpy(e->text, m->content, copy);
++                e->text[copy] = '\0';
++                e->timestamp[0] = '\0';
++                hist_count++;
++            }
++        }
++    }
++
++    /* Conversation intelligence: build awareness context */
++    char *convo_ctx = NULL;
++    size_t convo_ctx_len = 0;
++    if (hist_count > 0) {
++        convo_ctx = hu_conversation_build_awareness(alloc, hist_entries, hist_count,
++#ifdef HU_HAS_PERSONA
++                                                    agent->persona,
++#else
++                                                    NULL,
++#endif
++                                                    &convo_ctx_len);
++    }
++    agent->conversation_context = convo_ctx;
++    agent->conversation_context_len = convo_ctx_len;
++
++    /* Model routing: select optimal model tier based on message content */
++    {
++        hu_model_router_config_t mr_cfg = hu_model_router_default_config();
++        time_t now = time(NULL);
++        struct tm lt;
++        localtime_r(&now, &lt);
++        hu_model_selection_t sel = hu_model_route(&mr_cfg, msg, strlen(msg),
++                                                  NULL, 0, lt.tm_hour, hist_count);
++        agent->turn_model = sel.model;
++        agent->turn_model_len = sel.model_len;
++        agent->turn_temperature = sel.temperature;
++        agent->turn_thinking_budget = sel.thinking_budget;
++    }
++
+     gw_stream_ctx_t stream_ctx;
+     memset(&stream_ctx, 0, sizeof(stream_ctx));
+     stream_ctx.bus = b->bus;
+     snprintf(stream_ctx.channel, HU_BUS_CHANNEL_LEN, "%s",
+              ev->channel[0] ? ev->channel : "gateway");
+     snprintf(stream_ctx.id, HU_BUS_ID_LEN, "%s", ev->id);
+-    hu_error_t err = hu_agent_turn_stream_v2(b->agent, msg, strlen(msg), gw_stream_event_cb,
++    hu_error_t err = hu_agent_turn_stream_v2(agent, msg, strlen(msg), gw_stream_event_cb,
+                                              &stream_ctx, &reply, &reply_len);
++
++    /* Clean up per-turn context */
++    agent->conversation_context = NULL;
++    agent->conversation_context_len = 0;
++    agent->turn_model = NULL;
++    agent->turn_model_len = 0;
++    agent->turn_temperature = 0.0;
++    agent->turn_thinking_budget = 0;
++    if (convo_ctx)
++        alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
++    if (hist_entries)
++        alloc->free(alloc->ctx, hist_entries, hist_cap * sizeof(hu_channel_history_entry_t));
+     if (err == HU_OK && reply && reply_len > 0) {
+         hu_bus_event_t rev;
+         memset(&rev, 0, sizeof(rev));
+@@ -2422,7 +2496,7 @@ static bool gw_agent_on_message(hu_bus_event_type_t type, const hu_bus_event_t *
+         hu_bus_publish(b->bus, &eev);
+     }
+     if (reply)
+-        b->agent->alloc->free(b->agent->alloc->ctx, reply, reply_len + 1);
++        alloc->free(alloc->ctx, reply, reply_len + 1);
+     return true;
+ }
+ 

@@ -12,6 +12,8 @@ static void memory_ok_pizza_any_time_returns_true(void) {
     HU_ASSERT_TRUE(ok);
     ok = hu_protective_memory_ok(&alloc, &mem, "c1", 2, "pizza", 5, -0.5f, 23);
     HU_ASSERT_TRUE(ok);
+    if (mem.vtable && mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
 }
 
 static void memory_ok_death_late_hour_returns_false(void) {
@@ -20,6 +22,8 @@ static void memory_ok_death_late_hour_returns_false(void) {
     bool ok = hu_protective_memory_ok(&alloc, &mem, "c1", 2,
                                      "attended a death in the family", 30, -0.2f, 23);
     HU_ASSERT_FALSE(ok);
+    if (mem.vtable && mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
 }
 
 static void memory_ok_death_daytime_positive_valence_returns_true(void) {
@@ -28,6 +32,8 @@ static void memory_ok_death_daytime_positive_valence_returns_true(void) {
     bool ok = hu_protective_memory_ok(&alloc, &mem, "c1", 2,
                                      "death of a character in the movie", 34, 0.1f, 14);
     HU_ASSERT_TRUE(ok);
+    if (mem.vtable && mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
 }
 
 static void advice_ok_one_venting_returns_false(void) {

@@ -1,12 +1,15 @@
-#include "human/core/log.h"
 #include "human/gateway/openai_compat.h"
 #include "../agent/agent_internal.h"
 #include "human/agent.h"
+#include "human/agent/output_validator_chain.h"
+#include "human/agent/validators/builtin.h"
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/observability/validator_telemetry.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
 #include <math.h>
@@ -616,10 +619,45 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                                                  &response, &response_len);
 
             /* Strip model artifacts before further processing */
+            bool validator_rejected = false;
             if (agent_err == HU_OK && response && response_len > 0) {
-                response_len = hu_conversation_strip_channel_tags(response, response_len);
-                response_len = hu_conversation_strip_ai_phrases(response, response_len);
-                response_len = hu_conversation_strip_formal_structure(response, response_len);
+                hu_output_validator_chain_t *out_chain = NULL;
+                if (hu_validators_build_default_outbound_chain(alloc, NULL, 0, &out_chain) ==
+                    HU_OK) {
+                    hu_chain_result_t cr;
+                    memset(&cr, 0, sizeof(cr));
+                    if (hu_output_validator_chain_execute(out_chain, alloc, NULL, response,
+                                                          response_len, &cr) == HU_OK) {
+                        hu_observer_emit_validator_decision(
+                            app_ctx->agent ? app_ctx->agent->observer : NULL, &cr, NULL,
+                            response_len);
+                        if (cr.final_decision == HU_VALIDATOR_REJECT) {
+                            /* Deny-by-default: block response from reaching the client. */
+                            hu_log_warn("openai-compat",
+                                        app_ctx->agent ? app_ctx->agent->observer : NULL,
+                                        "validator chain REJECT (via %s) — suppressing response",
+                                        cr.deciding_validator_name ? cr.deciding_validator_name
+                                                                   : "unknown");
+                            validator_rejected = true;
+                        } else if (cr.final_text) {
+                            if (cr.final_text != response && cr.final_text_len <= response_len) {
+                                memcpy(response, cr.final_text, cr.final_text_len);
+                                response_len = cr.final_text_len;
+                                response[response_len] = '\0';
+                            }
+                        }
+                        hu_chain_result_free(alloc, &cr);
+                    }
+                    hu_output_validator_chain_destroy(out_chain);
+                }
+            }
+            if (validator_rejected) {
+                if (response)
+                    app_ctx->agent->alloc->free(app_ctx->agent->alloc->ctx, response,
+                                                response_len + 1);
+                error_response(alloc, 422, "Content policy violation", out_status, out_body,
+                               out_body_len);
+                return;
             }
 
             /* AI-tell filter: retry once if known robotic phrases detected */

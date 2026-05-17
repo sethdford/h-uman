@@ -184,6 +184,34 @@ hu_error_t hu_persona_cli_parse(int argc, const char **argv, hu_persona_cli_args
         if (argc < 4)
             return HU_ERR_INVALID_ARGUMENT;
         out->name = argv[3];
+    } else if (strcmp(action, "filler") == 0) {
+        if (argc < 5)
+            return HU_ERR_INVALID_ARGUMENT;
+        out->name = argv[3]; /* persona name is argv[3] for filler subcommand */
+        const char *sub = argv[4];
+        if (strcmp(sub, "add") == 0)
+            out->action = HU_PERSONA_ACTION_FILLER_ADD;
+        else if (strcmp(sub, "list") == 0)
+            out->action = HU_PERSONA_ACTION_FILLER_LIST;
+        else if (strcmp(sub, "remove") == 0)
+            out->action = HU_PERSONA_ACTION_FILLER_REMOVE;
+        else
+            return HU_ERR_INVALID_ARGUMENT;
+        out->filler_index = -1;
+        for (int i = 5; i < argc; i++) {
+            if (strcmp(argv[i], "--channel") == 0 && i + 1 < argc) {
+                out->filler_channel = argv[++i];
+            } else if (strcmp(argv[i], "--index") == 0 && i + 1 < argc) {
+                out->filler_index = atoi(argv[++i]);
+            } else if (argv[i][0] != '-' && out->action == HU_PERSONA_ACTION_FILLER_ADD &&
+                       out->filler_text == NULL) {
+                out->filler_text = argv[i];
+            }
+        }
+        if (!out->filler_channel)
+            return HU_ERR_INVALID_ARGUMENT;
+        if (out->action == HU_PERSONA_ACTION_FILLER_ADD && !out->filler_text)
+            return HU_ERR_INVALID_ARGUMENT;
     } else {
         return HU_ERR_INVALID_ARGUMENT;
     }
@@ -800,8 +828,8 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         }
         hu_persona_eval_question_t qs[16];
         size_t qn = 0;
-        err = hu_persona_eval_generate_baseline(alloc, &persona, qs, sizeof(qs) / sizeof(qs[0]),
-                                                &qn);
+        err =
+            hu_persona_eval_generate_baseline(alloc, &persona, qs, sizeof(qs) / sizeof(qs[0]), &qn);
         if (err != HU_OK || qn == 0) {
             fprintf(stderr, "eval: could not build baseline questions\n");
             hu_persona_deinit(alloc, &persona);
@@ -1333,6 +1361,162 @@ hu_error_t hu_persona_cli_run(hu_allocator_t *alloc, const hu_persona_cli_args_t
         fprintf(stdout, "Run this prompt through your AI provider, save the response, then run:\n");
         fprintf(stdout, "  human persona create %s --from-response <path>\n", args->name);
         return HU_OK;
+#endif
+    }
+    case HU_PERSONA_ACTION_FILLER_ADD:
+    case HU_PERSONA_ACTION_FILLER_LIST:
+    case HU_PERSONA_ACTION_FILLER_REMOVE: {
+        if (!args->name || !args->name[0]) {
+            fprintf(stderr, "Persona name required for filler\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        if (!args->filler_channel || !args->filler_channel[0]) {
+            fprintf(stderr, "filler: --channel is required\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+#if defined(__unix__) || defined(__APPLE__)
+        hu_persona_t p = {0};
+        hu_error_t err = hu_persona_load(alloc, args->name, strlen(args->name), &p);
+        if (err != HU_OK) {
+            fprintf(stderr, "Persona not found: %s\n", args->name);
+            return err;
+        }
+
+        /* Find the overlay for the requested channel (mutable pointer). */
+        hu_persona_overlay_t *ov = NULL;
+        for (size_t i = 0; i < p.overlays_count; i++) {
+            if (p.overlays[i].channel && strcmp(p.overlays[i].channel, args->filler_channel) == 0) {
+                ov = &p.overlays[i];
+                break;
+            }
+        }
+
+        if (args->action == HU_PERSONA_ACTION_FILLER_LIST) {
+            if (!ov || ov->filler_bank_count == 0) {
+                fprintf(stdout, "no fillers for channel %s\n", args->filler_channel);
+            } else {
+                for (size_t i = 0; i < ov->filler_bank_count; i++) {
+                    fprintf(stdout, "[%zu] \"%s\"\n", i,
+                            ov->filler_bank[i] ? ov->filler_bank[i] : "");
+                }
+            }
+            hu_persona_deinit(alloc, &p);
+            return HU_OK;
+        }
+
+        if (args->action == HU_PERSONA_ACTION_FILLER_ADD) {
+            if (!args->filler_text || !args->filler_text[0]) {
+                fprintf(stderr, "filler add: text is required\n");
+                hu_persona_deinit(alloc, &p);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            /* Create overlay if missing. */
+            if (!ov) {
+                hu_persona_overlay_t *new_ovs = (hu_persona_overlay_t *)alloc->alloc(
+                    alloc->ctx, (p.overlays_count + 1) * sizeof(hu_persona_overlay_t));
+                if (!new_ovs) {
+                    hu_persona_deinit(alloc, &p);
+                    return HU_ERR_OUT_OF_MEMORY;
+                }
+                if (p.overlays && p.overlays_count > 0)
+                    memcpy(new_ovs, p.overlays, p.overlays_count * sizeof(hu_persona_overlay_t));
+                if (p.overlays)
+                    alloc->free(alloc->ctx, p.overlays,
+                                p.overlays_count * sizeof(hu_persona_overlay_t));
+                memset(&new_ovs[p.overlays_count], 0, sizeof(hu_persona_overlay_t));
+                new_ovs[p.overlays_count].channel =
+                    (char *)alloc->alloc(alloc->ctx, strlen(args->filler_channel) + 1);
+                if (!new_ovs[p.overlays_count].channel) {
+                    alloc->free(alloc->ctx, new_ovs,
+                                (p.overlays_count + 1) * sizeof(hu_persona_overlay_t));
+                    p.overlays = NULL;
+                    p.overlays_count = 0;
+                    hu_persona_deinit(alloc, &p);
+                    return HU_ERR_OUT_OF_MEMORY;
+                }
+                memcpy(new_ovs[p.overlays_count].channel, args->filler_channel,
+                       strlen(args->filler_channel) + 1);
+                p.overlays = new_ovs;
+                p.overlays_count++;
+                ov = &p.overlays[p.overlays_count - 1];
+            }
+            /* Enforce soft cap of 32. */
+            if (ov->filler_bank_count >= 32) {
+                fprintf(stderr, "filler add: channel %s is at the 32-filler cap\n",
+                        args->filler_channel);
+                hu_persona_deinit(alloc, &p);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            /* Grow array if needed. */
+            if (ov->filler_bank_count >= ov->filler_bank_cap) {
+                size_t new_cap = ov->filler_bank_cap == 0 ? 4 : ov->filler_bank_cap * 2;
+                if (new_cap > 32)
+                    new_cap = 32;
+                char **new_bank = (char **)alloc->alloc(alloc->ctx, new_cap * sizeof(char *));
+                if (!new_bank) {
+                    hu_persona_deinit(alloc, &p);
+                    return HU_ERR_OUT_OF_MEMORY;
+                }
+                if (ov->filler_bank && ov->filler_bank_count > 0)
+                    memcpy(new_bank, ov->filler_bank, ov->filler_bank_count * sizeof(char *));
+                if (ov->filler_bank)
+                    alloc->free(alloc->ctx, ov->filler_bank, ov->filler_bank_cap * sizeof(char *));
+                ov->filler_bank = new_bank;
+                ov->filler_bank_cap = new_cap;
+            }
+            char *copy = (char *)alloc->alloc(alloc->ctx, strlen(args->filler_text) + 1);
+            if (!copy) {
+                hu_persona_deinit(alloc, &p);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memcpy(copy, args->filler_text, strlen(args->filler_text) + 1);
+            ov->filler_bank[ov->filler_bank_count++] = copy;
+            err = hu_persona_creator_write(alloc, &p);
+            hu_persona_deinit(alloc, &p);
+            if (err != HU_OK) {
+                fprintf(stderr, "filler add: failed to save persona\n");
+                return err;
+            }
+            fprintf(stdout, "filler added to %s for channel %s\n", args->name,
+                    args->filler_channel);
+            return HU_OK;
+        }
+
+        /* FILLER_REMOVE */
+        if (!ov || ov->filler_bank_count == 0) {
+            fprintf(stderr, "filler remove: no fillers for channel %s\n", args->filler_channel);
+            hu_persona_deinit(alloc, &p);
+            return HU_ERR_NOT_FOUND;
+        }
+        if (args->filler_index < 0 || (size_t)args->filler_index >= ov->filler_bank_count) {
+            fprintf(stderr, "filler remove: index %d out of range [0, %zu)\n", args->filler_index,
+                    ov->filler_bank_count);
+            hu_persona_deinit(alloc, &p);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        size_t idx = (size_t)args->filler_index;
+        if (ov->filler_bank[idx]) {
+            size_t entry_len = strlen(ov->filler_bank[idx]);
+            alloc->free(alloc->ctx, ov->filler_bank[idx], entry_len + 1);
+            ov->filler_bank[idx] = NULL;
+        }
+        /* Shift entries down. */
+        for (size_t i = idx + 1; i < ov->filler_bank_count; i++)
+            ov->filler_bank[i - 1] = ov->filler_bank[i];
+        ov->filler_bank[ov->filler_bank_count - 1] = NULL;
+        ov->filler_bank_count--;
+        err = hu_persona_creator_write(alloc, &p);
+        hu_persona_deinit(alloc, &p);
+        if (err != HU_OK) {
+            fprintf(stderr, "filler remove: failed to save persona\n");
+            return err;
+        }
+        fprintf(stdout, "filler %d removed from channel %s\n", args->filler_index,
+                args->filler_channel);
+        return HU_OK;
+#else
+        fprintf(stderr, "filler subcommand requires POSIX\n");
+        return HU_ERR_NOT_SUPPORTED;
 #endif
     }
     }

@@ -103,6 +103,15 @@ hu_policy_action_t hu_agent_internal_evaluate_tool_policy(hu_agent_t *agent, con
                                                           const char *args_json);
 hu_tool_t *hu_agent_internal_find_tool(hu_agent_t *agent, const char *name, size_t name_len);
 
+/* Canonical tool dispatch: pre/post hook pipeline + execute.
+ * Returns HU_OK for normal completion (including hook-denied dispatch).
+ * Caller frees *out via hu_tool_result_free. */
+hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *tool,
+                                                 const char *tool_name, size_t tool_name_len,
+                                                 const char *args_json, size_t args_json_len,
+                                                 const hu_json_value_t *args_parsed,
+                                                 hu_tool_result_t *out);
+
 /* Shared humanness thresholds used by both batch and streaming paths */
 #ifndef HU_SYCOPHANCY_THRESHOLD
 #define HU_SYCOPHANCY_THRESHOLD 0.5f

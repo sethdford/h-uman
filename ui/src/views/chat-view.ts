@@ -118,6 +118,10 @@ export class ScChatView extends GatewayAwareLitElement {
         font-size: var(--hu-text-xs);
         letter-spacing: 0.01em;
       }
+      .status-meta {
+        color: var(--hu-text-muted);
+        font-size: var(--hu-text-2xs, 0.6875rem);
+      }
       .retry-btn-wrap {
         display: flex;
         justify-content: center;
@@ -1123,8 +1127,15 @@ export class ScChatView extends GatewayAwareLitElement {
   }
 
   private _renderStatusBar() {
+    const connLabel =
+      this.connectionStatus === "connected"
+        ? "Connected"
+        : this.connectionStatus === "connecting"
+          ? "Reconnecting\u2026"
+          : "Disconnected";
+
     return html`
-      <div class="status-bar">
+      <div class="status-bar" role="region" aria-label="Chat status">
         <div class="status-left">
           <button
             type="button"
@@ -1134,14 +1145,10 @@ export class ScChatView extends GatewayAwareLitElement {
           >
             ${icons["sidebar-toggle"]}
           </button>
-          ${this.connectionStatus !== "connected"
-            ? html`<hu-status-dot status=${this.connectionStatus}></hu-status-dot>
-                <span
-                  >${this.connectionStatus === "connecting"
-                    ? "Reconnecting\u2026"
-                    : "Disconnected"}</span
-                >`
-            : nothing}
+          <hu-status-dot
+            .status=${this.connectionStatus === "connected" ? "connected" : this.connectionStatus}
+          ></hu-status-dot>
+          <span class="status-meta">${connLabel}</span>
         </div>
         <span class="status-title"
           >${this.sessionKey === "default" ? "New Chat" : this.sessionKey}</span

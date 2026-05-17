@@ -1,0 +1,15 @@
+  skill_scaffold: 12/12 passed
+  plugin_discovery: 7/7 passed
+  context_engine_rag: 10/10 passed
+
+=== persona_directive_channels ===
+  PASS  persona_directive_starter_persona_loads_four_tier1_overlays
+  PASS  persona_directive_discord_overlay_fires_casual_emoji
+  PASS  persona_directive_imessage_overlay_fires_casual_emoji
+  PASS  persona_directive_slack_overlay_fires_formal_terse
+  PASS  persona_directive_telegram_overlay_fires_casual_or_short
+  PASS  persona_directive_tier1_batch_yields_zero_null_overlay
+  PASS  persona_directive_starter_persona_ships_tier1_example_banks
+  PASS  persona_directive_tier1_overlay_bank_coherence
+
+--- Results: 8/8 passed, 9710 skipped ---

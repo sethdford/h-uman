@@ -25,6 +25,8 @@
 
 #include "human/agent/self_rag.h"
 
+#include "human/agent/response_verifier.h" /* sprint-2c Story A — hu_negatives_scan_claim */
+#include "human/core/log.h"
 #include "human/memory/corrective_rag.h"
 /* Relation row payloads from v1 `HU_MEM_RELATION` facade reads (`hu_memory_relation_row_t`). */
 #include "human/memory/memory.h"
@@ -507,6 +509,49 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
         return HU_OK;
     }
 
+    /* 1b. sprint-2c Story A.3 — scan atomic claims against wm->negatives.
+     * [hard]/[policy] hits force ABSTAIN immediately (no per-claim scoring
+     * needed). [soft]/[confirm] hits mark the matching claim so the
+     * hedge-rebuild path threads the matching negative's text. */
+    hu_verifier_outcome_t neg_outcome = HU_VERIFY_RESULT_SUPPORTED;
+    char neg_refusal[256] = {0};
+    char neg_hedge[160] = {0};
+    bool policy_hit = false;
+    bool neg_hedge_per_claim[sizeof(resp->claims) / sizeof(resp->claims[0])] = {false};
+    if (req->wm) {
+        for (size_t i = 0; i < n; i++) {
+            char this_refusal[256] = {0};
+            char this_hedge[160] = {0};
+            bool this_policy = false;
+            hu_verifier_outcome_t o = hu_negatives_scan_claim(
+                req->wm, resp->claims[i].text, this_refusal, sizeof(this_refusal),
+                this_hedge, sizeof(this_hedge), &this_policy);
+            if (o == HU_VERIFY_RESULT_ABSTAIN) {
+                snprintf(neg_refusal, sizeof(neg_refusal), "%s", this_refusal);
+                policy_hit = this_policy;
+                neg_outcome = HU_VERIFY_RESULT_ABSTAIN;
+                break;
+            }
+            if (o == HU_VERIFY_RESULT_HEDGED) {
+                neg_hedge_per_claim[i] = true;
+                if (neg_hedge[0] == '\0')
+                    snprintf(neg_hedge, sizeof(neg_hedge), "%s", this_hedge);
+                if (neg_outcome == HU_VERIFY_RESULT_SUPPORTED)
+                    neg_outcome = HU_VERIFY_RESULT_HEDGED;
+            }
+        }
+    }
+    if (neg_outcome == HU_VERIFY_RESULT_ABSTAIN) {
+        resp->outcome = HU_SELF_RAG_ABSTAINED;
+        snprintf(resp->refusal_text, sizeof(resp->refusal_text), "%s", neg_refusal);
+        if (policy_hit)
+            hu_log_warn("self_rag_atomic", NULL,
+                        "negative-memory [policy] hit forced ABSTAIN for contact=%.*s",
+                        (int)(req->contact_id_len > 64 ? 64 : req->contact_id_len),
+                        req->contact_id ? req->contact_id : "");
+        return HU_OK;
+    }
+
     /* 2. Score each atomic claim. */
     int64_t now = req->now_ms;
     size_t flagged = 0;
@@ -602,6 +647,17 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
     for (size_t i = 0; i < n && off < sizeof(rebuilt) - 256; i++) {
         const hu_atomic_claim_t *c = &resp->claims[i];
         int w;
+        /* sprint-2c Story A.3 — claims that hit a [soft]/[confirm]
+         * negative get the negative's hedge prepended regardless of
+         * facade score. The facade may say "supported" but the negative
+         * is an explicit "don't say this without confirming". */
+        if (neg_hedge_per_claim[i]) {
+            w = snprintf(rebuilt + off, sizeof(rebuilt) - off, "%s%s %s.",
+                         off == 0 ? "" : " ", neg_hedge, c->text);
+            any_modified = true;
+            if (w > 0) off += (size_t)w;
+            continue;
+        }
         if (c->fabricated) {
             if (req->mode == HU_VERIFY_STRICT) {
                 /* P2F — Corrective-RAG via W7 facade. Bypasses the legacy

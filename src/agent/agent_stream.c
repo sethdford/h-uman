@@ -47,6 +47,7 @@
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/memory/personal_model.h"
+#include "human/agent/channel_trust.h"
 #include "human/persona.h"
 #include "human/persona/creative_voice.h"
 #include "human/persona/delta_observer.h"
@@ -367,7 +368,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     }
 
 #ifndef HU_IS_TEST
-    (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+    {
+        /* SOTA-2026 init-09: stamp provenance derived from the active
+         * channel so the trust gate + MINJA detector run in production. */
+        hu_provenance_t _ingest_prov = hu_channel_trust_stamp(
+            agent->active_channel, agent->active_channel_len,
+            NULL, 0, (int64_t)time(NULL));
+        (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true,
+                                       (int64_t)time(NULL), &_ingest_prov);
+    }
     if (agent->auto_save && hu_personal_model_has_content(&agent->personal_model)) {
         char pm_path[1024];
         if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path)))
@@ -391,6 +400,19 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                               4000);
         hu_memory_loader_set_facade(&loader, agent->w7_facade);
         hu_memory_loader_set_personal_model(&loader, &agent->personal_model);
+        /* Story B (sprint-4 follow-up): mirror agent_turn.c — bind persona
+         * context so the streaming-path loader render also gets persona
+         * merge. */
+        hu_persona_context_t loader_pctx = {0};
+        if (agent->persona) {
+            loader_pctx.persona = agent->persona;
+            loader_pctx.channel = agent->active_channel;
+            loader_pctx.channel_len = agent->active_channel_len;
+            loader_pctx.delta_limit = 8;
+            loader_pctx.tools = agent->tools;
+            loader_pctx.tools_count = agent->tools_count;
+            hu_memory_loader_set_persona_context(&loader, &loader_pctx);
+        }
         hu_error_t mem_err =
             hu_memory_loader_load(&loader, msg, msg_len,
                                   agent->memory_session_id ? agent->memory_session_id : "",
@@ -996,10 +1018,24 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         size_t tom_p_len = tom_p[0] ? strlen(tom_p) : 0;
         size_t tom_q_len = tom_q[0] ? strlen(tom_q) : 0;
         size_t tom_c_len = tom_c[0] ? strlen(tom_c) : 0;
+        /* Story B (sprint-4 follow-up): mirror agent_turn.c — thread persona
+         * context so the streaming path gets the same interaction_style and
+         * persona-grounded ToM as the non-streaming path. */
+        hu_persona_context_t pctx = {0};
+        const hu_persona_context_t *pctx_p = NULL;
+        if (agent->persona) {
+            pctx.persona = agent->persona;
+            pctx.channel = agent->active_channel;
+            pctx.channel_len = agent->active_channel_len;
+            pctx.delta_limit = 8;
+            pctx.tools = agent->tools;
+            pctx.tools_count = agent->tools_count;
+            pctx_p = &pctx;
+        }
         hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                  agent->memory_session_id_len, 0, &world_model_ctx,
                                  &world_model_ctx_len, tom_p, tom_p_len, tom_q, tom_q_len, tom_c,
-                                 tom_c_len, &agent->personal_model, NULL);
+                                 tom_c_len, &agent->personal_model, pctx_p);
         if (world_model_ctx_len > 0)
             agent->world_model_loads++;
     }
@@ -2480,8 +2516,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     /* Personal model: ingest assistant response for style learning */
 #ifndef HU_IS_TEST
     if (!agent->proactive_turn && final_content && final_content_len > 0) {
+        /* Assistant's own response. PERSONA_DERIVED tier — the agent
+         * is observing its own output for style learning. `from_user=false`
+         * means the fact-extraction path is skipped; only the temporal /
+         * interaction counter and metadata are updated. */
+        hu_provenance_t _self_prov = hu_provenance_make(
+            HU_TRUST_PERSONA_DERIVED, "persona_derived", NULL,
+            (int64_t)time(NULL));
         (void)hu_personal_model_ingest(&agent->personal_model, final_content, final_content_len,
-                                       false, (int64_t)time(NULL));
+                                       false, (int64_t)time(NULL), &_self_prov);
     }
 #endif
 

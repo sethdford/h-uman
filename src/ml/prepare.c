@@ -3,6 +3,7 @@
 #include "human/ml/prepare.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/io_secure.h"
 #include "human/ml/ml.h"
 #include "human/ml/tokenizer_ml.h"
 #include <stdio.h>
@@ -55,8 +56,10 @@ hu_error_t hu_ml_prepare_tokenize_file(hu_allocator_t *alloc, hu_bpe_tokenizer_t
     if (err != HU_OK)
         return err;
 
-    FILE *out = fopen(output_path, "wb");
-    if (!out) {
+    /* Tokenized training data — derived from user conversations, so
+     * conservatively 0600 even though the format is opaque binary. */
+    FILE *out = NULL;
+    if (hu_io_secure_open(output_path, HU_IO_PERM_SECRET, "wb", &out) != HU_OK || !out) {
         alloc->free(alloc->ctx, ids, ids_count * sizeof(int32_t));
         return HU_ERR_IO;
     }
@@ -383,12 +386,16 @@ hu_error_t hu_ml_prepare_conversations(hu_allocator_t *alloc, hu_bpe_tokenizer_t
     snprintf(train_path, sizeof(train_path), "%s/train.bin", output_dir);
     snprintf(val_path, sizeof(val_path), "%s/val.bin", output_dir);
 
-    FILE *tf = fopen(train_path, "wb");
+    /* train.bin / val.bin — same PII-derived reasoning as the
+     * single-file output above. 0600 for both. */
+    FILE *tf = NULL;
+    (void)hu_io_secure_open(train_path, HU_IO_PERM_SECRET, "wb", &tf);
     if (tf) {
         fwrite(ids, sizeof(int32_t), val_start, tf);
         fclose(tf);
     }
-    FILE *vf = fopen(val_path, "wb");
+    FILE *vf = NULL;
+    (void)hu_io_secure_open(val_path, HU_IO_PERM_SECRET, "wb", &vf);
     if (vf) {
         fwrite(ids + val_start, sizeof(int32_t), ids_count - val_start, vf);
         fclose(vf);

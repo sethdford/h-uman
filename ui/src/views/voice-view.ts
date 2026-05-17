@@ -1466,22 +1466,24 @@ export class ScVoiceView extends GatewayAwareLitElement {
           <div class="sessions-panel-header">Voice Sessions</div>
 
           <div class="sessions-panel-section">
-            <h4>Sessions</h4>
-            <button
-              type="button"
-              class="session-item active"
-              role="option"
-              aria-selected="true"
-              aria-label="Current session"
-            >
-              <span class="session-item-icon">${icons.mic}</span>
-              <span class="session-item-label"
-                >Session ${sessionCount}
-                ${this._messages.length > 0
-                  ? html` · ${this._messages.length} msg${this._messages.length !== 1 ? "s" : ""}`
-                  : nothing}</span
+            <h4 id="voice-sessions-listbox-label">Sessions</h4>
+            <div role="listbox" aria-labelledby="voice-sessions-listbox-label">
+              <button
+                type="button"
+                class="session-item active"
+                role="option"
+                aria-selected="true"
+                aria-label="Current session"
               >
-            </button>
+                <span class="session-item-icon">${icons.mic}</span>
+                <span class="session-item-label"
+                  >Session ${sessionCount}
+                  ${this._messages.length > 0
+                    ? html` · ${this._messages.length} msg${this._messages.length !== 1 ? "s" : ""}`
+                    : nothing}</span
+                >
+              </button>
+            </div>
           </div>
 
           <div class="sessions-panel-section">

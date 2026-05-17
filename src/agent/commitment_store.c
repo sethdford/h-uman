@@ -155,8 +155,18 @@ hu_error_t hu_commitment_store_list_active(hu_commitment_store_t *store, hu_allo
                                                   session_id_len, &entries, &count);
     if (err != HU_OK)
         return err;
-    if (!entries || count == 0)
+    if (!entries || count == 0) {
+        /* Some memory engines return a pre-allocated entries buffer
+         * even when count==0 (the in-memory engines allocate scratch
+         * before scanning, and the scan may yield no rows). We don't
+         * know the exact size the engine asked for, but the system
+         * allocator and tracking allocator both accept size=0 here
+         * (it's the standard hu_allocator_t contract). Free unconditionally
+         * to satisfy the Linux ASan gate (2.4 KB leak per turn). */
+        if (entries)
+            alloc->free(alloc->ctx, entries, 0);
         return HU_OK;
+    }
 
     hu_commitment_t *active = NULL;
     size_t active_count = 0;

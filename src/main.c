@@ -708,8 +708,8 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
             printf("\n  human doctor %s — diagnostics\n\n", argv[2]);
             for (size_t i = 0; i < item_count; i++) {
                 const char *sev_str = (items[i].severity == HU_DIAG_ERR)    ? "error  "
-                                       : (items[i].severity == HU_DIAG_WARN) ? "warn   "
-                                                                             : "ok     ";
+                                      : (items[i].severity == HU_DIAG_WARN) ? "warn   "
+                                                                            : "ok     ";
                 printf("  %s %s\n", sev_str, items[i].message ? items[i].message : "");
             }
             printf("\n  Summary: %zu ok, %zu warnings, %zu errors\n\n", ok_n, warn_n, err_n);
@@ -2257,10 +2257,9 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
     hu_persona_cli_args_t args;
     hu_error_t err = hu_persona_cli_parse(argc, (const char **)argv, &args);
     if (err != HU_OK) {
-        fprintf(
-            stderr,
-            "Usage: human persona <create|update|show|list|delete|validate|eval|export|merge|import> "
-            "[name] [options]\n");
+        fprintf(stderr, "Usage: human persona "
+                        "<create|update|show|list|delete|validate|eval|export|merge|import|filler> "
+                        "[name] [options]\n");
         fprintf(
             stderr,
             "  create <name> [--from-imessage] [--from-gmail] [--from-facebook] [--interactive]\n");
@@ -2273,6 +2272,9 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "  export <name>\n");
         fprintf(stderr, "  merge <output_name> <name1> <name2> [name3...]\n");
         fprintf(stderr, "  import <name> [--from-stdin | --from-file <path>]\n");
+        fprintf(stderr, "  filler <name> add --channel <name> \"<text>\"     append a filler\n");
+        fprintf(stderr, "  filler <name> list --channel <name>             list fillers\n");
+        fprintf(stderr, "  filler <name> remove --channel <name> --index N  remove by index\n");
         return err;
     }
     return hu_persona_cli_run(alloc, &args);

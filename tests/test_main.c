@@ -22,10 +22,14 @@ void run_crypto_tests(void);
 void run_json_tests(void);
 void run_wasm_tests(void); /* from test_wasm.c when built */
 void run_string_tests(void);
+void run_io_secure_tests(void);
 void run_slice_tests(void);
 void run_memory_tests(void);
 void run_sql_transaction_tests(void);
 void run_memory_util_tests(void);
+#if defined(HU_ENABLE_KV_COMPRESSION)
+void run_kv_compressor_tests(void);
+#endif
 void run_tunnel_tests(void);
 void run_gateway_tests(void);
 void run_auth_tests(void);
@@ -39,6 +43,7 @@ void run_provider_http_tests(void);
 void run_ensemble_tests(void);
 void run_api_key_tests(void);
 void run_channel_tests(void);
+void run_channel_class_tests(void);
 void run_channel_format_tests(void);
 void run_channel_rate_limit_tests(void);
 void run_channel_http_tests(void);
@@ -58,6 +63,7 @@ void run_skill_trust_tests(void);
 void run_tool_tests(void);
 void run_webhook_tests(void);
 void run_hook_pipeline_tests(void);
+void run_agent_dispatch_hooks_tests(void);
 void run_compaction_structured_tests(void);
 void run_instruction_discover_tests(void);
 void test_vtables_run(void);
@@ -112,6 +118,7 @@ void run_style_clone_tests(void);
 void run_life_sim_tests(void);
 void run_persona_mood_tests(void);
 void run_persona_feedback_tests(void);
+void run_persona_filler_roundtrip_tests(void);
 void run_persona_cli_tests(void);
 void run_voice_maturity_tests(void);
 void run_style_learner_tests(void);
@@ -188,6 +195,7 @@ void run_cli_tests(void);
 void run_update_tests(void);
 void run_vector_stores_tests(void);
 void run_memory_engines_ext_tests(void);
+void run_memory_poisoning_tests(void);
 void run_runtime_tests(void);
 void run_runtime_bundle_tests(void);
 void run_channel_loop_tests(void);
@@ -243,6 +251,17 @@ void run_signal_channel_wire_tests(void);
 void run_daemon_housekeeping_tests(void);
 void run_orphan_channel_audit_tests(void);
 void run_verifier_metrics_tests(void);
+void run_output_validator_tests(void);
+void run_chain_failure_paths_tests(void);
+void run_agent_fail_path_regressions_tests(void);
+void run_stop_sequences_tests(void);
+void run_validators_builtin_tests(void);
+void run_pattern_c_paths_tests(void);
+void run_validators_persona_safety_tests(void);
+void run_validator_reject_discards_tests(void);
+void run_validator_telemetry_tests(void);
+void run_validator_chain_cache_tests(void);
+void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
 void run_w6_e2e_adversarial_tests(void);
@@ -267,6 +286,9 @@ void run_v2_wiring_e2e_tests(void);
 void run_b11_pressure_history_e2e_tests(void);
 void run_b9_user_sim_agent_turn_e2e_tests(void);
 void run_personal_model_contradicts_tests(void);
+void run_channel_trust_tests(void);
+void run_minja_guard_tests(void);
+void run_frontier_prompt_tests(void);
 void run_w11_abstain_calibration_tests(void);
 void run_fast_capture_tests(void);
 void run_promotion_tests(void);
@@ -532,6 +554,8 @@ void run_plan_executor_tests(void);
 void run_planner_mcts_wiring_tests(void);
 void run_cdp_tests(void);
 void run_emotional_cognition_tests(void);
+void run_emotional_contagion_tests(void);
+void run_style_mirror_tests(void);
 void run_evolving_cognition_tests(void);
 void run_metacognition_tests(void);
 void run_humanness_frontiers_tests(void);
@@ -541,6 +565,7 @@ void run_sota_research_tests(void);
 void run_sota_wiring_tests(void);
 void run_sota_live_wiring_tests(void);
 void hu_test_permission(void);
+void run_shell_sandbox_tests(void);
 void test_session_persist(void);
 void run_adversarial_memory_safety_tests(void);
 void run_adversarial_injection_tests(void);
@@ -567,33 +592,27 @@ void run_canvas_persist_tests(void);
 void run_canvas_render_tests(void);
 void run_background_registry_tests(void);
 void run_consistency_tests(void);
+void run_mlx_provider_tests(void);
+void run_persona_fidelity_tests(void);
+void run_persona_fidelity_judge_tests(void);
+void run_persona_fidelity_validator_tests(void);
+void run_persona_fidelity_cross_tests(void);
+void run_dpo_extractor_integration_tests(void);
+void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
-/* Phase 5 Task 1 (RL SOTA): opt-in 4-axis fidelity scorer (v2).
- * Additive — v1 scorer + v1 callers are byte-stable per BLOCKER-1. */
+void run_personal_model_simulation_tests(void);
+#ifdef HU_ENABLE_RL_FULL
 void run_personal_model_fidelity_v2_tests(void);
-/* Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative advantage,
- * pessimistic PPO clip, KL-aware loss, analytical gradient.  Loss-only;
- * Task 5 lands the trainer step. */
 void run_grpo_loss_tests(void);
-/* Phase 4 Task 8 (RL SOTA): GRPO MLX subprocess wrapper — JSONL secure
- * perms (H2), factory probe M7 short-circuit, dummy-adapter Python
- * shortcut, real-subprocess gated by HU_HAVE_MLX_LM_GRPO (L1). */
 void run_grpo_mlx_tests(void);
-/* Phase 4 Task 5 (RL SOTA): GRPO HUML trainer — full hu_rl_trainer_t
- * impl that composes rollout + reward_source + KL k3 + GRPO loss math
- * + structural backward into the toy GPT.  Distinct from grpo_loss
- * (this suite is impl-level: factory shape, R12 bounds, kl_beta=0
- * skip-reference contract, step_count advancement, ASan leak pin). */
 void run_grpo_huml_tests(void);
-/* Phase 4 Task 7 (RL SOTA): GRPO HUML synthetic-reward N=4 E2E —
- * umbrella §5 row 4 ship-contract gate.  50 iters × 20-prompt fixture;
- * pins final_loss change signal, mean log-prob of good tokens at policy
- * level, and KL brake (R5).  Optional MLX subprocess test gated
- * compile-time by HU_HAVE_MLX_LM_GRPO. */
 void run_grpo_e2e_tests(void);
+#endif
 void run_persona_directive_channels_tests(void);
+void run_filler_recency_tests(void);
+void run_filler_pctt_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
 void run_self_improve_tests(void);
@@ -601,24 +620,9 @@ void run_sycophancy_guard_tests(void);
 void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
+void run_structured_output_tests(void);
 #ifdef HU_ENABLE_RL_FULL
-/* Phase 5 Task 2 (RL SOTA): bootstrap CI helper — percentile-bootstrap
- * on a vector of per-conversation scores (round-1 BLOCKER-2 fix: NOT
- * a single aggregated scalar — that's degenerate).  Pins n>=30
- * production floor (Wilson NEW-MED-3), n>=10 _for_test floor, finite
- * CI bracketing the mean on a known Normal(0.5, 0.1) sample, byte-
- * identical results across seed=42 calls, and the Task 9 baseline-vs-
- * policy compare-means p-value (low for distinct distributions, high
- * for identical).  Consumed by Task 5 hu_eval_gate_decide and Task 9
- * competitive harness; gated so default release/dev builds
- * (HU_ENABLE_RL_FULL=OFF) do not link the suite. */
 extern void run_bootstrap_ci_tests(void);
-/* Phase 5 Task 3 (RL SOTA): hu_eval_judge_external_t vtable + canned
- * factory — pairwise external-LLM judge bridge for the eval gate
- * (Task 5) and competitive harness (Task 9).  Pins canned cycle
- * determinism, verdict round-trip through deep copy, zero-verdicts
- * rejection, Apple FM (Task 7) + Gemini Nano (Task 8) stub
- * HU_ERR_NOT_SUPPORTED, ASan leak-free deinit. */
 extern void run_eval_judge_external_tests(void);
 extern void run_leaderboard_tests(void);
 extern void run_eval_gate_tests(void);
@@ -699,10 +703,14 @@ int main(int argc, char **argv) {
     run_wasm_tests();
     run_json_tests();
     run_string_tests();
+    run_io_secure_tests();
     run_slice_tests();
     run_memory_tests();
     run_sql_transaction_tests();
     run_memory_util_tests();
+#if defined(HU_ENABLE_KV_COMPRESSION)
+    run_kv_compressor_tests();
+#endif
     run_tunnel_tests();
     run_gateway_tests();
     run_auth_tests();
@@ -716,6 +724,7 @@ int main(int argc, char **argv) {
     run_ensemble_tests();
     run_api_key_tests();
     run_channel_tests();
+    run_channel_class_tests();
     run_channel_format_tests();
     run_channel_rate_limit_tests();
     run_channel_http_tests();
@@ -790,8 +799,10 @@ int main(int argc, char **argv) {
     run_life_sim_tests();
     run_persona_mood_tests();
     run_persona_feedback_tests();
+    run_persona_filler_roundtrip_tests();
     run_persona_cli_tests();
     run_voice_maturity_tests();
+    run_style_mirror_tests();
     run_style_learner_tests();
     run_temporal_tests();
     run_inner_world_tests();
@@ -861,6 +872,7 @@ int main(int argc, char **argv) {
     run_cli_tests();
     run_update_tests();
     run_memory_engines_ext_tests();
+    run_memory_poisoning_tests();
     run_runtime_tests();
     run_runtime_bundle_tests();
     run_channel_loop_tests();
@@ -916,6 +928,17 @@ int main(int argc, char **argv) {
     run_daemon_housekeeping_tests();
     run_orphan_channel_audit_tests();
     run_verifier_metrics_tests();
+    run_output_validator_tests();
+    run_chain_failure_paths_tests();
+    run_agent_fail_path_regressions_tests();
+    run_stop_sequences_tests();
+    run_validators_builtin_tests();
+    run_pattern_c_paths_tests();
+    run_validators_persona_safety_tests();
+    run_validator_reject_discards_tests();
+    run_validator_telemetry_tests();
+    run_validator_chain_cache_tests();
+    run_daemon_e2e_validator_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
     run_w6_e2e_adversarial_tests();
@@ -940,6 +963,9 @@ int main(int argc, char **argv) {
     run_b11_pressure_history_e2e_tests();
     run_b9_user_sim_agent_turn_e2e_tests();
     run_personal_model_contradicts_tests();
+    run_channel_trust_tests();
+    run_minja_guard_tests();
+    run_frontier_prompt_tests();
     run_w11_abstain_calibration_tests();
     run_fast_capture_tests();
     run_promotion_tests();
@@ -1086,6 +1112,7 @@ int main(int argc, char **argv) {
     run_reference_model_tests();
     /* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
     run_dpo_real_loss_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs. */
     run_dpo_real_e2e_tests();
     /* Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper test (skip stub
@@ -1093,6 +1120,7 @@ int main(int argc, char **argv) {
     run_dpo_real_mlx_tests();
     /* Phase 2 Task 8 (RL SOTA): post-split CLI handler surface contract. */
     run_cli_dpo_tests();
+#endif
     /* Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection — forward,
      * backward (analytical + finite-diff grad check), save/load round trip. */
     run_value_head_tests();
@@ -1102,8 +1130,10 @@ int main(int argc, char **argv) {
     run_reward_model_train_tests();
     /* Phase 3 Task 8 (RL SOTA): RM inference latency tests. */
     run_reward_model_inference_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 3 Task 5 (RL SOTA): KTO loss. */
     run_kto_loss_tests();
+#endif
     /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 + k3 backward grad. */
     run_kl_divergence_tests();
     /* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML — sampling determinism
@@ -1112,8 +1142,10 @@ int main(int argc, char **argv) {
     /* Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic token
      * counting + Phase 3 RM composition + Phase 5 judge stub pin. */
     run_reward_source_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler. */
     run_cli_grpo_tests();
+#endif
 #endif
 
     run_experience_tests();
@@ -1186,6 +1218,7 @@ int main(int argc, char **argv) {
     run_planner_mcts_wiring_tests();
     run_cdp_tests();
     run_emotional_cognition_tests();
+    run_emotional_contagion_tests();
     run_evolving_cognition_tests();
     run_metacognition_tests();
     run_humanness_frontiers_tests();
@@ -1195,7 +1228,9 @@ int main(int argc, char **argv) {
     run_sota_wiring_tests();
     run_sota_live_wiring_tests();
     hu_test_permission();
+    run_shell_sandbox_tests();
     run_hook_pipeline_tests();
+    run_agent_dispatch_hooks_tests();
     test_session_persist();
     run_compaction_structured_tests();
     run_instruction_discover_tests();
@@ -1222,16 +1257,27 @@ int main(int argc, char **argv) {
     run_vector_retrieval_remote_tests();
     run_background_registry_tests();
     run_consistency_tests();
+    run_mlx_provider_tests();
+    run_persona_fidelity_tests();
+    run_persona_fidelity_judge_tests();
+    run_persona_fidelity_validator_tests();
+    run_persona_fidelity_cross_tests();
+    run_dpo_extractor_integration_tests();
+    run_fact_extract_llm_tests();
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_personal_model_simulation_tests();
+#ifdef HU_ENABLE_RL_FULL
     run_personal_model_fidelity_v2_tests();
     run_grpo_loss_tests();
     run_grpo_huml_tests();
     run_grpo_mlx_tests();
-    /* Phase 4 Task 7 (RL SOTA): GRPO HUML E2E synthetic-reward gate. */
     run_grpo_e2e_tests();
+#endif
     run_persona_directive_channels_tests();
+    run_filler_recency_tests();
+    run_filler_pctt_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();
     run_self_improve_tests();
@@ -1239,6 +1285,7 @@ int main(int argc, char **argv) {
     run_trust_calibration_tests();
     run_vision_ocr_tests();
     run_markdown_loader_tests();
+    run_structured_output_tests();
     run_anticipatory_state_tests();
     run_canvas_tool_tests();
     run_canvas_e2e_tests();

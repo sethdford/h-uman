@@ -7493,11 +7493,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (agent && agent->w7_facade) {
                         /* P1.1-P1.3: imessage batch path uses agent's persona
                          * + the iMessage channel name. */
-                        hu_persona_context_t batch_pctx;
+                        hu_persona_context_t batch_pctx = {0};
                         batch_pctx.persona = agent->persona;
                         batch_pctx.channel = "imessage";
                         batch_pctx.channel_len = 8;
                         batch_pctx.delta_limit = 8;
+                        batch_pctx.tools = agent->tools;
+                        batch_pctx.tools_count = agent->tools_count;
                         gerr = hu_w7_render_world_model(agent->w7_facade, alloc,
                                                         batch_key, key_len, 0,
                                                         &graph_ctx, &graph_ctx_len,
@@ -9071,9 +9073,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 {
                     hu_thinking_response_t thinking;
                     memset(&thinking, 0, sizeof(thinking));
+                    const char *ch_name = ch->channel->vtable->name
+                                              ? ch->channel->vtable->name(ch->channel->ctx)
+                                              : NULL;
+                    hu_thinking_context_t think_ctx = {
+                        .persona = agent ? agent->persona : NULL,
+                        .channel_name = ch_name,
+                        .chat_id = send_target,
+                        .chat_id_len = send_target_len,
+                        .recency = agent ? &agent->filler_recency : NULL,
+                        .seed = (uint32_t)time(NULL),
+                    };
                     bool needs_thinking = hu_conversation_classify_thinking(
-                        combined, combined_len, history_entries, history_count, &thinking,
-                        (uint32_t)time(NULL));
+                        &think_ctx, combined, combined_len, history_entries, history_count,
+                        &thinking);
                     if (needs_thinking && thinking.filler_len > 0 && ch->channel->vtable->send) {
                         ch->channel->vtable->send(ch->channel->ctx, send_target, send_target_len,
                                                   thinking.filler, thinking.filler_len, NULL, 0);

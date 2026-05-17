@@ -50,10 +50,16 @@ int  hu_reaction_handler_was_called_this_turn(void);
 #include "human/agent/response_guard.h"
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/response_verifier.h"
+#include "human/agent/output_validator_chain.h"
+#include "human/agent/validators/builtin.h"
+#include "human/observability/validator_telemetry.h"
+#include "human/provider/structured_output.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/neural_memory.h"
 #include "human/memory/personal_model.h"
+#include "human/agent/channel_trust.h"
+#include "human/agent/world_model.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
@@ -138,6 +144,29 @@ static void at_free_patterns(hu_allocator_t *alloc, const char **arr, const char
         i++;
     }
     alloc->free(alloc->ctx, (void *)arr, slot_count * sizeof(const char *));
+}
+
+/* Story F.2 — collect HU_ROLE_TOOL names from recent history (newest first). */
+static size_t at_collect_recent_tool_names_(const hu_agent_t *agent, const char **out_names,
+                                            size_t out_cap) {
+    if (!agent || !out_names || out_cap == 0 || agent->history_count <= 1)
+        return 0;
+    size_t n = 0;
+    for (size_t hi = agent->history_count; hi > 0 && n < out_cap; hi--) {
+        const hu_owned_message_t *m = &agent->history[hi - 1];
+        if (m->role != HU_ROLE_TOOL) continue;
+        if (!m->name || m->name_len == 0) continue;
+        bool dup = false;
+        for (size_t j = 0; j < n; j++) {
+            if (strcmp(out_names[j], m->name) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+        out_names[n++] = m->name;
+    }
+    return n;
 }
 
 hu_error_t hu_agent_turn_data_init(hu_allocator_t *alloc) {
@@ -969,7 +998,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 
 #ifndef HU_IS_TEST
-    (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true, (int64_t)time(NULL));
+    {
+        /* SOTA-2026 init-09: stamp provenance derived from the active
+         * channel so the trust gate + MINJA detector run in production. */
+        hu_provenance_t _ingest_prov = hu_channel_trust_stamp(
+            agent->active_channel, agent->active_channel_len,
+            NULL, 0, (int64_t)time(NULL));
+        (void)hu_personal_model_ingest(&agent->personal_model, msg, msg_len, true,
+                                       (int64_t)time(NULL), &_ingest_prov);
+    }
 #endif
 
     /* B16 follow-up — close the chronotype loop. Whatever populated the
@@ -1396,6 +1433,25 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                               cognition_budget.max_memory_chars);
         hu_memory_loader_set_facade(&loader, agent->w7_facade);
         hu_memory_loader_set_personal_model(&loader, &agent->personal_model);
+        /* Story B (sprint-4 follow-up): bind persona context so the loader's
+         * supplementary graph render runs with persona-grounded ToM and the
+         * channel-aware pragmatics digest. */
+        hu_persona_context_t loader_pctx = {0};
+        if (agent->persona) {
+            const char *loader_recent_tools[HU_SELF_RECENT_TOOLS];
+            size_t loader_recent_tools_n =
+                at_collect_recent_tool_names_(agent, loader_recent_tools,
+                                              HU_SELF_RECENT_TOOLS);
+            loader_pctx.persona = agent->persona;
+            loader_pctx.channel = agent->active_channel;
+            loader_pctx.channel_len = agent->active_channel_len;
+            loader_pctx.delta_limit = 8;
+            loader_pctx.tools = agent->tools;
+            loader_pctx.tools_count = agent->tools_count;
+            loader_pctx.recent_tools_used = loader_recent_tools_n ? loader_recent_tools : NULL;
+            loader_pctx.recent_tools_used_count = loader_recent_tools_n;
+            hu_memory_loader_set_persona_context(&loader, &loader_pctx);
+        }
         hu_error_t load_err = hu_memory_loader_load(
             &loader, msg, msg_len, agent->memory_session_id ? agent->memory_session_id : "",
             agent->memory_session_id ? agent->memory_session_id_len : 0, &memory_ctx,
@@ -3498,10 +3554,31 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             size_t tom_p_len = tom_p[0] ? strlen(tom_p) : 0;
             size_t tom_q_len = tom_q[0] ? strlen(tom_q) : 0;
             size_t tom_c_len = tom_c[0] ? strlen(tom_c) : 0;
+            /* Story B (sprint-4 follow-up): thread persona context so the
+             * bridge's persona-merge runs and interaction_style reaches the
+             * rendered prompt. Previously this passed NULL → merge skipped. */
+            hu_persona_context_t pctx = {0};
+            const hu_persona_context_t *pctx_p = NULL;
+            if (agent->persona) {
+                const char *recent_tool_names[HU_SELF_RECENT_TOOLS];
+                size_t recent_tool_names_n =
+                    at_collect_recent_tool_names_(agent, recent_tool_names,
+                                                  HU_SELF_RECENT_TOOLS);
+                pctx.persona = agent->persona;
+                pctx.channel = agent->active_channel;
+                pctx.channel_len = agent->active_channel_len;
+                pctx.delta_limit = 8;
+                pctx.tools = agent->tools;
+                pctx.tools_count = agent->tools_count;
+                pctx.recent_tools_used =
+                    recent_tool_names_n ? recent_tool_names : NULL;
+                pctx.recent_tools_used_count = recent_tool_names_n;
+                pctx_p = &pctx;
+            }
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
                                      agent->memory_session_id_len, 0, &world_model_ctx,
                                      &world_model_ctx_len, tom_p, tom_p_len, tom_q, tom_q_len,
-                                     tom_c, tom_c_len, &agent->personal_model, NULL);
+                                     tom_c, tom_c_len, &agent->personal_model, pctx_p);
             if (world_model_ctx_len > 0)
                 agent->world_model_loads++;
         }
@@ -4093,6 +4170,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     } else {
         req.tools = (agent->tool_specs_count > 0) ? agent->tool_specs : NULL;
         req.tools_count = agent->tool_specs_count;
+    }
+    if (agent->persona && agent->persona->structured_output_enabled) {
+        req.response_format = "json_schema";
+        req.response_format_len = 11;
+        req.response_schema = hu_structured_output_chat_reply_schema();
+        req.response_schema_len = hu_structured_output_chat_reply_schema_len();
     }
 
     uint32_t iter = 0;
@@ -5578,6 +5661,174 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 #endif
                 }
 
+                /* Last-mile output validation — response_guard + strip trio via
+                 * the default outbound chain (P2.T12). Catches the class of
+                 * failure that leaked `<|channel>thought` + a 200x quote loop
+                 * to a real human contact via iMessage on 2026-05-10.
+                 *
+                 * US-4: prefer the chain cached on the persona (built once at
+                 * load time) over per-message inline build. Fall back to inline
+                 * build when no persona or no cached chain. */
+                {
+                    const char *persona_name =
+                        (agent->persona && agent->persona->name) ? agent->persona->name : NULL;
+                    size_t persona_name_len = persona_name ? strlen(persona_name) : 0;
+                    bool chain_owned = false;
+                    hu_error_t build_err = HU_OK;
+                    hu_output_validator_chain_t *out_chain =
+                        (agent->persona && agent->persona->outbound_chain)
+                            ? agent->persona->outbound_chain
+                            : NULL;
+                    if (!out_chain) {
+                        build_err = hu_validators_build_default_outbound_chain(
+                            agent->alloc, persona_name, persona_name_len, &out_chain);
+                        chain_owned = (build_err == HU_OK);
+                    }
+                    /* HIGH-1: deny-by-default on chain machinery failure.
+                     * Validation is a security boundary; if the chain can't be
+                     * built or executed (OOM, persona misconfig, internal error),
+                     * suppress the send rather than let unvalidated content reach
+                     * the user. Matches the existing retry-failed branch's
+                     * "suppress send" semantics. */
+                    bool chain_unrunnable = false;
+                    if (!out_chain) {
+                        hu_log_error("agent_turn", agent->observer,
+                                     "validator chain BUILD failed (persona=%s, err=%s) "
+                                     "-- suppressing send (deny-by-default)",
+                                     persona_name ? persona_name : "(none)",
+                                     hu_error_string(build_err));
+                        chain_unrunnable = true;
+                    } else {
+                        hu_validator_context_t vctx = {0};
+                        vctx.persona_name = persona_name;
+                        vctx.persona_name_len = persona_name_len;
+                        hu_chain_result_t cr;
+                        memset(&cr, 0, sizeof(cr));
+                        hu_error_t cerr = hu_output_validator_chain_execute(
+                            out_chain, agent->alloc, &vctx, final_content, final_len, &cr);
+                        if (cerr != HU_OK) {
+                            hu_log_error("agent_turn", agent->observer,
+                                         "validator chain EXECUTE failed (err=%s) "
+                                         "-- suppressing send (deny-by-default)",
+                                         hu_error_string(cerr));
+                            hu_chain_result_free(agent->alloc, &cr);
+                            chain_unrunnable = true;
+                        } else {
+                            hu_observer_emit_validator_decision(agent->observer, &cr, &vctx,
+                                                                final_len);
+                            if (cr.final_decision == HU_VALIDATOR_REJECT) {
+                                hu_log_error("agent_turn", agent->observer,
+                                             "validator chain REJECT (via %s) — "
+                                             "retrying once with repair prompt",
+                                             cr.deciding_validator_name ? cr.deciding_validator_name
+                                                                        : "unknown");
+                                hu_chain_result_free(agent->alloc, &cr);
+                                char *retry_content = NULL;
+                                size_t retry_len = 0;
+                                hu_guard_report_t retry_report;
+                                memset(&retry_report, 0, sizeof(retry_report));
+                                hu_error_t retry_err = hu_response_guard_retry_slim(
+                                    agent->alloc, agent->observer, agent->config, &agent->provider,
+                                    turn_model, turn_model_len, msg, msg_len, &retry_content,
+                                    &retry_len, &retry_report);
+                                if (retry_err == HU_OK && retry_content && retry_len > 0) {
+                                    hu_agent_m3_on_provider_success(agent);
+                                    /* Re-validate the retry output through the chain so a
+                                     * regenerated CoT or helper-closer cannot escape (Fix 3). */
+                                    hu_chain_result_t retry_cr;
+                                    memset(&retry_cr, 0, sizeof(retry_cr));
+                                    hu_validator_context_t retry_vctx = {0};
+                                    retry_vctx.persona_name = persona_name;
+                                    retry_vctx.persona_name_len = persona_name_len;
+                                    hu_error_t recheck_err = hu_output_validator_chain_execute(
+                                        out_chain, agent->alloc, &retry_vctx, retry_content,
+                                        retry_len, &retry_cr);
+                                    if (recheck_err == HU_OK &&
+                                        retry_cr.final_decision == HU_VALIDATOR_REJECT) {
+                                        hu_log_error(
+                                            "agent_turn", agent->observer,
+                                            "validator chain retry REJECTED by chain (via %s) — "
+                                            "suppressing send",
+                                            retry_cr.deciding_validator_name
+                                                ? retry_cr.deciding_validator_name
+                                                : "unknown");
+                                        hu_chain_result_free(agent->alloc, &retry_cr);
+                                        agent->alloc->free(agent->alloc->ctx, retry_content,
+                                                           retry_len + 1);
+                                        if (ab_owned)
+                                            agent->alloc->free(agent->alloc->ctx,
+                                                               (void *)final_content,
+                                                               final_len + 1);
+                                        final_content = NULL;
+                                        final_len = 0;
+                                        ab_owned = false;
+                                    } else {
+                                        size_t accepted_len =
+                                            (recheck_err == HU_OK && retry_cr.final_text_owned &&
+                                             retry_cr.final_text)
+                                                ? retry_cr.final_text_len
+                                                : retry_len;
+                                        hu_log_warn("agent_turn", agent->observer,
+                                                    "validator chain RECOVERED: retry passed chain "
+                                                    "(len=%zu, stripped=%zu)",
+                                                    accepted_len, retry_report.bytes_stripped);
+                                        if (ab_owned)
+                                            agent->alloc->free(agent->alloc->ctx,
+                                                               (void *)final_content,
+                                                               final_len + 1);
+                                        if (recheck_err == HU_OK && retry_cr.final_text_owned &&
+                                            retry_cr.final_text) {
+                                            final_content = retry_cr.final_text;
+                                            final_len = retry_cr.final_text_len;
+                                            retry_cr.final_text_owned = false;
+                                            agent->alloc->free(agent->alloc->ctx, retry_content,
+                                                               retry_len + 1);
+                                        } else {
+                                            final_content = retry_content;
+                                            final_len = retry_len;
+                                        }
+                                        ab_owned = true;
+                                        hu_chain_result_free(agent->alloc, &retry_cr);
+                                    }
+                                } else {
+                                    hu_log_error(
+                                        "agent_turn", agent->observer,
+                                        "validator chain retry failed (err=%s) — suppressing send",
+                                        hu_error_string(retry_err));
+                                    if (ab_owned)
+                                        agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                                           final_len + 1);
+                                    final_content = NULL;
+                                    final_len = 0;
+                                    ab_owned = false;
+                                }
+                            } else if (cr.final_text_owned && cr.final_text) {
+                                /* Chain rewrote (stripped tokens/phrases/structure). */
+                                if (ab_owned)
+                                    agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                                       final_len + 1);
+                                final_content = cr.final_text;
+                                final_len = cr.final_text_len;
+                                ab_owned = true;
+                                cr.final_text_owned = false; /* transferred — prevent double-free */
+                                hu_chain_result_free(agent->alloc, &cr);
+                            } else {
+                                hu_chain_result_free(agent->alloc, &cr);
+                            }
+                        }
+                        if (chain_owned)
+                            hu_output_validator_chain_destroy(out_chain);
+                    }
+                    if (chain_unrunnable) {
+                        if (ab_owned)
+                            agent->alloc->free(agent->alloc->ctx, (void *)final_content,
+                                               final_len + 1);
+                        final_content = NULL;
+                        final_len = 0;
+                        ab_owned = false;
+                    }
+                }
+                /* Turn-local guard (G5–G8) after outbound chain — check_ex with guard_ctx. */
                 /* Last-mile response guard — strips Harmony / ChatML special
                  * tokens and rejects degenerate model output (runaway
                  * repetition). Catches the class of failure that leaked
@@ -5684,7 +5935,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         }
                     }
                 }
-
                 /* Strip AI phrases and formal structure so the model's
                  * history matches the wire text the user actually sees. */
                 if (final_content && final_len > 0) {
@@ -5848,12 +6098,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 }
 
                 /* Store in semantic response cache for future lookups */
-                if (agent->infra.response_cache && final_len > 0) {
+                if (agent->infra.response_cache && *response_out && response_effective_len > 0) {
                     const char *mname = agent->model_name ? agent->model_name : "";
                     size_t mname_len = agent->model_name ? agent->model_name_len : 0;
                     hu_semantic_cache_put(agent->infra.response_cache, agent->alloc, msg, msg_len,
-                                          mname, mname_len, final_content, final_len, 0, msg,
-                                          msg_len);
+                                          mname, mname_len, *response_out, response_effective_len,
+                                          0, msg, msg_len);
                 }
 
                 /* Speculative: predict follow-ups and pre-cache them */
