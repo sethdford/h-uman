@@ -436,6 +436,12 @@ static const char *const schema_parts[] = {
     "timestamp INTEGER NOT NULL)",
     "CREATE INDEX IF NOT EXISTS idx_interaction_quality_contact_recovery ON "
     "interaction_quality(contact_id, recovery_sent)",
+    /* 2026-05-16 P3-4: source_contact_id scopes per-contact narration events.
+     * Default '' preserves legacy / channel-wide behaviour for events written
+     * before this column existed.  hu_narration_events_unsent only surfaces a
+     * row to a different target_contact_id when source_contact_id is ''.
+     * Pre-existing databases pick up the column via the ADD-COLUMN migration
+     * block below (search for "life_narration_events ADD COLUMN"). */
     "CREATE TABLE IF NOT EXISTS life_narration_events("
     "id INTEGER PRIMARY KEY,"
     "event_type TEXT NOT NULL,"
@@ -443,7 +449,8 @@ static const char *const schema_parts[] = {
     "shareability_score REAL NOT NULL,"
     "shared_with TEXT,"
     "generated_at INTEGER NOT NULL,"
-    "shared_at INTEGER)",
+    "shared_at INTEGER,"
+    "source_contact_id TEXT NOT NULL DEFAULT '')",
     "CREATE TABLE IF NOT EXISTS held_contradictions("
     "id INTEGER PRIMARY KEY,"
     "topic TEXT NOT NULL,"
@@ -1492,6 +1499,14 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
         }
         sqlite3_exec(db, "ALTER TABLE avoidance_patterns ADD COLUMN last_surfaced INTEGER", NULL,
                      NULL, &e);
+        if (e) {
+            sqlite3_free(e);
+            e = NULL;
+        }
+        /* 2026-05-16 P3-4: scope life_narration_events per source contact. */
+        const char *p34_alter = "ALTER TABLE life_narration_events ADD COLUMN "
+                                "source_contact_id TEXT NOT NULL DEFAULT ''";
+        sqlite3_exec(db, p34_alter, NULL, NULL, &e);
         if (e)
             sqlite3_free(e);
     }

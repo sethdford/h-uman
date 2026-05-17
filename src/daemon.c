@@ -1093,12 +1093,17 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 #endif
 
 #ifdef HU_ENABLE_SQLITE
-    /* Phase 9: F103 Life narration — check for unsent narration events (global) */
+    /* Phase 9: F103 Life narration — check for unsent narration events.
+     * 2026-05-16 P3-4: this outer-tick query has no specific target contact
+     * in scope (it's a daemon-wide "is anything available" probe).  Pass NULL
+     * → only legacy / channel-wide events (source_contact_id='') return; any
+     * per-contact event stays bound to its source until the proactive path
+     * with a real target queries with that contact_id. */
     if (agent && agent->memory) {
         sqlite3 *p9_db = hu_sqlite_memory_get_db(agent->memory);
         if (p9_db) {
             int64_t narr_ids[3];
-            int narr_count = hu_narration_events_unsent(p9_db, 0.7f, narr_ids, 3);
+            int narr_count = hu_narration_events_unsent(p9_db, 0.7f, NULL, narr_ids, 3);
             if (narr_count > 0)
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "Phase 9: %d narration events available", narr_count);

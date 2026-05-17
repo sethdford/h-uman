@@ -11,8 +11,7 @@
 
 static void select_zero_probabilities_returns_none(void) {
     hu_authentic_config_t config = {0};
-    hu_authentic_behavior_t b =
-        hu_authentic_select(&config, 0.9, false, 12345u);
+    hu_authentic_behavior_t b = hu_authentic_select(&config, 0.9, false, 12345u);
     HU_ASSERT_EQ(b, HU_AUTH_NONE);
 }
 
@@ -23,8 +22,7 @@ static void select_high_closeness_serious_topic_suppresses_gossip(void) {
     config.random_thought_probability = 0.0;
     config.imperfection_probability = 0.0;
     /* With serious_topic, gossip/random_thought/imperfection are suppressed */
-    hu_authentic_behavior_t b =
-        hu_authentic_select(&config, 0.9, true, 999u);
+    hu_authentic_behavior_t b = hu_authentic_select(&config, 0.9, true, 999u);
     HU_ASSERT_NEQ(b, HU_AUTH_GOSSIP);
     HU_ASSERT_NEQ(b, HU_AUTH_RANDOM_THOUGHT);
     HU_ASSERT_NEQ(b, HU_AUTH_IMPERFECTION);
@@ -36,8 +34,7 @@ static void select_low_closeness_suppresses_existential(void) {
     config.guilt_probability = 0.0;
     config.embodiment_probability = 0.0;
     /* closeness < 0.5 suppresses existential, guilt, embodiment */
-    hu_authentic_behavior_t b =
-        hu_authentic_select(&config, 0.3, false, 111u);
+    hu_authentic_behavior_t b = hu_authentic_select(&config, 0.3, false, 111u);
     HU_ASSERT_NEQ(b, HU_AUTH_EXISTENTIAL);
     HU_ASSERT_NEQ(b, HU_AUTH_GUILT);
     HU_ASSERT_NEQ(b, HU_AUTH_EMBODIMENT);
@@ -46,10 +43,8 @@ static void select_low_closeness_suppresses_existential(void) {
 static void select_resistance_only_high_closeness(void) {
     hu_authentic_config_t config = {0};
     config.resistance_probability = 1.0;
-    hu_authentic_behavior_t b_low =
-        hu_authentic_select(&config, 0.5, false, 1u);
-    hu_authentic_behavior_t b_high =
-        hu_authentic_select(&config, 0.8, false, 1u);
+    hu_authentic_behavior_t b_low = hu_authentic_select(&config, 0.5, false, 1u);
+    hu_authentic_behavior_t b_high = hu_authentic_select(&config, 0.8, false, 1u);
     HU_ASSERT_NEQ(b_low, HU_AUTH_RESISTANCE);
     HU_ASSERT_EQ(b_high, HU_AUTH_RESISTANCE);
 }
@@ -67,8 +62,8 @@ static void build_directive_narration_returns_valid(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_authentic_build_directive(&alloc, HU_AUTH_NARRATION,
-                                                   NULL, 0, &out, &out_len);
+    hu_error_t err =
+        hu_authentic_build_directive(&alloc, HU_AUTH_NARRATION, NULL, 0, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(out_len > 0);
@@ -81,8 +76,8 @@ static void build_directive_embodiment_returns_valid(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_authentic_build_directive(&alloc, HU_AUTH_EMBODIMENT,
-                                                   NULL, 0, &out, &out_len);
+    hu_error_t err =
+        hu_authentic_build_directive(&alloc, HU_AUTH_EMBODIMENT, NULL, 0, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "physical") != NULL);
@@ -94,8 +89,8 @@ static void build_directive_life_thread_with_context_includes(void) {
     const char *ctx = "moving to a new apartment next week";
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_authentic_build_directive(&alloc, HU_AUTH_LIFE_THREAD,
-                                                   ctx, strlen(ctx), &out, &out_len);
+    hu_error_t err =
+        hu_authentic_build_directive(&alloc, HU_AUTH_LIFE_THREAD, ctx, strlen(ctx), &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "apartment") != NULL);
@@ -107,8 +102,8 @@ static void build_directive_life_thread_empty_uses_default(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_authentic_build_directive(&alloc, HU_AUTH_LIFE_THREAD,
-                                                   NULL, 0, &out, &out_len);
+    hu_error_t err =
+        hu_authentic_build_directive(&alloc, HU_AUTH_LIFE_THREAD, NULL, 0, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "narrative") != NULL);
@@ -119,8 +114,7 @@ static void build_directive_none_returns_ok(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 1;
-    hu_error_t err = hu_authentic_build_directive(&alloc, HU_AUTH_NONE,
-                                                   NULL, 0, &out, &out_len);
+    hu_error_t err = hu_authentic_build_directive(&alloc, HU_AUTH_NONE, NULL, 0, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NULL(out);
     HU_ASSERT_EQ(out_len, 0u);
@@ -130,8 +124,7 @@ static void build_directive_bad_day_returns_valid(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_authentic_build_directive(&alloc, HU_AUTH_BAD_DAY,
-                                                   NULL, 0, &out, &out_len);
+    hu_error_t err = hu_authentic_build_directive(&alloc, HU_AUTH_BAD_DAY, NULL, 0, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "rough day") != NULL);
@@ -151,8 +144,8 @@ static void life_thread_create_table_sql_valid(void) {
 static void life_thread_insert_sql_valid(void) {
     char buf[512];
     size_t out_len = 0;
-    hu_error_t err = hu_life_thread_insert_sql("coffee with Alex", 16, 1700000000000ull,
-                                                buf, sizeof(buf), &out_len);
+    hu_error_t err = hu_life_thread_insert_sql("coffee with Alex", 16, 1700000000000ull, buf,
+                                               sizeof(buf), &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(out_len > 0);
     HU_ASSERT_TRUE(strstr(buf, "INSERT INTO") != NULL);
@@ -162,8 +155,8 @@ static void life_thread_insert_sql_valid(void) {
 static void life_thread_insert_sql_escapes_quotes(void) {
     char buf[512];
     size_t out_len = 0;
-    hu_error_t err = hu_life_thread_insert_sql("it's a test", 11, 1700000000000ull,
-                                                buf, sizeof(buf), &out_len);
+    hu_error_t err =
+        hu_life_thread_insert_sql("it's a test", 11, 1700000000000ull, buf, sizeof(buf), &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(strstr(buf, "''") != NULL);
 }
@@ -228,8 +221,7 @@ static void state_deinit_clears_context(void) {
 static void build_directive_null_alloc_returns_error(void) {
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_authentic_build_directive(NULL, HU_AUTH_NARRATION,
-                                                   NULL, 0, &out, &out_len);
+    hu_error_t err = hu_authentic_build_directive(NULL, HU_AUTH_NARRATION, NULL, 0, &out, &out_len);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
@@ -439,52 +431,44 @@ static void test_curiosity_returns_question(void) {
 
 /* F112: Contradiction */
 static void test_contradiction_positive_mood(void) {
-    hu_contradiction_t c = {
-        .topic = "politics",
-        .position_a = "optimistic",
-        .position_b = "pessimistic",
-        .expressed_a_count = 1,
-        .expressed_b_count = 2
-    };
+    hu_contradiction_t c = {.topic = "politics",
+                            .position_a = "optimistic",
+                            .position_b = "pessimistic",
+                            .expressed_a_count = 1,
+                            .expressed_b_count = 2};
     const char *p = hu_contradiction_select_position(&c, 0.7f, 0.8f);
     HU_ASSERT_NOT_NULL(p);
     HU_ASSERT_STR_EQ(p, "optimistic");
 }
 
 static void test_contradiction_negative_mood(void) {
-    hu_contradiction_t c = {
-        .topic = "politics",
-        .position_a = "optimistic",
-        .position_b = "pessimistic",
-        .expressed_a_count = 2,
-        .expressed_b_count = 1
-    };
+    hu_contradiction_t c = {.topic = "politics",
+                            .position_a = "optimistic",
+                            .position_b = "pessimistic",
+                            .expressed_a_count = 2,
+                            .expressed_b_count = 1};
     const char *p = hu_contradiction_select_position(&c, -0.6f, 0.8f);
     HU_ASSERT_NOT_NULL(p);
     HU_ASSERT_STR_EQ(p, "pessimistic");
 }
 
 static void test_contradiction_low_cognitive(void) {
-    hu_contradiction_t c = {
-        .topic = "politics",
-        .position_a = "optimistic",
-        .position_b = "pessimistic",
-        .expressed_a_count = 3,
-        .expressed_b_count = 1
-    };
+    hu_contradiction_t c = {.topic = "politics",
+                            .position_a = "optimistic",
+                            .position_b = "pessimistic",
+                            .expressed_a_count = 3,
+                            .expressed_b_count = 1};
     const char *p = hu_contradiction_select_position(&c, 0.0f, 0.2f);
     HU_ASSERT_NOT_NULL(p);
     HU_ASSERT_STR_EQ(p, "optimistic");
 }
 
 static void test_contradiction_low_cognitive_prefers_b(void) {
-    hu_contradiction_t c = {
-        .topic = "politics",
-        .position_a = "optimistic",
-        .position_b = "pessimistic",
-        .expressed_a_count = 1,
-        .expressed_b_count = 3
-    };
+    hu_contradiction_t c = {.topic = "politics",
+                            .position_a = "optimistic",
+                            .position_b = "pessimistic",
+                            .expressed_a_count = 1,
+                            .expressed_b_count = 3};
     const char *p = hu_contradiction_select_position(&c, 0.0f, 0.2f);
     HU_ASSERT_NOT_NULL(p);
     HU_ASSERT_STR_EQ(p, "pessimistic");
@@ -504,7 +488,7 @@ static void test_narration_event_record_query(void) {
     HU_ASSERT_EQ(err, HU_OK);
 
     int64_t ids[4];
-    int n = hu_narration_events_unsent(db, 0.5f, ids, 4);
+    int n = hu_narration_events_unsent(db, 0.5f, NULL, ids, 4);
     HU_ASSERT_EQ(n, 1);
     HU_ASSERT_TRUE(ids[0] > 0);
 
@@ -521,14 +505,52 @@ static void test_narration_event_mark_shared(void) {
     HU_ASSERT_EQ(hu_narration_event_record(db, "coffee", "grabbed a latte", 0.7f, now), HU_OK);
 
     int64_t ids[4];
-    int n = hu_narration_events_unsent(db, 0.0f, ids, 4);
+    int n = hu_narration_events_unsent(db, 0.0f, NULL, ids, 4);
     HU_ASSERT_EQ(n, 1);
     int64_t id = ids[0];
 
     HU_ASSERT_EQ(hu_narration_event_mark_shared(db, id, "contact_a", now + 1), HU_OK);
 
-    n = hu_narration_events_unsent(db, 0.0f, ids, 4);
+    n = hu_narration_events_unsent(db, 0.0f, NULL, ids, 4);
     HU_ASSERT_EQ(n, 0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* 2026-05-16 P3-4 regression: narration events scoped to source_contact_id
+ * should never surface in a different contact's unsent query.  Event generated
+ * in contact A's context (source_contact_id="alice") must not appear when the
+ * proactive loop is asking "what should we send to bob?". */
+static void test_narration_events_unsent_scoped_to_target_contact(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    /* Event scoped to contact "alice" (e.g. a moment captured while talking
+     * to alice). */
+    HU_ASSERT_EQ(
+        hu_narration_event_record_for(db, "alice", "gym", "alice mentioned the gym", 0.8f, now),
+        HU_OK);
+    /* Event with empty source — legacy / channel-wide (allowed for anyone). */
+    HU_ASSERT_EQ(hu_narration_event_record_for(db, "", "weather", "raining outside", 0.8f, now),
+                 HU_OK);
+
+    int64_t ids[4];
+    /* When asking on behalf of "bob": only the empty-source event is returned;
+     * the alice-scoped one is NOT surfaced. */
+    int n = hu_narration_events_unsent(db, 0.5f, "bob", ids, 4);
+    HU_ASSERT_EQ(n, 1);
+
+    /* When asking on behalf of "alice": both events surface. */
+    n = hu_narration_events_unsent(db, 0.5f, "alice", ids, 4);
+    HU_ASSERT_EQ(n, 2);
+
+    /* NULL target_contact_id falls back to legacy behaviour: only the
+     * empty-source event (conservative) — never leaks per-contact events. */
+    n = hu_narration_events_unsent(db, 0.5f, NULL, ids, 4);
+    HU_ASSERT_EQ(n, 1);
 
     mem.vtable->deinit(mem.ctx);
 }
@@ -574,9 +596,10 @@ static void test_thread_resolve(void) {
     HU_ASSERT_EQ(hu_thread_open(db, "contact_y", "vacation plans", now), HU_OK);
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db, "SELECT id FROM active_threads WHERE contact_id='contact_y' "
-                                    "AND topic='vacation plans' ORDER BY id DESC LIMIT 1", -1,
-                               &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db,
+                                "SELECT id FROM active_threads WHERE contact_id='contact_y' "
+                                "AND topic='vacation plans' ORDER BY id DESC LIMIT 1",
+                                -1, &stmt, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
     int64_t thread_id = sqlite3_column_int64(stmt, 0);
@@ -673,9 +696,11 @@ static void test_gossip_check_returns_count(void) {
 
     int64_t now = (int64_t)time(NULL);
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
+    int rc = sqlite3_prepare_v2(
+        db,
         "INSERT INTO feed_items (source, contact_id, content_type, content, ingested_at) "
-        "VALUES ('test', 'contact_b', 'post', 'saw Alex at cafe', ?)", -1, &stmt, NULL);
+        "VALUES ('test', 'contact_b', 'post', 'saw Alex at cafe', ?)",
+        -1, &stmt, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
     sqlite3_bind_int64(stmt, 1, now);
     rc = sqlite3_step(stmt);
@@ -745,6 +770,7 @@ void run_authentic_tests(void) {
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_narration_event_record_query);
     HU_RUN_TEST(test_narration_event_mark_shared);
+    HU_RUN_TEST(test_narration_events_unsent_scoped_to_target_contact);
     HU_RUN_TEST(test_random_thought_morning_dream);
     HU_RUN_TEST(test_random_thought_frequency_cap);
     HU_RUN_TEST(test_thread_open_list);

@@ -151,7 +151,24 @@ int hu_contradiction_get(sqlite3 *db, const char *topic, hu_contradiction_t *out
 hu_error_t hu_narration_event_record(sqlite3 *db, const char *event_type, const char *description,
                                      float shareability_score, int64_t now);
 
-int hu_narration_events_unsent(sqlite3 *db, float min_shareability, int64_t *out_ids, int max_out);
+/* 2026-05-16 P3-4: record a narration event scoped to a specific source contact.
+ * Events written with a non-empty `source_contact_id` only surface to
+ * `hu_narration_events_unsent` when that same contact is the target;
+ * events written with NULL or "" remain channel-wide (legacy behaviour). */
+hu_error_t hu_narration_event_record_for(sqlite3 *db, const char *source_contact_id,
+                                         const char *event_type, const char *description,
+                                         float shareability_score, int64_t now);
+
+/* 2026-05-16 P3-4: filter unsent events by target contact.
+ * - target_contact_id == NULL: conservative; only return events with empty
+ *   source_contact_id (never leak per-contact events).
+ * - target_contact_id == "": same as NULL.
+ * - target_contact_id == "X": return events where source_contact_id is ""
+ *   (legacy/global) OR exactly "X".
+ * Pre-P3-4 callers passing only 4 args will not compile — by design.
+ */
+int hu_narration_events_unsent(sqlite3 *db, float min_shareability, const char *target_contact_id,
+                               int64_t *out_ids, int max_out);
 
 hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id, const char *contact_id,
                                           int64_t now);
