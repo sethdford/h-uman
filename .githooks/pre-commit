@@ -106,3 +106,19 @@ if [ -x "scripts/check-test-references.sh" ]; then
         exit 1
     fi
 fi
+
+# Test/source gate-symmetry check — added after PR #113 hit the same
+# systemic failure 6+ times across 13 rounds. Fires when a staged change
+# touches CMakeLists.txt OR a tests/test_*.c file, since those are the
+# moments where a gate-mismatch can be introduced. See
+# .claude/rules/test-source-gate-symmetry.md for the failure pattern.
+staged_gate_inputs=$(git diff --cached --name-only --diff-filter=ACM -- \
+    'CMakeLists.txt' 'tests/test_*.c' 'tests/test_main.c')
+if [ -n "$staged_gate_inputs" ] && [ -x "scripts/check-test-source-gate-symmetry.sh" ]; then
+    if ! bash scripts/check-test-source-gate-symmetry.sh; then
+        echo ""
+        echo "Pre-commit blocked: test/source gate-symmetry violations."
+        echo "See .claude/rules/test-source-gate-symmetry.md for the fix pattern."
+        exit 1
+    fi
+fi
