@@ -462,6 +462,7 @@ void run_reward_model_inference_tests(void);
 /* Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
  * grad check + vtable contract. */
 void run_kto_loss_tests(void);
+#ifdef HU_ENABLE_RL_FULL
 /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 estimators + k3 analytical
  * backward grad — pure C leaf math primitive used by the GRPO
  * trainer (Task 5) for the KL penalty term. */
@@ -476,6 +477,7 @@ void run_rollout_tests(void);
  * [26..30]) + Phase 3 hu_reward_model_t composition smoke + Phase 5
  * judge factory NOT_SUPPORTED pin. */
 void run_reward_source_tests(void);
+#endif
 /* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler surface
  * contract — argument validation (R9, R12, --reward-fn/-model pairing,
  * --backend mlx demands --backbone-path) + HUML synthetic-reward e2e
@@ -595,6 +597,7 @@ void run_consistency_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+#ifdef HU_ENABLE_RL_FULL
 /* Phase 5 Task 1 (RL SOTA): opt-in 4-axis fidelity scorer (v2).
  * Additive — v1 scorer + v1 callers are byte-stable per BLOCKER-1. */
 void run_personal_model_fidelity_v2_tests(void);
@@ -618,6 +621,7 @@ void run_grpo_huml_tests(void);
  * level, and KL brake (R5).  Optional MLX subprocess test gated
  * compile-time by HU_HAVE_MLX_LM_GRPO. */
 void run_grpo_e2e_tests(void);
+#endif
 void run_persona_directive_channels_tests(void);
 void run_filler_recency_tests(void);
 void run_filler_pctt_tests(void);
@@ -1153,6 +1157,7 @@ int main(int argc, char **argv) {
     run_reward_model_inference_tests();
     /* Phase 3 Task 5 (RL SOTA): KTO loss. */
     run_kto_loss_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 + k3 backward grad. */
     run_kl_divergence_tests();
     /* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML — sampling determinism
@@ -1161,6 +1166,7 @@ int main(int argc, char **argv) {
     /* Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic token
      * counting + Phase 3 RM composition + Phase 5 judge stub pin. */
     run_reward_source_tests();
+#endif
     /* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler. */
     run_cli_grpo_tests();
 #endif
@@ -1277,12 +1283,14 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+#ifdef HU_ENABLE_RL_FULL
     run_personal_model_fidelity_v2_tests();
     run_grpo_loss_tests();
     run_grpo_huml_tests();
     run_grpo_mlx_tests();
     /* Phase 4 Task 7 (RL SOTA): GRPO HUML E2E synthetic-reward gate. */
     run_grpo_e2e_tests();
+#endif
     run_persona_directive_channels_tests();
     run_filler_recency_tests();
     run_filler_pctt_tests();
