@@ -489,6 +489,123 @@ static bool hu_guard_has_director_echo(const hu_guard_context_t *ctx, const char
     return false;
 }
 
+/* G7 — persona-PII echo. Returns true if `ctx->persona_name` appears
+ * verbatim (case-insensitively) in `s[0..len)` followed within
+ * HU_GUARD_PERSONA_LOOKAHEAD bytes by a third-person profile
+ * construct: " is ", " was ", " has ", " lives ", " works ", " said ",
+ * " would ", or possessive "'s ".
+ *
+ * Word-boundary aware: the name must be preceded by start-of-string or
+ * a non-letter character. Without this, "Bethseth" would match "Seth"
+ * and a model writing "ethel said" would trip on "Eth" as a name.
+ *
+ * NULL ctx, NULL persona_name, persona_name_len < 2 or > 64, or empty
+ * response disable the check. */
+#define HU_GUARD_PERSONA_LOOKAHEAD 30
+
+static bool hu_guard_persona_pii_construct_at(const char *s, size_t len, size_t pos) {
+    /* Look for a third-person construct starting at `pos`. We accept up
+     * to HU_GUARD_PERSONA_LOOKAHEAD bytes of slack between the name and
+     * the construct — covers cases like `"Seth, 51, is a ..."`. */
+    if (pos >= len)
+        return false;
+    size_t scan_end = pos + HU_GUARD_PERSONA_LOOKAHEAD;
+    if (scan_end > len)
+        scan_end = len;
+
+    /* Possessive: <Name>'s — the apostrophe must be at pos exactly. */
+    if (pos < len && s[pos] == '\'' && pos + 2 < len && (s[pos + 1] == 's' || s[pos + 1] == 'S') &&
+        s[pos + 2] == ' ')
+        return true;
+
+    /* Sliding window for verbs. Patterns include the leading space. */
+    static const char *constructs[] = {
+        " is a ",  " is an ", " is the ", " is currently",
+        " was a ", " was an ", " was the ",
+        " has a ", " has an ", " has been ",
+        " lives ", " lives in ", " lives alone",
+        " works ", " works at ", " works as ",
+        " said ", " would ", " prefers ", " enjoys ", " likes ",
+    };
+    static const size_t n_constructs = sizeof(constructs) / sizeof(constructs[0]);
+
+    for (size_t p = pos; p < scan_end; p++) {
+        for (size_t k = 0; k < n_constructs; k++) {
+            size_t clen = strlen(constructs[k]);
+            if (p + clen > len)
+                continue;
+            /* Case-insensitive prefix match. */
+            bool match = true;
+            for (size_t j = 0; j < clen; j++) {
+                char a = s[p + j];
+                char b = constructs[k][j];
+                if (a >= 'A' && a <= 'Z')
+                    a = (char)(a + 32);
+                if (b >= 'A' && b <= 'Z')
+                    b = (char)(b + 32);
+                if (a != b) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+                return true;
+        }
+    }
+    return false;
+}
+
+static bool hu_guard_has_persona_pii_echo(const hu_guard_context_t *ctx, const char *s,
+                                          size_t len) {
+    if (!ctx || !ctx->persona_name || ctx->persona_name_len < 2 ||
+        ctx->persona_name_len > 64)
+        return false;
+    if (!s || len < ctx->persona_name_len + 4) /* need name + " is " minimum */
+        return false;
+
+    size_t nlen = ctx->persona_name_len;
+    /* Find each case-insensitive occurrence of the name with word
+     * boundaries on both sides. */
+    for (size_t i = 0; i + nlen <= len; i++) {
+        /* Left boundary: start-of-string or non-letter. */
+        if (i > 0) {
+            char prev = s[i - 1];
+            bool prev_letter = (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z');
+            if (prev_letter)
+                continue;
+        }
+        /* Case-insensitive name match. */
+        bool name_match = true;
+        for (size_t j = 0; j < nlen; j++) {
+            char a = s[i + j];
+            char b = ctx->persona_name[j];
+            if (a >= 'A' && a <= 'Z')
+                a = (char)(a + 32);
+            if (b >= 'A' && b <= 'Z')
+                b = (char)(b + 32);
+            if (a != b) {
+                name_match = false;
+                break;
+            }
+        }
+        if (!name_match)
+            continue;
+        /* Right boundary: end-of-string or non-letter. */
+        if (i + nlen < len) {
+            char next = s[i + nlen];
+            bool next_letter =
+                (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z');
+            if (next_letter)
+                continue;
+        }
+        /* Word-boundary-isolated occurrence at [i, i+nlen). Look for a
+         * third-person construct starting at i+nlen. */
+        if (hu_guard_persona_pii_construct_at(s, len, i + nlen))
+            return true;
+    }
+    return false;
+}
+
 /* Orchestrator — returns true if the response trips ANY of G1/G2/G3.
  * Out-param `which` is set to a small bitmask for diagnostics:
  *   bit 0 = G1 numbered analysis    bit 1 = G2 self-talk
@@ -853,14 +970,16 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
         return HU_OK;
     }
 
-    /* Phase 4 (Sprint 31) — context-aware detections. Skipped when
+    /* Phase 4 (Sprint 31 + 35) — context-aware detections. Skipped when
      * `ctx` is NULL (legacy `hu_response_guard_check` callers).
      *
      * Phase 4a: length anomaly (response_len >> recent_avg_len).
      * Phase 4b: director-string echo (verbatim quote of upstream
-     * scene-direction text).
+     *           scene-direction text).
+     * Phase 4c: persona-PII echo (loaded persona name in third-person
+     *           profile construct — Sprint 35).
      *
-     * Both run on the cleaned text (post-Phase 1 strip). The length
+     * All run on the cleaned text (post-Phase 1 strip). The length
      * anomaly check uses the original `response_len` because the
      * cleaning only removes markup, not user-visible content — the
      * "what got sent on the wire" length is what matters relative
@@ -868,7 +987,8 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
     if (ctx) {
         bool length_anomaly = hu_guard_has_length_anomaly(ctx, response_len);
         bool director_echo = hu_guard_has_director_echo(ctx, for_repetition_check, check_len);
-        if (length_anomaly || director_echo) {
+        bool persona_echo = hu_guard_has_persona_pii_echo(ctx, for_repetition_check, check_len);
+        if (length_anomaly || director_echo || persona_echo) {
             if (cleaned)
                 alloc->free(alloc->ctx, cleaned, effective_len + 1);
             *out_response = NULL;
@@ -877,6 +997,7 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
             if (report) {
                 report->detected_length_anomaly = length_anomaly;
                 report->detected_director_echo = director_echo;
+                report->detected_persona_pii_echo = persona_echo;
             }
             return HU_OK;
         }

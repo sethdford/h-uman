@@ -79,6 +79,13 @@ typedef struct {
      *     on why they"). */
     bool detected_length_anomaly;
     bool detected_director_echo;
+    /* Sprint 35 — persona PII echo. Set when `ctx->persona_name` is
+     * non-NULL and the response contains the persona name in a
+     * third-person profile construct (e.g. `"<Name> is a"`,
+     * `"<Name>'s job"`, `"<Name> lives"`, `"<Name> works"`). Catches
+     * the 2026-05-11 leak class where the model echoed the operator's
+     * loaded persona name back to the recipient. */
+    bool detected_persona_pii_echo;
     /* If rejected, the longest run length that triggered rejection. */
     size_t max_repetition_run;
     /* Number of bytes removed by sanitization (0 if rejected outright). */
@@ -103,6 +110,15 @@ typedef struct {
      * or director_len < 30 disables the check. */
     const char *director_text;
     size_t director_len;
+
+    /* Sprint 35 — loaded persona's name (e.g. `"Seth"`). The guard
+     * rejects if this name appears in a third-person profile
+     * construct (e.g. `"<Name> is a"`, `"<Name>'s job"`,
+     * `"<Name> lives"`). NULL or persona_name_len < 2 disables
+     * the check. Word-boundary aware — `"Bethseth"` does NOT match
+     * `"Seth"`. */
+    const char *persona_name;
+    size_t persona_name_len;
 } hu_guard_context_t;
 
 /* Run the guard over a response.

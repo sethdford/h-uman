@@ -908,6 +908,213 @@ static void guard_ex_with_null_ctx_matches_legacy_behavior(void) {
     HU_ASSERT(out == raw);
 }
 
+/* ── Sprint 35 — persona-PII echo (G7) ─────────────────────────────────
+ *
+ * The guard rejects model output that echoes the loaded persona's
+ * name in a third-person profile construct. The persona name is
+ * passed via `hu_guard_context_t.persona_name`. Word-boundary aware
+ * (no false positive on "Bethseth"). Case-insensitive. Disabled
+ * when name is NULL or shorter than 2 characters. */
+
+static void guard_g7_rejects_third_person_is_construct(void) {
+    const char *raw = "Seth is a software developer who lives alone";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_name = "Seth";
+    ctx.persona_name_len = 4;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_pii_echo);
+}
+
+static void guard_g7_rejects_third_person_possessive(void) {
+    const char *raw = "yeah Seth's job is wild lol, he loves it";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_name = "Seth";
+    ctx.persona_name_len = 4;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_pii_echo);
+}
+
+static void guard_g7_rejects_third_person_lives_works(void) {
+    static const char *cases[] = {
+        "Seth lives in Salt Lake City",
+        "Seth works at a software company",
+        "Seth has been busy lately with his side projects",
+        "Seth was a chief architect for many years",
+    };
+    const size_t n = sizeof(cases) / sizeof(cases[0]);
+    for (size_t i = 0; i < n; i++) {
+        hu_guard_context_t ctx = {0};
+        ctx.persona_name = "Seth";
+        ctx.persona_name_len = 4;
+        hu_allocator_t alloc = A();
+        char *out = NULL;
+        size_t out_len = 0;
+        hu_guard_outcome_t outcome = HU_GUARD_OK;
+        hu_guard_report_t report;
+        memset(&report, 0, sizeof(report));
+        HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, cases[i], strlen(cases[i]), &ctx, &out,
+                                                &out_len, &outcome, &report),
+                     HU_OK);
+        HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+        HU_ASSERT(report.detected_persona_pii_echo);
+    }
+}
+
+static void guard_g7_passes_first_person_self_reference(void) {
+    /* These all contain "Seth" in legitimate first-person or direct
+     * contexts. None should trip G7. */
+    static const char *cases[] = {
+        "i'm seth, what's up",
+        "this is seth, sorry for the delay",
+        "yo seth here, one sec",
+        "hey seth speaking",
+    };
+    const size_t n = sizeof(cases) / sizeof(cases[0]);
+    for (size_t i = 0; i < n; i++) {
+        hu_guard_context_t ctx = {0};
+        ctx.persona_name = "Seth";
+        ctx.persona_name_len = 4;
+        hu_allocator_t alloc = A();
+        char *out = NULL;
+        size_t out_len = 0;
+        hu_guard_outcome_t outcome = HU_GUARD_OK;
+        hu_guard_report_t report;
+        memset(&report, 0, sizeof(report));
+        HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, cases[i], strlen(cases[i]), &ctx, &out,
+                                                &out_len, &outcome, &report),
+                     HU_OK);
+        HU_ASSERT(!report.detected_persona_pii_echo);
+        HU_ASSERT(outcome != HU_GUARD_REJECT);
+    }
+}
+
+static void guard_g7_passes_direct_address(void) {
+    /* Other people addressing Seth — totally fine. */
+    static const char *cases[] = {
+        "hey seth, want to grab coffee tomorrow",
+        "thanks seth, that helps a ton",
+        "yo seth what time should we meet",
+        "seth! good to hear from you",
+        "seth?",
+    };
+    const size_t n = sizeof(cases) / sizeof(cases[0]);
+    for (size_t i = 0; i < n; i++) {
+        hu_guard_context_t ctx = {0};
+        ctx.persona_name = "Seth";
+        ctx.persona_name_len = 4;
+        hu_allocator_t alloc = A();
+        char *out = NULL;
+        size_t out_len = 0;
+        hu_guard_outcome_t outcome = HU_GUARD_OK;
+        hu_guard_report_t report;
+        memset(&report, 0, sizeof(report));
+        HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, cases[i], strlen(cases[i]), &ctx, &out,
+                                                &out_len, &outcome, &report),
+                     HU_OK);
+        HU_ASSERT(!report.detected_persona_pii_echo);
+    }
+}
+
+static void guard_g7_skips_when_persona_name_null(void) {
+    /* Same input that would trip G7 — but persona_name is NULL, so
+     * the detector must not fire. */
+    const char *raw = "Seth is a software developer who lives alone";
+    hu_guard_context_t ctx = {0};
+    /* persona_name = NULL by zero-init. */
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT(!report.detected_persona_pii_echo);
+}
+
+static void guard_g7_skips_when_persona_name_too_short(void) {
+    /* Single-letter names are too generic to safely match. */
+    const char *raw = "S is a software developer who lives alone";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_name = "S";
+    ctx.persona_name_len = 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT(!report.detected_persona_pii_echo);
+}
+
+static void guard_g7_word_boundary_isolates_name(void) {
+    /* "Seth" embedded inside "Bethseth" must NOT match. The word-boundary
+     * check requires non-letter (or start) before the name. */
+    const char *raw = "yeah Bethseth is a great band tbh";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_name = "Seth";
+    ctx.persona_name_len = 4;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT(!report.detected_persona_pii_echo);
+}
+
+static void guard_g7_case_insensitive(void) {
+    /* "SETH" vs "seth" vs "Seth" all match a configured "Seth". */
+    static const char *cases[] = {
+        "SETH IS A SOFTWARE DEVELOPER",
+        "seth is a software developer",
+        "Seth is a software developer",
+        "SeTh is a software developer",
+    };
+    const size_t n = sizeof(cases) / sizeof(cases[0]);
+    for (size_t i = 0; i < n; i++) {
+        hu_guard_context_t ctx = {0};
+        ctx.persona_name = "Seth";
+        ctx.persona_name_len = 4;
+        hu_allocator_t alloc = A();
+        char *out = NULL;
+        size_t out_len = 0;
+        hu_guard_outcome_t outcome = HU_GUARD_OK;
+        hu_guard_report_t report;
+        memset(&report, 0, sizeof(report));
+        HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, cases[i], strlen(cases[i]), &ctx, &out,
+                                                &out_len, &outcome, &report),
+                     HU_OK);
+        HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+        HU_ASSERT(report.detected_persona_pii_echo);
+    }
+}
+
 /* ── Sprint 33 — recent_assistant_avg_len helper ───────────────────────
  *
  * Production call sites (agent_stream.c, agent_turn.c) populate
@@ -1075,4 +1282,17 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(agent_recent_assistant_avg_len_empty_history_returns_zero);
     HU_RUN_TEST(agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant);
     HU_RUN_TEST(agent_recent_assistant_avg_len_uses_most_recent_n);
+
+    /* Sprint 35 — persona-PII echo (G7). Catches third-person profile
+     * constructs ("<Name> is a", "<Name>'s job", "<Name> lives") that
+     * leak the loaded persona's identity. */
+    HU_RUN_TEST(guard_g7_rejects_third_person_is_construct);
+    HU_RUN_TEST(guard_g7_rejects_third_person_possessive);
+    HU_RUN_TEST(guard_g7_rejects_third_person_lives_works);
+    HU_RUN_TEST(guard_g7_passes_first_person_self_reference);
+    HU_RUN_TEST(guard_g7_passes_direct_address);
+    HU_RUN_TEST(guard_g7_skips_when_persona_name_null);
+    HU_RUN_TEST(guard_g7_skips_when_persona_name_too_short);
+    HU_RUN_TEST(guard_g7_word_boundary_isolates_name);
+    HU_RUN_TEST(guard_g7_case_insensitive);
 }

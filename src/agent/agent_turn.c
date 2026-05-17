@@ -5590,6 +5590,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_agent_internal_recent_assistant_avg_len(agent, 5);
                     guard_ctx.director_text = agent->scene_direction_text;
                     guard_ctx.director_len = agent->scene_direction_text_len;
+                    if (agent->persona && agent->persona->name &&
+                        agent->persona->name_len > 1) {
+                        guard_ctx.persona_name = agent->persona->name;
+                        guard_ctx.persona_name_len = agent->persona->name_len;
+                    }
                     hu_error_t guard_err = hu_response_guard_check_ex(
                         agent->alloc, final_content, final_len, &guard_ctx, &guard_out,
                         &guard_out_len, &guard_outcome, &guard_report);
@@ -5598,12 +5603,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             hu_log_error(
                                 "agent_turn", agent->observer,
                                 "response_guard REJECT: turn final (len=%zu, recent_avg=%zu) "
-                                "[semantic=%d length=%d director=%d repetition_run=%zu] - "
-                                "retrying once with repair prompt",
+                                "[semantic=%d length=%d director=%d persona=%d "
+                                "repetition_run=%zu] - retrying once with repair prompt",
                                 final_len, guard_ctx.recent_avg_len,
                                 guard_report.detected_semantic_leak ? 1 : 0,
                                 guard_report.detected_length_anomaly ? 1 : 0,
                                 guard_report.detected_director_echo ? 1 : 0,
+                                guard_report.detected_persona_pii_echo ? 1 : 0,
                                 guard_report.max_repetition_run);
                             char *retry_content = NULL;
                             size_t retry_len = 0;

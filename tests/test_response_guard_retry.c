@@ -1,6 +1,7 @@
 #include "human/agent.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
+#include "human/persona.h"
 #include "human/provider.h"
 #include "test_framework.h"
 
@@ -440,6 +441,66 @@ static void agent_g6_director_echo_rejects_and_retries(void) {
     hu_agent_deinit(&agent);
 }
 
+/* G7 — persona-PII echo through agent_turn (Sprint 35).
+ *
+ * Loads the agent with a tiny synthetic persona (name="testname", all
+ * other fields zero/empty), then drives a turn where the mock provider
+ * leaks "testname is a software developer". The wired G7 must reject;
+ * the slim retry must surface a clean reply. */
+static void agent_g7_persona_pii_echo_rejects_and_retries(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    static const char leaked[] =
+        "yeah testname is a software developer who loves dry humor";
+    static const char retry_ok[] = "yeah lol";
+    pctx.call_text[0] = leaked;
+    pctx.call_text_len[0] = sizeof(leaked) - 1;
+    pctx.call_text[1] = retry_ok;
+    pctx.call_text_len[1] = sizeof(retry_ok) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "length_anomaly_mock", 19, 0.7,
+                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+
+    /* Build a heap-allocated minimal persona shim. hu_persona_deinit
+     * frees `persona->name` with `name_len + 1` and skips other fields
+     * if they are NULL. So we can safely set just `name` + `name_len`
+     * and zero everything else — agent_deinit will clean up properly. */
+    hu_persona_t *p = (hu_persona_t *)alloc.alloc(alloc.ctx, sizeof(*p));
+    HU_ASSERT_NOT_NULL(p);
+    memset(p, 0, sizeof(*p));
+    p->name = hu_strndup(&alloc, "testname", 8);
+    p->name_len = 8;
+    HU_ASSERT_NOT_NULL(p->name);
+    /* Replace any persona the agent allocated. */
+    if (agent.persona) {
+        hu_persona_deinit(&alloc, agent.persona);
+        alloc.free(alloc.ctx, agent.persona, sizeof(hu_persona_t));
+    }
+    agent.persona = p;
+
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "tell me about you", 17, &r, &rlen), HU_OK);
+
+    /* The leaked "testname is a software developer" must NOT have made
+     * it to the surfaced response. */
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT(strstr(r, "is a software developer") == NULL);
+    /* Provider was called at least twice — original + retry. */
+    HU_ASSERT(pctx.calls >= 2);
+
+    alloc.free(alloc.ctx, r, rlen + 1);
+    hu_agent_deinit(&agent);
+}
+
 void run_response_guard_retry_tests(void) {
     HU_TEST_SUITE("Response Guard Retry");
     HU_RUN_TEST(guard_reject_retry_produces_human_like_replacement);
@@ -449,4 +510,7 @@ void run_response_guard_retry_tests(void) {
     /* Sprint 34 — end-to-end wired G5 + G6 through hu_agent_turn. */
     HU_RUN_TEST(agent_g5_length_anomaly_rejects_and_retries);
     HU_RUN_TEST(agent_g6_director_echo_rejects_and_retries);
+
+    /* Sprint 35 — end-to-end persona-PII echo (G7). */
+    HU_RUN_TEST(agent_g7_persona_pii_echo_rejects_and_retries);
 }
