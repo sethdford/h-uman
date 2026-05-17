@@ -22,6 +22,14 @@ static hu_allocator_t A(void) { return hu_system_allocator(); }
  * for `hu_guard_context_t`. (Sprint 33) */
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
 
+/* Sprint 37 — director history ring buffer helpers. Same forward-decl
+ * trick: agent_internal.h is not exported, but the symbols are linked
+ * into the test binary because the test target builds against the
+ * same agent.c TU. */
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
+                                              size_t text_len);
+void hu_agent_internal_free_director_history(hu_agent_t *agent);
+
 /* ── Production regression — Harmony channel marker ────────────────────── */
 
 static void guard_rejects_or_sanitizes_production_harmony_leak(void) {
@@ -1115,6 +1123,268 @@ static void guard_g7_case_insensitive(void) {
     }
 }
 
+/* ── Sprint 37 — Cross-turn director-history echo (G6 extension) ───────
+ *
+ * G6 (Sprint 31) only saw the current turn's `director_text`. A model
+ * that quotes a *previous* turn's director slips past. The agent now
+ * keeps a small ring buffer of recent directors; G6 iterates it. */
+
+static const char G37_DIRECTOR_PAST[] =
+    "casual short, dry; respond briefly with skeptical follow-up question";
+static const char G37_DIRECTOR_PAST2[] =
+    "warm and curious; ask one clarifying question; minimum two sentences";
+
+static void guard_g6_history_catches_previous_director(void) {
+    /* Current turn has NO director (e.g., a follow-up where the
+     * upstream pipeline didn't generate one). History slot 0 holds
+     * yesterday's director. The model leaks a 30+ byte verbatim
+     * quote of the historical director. G6 must fire via history. */
+    hu_guard_context_t ctx = {0};
+    /* No current director set. */
+    const char *history[1] = {G37_DIRECTOR_PAST};
+    size_t history_lens[1] = {sizeof(G37_DIRECTOR_PAST) - 1};
+    ctx.director_history = history;
+    ctx.director_history_lens = history_lens;
+    ctx.director_history_count = 1;
+
+    const char *raw = "yeah respond briefly with skeptical follow-up question, sure";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_director_echo);
+}
+
+static void guard_g6_history_skips_below_threshold(void) {
+    /* History entry shorter than 30 bytes — must not trip G6 even
+     * if the response contains it verbatim. */
+    static const char short_director[] = "casual brief"; /* 12 bytes */
+    hu_guard_context_t ctx = {0};
+    const char *history[1] = {short_director};
+    size_t history_lens[1] = {sizeof(short_director) - 1};
+    ctx.director_history = history;
+    ctx.director_history_lens = history_lens;
+    ctx.director_history_count = 1;
+
+    const char *raw = "yeah, casual brief — sounds good";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT(!report.detected_director_echo);
+}
+
+static void guard_g6_history_orthogonal_to_current(void) {
+    /* Both a current director and a history entry are set. The
+     * response quotes ONLY the history (not the current director).
+     * G6 must fire — we don't care which source. */
+    static const char current_director[] =
+        "professional, slightly skeptical, ask for clarification on why they";
+    hu_guard_context_t ctx = {0};
+    ctx.director_text = current_director;
+    ctx.director_len = sizeof(current_director) - 1;
+    const char *history[1] = {G37_DIRECTOR_PAST};
+    size_t history_lens[1] = {sizeof(G37_DIRECTOR_PAST) - 1};
+    ctx.director_history = history;
+    ctx.director_history_lens = history_lens;
+    ctx.director_history_count = 1;
+
+    /* Response quotes 35 chars of HISTORY, not of current. */
+    const char *raw = "ok, respond briefly with skeptical follow-up — got it";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_director_echo);
+}
+
+static void guard_g6_history_zero_count_disables(void) {
+    /* History pointers set but count = 0 — must skip iteration
+     * (no NULL deref), no enforcement. */
+    hu_guard_context_t ctx = {0};
+    const char *history[1] = {G37_DIRECTOR_PAST};
+    size_t history_lens[1] = {sizeof(G37_DIRECTOR_PAST) - 1};
+    ctx.director_history = history;
+    ctx.director_history_lens = history_lens;
+    ctx.director_history_count = 0; /* explicit */
+
+    const char *raw = "yeah respond briefly with skeptical follow-up question";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT(!report.detected_director_echo);
+}
+
+static void guard_g6_history_walks_all_slots(void) {
+    /* 4 slots, response quotes the OLDEST (slot 3). Detector must
+     * iterate all slots, not just slot 0. */
+    hu_guard_context_t ctx = {0};
+    static const char slot0[] = "alpha bravo charlie delta echo foxtrot golf";
+    static const char slot1[] = "hotel india juliet kilo lima mike november";
+    static const char slot2[] = "oscar papa quebec romeo sierra tango uniform";
+    /* slot3 = the historical director that the model quotes. */
+    const char *history[4] = {slot0, slot1, slot2, G37_DIRECTOR_PAST2};
+    size_t history_lens[4] = {sizeof(slot0) - 1, sizeof(slot1) - 1, sizeof(slot2) - 1,
+                              sizeof(G37_DIRECTOR_PAST2) - 1};
+    ctx.director_history = history;
+    ctx.director_history_lens = history_lens;
+    ctx.director_history_count = 4;
+
+    const char *raw =
+        "ok ask one clarifying question; minimum two sentences sounds fair";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_director_echo);
+}
+
+/* ── Sprint 37 — Director history ring buffer helpers ──────────────────
+ *
+ * `hu_agent_internal_push_director_history` and
+ * `hu_agent_internal_free_director_history` manage a small
+ * heap-owned ring of director string copies on the agent. Push is
+ * idempotent on NULL/short directors; truncates oversized strings;
+ * evicts the oldest slot when the buffer fills. Free is called by
+ * `hu_agent_deinit`. */
+
+static hu_agent_t g37_make_test_agent(hu_allocator_t *alloc) {
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = alloc;
+    return agent;
+}
+
+static void agent_director_history_push_basic(void) {
+    hu_allocator_t alloc = A();
+    hu_agent_t a = g37_make_test_agent(&alloc);
+
+    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST,
+                                             sizeof(G37_DIRECTOR_PAST) - 1);
+    HU_ASSERT_EQ(a.director_history_count, (size_t)1);
+    HU_ASSERT_NOT_NULL(a.director_history[0]);
+    HU_ASSERT_EQ(a.director_history_lens[0], sizeof(G37_DIRECTOR_PAST) - 1);
+    HU_ASSERT(strcmp(a.director_history[0], G37_DIRECTOR_PAST) == 0);
+
+    hu_agent_internal_free_director_history(&a);
+    HU_ASSERT_EQ(a.director_history_count, (size_t)0);
+}
+
+static void agent_director_history_push_overflow_evicts_oldest(void) {
+    hu_allocator_t alloc = A();
+    hu_agent_t a = g37_make_test_agent(&alloc);
+
+    /* Push 6 distinct entries — only the most-recent 4 should survive
+     * (HU_DIRECTOR_HISTORY_MAX = 4). */
+    static const char *texts[] = {
+        "first director, the oldest one that should be evicted today",
+        "second director, also evicted because the buffer fills up first",
+        "third director that should still be in the buffer at the end",
+        "fourth director that should still be in the buffer at the end",
+        "fifth director that should still be in the buffer at the end",
+        "sixth and most recent director string in the entire test set",
+    };
+    for (size_t i = 0; i < 6; i++) {
+        hu_agent_internal_push_director_history(&a, texts[i], strlen(texts[i]));
+    }
+
+    HU_ASSERT_EQ(a.director_history_count, (size_t)HU_DIRECTOR_HISTORY_MAX);
+    /* Slot 0 = most recent (texts[5]), slot 3 = oldest retained (texts[2]). */
+    HU_ASSERT(strcmp(a.director_history[0], texts[5]) == 0);
+    HU_ASSERT(strcmp(a.director_history[1], texts[4]) == 0);
+    HU_ASSERT(strcmp(a.director_history[2], texts[3]) == 0);
+    HU_ASSERT(strcmp(a.director_history[3], texts[2]) == 0);
+
+    hu_agent_internal_free_director_history(&a);
+}
+
+static void agent_director_history_push_truncates_long(void) {
+    hu_allocator_t alloc = A();
+    hu_agent_t a = g37_make_test_agent(&alloc);
+
+    /* Push a 1KB director — slot 0 must contain first HU_DIRECTOR_TEXT_CAP
+     * bytes and be NUL-terminated. */
+    char big[1024];
+    memset(big, 'x', sizeof(big));
+    /* Make first 64 bytes a varied prefix (passes G6 threshold). */
+    static const char varied_prefix[] =
+        "casual short and dry, respond briefly with one short sentence here";
+    memcpy(big, varied_prefix, sizeof(varied_prefix) - 1);
+    hu_agent_internal_push_director_history(&a, big, sizeof(big));
+
+    HU_ASSERT_EQ(a.director_history_count, (size_t)1);
+    HU_ASSERT_NOT_NULL(a.director_history[0]);
+    HU_ASSERT_EQ(a.director_history_lens[0], (size_t)HU_DIRECTOR_TEXT_CAP);
+    /* NUL-terminated at exactly CAP. */
+    HU_ASSERT_EQ(a.director_history[0][HU_DIRECTOR_TEXT_CAP], '\0');
+    /* Prefix preserved. */
+    HU_ASSERT(memcmp(a.director_history[0], varied_prefix, sizeof(varied_prefix) - 1) == 0);
+
+    hu_agent_internal_free_director_history(&a);
+}
+
+static void agent_director_history_push_null_is_noop(void) {
+    hu_allocator_t alloc = A();
+    hu_agent_t a = g37_make_test_agent(&alloc);
+
+    hu_agent_internal_push_director_history(&a, NULL, 0);
+    hu_agent_internal_push_director_history(&a, "short", 5); /* < 30 bytes */
+    HU_ASSERT_EQ(a.director_history_count, (size_t)0);
+    HU_ASSERT(a.director_history[0] == NULL);
+
+    hu_agent_internal_free_director_history(&a);
+}
+
+static void agent_director_history_free_zeroes_count(void) {
+    hu_allocator_t alloc = A();
+    hu_agent_t a = g37_make_test_agent(&alloc);
+
+    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST,
+                                             sizeof(G37_DIRECTOR_PAST) - 1);
+    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST2,
+                                             sizeof(G37_DIRECTOR_PAST2) - 1);
+    HU_ASSERT_EQ(a.director_history_count, (size_t)2);
+
+    hu_agent_internal_free_director_history(&a);
+    HU_ASSERT_EQ(a.director_history_count, (size_t)0);
+    for (size_t i = 0; i < HU_DIRECTOR_HISTORY_MAX; i++) {
+        HU_ASSERT(a.director_history[i] == NULL);
+        HU_ASSERT_EQ(a.director_history_lens[i], (size_t)0);
+    }
+
+    /* Idempotent — second free must not crash or leak. */
+    hu_agent_internal_free_director_history(&a);
+}
+
 /* ── Sprint 36 — persona identity / core-anchor echo (G8) ──────────────
  *
  * The guard rejects model output that quotes a 25+ byte verbatim
@@ -1486,4 +1756,21 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_g8_case_insensitive);
     HU_RUN_TEST(guard_g8_orthogonal_to_g6);
     HU_RUN_TEST(guard_g8_orthogonal_to_g7);
+
+    /* Sprint 37 — Cross-turn director-history echo (G6 extension). G6
+     * now iterates a small ring buffer of recent directors so a model
+     * that quotes yesterday's director instead of today's still trips. */
+    HU_RUN_TEST(guard_g6_history_catches_previous_director);
+    HU_RUN_TEST(guard_g6_history_skips_below_threshold);
+    HU_RUN_TEST(guard_g6_history_orthogonal_to_current);
+    HU_RUN_TEST(guard_g6_history_zero_count_disables);
+    HU_RUN_TEST(guard_g6_history_walks_all_slots);
+
+    /* Sprint 37 — Director history ring buffer helpers used by the
+     * daemon to carry the about-to-go-stale director across turns. */
+    HU_RUN_TEST(agent_director_history_push_basic);
+    HU_RUN_TEST(agent_director_history_push_overflow_evicts_oldest);
+    HU_RUN_TEST(agent_director_history_push_truncates_long);
+    HU_RUN_TEST(agent_director_history_push_null_is_noop);
+    HU_RUN_TEST(agent_director_history_free_zeroes_count);
 }

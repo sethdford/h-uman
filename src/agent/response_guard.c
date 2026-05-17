@@ -478,22 +478,47 @@ static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t re
     return response_len > ctx->recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT;
 }
 
-/* G6 — director-string echo. Returns true if any 30-char substring of
- * `ctx->director_text` appears verbatim (case-insensitively) in
- * `s[0..len)`. NULL ctx, NULL director_text, or director_len <
- * HU_GUARD_DIRECTOR_ECHO_MIN_MATCH disables the check. */
-static bool hu_guard_has_director_echo(const hu_guard_context_t *ctx, const char *s, size_t len) {
-    if (!ctx || !ctx->director_text ||
-        ctx->director_len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
+/* Helper — slide a 30-char window over `src[0..src_len)` and return
+ * true if any window appears verbatim (case-insensitively) in
+ * `s[0..len)`. Skips when src is NULL/short or response is short. */
+static bool hu_guard_director_window_matches(const char *src, size_t src_len, const char *s,
+                                              size_t len) {
+    if (!src || src_len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
         return false;
     if (len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
         return false;
-    /* Slide a 30-char window over director_text. For each window,
-     * check if the response contains it. First match wins. */
     size_t window = (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH;
-    for (size_t i = 0; i + window <= ctx->director_len; i++) {
-        if (hu_guard_ci_contains(s, len, ctx->director_text + i, window))
+    for (size_t i = 0; i + window <= src_len; i++) {
+        if (hu_guard_ci_contains(s, len, src + i, window))
             return true;
+    }
+    return false;
+}
+
+/* G6 — director-string echo. Returns true if any 30-char substring of
+ * `ctx->director_text` (current turn) OR any entry in
+ * `ctx->director_history[]` (past turns, most-recent-first) appears
+ * verbatim (case-insensitively) in `s[0..len)`. NULL ctx disables the
+ * check entirely. Per-source skip rules:
+ *
+ *   - current `director_text` skipped if NULL or director_len < 30.
+ *   - history slot skipped if its entry is NULL or its length < 30.
+ *
+ * Returns on first match (any source), so cost is bounded by
+ * HU_DIRECTOR_HISTORY_MAX + 1 sliding-window scans. */
+static bool hu_guard_has_director_echo(const hu_guard_context_t *ctx, const char *s, size_t len) {
+    if (!ctx)
+        return false;
+    /* Current-turn director (Sprint 31 baseline). */
+    if (hu_guard_director_window_matches(ctx->director_text, ctx->director_len, s, len))
+        return true;
+    /* Cross-turn history (Sprint 37). */
+    if (ctx->director_history && ctx->director_history_lens && ctx->director_history_count > 0) {
+        for (size_t i = 0; i < ctx->director_history_count; i++) {
+            if (hu_guard_director_window_matches(ctx->director_history[i],
+                                                  ctx->director_history_lens[i], s, len))
+                return true;
+        }
     }
     return false;
 }

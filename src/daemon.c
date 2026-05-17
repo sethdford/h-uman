@@ -10,6 +10,7 @@
 /* Core daemon headers */
 #include "human/daemon.h"
 #include "human/agent.h"
+#include "agent/agent_internal.h"
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
@@ -9388,6 +9389,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             agent->tools_count = saved_tools;
                             agent->tool_specs_count = saved_specs;
                         }
+                        /* Sprint 37: push the about-to-go-stale director into
+                         * the agent's heap-owned ring buffer. This survives
+                         * across turns and lets G6 catch a model that quotes
+                         * the *previous* turn's director on the next turn.
+                         * Idempotent on NULL/short directors. Must run BEFORE
+                         * we clear scene_direction_text below. */
+                        hu_agent_internal_push_director_history(
+                            agent, agent->scene_direction_text,
+                            agent->scene_direction_text_len);
+
                         /* Sprint 34: clear scene-direction pointer on the agent
                          * before director_result goes out of scope. Without
                          * this, a subsequent turn could read freed/stale

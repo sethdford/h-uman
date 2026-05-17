@@ -563,6 +563,137 @@ static void agent_g8_persona_identity_echo_rejects_and_retries(void) {
     hu_agent_deinit(&agent);
 }
 
+/* Forward declaration — director history helpers (Sprint 37). The
+ * test binary links against agent.c so the symbols resolve. */
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
+                                              size_t text_len);
+
+/* G6 — cross-turn director-history echo through agent_turn (Sprint 37).
+ *
+ * Drives a real hu_agent_turn through a mock provider. The agent's
+ * scene_direction_text is NULL (no current director) but the ring
+ * buffer holds yesterday's director from a previous turn. The mock
+ * leaks a 30+ byte verbatim quote of the historical director — G6
+ * must fire via the history path, not the current-turn path. */
+static void agent_g6_history_cross_turn_rejects_and_retries(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    static const char yesterday_director[] =
+        "casual short, dry; respond briefly with a skeptical follow-up";
+    static const char leaked[] =
+        "yeah respond briefly with a skeptical follow-up question, sure";
+    static const char retry_ok[] = "yeah lol";
+    pctx.call_text[0] = leaked;
+    pctx.call_text_len[0] = sizeof(leaked) - 1;
+    pctx.call_text[1] = retry_ok;
+    pctx.call_text_len[1] = sizeof(retry_ok) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "history_echo_mock", 17, 0.7,
+                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+
+    /* Simulate the daemon at end-of-previous-turn: push yesterday's
+     * director into history, leave scene_direction_text NULL. */
+    hu_agent_internal_push_director_history(&agent, yesterday_director,
+                                             sizeof(yesterday_director) - 1);
+    HU_ASSERT_EQ(agent.director_history_count, (size_t)1);
+    HU_ASSERT(agent.scene_direction_text == NULL);
+
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "tell me what to do today", 24, &r, &rlen), HU_OK);
+
+    /* The leaked verbatim director quote must NOT have made it
+     * through to the user. */
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT(strstr(r, "skeptical follow-up") == NULL);
+    HU_ASSERT(pctx.calls >= 2);
+
+    alloc.free(alloc.ctx, r, rlen + 1);
+    hu_agent_deinit(&agent);
+}
+
+/* Daemon clear-on-exit — proves no stale-memory read on next turn
+ * (Sprint 37, also closes Sprint 34 carry-over).
+ *
+ * Simulates the daemon lifecycle:
+ *   Turn 1: scene_direction_text points at a stack-local buffer.
+ *           After the turn, daemon NULLs scene_direction_text and
+ *           pushes the buffer into the heap-owned ring buffer.
+ *   Turn 2: scene_direction_text is NULL. The ring buffer holds a
+ *           heap-owned copy. ASan must see no use-after-free if the
+ *           original stack buffer is later overwritten.
+ *
+ * We exercise the second-turn path explicitly: zero out the stack
+ * buffer between turns, then run turn 2 with a benign mock. The
+ * guard must run cleanly (no crash, no false positive from stale
+ * pointer reads). */
+static void agent_clear_on_exit_no_stale_memory(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    /* Turn 2 mock — benign, very short reply. G6 should not fire
+     * because (a) scene_direction_text is NULL, (b) the ring buffer
+     * holds yesterday's director (heap-owned, alive), but the response
+     * doesn't quote it. */
+    static const char benign[] = "yeah, sounds good";
+    pctx.call_text[0] = benign;
+    pctx.call_text_len[0] = sizeof(benign) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "clear_on_exit_mock", 18, 0.7,
+                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+
+    /* Turn 1 simulation: stack buffer holding the director, then push
+     * to history and clear scene_direction_text — exact daemon flow. */
+    {
+        char turn1_director[256];
+        memset(turn1_director, 0, sizeof(turn1_director));
+        const char *t1 =
+            "warm and curious; ask one clarifying question; minimum two sentences";
+        size_t t1_len = strlen(t1);
+        memcpy(turn1_director, t1, t1_len);
+        agent.scene_direction_text = turn1_director;
+        agent.scene_direction_text_len = t1_len;
+        /* End-of-turn: push then clear. */
+        hu_agent_internal_push_director_history(&agent, agent.scene_direction_text,
+                                                 agent.scene_direction_text_len);
+        agent.scene_direction_text = NULL;
+        agent.scene_direction_text_len = 0;
+    }
+    /* Stack frame goes out of scope. The original buffer is now
+     * undefined. The agent must NOT have a dangling pointer. */
+    HU_ASSERT(agent.scene_direction_text == NULL);
+    HU_ASSERT_EQ(agent.scene_direction_text_len, (size_t)0);
+    HU_ASSERT_EQ(agent.director_history_count, (size_t)1);
+    HU_ASSERT_NOT_NULL(agent.director_history[0]);
+
+    /* Turn 2 — guard must run cleanly. Under ASan, any read of stale
+     * stack memory through scene_direction_text would crash here. */
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "ok thanks", 9, &r, &rlen), HU_OK);
+    HU_ASSERT_NOT_NULL(r);
+    /* Provider was called exactly once — no retry, guard accepted. */
+    HU_ASSERT_EQ(pctx.calls, (size_t)1);
+
+    alloc.free(alloc.ctx, r, rlen + 1);
+    hu_agent_deinit(&agent);
+}
+
 void run_response_guard_retry_tests(void) {
     HU_TEST_SUITE("Response Guard Retry");
     HU_RUN_TEST(guard_reject_retry_produces_human_like_replacement);
@@ -578,4 +709,9 @@ void run_response_guard_retry_tests(void) {
 
     /* Sprint 36 — end-to-end persona identity echo (G8). */
     HU_RUN_TEST(agent_g8_persona_identity_echo_rejects_and_retries);
+
+    /* Sprint 37 — cross-turn director history (G6 extension) +
+     * daemon clear-on-exit lifetime safety. */
+    HU_RUN_TEST(agent_g6_history_cross_turn_rejects_and_retries);
+    HU_RUN_TEST(agent_clear_on_exit_no_stale_memory);
 }

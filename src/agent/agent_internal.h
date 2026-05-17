@@ -50,6 +50,28 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
 void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len);
 void hu_agent_internal_clear_scene_direction(hu_agent_t *agent);
 
+/* Sprint 37 — Push the about-to-go-stale director string into the
+ * agent's ring buffer of recent directors. Slot 0 is most recent;
+ * older entries shift down; the oldest is freed when the buffer fills.
+ *
+ * No-op if `text` is NULL or shorter than 30 bytes
+ * (HU_GUARD_DIRECTOR_ECHO_MIN_MATCH — wouldn't trip G6 anyway).
+ *
+ * Allocates a NUL-terminated copy on `agent->alloc`, truncated to
+ * HU_DIRECTOR_TEXT_CAP bytes. The agent owns the copy; freed by
+ * `hu_agent_internal_free_director_history` (called by
+ * `hu_agent_deinit`).
+ *
+ * Used by the daemon at end-of-turn, just before clearing
+ * `agent->scene_direction_text`, so that G6 on the next turn can
+ * still catch a model that quotes the *previous* turn's director. */
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
+                                              size_t text_len);
+
+/* Free all director history slots; reset count to 0. Called by
+ * `hu_agent_deinit`. Idempotent. */
+void hu_agent_internal_free_director_history(hu_agent_t *agent);
+
 hu_error_t hu_agent_internal_ensure_history_cap(hu_agent_t *agent, size_t need);
 hu_error_t hu_agent_internal_append_history(hu_agent_t *agent, hu_role_t role, const char *content,
                                             size_t content_len, const char *name, size_t name_len,

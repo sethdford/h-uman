@@ -118,6 +118,15 @@ typedef struct {
     const char *director_text;
     size_t director_len;
 
+    /* Sprint 37 — past-turn director history (most-recent-first). G6
+     * iterates these after the current `director_text` to catch model
+     * output that quotes a *previous* turn's director rather than the
+     * current one. Same 30-byte minimum match. NULL or
+     * director_history_count == 0 disables the cross-turn check. */
+    const char *const *director_history;
+    const size_t *director_history_lens;
+    size_t director_history_count;
+
     /* Sprint 35 — loaded persona's name (e.g. `"Seth"`). The guard
      * rejects if this name appears in a third-person profile
      * construct (e.g. `"<Name> is a"`, `"<Name>'s job"`,

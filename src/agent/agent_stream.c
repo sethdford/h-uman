@@ -1403,6 +1403,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_agent_internal_recent_assistant_avg_len(agent, 5);
                 guard_ctx.director_text = agent->scene_direction_text;
                 guard_ctx.director_len = agent->scene_direction_text_len;
+                /* Sprint 37 — cross-turn director history. */
+                guard_ctx.director_history = (const char *const *)agent->director_history;
+                guard_ctx.director_history_lens = agent->director_history_lens;
+                guard_ctx.director_history_count = agent->director_history_count;
                 if (agent->persona) {
                     if (agent->persona->name && agent->persona->name_len > 1) {
                         guard_ctx.persona_name = agent->persona->name;
@@ -2161,6 +2165,9 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_agent_internal_recent_assistant_avg_len(agent, 5);
             guard_ctx.director_text = agent->scene_direction_text;
             guard_ctx.director_len = agent->scene_direction_text_len;
+            guard_ctx.director_history = (const char *const *)agent->director_history;
+            guard_ctx.director_history_lens = agent->director_history_lens;
+            guard_ctx.director_history_count = agent->director_history_count;
             if (agent->persona) {
                 if (agent->persona->name && agent->persona->name_len > 1) {
                     guard_ctx.persona_name = agent->persona->name;

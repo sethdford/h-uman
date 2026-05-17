@@ -329,8 +329,16 @@ static void judge_system_prompt_not_null(void) {
 }
 
 static void route_populates_global_log(void) {
+    /* Sprint 37 — robustness fix: the global log is a 100-entry ring
+     * shared across the whole test suite. As more agent_turn-driven
+     * tests are added (e.g. response_guard retry integration tests),
+     * the log can saturate at count = 100 by the time this test runs,
+     * causing `count > before` to spuriously fail. Reset the log here
+     * so the assertion is about *this* call, not cumulative state. */
     hu_route_decision_log_t *log = hu_route_global_log();
+    hu_route_log_init(log);
     size_t before = hu_route_log_count(log);
+    HU_ASSERT_EQ(before, (size_t)0);
 
     hu_model_router_config_t c = hu_model_router_default_config();
     hu_model_route(&c, "hello there", 11, NULL, 0, 12, 0);
