@@ -44,7 +44,9 @@
 ### US-9.2 (P0): As a first-time installer, I want `human onboard` to end with a concrete next step pointing me at iMessage pairing, so that I am not left at a prompt wondering what to do
 
 **Context from codebase:**
-`src/onboard.c` line 493-496: the wizard ends with either `"Run 'human onboard --apple' to start chatting with Apple Intelligence.\n"` (Apple path) or `"Run 'human agent' to start chatting.\n"` (all other paths). This is the dead end. The user has no config, no channel paired, and no idea what `human agent` does on its own. The wizard also has no post-write validation — it does not confirm the config parses cleanly before exiting.
+`src/onboard.c` line 493-496: the wizard ends with either `"Run 'human onboard --apple' to start chatting with Apple Intelligence.
+"` (Apple path) or `"Run 'human agent' to start chatting.
+"` (all other paths). This is the dead end. The user has no config, no channel paired, and no idea what `human agent` does on its own. The wizard also has no post-write validation — it does not confirm the config parses cleanly before exiting.
 
 **Acceptance criteria:**
 

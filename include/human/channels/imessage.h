@@ -183,6 +183,87 @@ int64_t hu_imessage_last_success_epoch(const hu_channel_t *ch);
  * Writes into buf; returns false if HOME unset or buffer too small. */
 bool hu_imessage_status_path(char *buf, size_t cap);
 
+/* ── Non-allowlisted sender courtesy reply (US-9.3) ─────────────────────
+ *
+ * When a DM arrives from a handle not in the channel's allow_from list, the
+ * historical behavior was to silently `continue` past the message. US-9.3
+ * replaces that with a rate-limited one-time-per-handle-per-24h courtesy
+ * reply explaining the allowlist requirement. The decision is exposed as a
+ * pure predicate per `.claude/rules/security-predicate-extraction.md` so
+ * tests can pin every row of the truth table without spawning a daemon or
+ * writing to chat.db.
+ *
+ * Aggregate spoof-spam mitigation: even if many spoofed handles spray the
+ * daemon, no more than HU_IMESSAGE_COURTESY_DAILY_CAP courtesy replies are
+ * emitted in any single 24h bucket (per `aggregate_today_count` input).
+ */
+
+#ifndef HU_IMESSAGE_COURTESY_DAILY_CAP
+#define HU_IMESSAGE_COURTESY_DAILY_CAP 50
+#endif
+
+/* Pure predicate: should we send a courtesy reply right now?
+ *
+ * Inputs (all booleans + one count):
+ *   allowlist_has_handle   — handle IS in allow_from → false (caller never asks for allowlisted).
+ *   dedup_already_replied  — same (handle, bucket) already received a reply → false.
+ *   courtesy_replies_enabled — operator config flag, default true.
+ *   aggregate_today_count  — number of courtesy replies already sent in this 24h bucket
+ *                            across ALL handles. If ≥ HU_IMESSAGE_COURTESY_DAILY_CAP → false.
+ *
+ * Returns true ONLY when: the handle is NOT allowlisted AND we have not
+ * already replied to this handle in this bucket AND the feature is enabled
+ * AND we have not blown the aggregate spoof-spam cap. Pure: no I/O, no
+ * logging, no mutation.
+ */
+bool hu_imessage_should_courtesy_reply(bool allowlist_has_handle, bool dedup_already_replied,
+                                       bool courtesy_replies_enabled,
+                                       uint32_t aggregate_today_count);
+
+/* Pure text builder: format a courtesy reply into a caller-provided buffer.
+ *
+ *   persona_name        — display name to identify the assistant ("Atlas").
+ *                         NULL → generic "the human assistant".
+ *   owner_display_name  — operator's preferred display name ("Jane"). NULL → "the operator".
+ *
+ * Security invariants enforced by builder + tests:
+ *   • The output NEVER contains a literal phone number or e-mail handle
+ *     ("+1..." or "@..."): only display names are interpolated.
+ *   • The output MUST contain the substring "allowlist".
+ *   • Safe with NULL persona_name and NULL owner_display_name.
+ *
+ * Writes a NUL-terminated string. Returns the number of bytes written
+ * (excluding the terminator). Returns 0 if out_cap < 32 (defensive).
+ */
+size_t hu_imessage_build_courtesy_reply(const char *persona_name, const char *owner_display_name,
+                                        char *out, size_t out_cap);
+
+/* Resolve the courtesy dedup-log path ("$HOME/.human/imessage_courtesy.log").
+ * Writes into buf; returns false if HOME unset or buffer too small. */
+bool hu_imessage_courtesy_log_path(char *buf, size_t cap);
+
+/* Check whether the (handle, bucket) pair has already received a courtesy
+ * reply. Reads the dedup log; bucket = floor(epoch / 86400). Returns false
+ * on any I/O failure (fail-open for sends, fail-safe for replies — we
+ * prefer "send anyway" to "silent drop forever after a transient FS hiccup").
+ */
+bool hu_imessage_courtesy_dedup_check(const char *handle, int64_t bucket);
+
+/* Record (handle, bucket) in the dedup log AND increment the aggregate
+ * per-bucket counter. Best-effort; silently no-ops on I/O failure (we'd
+ * rather double-reply than crash the daemon). Truncates the file when it
+ * grows beyond HU_IMESSAGE_COURTESY_LOG_MAX_LINES entries (keep tail). */
+void hu_imessage_courtesy_dedup_record(const char *handle, int64_t bucket);
+
+/* Returns the count of courtesy replies recorded in the dedup log for the
+ * given bucket. Used by the predicate's aggregate-cap input. Returns 0 if
+ * the log is missing or unreadable. */
+uint32_t hu_imessage_courtesy_aggregate_count(int64_t bucket);
+
+#ifndef HU_IMESSAGE_COURTESY_LOG_MAX_LINES
+#define HU_IMESSAGE_COURTESY_LOG_MAX_LINES 256
+#endif
+
 /* ── Health state machine + watchdog ─────────────────────────────────────
  * The breaker only sees sqlite-level failures. The watchdog also catches the
  * "process is alive but iMessage poll loop has been silently stuck for N
@@ -282,6 +363,36 @@ void hu_imessage_test_set_guid_lookup(const char *guid, const char *text);
 void hu_imessage_test_clear_guid_lookups(void);
 
 const char *hu_imessage_test_get_last_message(hu_channel_t *ch, size_t *out_len);
+
+/* Test-only accessor for the courtesy-reply mirror field. After the poll
+ * loop emits a courtesy reply, the channel ctx records the same text here
+ * so tests can assert without confusing concurrent agent-driven sends. */
+const char *hu_imessage_test_get_last_courtesy_message(hu_channel_t *ch, size_t *out_len);
+
+/* Test-only: drive the courtesy-reply pipeline as if a non-allowlisted DM
+ * had been observed by the poller. Computes bucket from `mock_epoch`,
+ * checks the dedup log, applies the predicate, sends via imessage_send,
+ * and records to the dedup log + last_courtesy_message mirror.
+ *
+ * Returns HU_OK on success regardless of whether a reply was sent. The
+ * test asserts the *observable* side-effects (last_courtesy_message set
+ * or unchanged) — never the rc.
+ */
+hu_error_t hu_imessage_test_handle_non_allowlisted(hu_channel_t *ch, const char *handle,
+                                                   int64_t mock_epoch);
+
+/* Test-only: clear the courtesy-reply mirror (for setup between assertions). */
+void hu_imessage_test_clear_last_courtesy_message(hu_channel_t *ch);
+
+/* Test-only: directly invoke the chat.db BUSY-exhaustion handler so tests
+ * can pin AC-9.3.3 without spawning a real chat.db lock contention. */
+void hu_imessage_test_record_chatdb_busy_exhaustion(hu_channel_t *ch);
+
+/* Test-only: reset the one-shot BUSY log gate (simulating a successful poll). */
+void hu_imessage_test_reset_chatdb_busy_gate(hu_channel_t *ch);
+
+/* Test-only: query whether the one-shot BUSY warn was emitted. */
+bool hu_imessage_test_chatdb_busy_log_emitted(hu_channel_t *ch);
 void hu_imessage_test_get_last_reaction(hu_channel_t *ch, hu_reaction_type_t *out_reaction,
                                         int64_t *out_message_id);
 size_t hu_imessage_test_get_last_media_count(hu_channel_t *ch);

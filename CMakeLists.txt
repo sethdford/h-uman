@@ -2873,6 +2873,7 @@ set(HU_TEST_SOURCES
     tests/test_e2e_conversation.c
     tests/test_e2e_agent_loop.c
     tests/test_subsystems.c
+    tests/test_onboard_nextstep.c
     tests/test_daemon_cron.c
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
@@ -2939,7 +2940,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_extended.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
-    tests/test_imessage_rich_link.c
+    tests/test_imessage_non_allowlisted.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
@@ -2956,6 +2957,7 @@ set(HU_TEST_SOURCES
     tests/test_agent_security.c
     tests/test_skills.c
     tests/test_ported_modules.c
+    tests/test_doctor_imessage_diagnose.c
     tests/test_subagent.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
@@ -3264,6 +3266,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_context_engine_rag.c
     tests/test_doctor_fix.c
     tests/test_doctor_personalization_warning.c
+    tests/test_doctor_install.c
     tests/test_humanness.c
     tests/test_opinions_persistence.c
     tests/test_plugin_discovery.c

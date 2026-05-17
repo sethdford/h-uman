@@ -23,6 +23,13 @@
 #include <sqlite3.h>
 #endif
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+#if defined(__linux__)
+#include <limits.h>
+#endif
+
 #define HU_DOCTOR_LINE_CATEGORY "doctor_line"
 
 static hu_error_t doctor_push_line(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n,
@@ -378,10 +385,13 @@ hu_error_t hu_doctor_check_skills(hu_allocator_t *alloc, hu_diag_item_t **items,
 
 /* ── iMessage channel diagnostics ────────────────────────────────────── */
 
-#if HU_HAS_IMESSAGE && !defined(_WIN32)
 /* Lightweight scan of a key:value pair from the poll-status JSON. The status
  * file is hand-emitted and small, so a substring search is sufficient and
- * avoids pulling in a JSON parser at this layer. Returns true on hit. */
+ * avoids pulling in a JSON parser at this layer. Returns true on hit.
+ *
+ * Kept unconditional (no HU_HAS_IMESSAGE guard) because the US-9.6 public
+ * helper `hu_imessage_diag_from_poll_status` is callable from any build
+ * profile so monitoring tools and tests get a stable symbol. */
 static bool doctor_imsg_status_extract_int(const char *blob, const char *key, int64_t *out) {
     const char *p = strstr(blob, key);
     if (!p)
@@ -445,7 +455,160 @@ static bool doctor_imsg_status_extract_bool(const char *blob, const char *key, b
     }
     return false;
 }
-#endif
+
+/* ── US-9.6 presentation predicate ─────────────────────────────────────
+ *
+ * Pure mapping from a `last_error_class` STRING (as serialized by the
+ * daemon via `hu_imessage_error_class_name` into `imessage.poll_status`)
+ * to a user-actionable diag item. Strings instead of the enum so the
+ * predicate compiles and links even when HU_ENABLE_IMESSAGE=OFF (the
+ * monitoring `--json` consumer may run on a slimmed binary that still
+ * reads the status file).
+ *
+ * Per `.claude/rules/security-predicate-extraction.md`: pure, single
+ * translation unit, called by both the production
+ * `hu_doctor_check_imessage` path AND the unit tests under
+ * `tests/test_doctor_imessage_diagnose.c` so the two cannot drift.
+ *
+ * Per `.claude/rules/tests-that-pin-bugs.md`: the BUSY branch MUST NOT
+ * mention "Full Disk Access" or "System Settings" and the AUTH branch
+ * MUST NOT mention "Messages.app may be syncing" — the test file pins
+ * both negatives.
+ *
+ * Inputs:
+ *   - `cls_str`: "NONE" / "AUTH" / "BUSY" / "CANTOPEN" / "OTHER" / "" /NULL
+ *   - `consecutive`: matches `consecutive_open_failures` in the status file
+ *   - `tripped`: matches `circuit_breaker_tripped` in the status file
+ *
+ * Output `out` is fully populated (severity + heap category + heap
+ * message). Caller frees `out->category` and `out->message`. */
+static hu_error_t doctor_imessage_present(hu_allocator_t *alloc, const char *cls_str,
+                                          int64_t consecutive, bool tripped, hu_diag_item_t *out) {
+    if (!alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *cls = cls_str ? cls_str : "";
+    bool is_auth = (strcmp(cls, "AUTH") == 0);
+    bool is_busy = (strcmp(cls, "BUSY") == 0);
+    bool is_cantopen = (strcmp(cls, "CANTOPEN") == 0);
+    bool is_none = (strcmp(cls, "NONE") == 0);
+    bool is_known = is_auth || is_busy || is_cantopen || is_none || (strcmp(cls, "OTHER") == 0);
+
+    /* Breaker tripped wins over the underlying class — it's the most
+     * urgent thing the user needs to know AND the underlying class is
+     * still surfaced inside the message body (AC-9.6.3). */
+    const char *category;
+    hu_diag_severity_t severity;
+    char *msg = NULL;
+
+    if (tripped) {
+        category = "imessage_breaker";
+        severity = HU_DIAG_ERR;
+        if (is_auth) {
+            msg =
+                hu_sprintf(alloc,
+                           "[doctor] iMessage circuit breaker: TRIPPED after %lld consecutive AUTH "
+                           "errors — Full Disk Access denied. Open System Settings > Privacy & "
+                           "Security > Full Disk Access, toggle human on, then run `human doctor "
+                           "--fix` to reset the breaker",
+                           (long long)consecutive);
+        } else if (is_cantopen) {
+            msg = hu_sprintf(alloc,
+                             "[doctor] iMessage circuit breaker: TRIPPED after %lld consecutive "
+                             "CANTOPEN errors — chat.db not found at the expected path. Open "
+                             "Messages.app once to create it, then run `human doctor --fix` to "
+                             "reset the breaker",
+                             (long long)consecutive);
+        } else if (is_busy) {
+            msg =
+                hu_sprintf(alloc,
+                           "[doctor] iMessage circuit breaker: TRIPPED after %lld consecutive BUSY "
+                           "errors — Messages.app may be syncing for an unusually long time. "
+                           "Wait for sync to settle, then run `human doctor --fix` to reset the "
+                           "breaker",
+                           (long long)consecutive);
+        } else {
+            msg = hu_sprintf(alloc,
+                             "[doctor] iMessage circuit breaker: TRIPPED after %lld consecutive %s "
+                             "errors. Run `human doctor --fix` to reset the breaker after the "
+                             "underlying issue is resolved",
+                             (long long)consecutive, cls[0] ? cls : "unknown");
+        }
+    } else if (is_auth) {
+        category = "imessage_fda";
+        severity = HU_DIAG_ERR;
+        msg = hu_sprintf(alloc,
+                         "[doctor] iMessage chat.db: Full Disk Access denied. Open System Settings "
+                         "> Privacy & Security > Full Disk Access, then toggle human on (and "
+                         "restart the daemon)");
+    } else if (is_busy) {
+        category = "imessage_busy";
+        severity = HU_DIAG_WARN;
+        msg =
+            hu_sprintf(alloc, "[doctor] iMessage chat.db: locked (transient). Messages.app may be "
+                              "syncing — try again in a moment");
+    } else if (is_cantopen) {
+        category = "imessage_not_found";
+        severity = HU_DIAG_ERR;
+        msg = hu_sprintf(alloc, "[doctor] iMessage chat.db: not found at the expected path "
+                                "(~/Library/Messages/chat.db). Open Messages.app at least once so "
+                                "macOS creates the database, then re-run this check");
+    } else if (is_none) {
+        category = "imessage_chat_db";
+        severity = HU_DIAG_OK;
+        msg = hu_sprintf(alloc, "[doctor] iMessage chat.db: healthy (last poll returned NONE)");
+    } else if (!is_known || !cls[0]) {
+        /* Unknown / empty class: surface as a WARN — the channel has not
+         * healthily polled, but we cannot point the user at a specific
+         * fix. Severity is NOT OK (the tests pin this — empty status must
+         * not falsely report healthy). */
+        category = "imessage_other";
+        severity = HU_DIAG_WARN;
+        msg =
+            hu_sprintf(alloc, "[doctor] iMessage chat.db: state unknown (no recognized error class "
+                              "in poll status — daemon may not have polled yet)");
+    } else {
+        /* OTHER */
+        category = "imessage_other";
+        severity = HU_DIAG_ERR;
+        msg = hu_sprintf(
+            alloc,
+            "[doctor] iMessage chat.db: sqlite reported an unclassified error (class=%s, "
+            "%lld consecutive failures). See daemon logs for the raw return code",
+            cls, (long long)consecutive);
+    }
+
+    char *cat = hu_strdup(alloc, category);
+    if (!msg || !cat) {
+        if (msg)
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        if (cat)
+            alloc->free(alloc->ctx, cat, strlen(cat) + 1);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    out->severity = severity;
+    out->category = cat;
+    out->message = msg;
+    return HU_OK;
+}
+
+hu_error_t hu_imessage_diag_from_poll_status(hu_allocator_t *alloc, const char *json_blob,
+                                             hu_diag_item_t *out) {
+    if (!alloc || !json_blob || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char err_class[32];
+    err_class[0] = '\0';
+    int64_t consecutive = 0;
+    bool tripped = false;
+
+    (void)doctor_imsg_status_extract_str(json_blob, "\"last_error_class\"", err_class,
+                                         sizeof(err_class));
+    (void)doctor_imsg_status_extract_int(json_blob, "\"consecutive_open_failures\"", &consecutive);
+    (void)doctor_imsg_status_extract_bool(json_blob, "\"circuit_breaker_tripped\"", &tripped);
+
+    return doctor_imessage_present(alloc, err_class, consecutive, tripped, out);
+}
 
 hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                                     int64_t stale_after_secs, hu_diag_item_t **items, size_t *count,
@@ -596,23 +759,26 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
     (void)doctor_imsg_status_extract_str(blob, "\"last_error_class\"", err_class,
                                          sizeof(err_class));
 
-    if (tripped) {
-        char *msg =
-            hu_sprintf(alloc,
-                       "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — "
-                       "re-grant Full Disk Access and restart the daemon",
-                       (long long)consecutive, err_class[0] ? err_class : "?");
-        if (msg) {
-            doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
-            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
-        }
-    } else if (consecutive > 0) {
-        char *msg = hu_sprintf(
-            alloc, "[doctor] iMessage circuit breaker: OK (%lld recent failures, last=%s)",
-            (long long)consecutive, err_class[0] ? err_class : "?");
-        if (msg) {
-            doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
-            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+    /* US-9.6: delegate breaker/error-class presentation to the shared
+     * predicate so the output matches what the unit tests pin. The
+     * predicate handles:
+     *   - tripped + class → "TRIPPED ... `human doctor --fix` ..."
+     *   - AUTH → "Full Disk Access denied. System Settings > ..."
+     *   - BUSY → "Messages.app may be syncing — try again in a moment"
+     *   - CANTOPEN → "chat.db: not found ..."
+     *   - NONE → healthy
+     *   - other / empty → WARN, "state unknown"
+     * The pre-US-9.6 free-form line is replaced — the existing red-team
+     * tests in `tests/test_ported_modules.c` have been updated to match
+     * the new substrings. */
+    if (tripped || consecutive > 0 || err_class[0]) {
+        hu_diag_item_t pres = {0};
+        if (doctor_imessage_present(alloc, err_class, consecutive, tripped, &pres) == HU_OK) {
+            doctor_push_line(alloc, items, count, cap, pres.severity, pres.message);
+            if (pres.category)
+                alloc->free(alloc->ctx, (void *)pres.category, strlen(pres.category) + 1);
+            if (pres.message)
+                alloc->free(alloc->ctx, (void *)pres.message, strlen(pres.message) + 1);
         }
     } else {
         doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
@@ -1046,5 +1212,226 @@ hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item
     (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
                            "[doctor] responses: MLX HTTP 52 (empty reply) usually means the "
                            "local server rejected an oversized body — slim retry addresses this");
+    return HU_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * US-9.4: install-readiness gate.
+ *
+ * Each sub-check reads PRIMARY EVIDENCE on the filesystem — not a cached
+ * "configured" flag — so that the doctor cannot lie when the install is
+ * actually broken. See .claude/rules/tests-that-pin-bugs.md.
+ * ------------------------------------------------------------------------- */
+
+/* Push one item using a specific (caller-owned literal) category. */
+static hu_error_t install_push(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n, size_t *cap,
+                               hu_diag_severity_t sev, const char *category, const char *line) {
+    if (!line || !category)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (*n >= *cap) {
+        size_t new_cap = (*cap) ? (*cap * 2) : 4;
+        hu_diag_item_t *nb =
+            (hu_diag_item_t *)alloc->alloc(alloc->ctx, sizeof(hu_diag_item_t) * new_cap);
+        if (!nb)
+            return HU_ERR_OUT_OF_MEMORY;
+        if (*buf)
+            memcpy(nb, *buf, sizeof(hu_diag_item_t) * (*n));
+        if (*buf)
+            alloc->free(alloc->ctx, *buf, sizeof(hu_diag_item_t) * (*cap));
+        *buf = nb;
+        *cap = new_cap;
+    }
+    char *cat = hu_strdup(alloc, category);
+    char *msg = hu_strdup(alloc, line);
+    if (!cat || !msg) {
+        if (cat)
+            alloc->free(alloc->ctx, cat, strlen(cat) + 1);
+        if (msg)
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    (*buf)[*n] = (hu_diag_item_t){sev, cat, msg};
+    (*n)++;
+    return HU_OK;
+}
+
+/* Resolve the running binary's path. PRIMARY EVIDENCE — ask the kernel
+ * (Linux) or dyld (macOS) where we actually are, not where someone said we
+ * are. Under HU_IS_TEST, allow $HU_TEST_BINARY_PATH override so unit tests
+ * can synthesize "binary missing" without nuking the test runner. */
+static char *resolve_binary_path(hu_allocator_t *alloc) {
+#if HU_IS_TEST
+    const char *override = getenv("HU_TEST_BINARY_PATH");
+    if (override && override[0])
+        return hu_strdup(alloc, override);
+#endif
+#if defined(__linux__)
+    char buf[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0)
+        return NULL;
+    buf[n] = '\0';
+    return hu_strdup(alloc, buf);
+#elif defined(__APPLE__)
+    char buf[4096];
+    uint32_t size = (uint32_t)sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) != 0)
+        return NULL;
+    char *resolved = realpath(buf, NULL);
+    if (resolved) {
+        char *out = hu_strdup(alloc, resolved);
+        free(resolved);
+        return out;
+    }
+    return hu_strdup(alloc, buf);
+#else
+    (void)alloc;
+    return NULL;
+#endif
+}
+
+/* Build "~/.human" (or $HU_STATE_DIR override). Returns 0 on success. */
+static int resolve_state_dir(char *out, size_t cap) {
+    const char *override = getenv("HU_STATE_DIR");
+    if (override && override[0]) {
+        size_t len = strlen(override);
+        if (len + 1 > cap)
+            return -1;
+        memcpy(out, override, len + 1);
+        return 0;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return -1;
+    int n = snprintf(out, cap, "%s/.human", home);
+    if (n <= 0 || (size_t)n >= cap)
+        return -1;
+    return 0;
+}
+
+hu_error_t hu_doctor_check_install(hu_allocator_t *alloc, const hu_config_t *cfg,
+                                   hu_diag_item_t **items, size_t *count, size_t *cap) {
+    if (!alloc || !items || !count || !cap)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    size_t err_seen_before_call = 0;
+    for (size_t i = 0; i < *count; i++)
+        if ((*items)[i].severity == HU_DIAG_ERR)
+            err_seen_before_call++;
+
+    /* --- 1. binary --- */
+    {
+        char *bin = resolve_binary_path(alloc);
+        bool ok = false;
+        if (bin && bin[0]) {
+            struct stat st;
+            if (stat(bin, &st) == 0 && S_ISREG(st.st_mode))
+                ok = true;
+        }
+        if (ok) {
+            char *msg = hu_sprintf(alloc, "binary: OK (%s)", bin);
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "binary",
+                               msg ? msg : "binary: OK");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        } else {
+            char *msg = hu_sprintf(alloc,
+                                   "binary: NOT_RESOLVABLE — could not locate "
+                                   "running executable (path=%s)",
+                                   bin ? bin : "(null)");
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "binary",
+                               msg ? msg
+                                   : "binary: NOT_RESOLVABLE — could not locate "
+                                     "running executable");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+        if (bin)
+            alloc->free(alloc->ctx, bin, strlen(bin) + 1);
+    }
+
+    /* --- 2. config_dir --- */
+    {
+        char dir[1024];
+        bool ok = false;
+        if (resolve_state_dir(dir, sizeof(dir)) == 0) {
+            struct stat st;
+            if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode))
+                ok = true;
+        }
+        if (ok) {
+            char *msg = hu_sprintf(alloc, "config_dir: OK (%s)", dir);
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "config_dir",
+                               msg ? msg : "config_dir: OK");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        } else {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "config_dir",
+                               "config_dir: MISSING — run 'human onboard' to create ~/.human/");
+        }
+    }
+
+    /* --- 3. channel --- */
+    {
+        bool has_channel = false;
+        if (cfg) {
+            for (size_t i = 0; i < cfg->channels.channel_config_len; i++) {
+                const char *k = cfg->channels.channel_config_keys[i];
+                if (k && k[0] && cfg->channels.channel_config_counts[i] > 0) {
+                    has_channel = true;
+                    break;
+                }
+            }
+        }
+        if (has_channel) {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "channel",
+                               "channel: OK (at least one channel configured)");
+        } else {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "channel",
+                               "channel: NONE — run 'human doctor imessage' to pair iMessage");
+        }
+    }
+
+    /* --- 4. persona --- */
+    {
+        bool ok = false;
+        char detail[256] = {0};
+        if (!cfg || !cfg->agent.persona || !cfg->agent.persona[0]) {
+            snprintf(detail, sizeof(detail),
+                     "persona: MISSING — no persona configured. Run 'human doctor "
+                     "--fix' to restore defaults");
+        } else {
+            const char *name = cfg->agent.persona;
+            size_t name_len = strlen(name);
+            hu_persona_t p;
+            memset(&p, 0, sizeof(p));
+            hu_error_t perr = hu_persona_load(alloc, name, name_len, &p);
+            if (perr == HU_OK) {
+                ok = true;
+                snprintf(detail, sizeof(detail), "persona: OK (%s)", name);
+                hu_persona_deinit(alloc, &p);
+            } else if (perr == HU_ERR_NOT_FOUND) {
+                snprintf(detail, sizeof(detail),
+                         "persona: MISSING — '%s' not found. Run 'human doctor "
+                         "--fix' to restore defaults",
+                         name);
+            } else {
+                snprintf(detail, sizeof(detail),
+                         "persona: PARSE_ERROR — '%s' failed to load (rc=%d). Run "
+                         "'human doctor --fix' to restore defaults",
+                         name, (int)perr);
+            }
+        }
+        (void)install_push(alloc, items, count, cap, ok ? HU_DIAG_OK : HU_DIAG_ERR, "persona",
+                           detail);
+    }
+
+    /* Tally new errors and decide return code. */
+    size_t err_n = 0;
+    for (size_t i = 0; i < *count; i++)
+        if ((*items)[i].severity == HU_DIAG_ERR)
+            err_n++;
+    if (err_n > err_seen_before_call)
+        return HU_ERR_NOT_FOUND;
     return HU_OK;
 }
