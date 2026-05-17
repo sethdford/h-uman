@@ -1086,6 +1086,40 @@ static const char *overlay_can_clause_(const char *axis, const char *value) {
     return NULL;
 }
 
+/* Story F.2 — map persona-delta kind to the short self-model label. */
+static const char *self_model_drift_kind_str_(hu_persona_delta_kind_t kind) {
+    switch (kind) {
+    case HU_PERSONA_DELTA_BOUNDARY:    return "BOUNDARY";
+    case HU_PERSONA_DELTA_VOCAB_AVOID: return "VOCAB_AVOID";
+    case HU_PERSONA_DELTA_FORMALITY:   return "FORMALITY";
+    case HU_PERSONA_DELTA_TONE:        return "TONE";
+    case HU_PERSONA_DELTA_LENGTH:      return "LENGTH";
+    default:                           return NULL;
+    }
+}
+
+/* Story F.2 — append a drift kind to the self-model ring (oldest-first). */
+static void self_model_append_drift_history_(hu_world_model_t *wm, const char *kind_str) {
+    if (!wm || !kind_str || !kind_str[0]) return;
+    size_t slot_cap = sizeof(wm->self_model.recent_drift_history[0]);
+    size_t klen = strlen(kind_str);
+    if (klen >= slot_cap) klen = slot_cap - 1;
+
+    if (wm->self_model.recent_drift_history_count < HU_SELF_DRIFT_HISTORY) {
+        size_t idx = wm->self_model.recent_drift_history_count++;
+        memcpy(wm->self_model.recent_drift_history[idx], kind_str, klen);
+        wm->self_model.recent_drift_history[idx][klen] = '\0';
+        return;
+    }
+    for (size_t i = 1; i < HU_SELF_DRIFT_HISTORY; i++) {
+        memcpy(wm->self_model.recent_drift_history[i - 1],
+               wm->self_model.recent_drift_history[i],
+               sizeof(wm->self_model.recent_drift_history[i]));
+    }
+    memcpy(wm->self_model.recent_drift_history[HU_SELF_DRIFT_HISTORY - 1], kind_str, klen);
+    wm->self_model.recent_drift_history[HU_SELF_DRIFT_HISTORY - 1][klen] = '\0';
+}
+
 void hu_world_model_merge_persona(hu_world_model_t *wm,
                                   const struct hu_persona *persona,
                                   const char *channel, size_t channel_len,
@@ -1279,12 +1313,16 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
     /* Step 3 — recent persona deltas (P1.3). Only APPLIED deltas with
      * confidence >= 0.6 are folded; pending/dropped/quarantined deltas
      * carry too little signal to drive ToM. */
+    wm->self_model.recent_drift_history_count = 0;
+    memset(wm->self_model.recent_drift_history, 0, sizeof(wm->self_model.recent_drift_history));
     const hu_persona_delta_t *latest_drift = NULL;
     for (size_t i = 0; i < deltas_count; i++) {
         const hu_persona_delta_t *d = &deltas[i];
         if (d->status != HU_DELTA_STATUS_APPLIED) continue;
         if (d->confidence < 0.6f) continue;
         if (!d->value[0]) continue;
+        const char *hist_kind = self_model_drift_kind_str_(d->kind);
+        if (hist_kind) self_model_append_drift_history_(wm, hist_kind);
         switch (d->kind) {
         case HU_PERSONA_DELTA_BOUNDARY:
         case HU_PERSONA_DELTA_VOCAB_AVOID:
@@ -1308,15 +1346,8 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
      * planner can echo "we agreed to be shorter on Slack" without
      * re-reading the deltas table. */
     if (latest_drift) {
-        const char *kind_str = "DELTA";
-        switch (latest_drift->kind) {
-        case HU_PERSONA_DELTA_BOUNDARY:    kind_str = "BOUNDARY"; break;
-        case HU_PERSONA_DELTA_VOCAB_AVOID: kind_str = "VOCAB_AVOID"; break;
-        case HU_PERSONA_DELTA_FORMALITY:   kind_str = "FORMALITY"; break;
-        case HU_PERSONA_DELTA_TONE:        kind_str = "TONE"; break;
-        case HU_PERSONA_DELTA_LENGTH:      kind_str = "LENGTH"; break;
-        default: break;
-        }
+        const char *kind_str = self_model_drift_kind_str_(latest_drift->kind);
+        if (!kind_str) kind_str = "DELTA";
         size_t kcap = sizeof(wm->self_model.recent_drift_kind);
         size_t klen = strlen(kind_str);
         if (klen >= kcap) klen = kcap - 1;
@@ -1516,6 +1547,51 @@ void hu_world_model_merge_self_capabilities(hu_world_model_t *wm,
         memcpy(wm->self_model.capabilities[wm->self_model.capabilities_count], nm, nlen);
         wm->self_model.capabilities[wm->self_model.capabilities_count][nlen] = '\0';
         wm->self_model.capabilities_count++;
+    }
+}
+
+void hu_world_model_merge_self_emotion(hu_world_model_t *wm) {
+    if (!wm) return;
+    wm->self_model.recent_emotional_register[0] = '\0';
+    if (!wm->dominant_emotion[0]) return;
+    if (strcmp(wm->dominant_emotion, "neutral") == 0) return;
+    size_t cap = sizeof(wm->self_model.recent_emotional_register);
+    size_t elen = strlen(wm->dominant_emotion);
+    if (elen >= cap) elen = cap - 1;
+    memcpy(wm->self_model.recent_emotional_register, wm->dominant_emotion, elen);
+    wm->self_model.recent_emotional_register[elen] = '\0';
+}
+
+void hu_world_model_merge_self_recent_tools(hu_world_model_t *wm,
+                                            const char *const *tool_names,
+                                            size_t tool_names_count) {
+    if (!wm) return;
+    memset(wm->self_model.recent_tools_used, 0, sizeof(wm->self_model.recent_tools_used));
+    wm->self_model.recent_tools_used_count = 0;
+    if (!tool_names || tool_names_count == 0) return;
+
+    size_t cap = sizeof(wm->self_model.recent_tools_used) /
+                 sizeof(wm->self_model.recent_tools_used[0]);
+    size_t name_cap = sizeof(wm->self_model.recent_tools_used[0]);
+
+    for (size_t i = 0; i < tool_names_count && wm->self_model.recent_tools_used_count < cap;
+         i++) {
+        const char *nm = tool_names[i];
+        if (!nm || !nm[0]) continue;
+        bool dup = false;
+        for (size_t j = 0; j < wm->self_model.recent_tools_used_count; j++) {
+            if (strcmp(wm->self_model.recent_tools_used[j], nm) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+        size_t nlen = strlen(nm);
+        if (nlen >= name_cap) nlen = name_cap - 1;
+        memcpy(wm->self_model.recent_tools_used[wm->self_model.recent_tools_used_count], nm,
+               nlen);
+        wm->self_model.recent_tools_used[wm->self_model.recent_tools_used_count][nlen] = '\0';
+        wm->self_model.recent_tools_used_count++;
     }
 }
 

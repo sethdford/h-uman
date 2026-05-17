@@ -163,18 +163,201 @@ static int64_t query_anchor(const char *goal, size_t goal_len,
     return 0;
 }
 
+static int goal_overlap_score(const char *goal, size_t goal_len,
+                              const char *text, size_t text_len);
+static hu_retrieval_step_t step_neighbors(const hu_world_model_t *wm,
+                                          int64_t anchor, size_t hops,
+                                          size_t limit, bool verify);
+
+/* Entity id for `eid` in the snapshot, or NULL. */
+static const hu_graph_entity_t *entity_by_id(const hu_world_model_t *wm,
+                                             int64_t eid) {
+    if (!wm || eid <= 0) return NULL;
+    for (size_t i = 0; i < wm->entities_count; i++) {
+        if (wm->entities[i].id == eid) return &wm->entities[i];
+    }
+    return NULL;
+}
+
+/* True when `name` appears in goal (whole-word or compact for long names). */
+static bool entity_name_in_goal(const char *goal, size_t goal_len,
+                                const char *name, size_t name_len) {
+    if (!goal || goal_len == 0 || !name || name_len == 0) return false;
+    if (contains_word(goal, goal_len, name)) return true;
+    return name_len >= 6 && contains_compact(goal, goal_len, name);
+}
+
+/* P5.2 — when the goal overlaps `self_model.focused_topics`, prefer the
+ * snapshot entity whose name best matches that overlap (W12 cell wiring). */
+static int64_t anchor_from_self_model_focus(const char *goal, size_t goal_len,
+                                            const hu_world_model_t *wm) {
+    if (!goal || goal_len == 0 || !wm || wm->self_model.focused_topics[0] == '\0')
+        return 0;
+
+    const char *topics = wm->self_model.focused_topics;
+    size_t best_id = 0;
+    size_t best_hits = 0;
+
+    for (size_t ei = 0; ei < wm->entities_count; ei++) {
+        const hu_graph_entity_t *e = &wm->entities[ei];
+        if (!e->name || e->name_len == 0) continue;
+
+        size_t topic_hits = 0;
+        const char *p = topics;
+        while (*p) {
+            while (*p == ';' || *p == ' ') p++;
+            if (!*p) break;
+            const char *start = p;
+            while (*p && *p != ';') p++;
+            size_t tlen = (size_t)(p - start);
+            while (tlen > 0 && start[tlen - 1] == ' ') tlen--;
+            if (tlen >= 3) {
+                if (goal_overlap_score(goal, goal_len, start, tlen) > 0 &&
+                    entity_name_in_goal(start, tlen, e->name, e->name_len))
+                    topic_hits++;
+            }
+            if (*p == ';') p++;
+        }
+        if (topic_hits > best_hits) {
+            best_hits = topic_hits;
+            best_id = (size_t)e->id;
+        }
+    }
+    return best_hits > 0 ? (int64_t)best_id : 0;
+}
+
+/* Goal asks for recency / change history (W12 recent_changes cell). */
+static bool goal_has_temporal_cue(const char *goal, size_t goal_len) {
+    return contains_word(goal, goal_len, "when")
+        || contains_word(goal, goal_len, "last")
+        || contains_word(goal, goal_len, "recent");
+}
+
+/* Derive relation-window bounds from wm->recent_changes when temporal. */
+static void relation_window_bounds(const hu_world_model_t *wm, bool temporal,
+                                   int64_t *out_from, int64_t *out_to) {
+    *out_from = 0;
+    *out_to = INT64_MAX;
+    if (!temporal || !wm || wm->recent_changes_count == 0) return;
+
+    int64_t oldest = wm->recent_changes[0].at_ms;
+    for (size_t i = 1; i < wm->recent_changes_count; i++) {
+        int64_t at = wm->recent_changes[i].at_ms;
+        if (at < oldest) oldest = at;
+    }
+    /* Pad before the earliest bitemporal stamp so event_start rows that
+     * predate the retraction/supersede still fall inside the window. */
+    const int64_t pad_ms = 7LL * 24 * 60 * 60 * 1000;
+    *out_from = oldest > pad_ms ? oldest - pad_ms : 0;
+}
+
+/* Count hyperedge members whose entity names appear in the goal. */
+static size_t hyperedge_named_members(const hu_hyperedge_t *he,
+                                      const char *goal, size_t goal_len,
+                                      const hu_world_model_t *wm) {
+    if (!he || !wm || he->members_count == 0) return 0;
+    size_t named = 0;
+    for (size_t m = 0; m < he->members_count; m++) {
+        const hu_graph_entity_t *e =
+            entity_by_id(wm, he->members[m].entity_id);
+        if (!e || !e->name) continue;
+        if (entity_name_in_goal(goal, goal_len, e->name, e->name_len)) named++;
+    }
+    return named;
+}
+
+/* Append neighbour-expansion steps for hyperedge members (deduped). */
+static size_t append_hyperedge_neighbor_steps(hu_retrieval_plan_t *out,
+                                            size_t step_idx,
+                                            const hu_world_model_t *wm,
+                                            const char *goal, size_t goal_len,
+                                            size_t neighbor_limit, bool verify) {
+    if (!wm || wm->hyperedges_count == 0 || step_idx >= HU_PLANNER_MAX_STEPS)
+        return step_idx;
+
+    for (size_t h = 0; h < wm->hyperedges_count && step_idx < HU_PLANNER_MAX_STEPS;
+         h++) {
+        const hu_hyperedge_t *he = &wm->hyperedges[h];
+        if (hyperedge_named_members(he, goal, goal_len, wm) < 2) continue;
+
+        for (size_t m = 0; m < he->members_count && step_idx < HU_PLANNER_MAX_STEPS;
+             m++) {
+            int64_t eid = he->members[m].entity_id;
+            if (eid <= 0) continue;
+
+            bool dup = false;
+            for (size_t s = 0; s < step_idx; s++) {
+                if (out->steps[s].kind == HU_MEM_ENTITY &&
+                    out->steps[s].query.as.neighbors.entity_id == eid) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+
+            out->steps[step_idx++] =
+                step_neighbors(wm, eid, 1, neighbor_limit, verify);
+        }
+    }
+    return step_idx;
+}
+
+/* Collect PageRank seed entity ids: snapshot entities + hyperedge members
+ * that match the goal + focused-topic entities (W12 P4.2 / P5.2 wiring). */
+static int64_t *collect_pagerank_seeds(hu_allocator_t *alloc,
+                                       const hu_world_model_t *wm,
+                                       const char *goal, size_t goal_len,
+                                       size_t *out_count) {
+    *out_count = 0;
+    if (!alloc || !wm || wm->entities_count == 0) return NULL;
+
+    size_t cap = wm->entities_count + 16;
+    int64_t *seeds = xalloc(alloc, cap * sizeof(*seeds));
+    if (!seeds) return NULL;
+
+    for (size_t i = 0; i < wm->entities_count; i++)
+        seeds[(*out_count)++] = wm->entities[i].id;
+
+    if (wm->hyperedges_count > 0 && goal && goal_len > 0) {
+        for (size_t h = 0; h < wm->hyperedges_count; h++) {
+            const hu_hyperedge_t *he = &wm->hyperedges[h];
+            if (hyperedge_named_members(he, goal, goal_len, wm) < 2) continue;
+            for (size_t m = 0; m < he->members_count; m++) {
+                int64_t eid = he->members[m].entity_id;
+                if (eid <= 0) continue;
+                bool dup = false;
+                for (size_t k = 0; k < *out_count; k++) {
+                    if (seeds[k] == eid) { dup = true; break; }
+                }
+                if (!dup && *out_count < cap) seeds[(*out_count)++] = eid;
+            }
+        }
+    }
+
+    int64_t focused = anchor_from_self_model_focus(goal, goal_len, wm);
+    if (focused > 0) {
+        bool dup = false;
+        for (size_t k = 0; k < *out_count; k++) {
+            if (seeds[k] == focused) { dup = true; break; }
+        }
+        if (!dup && *out_count < cap) seeds[(*out_count)++] = focused;
+    }
+
+    return seeds;
+}
+
 /* Pick a primary anchor entity from the world model. Priority order:
- *   1. Any world-model entity whose name appears in the goal text. This
- *      converts "where does Bob live?" from a Alice-anchored expansion into a
- *      Bob-anchored expansion, which is the actual signal the user gave us.
- *   2. The top-mentioned entity (W9-sorted) as the fallback when the goal
- *      doesn't name anyone — typical for short queries like "what happened".
+ *   1. Self-model focused topic overlap with the goal (P5.2).
+ *   2. Any world-model entity whose name appears in the goal text.
+ *   3. The top-mentioned entity (W9-sorted) as the fallback.
  * Returns 0 if the world model is empty.
  *
- * `goal` may be NULL; that just disables step 1. */
+ * `goal` may be NULL; that just disables steps 1-2. */
 static int64_t primary_anchor_with_goal(const char *goal, size_t goal_len,
                                         const hu_world_model_t *wm) {
     if (!wm || wm->entities_count == 0) return 0;
+    int64_t focused = anchor_from_self_model_focus(goal, goal_len, wm);
+    if (focused != 0) return focused;
     int64_t named = query_anchor(goal, goal_len, wm);
     if (named != 0) return named;
     return wm->entities[0].id;
@@ -306,8 +489,21 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
 
     plan_capture_goal(out, goal, goal_len);
 
-    bool has_when    = contains_word(goal, goal_len, "when")
-                    || contains_word(goal, goal_len, "last");
+    bool has_temporal = goal_has_temporal_cue(goal, goal_len);
+    int64_t win_from = 0;
+    int64_t win_to = INT64_MAX;
+    relation_window_bounds(wm, has_temporal, &win_from, &win_to);
+
+    size_t neighbor_limit = 16;
+    if (wm && wm->self_model.capabilities_count > 0) {
+        for (size_t ci = 0; ci < wm->self_model.capabilities_count; ci++) {
+            if (contains_word(goal, goal_len, wm->self_model.capabilities[ci])) {
+                neighbor_limit = 64;
+                break;
+            }
+        }
+    }
+
     bool has_where   = contains_word(goal, goal_len, "where");
     bool has_who     = contains_word(goal, goal_len, "who");
     bool has_between = contains_word(goal, goal_len, "between");
@@ -349,10 +545,13 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
      * anchor is available. */
     if ((has_between || has_with || b_is_named) && a != 0) {
         size_t i = 0;
-        out->steps[i++] = step_neighbors(wm, a, 1, 16, true);
+        out->steps[i++] = step_neighbors(wm, a, 1, neighbor_limit, true);
         if (b != 0)
-            out->steps[i++] = step_neighbors(wm, b, 1, 16, true);
-        out->steps[i++] = step_relations_window(wm, 0, INT64_MAX, 16, true);
+            out->steps[i++] = step_neighbors(wm, b, 1, neighbor_limit, true);
+        i = append_hyperedge_neighbor_steps(out, i, wm, goal, goal_len,
+                                            neighbor_limit, true);
+        out->steps[i++] =
+            step_relations_window(wm, win_from, win_to, 16, true);
         out->steps_count = i;
         out->total_budget_ms = 350;
         return HU_OK;
@@ -370,11 +569,14 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
      * was being truncated by the cap. 128 keeps the working set bounded
      * (≈ 25 KB of records aggregated per step) while giving the P6 P7
      * re-ranker enough candidates to discriminate. */
-    if (has_when) {
+    if (has_temporal) {
         size_t i = 0;
         if (a_is_named)
             out->steps[i++] = step_neighbors(wm, a, 1, 1024, true);
-        out->steps[i++] = step_relations_window(wm, 0, INT64_MAX, 16, true);
+        i = append_hyperedge_neighbor_steps(out, i, wm, goal, goal_len,
+                                            neighbor_limit, true);
+        out->steps[i++] =
+            step_relations_window(wm, win_from, win_to, 16, true);
         out->steps_count = i;
         out->total_budget_ms = a_is_named ? 300 : 150;
         return HU_OK;
@@ -399,15 +601,21 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
         /* W12 P8: same scale-up as the temporal branch above. Hub entities
          * with hundreds of relations need a wider neighbor window so the
          * matching context isn't truncated before the re-ranker sees it. */
-        out->steps[0] = step_neighbors(wm, a, 1, a_is_named ? 1024 : 16, true);
-        out->steps[1] = step_relations_window(wm, 0, INT64_MAX, 32, true);
-        out->steps_count = 2;
+        size_t i = 0;
+        out->steps[i++] = step_neighbors(wm, a, 1, a_is_named ? 1024 : neighbor_limit, true);
+        i = append_hyperedge_neighbor_steps(out, i, wm, goal, goal_len,
+                                            neighbor_limit, true);
+        out->steps[i++] =
+            step_relations_window(wm, win_from, win_to, 32, true);
+        out->steps_count = i;
         out->total_budget_ms = 250;
         return HU_OK;
     }
 
     /* Catch-all: list relations. Cheap and never wrong. */
-    default_plan(wm, out);
+    out->steps[0] = step_relations_window(wm, win_from, win_to, 16, false);
+    out->steps_count = 1;
+    out->total_budget_ms = 200;
     return HU_OK;
 }
 
@@ -941,12 +1149,11 @@ static hu_error_t gc_plan(void *raw_ctx, const char *goal, size_t goal_len,
         return heuristic_plan(NULL, goal, goal_len, wm, out);
     }
 
-    /* Extract seed entity IDs from the world model. */
-    size_t seeds_count = wm->entities_count;
-    int64_t *seeds = xalloc(ctx->alloc, seeds_count * sizeof(*seeds));
+  /* PageRank seeds: entities + hyperedge members + focused-topic anchors. */
+    size_t seeds_count = 0;
+    int64_t *seeds =
+        collect_pagerank_seeds(ctx->alloc, wm, goal, goal_len, &seeds_count);
     if (!seeds) return HU_ERR_OUT_OF_MEMORY;
-    for (size_t i = 0; i < seeds_count; i++)
-        seeds[i] = wm->entities[i].id;
 
     /* Compute contact_id length. */
     size_t cid_len = 0;
