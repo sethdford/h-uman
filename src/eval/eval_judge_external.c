@@ -146,9 +146,12 @@ oom:;
 
 #ifndef HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL
 hu_error_t hu_eval_judge_create_apple_fm(hu_allocator_t *alloc,
-                                         hu_eval_judge_external_t *out) {
+                                         hu_eval_judge_external_t *out,
+                                         const char **out_reason) {
     (void)alloc;
     (void)out;
+    if (out_reason)
+        *out_reason = "unavailable (not built: HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL=0)";
     return HU_ERR_NOT_SUPPORTED;
 }
 #endif /* HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL */
@@ -157,9 +160,12 @@ hu_error_t hu_eval_judge_create_apple_fm(hu_allocator_t *alloc,
 
 #ifndef HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL
 hu_error_t hu_eval_judge_create_gemini_nano(hu_allocator_t *alloc,
-                                            hu_eval_judge_external_t *out) {
+                                            hu_eval_judge_external_t *out,
+                                            const char **out_reason) {
     (void)alloc;
     (void)out;
+    if (out_reason)
+        *out_reason = "unavailable (not built: HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL=0)";
     return HU_ERR_NOT_SUPPORTED;
 }
 #endif /* HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL */

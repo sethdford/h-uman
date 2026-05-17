@@ -131,6 +131,65 @@ static void cli_parse_export_ok(void) {
     HU_ASSERT_STR_EQ(out.name, "export-persona");
 }
 
+static void cli_parse_export_bank_ok(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human", "persona", "export-bank", "ada"};
+    hu_error_t err = hu_persona_cli_parse(4, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_EXPORT_BANK);
+    HU_ASSERT_STR_EQ(out.name, "ada");
+    HU_ASSERT_TRUE(out.output_path == NULL);
+}
+
+static void cli_parse_export_bank_with_output_ok(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human",       "persona",         "export-bank", "ada",
+                          "--output",    "/tmp/ada.jsonl"};
+    hu_error_t err = hu_persona_cli_parse(6, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_EXPORT_BANK);
+    HU_ASSERT_STR_EQ(out.name, "ada");
+    HU_ASSERT_STR_EQ(out.output_path, "/tmp/ada.jsonl");
+}
+
+static void cli_parse_export_bank_with_short_output_ok(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human",       "persona",         "export-bank", "ada",
+                          "-o",          "/tmp/ada.jsonl"};
+    hu_error_t err = hu_persona_cli_parse(6, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_EXPORT_BANK);
+    HU_ASSERT_STR_EQ(out.output_path, "/tmp/ada.jsonl");
+}
+
+static void cli_parse_export_bank_requires_name(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human", "persona", "export-bank"};
+    hu_error_t err = hu_persona_cli_parse(3, argv, &out);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+}
+
+/* Run-time test: with no persona on disk, export-bank returns NOT_FOUND
+ * and does not crash. End-to-end run with a real persona is covered by
+ * tests/test_persona.c (test_persona_bank_export_jsonl_*).  This pins
+ * that the CLI envelope wires through to the loader correctly. */
+static void cli_run_export_bank_missing_persona_returns_not_found(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_EXPORT_BANK;
+    args.name = "definitely-not-a-real-persona-name-xyz123";
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_NEQ(err, HU_OK);
+}
+
+static void cli_run_export_bank_without_name_returns_invalid(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_EXPORT_BANK;
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+}
+
 static void cli_parse_merge_ok(void) {
     hu_persona_cli_args_t out = {0};
     const char *argv[] = {"human", "persona", "merge", "merged", "a", "b"};
@@ -388,6 +447,12 @@ void run_persona_cli_tests(void) {
     HU_RUN_TEST(cli_parse_diff_ok);
     HU_RUN_TEST(cli_parse_diff_requires_two_names);
     HU_RUN_TEST(cli_parse_export_ok);
+    HU_RUN_TEST(cli_parse_export_bank_ok);
+    HU_RUN_TEST(cli_parse_export_bank_with_output_ok);
+    HU_RUN_TEST(cli_parse_export_bank_with_short_output_ok);
+    HU_RUN_TEST(cli_parse_export_bank_requires_name);
+    HU_RUN_TEST(cli_run_export_bank_missing_persona_returns_not_found);
+    HU_RUN_TEST(cli_run_export_bank_without_name_returns_invalid);
     HU_RUN_TEST(cli_parse_merge_ok);
     HU_RUN_TEST(cli_parse_merge_requires_at_least_six_args);
     HU_RUN_TEST(cli_parse_create_ok);

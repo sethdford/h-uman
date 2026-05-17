@@ -32,10 +32,9 @@
 #ifdef HU_ENABLE_RL_FULL
 #include "human/agent/adapter_id.h"
 #include "human/eval/eval_gate.h"
-#include "human/ml/fidelity.h"
-#include "human/persona.h"
-#include "human/provider.h"
-#include <math.h>
+#include "human/eval/leaderboard.h"
+#include "human/eval/persona_rollout.h"
+#include "human/memory/personal_model.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -108,157 +107,38 @@ static hu_error_t write_proof_bundle(const char *proof_dir, bool promote,
     return HU_OK;
 }
 
-static size_t runner_derive_gate_persona_scores(const hu_lora_runner_ctx_t *ctx,
-                                              const hu_learner_report_t *report,
-                                              double *persona, size_t persona_cap) {
-    if (!ctx || !report || !persona || persona_cap == 0)
-        return 0;
-
-    size_t n = report->signals_consumed;
-    if (n < 10)
-        n = 10;
-    if (n > persona_cap)
-        n = persona_cap;
-
-    double baseline = 0.5;
-    if (ctx->eval_gate && ctx->eval_gate->baseline_persona_fidelity_mean > 0.0)
-        baseline = ctx->eval_gate->baseline_persona_fidelity_mean;
-
-    /* Trainer-derived lift (CF-4): same shape as cli_demo's
-     * tanh(chosen_logprob_delta)*0.25, proxied via final_loss when the
-     * learner report does not carry logprob deltas. */
-    double lift = 0.0;
-    if (report->final_loss > 0.0f)
-        lift = (1.0 - tanh((double)report->final_loss)) * 0.25;
-    else if (report->steps_completed > 0)
-        lift = 0.08;
-
-    for (size_t i = 0; i < n; i++) {
-        double noise = 0.02 * sin((double)i * 1.7);
-        persona[i] = baseline + noise + lift;
-    }
-    return n;
-}
-
-typedef struct lora_fidelity_probe {
-    const char *incoming;
-    size_t incoming_len;
-} lora_fidelity_probe_t;
-
-static size_t lora_collect_fidelity_probes(const hu_persona_t *persona,
-                                           lora_fidelity_probe_t *probes, size_t cap) {
-    if (!persona || !probes || cap == 0)
-        return 0;
-    size_t n = 0;
-    for (size_t b = 0; b < persona->example_banks_count && n < cap; b++) {
-        const hu_persona_example_bank_t *bank = &persona->example_banks[b];
-        for (size_t e = 0; e < bank->count && n < cap; e++) {
-            const hu_persona_example_t *ex = &bank->examples[e];
-            if (!ex->incoming || ex->incoming_len == 0 || !ex->response || ex->response_len == 0)
-                continue;
-            probes[n].incoming = ex->incoming;
-            probes[n].incoming_len = ex->incoming_len;
-            n++;
-        }
-    }
-    return n;
-}
-
-static size_t lora_score_example_bank_before(const hu_persona_t *persona,
-                                             const hu_communication_style_t *target,
-                                             double *out, size_t cap) {
-    if (!persona || !target || !out || cap == 0)
-        return 0;
-    size_t n = 0;
-    for (size_t b = 0; b < persona->example_banks_count && n < cap; b++) {
-        const hu_persona_example_bank_t *bank = &persona->example_banks[b];
-        for (size_t e = 0; e < bank->count && n < cap; e++) {
-            const hu_persona_example_t *ex = &bank->examples[e];
-            if (!ex->response || ex->response_len == 0)
-                continue;
-            float s = hu_communication_style_fidelity_score_v2(target, ex->response,
-                                                               ex->response_len);
-            if (s < 0.f)
-                continue;
-            out[n++] = (double)s;
-        }
-    }
-    return n;
-}
-
-static double lora_scores_mean(const double *scores, size_t n) {
-    if (!scores || n == 0)
-        return 0.0;
-    double sum = 0.0;
-    for (size_t i = 0; i < n; i++)
-        sum += scores[i];
-    return sum / (double)n;
-}
-
-static hu_error_t lora_score_after_adapter_probes(const hu_lora_runner_ctx_t *ctx,
-                                                  const hu_communication_style_t *target,
-                                                  const lora_fidelity_probe_t *probes,
-                                                  size_t probe_count, const char *adapter_path,
-                                                  double *after, size_t after_cap,
-                                                  size_t *out_after_n) {
-    if (!ctx || !target || !probes || !after || !out_after_n || after_cap == 0)
+static hu_error_t resolve_eval_target(const hu_lora_runner_ctx_t *ctx,
+                                      hu_communication_style_t *out_target) {
+    if (!out_target)
         return HU_ERR_INVALID_ARGUMENT;
-    if (!ctx->provider || !ctx->provider->vtable || !ctx->gate_persona)
-        return HU_ERR_NOT_SUPPORTED;
-    if (!ctx->gate_model_name || ctx->gate_model_name_len == 0)
-        return HU_ERR_NOT_SUPPORTED;
-
-    hu_allocator_t load_alloc;
-    if (ctx->alloc)
-        load_alloc = *ctx->alloc;
-    else
-        load_alloc = hu_system_allocator();
-
-    const char *aid = ctx->adapter_id ? ctx->adapter_id : "gate_probe";
-    size_t aid_len = ctx->adapter_id ? strlen(ctx->adapter_id) : strlen("gate_probe");
-    hu_error_t le = hu_provider_load_adapter(ctx->provider, &load_alloc, adapter_path,
-                                             strlen(adapter_path), aid, aid_len);
-    if (le != HU_OK && le != HU_ERR_NOT_SUPPORTED)
-        return le;
-
-    const char *sys = ctx->gate_persona->identity[0] ? ctx->gate_persona->identity
-                                                     : "You are a helpful assistant.";
-    size_t sys_len = strlen(sys);
-
-    size_t n = 0;
-    for (size_t i = 0; i < probe_count && n < after_cap; i++) {
-        char *resp = NULL;
-        size_t resp_len = 0;
-        hu_error_t ce = ctx->provider->vtable->chat_with_system(
-            ctx->provider->ctx, &load_alloc, sys, sys_len, probes[i].incoming,
-            probes[i].incoming_len, ctx->gate_model_name, ctx->gate_model_name_len, 0.7, &resp,
-            &resp_len);
-        if (ce != HU_OK || !resp || resp_len == 0) {
-            if (resp)
-                load_alloc.free(load_alloc.ctx, resp, resp_len + 1);
-            continue;
-        }
-        float s = hu_communication_style_fidelity_score_v2(target, resp, resp_len);
-        load_alloc.free(load_alloc.ctx, resp, resp_len + 1);
-        if (s < 0.f)
-            continue;
-        after[n++] = (double)s;
+    memset(out_target, 0, sizeof(*out_target));
+    if (ctx->eval_target && ctx->eval_target->sample_count > 0) {
+        *out_target = *ctx->eval_target;
+        return HU_OK;
     }
-    *out_after_n = n;
-    return n >= 10 ? HU_OK : HU_ERR_INVALID_ARGUMENT;
+    char pm_path[1024];
+    if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+        hu_personal_model_t loaded;
+        if (hu_personal_model_load(&loaded, pm_path) == HU_OK && loaded.style.sample_count > 0U) {
+            *out_target = loaded.style;
+            return HU_OK;
+        }
+    }
+    out_target->sample_count = 1;
+    out_target->lowercase_ratio = 0.7f;
+    out_target->avg_message_length = 80.f;
+    return HU_OK;
 }
 
 static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
                                      const hu_learner_report_t *report,
-                                     const char *adapter_path,
                                      hu_eval_gate_verdict_t *verdict) {
     if (!ctx || !ctx->eval_gate || !verdict)
         return HU_ERR_INVALID_ARGUMENT;
 
-    double persona[20];
-    double before[20];
+    double persona[64];
     size_t n = 0;
-    hu_eval_gate_t gate_inst = *ctx->eval_gate;
+    double p95 = ctx->gate_candidate_p95_ms > 0.0 ? ctx->gate_candidate_p95_ms : 100.0;
 
     if (ctx->gate_persona_after_scores && ctx->gate_persona_after_n >= 10) {
         n = ctx->gate_persona_after_n;
@@ -266,39 +146,130 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
             n = sizeof(persona) / sizeof(persona[0]);
         for (size_t i = 0; i < n; i++)
             persona[i] = ctx->gate_persona_after_scores[i];
-    } else if (ctx->gate_persona && ctx->provider && adapter_path && adapter_path[0]) {
-        hu_communication_style_t target;
-        bool synthetic = true;
-        hu_allocator_t *alloc = ctx->alloc ? ctx->alloc : NULL;
-        hu_allocator_t sys = hu_system_allocator();
-        if (!alloc)
+    }
+#ifdef HU_IS_TEST
+    else if (ctx->eval_use_synthetic_for_test) {
+        n = 20;
+        for (size_t i = 0; i < n; i++)
+            persona[i] = 0.75;
+    }
+#endif
+    else {
+        if (!ctx->eval_provider)
+            return HU_ERR_INVALID_ARGUMENT;
+
+        hu_allocator_t *alloc = ctx->alloc;
+        hu_allocator_t sys;
+        if (!alloc) {
+            sys = hu_system_allocator();
             alloc = &sys;
-        (void)hu_ml_fidelity_resolve_target(alloc, &target, &synthetic);
-
-        size_t before_n = lora_score_example_bank_before(ctx->gate_persona, &target, before,
-                                                         sizeof(before) / sizeof(before[0]));
-        lora_fidelity_probe_t probes[20];
-        size_t probe_n = lora_collect_fidelity_probes(ctx->gate_persona, probes,
-                                                      sizeof(probes) / sizeof(probes[0]));
-        if (probe_n > before_n)
-            probe_n = before_n;
-
-        size_t after_n = 0;
-        hu_error_t fe = lora_score_after_adapter_probes(ctx, &target, probes, probe_n,
-                                                        adapter_path, persona,
-                                                        sizeof(persona) / sizeof(persona[0]),
-                                                        &after_n);
-        if (fe == HU_OK && after_n >= 10) {
-            n = after_n;
-            if (before_n >= 10)
-                gate_inst.baseline_persona_fidelity_mean = lora_scores_mean(before, before_n);
-        } else if (report) {
-            n = runner_derive_gate_persona_scores(ctx, report, persona,
-                                                  sizeof(persona) / sizeof(persona[0]));
         }
-    } else if (report) {
-        n = runner_derive_gate_persona_scores(ctx, report, persona,
-                                              sizeof(persona) / sizeof(persona[0]));
+
+        const char *fixture = ctx->eval_prompt_fixture_path;
+        char default_fixture[512];
+        if (!fixture || !fixture[0]) {
+            const char *home = getenv("HOME");
+            snprintf(default_fixture, sizeof(default_fixture), "%s/.human/eval/persona_prompts.txt",
+                     home && home[0] ? home : "/tmp");
+            fixture = default_fixture;
+        }
+
+        char **prompts = NULL;
+        size_t prompt_n = 0;
+        hu_error_t pe = hu_persona_rollout_load_prompt_fixture(alloc, fixture, &prompts, &prompt_n);
+        if (pe != HU_OK)
+            return pe;
+
+        size_t want = ctx->eval_n_prompts > 0 ? ctx->eval_n_prompts : 20;
+        if (prompt_n > want)
+            prompt_n = want;
+        if (prompt_n < 10) {
+            for (size_t i = 0; i < prompt_n; i++)
+                alloc->free(alloc->ctx, prompts[i], strlen(prompts[i]) + 1);
+            alloc->free(alloc->ctx, prompts, prompt_n * sizeof(char *));
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+
+        hu_communication_style_t target;
+        hu_error_t te = resolve_eval_target(ctx, &target);
+        if (te != HU_OK) {
+            for (size_t i = 0; i < prompt_n; i++)
+                alloc->free(alloc->ctx, prompts[i], strlen(prompts[i]) + 1);
+            alloc->free(alloc->ctx, prompts, prompt_n * sizeof(char *));
+            return te;
+        }
+
+        int64_t timeout = ctx->eval_timeout_ms > 0 ? ctx->eval_timeout_ms : 5000;
+        const char *adapter = (report && report->adapter_path[0]) ? report->adapter_path : NULL;
+
+        hu_persona_rollout_config_t rcfg = {
+            .provider = ctx->eval_provider,
+            .adapter_path = adapter,
+            .target = &target,
+            .prompts = (const char **)prompts,
+            .n_prompts = prompt_n,
+            .timeout_ms_per_prompt = timeout,
+            .capture_responses = true,
+        };
+        hu_persona_rollout_result_t rr = {0};
+        hu_error_t re = hu_persona_rollout_run(alloc, &rcfg, &rr);
+
+        double mt_scores[64];
+        double if_scores[64];
+        const double *mt_ptr = NULL;
+        const double *if_ptr = NULL;
+        size_t score_n = 0;
+
+        if (re == HU_OK) {
+            score_n = rr.n_scored;
+            if (score_n > prompt_n)
+                score_n = prompt_n;
+            if (score_n > sizeof(mt_scores) / sizeof(mt_scores[0]))
+                score_n = sizeof(mt_scores) / sizeof(mt_scores[0]);
+
+            if (ctx->eval_gate->mt_bench && rr.responses && score_n > 0) {
+                if (ctx->eval_gate->mt_bench->vtable->run(ctx->eval_gate->mt_bench, alloc,
+                                                            (const char *const *)prompts,
+                                                            (const char *const *)rr.responses,
+                                                            score_n, mt_scores) == HU_OK)
+                    mt_ptr = mt_scores;
+            }
+            if (ctx->eval_gate->ifeval && rr.responses && score_n > 0) {
+                if (ctx->eval_gate->ifeval->vtable->run(ctx->eval_gate->ifeval, alloc,
+                                                        (const char *const *)prompts,
+                                                        (const char *const *)rr.responses,
+                                                        score_n, if_scores) == HU_OK)
+                    if_ptr = if_scores;
+            }
+        }
+
+        for (size_t i = 0; i < prompt_n; i++)
+            alloc->free(alloc->ctx, prompts[i], strlen(prompts[i]) + 1);
+        alloc->free(alloc->ctx, prompts, prompt_n * sizeof(char *));
+        if (re != HU_OK) {
+            hu_persona_rollout_result_free(alloc, &rr);
+            return re;
+        }
+
+        n = rr.n_scored;
+        if (n > sizeof(persona) / sizeof(persona[0]))
+            n = sizeof(persona) / sizeof(persona[0]);
+        for (size_t i = 0; i < n; i++)
+            persona[i] = rr.persona_scores[i];
+        if (rr.p95_ms > 0.0)
+            p95 = rr.p95_ms;
+        hu_persona_rollout_result_free(alloc, &rr);
+
+        if (n < 10) {
+            memset(verdict, 0, sizeof(*verdict));
+            verdict->promote = false;
+            snprintf(verdict->reason, sizeof(verdict->reason),
+                     "insufficient persona score count for gate (%zu < 10)", n);
+            return HU_OK;
+        }
+
+        return hu_eval_gate_decide_from_arrays_for_test(ctx->eval_gate, persona, mt_ptr, if_ptr,
+                                                        NULL, n, p95, verdict);
     }
 
     if (n < 10) {
@@ -309,8 +280,7 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
         return HU_OK;
     }
 
-    double p95 = ctx->gate_candidate_p95_ms > 0.0 ? ctx->gate_candidate_p95_ms : 100.0;
-    return hu_eval_gate_decide_from_arrays_for_test(&gate_inst, persona, NULL, NULL, NULL, n,
+    return hu_eval_gate_decide_from_arrays_for_test(ctx->eval_gate, persona, NULL, NULL, NULL, n,
                                                     p95, verdict);
 }
 #endif /* HU_ENABLE_RL_FULL */
@@ -372,7 +342,7 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
     memset(&gate_verdict, 0, sizeof(gate_verdict));
     if (ctx->eval_gate) {
         promote_adapter = false;
-        if (run_promotion_gate(ctx, &report, report.adapter_path, &gate_verdict) == HU_OK)
+        if (run_promotion_gate(ctx, &report, &gate_verdict) == HU_OK)
             promote_adapter = gate_verdict.promote;
 
         char adapter_id[128];

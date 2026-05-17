@@ -52,4 +52,29 @@ hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision,
 /* Convenience: human-readable label for logs / tests / UI. */
 const char *hu_conflict_resolution_str(hu_conflict_resolution_t r);
 
+/* W8 Phase 5 — Semantic-judge fallback.
+ *
+ * The strict classifier above keys on (source_id, type, target_id). When
+ * the strict peek finds no row with the same (source_id, type), a "same
+ * fact" may already exist in the graph under a different relation type
+ * or a paraphrased context (e.g. "lead engineer at Acme" vs "head of
+ * engineering at Acme"). This helper takes a set of candidate existing
+ * relations and runs `hu_belief_semantic_conflict` on each candidate's
+ * `context` against the proposed `context`. Returns the FIRST match in
+ * candidate order:
+ *   - PARAPHRASE → HU_CONFLICT_SUPERSEDE + *out_matched_existing_id
+ *   - CONTRADICT → HU_CONFLICT_FLAG + *out_matched_existing_id
+ *   - no match   → HU_CONFLICT_NONE (*out_matched_existing_id = 0)
+ *
+ * Heuristic-only (no provider round-trips); deterministic under tests.
+ * If `proposed` is NULL, `candidates` is NULL, or `n_candidates == 0`,
+ * returns HU_CONFLICT_NONE with `*out_matched_existing_id = 0`.
+ * `out_matched_existing_id` may be NULL — the resolution is still
+ * returned but the id is silently dropped. */
+hu_conflict_resolution_t hu_conflict_classify_semantic(
+    const hu_graph_relation_t *proposed,
+    const hu_graph_relation_t *candidates,
+    size_t n_candidates,
+    int64_t *out_matched_existing_id);
+
 #endif /* HU_MEMORY_CONFLICT_RESOLVER_H */

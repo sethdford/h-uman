@@ -356,7 +356,7 @@ static void route_populates_global_log(void) {
     hu_model_router_config_t c = hu_model_router_default_config();
     hu_model_route(&c, "hello there", 11, NULL, 0, 12, 0);
 
-    HU_ASSERT(hu_route_log_count(log) > before);
+    HU_ASSERT(hu_route_log_count(log) == 1);
     const hu_route_decision_t *d = hu_route_log_get(log, hu_route_log_count(log) - 1);
     HU_ASSERT(d != NULL);
     HU_ASSERT(d->source == HU_ROUTE_HEURISTIC);

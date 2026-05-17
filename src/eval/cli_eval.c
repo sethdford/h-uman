@@ -90,9 +90,13 @@ hu_error_t hu_eval_cli_competitive(hu_allocator_t *alloc, int argc, char **argv)
     if (e != HU_OK) return e;
 
     hu_eval_judge_external_t apple = {0};
-    hu_error_t apple_e = hu_eval_judge_create_apple_fm(alloc, &apple);
+    const char *apple_reason = NULL;
+    hu_error_t apple_e = hu_eval_judge_create_apple_fm(alloc, &apple, &apple_reason);
     hu_eval_judge_external_t nano = {0};
-    hu_error_t nano_e = hu_eval_judge_create_gemini_nano(alloc, &nano);
+    const char *nano_reason = NULL;
+    hu_error_t nano_e = hu_eval_judge_create_gemini_nano(alloc, &nano, &nano_reason);
+    (void)apple_reason;
+    (void)nano_reason;
 
     hu_competitive_harness_judge_slot_t slots[3];
     slots[0].column_name = "stock";

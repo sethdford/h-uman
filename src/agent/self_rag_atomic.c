@@ -75,6 +75,87 @@ static size_t next_sentence_end(const char *s, size_t len, size_t from,
     return len;
 }
 
+/* Case-insensitive prefix match against a fixed needle. Skips leading
+ * ASCII whitespace in the haystack so "   I think" matches "I think".
+ *
+ * The boundary check (next char after prefix is non-alpha) only fires
+ * when the prefix's LAST char is alpha — otherwise the prefix already
+ * encodes its own boundary (trailing space, etc.). Example: prefix
+ * "Maybe " matching "Maybe Berlin..." — the trailing space IS the
+ * boundary; the next char ('B') belongs to the next word. */
+static bool sentence_starts_with_ci(const char *s, size_t len, const char *prefix) {
+    size_t i = 0;
+    while (i < len && isspace((unsigned char)s[i])) i++;
+    size_t pl = strlen(prefix);
+    if (pl == 0 || len - i < pl) return false;
+    for (size_t j = 0; j < pl; j++) {
+        if (tolower((unsigned char)s[i + j]) != tolower((unsigned char)prefix[j]))
+            return false;
+    }
+    char last = prefix[pl - 1];
+    bool last_is_alpha = isalpha((unsigned char)last) != 0;
+    if (last_is_alpha && i + pl < len) {
+        char c = s[i + pl];
+        if (isalpha((unsigned char)c) || c == '_' || c == '\'')
+            return false;
+    }
+    return true;
+}
+
+/* W11 — propositional-claim filter. Returns false when the sentence is
+ * an opinion ("I think ..."), a request ("Tell me ..."), or a hedged
+ * subjective ("In my opinion ...") that the heuristic claim extractor
+ * should NOT treat as a factual proposition needing memory support.
+ *
+ * The 2026-05-16 abstain calibration pack flagged two false positives
+ * at threshold=0.5:
+ *   - "I think the autumn light in Brooklyn is the best."  (opinion)
+ *   - "Tell me a joke about debuggers."                    (request)
+ * Both contained real prepositions (`in`, `about`) so the splitter
+ * happily decomposed them into atomic claims, which the empty memory
+ * facade then couldn't support, which fired abstain. This filter
+ * rejects them before decomposition runs.
+ *
+ * Patterns covered (case-insensitive, word-boundary aware):
+ *   - Opinion / mental-verb starts: I think | I believe | I feel |
+ *     I guess | I suppose | I assume | I hope | I imagine | I doubt |
+ *     I wonder | I reckon
+ *   - Hedge starts: maybe | perhaps | probably | possibly |
+ *     in my opinion | it seems | it feels | apparently | supposedly
+ *   - Imperative / request starts: tell me | show me | give me |
+ *     help me | let me | please | could you | can you | would you |
+ *     will you | shall we | should I | shall I | do you | are you |
+ *     make me | create | write | generate | send | draft | brainstorm |
+ *     suggest | recommend | explain | summarize | translate | rewrite
+ *
+ * Returns true ONLY when the sentence is a proposition the heuristic
+ * extractor should examine. Keeps the false-positive surface tight
+ * without dropping real claims like "Alice works at Initech." */
+static bool sentence_is_propositional_claim(const char *s, size_t len) {
+    static const char *const k_skip[] = {
+        /* Opinion / mental verbs. */
+        "I think",   "I believe", "I feel",   "I guess",     "I suppose",
+        "I assume",  "I hope",    "I imagine","I doubt",     "I wonder",
+        "I reckon",  "I bet",     "I'd guess","I would guess",
+        /* Hedges. */
+        "Maybe ",    "Perhaps ",  "Probably ","Possibly ",
+        "In my opinion","It seems","It feels","Apparently ","Supposedly ",
+        /* Imperatives / requests. The leading verb is the tell. */
+        "Tell me",   "Show me",   "Give me",  "Help me",     "Let me",
+        "Please",    "Could you", "Can you",  "Would you",   "Will you",
+        "Shall we",  "Should I",  "Shall I",  "Do you",      "Are you",
+        "Make me",   "Create ",   "Write ",   "Generate ",   "Send ",
+        "Draft ",    "Brainstorm","Suggest ", "Recommend ",  "Explain ",
+        "Summarize", "Translate ","Rewrite ",
+        NULL,
+    };
+    for (size_t k = 0; k_skip[k]; k++) {
+        if (sentence_starts_with_ci(s, len, k_skip[k]))
+            return false;
+    }
+    return true;
+}
+
 /* Count alphabetic tokens (>= 1 char) in [s, s+len). */
 static size_t alpha_word_count(const char *s, size_t len) {
     size_t n = 0;
@@ -230,7 +311,9 @@ static size_t decompose_draft(const char *draft, size_t draft_len,
         bool is_q = false;
         size_t end = next_sentence_end(draft, draft_len, i, &is_q);
         size_t len = end - i;
-        if (!is_q && len > 0) {
+        /* W11 — skip questions, requests, opinions, and hedges. Only
+         * propositional sentences should be decomposed and verified. */
+        if (!is_q && len > 0 && sentence_is_propositional_claim(draft + i, len)) {
             out_n += decompose_sentence(draft + i, len, out + out_n,
                                          cap - out_n, i);
         }

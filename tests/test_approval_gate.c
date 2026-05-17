@@ -1,9 +1,11 @@
 #include "test_framework.h"
 #include "human/agent/approval_gate.h"
 #include "human/core/allocator.h"
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -27,9 +29,31 @@ static hu_allocator_t test_alloc = {
     .realloc = NULL
 };
 
+/* Return a per-pid, per-tag tmp path so cross-run state can't leak.
+ * Walks the directory and unlinks every entry before returning so the
+ * test starts with a guaranteed-empty directory. Two binaries running
+ * concurrently use different pids → no collision. */
+static const char *gates_path(int tag) {
+    static char buf[128];
+    snprintf(buf, sizeof(buf), "/tmp/hu_test_gates_%d_%d", (int)getpid(), tag);
+    DIR *d = opendir(buf);
+    if (d) {
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+                continue;
+            char path[256];
+            snprintf(path, sizeof(path), "%s/%s", buf, de->d_name);
+            unlink(path);
+        }
+        closedir(d);
+    }
+    return buf;
+}
+
 static void test_gate_manager_create(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_error_t err = hu_gate_manager_create(&test_alloc, "/tmp/test_gates", &mgr);
+    hu_error_t err = hu_gate_manager_create(&test_alloc, gates_path(1), &mgr);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(mgr);
 
@@ -42,7 +66,7 @@ static void test_gate_manager_create(void) {
 
 static void test_gate_create_and_check(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_gate_manager_create(&test_alloc, "/tmp/test_gates2", &mgr);
+    hu_gate_manager_create(&test_alloc, gates_path(2), &mgr);
     HU_ASSERT_NOT_NULL(mgr);
 
     char gate_id[64];
@@ -64,7 +88,7 @@ static void test_gate_create_and_check(void) {
 
 static void test_gate_load_details(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_gate_manager_create(&test_alloc, "/tmp/test_gates3", &mgr);
+    hu_gate_manager_create(&test_alloc, gates_path(3), &mgr);
 
     char gate_id[64];
     const char *desc = "Test approval gate";
@@ -86,7 +110,7 @@ static void test_gate_load_details(void) {
 
 static void test_gate_resolve_approve(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_gate_manager_create(&test_alloc, "/tmp/test_gates4", &mgr);
+    hu_gate_manager_create(&test_alloc, gates_path(4), &mgr);
 
     char gate_id[64];
     hu_gate_create(mgr, &test_alloc, "Approve?", 8, NULL, 0, 0, gate_id);
@@ -113,7 +137,7 @@ static void test_gate_resolve_approve(void) {
 
 static void test_gate_resolve_reject(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_gate_manager_create(&test_alloc, "/tmp/test_gates5", &mgr);
+    hu_gate_manager_create(&test_alloc, gates_path(5), &mgr);
 
     char gate_id[64];
     hu_gate_create(mgr, &test_alloc, "Reject test?", 12, NULL, 0, 0, gate_id);
@@ -139,7 +163,7 @@ static void test_gate_resolve_reject(void) {
 
 static void test_gate_timeout(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_gate_manager_create(&test_alloc, "/tmp/test_gates6", &mgr);
+    hu_gate_manager_create(&test_alloc, gates_path(6), &mgr);
 
     char gate_id[64];
     /* Create gate with 1-second timeout */
@@ -167,7 +191,7 @@ static void test_gate_timeout(void) {
 
 static void test_gate_list_pending_empty(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_gate_manager_create(&test_alloc, "/tmp/test_gates7", &mgr);
+    hu_gate_manager_create(&test_alloc, gates_path(7), &mgr);
 
     hu_approval_gate_t *gates = NULL;
     size_t count = 0;
@@ -181,7 +205,7 @@ static void test_gate_list_pending_empty(void) {
 
 static void test_gate_list_pending_multiple(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_gate_manager_create(&test_alloc, "/tmp/test_gates8", &mgr);
+    hu_gate_manager_create(&test_alloc, gates_path(8), &mgr);
 
     /* Create 3 pending gates */
     char gate_id1[64], gate_id2[64], gate_id3[64];
@@ -204,11 +228,12 @@ static void test_gate_list_pending_multiple(void) {
 
 static void test_gate_persistence(void) {
     const char *gate_id_save = NULL;
+    const char *persist_dir = gates_path(9); /* Reused across the two manager open/close cycles */
 
     /* Create and save a gate */
     {
         hu_gate_manager_t *mgr = NULL;
-        hu_gate_manager_create(&test_alloc, "/tmp/test_gates9", &mgr);
+        hu_gate_manager_create(&test_alloc, persist_dir, &mgr);
 
         char gate_id[64];
         hu_gate_create(mgr, &test_alloc, "Persist test", 12, NULL, 0, 0, gate_id);
@@ -218,10 +243,12 @@ static void test_gate_persistence(void) {
         hu_gate_manager_destroy(mgr, &test_alloc);
     }
 
-    /* Recreate manager and verify gate is still there */
+    /* Recreate manager and verify gate is still there. Pass the same
+     * persist_dir — `gates_path` would have cleaned it on a second
+     * call, which would defeat the persistence assertion. */
     {
         hu_gate_manager_t *mgr = NULL;
-        hu_gate_manager_create(&test_alloc, "/tmp/test_gates9", &mgr);
+        hu_gate_manager_create(&test_alloc, persist_dir, &mgr);
 
         hu_gate_status_t status;
         hu_error_t err = hu_gate_check(mgr, gate_id_save, &status);
@@ -243,7 +270,7 @@ static void test_gate_status_names(void) {
 
 static void test_gate_memory_cleanup(void) {
     hu_gate_manager_t *mgr = NULL;
-    hu_gate_manager_create(&test_alloc, "/tmp/test_gates10", &mgr);
+    hu_gate_manager_create(&test_alloc, gates_path(10), &mgr);
 
     char gate_id[64];
     hu_gate_create(mgr, &test_alloc, "Cleanup test", 12, NULL, 0, 0, gate_id);

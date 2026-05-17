@@ -252,7 +252,9 @@ static void inline_score_critique(hu_allocator_t *alloc, hu_memory_facade_t *m,
         c->fabricated = true;
         if (c->support.prov_count < 4) {
             hu_provenance_atom_t *p = &c->support.prov[c->support.prov_count++];
-            snprintf(p->source, sizeof(p->source), "neg:%s", neg_match->scope);
+            snprintf(p->source, sizeof(p->source), "neg:%.*s",
+                       (int)(sizeof(p->source) - sizeof("neg:")),
+                       neg_match->scope);
             p->observed_at = neg_match->created_at;
             p->weight = 0.0f;
         }

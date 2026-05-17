@@ -233,6 +233,9 @@ typedef struct hu_reaction_collection_config {
     char channels[HU_REACTION_COLLECTION_CHANNELS_MAX][32];
     size_t channel_count;
     int poll_interval_seconds;
+    /* Optional override for iMessage chat.db. If empty: HU_CHATDB env, then
+     * $HOME/Library/Messages/chat.db. Must be absolute when set. */
+    char chatdb_path[256];
 } hu_reaction_collection_config_t;
 
 typedef struct hu_imessage_channel_config {

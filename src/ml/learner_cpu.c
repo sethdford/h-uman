@@ -367,8 +367,9 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
     hu_error_t e = write_adapter_file(cfg->adapter_output_path, cfg->model_version,
                                        (uint32_t)cfg->rank, weights, n_weights, &bytes);
     if (e != HU_OK) {
+        /* adapter_output_path is up to 256 bytes; last_error is 128. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
-                 "failed to write adapter at %s", cfg->adapter_output_path);
+                 "failed to write adapter at %.90s", cfg->adapter_output_path);
     } else {
         out_report->adapter_bytes = bytes;
     }

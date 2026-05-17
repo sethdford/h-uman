@@ -23,6 +23,7 @@
 #include "human/ml/rl_trainer.h"
 #include "human/ml/dpo_real.h"
 #include "human/ml/dpo.h"
+#include "human/ml/ml_scripts_dir.h"
 #include "human/core/error.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -133,9 +134,17 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
         return HU_ERR_INVALID_ARGUMENT;
     }
 
+    /* CF-7 (Phase D Task D-1): resolve absolute path to dpo_mlx_train.py
+     * via hu_ml_resolve_script_path. Replaces the legacy CWD-relative
+     * "python3 scripts/dpo_mlx_train.py" splice. */
+    char script_path[512];
+    hu_error_t serr = hu_ml_resolve_script_path("dpo_mlx_train.py", script_path,
+                                                  sizeof(script_path));
+    if (serr != HU_OK) { unlink(jsonl_path); return serr; }
+
     char cmd[2048];
     snprintf(cmd, sizeof(cmd),
-             "python3 scripts/dpo_mlx_train.py "
+             "python3 '%s' "
              "--model '%s' "
              "--data '%s' "
              "--adapter-path '%s' "
@@ -143,7 +152,7 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
              "--beta %.4f "
              "--batch-size 1 "
              "2>&1",
-             c->model_id, jsonl_path, c->adapter_dir, c->max_iters, c->beta);
+             script_path, c->model_id, jsonl_path, c->adapter_dir, c->max_iters, c->beta);
 
 #ifdef HU_IS_TEST
     /* In test mode, write a dummy safetensors file so the test can verify

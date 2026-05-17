@@ -134,7 +134,7 @@ static hu_reaction_kind_t parse_reaction_kind(const char *s) {
     if (strcmp(s, "emphasize") == 0)
         return HU_REACTION_EMPHASIZE;
     if (strcmp(s, "question") == 0)
-        return HU_REACTION_QUESTION;
+        return HU_REACTION_KIND_QUESTION;
     return HU_REACTION_UNKNOWN;
 }
 

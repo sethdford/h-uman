@@ -2257,9 +2257,11 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
     hu_persona_cli_args_t args;
     hu_error_t err = hu_persona_cli_parse(argc, (const char **)argv, &args);
     if (err != HU_OK) {
-        fprintf(stderr, "Usage: human persona "
-                        "<create|update|show|list|delete|validate|eval|export|merge|import|filler> "
-                        "[name] [options]\n");
+        fprintf(stderr,
+                "Usage: human persona "
+                "<create|update|show|list|delete|validate|eval|export|export-bank|merge|import|"
+                "filler> "
+                "[name] [options]\n");
         fprintf(
             stderr,
             "  create <name> [--from-imessage] [--from-gmail] [--from-facebook] [--interactive]\n");
@@ -2270,6 +2272,8 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "  validate <name>\n");
         fprintf(stderr, "  eval <name>  (offline persona consistency harness)\n");
         fprintf(stderr, "  export <name>\n");
+        fprintf(stderr, "  export-bank <name> [--output <path>]  (Alpaca JSONL for "
+                        "llama.cpp/finetune, axolotl, MLX-LM)\n");
         fprintf(stderr, "  merge <output_name> <name1> <name2> [name3...]\n");
         fprintf(stderr, "  import <name> [--from-stdin | --from-file <path>]\n");
         fprintf(stderr, "  filler <name> add --channel <name> \"<text>\"     append a filler\n");
