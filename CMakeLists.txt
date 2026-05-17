@@ -439,6 +439,7 @@ set(HU_CORE_SOURCES
     src/security/pairing.c
     src/security/secrets.c
     src/security/vault.c
+    src/security/vault_aead.c
     src/security/audit.c
     src/security/delegation.c
     src/security/noop_sandbox.c
@@ -2719,6 +2720,7 @@ set(HU_TEST_SOURCES
     tests/test_security.c
     tests/test_sensitivity.c
     tests/test_vault.c
+    tests/test_vault_aead.c
     tests/test_provider.c
     tests/test_provider_http.c
     tests/test_ensemble.c
