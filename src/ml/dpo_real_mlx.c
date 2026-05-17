@@ -20,11 +20,11 @@
  * `human/ml/rl_trainer.h`; including it explicitly here matches the
  * convention used by every other Phase 2 file).
  */
-#include "human/ml/rl_trainer.h"
-#include "human/ml/dpo_real.h"
-#include "human/ml/dpo.h"
-#include "human/ml/ml_scripts_dir.h"
 #include "human/core/error.h"
+#include "human/ml/dpo.h"
+#include "human/ml/dpo_real.h"
+#include "human/ml/ml_scripts_dir.h"
+#include "human/ml/rl_trainer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,7 +54,9 @@ typedef struct {
  * Now we fail clearly at create time so the test can drive a
  * deterministic PATH override instead. */
 static int mlx_lm_lora_available(void) {
-    return system("python3 -c 'from mlx_lm_lora.trainer.dpo_trainer import train_dpo' 2>/dev/null") == 0;
+    return system(
+               "python3 -c 'from mlx_lm_lora.trainer.dpo_trainer import train_dpo' 2>/dev/null") ==
+           0;
 }
 
 /* Minimal JSON string escaper. RFC 8259 requires escaping " \ and U+0000-U+001F.
@@ -62,27 +64,65 @@ static int mlx_lm_lora_available(void) {
  * control range. Output is appended to dst (writes nothing if dst lacks space). */
 static size_t json_escape(char *dst, size_t cap, const char *src) {
     size_t w = 0;
-    if (cap == 0) return 0;
+    if (cap == 0)
+        return 0;
     for (const unsigned char *p = (const unsigned char *)src; *p && w + 7 < cap; p++) {
         switch (*p) {
-            case '"':  if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='"'; } break;
-            case '\\': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='\\'; } break;
-            case '\n': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='n'; } break;
-            case '\r': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='r'; } break;
-            case '\t': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='t'; } break;
-            case '\b': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='b'; } break;
-            case '\f': if (w + 2 < cap) { dst[w++]='\\'; dst[w++]='f'; } break;
-            default:
-                if (*p < 0x20) {
-                    int n = snprintf(dst + w, cap - w, "\\u%04x", *p);
-                    if (n < 0 || (size_t)n >= cap - w) return w;
-                    w += (size_t)n;
-                } else {
-                    dst[w++] = (char)*p;
-                }
+        case '"':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = '"';
+            }
+            break;
+        case '\\':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = '\\';
+            }
+            break;
+        case '\n':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 'n';
+            }
+            break;
+        case '\r':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 'r';
+            }
+            break;
+        case '\t':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 't';
+            }
+            break;
+        case '\b':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 'b';
+            }
+            break;
+        case '\f':
+            if (w + 2 < cap) {
+                dst[w++] = '\\';
+                dst[w++] = 'f';
+            }
+            break;
+        default:
+            if (*p < 0x20) {
+                int n = snprintf(dst + w, cap - w, "\\u%04x", *p);
+                if (n < 0 || (size_t)n >= cap - w)
+                    return w;
+                w += (size_t)n;
+            } else {
+                dst[w++] = (char)*p;
+            }
         }
     }
-    if (w < cap) dst[w] = '\0';
+    if (w < cap)
+        dst[w] = '\0';
     return w;
 }
 
@@ -92,35 +132,39 @@ static size_t json_escape(char *dst, size_t cap, const char *src) {
  * dpo_pairs rows from chat history routinely contain quotes, newlines, and
  * pasted code blocks that would produce invalid JSONL and cause the Python
  * wrapper's PreferenceDataset() to throw json.JSONDecodeError. */
-static hu_error_t write_jsonl(const hu_preference_pair_t *pairs, size_t n,
-                              char *out_path, size_t out_path_cap) {
+static hu_error_t write_jsonl(const hu_preference_pair_t *pairs, size_t n, char *out_path,
+                              size_t out_path_cap) {
     snprintf(out_path, out_path_cap, "/tmp/hu_dpo_mlx_%d.jsonl", getpid());
     FILE *f = fopen(out_path, "w");
-    if (!f) return HU_ERR_IO;
+    if (!f)
+        return HU_ERR_IO;
     for (size_t i = 0; i < n; i++) {
-        if (pairs[i].prompt_len == 0) continue;
-        if (pairs[i].chosen_len == 0 && pairs[i].rejected_len == 0) continue;
+        if (pairs[i].prompt_len == 0)
+            continue;
+        if (pairs[i].chosen_len == 0 && pairs[i].rejected_len == 0)
+            continue;
         char p_esc[8192], c_esc[16384], r_esc[16384];
         json_escape(p_esc, sizeof(p_esc), pairs[i].prompt);
         json_escape(c_esc, sizeof(c_esc), pairs[i].chosen);
         json_escape(r_esc, sizeof(r_esc), pairs[i].rejected);
-        fprintf(f, "{\"prompt\": \"%s\", \"chosen\": \"%s\", \"rejected\": \"%s\"}\n",
-                p_esc, c_esc, r_esc);
+        fprintf(f, "{\"prompt\": \"%s\", \"chosen\": \"%s\", \"rejected\": \"%s\"}\n", p_esc, c_esc,
+                r_esc);
     }
     fclose(f);
     return HU_OK;
 }
 
-static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
-                                const hu_preference_pair_t *pairs, size_t n_pairs,
-                                hu_rl_trainer_metrics_t *out) {
-    if (!vctx || !alloc || !pairs || n_pairs == 0 || !out) return HU_ERR_INVALID_ARGUMENT;
+static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc, const hu_preference_pair_t *pairs,
+                               size_t n_pairs, hu_rl_trainer_metrics_t *out) {
+    if (!vctx || !alloc || !pairs || n_pairs == 0 || !out)
+        return HU_ERR_INVALID_ARGUMENT;
     dpo_mlx_ctx_t *c = (dpo_mlx_ctx_t *)vctx;
 
     char jsonl_path[256];
-    if (write_jsonl(pairs, n_pairs, jsonl_path, sizeof(jsonl_path)) != HU_OK) return HU_ERR_IO;
+    if (write_jsonl(pairs, n_pairs, jsonl_path, sizeof(jsonl_path)) != HU_OK)
+        return HU_ERR_IO;
 
-    mkdir(c->adapter_dir, 0755);  /* OK if exists */
+    mkdir(c->adapter_dir, 0755); /* OK if exists */
 
     /* Match dpo_mlx_save's hardening pattern: reject single-quote in any
      * user-provided field that lands in the popen()'d shell command, then
@@ -138,9 +182,12 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
      * via hu_ml_resolve_script_path. Replaces the legacy CWD-relative
      * "python3 scripts/dpo_mlx_train.py" splice. */
     char script_path[512];
-    hu_error_t serr = hu_ml_resolve_script_path("dpo_mlx_train.py", script_path,
-                                                  sizeof(script_path));
-    if (serr != HU_OK) { unlink(jsonl_path); return serr; }
+    hu_error_t serr =
+        hu_ml_resolve_script_path("dpo_mlx_train.py", script_path, sizeof(script_path));
+    if (serr != HU_OK) {
+        unlink(jsonl_path);
+        return serr;
+    }
 
     char cmd[2048];
     snprintf(cmd, sizeof(cmd),
@@ -162,7 +209,10 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
     char dummy_path[768];
     snprintf(dummy_path, sizeof(dummy_path), "%s/adapters.safetensors", c->adapter_dir);
     FILE *df = fopen(dummy_path, "wb");
-    if (df) { fputs("dummy_safetensors", df); fclose(df); }
+    if (df) {
+        fputs("dummy_safetensors", df);
+        fclose(df);
+    }
     snprintf(out->adapter_path, sizeof(out->adapter_path), "%s", dummy_path);
     out->iters_completed = c->max_iters;
     out->final_loss = 0.0;
@@ -172,7 +222,10 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
 #endif
 
     FILE *fp = popen(cmd, "r");
-    if (!fp) { unlink(jsonl_path); return HU_ERR_IO; }
+    if (!fp) {
+        unlink(jsonl_path);
+        return HU_ERR_IO;
+    }
     char buf[1024];
     double last_loss = 0.0;
     size_t last_iter = 0;
@@ -188,12 +241,20 @@ static hu_error_t dpo_mlx_step(void *vctx, hu_allocator_t *alloc,
     }
     int status = pclose(fp);
     unlink(jsonl_path);
-    if (status != 0) return HU_ERR_PROVIDER_RESPONSE;
+    if (status != 0)
+        return HU_ERR_PROVIDER_RESPONSE;
 
-    snprintf(out->adapter_path, sizeof(out->adapter_path),
-             "%s/adapters.safetensors", c->adapter_dir);
+    /* Check the snprintf return value (Linux GCC -Werror=format-truncation
+     * fires otherwise because both buffers are 512 bytes and the literal
+     * suffix adds 21). If adapter_dir is pathologically long, fail
+     * cleanly rather than silently truncating to an unstat-able path. */
+    int path_len = snprintf(out->adapter_path, sizeof(out->adapter_path), "%s/adapters.safetensors",
+                            c->adapter_dir);
+    if (path_len < 0 || (size_t)path_len >= sizeof(out->adapter_path))
+        return HU_ERR_PROVIDER_RESPONSE;
     struct stat st;
-    if (stat(out->adapter_path, &st) != 0 || st.st_size == 0) return HU_ERR_PROVIDER_RESPONSE;
+    if (stat(out->adapter_path, &st) != 0 || st.st_size == 0)
+        return HU_ERR_PROVIDER_RESPONSE;
 
     out->iters_completed = last_iter > 0 ? last_iter : c->max_iters;
     out->final_loss = last_loss;
@@ -204,20 +265,27 @@ static hu_error_t dpo_mlx_save(void *vctx, hu_allocator_t *alloc, const char *pa
     /* The mlx-lm-lora train_dpo subprocess writes the adapter directly
      * during step(); save is a copy. Use snprintf-bounded shell-quoted
      * paths to avoid metacharacter issues if adapter_dir contains spaces. */
-    if (!vctx || !alloc || !path) return HU_ERR_INVALID_ARGUMENT;
+    if (!vctx || !alloc || !path)
+        return HU_ERR_INVALID_ARGUMENT;
     dpo_mlx_ctx_t *c = (dpo_mlx_ctx_t *)vctx;
     /* Reject paths containing single quote (would escape our quoting). */
-    if (strchr(c->adapter_dir, '\'') || strchr(path, '\'')) return HU_ERR_INVALID_ARGUMENT;
+    if (strchr(c->adapter_dir, '\'') || strchr(path, '\''))
+        return HU_ERR_INVALID_ARGUMENT;
     char cmd[1024];
     int n = snprintf(cmd, sizeof(cmd), "cp -r '%s' '%s'", c->adapter_dir, path);
-    if (n < 0 || (size_t)n >= sizeof(cmd)) return HU_ERR_INVALID_ARGUMENT;
+    if (n < 0 || (size_t)n >= sizeof(cmd))
+        return HU_ERR_INVALID_ARGUMENT;
     return system(cmd) == 0 ? HU_OK : HU_ERR_IO;
 }
 
-static const char *dpo_mlx_name(void *vctx) { (void)vctx; return "dpo_mlx"; }
+static const char *dpo_mlx_name(void *vctx) {
+    (void)vctx;
+    return "dpo_mlx";
+}
 
 static void dpo_mlx_deinit(void *vctx, hu_allocator_t *alloc) {
-    if (!vctx) return;
+    if (!vctx)
+        return;
     alloc->free(alloc->ctx, vctx, sizeof(dpo_mlx_ctx_t));
 }
 
@@ -228,18 +296,20 @@ static const hu_rl_trainer_vtable_t dpo_mlx_vtable = {
     .deinit = dpo_mlx_deinit,
 };
 
-hu_error_t hu_dpo_real_mlx_create(hu_allocator_t *alloc,
-                                   const hu_rl_trainer_config_t *config,
-                                   hu_rl_trainer_t *out) {
-    if (!alloc || !config || !out) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_dpo_real_mlx_create(hu_allocator_t *alloc, const hu_rl_trainer_config_t *config,
+                                  hu_rl_trainer_t *out) {
+    if (!alloc || !config || !out)
+        return HU_ERR_INVALID_ARGUMENT;
 #if !defined(__APPLE__)
     return HU_ERR_NOT_SUPPORTED;
 #endif
     /* Phase 3 Task 0 (D6): probe before allocation so a missing
      * mlx-lm-lora is reported at create time, not at step time. */
-    if (!mlx_lm_lora_available()) return HU_ERR_NOT_SUPPORTED;
+    if (!mlx_lm_lora_available())
+        return HU_ERR_NOT_SUPPORTED;
     dpo_mlx_ctx_t *c = (dpo_mlx_ctx_t *)alloc->alloc(alloc->ctx, sizeof(dpo_mlx_ctx_t));
-    if (!c) return HU_ERR_OUT_OF_MEMORY;
+    if (!c)
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     snprintf(c->model_id, sizeof(c->model_id), "%s",
              config->model_id ? config->model_id : "mlx-community/gemma-3-4b-it-bf16");
