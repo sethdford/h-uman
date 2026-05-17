@@ -1,0 +1,23 @@
+# Critic findings — US-8.1 DP-SGD with RDP Accounting
+
+## HIGH (2)
+
+- `src/ml/dp_sgd.c:84` — Stack buffer `log_terms[HU_DP_RDP_ALPHA_MAX + 1]` is allocated as 65 doubles. When `alpha == HU_DP_RDP_ALPHA_MAX` (64), the loop writes indices `k = 0..64`, which is 65 writes into a 65-element array (indices 0..64). This is correct, but only because `HU_DP_RDP_ALPHA_MAX + 1 == 65`. If `HU_DP_RDP_ALPHA_MAX` is ever increased beyond 64 without updating this declaration, the buffer overflows silently. The size should be `HU_DP_RDP_ALPHA_MAX + 1` made explicit as `(size_t)(alpha + 1)` via a VLA or a static assert that `HU_DP_RDP_ALPHA_MAX <= 127` to bound it. Fix: add `static_assert(HU_DP_RDP_ALPHA_MAX <= 127, "log_terms buffer must be resized");` immediately before the declaration, or size the buffer as `double log_terms[128]` with the same guard.
+
+- `src/ml/dp_sgd.c:157-174` / `tests/test_dp_sgd.c:74-107` — The alpha grid saturates at the upper boundary (`alpha* == 64`) for two of the four oracle cases (`tight_budget`: alpha*=64 returning eps=0.1217 when alpha=100 gives 0.0922; `sanity_lower_bound`: alpha*=64 returning eps=0.1042 when alpha=200 gives 0.0365). This means `hu_dp_rdp_epsilon_from_sigma` reports an epsilon that is 17-65% looser than the true minimum. The design doc (R2) claims the test `test_dp_sgd_alpha_range_does_not_saturate_for_typical_workloads` will catch boundary saturation, but that test is a no-op: lines 98-103 assign `a2_rdp_per_step = eps_grid` then `(void)a2_rdp_per_step` and assert only `eps_grid > 0.0 && eps_grid < 1e6` — it never checks that the argmin alpha is strictly interior. A user calibrating sigma for small q and large steps (exactly `tight_budget` and `sanity_lower_bound`) will receive a sigma that is larger than necessary (over-noising — not a safety violation), but the privacy accounting will report an epsilon that is looser than what the math actually provides. Fix: extend the alpha grid to 256, or add a real argmin check to the saturation test.
+
+## MED (2)
+
+- `tests/test_dp_sgd.c:74-107` — `test_dp_sgd_alpha_range_does_not_saturate_for_typical_workloads` claims by name to verify the alpha grid is non-saturating but the body contains only `HU_ASSERT(eps_grid > 0.0)` and `HU_ASSERT(eps_grid < 1e6)`. Per `.claude/rules/tests-that-pin-bugs.md`, a test whose name says "does not saturate" must assert the dangerous case (argmin at boundary) is blocked. The test currently accepts saturation silently. Fix: compute the per-alpha epsilon values inside the test and assert `best_alpha != HU_DP_RDP_ALPHA_MIN && best_alpha != HU_DP_RDP_ALPHA_MAX` for each case.
+
+- `tests/fixtures/dp_accountant_oracle.json` vs `sprints/sprint-8/designs/US-8.1.md` — The design doc (section 4) specifies `expected_epsilon` values of 2.95 / 0.45 / 1.85 / 0.06 with tolerances of 0.05 / 0.02 / 0.05 / 0.01. The committed fixture contains 1.73 / 0.12 / 7.97 / 0.10 with tolerances of 0.3 / 0.1 / 0.5 / 0.05. Independent numerical verification confirms the fixture values match the formula (within tolerance). The design doc values are wrong and were never corrected. This is not a code bug, but any future audit comparing the design doc to the oracle will raise a false alarm. Fix: update the design doc oracle section to match the committed fixture, or add a note explaining the discrepancy (CKS-2020 vs naive Mironov conversion accounts for the `abadi` case difference; the `high_q_short_run` difference of 1.85→7.97 is a large discrepancy that warrants a comment).
+
+## LOW (1)
+
+- `include/human/ml/dp_sgd.h:136` — Header doc says `hu_dp_accountant_rdp_epsilon` uses "Mironov 2017 Proposition 3" but the implementation uses Canonne-Kamath-Steinke 2020 Proposition 12 (the tighter conversion). This is documented correctly in the `.c` file comment (line 104) but inconsistently in the header. Fix: update the header to cite "Canonne-Kamath-Steinke 2020 Proposition 12 (tighter than Mironov 2017 Proposition 3)".
+
+## Cross-agent regression risk
+
+- `include/human/ml/learner.h` (not in diff) defines `hu_dp_accountant_t` and `hu_dp_accountant_*` symbols; `src/ml/dp_sgd.h` introduces `hu_dp_rdp_accountant_t` and `hu_dp_accountant_rdp_*`. Sprint-9 is documented to delete the additive accountant. Any sprint-9 agent that deletes `hu_dp_accountant_t` without first auditing all callers of `hu_dp_accountant_init` / `hu_dp_accountant_record_query` in `src/ml/learner.c` (lines 56, 64, 71, 145-147) will break the build. The naming is close enough (`hu_dp_accountant_*` vs `hu_dp_accountant_rdp_*`) that a text-replace migration can silently miss call sites.
+
+RESULT_critic=HAS_FINDINGS story=US-8.1 severity=HIGH
