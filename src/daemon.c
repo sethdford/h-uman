@@ -4695,11 +4695,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             action != HU_RESPONSE_SKIP && !tapback_skip;
                     if (eligible_to_roll) {
                         uint8_t lor_pct = 0;
-                        if (agent->persona && agent->active_channel) {
-                            const hu_persona_overlay_t *lor_ov = hu_persona_find_overlay(
-                                agent->persona, agent->active_channel, agent->active_channel_len);
-                            if (lor_ov)
-                                lor_pct = lor_ov->leave_on_read_pct;
+                        if (agent->persona) {
+                            const hu_persona_overlay_t *lor_ov = NULL;
+                            if (agent->active_channel)
+                                lor_ov =
+                                    hu_persona_find_overlay(agent->persona, agent->active_channel,
+                                                            agent->active_channel_len);
+                            const hu_contact_profile_t *lor_cp =
+                                hu_persona_find_contact(agent->persona, batch_key, key_len);
+                            lor_pct = hu_leave_on_read_pct_effective(lor_cp, lor_ov);
                         }
                         helper_says = hu_conversation_should_leave_on_read(
                             combined, combined_len, early_history, early_history_count, lor_seed,

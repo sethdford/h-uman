@@ -3902,6 +3902,115 @@ static void test_contact_json_parses_affect_mirror_ceiling(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+static void test_leave_on_read_pct_effective_contact_override_wins(void) {
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    cp.leave_on_read_pct = 25;
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.leave_on_read_pct = 10;
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(&cp, &ov), 25);
+}
+
+static void test_leave_on_read_pct_effective_falls_back_to_overlay(void) {
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    /* contact has 0 sentinel — should fall through to overlay */
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.leave_on_read_pct = 30;
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(&cp, &ov), 30);
+}
+
+static void test_leave_on_read_pct_effective_zero_when_neither_set(void) {
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    /* Both 0 → 0 (caller hands this to hu_conversation_should_leave_on_read
+     * which interprets 0 as "use classifier default 10%"). */
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(&cp, &ov), 0);
+}
+
+static void test_leave_on_read_pct_effective_null_contact_uses_overlay(void) {
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.leave_on_read_pct = 15;
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(NULL, &ov), 15);
+}
+
+static void test_leave_on_read_pct_effective_null_overlay_uses_contact(void) {
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    cp.leave_on_read_pct = 42;
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(&cp, NULL), 42);
+}
+
+static void test_leave_on_read_pct_effective_both_null_returns_zero(void) {
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(NULL, NULL), 0);
+}
+
+static void test_contact_json_parses_leave_on_read_pct_nested(void) {
+    /* Canonical shape: nested under communication_patterns. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{"
+                       "  \"version\": 1,"
+                       "  \"name\": \"jordan\","
+                       "  \"core\": {\"identity\":\"x\",\"traits\":[\"warm\"]},"
+                       "  \"contacts\": {"
+                       "    \"+15555550100\": {"
+                       "      \"communication_patterns\": {"
+                       "        \"prefers_short_texts\": true,"
+                       "        \"leave_on_read_pct\": 35"
+                       "      }"
+                       "    }"
+                       "  }"
+                       "}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    const hu_contact_profile_t *cp =
+        hu_persona_find_contact(&p, "+15555550100", strlen("+15555550100"));
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_EQ((int)cp->leave_on_read_pct, 35);
+    HU_ASSERT_TRUE(cp->prefers_short_texts);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_contact_json_parses_leave_on_read_pct_top_level_fallback(void) {
+    /* Forgiving shape: top-level when no communication_patterns object exists. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{"
+                       "  \"version\": 1,"
+                       "  \"name\": \"jordan\","
+                       "  \"core\": {\"identity\":\"x\",\"traits\":[\"warm\"]},"
+                       "  \"contacts\": {"
+                       "    \"+15555550100\": {"
+                       "      \"leave_on_read_pct\": 50"
+                       "    }"
+                       "  }"
+                       "}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    const hu_contact_profile_t *cp =
+        hu_persona_find_contact(&p, "+15555550100", strlen("+15555550100"));
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_EQ((int)cp->leave_on_read_pct, 50);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_contact_json_clamps_leave_on_read_pct_out_of_range(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json_high =
+        "{\"version\":1,\"name\":\"a\",\"core\":{\"identity\":\"x\",\"traits\":[\"t\"]},"
+        "\"contacts\":{\"u\":{\"leave_on_read_pct\":250}}}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json_high, strlen(json_high), &p), HU_OK);
+    const hu_contact_profile_t *cp = hu_persona_find_contact(&p, "u", 1);
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_EQ((int)cp->leave_on_read_pct, 100);
+    hu_persona_deinit(&alloc, &p);
+}
+
 static void test_contact_json_clamps_affect_mirror_ceiling_out_of_range(void) {
     /* Sanity: values outside [0,1] are clamped so a typo in JSON cannot disable the
      * affect-apply cap (>1.0) or invert the sentinel semantics (<0). */
@@ -5153,6 +5262,15 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_affect_ceiling_stranger);
     HU_RUN_TEST(test_contact_json_parses_affect_mirror_ceiling);
     HU_RUN_TEST(test_contact_json_clamps_affect_mirror_ceiling_out_of_range);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_contact_override_wins);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_falls_back_to_overlay);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_zero_when_neither_set);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_null_contact_uses_overlay);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_null_overlay_uses_contact);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_both_null_returns_zero);
+    HU_RUN_TEST(test_contact_json_parses_leave_on_read_pct_nested);
+    HU_RUN_TEST(test_contact_json_parses_leave_on_read_pct_top_level_fallback);
+    HU_RUN_TEST(test_contact_json_clamps_leave_on_read_pct_out_of_range);
 
     HU_RUN_TEST(test_proactive_master_disabled_by_default_on_minimal_persona);
     HU_RUN_TEST(test_proactive_master_disabled_when_object_missing);
