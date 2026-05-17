@@ -89,9 +89,17 @@ uint64_t hu_followup_compute_send_time(const hu_followup_input_t *in) {
 
 /* ── Warmth-string → tier enum ──────────────────────────────────────────── */
 
-/* Case-insensitive substring search. Returns true if `needle` is found in
- * `haystack` ignoring case. Empty needle returns false (defensive). */
-static bool ci_contains(const char *haystack, const char *needle) {
+/* Word-boundary-aware case-insensitive contains. Matches `needle` in
+ * `haystack` only when bounded by start-of-string OR end-of-string OR a
+ * non-alphanumeric character. See render.c's str_contains_word_ci for the
+ * full rationale; this is the same shape because the warmth classifier
+ * has the same hazard:
+ *   "lukewarm"      contains "warm"   — but means cool, not close
+ *   "unfriendly"    contains "friend" — but means distant, not friendly
+ *   "highly distant" contains "high"  — explicit disclaimer of closeness
+ * Pinned by tests/test_follow_up.c (warmth-string ⊃ keyword cases).
+ * See ~/.claude/rules/substring-classifier-pitfalls.md for the pattern. */
+static bool ci_contains_word(const char *haystack, const char *needle) {
     if (!haystack || !needle || !needle[0])
         return false;
     size_t nlen = strlen(needle);
@@ -106,8 +114,12 @@ static bool ci_contains(const char *haystack, const char *needle) {
             if (a != b)
                 break;
         }
-        if (j == nlen)
-            return true;
+        if (j == nlen) {
+            bool left_ok = (i == 0) || !isalnum((unsigned char)haystack[i - 1]);
+            bool right_ok = (i + nlen == hlen) || !isalnum((unsigned char)haystack[i + nlen]);
+            if (left_ok && right_ok)
+                return true;
+        }
     }
     return false;
 }
@@ -119,12 +131,13 @@ hu_followup_warmth_t hu_followup_warmth_from_string(const char *warmth_level) {
     /* CLOSE keywords first — "close friend" must map to CLOSE, not FRIEND.
      * The persona conventions in src/context/conversation.c already use
      * "high" / "warm" for close relationships; we accept both that and
-     * the more explicit "close". */
-    if (ci_contains(warmth_level, "close") || ci_contains(warmth_level, "high") ||
-        ci_contains(warmth_level, "warm"))
+     * the more explicit "close". Word-boundary matching avoids the
+     * "lukewarm" / "highly distant" / "unfriendly" mis-classifications. */
+    if (ci_contains_word(warmth_level, "close") || ci_contains_word(warmth_level, "high") ||
+        ci_contains_word(warmth_level, "warm"))
         return HU_FOLLOWUP_WARMTH_CLOSE;
 
-    if (ci_contains(warmth_level, "friend"))
+    if (ci_contains_word(warmth_level, "friend"))
         return HU_FOLLOWUP_WARMTH_FRIEND;
 
     /* Acquaintance / unknown / anything else: no follow-up. */
