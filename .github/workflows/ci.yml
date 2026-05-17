@@ -112,11 +112,35 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install ARM64 cross-compiler
-        # libsodium-dev:arm64 needed because src/persona/persona_crypt.c
-        # hard-#errors at compile time when libsodium isn't found, and
-        # cross-arm64 builds human_core just like the host targets.
-        # dpkg multi-arch must be enabled before :arm64 packages resolve.
+        # GitHub Actions ubuntu-latest runners use Azure-hosted apt
+        # mirrors that DON'T serve arm64 packages — `apt-get update`
+        # after `dpkg --add-architecture arm64` 404s on the arm64
+        # indices (Bugbot 672e8d04). Workaround:
+        #   1. Restrict the default Azure sources to amd64 only.
+        #   2. Add a separate sources list pointing arm64 to
+        #      ports.ubuntu.com (the canonical home for non-x86
+        #      Ubuntu packages).
+        # After this, both `libsqlite3-dev` (amd64) and
+        # `libsodium-dev:arm64` resolve cleanly.
+        #
+        # Note: round-24 made persona_crypt.c gated on HU_LIBSODIUM_FOUND,
+        # so the cross-arm64 build no longer strictly needs libsodium
+        # (it can fall back to PBKDF2). But installing :arm64 here lets
+        # the cross build exercise the real crypto path if a future
+        # contributor turns HU_ENABLE_LIBSODIUM=ON for arm64.
         run: |
+          set -euo pipefail
+          # Restrict default Azure sources (only carries amd64) so apt
+          # doesn't try to fetch arm64 indices from them.
+          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list \
+            /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          # Add ports.ubuntu.com for arm64 — Ubuntu codename varies by
+          # runner image, so source it from /etc/os-release.
+          . /etc/os-release
+          sudo tee /etc/apt/sources.list.d/arm64-ports.list > /dev/null <<EOF
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${VERSION_CODENAME} main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${VERSION_CODENAME}-updates main universe
+          EOF
           sudo dpkg --add-architecture arm64
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libsodium-dev:arm64
