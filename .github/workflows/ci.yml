@@ -750,3 +750,34 @@ jobs:
             echo "::error::One or more fuzz harnesses found crashes"
             exit 1
           fi
+
+  # US-8.3: Reproducible Binary Builds.
+  # Verifies that two independent builds from the same source with the
+  # same SOURCE_DATE_EPOCH produce bytewise-identical `human` binaries
+  # (modulo documented carve-outs: ELF build-id, Mach-O LC_UUID,
+  # ad-hoc code signature on Darwin).
+  # Required check; NO continue-on-error (rules/quality-gates.md AP-1).
+  # No untrusted input is interpolated in any run: step.
+  reproducible-build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Linux build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsqlite3-dev libcurl4-openssl-dev libssl-dev binutils
+      - name: Install macOS build deps
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install cmake ninja || true
+      - name: Lint gate — no __DATE__/__TIME__ in src or include
+        run: scripts/check-no-date-time-macros.sh
+      - name: Build gate — two-shot build + bytewise diff
+        env:
+          SOURCE_DATE_EPOCH: "1700000000"
+        run: scripts/check-reproducible-build.sh

@@ -124,6 +124,15 @@
         "HU_ENABLE_LLAMACPP": "ON",
         "HU_ENABLE_RL_FULL": "ON"
       }
+    },
+    {
+      "name": "release-reproducible",
+      "displayName": "Reproducible release (release + pinned SOURCE_DATE_EPOCH)",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build-release-reproducible",
+      "environment": {
+        "SOURCE_DATE_EPOCH": "1700000000"
+      }
     }
   ],
   "buildPresets": [
@@ -165,6 +174,11 @@
     {
       "name": "rl_sota",
       "configurePreset": "rl_sota",
+      "jobs": 0
+    },
+    {
+      "name": "release-reproducible",
+      "configurePreset": "release-reproducible",
       "jobs": 0
     }
   ],
