@@ -32,6 +32,7 @@ DPO note:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -40,6 +41,26 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+
+# ── Sprint 11 / US-11.3 — chosen_r early-stopping ────────────────────
+def _load_early_stop_module():
+    """Lazy-load `scripts/dpo_early_stop.py` (sibling file).
+
+    Same-directory import. Lazy so this script can still parse in
+    environments where the early-stopping module is absent (pure stdlib
+    today; the seam is here for forward-compat with Sprint 12 persona-
+    vector hooks).
+    """
+    here = Path(__file__).resolve().parent
+    es_path = here / "dpo_early_stop.py"
+    spec = importlib.util.spec_from_file_location("dpo_early_stop", es_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("dpo_early_stop", mod)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 # ── Model Target Registry ─────────────────────────────────────────
 MODEL_TARGETS = {
@@ -548,14 +569,51 @@ def run_dpo(args, adapter_dir: Path) -> int:
     print(f"\n  Running DPO: {dpo_iters} iters, LR={dpo_lr}, beta=0.1 (sigmoid)")
     print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)\n")
 
+    # Sprint 11 / US-11.3 — chosen_r plateau-break early stopping.
+    # Default 'none' (NOT 'chosen_r') when args has no `early_stopping_signal`
+    # attribute. This preserves backward-compat with Sprint 7/8 tests and
+    # internal Namespaces (run_train_all, run_speculative_draft_training)
+    # that predate this flag. main() sets it explicitly to the CLI value
+    # (default 'chosen_r' for new operator-driven runs).
+    es_signal = getattr(args, "early_stopping_signal", "none")
     t0 = time.time()
-    result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent))
+    if es_signal == "chosen_r":
+        es_mod = _load_early_stop_module()
+        detector = es_mod.ChosenRPlateauDetector(
+            window=5,
+            drop_ratio=0.5,
+            confirm_consecutive=2,
+            save_every=int(getattr(args, "save_every", 20)),
+            signal_mode="chosen_r",
+        )
+        sentinel = adapter_dir / ".early_stop"
+        event_log = adapter_dir / "early_stop_events.jsonl"
+        print(f"  Early stopping: chosen_r plateau-break "
+              f"(window=5, drop_ratio=0.5, confirm=2, save_every={detector.save_every})")
+        rc, decision = es_mod.run_with_early_stop(
+            cmd=cmd,
+            detector=detector,
+            cwd=str(Path(__file__).parent.parent),
+            sentinel_path=sentinel,
+            event_log_path=event_log,
+        )
+        if decision is not None:
+            print(
+                f"  Early stop FIRED: first_breach_iter={decision.first_breach_iter}, "
+                f"stopped_iter={decision.stopped_iter}, "
+                f"promoted_iter={decision.promoted_iter}"
+            )
+            print(f"  Promoted adapter: iter {decision.promoted_iter} (last save_every boundary)")
+        returncode = rc
+    else:
+        result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent))
+        returncode = result.returncode
     elapsed = time.time() - t0
 
-    if result.returncode == 0:
+    if returncode == 0:
         print(f"  DPO complete! ({elapsed/60:.1f} minutes)")
     else:
-        print(f"  DPO failed (exit code {result.returncode}, {elapsed:.0f}s)")
+        print(f"  DPO failed (exit code {returncode}, {elapsed:.0f}s)")
         print(f"  Primary SFT adapter is still valid — non-fatal.")
 
     return 0
@@ -611,6 +669,9 @@ def run_speculative_draft_training(args):
         # the target trains DoRA but the draft trains LoRA, speculative
         # decode acceptance drops and downstream merge-back diverges.
         train_type=getattr(args, "train_type", "dora"),
+        # Sprint 11 / US-11.3: forward early-stopping signal so the draft
+        # model uses the same plateau-break detection as the target.
+        early_stopping_signal=getattr(args, "early_stopping_signal", "none"),
         steps_per_report=args.steps_per_report,
         steps_per_eval=args.steps_per_eval,
         save_every=args.save_every,
@@ -930,6 +991,9 @@ def run_train_all(args):
             # targets train with the same adapter type. Mixing DoRA and
             # LoRA across the real-time stack would diverge magnitudes.
             train_type=getattr(args, "train_type", "dora"),
+            # Sprint 11 / US-11.3: forward early-stopping signal so each
+            # per-target run honors the same plateau-break policy.
+            early_stopping_signal=getattr(args, "early_stopping_signal", "none"),
             steps_per_report=args.steps_per_report,
             steps_per_eval=args.steps_per_eval,
             save_every=args.save_every,
@@ -1050,6 +1114,16 @@ Examples:
                         help="Train all three targets (31B + E4B + E2B) on the same data")
     parser.add_argument("--realtime-first", action="store_true",
                         help="With --train-all, train E4B and E2B before 31B (get real-time running fast)")
+    # Sprint 11 / US-11.3 — chosen_r plateau-break early stopping.
+    # Default 'chosen_r' for new operator-driven runs (Sprint 11 baseline).
+    # Pass 'none' to disable (AC-11.3.5 back-compat for Sprint 7/8 CI scripts
+    # and any pipeline that wants to run to the full --iters horizon).
+    parser.add_argument("--early-stopping-signal", choices=["chosen_r", "none"],
+                        default="chosen_r",
+                        help="DPO early-stopping signal: chosen_r (default, "
+                             "US-11.3; halts when train_chosen_r plateau breaks "
+                             "by >50%% drop for 2 consecutive eval steps) or "
+                             "none (run to --iters, Sprint 7/8 behavior).")
     args = parser.parse_args()
 
     target_cfg = get_target_config(args.target)
