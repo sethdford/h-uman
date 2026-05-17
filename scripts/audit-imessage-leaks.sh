@@ -15,9 +15,13 @@
 #                                   [--contacts "+1...,+1..."]
 #                                   [--out-dir DIR]
 #                                   [--self-test]
+#                                   [--fixtures DIR]
 #
 #   --self-test  Run signature checks on a synthetic leak blob (no chat.db).
 #                Used by CI on macOS to verify the script without Messages data.
+#
+#   --fixtures DIR  Scan every *.txt in DIR; each file must match a leak
+#                   signature (pins historical chat.db rowids 56049–56355).
 #
 # Defaults:
 #   --since      2026-05-10  (covers all known incidents)
@@ -55,6 +59,36 @@ audit_scan_text() {
     return 1
 }
 
+if [[ "${1:-}" == "--fixtures" ]]; then
+    FIXTURE_DIR="${2:-}"
+    if [[ -z "$FIXTURE_DIR" || ! -d "$FIXTURE_DIR" ]]; then
+        echo "audit-imessage-leaks.sh: --fixtures requires a directory argument" >&2
+        exit 2
+    fi
+    shopt -s nullglob
+    files=("$FIXTURE_DIR"/*.txt)
+    shopt -u nullglob
+    if [[ ${#files[@]} -eq 0 ]]; then
+        echo "audit-imessage-leaks.sh: no *.txt fixtures in $FIXTURE_DIR" >&2
+        exit 2
+    fi
+    failed=0
+    for f in "${files[@]}"; do
+        if audit_scan_text "$(cat "$f")"; then
+            echo "  OK  $(basename "$f")"
+        else
+            echo "  FAIL $(basename "$f") (no leak signature — guard regression?)" >&2
+            failed=$((failed + 1))
+        fi
+    done
+    if [[ "$failed" -gt 0 ]]; then
+        echo "audit-imessage-leaks.sh: --fixtures $failed/${#files[@]} FAILED" >&2
+        exit 2
+    fi
+    echo "audit-imessage-leaks.sh: --fixtures OK (${#files[@]} files)"
+    exit 0
+fi
+
 if [[ "${1:-}" == "--self-test" ]]; then
     synthetic=$'1. King Carpet and Flooring is a local business.\n'
     synthetic+=$'2. The prompt says Persona: test user.\n'
@@ -78,8 +112,8 @@ while [[ $# -gt 0 ]]; do
         --since)    SINCE="$2"; shift 2 ;;
         --contacts) CONTACTS="$2"; shift 2 ;;
         --out-dir)  OUT_DIR="$2"; shift 2 ;;
-        --self-test)
-            echo "audit-imessage-leaks.sh: --self-test must be the only argument" >&2
+        --self-test|--fixtures)
+            echo "audit-imessage-leaks.sh: $1 must be the first argument" >&2
             exit 2 ;;
         --help|-h)
             sed -n '2,30p' "$0"; exit 0 ;;

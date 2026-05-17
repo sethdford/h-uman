@@ -17,6 +17,7 @@ import "../components/hu-directive-telemetry-tile.js";
 import type { DirectiveTelemetry } from "../components/hu-directive-telemetry-tile.js";
 import "../components/hu-guard-rejects-tile.js";
 import type { GuardRejectStats } from "../components/hu-guard-rejects-tile.js";
+import { totalGuardRejects } from "../components/hu-guard-rejects-tile.js";
 import { icons } from "../icons.js";
 import { friendlyError } from "../utils/friendly-error.js";
 
@@ -257,6 +258,7 @@ export class ScMetricsView extends GatewayAwareLitElement {
   @state() private directiveTelemetryError = "";
   @state() private guardRejects: GuardRejectStats | null = null;
   @state() private guardRejectsError = "";
+  @state() private guardRejectsDelta = 0;
 
   protected override async load(): Promise<void> {
     const gw = this.gateway;
@@ -298,6 +300,11 @@ export class ScMetricsView extends GatewayAwareLitElement {
         (res && "result" in res && (res as { result?: GuardRejectStats }).result) ||
         (res && "semantic_leak" in res ? (res as GuardRejectStats) : null);
       if (data && typeof data.semantic_leak === "number") {
+        if (this.guardRejects) {
+          this.guardRejectsDelta = totalGuardRejects(data) - totalGuardRejects(this.guardRejects);
+        } else {
+          this.guardRejectsDelta = 0;
+        }
         this.guardRejects = data;
       } else {
         this.guardRejectsError = "no guard reject telemetry";
@@ -668,6 +675,7 @@ export class ScMetricsView extends GatewayAwareLitElement {
         ></hu-section-header>
         <hu-guard-rejects-tile
           .data=${this.guardRejects}
+          .deltaSinceRefresh=${this.guardRejectsDelta}
           .errorMessage=${this.guardRejectsError}
         ></hu-guard-rejects-tile>
       </div>

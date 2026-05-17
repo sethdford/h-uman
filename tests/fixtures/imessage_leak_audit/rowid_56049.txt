@@ -1,0 +1,3 @@
+Yeah User: "Very good AI!"
+Scene Direction: Laugh it off, slightly dry/sarcastic tone, brief.
+Constraints: All lowercase, no markdown, no AI-speak, short fragments, natural voice.

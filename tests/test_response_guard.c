@@ -436,7 +436,7 @@ static void guard_passes_normal_asterisk_text(void) {
 
 static void guard_rejects_2026_05_12_brea_leak_verbatim(void) {
     /* Reconstructed from the 979-byte payload that landed at a real
-     * human contact (+14848158444) on 2026-05-12 17:08 UTC-4. The
+     * human contact (+14848158444) on 2026-05-12 17:04:37 (chat.db rowid 56354).
      * leading `1.  ` was already stripped by an upstream pass, so the
      * wire content begins with ` A link...` — but every detector below
      * (G1, G2, G3) would still fire independently. */
@@ -475,6 +475,11 @@ static void guard_rejects_2026_05_12_brea_leak_verbatim(void) {
     HU_ASSERT(out == NULL);
     HU_ASSERT_EQ(out_len, 0u);
     HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* msg 56354 — alias regression pin (same payload as brea_leak above). */
+static void guard_rejects_msg_56354_brea_primary_recipient_leak_verbatim(void) {
+    guard_rejects_2026_05_12_brea_leak_verbatim();
 }
 
 /* G1 — numbered analytical-list dump.  3+ long items, no reply tail. */
@@ -1980,6 +1985,7 @@ void run_response_guard_tests(void) {
 
     /* Sprint 29 — CoT / prompt-context leak detectors. */
     HU_RUN_TEST(guard_rejects_2026_05_12_brea_leak_verbatim);
+    HU_RUN_TEST(guard_rejects_msg_56354_brea_primary_recipient_leak_verbatim);
     HU_RUN_TEST(guard_rejects_numbered_analysis_dump);
     HU_RUN_TEST(guard_rejects_numbered_analysis_paren_form);
     HU_RUN_TEST(guard_rejects_self_talk_substrings);

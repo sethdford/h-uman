@@ -83,6 +83,14 @@ describe("hu-guard-rejects-tile", () => {
     );
   });
 
+  it("shows delta since last refresh in the header", async () => {
+    const el = await mount((e) => {
+      e.data = populated;
+      e.deltaSinceRefresh = 4;
+    });
+    expect(el.shadowRoot!.textContent).toContain("+4 since last refresh");
+  });
+
   it("exports stable key order matching the C handler", () => {
     expect([...GUARD_REJECT_KEYS]).toEqual([
       "semantic_leak",

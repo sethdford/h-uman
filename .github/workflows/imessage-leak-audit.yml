@@ -16,6 +16,9 @@ jobs:
       - name: Self-test audit script signatures
         run: bash scripts/audit-imessage-leaks.sh --self-test
 
+      - name: Pin historical leak fixtures (rowids 56049–56355)
+        run: bash scripts/audit-imessage-leaks.sh --fixtures tests/fixtures/imessage_leak_audit
+
       - name: Audit outbound iMessages (if chat.db readable)
         run: |
           if [[ -r "$HOME/Library/Messages/chat.db" ]]; then

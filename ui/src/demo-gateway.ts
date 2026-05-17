@@ -20,6 +20,15 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
   }
 }
 
+/** Cumulative demo counters for metrics.guard_rejects (increments each poll). */
+const demoGuardRejectCounters = {
+  semantic_leak: 40,
+  length_anomaly: 16,
+  director_echo: 6,
+  persona_pii_echo: 2,
+  persona_identity_echo: 1,
+};
+
 const DEMO_CHANNELS = [
   { key: "telegram", label: "Telegram", configured: true, healthy: true, status: "Connected" },
   { key: "discord", label: "Discord", configured: true, healthy: true, status: "Connected" },
@@ -2333,13 +2342,9 @@ export class DemoGatewayClient extends EventTarget {
 
       // --- Response guard reject counters (`cp_admin_metrics_guard_rejects`) ---
       case "metrics.guard_rejects":
-        return {
-          semantic_leak: 42,
-          length_anomaly: 18,
-          director_echo: 7,
-          persona_pii_echo: 3,
-          persona_identity_echo: 2,
-        };
+        demoGuardRejectCounters.semantic_leak += 1;
+        demoGuardRejectCounters.length_anomaly += 1;
+        return { ...demoGuardRejectCounters };
 
       // --- Persona fidelity (mirrors `human ml fidelity-status`) ---
       // Mock shape MUST match the live C gateway exactly. The

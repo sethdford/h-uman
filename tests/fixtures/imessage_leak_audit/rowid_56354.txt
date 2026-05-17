@@ -1,0 +1,6 @@
+1. King Carpet and Flooring is a local business.
+2. The prompt says Persona: test user.
+3. Seth is a technical professional who lives alone with a cat.
+He's talking to Brea (romantic interest, casual, early stage).
+The user is bombarding him with logistics.
+Wait, the prompt says "Professional, slightly skeptical, ask for clarification on why they"

@@ -10,7 +10,7 @@
  * `semantic_leak` means template/CoT detectors are doing the work.
  */
 
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import "./hu-card.js";
 
@@ -55,7 +55,7 @@ const safeCount = (data: GuardRejectStats, key: GuardRejectKey): number => {
   return typeof v === "number" && v >= 0 ? v : 0;
 };
 
-const totalRejects = (data: GuardRejectStats): number =>
+export const totalGuardRejects = (data: GuardRejectStats): number =>
   GUARD_REJECT_KEYS.reduce((acc, key) => acc + safeCount(data, key), 0);
 
 const formatPercent = (count: number, total: number): string => {
@@ -66,6 +66,8 @@ const formatPercent = (count: number, total: number): string => {
 @customElement("hu-guard-rejects-tile")
 export class HuGuardRejectsTile extends LitElement {
   @property({ attribute: false }) data: GuardRejectStats | null = null;
+  /** Increment since the previous metrics poll (10s cadence on Observability). */
+  @property({ type: Number }) deltaSinceRefresh = 0;
   @property({ type: String }) errorMessage = "";
 
   static override styles = css`
@@ -109,6 +111,12 @@ export class HuGuardRejectsTile extends LitElement {
 
     .total-value {
       color: var(--hu-text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .delta-readout {
+      font-size: var(--hu-text-2xs);
+      color: var(--hu-accent);
       font-variant-numeric: tabular-nums;
     }
 
@@ -228,11 +236,17 @@ export class HuGuardRejectsTile extends LitElement {
   }
 
   private renderHeader() {
-    const total = this.data ? totalRejects(this.data) : 0;
+    const total = this.data ? totalGuardRejects(this.data) : 0;
+    const delta =
+      this.deltaSinceRefresh > 0
+        ? html`<span class="delta-readout"> +${this.deltaSinceRefresh} since last refresh</span>`
+        : nothing;
     return html`
       <div class="header">
         <div class="title">Response guard rejects</div>
-        <div class="total-readout"><span class="total-value">${total}</span> total rejects</div>
+        <div class="total-readout">
+          <span class="total-value">${total}</span> total rejects${delta}
+        </div>
       </div>
     `;
   }
@@ -248,7 +262,7 @@ export class HuGuardRejectsTile extends LitElement {
   }
 
   private renderBar(data: GuardRejectStats) {
-    const total = totalRejects(data);
+    const total = totalGuardRejects(data);
     if (total === 0) {
       return html`<div class="bar-empty" role="status" aria-label="No guard rejects yet">
         no rejects recorded yet
@@ -277,7 +291,7 @@ export class HuGuardRejectsTile extends LitElement {
   }
 
   private renderLegend(data: GuardRejectStats) {
-    const total = totalRejects(data);
+    const total = totalGuardRejects(data);
     return html`
       <div class="legend" aria-hidden="true">
         ${GUARD_REJECT_KEYS.map((key) => {
