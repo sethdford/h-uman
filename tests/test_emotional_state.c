@@ -100,10 +100,31 @@ static void emotional_state_record_confession_falls_back_to_emotion_keyword(void
     mem.vtable->deinit(mem.ctx);
 }
 
+/* P2-10 regression (2026-05-16 incident): src/context/emotional_state.c
+ * and src/memory/engines/sqlite.c BOTH had `CREATE TABLE IF NOT EXISTS
+ * mood_log` with different column schemas. The second CREATE silently
+ * no-ops; one writer's INSERTs silently fail. This test pins that the
+ * per-contact emotional-state writer succeeds end-to-end and is reachable
+ * via the public read API. */
+static void emotional_state_record_round_trip_succeeds(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    const char *user_text = "I am stressed about the deadline tomorrow";
+    hu_error_t err =
+        hu_emotional_state_record(&alloc, &mem, "contact_p10", 11, user_text, strlen(user_text));
+    /* After P2-10 fix, this MUST return HU_OK (no schema clash). */
+    HU_ASSERT_EQ(err, HU_OK);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_emotional_state_tests(void) {
     HU_TEST_SUITE("emotional_state");
     HU_RUN_TEST(emotional_state_record_lonely_does_not_store_raw_substring);
     HU_RUN_TEST(emotional_state_record_confession_falls_back_to_emotion_keyword);
+    HU_RUN_TEST(emotional_state_record_round_trip_succeeds);
 }
 
 #else

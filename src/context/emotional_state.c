@@ -100,10 +100,10 @@ static bool detect_emotion(const char *text, size_t text_len, const char **emoti
     return true;
 }
 
-/* ── mood_log table management ───────────────────────────────────── */
+/* ── contact_mood_log table management ───────────────────────────────────── */
 
-static hu_error_t ensure_mood_log_table(sqlite3 *db) {
-    static const char sql[] = "CREATE TABLE IF NOT EXISTS mood_log ("
+static hu_error_t ensure_contact_mood_log_table(sqlite3 *db) {
+    static const char sql[] = "CREATE TABLE IF NOT EXISTS contact_mood_log ("
                               "id INTEGER PRIMARY KEY AUTOINCREMENT,"
                               "contact_id TEXT NOT NULL,"
                               "mood TEXT NOT NULL,"
@@ -160,15 +160,15 @@ hu_error_t hu_emotional_state_record(hu_allocator_t *alloc, hu_memory_t *memory,
     hu_emotional_moment_record(alloc, memory, contact_id, contact_id_len, topic_buf, topic_len,
                                emotion, strlen(emotion), intensity);
 
-    /* Write to mood_log table */
-    hu_error_t err = ensure_mood_log_table(db);
+    /* Write to contact_mood_log table */
+    hu_error_t err = ensure_contact_mood_log_table(db);
     if (err != HU_OK)
         return err;
 
     sqlite3_stmt *stmt = NULL;
     int rc =
         sqlite3_prepare_v2(db,
-                           "INSERT INTO mood_log(contact_id,mood,intensity,context,created_at) "
+                           "INSERT INTO contact_mood_log(contact_id,mood,intensity,context,created_at) "
                            "VALUES(?,?,?,?,?)",
                            -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -221,12 +221,12 @@ hu_error_t hu_emotional_state_get_recent(hu_allocator_t *alloc, hu_memory_t *mem
     if (!db)
         return HU_OK;
 
-    if (ensure_mood_log_table(db) != HU_OK)
+    if (ensure_contact_mood_log_table(db) != HU_OK)
         return HU_OK;
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-                                "SELECT mood, intensity, context, created_at FROM mood_log "
+                                "SELECT mood, intensity, context, created_at FROM contact_mood_log "
                                 "WHERE contact_id=? ORDER BY created_at DESC LIMIT 5",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -334,7 +334,7 @@ hu_error_t hu_emotional_state_get_seth_mood(hu_allocator_t *alloc, hu_memory_t *
     if (!db)
         return HU_OK;
 
-    if (ensure_mood_log_table(db) != HU_OK)
+    if (ensure_contact_mood_log_table(db) != HU_OK)
         return HU_OK;
 
     int64_t now_ts = (int64_t)time(NULL);
@@ -345,7 +345,7 @@ hu_error_t hu_emotional_state_get_seth_mood(hu_allocator_t *alloc, hu_memory_t *
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-                                "SELECT mood, intensity FROM mood_log "
+                                "SELECT mood, intensity FROM contact_mood_log "
                                 "WHERE created_at>=? ORDER BY created_at DESC LIMIT 20",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
