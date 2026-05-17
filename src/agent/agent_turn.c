@@ -5332,6 +5332,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 ab_result.candidates[bi].response = NULL;
                                 ab_result.candidates[bi].response_len = 0;
                                 ab_owned = true;
+                                hu_guard_log_selection_audit(
+                                    agent->observer, agent->active_channel,
+                                    agent->active_channel_len, ab_result.candidate_count, bi,
+                                    ab_result.candidates[bi].quality_score, final_len,
+                                    final_content, final_len);
                             }
                         }
                         hu_ab_result_deinit(&ab_result, agent->alloc);

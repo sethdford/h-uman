@@ -64,6 +64,14 @@ typedef struct hu_lora_runner_ctx {
     struct hu_eval_gate *eval_gate;
     const char *rl_method_name; /* e.g. "dpo"; used for proof dir adapter id */
     size_t rl_step_index;
+
+    /* CF-4 — measured persona scores for the gate (after train).
+     * When non-NULL and gate_persona_n >= 10, passed to
+     * hu_eval_gate_decide_from_arrays_for_test. Otherwise scores are
+     * derived from hu_learner_report_t (signals_consumed, final_loss). */
+    const double *gate_persona_after_scores;
+    size_t gate_persona_after_n;
+    double gate_candidate_p95_ms; /* 0 → default 100 ms */
 } hu_lora_runner_ctx_t;
 
 hu_error_t hu_lora_training_runner(struct hu_memory_facade *m, const struct hu_job_spec *spec,

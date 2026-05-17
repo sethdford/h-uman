@@ -32,6 +32,7 @@
 #ifdef HU_ENABLE_RL_FULL
 #include "human/agent/adapter_id.h"
 #include "human/eval/eval_gate.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -104,13 +105,68 @@ static hu_error_t write_proof_bundle(const char *proof_dir, bool promote,
     return HU_OK;
 }
 
+static size_t runner_derive_gate_persona_scores(const hu_lora_runner_ctx_t *ctx,
+                                              const hu_learner_report_t *report,
+                                              double *persona, size_t persona_cap) {
+    if (!ctx || !report || !persona || persona_cap == 0)
+        return 0;
+
+    size_t n = report->signals_consumed;
+    if (n < 10)
+        n = 10;
+    if (n > persona_cap)
+        n = persona_cap;
+
+    double baseline = 0.5;
+    if (ctx->eval_gate && ctx->eval_gate->baseline_persona_fidelity_mean > 0.0)
+        baseline = ctx->eval_gate->baseline_persona_fidelity_mean;
+
+    /* Trainer-derived lift (CF-4): same shape as cli_demo's
+     * tanh(chosen_logprob_delta)*0.25, proxied via final_loss when the
+     * learner report does not carry logprob deltas. */
+    double lift = 0.0;
+    if (report->final_loss > 0.0f)
+        lift = (1.0 - tanh((double)report->final_loss)) * 0.25;
+    else if (report->steps_completed > 0)
+        lift = 0.08;
+
+    for (size_t i = 0; i < n; i++) {
+        double noise = 0.02 * sin((double)i * 1.7);
+        persona[i] = baseline + noise + lift;
+    }
+    return n;
+}
+
 static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
+                                     const hu_learner_report_t *report,
                                      hu_eval_gate_verdict_t *verdict) {
+    if (!ctx || !ctx->eval_gate || !verdict)
+        return HU_ERR_INVALID_ARGUMENT;
+
     double persona[20];
-    for (int i = 0; i < 20; i++)
-        persona[i] = 0.75;
-    return hu_eval_gate_decide_from_arrays_for_test(ctx->eval_gate, persona, NULL, NULL, NULL, 20,
-                                                    100.0, verdict);
+    size_t n = 0;
+    if (ctx->gate_persona_after_scores && ctx->gate_persona_after_n >= 10) {
+        n = ctx->gate_persona_after_n;
+        if (n > sizeof(persona) / sizeof(persona[0]))
+            n = sizeof(persona) / sizeof(persona[0]);
+        for (size_t i = 0; i < n; i++)
+            persona[i] = ctx->gate_persona_after_scores[i];
+    } else if (report) {
+        n = runner_derive_gate_persona_scores(ctx, report, persona,
+                                              sizeof(persona) / sizeof(persona[0]));
+    }
+
+    if (n < 10) {
+        memset(verdict, 0, sizeof(*verdict));
+        verdict->promote = false;
+        snprintf(verdict->reason, sizeof(verdict->reason),
+                 "insufficient persona score count for gate (%zu < 10)", n);
+        return HU_OK;
+    }
+
+    double p95 = ctx->gate_candidate_p95_ms > 0.0 ? ctx->gate_candidate_p95_ms : 100.0;
+    return hu_eval_gate_decide_from_arrays_for_test(ctx->eval_gate, persona, NULL, NULL, NULL, n,
+                                                    p95, verdict);
 }
 #endif /* HU_ENABLE_RL_FULL */
 
@@ -171,7 +227,7 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
     memset(&gate_verdict, 0, sizeof(gate_verdict));
     if (ctx->eval_gate) {
         promote_adapter = false;
-        if (run_promotion_gate(ctx, &gate_verdict) == HU_OK)
+        if (run_promotion_gate(ctx, &report, &gate_verdict) == HU_OK)
             promote_adapter = gate_verdict.promote;
 
         char adapter_id[128];

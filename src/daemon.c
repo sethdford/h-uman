@@ -105,6 +105,33 @@ hu_error_t hu_style_clone_from_history(hu_allocator_t *alloc, const char **own_m
 
 #define HU_DAEMON_PID_DIR  ".human"
 #define HU_DAEMON_PID_FILE "human.pid"
+
+/* Sprint 40 — last served contact/session key for cross-recipient hygiene. */
+static char g_daemon_last_batch_key[256];
+static size_t g_daemon_last_batch_key_len;
+
+static void daemon_contact_boundary_begin(hu_agent_t *agent, const char *batch_key,
+                                          size_t key_len) {
+    if (!agent || !batch_key || key_len == 0)
+        return;
+    if (key_len >= sizeof(g_daemon_last_batch_key))
+        key_len = sizeof(g_daemon_last_batch_key) - 1;
+
+    if (g_daemon_last_batch_key_len != key_len ||
+        memcmp(g_daemon_last_batch_key, batch_key, key_len) != 0) {
+        if (g_daemon_last_batch_key_len > 0) {
+            hu_log_info("daemon", agent->observer,
+                        "contact boundary: cleared cross-turn state (prev=%.*s new=%.*s)",
+                        (int)(g_daemon_last_batch_key_len < 24 ? g_daemon_last_batch_key_len : 24),
+                        g_daemon_last_batch_key,
+                        (int)(key_len < 24 ? key_len : 24), batch_key);
+            hu_agent_internal_reset_contact_boundary_state(agent);
+        }
+        memcpy(g_daemon_last_batch_key, batch_key, key_len);
+        g_daemon_last_batch_key[key_len] = '\0';
+        g_daemon_last_batch_key_len = key_len;
+    }
+}
 #define HU_MAX_PATH        1024
 
 /* Lightweight classification provider (e.g. Gemini Flash Lite) for hybrid routing.
@@ -3971,6 +3998,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 const char *batch_key = msgs[m].session_key;
                 size_t key_len = strlen(batch_key);
+                daemon_contact_boundary_begin(agent, batch_key, key_len);
 
                 /* For group chats, route sends to the chat_id (thread)
                  * rather than the sender's handle to avoid accidental DMs. */

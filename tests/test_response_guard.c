@@ -29,6 +29,7 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
 void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
                                               size_t text_len);
 void hu_agent_internal_free_director_history(hu_agent_t *agent);
+void hu_agent_internal_reset_contact_boundary_state(hu_agent_t *agent);
 
 /* ── Production regression — Harmony channel marker ────────────────────── */
 
@@ -1457,6 +1458,27 @@ static void agent_director_history_free_zeroes_count(void) {
     hu_agent_internal_free_director_history(&a);
 }
 
+/* ── Sprint 40 — contact boundary + selection audit ───────────────────── */
+
+static void agent_contact_boundary_clears_director_history(void) {
+    hu_allocator_t alloc = A();
+    hu_agent_t a = g37_make_test_agent(&alloc);
+    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST, sizeof(G37_DIRECTOR_PAST) - 1);
+    HU_ASSERT_EQ(a.director_history_count, (size_t)1);
+    hu_agent_internal_reset_contact_boundary_state(&a);
+    HU_ASSERT_EQ(a.director_history_count, (size_t)0);
+    HU_ASSERT(a.scene_direction_text == NULL);
+}
+
+static void guard_audit_detects_numbered_analysis_fixture(void) {
+    const char *raw =
+        "1. First long numbered analysis item that exceeds thirty chars.\n"
+        "2. Second long numbered analysis item that exceeds thirty chars.\n"
+        "3. Third long numbered analysis item that exceeds thirty chars.\n";
+    HU_ASSERT(hu_guard_audit_numbered_analysis_dump(raw, strlen(raw)));
+    HU_ASSERT(!hu_guard_audit_self_talk_leak("hey what's up", 13));
+}
+
 /* ── Sprint 38 — G8 biography + reject telemetry ─────────────────────── */
 
 static void guard_g8_rejects_biography_only_echo(void) {
@@ -1949,6 +1971,10 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(agent_director_history_push_truncates_long);
     HU_RUN_TEST(agent_director_history_push_null_is_noop);
     HU_RUN_TEST(agent_director_history_free_zeroes_count);
+
+    /* Sprint 40 — cross-recipient hygiene + selection-step audit. */
+    HU_RUN_TEST(agent_contact_boundary_clears_director_history);
+    HU_RUN_TEST(guard_audit_detects_numbered_analysis_fixture);
 
     /* Sprint 38 — G8 biography source + reject telemetry counters. */
     HU_RUN_TEST(guard_g8_rejects_biography_only_echo);

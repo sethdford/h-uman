@@ -279,6 +279,13 @@ void hu_agent_internal_free_director_history(hu_agent_t *agent) {
     agent->director_history_count = 0;
 }
 
+void hu_agent_internal_reset_contact_boundary_state(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    hu_agent_internal_clear_scene_direction(agent);
+    hu_agent_internal_free_director_history(agent);
+}
+
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n) {
     if (!agent || !agent->history || agent->history_count == 0 || max_n == 0)
         return 0;

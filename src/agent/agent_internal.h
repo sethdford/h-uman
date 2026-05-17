@@ -72,6 +72,13 @@ void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text
  * `hu_agent_deinit`. Idempotent. */
 void hu_agent_internal_free_director_history(hu_agent_t *agent);
 
+/* Sprint 40 — Clear cross-turn state when the daemon switches to a
+ * different contact/session key. Prevents director-history and scene
+ * pointers from one recipient influencing G6 on another (post-mortem
+ * rowid 56355 cross-contact fanout). Same-contact multi-turn history
+ * is preserved until the key changes. */
+void hu_agent_internal_reset_contact_boundary_state(hu_agent_t *agent);
+
 hu_error_t hu_agent_internal_ensure_history_cap(hu_agent_t *agent, size_t need);
 hu_error_t hu_agent_internal_append_history(hu_agent_t *agent, hu_role_t role, const char *content,
                                             size_t content_len, const char *name, size_t name_len,

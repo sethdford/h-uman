@@ -184,6 +184,16 @@ void hu_guard_reject_stats_reset(void);
 /* Channel-aware G5 threshold. imessage / cli / sms → 6×; else 8×. */
 unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t channel_len);
 
+/* Sprint 40 — selection-step audit helpers (observability only).
+ * Log when A/B or multi-candidate paths ship a response that would trip
+ * G1/G2 so post-mortems can trace *why* a numbered candidate list leaked. */
+bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len);
+bool hu_guard_audit_self_talk_leak(const char *s, size_t len);
+void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
+                                  size_t contact_key_len, size_t candidate_count,
+                                  size_t best_idx, int best_quality, size_t response_len,
+                                  const char *response, size_t response_text_len);
+
 /* Run the guard over a response.
  *
  * Inputs:
