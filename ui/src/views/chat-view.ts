@@ -13,6 +13,12 @@ import { staggerMotion9Styles } from "../styles/scroll-entrance.js";
 import "../components/hu-button.js";
 import "../components/hu-chat-composer.js";
 import "../components/hu-message-thread.js";
+// hu-thinking listens for `hu-thinking-toggle` events dispatched by
+// hu-chat-composer (composer.ts:795). Without an eager import here,
+// the element is registered only by tests, leaving the production
+// "show thinking" toggle a dead event in cold-start. Also satisfies
+// the chat.spec.ts smoke check (`customElements.get("hu-thinking")`).
+import "../components/hu-thinking.js";
 import "../components/hu-tapback-menu.js";
 import "../components/hu-chat-search.js";
 import "../components/hu-chat-sessions-panel.js";

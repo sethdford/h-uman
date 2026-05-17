@@ -1062,7 +1062,10 @@ list(APPEND HU_CORE_SOURCES
     src/memory/tiers.c
     src/agent/process_reward.c
     src/ml/dpo.c
-    src/ml/dpo_miner.c
+    # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
+    # (training_data_quality.c) which is itself ML-gated. Keeping it in
+    # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
+    # static-analysis builds with an undefined-reference linker error.
     src/security/cot_audit.c
     src/security/escalate.c
     src/security/normalize.c
@@ -1332,6 +1335,10 @@ if(HU_ENABLE_ML)
         # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
+        # dpo_miner consumes hu_pii_redact (above) + hu_dpo_collector
+        # (ml/dpo.c is core, but the miner itself is ML-only — it's the
+        # SQLite-backed "extract from corrections" pipeline).
+        src/ml/dpo_miner.c
         src/providers/huml.c
         # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t vtable + factory.
         # Backends are stubbed at HU_ERR_NOT_SUPPORTED until Tasks 4
@@ -2962,16 +2969,15 @@ set(HU_TEST_SOURCES
     tests/test_w11_self_rag.c
     tests/test_w12_planner.c
     tests/test_w12_verifier_loop.c
-    tests/test_w13_learner.c
-    tests/test_w14_runners.c
-    tests/test_w14_lora_retrain.c
-    tests/test_w14_dual_lora.c
+    # W13/W14 learning-loop tests and W16 eval-CLI tests reference
+    # hu_learner_* APIs that only exist when HU_ENABLE_LEARNING is on
+    # (default OFF). Gated below in the if(HU_ENABLE_LEARNING) block.
+    # Listing them here would break minimal-build / no-sqlite /
+    # cross-arm64 with undefined-reference linker errors.
     tests/test_w15_backup_restore.c
     tests/test_w14_scheduler.c
     tests/test_w15_keystore.c
     tests/test_encrypted_store.c
-    tests/test_w16_evaluation.c
-    tests/test_w16_eval_cli.c
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_personal_model_contradicts.c
@@ -3049,15 +3055,13 @@ set(HU_TEST_SOURCES
     tests/test_reflection_advanced.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
-    tests/test_ml.c
-    tests/test_ml_cli_actually_trains.c
-    tests/test_ml_fidelity_judgment.c
-    tests/test_dpo_judge_naming.c
-    tests/test_lora.c
-    tests/test_training_data.c
-    tests/test_training_data_extractor.c
-    tests/test_training_data_quality.c
-    tests/test_agent_trainer.c
+    # ML-coupled tests (test_ml.c, test_ml_cli_actually_trains.c,
+    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c, test_lora.c,
+    # test_training_data*.c, test_agent_trainer.c) are added below in
+    # the if(HU_ENABLE_ML) gate (CMakeLists.txt:3265+). Keeping them
+    # here would break minimal-build / no-sqlite / cross-arm64 builds
+    # because the tests reference hu_agent_t fields like m3_adapter
+    # that only exist when HU_ENABLE_ML is on (agent.h:428-435).
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
@@ -3144,8 +3148,12 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
 # Phase 2 Task 13 (RL SOTA): hu_reaction_handler_handle_event — event ⇒
 # dpo_pairs row + per-turn signal flag (consumed by Task 14's agent_turn
-# substring-heuristic guard).
-list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
+# substring-heuristic guard). Test calls sqlite3_open/_prepare_v2/_step
+# directly to seed the dpo_pairs collector, so gate on HU_ENABLE_SQLITE
+# to keep minimal-build / no-sqlite / cross-arm64 builds linkable.
+if(HU_ENABLE_SQLITE)
+    list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
+endif()
 
 # SOTA capability tests
 list(APPEND HU_TEST_SOURCES
@@ -3195,7 +3203,10 @@ list(APPEND HU_TEST_SOURCES
     tests/test_memory_tiers.c
     tests/test_process_reward.c
     tests/test_dpo.c
-    tests/test_dpo_miner.c
+    # test_dpo_miner.c is added in the if(HU_ENABLE_ML) block — its
+    # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round
+    # 11). Listing the test here would break audit-integrity /
+    # static-analysis / no-ML builds.
     tests/test_molora_router.c
     tests/test_contact_send_recency.c
     # NOTE: 3 test files briefly registered during the PR #115 merge-
@@ -3265,6 +3276,8 @@ if(HU_ENABLE_ML)
     list(APPEND HU_TEST_SOURCES
         tests/test_ml.c
         tests/test_ml_cli_actually_trains.c
+        tests/test_ml_fidelity_judgment.c
+        tests/test_dpo_miner.c
         tests/test_dpo_judge_naming.c
         tests/test_rl_trainer.c
         tests/test_policy_logprobs.c
@@ -3299,6 +3312,10 @@ if(HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_SOURCES
         tests/test_w13_learner.c
         tests/test_w14_runners.c
+        tests/test_w14_lora_retrain.c
+        tests/test_w14_dual_lora.c
+        tests/test_w16_evaluation.c
+        tests/test_w16_eval_cli.c
         tests/test_learner_bridge.c
         tests/test_v2_e2e_adversarial.c
         tests/test_v2_wiring_e2e.c)
@@ -3668,6 +3685,16 @@ endif()
 target_compile_options(human_core PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror)
 target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror)
 target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
+
+# src/onboard.c embeds hu_starter_persona_json — a 5275-char JSON literal
+# (starter persona w/ Tier-1 channel overlays + example banks). GCC's
+# -Wpedantic enforces C99's 4095-char string limit by default, and
+# -Werror upgrades that warning to a hard error. Suppress only the
+# overlength-strings diagnostic for this TU — every other -Wpedantic
+# check still applies. The alternative (split into many concatenated
+# fragments) hurts readability and risks subtle string-adjacency bugs.
+set_source_files_properties(src/onboard.c PROPERTIES
+    COMPILE_FLAGS "-Wno-overlength-strings")
 
 # Synthetic pressure tests (requires libcurl for real HTTP)
 option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)

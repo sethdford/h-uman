@@ -309,6 +309,18 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
     }
 
     size_t take = limit < nmatches ? limit : nmatches;
+    /* Empty result: return NULL/0 instead of malloc(0). On glibc,
+     * malloc(0) returns a valid 1-byte pointer that callers using the
+     * `if (!entries || count == 0)` guard pattern (e.g.
+     * daemon_proactive.c:259) never free, leaking under ASan. Producer-
+     * side NULL matches the round-3 fix for hu_self_improve_get_*. */
+    if (take == 0) {
+        *out = NULL;
+        *out_count = 0;
+        if (matches)
+            alloc->free(alloc->ctx, matches, cap * sizeof(pair_t));
+        return HU_OK;
+    }
     hu_memory_entry_t *results =
         (hu_memory_entry_t *)alloc->alloc(alloc->ctx, take * sizeof(hu_memory_entry_t));
     if (!results)

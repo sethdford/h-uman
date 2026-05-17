@@ -1,3 +1,9 @@
+---
+title: Re Enable Runbook
+date: 2026-05-16
+status: audit
+---
+
 # Re-Enable Runbook — Post-2026-05-16 Proactive Messaging Incident
 
 **Current branch:** `claude/friendly-bassi-8b438e`

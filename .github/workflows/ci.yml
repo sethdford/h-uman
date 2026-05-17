@@ -64,6 +64,12 @@ jobs:
         run: python3 scripts/eval_synthetic_imessage_offline.py
       - name: Check for untested modules
         run: scripts/check-untested.sh
+      - name: Test/source gate-symmetry
+        # Detects the recurring PR #113 failure class — test sources
+        # that reference symbols only defined under if(HU_ENABLE_X)
+        # gates without being themselves gated. See
+        # .claude/rules/test-source-gate-symmetry.md.
+        run: bash scripts/check-test-source-gate-symmetry.sh
 
   integration-tests:
     runs-on: ubuntu-latest

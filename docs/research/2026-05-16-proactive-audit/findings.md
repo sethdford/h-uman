@@ -1,3 +1,9 @@
+---
+title: Findings
+date: 2026-05-16
+status: audit
+---
+
 # Proactive Messaging Incident — Unified Audit Findings
 **Date:** 2026-05-16
 **Severity:** P0 — confirmed family-recipient data leak; 21 broken outbound messages shipped
@@ -66,53 +72,53 @@ because it makes re-enabling safe even if subsequent fixes have bugs.
 | ID | Severity | File:Line | Fix |
 | --- | --- | --- | --- |
 | P1-1 | CRITICAL | persona schema | Add `proactive.master_enabled` global kill switch; default OFF; daemon refuses to send if false |
-| P1-2 | CRITICAL | [daemon.c:975-984](src/daemon.c:975) | Remove all 3 fallback contact-match branches; strict `contact_id == contact_id` only |
-| P1-3 | CRITICAL | [daemon.c:1008](src/daemon.c:1008) | Reject `m->topic` containing: first-person pronouns, emotion keywords, `(last:`, `\n`, format specifiers |
-| P1-4 | CRITICAL | [daemon.c:7917-7925](src/daemon.c:7917) | Key `replay:latest` per-contact (`replay:<contact_id>:latest`); remove process-global static fallback |
-| P1-5 | CRITICAL | [proactive.c:732,736](src/agent/proactive.c:732) | F30 templates must go through LLM rephrasing OR have an outbound sanity filter |
-| P1-6 | HIGH | [rate_limit.c:83-106](src/channels/rate_limit.c:83) | Wire channel rate limiter into proactive send path (currently only on inbound) |
-| P1-7 | HIGH | [daemon.c:1808](src/daemon.c:1808), [daemon.c:951](src/daemon.c:951) | Replace fixed `[8]` ring buffers with heap-backed per-contact-per-date dedup |
-| P1-8 | HIGH | [self_awareness.c:140-191](src/context/self_awareness.c:140) | Wire topic-repeat suppression directive into the proactive prompt (currently dead code) |
+| P1-2 | CRITICAL | [daemon.c:975-984](../../../src/daemon.c) | Remove all 3 fallback contact-match branches; strict `contact_id == contact_id` only |
+| P1-3 | CRITICAL | [daemon.c:1008](../../../src/daemon.c) | Reject `m->topic` containing: first-person pronouns, emotion keywords, `(last:`, `\n`, format specifiers |
+| P1-4 | CRITICAL | [daemon.c:7917-7925](../../../src/daemon.c) | Key `replay:latest` per-contact (`replay:<contact_id>:latest`); remove process-global static fallback |
+| P1-5 | CRITICAL | [proactive.c:732,736](../../../src/agent/proactive.c) | F30 templates must go through LLM rephrasing OR have an outbound sanity filter |
+| P1-6 | HIGH | [rate_limit.c:83-106](../../../src/channels/rate_limit.c) | Wire channel rate limiter into proactive send path (currently only on inbound) |
+| P1-7 | HIGH | [daemon.c:1808](../../../src/daemon.c), [daemon.c:951](../../../src/daemon.c) | Replace fixed `[8]` ring buffers with heap-backed per-contact-per-date dedup |
+| P1-8 | HIGH | [self_awareness.c:140-191](../../../src/context/self_awareness.c) | Wire topic-repeat suppression directive into the proactive prompt (currently dead code) |
 
 ### Phase 2 — Memory pipeline integrity
 
 | ID | Severity | File:Line | Fix |
 | --- | --- | --- | --- |
-| P2-1 | CRITICAL | [daemon.c:8178-8183](src/daemon.c:8178) | Remove `combined` raw-fallback for topic; if extraction fails, use emotion keyword or skip |
-| P2-2 | CRITICAL | [emotional_state.c:181-188](src/context/emotional_state.c:181) | Replace 60-char window with LLM-extracted noun phrase OR emotion keyword |
-| P2-3 | CRITICAL | [daemon.c:9976-9984](src/daemon.c:9976) | Inner-thought store must store extracted topic, not raw 127-byte memcpy; this is a prompt-injection vector |
-| P2-4 | HIGH | [proactive.c:552-574](src/agent/proactive.c:552) | `hu_proactive_build_starter` must LLM-rephrase memory content before prompt injection |
-| P2-5 | HIGH | [daemon_proactive.c:227-241](src/daemon_proactive.c:227) | `hu_daemon_build_callback_context` must not inject raw `content` bytes |
-| P2-6 | HIGH | [fact_extract.c:14-71](src/memory/fact_extract.c:14) | Heuristic fact patterns that capture first-person confessions ("i am a", "when i'm") must store paraphrased third-person facts, not raw substrings |
-| P2-7 | HIGH | [conversation.c:2420](src/context/conversation.c:2420) | Expand stopword list: add `hey, doing, you, me, my, feel, feeling, lost, lonely, sad, ok, omg`; reject single-word topics under 5 chars |
-| P2-8 | HIGH | [humanness.c:437-439](src/humanness.c:437) | Curiosity template ("How is the %s going?") must take a structured noun phrase, not raw substring |
-| P2-9 | MED | [superhuman.c:957 vs :1807](src/memory/superhuman.c:957), [emotional_moments.c:27 vs :209](src/memory/emotional_moments.c:27) | Remove duplicate function definitions; collapse to single impl |
-| P2-10 | MED | [sqlite.c:186](src/memory/engines/sqlite.c:186) vs [emotional_state.c:126](src/context/emotional_state.c:126) | Resolve `mood_log` schema conflict (silently broken right now) |
+| P2-1 | CRITICAL | [daemon.c:8178-8183](../../../src/daemon.c) | Remove `combined` raw-fallback for topic; if extraction fails, use emotion keyword or skip |
+| P2-2 | CRITICAL | [emotional_state.c:181-188](../../../src/context/emotional_state.c) | Replace 60-char window with LLM-extracted noun phrase OR emotion keyword |
+| P2-3 | CRITICAL | [daemon.c:9976-9984](../../../src/daemon.c) | Inner-thought store must store extracted topic, not raw 127-byte memcpy; this is a prompt-injection vector |
+| P2-4 | HIGH | [proactive.c:552-574](../../../src/agent/proactive.c) | `hu_proactive_build_starter` must LLM-rephrase memory content before prompt injection |
+| P2-5 | HIGH | [daemon_proactive.c:227-241](../../../src/daemon_proactive.c) | `hu_daemon_build_callback_context` must not inject raw `content` bytes |
+| P2-6 | HIGH | [fact_extract.c:14-71](../../../src/memory/fact_extract.c) | Heuristic fact patterns that capture first-person confessions ("i am a", "when i'm") must store paraphrased third-person facts, not raw substrings |
+| P2-7 | HIGH | [conversation.c:2420](../../../src/context/conversation.c) | Expand stopword list: add `hey, doing, you, me, my, feel, feeling, lost, lonely, sad, ok, omg`; reject single-word topics under 5 chars |
+| P2-8 | HIGH | [humanness.c:437-439](../../../src/humanness.c) | Curiosity template ("How is the %s going?") must take a structured noun phrase, not raw substring |
+| P2-9 | MED | [superhuman.c:957 vs :1807](../../../src/memory/superhuman.c), [emotional_moments.c:27 vs :209](../../../src/memory/emotional_moments.c) | Remove duplicate function definitions; collapse to single impl |
+| P2-10 | MED | [sqlite.c:186](../../../src/memory/engines/sqlite.c) vs [emotional_state.c:126](../../../src/context/emotional_state.c) | Resolve `mood_log` schema conflict (silently broken right now) |
 | P2-11 | MED | [memory_degradation.c] | Stop applying degradation to content that is later injected into outbound prompts; degradation is a UX-of-recall concept, not a content-corruption tool |
 
 ### Phase 3 — Contact scoping (every table)
 
 | ID | Severity | Table / File:Line | Fix |
 | --- | --- | --- | --- |
-| P3-1 | CRITICAL | `goals` ([goals.c:44](src/agent/goals.c:44)) | Add `contact_id` column + WHERE clause to all queries |
-| P3-2 | CRITICAL | `life_threads` ([authentic.c:251](src/context/authentic.c:251)) | Same |
-| P3-3 | CRITICAL | `held_contradictions` ([authentic.c:622](src/context/authentic.c:622)) | Same; add UNIQUE(contact_id, topic) |
-| P3-4 | HIGH | `life_narration_events` ([authentic.c:726](src/context/authentic.c:726)) | Add `source_contact_id`; filter unsent-events by target contact |
-| P3-5 | HIGH | `scheduler_jobs` ([scheduler.c:451-456](src/agent/scheduler.c:451)) | Schema has contact_id but dispatch SELECT doesn't bind it; fix the WHERE clause |
-| P3-6 | HIGH | `prompt_patches` + `learning_signals` + `strategy_weights` ([self_improve.c:57](src/intelligence/self_improve.c:57)) | Add contact_id OR mark global-by-design explicitly |
-| P3-7 | HIGH | `hula_tasks` ([task_store.c:35](src/agent/task_store.c:35)) | Add contact_id + WHERE clause |
-| P3-8 | HIGH | world_model contact lookup ([world_model.c:1251](src/agent/world_model.c:1251)) | Remove case-insensitive display-name fallback; contact_id is the only allowed key |
-| P3-9 | MED | `ab_selections` ([ab_response.c:63](src/agent/ab_response.c:63)) | Add contact_id |
-| P3-10 | HIGH | [daemon.c:1338](src/daemon.c:1338), [proactive.c:772](src/agent/proactive.c:772) | Move contact_id from application-code filter to SQL WHERE clause (prefix-match risk) |
+| P3-1 | CRITICAL | `goals` ([goals.c:44](../../../src/agent/goals.c)) | Add `contact_id` column + WHERE clause to all queries |
+| P3-2 | CRITICAL | `life_threads` ([authentic.c:251](../../../src/context/authentic.c)) | Same |
+| P3-3 | CRITICAL | `held_contradictions` ([authentic.c:622](../../../src/context/authentic.c)) | Same; add UNIQUE(contact_id, topic) |
+| P3-4 | HIGH | `life_narration_events` ([authentic.c:726](../../../src/context/authentic.c)) | Add `source_contact_id`; filter unsent-events by target contact |
+| P3-5 | HIGH | `scheduler_jobs` ([scheduler.c:451-456](../../../src/agent/scheduler.c)) | Schema has contact_id but dispatch SELECT doesn't bind it; fix the WHERE clause |
+| P3-6 | HIGH | `prompt_patches` + `learning_signals` + `strategy_weights` ([self_improve.c:57](../../../src/intelligence/self_improve.c)) | Add contact_id OR mark global-by-design explicitly |
+| P3-7 | HIGH | `hula_tasks` ([task_store.c:35](../../../src/agent/task_store.c)) | Add contact_id + WHERE clause |
+| P3-8 | HIGH | world_model contact lookup ([world_model.c:1251](../../../src/agent/world_model.c)) | Remove case-insensitive display-name fallback; contact_id is the only allowed key |
+| P3-9 | MED | `ab_selections` ([ab_response.c:63](../../../src/agent/ab_response.c)) | Add contact_id |
+| P3-10 | HIGH | [daemon.c:1338](../../../src/daemon.c), [proactive.c:772](../../../src/agent/proactive.c) | Move contact_id from application-code filter to SQL WHERE clause (prefix-match risk) |
 
 ### Phase 4 — Repeat / dedup / rate-limit (close the spam loop)
 
 | ID | Severity | Table | Fix |
 | --- | --- | --- | --- |
-| P4-1 | CRITICAL | `topic_baselines` ([sqlite.c:128](src/memory/engines/sqlite.c:128)) | Add `last_checkin_sent_at`; gate F30 SELECT by it |
+| P4-1 | CRITICAL | `topic_baselines` ([sqlite.c:128](../../../src/memory/engines/sqlite.c)) | Add `last_checkin_sent_at`; gate F30 SELECT by it |
 | P4-2 | HIGH | `micro_moments` | Add UNIQUE(contact_id, fact) + `last_surfaced` |
 | P4-3 | HIGH | `growth` events | Add `celebrated_at` |
-| P4-4 | HIGH | `delayed_followup` ([proactive.c:784](src/agent/proactive.c:784)) | Mark consumed only on confirmed send, not on retrieve |
+| P4-4 | HIGH | `delayed_followup` ([proactive.c:784](../../../src/agent/proactive.c)) | Mark consumed only on confirmed send, not on retrieve |
 | P4-5 | MED | `inside_jokes`, `avoidance_patterns` | Add `last_surfaced`; suppress if used in last N days |
 | P4-6 | HIGH | per-contact daily/weekly send cap | Max N proactive sends per contact per 24h, hard cap |
 
@@ -127,11 +133,11 @@ because it makes re-enabling safe even if subsequent fixes have bugs.
 
 | ID | Severity | File | Fix |
 | --- | --- | --- | --- |
-| P6-1 | HIGH | [daemon_proactive.c:275](src/daemon_proactive.c:275) | Apply channel overlay (formality, length, emoji_usage) to proactive prompts |
-| P6-2 | HIGH | [daemon_proactive.c:275](src/daemon_proactive.c:275) | Include `relationship_type` and `dunbar_layer` in proactive prompts (currently invisible to model) |
-| P6-3 | HIGH | [daemon.c:1219-1236](src/daemon.c:1219) | Check emotional tone of last received message before firing proactive trigger |
-| P6-4 | MED | [humanness.c:268-284](src/humanness.c:268) | Replace "I'm here." / "I hear you." literals with LLM call routed through persona |
-| P6-5 | HIGH | [agent_stream.c:563](src/agent/agent_stream.c:563) | Move absolute-rules block to a shared module so proactive path inherits it |
+| P6-1 | HIGH | [daemon_proactive.c:275](../../../src/daemon_proactive.c) | Apply channel overlay (formality, length, emoji_usage) to proactive prompts |
+| P6-2 | HIGH | [daemon_proactive.c:275](../../../src/daemon_proactive.c) | Include `relationship_type` and `dunbar_layer` in proactive prompts (currently invisible to model) |
+| P6-3 | HIGH | [daemon.c:1219-1236](../../../src/daemon.c) | Check emotional tone of last received message before firing proactive trigger |
+| P6-4 | MED | [humanness.c:268-284](../../../src/humanness.c) | Replace "I'm here." / "I hear you." literals with LLM call routed through persona |
+| P6-5 | HIGH | [agent_stream.c:563](../../../src/agent/agent_stream.c) | Move absolute-rules block to a shared module so proactive path inherits it |
 
 ## 5. Fleet Implementation Plan
 
