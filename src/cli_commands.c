@@ -72,8 +72,8 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
 #ifndef HU_IS_TEST
 static const char HU_INIT_DEFAULT_JSON[] =
     "{\n"
-    "  \"default_provider\": \"gemini\",\n"
-    "  \"default_model\": \"gemini-3.1-flash-lite-preview\",\n"
+    "  \"default_provider\": \"ollama\",\n"
+    "  \"default_model\": \"llama3.2\",\n"
     "  \"max_tokens\": 4096,\n"
     "  \"agent\": {\n"
     "    \"persona\": \"default\"\n"
@@ -248,10 +248,11 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     printf("Created ~/.human/config.json\n");
     printf("Created ~/.human/personas/default.json (starter persona)\n");
     printf("\n");
-    printf("Set up your provider (pick one):\n");
-    printf("  Gemini:  export GEMINI_API_KEY=your-key\n");
-    printf("  OpenAI:  export OPENAI_API_KEY=sk-...\n");
-    printf("  Ollama:  ollama serve  (no API key needed)\n");
+    printf("Default provider is Ollama (local, no API key). Start the server:\n");
+    printf("  ollama serve && ollama pull llama3.2\n");
+    printf("\n");
+    printf("For cloud providers or Apple Intelligence, run:\n");
+    printf("  human onboard\n");
     printf("\n");
     printf("Start chatting: human agent\n");
     printf("Customize your persona: human persona update default\n");

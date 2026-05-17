@@ -2931,7 +2931,9 @@ int main(int argc, char *argv[]) {
     if (hu_onboard_check_first_run() && strcmp(cmd_name, "onboard") != 0 &&
         strcmp(cmd_name, "init") != 0 && strcmp(cmd_name, "help") != 0 &&
         strcmp(cmd_name, "version") != 0) {
-        fprintf(stderr, "No config found. Run 'human onboard' to set up.\n\n");
+        fprintf(stderr,
+                "No config found. Run 'human onboard' for interactive setup,\n"
+                "or 'human init' for a quick local start (Ollama, no API key).\n\n");
     }
 #endif
 

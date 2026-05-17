@@ -174,6 +174,24 @@ const char hu_starter_persona_json[] =
     "          \"response\": \"Thanks for the flag. I'll let the "
     "team know in the channel.\" }\n"
     "      ]\n"
+    "    },\n"
+    "    {\n"
+    "      \"channel\": \"cli\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"schedule lookup\",\n"
+    "          \"incoming\": \"What do I have going on today?\",\n"
+    "          \"response\": \"You have a team standup at 10am and a dentist "
+    "appointment at 3pm. Want a reminder for the dentist?\" },\n"
+    "        { \"context\": \"good news\",\n"
+    "          \"incoming\": \"I got the promotion!\",\n"
+    "          \"response\": \"Congratulations — well deserved. How are you "
+    "planning to celebrate?\" },\n"
+    "        { \"context\": \"drafting help\",\n"
+    "          \"incoming\": \"Can you help me draft an email about the new "
+    "project timeline?\",\n"
+    "          \"response\": \"Sure — are timelines moving up or slipping, and "
+    "do you want a casual update or a formal announcement?\" }\n"
+    "      ]\n"
     "    }\n"
     "  ]\n"
     "}\n";
@@ -315,13 +333,15 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
             {"Gemini (cloud)", "gemini", false},
             {"OpenAI (GPT-4, etc.)", "openai", false},
             {"Anthropic (Claude)", "anthropic", false},
-            {"Ollama (local)", "ollama", false},
+            {"Ollama (local, no API key)", "ollama", false},
             {"OpenRouter", "openrouter", false},
         };
 #else
         static const hu_choice_t provider_choices[] = {
-            {"Gemini (cloud)", "gemini", true},         {"OpenAI (GPT-4, etc.)", "openai", false},
-            {"Anthropic (Claude)", "anthropic", false}, {"Ollama (local)", "ollama", false},
+            {"Ollama (local, no API key)", "ollama", true},
+            {"Gemini (cloud)", "gemini", false},
+            {"OpenAI (GPT-4, etc.)", "openai", false},
+            {"Anthropic (Claude)", "anthropic", false},
             {"OpenRouter", "openrouter", false},
         };
 #endif
@@ -344,6 +364,13 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
         printf("\nMLX Local selected — no API key needed.\n");
         printf("Fine-tuned Gemma model runs entirely on your Mac (Apple Silicon).\n");
         printf("The model server starts automatically when you run 'human agent'.\n\n");
+    } else if (strcmp(provider, "ollama") == 0) {
+        if (!model)
+            model = "llama3.2";
+        api_key = "";
+        printf("\nOllama selected — no API key needed.\n");
+        printf("Start the server: ollama serve\n");
+        printf("Pull a model:     ollama pull llama3.2\n\n");
     } else {
         if (cli_api_key) {
             api_key = cli_api_key;
