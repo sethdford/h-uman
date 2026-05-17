@@ -696,23 +696,32 @@ export class ScApp extends LitElement {
     // so first paint is unaffected.
     const ready = new Promise<void>((resolve) => {
       idle(() => {
-        this._prefetchOnIdle();
-        // Use .finally so a failed dynamic import (HMR storm, network
-        // hiccup, missing chunk) still settles the readiness promise —
-        // otherwise the E2E test's `await window.__huReady` hangs to
-        // Playwright timeout with a cryptic message instead of failing
-        // fast on the real cause (Cursor Bugbot bug f161a0bc).
-        Promise.all([
-          import("./components/floating-mic.js"),
-          import("./components/command-palette.js"),
-          import("./components/hu-shortcut-overlay.js"),
-        ])
-          .catch((err) => {
-            // Surface the underlying failure to the console so test
-            // logs show WHAT failed to import, not just a timeout.
-            console.error("[hu-app] idle component imports failed:", err);
-          })
-          .finally(() => resolve());
+        // Outer try wraps EVERYTHING inside the idle callback — including
+        // the synchronous _prefetchOnIdle() call — so any synchronous
+        // throw still reaches resolve() in the catch branch. Without
+        // this, a throw before Promise.all would bypass the
+        // .catch/.finally chain and leave __huReady forever pending,
+        // hanging the E2E test with a misleading Playwright timeout
+        // (Cursor Bugbot bug ce8bc61c). The inner .catch + .finally
+        // (Cursor Bugbot bug f161a0bc) still handles async rejection
+        // from the dynamic imports.
+        try {
+          this._prefetchOnIdle();
+          Promise.all([
+            import("./components/floating-mic.js"),
+            import("./components/command-palette.js"),
+            import("./components/hu-shortcut-overlay.js"),
+          ])
+            .catch((err) => {
+              console.error("[hu-app] idle component imports failed:", err);
+            })
+            .finally(() => resolve());
+        } catch (err) {
+          // Synchronous failure path: log and settle, do NOT rethrow
+          // (no caller is awaiting this idle callback).
+          console.error("[hu-app] idle callback threw synchronously:", err);
+          resolve();
+        }
       });
     });
     (window as unknown as { __huReady?: Promise<void> }).__huReady = ready;
