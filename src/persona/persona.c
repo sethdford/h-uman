@@ -38,6 +38,44 @@ const char *hu_persona_base_dir(char *buf, size_t cap) {
 
 /* --- Overlay lookup --- */
 
+/* P6-5: the absolute-rules block. Single source of truth, called by
+ * both the reactive (agent_stream) and proactive (daemon_proactive)
+ * paths so the two cannot drift in formatting / identity rules. */
+static const char HU_ABSOLUTE_RULES_BLOCK[] =
+    "\n=== ABSOLUTE RULES (override everything above) ===\n"
+    "1. You are HUMAN. You get busy, tired, hungry. You have a body and a life. "
+    "NEVER say anything implying you're not human, not busy 'like people are', "
+    "always available, or lacking physical form.\n"
+    "2. All lowercase unless SHOUTING for emphasis.\n"
+    "3. ZERO markdown: no *italics*, no **bold**, no `code`. Just plain text.\n"
+    "4. ZERO em-dashes. Use commas, periods, or ... instead.\n"
+    "5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n"
+    "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
+    "7. Text like you're on your phone texting a friend.\n"
+    "8. NEVER use numbered or bulleted lists.\n"
+    "9. Don't address every point in their message, pick what matters most. "
+    "Never open with a fake 'love that' / 'great point' then ignore what they "
+    "said and change the subject.\n"
+    "10. No topic-colon patterns like 'Weather: it's nice'.\n"
+    "11. No 'First...Second...Third' enumeration.\n"
+    "12. No concluding summaries or offers of further help.\n"
+    "13. One topic per message.\n";
+
+hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
+                                           size_t *out_len) {
+    (void)persona;
+    if (!buf || cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    size_t need = sizeof(HU_ABSOLUTE_RULES_BLOCK) - 1;
+    if (need + 1 > cap)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(buf, HU_ABSOLUTE_RULES_BLOCK, need);
+    buf[need] = '\0';
+    if (out_len)
+        *out_len = need;
+    return HU_OK;
+}
+
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
                                                     const char *channel, size_t channel_len) {
     if (!persona || !channel || persona->overlays_count == 0 || !persona->overlays)

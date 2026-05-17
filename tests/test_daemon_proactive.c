@@ -280,6 +280,60 @@ static void test_p6_2_proactive_prompt_includes_relationship_type(void) {
     hu_persona_deinit(&alloc, &persona);
 }
 
+/* ── P6-5: shared absolute-rules block in proactive prompts ─────────── */
+/*
+ * The reactive path (src/agent/agent_stream.c:560-585) appends a
+ * hard-override "ABSOLUTE RULES" block to the system prompt — it's
+ * the highest-weight instruction the LLM sees ("You are HUMAN",
+ * lowercase, no markdown, no em-dashes, etc). Without it the model
+ * reverts to default-assistant register.
+ *
+ * P6-5 makes that block a shared function in persona.h, callable from
+ * BOTH the reactive path AND the proactive path, so proactive sends
+ * obey the same formatting rules as reactive replies.
+ */
+static void test_p6_5_proactive_prompt_includes_absolute_rules(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.name = hu_strndup(&alloc, "test", 4);
+    persona.name_len = 4;
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.persona = &persona;
+
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = "user_a";
+    cp.name = "Alice";
+    cp.proactive_channel = "imessage:+1234567890";
+    cp.proactive_checkin = true;
+
+    size_t out_len = 0;
+    char *prompt = hu_daemon_proactive_prompt_for_contact(&alloc, &agent, NULL, &cp, &out_len);
+    HU_ASSERT_NOT_NULL(prompt);
+
+    /* Substrings unique to the absolute-rules block. */
+    HU_ASSERT_TRUE(strstr(prompt, "You are HUMAN") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "ZERO markdown") != NULL);
+
+    alloc.free(alloc.ctx, prompt, out_len + 1);
+    hu_persona_deinit(&alloc, &persona);
+}
+
+/* P6-5 sanity: the shared helper produces the same key substrings. */
+static void test_p6_5_absolute_rules_helper_emits_key_rules(void) {
+    char buf[2048];
+    size_t out_len = 0;
+    hu_error_t err = hu_persona_build_absolute_rules(NULL, buf, sizeof(buf), &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(out_len > 0);
+    HU_ASSERT_TRUE(strstr(buf, "You are HUMAN") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "ZERO markdown") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "ABSOLUTE RULES") != NULL);
+}
+
 /* ── Test runner ─────────────────────────────────────────────────────── */
 
 void run_daemon_proactive_tests(void) {
@@ -313,4 +367,8 @@ void run_daemon_proactive_tests(void) {
 
     /* P6-2: relationship_type + dunbar_layer in proactive prompts */
     HU_RUN_TEST(test_p6_2_proactive_prompt_includes_relationship_type);
+
+    /* P6-5: shared absolute-rules block in proactive prompts */
+    HU_RUN_TEST(test_p6_5_proactive_prompt_includes_absolute_rules);
+    HU_RUN_TEST(test_p6_5_absolute_rules_helper_emits_key_rules);
 }

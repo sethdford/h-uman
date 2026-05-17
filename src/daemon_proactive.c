@@ -532,6 +532,14 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     }
     size_t base_len = (w > 0 && (size_t)w < sizeof(base_buf)) ? (size_t)w : 0;
 
+    /* P6-5: shared absolute-rules block — same source of truth as the
+     * reactive path (src/agent/agent_stream.c). Last-position weight. */
+    char absolute_rules_buf[2048];
+    size_t absolute_rules_len = 0;
+    if (hu_persona_build_absolute_rules(agent ? agent->persona : NULL, absolute_rules_buf,
+                                        sizeof(absolute_rules_buf), &absolute_rules_len) != HU_OK)
+        absolute_rules_len = 0;
+
     size_t total = base_len + rules_len;
     if (starter && starter_len > 0)
         total += 2 + starter_len;
@@ -547,6 +555,8 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
         total += 2 + calendar_ctx_len;
     if (overlay_ctx && overlay_ctx_len > 0)
         total += 2 + overlay_ctx_len;
+    if (absolute_rules_len > 0)
+        total += absolute_rules_len;
 
     char *result = (char *)alloc->alloc(alloc->ctx, total + 1);
     if (!result) {
@@ -619,6 +629,10 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 
     memcpy(result + pos, rules, rules_len);
     pos += rules_len;
+    if (absolute_rules_len > 0) {
+        memcpy(result + pos, absolute_rules_buf, absolute_rules_len);
+        pos += absolute_rules_len;
+    }
     result[pos] = '\0';
     *out_len = pos;
     return result;
