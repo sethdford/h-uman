@@ -648,7 +648,9 @@ void run_persona_encryption_tests(void);
 #endif
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
+#if defined(HU_ENABLE_IMESSAGE) && defined(HU_ENABLE_TELEGRAM)
 void run_channel_overlay_apply_tests(void);
+#endif
 void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
 #ifdef HU_ENABLE_ML
@@ -1363,7 +1365,9 @@ int main(int argc, char **argv) {
 #endif
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
+#if defined(HU_ENABLE_IMESSAGE) && defined(HU_ENABLE_TELEGRAM)
     run_channel_overlay_apply_tests();
+#endif
     run_filler_recency_tests();
     run_contact_send_recency_tests();
 #ifdef HU_ENABLE_ML

@@ -2847,7 +2847,10 @@ set(HU_TEST_SOURCES
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
     tests/test_persona_overlay_render.c
-    tests/test_channel_overlay_apply.c
+    # test_channel_overlay_apply.c — moved to gated block (needs both
+    # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
+    # hu_imessage_create AND hu_telegram_create). minimal-build doesn't
+    # enable either, so unconditional registration breaks the link.
     tests/test_personal_model_simulation.c
     tests/test_personal_model_fidelity_v2.c
     # test_persona_encryption.c — moved to gated block below; references
@@ -3427,6 +3430,11 @@ if(HU_ENABLE_ML)
         tests/test_training_data_quality.c
         tests/test_dpo_extractor_integration.c
         tests/test_agent_trainer.c)
+endif()
+
+# test_channel_overlay_apply.c needs both iMessage AND Telegram symbols.
+if(HU_ENABLE_IMESSAGE AND HU_ENABLE_TELEGRAM)
+    list(APPEND HU_TEST_SOURCES tests/test_channel_overlay_apply.c)
 endif()
 
 # Persona encryption-at-rest tests — only when libsodium was located.

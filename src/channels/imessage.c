@@ -558,8 +558,14 @@ void hu_imessage_courtesy_dedup_record(const char *handle, int64_t bucket) {
         return;
     char rec[256];
     int n = snprintf(rec, sizeof(rec), "%lld %s\n", (long long)bucket, handle);
-    if (n > 0 && (size_t)n < sizeof(rec))
-        (void)write(fd, rec, (size_t)n);
+    if (n > 0 && (size_t)n < sizeof(rec)) {
+        /* Best-effort journal write — `(void)` cast alone doesn't silence
+         * GCC -Werror=unused-result (gcc-2.42 + glibc-2.39 specifically),
+         * so check the return explicitly. Truncated/failed writes mean
+         * the activity record is dropped this round; not fatal. */
+        ssize_t ignored = write(fd, rec, (size_t)n);
+        (void)ignored;
+    }
     (void)close(fd);
     /* Truncate-tail if file has grown beyond the max-lines bound. Cheap
      * because the file is small (~16KB at the cap). Lock optimistically;
@@ -621,8 +627,13 @@ void hu_imessage_courtesy_dedup_record(const char *handle, int64_t bucket) {
         free(buf);
         return;
     }
-    if (buf_len > 0)
-        (void)write(tfd, buf, buf_len);
+    if (buf_len > 0) {
+        /* Best-effort tmp-file write before rename. Same -Werror=
+         * unused-result note as above — `(void)` cast doesn't silence
+         * the diagnostic on gcc-2.42, so assign-and-discard. */
+        ssize_t ignored = write(tfd, buf, buf_len);
+        (void)ignored;
+    }
     (void)fsync(tfd);
     (void)close(tfd);
     (void)rename(tmp_path, path);
