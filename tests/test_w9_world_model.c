@@ -1,8 +1,8 @@
 /* W9 — World model: build, cache hit/miss, invalidation, negative memory.
  * All tests run on in-memory SQLite. */
 
-#include "human/agent/world_model.h"
 #include "human/agent/goals.h"
+#include "human/agent/world_model.h"
 #include "human/core/allocator.h"
 #include "human/memory/emotional_residue.h"
 #include "human/memory/graph.h"
@@ -22,9 +22,11 @@
 
 #ifdef HU_ENABLE_SQLITE
 
-
 static hu_allocator_t g_alloc;
-static hu_allocator_t *A(void) { g_alloc = hu_system_allocator(); return &g_alloc; }
+static hu_allocator_t *A(void) {
+    g_alloc = hu_system_allocator();
+    return &g_alloc;
+}
 
 static void open_facade_(hu_graph_t **g, hu_memory_facade_t **m) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
@@ -41,15 +43,15 @@ static void close_facade_(hu_graph_t *g, hu_memory_facade_t *m) {
 
 static void seed_one_relation_(hu_graph_t *g, const char *cid) {
     int64_t alice = 0, acme = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, cid, strlen(cid), "Alice", 5,
-                                          HU_ENTITY_PERSON, NULL, &alice),
-                 HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, cid, strlen(cid), "Acme", 4,
-                                          HU_ENTITY_ORGANIZATION, NULL, &acme),
-                 HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_relation(g, cid, strlen(cid), alice, acme,
-                                            HU_REL_WORKS_AT, 1.0f, NULL, 0),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, cid, strlen(cid), "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation(g, cid, strlen(cid), alice, acme, HU_REL_WORKS_AT, 1.0f, NULL, 0),
+        HU_OK);
 }
 
 /* --- build --- */
@@ -139,8 +141,7 @@ static void test_w9_load_cache_miss_after_invalidation(void) {
     HU_ASSERT_EQ(wm1->entities_count, 2u);
 
     int64_t carol = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-inv", 5, "Carol", 5, HU_ENTITY_PERSON,
-                                          NULL, &carol),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-inv", 5, "Carol", 5, HU_ENTITY_PERSON, NULL, &carol),
                  HU_OK);
 
     /* Invalidate; next load should rebuild and see Carol. */
@@ -169,8 +170,7 @@ static void test_w9_upsert_auto_invalidates_cache(void) {
     HU_ASSERT_EQ(wm1->entities_count, 2u);
 
     int64_t carol = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-auto", 6, "Carol", 5, HU_ENTITY_PERSON,
-                                          NULL, &carol),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-auto", 6, "Carol", 5, HU_ENTITY_PERSON, NULL, &carol),
                  HU_OK);
 
     /* No explicit invalidate. The next load must still rebuild because
@@ -194,15 +194,12 @@ static void test_w9_load_cache_expires_after_ttl(void) {
     HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-ttl", 5, 1000LL, &wm1), HU_OK);
 
     int64_t carol = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-ttl", 5, "Carol", 5, HU_ENTITY_PERSON,
-                                          NULL, &carol),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-ttl", 5, "Carol", 5, HU_ENTITY_PERSON, NULL, &carol),
                  HU_OK);
 
     /* TTL is 60s by default; jump 120s ahead. */
     hu_world_model_t *wm2 = NULL;
-    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-ttl", 5,
-                                       1000LL + 120 * 1000, &wm2),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-ttl", 5, 1000LL + 120 * 1000, &wm2), HU_OK);
     HU_ASSERT_EQ(wm2->entities_count, 3u);
 
     hu_world_model_free(A(), wm1);
@@ -306,8 +303,7 @@ static void test_w9_goals_appear_in_world_model(void) {
     HU_ASSERT_EQ(hu_goal_engine_create(A(), db, &ge), HU_OK);
     HU_ASSERT_EQ(hu_goal_init_tables(&ge), HU_OK);
     int64_t gid = 0;
-    HU_ASSERT_EQ(hu_goal_create(&ge, "learn rust", 10, 0.8, 0, 0,
-                                 1735690000LL, &gid),
+    HU_ASSERT_EQ(hu_goal_create(&ge, "u-goals", 7, "learn rust", 10, 0.8, 0, 0, 1735690000LL, &gid),
                  HU_OK);
     HU_ASSERT_GT(gid, 0);
     hu_goal_engine_deinit(&ge);
@@ -329,15 +325,14 @@ static void test_w9_goals_appear_in_world_model(void) {
  * The W7 SQLite engine creates it on `human ml`/agent paths, but the
  * minimal in-memory graph in this test doesn't run that bootstrap. */
 static void ensure_emotional_residue_table_(struct sqlite3 *db) {
-    static const char *kCreate =
-        "CREATE TABLE IF NOT EXISTS emotional_residue("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "episode_id INTEGER,"
-        "contact_id TEXT NOT NULL,"
-        "valence REAL NOT NULL,"
-        "intensity REAL NOT NULL,"
-        "decay_rate REAL DEFAULT 0.1,"
-        "created_at INTEGER NOT NULL)";
+    static const char *kCreate = "CREATE TABLE IF NOT EXISTS emotional_residue("
+                                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                 "episode_id INTEGER,"
+                                 "contact_id TEXT NOT NULL,"
+                                 "valence REAL NOT NULL,"
+                                 "intensity REAL NOT NULL,"
+                                 "decay_rate REAL DEFAULT 0.1,"
+                                 "created_at INTEGER NOT NULL)";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, kCreate, -1, &stmt, NULL);
     HU_ASSERT_EQ(rc, 0);
@@ -358,14 +353,11 @@ static void test_w9_emotion_populated_from_distress_residue(void) {
     /* Two residues: one strong distress, one mild positive. Weighted by
      * intensity, the distress dominates (valence < -0.5 -> distressed). */
     int64_t id1 = 0, id2 = 0;
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-emo", 5,
-                                          -0.9, 0.9, 0.05, &id1), HU_OK);
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-emo", 5,
-                                          0.3, 0.2, 0.05, &id2), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-emo", 5, -0.9, 0.9, 0.05, &id1), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-emo", 5, 0.3, 0.2, 0.05, &id2), HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-emo", 5,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-emo", 5, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT_NOT_NULL(wm);
     HU_ASSERT_TRUE(wm->valence < -0.4f);
     HU_ASSERT_TRUE(wm->arousal >= 0.85f);
@@ -384,12 +376,10 @@ static void test_w9_emotion_populated_from_joy_residue(void) {
     ensure_emotional_residue_table_(db);
 
     int64_t id1 = 0;
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-joy", 5,
-                                          0.85, 0.7, 0.05, &id1), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-joy", 5, 0.85, 0.7, 0.05, &id1), HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-joy", 5,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-joy", 5, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT_NOT_NULL(wm);
     HU_ASSERT_TRUE(wm->valence > 0.5f);
     HU_ASSERT_EQ(strcmp(wm->dominant_emotion, "joy"), 0);
@@ -424,8 +414,7 @@ static void test_w9_tom_synthesized_from_negatives_and_entities(void) {
     HU_ASSERT_EQ(hu_negative_memory_add(g, "u-tom", 5, &nm2, &id2), HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-tom", 5,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-tom", 5, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT_NOT_NULL(wm);
 
     /* user_expects_we_cannot has both negatives ';'-joined. */
@@ -645,8 +634,7 @@ static void test_w9_gated_negmem_user_source_lands_live(void) {
     nm.created_at = 1735690000000LL;
 
     int64_t id = 0;
-    HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-trust1", 8, &nm,
-                                                     HU_WRITE_SOURCE_USER,
+    HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-trust1", 8, &nm, HU_WRITE_SOURCE_USER,
                                                      1735690000000LL, &id),
                  HU_OK);
     HU_ASSERT_GT(id, 0);
@@ -679,9 +667,8 @@ static void test_w9_gated_negmem_open_channel_quarantined(void) {
     nm.created_at = 1; /* stale observation -> recency_score collapses */
 
     int64_t id = 0;
-    hu_error_t e = hu_negative_memory_add_facade_gated(m, "u-trust2", 8, &nm,
-                                                       HU_WRITE_SOURCE_CHANNEL_OPEN,
-                                                       1735690000000LL, &id);
+    hu_error_t e = hu_negative_memory_add_facade_gated(
+        m, "u-trust2", 8, &nm, HU_WRITE_SOURCE_CHANNEL_OPEN, 1735690000000LL, &id);
     HU_ASSERT_EQ(e, HU_OK);
     /* The insert went through but with downgraded belief — the planner
      * never reads a 0.99 hard rule from an open-channel source. */
@@ -732,11 +719,14 @@ static void test_w9_negative_memory_source_roundtrips_through_db(void) {
 
     /* Insert one of each source kind via the gated facade (USER source so
      * write_trust lets all four kinds land LIVE). */
-    static const struct { const char *text; hu_negative_source_t src; } cases[] = {
-        {"never call me bro",       HU_NEGATIVE_SOURCE_USER_EXPLICIT},
+    static const struct {
+        const char *text;
+        hu_negative_source_t src;
+    } cases[] = {
+        {"never call me bro", HU_NEGATIVE_SOURCE_USER_EXPLICIT},
         {"unsure if Acme acquired Beta", HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN},
-        {"avoid politics topic",    HU_NEGATIVE_SOURCE_AUTO_EXTRACT},
-        {"do not share PHI",        HU_NEGATIVE_SOURCE_SYSTEM_POLICY},
+        {"avoid politics topic", HU_NEGATIVE_SOURCE_AUTO_EXTRACT},
+        {"do not share PHI", HU_NEGATIVE_SOURCE_SYSTEM_POLICY},
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         hu_negative_memory_t nm = {0};
@@ -746,8 +736,8 @@ static void test_w9_negative_memory_source_roundtrips_through_db(void) {
         nm.created_at = 1000LL + (int64_t)i;
         nm.source = cases[i].src;
         int64_t id = 0;
-        HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-src", 5, &nm,
-                                                          HU_WRITE_SOURCE_USER, 1000LL, &id),
+        HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-src", 5, &nm, HU_WRITE_SOURCE_USER,
+                                                         1000LL, &id),
                      HU_OK);
         HU_ASSERT_GT(id, 0);
     }
@@ -755,8 +745,7 @@ static void test_w9_negative_memory_source_roundtrips_through_db(void) {
     /* Read back via the facade list — each row must carry its source. */
     hu_negative_memory_t *out = NULL;
     size_t out_count = 0;
-    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-src", 5, 16, &out, &out_count),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-src", 5, 16, &out, &out_count), HU_OK);
     HU_ASSERT_EQ(out_count, 4u);
 
     /* Newest first (created_at DESC). */
@@ -802,8 +791,7 @@ static void test_w9_adversarial_system_policy_lands_live_on_open_channel(void) {
 
     hu_negative_memory_t *out = NULL;
     size_t out_count = 0;
-    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-policy", 8, 8, &out, &out_count),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-policy", 8, 8, &out, &out_count), HU_OK);
     HU_ASSERT_EQ(out_count, 1u);
     /* Belief was NOT clamped to ≤ 0.5 — proves SYSTEM_POLICY bypassed
      * the quarantine band. */
@@ -840,14 +828,13 @@ static void test_w9_adversarial_unauthorized_source_int_coerces_to_user_explicit
     nm.source = (hu_negative_source_t)99;
 
     int64_t id = 0;
-    HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-coerce", 8, &nm,
-                                                     HU_WRITE_SOURCE_USER, 1000LL, &id),
+    HU_ASSERT_EQ(hu_negative_memory_add_facade_gated(m, "u-coerce", 8, &nm, HU_WRITE_SOURCE_USER,
+                                                     1000LL, &id),
                  HU_OK);
 
     hu_negative_memory_t *out = NULL;
     size_t out_count = 0;
-    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-coerce", 8, 4, &out, &out_count),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-coerce", 8, 4, &out, &out_count), HU_OK);
     HU_ASSERT_EQ(out_count, 1u);
     HU_ASSERT_EQ((int)out[0].source, (int)HU_NEGATIVE_SOURCE_USER_EXPLICIT);
 
@@ -865,9 +852,9 @@ static void test_w9_channel_aware_key_isolates_per_channel(void) {
     seed_one_relation_(g, "u-multi");
 
     hu_world_model_t *wm_slack = NULL;
-    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-multi", 7, "slack", 5,
-                                                  1000LL, &wm_slack),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_world_model_load_with_channel(m, A(), "u-multi", 7, "slack", 5, 1000LL, &wm_slack),
+        HU_OK);
     HU_ASSERT_NOT_NULL(wm_slack);
 
     uint64_t loads = 0, hits = 0;
@@ -876,17 +863,17 @@ static void test_w9_channel_aware_key_isolates_per_channel(void) {
 
     /* Different channel for the same contact MUST miss. */
     hu_world_model_t *wm_imsg = NULL;
-    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-multi", 7, "imessage", 8,
-                                                  1100LL, &wm_imsg),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_world_model_load_with_channel(m, A(), "u-multi", 7, "imessage", 8, 1100LL, &wm_imsg),
+        HU_OK);
     hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
     HU_ASSERT_EQ(hits, hits_before);
 
     /* Reload Slack within TTL — MUST hit the slack slot. */
     hu_world_model_t *wm_slack2 = NULL;
-    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-multi", 7, "slack", 5,
-                                                  1500LL, &wm_slack2),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_world_model_load_with_channel(m, A(), "u-multi", 7, "slack", 5, 1500LL, &wm_slack2),
+        HU_OK);
     hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
     HU_ASSERT_EQ(hits, hits_before + 1);
 
@@ -904,12 +891,11 @@ static void test_w9_invalidate_clears_all_channels_for_contact(void) {
     seed_one_relation_(g, "u-fanout");
 
     hu_world_model_t *wm_a = NULL, *wm_b = NULL;
-    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "slack", 5,
-                                                  1000LL, &wm_a),
+    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "slack", 5, 1000LL, &wm_a),
                  HU_OK);
-    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "imessage", 8,
-                                                  1100LL, &wm_b),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "imessage", 8, 1100LL, &wm_b),
+        HU_OK);
 
     /* Wide invalidate (no channel) — clears every cached channel for
      * the contact. The default for write hooks. */
@@ -920,12 +906,11 @@ static void test_w9_invalidate_clears_all_channels_for_contact(void) {
     uint64_t hits_before = hits;
 
     hu_world_model_t *wm_a2 = NULL, *wm_b2 = NULL;
-    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "slack", 5,
-                                                  2000LL, &wm_a2),
-                 HU_OK);
-    HU_ASSERT_EQ(hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "imessage", 8,
-                                                  2100LL, &wm_b2),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "slack", 5, 2000LL, &wm_a2), HU_OK);
+    HU_ASSERT_EQ(
+        hu_world_model_load_with_channel(m, A(), "u-fanout", 8, "imessage", 8, 2100LL, &wm_b2),
+        HU_OK);
     hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
     HU_ASSERT_EQ(hits, hits_before);
 
@@ -957,11 +942,13 @@ static void test_w9_goal_create_invalidates_cache(void) {
     HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-goal", 6, 1000LL, &wm1), HU_OK);
     HU_ASSERT_EQ(wm1->goals_count, 0u);
 
-    /* Goal create — cache must be cleared (goals are global so every
-     * cached contact is affected). */
+    /* Goal create — cache for this contact must be cleared. P3-1 scopes
+     * goals per-contact, so a goal under u-goal only invalidates u-goal's
+     * snapshot (which is what we cached above). */
     int64_t goal_id = 0;
-    HU_ASSERT_EQ(hu_goal_create(&engine, "ship the prototype", 18, 0.7, 0, 0, 1500, &goal_id),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_goal_create(&engine, "u-goal", 6, "ship the prototype", 18, 0.7, 0, 0, 1500, &goal_id),
+        HU_OK);
     HU_ASSERT_GT(goal_id, 0);
 
     uint64_t loads = 0, hits = 0;
@@ -998,8 +985,7 @@ static void test_w9_residue_add_invalidates_cache(void) {
     HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-resid", 7, 1000LL, &wm1), HU_OK);
 
     int64_t res_id = 0;
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-resid", 7, -0.8, 0.9, 0.1, &res_id),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-resid", 7, -0.8, 0.9, 0.1, &res_id), HU_OK);
 
     uint64_t loads = 0, hits = 0;
     hu_world_model_cache_stats(NULL, &loads, &hits, NULL);
@@ -1057,28 +1043,28 @@ static void test_w9_relations_carry_provenance_into_snapshot(void) {
     open_facade_(&g, &m);
 
     int64_t alice = 0, acme = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-prov", 6, "Alice", 5,
-                                          HU_ENTITY_PERSON, NULL, &alice), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-prov", 6, "Acme", 4,
-                                          HU_ENTITY_ORGANIZATION, NULL, &acme), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-prov", 6, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, "u-prov", 6, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+        HU_OK);
 
     int64_t rid = 0;
     const char *prov = "channel:slack:T123";
-    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(
-                     g, "u-prov", 6, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                     /*event_start*/ 0, /*event_end*/ 0,
-                     /*belief_mean*/ 0.8f, /*belief_variance*/ 0.02f,
-                     /*context*/ NULL, 0, prov, strlen(prov), &rid), HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation_with_belief(g, "u-prov", 6, alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                             /*event_start*/ 0, /*event_end*/ 0,
+                                             /*belief_mean*/ 0.8f, /*belief_variance*/ 0.02f,
+                                             /*context*/ NULL, 0, prov, strlen(prov), &rid),
+        HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-prov", 6, 1735700000000LL, &wm),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-prov", 6, 1735700000000LL, &wm), HU_OK);
     HU_ASSERT(wm->relations_count >= 1);
 
     bool found = false;
     for (size_t i = 0; i < wm->relations_count; i++) {
-        if (wm->relations[i].provenance
-            && strcmp(wm->relations[i].provenance, prov) == 0) {
+        if (wm->relations[i].provenance && strcmp(wm->relations[i].provenance, prov) == 0) {
             found = true;
             HU_ASSERT(wm->relations[i].confidence > 0.79f);
             HU_ASSERT(wm->relations[i].confidence_variance > 0.0f);
@@ -1097,14 +1083,15 @@ static void test_w9_relations_provenance_survives_cache_clone(void) {
     open_facade_(&g, &m);
 
     int64_t a = 0, b = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-clone", 7, "Bob", 3,
-                                          HU_ENTITY_PERSON, NULL, &a), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-clone", 7, "Cafe", 4,
-                                          HU_ENTITY_PLACE, NULL, &b), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-clone", 7, "Bob", 3, HU_ENTITY_PERSON, NULL, &a),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-clone", 7, "Cafe", 4, HU_ENTITY_PLACE, NULL, &b),
+                 HU_OK);
     const char *prov = "import:contacts:vcard";
-    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(
-                     g, "u-clone", 7, a, b, HU_REL_RELATED_TO, 1.0f, 0, 0,
-                     0.6f, 0.05f, NULL, 0, prov, strlen(prov), NULL), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(g, "u-clone", 7, a, b, HU_REL_RELATED_TO,
+                                                      1.0f, 0, 0, 0.6f, 0.05f, NULL, 0, prov,
+                                                      strlen(prov), NULL),
+                 HU_OK);
 
     hu_world_model_t *wm1 = NULL;
     HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-clone", 7, 1000LL, &wm1), HU_OK);
@@ -1130,15 +1117,15 @@ static void test_w9_recent_changes_surfaces_retracted_relation(void) {
     open_facade_(&g, &m);
 
     int64_t a = 0, b = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-ret", 5, "Carol", 5,
-                                          HU_ENTITY_PERSON, NULL, &a), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-ret", 5, "Dawn", 4,
-                                          HU_ENTITY_ORGANIZATION, NULL, &b), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(
-                     g, "u-ret", 5, a, b, HU_REL_WORKS_AT, 1.0f,
-                     /*event_start*/ 1735000000000LL,
-                     /*event_end*/   1735500000000LL,
-                     0.9f, 0.01f, NULL, 0, NULL, 0, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-ret", 5, "Carol", 5, HU_ENTITY_PERSON, NULL, &a),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-ret", 5, "Dawn", 4, HU_ENTITY_ORGANIZATION, NULL, &b),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation_with_belief(g, "u-ret", 5, a, b, HU_REL_WORKS_AT, 1.0f,
+                                                      /*event_start*/ 1735000000000LL,
+                                                      /*event_end*/ 1735500000000LL, 0.9f, 0.01f,
+                                                      NULL, 0, NULL, 0, NULL),
+                 HU_OK);
 
     hu_world_model_t *wm = NULL;
     HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-ret", 5, 1735700000000LL, &wm), HU_OK);
@@ -1252,12 +1239,10 @@ static void test_w9_stance_vector_dominance_low_when_overwhelmed(void) {
     int64_t id = 0;
     /* Negative valence + high arousal → user feels overwhelmed →
      * dominance should be < 0. */
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-vad", 5,
-                                          -0.8, 0.9, 0.05, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-vad", 5, -0.8, 0.9, 0.05, &id), HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-vad", 5,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-vad", 5, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT(wm->stance.valence < -0.4f);
     HU_ASSERT(wm->stance.arousal > 0.85f);
     HU_ASSERT(wm->stance.dominance < 0.0f);
@@ -1279,14 +1264,11 @@ static void test_w9_stance_vector_certainty_drops_when_residues_disagree(void) {
     /* Two residues with opposite valences → variance is max → certainty
      * collapses. The mix is intentionally severe so the test is
      * insensitive to the exact heuristic. */
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-mix", 5,
-                                           0.95, 0.8, 0.05, &id), HU_OK);
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-mix", 5,
-                                          -0.95, 0.8, 0.05, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-mix", 5, 0.95, 0.8, 0.05, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-mix", 5, -0.95, 0.8, 0.05, &id), HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-mix", 5,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-mix", 5, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT(wm->stance.certainty < 0.3f);
 
     hu_world_model_free(A(), wm);
@@ -1304,16 +1286,12 @@ static void test_w9_pressure_recent_anger_count_picks_up_recent_residues(void) {
     ensure_emotional_residue_table_(db);
     /* Three high-intensity strongly-negative residues = three angry turns. */
     int64_t id = 0;
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7,
-                                          -0.9, 0.85, 0.001, &id), HU_OK);
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7,
-                                          -0.85, 0.8, 0.001, &id), HU_OK);
-    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7,
-                                          -0.95, 0.9, 0.001, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7, -0.9, 0.85, 0.001, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7, -0.85, 0.8, 0.001, &id), HU_OK);
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, "u-anger", 7, -0.95, 0.9, 0.001, &id), HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-anger", 7,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-anger", 7, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT(wm->pressure.recent_anger_count >= 3);
     HU_ASSERT(wm->pressure.urgency_score > 0.0f);
 
@@ -1327,8 +1305,7 @@ static void test_w9_pressure_neutral_when_no_residues(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-calm", 6,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-calm", 6, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT_EQ(wm->pressure.recent_anger_count, 0);
     HU_ASSERT_EQ(wm->pressure.sustained_complaint_minutes, 0);
     HU_ASSERT(wm->pressure.urgency_score == 0.0f);
@@ -1345,8 +1322,7 @@ static void test_w9_confidence_history_appends_on_merge_persona(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-spark", 7,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-spark", 7, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT_EQ(wm->tom.confidence_history_count, 0u);
 
     hu_persona_t persona;
@@ -1371,8 +1347,7 @@ static void test_w9_confidence_history_scrolls_when_full(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-scroll", 8,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-scroll", 8, 1735690000000LL, &wm), HU_OK);
 
     hu_persona_t persona;
     hu_persona_overlay_t overlay;
@@ -1385,11 +1360,9 @@ static void test_w9_confidence_history_scrolls_when_full(void) {
     for (size_t i = 0; i < HU_TOM_CONFIDENCE_HISTORY + 4; i++) {
         hu_world_model_merge_persona(wm, &persona, "slack", 5, NULL, 0);
     }
-    HU_ASSERT_EQ(wm->tom.confidence_history_count,
-                 (size_t)HU_TOM_CONFIDENCE_HISTORY);
+    HU_ASSERT_EQ(wm->tom.confidence_history_count, (size_t)HU_TOM_CONFIDENCE_HISTORY);
     /* Latest sample matches current mean. */
-    HU_ASSERT(wm->tom.confidence_history[HU_TOM_CONFIDENCE_HISTORY - 1]
-              == wm->tom.confidence.mean);
+    HU_ASSERT(wm->tom.confidence_history[HU_TOM_CONFIDENCE_HISTORY - 1] == wm->tom.confidence.mean);
 
     hu_world_model_free(A(), wm);
     close_facade_(g, m);
@@ -1403,16 +1376,17 @@ static void test_w9_hyperedges_appear_for_member_entity(void) {
     open_facade_(&g, &m);
 
     int64_t alice = 0, bob = 0, acme = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-he", 4, "Alice", 5,
-                                          HU_ENTITY_PERSON, NULL, &alice), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-he", 4, "Bob", 3,
-                                          HU_ENTITY_PERSON, NULL, &bob), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-he", 4, "Acme", 4,
-                                          HU_ENTITY_ORGANIZATION, NULL, &acme), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-he", 4, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-he", 4, "Bob", 3, HU_ENTITY_PERSON, NULL, &bob),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, "u-he", 4, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+        HU_OK);
     /* Need at least one binary relation so the entity makes it into
      * the top-K snapshot window. */
-    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-he", 4, alice, acme,
-                                            HU_REL_WORKS_AT, 1.0f, NULL, 0), HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation(g, "u-he", 4, alice, acme, HU_REL_WORKS_AT, 1.0f, NULL, 0), HU_OK);
 
     hu_hyperedge_t he;
     memset(&he, 0, sizeof(he));
@@ -1449,12 +1423,12 @@ static void test_w9_hyperedges_survive_cache_clone(void) {
     open_facade_(&g, &m);
 
     int64_t a = 0, b = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-hec", 5, "Alice", 5,
-                                          HU_ENTITY_PERSON, NULL, &a), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-hec", 5, "Acme", 4,
-                                          HU_ENTITY_ORGANIZATION, NULL, &b), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-hec", 5, a, b,
-                                            HU_REL_WORKS_AT, 1.0f, NULL, 0), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-hec", 5, "Alice", 5, HU_ENTITY_PERSON, NULL, &a),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-hec", 5, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &b),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-hec", 5, a, b, HU_REL_WORKS_AT, 1.0f, NULL, 0),
+                 HU_OK);
 
     hu_hyperedge_t he;
     memset(&he, 0, sizeof(he));
@@ -1492,8 +1466,7 @@ static void test_w9_self_model_populated_from_persona(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-self", 6,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-self", 6, 1735690000000LL, &wm), HU_OK);
     HU_ASSERT_EQ(wm->self_model.name[0], '\0');
     HU_ASSERT(wm->self_model.confidence_in_self == 0.0f);
 
@@ -1516,8 +1489,7 @@ static void test_w9_self_model_recent_drift_from_latest_delta(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-drift", 7,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-drift", 7, 1735690000000LL, &wm), HU_OK);
 
     hu_persona_t persona;
     hu_persona_overlay_t overlay;
@@ -1552,8 +1524,7 @@ static void test_w9_media_and_w10_seams_default_zero(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-seam", 6,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-seam", 6, 1735690000000LL, &wm), HU_OK);
 
     /* P5.6 — media context: every field zero/empty by default. */
     HU_ASSERT_EQ(wm->media.contact_photo_path[0], '\0');
@@ -1580,30 +1551,32 @@ static void test_w9_rerank_for_goal_promotes_matching_entities(void) {
      * meeting (1). After re-ranking on "meeting", meeting should
      * surface to position 0 with apple/zebra preserving order. */
     int64_t zebra = 0, apple = 0, meeting = 0, anchor = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5,
-                                          HU_ENTITY_TOPIC, NULL, &zebra), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5,
-                                          HU_ENTITY_TOPIC, NULL, &zebra), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5,
-                                          HU_ENTITY_TOPIC, NULL, &zebra), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "apple", 5,
-                                          HU_ENTITY_TOPIC, NULL, &apple), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "apple", 5,
-                                          HU_ENTITY_TOPIC, NULL, &apple), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "meeting", 7,
-                                          HU_ENTITY_TOPIC, NULL, &meeting), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "anchor", 6,
-                                          HU_ENTITY_PERSON, NULL, &anchor), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-rr", 4, anchor, zebra,
-                                            HU_REL_RELATED_TO, 1.0f, NULL, 0), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-rr", 4, anchor, apple,
-                                            HU_REL_RELATED_TO, 1.0f, NULL, 0), HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-rr", 4, anchor, meeting,
-                                            HU_REL_RELATED_TO, 1.0f, NULL, 0), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5, HU_ENTITY_TOPIC, NULL, &zebra),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5, HU_ENTITY_TOPIC, NULL, &zebra),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "zebra", 5, HU_ENTITY_TOPIC, NULL, &zebra),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "apple", 5, HU_ENTITY_TOPIC, NULL, &apple),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "apple", 5, HU_ENTITY_TOPIC, NULL, &apple),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, "u-rr", 4, "meeting", 7, HU_ENTITY_TOPIC, NULL, &meeting), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-rr", 4, "anchor", 6, HU_ENTITY_PERSON, NULL, &anchor),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation(g, "u-rr", 4, anchor, zebra, HU_REL_RELATED_TO, 1.0f, NULL, 0),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation(g, "u-rr", 4, anchor, apple, HU_REL_RELATED_TO, 1.0f, NULL, 0),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_relation(g, "u-rr", 4, anchor, meeting, HU_REL_RELATED_TO, 1.0f, NULL, 0),
+        HU_OK);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-rr", 4, 1735690000000LL, &wm),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-rr", 4, 1735690000000LL, &wm), HU_OK);
 
     /* Find the meeting entity's pre-rerank position. */
     size_t pre_meeting_pos = SIZE_MAX;
@@ -1615,8 +1588,7 @@ static void test_w9_rerank_for_goal_promotes_matching_entities(void) {
     }
     HU_ASSERT(pre_meeting_pos != SIZE_MAX);
 
-    HU_ASSERT_EQ(hu_world_model_rerank_for_goal(wm, "schedule the meeting Friday",
-                                                  27, A()), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_rerank_for_goal(wm, "schedule the meeting Friday", 27, A()), HU_OK);
 
     /* Post-rerank: meeting must be at index 0. */
     HU_ASSERT_NOT_NULL(wm->entities[0].name);
@@ -1640,8 +1612,8 @@ static void test_w9_rerank_for_goal_no_match_is_noop(void) {
         strncpy(first_before, wm->entities[0].name, sizeof(first_before) - 1);
     }
 
-    HU_ASSERT_EQ(hu_world_model_rerank_for_goal(wm, "totally unrelated tokens here",
-                                                  29, A()), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_rerank_for_goal(wm, "totally unrelated tokens here", 29, A()),
+                 HU_OK);
 
     if (first_before[0]) {
         HU_ASSERT_NOT_NULL(wm->entities[0].name);
@@ -1667,36 +1639,36 @@ static void test_w9_latency_benchmark_load_under_budget(void) {
     /* Seed 32 entities + 32 relations to exercise the realistic
      * snapshot footprint. */
     int64_t anchor = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-perf", 6, "Anchor", 6,
-                                          HU_ENTITY_PERSON, NULL, &anchor), HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, "u-perf", 6, "Anchor", 6, HU_ENTITY_PERSON, NULL, &anchor),
+        HU_OK);
     for (int i = 0; i < 32; i++) {
         char name[32];
         snprintf(name, sizeof(name), "Entity%02d", i);
         int64_t eid = 0;
-        HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u-perf", 6, name, strlen(name),
-                                              HU_ENTITY_TOPIC, NULL, &eid), HU_OK);
-        HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u-perf", 6, anchor, eid,
-                                                HU_REL_RELATED_TO, 1.0f, NULL, 0),
-                     HU_OK);
+        HU_ASSERT_EQ(
+            hu_graph_upsert_entity(g, "u-perf", 6, name, strlen(name), HU_ENTITY_TOPIC, NULL, &eid),
+            HU_OK);
+        HU_ASSERT_EQ(
+            hu_graph_upsert_relation(g, "u-perf", 6, anchor, eid, HU_REL_RELATED_TO, 1.0f, NULL, 0),
+            HU_OK);
     }
 
     hu_world_model_t *wm0 = NULL;
-    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-perf", 6, 1735690000000LL, &wm0),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-perf", 6, 1735690000000LL, &wm0), HU_OK);
     hu_world_model_free(A(), wm0);
 
     struct timespec t0;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     for (int i = 0; i < 200; i++) {
         hu_world_model_t *wm = NULL;
-        HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-perf", 6,
-                                          1735690000000LL + i, &wm), HU_OK);
+        HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-perf", 6, 1735690000000LL + i, &wm), HU_OK);
         hu_world_model_free(A(), wm);
     }
     struct timespec t1;
     clock_gettime(CLOCK_MONOTONIC, &t1);
-    double elapsed_ms = (double)(t1.tv_sec - t0.tv_sec) * 1000.0
-                        + (double)(t1.tv_nsec - t0.tv_nsec) / 1.0e6;
+    double elapsed_ms =
+        (double)(t1.tv_sec - t0.tv_sec) * 1000.0 + (double)(t1.tv_nsec - t0.tv_nsec) / 1.0e6;
     /* 200 loads in < 1 second total = avg < 5 ms / load. CI-safe. */
     HU_ASSERT(elapsed_ms < 1000.0);
 
@@ -1722,8 +1694,7 @@ static void test_w9_ab_negative_memory_changes_planner_signal(void) {
     seed_one_relation_(g, "u-ab");
 
     hu_world_model_t *wm_a = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-ab", 4, 1735690000000LL, &wm_a),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-ab", 4, 1735690000000LL, &wm_a), HU_OK);
     HU_ASSERT_EQ(wm_a->negatives_count, 0u);
     int a_can_not = wm_a->tom.user_expects_we_cannot[0] ? 1 : 0;
     hu_world_model_free(A(), wm_a);
@@ -1748,8 +1719,7 @@ static void test_w9_ab_negative_memory_changes_planner_signal(void) {
     HU_ASSERT_EQ(hu_negative_memory_add_facade(m, "u-ab", 4, &nm, &out_id), HU_OK);
 
     hu_world_model_t *wm_b = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-ab", 4, 1735690000001LL, &wm_b),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-ab", 4, 1735690000001LL, &wm_b), HU_OK);
 
     /* Behavior 1: count rose from 0 → 2. */
     HU_ASSERT(wm_b->negatives_count >= 2);
@@ -1795,8 +1765,7 @@ static void test_w9_invalid_args_rejected(void) {
     char long_cid[80];
     memset(long_cid, 'x', 79);
     long_cid[79] = '\0';
-    HU_ASSERT_EQ(hu_world_model_load(m, A(), long_cid, 79, 0, &wm),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_world_model_load(m, A(), long_cid, 79, 0, &wm), HU_ERR_INVALID_ARGUMENT);
 
     close_facade_(g, m);
 }

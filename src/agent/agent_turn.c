@@ -2142,14 +2142,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 }
             }
 
-            /* Goals: active goals context */
+            /* Goals: active goals context — P3-1 scopes per-contact via memory_session_id. */
             {
                 hu_goal_engine_t ge;
                 if (hu_goal_engine_create(agent->alloc, intel_db, &ge) == HU_OK) {
                     char *gctx = NULL;
                     size_t gctx_len = 0;
-                    if (hu_goal_build_context(&ge, &gctx, &gctx_len) == HU_OK && gctx &&
-                        gctx_len > 0) {
+                    const char *goal_cid = agent->memory_session_id ? agent->memory_session_id : "";
+                    size_t goal_cid_len =
+                        agent->memory_session_id ? agent->memory_session_id_len : 0;
+                    if (hu_goal_build_context(&ge, goal_cid, goal_cid_len, &gctx, &gctx_len) ==
+                            HU_OK &&
+                        gctx && gctx_len > 0) {
                         int n = snprintf(parts + pos, sizeof(parts) - pos, "### %.*s\n",
                                          (int)gctx_len, gctx);
                         if (n > 0 && pos + (size_t)n < sizeof(parts))
@@ -6305,22 +6309,30 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 }
             }
 #ifdef HU_ENABLE_SQLITE
-            /* Goal progress: advance active goals based on turn output */
+            /* Goal progress: advance active goals based on turn output. P3-1
+             * scopes per-contact using memory_session_id. */
             if (agent->memory) {
                 sqlite3 *goal_db = hu_sqlite_memory_get_db(agent->memory);
                 if (goal_db) {
                     hu_goal_engine_t ge;
                     if (hu_goal_engine_create(agent->alloc, goal_db, &ge) == HU_OK) {
+                        const char *goal_cid =
+                            agent->memory_session_id ? agent->memory_session_id : "";
+                        size_t goal_cid_len =
+                            agent->memory_session_id ? agent->memory_session_id_len : 0;
                         hu_goal_t active_goal;
                         bool gfound = false;
-                        if (hu_goal_select_next(&ge, &active_goal, &gfound) == HU_OK && gfound) {
+                        if (hu_goal_select_next(&ge, goal_cid, goal_cid_len, &active_goal,
+                                                &gfound) == HU_OK &&
+                            gfound) {
                             double pdelta = (turn_tool_results_count > 0)
                                                 ? 0.15 + 0.05 * (double)turn_tool_results_count
                                                 : 0.1;
                             double nprog = active_goal.progress + pdelta;
                             if (nprog > 1.0)
                                 nprog = 1.0;
-                            (void)hu_goal_update_progress(&ge, active_goal.id, nprog,
+                            (void)hu_goal_update_progress(&ge, goal_cid, goal_cid_len,
+                                                          active_goal.id, nprog,
                                                           (int64_t)time(NULL));
                         }
                         hu_goal_engine_deinit(&ge);
