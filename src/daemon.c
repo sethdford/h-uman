@@ -9357,6 +9357,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 agent->conversation_context = convo_ctx;
                                 agent->conversation_context_len = convo_ctx_len;
                             }
+                            /* Sprint 34: tell the response_guard what the director
+                             * said, so any verbatim quote in the model's reply
+                             * triggers G6 → REJECT. The buffer
+                             * `director_result.direction` is stack-resident in
+                             * this scope — we clear scene_direction_text on the
+                             * agent before returning to the daemon main loop
+                             * (see clear-on-exit below). */
+                            agent->scene_direction_text = director_result.direction;
+                            agent->scene_direction_text_len = dn_len;
                         }
 
                         size_t saved_tools = 0;
@@ -9379,6 +9388,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             agent->tools_count = saved_tools;
                             agent->tool_specs_count = saved_specs;
                         }
+                        /* Sprint 34: clear scene-direction pointer on the agent
+                         * before director_result goes out of scope. Without
+                         * this, a subsequent turn could read freed/stale
+                         * stack memory through hu_guard_context_t.director_text. */
+                        agent->scene_direction_text = NULL;
+                        agent->scene_direction_text_len = 0;
                     }
                     daemon_out_bus_bridge.active_turn = NULL;
                     hu_log_info("human", agent ? agent->observer : NULL,

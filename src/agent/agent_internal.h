@@ -36,6 +36,20 @@ void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *us
  */
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
 
+/* Set / clear the active scene-direction text for the next turn. The
+ * daemon owns the buffer (typically `hu_director_result_t.direction[512]`);
+ * the agent only borrows a const pointer + length. Setter is a plain
+ * field assignment — no allocation, no copy. Clear must be called when
+ * the daemon's director_result goes out of scope, otherwise the guard
+ * could read freed memory on the next turn.
+ *
+ * Used by the response_guard call sites to populate
+ * `hu_guard_context_t.director_text` so a verbatim quote of "casual
+ * short, dry" by the model triggers G6 → REJECT. (Sprint 34 — wires
+ * Sprint 31's G6 into production.) */
+void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len);
+void hu_agent_internal_clear_scene_direction(hu_agent_t *agent);
+
 hu_error_t hu_agent_internal_ensure_history_cap(hu_agent_t *agent, size_t need);
 hu_error_t hu_agent_internal_append_history(hu_agent_t *agent, hu_role_t role, const char *content,
                                             size_t content_len, const char *name, size_t name_len,

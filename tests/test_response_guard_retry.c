@@ -221,9 +221,232 @@ static void stream_guard_buffers_raw_output_until_retry_passes(void) {
     hu_agent_deinit(&agent);
 }
 
+/* ── Sprint 34 — end-to-end G5 (length anomaly) + G6 (director echo) ──
+ *
+ * These exercise the production wiring that lives in agent_stream.c
+ * and agent_turn.c (Sprint 33 added recent_avg_len, Sprint 34 added
+ * scene_direction_text). Each test runs a real agent turn through a
+ * mock provider and asserts the agent surfaces a clean reply, not the
+ * leaky one — proof the guard fires at runtime, not just in unit tests. */
+
+typedef struct {
+    int calls;
+    /* Per-call text. NULL = use defaults below. */
+    const char *call_text[8];
+    size_t call_text_len[8];
+} length_provider_ctx_t;
+
+static const char *length_provider_name(void *ctx) {
+    (void)ctx;
+    return "length_anomaly_mock";
+}
+
+static bool length_provider_supports_native_tools(void *ctx) {
+    (void)ctx;
+    return false;
+}
+
+static bool length_provider_supports_streaming(void *ctx) {
+    (void)ctx;
+    return false;
+}
+
+static void length_provider_deinit(void *ctx, hu_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+}
+
+static hu_error_t length_provider_chat(void *ctx, hu_allocator_t *alloc,
+                                       const hu_chat_request_t *request, const char *model,
+                                       size_t model_len, double temperature,
+                                       hu_chat_response_t *out) {
+    (void)request;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    length_provider_ctx_t *r = (length_provider_ctx_t *)ctx;
+    int idx = r->calls;
+    if (idx < 0 || idx >= 8 || !r->call_text[idx]) {
+        out->content = hu_strndup(alloc, "ok", 2);
+        out->content_len = out->content ? 2 : 0;
+    } else {
+        out->content = hu_strndup(alloc, r->call_text[idx], r->call_text_len[idx]);
+        out->content_len = out->content ? r->call_text_len[idx] : 0;
+    }
+    r->calls++;
+    out->tool_calls = NULL;
+    out->tool_calls_count = 0;
+    out->reasoning_content = NULL;
+    out->reasoning_content_len = 0;
+    return out->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+}
+
+static const hu_provider_vtable_t length_provider_vtable = {
+    .chat = length_provider_chat,
+    .supports_native_tools = length_provider_supports_native_tools,
+    .get_name = length_provider_name,
+    .deinit = length_provider_deinit,
+    .supports_streaming = length_provider_supports_streaming,
+    .stream_chat = NULL,
+};
+
+static hu_provider_t length_provider_create(length_provider_ctx_t *ctx) {
+    return (hu_provider_t){.ctx = ctx, .vtable = &length_provider_vtable};
+}
+
+/* G5 — length anomaly through agent_turn.
+ *
+ * Seeds the agent's history with two short replies (~25 bytes each),
+ * then a third response that is 1500 bytes of *varied* prose (trips
+ * neither degenerate repetition nor any semantic marker). The wired
+ * Sprint 33 helper computes recent_avg_len ≈ 25; G5 fires at 8×; the
+ * 1500-byte response is REJECTed and the retry returns a normal reply. */
+static void agent_g5_length_anomaly_rejects_and_retries(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    /* Build a benign 1500-byte reply with varied content (mirrors the
+     * fixture pattern in test_response_guard.c: long enough to trip G5
+     * but varied enough not to trip Phase 2 / Phase 3). */
+    static char long_reply[1600];
+    static const char phrase[] =
+        "Sure thing, that all sounds reasonable to me right now. "
+        "Maybe we can grab coffee tomorrow if you have free time then. ";
+    size_t plen = sizeof(phrase) - 1;
+    size_t target = 1500;
+    size_t i = 0;
+    while (i + plen < target) {
+        memcpy(long_reply + i, phrase, plen);
+        i += plen;
+    }
+    long_reply[i] = '\0';
+    size_t long_len = i;
+
+    static const char short1[] = "yeah, sounds good lol";       /* 21 */
+    static const char short2[] = "hahaha ok, fair enough";      /* 22 */
+    static const char retry_ok[] = "ok cool, sounds good";      /* 20 */
+    pctx.call_text[0] = short1;
+    pctx.call_text_len[0] = sizeof(short1) - 1;
+    pctx.call_text[1] = short2;
+    pctx.call_text_len[1] = sizeof(short2) - 1;
+    pctx.call_text[2] = long_reply;
+    pctx.call_text_len[2] = long_len;
+    /* Call 3 is the slim retry triggered by the REJECT. */
+    pctx.call_text[3] = retry_ok;
+    pctx.call_text_len[3] = sizeof(retry_ok) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "length_anomaly_mock", 19, 0.7,
+                                          "/tmp", 4, 5, 50, false, 3, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+
+    /* Turn 1: short reply, history empty → recent_avg = 0, no G5. */
+    char *r1 = NULL;
+    size_t r1_len = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "hey", 3, &r1, &r1_len), HU_OK);
+    HU_ASSERT_EQ(r1_len, sizeof(short1) - 1);
+    alloc.free(alloc.ctx, r1, r1_len + 1);
+
+    /* Turn 2: short reply, history has 1 entry → recent_avg = 21,
+     * 22 bytes is well within tolerance, no G5. */
+    char *r2 = NULL;
+    size_t r2_len = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "hi", 2, &r2, &r2_len), HU_OK);
+    HU_ASSERT_EQ(r2_len, sizeof(short2) - 1);
+    alloc.free(alloc.ctx, r2, r2_len + 1);
+
+    /* Turn 3: provider returns 1500 bytes. recent_avg ≈ 21 → ratio
+     * ~71×, trips G5 at the 8× threshold. Guard REJECTs, slim retry
+     * fires (call #4 in the provider), agent surfaces the retry text. */
+    char *r3 = NULL;
+    size_t r3_len = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "what's up", 9, &r3, &r3_len), HU_OK);
+    /* Provider was called at least 4 times — original + slim retry. */
+    HU_ASSERT(pctx.calls >= 4);
+    /* Final response must NOT be the 1500-byte dump. */
+    HU_ASSERT(r3_len < 200);
+    /* Retry path returned the clean text. */
+    HU_ASSERT_NOT_NULL(r3);
+    alloc.free(alloc.ctx, r3, r3_len + 1);
+
+    hu_agent_deinit(&agent);
+}
+
+/* G6 — director-string echo through agent_turn.
+ *
+ * Sets the agent's scene_direction_text to the same string the mock
+ * provider verbatim-quotes back. The wiring (Sprint 34) propagates
+ * this into hu_guard_context_t.director_text; the response_guard
+ * matches the >=30-byte verbatim run and REJECTs. The slim retry
+ * returns a clean reply.
+ *
+ * Pattern reproduces the 2026-05-12 leak signature where the model
+ * echoed "per scene direction" + the rest of the scene-direction
+ * paragraph back to a real human contact. */
+static void agent_g6_director_echo_rejects_and_retries(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    static const char director[] =
+        "Slightly skeptical but intrigued, acknowledge the observation about the AI";
+    /* Mock first reply: model leaks the director text verbatim back
+     * (>= 30 bytes). Guard's G6 must REJECT this. */
+    static char leaked[256];
+    int n = snprintf(leaked, sizeof(leaked),
+                     "got it - %s. yeah lol", director);
+    HU_ASSERT(n > 0 && (size_t)n < sizeof(leaked));
+    static const char retry_ok[] = "got it lol";
+    pctx.call_text[0] = leaked;
+    pctx.call_text_len[0] = (size_t)n;
+    /* Slim retry returns a clean reply with no director quote. */
+    pctx.call_text[1] = retry_ok;
+    pctx.call_text_len[1] = sizeof(retry_ok) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "length_anomaly_mock", 19, 0.7,
+                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+    /* Mirror the daemon-side wire: scene_direction_text is set before
+     * the turn, cleared after. Here we just set it; deinit will not
+     * free the static string. */
+    agent.scene_direction_text = director;
+    agent.scene_direction_text_len = sizeof(director) - 1;
+
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "interesting", 11, &r, &rlen), HU_OK);
+
+    /* The leaked content must NOT be in the surfaced reply. */
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT(strstr(r, director) == NULL);
+    /* Provider was called at least twice — original + retry. */
+    HU_ASSERT(pctx.calls >= 2);
+
+    /* Mirror the daemon clear-on-exit. */
+    agent.scene_direction_text = NULL;
+    agent.scene_direction_text_len = 0;
+
+    alloc.free(alloc.ctx, r, rlen + 1);
+    hu_agent_deinit(&agent);
+}
+
 void run_response_guard_retry_tests(void) {
     HU_TEST_SUITE("Response Guard Retry");
     HU_RUN_TEST(guard_reject_retry_produces_human_like_replacement);
     HU_RUN_TEST(stream_guard_reject_retry_produces_human_like_replacement);
     HU_RUN_TEST(stream_guard_buffers_raw_output_until_retry_passes);
+
+    /* Sprint 34 — end-to-end wired G5 + G6 through hu_agent_turn. */
+    HU_RUN_TEST(agent_g5_length_anomaly_rejects_and_retries);
+    HU_RUN_TEST(agent_g6_director_echo_rejects_and_retries);
 }

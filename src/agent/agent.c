@@ -200,6 +200,25 @@ void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *us
     }
 }
 
+void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len) {
+    if (!agent)
+        return;
+    if (!text || text_len == 0) {
+        agent->scene_direction_text = NULL;
+        agent->scene_direction_text_len = 0;
+        return;
+    }
+    agent->scene_direction_text = text;
+    agent->scene_direction_text_len = text_len;
+}
+
+void hu_agent_internal_clear_scene_direction(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    agent->scene_direction_text = NULL;
+    agent->scene_direction_text_len = 0;
+}
+
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n) {
     if (!agent || !agent->history || agent->history_count == 0 || max_n == 0)
         return 0;

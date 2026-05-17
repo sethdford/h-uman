@@ -232,6 +232,14 @@ struct hu_agent {
     size_t contact_context_len;
     const char *conversation_context;
     size_t conversation_context_len;
+    /* Active scene-direction text for this turn (e.g. "casual short, dry").
+     * Set by the daemon before hu_agent_turn / hu_agent_turn_stream_v2; not
+     * owned by the agent. The response_guard uses this as
+     * `hu_guard_context_t.director_text` to reject any verbatim quote of
+     * the directive in the model's reply (G6, Sprint 31).
+     * NULL / 0 = no signal — guard does not enforce G6 for this turn. */
+    const char *scene_direction_text;
+    size_t scene_direction_text_len;
     uint32_t max_response_chars;
 
     /* Per-turn model override (set by daemon/CLI, not owned; NULL = use default) */

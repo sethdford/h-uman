@@ -1401,6 +1401,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 memset(&guard_ctx, 0, sizeof(guard_ctx));
                 guard_ctx.recent_avg_len =
                     hu_agent_internal_recent_assistant_avg_len(agent, 5);
+                guard_ctx.director_text = agent->scene_direction_text;
+                guard_ctx.director_len = agent->scene_direction_text_len;
                 hu_error_t guard_err = hu_response_guard_check_ex(
                     agent->alloc, sresp.content, sresp.content_len, &guard_ctx, &guard_out,
                     &guard_out_len, &guard_outcome, &guard_report);
@@ -2141,6 +2143,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             memset(&guard_ctx, 0, sizeof(guard_ctx));
             guard_ctx.recent_avg_len =
                 hu_agent_internal_recent_assistant_avg_len(agent, 5);
+            guard_ctx.director_text = agent->scene_direction_text;
+            guard_ctx.director_len = agent->scene_direction_text_len;
             hu_error_t guard_err = hu_response_guard_check_ex(
                 agent->alloc, final_content, final_content_len, &guard_ctx, &guard_out,
                 &guard_out_len, &guard_outcome, &guard_report);
