@@ -701,7 +701,7 @@ export class ScApp extends LitElement {
         // hiccup, missing chunk) still settles the readiness promise —
         // otherwise the E2E test's `await window.__huReady` hangs to
         // Playwright timeout with a cryptic message instead of failing
-        // fast on the real cause (Cursor Bugbot #f161a0bc).
+        // fast on the real cause (Cursor Bugbot bug f161a0bc).
         Promise.all([
           import("./components/floating-mic.js"),
           import("./components/command-palette.js"),

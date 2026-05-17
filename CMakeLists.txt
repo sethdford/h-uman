@@ -3585,6 +3585,16 @@ target_compile_options(human_core PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wfo
 target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror)
 target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
 
+# src/onboard.c embeds hu_starter_persona_json — a 5275-char JSON literal
+# (starter persona w/ Tier-1 channel overlays + example banks). GCC's
+# -Wpedantic enforces C99's 4095-char string limit by default, and
+# -Werror upgrades that warning to a hard error. Suppress only the
+# overlength-strings diagnostic for this TU — every other -Wpedantic
+# check still applies. The alternative (split into many concatenated
+# fragments) hurts readability and risks subtle string-adjacency bugs.
+set_source_files_properties(src/onboard.c PROPERTIES
+    COMPILE_FLAGS "-Wno-overlength-strings")
+
 # Synthetic pressure tests (requires libcurl for real HTTP)
 option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)
 if(HU_ENABLE_SYNTHETIC)
