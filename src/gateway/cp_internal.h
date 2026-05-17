@@ -115,6 +115,11 @@ hu_error_t cp_admin_metrics_directive_telemetry(hu_allocator_t *alloc, hu_app_co
                                                 const hu_control_protocol_t *proto,
                                                 const hu_json_value_t *root, char **out,
                                                 size_t *out_len);
+/* Sprint 39/41 — cumulative response_guard REJECT counts for dashboards. */
+hu_error_t cp_admin_metrics_guard_rejects(hu_allocator_t *alloc, hu_app_context_t *app,
+                                          hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                          const hu_json_value_t *root, char **out,
+                                          size_t *out_len);
 hu_error_t cp_admin_activity_recent(hu_allocator_t *alloc, hu_app_context_t *app,
                                     hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
                                     const hu_json_value_t *root, char **out, size_t *out_len);

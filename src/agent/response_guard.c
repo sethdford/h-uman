@@ -31,9 +31,13 @@
 #include "human/agent/response_guard.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
+#include "human/observer.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 /* Calibrated thresholds — tuned against the production failure (200x `\" `,
@@ -54,6 +58,46 @@
  * (≥ 9 chars) bypass this check; collisions there are extraordinarily
  * unlikely to be degenerate model output anyway. */
 #define HU_GUARD_TOKEN_LEN_MAX 8
+
+/* Sprint 29 — numbered analytical-list dump detector thresholds.
+ *
+ * Calibrated against the 2026-05-12 leak (5 items, content lengths
+ * 32 / 32 / 52 / 72 / 45 chars) and against legitimate short numbered
+ * lists ("1. coffee\n2. lunch\n3. dinner" — items 6, 5, 6 chars).
+ *
+ * `LONG_THRESHOLD = 30` cleanly separates the two: every leak item is
+ * >= 32 chars; every legit short-list item is <= 12 chars.
+ *
+ * `MIN_ITEMS = 3` is the smallest count that distinguishes a real
+ * structured analytical dump from a one-off "as I said in (1) ..."
+ * casual mention. */
+#define HU_GUARD_NUMBERED_LONG_THRESHOLD 30
+#define HU_GUARD_NUMBERED_MIN_ITEMS      3
+
+/* Sprint 31 — context-aware detection thresholds.
+ *
+ * Length anomaly multiplier. Calibrated against the 2026-05-12 Brea
+ * leak (979 char response vs 44 char rolling avg = 22x). A
+ * "long-but-legit" reply (story telling, link with explanation,
+ * detailed answer) is typically 3-5x the rolling avg. 8x is the safe
+ * midpoint that catches the leak with margin.
+ *
+ * Director echo minimum match length. The leak quoted 64 verbatim
+ * chars from the director string. 30 chars is shorter than that (so
+ * we catch it) and longer than incidental phrase matches like
+ * "I think we should" that happen to appear in both director and
+ * reply for normal reasons. */
+#define HU_GUARD_LENGTH_ANOMALY_MULT          HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT
+#define HU_GUARD_DIRECTOR_ECHO_MIN_MATCH      30
+
+/* Persona identity echo minimum match length. Persona identity strings
+ * are typically 30-60 chars ("Chief Architect at Pure Health Solutions"
+ * = 40, "51-year-old technical professional, lives alone with a cat" =
+ * 58). 25 chars is below typical identity length (catches verbatim
+ * quotes) and above common-phrase floor ("thanks for the message" = 22)
+ * to avoid incidental overlap. Calibrated against the 2026-05-12 audit:
+ * every identity-class leak quoted ≥ 30 contiguous chars. */
+#define HU_GUARD_PERSONA_IDENTITY_MIN_MATCH    25
 
 /* Documented surface (handled by the catch-all <|...|> stripper, listed
  * here so future maintainers know what model formats we cover):
@@ -177,6 +221,593 @@ size_t hu_response_guard_longest_token_run(const char *s, size_t len) {
         }
     }
     return best;
+}
+
+/* ── Sprint 29: semantic leak detectors (CoT / prompt-context dumps) ───
+ *
+ * Three failure classes that Phase 0/1/2 cannot catch because they have
+ * no markup signature and no repetition signature. They are all variants
+ * of "the model dumped its internal reasoning verbatim into the reply."
+ * Caught from a real production leak on 2026-05-12 to a real human
+ * contact via the live service-loop daemon. See docs/postmortems/. */
+
+/* Case-insensitive substring search. Returns true if `needle[0..nlen)`
+ * occurs anywhere in `hay[0..hlen)`. ASCII-only; we do not normalize
+ * unicode case here because every leak signature we match against is
+ * pure ASCII. */
+static bool hu_guard_ci_contains(const char *hay, size_t hlen, const char *needle, size_t nlen) {
+    if (nlen == 0)
+        return true;
+    if (hlen < nlen)
+        return false;
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        bool match = true;
+        for (size_t k = 0; k < nlen; k++) {
+            char a = hay[i + k];
+            char b = needle[k];
+            if (a >= 'A' && a <= 'Z')
+                a = (char)(a + 32);
+            if (b >= 'A' && b <= 'Z')
+                b = (char)(b + 32);
+            if (a != b) {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+            return true;
+    }
+    return false;
+}
+
+/* G1 — numbered analytical-list dump.
+ *
+ * Returns true if `s[0..len)` contains ≥ HU_GUARD_NUMBERED_MIN_ITEMS
+ * numbered list items (each on its own line, leading-whitespace tolerant)
+ * where each qualifying item has content length ≥
+ * HU_GUARD_NUMBERED_LONG_THRESHOLD chars.
+ *
+ * Shape recognized:    `<line-start>[ \t]*\d+[.)] [ \t]*CONTENT<\n>`
+ *
+ * Calibrated: legitimate short lists ("1. coffee\n2. lunch\n3. dinner")
+ * have content lengths 6/5/6 chars — well below the 30-char threshold.
+ * The 2026-05-12 leak items were 32/32/52/72/45 chars — well above. */
+static bool hu_guard_has_numbered_analysis_dump(const char *s, size_t len) {
+    if (len < 8)
+        return false;
+    int long_items = 0;
+    size_t pos = 0;
+    while (pos < len) {
+        /* Walk to the next line start unless we're already at one. */
+        if (pos > 0 && s[pos - 1] != '\n') {
+            const char *nl = (const char *)memchr(s + pos, '\n', len - pos);
+            if (!nl)
+                break;
+            pos = (size_t)(nl - s) + 1;
+            if (pos >= len)
+                break;
+        }
+        /* At a line start. Skip leading whitespace. */
+        while (pos < len && (s[pos] == ' ' || s[pos] == '\t'))
+            pos++;
+        if (pos >= len)
+            break;
+        size_t scan = pos;
+        /* Need 1+ digit. */
+        if (!(s[scan] >= '0' && s[scan] <= '9')) {
+            const char *nl = (const char *)memchr(s + pos, '\n', len - pos);
+            if (!nl)
+                break;
+            pos = (size_t)(nl - s) + 1;
+            continue;
+        }
+        while (scan < len && s[scan] >= '0' && s[scan] <= '9')
+            scan++;
+        /* Followed by `.` or `)`. */
+        if (scan >= len || (s[scan] != '.' && s[scan] != ')')) {
+            const char *nl = (const char *)memchr(s + pos, '\n', len - pos);
+            if (!nl)
+                break;
+            pos = (size_t)(nl - s) + 1;
+            continue;
+        }
+        scan++;
+        /* Followed by 1+ whitespace (space or tab). */
+        if (scan >= len || (s[scan] != ' ' && s[scan] != '\t')) {
+            const char *nl = (const char *)memchr(s + pos, '\n', len - pos);
+            if (!nl)
+                break;
+            pos = (size_t)(nl - s) + 1;
+            continue;
+        }
+        while (scan < len && (s[scan] == ' ' || s[scan] == '\t'))
+            scan++;
+        /* `scan` is now at the content start. Measure to end-of-line. */
+        const char *nl = (const char *)memchr(s + scan, '\n', len - scan);
+        size_t content_end = nl ? (size_t)(nl - s) : len;
+        size_t content_len = content_end - scan;
+        if (content_len >= HU_GUARD_NUMBERED_LONG_THRESHOLD) {
+            long_items++;
+            if (long_items >= HU_GUARD_NUMBERED_MIN_ITEMS)
+                return true;
+        }
+        pos = nl ? content_end + 1 : len;
+    }
+    return false;
+}
+
+/* G2 + G4 — model self-talk + prompt-template label leak.
+ *
+ * These patterns have no legitimate human-to-human reply use case. A
+ * single hit is a hard reject. Two classes:
+ *
+ *   G2 (Sprint 29) — model self-talk / scene-direction echo. All six
+ *   were present in the 2026-05-12 17:04:37 Brea leak (rowid 56354).
+ *   None can plausibly appear in a normal text message to a friend.
+ *
+ *   G4 (Sprint 30) — prompt-template label leak. Found in chat.db
+ *   audit after Sprint 29 closed. Two May-11 leaks (rowid 56055,
+ *   56065) to a third contact dumped the literal prompt template
+ *   (User:/Context:/Persona:/Scene Direction:/Rules:/Constraints:)
+ *   plus candidate response drafts to the recipient. These do not
+ *   trip G1 (no numbered list), G2 (no self-talk substrings), or G3
+ *   (only one third-person hit). G4 catches them on the literal
+ *   template-label substrings.
+ *
+ * Both classes are merged into a single substring table since the
+ * detection logic is identical (case-insensitive contains → REJECT). */
+static bool hu_guard_has_self_talk_pattern(const char *s, size_t len) {
+    static const struct {
+        const char *pat;
+        size_t pat_len;
+    } patterns[] = {
+        /* G2 (Sprint 29) — model self-talk. */
+        {"the prompt says", 15},
+        {"wait, the prompt", 16},
+        {"i should still maintain", 23},
+        {"(per scene direction", 20},
+        {"per the scene direction", 23},
+        {"the user is bombarding", 22},
+        /* G4 (Sprint 30) — prompt-template labels. Each is a verbatim
+         * substring from one of the 4 audit-discovered leaks. The
+         * `\n` prefix on most ensures we match line-prefix style
+         * (mid-sentence "the persona: warm" wouldn't trip on the
+         * leading-newline form). */
+        {"\nPersona:", 9},
+        {" Persona:", 9},
+        {"\nScene Direction:", 17},
+        {" Scene Direction:", 17},
+        {"\nUser: \"", 8},
+        {" User: \"", 8},
+        {"\nRules: All lowercase", 21},
+        {" Rules: All lowercase", 21},
+        {"\nConstraints: All lowercase", 27},
+        {" Constraints: All lowercase", 27},
+        {"\nSystem prompt:", 15},
+        {" System prompt:", 15},
+        /* NOTE: we do NOT hardcode the persona's name / title / age
+         * here even though they appeared verbatim in the audit leaks.
+         * Hardcoding PII into open-source guard code is a leak in
+         * its own right, and the structural template-label patterns
+         * above already match every audit leak 4+ times. A future
+         * sprint should make this dynamic by reading the loaded
+         * persona's biographical fields and rejecting any response
+         * that quotes them verbatim — that generalizes to every
+         * user's deployment without baking specific names into
+         * source control. */
+    };
+    const size_t n = sizeof(patterns) / sizeof(patterns[0]);
+    for (size_t i = 0; i < n; i++) {
+        if (hu_guard_ci_contains(s, len, patterns[i].pat, patterns[i].pat_len))
+            return true;
+    }
+    return false;
+}
+
+/* G3 — third-person-about-the-user pattern counter.
+ *
+ * Returns the number of distinct third-person profile signals found.
+ * Single hits are ambiguous (a real reply might say "He's coming over").
+ * Two or more distinct signals is structural — that's a profile dump,
+ * not a casual reference.
+ *
+ * Each pattern is counted at most once even if it appears multiple
+ * times; we want pattern *diversity* as the signal. */
+static int hu_guard_count_third_person_patterns(const char *s, size_t len) {
+    static const char *const patterns[] = {
+        " is a technical professional",
+        " is a software engineer",
+        " is a chief architect",
+        " is a data scientist",
+        " is a product manager",
+        " is a senior engineer",
+        " is a senior software",
+        " is a software developer",
+        " is a machine learning",
+        "he's talking to ",
+        "she's talking to ",
+        "they're talking to ",
+        " lives alone with",
+        " lives with his ",
+        " lives with her ",
+        "(romantic interest",
+        "(early stage relationship",
+        "early stage)",
+    };
+    const size_t n = sizeof(patterns) / sizeof(patterns[0]);
+    int hits = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (hu_guard_ci_contains(s, len, patterns[i], strlen(patterns[i])))
+            hits++;
+    }
+    /* Bonus rule: "<Capitalized-Name> just \"" — proper-name self-narration
+     * with a quoted action. From the leak: `Seth just "glitched"`. We do
+     * a single pass: find `just "` (5 chars + the quote), walk back to
+     * the previous word boundary, check the word starts with an
+     * uppercase letter. Counts at most once. */
+    if (len >= 7) {
+        for (size_t i = 0; i + 5 < len; i++) {
+            if (s[i] == 'j' && s[i + 1] == 'u' && s[i + 2] == 's' && s[i + 3] == 't' &&
+                s[i + 4] == ' ' && s[i + 5] == '"') {
+                if (i == 0)
+                    continue;
+                /* Walk back to find start of prior word. */
+                size_t end = i - 1;
+                while (end > 0 && (s[end] == ' ' || s[end] == '\t'))
+                    end--;
+                if (end == 0 && (s[end] == ' ' || s[end] == '\t'))
+                    continue;
+                size_t start = end;
+                while (start > 0 && s[start - 1] != ' ' && s[start - 1] != '\n' &&
+                       s[start - 1] != '\t')
+                    start--;
+                if (start <= end && s[start] >= 'A' && s[start] <= 'Z') {
+                    hits++;
+                    break;
+                }
+            }
+        }
+    }
+    return hits;
+}
+
+/* G5 — length anomaly. Returns true if `response_len` exceeds
+ * `ctx->recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT`. A NULL ctx or
+ * `recent_avg_len == 0` disables the check (returns false). */
+static bool guard_channel_prefix_ci(const char *ch, size_t ch_len, const char *prefix) {
+    size_t plen = strlen(prefix);
+    if (ch_len < plen)
+        return false;
+    for (size_t i = 0; i < plen; i++) {
+        char a = ch[i];
+        char b = prefix[i];
+        if (a >= 'A' && a <= 'Z')
+            a = (char)(a + 32);
+        if (b >= 'A' && b <= 'Z')
+            b = (char)(b + 32);
+        if (a != b)
+            return false;
+    }
+    /* "imessage:thread-7" or "cli" exact. */
+    return ch_len == plen || ch[plen] == ':' || ch[plen] == '_';
+}
+
+unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t channel_len) {
+    static const char *compact[] = {"imessage", "cli", "sms", NULL};
+    if (!channel || channel_len == 0)
+        return HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
+    for (size_t k = 0; compact[k]; k++) {
+        if (guard_channel_prefix_ci(channel, channel_len, compact[k]))
+            return HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT;
+    }
+    return HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
+}
+
+static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t response_len) {
+    if (!ctx || ctx->recent_avg_len == 0)
+        return false;
+    unsigned mult = ctx->length_anomaly_mult;
+    if (mult == 0)
+        mult = HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
+    return response_len > ctx->recent_avg_len * (size_t)mult;
+}
+
+/* Helper — slide a 30-char window over `src[0..src_len)` and return
+ * true if any window appears verbatim (case-insensitively) in
+ * `s[0..len)`. Skips when src is NULL/short or response is short. */
+static bool hu_guard_director_window_matches(const char *src, size_t src_len, const char *s,
+                                              size_t len) {
+    if (!src || src_len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
+        return false;
+    if (len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
+        return false;
+    size_t window = (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH;
+    for (size_t i = 0; i + window <= src_len; i++) {
+        if (hu_guard_ci_contains(s, len, src + i, window))
+            return true;
+    }
+    return false;
+}
+
+/* G6 — director-string echo. Returns true if any 30-char substring of
+ * `ctx->director_text` (current turn) OR any entry in
+ * `ctx->director_history[]` (past turns, most-recent-first) appears
+ * verbatim (case-insensitively) in `s[0..len)`. NULL ctx disables the
+ * check entirely. Per-source skip rules:
+ *
+ *   - current `director_text` skipped if NULL or director_len < 30.
+ *   - history slot skipped if its entry is NULL or its length < 30.
+ *
+ * Returns on first match (any source), so cost is bounded by
+ * HU_DIRECTOR_HISTORY_MAX + 1 sliding-window scans. */
+static bool hu_guard_has_director_echo(const hu_guard_context_t *ctx, const char *s, size_t len) {
+    if (!ctx)
+        return false;
+    /* Current-turn director (Sprint 31 baseline). */
+    if (hu_guard_director_window_matches(ctx->director_text, ctx->director_len, s, len))
+        return true;
+    /* Cross-turn history (Sprint 37). */
+    if (ctx->director_history && ctx->director_history_lens && ctx->director_history_count > 0) {
+        for (size_t i = 0; i < ctx->director_history_count; i++) {
+            if (hu_guard_director_window_matches(ctx->director_history[i],
+                                                  ctx->director_history_lens[i], s, len))
+                return true;
+        }
+    }
+    return false;
+}
+
+/* G7 — persona-PII echo. Returns true if `ctx->persona_name` appears
+ * verbatim (case-insensitively) in `s[0..len)` followed within
+ * HU_GUARD_PERSONA_LOOKAHEAD bytes by a third-person profile
+ * construct: " is ", " was ", " has ", " lives ", " works ", " said ",
+ * " would ", or possessive "'s ".
+ *
+ * Word-boundary aware: the name must be preceded by start-of-string or
+ * a non-letter character. Without this, "Bethseth" would match "Seth"
+ * and a model writing "ethel said" would trip on "Eth" as a name.
+ *
+ * NULL ctx, NULL persona_name, persona_name_len < 2 or > 64, or empty
+ * response disable the check. */
+/* Sprint 39 — widened from 30→60 to catch "Seth, 51, is a Chief Architect"
+ * style parentheticals between name and third-person verb (audit rowid 56055). */
+#define HU_GUARD_PERSONA_LOOKAHEAD 60
+
+static bool hu_guard_persona_pii_construct_at(const char *s, size_t len, size_t pos) {
+    /* Look for a third-person construct starting at `pos`. We accept up
+     * to HU_GUARD_PERSONA_LOOKAHEAD bytes of slack between the name and
+     * the construct — covers cases like `"Seth, 51, is a ..."`. */
+    if (pos >= len)
+        return false;
+    size_t scan_end = pos + HU_GUARD_PERSONA_LOOKAHEAD;
+    if (scan_end > len)
+        scan_end = len;
+
+    /* Possessive: <Name>'s — the apostrophe must be at pos exactly. */
+    if (pos < len && s[pos] == '\'' && pos + 2 < len && (s[pos + 1] == 's' || s[pos + 1] == 'S') &&
+        s[pos + 2] == ' ')
+        return true;
+
+    /* Sliding window for verbs. Patterns include the leading space. */
+    static const char *constructs[] = {
+        " is a ",  " is an ", " is the ", " is currently",
+        " was a ", " was an ", " was the ",
+        " has a ", " has an ", " has been ",
+        " lives ", " lives in ", " lives alone",
+        " works ", " works at ", " works as ",
+        " said ", " would ", " prefers ", " enjoys ", " likes ",
+    };
+    static const size_t n_constructs = sizeof(constructs) / sizeof(constructs[0]);
+
+    for (size_t p = pos; p < scan_end; p++) {
+        for (size_t k = 0; k < n_constructs; k++) {
+            size_t clen = strlen(constructs[k]);
+            if (p + clen > len)
+                continue;
+            /* Case-insensitive prefix match. */
+            bool match = true;
+            for (size_t j = 0; j < clen; j++) {
+                char a = s[p + j];
+                char b = constructs[k][j];
+                if (a >= 'A' && a <= 'Z')
+                    a = (char)(a + 32);
+                if (b >= 'A' && b <= 'Z')
+                    b = (char)(b + 32);
+                if (a != b) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+                return true;
+        }
+    }
+    return false;
+}
+
+static bool hu_guard_has_persona_pii_echo(const hu_guard_context_t *ctx, const char *s,
+                                          size_t len) {
+    if (!ctx || !ctx->persona_name || ctx->persona_name_len < 2 ||
+        ctx->persona_name_len > 64)
+        return false;
+    if (!s || len < ctx->persona_name_len + 4) /* need name + " is " minimum */
+        return false;
+
+    size_t nlen = ctx->persona_name_len;
+    /* Find each case-insensitive occurrence of the name with word
+     * boundaries on both sides. */
+    for (size_t i = 0; i + nlen <= len; i++) {
+        /* Left boundary: start-of-string or non-letter. */
+        if (i > 0) {
+            char prev = s[i - 1];
+            bool prev_letter = (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z');
+            if (prev_letter)
+                continue;
+        }
+        /* Case-insensitive name match. */
+        bool name_match = true;
+        for (size_t j = 0; j < nlen; j++) {
+            char a = s[i + j];
+            char b = ctx->persona_name[j];
+            if (a >= 'A' && a <= 'Z')
+                a = (char)(a + 32);
+            if (b >= 'A' && b <= 'Z')
+                b = (char)(b + 32);
+            if (a != b) {
+                name_match = false;
+                break;
+            }
+        }
+        if (!name_match)
+            continue;
+        /* Right boundary: end-of-string or non-letter. */
+        if (i + nlen < len) {
+            char next = s[i + nlen];
+            bool next_letter =
+                (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z');
+            if (next_letter)
+                continue;
+        }
+        /* Word-boundary-isolated occurrence at [i, i+nlen). Look for a
+         * third-person construct starting at i+nlen. */
+        if (hu_guard_persona_pii_construct_at(s, len, i + nlen))
+            return true;
+    }
+    return false;
+}
+
+/* G8 helper — verbatim substring echo for any persona text blob. */
+static bool hu_guard_persona_text_echo(const char *text, size_t text_len, const char *s,
+                                       size_t len) {
+    if (!text || text_len < (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH)
+        return false;
+    if (len < (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH)
+        return false;
+    size_t window = (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH;
+    for (size_t i = 0; i + window <= text_len; i++) {
+        if (hu_guard_ci_contains(s, len, text + i, window))
+            return true;
+    }
+    return false;
+}
+
+/* G8 — persona identity / biography echo. Returns true if any
+ * contiguous 25-byte substring of `persona_identity` OR
+ * `persona_biography` appears verbatim in `s[0..len)`. */
+static bool hu_guard_has_persona_identity_echo(const hu_guard_context_t *ctx, const char *s,
+                                               size_t len) {
+    if (!ctx)
+        return false;
+    if (hu_guard_persona_text_echo(ctx->persona_identity, ctx->persona_identity_len, s, len))
+        return true;
+    if (hu_guard_persona_text_echo(ctx->persona_biography, ctx->persona_biography_len, s, len))
+        return true;
+    return false;
+}
+
+/* Sprint 38 — process-wide REJECT telemetry (G5–G8). */
+static atomic_uint_fast64_t s_guard_stat_semantic;
+static atomic_uint_fast64_t s_guard_stat_length;
+static atomic_uint_fast64_t s_guard_stat_director;
+static atomic_uint_fast64_t s_guard_stat_persona_pii;
+static atomic_uint_fast64_t s_guard_stat_persona_identity;
+
+static void hu_guard_record_reject_stats(const hu_guard_report_t *report) {
+    if (!report)
+        return;
+    if (report->detected_semantic_leak)
+        atomic_fetch_add_explicit(&s_guard_stat_semantic, 1, memory_order_relaxed);
+    if (report->detected_length_anomaly)
+        atomic_fetch_add_explicit(&s_guard_stat_length, 1, memory_order_relaxed);
+    if (report->detected_director_echo)
+        atomic_fetch_add_explicit(&s_guard_stat_director, 1, memory_order_relaxed);
+    if (report->detected_persona_pii_echo)
+        atomic_fetch_add_explicit(&s_guard_stat_persona_pii, 1, memory_order_relaxed);
+    if (report->detected_persona_identity_echo)
+        atomic_fetch_add_explicit(&s_guard_stat_persona_identity, 1, memory_order_relaxed);
+}
+
+void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out) {
+    if (!out)
+        return;
+    out->semantic_leak =
+        atomic_load_explicit(&s_guard_stat_semantic, memory_order_relaxed);
+    out->length_anomaly = atomic_load_explicit(&s_guard_stat_length, memory_order_relaxed);
+    out->director_echo = atomic_load_explicit(&s_guard_stat_director, memory_order_relaxed);
+    out->persona_pii_echo =
+        atomic_load_explicit(&s_guard_stat_persona_pii, memory_order_relaxed);
+    out->persona_identity_echo =
+        atomic_load_explicit(&s_guard_stat_persona_identity, memory_order_relaxed);
+}
+
+void hu_guard_reject_stats_reset(void) {
+    atomic_store_explicit(&s_guard_stat_semantic, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_length, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_director, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_persona_pii, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_persona_identity, 0, memory_order_relaxed);
+}
+
+bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len) {
+    return hu_guard_has_numbered_analysis_dump(s, len);
+}
+
+bool hu_guard_audit_self_talk_leak(const char *s, size_t len) {
+    return hu_guard_has_self_talk_pattern(s, len);
+}
+
+void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
+                                  size_t contact_key_len, size_t candidate_count,
+                                  size_t best_idx, int best_quality, size_t response_len,
+                                  const char *response, size_t response_text_len) {
+    hu_observer_t *obs = (hu_observer_t *)observer;
+    int preview_n = (int)(response_text_len < 48 ? response_text_len : 48);
+    hu_log_info("response_guard", obs,
+                "selection_audit contact=%.*s candidates=%zu best=%zu quality=%d len=%zu",
+                (int)(contact_key_len < 32 ? contact_key_len : 32), contact_key ? contact_key : "",
+                candidate_count, best_idx, best_quality, response_len);
+    if (response && response_text_len > 0) {
+        if (hu_guard_has_numbered_analysis_dump(response, response_text_len))
+            hu_log_warn("response_guard", obs,
+                        "selection_audit: shipped response has G1 numbered-analysis pattern "
+                        "(contact=%.*s best=%zu preview=%.*s)",
+                        (int)(contact_key_len < 32 ? contact_key_len : 32),
+                        contact_key ? contact_key : "", best_idx, preview_n, response);
+        if (hu_guard_has_self_talk_pattern(response, response_text_len))
+            hu_log_warn("response_guard", obs,
+                        "selection_audit: shipped response has G2 self-talk pattern "
+                        "(contact=%.*s best=%zu)",
+                        (int)(contact_key_len < 32 ? contact_key_len : 32),
+                        contact_key ? contact_key : "", best_idx);
+    }
+}
+
+/* Orchestrator — returns true if the response trips ANY of G1/G2/G3.
+ * Out-param `which` is set to a small bitmask for diagnostics:
+ *   bit 0 = G1 numbered analysis    bit 1 = G2 self-talk
+ *   bit 2 = G3 third-person double  (other bits reserved). */
+static bool hu_guard_detect_semantic_leak(const char *s, size_t len, unsigned *which) {
+    if (which)
+        *which = 0;
+    if (!s || len == 0)
+        return false;
+    bool hit = false;
+    if (hu_guard_has_numbered_analysis_dump(s, len)) {
+        if (which)
+            *which |= 1u << 0;
+        hit = true;
+    }
+    if (hu_guard_has_self_talk_pattern(s, len)) {
+        if (which)
+            *which |= 1u << 1;
+        hit = true;
+    }
+    if (hu_guard_count_third_person_patterns(s, len) >= 2) {
+        if (which)
+            *which |= 1u << 2;
+        hit = true;
+    }
+    return hit;
 }
 
 /* ── Internal: strip known patterns into `out` (must be ≥ in_len + 1) ── */
@@ -336,6 +967,17 @@ static void strip_special_into(const char *in, size_t in_len, char *out, size_t 
 hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, size_t response_len,
                                    char **out_response, size_t *out_len,
                                    hu_guard_outcome_t *out_outcome, hu_guard_report_t *report) {
+    /* Sprint 31 — thin wrapper. ctx=NULL disables context-aware
+     * detections so legacy callers see byte-identical behavior. */
+    return hu_response_guard_check_ex(alloc, response, response_len, NULL, out_response, out_len,
+                                      out_outcome, report);
+}
+
+hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *response,
+                                      size_t response_len, const hu_guard_context_t *ctx,
+                                      char **out_response, size_t *out_len,
+                                      hu_guard_outcome_t *out_outcome,
+                                      hu_guard_report_t *report) {
     if (!alloc || !response || !out_response || !out_len || !out_outcome)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -476,6 +1118,72 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, 
         *out_len = 0;
         *out_outcome = HU_GUARD_REJECT;
         return HU_OK;
+    }
+
+    /* Phase 3 (Sprint 29) — semantic leak detection. Catches CoT /
+     * prompt-context dumps that earlier phases miss because the leak
+     * has no markup signature and no repetition signature.
+     *
+     * Production root-cause: 2026-05-12 leak via the live service-loop
+     * daemon. The primary guard returned REWROTE (stripped 82 bytes of
+     * leading whitespace) and let 897 bytes of model self-narration
+     * pass to a real human contact. Phase 3 inspects the cleaned text
+     * for three structural signatures (G1/G2/G3) and rejects on any
+     * single hit.
+     *
+     * See `docs/postmortems/2026-05-12-cot-leak.md`. */
+    unsigned semantic_which = 0;
+    bool semantic_leak =
+        hu_guard_detect_semantic_leak(for_repetition_check, check_len, &semantic_which);
+    if (semantic_leak) {
+        if (cleaned)
+            alloc->free(alloc->ctx, cleaned, effective_len + 1);
+        *out_response = NULL;
+        *out_len = 0;
+        *out_outcome = HU_GUARD_REJECT;
+        if (report)
+            report->detected_semantic_leak = true;
+        hu_guard_record_reject_stats(report);
+        return HU_OK;
+    }
+
+    /* Phase 4 (Sprint 31 + 35 + 36) — context-aware detections. Skipped
+     * when `ctx` is NULL (legacy `hu_response_guard_check` callers).
+     *
+     * Phase 4a: length anomaly (response_len >> recent_avg_len).
+     * Phase 4b: director-string echo (verbatim quote of upstream
+     *           scene-direction text).
+     * Phase 4c: persona-PII echo (loaded persona name in third-person
+     *           profile construct — Sprint 35).
+     * Phase 4d: persona identity echo (verbatim 25+ byte substring of
+     *           loaded persona's identity / core_anchor — Sprint 36).
+     *
+     * All run on the cleaned text (post-Phase 1 strip). The length
+     * anomaly check uses the original `response_len` because the
+     * cleaning only removes markup, not user-visible content — the
+     * "what got sent on the wire" length is what matters relative
+     * to the recipient's avg. */
+    if (ctx) {
+        bool length_anomaly = hu_guard_has_length_anomaly(ctx, response_len);
+        bool director_echo = hu_guard_has_director_echo(ctx, for_repetition_check, check_len);
+        bool persona_echo = hu_guard_has_persona_pii_echo(ctx, for_repetition_check, check_len);
+        bool identity_echo =
+            hu_guard_has_persona_identity_echo(ctx, for_repetition_check, check_len);
+        if (length_anomaly || director_echo || persona_echo || identity_echo) {
+            if (cleaned)
+                alloc->free(alloc->ctx, cleaned, effective_len + 1);
+            *out_response = NULL;
+            *out_len = 0;
+            *out_outcome = HU_GUARD_REJECT;
+            if (report) {
+                report->detected_length_anomaly = length_anomaly;
+                report->detected_director_echo = director_echo;
+                report->detected_persona_pii_echo = persona_echo;
+                report->detected_persona_identity_echo = identity_echo;
+            }
+            hu_guard_record_reject_stats(report);
+            return HU_OK;
+        }
     }
 
     if (needs_strip) {

@@ -11,13 +11,24 @@ static hu_allocator_t hu_test_allocator_create(void) {
     return alloc;
 }
 
+/* Per-pid event-log path: makes the test deterministic across
+ * concurrent test-binary runs (CI matrix) and immune to a previous
+ * run's stale jsonl file. The unlink in each test still scrubs the
+ * file before create — this just guarantees no other binary can
+ * race us. */
+static const char *events_path(const char *tag) {
+    static char buf[160];
+    snprintf(buf, sizeof(buf), "/tmp/hu_test_events_%d_%s.jsonl", (int)getpid(), tag);
+    (void)unlink(buf);
+    return buf;
+}
+
 /* Test: Create and destroy event log */
 static void test_workflow_event_log_create_destroy(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events.jsonl");
-    hu_error_t err = hu_workflow_event_log_create(&alloc, "/tmp/test_events.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("basic"), &log);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(log);
 
@@ -32,8 +43,7 @@ static void test_workflow_event_append_single(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events_single.jsonl");
-    hu_error_t err = hu_workflow_event_log_create(&alloc, "/tmp/test_events_single.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("single"), &log);
     HU_ASSERT_EQ(err, HU_OK);
 
     /* Create an event */
@@ -59,8 +69,7 @@ static void test_workflow_event_sequence_numbers(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events_seq.jsonl");
-    hu_error_t err = hu_workflow_event_log_create(&alloc, "/tmp/test_events_seq.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("seq"), &log);
     HU_ASSERT_EQ(err, HU_OK);
 
     int64_t ts = hu_workflow_event_current_timestamp_ms();
@@ -92,8 +101,7 @@ static void test_workflow_event_replay(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events_replay.jsonl");
-    hu_error_t err = hu_workflow_event_log_create(&alloc, "/tmp/test_events_replay.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("replay"), &log);
     HU_ASSERT_EQ(err, HU_OK);
 
     int64_t ts = hu_workflow_event_current_timestamp_ms();
@@ -153,8 +161,7 @@ static void test_workflow_event_find_by_key_found(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events_find.jsonl");
-    hu_error_t err = hu_workflow_event_log_create(&alloc, "/tmp/test_events_find.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("find"), &log);
     HU_ASSERT_EQ(err, HU_OK);
 
     int64_t ts = hu_workflow_event_current_timestamp_ms();
@@ -199,8 +206,7 @@ static void test_workflow_event_find_by_key_not_found(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events_notfound.jsonl");
-    hu_error_t err = hu_workflow_event_log_create(&alloc, "/tmp/test_events_notfound.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("notfound"), &log);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_workflow_event_t found = {0};
@@ -217,8 +223,7 @@ static void test_workflow_event_replay_empty(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events_empty.jsonl");
-    hu_error_t err = hu_workflow_event_log_create(&alloc, "/tmp/test_events_empty.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("empty"), &log);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_workflow_event_t *events = NULL;
@@ -234,7 +239,9 @@ static void test_workflow_event_replay_empty(void) {
 /* Test: Persists to file and reloads correctly */
 static void test_workflow_event_persist_and_reload(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
-    const char *path = "/tmp/test_events_persist.jsonl";
+    /* Single-call gets and cleans the path; the second create below
+     * reopens it (no scrub) so the persistence assertion is honest. */
+    const char *path = events_path("persist");
 
     /* Create log and append event */
     hu_workflow_event_log_t *log = NULL;
@@ -283,9 +290,7 @@ static void test_workflow_event_special_chars(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events_special.jsonl");
-    hu_error_t err =
-        hu_workflow_event_log_create(&alloc, "/tmp/test_events_special.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("special"), &log);
     HU_ASSERT_EQ(err, HU_OK);
 
     int64_t ts = hu_workflow_event_current_timestamp_ms();
@@ -364,8 +369,7 @@ static void test_workflow_event_multiple_workflows(void) {
     hu_allocator_t alloc = hu_test_allocator_create();
 
     hu_workflow_event_log_t *log = NULL;
-    (void)unlink("/tmp/test_events_multi.jsonl");
-    hu_error_t err = hu_workflow_event_log_create(&alloc, "/tmp/test_events_multi.jsonl", &log);
+    hu_error_t err = hu_workflow_event_log_create(&alloc, events_path("multi"), &log);
     HU_ASSERT_EQ(err, HU_OK);
 
     int64_t ts = hu_workflow_event_current_timestamp_ms();

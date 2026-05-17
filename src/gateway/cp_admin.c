@@ -12,6 +12,7 @@
 #include "human/cost.h"
 #include "human/gateway/oauth.h"
 #include "human/health.h"
+#include "human/agent/response_guard.h"
 #include "human/ml/fidelity.h"
 #include "human/observability/bth_metrics.h"
 #include "human/observability/metrics_observer.h"
@@ -1356,6 +1357,40 @@ hu_error_t cp_admin_metrics_fidelity(hu_allocator_t *alloc, hu_app_context_t *ap
         hu_json_object_set(alloc, obj, "delta", hu_json_null_new(alloc));
 
     hu_persona_deinit(alloc, &persona);
+    hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
+    hu_json_free(alloc, obj);
+    return err;
+}
+
+/* ── metrics.guard_rejects ───────────────────────────────────────────── */
+
+hu_error_t cp_admin_metrics_guard_rejects(hu_allocator_t *alloc, hu_app_context_t *app,
+                                          hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                          const hu_json_value_t *root, char **out,
+                                          size_t *out_len) {
+    (void)app;
+    (void)conn;
+    (void)proto;
+    (void)root;
+
+    hu_guard_reject_stats_t snap;
+    hu_guard_reject_stats_snapshot(&snap);
+
+    hu_json_value_t *obj = hu_json_object_new(alloc);
+    if (!obj)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    hu_json_object_set(alloc, obj, "semantic_leak",
+                       hu_json_number_new(alloc, (double)snap.semantic_leak));
+    hu_json_object_set(alloc, obj, "length_anomaly",
+                       hu_json_number_new(alloc, (double)snap.length_anomaly));
+    hu_json_object_set(alloc, obj, "director_echo",
+                       hu_json_number_new(alloc, (double)snap.director_echo));
+    hu_json_object_set(alloc, obj, "persona_pii_echo",
+                       hu_json_number_new(alloc, (double)snap.persona_pii_echo));
+    hu_json_object_set(alloc, obj, "persona_identity_echo",
+                       hu_json_number_new(alloc, (double)snap.persona_identity_echo));
+
     hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
     hu_json_free(alloc, obj);
     return err;

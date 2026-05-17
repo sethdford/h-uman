@@ -1152,6 +1152,21 @@ static void test_config_save_roundtrip_m3_disabled(void) {
     hu_arena_destroy(arena2);
 }
 
+static void test_config_parse_reaction_collection_rejects_relative_chatdb_path(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json =
+        "{\"reaction_collection\":{\"enabled\":true,\"chatdb_path\":\"../etc/passwd\"}}";
+    hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+    hu_arena_destroy(arena);
+}
+
 void run_config_parse_tests(void) {
     HU_TEST_SUITE("Config parse");
     HU_RUN_TEST(test_config_parse_empty_json);
@@ -1223,4 +1238,7 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_voice_section);
     HU_RUN_TEST(test_config_parse_voice_realtime_mode_fields);
     HU_RUN_TEST(test_config_parse_voice_stt_tts_providers);
+
+    HU_TEST_SUITE("Reaction collection");
+    HU_RUN_TEST(test_config_parse_reaction_collection_rejects_relative_chatdb_path);
 }

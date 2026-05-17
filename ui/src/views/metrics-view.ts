@@ -15,6 +15,9 @@ import "../components/hu-fidelity-tile.js";
 import type { FidelityStatus } from "../components/hu-fidelity-tile.js";
 import "../components/hu-directive-telemetry-tile.js";
 import type { DirectiveTelemetry } from "../components/hu-directive-telemetry-tile.js";
+import "../components/hu-guard-rejects-tile.js";
+import type { GuardRejectStats } from "../components/hu-guard-rejects-tile.js";
+import { totalGuardRejects } from "../components/hu-guard-rejects-tile.js";
 import { icons } from "../icons.js";
 import { friendlyError } from "../utils/friendly-error.js";
 
@@ -253,6 +256,9 @@ export class ScMetricsView extends GatewayAwareLitElement {
    * counter backend never blanks the main view. */
   @state() private directiveTelemetry: DirectiveTelemetry | null = null;
   @state() private directiveTelemetryError = "";
+  @state() private guardRejects: GuardRejectStats | null = null;
+  @state() private guardRejectsError = "";
+  @state() private guardRejectsDelta = 0;
 
   protected override async load(): Promise<void> {
     const gw = this.gateway;
@@ -278,6 +284,34 @@ export class ScMetricsView extends GatewayAwareLitElement {
     }
     void this._loadFidelity();
     void this._loadDirectiveTelemetry();
+    void this._loadGuardRejects();
+  }
+
+  private async _loadGuardRejects(): Promise<void> {
+    const gw = this.gateway;
+    if (!gw) return;
+    this.guardRejects = null;
+    this.guardRejectsError = "";
+    try {
+      const res = (await gw.request<GuardRejectStats>("metrics.guard_rejects", {})) as
+        | GuardRejectStats
+        | { result?: GuardRejectStats };
+      const data =
+        (res && "result" in res && (res as { result?: GuardRejectStats }).result) ||
+        (res && "semantic_leak" in res ? (res as GuardRejectStats) : null);
+      if (data && typeof data.semantic_leak === "number") {
+        if (this.guardRejects) {
+          this.guardRejectsDelta = totalGuardRejects(data) - totalGuardRejects(this.guardRejects);
+        } else {
+          this.guardRejectsDelta = 0;
+        }
+        this.guardRejects = data;
+      } else {
+        this.guardRejectsError = "no guard reject telemetry";
+      }
+    } catch (e) {
+      this.guardRejectsError = friendlyError(e);
+    }
   }
 
   private async _loadDirectiveTelemetry(): Promise<void> {
@@ -601,7 +635,8 @@ export class ScMetricsView extends GatewayAwareLitElement {
       ${this.loading
         ? this._renderSkeleton()
         : html`
-            ${this._renderFidelity()} ${this._renderDirectiveTelemetry()}
+            ${this._renderFidelity()} ${this._renderGuardRejects()}
+            ${this._renderDirectiveTelemetry()}
             ${this._renderIntelligenceStats()} ${this._renderEvalCalibration()}
             ${this._renderHulaObservability()} ${this._renderSystemHealth()}
             ${this._renderIntelligencePipeline()}
@@ -627,6 +662,22 @@ export class ScMetricsView extends GatewayAwareLitElement {
           description="LoRA-adapter delta against the active persona's example bank"
         ></hu-section-header>
         <hu-fidelity-tile .data=${this.fidelity} .errorMessage=${errMsg}></hu-fidelity-tile>
+      </div>
+    `;
+  }
+
+  private _renderGuardRejects() {
+    return html`
+      <div class="section hu-scroll-reveal" role="region" aria-label="Response guard rejects">
+        <hu-section-header
+          heading="Response Guard"
+          description="Cumulative outbound REJECT counts by detector class (G1–G8 family)"
+        ></hu-section-header>
+        <hu-guard-rejects-tile
+          .data=${this.guardRejects}
+          .deltaSinceRefresh=${this.guardRejectsDelta}
+          .errorMessage=${this.guardRejectsError}
+        ></hu-guard-rejects-tile>
       </div>
     `;
   }

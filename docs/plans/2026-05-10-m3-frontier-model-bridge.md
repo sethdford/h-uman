@@ -178,6 +178,43 @@ Coverage:
   per-channel cap, orphan assistant, low-quality rejection, dedup,
   PII redaction, free safety, and a happy-path extraction).
 
+## Bridge A Phase 1 — JSONL exporter ↔ training wiring (DONE 2026-05-16)
+
+The MLX frontier-training path (`lora-persona --backend mlx`) now
+**persists the exported JSONL alongside the adapter** instead of
+tossing it to `/tmp`. Two wins:
+
+1. **Reproducibility** — the JSONL survives the training run; an
+   operator can re-train against the exact same data via
+   `--data-dir <adapter_output_path>` weeks later.
+2. **Auditability** — the inputs that produced an adapter live in the
+   same directory as the adapter itself, not on a tmpfs that cycles
+   on reboot.
+
+Resolution order for the JSONL directory (when `--data-dir` is not set):
+1. `lcfg.adapter_output_path` — preferred, gives reproducibility.
+2. `/tmp/hu-lora-frontier-<pid>` — fallback when the adapter dir is
+   not writable (read-only HOME, etc.), with a stderr note so the
+   operator knows the training will succeed but the JSONL won't
+   persist.
+
+The pure `--export-jsonl` path (no training, just export) was also
+unblocked under `HU_IS_TEST` — the CLI envelope now has two new
+end-to-end tests pinning the Alpaca shape and the
+"missing-persona-rejected" failure mode. The training paths
+(huml in-process, MLX subprocess) remain short-circuited under
+test mode.
+
+Coverage:
+- `src/ml/cli.c::hu_ml_cli_lora_persona` — adapter-dir-first
+  `data_dir` resolution + `/tmp` fallback.
+- `tests/test_ml.c::test_lora_persona_export_jsonl_writes_alpaca_shape`
+  — end-to-end CLI test: load fixture persona → export-jsonl →
+  assert file contains `instruction`/`input`/`output` + every
+  bank's response strings.
+- `tests/test_ml.c::test_lora_persona_export_jsonl_without_persona_rejects`
+  — regression guard for the HU_IS_TEST refactor.
+
 ## Bridge A — llama.cpp / GGUF inference + LoRA loader (target: 4-6 weeks)
 
 The smallest honest step. Pull `llama.cpp` as a **conditionally-compiled**

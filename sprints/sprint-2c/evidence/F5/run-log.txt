@@ -1,0 +1,21 @@
+== Scenario 1: #ifdef HU_IS_TEST ... #else <DEF> (original Sprint 1 bug) ==
+  PASS: lint flagged #ifdef-#else hidden definition (rc=1)
+  PASS: diagnostic mentions the actual guard shape
+== Scenario 2: #ifndef HU_IS_TEST <DEF> ==
+  PASS: lint flagged #ifndef HU_IS_TEST hidden definition
+== Scenario 3: #if !defined(HU_IS_TEST) <DEF> ==
+  PASS: lint flagged #if !defined(HU_IS_TEST) hidden definition
+== Scenario 4: correct shape (def above guard) — lint MUST NOT flag ==
+  PASS: correct shape (def above guard) accepted
+== Scenario 5: extern in tests/ (not include/) — lint MUST NOT flag ==
+  PASS: private extern in tests/ header ignored (out of lint scope)
+== Scenario 6: platform guard (#ifdef _WIN32) — lint MUST NOT flag ==
+  PASS: platform-only guard ignored (not test-related)
+== Scenario 7: extern function decl — lint MUST NOT flag ==
+  PASS: extern function decl ignored (lint targets data)
+== Scenario 8: live tree must remain clean ==
+  PASS: live tree has no test-time-invisible extern symbols
+
+==========================================================
+Sprint 2c F5 negative test: PASS=9 FAIL=0
+==========================================================

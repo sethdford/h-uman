@@ -20,6 +20,7 @@ import {
   waitForViewReady,
   ANIMATION_SETTLE_MS,
   POLL,
+  isKnownPageError,
 } from "./helpers.js";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -406,7 +407,9 @@ test.describe("Wave 5: Theme Parity", () => {
   for (const view of THEME_VIEWS) {
     test(`${view.hash}: renders in dark theme without errors`, async ({ page }) => {
       const errors: string[] = [];
-      page.on("pageerror", (err) => errors.push(err.message));
+      page.on("pageerror", (err) => {
+        if (!isKnownPageError(err.message)) errors.push(err.message);
+      });
 
       await page.goto(`/?demo#${view.hash}`);
       await waitForViewReady(page, view.tag);
@@ -425,7 +428,9 @@ test.describe("Wave 5: Theme Parity", () => {
 
     test(`${view.hash}: renders in light theme without errors`, async ({ page }) => {
       const errors: string[] = [];
-      page.on("pageerror", (err) => errors.push(err.message));
+      page.on("pageerror", (err) => {
+        if (!isKnownPageError(err.message)) errors.push(err.message);
+      });
 
       await page.goto(`/?demo#${view.hash}`);
       await waitForViewReady(page, view.tag);

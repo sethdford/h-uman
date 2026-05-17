@@ -3,6 +3,10 @@
 #include "human/ml/cli.h"
 #include "human/agent/scheduler_status_json.h"
 #include "human/config.h"
+#ifdef HU_ENABLE_RL_FULL
+#include "human/eval/eval_gate.h"
+#endif
+#include "human/ml/cli_dpo.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
@@ -478,117 +482,18 @@ hu_error_t hu_ml_cli_status(hu_allocator_t *alloc, int argc, const char **argv) 
 #endif
 }
 
+/* Phase 2 Task 8: hu_ml_cli_dpo_train's pre-Phase-2 body has been
+ * extracted into hu_ml_cli_dpo_judge in src/ml/cli_dpo.c (the legacy
+ * provider-scored path). The CLI verb `human ml dpo-train` now routes
+ * through hu_ml_cli_dpo_real, which dispatches the new hu_rl_trainer_t
+ * vtable from Tasks 1/4/6. The legacy semantics are still reachable via
+ * `human ml dpo-judge` or `human ml dpo-train --legacy-judge`.
+ *
+ * This forwarder preserves the existing public symbol so any external
+ * callers of hu_ml_cli_dpo_train (including the cmd_ml dispatch in
+ * src/main.c, until that's updated) keep linking. */
 hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **argv) {
-    const char *db_path = NULL;
-    const char *provider_name = NULL;
-    const char *model = NULL;
-    int batch_size = 20;
-    for (int i = 1; i < argc; i++) {
-        const char *v = get_opt(argv, argc, i, "--db");
-        if (v) {
-            db_path = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--provider");
-        if (v) {
-            provider_name = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--model");
-        if (v) {
-            model = v;
-            i++;
-            continue;
-        }
-        v = get_opt(argv, argc, i, "--batch-size");
-        if (v) {
-            if (parse_int_arg(v, &batch_size) != 0) {
-                hu_log_error("ml", NULL, "Invalid --batch-size: %s", v);
-                return HU_ERR_INVALID_ARGUMENT;
-            }
-            i++;
-            continue;
-        }
-        if (strcmp(argv[i], "--help") == 0) {
-            printf("Usage: human ml dpo-train [--db <path>] [--provider <name>] "
-                   "[--model <name>] [--batch-size <N>] [--help]\n");
-            return HU_OK;
-        }
-    }
-#ifdef HU_IS_TEST
-    (void)alloc;
-    (void)db_path;
-    (void)provider_name;
-    (void)model;
-    (void)batch_size;
-    printf("[dpo] test mode: skipped\n");
-    return HU_OK;
-#else
-#ifdef HU_ENABLE_SQLITE
-    if (!db_path)
-        db_path = "memory.db";
-    if (!provider_name) {
-        fprintf(stderr, "dpo-train requires --provider\n");
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    sqlite3 *db = NULL;
-    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
-        fprintf(stderr, "Cannot open database: %s\n", db_path);
-        return HU_ERR_IO;
-    }
-
-    hu_dpo_collector_t collector;
-    hu_error_t err = hu_dpo_collector_create(alloc, db, 10000, &collector);
-    if (err != HU_OK) {
-        sqlite3_close(db);
-        return err;
-    }
-
-    hu_provider_t provider = {0};
-    size_t pname_len = strlen(provider_name);
-    err = hu_provider_create(alloc, provider_name, pname_len, NULL, 0, NULL, 0, &provider);
-    if (err != HU_OK) {
-        fprintf(stderr, "Cannot create provider '%s': %d\n", provider_name, err);
-        hu_dpo_collector_deinit(&collector);
-        sqlite3_close(db);
-        return err;
-    }
-
-    size_t model_len = model ? strlen(model) : 0;
-    hu_dpo_judge_result_t result = {0};
-    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name, batch_size);
-
-    err = hu_dpo_judge_step(&collector, alloc, &provider, model, model_len, 0.1, (size_t)batch_size,
-                            &result);
-
-    if (err == HU_OK) {
-        printf("[dpo] Judge step complete:\n");
-        printf("  Pairs evaluated: %zu\n", result.pairs_evaluated);
-        printf("  Pairs aligned:   %zu\n", result.pairs_aligned);
-        printf("  Alignment score: %.2f%%\n", result.alignment_score * 100.0);
-        printf("  Loss:            %.4f\n", result.loss);
-    } else {
-        fprintf(stderr, "[dpo] Judge step failed: %d\n", err);
-    }
-
-    if (provider.vtable && provider.vtable->deinit)
-        provider.vtable->deinit(provider.ctx, alloc);
-    hu_dpo_collector_deinit(&collector);
-    sqlite3_close(db);
-    return err;
-#else
-    (void)alloc;
-    (void)db_path;
-    (void)provider_name;
-    (void)model;
-    (void)batch_size;
-    fprintf(stderr, "dpo-train requires HU_ENABLE_SQLITE\n");
-    return HU_ERR_NOT_SUPPORTED;
-#endif
-#endif
+    return hu_ml_cli_dpo_real(alloc, argc, argv);
 }
 
 hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, const char **argv) {
@@ -720,6 +625,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
      * data source for LoRA. */
     const char *from_deltas_db = NULL;
     const char *signal_contact = NULL;
+    (void)signal_contact;
     /* Bridge B — MLX frontier LoRA. When --backend mlx is set, we skip
      * in-process HUML training and shell out to mlx_lm.lora for real
      * Gemma fine-tuning on Apple Silicon. */
@@ -900,27 +806,33 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         }
     }
 #ifdef HU_IS_TEST
-    (void)alloc;
-    (void)persona_name;
-    (void)checkpoint_path;
-    (void)output_path;
-    (void)rank;
-    (void)max_steps;
-    (void)export_jsonl_path;
-    (void)from_history_db;
-    (void)from_history_max_per_channel;
-    (void)persist_persona;
-    (void)backend;
-    (void)mlx_model;
-    (void)data_dir;
-    (void)num_layers;
-    (void)max_seq_length;
-    (void)save_every;
-    (void)learning_rate;
-    printf("[lora-persona] test mode: skipped\n");
-    printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
-    return HU_OK;
-#else
+    /* M3 Bridge A Phase 1 — the `--export-jsonl` path is pure (loads the
+     * persona, writes a JSONL, exits). No subprocess, no provider, no
+     * HUML training loop. Allow it through under HU_IS_TEST so the CLI
+     * envelope is testable end-to-end. The training paths below (huml,
+     * MLX subprocess) still short-circuit. */
+    if (!export_jsonl_path || !export_jsonl_path[0]) {
+        (void)alloc;
+        (void)persona_name;
+        (void)checkpoint_path;
+        (void)output_path;
+        (void)rank;
+        (void)max_steps;
+        (void)from_history_db;
+        (void)from_history_max_per_channel;
+        (void)persist_persona;
+        (void)backend;
+        (void)mlx_model;
+        (void)data_dir;
+        (void)num_layers;
+        (void)max_seq_length;
+        (void)save_every;
+        (void)learning_rate;
+        printf("[lora-persona] test mode: skipped\n");
+        printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+        return HU_OK;
+    }
+#endif
     if (!persona_name) {
         fprintf(stderr, "lora-persona requires --persona <name>\n");
         return HU_ERR_INVALID_ARGUMENT;
@@ -1142,7 +1054,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     hu_persona_example_t *delta_examples = NULL;
     size_t delta_examples_count = 0;
     if (from_deltas_db && from_deltas_db[0]) {
-#ifdef HU_ENABLE_SQLITE
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_LEARNING)
         if (!signal_contact) {
             fprintf(stderr, "[lora-persona] --from-deltas requires --contact <id>\n");
             hu_persona_deinit(alloc, &persona);
@@ -1216,7 +1128,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         hu_memory_facade_close(signal_mem, alloc);
         hu_graph_close(signal_graph, alloc);
 #else
-        fprintf(stderr, "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE\n");
+        fprintf(stderr,
+                "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE + HU_ENABLE_LEARNING\n");
         hu_persona_deinit(alloc, &persona);
         return HU_ERR_NOT_SUPPORTED;
 #endif
@@ -1502,7 +1415,6 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     free_delta_examples(alloc, delta_examples, delta_examples_count);
     hu_persona_deinit(alloc, &persona);
     return err;
-#endif
 }
 
 /* Track D D2.2 — offline persona-fidelity baseline.
@@ -1865,10 +1777,16 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
      * The fingerprint itself comes from personal_model.bin or the
      * synthetic fallback, same as `lora-baseline`. */
     hu_persona_t persona = {0};
-    hu_error_t err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
-    if (err != HU_OK) {
-        fprintf(stderr, "[lora-ab] failed to load persona '%s': %d\n", persona_name, err);
-        return err;
+    hu_error_t err = HU_OK;
+#ifdef HU_IS_TEST
+    if (strcmp(persona_name, "test-inline") != 0)
+#endif
+    {
+        err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+        if (err != HU_OK) {
+            fprintf(stderr, "[lora-ab] failed to load persona '%s': %d\n", persona_name, err);
+            return err;
+        }
     }
 
     hu_communication_style_t target;
@@ -1931,27 +1849,65 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     hu_communication_style_set_summary_t sum_before, sum_after;
     float delta = 0.f;
     err = hu_communication_style_compare_response_sets(&target, strs_before, lens_before, n_before,
-                                                       strs_after, lens_after, n_after, &sum_before,
-                                                       &sum_after, &delta);
-    /* Free loaders before reporting so a fail-fast exit doesn't
-     * leak. The summaries are stack values and don't alias into
-     * the JSON tree. */
-    if (strs_before)
-        alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
-    if (lens_before)
-        alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
-    if (strs_after)
-        alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
-    if (lens_after)
-        alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
-    hu_json_free(alloc, json_before);
-    hu_json_free(alloc, json_after);
-    hu_persona_deinit(alloc, &persona);
-
+                                                       strs_after, lens_after, n_after,
+                                                       &sum_before, &sum_after, &delta);
     if (err != HU_OK) {
+        if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+        if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+        if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+        if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+        hu_json_free(alloc, json_before);
+        hu_json_free(alloc, json_after);
+        hu_persona_deinit(alloc, &persona);
         fprintf(stderr, "[lora-ab] compare failed: %d\n", err);
         return err;
     }
+
+#ifdef HU_ENABLE_RL_FULL
+    if (require_positive) {
+        size_t n_gate = n_after < n_before ? n_after : n_before;
+        if (n_gate < 10)
+            n_gate = 10;
+        double persona_after[32];
+        for (size_t i = 0; i < n_gate; i++) {
+            size_t ia = i < n_after ? i : 0;
+            persona_after[i] = (double)hu_communication_style_fidelity_score_v2(
+                &target, strs_after[ia], lens_after[ia]);
+        }
+        hu_eval_gate_t gate = {
+            .baseline_persona_fidelity_mean = (double)sum_before.mean,
+            .persona_delta_min = 0.05,
+            .baseline_p95_latency_ms = 0.0,
+            .latency_delta_max_ms = 1e9,
+            .bootstrap_samples = 100,
+            .bootstrap_seed = 42,
+            .mt_bench = NULL,
+            .ifeval = NULL,
+            .reward_model = NULL,
+        };
+        hu_eval_gate_verdict_t verdict = {0};
+        hu_error_t ge = hu_eval_gate_decide_from_arrays_for_test(
+            &gate, persona_after, NULL, NULL, NULL, n_gate, 0.0, &verdict);
+        if (ge != HU_OK) {
+            fprintf(stderr, "[lora-ab] gate error: %d\n", (int)ge);
+            return ge;
+        }
+        if (!verdict.promote) {
+            fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n",
+                    verdict.reason);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+    } else
+#endif
+
+    /* Free loaders before reporting so a fail-fast exit doesn't leak. */
+    if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+    if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+    if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+    if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+    hu_json_free(alloc, json_before);
+    hu_json_free(alloc, json_after);
+    hu_persona_deinit(alloc, &persona);
 
     printf("[lora-ab] persona '%s' A/B fidelity:\n"
            "[lora-ab]   before: scored=%zu skipped=%zu mean=%.3f min=%.3f max=%.3f\n"

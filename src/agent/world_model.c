@@ -22,6 +22,7 @@
 #include "human/memory/memory.h"
 #include "human/persona.h"
 #include "human/persona/persona_deltas.h"
+#include "human/tool.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1156,6 +1157,47 @@ static const char *overlay_can_clause_(const char *axis, const char *value) {
     return NULL;
 }
 
+/* Story F.2 — map persona-delta kind to the short self-model label. */
+static const char *self_model_drift_kind_str_(hu_persona_delta_kind_t kind) {
+    switch (kind) {
+    case HU_PERSONA_DELTA_BOUNDARY:
+        return "BOUNDARY";
+    case HU_PERSONA_DELTA_VOCAB_AVOID:
+        return "VOCAB_AVOID";
+    case HU_PERSONA_DELTA_FORMALITY:
+        return "FORMALITY";
+    case HU_PERSONA_DELTA_TONE:
+        return "TONE";
+    case HU_PERSONA_DELTA_LENGTH:
+        return "LENGTH";
+    default:
+        return NULL;
+    }
+}
+
+/* Story F.2 — append a drift kind to the self-model ring (oldest-first). */
+static void self_model_append_drift_history_(hu_world_model_t *wm, const char *kind_str) {
+    if (!wm || !kind_str || !kind_str[0])
+        return;
+    size_t slot_cap = sizeof(wm->self_model.recent_drift_history[0]);
+    size_t klen = strlen(kind_str);
+    if (klen >= slot_cap)
+        klen = slot_cap - 1;
+
+    if (wm->self_model.recent_drift_history_count < HU_SELF_DRIFT_HISTORY) {
+        size_t idx = wm->self_model.recent_drift_history_count++;
+        memcpy(wm->self_model.recent_drift_history[idx], kind_str, klen);
+        wm->self_model.recent_drift_history[idx][klen] = '\0';
+        return;
+    }
+    for (size_t i = 1; i < HU_SELF_DRIFT_HISTORY; i++) {
+        memcpy(wm->self_model.recent_drift_history[i - 1], wm->self_model.recent_drift_history[i],
+               sizeof(wm->self_model.recent_drift_history[i]));
+    }
+    memcpy(wm->self_model.recent_drift_history[HU_SELF_DRIFT_HISTORY - 1], kind_str, klen);
+    wm->self_model.recent_drift_history[HU_SELF_DRIFT_HISTORY - 1][klen] = '\0';
+}
+
 void hu_world_model_merge_persona(hu_world_model_t *wm, const struct hu_persona *persona,
                                   const char *channel, size_t channel_len,
                                   const struct hu_persona_delta *deltas, size_t deltas_count) {
@@ -1368,6 +1410,8 @@ void hu_world_model_merge_persona(hu_world_model_t *wm, const struct hu_persona 
     /* Step 3 — recent persona deltas (P1.3). Only APPLIED deltas with
      * confidence >= 0.6 are folded; pending/dropped/quarantined deltas
      * carry too little signal to drive ToM. */
+    wm->self_model.recent_drift_history_count = 0;
+    memset(wm->self_model.recent_drift_history, 0, sizeof(wm->self_model.recent_drift_history));
     const hu_persona_delta_t *latest_drift = NULL;
     for (size_t i = 0; i < deltas_count; i++) {
         const hu_persona_delta_t *d = &deltas[i];
@@ -1377,6 +1421,9 @@ void hu_world_model_merge_persona(hu_world_model_t *wm, const struct hu_persona 
             continue;
         if (!d->value[0])
             continue;
+        const char *hist_kind = self_model_drift_kind_str_(d->kind);
+        if (hist_kind)
+            self_model_append_drift_history_(wm, hist_kind);
         switch (d->kind) {
         case HU_PERSONA_DELTA_BOUNDARY:
         case HU_PERSONA_DELTA_VOCAB_AVOID:
@@ -1399,26 +1446,9 @@ void hu_world_model_merge_persona(hu_world_model_t *wm, const struct hu_persona 
      * planner can echo "we agreed to be shorter on Slack" without
      * re-reading the deltas table. */
     if (latest_drift) {
-        const char *kind_str = "DELTA";
-        switch (latest_drift->kind) {
-        case HU_PERSONA_DELTA_BOUNDARY:
-            kind_str = "BOUNDARY";
-            break;
-        case HU_PERSONA_DELTA_VOCAB_AVOID:
-            kind_str = "VOCAB_AVOID";
-            break;
-        case HU_PERSONA_DELTA_FORMALITY:
-            kind_str = "FORMALITY";
-            break;
-        case HU_PERSONA_DELTA_TONE:
-            kind_str = "TONE";
-            break;
-        case HU_PERSONA_DELTA_LENGTH:
-            kind_str = "LENGTH";
-            break;
-        default:
-            break;
-        }
+        const char *kind_str = self_model_drift_kind_str_(latest_drift->kind);
+        if (!kind_str)
+            kind_str = "DELTA";
         size_t kcap = sizeof(wm->self_model.recent_drift_kind);
         size_t klen = strlen(kind_str);
         if (klen >= kcap)
@@ -1579,6 +1609,108 @@ hu_error_t hu_world_model_rerank_for_goal(hu_world_model_t *wm, const char *goal
     }
 
     return HU_OK;
+}
+
+void hu_world_model_merge_self_capabilities(hu_world_model_t *wm, const struct hu_tool *tools,
+                                            size_t tools_count) {
+    /* Story F.1 — agent capabilities cell. Pulls tool names from the
+     * registry and parks them on `wm->self_model.capabilities` so the
+     * planner / LLM can answer "what can I do?" without re-reading the
+     * tool list. Defensive against every NULL we can spell — the world-
+     * model snapshot must remain renderable even when the caller forgot
+     * to wire tools (back-compat with all pre-F.1 callers). */
+    if (!wm)
+        return;
+    /* Always zero the slab so a re-merge with zero tools cleans stale
+     * entries from a prior call. */
+    memset(wm->self_model.capabilities, 0, sizeof(wm->self_model.capabilities));
+    wm->self_model.capabilities_count = 0;
+    if (!tools || tools_count == 0)
+        return;
+
+    size_t cap =
+        sizeof(wm->self_model.capabilities) / sizeof(wm->self_model.capabilities[0]); /* 6 today */
+    size_t name_cap = sizeof(wm->self_model.capabilities[0]);                         /* 32 today */
+
+    for (size_t i = 0; i < tools_count && wm->self_model.capabilities_count < cap; i++) {
+        const hu_tool_t *t = &tools[i];
+        if (!t->vtable || !t->vtable->name)
+            continue;
+        const char *nm = t->vtable->name(t->ctx);
+        if (!nm || !nm[0])
+            continue;
+
+        /* Dedup: skip names already present (some agent configurations
+         * register the same tool under a couple of aliases via different
+         * factories — the planner only needs the canonical name once). */
+        bool dup = false;
+        for (size_t j = 0; j < wm->self_model.capabilities_count; j++) {
+            if (strcmp(wm->self_model.capabilities[j], nm) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup)
+            continue;
+
+        size_t nlen = strlen(nm);
+        if (nlen >= name_cap)
+            nlen = name_cap - 1;
+        memcpy(wm->self_model.capabilities[wm->self_model.capabilities_count], nm, nlen);
+        wm->self_model.capabilities[wm->self_model.capabilities_count][nlen] = '\0';
+        wm->self_model.capabilities_count++;
+    }
+}
+
+void hu_world_model_merge_self_emotion(hu_world_model_t *wm) {
+    if (!wm)
+        return;
+    wm->self_model.recent_emotional_register[0] = '\0';
+    if (!wm->dominant_emotion[0])
+        return;
+    if (strcmp(wm->dominant_emotion, "neutral") == 0)
+        return;
+    size_t cap = sizeof(wm->self_model.recent_emotional_register);
+    size_t elen = strlen(wm->dominant_emotion);
+    if (elen >= cap)
+        elen = cap - 1;
+    memcpy(wm->self_model.recent_emotional_register, wm->dominant_emotion, elen);
+    wm->self_model.recent_emotional_register[elen] = '\0';
+}
+
+void hu_world_model_merge_self_recent_tools(hu_world_model_t *wm, const char *const *tool_names,
+                                            size_t tool_names_count) {
+    if (!wm)
+        return;
+    memset(wm->self_model.recent_tools_used, 0, sizeof(wm->self_model.recent_tools_used));
+    wm->self_model.recent_tools_used_count = 0;
+    if (!tool_names || tool_names_count == 0)
+        return;
+
+    size_t cap =
+        sizeof(wm->self_model.recent_tools_used) / sizeof(wm->self_model.recent_tools_used[0]);
+    size_t name_cap = sizeof(wm->self_model.recent_tools_used[0]);
+
+    for (size_t i = 0; i < tool_names_count && wm->self_model.recent_tools_used_count < cap; i++) {
+        const char *nm = tool_names[i];
+        if (!nm || !nm[0])
+            continue;
+        bool dup = false;
+        for (size_t j = 0; j < wm->self_model.recent_tools_used_count; j++) {
+            if (strcmp(wm->self_model.recent_tools_used[j], nm) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup)
+            continue;
+        size_t nlen = strlen(nm);
+        if (nlen >= name_cap)
+            nlen = name_cap - 1;
+        memcpy(wm->self_model.recent_tools_used[wm->self_model.recent_tools_used_count], nm, nlen);
+        wm->self_model.recent_tools_used[wm->self_model.recent_tools_used_count][nlen] = '\0';
+        wm->self_model.recent_tools_used_count++;
+    }
 }
 
 void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm) {
