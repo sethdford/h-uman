@@ -68,6 +68,15 @@ def _make_args(tmp_path: pathlib.Path, **overrides) -> argparse.Namespace:
         quant_format="mlx",
         train_all=False,
         realtime_first=False,
+        # Sprint 11 / US-11.2: default flipped from "lora" to "dora";
+        # pin "lora" here to preserve the Sprint 7/8 contract these tests verify.
+        train_type="lora",
+        # Sprint 11 / US-11.3: opt out of the early-stop wrapper for tests
+        # that assert direct subprocess.run shape.
+        early_stopping_signal="none",
+        # Sprint 11 / US-11.1: opt out of length normalization to preserve
+        # the pre-US-11.1 DPO argv shape this test expects.
+        length_normalize=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
