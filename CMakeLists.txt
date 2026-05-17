@@ -48,6 +48,7 @@ option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
 option(HU_ENABLE_LLAMACPP "Enable in-process llama.cpp provider with chat-time LoRA merging (W13 Bridge A)" OFF)
+option(HU_ENABLE_MLX_PROVIDER "Enable MLX provider (M3 Bridge B) — stub when OFF, subprocess MLX runtime when ON" OFF)
 # Phase 2 Task 6 (RL SOTA) — gate the mlx-lm-lora DPO subprocess
 # integration test. OFF by default keeps CI hermetic; flipping ON
 # locally activates the heavyweight Gemma download in
@@ -1009,6 +1010,8 @@ list(APPEND HU_CORE_SOURCES
     src/a2a.c
     src/eval.c
     src/eval/consistency.c
+    src/eval/persona_fidelity.c
+    src/memory/fact_extract_llm.c
     src/evaluation/evaluation.c
     src/evaluation/evaluation_dataset_loader.c
     src/evaluation/evaluation_locomo.c
@@ -1063,6 +1066,7 @@ list(APPEND HU_CORE_SOURCES
     src/voice/semantic_eot.c
     src/providers/embedded.c
     src/providers/llamacpp.c
+    src/providers/mlx.c
     src/providers/llamacpp_sampling.c
     src/providers/llamacpp_kvcache.c
     src/providers/llamacpp_decode.c
@@ -1822,6 +1826,9 @@ set(HU_LLAMACPP_FOUND OFF CACHE INTERNAL "Whether llama.cpp was located")
 set(HU_LLAMACPP_INCLUDE_DIRS "" CACHE INTERNAL "")
 set(HU_LLAMACPP_LIBRARIES "" CACHE INTERNAL "")
 set(HU_LLAMACPP_LIBRARY_DIRS "" CACHE INTERNAL "")
+if(HU_ENABLE_MLX_PROVIDER)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_MLX_PROVIDER=1)
+endif()
 if(HU_ENABLE_LLAMACPP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_LLAMACPP=1)
     set(HU_LLAMACPP_FOUND ON CACHE INTERNAL "")
@@ -2661,6 +2668,11 @@ set(HU_TEST_SOURCES
     tests/test_canvas_persist.c
     tests/test_canvas_tool.c
     tests/test_consistency.c
+    tests/test_mlx_provider.c
+    tests/test_persona_fidelity.c
+    tests/test_persona_fidelity_judge.c
+    tests/test_persona_fidelity_validator.c
+    tests/test_fact_extract_llm.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
