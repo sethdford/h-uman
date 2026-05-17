@@ -30,6 +30,10 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
+#include "human/ml/lora_retrain_runner.h"
+#ifdef HU_ENABLE_MOLORA
+#include "human/ml/molora.h"
+#endif
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
 #endif
@@ -891,6 +895,37 @@ void hu_daemon_trust_reset(void) {
     g_contact_trust_count = 0;
     memset(g_contact_trust, 0, sizeof(g_contact_trust));
     TRUST_UNLOCK();
+}
+#endif
+
+/* ── US-7.3 — Honesty gate: LoRA adapter ignored by cloud provider ───
+ *
+ * Per-process one-shot. Sprint-7 decision D4 binds:
+ *   - fire at most once per daemon process lifetime
+ *   - test-only reset shim, no production-side suppression key
+ *
+ * The literal substring "personalization adapter ignored" plus the
+ * provider name is what AC-7.3.1 pins. Do not change either without
+ * updating tests/test_provider_all.c. */
+static int s_personalization_warn_emitted = 0;
+
+void hu_daemon_personalization_warn_adapter_ignored(struct hu_observer *observer,
+                                                    const char *provider_name,
+                                                    const char *adapter_id) {
+    if (s_personalization_warn_emitted)
+        return;
+    s_personalization_warn_emitted = 1;
+    const char *pname = (provider_name && *provider_name) ? provider_name : "(unknown)";
+    const char *aid = (adapter_id && *adapter_id) ? adapter_id : "(unknown)";
+    hu_log_warn("human", observer,
+                "personalization adapter ignored: provider '%s' does not support LoRA adapters "
+                "(adapter '%s' will not be applied)",
+                pname, aid);
+}
+
+#ifdef HU_IS_TEST
+void hu_daemon_personalization_warn_reset_for_test(void) {
+    s_personalization_warn_emitted = 0;
 }
 #endif
 
@@ -2774,6 +2809,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_log_warn("human", agent->observer,
                                 "W14: training data runner registration failed: %d", (int)tde);
             }
+            /* US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess
+             * path). Sibling to the in-process learner runner above.
+             * Registration is best-effort — failure logs a warning and
+             * leaves the slot as a no-op rather than crashing the daemon. */
+            {
+                static hu_lora_retrain_ctx_t w14_lora_retrain_ctx;
+                static char retrain_candidate_dir[512];
+                static char retrain_current_symlink[512];
+                static char retrain_pidfile[512];
+                memset(&w14_lora_retrain_ctx, 0, sizeof(w14_lora_retrain_ctx));
+                const char *hm2 = getenv("HOME");
+                if (hm2 && hm2[0]) {
+                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
+                                   "%s/.human/ml/seth-lora-candidate", hm2);
+                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
+                                   "%s/.human/ml/seth-lora-current", hm2);
+                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
+                                   "%s/.human/lora_retrain.pid", hm2);
+                } else {
+                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
+                                   "/tmp/human_seth_lora_candidate");
+                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
+                                   "/tmp/human_seth_lora_current");
+                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
+                                   "/tmp/human_lora_retrain.pid");
+                }
+                w14_lora_retrain_ctx.candidate_dir = retrain_candidate_dir;
+                w14_lora_retrain_ctx.current_symlink = retrain_current_symlink;
+                w14_lora_retrain_ctx.pidfile_path = retrain_pidfile;
+                /* Defaults for argv pieces are set by the runner when NULL. */
+                hu_error_t rre = hu_w14_scheduler_register_lora_retrain_runner(
+                    agent->w14_scheduler, &w14_lora_retrain_ctx);
+                if (rre == HU_OK)
+                    hu_log_info("human", agent->observer,
+                                "W14: nightly LoRA retrain runner registered (candidate=%s)",
+                                retrain_candidate_dir);
+                else
+                    hu_log_warn("human", agent->observer,
+                                "W14: nightly LoRA retrain runner registration failed: %d",
+                                (int)rre);
+            }
         }
     }
 #endif /* HU_ENABLE_LEARNING — W14 LoRA + training data runner wiring */
@@ -2806,16 +2882,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         if (le == HU_OK)
             hu_log_info("human", agent->observer, "personalization: loaded adapter '%s' from %s",
                         adapter_id, adapter_path);
-        else if (le == HU_ERR_NOT_SUPPORTED)
-            hu_log_info("human", agent->observer,
-                        "personalization: provider does not support LoRA adapters; "
-                        "skipping '%s'",
-                        adapter_id);
-        else
+        else if (le == HU_ERR_NOT_SUPPORTED) {
+            /* US-7.3 (INS-B): cloud providers return HU_ERR_NOT_SUPPORTED
+             * from hu_provider_load_adapter. Surface as WARN with the
+             * literal "personalization adapter ignored" string so the
+             * operator is never silently misled. One-shot per process. */
+            const char *pname =
+                (agent->provider.vtable && agent->provider.vtable->get_name)
+                    ? agent->provider.vtable->get_name(agent->provider.ctx)
+                    : (config->default_provider ? config->default_provider : "(unknown)");
+            hu_daemon_personalization_warn_adapter_ignored(agent->observer, pname, adapter_id);
+        } else
             hu_log_warn("human", agent->observer,
                         "personalization: load_adapter('%s', %s) failed: %d", adapter_id,
                         adapter_path, (int)le);
     }
+#ifdef HU_ENABLE_MOLORA
+    /* US-7.8 — Initialize the MoLoRA static per-channel router from config.
+     * Disabled-by-default; the agent-turn hook is a no-op until the router
+     * is enabled AND at least one channel adapter is mapped. The router
+     * borrows path pointers from `config->personalization.molora` — config
+     * shares the agent's bootstrap arena, so the lifetimes match. */
+    if (agent && config) {
+        hu_error_t mre = hu_molora_router_init(&agent->molora_router, config);
+        if (mre != HU_OK)
+            hu_log_warn("human", agent->observer, "molora: router init failed: %d", (int)mre);
+        else if (agent->molora_router.enabled)
+            hu_log_info("human", agent->observer,
+                        "molora: router enabled with %zu channel adapter(s)",
+                        agent->molora_router.count);
+    }
+#endif
     /* Initialize contact identity graph for cross-channel resolution */
     if (agent && agent->memory) {
         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
@@ -3248,6 +3345,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     agent->w14_scheduler, now_ms, 120000);
                                 if (tde == HU_OK)
                                     last_td_extract_ms = now_ms;
+                            }
+                        }
+                        /* US-7.5: nightly LoRA retrain enqueue. Fires once
+                         * per 24h. The scheduler enforces idle + AC-power
+                         * gating per the W14 contract; the runner's PID-file
+                         * prevents overlapping retrains across ticks. */
+                        {
+                            static int64_t last_retrain_enqueue_ms = 0;
+                            bool retrain_due = (last_retrain_enqueue_ms == 0) ||
+                                               (now_ms - last_retrain_enqueue_ms >= 86400000LL);
+                            if (retrain_due) {
+                                hu_error_t rre = hu_w14_scheduler_enqueue_lora_retrain_nightly(
+                                    agent->w14_scheduler, now_ms, 0);
+                                if (rre == HU_OK)
+                                    last_retrain_enqueue_ms = now_ms;
                             }
                         }
                         hu_error_t te = hu_w14_scheduler_tick(agent->w14_scheduler, now_ms);

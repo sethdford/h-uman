@@ -1,0 +1,15 @@
+ CMakeLists.txt                         |   3 +
+ include/human/agent.h                  |   6 +
+ include/human/config.h                 |  46 ++--
+ include/human/persona/style_critique.h |  90 ++++++++
+ src/agent/agent.c                      |   1 +
+ src/agent/agent_turn.c                 |  30 +++
+ src/agent/cli.c                        |  22 +-
+ src/bootstrap.c                        |  89 ++++----
+ src/config_merge.c                     |   1 +
+ src/config_parse_agent.c               |  15 +-
+ src/persona/style_critique.c           | 397 +++++++++++++++++++++++++++++++++
+ tests/test_main.c                      |   4 +
+ tests/test_style_critique_patterns.c   | 172 ++++++++++++++
+ tests/test_style_self_critique.c       | 242 ++++++++++++++++++++
+ 14 files changed, 1034 insertions(+), 84 deletions(-)

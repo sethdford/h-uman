@@ -1,0 +1,10 @@
+{"prompt": "PLACEHOLDER row. Real PII-redacted 10-row sample lands when Seth runs scripts/derive_yntp_holdout.py on ~/.human/memory.db.", "continuation": "This file is a structural placeholder per decisions.md D1 (tier-2 of hybrid fixture policy). Schema matches yntp_synthetic_5.jsonl.", "metadata": {"placeholder": true, "row_id": 1, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 2, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 3, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 4, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 5, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 6, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 7, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 8, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 9, "channel": "TBD"}}
+{"prompt": "PLACEHOLDER", "continuation": "PLACEHOLDER", "metadata": {"placeholder": true, "row_id": 10, "channel": "TBD"}}

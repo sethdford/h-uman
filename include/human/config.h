@@ -26,9 +26,9 @@ typedef struct hu_provider_entry {
      * "llama.cpp". Zero values mean "use llama.cpp's default".
      * Other providers ignore these fields. */
     size_t context_size;
-    int    threads;
-    bool   use_gpu;
-    int    n_gpu_layers;
+    int threads;
+    bool use_gpu;
+    int n_gpu_layers;
 } hu_provider_entry_t;
 
 typedef struct hu_diagnostics_config {
@@ -102,6 +102,10 @@ typedef struct hu_agent_config {
     bool tree_of_thought;
     bool constitutional_ai;
     char *constitutional_principles; /* formatted principle list for system prompt injection */
+    /* US-7.9: when true, persona->style_rules are enforced via a pure
+     * string-pattern self-critique pass after LLM generation.  Default
+     * false → zero effect on existing behavior. */
+    bool constitutional_style_rules_enabled;
     bool speculative_cache;
     bool multi_agent;
     bool compact_context;
@@ -135,22 +139,24 @@ typedef struct hu_agent_config {
     char *mr_analytical_model;           /* model router: capable reasoning model */
     char *mr_deep_model;                 /* model router: most capable model */
     bool mr_judge_enabled;               /* model router: enable LLM-as-Judge classification */
-    char *mr_judge_model;                /* model router: model to use for judge (default: reflexive) */
-    char *s3_local_model;                /* dedicated model for S3 (private) content; NULL = use degradation fallback */
-    char *mr_on_device_model;            /* model router: on-device model name (default: apple-foundationmodel) */
-    bool mr_on_device_enabled;           /* model router: enable on-device routing (default: true on macOS) */
-    bool prompt_cache_enabled;           /* enable cross-turn system prompt dedup (default true) */
+    char *mr_judge_model;     /* model router: model to use for judge (default: reflexive) */
+    char *s3_local_model;     /* dedicated model for S3 (private) content; NULL = use degradation
+                                 fallback */
+    char *mr_on_device_model; /* model router: on-device model name (default: apple-foundationmodel)
+                               */
+    bool mr_on_device_enabled; /* model router: enable on-device routing (default: true on macOS) */
+    bool prompt_cache_enabled; /* enable cross-turn system prompt dedup (default true) */
     bool agent_comm_enabled;
-    uint32_t best_of_n;                  /* best-of-N candidates (0 or 1 = disabled, max 5) */
-    char *context_engine_type;           /* "legacy" (default) or "rag" */
+    uint32_t best_of_n;        /* best-of-N candidates (0 or 1 = disabled, max 5) */
+    char *context_engine_type; /* "legacy" (default) or "rag" */
     /* Claude Code feature integration */
-    uint8_t permission_level;          /* 0=ReadOnly, 1=WorkspaceWrite, 2=DangerFullAccess */
-    bool session_auto_save;            /* auto-save session after each turn */
-    char *session_dir;                 /* directory for session JSON files */
-    bool discover_instructions;        /* discover .human.md/HUMAN.md files */
-    bool compaction_use_structured;    /* use XML structured summaries */
-    char *self_rag_mode;               /* "off", "telemetry", "soft", "strict" (env: HU_SELF_RAG_MODE) */
-    bool self_rag_streaming;           /* enable streaming self-RAG (env: HU_SELF_RAG_STREAMING) */
+    uint8_t permission_level;       /* 0=ReadOnly, 1=WorkspaceWrite, 2=DangerFullAccess */
+    bool session_auto_save;         /* auto-save session after each turn */
+    char *session_dir;              /* directory for session JSON files */
+    bool discover_instructions;     /* discover .human.md/HUMAN.md files */
+    bool compaction_use_structured; /* use XML structured summaries */
+    char *self_rag_mode;     /* "off", "telemetry", "soft", "strict" (env: HU_SELF_RAG_MODE) */
+    bool self_rag_streaming; /* enable streaming self-RAG (env: HU_SELF_RAG_STREAMING) */
 } hu_agent_config_t;
 
 typedef struct hu_policy_config {
@@ -246,7 +252,7 @@ typedef struct hu_imessage_channel_config {
     int user_response_window_sec; /* DEPRECATED: use daemon.user_response_window_sec */
     char *response_mode;          /* DEPRECATED: use daemon.response_mode */
     bool use_imsg_cli;            /* prefer steipete/imsg CLI for send/react when available */
-    char *loopback_handle; /* treat is_from_me=1 from this handle as incoming (self-test) */
+    char *loopback_handle;        /* treat is_from_me=1 from this handle as incoming (self-test) */
     hu_channel_daemon_config_t daemon;
 } hu_imessage_channel_config_t;
 
@@ -292,9 +298,9 @@ typedef struct hu_mcp_server_entry {
     char *command;        /* stdio: binary path */
     char *args[HU_MCP_SERVER_ARGS_MAX];
     size_t args_count;
-    char *url;            /* sse/http: endpoint URL */
+    char *url; /* sse/http: endpoint URL */
     bool auto_connect;
-    uint32_t timeout_ms;  /* 0 = use default (30s) */
+    uint32_t timeout_ms; /* 0 = use default (30s) */
     /* OAuth2 PKCE authentication (optional, for HTTP/SSE servers) */
     char *oauth_client_id;
     char *oauth_auth_url;
@@ -661,6 +667,7 @@ typedef struct hu_config {
     hu_cron_config_t cron;
     hu_scheduler_config_t scheduler;
     hu_personalization_config_t personalization;
+    hu_inference_config_t inference; /* US-7.7 — best-of-N at inference (default off) */
     hu_behavior_config_t behavior;
     hu_node_entry_t nodes[HU_NODES_MAX];
     size_t nodes_len;

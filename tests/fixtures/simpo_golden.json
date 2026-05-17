@@ -1,0 +1,13 @@
+{
+  "_comment": "US-7.10 SimPO golden fixture. expected_loss is computed offline against the canonical SimPO formula: L = -log(sigmoid(beta * (logp_chosen/|y_w| - logp_rejected/|y_l|) - gamma)). Python reference (run with `python3 -c ...`): avg_c = -10/5 = -2.0; avg_r = -30/10 = -3.0; diff = 1.0; logits = 0.1*1.0 - 0.5 = -0.4; sig = 1/(1+exp(0.4)) = 0.4013123398875480; loss = -log(sig) = 0.9130152523999526. The logprobs are INJECTED via hu_pref_pair_logprobs_t; this fixture never instantiates a model.",
+  "prompt": "What is the capital of France?",
+  "chosen": "The capital of France is Paris.",
+  "rejected": "I think it might be Berlin?",
+  "beta": 0.1,
+  "gamma": 0.5,
+  "chosen_logprob_sum": -10.0,
+  "chosen_token_count": 5,
+  "rejected_logprob_sum": -30.0,
+  "rejected_token_count": 10,
+  "expected_loss": 0.9130152523999526
+}

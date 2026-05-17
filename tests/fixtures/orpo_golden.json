@@ -1,0 +1,14 @@
+{
+  "_comment": "US-11.5 ORPO golden fixture. expected_loss is computed offline against the canonical ORPO formula (Hong et al. arXiv:2403.07691 Eq. 7): L_ORPO = -avg_chosen_logp + lambda * -log(sigmoid(log_odds(chosen) - log_odds(rejected))), where log_odds(y) = logp(y) - log(1 - exp(logp(y))). Python reference (python3 -m): import math; avg_c=-1.5/3=-0.5; avg_r=-4.5/3=-1.5; nll=0.5; log1mexp_c=log1p(-exp(-0.5))=-0.9327521295671886; log1mexp_r=log1p(-exp(-1.5))=-0.2524824589254540; lo_c=-0.5 - (-0.9327521295671886)=0.4327521295671886; lo_r=-1.5 - (-0.2524824589254540)=-1.2475175410745460; or_logits=1.6802696706417346; sig=1/(1+exp(-1.6802696706417346))=0.8429402366504173; or_penalty=-log(0.8429402366504173)=0.1708592171464784; loss=0.5 + 0.1*0.1708592171464784 = 0.5170859217146478. Logprobs are INJECTED via hu_pref_pair_logprobs_t; this fixture never instantiates a model.",
+  "prompt": "What is the capital of France?",
+  "chosen": "The capital of France is Paris.",
+  "rejected": "I think it might be Berlin?",
+  "lambda": 0.1,
+  "chosen_logprob_sum": -1.5,
+  "chosen_token_count": 3,
+  "rejected_logprob_sum": -4.5,
+  "rejected_token_count": 3,
+  "expected_nll_term": 0.5,
+  "expected_or_term": 0.1708592171464784,
+  "expected_loss": 0.5170859217146478
+}

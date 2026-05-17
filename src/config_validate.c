@@ -1,8 +1,8 @@
 /* Strict config schema validation — unknown keys, type checks, value validation. */
-#include "human/core/log.h"
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/providers/factory.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -26,6 +26,7 @@ static const char *const hu_config_top_keys[] = {
     "cron",
     "scheduler",
     "personalization",
+    "inference",
     "runtime",
     "tunnel",
     "channels",
@@ -108,10 +109,9 @@ static const size_t hu_security_keys_len = sizeof(hu_security_keys) / sizeof(hu_
 
 /* Core provider names */
 static const char *const hu_known_providers[] = {
-    "openai",       "anthropic",  "gemini",     "google",     "google-gemini",
-    "ollama",       "openrouter", "compatible", "claude_cli", "codex_cli",
-    "openai-codex", "router",     "reliable",   "ensemble",   "mlx_local",
-    "mlx-local",    "apple",
+    "openai",     "anthropic",  "gemini",     "google",    "google-gemini", "ollama",
+    "openrouter", "compatible", "claude_cli", "codex_cli", "openai-codex",  "router",
+    "reliable",   "ensemble",   "mlx_local",  "mlx-local", "apple",
 };
 static const size_t hu_known_providers_len =
     sizeof(hu_known_providers) / sizeof(hu_known_providers[0]);
@@ -295,18 +295,19 @@ hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value
     }
     if (cfg->default_provider && !is_provider_valid(cfg->default_provider)) {
         hu_log_info("config", NULL, "unknown provider: '%s'",
-                cfg->default_provider ? cfg->default_provider : "(empty)");
+                    cfg->default_provider ? cfg->default_provider : "(empty)");
         if (strict)
             has_error = true;
     }
     if (cfg->max_tokens != 0 && (cfg->max_tokens < 1 || cfg->max_tokens > 1000000)) {
-        hu_log_error("config", NULL, "max_tokens (%u) outside 1–1000000 (warning)", cfg->max_tokens);
+        hu_log_error("config", NULL, "max_tokens (%u) outside 1–1000000 (warning)",
+                     cfg->max_tokens);
         if (strict)
             has_error = true;
     }
     if (cfg->agent.max_tool_iterations > 10000) {
         hu_log_error("config", NULL, "agent.max_tool_iterations (%u) outside 1–10000 (warning)",
-                cfg->agent.max_tool_iterations);
+                     cfg->agent.max_tool_iterations);
         if (strict)
             has_error = true;
     }
@@ -331,7 +332,7 @@ hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value
         if (url && strlen(url) >= 8 && !starts_with(url, "https://") &&
             !starts_with(url, "http://localhost") && !starts_with(url, "http://127.0.0.1")) {
             hu_log_info("config", NULL, "providers[%zu].base_url must use https:// (or localhost)",
-                    i);
+                        i);
             if (strict)
                 has_error = true;
         }

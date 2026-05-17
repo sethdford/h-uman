@@ -276,6 +276,8 @@ void run_w12_verifier_loop_tests(void);
 #ifdef HU_ENABLE_LEARNING
 void run_w13_learner_tests(void);
 void run_w14_runners_tests(void);
+void run_w14_lora_retrain_tests(void);
+void run_w14_dual_lora_tests(void);
 void run_learner_bridge_tests(void);
 #endif
 void run_w15_backup_restore_tests(void);
@@ -354,6 +356,7 @@ void run_context_engine_tests(void);
 void run_exec_env_tests(void);
 int run_channel_monitor_tests(void);
 int run_doctor_fix_tests(void);
+void run_doctor_personalization_warning_tests(void);
 int run_skill_scaffold_tests(void);
 int run_plugin_discovery_tests(void);
 int run_context_engine_rag_tests(void);
@@ -433,6 +436,11 @@ void run_emotion_map_tests(void);
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
 void run_ml_cli_actually_trains_tests(void);
+void run_ml_fidelity_judgment_tests(void);
+/* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
+ * rl_trainer_simpo + rl_trainer_orpo C tests orphaned by main's RL
+ * architecture rework — files deleted, declarations removed. Sprint 12
+ * FU-11.5.a will re-target against main's new framework. */
 void run_dpo_judge_naming_tests(void);
 void run_lora_tests(void);
 void run_agent_trainer_tests(void);
@@ -548,6 +556,8 @@ void run_llamacpp_kvcache_tests(void);
 void run_llamacpp_decode_tests(void);
 void run_llamacpp_lora_hotswap_tests(void);
 void run_llamacpp_chat_metal_tests(void);
+void run_llamacpp_best_of_n_tests(void);
+void run_doctor_best_of_n_warning_tests(void);
 void run_coreml_provider_tests(void);
 void run_forgetting_tests(void);
 void run_bootstrap_tests(void);
@@ -610,6 +620,8 @@ void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+void run_style_critique_patterns_tests(void);
+void run_style_self_critique_tests(void);
 void run_personal_model_simulation_tests(void);
 #ifdef HU_ENABLE_RL_FULL
 void run_personal_model_fidelity_v2_tests(void);
@@ -620,6 +632,20 @@ void run_grpo_e2e_tests(void);
 #endif
 void run_persona_directive_channels_tests(void);
 void run_filler_recency_tests(void);
+void run_contact_send_recency_tests(void);
+void run_dpo_miner_tests(void);
+void run_molora_router_tests(void);
+/* PR #115: 3 declarations + calls removed — see CMakeLists.txt comment
+ * at line ~2970. These tests were ghost-registered (declared in
+ * test_main.c but not compiled pre-PR) and exercise features not yet
+ * fully implemented:
+ *   - run_config_identity_links_tests
+ *   - run_memory_session_scoping_tests
+ *   - run_imessage_outbound_dedup_tests
+ * Activated briefly during merge resolution; produced 11 failures in
+ * minimal-build (8 from missing parsers + 3 from cross-test state
+ * pollution on the dedup channel). Re-add when the underlying
+ * features land. */
 void run_filler_pctt_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -961,6 +987,8 @@ int main(int argc, char **argv) {
 #ifdef HU_ENABLE_LEARNING
     run_w13_learner_tests();
     run_w14_runners_tests();
+    run_w14_lora_retrain_tests();
+    run_w14_dual_lora_tests();
     run_learner_bridge_tests();
 #endif
     run_w15_backup_restore_tests();
@@ -1041,6 +1069,7 @@ int main(int argc, char **argv) {
     run_exec_env_tests();
     run_channel_monitor_tests();
     run_doctor_fix_tests();
+    run_doctor_personalization_warning_tests();
     run_skill_scaffold_tests();
     run_plugin_discovery_tests();
     run_context_engine_rag_tests();
@@ -1112,6 +1141,11 @@ int main(int argc, char **argv) {
 #ifdef HU_ENABLE_ML
     run_ml_tests();
     run_ml_cli_actually_trains_tests();
+    run_ml_fidelity_judgment_tests();
+    /* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
+     * rl_trainer_orpo/simpo suites removed — they pinned Sprint 11's
+     * per-trainer factory pattern, orphaned by main's RL architecture
+     * rework. See declaration block at ~line 441. */
     run_dpo_judge_naming_tests();
     run_lora_tests();
     run_agent_trainer_tests();
@@ -1220,6 +1254,8 @@ int main(int argc, char **argv) {
     run_llamacpp_decode_tests();
     run_llamacpp_lora_hotswap_tests();
     run_llamacpp_chat_metal_tests();
+    run_llamacpp_best_of_n_tests();
+    run_doctor_best_of_n_warning_tests();
     run_coreml_provider_tests();
     run_forgetting_tests();
     run_bootstrap_tests();
@@ -1283,6 +1319,8 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_style_critique_patterns_tests();
+    run_style_self_critique_tests();
     run_personal_model_simulation_tests();
 #ifdef HU_ENABLE_RL_FULL
     run_personal_model_fidelity_v2_tests();
@@ -1293,6 +1331,12 @@ int main(int argc, char **argv) {
 #endif
     run_persona_directive_channels_tests();
     run_filler_recency_tests();
+    run_contact_send_recency_tests();
+    run_dpo_miner_tests();
+    run_molora_router_tests();
+    /* PR #115: removed 3 ghost-test calls (see declaration block above):
+     * run_config_identity_links_tests, run_memory_session_scoping_tests,
+     * run_imessage_outbound_dedup_tests. */
     run_filler_pctt_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();

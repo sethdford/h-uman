@@ -3,6 +3,7 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -174,8 +175,7 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
                                         const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
-    cfg->personalization.enabled =
-        hu_json_get_bool(obj, "enabled", cfg->personalization.enabled);
+    cfg->personalization.enabled = hu_json_get_bool(obj, "enabled", cfg->personalization.enabled);
     const char *path = hu_json_get_string(obj, "lora_adapter_path");
     if (path) {
         if (cfg->personalization.lora_adapter_path)
@@ -202,8 +202,118 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
      * `HUMAN_M3_ADAPTER_DISABLE=1` is consulted at attach time
      * and wins over this config value. */
     cfg->personalization.m3_adapter_disabled =
-        hu_json_get_bool(obj, "m3_adapter_disabled",
-                         cfg->personalization.m3_adapter_disabled);
+        hu_json_get_bool(obj, "m3_adapter_disabled", cfg->personalization.m3_adapter_disabled);
+
+    /* US-7.8 — MoLoRA static per-channel router (Init #02 phase 1).
+     * Schema:
+     *   "molora": {
+     *     "enabled": true,
+     *     "channel_adapters": {
+     *       "telegram": "~/.human/adapters/seth/telegram.lora",
+     *       "slack":    "~/.human/adapters/seth/slack.lora",
+     *       ...
+     *     }
+     *   }
+     * Channel ids are normalized at parse time (lowercase, no `:`-suffix,
+     * no whitespace). The runtime router re-normalizes defensively. Parsing
+     * is unconditional so OFF builds still drop the keys cleanly (no
+     * "unknown field" surprises if a user has the block configured); only
+     * the agent-turn hook is gated behind HU_ENABLE_MOLORA. */
+    hu_json_value_t *mol = hu_json_object_get(obj, "molora");
+    if (mol && mol->type == HU_JSON_OBJECT) {
+        cfg->personalization.molora.enabled =
+            hu_json_get_bool(mol, "enabled", cfg->personalization.molora.enabled);
+        /* Free any prior entries (reparse-safe). */
+        for (size_t mi = 0; mi < cfg->personalization.molora.count; mi++) {
+            hu_molora_channel_entry_t *e = &cfg->personalization.molora.entries[mi];
+            if (e->adapter_path) {
+                a->free(a->ctx, e->adapter_path, strlen(e->adapter_path) + 1);
+                e->adapter_path = NULL;
+            }
+            e->channel[0] = '\0';
+        }
+        cfg->personalization.molora.count = 0;
+        hu_json_value_t *ca = hu_json_object_get(mol, "channel_adapters");
+        if (ca && ca->type == HU_JSON_OBJECT && ca->data.object.pairs) {
+            for (size_t mi = 0; mi < ca->data.object.len &&
+                                cfg->personalization.molora.count < HU_MOLORA_CONFIG_MAX_CHANNELS;
+                 mi++) {
+                hu_json_pair_t *p = &ca->data.object.pairs[mi];
+                if (!p->key || !p->value || p->value->type != HU_JSON_STRING ||
+                    !p->value->data.string.ptr)
+                    continue;
+                /* Channel id key must normalize to a non-empty string. */
+                char norm[HU_MOLORA_CONFIG_CHANNEL_NAME_MAX];
+                size_t kl = strlen(p->key);
+                /* Inline normalizer — same rules as
+                 * hu_molora_router_normalize_channel; duplicated here so
+                 * the parser doesn't pull in the ML include in OFF builds. */
+                size_t kstart = 0;
+                while (kstart < kl && ((unsigned char)p->key[kstart] == ' ' ||
+                                       (unsigned char)p->key[kstart] == '\t' ||
+                                       (unsigned char)p->key[kstart] == '\n' ||
+                                       (unsigned char)p->key[kstart] == '\r'))
+                    kstart++;
+                size_t kend = kstart;
+                while (kend < kl && p->key[kend] != ':' && (unsigned char)p->key[kend] != ' ' &&
+                       (unsigned char)p->key[kend] != '\t' && (unsigned char)p->key[kend] != '\n' &&
+                       (unsigned char)p->key[kend] != '\r')
+                    kend++;
+                if (kend <= kstart)
+                    continue;
+                size_t klen = kend - kstart;
+                if (klen >= sizeof(norm))
+                    klen = sizeof(norm) - 1;
+                for (size_t ci = 0; ci < klen; ci++) {
+                    unsigned char ch = (unsigned char)p->key[kstart + ci];
+                    if (ch >= 'A' && ch <= 'Z')
+                        ch = (unsigned char)(ch + ('a' - 'A'));
+                    norm[ci] = (char)ch;
+                }
+                norm[klen] = '\0';
+                const char *molora_path = p->value->data.string.ptr;
+                if (!molora_path || !molora_path[0])
+                    continue;
+                hu_molora_channel_entry_t *e =
+                    &cfg->personalization.molora.entries[cfg->personalization.molora.count];
+                memcpy(e->channel, norm, klen + 1);
+                e->adapter_path = hu_strdup(a, molora_path);
+                if (!e->adapter_path) {
+                    e->channel[0] = '\0';
+                    continue;
+                }
+                cfg->personalization.molora.count++;
+            }
+        }
+    }
+    return HU_OK;
+}
+
+/* US-7.7 — `inference` block:
+ *   {
+ *     "best_of_n": 4,                  // default 1 (disabled); clamped 0..8
+ *     "best_of_n_cost_cap_ms": 1500    // default 0 (no cap); soft wall-clock cap
+ *   }
+ * The decorator (src/agent/best_of_n.c) only fires when best_of_n >= 2 AND
+ * the active provider is "llamacpp". Cloud-provider misconfiguration is
+ * surfaced by the doctor warning in src/doctor.c (AC-7.7.3). */
+static hu_error_t parse_inference(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {
+    (void)a;
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    double bon = hu_json_get_number(obj, "best_of_n", (double)cfg->inference.best_of_n);
+    if (bon < 0)
+        bon = 0;
+    else if (bon > 8)
+        bon = 8;
+    cfg->inference.best_of_n = (uint32_t)bon;
+    double cap = hu_json_get_number(obj, "best_of_n_cost_cap_ms",
+                                    (double)cfg->inference.best_of_n_cost_cap_ms);
+    if (cap < 0)
+        cap = 0;
+    if (cap > (double)UINT32_MAX)
+        cap = (double)UINT32_MAX;
+    cfg->inference.best_of_n_cost_cap_ms = (uint32_t)cap;
     return HU_OK;
 }
 
@@ -219,8 +329,8 @@ static hu_error_t parse_reaction_collection(hu_config_t *cfg, const hu_json_valu
     if (db_path && db_path[0]) {
         if (db_path[0] != '/')
             return HU_ERR_INVALID_ARGUMENT;
-        snprintf(cfg->reaction_collection.chatdb_path,
-                 sizeof(cfg->reaction_collection.chatdb_path), "%s", db_path);
+        snprintf(cfg->reaction_collection.chatdb_path, sizeof(cfg->reaction_collection.chatdb_path),
+                 "%s", db_path);
     }
     hu_json_value_t *ch_arr = hu_json_object_get(obj, "channels");
     if (ch_arr && ch_arr->type == HU_JSON_ARRAY) {
@@ -230,8 +340,7 @@ static hu_error_t parse_reaction_collection(hu_config_t *cfg, const hu_json_valu
         cfg->reaction_collection.channel_count = n;
         for (size_t i = 0; i < n; i++) {
             const char *s = NULL;
-            if (ch_arr->data.array.items[i] &&
-                ch_arr->data.array.items[i]->type == HU_JSON_STRING)
+            if (ch_arr->data.array.items[i] && ch_arr->data.array.items[i]->type == HU_JSON_STRING)
                 s = ch_arr->data.array.items[i]->data.string.ptr;
             if (s)
                 snprintf(cfg->reaction_collection.channels[i],
@@ -1062,8 +1171,7 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
             return HU_ERR_OUT_OF_MEMORY;
         }
         if (cfg->workspace_dir_override) {
-            a->free(a->ctx, cfg->workspace_dir_override,
-                    strlen(cfg->workspace_dir_override) + 1);
+            a->free(a->ctx, cfg->workspace_dir_override, strlen(cfg->workspace_dir_override) + 1);
         }
         cfg->workspace_dir_override = ws_override;
         if (cfg->workspace_dir)
@@ -1180,10 +1288,14 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     if (sched_obj)
         parse_scheduler(a, cfg, sched_obj);
 
-    hu_json_value_t *personalization_obj =
-        hu_json_object_get(root, "personalization");
+    hu_json_value_t *personalization_obj = hu_json_object_get(root, "personalization");
     if (personalization_obj)
         parse_personalization(a, cfg, personalization_obj);
+
+    /* US-7.7 — best-of-N at inference (top-level "inference" block). */
+    hu_json_value_t *inference_obj = hu_json_object_get(root, "inference");
+    if (inference_obj)
+        parse_inference(a, cfg, inference_obj);
 
     hu_json_value_t *reaction_obj = hu_json_object_get(root, "reaction_collection");
     if (reaction_obj) {
@@ -1312,9 +1424,9 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
                     a->free(a->ctx, cfg->security.sandbox_config.firejail_args,
                             cfg->security.sandbox_config.firejail_args_len * sizeof(char *));
                 }
-                hu_error_t fa_err = parse_string_array(a, &cfg->security.sandbox_config.firejail_args,
-                                                       &cfg->security.sandbox_config.firejail_args_len,
-                                                       fa);
+                hu_error_t fa_err =
+                    parse_string_array(a, &cfg->security.sandbox_config.firejail_args,
+                                       &cfg->security.sandbox_config.firejail_args_len, fa);
                 if (fa_err != HU_OK) {
                     hu_json_free(a, root);
                     return fa_err;
@@ -1346,10 +1458,9 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
                                 cfg->security.sandbox_config.net_proxy.allowed_domains_len *
                                     sizeof(char *));
                     }
-                    hu_error_t ad_err =
-                        parse_string_array(a, &cfg->security.sandbox_config.net_proxy.allowed_domains,
-                                           &cfg->security.sandbox_config.net_proxy.allowed_domains_len,
-                                           ad);
+                    hu_error_t ad_err = parse_string_array(
+                        a, &cfg->security.sandbox_config.net_proxy.allowed_domains,
+                        &cfg->security.sandbox_config.net_proxy.allowed_domains_len, ad);
                     if (ad_err != HU_OK) {
                         hu_json_free(a, root);
                         return ad_err;

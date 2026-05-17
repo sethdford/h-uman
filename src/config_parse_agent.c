@@ -17,6 +17,9 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
         hu_json_get_bool(obj, "tree_of_thought", cfg->agent.tree_of_thought);
     cfg->agent.constitutional_ai =
         hu_json_get_bool(obj, "constitutional_ai", cfg->agent.constitutional_ai);
+    /* US-7.9: pure string-pattern style self-critique (separate from LLM-judge above). */
+    cfg->agent.constitutional_style_rules_enabled = hu_json_get_bool(
+        obj, "constitutional_style_rules_enabled", cfg->agent.constitutional_style_rules_enabled);
     cfg->agent.speculative_cache =
         hu_json_get_bool(obj, "speculative_cache", cfg->agent.speculative_cache);
     cfg->agent.tool_routing_enabled =
@@ -291,11 +294,9 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
                             count++;
                         else {
                             if (arr[count].channel)
-                                a->free(a->ctx, arr[count].channel,
-                                        strlen(arr[count].channel) + 1);
+                                a->free(a->ctx, arr[count].channel, strlen(arr[count].channel) + 1);
                             if (arr[count].persona)
-                                a->free(a->ctx, arr[count].persona,
-                                        strlen(arr[count].persona) + 1);
+                                a->free(a->ctx, arr[count].persona, strlen(arr[count].persona) + 1);
                         }
                     }
                     if (count > 0) {
@@ -368,15 +369,13 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
         const char *mr_judge_model = hu_json_get_string(mr_obj, "judge_model");
         if (mr_judge_model) {
             if (cfg->agent.mr_judge_model)
-                a->free(a->ctx, cfg->agent.mr_judge_model,
-                        strlen(cfg->agent.mr_judge_model) + 1);
+                a->free(a->ctx, cfg->agent.mr_judge_model, strlen(cfg->agent.mr_judge_model) + 1);
             cfg->agent.mr_judge_model = hu_strdup(a, mr_judge_model);
         }
         const char *s3_local = hu_json_get_string(mr_obj, "s3_local_model");
         if (s3_local) {
             if (cfg->agent.s3_local_model)
-                a->free(a->ctx, cfg->agent.s3_local_model,
-                        strlen(cfg->agent.s3_local_model) + 1);
+                a->free(a->ctx, cfg->agent.s3_local_model, strlen(cfg->agent.s3_local_model) + 1);
             cfg->agent.s3_local_model = hu_strdup(a, s3_local);
         }
         const char *mr_on_dev = hu_json_get_string(mr_obj, "on_device_model");

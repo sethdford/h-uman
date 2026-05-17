@@ -1,0 +1,453 @@
+commit b7bd009b372ea0b8cfbb354c016c8a075408df3a
+Author: Seth Ford <sethford@studio.local>
+Date:   Sat May 16 10:57:12 2026 -0400
+
+    feat(sprint-7): higher LoRA rank + target-modules CLI flag (US-7.4)
+
+diff --git a/scripts/finetune-gemma.py b/scripts/finetune-gemma.py
+index f942cf7f..57164ed4 100644
+--- a/scripts/finetune-gemma.py
++++ b/scripts/finetune-gemma.py
+@@ -51,7 +51,10 @@ MODEL_TARGETS = {
+         "default_lr": 1e-6,
+         "default_num_layers": 8,
+         "default_max_seq_length": 2048,
+-        "default_rank": 16,
++        # Sprint 7 / US-7.4: bumped from 16 -> 32. DPO benefits from
++        # higher-rank adapters that can represent the contrastive signal
++        # more expressively. e4b/e2b stay at 32 (out of scope per story).
++        "default_rank": 32,
+         "adapter_suffix": "seth-lora",
+     },
+     "e4b": {
+@@ -82,6 +85,41 @@ DEFAULT_TARGET = "31b"
+ DEFAULT_DATA = str(Path.home() / ".human" / "training-data" / "finetune")
+ MLX_SERVER_PORT = 8741
+ 
++# Sprint 7 / US-7.4 — default LoRA target modules.
++# QKVO (a small expansion from the previous auto-discovery default which
++# was effectively QV on Gemma's last-N blocks). When the user does not
++# pass --target-modules, this list is used to materialize the `keys`
++# field of `--lora-parameters`. Q+K+V+O are the conventional attention
++# projection names for Gemma/Llama/Qwen/Mistral; the wider set
++# (gate_proj,up_proj,down_proj for MLP) is opt-in via CLI.
++DEFAULT_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
++
++
++def _build_lora_parameters_json(args) -> str:
++    """Build the single argv token after `--lora-parameters` for mlx-lm-lora.
++
++    Per Sprint 7 / US-7.4 design §0: target-module selection is passed to
++    mlx-lm-lora via the existing `--lora-parameters` JSON flag, not via a
++    dedicated `--target-modules` flag (no such flag exists on the mlx-lm
++    side). The JSON's `keys` field is what mlx-lm's `linear_to_lora_layers`
++    uses to override its auto-discovery. Stock `mlx_lm.lora` honors the
++    same JSON shape, so this helper is used by BOTH `run_sft()` (Phase 1,
++    stock mlx_lm) and `run_dpo()` (Phase 2, mlx-lm-lora fork).
++
++    The dict is serialised via `json.dumps` (NOT f-string concatenation)
++    so `subprocess.run` receives the whole JSON as a SINGLE argv slot. No
++    shell quoting needed — we never use `shell=True`.
++    """
++    target_modules = list(getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES)
++    rank = int(getattr(args, "rank", None) or 32)
++    payload = {
++        "rank": rank,
++        "dropout": 0.0,
++        "scale": 10.0,
++        "keys": target_modules,
++    }
++    return json.dumps(payload)
++
+ 
+ def find_mlx_server_pid() -> int | None:
+     """Find the PID of the running MLX server."""
+@@ -213,6 +251,9 @@ def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
+         "--max-seq-length", str(args.max_seq_length),
+         "--grad-checkpoint",
+         "--optimizer", "adamw",
++        # Sprint 7 / US-7.4: emit the target-modules + rank to mlx_lm via
++        # --lora-parameters JSON. See _build_lora_parameters_json().
++        "--lora-parameters", _build_lora_parameters_json(args),
+     ]
+ 
+     if args.mask_prompt:
+@@ -457,6 +498,10 @@ def run_dpo(args, adapter_dir: Path) -> int:
+         "--num-layers", str(args.num_layers),
+         "--max-seq-length", str(args.max_seq_length),
+         "--grad-checkpoint",
++        # Sprint 7 / US-7.4: same JSON shape as SFT path. mlx-lm-lora
++        # accepts `--lora-parameters` and routes through the same
++        # `linear_to_lora_layers` discovery override.
++        "--lora-parameters", _build_lora_parameters_json(args),
+     ]
+ 
+     if getattr(args, "mask_prompt", False):
+@@ -518,6 +563,11 @@ def run_speculative_draft_training(args):
+         rank=draft_cfg["default_rank"],
+         num_layers=draft_cfg["default_num_layers"],
+         max_seq_length=draft_cfg["default_max_seq_length"],
++        # Sprint 7 / US-7.4: inherit the operator's target-module choice
++        # (or None to fall through to DEFAULT_TARGET_MODULES inside the
++        # helper). Without this, the draft model would silently fall back
++        # to an undefined attribute on the Namespace.
++        target_modules=getattr(args, "target_modules", None),
+         steps_per_report=args.steps_per_report,
+         steps_per_eval=args.steps_per_eval,
+         save_every=args.save_every,
+@@ -680,6 +730,13 @@ def run_finetune(args):
+     print(f"  Iterations:  {args.iters}")
+     print(f"  Batch size:  {args.batch_size}")
+     print(f"  LoRA rank:   {args.rank}")
++    # Sprint 7 / US-7.4 risk #2: surface the resolved target modules so
++    # the operator can spot a typo (e.g. --target-modules q_proj that
++    # collapses the adapter to Q-only) before training starts.
++    _resolved_modules = list(
++        getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES
++    )
++    print(f"  Target mods: {','.join(_resolved_modules)}")
+     print(f"  LoRA layers: {args.num_layers}")
+     print(f"  LR:          {args.learning_rate}")
+     print(f"  Seq length:  {args.max_seq_length}")
+@@ -726,6 +783,14 @@ def run_finetune(args):
+         "model": model,
+         "adapter_path": str(adapter_dir),
+         "rank": args.rank,
++        # Sprint 7 / US-7.4 (AC-7.4.5): record the resolved target
++        # modules alongside rank so a downstream consumer (e.g. the
++        # US-7.5 nightly cron's promotion gate or check-lora-ab.sh) can
++        # distinguish a true regression in size_mb from a deliberate
++        # config change.
++        "target_modules": list(
++            getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES
++        ),
+         "iters": args.iters,
+         "batch_size": args.batch_size,
+         "learning_rate": args.learning_rate,
+@@ -806,6 +871,9 @@ def run_train_all(args):
+             rank=target_cfg["default_rank"],
+             num_layers=target_cfg["default_num_layers"],
+             max_seq_length=target_cfg["default_max_seq_length"],
++            # Sprint 7 / US-7.4: forward operator's target-module choice
++            # (or None for the QKVO default) into each per-target run.
++            target_modules=getattr(args, "target_modules", None),
+             steps_per_report=args.steps_per_report,
+             steps_per_eval=args.steps_per_eval,
+             save_every=args.save_every,
+@@ -872,6 +940,15 @@ Examples:
+     parser.add_argument("--learning-rate", type=float, default=None,
+                         help="Learning rate (default: auto from target)")
+     parser.add_argument("--rank", type=int, default=None, help="LoRA rank (default: auto from target)")
++    # Sprint 7 / US-7.4: CSV of LoRA target module names. CSV is the
++    # friendliest input — we materialize it into the `keys` field of the
++    # `--lora-parameters` JSON token at subprocess-build time. The
++    # canonical set for Gemma/Llama/Qwen/Mistral attention is QKVO; the
++    # MLP set (gate_proj,up_proj,down_proj) is opt-in.
++    parser.add_argument("--target-modules", type=str, default=None,
++                        help="CSV of LoRA target module names "
++                             "(default: q_proj,k_proj,v_proj,o_proj). "
++                             "Passed via --lora-parameters JSON `keys` to mlx-lm/mlx-lm-lora.")
+     parser.add_argument("--num-layers", type=int, default=None,
+                         help="Number of layers to apply LoRA (default: auto from target)")
+     parser.add_argument("--max-seq-length", type=int, default=None,
+@@ -923,6 +1000,16 @@ Examples:
+     if args.max_seq_length is None:
+         args.max_seq_length = target_cfg["default_max_seq_length"]
+ 
++    # Sprint 7 / US-7.4: parse --target-modules CSV into list[str] exactly
++    # once, here in main(), so run_sft/run_dpo never re-parse and never see
++    # a None or a string. Default to QKVO.
++    if args.target_modules:
++        args.target_modules = [
++            s.strip() for s in args.target_modules.split(",") if s.strip()
++        ]
++    else:
++        args.target_modules = list(DEFAULT_TARGET_MODULES)
++
+     if args.train_all:
+         sys.exit(run_train_all(args))
+ 
+diff --git a/tests/test_finetune_gemma_modules.py b/tests/test_finetune_gemma_modules.py
+new file mode 100644
+index 00000000..81f929cd
+--- /dev/null
++++ b/tests/test_finetune_gemma_modules.py
+@@ -0,0 +1,278 @@
++"""Sprint 7 / US-7.4 — tests for LoRA rank + target-modules CLI surface.
++
++Covers all five acceptance criteria (AC-7.4.1 .. AC-7.4.5). The shell-gate
++ACs (AC-7.4.3, AC-7.4.4) are exercised separately in CI via
++`bash scripts/check-lora-ab.sh` and `bash scripts/check-lora-baseline.sh`;
++this file pins the *interface contract* those gates rely on (the JSON
++shape of the `--lora-parameters` token and the recorded `train_config.json`
++fields) so the gates can rely on stable inputs.
++
++Mocks `subprocess.run` — no real `mlx_lm_lora.train` invocation, no real
++model weights, no network. The script's filename has a hyphen, so we
++load it via `importlib.util` just like `tests/test_finetune_gemma_dpo.py`.
++"""
++from __future__ import annotations
++
++import argparse
++import importlib.util
++import io
++import json
++import pathlib
++import types
++from contextlib import redirect_stdout
++from unittest.mock import patch
++
++
++# ── Module loader (hyphenated filename, cannot be `import`-ed normally) ───
++_HERE = pathlib.Path(__file__).resolve().parent
++_SCRIPT = _HERE.parent / "scripts" / "finetune-gemma.py"
++
++
++def _load_finetune_gemma():
++    spec = importlib.util.spec_from_file_location("finetune_gemma", _SCRIPT)
++    assert spec is not None and spec.loader is not None
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++    return mod
++
++
++fg = _load_finetune_gemma()
++
++
++def _make_args(tmp_path: pathlib.Path, **overrides) -> argparse.Namespace:
++    """argparse.Namespace shaped like main()'s `args` post-default-resolution."""
++    defaults = dict(
++        target="31b",
++        model=None,
++        data=str(tmp_path / "data"),
++        adapter_path=str(tmp_path / "adapter"),
++        iters=10,
++        batch_size=1,
++        learning_rate=1e-6,
++        rank=32,
++        num_layers=8,
++        max_seq_length=2048,
++        target_modules=list(fg.DEFAULT_TARGET_MODULES),
++        steps_per_report=5,
++        steps_per_eval=20,
++        save_every=20,
++        mask_prompt=True,
++        resume=False,
++        dpo=True,
++        sft_only=False,
++        from_corrections=False,
++        no_version=True,
++        no_restart_server=True,
++        speculative_draft=False,
++        quantize=False,
++        quant_bits=4,
++        quant_format="mlx",
++        train_all=False,
++        realtime_first=False,
++    )
++    defaults.update(overrides)
++    return argparse.Namespace(**defaults)
++
++
++def _extract_lora_parameters_json(cmd: list[str]) -> dict:
++    """Find `--lora-parameters` in argv and return the parsed JSON dict.
++
++    The flag is emitted as TWO argv slots: `["--lora-parameters", "<json>"]`.
++    Asserting on the indexed slot also pins the design's risk #3 (any
++    refactor that joins the cmd into a shell string fails this lookup).
++    """
++    assert "--lora-parameters" in cmd, (
++        f"--lora-parameters not found in cmd: {cmd}"
++    )
++    idx = cmd.index("--lora-parameters")
++    assert idx + 1 < len(cmd), (
++        f"--lora-parameters appeared as the last argv slot with no value: {cmd}"
++    )
++    json_str = cmd[idx + 1]
++    return json.loads(json_str)
++
++
++def _stage_jsonl_dpo(tmp_path: pathlib.Path) -> pathlib.Path:
++    """Stage a real {prompt, chosen, rejected} JSONL into <tmp>/data/dpo/pairs.jsonl
++    and pre-create the SFT adapter dir so `run_dpo` finds adapters.safetensors."""
++    dst_dir = tmp_path / "data" / "dpo"
++    dst_dir.mkdir(parents=True, exist_ok=True)
++    dst = dst_dir / "pairs.jsonl"
++    dst.write_text(
++        '{"prompt": "hey", "chosen": "yo", "rejected": "Hello there."}\n'
++        '{"prompt": "lunch?", "chosen": "ya", "rejected": "Yes, certainly."}\n'
++        '{"prompt": "ok?", "chosen": "k", "rejected": "Acknowledged."}\n'
++    )
++    adapter_dir = tmp_path / "adapter"
++    adapter_dir.mkdir(parents=True, exist_ok=True)
++    (adapter_dir / "adapters.safetensors").write_bytes(b"")
++    return dst
++
++
++# ────────────────────────────────────────────────────────────────────────
++# AC-7.4.1 — --target-modules / --rank propagate to the mlx_lm cmd
++# ────────────────────────────────────────────────────────────────────────
++def test_target_modules_propagated_to_mlx_cmd(tmp_path):
++    """GIVEN --rank 64 --target-modules q,k,v,o,gate,up,down, WHEN run_sft
++    fires, THEN --lora-parameters JSON carries rank=64 and the 7 keys."""
++    seven = ["q_proj", "k_proj", "v_proj", "o_proj",
++             "gate_proj", "up_proj", "down_proj"]
++    args = _make_args(tmp_path, rank=64, target_modules=seven)
++    data_dir = tmp_path / "data"
++    data_dir.mkdir(parents=True, exist_ok=True)
++    adapter_dir = tmp_path / "adapter"
++
++    fake_result = types.SimpleNamespace(returncode=0)
++    with patch.object(fg.subprocess, "run", return_value=fake_result) as mock_run:
++        buf = io.StringIO()
++        with redirect_stdout(buf):
++            rc = fg.run_sft(args, data_dir, adapter_dir)
++
++    assert rc == 0
++    assert mock_run.call_count == 1, "expected exactly one SFT subprocess invocation"
++    cmd = mock_run.call_args.args[0]
++    assert isinstance(cmd, list)
++
++    params = _extract_lora_parameters_json(cmd)
++    assert params["rank"] == 64, params
++    assert params["keys"] == seven, params
++    # Schema invariants we promised to mlx-lm via design §3:
++    assert params["dropout"] == 0.0
++    assert params["scale"] == 10.0
++
++
++# ────────────────────────────────────────────────────────────────────────
++# AC-7.4.2 — defaults: 31b => rank=32, modules=QKVO
++# ────────────────────────────────────────────────────────────────────────
++def test_31b_default_rank_32_default_modules_qkvo(tmp_path):
++    """GIVEN no --rank and no --target-modules, WHEN main() resolves args
++    for target=31b, THEN the rank materialises as 32 and target_modules as
++    the canonical QKVO set; AND the JSON helper emits the same."""
++    # AC anchor: the MODEL_TARGETS entry itself was bumped.
++    assert fg.MODEL_TARGETS["31b"]["default_rank"] == 32, (
++        f"31b default_rank must be 32 post-Sprint-7, got "
++        f"{fg.MODEL_TARGETS['31b']['default_rank']}"
++    )
++
++    # And the helper materialises the JSON shape that mlx-lm sees on the wire.
++    args = _make_args(tmp_path)  # rank=32, target_modules=DEFAULT (QKVO)
++    json_str = fg._build_lora_parameters_json(args)
++    params = json.loads(json_str)
++    assert params["rank"] == 32, params
++    assert params["keys"] == ["q_proj", "k_proj", "v_proj", "o_proj"], params
++
++    # And: when --target-modules is omitted via the CSV path, main()'s
++    # default-resolution falls through to DEFAULT_TARGET_MODULES. Simulate
++    # the post-default-resolution state (an empty CSV cleared by main()).
++    args_none = _make_args(tmp_path)
++    # Re-set to None and re-resolve as main() does, to prove the fallback.
++    args_none.target_modules = None
++    json_none = fg._build_lora_parameters_json(args_none)
++    assert json.loads(json_none)["keys"] == ["q_proj", "k_proj", "v_proj", "o_proj"]
++
++
++# ────────────────────────────────────────────────────────────────────────
++# AC-7.4.5 — train_config.json records target_modules + rank
++# ────────────────────────────────────────────────────────────────────────
++def test_train_config_records_target_modules(tmp_path):
++    """GIVEN a versioned adapter is written, WHEN train_config.json is
++    inspected, THEN it contains BOTH `target_modules` (as a list) AND
++    `rank` (the new 32 default)."""
++    adapter_dir = tmp_path / "adapter"
++    adapter_dir.mkdir(parents=True, exist_ok=True)
++    # version_adapter copies the tree, so populate a small marker.
++    (adapter_dir / "adapters.safetensors").write_bytes(b"")
++
++    lora_config = {
++        "target": "31b",
++        "model": "mlx-community/gemma-4-31b-it-4bit",
++        "adapter_path": str(adapter_dir),
++        "rank": 32,
++        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
++        "iters": 10,
++        "batch_size": 1,
++        "learning_rate": 1e-6,
++        "max_seq_length": 2048,
++        "dpo": True,
++        "data": str(tmp_path / "data"),
++        "train_examples": 0,
++        "timestamp": "2026-05-16 12:00:00",
++    }
++
++    buf = io.StringIO()
++    with redirect_stdout(buf):
++        versioned = fg.version_adapter(adapter_dir, lora_config)
++
++    cfg_path = versioned / "train_config.json"
++    assert cfg_path.exists(), f"missing train_config.json at {cfg_path}"
++    parsed = json.loads(cfg_path.read_text())
++    assert parsed.get("rank") == 32, parsed
++    assert parsed.get("target_modules") == ["q_proj", "k_proj", "v_proj", "o_proj"], parsed
++    # version_adapter is also expected to stamp version metadata.
++    assert "version" in parsed and "versioned_path" in parsed
++
++
++# ────────────────────────────────────────────────────────────────────────
++# Regression guard — run_dpo() also emits --lora-parameters with the same JSON
++# ────────────────────────────────────────────────────────────────────────
++def test_dpo_cmd_also_carries_lora_parameters(tmp_path, monkeypatch):
++    """Catches the easy mistake of plumbing --lora-parameters through the
++    SFT path only. The DPO cmd built by run_dpo() must also carry the same
++    JSON token — one code path, two consumers (stock mlx_lm for SFT,
++    mlx-lm-lora fork for DPO)."""
++    monkeypatch.setenv("HU_DPO_DETERMINISTIC", "1")
++    _stage_jsonl_dpo(tmp_path)
++
++    seven = ["q_proj", "k_proj", "v_proj", "o_proj",
++             "gate_proj", "up_proj", "down_proj"]
++    args = _make_args(tmp_path, rank=64, target_modules=seven)
++    adapter_dir = pathlib.Path(args.adapter_path)
++
++    fake_result = types.SimpleNamespace(returncode=0)
++    with patch.object(fg.subprocess, "run", return_value=fake_result) as mock_run:
++        buf = io.StringIO()
++        with redirect_stdout(buf):
++            rc = fg.run_dpo(args, adapter_dir)
++
++    assert rc == 0
++    assert mock_run.call_count == 1, "expected one DPO subprocess invocation"
++    cmd = mock_run.call_args.args[0]
++
++    # Must be the mlx-lm-lora fork path (D1 contract from US-7.1).
++    assert "mlx_lm_lora.train" in cmd, f"cmd: {cmd}"
++
++    params = _extract_lora_parameters_json(cmd)
++    assert params["rank"] == 64
++    assert params["keys"] == seven
++
++
++# ────────────────────────────────────────────────────────────────────────
++# Regression guard — --lora-parameters is a SINGLE argv slot (design risk #3)
++# ────────────────────────────────────────────────────────────────────────
++def test_lora_parameters_is_single_argv_slot(tmp_path):
++    """If anyone refactors run_sft to `" ".join(cmd)` or `shell=True`, the
++    JSON's embedded spaces and braces would break shell parsing. We assert
++    the flag value lives in exactly ONE list element so any such refactor
++    fails this test immediately."""
++    args = _make_args(tmp_path, rank=32)
++    data_dir = tmp_path / "data"
++    data_dir.mkdir(parents=True, exist_ok=True)
++    adapter_dir = tmp_path / "adapter"
++
++    fake_result = types.SimpleNamespace(returncode=0)
++    with patch.object(fg.subprocess, "run", return_value=fake_result) as mock_run:
++        buf = io.StringIO()
++        with redirect_stdout(buf):
++            fg.run_sft(args, data_dir, adapter_dir)
++
++    cmd = mock_run.call_args.args[0]
++    idx = cmd.index("--lora-parameters")
++    json_slot = cmd[idx + 1]
++    assert isinstance(json_slot, str), f"expected str argv slot, got {type(json_slot)}"
++    # The slot must be valid JSON on its own (no shell-style concatenation
++    # like `--lora-parameters={json}` which would also pass argparse but
++    # break the indexing contract).
++    assert json_slot.startswith("{") and json_slot.endswith("}"), (
++        f"JSON slot is not a bare JSON object: {json_slot!r}"
++    )
++    json.loads(json_slot)  # raises on malformed JSON
