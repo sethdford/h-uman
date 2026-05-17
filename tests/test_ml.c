@@ -4846,12 +4846,16 @@ static void test_m3_adapter_should_disable_env_nonzero_force(void) {
     unsetenv("HUMAN_M3_ADAPTER_DISABLE");
 }
 
+#ifdef HU_ENABLE_ML
 /* When the rollback flag is active, the chat-loop hook should remain
  * a no-op even if a stray `agent->m3_adapter` had somehow been left
  * attached (defensive): the no-op-when-NULL contract on
  * `hu_agent_m3_on_provider_success` is what turns this into a true
  * compile-time-eliminable rollback. This test pins that NULL
- * adapter → no-op contract. */
+ * adapter → no-op contract.
+ *
+ * Guarded on HU_ENABLE_ML alongside the other two m3_adapter-struct-field
+ * tests above — without ML, hu_agent_t.m3_adapter does not exist. */
 static void test_m3_on_provider_success_noop_when_unattached(void) {
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
@@ -4862,6 +4866,7 @@ static void test_m3_on_provider_success_noop_when_unattached(void) {
     hu_agent_m3_on_provider_success(NULL);
     HU_ASSERT_NULL(agent.m3_adapter);
 }
+#endif /* HU_ENABLE_ML */
 
 /* ── Track D D2.1 — honest-gap caveat snapshot tests ──────────────────
  *
@@ -5332,7 +5337,9 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_adapter_should_disable_env_zero_does_not_force);
     HU_RUN_TEST(test_m3_adapter_should_disable_env_empty_does_not_force);
     HU_RUN_TEST(test_m3_adapter_should_disable_env_nonzero_force);
+#ifdef HU_ENABLE_ML
     HU_RUN_TEST(test_m3_on_provider_success_noop_when_unattached);
+#endif
     /* Track D D2.1 — honest-gap caveat snapshot tests */
     HU_RUN_TEST(test_lora_persona_caveat_doc_path_is_stable);
     HU_RUN_TEST(test_lora_runner_writes_response_array_in_test_mode);
