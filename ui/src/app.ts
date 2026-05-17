@@ -686,45 +686,12 @@ export class ScApp extends LitElement {
   override firstUpdated(): void {
     const idle = (fn: () => void) =>
       "requestIdleCallback" in window ? requestIdleCallback(fn) : setTimeout(fn, 0);
-    // Expose a test-only readiness promise that resolves once the
-    // idle-loaded components have imported. E2E tests under CI
-    // cold-start hit Vite WS ECONNRESET storms that delay
-    // requestIdleCallback past any reasonable timeout (see ui/e2e/app.spec.ts
-    // "floating mic" history on PRs #104/#107/#113). Awaiting this
-    // promise removes the timing race without changing production
-    // behavior — the requestIdleCallback path still runs for real users
-    // so first paint is unaffected.
-    const ready = new Promise<void>((resolve) => {
-      idle(() => {
-        // Outer try wraps EVERYTHING inside the idle callback — including
-        // the synchronous _prefetchOnIdle() call — so any synchronous
-        // throw still reaches resolve() in the catch branch. Without
-        // this, a throw before Promise.all would bypass the
-        // .catch/.finally chain and leave __huReady forever pending,
-        // hanging the E2E test with a misleading Playwright timeout
-        // (Cursor Bugbot bug ce8bc61c). The inner .catch + .finally
-        // (Cursor Bugbot bug f161a0bc) still handles async rejection
-        // from the dynamic imports.
-        try {
-          this._prefetchOnIdle();
-          Promise.all([
-            import("./components/floating-mic.js"),
-            import("./components/command-palette.js"),
-            import("./components/hu-shortcut-overlay.js"),
-          ])
-            .catch((err) => {
-              console.error("[hu-app] idle component imports failed:", err);
-            })
-            .finally(() => resolve());
-        } catch (err) {
-          // Synchronous failure path: log and settle, do NOT rethrow
-          // (no caller is awaiting this idle callback).
-          console.error("[hu-app] idle callback threw synchronously:", err);
-          resolve();
-        }
-      });
+    idle(() => {
+      this._prefetchOnIdle();
+      import("./components/floating-mic.js");
+      import("./components/command-palette.js");
+      import("./components/hu-shortcut-overlay.js");
     });
-    (window as unknown as { __huReady?: Promise<void> }).__huReady = ready;
   }
 
   override disconnectedCallback(): void {
