@@ -1,3 +1,7 @@
+---
+title: Privacy Primitives Gap Analysis 2026-05-16
+---
+
 # Privacy Primitives — Gap Analysis (2026-05-16)
 
 The product thesis claims "privacy by architecture, not by settings."
@@ -25,7 +29,7 @@ turning trust statements into verifiable properties.
 
 ## Gap 1 — DP-SGD is theater (high severity)
 
-[src/ml/learner_mlx.c:309](../../src/ml/learner_mlx.c:309) adds Gaussian
+[src/ml/learner_mlx.c:309](../../src/ml/learner_mlx.c#L309) adds Gaussian
 noise to the trained LoRA adapter *after* `mlx_lm.lora` finishes
 training. The critic (2026-05-16 audit) flagged this:
 
@@ -78,7 +82,7 @@ without the source ever showing it.
 
 ## Gap 3 — Plaintext personal model on disk (low-medium)
 
-[`hu_personal_model_save`](../../include/human/memory/personal_model.h:333)
+[`hu_personal_model_save`](../../include/human/memory/personal_model.h#L333)
 writes a binary blob in plaintext. Anyone with read access to the user's
 home dir can dump it.
 

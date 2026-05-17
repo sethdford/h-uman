@@ -1,3 +1,7 @@
+---
+title: Remaining SOTA Gaps Honest Backlog 2026-05-16
+---
+
 # Remaining SOTA Gaps — Honest Backlog (2026-05-16)
 
 Companion to [trait-coverage-analysis-2026-05-16.md](trait-coverage-analysis-2026-05-16.md)
@@ -15,7 +19,7 @@ steps, sized honestly.
 **Status: pipeline EXISTS, integration test MISSING.**
 
 The DPO-from-corrections pipeline is already implemented:
-- [src/ml/training_data_extractor.c:462](../../src/ml/training_data_extractor.c:462)
+- [src/ml/training_data_extractor.c:462](../../src/ml/training_data_extractor.c#L462)
   extracts `(user_prompt, assistant_response, user_correction)` triples
   from the messages SQLite table and writes them as DPO pairs with
   `chosen=correction, rejected=response, source='auto_correction'`.
@@ -24,7 +28,7 @@ The DPO-from-corrections pipeline is already implemented:
 - Existing tests at
   [tests/test_training_data_extractor.c](../../tests/test_training_data_extractor.c)
   cover NULL-arg guards but ALL hit the
-  [HU_IS_TEST short-circuit at extractor.c:390](../../src/ml/training_data_extractor.c:390)
+  [HU_IS_TEST short-circuit at extractor.c:390](../../src/ml/training_data_extractor.c#L390)
   — the real SQL path is unverified.
 
 **What's missing:** an integration test that creates a real SQLite DB
@@ -79,7 +83,7 @@ pipeline is a separate concern requiring annotation infrastructure.
 
 **Status: text-only today, despite our providers supporting more.**
 
-- Vision OCR exists ([src/intelligence/vision_ocr.c](../../src/intelligence/vision_ocr.c))
+- Vision OCR exists ([src/tools/vision_ocr.c](../../src/tools/vision_ocr.c))
   but not as a first-class context type.
 - Voice channel exists but doesn't drive conversation primitives.
 - Gemini 3.1 / Claude 4.7 support native multimodal — we pass text only.
