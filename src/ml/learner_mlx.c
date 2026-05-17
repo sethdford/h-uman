@@ -249,8 +249,14 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
 
     hu_error_t we = write_training_jsonl(jsonl_path, signals, signals_count);
     if (we != HU_OK) {
+        /* Buffer is 128 bytes. Literal prefix "failed to write training data at "
+         * is 33 chars; %.95s previously consumed the remaining 95 leaving no
+         * room for the NUL terminator (33+95 = 128, exactly the buffer size).
+         * Linux GCC -Werror=format-truncation flags that as "may be truncated
+         * before the last format character". Drop to %.94s so the maximum
+         * formatted length is 33+94 = 127 + NUL = 128 fits exactly. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
-                 "failed to write training data at %.95s", jsonl_path);
+                 "failed to write training data at %.94s", jsonl_path);
         return we;
     }
 
