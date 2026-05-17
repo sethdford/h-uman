@@ -71,6 +71,12 @@ test.describe("Chat Streaming Choreography (demo mode)", () => {
  */
 test.describe("Chat via Gateway Direct", () => {
   test("send message via gw.request and capture response", async ({ page }) => {
+    // Requires a real connected gateway and a live model response. CI
+    // doesn't have either — the in-test status check correctly skips on
+    // disconnected, but on flaky CI the gateway flickers connected long
+    // enough to enter the request path, then the response never lands
+    // and the 15s predicate times out. Skip on CI deterministically.
+    test.skip(!!process.env.CI, "needs live gateway + model response (PR #125 follow-up)");
     await page.goto("/#chat");
     await page.waitForLoadState("networkidle");
     await expect(page.locator("hu-app >> hu-chat-view")).toBeAttached({ timeout: 10000 });
