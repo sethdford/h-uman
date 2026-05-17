@@ -2280,6 +2280,7 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
     }
     hu_persona_rollout_result_free(alloc, &rr);
 #else
+    (void)adapter_path;
     err = HU_ERR_NOT_SUPPORTED;
 #endif
     alloc->free(alloc->ctx, prompts, total_examples * sizeof(const char *));

@@ -634,7 +634,6 @@ export class ScMetricsView extends GatewayAwareLitElement {
   private _renderDirectiveTelemetry() {
     return html`
       <div class="section hu-scroll-reveal" role="region" aria-label="Directive variant telemetry">
-
         <hu-section-header
           heading="Directive Variant Telemetry"
           description="Distribution of acknowledgment-directive variants fired across all channels"
