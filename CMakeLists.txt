@@ -2649,7 +2649,11 @@ if(HU_LIBSODIUM_FOUND)
     if(HU_LIBSODIUM_LIBRARY_DIRS)
         target_link_directories(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
     endif()
-    list(APPEND HU_TEST_SOURCES tests/test_persona_encryption.c)
+    # NOTE: test_persona_encryption.c registration is appended AFTER
+    # the `set(HU_TEST_SOURCES ...)` at line ~2834 (which would otherwise
+    # discard an append done here). See the matching `if(HU_LIBSODIUM_FOUND)`
+    # block near line ~3370 in the gated test-sources section.
+    # Bugbot 8b687b9c caught this set-after-append silent loss.
 endif()
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_FEEDS=1)
@@ -3434,6 +3438,16 @@ if(HU_ENABLE_ML)
         tests/test_agent_trainer.c)
 endif()
 
+# Persona encryption-at-rest tests — only when libsodium was located.
+# Calls hu_persona_crypt_* which is only compiled inside the matching
+# if(HU_LIBSODIUM_FOUND) block near line ~2605 (production) + ~2644
+# (test library). Registered HERE because `set(HU_TEST_SOURCES ...)`
+# at ~2834 happens AFTER the libsodium target_sources block — appends
+# before the set() get silently discarded (Bugbot 8b687b9c).
+if(HU_LIBSODIUM_FOUND)
+    list(APPEND HU_TEST_SOURCES tests/test_persona_encryption.c)
+endif()
+
 # W13 learning loop — only when HU_ENABLE_LEARNING is ON (requires ML).
 if(HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_SOURCES
@@ -3493,6 +3507,15 @@ target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/s
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
+# Mirror HU_HAS_LIBSODIUM onto human_tests so tests/test_main.c's
+# `#ifdef HU_HAS_LIBSODIUM` call-site guard for run_persona_encryption_tests()
+# actually activates. Without this, the runner is registered (because
+# test_persona_encryption.c is in HU_TEST_SOURCES under HU_LIBSODIUM_FOUND)
+# but the call site stays `#endif`-disabled and the tests silently skip.
+# Bugbot 8b687b9c caught the half-wired guard.
+if(HU_LIBSODIUM_FOUND)
+    target_compile_definitions(human_tests PRIVATE HU_HAS_LIBSODIUM=1)
+endif()
 if(HU_ENABLE_APPLE_INTELLIGENCE)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_APPLE_INTELLIGENCE=1)
 endif()
