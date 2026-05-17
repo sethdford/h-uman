@@ -260,11 +260,11 @@ static void inline_score_critique(hu_allocator_t *alloc, hu_memory_facade_t *m,
         if (c->support.prov_count < 4) {
             hu_provenance_atom_t *p = &c->support.prov[c->support.prov_count++];
             /* Bound the format-truncation: "neg:" prefix (4 chars) + NUL
-             * leaves sizeof(p->source) - 5 bytes for the scope. GCC's
-             * -Werror=format-truncation flagged this on the b1299c5+118
-             * merged main. */
-            snprintf(p->source, sizeof(p->source), "neg:%.*s", (int)(sizeof(p->source) - 5),
-                     neg_match->scope);
+             * leaves sizeof(p->source) - sizeof("neg:") bytes for the scope.
+             * GCC's -Werror=format-truncation flagged this on the
+             * b1299c5+118 merged main. */
+            snprintf(p->source, sizeof(p->source), "neg:%.*s",
+                     (int)(sizeof(p->source) - sizeof("neg:")), neg_match->scope);
             p->observed_at = neg_match->created_at;
             p->weight = 0.0f;
         }

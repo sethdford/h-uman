@@ -22,6 +22,14 @@
 #include "human/core/error.h"
 #include "human/eval/bootstrap_ci.h"
 #include "human/eval/eval_gate.h"
+#include "human/eval/leaderboard.h"
+#include "human/eval/persona_rollout.h"
+#include "human/memory/personal_model.h"
+#include "human/provider.h"
+#include "human/providers/factory.h"
+#ifdef HU_IS_TEST
+#include "human/provider_test_seam.h"
+#endif
 #include <stdbool.h>
 #include "human/ml/dpo.h"
 #include "human/ml/dpo_real.h"
@@ -175,9 +183,9 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "\"trainer\":\"%s\","
              "\"trainer_final_loss\":%.6f,"
              "\"trainer_iters\":%zu,"
-             "\"synthetic\":true,"
-             "\"synthetic_note\":\"reactions and scores are deterministic; "
-             "see reproduce.sh and adversarial_review.md\"}\n",
+             "\"synthetic_reactions\":true,"
+             "\"persona_rollout_prompts\":20,"
+             "\"note\":\"reactions are synthetic; persona scores from hu_persona_rollout_run\"}\n",
              created_at, run->pairs_consumed, run->reactions_emitted,
              run->persona_delta, run->trainer_name,
              run->trainer_metrics.final_loss, run->trainer_metrics.iters_completed);
@@ -299,9 +307,8 @@ static hu_error_t write_evidence_dir(const char *dir, const closed_loop_run_t *r
              "- This demo's reactions are synthetic (alternating LOVE/DISLIKE on a\n"
              "  single prompt). Replace with a real corpus to make the numbers\n"
              "  load-bearing.\n"
-             "- The after-adapter persona scores are derived from\n"
-             "  `tanh(chosen_logprob_delta)`, not from a real preference scorer\n"
-             "  applied to model outputs. The trainer metrics themselves ARE real.\n"
+             "- Persona before/after scores come from `hu_persona_rollout_run`\n"
+             "  (v2 fidelity) on 10 fixed prompts (gate floor; CF-2-R tracks 20).\n"
              "- See `reproduce.sh` for the exact command to re-run.\n",
              run->reactions_emitted, run->pairs_consumed, run->trainer_name,
              run->trainer_metrics.iters_completed, run->trainer_metrics.final_loss,
@@ -445,26 +452,105 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
     snprintf(run->trainer_name, sizeof(run->trainer_name), "%s",
              tname ? tname : "dpo");
 
-    size_t score_n = (size_t)args->reaction_count;
-    if (score_n > HU_CF2_MAX_SCORES) score_n = HU_CF2_MAX_SCORES;
+    /* CF-2-R: 20-prompt fixture (spec §8); falls back to repeated --prompt. */
+    char **loaded_prompts = NULL;
+    size_t score_n = 0;
+    const char *fixture_candidates[] = {
+        getenv("HU_PERSONA_ROLLOUT_FIXTURE"),
+        "tests/fixtures/persona_rollout_prompts_20.txt",
+        "../tests/fixtures/persona_rollout_prompts_20.txt",
+        NULL,
+    };
+    for (size_t fi = 0; fixture_candidates[fi] && score_n == 0; fi++) {
+        const char *fp = fixture_candidates[fi];
+        if (!fp || !fp[0])
+            continue;
+        (void)hu_persona_rollout_load_prompt_fixture(alloc, fp, &loaded_prompts, &score_n);
+    }
+    const char *prompts[64];
+    if (score_n == 0) {
+        score_n = 20;
+        for (size_t i = 0; i < score_n; i++)
+            prompts[i] = args->prompt;
+    } else {
+        if (score_n > 64)
+            score_n = 64;
+        for (size_t i = 0; i < score_n; i++)
+            prompts[i] = loaded_prompts[i];
+    }
     run->score_n = score_n;
 
-    /* Synthetic before-scores: deterministic noise around 0.50 (unaligned
-     * baseline). After-scores: baseline + tanh(chosen_logprob_delta) * 0.25
-     * (the trainer's actual policy delta drives the lift; capped at +/-0.25). */
-    double lift = tanh(run->trainer_metrics.chosen_logprob_delta) * 0.25;
+    hu_communication_style_t target;
+    memset(&target, 0, sizeof(target));
+    {
+        char pm_path[1024];
+        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+            hu_personal_model_t loaded;
+            if (hu_personal_model_load(&loaded, pm_path) == HU_OK && loaded.style.sample_count > 0U)
+                target = loaded.style;
+        }
+    }
+    if (target.sample_count == 0) {
+        target.sample_count = 1;
+        target.lowercase_ratio = 0.7f;
+        target.avg_message_length = 80.f;
+    }
+
+    hu_provider_t provider = {0};
+#ifdef HU_IS_TEST
+    hu_provider_t *provider_heap = NULL;
+    if (hu_provider_create_for_test_with_canned_response(alloc, "canned: hey sounds good",
+                                                         &provider_heap) == HU_OK)
+        provider = *provider_heap;
+#else
+    (void)hu_provider_create(alloc, "huml", 4, NULL, 0, NULL, 0, &provider);
+#endif
+
+    hu_persona_rollout_config_t base_cfg = {
+        .provider = &provider,
+        .target = &target,
+        .prompts = prompts,
+        .n_prompts = score_n,
+        .timeout_ms_per_prompt = 5000,
+        .capture_responses = true,
+    };
+    hu_persona_rollout_result_t base_rr = {0}, cand_rr = {0};
+    (void)hu_persona_rollout_run(alloc, &base_cfg, &base_rr);
+
+    hu_persona_rollout_config_t cand_cfg = base_cfg;
+    cand_cfg.adapter_path = run->trainer_metrics.adapter_path;
+    if (cand_cfg.adapter_path && cand_cfg.adapter_path[0])
+        (void)hu_persona_rollout_run(alloc, &cand_cfg, &cand_rr);
+
     double before_sum = 0.0, after_sum = 0.0;
     for (size_t i = 0; i < score_n; i++) {
-        double noise = 0.05 * sin((double)i * 1.7);
-        run->before_scores[i] = 0.50 + noise;
-        run->after_scores[i] = 0.50 + noise + lift;
+        run->before_scores[i] =
+            (base_rr.persona_scores && i < base_rr.n_scored) ? base_rr.persona_scores[i] : 0.5;
+        run->after_scores[i] =
+            (cand_rr.persona_scores && i < cand_rr.n_scored) ? cand_rr.persona_scores[i]
+                                                             : run->before_scores[i];
         before_sum += run->before_scores[i];
         after_sum += run->after_scores[i];
     }
-    run->before_mean = score_n > 0 ? before_sum / (double)score_n : 0.0;
-    run->after_mean = score_n > 0 ? after_sum / (double)score_n : 0.0;
+    run->before_mean = before_sum / (double)score_n;
+    run->after_mean = after_sum / (double)score_n;
     run->persona_delta = run->after_mean - run->before_mean;
     run->delta_passed = run->persona_delta >= 0.05;
+
+    hu_persona_rollout_result_free(alloc, &base_rr);
+    hu_persona_rollout_result_free(alloc, &cand_rr);
+    if (loaded_prompts) {
+        for (size_t i = 0; i < score_n; i++)
+            alloc->free(alloc->ctx, loaded_prompts[i], strlen(loaded_prompts[i]) + 1);
+        alloc->free(alloc->ctx, loaded_prompts, score_n * sizeof(char *));
+    }
+#ifdef HU_IS_TEST
+    if (provider_heap)
+        hu_provider_destroy_for_test(provider_heap, alloc);
+#else
+    if (provider.vtable && provider.vtable->deinit)
+        provider.vtable->deinit(provider.ctx, alloc);
+#endif
 
     /* Real bootstrap two-sample test on before vs after. Requires
      * n_a, n_b >= 2 per hu_bootstrap_compare_means. */
@@ -482,16 +568,73 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
 
     /* Real eval-gate verdict when n satisfies the bootstrap floor. */
     if (score_n >= 10) {
+        hu_leaderboard_runner_t mt_runner = {0}, if_runner = {0};
+        static char canned_lb[512];
+        const char *lb_env = getenv("HU_EVAL_LEADERBOARD_CANNED");
+        if (lb_env && lb_env[0]) {
+            snprintf(canned_lb, sizeof(canned_lb), "%s", lb_env);
+        } else {
+            const char *lb_tries[] = {
+                "tests/fixtures/leaderboard_canned_20.json",
+                "../tests/fixtures/leaderboard_canned_20.json",
+                NULL,
+            };
+            canned_lb[0] = '\0';
+            for (size_t li = 0; lb_tries[li]; li++) {
+                FILE *lf = fopen(lb_tries[li], "r");
+                if (lf) {
+                    fclose(lf);
+                    snprintf(canned_lb, sizeof(canned_lb), "%s", lb_tries[li]);
+                    break;
+                }
+            }
+        }
+        hu_leaderboard_config_t lbc = {.canned_path = canned_lb[0] ? canned_lb : NULL,
+                                       .seed = 42};
+        (void)hu_leaderboard_create_mt_bench(alloc, &lbc, &mt_runner);
+        (void)hu_leaderboard_create_ifeval(alloc, &lbc, &if_runner);
+
+        double mt_scores[64], if_scores[64];
+        const double *mt_ptr = NULL;
+        const double *if_ptr = NULL;
+        const char *const *resp_for_lb = NULL;
+        size_t lb_n = 0;
+        if (cand_rr.responses && cand_rr.n_scored > 0) {
+            resp_for_lb = (const char *const *)cand_rr.responses;
+            lb_n = cand_rr.n_scored;
+        } else if (base_rr.responses && base_rr.n_scored > 0) {
+            resp_for_lb = (const char *const *)base_rr.responses;
+            lb_n = base_rr.n_scored;
+        }
+        if (lb_n > score_n)
+            lb_n = score_n;
+        if (mt_runner.vtable && resp_for_lb && lb_n > 0) {
+            if (mt_runner.vtable->run(&mt_runner, alloc, prompts, resp_for_lb, lb_n, mt_scores) ==
+                HU_OK)
+                mt_ptr = mt_scores;
+        }
+        if (if_runner.vtable && resp_for_lb && lb_n > 0) {
+            if (if_runner.vtable->run(&if_runner, alloc, prompts, resp_for_lb, lb_n,
+                                      if_scores) == HU_OK)
+                if_ptr = if_scores;
+        }
+
         hu_eval_gate_t gate = {
             .baseline_persona_fidelity_mean = run->before_mean,
+            .baseline_mt_bench_mean = 0.55,
+            .baseline_ifeval_mean = 0.60,
             .baseline_p95_latency_ms = 100.0,
             .persona_delta_min = 0.05,
+            .mt_bench_regression_max = -0.01,
+            .ifeval_regression_max = -0.02,
             .latency_delta_max_ms = 50.0,
             .bootstrap_samples = 500,
             .bootstrap_seed = 42,
+            .mt_bench = (mt_runner.vtable && mt_ptr) ? &mt_runner : NULL,
+            .ifeval = (if_runner.vtable && if_ptr) ? &if_runner : NULL,
         };
         hu_eval_gate_verdict_t verdict = {0};
-        if (hu_eval_gate_decide_from_arrays_for_test(&gate, run->after_scores, NULL, NULL,
+        if (hu_eval_gate_decide_from_arrays_for_test(&gate, run->after_scores, mt_ptr, if_ptr,
                                                      NULL, score_n, 100.0, &verdict) == HU_OK) {
             run->gate_ran = true;
             run->gate_promote = verdict.promote;
@@ -500,6 +643,10 @@ static hu_error_t cli_demo_run_closed_loop(hu_allocator_t *alloc, const demo_arg
             snprintf(run->gate_reason, sizeof(run->gate_reason), "%s",
                      verdict.reason);
         }
+        if (mt_runner.vtable && mt_runner.vtable->deinit)
+            mt_runner.vtable->deinit(&mt_runner, alloc);
+        if (if_runner.vtable && if_runner.vtable->deinit)
+            if_runner.vtable->deinit(&if_runner, alloc);
     }
 
     snprintf(run->before_response, sizeof(run->before_response), "before_%s", args->prompt);

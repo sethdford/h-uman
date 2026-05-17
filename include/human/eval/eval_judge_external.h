@@ -86,14 +86,18 @@ hu_error_t hu_eval_judge_create_canned(hu_allocator_t *alloc,
 /* Apple Foundation Models factory (Task 7 lands the real impl behind
  * `HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL`). Until then returns
  * `HU_ERR_NOT_SUPPORTED`. */
+/* If out_reason is non-NULL and the factory returns HU_ERR_NOT_SUPPORTED,
+ * writes a static string describing why (caller must not free). */
 hu_error_t hu_eval_judge_create_apple_fm(hu_allocator_t *alloc,
-                                         hu_eval_judge_external_t *out);
+                                         hu_eval_judge_external_t *out,
+                                         const char **out_reason);
 
 /* Gemini Nano factory (Task 8 lands the real impl behind
  * `HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL`). Until then returns
  * `HU_ERR_NOT_SUPPORTED`. */
 hu_error_t hu_eval_judge_create_gemini_nano(hu_allocator_t *alloc,
-                                            hu_eval_judge_external_t *out);
+                                            hu_eval_judge_external_t *out,
+                                            const char **out_reason);
 
 #ifdef __cplusplus
 }

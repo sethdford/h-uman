@@ -25,6 +25,16 @@ typedef struct hu_competitive_harness_judge_slot {
     hu_eval_judge_external_t judge;
     bool available;
     const char *unavailable_reason;
+    bool has_persona_metrics;
+    double persona_fidelity;
+    double ci_lower;
+    double ci_upper;
+    size_t n_samples;
+    double p95_ms;
+    bool is_baseline;
+    double delta_vs_baseline;
+    double delta_ci_lower;
+    double delta_ci_upper;
 } hu_competitive_harness_judge_slot_t;
 
 typedef struct hu_competitive_harness_result {

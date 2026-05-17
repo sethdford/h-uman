@@ -1369,6 +1369,13 @@ if(HU_ENABLE_ML)
         # degeneracy (N<2 / N>1024), Phase 3 cli_rm precedent (--backend
         # mlx demands --backbone-path).
         src/ml/cli_grpo.c
+        # Phase D Task D-1 (CF-7 RL SOTA): hu_ml_resolve_script_path —
+        # resolves absolute path to a helper Python script under the
+        # project's scripts/ directory, so MLX popen wrappers
+        # (dpo_real_mlx, kto_mlx, grpo_mlx, reward_model_mlx) no longer
+        # invoke `python3 scripts/<name>.py` with a CWD-relative path.
+        # Closes CF-7 (popen relative-CWD shadow attack).
+        src/ml/ml_scripts_dir.c
         # Phase 4 Task 1 (RL SOTA): KL divergence estimators (k1/k2/k3) +
         # k3 analytical backward grad. Pure C leaf math primitive — no
         # model coupling, no allocator. Used by the GRPO trainer
@@ -1519,6 +1526,7 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_CORE_SOURCES src/eval/apple_fm_client.c)
     list(APPEND HU_CORE_SOURCES src/eval/gemini_nano_client.c)
     list(APPEND HU_CORE_SOURCES src/eval/competitive_harness.c)
+    list(APPEND HU_CORE_SOURCES src/eval/persona_rollout.c)
     list(APPEND HU_CORE_SOURCES src/eval/cli_eval.c)
     list(APPEND HU_CORE_SOURCES src/agent/adapter_id.c)
     list(APPEND HU_CORE_SOURCES src/ml/cli_demo.c)
@@ -1760,6 +1768,13 @@ if(HU_ENABLE_SQLITE)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_SQLITE=1)
     target_compile_definitions(human_core PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
 endif()
+
+# Phase D Task D-1 (CF-7 RL SOTA): inject HU_ML_SCRIPTS_DIR compile-time
+# default so hu_ml_resolve_script_path resolves to absolute paths without
+# requiring HU_ML_SCRIPTS_DIR env in dev/test builds. Env override (set
+# at runtime) still wins. Installed builds should override this at
+# install time to point at <prefix>/share/human/scripts.
+target_compile_definitions(human_core PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 
 if(HU_ENABLE_POSTGRES)
     find_package(PostgreSQL QUIET)
@@ -2400,33 +2415,6 @@ if(NOT HU_ENABLE_CARTESIA)
         src/tts/audio_pipeline.c
         src/context/voice_decision.c src/tts/emotion_map.c)
 endif()
-if(NOT HU_ENABLE_ML)
-    list(APPEND HU_TEST_EXTRA_MODULES
-        src/ml/tokenizer_bpe.c src/ml/dataloader.c src/ml/prepare.c
-        src/ml/evaluator.c src/ml/experiment.c src/ml/experiment_store.c src/ml/gpt.c
-        src/ml/muon_adamw.c src/ml/train.c src/ml/checkpoint.c src/ml/cli.c
-        src/ml/lora.c src/ml/agent_trainer.c src/ml/m3_frontier_adapter.c
-        src/ml/fidelity.c
-        src/ml/training_data.c src/ml/training_data_extractor.c
-        src/ml/training_data_quality.c
-        src/providers/huml.c
-        src/ml/rl_trainer.c src/ml/dpo_real_huml.c src/ml/dpo_real_mlx.c
-        src/ml/kto.c src/ml/kto_mlx.c src/ml/grpo_mlx.c
-        src/ml/value_head.c src/ml/policy_logprobs.c src/ml/reference_model.c
-        src/ml/cli_dpo.c src/ml/reward_model.c src/ml/reward_model_mlx.c
-        src/ml/reward_model_train.c
-        src/ml/cli_kto.c src/ml/cli_rm.c src/ml/cli_grpo.c
-        # Phase 4 Task 2 (RL SOTA): hu_rollout_t. Mirror the ML-disabled
-        # fallback for the other Phase 2/3 RL TUs above so symbol resolution
-        # still works in minimal builds.
-        src/ml/rollout.c)
-endif()
-if(NOT HU_ENABLE_LEARNING)
-    list(APPEND HU_TEST_EXTRA_MODULES
-        src/ml/learner.c src/ml/learner_cpu.c src/ml/learner_mlx.c src/ml/learner_ggml.c
-        src/ml/learner_bridge.c
-        src/agent/lora_training_runner.c src/agent/training_data_runner.c)
-endif()
 # Phase 7 modules (experience, forgetting, weakness) — tests need them when SQLite is OFF (minimal build)
 if(NOT HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -2492,7 +2480,13 @@ if(HU_ENABLE_CARTESIA)
 endif()
 target_compile_definitions(human_core_test PRIVATE HU_ENABLE_PERSONA=1)
 # Tests always have all module groups available
-target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_ENABLE_ML=1 HU_ENABLE_LEARNING=1)
+target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1)
+if(HU_ENABLE_ML)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ML=1)
+endif()
+if(HU_ENABLE_LEARNING)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_LEARNING=1)
+endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
@@ -2615,6 +2609,12 @@ if(HU_ENABLE_SQLITE)
         target_link_libraries(human_core_test PUBLIC sqlite3)
     endif()
 endif()
+
+# Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for the test
+# library so hu_ml_resolve_script_path inside ml_scripts_dir.c falls back
+# to the repo's scripts/ dir during test runs (the env override can still
+# point tests at a temp dir for CWD-shadow regression tests).
+target_compile_definitions(human_core_test PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 if(HU_ENABLE_FIPS_CRYPTO)
     if(OpenSSL_FOUND)
         target_link_libraries(human_core_test PUBLIC OpenSSL::Crypto)
@@ -2676,7 +2676,6 @@ set(HU_TEST_SOURCES
     tests/test_persona_fidelity_judge.c
     tests/test_persona_fidelity_validator.c
     tests/test_fact_extract_llm.c
-    tests/test_dpo_extractor_integration.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
@@ -2914,17 +2913,12 @@ set(HU_TEST_SOURCES
     tests/test_w11_self_rag.c
     tests/test_w12_planner.c
     tests/test_w12_verifier_loop.c
-    tests/test_w13_learner.c
-    tests/test_w14_runners.c
     tests/test_w15_backup_restore.c
-    tests/test_learner_bridge.c
     tests/test_w14_scheduler.c
     tests/test_w15_keystore.c
     tests/test_encrypted_store.c
     tests/test_w16_evaluation.c
     tests/test_w16_eval_cli.c
-    tests/test_v2_e2e_adversarial.c
-    tests/test_v2_wiring_e2e.c
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_personal_model_contradicts.c
@@ -3001,95 +2995,6 @@ set(HU_TEST_SOURCES
     tests/test_reflection_advanced.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
-    tests/test_ml.c
-    tests/test_ml_cli_actually_trains.c
-    tests/test_dpo_judge_naming.c
-    # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t factory dispatch pin.
-    tests/test_rl_trainer.c
-    # Phase 2 Task 2 (RL SOTA): hu_policy_logprobs sanity + determinism + null-arg.
-    tests/test_policy_logprobs.c
-    # Phase 2 Task 3 (RL SOTA): hu_reference_model_create_from clone + freeze.
-    tests/test_reference_model.c
-    # Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient.
-    tests/test_dpo_real_loss.c
-    # Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs.
-    tests/test_dpo_real_e2e.c
-    # Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper — JSONL export +
-    # dummy-adapter shortcut without HU_HAVE_MLX_LM; real Gemma DPO with it.
-    tests/test_dpo_real_mlx.c
-    # Phase 3 Task 1 (RL SOTA): hu_value_head_t forward + backward grad
-    # check (analytical vs finite-diff) + save/load round trip.
-    tests/test_value_head.c
-    # Phase 2 Task 8 (RL SOTA): pins surface contract for the post-split
-    # hu_ml_cli_dpo_judge / hu_ml_cli_dpo_real CLI handlers.
-    tests/test_cli_dpo.c
-    # Phase 3 Task 2 (RL SOTA): hu_reward_model_t HUML composition smoke
-    # test + M3 NaN contract pin for one-sided KTO pairs. Task 3 will
-    # APPEND Bradley-Terry convergence + finite-diff grad-check tests to
-    # tests/test_reward_model_train.c (same suite, same runner).
-    tests/test_reward_model_train.c
-    # Phase 3 Task 8 (RL SOTA): RM inference latency tests — HUML
-    # (sub-50ms Release) + MLX (gated by HU_HAVE_MLX_LM + Qwen GGUF).
-    tests/test_reward_model_inference.c
-    # Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
-    # grad check + vtable contract.
-    tests/test_kto_loss.c
-    # Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 forward + k3 backward grad
-    # check + v=0 graceful zero-return. Pins the math primitive that
-    # backs the GRPO KL penalty (Task 5).
-    tests/test_kl_divergence.c
-    # Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative
-    # advantage with std-floor (D7/R6), pessimistic PPO ratio clip
-    # min (R8/F3), KL-aware loss (MED-1 kl_beta=0 disables; <0 →
-    # default 0.04), log-ratio overflow clamp (D8), analytical
-    # log-ratio gradient with finite-diff agreement to 5% (H4).
-    # Loss-only — no model coupling; Task 5 lands the trainer step.
-    tests/test_grpo_loss.c
-    # Phase 4 Task 8 (RL SOTA): GRPO MLX subprocess wrapper — JSONL
-    # secure-perms (H2: O_EXCL + 0600) + factory probe short-circuit
-    # (M7) + dummy-adapter Python shortcut (HU_E2E_TEST_MODE).  The
-    # real-subprocess test is gated by HU_HAVE_MLX_LM_GRPO (L1 — compile
-    # time, not HU_SKIP_IF).
-    tests/test_grpo_mlx.c
-    # Phase 4 Task 5 (RL SOTA): GRPO HUML trainer — full
-    # hu_rl_trainer_t vtable impl composing rollout (Task 2) +
-    # reward_source (Task 4) + KL k3 (Task 1) + GRPO loss math
-    # (Task 3) + structural backward on lm_head.  Pins factory shape,
-    # R12 n_rollouts bounds [2, 1024], MED-1 kl_beta=0 skips reference
-    # forward, step_count advancement, and 50-step ASan leak check
-    # (R10 / F6 single-cleanup-label contract).
-    tests/test_grpo_huml.c
-    # Phase 4 Task 7 (RL SOTA): GRPO HUML synthetic-reward N=4 E2E
-    # multi-step convergence proof — umbrella §5 row 4 ship-contract
-    # gate.  50 iters × 20-prompt fixture; asserts (1) final_loss vs
-    # initial_loss change signal (loss inc. via KL penalty growth in
-    # this impl — see test docstring), (2) mean log-prob of good
-    # tokens 1..5 at iter 50 > iter 0 via shadow-GPT + save_adapter
-    # byte injection, (3) mean KL(π_θ || π_ref) < 2.0 nats with
-    # kl_beta = 0.04 (R5).  MLX subprocess test gated #if defined(
-    # HU_HAVE_MLX_LM_GRPO) per round-3 critic L1 (compile-time, not
-    # HU_SKIP_IF).
-    tests/test_grpo_e2e.c
-    # Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML factory — multinomial
-    # sampling determinism (xorshift64 + per-rollout splitmix64 seed),
-    # n_rollouts honoured, max_new_tokens cap, cross-platform pin (R13).
-    tests/test_rollout.c
-    # Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic
-    # token-counting backend (good=1..5, bad=26..30 convention), Phase 3
-    # hu_reward_model_t composition smoke, Phase 5 judge stub pin.
-    tests/test_reward_source.c
-    # Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI surface contract —
-    # 5 argument-rejection cases (R9 reward-hacking, R12 N<2 bounds,
-    # --reward-fn rm requires --reward-model, --backend mlx requires
-    # --backbone-path) + 2 HUML synthetic-reward e2e smokes (5 iters
-    # writes a non-empty adapter file; --kl-beta 0 disables KL flows
-    # through the CLI per MED-1 escape valve).
-    tests/test_cli_grpo.c
-    tests/test_lora.c
-    tests/test_training_data.c
-    tests/test_training_data_extractor.c
-    tests/test_training_data_quality.c
-    tests/test_agent_trainer.c
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
@@ -3268,6 +3173,52 @@ list(APPEND HU_TEST_SOURCES
     tests/test_structured_output.c
 )
 
+# ML + RL SOTA Phase 2–4 tests — only when HU_ENABLE_ML is ON.  CI
+# build-and-test leaves ML OFF; human_tests must not force HU_ENABLE_ML=1
+# nor link test TUs that reference hu_ml_* / hu_grpo_* / hu_kl_* symbols.
+if(HU_ENABLE_ML)
+    list(APPEND HU_TEST_SOURCES
+        tests/test_ml.c
+        tests/test_ml_cli_actually_trains.c
+        tests/test_dpo_judge_naming.c
+        tests/test_rl_trainer.c
+        tests/test_policy_logprobs.c
+        tests/test_reference_model.c
+        tests/test_dpo_real_loss.c
+        tests/test_dpo_real_e2e.c
+        tests/test_dpo_real_mlx.c
+        tests/test_value_head.c
+        tests/test_cli_dpo.c
+        tests/test_reward_model_train.c
+        tests/test_reward_model_inference.c
+        tests/test_kto_loss.c
+        tests/test_ml_scripts_dir.c
+        tests/test_kl_divergence.c
+        tests/test_grpo_loss.c
+        tests/test_grpo_mlx.c
+        tests/test_grpo_huml.c
+        tests/test_grpo_e2e.c
+        tests/test_rollout.c
+        tests/test_reward_source.c
+        tests/test_cli_grpo.c
+        tests/test_lora.c
+        tests/test_training_data.c
+        tests/test_training_data_extractor.c
+        tests/test_training_data_quality.c
+        tests/test_dpo_extractor_integration.c
+        tests/test_agent_trainer.c)
+endif()
+
+# W13 learning loop — only when HU_ENABLE_LEARNING is ON (requires ML).
+if(HU_ENABLE_LEARNING)
+    list(APPEND HU_TEST_SOURCES
+        tests/test_w13_learner.c
+        tests/test_w14_runners.c
+        tests/test_learner_bridge.c
+        tests/test_v2_e2e_adversarial.c
+        tests/test_v2_wiring_e2e.c)
+endif()
+
 # Phase 5 Task 2 (RL SOTA) — bootstrap_ci tests live in the same gated
 # bucket as the impl above.  Mirrored guard so the test TU is only
 # compiled when HU_ENABLE_RL_FULL is ON (default release/dev keep the
@@ -3285,11 +3236,13 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_TEST_SOURCES tests/test_apple_fm_client.c)
     list(APPEND HU_TEST_SOURCES tests/test_gemini_nano_client.c)
     list(APPEND HU_TEST_SOURCES tests/test_competitive_harness.c)
+    list(APPEND HU_TEST_SOURCES tests/test_persona_rollout.c)
     list(APPEND HU_TEST_SOURCES tests/test_cli_eval_phase5.c)
     list(APPEND HU_TEST_SOURCES tests/test_cli_demo_evidence.c)
     list(APPEND HU_TEST_SOURCES tests/test_lora_ab_require_positive_forwards_to_gate.c)
     list(APPEND HU_TEST_SOURCES tests/test_lora_training_runner_eval_gate.c)
     list(APPEND HU_TEST_SOURCES tests/test_daemon_reaction_poll_wiring.c)
+    list(APPEND HU_TEST_SOURCES tests/test_daemon_reaction_poll_production.c)
     list(APPEND HU_TEST_SOURCES tests/test_lora_training_runner_proof_directory.c)
     list(APPEND HU_TEST_SOURCES tests/test_e2e_rl_loop.c)
 endif()
@@ -3306,6 +3259,8 @@ target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests
     # Phase 3 reward_model_priv.h (H2 fix).
     ${HU_ROOT}/src/ml)
 target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
+# Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for tests.
+target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
@@ -3454,7 +3409,12 @@ endif()
 if(HU_ENABLE_FIPS_CRYPTO)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_FIPS_CRYPTO=1)
 endif()
-target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1 HU_ENABLE_LEARNING=1)
+if(HU_ENABLE_ML)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1)
+endif()
+if(HU_ENABLE_LEARNING)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_LEARNING=1)
+endif()
 # Phase 1 (RL SOTA) — propagate HU_ENABLE_LLAMACPP into the test build so
 # .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).
 # The human_core target already has this define under HU_LLAMACPP_FOUND, but
@@ -3507,9 +3467,11 @@ endif()
 # Phase 4 fix for round-3 critic L3 (strict C11, no __attribute__((weak)));
 # the source-level #defines remain as documentation but are now
 # redundant with these target_compile_definitions.
-target_compile_definitions(human_core PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
-target_compile_definitions(human_core_test PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
-target_compile_definitions(human_tests PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+if(HU_ENABLE_ML)
+    target_compile_definitions(human_core PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+    target_compile_definitions(human_core_test PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+    target_compile_definitions(human_tests PRIVATE HU_GRPO_HAVE_HUML_IMPL=1 HU_GRPO_HAVE_MLX_IMPL=1)
+endif()
 
 # Phase 4 Task 0 (RL SOTA) — propagate HU_HAVE_MLX_LM_GRPO into targets.
 # OFF by default; flipping ON activates the real MLX GRPO subprocess path

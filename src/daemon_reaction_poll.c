@@ -1,20 +1,20 @@
 /* src/daemon_reaction_poll.c
  *
- * CF-3 closure: the iMessage reaction poll tick was previously gated
- * under #if HU_IS_TEST and discarded events with (void). Now exposed
- * as `hu_daemon_reaction_poll_tick` (production-callable) which
- * additionally feeds each event into `hu_reaction_handler_handle_event`
- * so it lands in the daemon-owned hu_dpo_collector_t.
+ * CF-3 closure: production iMessage reaction polling for the daemon.
+ * `hu_daemon_reaction_poll_tick` is the simple since-watermark entry;
+ * `hu_daemon_tick_reaction_poll` adds poll_interval_seconds gating for
+ * the daemon main loop.
  */
 
 #include "human/daemon_reaction_poll.h"
 
 #include "human/agent/reaction_handler.h"
-#include "human/channels/reaction_event.h"
+#include "human/channels/imessage_reactions.h"
 #include "human/core/error.h"
 #include "human/ml/dpo.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,22 +24,36 @@ void hu_daemon_reaction_wire_collector(struct hu_dpo_collector *collector) {
 
 #if HU_IS_TEST
 static int *g_imessage_poll_call_counter = NULL;
+static int g_poll_count_for_test = 0;
 
 void hu_daemon_set_poll_call_counter_for_test(int *counter) {
     g_imessage_poll_call_counter = counter;
 }
+
+int hu_daemon_reaction_poll_get_count_for_test(void) { return g_poll_count_for_test; }
+
+void hu_daemon_reaction_poll_reset_count_for_test(void) { g_poll_count_for_test = 0; }
 #endif
 
-extern hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
-                                             hu_reaction_event_t *out, size_t cap, size_t *out_n);
-
-static bool reaction_collection_wants_imessage(const hu_config_t *cfg) {
+static bool reaction_collection_wants_imessage_cfg(const hu_config_t *cfg) {
     if (!cfg || !cfg->reaction_collection.enabled)
         return false;
     if (cfg->reaction_collection.channel_count == 0)
         return true;
     for (size_t i = 0; i < cfg->reaction_collection.channel_count; i++) {
         if (strcmp(cfg->reaction_collection.channels[i], "imessage") == 0)
+            return true;
+    }
+    return false;
+}
+
+static bool reaction_collection_wants_imessage_sub(const hu_reaction_collection_config_t *cfg) {
+    if (!cfg || !cfg->enabled)
+        return false;
+    if (cfg->channel_count == 0)
+        return true;
+    for (size_t i = 0; i < cfg->channel_count; i++) {
+        if (strcmp(cfg->channels[i], "imessage") == 0)
             return true;
     }
     return false;
@@ -54,13 +68,28 @@ static void free_event_strings(hu_reaction_event_t *ev) {
     ev->sender_handle = NULL;
 }
 
+static const char *resolve_chatdb_path(const hu_reaction_collection_config_t *cfg) {
+    if (cfg && cfg->chatdb_path[0])
+        return cfg->chatdb_path;
+    const char *env = getenv("HU_CHATDB");
+    if (env && env[0])
+        return env;
+    static char home_path[512];
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return NULL;
+    snprintf(home_path, sizeof(home_path), "%s/Library/Messages/chat.db", home);
+    return home_path;
+}
+
 hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg,
                                         int64_t since_unix,
                                         size_t *out_ingested) {
-    if (out_ingested) *out_ingested = 0;
+    if (out_ingested)
+        *out_ingested = 0;
     if (!cfg)
         return HU_OK;
-    if (!reaction_collection_wants_imessage(cfg))
+    if (!reaction_collection_wants_imessage_cfg(cfg))
         return HU_OK;
 
     const char *db = getenv("HU_CHATDB");
@@ -76,11 +105,9 @@ hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg,
         (*g_imessage_poll_call_counter)++;
 #endif
 
-    /* HU_ERR_NOT_SUPPORTED is expected on non-macOS / non-SQLite
-     * builds and under HU_IS_TEST -- treat it as "nothing to poll"
-     * rather than a hard error, so the daemon's tick stays quiet. */
     if (pe != HU_OK && pe != HU_ERR_NOT_SUPPORTED) {
-        for (size_t i = 0; i < n; i++) free_event_strings(&events[i]);
+        for (size_t i = 0; i < n; i++)
+            free_event_strings(&events[i]);
         return pe;
     }
 
@@ -89,20 +116,59 @@ hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg,
         if (events[i].channel_id == NULL)
             events[i].channel_id = "imessage";
         hu_error_t he = hu_reaction_handler_handle_event(&events[i]);
-        if (he == HU_OK) ingested++;
+        if (he == HU_OK)
+            ingested++;
         free_event_strings(&events[i]);
     }
-    if (out_ingested) *out_ingested = ingested;
+    if (out_ingested)
+        *out_ingested = ingested;
     return HU_OK;
+}
+
+hu_error_t hu_daemon_tick_reaction_poll(const hu_reaction_collection_config_t *cfg,
+                                        int64_t now_unix, int64_t *last_poll_unix_inout,
+                                        int64_t *watermark_inout) {
+    if (!cfg || !last_poll_unix_inout || !watermark_inout)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!reaction_collection_wants_imessage_sub(cfg))
+        return HU_OK;
+
+    int interval = cfg->poll_interval_seconds > 0 ? cfg->poll_interval_seconds : 30;
+    if (*last_poll_unix_inout > 0 && now_unix - *last_poll_unix_inout < interval)
+        return HU_OK;
+
+    const char *db = resolve_chatdb_path(cfg);
+    if (!db || !db[0])
+        return HU_OK;
+
+    hu_reaction_event_t events[8];
+    size_t n = 0;
+    int64_t since = *watermark_inout > 0 ? *watermark_inout : now_unix;
+    hu_error_t err = hu_imessage_poll_reactions(db, since, events, 8, &n);
+
+#if HU_IS_TEST
+    g_poll_count_for_test++;
+    if (g_imessage_poll_call_counter)
+        (*g_imessage_poll_call_counter)++;
+#endif
+
+    *last_poll_unix_inout = now_unix;
+    *watermark_inout = now_unix;
+
+    if (err == HU_OK) {
+        for (size_t i = 0; i < n; i++)
+            (void)hu_reaction_handler_handle_event(&events[i]);
+    }
+    for (size_t i = 0; i < n; i++)
+        free_event_strings(&events[i]);
+
+    return err == HU_ERR_IO ? err : HU_OK;
 }
 
 #if HU_IS_TEST
 hu_error_t hu_daemon_tick_for_test(const hu_config_t *cfg) {
     if (!cfg)
         return HU_ERR_INVALID_ARGUMENT;
-    /* Preserve the original test entry's strict-arg validation
-     * (returns INVALID_ARGUMENT on NULL cfg) while delegating the
-     * poll loop to the production path so both share the same code. */
     return hu_daemon_reaction_poll_tick(cfg, 0, NULL);
 }
 #endif

@@ -4803,7 +4803,7 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_persona_bank_export_jsonl_null_args_rejected);
     HU_RUN_TEST(test_persona_bank_export_jsonl_escapes_special_chars);
     HU_RUN_TEST(test_persona_banks_from_history_null_args_rejected);
-#ifdef HU_ENABLE_SQLITE
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
     HU_RUN_TEST(test_persona_banks_from_history_nonexistent_db_returns_io);
     HU_RUN_TEST(test_persona_banks_from_history_empty_db_returns_zero_banks);
     HU_RUN_TEST(test_persona_banks_from_history_extracts_user_assistant_pair);

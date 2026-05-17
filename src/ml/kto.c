@@ -320,6 +320,74 @@ hu_error_t kto_compute_loss_only_for_test(void *vctx,
     return HU_OK;
 }
 
+/* Policy log-probability for a one-sided pair (HU_IS_TEST seam). */
+hu_error_t kto_compute_logprob_pol_for_test(void *vctx,
+                                              const hu_preference_pair_t *p,
+                                              double *out_logprob) {
+    if (!vctx || !p || !out_logprob) return HU_ERR_INVALID_ARGUMENT;
+    kto_huml_ctx_t *c = (kto_huml_ctx_t *)vctx;
+    hu_allocator_t alloc = hu_system_allocator();
+
+    int is_desirable   = (p->chosen_len > 0 && p->rejected_len == 0);
+    int is_undesirable = (p->chosen_len == 0 && p->rejected_len > 0);
+    if (!is_desirable && !is_undesirable) return HU_ERR_INVALID_ARGUMENT;
+
+    int32_t *prompt = NULL, *response = NULL;
+    size_t pl = 0, rl = 0, pcap = 0, rcap = 0;
+    if (parse_id_string(&alloc, p->prompt, &prompt, &pl, &pcap) != HU_OK)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *resp_str = is_desirable ? p->chosen : p->rejected;
+    if (parse_id_string(&alloc, resp_str, &response, &rl, &rcap) != HU_OK) {
+        alloc.free(alloc.ctx, prompt, pcap * sizeof(int32_t));
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_policy_logprobs(&alloc, &c->policy, prompt, pl, response, rl, out_logprob);
+    alloc.free(alloc.ctx, prompt, pcap * sizeof(int32_t));
+    alloc.free(alloc.ctx, response, rcap * sizeof(int32_t));
+    return HU_OK;
+}
+
+/* Returns dL/d(logpi_theta) for a one-sided pair (chain-rule scalar). */
+hu_error_t kto_compute_grad_scalar_for_test(void *vctx,
+                                              const hu_preference_pair_t *p,
+                                              double *out_grad_scalar) {
+    if (!vctx || !p || !out_grad_scalar) return HU_ERR_INVALID_ARGUMENT;
+    kto_huml_ctx_t *c = (kto_huml_ctx_t *)vctx;
+    hu_allocator_t alloc = hu_system_allocator();
+
+    int is_desirable   = (p->chosen_len > 0 && p->rejected_len == 0);
+    int is_undesirable = (p->chosen_len == 0 && p->rejected_len > 0);
+    if (!is_desirable && !is_undesirable) return HU_ERR_INVALID_ARGUMENT;
+
+    int32_t *prompt = NULL, *response = NULL;
+    size_t pl = 0, rl = 0, pcap = 0, rcap = 0;
+    if (parse_id_string(&alloc, p->prompt, &prompt, &pl, &pcap) != HU_OK)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *resp_str = is_desirable ? p->chosen : p->rejected;
+    if (parse_id_string(&alloc, resp_str, &response, &rl, &rcap) != HU_OK) {
+        alloc.free(alloc.ctx, prompt, pcap * sizeof(int32_t));
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    double lp_pol = 0, lp_ref = 0;
+    hu_policy_logprobs(&alloc, &c->policy, prompt, pl, response, rl, &lp_pol);
+    hu_policy_logprobs(&alloc, &c->reference, prompt, pl, response, rl, &lp_ref);
+
+    if (is_desirable) {
+        double diff = lp_pol - lp_ref;
+        double sig = 1.0 / (1.0 + exp(-c->beta * diff));
+        *out_grad_scalar = -c->lambda_d * c->beta * sig * (1.0 - sig);
+    } else {
+        double diff = lp_ref - lp_pol;
+        double sig = 1.0 / (1.0 + exp(-c->beta * diff));
+        *out_grad_scalar = c->lambda_u * c->beta * sig * (1.0 - sig);
+    }
+
+    alloc.free(alloc.ctx, prompt, pcap * sizeof(int32_t));
+    alloc.free(alloc.ctx, response, rcap * sizeof(int32_t));
+    return HU_OK;
+}
+
 hu_error_t kto_get_huml_lm_head_param_for_test(void *vctx,
                                                  size_t row, size_t col,
                                                  float **out_param_ptr) {

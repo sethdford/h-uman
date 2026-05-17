@@ -104,9 +104,18 @@ static void test_eval_judge_canned_handles_zero_verdicts_gracefully(void) {
 static void test_eval_judge_apple_fm_returns_not_supported_until_task_7(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_eval_judge_external_t judge = {0};
-    HU_ASSERT_EQ(hu_eval_judge_create_apple_fm(&alloc, &judge), HU_ERR_NOT_SUPPORTED);
+    const char *reason = NULL;
+    HU_ASSERT_EQ(hu_eval_judge_create_apple_fm(&alloc, &judge, &reason), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NOT_NULL(reason);
+    HU_ASSERT_STR_CONTAINS(reason, "unavailable");
     HU_ASSERT_NULL(judge.vtable);
     HU_ASSERT_NULL(judge.ctx);
+}
+
+static void test_eval_judge_apple_fm_accepts_null_out_reason(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_eval_judge_external_t judge = {0};
+    HU_ASSERT_EQ(hu_eval_judge_create_apple_fm(&alloc, &judge, NULL), HU_ERR_NOT_SUPPORTED);
 }
 #endif
 
@@ -114,7 +123,10 @@ static void test_eval_judge_apple_fm_returns_not_supported_until_task_7(void) {
 static void test_eval_judge_gemini_nano_returns_not_supported_until_task_8(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_eval_judge_external_t judge = {0};
-    HU_ASSERT_EQ(hu_eval_judge_create_gemini_nano(&alloc, &judge), HU_ERR_NOT_SUPPORTED);
+    const char *reason = NULL;
+    HU_ASSERT_EQ(hu_eval_judge_create_gemini_nano(&alloc, &judge, &reason), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NOT_NULL(reason);
+    HU_ASSERT_STR_CONTAINS(reason, "unavailable");
     HU_ASSERT_NULL(judge.vtable);
     HU_ASSERT_NULL(judge.ctx);
 }
@@ -158,6 +170,7 @@ void run_eval_judge_external_tests(void) {
     HU_RUN_TEST(test_eval_judge_canned_handles_zero_verdicts_gracefully);
 #if !defined(HU_EVAL_JUDGE_HAVE_APPLE_FM_IMPL)
     HU_RUN_TEST(test_eval_judge_apple_fm_returns_not_supported_until_task_7);
+    HU_RUN_TEST(test_eval_judge_apple_fm_accepts_null_out_reason);
 #endif
 #if !defined(HU_EVAL_JUDGE_HAVE_GEMINI_NANO_IMPL)
     HU_RUN_TEST(test_eval_judge_gemini_nano_returns_not_supported_until_task_8);

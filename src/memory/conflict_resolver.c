@@ -1,4 +1,5 @@
 #include "human/memory/conflict_resolver.h"
+#include "human/memory/belief.h"
 
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/sql_transaction.h"
@@ -61,6 +62,51 @@ const char *hu_conflict_resolution_str(hu_conflict_resolution_t r) {
         case HU_CONFLICT_FLAG:      return "FLAG";
     }
     return "UNKNOWN";
+}
+
+/* W8 Phase 5 — semantic-judge fallback.
+ *
+ * Pure helper, no DB I/O. Walks `candidates` in order, runs
+ * `hu_belief_semantic_conflict` on each candidate's context vs the
+ * proposed context. Returns the first match.
+ *
+ * Why first-match instead of "best score": the candidate set is already
+ * filtered upstream (the caller broadens the peek SQL to "open
+ * relations on (contact_id, source_id)" and orders by recency). The
+ * most recently observed paraphrase is the right thing to supersede.
+ *
+ * Skips candidates with empty context — there's nothing to compare. */
+hu_conflict_resolution_t hu_conflict_classify_semantic(
+    const hu_graph_relation_t *proposed,
+    const hu_graph_relation_t *candidates,
+    size_t n_candidates,
+    int64_t *out_matched_existing_id) {
+    if (out_matched_existing_id)
+        *out_matched_existing_id = 0;
+    if (!proposed || !candidates || n_candidates == 0)
+        return HU_CONFLICT_NONE;
+    if (!proposed->context || proposed->context_len == 0)
+        return HU_CONFLICT_NONE;
+
+    for (size_t i = 0; i < n_candidates; i++) {
+        const hu_graph_relation_t *ex = &candidates[i];
+        if (!ex->context || ex->context_len == 0 || ex->id <= 0)
+            continue;
+        hu_belief_conflict_t verdict = hu_belief_semantic_conflict(
+            proposed->context, proposed->context_len,
+            ex->context, ex->context_len);
+        if (verdict == HU_BELIEF_CONFLICT_PARAPHRASE) {
+            if (out_matched_existing_id)
+                *out_matched_existing_id = ex->id;
+            return HU_CONFLICT_SUPERSEDE;
+        }
+        if (verdict == HU_BELIEF_CONFLICT_CONTRADICT) {
+            if (out_matched_existing_id)
+                *out_matched_existing_id = ex->id;
+            return HU_CONFLICT_FLAG;
+        }
+    }
+    return HU_CONFLICT_NONE;
 }
 
 #ifdef HU_ENABLE_SQLITE

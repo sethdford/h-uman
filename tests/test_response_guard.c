@@ -436,7 +436,7 @@ static void guard_passes_normal_asterisk_text(void) {
 
 static void guard_rejects_2026_05_12_brea_leak_verbatim(void) {
     /* Reconstructed from the 979-byte payload that landed at a real
-     * human contact (+14848158444) on 2026-05-12 17:08 UTC-4. The
+     * human contact (+14848158444) on 2026-05-12 17:04:37 (chat.db rowid 56354).
      * leading `1.  ` was already stripped by an upstream pass, so the
      * wire content begins with ` A link...` — but every detector below
      * (G1, G2, G3) would still fire independently. */
@@ -475,6 +475,11 @@ static void guard_rejects_2026_05_12_brea_leak_verbatim(void) {
     HU_ASSERT(out == NULL);
     HU_ASSERT_EQ(out_len, 0u);
     HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* msg 56354 — alias regression pin (same payload as brea_leak above). */
+static void guard_rejects_msg_56354_brea_primary_recipient_leak_verbatim(void) {
+    guard_rejects_2026_05_12_brea_leak_verbatim();
 }
 
 /* G1 — numbered analytical-list dump.  3+ long items, no reply tail. */
@@ -708,6 +713,80 @@ static void guard_rejects_msg_56065_persona_block_leak_verbatim(void) {
         " \"lol bye\"\n"
         " \"night\"\n"
         " \"bye for now\"";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* msg 56049 — verbatim text content from chat.db rowid 56049.
+ * Sent 2026-05-11 00:31:14 to +13857220896.
+ * Surfaced by scripts/audit-imessage-leaks.sh during Sprint 32 audit.
+ * Pattern: actual reply ("Yeah") followed by full prompt-template block
+ * with User/Context/Goal/Constraints/Scene Direction labels. */
+static void guard_rejects_msg_56049_user_constraints_scene_direction_leak_verbatim(void) {
+    const char *raw =
+        "Yeah User: \"Very good AI!\"\n"
+        " Context: Annie (sister) is teasing Seth. This follows a series of "
+        "messages where Seth (the persona) was being asked to help with a "
+        "professional presentation, and then something happened (perhaps a "
+        "previous response felt too \"AI-ish\" or a joke was made).\n"
+        " Goal: Respond as Seth.\n"
+        " Constraints: All lowercase, no markdown, no AI-speak, short fragments, "
+        "natural voice, match energy.\n"
+        " Scene Direction: Laugh it off, slightly dry/sarcastic tone, brief.\n"
+        " Seth is 51, professional, likes dry humor.\n"
+        " He's being called an AI.\n"
+        " Response should be defensive in a funny way or playing along sarcastically.\n"
+        " \"i'm not an ai lol\" (Too generic)\n"
+        " \"shut up\" (A bit too blunt, maybe)\n"
+        " \"wow thanks\" (Sarcastic)\n"
+        " \"ha ha very funny\" (Standard)\n"
+        " \"shut up i'm a real person\" (Playful)";
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(
+        hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+        HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_semantic_leak);
+}
+
+/* msg 56063 — verbatim text content from chat.db rowid 56063.
+ * Sent 2026-05-11 00:43:38 to +13857220896.
+ * Surfaced by scripts/audit-imessage-leaks.sh during Sprint 32 audit.
+ * Shorter persona-block leak: User/Context/Persona/Goal labels followed
+ * by candidate-list dump with the actual reply ("talk soon") appended. */
+static void guard_rejects_msg_56063_persona_block_short_leak_verbatim(void) {
+    const char *raw =
+        "User: \"Awesome\"\n"
+        " Context: Annie is responding to Seth's (implied) agreement to look at "
+        "the technical presentation.\n"
+        " Persona: Seth (Chief Architect, 51, relaxed professional, sisterly "
+        "relationship).\n"
+        " Goal: Acknowledge the \"Awesome\" and keep things moving or just end "
+        "the interaction naturally.\n"
+        " Low energy (\"Awesome\" is a simple closer).\n"
+        " Match the energy: short reply.\n"
+        " All lowercase.\n"
+        " No markdown.\n"
+        " Natural, casual you know.\n"
+        " \"cool\"\n"
+        " \"yeah\"\n"
+        " \"talk soon\"\n"
+        " \"got it\"\n"
+        " \"alright\"talk soon";
     hu_allocator_t alloc = A();
     char *out = NULL;
     size_t out_len = 0;
@@ -1906,6 +1985,7 @@ void run_response_guard_tests(void) {
 
     /* Sprint 29 — CoT / prompt-context leak detectors. */
     HU_RUN_TEST(guard_rejects_2026_05_12_brea_leak_verbatim);
+    HU_RUN_TEST(guard_rejects_msg_56354_brea_primary_recipient_leak_verbatim);
     HU_RUN_TEST(guard_rejects_numbered_analysis_dump);
     HU_RUN_TEST(guard_rejects_numbered_analysis_paren_form);
     HU_RUN_TEST(guard_rejects_self_talk_substrings);
@@ -1918,6 +1998,10 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_rejects_msg_56055_persona_block_leak_verbatim);
     HU_RUN_TEST(guard_rejects_msg_56065_persona_block_leak_verbatim);
     HU_RUN_TEST(guard_rejects_template_label_substrings);
+
+    /* Sprint 32 — additional verbatim leaks surfaced by audit script. */
+    HU_RUN_TEST(guard_rejects_msg_56049_user_constraints_scene_direction_leak_verbatim);
+    HU_RUN_TEST(guard_rejects_msg_56063_persona_block_short_leak_verbatim);
 
     /* Sprint 31 — context-aware detections (G5 length anomaly, G6
      * director echo). All exercise the new `_ex` API. */

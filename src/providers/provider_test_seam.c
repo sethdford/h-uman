@@ -73,8 +73,40 @@ static void test_deinit(void *ctx, hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, ctx, sizeof(hu_provider_test_ctx_t));
 }
 
+static hu_error_t test_chat_with_system_full(void *ctx, hu_allocator_t *alloc,
+                                              const char *system_prompt,
+                                              size_t system_prompt_len, const char *message,
+                                              size_t message_len, const char *model,
+                                              size_t model_len, double temperature, char **out,
+                                              size_t *out_len) {
+    (void)system_prompt;
+    (void)system_prompt_len;
+    (void)message;
+    (void)message_len;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    if (!ctx || !alloc || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_provider_test_ctx_t *t = (hu_provider_test_ctx_t *)ctx;
+    const char *text = t->canned;
+    if (strncmp(text, "canned:", 7) == 0)
+        text += 7;
+    while (*text == ' ')
+        text++;
+    size_t len = strlen(text);
+    char *copy = (char *)alloc->alloc(alloc->ctx, len + 1);
+    if (!copy)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(copy, text, len);
+    copy[len] = '\0';
+    *out = copy;
+    *out_len = len;
+    return HU_OK;
+}
+
 static const hu_provider_vtable_t TEST_VTABLE = {
-    .chat_with_system = NULL,
+    .chat_with_system = test_chat_with_system_full,
     .chat = test_chat,
     .supports_native_tools = NULL,
     .get_name = test_name,

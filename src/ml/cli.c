@@ -806,27 +806,33 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         }
     }
 #ifdef HU_IS_TEST
-    (void)alloc;
-    (void)persona_name;
-    (void)checkpoint_path;
-    (void)output_path;
-    (void)rank;
-    (void)max_steps;
-    (void)export_jsonl_path;
-    (void)from_history_db;
-    (void)from_history_max_per_channel;
-    (void)persist_persona;
-    (void)backend;
-    (void)mlx_model;
-    (void)data_dir;
-    (void)num_layers;
-    (void)max_seq_length;
-    (void)save_every;
-    (void)learning_rate;
-    printf("[lora-persona] test mode: skipped\n");
-    printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
-    return HU_OK;
-#else
+    /* M3 Bridge A Phase 1 — the `--export-jsonl` path is pure (loads the
+     * persona, writes a JSONL, exits). No subprocess, no provider, no
+     * HUML training loop. Allow it through under HU_IS_TEST so the CLI
+     * envelope is testable end-to-end. The training paths below (huml,
+     * MLX subprocess) still short-circuit. */
+    if (!export_jsonl_path || !export_jsonl_path[0]) {
+        (void)alloc;
+        (void)persona_name;
+        (void)checkpoint_path;
+        (void)output_path;
+        (void)rank;
+        (void)max_steps;
+        (void)from_history_db;
+        (void)from_history_max_per_channel;
+        (void)persist_persona;
+        (void)backend;
+        (void)mlx_model;
+        (void)data_dir;
+        (void)num_layers;
+        (void)max_seq_length;
+        (void)save_every;
+        (void)learning_rate;
+        printf("[lora-persona] test mode: skipped\n");
+        printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+        return HU_OK;
+    }
+#endif
     if (!persona_name) {
         fprintf(stderr, "lora-persona requires --persona <name>\n");
         return HU_ERR_INVALID_ARGUMENT;
@@ -1409,7 +1415,6 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     free_delta_examples(alloc, delta_examples, delta_examples_count);
     hu_persona_deinit(alloc, &persona);
     return err;
-#endif
 }
 
 /* Track D D2.2 — offline persona-fidelity baseline.

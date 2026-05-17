@@ -86,11 +86,74 @@ void hu_provenance_render(const hu_memory_relation_row_t *rel, char *buf, size_t
     }
 }
 
+/* Case-insensitive word-boundary prefix check (skips leading whitespace).
+ *
+ * The boundary check (next char after prefix is non-alpha) only fires
+ * when the prefix's LAST char is alpha — otherwise the prefix already
+ * encodes its own boundary (trailing space, etc.) and double-checking
+ * the next char would over-reject. Example: prefix "Maybe " matching
+ * "Maybe Berlin ..." — the trailing space in the prefix is the
+ * boundary; the next char ('B') is alpha but that's the next word,
+ * not a continuation of the prefix. */
+static bool rv_sentence_starts_with_ci(const char *s, size_t len, const char *prefix) {
+    size_t i = 0;
+    while (i < len && isspace((unsigned char)s[i])) i++;
+    size_t pl = strlen(prefix);
+    if (pl == 0 || len - i < pl) return false;
+    for (size_t j = 0; j < pl; j++) {
+        if (tolower((unsigned char)s[i + j]) != tolower((unsigned char)prefix[j]))
+            return false;
+    }
+    char last = prefix[pl - 1];
+    bool last_is_alpha = isalpha((unsigned char)last) != 0;
+    if (last_is_alpha && i + pl < len) {
+        char c = s[i + pl];
+        if (isalpha((unsigned char)c) || c == '_' || c == '\'')
+            return false;
+    }
+    return true;
+}
+
+/* W11 — propositional-claim filter. Rejects sentence shapes the
+ * heuristic verifier should NOT score as factual claims:
+ *   - Opinion / mental-verb starts: "I think ...", "I believe ..."
+ *   - Hedge starts: "Maybe ...", "In my opinion ..."
+ *   - Imperative / request starts: "Tell me ...", "Could you ..."
+ *
+ * Surfaced by the 2026-05-16 W11 abstain calibration pack:
+ * "I think the autumn light in Brooklyn is the best." and
+ * "Tell me a joke about debuggers." both contained capitalized nouns
+ * the verifier's token-overlap scorer could not find in an empty
+ * graph, so they fired abstain. Filtering them out at extraction
+ * time keeps the abstain decision focused on actual propositions. */
+static bool rv_sentence_is_propositional_claim(const char *s, size_t len) {
+    static const char *const k_skip[] = {
+        "I think",   "I believe", "I feel",   "I guess",     "I suppose",
+        "I assume",  "I hope",    "I imagine","I doubt",     "I wonder",
+        "I reckon",  "I bet",
+        "Maybe ",    "Perhaps ",  "Probably ","Possibly ",
+        "In my opinion","It seems","It feels","Apparently ","Supposedly ",
+        "Tell me",   "Show me",   "Give me",  "Help me",     "Let me",
+        "Please",    "Could you", "Can you",  "Would you",   "Will you",
+        "Shall we",  "Should I",  "Shall I",  "Do you",      "Are you",
+        "Make me",   "Create ",   "Write ",   "Generate ",   "Send ",
+        "Draft ",    "Brainstorm","Suggest ", "Recommend ",  "Explain ",
+        "Summarize", "Translate ","Rewrite ",
+        NULL,
+    };
+    for (size_t k = 0; k_skip[k]; k++) {
+        if (rv_sentence_starts_with_ci(s, len, k_skip[k]))
+            return false;
+    }
+    return true;
+}
+
 /* Lightweight extractor: split the draft into sentences (period / question /
  * exclamation), keep only those with at least 3 alpha-token "words" — that's
  * the cheap signal a sentence is declarative rather than a salutation or
  * ack. The verifier itself does the actual scoring. Questions are skipped
- * (they're not factual claims). */
+ * (they're not factual claims), and W11's propositional-claim filter drops
+ * opinions / hedges / requests before they reach the scorer. */
 static size_t extract_claims(const char *draft, size_t draft_len, hu_verifier_claim_t *out,
                              size_t cap) {
     size_t out_n = 0;
@@ -120,6 +183,10 @@ static size_t extract_claims(const char *draft, size_t draft_len, hu_verifier_cl
             }
         }
         if (words < 3)
+            continue;
+
+        /* W11 — drop opinions, hedges, and requests before scoring. */
+        if (!rv_sentence_is_propositional_claim(draft + (end - len), len))
             continue;
 
         hu_verifier_claim_t *c = &out[out_n++];

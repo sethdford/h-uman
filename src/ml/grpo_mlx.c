@@ -34,6 +34,7 @@
 
 #include "human/ml/grpo.h"
 #include "human/ml/rl_trainer.h"
+#include "human/ml/ml_scripts_dir.h"
 #include "human/core/error.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -219,13 +220,23 @@ static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
         return HU_ERR_INVALID_ARGUMENT;
     }
 
+    /* CF-7 (Phase D Task D-1): resolve absolute path to grpo_mlx_train.py
+     * via hu_ml_resolve_script_path. Replaces the legacy CWD-relative
+     * "python3 scripts/grpo_mlx_train.py" splice, which would invoke an
+     * attacker-supplied scripts/grpo_mlx_train.py if the daemon was started
+     * from an attacker-controlled directory. */
+    char script_path[512];
+    hu_error_t serr = hu_ml_resolve_script_path("grpo_mlx_train.py", script_path,
+                                                  sizeof(script_path));
+    if (serr != HU_OK) { unlink(jsonl_path); return serr; }
+
     char cmd[2048];
     /* The script forwards --n-rollouts, --clip-eps, --kl-beta, --iters
      * to mlx-lm-lora's GRPO trainer (grpo-group-size / grpo-epsilon /
      * grpo-beta CLI flags). --backbone-path is the model id; --input
      * is the JSONL just written. */
     snprintf(cmd, sizeof(cmd),
-             "python3 scripts/grpo_mlx_train.py "
+             "python3 '%s' "
              "--input '%s' "
              "--adapter-out '%s' "
              "--backbone-path '%s' "
@@ -235,7 +246,7 @@ static hu_error_t grpo_mlx_step(void *vctx, hu_allocator_t *alloc,
              "--iters %zu "
              "--reward-fn synthetic "
              "2>&1",
-             jsonl_path, c->adapter_dir, c->model_id,
+             script_path, jsonl_path, c->adapter_dir, c->model_id,
              c->n_rollouts, c->clip_eps, c->kl_beta, c->max_iters);
 
     /* Push HU_E2E_TEST_MODE=1 into the popen environment under HU_IS_TEST

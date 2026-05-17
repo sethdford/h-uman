@@ -215,6 +215,13 @@ static hu_error_t parse_reaction_collection(hu_config_t *cfg, const hu_json_valu
     int interval = (int)hu_json_get_number(obj, "poll_interval_seconds", 30);
     if (interval > 0)
         cfg->reaction_collection.poll_interval_seconds = interval;
+    const char *db_path = hu_json_get_string(obj, "chatdb_path");
+    if (db_path && db_path[0]) {
+        if (db_path[0] != '/')
+            return HU_ERR_INVALID_ARGUMENT;
+        snprintf(cfg->reaction_collection.chatdb_path,
+                 sizeof(cfg->reaction_collection.chatdb_path), "%s", db_path);
+    }
     hu_json_value_t *ch_arr = hu_json_object_get(obj, "channels");
     if (ch_arr && ch_arr->type == HU_JSON_ARRAY) {
         size_t n = ch_arr->data.array.len;
@@ -1179,8 +1186,13 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         parse_personalization(a, cfg, personalization_obj);
 
     hu_json_value_t *reaction_obj = hu_json_object_get(root, "reaction_collection");
-    if (reaction_obj)
-        parse_reaction_collection(cfg, reaction_obj);
+    if (reaction_obj) {
+        hu_error_t rc_err = parse_reaction_collection(cfg, reaction_obj);
+        if (rc_err != HU_OK) {
+            hu_json_free(a, root);
+            return rc_err;
+        }
+    }
 
     hu_json_value_t *rt_obj = hu_json_object_get(root, "runtime");
     if (rt_obj)

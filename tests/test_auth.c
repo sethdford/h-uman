@@ -10,7 +10,18 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Setup writable auth dir: create /tmp/human_auth_test_<pid>_<n>/.human and set HOME. */
+/* Setup writable auth dir: create /tmp/human_auth_test_<pid>_<n>/.human and set HOME.
+ *
+ * Returns a non-NULL pointer on success — the caller must pass it to
+ * `restore_auth_test_home`. An empty string ("") sentinel means "prior
+ * HOME was unset"; the restore helper distinguishes the two. NULL means
+ * setup itself failed (mkdir refused).
+ *
+ * Why the sentinel: earlier the helper returned NULL when there was no
+ * prior HOME — but other suites (test_e2e.c) call `unsetenv("HOME")`,
+ * so the NULL became indistinguishable from a setup failure and the
+ * per-test `HU_ASSERT_NOT_NULL(saved)` flaked when test_auth happened
+ * to run after test_e2e in the same binary. */
 static char *setup_auth_test_home(hu_allocator_t *alloc) {
     static int counter = 0;
     char tmpdir[128];
@@ -31,18 +42,20 @@ static char *setup_auth_test_home(hu_allocator_t *alloc) {
         return NULL;
     }
     const char *old = getenv("HOME");
-    char *saved = old ? hu_strdup(alloc, old) : NULL;
+    char *saved = old ? hu_strdup(alloc, old) : hu_strdup(alloc, "");
     setenv("HOME", tmpdir, 1);
     return saved;
 }
 
 static void restore_auth_test_home(hu_allocator_t *alloc, char *saved) {
-    if (saved) {
+    if (!saved)
+        return;
+    if (saved[0] != '\0') {
         setenv("HOME", saved, 1);
-        alloc->free(alloc->ctx, saved, strlen(saved) + 1);
     } else {
         unsetenv("HOME");
     }
+    alloc->free(alloc->ctx, saved, strlen(saved) + 1);
 }
 
 /* ── OAuth token lifecycle ─────────────────────────────────────────────────── */
