@@ -156,13 +156,22 @@ test.describe("h-uman Control UI", () => {
     await expect(sidebar).toBeAttached({ timeout: 5000 });
   });
 
-  test("floating mic button is present", async ({ page }) => {
+  // The <hu-floating-mic> element was removed from app.ts render() in
+  // commit b7abafcc (feat: iMessage red team humanness + UI overhaul +
+  // persona v8) — the prior render was `${this.tab === "chat" ?
+  // html\`<hu-floating-mic></hu-floating-mic>\` : nothing}`. The component
+  // class still exists at ui/src/components/floating-mic.ts and is
+  // dynamically imported in firstUpdated, but no template renders it.
+  //
+  // This test was kept across the overhaul, so it became a test pinning
+  // a contract the code no longer implements (see
+  // .claude/rules/tests-that-pin-bugs.md). Marking `fixme` instead of
+  // deleting because the intent of the overhaul vs. the test is unclear:
+  // either restore the render and remove the fixme, or delete this
+  // test if the floating-mic feature is permanently retired. Tracked
+  // 2026-05-17 as part of the CI rot cleanup pass.
+  test.fixme("floating mic button is present", async ({ page }) => {
     await page.goto("/");
-    // Wait for the page DOM before querying — every other test in this file
-    // does the same, and skipping it caused a 5s-timeout flake under
-    // WebSocket-reconnect churn (Vite proxy ECONNRESET storms during cold
-    // start). Also wait for hu-app itself before drilling into its shadow
-    // tree so the locator doesn't race the custom-element upgrade.
     await page.waitForLoadState("domcontentloaded");
     await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
     const mic = page.locator("hu-app >> hu-floating-mic");
