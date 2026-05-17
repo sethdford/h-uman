@@ -270,6 +270,59 @@ static void curiosity_build_directive(void) {
     alloc.free(alloc.ctx, d, len + 1);
 }
 
+/* P2-8 regression (2026-05-16 incident): hu_curiosity_generate used to
+ * memcpy up to 60 chars around a trigger word into the
+ *   "How is the %s going?"
+ * template, producing garbage like "How is the i like hiking going?".
+ *
+ * The fix: gate the question on hu_proactive_topic_is_safe — if the
+ * substring contains first-person pronouns or charged emotional keywords,
+ * skip emitting that prompt. */
+static void curiosity_skips_first_person_substring(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_curiosity_prompt_t *prompts = NULL;
+    size_t count = 0;
+    /* Memory context with a trigger word ("learning") embedded inside a
+     * first-person confession-style sentence. The old code would build
+     * "How is the i'm learning to lie better going?" — a garbage,
+     * leakage-prone message. */
+    const char *memory = "I'm learning to lie better lately.";
+    hu_error_t err = hu_curiosity_generate(&alloc, S("user1"), memory, strlen(memory), S("hello"),
+                                           &prompts, &count, 2);
+    HU_ASSERT(err == HU_OK);
+
+    /* If any prompt landed, none of them may contain first-person leakage. */
+    for (size_t i = 0; i < count; i++) {
+        HU_ASSERT(strstr(prompts[i].question, "i'm") == NULL);
+        HU_ASSERT(strstr(prompts[i].question, "I'm") == NULL);
+        HU_ASSERT(strstr(prompts[i].question, " i ") == NULL);
+        /* No "How is the i" prefix garbage. */
+        HU_ASSERT(strstr(prompts[i].question, "How is the i") == NULL);
+        HU_ASSERT(strstr(prompts[i].question, "to lie better") == NULL);
+    }
+    if (count > 0)
+        hu_curiosity_prompts_free(&alloc, prompts, count);
+}
+
+static void curiosity_skips_emotion_keyword_substring(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_curiosity_prompt_t *prompts = NULL;
+    size_t count = 0;
+    /* Substring with a charged emotion keyword that must never become a
+     * topic in a chirpy "How is the X going?" message. */
+    const char *memory = "feeling lonely and considering quitting therapy";
+    hu_error_t err = hu_curiosity_generate(&alloc, S("user1"), memory, strlen(memory), S("hello"),
+                                           &prompts, &count, 2);
+    HU_ASSERT(err == HU_OK);
+
+    for (size_t i = 0; i < count; i++) {
+        HU_ASSERT(strstr(prompts[i].question, "lonely") == NULL);
+        HU_ASSERT(strstr(prompts[i].question, "quitting therapy") == NULL);
+    }
+    if (count > 0)
+        hu_curiosity_prompts_free(&alloc, prompts, count);
+}
+
 /* ── Unasked Question Detector Tests ─────────────────────────────────────── */
 
 static void absence_null_args(void) {
@@ -483,6 +536,8 @@ int run_humanness_tests(void) {
     HU_RUN_TEST(curiosity_empty_memory);
     HU_RUN_TEST(curiosity_finds_triggers);
     HU_RUN_TEST(curiosity_build_directive);
+    HU_RUN_TEST(curiosity_skips_first_person_substring);
+    HU_RUN_TEST(curiosity_skips_emotion_keyword_substring);
 
     /* Unasked question detector */
     HU_RUN_TEST(absence_null_args);

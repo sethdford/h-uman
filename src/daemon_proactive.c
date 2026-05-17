@@ -41,8 +41,64 @@
 #endif
 
 #include "human/core/debug.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+
+/* P2-5 (2026-05-16 incident): public outbound-safety predicate for memory
+ * entries that hu_daemon_build_callback_context is about to inject into a
+ * proactive prompt. The previous code memcpy'd raw entries[i].content
+ * bytes — which let "I confessed something terrible" reach family
+ * contacts via F25/F30 paths.
+ *
+ * A memory entry is UNSAFE if it contains:
+ *   - first-person pronouns/contractions (i, i'm, i'll, my, me, mine)
+ *   - confession verbs (confessed/admitted/lied/cheated/betrayed/secret)
+ *   - bare emotion keywords (lonely/depressed/suicidal/anxious/...)
+ *   - format-specifier or newline injection
+ *
+ * Made non-static so tests can pin the predicate directly. Local to this
+ * TU rather than depending on the Phase 1 hu_proactive_topic_is_safe so
+ * this commit doesn't depend on Phase 1's merge order. */
+bool hu_daemon_callback_content_is_safe(const char *content, size_t content_len) {
+    if (!content || content_len == 0)
+        return false;
+    char buf[256];
+    size_t copy = content_len < sizeof(buf) - 1 ? content_len : sizeof(buf) - 1;
+    for (size_t i = 0; i < copy; i++)
+        buf[i] = (char)tolower((unsigned char)content[i]);
+    buf[copy] = '\0';
+
+    static const char *first_person_tokens[] = {
+        " i ", " i'm", " i'll", "i'm ", "i'll ", " my ", " me ", " mine ", "myself", NULL,
+    };
+    for (const char **p = first_person_tokens; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+    if (copy >= 2 && buf[0] == 'i' && (buf[1] == ' ' || buf[1] == '\''))
+        return false;
+
+    static const char *confession_verbs[] = {
+        "confessed", "admitted", "lied to", "cheated on", "betrayed", "secret", "regret", NULL,
+    };
+    for (const char **p = confession_verbs; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    static const char *charged_keywords[] = {
+        "lonely",     "depressed", "suicidal",  "scared",    "terrible",
+        "dying",      "crying",    "anxious",   "exhausted", "burnt out",
+        "burned out", "broken",    "miserable", "hopeless",  NULL,
+    };
+    for (const char **p = charged_keywords; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    if (strchr(buf, '%') || strchr(buf, '\n') || strchr(buf, '\r'))
+        return false;
+
+    return true;
+}
 
 /* ── Contact activity LRU cache ─────────────────────────────────────── */
 
@@ -225,23 +281,25 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t
             !hu_protective_memory_ok(alloc, memory, session_id, session_id_len, entries[i].content,
                                      entries[i].content_len, 0.0f, hour_local))
             continue;
+        /* P2-5 (2026-05-16): skip entries whose raw content is unsafe to
+         * inject into an outbound prompt. The previous code memcpy'd the
+         * raw bytes regardless of content, which let "I confessed
+         * something terrible" reach a family contact via this path. */
+        if (!hu_daemon_callback_content_is_safe(entries[i].content, entries[i].content_len))
+            continue;
+        /* P2-11 (2026-05-16): memory degradation is a UX-of-recall concept
+         * (mimics human forgetting in interactive recall). The previous
+         * code applied it to content about to be injected into an OUTBOUND
+         * proactive prompt — corrupting the text the LLM would then send
+         * verbatim. Disable degradation on this path. The seed/rate locals
+         * remain for the future-when-recall-display-is-separate flow. */
+        (void)deg_rate;
         const char *content = entries[i].content;
         size_t content_len = entries[i].content_len;
-        char *degraded = NULL;
-        size_t degraded_len = 0;
-        uint32_t seed = (uint32_t)now * 1103515245u + 12345u + (uint32_t)i;
-        degraded =
-            hu_memory_degradation_apply(alloc, content, content_len, seed, deg_rate, &degraded_len);
-        if (degraded && degraded_len > 0) {
-            content = degraded;
-            content_len = degraded_len;
-        }
         size_t show = content_len;
         if (show > 200)
             show = 200;
         w = snprintf(buf + pos, sizeof(buf) - pos, "%.*s\n", (int)show, content);
-        if (degraded)
-            alloc->free(alloc->ctx, degraded, degraded_len + 1);
         if (w > 0 && pos + (size_t)w < sizeof(buf)) {
             pos += (size_t)w;
             usable++;

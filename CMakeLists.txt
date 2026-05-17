@@ -2658,6 +2658,7 @@ set(HU_TEST_SOURCES
     tests/test_emotional_graph.c
     tests/test_comfort_patterns.c
     tests/test_emotional_moments.c
+    tests/test_emotional_state.c
     tests/test_contact_style_overlay.c
     tests/test_graph.c
     tests/test_w1_bitemporal.c

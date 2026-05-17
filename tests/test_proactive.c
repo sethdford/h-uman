@@ -334,6 +334,82 @@ static void proactive_starter_empty_memory(void) {
         mem.vtable->deinit(mem.ctx);
 }
 
+/* P2-4 regression (2026-05-16 incident): hu_proactive_build_starter used
+ * to memcpy raw entries[i].content into the prompt without ANY safety
+ * filter. Memory entries containing first-person confession-style content
+ * (e.g. "I confessed something terrible to my friend") were thus injected
+ * directly into outbound proactive prompts. The fix filters entries
+ * through a local safety predicate; unsafe entries are skipped. */
+static void proactive_starter_skips_first_person_confession_entry(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_p24";
+    static const char topic_cat[] = "conversation";
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = topic_cat, .name_len = sizeof(topic_cat) - 1},
+    };
+    /* Poisonous entry: a first-person confession fragment. */
+    const char *key1 = "topic:contact_p24:1";
+    const char *content1 = "recent topics activities interests: I confessed something terrible";
+    mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat, CONTACT,
+                      sizeof(CONTACT) - 1);
+    /* Clean entry mixed in. */
+    const char *key2 = "topic:contact_p24:2";
+    const char *content2 = "recent topics activities interests: pasta recipe weekend";
+    mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat, CONTACT,
+                      sizeof(CONTACT) - 1);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err =
+        hu_proactive_build_starter(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    if (out && out_len > 0) {
+        /* Confession content must NEVER appear. */
+        HU_ASSERT_NULL(strstr(out, "confessed something terrible"));
+        HU_ASSERT_NULL(strstr(out, "I confessed"));
+        /* Clean entry may appear. */
+        alloc.free(alloc.ctx, out, out_len + 1);
+    }
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
+static void proactive_starter_skips_emotion_keyword_entry(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_p24b";
+    static const char topic_cat[] = "conversation";
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = topic_cat, .name_len = sizeof(topic_cat) - 1},
+    };
+    const char *key = "topic:contact_p24b:1";
+    const char *content = "recent topics activities interests: feeling lonely and depressed";
+    mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat, CONTACT,
+                      sizeof(CONTACT) - 1);
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err =
+        hu_proactive_build_starter(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    if (out && out_len > 0) {
+        HU_ASSERT_NULL(strstr(out, "lonely"));
+        HU_ASSERT_NULL(strstr(out, "depressed"));
+        alloc.free(alloc.ctx, out, out_len + 1);
+    }
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
 static void proactive_starter_null_memory(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
@@ -1308,6 +1384,8 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_starter_with_memory);
     HU_RUN_TEST(proactive_starter_diverse_memories_produce_context);
     HU_RUN_TEST(proactive_starter_empty_memory);
+    HU_RUN_TEST(proactive_starter_skips_first_person_confession_entry);
+    HU_RUN_TEST(proactive_starter_skips_emotion_keyword_entry);
     HU_RUN_TEST(proactive_starter_null_memory);
     HU_RUN_TEST(proactive_event_follow_up);
     HU_RUN_TEST(proactive_event_yesterday_referenced_naturally);

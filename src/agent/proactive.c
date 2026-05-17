@@ -11,6 +11,61 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* P2-4 (2026-05-16 incident): local outbound-safety predicate for memory
+ * entries that hu_proactive_build_starter is about to inject into the
+ * starter prompt. The previous code memcpy'd raw `entries[i].content` —
+ * which let "I confessed something terrible" reach a family contact.
+ *
+ * A memory entry is UNSAFE if it contains:
+ *   - first-person pronouns/contractions (i, i'm, i'll, my, me, mine)
+ *   - confession verbs (confessed, admitted, lied, cheated)
+ *   - bare emotion keywords (lonely, depressed, suicidal, anxious,
+ *     scared, terrible, dying, crying)
+ *   - format-specifier or newline injection
+ *
+ * Local rather than depending on the Phase 1 hu_proactive_topic_is_safe
+ * symbol — when that branch lands the two predicates can be reconciled. */
+static bool proactive_entry_content_is_safe(const char *content, size_t content_len) {
+    if (!content || content_len == 0)
+        return false;
+    char buf[256];
+    size_t copy = content_len < sizeof(buf) - 1 ? content_len : sizeof(buf) - 1;
+    for (size_t i = 0; i < copy; i++)
+        buf[i] = (char)tolower((unsigned char)content[i]);
+    buf[copy] = '\0';
+
+    static const char *first_person_tokens[] = {
+        " i ", " i'm", " i'll", "i'm ", "i'll ", " my ", " me ", " mine ", "myself", NULL,
+    };
+    for (const char **p = first_person_tokens; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+    /* Lone "i" at start. */
+    if (copy >= 2 && buf[0] == 'i' && (buf[1] == ' ' || buf[1] == '\''))
+        return false;
+
+    static const char *confession_verbs[] = {
+        "confessed", "admitted", "lied to", "cheated on", "betrayed", "secret", NULL,
+    };
+    for (const char **p = confession_verbs; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    static const char *charged_keywords[] = {
+        "lonely",     "depressed", "suicidal",  "scared",    "terrible",
+        "dying",      "crying",    "anxious",   "exhausted", "burnt out",
+        "burned out", "broken",    "miserable", "hopeless",  NULL,
+    };
+    for (const char **p = charged_keywords; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    if (strchr(buf, '%') || strchr(buf, '\n') || strchr(buf, '\r'))
+        return false;
+
+    return true;
+}
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/superhuman.h"
 #endif
@@ -552,6 +607,11 @@ hu_error_t hu_proactive_build_starter(hu_allocator_t *alloc, hu_memory_t *memory
 
     for (size_t i = 0; i < count; i++) {
         if (!entries[i].content || entries[i].content_len == 0)
+            continue;
+        /* P2-4 (2026-05-16): skip unsafe entries before injecting them
+         * into the starter prompt. The previous code shipped confession
+         * fragments verbatim. */
+        if (!proactive_entry_content_is_safe(entries[i].content, entries[i].content_len))
             continue;
         size_t show = entries[i].content_len > 100 ? 100 : entries[i].content_len;
         size_t need = len + 2 + show + 2; /* "- " + content + "\n" */
