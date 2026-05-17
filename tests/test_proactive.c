@@ -817,6 +817,52 @@ static void proactive_contact_match_handles_null_or_empty(void) {
     HU_ASSERT_FALSE(hu_proactive_contact_matches_moment("", ""));
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Regression suite for 2026-05-16 replay-insights cross-contact leak (RI-1).
+ *
+ * daemon.c stored/read replay-analysis blobs under the GLOBAL key
+ * "replay:latest" with a process-global static fallback, so every contact's
+ * prompt picked up the most recently analyzed conversation's insights from
+ * any other contact.  hu_proactive_build_replay_key forces the key into
+ * per-contact form.
+ * ───────────────────────────────────────────────────────────────────── */
+
+static void proactive_replay_key_builds_per_contact(void) {
+    char buf[128] = {0};
+    size_t out_len = 0;
+    HU_ASSERT_TRUE(
+        hu_proactive_build_replay_key("alice", strlen("alice"), buf, sizeof(buf), &out_len));
+    HU_ASSERT_STR_EQ(buf, "replay:alice:latest");
+    HU_ASSERT_EQ(out_len, strlen("replay:alice:latest"));
+}
+
+static void proactive_replay_key_two_contacts_produce_different_keys(void) {
+    char a[128] = {0};
+    char b[128] = {0};
+    size_t a_len = 0;
+    size_t b_len = 0;
+    HU_ASSERT_TRUE(hu_proactive_build_replay_key("mindy", strlen("mindy"), a, sizeof(a), &a_len));
+    HU_ASSERT_TRUE(hu_proactive_build_replay_key("betty", strlen("betty"), b, sizeof(b), &b_len));
+    HU_ASSERT_TRUE(strcmp(a, b) != 0);
+}
+
+static void proactive_replay_key_rejects_null_or_empty(void) {
+    char buf[128] = {0};
+    size_t out_len = 99;
+    HU_ASSERT_FALSE(hu_proactive_build_replay_key(NULL, 5, buf, sizeof(buf), &out_len));
+    HU_ASSERT_FALSE(hu_proactive_build_replay_key("alice", 0, buf, sizeof(buf), &out_len));
+    HU_ASSERT_FALSE(hu_proactive_build_replay_key("alice", 5, NULL, sizeof(buf), &out_len));
+    HU_ASSERT_FALSE(hu_proactive_build_replay_key("alice", 5, buf, 0, &out_len));
+}
+
+static void proactive_replay_key_rejects_too_small_buffer(void) {
+    char tiny[5] = {0};
+    size_t out_len = 0;
+    /* "replay:alice:latest" is 19 chars + NUL = 20 needed; 5 is far too small. */
+    HU_ASSERT_FALSE(
+        hu_proactive_build_replay_key("alice", strlen("alice"), tiny, sizeof(tiny), &out_len));
+}
+
 #ifdef HU_ENABLE_SQLITE
 static void proactive_curiosity_returns_message_from_micro_moment(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -1217,6 +1263,10 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_contact_match_rejects_prefix_collision);
     HU_RUN_TEST(proactive_contact_match_rejects_case_collision);
     HU_RUN_TEST(proactive_contact_match_handles_null_or_empty);
+    HU_RUN_TEST(proactive_replay_key_builds_per_contact);
+    HU_RUN_TEST(proactive_replay_key_two_contacts_produce_different_keys);
+    HU_RUN_TEST(proactive_replay_key_rejects_null_or_empty);
+    HU_RUN_TEST(proactive_replay_key_rejects_too_small_buffer);
     HU_RUN_TEST(proactive_important_dates_match_returns_true_and_message);
     HU_RUN_TEST(proactive_important_dates_no_match_returns_false);
     HU_RUN_TEST(proactive_important_dates_empty_returns_false);

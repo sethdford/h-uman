@@ -86,6 +86,20 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
                                   const char *contact_id, size_t contact_id_len, uint32_t seed,
                                   char *message_out, size_t msg_cap);
 
+/* Build the per-contact replay-insights memory key.
+ *
+ * Returns true and writes "replay:<contact_id>:latest" (NUL-terminated) into
+ * out_buf, with the byte count (excluding NUL) at *out_len.  Returns false on
+ * NULL/empty inputs or if out_buf_cap is too small.
+ *
+ * Originated from the 2026-05-16 incident: src/daemon.c stored replay
+ * insights under the global key "replay:latest" with a process-global static
+ * fallback buffer, so every contact's prompt received every other contact's
+ * replay-analysis blob.  This helper makes the contact scope explicit and
+ * unit-testable.  Pinned by tests/test_proactive.c. */
+bool hu_proactive_build_replay_key(const char *contact_id, size_t contact_id_len, char *out_buf,
+                                   size_t out_buf_cap, size_t *out_len);
+
 /* Strict contact-match predicate for F25 emotional check-ins.
  *
  * Returns true iff the contact profile is the actual originator of the

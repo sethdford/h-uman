@@ -2616,8 +2616,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #ifndef HU_IS_TEST
-    static char replay_insights[2048] = {0};
-    static size_t replay_insights_len = 0;
+    /* The `replay_insights` static buffer was removed on 2026-05-16: it acted
+     * as a process-global fallback that leaked one contact's replay-analysis
+     * blob into every other contact's prompt.  Per-contact replay insights
+     * are now stored under "replay:<contact_id>:latest" via
+     * hu_proactive_build_replay_key.  Daily auto-tune still runs and logs but
+     * no longer mutates a shared buffer; Phase 6 will give it a dedicated
+     * non-global key if needed. */
     static char community_insights[2048] = {0};
     static size_t community_insights_len = 0;
     static size_t promotion_counter = 0;
@@ -3894,21 +3899,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (hu_replay_auto_tune(alloc, agent->memory, NULL, 0, &tune_summary,
                                                 &tune_len) == HU_OK &&
                             tune_summary && tune_len > 0) {
-                            size_t ctx_len = 0;
-                            char *tone_ctx = hu_replay_tune_build_context(alloc, tune_summary,
-                                                                          tune_len, &ctx_len);
-                            const char *src = tone_ctx ? tone_ctx : tune_summary;
-                            size_t src_len = tone_ctx ? ctx_len : tune_len;
-                            size_t copy_len = src_len < sizeof(replay_insights) - 1
-                                                  ? src_len
-                                                  : sizeof(replay_insights) - 1;
-                            memcpy(replay_insights, src, copy_len);
-                            replay_insights[copy_len] = '\0';
-                            replay_insights_len = copy_len;
-                            if (tone_ctx)
-                                alloc->free(alloc->ctx, tone_ctx, ctx_len + 1);
+                            /* 2026-05-16: the daily auto-tune used to dump its
+                             * context into the process-global `replay_insights`
+                             * static buffer, which was then injected into every
+                             * contact's prompt — a cross-contact leak channel.
+                             * The static buffer was removed; auto-tune now
+                             * runs as a no-op storage side and only logs.
+                             * Phase 6 will give auto-tune a properly scoped
+                             * persistent key if the feature is kept. */
+                            (void)hu_replay_tune_build_context;
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "daily replay auto-tune completed");
+                                        "daily replay auto-tune completed (tune_len=%zu)",
+                                        tune_len);
                         }
                         if (tune_summary)
                             alloc->free(alloc->ctx, tune_summary, tune_len + 1);
@@ -7919,27 +7921,38 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #ifndef HU_IS_TEST
-                /* Replay insights: per-contact lookup from memory store */
+                /* Replay insights: per-contact lookup from memory store.
+                 *
+                 * 2026-05-16 incident: the previous version read under the
+                 * GLOBAL key "replay:latest" and, on miss, fell back to the
+                 * process-global `replay_insights` static buffer.  Both paths
+                 * leaked one contact's replay-analysis blob into every other
+                 * contact's prompt — confirmed source of the "Replay MCP"
+                 * variants that shipped to all three relatives.  Static-buffer
+                 * fallback removed entirely; the key is now per-contact.
+                 */
                 {
                     const char *ri_src = NULL;
                     size_t ri_len = 0;
                     char *ri_heap = NULL;
                     if (agent->memory && agent->memory->vtable && agent->memory->vtable->get &&
                         batch_key && key_len > 0) {
-                        hu_memory_entry_t ri_entry;
-                        memset(&ri_entry, 0, sizeof(ri_entry));
-                        bool ri_found = false;
-                        if (agent->memory->vtable->get(agent->memory->ctx, alloc, "replay:latest",
-                                                       13, &ri_entry, &ri_found) == HU_OK &&
-                            ri_found && ri_entry.content && ri_entry.content_len > 0) {
-                            ri_src = ri_entry.content;
-                            ri_len = ri_entry.content_len;
-                            ri_heap = (char *)ri_entry.content;
+                        char ri_key[320];
+                        size_t ri_key_len = 0;
+                        if (hu_proactive_build_replay_key(batch_key, key_len, ri_key,
+                                                          sizeof(ri_key), &ri_key_len)) {
+                            hu_memory_entry_t ri_entry;
+                            memset(&ri_entry, 0, sizeof(ri_entry));
+                            bool ri_found = false;
+                            if (agent->memory->vtable->get(agent->memory->ctx, alloc, ri_key,
+                                                           ri_key_len, &ri_entry,
+                                                           &ri_found) == HU_OK &&
+                                ri_found && ri_entry.content && ri_entry.content_len > 0) {
+                                ri_src = ri_entry.content;
+                                ri_len = ri_entry.content_len;
+                                ri_heap = (char *)ri_entry.content;
+                            }
                         }
-                    }
-                    if (!ri_src && replay_insights_len > 0) {
-                        ri_src = replay_insights;
-                        ri_len = replay_insights_len;
                     }
                     if (ri_src && ri_len > 0) {
                         if (convo_ctx) {
@@ -9954,16 +9967,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         size_t rctx_len = 0;
                         char *rctx = hu_replay_build_context(alloc, &replay, &rctx_len);
                         if (rctx && rctx_len > 0) {
-#ifndef HU_IS_TEST
-                            {
-                                size_t copy_len = rctx_len < sizeof(replay_insights) - 1
-                                                      ? rctx_len
-                                                      : sizeof(replay_insights) - 1;
-                                memcpy(replay_insights, rctx, copy_len);
-                                replay_insights[copy_len] = '\0';
-                                replay_insights_len = copy_len;
-                            }
-#endif
+                            /* 2026-05-16: removed the unconditional mirror of
+                             * rctx into the process-global `replay_insights`
+                             * static buffer.  That buffer was a cross-contact
+                             * leak channel.  The per-contact memory-store
+                             * write below is the only durable path. */
                             if (history_count > 2 && agent->memory && agent->memory->vtable &&
                                 agent->memory->vtable->store) {
                                 static const char cat_name[] = "replay_insights";
@@ -9972,9 +9980,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     .data.custom = {.name = cat_name,
                                                     .name_len = sizeof(cat_name) - 1},
                                 };
-                                agent->memory->vtable->store(agent->memory->ctx, "replay:latest",
-                                                             13, rctx, rctx_len, &cat, batch_key,
-                                                             key_len);
+                                /* Per-contact key; pairs with the per-contact
+                                 * read at the F25 prompt-assembly site above. */
+                                char ri_key[320];
+                                size_t ri_key_len = 0;
+                                if (hu_proactive_build_replay_key(batch_key, key_len, ri_key,
+                                                                  sizeof(ri_key), &ri_key_len)) {
+                                    agent->memory->vtable->store(agent->memory->ctx, ri_key,
+                                                                 ri_key_len, rctx, rctx_len, &cat,
+                                                                 batch_key, key_len);
+                                }
                             }
                         }
                         if (rctx)

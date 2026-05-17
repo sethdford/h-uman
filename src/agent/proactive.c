@@ -918,6 +918,21 @@ bool hu_proactive_contact_matches_moment(const char *cp_contact_id, const char *
     return strcmp(cp_contact_id, moment_contact_id) == 0;
 }
 
+bool hu_proactive_build_replay_key(const char *contact_id, size_t contact_id_len, char *out_buf,
+                                   size_t out_buf_cap, size_t *out_len) {
+    if (!contact_id || contact_id_len == 0 || !out_buf || out_buf_cap == 0)
+        return false;
+    /* "replay:" + contact_id + ":latest" + NUL.  snprintf reports the count
+     * it WOULD have written if buf were large enough — if that's >= cap, the
+     * caller's buffer was too small and we must refuse. */
+    int n = snprintf(out_buf, out_buf_cap, "replay:%.*s:latest", (int)contact_id_len, contact_id);
+    if (n < 0 || (size_t)n >= out_buf_cap)
+        return false;
+    if (out_len)
+        *out_len = (size_t)n;
+    return true;
+}
+
 bool hu_proactive_topic_is_safe(const char *topic, size_t topic_len) {
     if (!topic || topic_len == 0)
         return false;
