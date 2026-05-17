@@ -179,6 +179,7 @@ Tests (`tests/test_w11_self_rag.c::W11 inline self-RAG with abstention`):
 ### Remaining scope
 
 - ~~Calibrate `abstain_threshold` against the 200-prompt annotated suite~~ **Closed (2026-05-11)** — see "Closed" row below for the in-tree calibration test that pins the W11 success-metric floor. External 200-prompt corpus can supersede the in-tree pack when it lands; gate shape is unchanged.
+- ~~Heuristic claim extractor flags opinion / request shapes ("I think X is the best", "Tell me a joke about X") as factual claims~~ **Closed (2026-05-16)** — `rv_sentence_is_propositional_claim` in `src/agent/response_verifier.c` + `sentence_is_propositional_claim` in `src/agent/self_rag_atomic.c` reject 40+ opinion / hedge / request prefixes before token scoring. W11 calibration precision climbed 85 → 100 % (FP=0); floors ratcheted to 90 % precision / 70 % global. New regression guard test `w11_cal_filter_rejects_opinion_and_request_shapes` pins 9 specific shapes (I think, I believe, I feel, Tell me, Show me, Could you, Maybe, Perhaps, In my opinion) so a silent revert names the offending sentence.
 - Inline backend control-token wiring for additional providers (currently only the placeholder protocol parser is exercised end-to-end).
 
 ---

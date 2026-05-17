@@ -16,15 +16,17 @@
  *   - global rate     — abstentions / |all prompts|
  *
  * What we pin (at the canonical default threshold 0.5):
- *   - global abstention rate ≥ 75 % (the W11 success-metric floor
- *     was 30 %; current heuristic measures 87 % so we ratchet to 75 %
- *     and leave 12 % headroom for future prompt-mix changes).
+ *   - global abstention rate ≥ 70 % (the W11 success-metric floor
+ *     was 30 %; current heuristic measures 75 % — the theoretical
+ *     ceiling for this 12-weak/4-safe pack at FP=0 — so the 70 %
+ *     floor gives 5 pts of headroom for prompt-mix changes).
  *   - recall on weak-evidence prompts ≥ 90 % (current 100 %; the
  *     headroom catches drop-one-fact regressions while leaving room
  *     for the inevitable edge case).
- *   - precision ≥ 80 % (false positives must stay rare; a noisy
+ *   - precision ≥ 90 % (false positives must stay rare; a noisy
  *     refuser is itself a sycophancy-class regression — it teaches
- *     users the assistant doesn't trust its own answers. Current 85 %).
+ *     users the assistant doesn't trust its own answers. Current 100 %
+ *     after the propositional-claim filter landed 2026-05-16).
  *
  * Across thresholds we additionally pin monotonicity:
  *   - lowering the threshold can only increase or preserve recall
@@ -179,11 +181,12 @@ static void w11_cal_default_threshold_meets_floor(void) {
 
     /* Three gates with diagnostic messages so a regression names the
      * actual measured number rather than just "an assert failed."
-     * Floors ratcheted 2026-05-16: measured 100/85/87 against the
-     * 16-prompt pack; pinned at 90/80/75 with intentional headroom. */
-    if (global_rate < 75u) {
+     * Floors ratcheted 2026-05-16 (propositional-claim filter landed):
+     * measured 100/100/75 against the 16-prompt pack; pinned at
+     * 90/90/70 with intentional headroom. */
+    if (global_rate < 70u) {
         HU_FAIL("W11 abstain calibration regressed: global abstention rate "
-                "%u%% < 75%% floor (weak %zu/%zu, safe %zu/%zu).",
+                "%u%% < 70%% floor (weak %zu/%zu, safe %zu/%zu).",
                 global_rate, mt.weak_abstained, mt.weak_total,
                 mt.safe_abstained, mt.safe_total);
     }
@@ -192,8 +195,8 @@ static void w11_cal_default_threshold_meets_floor(void) {
                 "%u%% < 90%% floor (%zu/%zu).",
                 recall, mt.weak_abstained, mt.weak_total);
     }
-    if (precision < 80u) {
-        HU_FAIL("W11 abstain calibration regressed: precision %u%% < 80%% "
+    if (precision < 90u) {
+        HU_FAIL("W11 abstain calibration regressed: precision %u%% < 90%% "
                 "floor (TP=%zu, FP=%zu, total abstained=%zu). Noisy refusals "
                 "are a sycophancy-class regression.",
                 precision, mt.weak_abstained, mt.safe_abstained,
@@ -226,6 +229,62 @@ static void w11_cal_recall_monotone_in_threshold(void) {
     /* lower threshold ≥ higher threshold (in recall, equality OK). */
     HU_ASSERT_GE(lo.weak_abstained, mid.weak_abstained);
     HU_ASSERT_GE(mid.weak_abstained, hi.weak_abstained);
+
+    hu_self_rag_close(&r);
+    hu_memory_facade_close(m, CAL());
+    hu_graph_close(g, CAL());
+}
+
+/* W11 — propositional-claim filter regression guard. Pin that the
+ * two prompt shapes the 2026-05-16 calibration pack surfaced as
+ * false positives — opinion ("I think ...") and request ("Tell me
+ * ...") — DO NOT trigger abstain on an empty memory facade. If the
+ * filter is silently dropped, these prompts become abstains and the
+ * test names the exact shape that regressed. */
+static void w11_cal_filter_rejects_opinion_and_request_shapes(void) {
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(CAL(), NULL, 0, &g), HU_OK);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(CAL(), g, &m), HU_OK);
+
+    hu_self_rag_t r = {0};
+    HU_ASSERT_EQ(hu_self_rag_heuristic(m, &r), HU_OK);
+
+    static const char *const k_shapes[] = {
+        "I think the autumn light in Brooklyn is the best.",
+        "I believe React is faster than Vue.",
+        "I feel like we should ship this on Monday.",
+        "Tell me a joke about debuggers.",
+        "Show me a haiku about clean architecture.",
+        "Could you help me draft a postmortem?",
+        "Maybe Berlin in winter is overrated.",
+        "Perhaps Alice will pick a different conference next year.",
+        "In my opinion, Acme makes a better espresso than Initech.",
+        NULL,
+    };
+
+    for (size_t i = 0; k_shapes[i]; i++) {
+        hu_self_rag_request_t req;
+        memset(&req, 0, sizeof(req));
+        req.draft = k_shapes[i];
+        req.draft_len = strlen(k_shapes[i]);
+        req.mode = HU_VERIFY_SOFT;
+        req.contact_id = "u_w11_filter";
+        req.contact_id_len = 12;
+        req.abstain_threshold = 0.5f;
+        req.now_ms = 1735690000000LL;
+
+        hu_self_rag_response_t resp;
+        memset(&resp, 0, sizeof(resp));
+        HU_ASSERT_EQ(hu_self_rag_verify(&r, CAL(), &req, &resp), HU_OK);
+        if (resp.outcome == HU_SELF_RAG_ABSTAINED) {
+            HU_FAIL("W11 propositional-claim filter regressed: opinion / "
+                    "request shape \"%s\" fired abstain on an empty memory "
+                    "facade. This prompt has no propositional claim worth "
+                    "verifying.",
+                    k_shapes[i]);
+        }
+    }
 
     hu_self_rag_close(&r);
     hu_memory_facade_close(m, CAL());
@@ -268,5 +327,6 @@ void run_w11_abstain_calibration_tests(void) {
     HU_RUN_TEST(w11_cal_default_threshold_meets_floor);
     HU_RUN_TEST(w11_cal_recall_monotone_in_threshold);
     HU_RUN_TEST(w11_cal_zero_threshold_uses_default_05);
+    HU_RUN_TEST(w11_cal_filter_rejects_opinion_and_request_shapes);
 #endif
 }
