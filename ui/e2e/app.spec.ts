@@ -156,29 +156,23 @@ test.describe("h-uman Control UI", () => {
     await expect(sidebar).toBeAttached({ timeout: 5000 });
   });
 
-  test.fixme("floating mic button is present", async ({ page }) => {
-    // ROOT CAUSE (re-discovered 2026-05-17): commit b7abafcc removed
-    // `<hu-floating-mic>` from hu-app's render template (replaced with
-    // ${nothing}) as part of the UI overhaul, while keeping the import
-    // for the lazy registration. The custom element is REGISTERED but
-    // never INSERTED into hu-app's shadow DOM, so this test will fail
-    // regardless of timing.
-    //
-    // The earlier un-fixme attempt in PR #113 (round 1) was based on
-    // the wrong hypothesis — that the test was a timing flake from
-    // Vite WS ECONNRESET delaying requestIdleCallback. We added an
-    // await-able `window.__huReady` promise (see app.ts firstUpdated)
-    // which IS useful for any future test that needs to wait for the
-    // idle-loaded components to register, but it doesn't help when
-    // the element is simply not in the DOM tree.
-    //
-    // To un-fixme this test, app.ts must restore something like:
-    //   ${this.tab === "chat" ? html`<hu-floating-mic></hu-floating-mic>` : nothing}
-    // That's a design decision (does the chat view want a floating
-    // mic again?) — not a CI fix. Re-fixme until that decision lands.
+  // Document the CURRENT design intent — hu-floating-mic is NOT rendered
+  // in hu-app's shadow DOM. Commit b7abafcc removed it from the chat
+  // view template (replaced with ${nothing}) during the UI overhaul,
+  // keeping only the lazy `import("./components/floating-mic.js")` for
+  // potential future use. If a future change restores
+  //   ${this.tab === "chat" ? html`<hu-floating-mic></hu-floating-mic>` : nothing}
+  // this test will fail loudly — flip the assertion at that point
+  // rather than letting a fixme rot. Per CodeRabbit suggestion
+  // (b45cff0a → cf. ce8bc61c → b45cff0a → this fix) — a permanent
+  // .fixme with a failing assertion hides regressions; an explicit
+  // toHaveCount(0) locks the current behavior as the contract.
+  test("floating mic button is not rendered (removed by b7abafcc)", async ({ page }) => {
     await page.goto("/");
+    await page.waitForLoadState("domcontentloaded");
+    await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
     const mic = page.locator("hu-app >> hu-floating-mic");
-    await expect(mic).toBeAttached({ timeout: 5000 });
+    await expect(mic).toHaveCount(0);
   });
 
   test("navigating through all tabs sequentially works", async ({ page }) => {

@@ -1062,7 +1062,10 @@ list(APPEND HU_CORE_SOURCES
     src/memory/tiers.c
     src/agent/process_reward.c
     src/ml/dpo.c
-    src/ml/dpo_miner.c
+    # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
+    # (training_data_quality.c) which is itself ML-gated. Keeping it in
+    # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
+    # static-analysis builds with an undefined-reference linker error.
     src/security/cot_audit.c
     src/security/escalate.c
     src/security/normalize.c
@@ -1332,6 +1335,10 @@ if(HU_ENABLE_ML)
         # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
+        # dpo_miner consumes hu_pii_redact (above) + hu_dpo_collector
+        # (ml/dpo.c is core, but the miner itself is ML-only — it's the
+        # SQLite-backed "extract from corrections" pipeline).
+        src/ml/dpo_miner.c
         src/providers/huml.c
         # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t vtable + factory.
         # Backends are stubbed at HU_ERR_NOT_SUPPORTED until Tasks 4
