@@ -34,10 +34,8 @@ option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
 option(HU_ENABLE_NEURAL_MEMORY "W10 neural memory placeholder (schema/ONNX path; default OFF)" OFF)
-# Init 13: DeltaKV + SWAN KV-cache compression. Pairs with W10 neural memory;
-# default OFF until the codecs meet the TVD < 1% / ≤ 2 ms / ≤ +40 KB binary
-# gates documented in docs/plans/2026-05-11-init-13-kv-compression.md.
-option(HU_ENABLE_KV_COMPRESSION "Init 13 KV-cache compression (DeltaKV + SWAN)" OFF)
+# Init 13 KV-cache compression (DeltaKV + SWAN) was ABANDONED on 2026-05-17:
+# see docs/plans/2026-05-11-init-13-kv-compression.md (Status: ABANDONED).
 # W13: learning loop (LoRA + DPO from W4/W5/W3 signals). Defaults follow ML.
 if(HU_ENABLE_ML)
     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" ON)
@@ -680,8 +678,6 @@ set(HU_CORE_SOURCES
     src/memory/cross_graph.c
     src/memory/erasure.c
     src/memory/neural_memory.c
-    # Init 13 KV-cache compression sources are guarded by HU_ENABLE_KV_COMPRESSION
-    # and appended below so MinSizeRel binaries stay flat when the feature is off.
     src/agent/self_rag.c
     src/agent/self_rag_atomic.c
     src/agent/self_rag_inline.c
@@ -1415,14 +1411,6 @@ if(HU_ENABLE_LEARNING)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
-endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_sources(human_core PRIVATE
-        src/memory/kv_compressor.c
-        src/memory/kv_deltakv.c
-        src/memory/kv_swan.c
-    )
-    target_compile_definitions(human_core PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
 if(HU_ENABLE_MCP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_MCP=1)
@@ -2289,14 +2277,6 @@ target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_T
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_sources(human_core_test PRIVATE
-        src/memory/kv_compressor.c
-        src/memory/kv_deltakv.c
-        src/memory/kv_swan.c
-    )
-    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_KV_COMPRESSION=1)
-endif()
 target_compile_options(human_core_test PRIVATE -UNDEBUG)
 if(Threads_FOUND)
     target_link_libraries(human_core_test PUBLIC Threads::Threads)
@@ -2851,9 +2831,6 @@ endif()
 if(HU_ENABLE_AUTHENTIC)
     list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
 endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    list(APPEND HU_TEST_SOURCES tests/test_kv_compressor.c)
-endif()
 
 # Music preview tests (pure computation — always compiled)
 list(APPEND HU_TEST_SOURCES tests/test_music.c)
@@ -2989,9 +2966,6 @@ if(HU_ENABLE_FEEDS)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_AUTHENTIC=1)
-endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_compile_definitions(human_tests PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
 if(UNIX AND NOT WIN32)
     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)
