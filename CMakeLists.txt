@@ -569,6 +569,7 @@ set(HU_CORE_SOURCES
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/contact_send_recency.c
     src/context/filler_recency.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
@@ -2664,6 +2665,8 @@ set(HU_TEST_SOURCES
     tests/test_personal_model_fidelity_v2.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
+    tests/test_contact_send_recency.c
+    tests/test_contact_send_recency_daemon.c
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c

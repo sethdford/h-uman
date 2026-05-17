@@ -28,6 +28,7 @@
 #include "human/agent/worktree.h"
 #include "human/behavior/pressure_history.h"
 #include "human/channel.h"
+#include "human/contact_send_recency.h"
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
 #include "human/core/error.h"
@@ -519,6 +520,15 @@ struct hu_agent {
      * avoid picking the same filler twice in a row.  In-memory only; loss on
      * restart is acceptable.  Zero-initialised by memset in hu_agent_from_config. */
     hu_filler_recency_t filler_recency;
+
+    /* Per-contact send-path recency (memory-scoping FU-1, plan
+     * docs/plans/2026-05-15-memory-scoping-followups.md).  Tracks the last
+     * outbound path (reactive vs proactive vs scheduled vs photo vs morning)
+     * so proactive paths in the daemon can DEFER when a reactive turn has
+     * fired for the same contact within the recency window.  In-memory only;
+     * loss on restart is acceptable.  Zero-initialised by memset in
+     * hu_agent_from_config. */
+    hu_contact_send_recency_t contact_send_recency;
 };
 
 /* Create agent from minimal config (no full config loader yet).

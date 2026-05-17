@@ -617,6 +617,8 @@ void run_grpo_e2e_tests(void);
 #endif
 void run_persona_directive_channels_tests(void);
 void run_filler_recency_tests(void);
+void run_contact_send_recency_tests(void);
+void run_contact_send_recency_daemon_tests(void);
 void run_filler_pctt_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -1287,6 +1289,8 @@ int main(int argc, char **argv) {
 #endif
     run_persona_directive_channels_tests();
     run_filler_recency_tests();
+    run_contact_send_recency_tests();
+    run_contact_send_recency_daemon_tests();
     run_filler_pctt_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();
