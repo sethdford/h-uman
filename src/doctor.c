@@ -23,6 +23,13 @@
 #include <sqlite3.h>
 #endif
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+#if defined(__linux__)
+#include <limits.h>
+#endif
+
 #define HU_DOCTOR_LINE_CATEGORY "doctor_line"
 
 static hu_error_t doctor_push_line(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n,
@@ -448,8 +455,8 @@ static bool doctor_imsg_status_extract_bool(const char *blob, const char *key, b
 #endif
 
 hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
-                                    int64_t stale_after_secs, hu_diag_item_t **items,
-                                    size_t *count, size_t *cap) {
+                                    int64_t stale_after_secs, hu_diag_item_t **items, size_t *count,
+                                    size_t *cap) {
     if (!alloc || !items || !count || !cap)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -484,8 +491,8 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                 /* Run a tiny query to actually trigger TCC, since open alone
                  * sometimes succeeds before TCC fires on first read. */
                 sqlite3_stmt *stmt = NULL;
-                int qrc = sqlite3_prepare_v2(probe, "SELECT 1 FROM message LIMIT 1", -1, &stmt,
-                                             NULL);
+                int qrc =
+                    sqlite3_prepare_v2(probe, "SELECT 1 FROM message LIMIT 1", -1, &stmt, NULL);
                 if (qrc == SQLITE_OK)
                     qrc = sqlite3_step(stmt);
                 if (stmt)
@@ -493,9 +500,8 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                 hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(qrc);
                 sqlite3_close(probe);
                 if (cls == HU_IMESSAGE_ERR_NONE || qrc == SQLITE_DONE || qrc == SQLITE_ROW) {
-                    char *msg =
-                        hu_sprintf(alloc, "[doctor] iMessage chat.db: readable via sqlite (%s)",
-                                   db_path);
+                    char *msg = hu_sprintf(
+                        alloc, "[doctor] iMessage chat.db: readable via sqlite (%s)", db_path);
                     if (msg) {
                         doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
                         alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -517,8 +523,7 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                     sqlite3_close(probe);
                 hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(rc);
                 char *msg = hu_sprintf(
-                    alloc,
-                    "[doctor] iMessage chat.db: sqlite_open failed %s (rc=%d) — %s",
+                    alloc, "[doctor] iMessage chat.db: sqlite_open failed %s (rc=%d) — %s",
                     hu_imessage_error_class_name(cls), rc,
                     cls == HU_IMESSAGE_ERR_AUTH
                         ? "Full Disk Access denied; grant FDA to the daemon binary"
@@ -531,11 +536,10 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
 #else
             /* No sqlite at build time: weakened POSIX-only check. */
             if (access(db_path, R_OK) == 0) {
-                char *msg =
-                    hu_sprintf(alloc,
-                               "[doctor] iMessage chat.db: POSIX-readable (%s) — TCC not "
-                               "checked (HU_ENABLE_SQLITE=OFF)",
-                               db_path);
+                char *msg = hu_sprintf(alloc,
+                                       "[doctor] iMessage chat.db: POSIX-readable (%s) — TCC not "
+                                       "checked (HU_ENABLE_SQLITE=OFF)",
+                                       db_path);
                 if (msg) {
                     doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
                     alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -560,10 +564,9 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
         doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
                          "[doctor] imsg CLI: on PATH (send + react + watch enabled)");
     else
-        doctor_push_line(
-            alloc, items, count, cap, HU_DIAG_WARN,
-            "[doctor] imsg CLI: not on PATH — fallback to AppleScript only "
-            "(install steipete/imsg for send/react/watch)");
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                         "[doctor] imsg CLI: not on PATH — fallback to AppleScript only "
+                         "(install steipete/imsg for send/react/watch)");
 #endif
 
     /* 3. Poll-status file: presence + freshness + breaker. */
@@ -577,10 +580,9 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
 
     FILE *f = fopen(status_path, "r");
     if (!f) {
-        doctor_push_line(
-            alloc, items, count, cap, HU_DIAG_WARN,
-            "[doctor] iMessage poll status: file missing — daemon has not polled yet "
-            "(start `human service-loop` and re-run)");
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                         "[doctor] iMessage poll status: file missing — daemon has not polled yet "
+                         "(start `human service-loop` and re-run)");
         return HU_OK;
     }
     char blob[2048];
@@ -598,15 +600,15 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
     (void)doctor_imsg_status_extract_int(blob, "\"last_successful_poll_epoch\"", &last_success);
     (void)doctor_imsg_status_extract_int(blob, "\"consecutive_open_failures\"", &consecutive);
     (void)doctor_imsg_status_extract_bool(blob, "\"circuit_breaker_tripped\"", &tripped);
-    (void)doctor_imsg_status_extract_str(blob, "\"last_error_class\"", err_class, sizeof(err_class));
+    (void)doctor_imsg_status_extract_str(blob, "\"last_error_class\"", err_class,
+                                         sizeof(err_class));
 
     if (tripped) {
-        char *msg = hu_sprintf(
-            alloc,
-            "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — "
-            "re-grant Full Disk Access and restart the daemon",
-            (long long)consecutive,
-            err_class[0] ? err_class : "?");
+        char *msg =
+            hu_sprintf(alloc,
+                       "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — "
+                       "re-grant Full Disk Access and restart the daemon",
+                       (long long)consecutive, err_class[0] ? err_class : "?");
         if (msg) {
             doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -625,8 +627,7 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
     }
 
     if (last_rowid >= 0) {
-        char *msg = hu_sprintf(alloc, "[doctor] iMessage last_rowid: %lld",
-                               (long long)last_rowid);
+        char *msg = hu_sprintf(alloc, "[doctor] iMessage last_rowid: %lld", (long long)last_rowid);
         if (msg) {
             doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -641,17 +642,17 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
         if (age < 0)
             age = 0;
         if (stale_after_secs > 0 && age > stale_after_secs) {
-            char *msg = hu_sprintf(
-                alloc, "[doctor] iMessage poll: STALE — last success %lld seconds ago",
-                (long long)age);
+            char *msg =
+                hu_sprintf(alloc, "[doctor] iMessage poll: STALE — last success %lld seconds ago",
+                           (long long)age);
             if (msg) {
                 doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
                 alloc->free(alloc->ctx, msg, strlen(msg) + 1);
             }
         } else {
-            char *msg = hu_sprintf(
-                alloc, "[doctor] iMessage poll: fresh (last success %lld seconds ago)",
-                (long long)age);
+            char *msg =
+                hu_sprintf(alloc, "[doctor] iMessage poll: fresh (last success %lld seconds ago)",
+                           (long long)age);
             if (msg) {
                 doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
                 alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -841,8 +842,8 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
         return HU_OK;
     }
     if (lerr != HU_OK) {
-        char *msg = hu_sprintf(alloc, "[doctor] verifier: failed to read %s (err=%d)", path,
-                               (int)lerr);
+        char *msg =
+            hu_sprintf(alloc, "[doctor] verifier: failed to read %s (err=%d)", path, (int)lerr);
         if (msg) {
             (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -860,8 +861,7 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
      * either the daemon just started, or no chat has happened. */
     {
         char *msg = hu_sprintf(
-            alloc,
-            "[doctor] verifier: %llu turns, %llu claims (flagged %llu, %.1f%% rate)",
+            alloc, "[doctor] verifier: %llu turns, %llu claims (flagged %llu, %.1f%% rate)",
             (unsigned long long)m.total_runs, (unsigned long long)m.total_claims_extracted,
             (unsigned long long)m.total_claims_flagged,
             hu_verifier_metrics_flagged_rate(&m) * 100.0);
@@ -875,18 +875,17 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
      * cadence is 60s, so default 300s = 5 min gives plenty of headroom for
      * normal scheduling jitter while still catching a wedged daemon fast. */
     if (stale) {
-        char *msg =
-            hu_sprintf(alloc,
-                       "[doctor] verifier heartbeat: STALE — last flush %lld seconds ago "
-                       "(threshold %lld); daemon may be offline or wedged",
-                       (long long)age, (long long)stale_after_secs);
+        char *msg = hu_sprintf(alloc,
+                               "[doctor] verifier heartbeat: STALE — last flush %lld seconds ago "
+                               "(threshold %lld); daemon may be offline or wedged",
+                               (long long)age, (long long)stale_after_secs);
         if (msg) {
             (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
         }
     } else {
-        char *msg = hu_sprintf(alloc, "[doctor] verifier heartbeat: fresh (%llds ago)",
-                               (long long)age);
+        char *msg =
+            hu_sprintf(alloc, "[doctor] verifier heartbeat: fresh (%llds ago)", (long long)age);
         if (msg) {
             (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -898,11 +897,11 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
     if (m.total_claims_extracted > 0) {
         double rate = hu_verifier_metrics_flagged_rate(&m);
         if (flagged_warn_rate > 0.0 && rate >= flagged_warn_rate) {
-            char *msg = hu_sprintf(
-                alloc,
-                "[doctor] verifier flagged-rate: HIGH (%.1f%% >= threshold %.1f%%) — "
-                "memory may be under-populated or the model is hallucinating",
-                rate * 100.0, flagged_warn_rate * 100.0);
+            char *msg =
+                hu_sprintf(alloc,
+                           "[doctor] verifier flagged-rate: HIGH (%.1f%% >= threshold %.1f%%) — "
+                           "memory may be under-populated or the model is hallucinating",
+                           rate * 100.0, flagged_warn_rate * 100.0);
             if (msg) {
                 (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
                 alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -913,11 +912,10 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
     return HU_OK;
 }
 
-hu_error_t hu_doctor_parse_scheduler_status_json(const char *json,
-                                                   unsigned long long *jobs_pending,
-                                                   unsigned long long *jobs_completed_today,
-                                                   long long *battery_pct, char *on_ac_power_text,
-                                                   size_t on_ac_power_cap, long long *updated_epoch) {
+hu_error_t hu_doctor_parse_scheduler_status_json(const char *json, unsigned long long *jobs_pending,
+                                                 unsigned long long *jobs_completed_today,
+                                                 long long *battery_pct, char *on_ac_power_text,
+                                                 size_t on_ac_power_cap, long long *updated_epoch) {
     return hu_scheduler_status_parse_json(json, jobs_pending, jobs_completed_today, battery_pct,
                                           on_ac_power_text, on_ac_power_cap, updated_epoch);
 }
@@ -990,9 +988,8 @@ hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
         }
     } else {
-        char *msg =
-            hu_sprintf(alloc, "[doctor] scheduler heartbeat: fresh (status_age=%llds)",
-                       (long long)age);
+        char *msg = hu_sprintf(alloc, "[doctor] scheduler heartbeat: fresh (status_age=%llds)",
+                               (long long)age);
         if (msg) {
             (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -1009,12 +1006,232 @@ hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item
         alloc, items, count, cap, HU_DIAG_OK,
         "[doctor] responses: degenerate output is retried via a slim 2-message request, then "
         "cloud fallback (gemini → openai) when HU_ENABLE_CURL=1");
-    (void)doctor_push_line(
-        alloc, items, count, cap, HU_DIAG_OK,
-        "[doctor] responses: grep ~/.human/logs/service-loop-error.log for "
-        "\"response_guard\" and \"empty assistant response\"");
+    (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                           "[doctor] responses: grep ~/.human/logs/service-loop-error.log for "
+                           "\"response_guard\" and \"empty assistant response\"");
     (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
                            "[doctor] responses: MLX HTTP 52 (empty reply) usually means the "
                            "local server rejected an oversized body — slim retry addresses this");
+    return HU_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * US-9.4: install-readiness gate.
+ *
+ * Each sub-check reads PRIMARY EVIDENCE on the filesystem — not a cached
+ * "configured" flag — so that the doctor cannot lie when the install is
+ * actually broken. See .claude/rules/tests-that-pin-bugs.md.
+ * ------------------------------------------------------------------------- */
+
+/* Push one item using a specific (caller-owned literal) category. */
+static hu_error_t install_push(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n, size_t *cap,
+                               hu_diag_severity_t sev, const char *category, const char *line) {
+    if (!line || !category)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (*n >= *cap) {
+        size_t new_cap = (*cap) ? (*cap * 2) : 4;
+        hu_diag_item_t *nb =
+            (hu_diag_item_t *)alloc->alloc(alloc->ctx, sizeof(hu_diag_item_t) * new_cap);
+        if (!nb)
+            return HU_ERR_OUT_OF_MEMORY;
+        if (*buf)
+            memcpy(nb, *buf, sizeof(hu_diag_item_t) * (*n));
+        if (*buf)
+            alloc->free(alloc->ctx, *buf, sizeof(hu_diag_item_t) * (*cap));
+        *buf = nb;
+        *cap = new_cap;
+    }
+    char *cat = hu_strdup(alloc, category);
+    char *msg = hu_strdup(alloc, line);
+    if (!cat || !msg) {
+        if (cat)
+            alloc->free(alloc->ctx, cat, strlen(cat) + 1);
+        if (msg)
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    (*buf)[*n] = (hu_diag_item_t){sev, cat, msg};
+    (*n)++;
+    return HU_OK;
+}
+
+/* Resolve the running binary's path. PRIMARY EVIDENCE — ask the kernel
+ * (Linux) or dyld (macOS) where we actually are, not where someone said we
+ * are. Under HU_IS_TEST, allow $HU_TEST_BINARY_PATH override so unit tests
+ * can synthesize "binary missing" without nuking the test runner. */
+static char *resolve_binary_path(hu_allocator_t *alloc) {
+#if HU_IS_TEST
+    const char *override = getenv("HU_TEST_BINARY_PATH");
+    if (override && override[0])
+        return hu_strdup(alloc, override);
+#endif
+#if defined(__linux__)
+    char buf[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0)
+        return NULL;
+    buf[n] = '\0';
+    return hu_strdup(alloc, buf);
+#elif defined(__APPLE__)
+    char buf[4096];
+    uint32_t size = (uint32_t)sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) != 0)
+        return NULL;
+    char *resolved = realpath(buf, NULL);
+    if (resolved) {
+        char *out = hu_strdup(alloc, resolved);
+        free(resolved);
+        return out;
+    }
+    return hu_strdup(alloc, buf);
+#else
+    (void)alloc;
+    return NULL;
+#endif
+}
+
+/* Build "~/.human" (or $HU_STATE_DIR override). Returns 0 on success. */
+static int resolve_state_dir(char *out, size_t cap) {
+    const char *override = getenv("HU_STATE_DIR");
+    if (override && override[0]) {
+        size_t len = strlen(override);
+        if (len + 1 > cap)
+            return -1;
+        memcpy(out, override, len + 1);
+        return 0;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return -1;
+    int n = snprintf(out, cap, "%s/.human", home);
+    if (n <= 0 || (size_t)n >= cap)
+        return -1;
+    return 0;
+}
+
+hu_error_t hu_doctor_check_install(hu_allocator_t *alloc, const hu_config_t *cfg,
+                                   hu_diag_item_t **items, size_t *count, size_t *cap) {
+    if (!alloc || !items || !count || !cap)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    size_t err_seen_before_call = 0;
+    for (size_t i = 0; i < *count; i++)
+        if ((*items)[i].severity == HU_DIAG_ERR)
+            err_seen_before_call++;
+
+    /* --- 1. binary --- */
+    {
+        char *bin = resolve_binary_path(alloc);
+        bool ok = false;
+        if (bin && bin[0]) {
+            struct stat st;
+            if (stat(bin, &st) == 0 && S_ISREG(st.st_mode))
+                ok = true;
+        }
+        if (ok) {
+            char *msg = hu_sprintf(alloc, "binary: OK (%s)", bin);
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "binary",
+                               msg ? msg : "binary: OK");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        } else {
+            char *msg = hu_sprintf(alloc,
+                                   "binary: NOT_RESOLVABLE — could not locate "
+                                   "running executable (path=%s)",
+                                   bin ? bin : "(null)");
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "binary",
+                               msg ? msg
+                                   : "binary: NOT_RESOLVABLE — could not locate "
+                                     "running executable");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+        if (bin)
+            alloc->free(alloc->ctx, bin, strlen(bin) + 1);
+    }
+
+    /* --- 2. config_dir --- */
+    {
+        char dir[1024];
+        bool ok = false;
+        if (resolve_state_dir(dir, sizeof(dir)) == 0) {
+            struct stat st;
+            if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode))
+                ok = true;
+        }
+        if (ok) {
+            char *msg = hu_sprintf(alloc, "config_dir: OK (%s)", dir);
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "config_dir",
+                               msg ? msg : "config_dir: OK");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        } else {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "config_dir",
+                               "config_dir: MISSING — run 'human onboard' to create ~/.human/");
+        }
+    }
+
+    /* --- 3. channel --- */
+    {
+        bool has_channel = false;
+        if (cfg) {
+            for (size_t i = 0; i < cfg->channels.channel_config_len; i++) {
+                const char *k = cfg->channels.channel_config_keys[i];
+                if (k && k[0] && cfg->channels.channel_config_counts[i] > 0) {
+                    has_channel = true;
+                    break;
+                }
+            }
+        }
+        if (has_channel) {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "channel",
+                               "channel: OK (at least one channel configured)");
+        } else {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "channel",
+                               "channel: NONE — run 'human doctor imessage' to pair iMessage");
+        }
+    }
+
+    /* --- 4. persona --- */
+    {
+        bool ok = false;
+        char detail[256] = {0};
+        if (!cfg || !cfg->agent.persona || !cfg->agent.persona[0]) {
+            snprintf(detail, sizeof(detail),
+                     "persona: MISSING — no persona configured. Run 'human doctor "
+                     "--fix' to restore defaults");
+        } else {
+            const char *name = cfg->agent.persona;
+            size_t name_len = strlen(name);
+            hu_persona_t p;
+            memset(&p, 0, sizeof(p));
+            hu_error_t perr = hu_persona_load(alloc, name, name_len, &p);
+            if (perr == HU_OK) {
+                ok = true;
+                snprintf(detail, sizeof(detail), "persona: OK (%s)", name);
+                hu_persona_deinit(alloc, &p);
+            } else if (perr == HU_ERR_NOT_FOUND) {
+                snprintf(detail, sizeof(detail),
+                         "persona: MISSING — '%s' not found. Run 'human doctor "
+                         "--fix' to restore defaults",
+                         name);
+            } else {
+                snprintf(detail, sizeof(detail),
+                         "persona: PARSE_ERROR — '%s' failed to load (rc=%d). Run "
+                         "'human doctor --fix' to restore defaults",
+                         name, (int)perr);
+            }
+        }
+        (void)install_push(alloc, items, count, cap, ok ? HU_DIAG_OK : HU_DIAG_ERR, "persona",
+                           detail);
+    }
+
+    /* Tally new errors and decide return code. */
+    size_t err_n = 0;
+    for (size_t i = 0; i < *count; i++)
+        if ((*items)[i].severity == HU_DIAG_ERR)
+            err_n++;
+    if (err_n > err_seen_before_call)
+        return HU_ERR_NOT_FOUND;
     return HU_OK;
 }

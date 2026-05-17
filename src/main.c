@@ -674,10 +674,106 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
         return err_n > 0 ? HU_ERR_INTERNAL : HU_OK;
     }
 
+    /* Dispatch precedence for `human doctor` flags:
+     *   1. subcommand (imessage|verifier|scheduler|responses) — handled above
+     *   2. --install (US-9.4) — install-readiness gate, exits nonzero on red
+     *   3. --privacy [SPRINT-8 RESERVED] — slot kept free; do not move
+     *   4. --fix — auto-repair
+     *   5. default — legacy full report
+     * Flags are non-exclusive in argv parsing; we honor the first match in
+     * this list so flags compose predictably and additively. */
+    bool do_install = false;
     bool do_fix = false;
+    bool emit_json = false;
     for (int i = 2; i < argc; i++) {
+        if (argv[i] && strcmp(argv[i], "--install") == 0)
+            do_install = true;
         if (argv[i] && strcmp(argv[i], "--fix") == 0)
             do_fix = true;
+        if (argv[i] && strcmp(argv[i], "--json") == 0)
+            emit_json = true;
+    }
+
+    if (do_install) {
+        hu_config_t inst_cfg;
+        hu_error_t lerr = hu_config_load(alloc, &inst_cfg);
+        const hu_config_t *cfg_ptr = (lerr == HU_OK) ? &inst_cfg : NULL;
+
+        hu_diag_item_t *items = NULL;
+        size_t item_count = 0;
+        size_t cap = 8;
+        items = (hu_diag_item_t *)alloc->alloc(alloc->ctx, sizeof(hu_diag_item_t) * cap);
+        if (!items) {
+            if (cfg_ptr)
+                hu_config_deinit(&inst_cfg);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+
+        hu_error_t cerr = hu_doctor_check_install(alloc, cfg_ptr, &items, &item_count, &cap);
+        (void)cerr; /* err count below is the authoritative signal */
+
+        size_t err_n = 0;
+        for (size_t i = 0; i < item_count; i++)
+            if (items[i].severity == HU_DIAG_ERR)
+                err_n++;
+
+        if (emit_json) {
+            const char *summary = err_n > 0 ? "NOT_READY" : "READY";
+            printf("{\"status\":\"%s\",\"checks\":[", summary);
+            for (size_t i = 0; i < item_count; i++) {
+                printf("%s{", i == 0 ? "" : ",");
+                printf("\"name\":\"");
+                for (const char *p = items[i].category ? items[i].category : ""; *p; p++) {
+                    if (*p == '"' || *p == '\\')
+                        putchar('\\');
+                    putchar(*p);
+                }
+                printf("\",\"ok\":%s,\"message\":\"",
+                       items[i].severity == HU_DIAG_OK ? "true" : "false");
+                for (const char *p = items[i].message ? items[i].message : ""; *p; p++) {
+                    if (*p == '"' || *p == '\\')
+                        putchar('\\');
+                    else if (*p == '\n')
+                        printf("\\n");
+                    else if ((unsigned char)*p < 0x20)
+                        continue;
+                    else
+                        putchar(*p);
+                }
+                printf("\"}");
+            }
+            printf("]}\n");
+        } else {
+            printf("\n  human doctor --install — install-readiness\n\n");
+            if (err_n == 0)
+                printf("  install: READY\n");
+            for (size_t i = 0; i < item_count; i++) {
+                const char *sev = (items[i].severity == HU_DIAG_ERR)    ? "error  "
+                                  : (items[i].severity == HU_DIAG_WARN) ? "warn   "
+                                                                        : "ok     ";
+                printf("  %s %s\n", sev, items[i].message ? items[i].message : "");
+            }
+            printf("\n");
+            /* Mirror failing categories to stderr so users pasting the
+             * output into a bug report include the diagnostic. */
+            if (err_n > 0) {
+                for (size_t i = 0; i < item_count; i++) {
+                    if (items[i].severity == HU_DIAG_ERR && items[i].category)
+                        fprintf(stderr, "doctor[install]: %s failed\n", items[i].category);
+                }
+            }
+        }
+
+        for (size_t i = 0; i < item_count; i++) {
+            if (items[i].category)
+                alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
+            if (items[i].message)
+                alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+        }
+        alloc->free(alloc->ctx, items, cap * sizeof(hu_diag_item_t));
+        if (cfg_ptr)
+            hu_config_deinit(&inst_cfg);
+        return err_n > 0 ? HU_ERR_INTERNAL : HU_OK;
     }
 
     if (do_fix) {

@@ -51,8 +51,8 @@ hu_error_t hu_doctor_check_skills(hu_allocator_t *alloc, hu_diag_item_t **items,
  * `stale_after_secs` argument controls the WARN threshold for "no successful
  * poll in the last N seconds" (e.g. 600 for 10 minutes). */
 hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
-                                    int64_t stale_after_secs, hu_diag_item_t **items,
-                                    size_t *count, size_t *cap);
+                                    int64_t stale_after_secs, hu_diag_item_t **items, size_t *count,
+                                    size_t *cap);
 
 /* Diagnose the response verifier (W4) by reading the metrics heartbeat file
  * (~/.human/verifier_metrics.json) the daemon flushes every minute. Reports
@@ -69,8 +69,7 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
  * Deprecated for new callers: use `hu_scheduler_status_parse_json` from
  * `human/agent/scheduler_status_json.h` so non-doctor modules (e.g. ML CLI) do not
  * depend on this header. This symbol remains as a thin compatibility wrapper. */
-hu_error_t hu_doctor_parse_scheduler_status_json(const char *json,
-                                                 unsigned long long *jobs_pending,
+hu_error_t hu_doctor_parse_scheduler_status_json(const char *json, unsigned long long *jobs_pending,
                                                  unsigned long long *jobs_completed_today,
                                                  long long *battery_pct, char *on_ac_power_text,
                                                  size_t on_ac_power_cap, long long *updated_epoch);
@@ -84,5 +83,32 @@ hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
 /* Operational hints for response_guard / empty-reply triage (no secrets). */
 hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item_t **items,
                                              size_t *count, size_t *cap);
+
+/* US-9.4 install-readiness gate. One predicate, four sub-checks, each
+ * reading PRIMARY EVIDENCE on the live filesystem (not a cached flag):
+ *
+ *   1. binary       — running executable resolves and stats as a regular file.
+ *                     Linux: readlink /proc/self/exe; macOS: _NSGetExecutablePath
+ *                     + realpath. Under HU_IS_TEST, honors $HU_TEST_BINARY_PATH.
+ *                     Category: "binary".
+ *   2. config_dir   — ~/.human/ (or $HU_STATE_DIR override) stats as a directory.
+ *                     Category: "config_dir".
+ *   3. channel      — cfg->channels.channel_config_keys[] contains at least
+ *                     one entry with a non-empty key and non-zero count.
+ *                     Category: "channel".
+ *   4. persona      — hu_persona_load(cfg->agent.persona) succeeds; file
+ *                     present + parses as JSON, or embedded persona resolves.
+ *                     Category: "persona".
+ *
+ * Returns HU_OK iff all four sub-checks are HU_DIAG_OK. Returns
+ * HU_ERR_NOT_FOUND if any sub-check is HU_DIAG_ERR (the predicate appends
+ * all four items either way — it does NOT short-circuit, so the user sees
+ * every red line in one run). Returns HU_ERR_OUT_OF_MEMORY on alloc fail,
+ * HU_ERR_INVALID_ARGUMENT on NULL alloc/items/count/cap. `cfg` may be NULL
+ * — callers that failed to load the config still get a single
+ * config_dir/channel/persona red line rather than a crash.
+ */
+hu_error_t hu_doctor_check_install(hu_allocator_t *alloc, const hu_config_t *cfg,
+                                   hu_diag_item_t **items, size_t *count, size_t *cap);
 
 #endif /* HU_DOCTOR_H */
