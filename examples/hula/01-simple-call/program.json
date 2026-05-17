@@ -1,0 +1,10 @@
+{
+  "name": "example_01_simple_call",
+  "version": 1,
+  "root": {
+    "op": "call",
+    "id": "greet",
+    "tool": "echo",
+    "args": {"text": "hello from HuLa"}
+  }
+}

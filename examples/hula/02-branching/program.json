@@ -1,0 +1,33 @@
+{
+  "name": "example_02_branching",
+  "version": 1,
+  "root": {
+    "op": "seq",
+    "id": "pipeline",
+    "children": [
+      {
+        "op": "call",
+        "id": "probe",
+        "tool": "search",
+        "args": {"text": "is the service healthy?"}
+      },
+      {
+        "op": "branch",
+        "id": "decide",
+        "pred": "success",
+        "then": {
+          "op": "call",
+          "id": "report_ok",
+          "tool": "echo",
+          "args": {"text": "service healthy; continue"}
+        },
+        "else": {
+          "op": "call",
+          "id": "report_bad",
+          "tool": "echo",
+          "args": {"text": "service unhealthy; halt"}
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "example_04_emergence_detection",
+  "version": 1,
+  "root": {
+    "op": "seq",
+    "id": "verified_pipeline",
+    "children": [
+      {
+        "op": "call",
+        "id": "fetch_summary",
+        "tool": "summarize",
+        "args": {"text": "produce a one-sentence summary of recent activity"}
+      },
+      {
+        "op": "verify",
+        "id": "check_summary_nonempty",
+        "verify_node_id": "fetch_summary",
+        "pred": "contains",
+        "match": "summary"
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "example_05_multi_step_pipeline",
+  "version": 1,
+  "root": {
+    "op": "seq",
+    "id": "pipeline",
+    "children": [
+      {
+        "op": "call",
+        "id": "prepare",
+        "tool": "echo",
+        "args": {"text": "prepare inputs"}
+      },
+      {
+        "op": "par",
+        "id": "gather",
+        "children": [
+          {
+            "op": "call",
+            "id": "fetch_a",
+            "tool": "web_fetch",
+            "args": {"url": "https://example.com/a"}
+          },
+          {
+            "op": "call",
+            "id": "fetch_b",
+            "tool": "web_fetch",
+            "args": {"url": "https://example.com/b"}
+          }
+        ]
+      },
+      {
+        "op": "call",
+        "id": "aggregate",
+        "tool": "summarize",
+        "args": {"text": "combine $fetch_a and $fetch_b"}
+      }
+    ]
+  }
+}

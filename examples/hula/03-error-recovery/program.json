@@ -1,0 +1,20 @@
+{
+  "name": "example_03_error_recovery",
+  "version": 1,
+  "root": {
+    "op": "try",
+    "id": "guarded",
+    "body": {
+      "op": "call",
+      "id": "primary",
+      "tool": "web_fetch",
+      "args": {"url": "https://example.com/api/status"}
+    },
+    "catch": {
+      "op": "call",
+      "id": "fallback",
+      "tool": "echo",
+      "args": {"text": "primary failed; serving cached fallback"}
+    }
+  }
+}
