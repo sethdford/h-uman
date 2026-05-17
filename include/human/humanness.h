@@ -85,6 +85,17 @@ hu_silence_response_t hu_silence_intuit(const char *msg, size_t msg_len,
 char *hu_silence_build_acknowledgment(hu_allocator_t *alloc, hu_silence_response_t response,
                                       size_t *out_len);
 
+/* P6-3: emotional-tone gate. Returns true when the daemon should
+ * SKIP a generic proactive check-in because the contact's most-recent
+ * inbound message was emotionally heavy (HU_WEIGHT_HEAVY) or grief
+ * (HU_WEIGHT_GRIEF). Generic check-ins on top of a vulnerable inbound
+ * read as oblivious; let the next reactive turn respond instead.
+ *
+ * Pure predicate — same predicate the daemon calls, see
+ * .claude/rules/security-predicate-extraction.md. Safe with NULL /
+ * empty msg (returns false). */
+bool hu_proactive_should_suppress_for_emotion(const char *last_inbound_msg, size_t msg_len);
+
 /* ──────────────────────────────────────────────────────────────────────────
  * 4. Emotional Residue Carryover — next-conversation texture changes
  * ────────────────────────────────────────────────────────────────────────── */

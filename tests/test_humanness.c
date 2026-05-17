@@ -437,6 +437,43 @@ static void imperfect_genuinely_unsure(void) {
     alloc.free(alloc.ctx, d, len + 1);
 }
 
+/* ── P6-3: emotional-tone gate before proactive trigger ──────────────── */
+/*
+ * Pure predicate that the daemon's proactive trigger should consult
+ * before firing a generic check-in. If the contact's MOST RECENT
+ * inbound message was emotionally heavy (HU_WEIGHT_HEAVY or
+ * HU_WEIGHT_GRIEF), the daemon should NOT pile a generic "hey what's
+ * up" on top — the next reactive turn handles them. The predicate
+ * lives in humanness.c so the testable surface is the same surface
+ * the daemon calls; see security-predicate-extraction.md.
+ */
+static void p6_3_suppress_when_last_was_grief(void) {
+    const char *grief_msg = "i lost my dad last night";
+    HU_ASSERT_TRUE(hu_proactive_should_suppress_for_emotion(grief_msg, strlen(grief_msg)));
+}
+
+static void p6_3_suppress_when_last_was_heavy(void) {
+    const char *heavy_msg = "honestly i'm so anxious i can't sleep";
+    HU_ASSERT_TRUE(hu_proactive_should_suppress_for_emotion(heavy_msg, strlen(heavy_msg)));
+}
+
+static void p6_3_do_not_suppress_when_last_was_light(void) {
+    const char *light_msg = "lol that meme was good";
+    HU_ASSERT_FALSE(hu_proactive_should_suppress_for_emotion(light_msg, strlen(light_msg)));
+}
+
+static void p6_3_do_not_suppress_when_last_was_normal(void) {
+    const char *normal_msg = "can you explain how this works";
+    HU_ASSERT_FALSE(hu_proactive_should_suppress_for_emotion(normal_msg, strlen(normal_msg)));
+}
+
+static void p6_3_do_not_suppress_when_no_last_message(void) {
+    /* No inbound history (e.g. brand new contact) — predicate must NOT
+     * suppress (let other gates decide). */
+    HU_ASSERT_FALSE(hu_proactive_should_suppress_for_emotion(NULL, 0));
+    HU_ASSERT_FALSE(hu_proactive_should_suppress_for_emotion("", 0));
+}
+
 /* ── Test Runner ─────────────────────────────────────────────────────────── */
 
 int run_humanness_tests(void) {
@@ -506,6 +543,13 @@ int run_humanness_tests(void) {
     HU_RUN_TEST(imperfect_certain_no_directive);
     HU_RUN_TEST(imperfect_uncertain_has_directive);
     HU_RUN_TEST(imperfect_genuinely_unsure);
+
+    /* P6-3: emotional-tone gate before proactive trigger */
+    HU_RUN_TEST(p6_3_suppress_when_last_was_grief);
+    HU_RUN_TEST(p6_3_suppress_when_last_was_heavy);
+    HU_RUN_TEST(p6_3_do_not_suppress_when_last_was_light);
+    HU_RUN_TEST(p6_3_do_not_suppress_when_last_was_normal);
+    HU_RUN_TEST(p6_3_do_not_suppress_when_no_last_message);
 
     return 0;
 }

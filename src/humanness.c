@@ -132,16 +132,17 @@ char *hu_shared_references_build_directive(hu_allocator_t *alloc, const hu_share
         return NULL;
 
     char buf[2048];
-    size_t pos = hu_buf_appendf(buf, sizeof(buf), 0,
-                                "You share history with this person. "
-                                "If naturally relevant, weave in brief callbacks to past moments — "
-                                "not as explicit reminders, but as the shorthand that develops between "
-                                "people who know each other. Possible references:\n");
+    size_t pos =
+        hu_buf_appendf(buf, sizeof(buf), 0,
+                       "You share history with this person. "
+                       "If naturally relevant, weave in brief callbacks to past moments — "
+                       "not as explicit reminders, but as the shorthand that develops between "
+                       "people who know each other. Possible references:\n");
 
     for (size_t i = 0; i < count && pos < sizeof(buf) - 200; i++) {
         pos = hu_buf_appendf(buf, sizeof(buf), pos, "- \"%.*s\"\n",
-                              (int)(refs[i].reference_len > 120 ? 120 : refs[i].reference_len),
-                              refs[i].reference);
+                             (int)(refs[i].reference_len > 120 ? 120 : refs[i].reference_len),
+                             refs[i].reference);
     }
     pos = hu_buf_appendf(buf, sizeof(buf), pos,
                          "Use these sparingly. A single natural callback is better than "
@@ -256,6 +257,14 @@ hu_silence_response_t hu_silence_intuit(const char *msg, size_t msg_len,
         return HU_SILENCE_BRIEF_ACKNOWLEDGE;
 
     return HU_SILENCE_FULL_RESPONSE;
+}
+
+bool hu_proactive_should_suppress_for_emotion(const char *last_inbound_msg, size_t msg_len) {
+    /* No inbound history → let other gates decide; do not suppress. */
+    if (!last_inbound_msg || msg_len == 0)
+        return false;
+    hu_emotional_weight_t w = hu_emotional_weight_classify(last_inbound_msg, msg_len);
+    return w == HU_WEIGHT_HEAVY || w == HU_WEIGHT_GRIEF;
 }
 
 char *hu_silence_build_acknowledgment(hu_allocator_t *alloc, hu_silence_response_t response,
@@ -480,8 +489,8 @@ char *hu_curiosity_build_directive(hu_allocator_t *alloc, const hu_curiosity_pro
                                 "but because you actually want to know:\n");
 
     for (size_t i = 0; i < count && pos < sizeof(buf) - 200; i++) {
-        pos = hu_buf_appendf(buf, sizeof(buf), pos, "- %.*s\n",
-                             (int)prompts[i].question_len, prompts[i].question);
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, "- %.*s\n", (int)prompts[i].question_len,
+                             prompts[i].question);
     }
     pos = hu_buf_appendf(buf, sizeof(buf), pos,
                          "Only ask if the conversation naturally leads there. Never force it.");
@@ -631,11 +640,12 @@ char *hu_evolved_opinion_build_directive(hu_allocator_t *alloc,
         return NULL;
 
     char buf[2048];
-    size_t pos = hu_buf_appendf(buf, sizeof(buf), 0,
-                                  "Over time, you've developed genuine perspectives on certain topics "
-                                  "through repeated conversation. These aren't reflexive agreement — "
-                                  "they're positions you've arrived at through experience. "
-                                  "Share them when relevant, even if the user might disagree:\n");
+    size_t pos =
+        hu_buf_appendf(buf, sizeof(buf), 0,
+                       "Over time, you've developed genuine perspectives on certain topics "
+                       "through repeated conversation. These aren't reflexive agreement — "
+                       "they're positions you've arrived at through experience. "
+                       "Share them when relevant, even if the user might disagree:\n");
 
     for (size_t i = 0; i < count && pos < sizeof(buf) - 300; i++) {
         if (opinions[i].conviction < min_conviction)
@@ -643,11 +653,12 @@ char *hu_evolved_opinion_build_directive(hu_allocator_t *alloc,
         const char *firmness = opinions[i].conviction > 0.8   ? "firmly"
                                : opinions[i].conviction > 0.5 ? "moderately"
                                                               : "tentatively";
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                             "- On \"%.*s\": you %s believe \"%.*s\" (shaped by %u conversations)\n",
-                             (int)opinions[i].topic_len, opinions[i].topic, firmness,
-                             (int)(opinions[i].stance_len > 100 ? 100 : opinions[i].stance_len),
-                             opinions[i].stance, opinions[i].interactions);
+        pos =
+            hu_buf_appendf(buf, sizeof(buf), pos,
+                           "- On \"%.*s\": you %s believe \"%.*s\" (shaped by %u conversations)\n",
+                           (int)opinions[i].topic_len, opinions[i].topic, firmness,
+                           (int)(opinions[i].stance_len > 100 ? 100 : opinions[i].stance_len),
+                           opinions[i].stance, opinions[i].interactions);
     }
     pos = hu_buf_appendf(buf, sizeof(buf), pos,
                          "Express these naturally — not as pronouncements, but as a thoughtful "
