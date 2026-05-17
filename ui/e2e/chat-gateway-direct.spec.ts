@@ -9,12 +9,24 @@ test.describe("Chat Streaming Choreography (demo mode)", () => {
   });
 
   test("empty state shows time-aware hero greeting", async ({ page }) => {
+    // Greeting set must mirror getTimeGreeting() in
+    // ui/src/components/hu-message-thread.ts. The source was decluttered
+    // in commit 2392ca2f (2026-04-04 "major visual cleanup — remove
+    // ambient wash, declutter empty state") and dropped the original
+    // "Late night" / "Burning the midnight oil" entries, but this test
+    // was authored against the OLD set in commit ae08a616 (2026-03-08)
+    // and never updated — a tests-that-pin-bugs.md class regression.
+    //
+    // Note: CI runs at UTC and the greeting depends on getHours() local
+    // to the test runner, so the runtime-selected greeting can be ANY
+    // entry below depending on when the job lands. Listing all five
+    // keeps the test deterministic across runner timezones.
     const greetings = [
-      "Good morning",
-      "Good afternoon",
-      "Good evening",
-      "Late night",
-      "Burning the midnight oil",
+      "Night owl session", // hour < 5
+      "Good morning",      // hour < 12
+      "Good afternoon",    // hour < 17
+      "Good evening",      // hour < 21
+      "Evening",           // hour >= 21
     ];
     await expect(async () => {
       const text: string = await page.evaluate(deepText("hu-chat-view"));
