@@ -22,7 +22,8 @@
         "HU_ENABLE_APPLE_INTELLIGENCE": "ON",
         "HU_ENABLE_CARTESIA": "ON",
         "HU_ENABLE_CRON": "ON",
-        "HU_ENABLE_TOOLS_ADVANCED": "ON"
+        "HU_ENABLE_TOOLS_ADVANCED": "ON",
+        "HU_ENABLE_LIBSODIUM": "ON"
       }
     },
     {

@@ -631,6 +631,7 @@ void run_grpo_mlx_tests(void);
 void run_grpo_huml_tests(void);
 void run_grpo_e2e_tests(void);
 #endif
+void run_persona_encryption_tests(void);
 void run_persona_directive_channels_tests(void);
 void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
@@ -1331,6 +1332,7 @@ int main(int argc, char **argv) {
     run_grpo_mlx_tests();
     run_grpo_e2e_tests();
 #endif
+    run_persona_encryption_tests();
     run_persona_directive_channels_tests();
     run_filler_recency_tests();
     run_contact_send_recency_tests();
