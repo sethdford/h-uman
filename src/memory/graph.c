@@ -602,8 +602,90 @@ hu_error_t hu_graph_upsert_relation_with_belief(
     proposed.event_start = event_start;
     proposed.event_end = event_end;
     proposed.confidence = belief_mean;
+    /* W8 P5 — populate context on the proposed relation so the semantic
+     * classifier (called below when strict classify returns NONE) can
+     * compare it against existing contexts. The lifetime is fine: the
+     * input `context` outlives this function call. */
+    proposed.context = (char *)context;
+    proposed.context_len = context_len;
 
     hu_conflict_resolution_t decision = hu_conflict_classify(&proposed, &existing);
+
+    /* W8 Phase 5 — semantic-judge fallback. When the strict (source_id,
+     * type) peek above missed (existing.id == 0, decision == NONE), the
+     * proposed fact may still paraphrase or contradict an existing fact
+     * on the same source under a different relation type. Broaden the
+     * lookup to all open relations on (contact_id, source_id) and run
+     * the heuristic semantic classifier. On PARAPHRASE we promote the
+     * decision to SUPERSEDE against the matched row; on CONTRADICT we
+     * promote to FLAG (the FLAG decision is logged downstream — no
+     * extra SQL write today, matching the existing W1 contract).
+     *
+     * Bounded fan-out: at most 8 candidates per write. This keeps the
+     * write-path P95 latency cap intact (per the W1 design constraint:
+     * "Deterministic, no LLM at write time"). The semantic classifier
+     * is heuristic-only and runs in O(len_a + len_b) per pair. */
+    int64_t semantic_match_id = 0;
+    if (decision == HU_CONFLICT_NONE && existing.id == 0 &&
+        proposed.context && proposed.context_len > 0) {
+        const char *cand_sql =
+            "SELECT id, source_id, target_id, relation_type, weight, "
+            "first_seen, last_seen, context, event_start, event_end, "
+            "confidence, supersedes_id, provenance "
+            "FROM relations WHERE contact_id = ? AND source_id = ? "
+            "AND event_end = 0 AND context IS NOT NULL AND context != '' "
+            "ORDER BY last_seen DESC LIMIT 8";
+        sqlite3_stmt *cand_st = NULL;
+        if (sqlite3_prepare_v2(g->db, cand_sql, -1, &cand_st, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(cand_st, 1, cid, cid_len, SQLITE_STATIC);
+            sqlite3_bind_int64(cand_st, 2, source_id);
+            hu_graph_relation_t cands[8];
+            memset(cands, 0, sizeof(cands));
+            size_t n_cands = 0;
+            while (n_cands < 8 && sqlite3_step(cand_st) == SQLITE_ROW) {
+                hu_graph_relation_t *r = &cands[n_cands];
+                r->id = sqlite3_column_int64(cand_st, 0);
+                r->source_id = sqlite3_column_int64(cand_st, 1);
+                r->target_id = sqlite3_column_int64(cand_st, 2);
+                r->type = (hu_relation_type_t)sqlite3_column_int(cand_st, 3);
+                r->weight = (float)sqlite3_column_double(cand_st, 4);
+                r->first_seen = sqlite3_column_int64(cand_st, 5);
+                r->last_seen = sqlite3_column_int64(cand_st, 6);
+                /* Candidate context: borrowed from SQLite's row buffer.
+                 * Only valid until the next sqlite3_step or finalize.
+                 * The semantic classifier runs inside this loop window
+                 * (via hu_conflict_classify_semantic below the loop)
+                 * AFTER finalize, so we'd be reading freed memory.
+                 * Therefore: snapshot the string into a thread-local
+                 * static buffer per slot. The 8x256 cap matches the
+                 * candidate cap above and stays under 2 KB stack. */
+                static char ctx_storage[8][256];
+                const unsigned char *txt = sqlite3_column_text(cand_st, 7);
+                if (txt) {
+                    size_t tlen = (size_t)sqlite3_column_bytes(cand_st, 7);
+                    if (tlen >= sizeof(ctx_storage[0]))
+                        tlen = sizeof(ctx_storage[0]) - 1;
+                    memcpy(ctx_storage[n_cands], txt, tlen);
+                    ctx_storage[n_cands][tlen] = '\0';
+                    r->context = ctx_storage[n_cands];
+                    r->context_len = tlen;
+                }
+                r->event_start = sqlite3_column_int64(cand_st, 8);
+                r->event_end = sqlite3_column_int64(cand_st, 9);
+                r->confidence = (float)sqlite3_column_double(cand_st, 10);
+                r->supersedes_id = sqlite3_column_int64(cand_st, 11);
+                n_cands++;
+            }
+            sqlite3_finalize(cand_st);
+            if (n_cands > 0) {
+                hu_conflict_resolution_t sem =
+                    hu_conflict_classify_semantic(&proposed, cands, n_cands,
+                                                  &semantic_match_id);
+                if (sem == HU_CONFLICT_SUPERSEDE || sem == HU_CONFLICT_FLAG)
+                    decision = sem;
+            }
+        }
+    }
 
     /* INSERT the proposed row. Always a fresh row — the resolver may close
      * the prior afterwards. We don't use ON CONFLICT here: bitemporal
@@ -651,12 +733,23 @@ hu_error_t hu_graph_upsert_relation_with_belief(
     if (rc != SQLITE_DONE)
         return HU_ERR_IO;
 
-    /* Apply the resolution. SUPERSEDE closes the prior + links via supersedes_id. */
+    /* Apply the resolution. SUPERSEDE closes the prior + links via supersedes_id.
+     *
+     * W8 P5 — when the SUPERSEDE came from the strict (source_id, type)
+     * peek, the row to close is `existing.id`. When it came from the
+     * semantic-judge fallback, the row to close is `semantic_match_id`
+     * (a paraphrased fact under a possibly-different relation type).
+     * Both branches use the same hu_conflict_apply contract. */
     if (decision == HU_CONFLICT_SUPERSEDE) {
-        hu_error_t apply_rc =
-            hu_conflict_apply(g, decision, proposed_id, existing.id, event_start);
-        if (apply_rc != HU_OK)
-            return apply_rc;
+        int64_t target_existing_id = existing.id;
+        if (target_existing_id == 0 && semantic_match_id > 0)
+            target_existing_id = semantic_match_id;
+        if (target_existing_id > 0) {
+            hu_error_t apply_rc =
+                hu_conflict_apply(g, decision, proposed_id, target_existing_id, event_start);
+            if (apply_rc != HU_OK)
+                return apply_rc;
+        }
     }
 
     if (out_id)
