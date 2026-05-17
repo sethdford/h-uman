@@ -250,6 +250,111 @@ static void render_casual_swaps_formal_words(void) {
     free(out);
 }
 
+/* ── Effective formality predicate ──────────────────────────────────────── */
+
+static void effective_formality_null_warmth_returns_overlay(void) {
+    /* No warmth context → overlay's formality unchanged (preserves the
+     * existing channel-overlay-driven behavior for all the channels that
+     * don't have contact context yet — slack/telegram/discord/etc.). */
+    HU_ASSERT(hu_persona_effective_formality(NULL, NULL) == NULL);
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", NULL), "formal");
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("casual", NULL), "casual");
+}
+
+static void effective_formality_close_overrides_formal(void) {
+    /* The load-bearing case: a "close" contact downgrades the formal overlay
+     * to casual. This is what makes the persona's warmth_level field finally
+     * shape outbound rendering instead of being parsed-but-ignored. */
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", "close"), "casual");
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("professional", "close friend"), "casual");
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", "warm"), "casual");
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", "high"), "casual");
+}
+
+static void effective_formality_close_with_no_overlay_returns_casual(void) {
+    /* No channel overlay but a close contact → "casual" still wins. */
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality(NULL, "close"), "casual");
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("", "warm"), "casual");
+}
+
+static void effective_formality_close_with_casual_overlay_unchanged(void) {
+    /* Close + already-casual → don't double-cast; preserve the overlay. */
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("casual", "close"), "casual");
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("informal", "warm"), "informal");
+}
+
+static void effective_formality_distant_warmth_preserves_overlay(void) {
+    /* Acquaintance / professional contact → don't downgrade formal overlay. */
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", "acquaintance"), "formal");
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", "professional"), "formal");
+    HU_ASSERT_STR_EQ(hu_persona_effective_formality("formal", "unknown"), "formal");
+}
+
+/* ── Render-with-warmth integration ─────────────────────────────────────── */
+
+static void render_with_warmth_close_downgrades_formal_overlay(void) {
+    /* The end-to-end invariant: a formal Slack/Teams-style overlay applied
+     * to a close contact produces casual output (formal swaps NOT applied;
+     * lowercase-first applied). If a future change drops the warmth wiring,
+     * this test fails before that change ships. */
+    hu_persona_overlay_t ov = {0};
+    ov.formality = "formal";
+    const char *in = "Going to grab coffee";
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_persona_render_for_channel_with_warmth(&ov, "close", in, strlen(in),
+                                                               &test_alloc, &out, &out_len);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    /* "Going" → "gonna" is the canonical FORMAL_TO_CASUAL swap; if warmth
+     * override worked, the casual swap fired even though overlay was formal. */
+    HU_ASSERT_STR_CONTAINS(out, "gonna");
+    /* Casual mode lowercases the first letter (unless it's "I"). */
+    HU_ASSERT(out[0] >= 'a' && out[0] <= 'z');
+    free(out);
+}
+
+static void render_with_warmth_null_matches_original_render(void) {
+    /* Backward compatibility: passing NULL warmth must produce byte-identical
+     * output to the original hu_persona_render_for_channel. Catches a future
+     * change that accidentally adds warmth-related processing to the NULL
+     * path. */
+    hu_persona_overlay_t ov = {0};
+    ov.formality = "formal";
+    const char *in = "Going to grab coffee yeah";
+
+    char *out_old = NULL, *out_new = NULL;
+    size_t out_old_len = 0, out_new_len = 0;
+    hu_error_t e1 =
+        hu_persona_render_for_channel(&ov, in, strlen(in), &test_alloc, &out_old, &out_old_len);
+    hu_error_t e2 = hu_persona_render_for_channel_with_warmth(&ov, NULL, in, strlen(in),
+                                                              &test_alloc, &out_new, &out_new_len);
+    HU_ASSERT_EQ((int)e1, (int)HU_OK);
+    HU_ASSERT_EQ((int)e2, (int)HU_OK);
+    HU_ASSERT_EQ(out_old_len, out_new_len);
+    HU_ASSERT_EQ(memcmp(out_old, out_new, out_old_len), 0);
+    free(out_old);
+    free(out_new);
+}
+
+static void render_with_warmth_distant_preserves_formal(void) {
+    /* A distant / acquaintance contact must NOT downgrade the formal overlay.
+     * Pin: if a future change overly-eager-matches the warmth string
+     * (e.g. accidentally maps "acquaintance" to casual), this catches it. */
+    hu_persona_overlay_t ov = {0};
+    ov.formality = "formal";
+    const char *in = "going to grab coffee";
+
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err = hu_persona_render_for_channel_with_warmth(&ov, "acquaintance", in, strlen(in),
+                                                               &test_alloc, &out, &out_len);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    /* Formal path capitalizes first letter; if the warmth override fired
+     * by mistake the first letter would stay lowercase. */
+    HU_ASSERT(out[0] >= 'A' && out[0] <= 'Z');
+    free(out);
+}
+
 void run_persona_overlay_render_tests(void);
 void run_persona_overlay_render_tests(void) {
     HU_TEST_SUITE("persona_overlay_render");
@@ -265,4 +370,14 @@ void run_persona_overlay_render_tests(void) {
     HU_RUN_TEST(render_combined_formal_and_length_applies_both);
     HU_RUN_TEST(render_zero_overlay_returns_identity);
     HU_RUN_TEST(render_casual_swaps_formal_words);
+
+    HU_RUN_TEST(effective_formality_null_warmth_returns_overlay);
+    HU_RUN_TEST(effective_formality_close_overrides_formal);
+    HU_RUN_TEST(effective_formality_close_with_no_overlay_returns_casual);
+    HU_RUN_TEST(effective_formality_close_with_casual_overlay_unchanged);
+    HU_RUN_TEST(effective_formality_distant_warmth_preserves_overlay);
+
+    HU_RUN_TEST(render_with_warmth_close_downgrades_formal_overlay);
+    HU_RUN_TEST(render_with_warmth_null_matches_original_render);
+    HU_RUN_TEST(render_with_warmth_distant_preserves_formal);
 }

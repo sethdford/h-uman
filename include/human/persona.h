@@ -645,6 +645,40 @@ hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, co
                                          size_t raw_len, hu_allocator_t *alloc, char **out_rendered,
                                          size_t *out_rendered_len);
 
+/* Pure predicate: returns the effective formality string for rendering given
+ * an overlay's configured formality and (optionally) a contact's warmth_level.
+ *
+ * Rules:
+ *   - contact_warmth indicates closeness ("close", "high", "warm") AND the
+ *     overlay's formality is unset OR formal-leaning ("formal" / "professional")
+ *     → return "casual" (the contact relationship overrides a stiff overlay).
+ *   - Any other combination → return overlay_formality unchanged (NULL is OK).
+ *
+ * Returned pointer is either overlay_formality itself or a static "casual"
+ * string. Do NOT free. Pure; safe for tests.
+ *
+ * This is the predicate that wires the persona's "warmth_level" field
+ * (previously parsed-but-never-read in the send path) into deterministic
+ * render-time behavior — extending the compiled-persona-architecture pattern
+ * pioneered by hu_followup_compute_send_time. */
+const char *hu_persona_effective_formality(const char *overlay_formality,
+                                           const char *contact_warmth);
+
+/* Render variant that takes a contact's warmth_level string. The renderer
+ * uses hu_persona_effective_formality(overlay->formality, contact_warmth)
+ * as the effective formality, so a close-relationship contact gets casual
+ * rendering even when the channel overlay is configured formal.
+ *
+ * Callers without contact context should pass NULL for contact_warmth;
+ * behavior then matches the original hu_persona_render_for_channel exactly.
+ *
+ * Pinned by tests/test_persona_render.c (warmth-override cases). */
+hu_error_t hu_persona_render_for_channel_with_warmth(const hu_persona_overlay_t *overlay,
+                                                     const char *contact_warmth,
+                                                     const char *raw_text, size_t raw_len,
+                                                     hu_allocator_t *alloc, char **out_rendered,
+                                                     size_t *out_rendered_len);
+
 const hu_contact_profile_t *hu_persona_find_contact(const hu_persona_t *persona,
                                                     const char *contact_id, size_t contact_id_len);
 

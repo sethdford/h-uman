@@ -1316,10 +1316,18 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         size_t rendered_len = 0;
         if (message_len > 0) {
             const hu_persona_overlay_t *ov = NULL;
-            if (c->persona)
+            const char *contact_warmth = NULL;
+            if (c->persona) {
                 ov = hu_persona_find_overlay(c->persona, "imessage", 8);
-            hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
-                                                            &rendered, &rendered_len);
+                if (target && target_len > 0) {
+                    const hu_contact_profile_t *cp =
+                        hu_persona_find_contact(c->persona, target, target_len);
+                    if (cp && cp->warmth_level)
+                        contact_warmth = cp->warmth_level;
+                }
+            }
+            hu_error_t rerr = hu_persona_render_for_channel_with_warmth(
+                ov, contact_warmth, message, message_len, c->alloc, &rendered, &rendered_len);
             if (rerr != HU_OK)
                 return rerr;
             message = rendered;
@@ -1372,10 +1380,15 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
     size_t overlay_buf_len = 0;
     if (message_len > 0) {
         const hu_persona_overlay_t *ov = NULL;
-        if (c->persona)
+        const char *contact_warmth = NULL;
+        if (c->persona) {
             ov = hu_persona_find_overlay(c->persona, "imessage", 8);
-        hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
-                                                        &overlay_buf, &overlay_buf_len);
+            const hu_contact_profile_t *cp = hu_persona_find_contact(c->persona, tgt, tgt_len);
+            if (cp && cp->warmth_level)
+                contact_warmth = cp->warmth_level;
+        }
+        hu_error_t rerr = hu_persona_render_for_channel_with_warmth(
+            ov, contact_warmth, message, message_len, c->alloc, &overlay_buf, &overlay_buf_len);
         if (rerr != HU_OK)
             return rerr;
         message = overlay_buf;
