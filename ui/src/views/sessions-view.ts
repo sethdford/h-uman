@@ -341,7 +341,10 @@ export class ScSessionsView extends GatewayAwareLitElement {
     clicked.style.viewTransitionName = "hu-selected-item";
 
     const doc = document as Document & {
-      startViewTransition?: (cb: () => void | Promise<void>) => { finished: Promise<void> };
+      startViewTransition?: (cb: () => void | Promise<void>) => {
+        finished: Promise<void>;
+        ready: Promise<void>;
+      };
     };
 
     const clearVtName = (): void => {
@@ -355,6 +358,9 @@ export class ScSessionsView extends GatewayAwareLitElement {
           await this.updateComplete;
           clearVtName();
         });
+        /* See app.ts._switchView for rationale: .ready also rejects on skip
+         * and must have a handler to prevent unhandled-rejection noise. */
+        transition.ready.catch(() => undefined);
         await transition.finished;
       } catch {
         clearVtName();

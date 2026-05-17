@@ -17,7 +17,7 @@
 static void personal_model_init_sets_defaults(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
-    HU_ASSERT_EQ((long)m.version, 4L);
+    HU_ASSERT_EQ((long)m.version, 5L);
     HU_ASSERT_EQ((long)m.created_at, 0L);
     HU_ASSERT_EQ((long)m.fact_count, 0L);
     HU_ASSERT_EQ((long)m.topic_count, 0L);
@@ -29,7 +29,7 @@ static void personal_model_ingest_extracts_facts(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
     const char *text = "I like hiking, I live in Portland";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, strlen(text), true, 1700000000LL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, strlen(text), true, 1700000000LL, NULL), HU_OK);
     HU_ASSERT_TRUE(m.fact_count >= 2U);
 }
 
@@ -66,7 +66,7 @@ static void personal_model_query_preference_finds_match(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
     const char *text = "I prefer dark mode for coding";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, strlen(text), true, 0), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, strlen(text), true, 0, NULL), HU_OK);
     const hu_heuristic_fact_t *f = hu_personal_model_query_preference(&m, "dark", 4);
     HU_ASSERT_NOT_NULL(f);
 }
@@ -76,7 +76,7 @@ static void personal_model_ingest_updates_style_metrics(void) {
     hu_personal_model_init(&m);
     const char *text = "Hello there";
     size_t len = strlen(text);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, len, true, 0), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, len, true, 0, NULL), HU_OK);
     HU_ASSERT_EQ((unsigned)m.style.sample_count, 1U);
     HU_ASSERT_EQ((unsigned)m.style.avg_message_length, (unsigned)len);
 }
@@ -92,7 +92,7 @@ static void personal_model_has_content_true_after_fact(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
     const char *text = "I like hiking";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, strlen(text), true, 1700000000LL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, strlen(text), true, 1700000000LL, NULL), HU_OK);
     HU_ASSERT_TRUE(hu_personal_model_has_content(&m));
 }
 
@@ -100,7 +100,7 @@ static void personal_model_has_content_true_after_style_observation(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
     const char *text = "ok";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, strlen(text), true, 1700000000LL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text, strlen(text), true, 1700000000LL, NULL), HU_OK);
     HU_ASSERT_TRUE(hu_personal_model_has_content(&m));
 }
 
@@ -114,8 +114,8 @@ static void personal_model_reaches_system_prompt_via_config(void) {
     strncpy(m.core.user_name, "Sethford", sizeof(m.core.user_name) - 1);
     const char *text1 = "I love rock climbing on weekends";
     const char *text2 = "I prefer dark roast coffee in the morning";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text1, strlen(text1), true, 1700000000LL), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text2, strlen(text2), true, 1700000060LL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text1, strlen(text1), true, 1700000000LL, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, text2, strlen(text2), true, 1700000060LL, NULL), HU_OK);
     HU_ASSERT_TRUE(hu_personal_model_has_content(&m));
 
     char pm_buf[8192];
@@ -174,9 +174,9 @@ static void personal_model_save_load_round_trips(void) {
     hu_personal_model_init(&a);
     /* Seed signal: a couple of fact-shaped utterances + style observations. */
     hu_personal_model_ingest(&a, "i love climbing in the morning", 30, true,
-                             1700000000LL);
-    hu_personal_model_ingest(&a, "i never drink coffee", 21, true, 1700000100LL);
-    hu_personal_model_ingest(&a, "lol that's cool 😎", 18, true, 1700000200LL);
+                             1700000000LL, NULL);
+    hu_personal_model_ingest(&a, "i never drink coffee", 21, true, 1700000100LL, NULL);
+    hu_personal_model_ingest(&a, "lol that's cool 😎", 18, true, 1700000200LL, NULL);
     HU_ASSERT_TRUE(hu_personal_model_has_content(&a));
 
     /* Round-trip through a unique tmp path. */
@@ -215,7 +215,7 @@ static void personal_model_load_rejects_bad_magic(void) {
     hu_personal_model_t out;
     HU_ASSERT_EQ(hu_personal_model_load(&out, path), HU_ERR_PARSE);
     /* Initialized to defaults — version matches current schema. */
-    HU_ASSERT_EQ(out.version, 4U);
+    HU_ASSERT_EQ(out.version, 5U);
     HU_ASSERT_EQ(out.fact_count, (size_t)0);
     HU_ASSERT_FALSE(hu_personal_model_has_content(&out));
 
@@ -290,7 +290,7 @@ static void personal_model_save_creates_parent_directory(void) {
 
     hu_personal_model_t a;
     hu_personal_model_init(&a);
-    hu_personal_model_ingest(&a, "i prefer dark mode", 18, true, 1700000300LL);
+    hu_personal_model_ingest(&a, "i prefer dark mode", 18, true, 1700000300LL, NULL);
     HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
 
     hu_personal_model_t b;
@@ -313,7 +313,7 @@ static void personal_model_default_path_round_trip(void) {
 
     hu_personal_model_t a;
     hu_personal_model_init(&a);
-    hu_personal_model_ingest(&a, "i never drink coffee", 21, true, 1700000400LL);
+    hu_personal_model_ingest(&a, "i never drink coffee", 21, true, 1700000400LL, NULL);
     HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
 
     char path2[256];
@@ -361,11 +361,11 @@ static void personal_model_survives_simulated_crash(void) {
      * per-turn save now wired into agent_turn.c / agent_stream.c). */
     hu_personal_model_t a;
     hu_personal_model_init(&a);
-    hu_personal_model_ingest(&a, "i never drink coffee after 2pm", 30, true, 1700000100LL);
+    hu_personal_model_ingest(&a, "i never drink coffee after 2pm", 30, true, 1700000100LL, NULL);
     HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
-    hu_personal_model_ingest(&a, "i love long walks at sunset", 27, true, 1700000200LL);
+    hu_personal_model_ingest(&a, "i love long walks at sunset", 27, true, 1700000200LL, NULL);
     HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
-    hu_personal_model_ingest(&a, "my favorite color is teal", 25, true, 1700000300LL);
+    hu_personal_model_ingest(&a, "my favorite color is teal", 25, true, 1700000300LL, NULL);
     HU_ASSERT_EQ(hu_personal_model_save(&a, path), HU_OK);
 
     size_t expected_fact_count = a.fact_count;
@@ -440,13 +440,13 @@ static void personal_model_survives_real_sigkill(void) {
 
         hu_personal_model_t a;
         hu_personal_model_init(&a);
-        hu_personal_model_ingest(&a, "i never drink coffee after 2pm", 30, true, 1700000100LL);
+        hu_personal_model_ingest(&a, "i never drink coffee after 2pm", 30, true, 1700000100LL, NULL);
         if (hu_personal_model_save(&a, path) != HU_OK)
             _exit(3);
-        hu_personal_model_ingest(&a, "i love long walks at sunset", 27, true, 1700000200LL);
+        hu_personal_model_ingest(&a, "i love long walks at sunset", 27, true, 1700000200LL, NULL);
         if (hu_personal_model_save(&a, path) != HU_OK)
             _exit(4);
-        hu_personal_model_ingest(&a, "my favorite color is teal", 25, true, 1700000300LL);
+        hu_personal_model_ingest(&a, "my favorite color is teal", 25, true, 1700000300LL, NULL);
         if (hu_personal_model_save(&a, path) != HU_OK)
             _exit(5);
 
@@ -506,14 +506,14 @@ static void personal_model_style_directive_emerges_after_three_samples(void) {
     hu_personal_model_init(&m);
     char buf[2048];
 
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "yo", 2, true, 1700000001), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol", 3, true, 1700000002), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "yo", 2, true, 1700000001, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol", 3, true, 1700000002, NULL), HU_OK);
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
     /* Two samples — directive should still be suppressed (warm-up). */
     HU_ASSERT_TRUE(strstr(buf, "Mirror their style:") == NULL);
 
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "hey there", 9, true, 1700000003), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "hey there", 9, true, 1700000003, NULL), HU_OK);
     n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
     /* Three samples — directive activates. */
@@ -527,9 +527,9 @@ static void personal_model_style_directive_casual_terse_humorous(void) {
 
     /* Three short, casual, humor-heavy messages move the EWMA toward
      * casual + terse + humor. */
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol same", 8, true, 1700000001), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "haha yep", 8, true, 1700000002), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol btw", 7, true, 1700000003), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol same", 8, true, 1700000001, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "haha yep", 8, true, 1700000002, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol btw", 7, true, 1700000003, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -561,9 +561,9 @@ static void personal_model_style_directive_formal_verbose(void) {
         "Please share the benchmark methodology. Thank you. Would you "
         "specifically clarify how you measured tail latency and what "
         "percentiles you reported across runs?";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long1, strlen(long1), true, 1700000001), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long2, strlen(long2), true, 1700000002), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long3, strlen(long3), true, 1700000003), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long1, strlen(long1), true, 1700000001, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long2, strlen(long2), true, 1700000002, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, long3, strlen(long3), true, 1700000003, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -584,11 +584,11 @@ static void personal_model_style_directive_lowercase_typer(void) {
     char buf[2048];
 
     /* Five all-lowercase messages — ratio should clear the 0.5 threshold. */
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "yo whats up", 11, true, 1700000001), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol same", 8, true, 1700000002), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "haha yeah", 9, true, 1700000003), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "i think so", 10, true, 1700000004), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ok cool", 7, true, 1700000005), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "yo whats up", 11, true, 1700000001, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "lol same", 8, true, 1700000002, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "haha yeah", 9, true, 1700000003, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "i think so", 10, true, 1700000004, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ok cool", 7, true, 1700000005, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -602,11 +602,11 @@ static void personal_model_style_directive_abbreviation_user(void) {
     char buf[2048];
 
     /* Five messages, all carrying chat shorthand — ratio clears 0.4. */
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "u busy?", 7, true, 1700000001), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "btw lmk", 7, true, 1700000002), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ty ty", 5, true, 1700000003), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "rn? or later?", 13, true, 1700000004), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ok ty btw", 9, true, 1700000005), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "u busy?", 7, true, 1700000001, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "btw lmk", 7, true, 1700000002, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ty ty", 5, true, 1700000003, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "rn? or later?", 13, true, 1700000004, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "ok ty btw", 9, true, 1700000005, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -622,9 +622,9 @@ static void personal_model_style_directive_proper_case_no_lowercase_clause(void)
     /* Three messages, all properly capitalized — lowercase_ratio stays
      * near zero. The directive should appear (3 samples) but without the
      * "type lowercase" clause. */
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "Hello there.", 12, true, 1700000001), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "How are you today?", 18, true, 1700000002), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "What time works?", 16, true, 1700000003), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "Hello there.", 12, true, 1700000001, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "How are you today?", 18, true, 1700000002, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "What time works?", 16, true, 1700000003, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -646,7 +646,7 @@ static void personal_model_avoid_line_emerges_for_dislikes(void) {
     char buf[2048];
 
     const char msg[] = "i don't like coffee or small talk early in the morning";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg, strlen(msg), true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg, strlen(msg), true, 1700000001, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -660,7 +660,7 @@ static void personal_model_avoid_line_handles_hate(void) {
     char buf[2048];
 
     const char msg[] = "i hate flaky meetings";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg, strlen(msg), true, 1700000001), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg, strlen(msg), true, 1700000001, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -675,8 +675,8 @@ static void personal_model_avoid_line_skips_when_only_positive_facts(void) {
 
     const char msg1[] = "i love hiking on weekends";
     const char msg2[] = "i work at acme";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg1, strlen(msg1), true, 1700000001), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg2, strlen(msg2), true, 1700000002), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg1, strlen(msg1), true, 1700000001, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg2, strlen(msg2), true, 1700000002, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -691,9 +691,9 @@ static void personal_model_avoid_line_collects_multiple_dislikes(void) {
     const char msg1[] = "i'm allergic to peanuts";
     const char msg2[] = "i dislike loud music";
     const char msg3[] = "i love jazz";
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg1, strlen(msg1), true, 1700000001), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg2, strlen(msg2), true, 1700000002), HU_OK);
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg3, strlen(msg3), true, 1700000003), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg1, strlen(msg1), true, 1700000001, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg2, strlen(msg2), true, 1700000002, NULL), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg3, strlen(msg3), true, 1700000003, NULL), HU_OK);
 
     size_t n = hu_personal_model_build_prompt(&m, buf, sizeof(buf));
     HU_ASSERT_GT((long)n, 0L);
@@ -1245,7 +1245,7 @@ static void personal_model_ingest_stamps_style_last_observed_at(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
     int64_t ts = 1700000000;
-    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "hello there friend", 18, true, ts), HU_OK);
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, "hello there friend", 18, true, ts, NULL), HU_OK);
     HU_ASSERT_EQ(m.style.last_observed_at, ts);
 }
 
@@ -2677,8 +2677,9 @@ static void personal_model_load_migrates_v3_facts_and_topics(void) {
     HU_ASSERT_EQ(loaded.topic_count, 1u);
     HU_ASSERT_STR_EQ(loaded.topics[0].name, "hiking");
     /* In-memory model now reports the current schema, even though the
-     * on-disk file was v3. Re-saving will write a v4 file. */
-    HU_ASSERT_EQ((unsigned)loaded.version, 4u);
+     * on-disk file was v3. Re-saving will write a v5 file (init-09: trust
+     * tiers + provenance + pending-facts quarantine). */
+    HU_ASSERT_EQ((unsigned)loaded.version, 5u);
 }
 
 static void personal_model_load_migrates_v3_goals_zero_fills_last_referenced(void) {

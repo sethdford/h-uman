@@ -1,4 +1,5 @@
 #include "human/ml/dpo.h"
+#include "human/core/io_secure.h"
 #include "human/provider.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/core/json.h"
@@ -190,8 +191,10 @@ hu_error_t hu_dpo_export_jsonl(hu_dpo_collector_t *collector,
     memcpy(filepath, path, flen);
     filepath[flen] = '\0';
 
-    FILE *f = fopen(filepath, "w");
-    if (!f)
+    /* DPO preference pairs are JSONL output from collected feedback —
+     * contains user conversation excerpts. 0600. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(filepath, HU_IO_PERM_SECRET, "w", &f) != HU_OK || !f)
         return HU_ERR_IO;
 
     sqlite3_stmt *stmt = NULL;

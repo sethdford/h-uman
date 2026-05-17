@@ -4,6 +4,7 @@
 #include "core/allocator.h"
 #include "core/error.h"
 #include "core/slice.h"
+#include "memory/trust.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -44,6 +45,14 @@ typedef struct hu_memory_entry {
     const char *source;     /* optional provenance URI, NULL if none */
     size_t source_len;      /* 0 if source is NULL */
     double score;           /* optional, NAN if not set */
+    /* SOTA-2026 init-09 fields. Default 0 (UNTRUSTED) only when the row
+     * predates the M5 migration AND the upgrade audit hasn't yet run;
+     * production rows carry an explicit tier. `provenance` is JSON-encoded
+     * channel/handle/source_ts when non-NULL and is caller-freed (via
+     * `hu_memory_entry_free_fields`) just like the other string fields. */
+    int trust_tier;
+    const char *provenance;
+    size_t provenance_len;
 } hu_memory_entry_t;
 
 typedef struct hu_message_entry {

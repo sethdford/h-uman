@@ -86,6 +86,11 @@
       "$value": "{color.neutral.500}",
       "$type": "color"
     },
+    "text-tertiary": {
+      "$value": "{color.neutral.500}",
+      "$type": "color",
+      "$description": "Tertiary text — same WCAG profile as text-muted; used by sidebar nav-group labels and other non-primary chrome"
+    },
     "text-faint": {
       "$value": "{color.neutral.400}",
       "$type": "color"
@@ -411,6 +416,11 @@
       "$value": "#6B655E",
       "$type": "color"
     },
+    "text-tertiary": {
+      "$value": "#6B655E",
+      "$type": "color",
+      "$description": "Tertiary text — same WCAG profile as text-muted"
+    },
     "text-faint": {
       "$value": "#9A9490",
       "$type": "color"
@@ -685,6 +695,11 @@
     "text-muted": {
       "$value": "{color.neutral.700}",
       "$type": "color"
+    },
+    "text-tertiary": {
+      "$value": "{color.neutral.700}",
+      "$type": "color",
+      "$description": "Tertiary text — same WCAG profile as text-muted (high-contrast theme)"
     },
     "text-faint": {
       "$value": "{color.neutral.600}",

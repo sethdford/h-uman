@@ -273,9 +273,20 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc,
 }
 
 void hu_cartesia_tts_free_bytes(hu_allocator_t *alloc, unsigned char *bytes, size_t len) {
+#if HU_IS_TEST
+    /* The HU_IS_TEST branch of hu_cartesia_tts_synthesize above allocates
+     * a 400-byte mock buffer through `alloc->alloc` regardless of whether
+     * HU_ENABLE_CARTESIA is on or off. When CARTESIA is off the stub free
+     * used to be a (void) no-op, leaking the entire mock buffer on every
+     * test invocation (test_voice_message_integration leaked 400 b on PR55
+     * ASan). Mirror the allocation: free through the same allocator. */
+    if (alloc && bytes)
+        alloc->free(alloc->ctx, bytes, len);
+#else
     (void)alloc;
     (void)bytes;
     (void)len;
+#endif
 }
 
 #endif

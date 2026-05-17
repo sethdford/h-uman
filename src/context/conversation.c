@@ -1,8 +1,11 @@
 #include "human/context/conversation.h"
+#include "human/channel_class.h"
 #include "human/core/allocator.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
+#include "human/filler_recency.h"
 #include "human/persona.h"
 #include "human/provider.h"
 #ifdef HU_ENABLE_SQLITE
@@ -395,6 +398,22 @@ void hu_conversation_data_cleanup(void) {
     }
 
     if (s_contractions) {
+        /* `load_contractions` heap-allocates per-entry `from` and `to`
+         * copies (see lines 149-150) — the contraction struct itself
+         * holds borrowed-looking `const char *` but they're owned. We
+         * must free both copies before releasing the array, otherwise
+         * each contraction reload leaks 158 + 135 bytes (293 b/cycle,
+         * 18 cycles in the data-loader integration tests = 5,274 b).
+         * The ASan leak summary at b9055/PR55 attributed this to
+         * `load_contractions` -> `hu_conversation_data_init`. */
+        for (size_t i = 0; i < s_contractions_len; i++) {
+            if (s_contractions[i].from && s_contractions[i].from_len > 0)
+                s_conv_alloc->free(s_conv_alloc->ctx, (void *)s_contractions[i].from,
+                                   s_contractions[i].from_len + 1);
+            if (s_contractions[i].to && s_contractions[i].to_len > 0)
+                s_conv_alloc->free(s_conv_alloc->ctx, (void *)s_contractions[i].to,
+                                   s_contractions[i].to_len + 1);
+        }
         s_conv_alloc->free(s_conv_alloc->ctx, s_contractions,
                            s_contractions_len * sizeof(hu_conversation_contraction_t));
         s_contractions = NULL;
@@ -3592,7 +3611,7 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
     /* Last message length (structural) + numeric char limit for prompt */
     int max_chars = is_group ? hu_conversation_max_response_chars(last_msg_len)
                              : hu_conversation_max_response_chars_relational(last_msg_len, contact,
-                                                                           session_stage);
+                                                                             session_stage);
     w = snprintf(buf + pos, cap - pos, "Their last message: %zu chars. ", last_msg_len);
     POS_ADVANCE(w, pos, cap);
     if (last_msg_len < 15) {
@@ -3603,8 +3622,8 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
                          "up to %d chars.\n",
                          max_chars);
         } else {
-            w = snprintf(buf + pos, cap - pos, "Very brief — match that brevity. Target: 1-%d chars.\n",
-                         max_chars);
+            w = snprintf(buf + pos, cap - pos,
+                         "Very brief — match that brevity. Target: 1-%d chars.\n", max_chars);
         }
     } else if (last_msg_len > 100) {
         w = snprintf(buf + pos, cap - pos,
@@ -4110,46 +4129,29 @@ size_t hu_conversation_apply_typos(char *buf, size_t len, size_t cap, uint32_t s
 
 /* ── Two-phase "let me think" thinking response classifier ─────────────── */
 
-typedef enum {
-    HU_THINK_DECISION = 0,  /* advice/complex decision */
-    HU_THINK_EMOTIONAL = 1, /* emotional support */
-    HU_THINK_COMPLEX = 2,   /* philosophical/factual */
-} hu_think_type_t;
-
-static hu_think_type_t classify_think_type(const char *msg, size_t msg_len) {
-    size_t excl = 0;
-    size_t words = 0;
-    for (size_t i = 0; i < msg_len; i++) {
-        if (msg[i] == '!')
-            excl++;
-        if (msg[i] == ' ' || msg[i] == '\n')
-            words++;
-    }
-    if (msg_len > 0)
-        words++;
-
-    /* Emotional: high exclamation density or short + intense */
-    if (excl >= 2 || (excl >= 1 && msg_len < 60))
-        return HU_THINK_EMOTIONAL;
-    /* Complex: long message, often philosophical or multi-part */
-    if (msg_len > 120 && words > 15)
-        return HU_THINK_COMPLEX;
-    /* Decision: medium-length question (advice-seeking) */
-    return HU_THINK_DECISION;
-}
-
-bool hu_conversation_classify_thinking(const char *msg, size_t msg_len,
-                                       const hu_channel_history_entry_t *entries,
-                                       size_t entry_count, hu_thinking_response_t *out,
-                                       uint32_t seed) {
+bool hu_conversation_classify_thinking(const hu_thinking_context_t *ctx, const char *msg,
+                                       size_t msg_len, const hu_channel_history_entry_t *entries,
+                                       size_t entry_count, hu_thinking_response_t *out) {
     (void)entries;
     (void)entry_count;
-    if (!msg || msg_len == 0 || !out)
+    if (!ctx || !msg || msg_len == 0 || !out)
         return false;
-
     memset(out, 0, sizeof(*out));
 
-    /* Trigger: message characteristics */
+    /* text_fast channels (iMessage/SMS): no thinking filler — speed wins */
+    hu_channel_class_t cls = hu_channel_class_for_name(ctx->channel_name);
+    if (cls == HU_CHANNEL_CLASS_TEXT_FAST)
+        return false;
+
+    /* Persona and filler bank are required */
+    if (!ctx->persona || !ctx->channel_name)
+        return false;
+    const hu_persona_overlay_t *ov =
+        hu_persona_find_overlay(ctx->persona, ctx->channel_name, strlen(ctx->channel_name));
+    if (!ov || ov->filler_bank_count == 0)
+        return false;
+
+    /* Trigger heuristic — preserved from original */
     bool has_question = false;
     size_t words = 0;
     for (size_t i = 0; i < msg_len; i++) {
@@ -4160,43 +4162,35 @@ bool hu_conversation_classify_thinking(const char *msg, size_t msg_len,
     }
     if (msg_len > 0)
         words++;
-
     bool triggered = false;
     if (has_question && msg_len > 35 && words > 6)
         triggered = true;
     if (!triggered && msg_len > 80 && words > 10)
         triggered = true;
-
     if (!triggered)
         return false;
 
-    hu_think_type_t t = classify_think_type(msg, msg_len);
-    const char *fillers[4];
-    size_t filler_count;
-    switch (t) {
-    case HU_THINK_EMOTIONAL:
-        fillers[0] = "hmm";
-        fillers[1] = "oh wow";
-        fillers[2] = "oh";
-        filler_count = 3;
-        break;
-    case HU_THINK_DECISION:
-        fillers[0] = "ooh that's a tough one";
-        fillers[1] = "let me think about that for a sec";
-        fillers[2] = "hm good question";
-        filler_count = 3;
-        break;
-    case HU_THINK_COMPLEX:
-        fillers[0] = "that's a really good question";
-        fillers[1] = "okay give me a sec";
-        fillers[2] = "let me think about that";
-        filler_count = 3;
-        break;
+    /* Select index, excluding recency_last when bank has >=2 entries */
+    uint32_t state = ctx->seed * 1103515245u + 12345u;
+    uint32_t n = (uint32_t)ov->filler_bank_count;
+    int32_t last =
+        ctx->recency ? hu_filler_recency_last(ctx->recency, ctx->chat_id, ctx->chat_id_len) : -1;
+    uint32_t idx;
+    if (n >= 2 && last >= 0 && (uint32_t)last < n) {
+        /* pick from n-1 alternatives, skipping the excluded slot */
+        uint32_t pick = (state >> 16) % (n - 1);
+        idx = (pick >= (uint32_t)last) ? pick + 1 : pick;
+    } else {
+        idx = (state >> 16) % n;
     }
 
-    uint32_t state = seed * 1103515245u + 12345u;
-    uint32_t idx = (state >> 16) % (uint32_t)filler_count;
-    const char *filler = fillers[idx];
+    if (ctx->recency) {
+        hu_filler_recency_record(ctx->recency, ctx->chat_id, ctx->chat_id_len, (uint16_t)idx);
+    }
+
+    const char *filler = ov->filler_bank[idx];
+    if (!filler)
+        return false;
     size_t flen = strlen(filler);
     if (flen >= sizeof(out->filler))
         flen = sizeof(out->filler) - 1;
@@ -4204,18 +4198,26 @@ bool hu_conversation_classify_thinking(const char *msg, size_t msg_len,
     out->filler[flen] = '\0';
     out->filler_len = flen;
 
-    uint32_t base = 30000;
-    uint32_t extra = 0;
-    if (msg_len > 150)
-        extra = 30000;
-    else if (msg_len > 100)
-        extra = 15000;
-    else if (msg_len > 80)
-        extra = 10000;
-    out->delay_ms = base + extra;
-    if (out->delay_ms > 60000)
-        out->delay_ms = 60000;
-
+    /* Channel-aware delay */
+    if (cls == HU_CHANNEL_CLASS_VOICE) {
+#ifdef HU_ENABLE_VOICE_VAD_TIMING
+        out->delay_ms = 200 + ((state >> 8) % 301); /* 200-500ms uniform */
+#else
+        out->delay_ms = 0; /* voice channel without VAD timing: no delay */
+#endif
+    } else {
+        /* TEXT_ASYNC / UNKNOWN: existing dynamic formula */
+        uint32_t base = 30000, extra = 0;
+        if (msg_len > 150)
+            extra = 30000;
+        else if (msg_len > 100)
+            extra = 15000;
+        else if (msg_len > 80)
+            extra = 10000;
+        out->delay_ms = base + extra;
+        if (out->delay_ms > 60000)
+            out->delay_ms = 60000;
+    }
     return true;
 }
 
@@ -6581,8 +6583,8 @@ size_t hu_conversation_strip_channel_tags(char *buf, size_t len) {
         return len;
 
     /* Known artifact tags to strip entirely (paired XML-style) */
-    static const char *const xml_tags[] = {"thinking", "answer", "analysis", "reflection",
-                                           "internal", "scratchpad"};
+    static const char *const xml_tags[] = {"thinking",   "answer",   "analysis",
+                                           "reflection", "internal", "scratchpad"};
     static const size_t xml_tag_count = sizeof(xml_tags) / sizeof(xml_tags[0]);
 
     /* Known standalone tokens to strip */
@@ -6590,11 +6592,17 @@ size_t hu_conversation_strip_channel_tags(char *buf, size_t len) {
         const char *token;
         size_t len;
     } standalone[] = {
-        {"</s>", 4},   {"<s>", 3},       {"<|endoftext|>", 14},
+        {"</s>", 4},
+        {"<s>", 3},
+        {"<|endoftext|>", 14},
         {"<|im_start|>", 12},
         /* Split literal so "\\r" in "redacted\\r..." is not parsed as a carriage return. */
-        {"<|redacted" "_im_end|>", 19},
-        {"[INST]", 6}, {"[/INST]", 7},   {"<<SYS>>", 7},
+        {"<|redacted"
+         "_im_end|>",
+         19},
+        {"[INST]", 6},
+        {"[/INST]", 7},
+        {"<<SYS>>", 7},
         {"<</SYS>>", 8},
     };
     static const size_t standalone_count = sizeof(standalone) / sizeof(standalone[0]);
@@ -6699,8 +6707,7 @@ size_t hu_conversation_strip_formal_structure(char *buf, size_t len) {
         }
 
         /* Strip bullet markers at line start: "- ", "* " */
-        if (at_line_start && i + 1 < len && (buf[i] == '-' || buf[i] == '*') &&
-            buf[i + 1] == ' ') {
+        if (at_line_start && i + 1 < len && (buf[i] == '-' || buf[i] == '*') && buf[i + 1] == ' ') {
             i += 2;
             continue;
         }
@@ -6709,8 +6716,8 @@ size_t hu_conversation_strip_formal_structure(char *buf, size_t len) {
          * Keeps the text after the colon. */
         if (at_line_start && buf[i] >= 'A' && buf[i] <= 'Z') {
             size_t j = i + 1;
-            while (j < len && ((buf[j] >= 'a' && buf[j] <= 'z') ||
-                               (buf[j] >= 'A' && buf[j] <= 'Z')))
+            while (j < len &&
+                   ((buf[j] >= 'a' && buf[j] <= 'z') || (buf[j] >= 'A' && buf[j] <= 'Z')))
                 j++;
             if (j < len && buf[j] == ':' && j + 1 < len && buf[j + 1] == ' ' && j - i >= 2 &&
                 j - i <= 20) {
@@ -7715,8 +7722,11 @@ hu_error_t hu_conversation_gif_cal_save(const char *path, size_t path_len) {
     memcpy(path_buf, path, path_len);
     path_buf[path_len] = '\0';
 
-    FILE *f = fopen(path_buf, "w");
-    if (!f)
+    /* GIF calibration data (per-contact preferences). Caller-supplied
+     * path, typically ~/.human/conversation_data/gif_calibrations.json;
+     * user data, not secret. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path_buf, HU_IO_PERM_USER, "w", &f) != HU_OK || !f)
         return HU_ERR_IO;
 
     fprintf(f, "[\n");
@@ -7987,8 +7997,10 @@ hu_error_t hu_conversation_sched_save(const char *path, size_t path_len) {
         return HU_OK;
     }
 
-    FILE *f = fopen(path_buf, "w");
-    if (!f)
+    /* Scheduled messages queue at ~/.human/conversation_data/
+     * scheduled.json. User data, not secret. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path_buf, HU_IO_PERM_USER, "w", &f) != HU_OK || !f)
         return HU_ERR_IO;
 
     fprintf(f, "[\n");
@@ -8306,8 +8318,13 @@ size_t hu_conversation_contact_photo_path(const char *contact_id, size_t cid_len
                         n = snprintf(out_path, out_cap, "%s/%lld.jpg", cache_dir,
                                      (long long)record_pk);
                         if (n > 0 && (size_t)n < out_cap) {
-                            FILE *cf = fopen(out_path, "wb");
-                            if (cf) {
+                            /* Contact photo cache at
+                             * ~/.human/cache/contact-photos/{pk}.jpg.
+                             * Photos are personal data; 0600. */
+                            FILE *cf = NULL;
+                            if (hu_io_secure_open(out_path, HU_IO_PERM_SECRET, "wb", &cf) ==
+                                    HU_OK &&
+                                cf) {
                                 fwrite(blob, 1, (size_t)blob_len, cf);
                                 fclose(cf);
                                 sqlite3_finalize(blob_stmt);

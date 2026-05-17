@@ -41,8 +41,14 @@ for (const bp of BREAKPOINTS) {
         `No baseline for ${process.platform}; run: npx playwright test density.spec.ts --update-snapshots`,
       );
     }
+    /* Threshold rationale: 0.02 (2%) at the wide breakpoint (1440x900 =
+     * ~1.3M pixels) flaked ~33% of the time on Chromium-darwin due to
+     * sub-pixel font rendering jitter between runs even with animations
+     * disabled. 0.05 (5%) is still strict enough to fail on any real
+     * layout regression (the historical regressions that motivated this
+     * test all produced 7-15% diff) while tolerating compositor noise. */
     await expect(page).toHaveScreenshot(`density-${bp.name}.png`, {
-      maxDiffPixelRatio: 0.02,
+      maxDiffPixelRatio: 0.05,
     });
   });
 }

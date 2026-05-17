@@ -104,6 +104,48 @@ static void test_api_key_resolve_zero_len_returns_null(void) {
     HU_ASSERT_NULL(k);
 }
 
+/* ── hu_provider_default_api_key_env_name ──
+ * Centralized env-var lookup that replaced the strcmp ladder in
+ * config_merge.c. Single source of truth for provider → env mapping. */
+
+static void test_env_name_openai_returns_openai_api_key(void) {
+    HU_ASSERT_STR_EQ(hu_provider_default_api_key_env_name("openai", 6), "OPENAI_API_KEY");
+}
+
+static void test_env_name_anthropic_returns_anthropic_api_key(void) {
+    HU_ASSERT_STR_EQ(hu_provider_default_api_key_env_name("anthropic", 9), "ANTHROPIC_API_KEY");
+}
+
+static void test_env_name_gemini_returns_gemini_api_key(void) {
+    HU_ASSERT_STR_EQ(hu_provider_default_api_key_env_name("gemini", 6), "GEMINI_API_KEY");
+}
+
+/* "google" and "vertex" are aliases that resolve to the same env var.
+ * Previously these were two extra strcmp branches in config_merge.c. */
+static void test_env_name_google_alias_resolves_to_gemini(void) {
+    HU_ASSERT_STR_EQ(hu_provider_default_api_key_env_name("google", 6), "GEMINI_API_KEY");
+}
+
+static void test_env_name_vertex_alias_resolves_to_gemini(void) {
+    HU_ASSERT_STR_EQ(hu_provider_default_api_key_env_name("vertex", 6), "GEMINI_API_KEY");
+}
+
+static void test_env_name_ollama_returns_ollama_host(void) {
+    HU_ASSERT_STR_EQ(hu_provider_default_api_key_env_name("ollama", 6), "OLLAMA_HOST");
+}
+
+static void test_env_name_unknown_returns_null(void) {
+    HU_ASSERT_NULL(hu_provider_default_api_key_env_name("totally_unknown", 15));
+}
+
+static void test_env_name_null_returns_null(void) {
+    HU_ASSERT_NULL(hu_provider_default_api_key_env_name(NULL, 0));
+}
+
+static void test_env_name_zero_len_returns_null(void) {
+    HU_ASSERT_NULL(hu_provider_default_api_key_env_name("openai", 0));
+}
+
 void run_api_key_tests(void) {
     HU_TEST_SUITE("ApiKey");
     HU_RUN_TEST(test_api_key_valid_non_null_key_returns_true);
@@ -122,4 +164,14 @@ void run_api_key_tests(void) {
     HU_RUN_TEST(test_api_key_resolve_empty_key_no_env_returns_null);
     HU_RUN_TEST(test_api_key_resolve_whitespace_only_key_returns_null);
     HU_RUN_TEST(test_api_key_resolve_zero_len_returns_null);
+
+    HU_RUN_TEST(test_env_name_openai_returns_openai_api_key);
+    HU_RUN_TEST(test_env_name_anthropic_returns_anthropic_api_key);
+    HU_RUN_TEST(test_env_name_gemini_returns_gemini_api_key);
+    HU_RUN_TEST(test_env_name_google_alias_resolves_to_gemini);
+    HU_RUN_TEST(test_env_name_vertex_alias_resolves_to_gemini);
+    HU_RUN_TEST(test_env_name_ollama_returns_ollama_host);
+    HU_RUN_TEST(test_env_name_unknown_returns_null);
+    HU_RUN_TEST(test_env_name_null_returns_null);
+    HU_RUN_TEST(test_env_name_zero_len_returns_null);
 }

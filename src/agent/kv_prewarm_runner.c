@@ -18,6 +18,7 @@
 
 #include "human/agent/kv_cache.h"
 #include "human/agent/scheduler.h"
+#include <string.h>
 
 #define HU_KV_PRUNE_MAX_SLOTS 8
 
@@ -36,7 +37,19 @@ hu_error_t hu_kv_prewarm_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec
         if (!hu_kv_cache_needs_eviction(mgr))
             return HU_OK;
         const char *evicted[HU_KV_PRUNE_MAX_SLOTS];
-        (void)hu_kv_cache_prune(mgr, evicted, HU_KV_PRUNE_MAX_SLOTS);
+        memset(evicted, 0, sizeof(evicted));
+        size_t n_ev = hu_kv_cache_prune(mgr, evicted, HU_KV_PRUNE_MAX_SLOTS);
+        /* `hu_kv_cache_prune` (src/agent/kv_cache.c:109) transfers
+         * evicted-label heap pointers to the caller when out_evicted_labels
+         * is non-NULL, so the prune function doesn't free them. We don't
+         * read them — but we still own them. Free here so each pruned
+         * segment's label doesn't leak (9 b each on PR55's ASan run via
+         * test_w14_kv_prewarm_eviction_prunes_when_saturated). */
+        for (size_t i = 0; i < n_ev && i < HU_KV_PRUNE_MAX_SLOTS; i++) {
+            if (evicted[i] && mgr->alloc)
+                mgr->alloc->free(mgr->alloc->ctx, (void *)evicted[i],
+                                 strlen(evicted[i]) + 1);
+        }
         return HU_OK;
     }
     case HU_JOB_KV_CACHE_WARMING:

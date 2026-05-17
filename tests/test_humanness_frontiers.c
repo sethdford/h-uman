@@ -1092,6 +1092,14 @@ static void test_multi_turn_frontier_evolution(void) {
     hu_rupture_deinit(&alloc, &fs.rupture);
     hu_growth_narrative_deinit(&alloc, &fs.growth);
     hu_genuine_boundary_set_deinit(&alloc, &fs.boundaries);
+    /* The restored side rehydrates the same frontier fields via
+     * hu_frontier_persist_load (frontier_persist.c:291 was leaking
+     * 25 b of hu_strndup'd narrative text on PR55's ASan run).
+     * Mirror the fs cleanup on restored. */
+    hu_narrative_self_deinit(&alloc, &restored.narrative);
+    hu_creative_voice_deinit(&alloc, &restored.creative_voice);
+    hu_attachment_deinit(&alloc, &restored.attachment);
+    hu_rupture_deinit(&alloc, &restored.rupture);
     hu_growth_narrative_deinit(&alloc, &restored.growth);
     sqlite3_close(db);
 }

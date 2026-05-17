@@ -1,6 +1,7 @@
 #include "human/agent/memory_loader.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/memory/personal_model.h"
+#include "human/memory/trust.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
@@ -284,6 +285,36 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
     size_t total_len = 0;
     for (size_t i = 0; i < count && total_len < loader->max_context_chars; i++) {
         const hu_memory_entry_t *e = &entries[i];
+
+        /* SOTA-2026 init-09 sec 2.9: trust gate.
+         *
+         * UNTRUSTED entries are silently suppressed from recall context.
+         * THIRD_PARTY entries are suppressed when a same-key FIRST_PARTY+
+         * entry exists in the same batch (the higher-trust statement
+         * shadows the lower-trust one). Otherwise the entry surfaces but
+         * the frontier model is expected to weight it less based on the
+         * source field (the [Unverified hints] convention from sec 2.9
+         * is enforced for hu_personal_model facts in the prompt builder,
+         * not here in the recall list). */
+        if (e->trust_tier == (int)HU_TRUST_UNTRUSTED)
+            continue;
+        if (e->trust_tier <= (int)HU_TRUST_THIRD_PARTY && e->key && e->key_len > 0) {
+            bool shadowed = false;
+            for (size_t k = 0; k < count; k++) {
+                if (k == i)
+                    continue;
+                const hu_memory_entry_t *o = &entries[k];
+                if (o->trust_tier >= (int)HU_TRUST_FIRST_PARTY && o->key &&
+                    o->key_len == e->key_len &&
+                    memcmp(o->key, e->key, e->key_len) == 0) {
+                    shadowed = true;
+                    break;
+                }
+            }
+            if (shadowed)
+                continue;
+        }
+
         const char *key = e->key ? e->key : "unknown";
         size_t key_len = e->key_len ? e->key_len : strlen(key);
         const char *content = e->content ? e->content : "";

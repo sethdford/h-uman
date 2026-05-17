@@ -1,5 +1,6 @@
 #include "human/onboard.h"
 #include "human/config.h"
+#include "human/core/io_secure.h"
 #include "human/core/string.h"
 #include "human/interactions.h"
 #include <stdio.h>
@@ -9,6 +10,7 @@
 #include <direct.h>
 #include <io.h>
 #else
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -92,7 +94,88 @@ const char hu_starter_persona_json[] =
     "      \"style_notes\": \"Technical, precise. No emoji. "
     "Format code blocks when showing code.\"\n"
     "    }\n"
-    "  }\n"
+    "  },\n"
+    /* Starter example banks for the four Tier-1 channels. The persona
+     * prompt builder samples from these to anchor tone and length when
+     * a fresh user has no learned-from-history examples yet. Each bank
+     * holds three short examples chosen to match the channel's overlay
+     * (formality / avg_length / emoji_usage). Sprint 2b Story A'.
+     *
+     * Schema (parsed by `hu_persona_load_json` ->
+     * `hu_persona_examples_bank_from_array`):
+     *
+     *   { "channel": "<name>",
+     *     "examples": [
+     *       {"context": "...", "incoming": "...", "response": "..."},
+     *       ... ] }
+     *
+     * Examples are deliberately neutral (no proper nouns, no PII, no
+     * politics, no proper names) so they ship as defaults for every
+     * user without baking-in a single voice. They demonstrate length
+     * and emoji norms; the persona system overlays the user's learned
+     * style on top once `personal_model.bin` has data. */
+    "  \"example_banks\": [\n"
+    "    {\n"
+    "      \"channel\": \"imessage\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"casual check-in\",\n"
+    "          \"incoming\": \"hey you up?\",\n"
+    "          \"response\": \"yeah, what's up?\" },\n"
+    "        { \"context\": \"quick thanks\",\n"
+    "          \"incoming\": \"thx for the help earlier\",\n"
+    "          \"response\": \"anytime 🙏\" },\n"
+    "        { \"context\": \"running late\",\n"
+    "          \"incoming\": \"i'm gonna be like 10 min late\",\n"
+    "          \"response\": \"no worries, see you soon\" }\n"
+    "      ]\n"
+    "    },\n"
+    "    {\n"
+    "      \"channel\": \"telegram\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"news chat\",\n"
+    "          \"incoming\": \"did you see the latest update?\",\n"
+    "          \"response\": \"just read it. interesting take, "
+    "though i'd want to see the data.\" },\n"
+    "        { \"context\": \"making plans\",\n"
+    "          \"incoming\": \"want to grab dinner tonight?\",\n"
+    "          \"response\": \"i can do 7pm. any spot in mind?\" },\n"
+    "        { \"context\": \"meeting recap\",\n"
+    "          \"incoming\": \"how did the meeting go?\",\n"
+    "          \"response\": \"longer than i wanted but they're "
+    "on board with the proposal.\" }\n"
+    "      ]\n"
+    "    },\n"
+    "    {\n"
+    "      \"channel\": \"discord\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"game invite\",\n"
+    "          \"incoming\": \"anyone wanna play tonight?\",\n"
+    "          \"response\": \"i'm in 🎮 what are we playing?\" },\n"
+    "        { \"context\": \"thanks for help\",\n"
+    "          \"incoming\": \"thanks for helping me debug that\",\n"
+    "          \"response\": \"np 🙌 hit me up anytime\" },\n"
+    "        { \"context\": \"reacting to news\",\n"
+    "          \"incoming\": \"they finally fixed the lag bug!\",\n"
+    "          \"response\": \"about time 🔥 release notes drop today?\" }\n"
+    "      ]\n"
+    "    },\n"
+    "    {\n"
+    "      \"channel\": \"slack\",\n"
+    "      \"examples\": [\n"
+    "        { \"context\": \"PR review request\",\n"
+    "          \"incoming\": \"Can you review my PR when you have a sec?\",\n"
+    "          \"response\": \"Reviewing now \\u2014 I'll leave "
+    "comments by EOD.\" },\n"
+    "        { \"context\": \"calendar coordination\",\n"
+    "          \"incoming\": \"Quick sync at 3?\",\n"
+    "          \"response\": \"Works for me. I'll send the invite.\" },\n"
+    "        { \"context\": \"deploy heads-up\",\n"
+    "          \"incoming\": \"Heads up: the deploy is delayed an hour.\",\n"
+    "          \"response\": \"Thanks for the flag. I'll let the "
+    "team know in the channel.\" }\n"
+    "      ]\n"
+    "    }\n"
+    "  ]\n"
     "}\n";
 
 #ifdef HU_IS_TEST
@@ -137,6 +220,30 @@ static const char *const HU_IDENTITY_TEMPLATE =
  * unit tests can link against it. */
 
 static bool write_template_if_missing(const char *path, const char *content) {
+    /* Previously: fopen("rb") existence check, then fopen("w") to
+     * create — a classic TOCTOU race (CodeQL cpp/toctou-race-condition
+     * at onboard.c:383). A malicious local process can win the race
+     * and replace `path` with a symlink between the check and the
+     * open, redirecting the write to an attacker-chosen file.
+     *
+     * Fix: do the "create only if missing" atomically with
+     * O_CREAT|O_EXCL via plain open(). hu_io_secure_open uses O_TRUNC
+     * (always-create semantics) so we can't reuse it here without
+     * extending its API — do the open inline and keep this function
+     * tight. */
+#ifndef _WIN32
+    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    if (fd < 0)
+        return false;
+    FILE *f = fdopen(fd, "w");
+    if (!f) {
+        close(fd);
+        return false;
+    }
+#else
+    /* Windows: best-effort fall-back to the original two-step pattern;
+     * the TOCTOU window is narrow and Windows ACLs cover the worst
+     * abuse. */
     FILE *check = fopen(path, "rb");
     if (check) {
         fclose(check);
@@ -145,6 +252,7 @@ static bool write_template_if_missing(const char *path, const char *content) {
     FILE *f = fopen(path, "w");
     if (!f)
         return false;
+#endif
     size_t len = strlen(content);
     if (fwrite(content, 1, len, f) != len) {
         fclose(f);
@@ -316,8 +424,13 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
             printf("  Created %s\n", tmpl_path);
     }
 
-    FILE *f = fopen(config_path, "w");
-    if (!f) {
+    /* config.json contains an API key when the user types one in
+     * interactively (line 410-412 below). Treat it as a secret so
+     * the file is created mode 0600 even when the user hasn't pasted
+     * a key — they might paste later via `human config edit` and the
+     * mode persists. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(config_path, HU_IO_PERM_SECRET, "w", &f) != HU_OK || !f) {
         alloc->free(alloc->ctx, ws_dir, strlen(ws_dir) + 1);
         return HU_ERR_IO;
     }
@@ -356,7 +469,12 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
                 if (access(persona_path, F_OK) != 0)
 #endif
                 {
-                    FILE *pf = fopen(persona_path, "w");
+                    /* Persona file at ~/.human/personas/default.json.
+                     * The path is env-derived; route through the
+                     * secure helper. User-readable (0644) is fine —
+                     * persona JSON contains no secrets. */
+                    FILE *pf = NULL;
+                    (void)hu_io_secure_open(persona_path, HU_IO_PERM_USER, "w", &pf);
                     if (pf) {
                         size_t plen = strlen(hu_starter_persona_json);
                         if (fwrite(hu_starter_persona_json, 1, plen, pf) == plen)

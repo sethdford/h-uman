@@ -22,17 +22,18 @@
 #include "human/agent/superhuman_silence.h"
 #include "human/agent/task_list.h"
 #include "human/agent/team.h"
-#include "human/behavior/pressure_history.h"
 #include "human/agent/timing.h"
 #include "human/agent/token_budget.h"
 #include "human/agent/workflow_event.h"
 #include "human/agent/worktree.h"
+#include "human/behavior/pressure_history.h"
 #include "human/channel.h"
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
 #include "human/core/error.h"
 #include "human/core/slice.h"
 #include "human/cost.h"
+#include "human/filler_recency.h"
 #include "human/memory.h"
 #include "human/memory/policy.h"
 #include "human/memory/retrieval.h"
@@ -296,7 +297,7 @@ struct hu_agent {
      * `agent->memory` (hu_memory_t). */
     struct hu_w7_facade *w7_facade;
     struct hu_audit_log *w15_audit_log; /* W15 audit log for facade write/erase ops */
-    uint64_t world_model_loads; /* telemetry: per-turn world_model render count */
+    uint64_t world_model_loads;         /* telemetry: per-turn world_model render count */
 
     /* B8 — Optional theory-of-mind scenario merged into the rendered world
      * model on the next turn (eval / benchmark hook). Empty strings disable
@@ -339,8 +340,8 @@ struct hu_agent {
      * hu_w7_facade_open; ticked once per main-loop iteration; closed BEFORE
      * w7_facade_close (the scheduler borrows the facade's memory handle). */
     struct hu_w14_scheduler *w14_scheduler;
-    uint64_t scheduler_ticks;     /* telemetry: total ticks since startup */
-    int64_t  scheduler_last_tick_ms; /* telemetry: most recent tick wall time */
+    uint64_t scheduler_ticks;       /* telemetry: total ticks since startup */
+    int64_t scheduler_last_tick_ms; /* telemetry: most recent tick wall time */
 
     volatile sig_atomic_t cancel_requested; /* set by SIGINT handler to abort turn */
 
@@ -478,6 +479,12 @@ struct hu_agent {
     /* Media generation: tool-produced file paths accumulated per turn */
     char *generated_media[4];
     size_t generated_media_count;
+
+    /* Per-chat filler anti-repetition LRU (PCTT Task 3).
+     * Tracks the last filler index emitted per chat_id so the selector can
+     * avoid picking the same filler twice in a row.  In-memory only; loss on
+     * restart is acceptable.  Zero-initialised by memset in hu_agent_from_config. */
+    hu_filler_recency_t filler_recency;
 };
 
 /* Create agent from minimal config (no full config loader yet).
@@ -651,14 +658,14 @@ void hu_agent_set_tom_scenario(hu_agent_t *agent, const char *premise, const cha
  * HU_ERR_INVALID_ARGUMENT when `agent` lacks a W7 facade or memory session id
  * (the verifier requires both). Tests passing `swapped_out == NULL` get the
  * telemetry-only path even under SOFT/STRICT. */
-hu_error_t hu_agent_self_rag_apply(hu_agent_t *agent, const char *draft, size_t draft_len,
-                                   int mode, char **swapped_out, size_t *swapped_len_out);
+hu_error_t hu_agent_self_rag_apply(hu_agent_t *agent, const char *draft, size_t draft_len, int mode,
+                                   char **swapped_out, size_t *swapped_len_out);
 
 /* W11 P1 — Read-only snapshot of self-RAG telemetry. Any out pointer may be
  * NULL. Safe with `agent == NULL` (writes 0 into every non-NULL out). */
-void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs,
-                                 uint64_t *abstentions, uint64_t *refusals_rendered,
-                                 uint64_t *claims_total, uint64_t *claims_flagged);
+void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64_t *abstentions,
+                                 uint64_t *refusals_rendered, uint64_t *claims_total,
+                                 uint64_t *claims_flagged);
 
 /* Run memory consolidation (merge similar entries, decay old). */
 hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent);

@@ -1,8 +1,8 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
-#include "human/core/log.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/provider.h"
 #include "human/providers/provider_http.h"
@@ -297,14 +297,12 @@ static hu_error_t anthropic_chat(void *ctx, hu_allocator_t *alloc, const hu_chat
                     break;
                 }
                 if (cp->tag == HU_CONTENT_PART_TEXT) {
-                    hu_json_object_set(alloc, part, "type",
-                                       hu_json_string_new(alloc, "text", 4));
+                    hu_json_object_set(alloc, part, "type", hu_json_string_new(alloc, "text", 4));
                     hu_json_object_set(
                         alloc, part, "text",
                         hu_json_string_new(alloc, cp->data.text.ptr, cp->data.text.len));
                 } else if (cp->tag == HU_CONTENT_PART_IMAGE_BASE64) {
-                    hu_json_object_set(alloc, part, "type",
-                                       hu_json_string_new(alloc, "image", 5));
+                    hu_json_object_set(alloc, part, "type", hu_json_string_new(alloc, "image", 5));
                     hu_json_value_t *src_obj = hu_json_object_new(alloc);
                     if (src_obj) {
                         hu_json_object_set(alloc, src_obj, "type",
@@ -319,8 +317,7 @@ static hu_error_t anthropic_chat(void *ctx, hu_allocator_t *alloc, const hu_chat
                         hu_json_object_set(alloc, part, "source", src_obj);
                     }
                 } else if (cp->tag == HU_CONTENT_PART_IMAGE_URL) {
-                    hu_json_object_set(alloc, part, "type",
-                                       hu_json_string_new(alloc, "image", 5));
+                    hu_json_object_set(alloc, part, "type", hu_json_string_new(alloc, "image", 5));
                     hu_json_value_t *src_obj = hu_json_object_new(alloc);
                     if (src_obj) {
                         hu_json_object_set(alloc, src_obj, "type",
@@ -379,6 +376,25 @@ static hu_error_t anthropic_chat(void *ctx, hu_allocator_t *alloc, const hu_chat
                 hu_json_array_push(alloc, tools_arr, tool_obj);
             }
             hu_json_object_set(alloc, root, "tools", tools_arr);
+        }
+    }
+
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            bool stop_ok = true;
+            for (size_t i = 0; i < request->stop_sequences_count && stop_ok; i++) {
+                hu_json_value_t *sv = hu_json_string_new(alloc, request->stop_sequences[i],
+                                                         strlen(request->stop_sequences[i]));
+                if (!sv) {
+                    hu_json_free(alloc, stop_arr);
+                    stop_ok = false;
+                } else {
+                    hu_json_array_push(alloc, stop_arr, sv);
+                }
+            }
+            if (stop_ok)
+                hu_json_object_set(alloc, root, "stop_sequences", stop_arr);
         }
     }
 
@@ -1052,14 +1068,12 @@ static hu_error_t anthropic_stream_chat(void *ctx, hu_allocator_t *alloc,
                     break;
                 }
                 if (cp->tag == HU_CONTENT_PART_TEXT) {
-                    hu_json_object_set(alloc, part, "type",
-                                       hu_json_string_new(alloc, "text", 4));
+                    hu_json_object_set(alloc, part, "type", hu_json_string_new(alloc, "text", 4));
                     hu_json_object_set(
                         alloc, part, "text",
                         hu_json_string_new(alloc, cp->data.text.ptr, cp->data.text.len));
                 } else if (cp->tag == HU_CONTENT_PART_IMAGE_BASE64) {
-                    hu_json_object_set(alloc, part, "type",
-                                       hu_json_string_new(alloc, "image", 5));
+                    hu_json_object_set(alloc, part, "type", hu_json_string_new(alloc, "image", 5));
                     hu_json_value_t *src_obj = hu_json_object_new(alloc);
                     if (src_obj) {
                         hu_json_object_set(alloc, src_obj, "type",
@@ -1074,8 +1088,7 @@ static hu_error_t anthropic_stream_chat(void *ctx, hu_allocator_t *alloc,
                         hu_json_object_set(alloc, part, "source", src_obj);
                     }
                 } else if (cp->tag == HU_CONTENT_PART_IMAGE_URL) {
-                    hu_json_object_set(alloc, part, "type",
-                                       hu_json_string_new(alloc, "image", 5));
+                    hu_json_object_set(alloc, part, "type", hu_json_string_new(alloc, "image", 5));
                     hu_json_value_t *src_obj = hu_json_object_new(alloc);
                     if (src_obj) {
                         hu_json_object_set(alloc, src_obj, "type",
@@ -1134,6 +1147,25 @@ static hu_error_t anthropic_stream_chat(void *ctx, hu_allocator_t *alloc,
                 hu_json_array_push(alloc, tools_arr, tool_obj);
             }
             hu_json_object_set(alloc, root, "tools", tools_arr);
+        }
+    }
+
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            bool stop_ok = true;
+            for (size_t i = 0; i < request->stop_sequences_count && stop_ok; i++) {
+                hu_json_value_t *sv = hu_json_string_new(alloc, request->stop_sequences[i],
+                                                         strlen(request->stop_sequences[i]));
+                if (!sv) {
+                    hu_json_free(alloc, stop_arr);
+                    stop_ok = false;
+                } else {
+                    hu_json_array_push(alloc, stop_arr, sv);
+                }
+            }
+            if (stop_ok)
+                hu_json_object_set(alloc, root, "stop_sequences", stop_arr);
         }
     }
 

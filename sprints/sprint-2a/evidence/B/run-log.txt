@@ -1,0 +1,20 @@
+== AC-B.1.a happy path ==
+  PASS: orchestrator exit 0 on non-empty responses
+  PASS: canonical file written after happy run
+  PASS: canonical content has expected delta
+  PASS: no leftover tmp file (atomic mv intact)
+== AC-B.1.b empty BEFORE short-circuits ==
+  PASS: exit 2 on empty before
+  PASS: canonical NOT written when before empty
+== AC-B.1.c empty AFTER short-circuits ==
+  PASS: exit 2 on empty after
+  PASS: canonical NOT written when after empty
+== AC-B.1.d --no-publish skips canonical write ==
+  PASS: orchestrator exit 0 under --no-publish
+  PASS: canonical NOT written under --no-publish
+== sentinel: BSD-grep regex regression guard ==
+  PASS: non-empty JSON arrays still classified as non-empty
+
+==========================================================
+Story B (Sprint 2a) end-to-end: PASS=11 FAIL=0
+==========================================================

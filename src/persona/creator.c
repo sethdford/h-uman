@@ -358,14 +358,12 @@ hu_error_t hu_persona_creator_synthesize(hu_allocator_t *alloc, const hu_persona
             out->humor.frequency = hu_strdup(alloc, partials[i].humor.frequency);
         if (partials[i].humor.never_during_count > 0 && out->humor.never_during_count == 0) {
             for (size_t j = 0; j < partials[i].humor.never_during_count && j < 8; j++)
-                (void)snprintf(out->humor.never_during[j],
-                              sizeof(out->humor.never_during[j]), "%.31s",
-                              partials[i].humor.never_during[j]);
+                (void)snprintf(out->humor.never_during[j], sizeof(out->humor.never_during[j]),
+                               "%.31s", partials[i].humor.never_during[j]);
             out->humor.never_during_count = partials[i].humor.never_during_count;
         }
 
-        if (partials[i].conflict_style.pushback_response &&
-            !out->conflict_style.pushback_response)
+        if (partials[i].conflict_style.pushback_response && !out->conflict_style.pushback_response)
             out->conflict_style.pushback_response =
                 hu_strdup(alloc, partials[i].conflict_style.pushback_response);
         if (partials[i].conflict_style.apology_style && !out->conflict_style.apology_style)
@@ -437,13 +435,11 @@ hu_error_t hu_persona_creator_synthesize(hu_allocator_t *alloc, const hu_persona
 
         /* Repair protocol */
         if (partials[i].repair.rupture_detection && !out->repair.rupture_detection)
-            out->repair.rupture_detection =
-                hu_strdup(alloc, partials[i].repair.rupture_detection);
+            out->repair.rupture_detection = hu_strdup(alloc, partials[i].repair.rupture_detection);
         if (partials[i].repair.repair_approach && !out->repair.repair_approach)
             out->repair.repair_approach = hu_strdup(alloc, partials[i].repair.repair_approach);
         if (partials[i].repair.face_saving_style && !out->repair.face_saving_style)
-            out->repair.face_saving_style =
-                hu_strdup(alloc, partials[i].repair.face_saving_style);
+            out->repair.face_saving_style = hu_strdup(alloc, partials[i].repair.face_saving_style);
 
         /* Linguistic mirroring */
         if (partials[i].mirroring.mirroring_level && !out->mirroring.mirroring_level)
@@ -453,13 +449,11 @@ hu_error_t hu_persona_creator_synthesize(hu_allocator_t *alloc, const hu_persona
             out->mirroring.convergence_speed =
                 hu_strdup(alloc, partials[i].mirroring.convergence_speed);
         if (partials[i].mirroring.power_dynamic && !out->mirroring.power_dynamic)
-            out->mirroring.power_dynamic =
-                hu_strdup(alloc, partials[i].mirroring.power_dynamic);
+            out->mirroring.power_dynamic = hu_strdup(alloc, partials[i].mirroring.power_dynamic);
 
         /* Social dynamics */
         if (partials[i].social.default_ego_state && !out->social.default_ego_state)
-            out->social.default_ego_state =
-                hu_strdup(alloc, partials[i].social.default_ego_state);
+            out->social.default_ego_state = hu_strdup(alloc, partials[i].social.default_ego_state);
         if (partials[i].social.phatic_style && !out->social.phatic_style)
             out->social.phatic_style = hu_strdup(alloc, partials[i].social.phatic_style);
     }
@@ -600,7 +594,17 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
         fputs(",\n      \"style_notes\": [", f);
         if (write_json_string_array(f, ov->style_notes, ov->style_notes_count) != HU_OK)
             goto fail;
-        fputs("]\n    }", f);
+        fputs("]", f);
+        /* PCTT Task 2: per-channel thinking-filler bank. Emitted only when
+         * non-empty so legacy persona files remain diff-clean. Appended at
+         * the end of the overlay object to avoid reordering existing keys. */
+        if (ov->filler_bank_count > 0 && ov->filler_bank) {
+            fputs(",\n      \"filler_bank\": [", f);
+            if (write_json_string_array(f, ov->filler_bank, ov->filler_bank_count) != HU_OK)
+                goto fail;
+            fputs("]", f);
+        }
+        fputs("\n    }", f);
     }
     fputs("\n  }", f);
 
@@ -621,19 +625,22 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->motivation.protecting) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"protecting\": ", f);
             write_json_string(f, persona->motivation.protecting);
             first = false;
         }
         if (persona->motivation.avoiding) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"avoiding\": ", f);
             write_json_string(f, persona->motivation.avoiding);
             first = false;
         }
         if (persona->motivation.wanting) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"wanting\": ", f);
             write_json_string(f, persona->motivation.wanting);
         }
@@ -641,7 +648,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
     }
 
     /* Humor (Phase 6 — style, frequency, never_during, signature_phrases, self_deprecation) */
-    if (persona->humor.style_count > 0 || (persona->humor.frequency && persona->humor.frequency[0]) ||
+    if (persona->humor.style_count > 0 ||
+        (persona->humor.frequency && persona->humor.frequency[0]) ||
         persona->humor.never_during_count > 0 || persona->humor.signature_phrases_count > 0 ||
         persona->humor.self_deprecation_count > 0) {
         fputs(",\n  \"humor\": {", f);
@@ -716,7 +724,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
         };
         for (int ci = 0; ci < 5; ci++) {
             if (cs_vals[ci]) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fprintf(f, "\n    \"%s\": ", cs_fields[ci]);
                 write_json_string(f, cs_vals[ci]);
                 first = false;
@@ -735,13 +744,15 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->emotional_range.floor) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"floor\": ", f);
             write_json_string(f, persona->emotional_range.floor);
             first = false;
         }
         if (persona->emotional_range.escalation_triggers_count > 0) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"escalation_triggers\": [", f);
             write_json_string_array(f, persona->emotional_range.escalation_triggers,
                                     persona->emotional_range.escalation_triggers_count);
@@ -749,7 +760,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->emotional_range.de_escalation_count > 0) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"de_escalation\": [", f);
             write_json_string_array(f, persona->emotional_range.de_escalation,
                                     persona->emotional_range.de_escalation_count);
@@ -757,13 +769,15 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->emotional_range.withdrawal_conditions) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"withdrawal_conditions\": ", f);
             write_json_string(f, persona->emotional_range.withdrawal_conditions);
             first = false;
         }
         if (persona->emotional_range.recovery_style) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"recovery_style\": ", f);
             write_json_string(f, persona->emotional_range.recovery_style);
         }
@@ -777,15 +791,14 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
         const char *vr_fields[] = {"sentence_pattern", "paragraph_cadence", "response_tempo",
                                    "emphasis_style", "pause_behavior"};
         const char *vr_vals[] = {
-            persona->voice_rhythm.sentence_pattern,
-            persona->voice_rhythm.paragraph_cadence,
-            persona->voice_rhythm.response_tempo,
-            persona->voice_rhythm.emphasis_style,
+            persona->voice_rhythm.sentence_pattern, persona->voice_rhythm.paragraph_cadence,
+            persona->voice_rhythm.response_tempo,   persona->voice_rhythm.emphasis_style,
             persona->voice_rhythm.pause_behavior,
         };
         for (int vi = 0; vi < 5; vi++) {
             if (vr_vals[vi]) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fprintf(f, "\n    \"%s\": ", vr_fields[vi]);
                 write_json_string(f, vr_vals[vi]);
                 first = false;
@@ -817,7 +830,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
         };
         for (int wi = 0; wi < 5; wi++) {
             if (iw[wi].count > 0) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fprintf(f, "\n    \"%s\": [", iw[wi].key);
                 write_json_string_array(f, iw[wi].arr, iw[wi].count);
                 fputc(']', f);
@@ -858,7 +872,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->intellectual.expertise_count > 0) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"expertise\": [", f);
             write_json_string_array(f, persona->intellectual.expertise,
                                     persona->intellectual.expertise_count);
@@ -866,7 +881,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->intellectual.curiosity_areas_count > 0) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"curiosity_areas\": [", f);
             write_json_string_array(f, persona->intellectual.curiosity_areas,
                                     persona->intellectual.curiosity_areas_count);
@@ -874,7 +890,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->intellectual.metaphor_sources) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"metaphor_sources\": ", f);
             write_json_string(f, persona->intellectual.metaphor_sources);
         }
@@ -891,7 +908,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->sensory.metaphor_vocabulary_count > 0) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"metaphor_vocabulary\": [", f);
             write_json_string_array(f, persona->sensory.metaphor_vocabulary,
                                     persona->sensory.metaphor_vocabulary_count);
@@ -899,7 +917,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             first = false;
         }
         if (persona->sensory.grounding_patterns) {
-            if (!first) fputc(',', f);
+            if (!first)
+                fputc(',', f);
             fputs("\n    \"grounding_patterns\": ", f);
             write_json_string(f, persona->sensory.grounding_patterns);
         }
@@ -910,7 +929,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
     if (persona->backstory_behaviors && persona->backstory_behaviors_count > 0) {
         fputs(",\n  \"backstory_behaviors\": [", f);
         for (size_t i = 0; i < persona->backstory_behaviors_count; i++) {
-            if (i > 0) fputc(',', f);
+            if (i > 0)
+                fputc(',', f);
             fputs("\n    {\"backstory_beat\": ", f);
             write_json_string(f, persona->backstory_behaviors[i].backstory_beat);
             fputs(", \"behavioral_rule\": ", f);
@@ -924,7 +944,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
     if (persona->situational_directions && persona->situational_directions_count > 0) {
         fputs(",\n  \"situational_directions\": [", f);
         for (size_t i = 0; i < persona->situational_directions_count; i++) {
-            if (i > 0) fputc(',', f);
+            if (i > 0)
+                fputc(',', f);
             fputs("\n    {\"trigger\": ", f);
             write_json_string(f, persona->situational_directions[i].trigger);
             fputs(", \"instruction\": ", f);
@@ -947,26 +968,30 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
                 first = false;
             }
             if (ri->emotional_bids_count > 0) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"emotional_bids\": [", f);
                 write_json_string_array(f, ri->emotional_bids, ri->emotional_bids_count);
                 fputc(']', f);
                 first = false;
             }
             if (ri->attachment_style) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"attachment_style\": ", f);
                 write_json_string(f, ri->attachment_style);
                 first = false;
             }
             if (ri->attachment_awareness) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"attachment_awareness\": ", f);
                 write_json_string(f, ri->attachment_awareness);
                 first = false;
             }
             if (ri->dunbar_awareness) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"dunbar_awareness\": ", f);
                 write_json_string(f, ri->dunbar_awareness);
             }
@@ -977,8 +1002,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
     /* Listening protocol */
     {
         const hu_listening_protocol_t *lp = &persona->listening;
-        if (lp->default_response_type || lp->reflective_techniques_count > 0 ||
-            lp->nvc_style || lp->validation_style) {
+        if (lp->default_response_type || lp->reflective_techniques_count > 0 || lp->nvc_style ||
+            lp->validation_style) {
             fputs(",\n  \"listening\": {", f);
             bool first = true;
             if (lp->default_response_type) {
@@ -987,7 +1012,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
                 first = false;
             }
             if (lp->reflective_techniques_count > 0) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"reflective_techniques\": [", f);
                 write_json_string_array(f, lp->reflective_techniques,
                                         lp->reflective_techniques_count);
@@ -995,13 +1021,15 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
                 first = false;
             }
             if (lp->nvc_style) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"nvc_style\": ", f);
                 write_json_string(f, lp->nvc_style);
                 first = false;
             }
             if (lp->validation_style) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"validation_style\": ", f);
                 write_json_string(f, lp->validation_style);
             }
@@ -1022,19 +1050,22 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
                 first = false;
             }
             if (rp->repair_approach) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"repair_approach\": ", f);
                 write_json_string(f, rp->repair_approach);
                 first = false;
             }
             if (rp->face_saving_style) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"face_saving_style\": ", f);
                 write_json_string(f, rp->face_saving_style);
                 first = false;
             }
             if (rp->repair_phrases_count > 0) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"repair_phrases\": [", f);
                 write_json_string_array(f, rp->repair_phrases, rp->repair_phrases_count);
                 fputc(']', f);
@@ -1056,20 +1087,23 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
                 first = false;
             }
             if (lm->adapts_to_count > 0) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"adapts_to\": [", f);
                 write_json_string_array(f, lm->adapts_to, lm->adapts_to_count);
                 fputc(']', f);
                 first = false;
             }
             if (lm->convergence_speed) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"convergence_speed\": ", f);
                 write_json_string(f, lm->convergence_speed);
                 first = false;
             }
             if (lm->power_dynamic) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"power_dynamic\": ", f);
                 write_json_string(f, lm->power_dynamic);
             }
@@ -1090,20 +1124,23 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
                 first = false;
             }
             if (sd->phatic_style) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"phatic_style\": ", f);
                 write_json_string(f, sd->phatic_style);
                 first = false;
             }
             if (sd->bonding_behaviors_count > 0) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"bonding_behaviors\": [", f);
                 write_json_string_array(f, sd->bonding_behaviors, sd->bonding_behaviors_count);
                 fputc(']', f);
                 first = false;
             }
             if (sd->anti_patterns_count > 0) {
-                if (!first) fputc(',', f);
+                if (!first)
+                    fputc(',', f);
                 fputs("\n    \"anti_patterns\": [", f);
                 write_json_string_array(f, sd->anti_patterns, sd->anti_patterns_count);
                 fputc(']', f);

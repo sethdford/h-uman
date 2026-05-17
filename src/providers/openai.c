@@ -371,6 +371,25 @@ static hu_error_t openai_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
     hu_json_value_t *temp_val = hu_json_number_new(alloc, temperature);
     hu_json_object_set(alloc, root, "temperature", temp_val);
 
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            bool stop_ok = true;
+            for (size_t i = 0; i < request->stop_sequences_count && stop_ok; i++) {
+                hu_json_value_t *sv = hu_json_string_new(alloc, request->stop_sequences[i],
+                                                         strlen(request->stop_sequences[i]));
+                if (!sv) {
+                    hu_json_free(alloc, stop_arr);
+                    stop_ok = false;
+                } else {
+                    hu_json_array_push(alloc, stop_arr, sv);
+                }
+            }
+            if (stop_ok)
+                hu_json_object_set(alloc, root, "stop", stop_arr);
+        }
+    }
+
     if (request->response_format && request->response_format_len > 0) {
         hu_json_value_t *rf_obj = hu_json_object_new(alloc);
         if (rf_obj) {
@@ -455,9 +474,9 @@ static hu_error_t openai_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
                 size_t tc_count = tc_arr->data.array.len;
                 if (tc_count > SIZE_MAX / sizeof(hu_tool_call_t))
                     tc_count = 0;
-                hu_tool_call_t *tcs = tc_count
-                    ? (hu_tool_call_t *)alloc->alloc(alloc->ctx, tc_count * sizeof(hu_tool_call_t))
-                    : NULL;
+                hu_tool_call_t *tcs = tc_count ? (hu_tool_call_t *)alloc->alloc(
+                                                     alloc->ctx, tc_count * sizeof(hu_tool_call_t))
+                                               : NULL;
                 if (tcs) {
                     memset(tcs, 0, tc_count * sizeof(hu_tool_call_t));
                     size_t valid = 0;
@@ -1024,6 +1043,25 @@ static hu_error_t openai_stream_chat(void *ctx, hu_allocator_t *alloc,
     hu_json_object_set(alloc, root, "model", hu_json_string_new(alloc, model, model_len));
     hu_json_object_set(alloc, root, "temperature", hu_json_number_new(alloc, temperature));
     hu_json_object_set(alloc, root, "stream", hu_json_bool_new(alloc, true));
+
+    if (request->stop_sequences && request->stop_sequences_count > 0) {
+        hu_json_value_t *stop_arr = hu_json_array_new(alloc);
+        if (stop_arr) {
+            bool stop_ok = true;
+            for (size_t i = 0; i < request->stop_sequences_count && stop_ok; i++) {
+                hu_json_value_t *sv = hu_json_string_new(alloc, request->stop_sequences[i],
+                                                         strlen(request->stop_sequences[i]));
+                if (!sv) {
+                    hu_json_free(alloc, stop_arr);
+                    stop_ok = false;
+                } else {
+                    hu_json_array_push(alloc, stop_arr, sv);
+                }
+            }
+            if (stop_ok)
+                hu_json_object_set(alloc, root, "stop", stop_arr);
+        }
+    }
 
     if (request->response_format && request->response_format_len > 0) {
         hu_json_value_t *rf_obj = hu_json_object_new(alloc);

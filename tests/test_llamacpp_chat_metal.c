@@ -28,12 +28,24 @@
 
 #include <stdio.h>
 
-#ifdef HU_ENABLE_LLAMACPP
-#include "llama.h"
+/* The CI feature-flags matrix passes -DHU_ENABLE_LLAMACPP=ON to
+ * exercise the link path, but Linux runners don't init the vendored
+ * `third_party/llama.cpp` submodule (size). When llama.cpp's header
+ * isn't reachable, the CMake discovery chain at CMakeLists.txt:1605
+ * falls through to the stub provider with empty HU_LLAMACPP_INCLUDE_DIRS,
+ * so the test compiles but emits NOT_SUPPORTED at runtime. Guard the
+ * llama.h include with __has_include so we don't fatal-error in that
+ * path while still proving the link mirror works when the header IS
+ * available (rl_sota preset locally, Apple macOS + Metal CI). */
+#if defined(HU_ENABLE_LLAMACPP) && defined(__has_include)
+#  if __has_include("llama.h")
+#    include "llama.h"
+#    define HU_TEST_LLAMA_H_AVAILABLE 1
+#  endif
 #endif
 
 static void test_human_core_test_links_llama_when_enabled(void) {
-#ifdef HU_ENABLE_LLAMACPP
+#if defined(HU_ENABLE_LLAMACPP) && defined(HU_TEST_LLAMA_H_AVAILABLE)
     /* Calling any llama_* symbol from this test object proves the
      * test-binary link mirror at CMakeLists.txt:2191-2211 is intact.
      * llama_print_system_info() is a one-line printf-style helper
@@ -44,6 +56,9 @@ static void test_human_core_test_links_llama_when_enabled(void) {
     /* Sanity-check the string isn't empty — proves the function
      * actually executed and didn't get inlined to a NULL stub. */
     HU_ASSERT_TRUE(info[0] != '\0');
+#elif defined(HU_ENABLE_LLAMACPP)
+    fprintf(stderr, "[skip] HU_ENABLE_LLAMACPP defined but llama.h "
+                    "not reachable — submodule not initialized\n");
 #else
     fprintf(stderr, "[skip] HU_ENABLE_LLAMACPP not defined — link-mirror "
                     "test only meaningful in rl_sota preset\n");

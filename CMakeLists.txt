@@ -34,6 +34,10 @@ option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
 option(HU_ENABLE_NEURAL_MEMORY "W10 neural memory placeholder (schema/ONNX path; default OFF)" OFF)
+# Init 13: DeltaKV + SWAN KV-cache compression. Pairs with W10 neural memory;
+# default OFF until the codecs meet the TVD < 1% / ≤ 2 ms / ≤ +40 KB binary
+# gates documented in docs/plans/2026-05-11-init-13-kv-compression.md.
+option(HU_ENABLE_KV_COMPRESSION "Init 13 KV-cache compression (DeltaKV + SWAN)" OFF)
 # W13: learning loop (LoRA + DPO from W4/W5/W3 signals). Defaults follow ML.
 if(HU_ENABLE_ML)
     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" ON)
@@ -370,6 +374,7 @@ set(HU_CORE_SOURCES
     src/core/error.c
     src/core/arena.c
     src/core/string.c
+    src/core/io_secure.c
     src/core/json.c
     src/core/http.c
     src/core/vertex_auth.c
@@ -397,6 +402,7 @@ set(HU_CORE_SOURCES
     src/doctor.c
     src/doctor_fix.c
     src/humanness.c
+    src/channels/channel_class.c
     src/channels/channel_monitor.c
     src/memory/evolved_opinions.c
     src/status.c
@@ -453,6 +459,7 @@ set(HU_CORE_SOURCES
     src/observability/bth_metrics.c
     src/observability/otlp.c
     src/observability/background_registry.c
+    src/observability/validator_telemetry.c
     src/tunnel/none.c
     src/tunnel/root.c
     src/gateway/gateway.c
@@ -506,6 +513,7 @@ set(HU_CORE_SOURCES
     src/agent/context.c
     src/agent/prompt.c
     src/agent/memory_loader.c
+    src/agent/channel_trust.c
     src/agent/agent_definition.c
     src/agent/agent_git.c
     src/agent/dispatcher.c
@@ -546,9 +554,23 @@ set(HU_CORE_SOURCES
     src/agent/preferences.c
     src/agent/awareness.c
     src/agent/outcomes.c
+    src/agent/output_validator.c
+    src/agent/output_validator_chain.c
+    src/agent/stop_sequence_registry.c
+    src/agent/validators/response_guard_validator.c
+    src/agent/validators/channel_tags_validator.c
+    src/agent/validators/ai_phrases_validator.c
+    src/agent/validators/formal_structure_validator.c
+    src/agent/validators/cot_audit_validator.c
+    src/agent/validators/persona_narrator_validator.c
+    src/agent/validators/assistant_closer_validator.c
+    src/agent/validators/role_consistency_validator.c
+    src/agent/validators/persona_fidelity_validator.c
+    src/agent/validators/default_chains.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/filler_recency.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
     src/context/theory_of_mind.c
@@ -656,6 +678,7 @@ set(HU_CORE_SOURCES
     src/providers/openai.c
     src/providers/anthropic.c
     src/providers/gemini.c
+    src/providers/structured_output.c
     src/providers/ollama.c
     src/providers/openrouter.c
     src/providers/compatible.c
@@ -684,6 +707,7 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
+    src/memory/minja_guard.c
     src/memory/hallucination_guard.c
     # W7: graph.h is the internal graph API. Direct includes from outside
     # src/memory/ and tests/ are deprecated — callers should migrate to
@@ -696,6 +720,8 @@ set(HU_CORE_SOURCES
     src/memory/cross_graph.c
     src/memory/erasure.c
     src/memory/neural_memory.c
+    # Init 13 KV-cache compression sources are guarded by HU_ENABLE_KV_COMPRESSION
+    # and appended below so MinSizeRel binaries stay flat when the feature is off.
     src/agent/self_rag.c
     src/agent/self_rag_atomic.c
     src/agent/self_rag_inline.c
@@ -1068,6 +1094,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/auto_profile.c
     src/persona/auto_tune.c
     src/persona/voice_maturity.c
+    src/persona/style_mirror.c
     src/persona/style_clone.c
     src/persona/training.c
     src/persona/life_sim.c
@@ -1568,6 +1595,14 @@ if(HU_ENABLE_LEARNING)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
+endif()
+if(HU_ENABLE_KV_COMPRESSION)
+    target_sources(human_core PRIVATE
+        src/memory/kv_compressor.c
+        src/memory/kv_deltakv.c
+        src/memory/kv_swan.c
+    )
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
 if(HU_ENABLE_MCP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_MCP=1)
@@ -2091,6 +2126,25 @@ if(HU_ENABLE_TOPOLOGY_CHECK AND NOT WIN32)
         VERBATIM)
     add_dependencies(human human_topology_check)
 endif()
+# PCTT Task 9 — regression guard: prevent the three hardcoded DECISION-bucket
+# fillers from being reintroduced under src/ after PCTT Task 4 deletes them.
+# data/eval_*.json preserves the strings as fixtures and is excluded by the
+# script. The guard is ALL (runs on every `cmake --build --preset dev`) but
+# honours the HU_SKIP_FILLER_GUARD=1 env-var bypass for Wave 2 in-flight
+# builds where Task 4 has not yet merged. Flip to remove the bypass once
+# Task 4 lands on main.
+# Skip on Windows (script is POSIX bash).
+if(NOT WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh")
+    # Defense-in-depth: skip silently if tools/ wasn't copied into the build
+    # context (the Dockerfile must COPY tools/ explicitly — see Dockerfile).
+    # Local dev and CI runners always have tools/ so the guard runs there.
+    add_custom_target(human_filler_guard
+        ALL
+        COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check-no-hardcoded-fillers.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Checking no hardcoded fillers regressed (PCTT Task 9)"
+        VERBATIM)
+endif()
 # Embed Info.plist for macOS TCC (accessibility, AppleEvents) identity
 if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/resources/Info.plist")
     target_link_options(human PRIVATE
@@ -2433,6 +2487,14 @@ target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_T
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
+if(HU_ENABLE_KV_COMPRESSION)
+    target_sources(human_core_test PRIVATE
+        src/memory/kv_compressor.c
+        src/memory/kv_deltakv.c
+        src/memory/kv_swan.c
+    )
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_KV_COMPRESSION=1)
+endif()
 target_compile_options(human_core_test PRIVATE -UNDEBUG)
 if(Threads_FOUND)
     target_link_libraries(human_core_test PUBLIC Threads::Threads)
@@ -2604,6 +2666,8 @@ set(HU_TEST_SOURCES
     tests/test_personal_model_atomic_save.c
     tests/test_personal_model_fidelity_v2.c
     tests/test_persona_directive_channels.c
+    tests/test_filler_recency.c
+    tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
     tests/test_markdown_loader.c
@@ -2627,6 +2691,7 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_io_secure.c
     tests/test_slice.c
     tests/test_memory.c
     tests/test_sql_transaction.c
@@ -2756,6 +2821,7 @@ set(HU_TEST_SOURCES
     tests/test_cli.c
     tests/test_update.c
     tests/test_memory_engines_ext.c
+    tests/test_memory_poisoning.c
     tests/test_runtime.c
     tests/test_runtime_bundle.c
     tests/test_util_modules.c
@@ -2811,6 +2877,16 @@ set(HU_TEST_SOURCES
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
+    tests/test_output_validator.c
+    tests/test_chain_failure_paths.c
+    tests/test_agent_fail_path_regressions.c
+    tests/test_validators_builtin.c
+    tests/test_pattern_c_paths.c
+    tests/test_validators_persona_safety.c
+    tests/test_validator_reject_discards.c
+    tests/test_validator_telemetry.c
+    tests/test_validator_chain_cache.c
+    tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c
@@ -2835,6 +2911,9 @@ set(HU_TEST_SOURCES
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_personal_model_contradicts.c
+    tests/test_channel_trust.c
+    tests/test_minja_guard.c
+    tests/test_frontier_prompt.c
     tests/test_w11_abstain_calibration.c
     tests/test_fast_capture.c
     tests/test_promotion.c
@@ -3018,6 +3097,7 @@ set(HU_TEST_SOURCES
     tests/test_planner_mcts_wiring.c
     tests/test_cdp.c
     tests/test_emotional_cognition.c
+    tests/test_emotional_contagion.c
     tests/test_evolving_cognition.c
     tests/test_metacognition.c
     tests/test_humanness_frontiers.c
@@ -3029,7 +3109,7 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c)
 list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
@@ -3042,6 +3122,9 @@ if(HU_ENABLE_CARTESIA)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
+endif()
+if(HU_ENABLE_KV_COMPRESSION)
+    list(APPEND HU_TEST_SOURCES tests/test_kv_compressor.c)
 endif()
 
 # Music preview tests (pure computation — always compiled)
@@ -3062,6 +3145,7 @@ list(APPEND HU_TEST_SOURCES tests/test_agent_registry.c)
 list(APPEND HU_TEST_SOURCES tests/test_pwa.c)
 list(APPEND HU_TEST_SOURCES tests/test_integration.c)
 list(APPEND HU_TEST_SOURCES tests/test_hook_pipeline.c)
+list(APPEND HU_TEST_SOURCES tests/test_agent_dispatch_hooks.c)
 list(APPEND HU_TEST_SOURCES tests/test_config_reload.c)
 list(APPEND HU_TEST_SOURCES tests/test_plugin_hooks.c)
 # Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers.
@@ -3110,6 +3194,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_context_engine.c
     tests/test_exec_env.c
     tests/test_channel_monitor.c
+    tests/test_channel_class.c
     tests/test_context_engine_rag.c
     tests/test_doctor_fix.c
     tests/test_humanness.c
@@ -3152,6 +3237,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_bootstrap.c
     tests/test_thread_pool.c
     tests/test_permission.c
+    tests/test_shell_sandbox.c
     tests/test_mcp_manager.c
     tests/test_compaction_structured.c
     tests/test_session_persist.c
@@ -3161,6 +3247,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_adversarial_dos_protocol.c
     tests/test_adversarial_concurrency.c
     tests/test_adversarial_integration.c
+    tests/test_stop_sequences.c
+    tests/test_structured_output.c
 )
 
 # Phase 5 Task 2 (RL SOTA) — bootstrap_ci tests live in the same gated
@@ -3200,6 +3288,7 @@ target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests
     # Phase 3 reward_model_priv.h (H2 fix).
     ${HU_ROOT}/src/ml)
 target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
+target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
 if(HU_ENABLE_APPLE_INTELLIGENCE)
@@ -3217,6 +3306,9 @@ if(HU_ENABLE_FEEDS)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_AUTHENTIC=1)
+endif()
+if(HU_ENABLE_KV_COMPRESSION)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
 if(UNIX AND NOT WIN32)
     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)
@@ -3890,6 +3982,14 @@ if(HU_ENABLE_FUZZ)
     target_link_libraries(fuzz_session_deserialization PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_session_deserialization PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
     target_link_options(fuzz_session_deserialization PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+
+    add_executable(fuzz_output_validator_chain fuzz/fuzz_output_validator_chain.c)
+    set_target_properties(fuzz_output_validator_chain PROPERTIES LINKER_LANGUAGE CXX)
+    target_compile_definitions(fuzz_output_validator_chain PRIVATE HU_IS_TEST=1)
+    target_compile_options(fuzz_output_validator_chain PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(fuzz_output_validator_chain PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
+    target_compile_options(fuzz_output_validator_chain PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_output_validator_chain PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
 endif()
 
 # Benchmark suite (micro-benchmarks of core operations)

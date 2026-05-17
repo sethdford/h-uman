@@ -2,11 +2,16 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/string.h"
 #include "human/persona.h"
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 static void cli_parse_null_argv_returns_invalid(void) {
     hu_persona_cli_args_t out = {0};
@@ -147,8 +152,8 @@ static void cli_parse_merge_requires_at_least_six_args(void) {
 
 static void cli_parse_create_ok(void) {
     hu_persona_cli_args_t out = {0};
-    const char *argv[] = {"human", "persona", "create", "new-persona", "--from-response",
-                          "/tmp/response.json"};
+    const char *argv[] = {"human",       "persona",         "create",
+                          "new-persona", "--from-response", "/tmp/response.json"};
     hu_error_t err = hu_persona_cli_parse(6, argv, &out);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_CREATE);
@@ -165,8 +170,8 @@ static void cli_parse_create_requires_name(void) {
 
 static void cli_parse_import_ok(void) {
     hu_persona_cli_args_t out = {0};
-    const char *argv[] = {"human", "persona", "import", "imported", "--from-file",
-                          "/tmp/persona.json"};
+    const char *argv[] = {"human",    "persona",     "import",
+                          "imported", "--from-file", "/tmp/persona.json"};
     hu_error_t err = hu_persona_cli_parse(6, argv, &out);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_IMPORT);
@@ -259,6 +264,112 @@ static void cli_run_feedback_apply_without_name_returns_invalid(void) {
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ---- PCTT Task 7: filler parse tests ---- */
+
+static void cli_parse_filler_add_ok(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human", "persona",   "filler",   "mypersona",
+                          "add",   "--channel", "imessage", "hmm"};
+    hu_error_t err = hu_persona_cli_parse(8, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_FILLER_ADD);
+    HU_ASSERT_STR_EQ(out.filler_channel, "imessage");
+    HU_ASSERT_STR_EQ(out.filler_text, "hmm");
+    HU_ASSERT_STR_EQ(out.name, "mypersona");
+}
+
+static void cli_parse_filler_list_ok(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human", "persona", "filler", "mypersona", "list", "--channel", "slack"};
+    hu_error_t err = hu_persona_cli_parse(7, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_FILLER_LIST);
+    HU_ASSERT_STR_EQ(out.filler_channel, "slack");
+}
+
+static void cli_parse_filler_remove_ok(void) {
+    hu_persona_cli_args_t out = {0};
+    const char *argv[] = {"human",     "persona", "filler",  "mypersona", "remove",
+                          "--channel", "slack",   "--index", "2"};
+    hu_error_t err = hu_persona_cli_parse(9, argv, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.action, HU_PERSONA_ACTION_FILLER_REMOVE);
+    HU_ASSERT_STR_EQ(out.filler_channel, "slack");
+    HU_ASSERT_EQ(out.filler_index, 2);
+}
+
+static void cli_run_filler_add_persists(void) {
+#if defined(__unix__) || defined(__APPLE__)
+    char tmpdir[] = "/tmp/human_persona_filler_cli_test_XXXXXX";
+    if (!mkdtemp(tmpdir))
+        return;
+
+    setenv("HU_PERSONA_DIR", tmpdir, 1);
+
+    hu_allocator_t alloc = hu_system_allocator();
+
+    /* Build a minimal persona with one overlay (no fillers yet). */
+    hu_persona_t p = {0};
+    p.name = hu_strdup(&alloc, "testpersona");
+    p.name_len = p.name ? strlen(p.name) : 0;
+    p.identity = hu_strdup(&alloc, "test identity");
+    if (!p.name || !p.identity) {
+        hu_persona_deinit(&alloc, &p);
+        unsetenv("HU_PERSONA_DIR");
+        rmdir(tmpdir);
+        return;
+    }
+    p.overlays = (hu_persona_overlay_t *)alloc.alloc(alloc.ctx, sizeof(hu_persona_overlay_t));
+    HU_ASSERT_NOT_NULL(p.overlays);
+    memset(p.overlays, 0, sizeof(hu_persona_overlay_t));
+    p.overlays_count = 1;
+    p.overlays[0].channel = hu_strdup(&alloc, "imessage");
+    HU_ASSERT_NOT_NULL(p.overlays[0].channel);
+
+    hu_error_t err = hu_persona_creator_write(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
+    if (err != HU_OK) {
+        unsetenv("HU_PERSONA_DIR");
+        char path[512];
+        snprintf(path, sizeof(path), "%s/testpersona.json", tmpdir);
+        unlink(path);
+        rmdir(tmpdir);
+        HU_ASSERT_EQ(err, HU_OK);
+        return;
+    }
+
+    /* Run filler add via the CLI run path. */
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_FILLER_ADD;
+    args.name = "testpersona";
+    args.filler_channel = "imessage";
+    args.filler_text = "hmm";
+    args.filler_index = -1;
+
+    err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Reload and verify the filler persisted. */
+    hu_persona_t loaded = {0};
+    err = hu_persona_load(&alloc, "testpersona", strlen("testpersona"), &loaded);
+    unsetenv("HU_PERSONA_DIR");
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/testpersona.json", tmpdir);
+    unlink(path);
+    rmdir(tmpdir);
+
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(loaded.overlays_count, 1);
+    HU_ASSERT_NOT_NULL(loaded.overlays);
+    HU_ASSERT_EQ(loaded.overlays[0].filler_bank_count, 1);
+    HU_ASSERT_NOT_NULL(loaded.overlays[0].filler_bank);
+    HU_ASSERT_STR_EQ(loaded.overlays[0].filler_bank[0], "hmm");
+
+    hu_persona_deinit(&alloc, &loaded);
+#endif
+}
+
 void run_persona_cli_tests(void) {
     HU_TEST_SUITE("PersonaCli");
 
@@ -293,10 +404,18 @@ void run_persona_cli_tests(void) {
     HU_RUN_TEST(cli_run_feedback_apply_with_name_returns_ok_under_test);
     HU_RUN_TEST(cli_run_feedback_apply_without_name_returns_invalid);
     HU_RUN_TEST(cli_run_eval_embedded_default_passes);
+
+    /* PCTT Task 7 — filler subcommand tests */
+    HU_RUN_TEST(cli_parse_filler_add_ok);
+    HU_RUN_TEST(cli_parse_filler_list_ok);
+    HU_RUN_TEST(cli_parse_filler_remove_ok);
+    HU_RUN_TEST(cli_run_filler_add_persists);
 }
 
 #else
 
-void run_persona_cli_tests(void) { (void)0; }
+void run_persona_cli_tests(void) {
+    (void)0;
+}
 
 #endif /* HU_ENABLE_PERSONA */

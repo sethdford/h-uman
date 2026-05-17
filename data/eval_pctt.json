@@ -1,0 +1,35 @@
+{
+  "name": "PCTT Echo Regression Eval",
+  "description": "Drives 20+ incoming messages through the persona-driven filler selector with a fixed synthetic 5-entry bank that contains NONE of the incoming strings. Asserts the emitted filler is never byte-identical to the incoming message (AC-7) and that text_fast channels never trigger (AC-1).",
+  "synthetic_persona_bank": [
+    "hmm let me think",
+    "one sec",
+    "oh that's interesting",
+    "okay give me a moment",
+    "thinking on it"
+  ],
+  "corpus": [
+    { "incoming": "ooh that's a tough one", "channel": "slack", "note": "Original echo failure case from eval_blinded_ab.json:300 — when the model was free to generate fillers, it echoed this verbatim. PCTT must never echo." },
+    { "incoming": "What's your take on splitting the inventory schema vs keeping it flat? Curious if you've seen Postgres patterns that handle both reads and bulk writes well at this scale.", "channel": "slack", "note": "Long technical question — should trigger filler" },
+    { "incoming": "How do I think about staffing the data team given the FY26 freeze?", "channel": "slack", "note": "Medium decision question" },
+    { "incoming": "k", "channel": "slack", "note": "Single char — must not trigger" },
+    { "incoming": "thanks", "channel": "slack", "note": "Short ack — must not trigger" },
+    { "incoming": "Is it worth migrating to Bun or sticking with Node 22 LTS?", "channel": "discord", "note": "Medium question on Discord" },
+    { "incoming": "Why did the build go red on the Thursday push?", "channel": "discord", "note": "Diagnostic question" },
+    { "incoming": "ok cool", "channel": "discord", "note": "Short ack" },
+    { "incoming": "What's our take on monorepo vs polyrepo for the new platform team — given how much infra glue we already share between the two existing repos?", "channel": "slack", "note": "Long architectural question — should trigger" },
+    { "incoming": "Can you remind me of the AGI Frontiers timeline?", "channel": "slack", "note": "Recall question" },
+    { "incoming": "ooh that's a tough one", "channel": "imessage", "note": "Same echo case on iMessage — must NOT trigger per AC-1 (text_fast class)" },
+    { "incoming": "What's the strategy for FY27 if the data team headcount stays flat?", "channel": "imessage", "note": "Long question on iMessage — must NOT trigger per AC-1" },
+    { "incoming": "Why is auth so slow today?", "channel": "imessage", "note": "Even a real question — iMessage never triggers" },
+    { "incoming": "hmm let me think", "channel": "slack", "note": "Incoming text matches a BANK entry — selector must still not echo (must not pick this exact filler when chat_id matches a recent emit; but even if not, the test just checks emit != incoming)" },
+    { "incoming": "What if we just kept all three layers and let the orchestrator decide which to invoke per request type?", "channel": "discord", "note": "Long design question" },
+    { "incoming": "got it", "channel": "slack", "note": "Short" },
+    { "incoming": "Have you ever thought about why texting back fast vs slow signals something completely different on text vs voice?", "channel": "slack", "note": "Philosophical Q referencing the Rendle-Short finding" },
+    { "incoming": "Yeah I'd be down — what time?", "channel": "imessage", "note": "Casual iMessage — never triggers" },
+    { "incoming": "I dunno man, what do you think we should do about the deploy cadence?", "channel": "slack", "note": "Long advice question" },
+    { "incoming": "What does the eval say about persona tone vs lexical fidelity?", "channel": "discord", "note": "Question referencing TwinVoice research" },
+    { "incoming": "Could you walk me through how the LRU eviction in the recency module decides which chat to drop?", "channel": "slack", "note": "Long technical recall question" },
+    { "incoming": "lol", "channel": "discord", "note": "Tiny laugh — must not trigger" }
+  ]
+}

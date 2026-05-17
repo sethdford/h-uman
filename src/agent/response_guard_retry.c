@@ -7,12 +7,12 @@
 
 #include <string.h>
 
-#define HU_GUARD_RETRY_USER_MAX 4096
+#define HU_GUARD_RETRY_USER_MAX    4096
 #define HU_GUARD_RETRY_MODEL_CLOUD "gemini-3.1-flash-lite-preview"
 
 /* Match agent_turn last-mile: guard does not strip `<tool_call>` XML leaks. */
 static hu_error_t response_guard_retry_strip_text_tool_calls(hu_allocator_t *alloc, char **out,
-                                                              size_t *out_len) {
+                                                             size_t *out_len) {
     if (!alloc || !out || !*out || !out_len || *out_len == 0)
         return HU_OK;
     char *cur = *out;
@@ -45,7 +45,10 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
     static const char repair_instruction[] =
         "Your previous draft was invalid (internal model tokens or runaway repetition). "
         "Reply ONLY with the final human-visible text for the user's latest message below. "
-        "Short, natural, channel-appropriate. No analysis, XML, markdown fences, or filler.";
+        "Short, natural, channel-appropriate. No analysis, XML, markdown fences, or filler. "
+        "Do not think out loud or narrate your reasoning — no 'Let me think' or 'Step 1:' prose. "
+        "Do not refer to yourself in third-person by name (e.g. 'As Aria, I...'). "
+        "Do not end with AI-helper closers (e.g. 'Is there anything else I can help with?').";
 
     if (!alloc || !prov || !prov->vtable || !prov->vtable->chat || !out || !out_len || !user_msg)
         return HU_ERR_INVALID_ARGUMENT;
@@ -84,8 +87,8 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
     hu_error_t err = prov->vtable->chat(prov->ctx, alloc, &req, model, model_len, 0.2, &resp);
     if (err != HU_OK) {
         if (obs)
-            hu_log_warn("response_guard_retry", obs,
-                        "slim retry chat failed on provider (err=%s)", hu_error_string(err));
+            hu_log_warn("response_guard_retry", obs, "slim retry chat failed on provider (err=%s)",
+                        hu_error_string(err));
         hu_chat_response_free(alloc, &resp);
         return err;
     }
@@ -121,10 +124,10 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
 }
 
 hu_error_t hu_response_guard_retry_slim(hu_allocator_t *alloc, hu_observer_t *obs,
-                                         const hu_config_t *cfg, hu_provider_t *primary,
-                                         const char *model, size_t model_len, const char *user_msg,
-                                         size_t user_msg_len, char **out, size_t *out_len,
-                                         hu_guard_report_t *guard_report) {
+                                        const hu_config_t *cfg, hu_provider_t *primary,
+                                        const char *model, size_t model_len, const char *user_msg,
+                                        size_t user_msg_len, char **out, size_t *out_len,
+                                        hu_guard_report_t *guard_report) {
     if (!alloc || !primary || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -164,7 +167,7 @@ hu_error_t hu_response_guard_retry_slim(hu_allocator_t *alloc, hu_observer_t *ob
                         "slim retry: falling back to cloud provider '%.*s' after primary err=%s",
                         (int)k_fallback[i].len, k_fallback[i].name, hu_error_string(err));
         hu_error_t e2 = dispatch_slim_chat(alloc, obs, &fb, cloud_model, cloud_model_len, user_msg,
-                                            user_msg_len, out, out_len, guard_report);
+                                           user_msg_len, out, out_len, guard_report);
         if (fb.vtable && fb.vtable->deinit)
             fb.vtable->deinit(fb.ctx, alloc);
         if (e2 == HU_OK && *out && *out_len > 0)

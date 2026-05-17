@@ -892,7 +892,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     }
 
     if (config->boundary_context && config->boundary_context_len > 0) {
-        err = append(alloc, &buf, &len, &cap, config->boundary_context, config->boundary_context_len);
+        err =
+            append(alloc, &buf, &len, &cap, config->boundary_context, config->boundary_context_len);
         if (err != HU_OK)
             goto fail;
         err = append(alloc, &buf, &len, &cap, "\n", 1);
@@ -911,12 +912,26 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
         if (err != HU_OK)
             goto fail;
     }
+    /* Sprint 6 US-14: Voice maturity directive — injected alongside somatic/mood context. */
+    if (config->voice_maturity_directive && config->voice_maturity_directive_len > 0) {
+        err = append(alloc, &buf, &len, &cap, "\n", 1);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, config->voice_maturity_directive,
+                     config->voice_maturity_directive_len);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, "\n", 1);
+        if (err != HU_OK)
+            goto fail;
+    }
     if (config->presence_context && config->presence_context_len > 0) {
         static const char presence_hdr[] = "\n## Presence\n\n";
         err = append(alloc, &buf, &len, &cap, presence_hdr, sizeof(presence_hdr) - 1);
         if (err != HU_OK)
             goto fail;
-        err = append(alloc, &buf, &len, &cap, config->presence_context, config->presence_context_len);
+        err =
+            append(alloc, &buf, &len, &cap, config->presence_context, config->presence_context_len);
         if (err != HU_OK)
             goto fail;
         err = append(alloc, &buf, &len, &cap, "\n", 1);

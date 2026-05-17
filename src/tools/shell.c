@@ -1,3 +1,4 @@
+#include "human/tools/shell.h"
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -8,6 +9,7 @@
 #include "human/security/sandbox.h"
 #include "human/security/skill_trust.h"
 #include "human/tool.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +33,33 @@ typedef struct hu_shell_ctx {
     size_t workspace_dir_len;
     hu_security_policy_t *policy;
 } hu_shell_ctx_t;
+
+/*
+ * Sandbox deny-by-default predicate.
+ *
+ * If the operator configured a sandbox on the policy, we must NOT silently
+ * fall through to bare /bin/sh unless at least one sandbox method actually
+ * took effect on this process. Doing so would defeat the operator's intent
+ * and the high-risk marker on src/tools/. See include/human/tools/shell.h
+ * for parameter semantics.
+ *
+ * Truth table:
+ *   policy->sandbox == NULL ........................ → false (allow bare launch)
+ *   apply_applied || wrap_succeeded ................ → false (process is sandboxed)
+ *   otherwise (sandbox configured but ineffective) . → true  (deny)
+ *
+ * Note: the earlier signature had a wrap_attempted parameter that combined
+ * with !wrap_succeeded to force a deny. That short-circuited the
+ * apply_applied check — if the kernel sandbox locked the process down AND
+ * wrap_command was reached but failed, the predicate denied a process that
+ * was already sandboxed. Removed (cursor-bot review on PR #90).
+ */
+bool hu_shell_must_deny_unsandboxed(const hu_security_policy_t *policy, bool apply_applied,
+                                    bool wrap_succeeded) {
+    if (!policy || !policy->sandbox)
+        return false;
+    return !(apply_applied || wrap_succeeded);
+}
 
 /*
  * SECURITY WARNING: This tool passes commands directly to /bin/sh -c.
@@ -180,15 +209,26 @@ static hu_error_t shell_execute(void *ctx, hu_allocator_t *alloc, const hu_json_
             }
         }
 
-        /* Apply kernel-level sandbox (Landlock, seccomp) */
+        /* Apply kernel-level sandbox (Landlock, seccomp).
+           Tracks whether apply() actually took effect so the deny-by-default
+           predicate below can distinguish "no sandbox configured" (allow bare
+           exec) from "sandbox configured but unavailable" (must deny). */
+        bool apply_applied = false;
         if (s->policy && s->policy->sandbox && s->policy->sandbox->vtable &&
             s->policy->sandbox->vtable->apply) {
             hu_error_t serr = s->policy->sandbox->vtable->apply(s->policy->sandbox->ctx);
-            if (serr != HU_OK && serr != HU_ERR_NOT_SUPPORTED)
+            if (serr == HU_OK) {
+                apply_applied = true;
+            } else if (serr != HU_ERR_NOT_SUPPORTED) {
                 _exit(125);
+            }
         }
 
-        /* Wrap command with sandbox if available (argv-wrapping backends) */
+        /* Wrap command with sandbox if available (argv-wrapping backends).
+           A failed wrap is not by itself a deny: if kernel apply succeeded
+           above, the process is already contained and the wrap miss is
+           informational. The deny predicate below makes the final call. */
+        bool wrap_succeeded = false;
         if (s->policy && s->policy->sandbox && hu_sandbox_is_available(s->policy->sandbox)) {
             const char *orig_argv[] = {"/bin/sh", "-c", cmd, NULL};
             const char *wrapped[16];
@@ -196,11 +236,20 @@ static hu_error_t shell_execute(void *ctx, hu_allocator_t *alloc, const hu_json_
             if (hu_sandbox_wrap_command(s->policy->sandbox, orig_argv, 3, wrapped, 15,
                                         &wrapped_count) == HU_OK &&
                 wrapped_count > 0) {
+                wrap_succeeded = true;
                 wrapped[wrapped_count] = NULL;
                 execvp(wrapped[0], (char *const *)wrapped);
                 _exit(127);
             }
         }
+
+        /* DENY-BY-DEFAULT: a sandbox was configured but neither kernel apply
+           nor argv-wrap actually protected this process. Refuse to exec
+           rather than silently running uncontained. Exit 125 mirrors the
+           apply-failure path above. */
+        if (hu_shell_must_deny_unsandboxed(s->policy, apply_applied, wrap_succeeded))
+            _exit(125);
+
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
         _exit(127);
     }
@@ -291,11 +340,10 @@ static void shell_deinit(void *ctx, hu_allocator_t *alloc) {
         alloc->free(alloc->ctx, s, sizeof(*s));
 }
 
-static hu_error_t shell_execute_streaming(void *ctx, hu_allocator_t *alloc,
-                                          const hu_json_value_t *args,
-                                          void (*on_chunk)(void *cb_ctx, const char *data, size_t len),
-                                          void *cb_ctx,
-                                          hu_tool_result_t *out) {
+static hu_error_t
+shell_execute_streaming(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                        void (*on_chunk)(void *cb_ctx, const char *data, size_t len), void *cb_ctx,
+                        hu_tool_result_t *out) {
     if (!on_chunk)
         return shell_execute(ctx, alloc, args, out);
 

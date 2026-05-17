@@ -34,9 +34,7 @@ const elements: HTMLElement[] = [];
 const mount = async (
   apply: (el: HuDirectiveTelemetryTile) => void = () => {},
 ): Promise<HuDirectiveTelemetryTile> => {
-  const el = document.createElement(
-    "hu-directive-telemetry-tile",
-  ) as HuDirectiveTelemetryTile;
+  const el = document.createElement("hu-directive-telemetry-tile") as HuDirectiveTelemetryTile;
   apply(el);
   document.body.appendChild(el);
   elements.push(el);
@@ -80,9 +78,7 @@ describe("hu-directive-telemetry-tile", () => {
      * documented "<variant>: <count> fires (<pct>%)" shape from
      * design A.md §3.4. */
     const casualEmoji = segments[3]!;
-    expect(casualEmoji.getAttribute("aria-label")).toBe(
-      "casual_emoji: 113 fires (61.4%)",
-    );
+    expect(casualEmoji.getAttribute("aria-label")).toBe("casual_emoji: 113 fires (61.4%)");
     expect((casualEmoji as HTMLElement).style.flexGrow).toBe("113");
 
     const legend = root.querySelector(".legend");

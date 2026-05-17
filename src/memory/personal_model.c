@@ -1,4 +1,5 @@
 #include "human/memory/personal_model.h"
+#include "human/memory/minja_guard.h"
 #include "human/persona.h"
 #include "human/platform.h"
 #include <ctype.h>
@@ -15,8 +16,12 @@
 
 /* Schema version — kept near the top so `hu_personal_model_init` can
  * stamp freshly-initialized models at the current version. The
- * persistence section re-uses this constant for the on-disk header. */
-#define HU_PM_VERSION  4u
+ * persistence section re-uses this constant for the on-disk header.
+ *
+ * SOTA-2026 init-09: v5 adds `hu_provenance_t` per fact + pending-facts
+ * quarantine queue. On-disk struct size grew; the existing version-mismatch
+ * path in the loader resets the model rather than partial-reads. */
+#define HU_PM_VERSION  5u
 
 void hu_personal_model_init(hu_personal_model_t *model) {
     if (!model)
@@ -931,7 +936,8 @@ static void bump_temporal(hu_personal_model_t *model, int64_t timestamp) {
 }
 
 hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *message,
-                                    size_t message_len, bool from_user, int64_t timestamp) {
+                                    size_t message_len, bool from_user, int64_t timestamp,
+                                    const hu_provenance_t *prov) {
     if (!model)
         return HU_ERR_INVALID_ARGUMENT;
     if (message_len > 0 && !message)
@@ -951,6 +957,32 @@ hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *mess
     if (message_len == 0)
         return HU_OK;
 
+    /* SOTA-2026 init-09 §2.4: provenance + MINJA gate.
+     *
+     * NULL is permitted (defaults to USER_DIRECT) only because the self-test
+     * harness at the bottom of this file and a handful of legacy tests pass
+     * NULL; production call sites in agent_turn.c / agent_stream.c /
+     * feeds/processor.c MUST pass a non-NULL hu_provenance_t derived from
+     * the active channel via `hu_channel_trust_stamp`. */
+    hu_provenance_t effective_prov;
+    if (prov) {
+        effective_prov = *prov;
+    } else {
+        effective_prov = hu_provenance_user_direct(timestamp);
+    }
+
+    /* MINJA / memory-injection gate for low-trust inbound content. A
+     * detected payload is quarantined silently: no style update, no
+     * fact extraction, no temporal bump. The interaction_count bump
+     * above is intentional — we still observed an interaction, just
+     * a poisoned one. */
+    if (effective_prov.tier <= HU_TRUST_THIRD_PARTY) {
+        if (hu_minja_detect(message, message_len, NULL)) {
+            hu_minja_quarantine_log(message, message_len, &effective_prov);
+            return HU_OK;
+        }
+    }
+
     bump_temporal(model, timestamp);
     update_style_from_message(&model->style, message, message_len, timestamp);
 
@@ -959,7 +991,18 @@ hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *mess
     if (err != HU_OK)
         return err;
 
-    return hu_personal_model_merge_facts(model, &extracted);
+    /* Stamp provenance on every extracted fact before merge — the
+     * checked merge consults `fact->provenance.tier` for the overwrite
+     * decision. */
+    for (size_t i = 0; i < extracted.fact_count; i++)
+        extracted.facts[i].provenance = effective_prov;
+
+    /* USER_DIRECT facts may promote matching pending entries. */
+    if (effective_prov.tier >= HU_TRUST_USER_DIRECT) {
+        (void)hu_personal_model_promote_pending_facts(model, &extracted, timestamp);
+    }
+
+    return hu_personal_model_merge_facts_checked(model, &extracted, &effective_prov);
 }
 
 hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
@@ -1014,6 +1057,205 @@ hu_error_t hu_personal_model_merge_facts(hu_personal_model_t *model,
         bump_topic(model, nf->object, ts);
     }
     return HU_OK;
+}
+
+/* ── SOTA-2026 init-09 §2.5: trust-gated merge + pending-facts queue ── */
+
+/* Find an index in pending_facts whose subject+predicate matches `nf`,
+ * or HU_PM_MAX_PENDING_FACTS if not found. */
+static size_t pending_fact_index(const hu_personal_model_t *model,
+                                 const hu_heuristic_fact_t *nf) {
+    for (size_t i = 0; i < model->pending_fact_count; i++) {
+        if (fact_key_dup(&model->pending_facts[i], nf))
+            return i;
+    }
+    return HU_PM_MAX_PENDING_FACTS;
+}
+
+/* Insert / corroborate a fact in the pending-facts quarantine queue.
+ * Returns true when the fact was inserted (or its corroboration count
+ * was bumped); false on overflow. */
+static bool pending_fact_admit(hu_personal_model_t *model,
+                               const hu_heuristic_fact_t *nf, int64_t ts) {
+    size_t idx = pending_fact_index(model, nf);
+    if (idx < model->pending_fact_count) {
+        /* Corroboration only when the new handle differs from the
+         * stored one — same source repeating itself never promotes. */
+        if (strncmp(model->pending_facts[idx].provenance.contact_handle,
+                    nf->provenance.contact_handle, HU_PROV_HANDLE_MAX) != 0 &&
+            model->pending_corroboration_count[idx] < 255) {
+            model->pending_corroboration_count[idx]++;
+        }
+        if (ts > model->pending_facts[idx].last_seen_at)
+            model->pending_facts[idx].last_seen_at = ts;
+        return true;
+    }
+    if (model->pending_fact_count >= HU_PM_MAX_PENDING_FACTS) {
+        /* Evict the lowest-corroboration entry to make room. */
+        size_t victim = 0;
+        for (size_t j = 1; j < model->pending_fact_count; j++) {
+            if (model->pending_corroboration_count[j] <
+                model->pending_corroboration_count[victim])
+                victim = j;
+        }
+        model->pending_facts[victim] =
+            model->pending_facts[model->pending_fact_count - 1];
+        model->pending_since[victim] =
+            model->pending_since[model->pending_fact_count - 1];
+        model->pending_corroboration_count[victim] =
+            model->pending_corroboration_count[model->pending_fact_count - 1];
+        model->pending_fact_count--;
+    }
+    model->pending_facts[model->pending_fact_count] = *nf;
+    model->pending_facts[model->pending_fact_count].last_seen_at = ts;
+    model->pending_since[model->pending_fact_count] = ts;
+    model->pending_corroboration_count[model->pending_fact_count] = 1;
+    model->pending_fact_count++;
+    return true;
+}
+
+/* Remove pending_facts[idx], compacting the queue. */
+static void pending_fact_remove(hu_personal_model_t *model, size_t idx) {
+    if (idx >= model->pending_fact_count)
+        return;
+    size_t last = model->pending_fact_count - 1;
+    if (idx != last) {
+        model->pending_facts[idx] = model->pending_facts[last];
+        model->pending_since[idx] = model->pending_since[last];
+        model->pending_corroboration_count[idx] =
+            model->pending_corroboration_count[last];
+    }
+    model->pending_fact_count--;
+}
+
+hu_error_t hu_personal_model_merge_facts_checked(hu_personal_model_t *model,
+                                                 const hu_fact_extract_result_t *facts,
+                                                 const hu_provenance_t *prov) {
+    if (!model || !facts)
+        return HU_ERR_INVALID_ARGUMENT;
+    int64_t ts = model->updated_at;
+    hu_trust_tier_t src_tier = prov ? prov->tier : HU_TRUST_USER_DIRECT;
+
+    for (size_t i = 0; i < facts->fact_count; i++) {
+        const hu_heuristic_fact_t *nf = &facts->facts[i];
+
+        /* Check existing live facts for a key collision. */
+        bool dup_live = false;
+        for (size_t j = 0; j < model->fact_count; j++) {
+            hu_heuristic_fact_t *ef = &model->facts[j];
+            if (!fact_key_dup(ef, nf))
+                continue;
+            dup_live = true;
+            /* MemoryGraft guard: a lower-trust source cannot overwrite
+             * a higher-trust stored fact. The contradiction is logged
+             * and the existing fact is preserved unchanged. */
+            if (!hu_trust_can_overwrite(nf->provenance.tier, ef->provenance.tier)) {
+                if (prov)
+                    hu_minja_quarantine_log(nf->object, strlen(nf->object), prov);
+                break;
+            }
+            /* Same-or-higher trust: refresh confidence + freshness +
+             * provenance (most recent observation wins). */
+            if (ts > ef->last_seen_at)
+                ef->last_seen_at = ts;
+            float lifted = ef->confidence + 0.1f * (nf->confidence - ef->confidence);
+            if (lifted > 1.0f)
+                lifted = 1.0f;
+            if (lifted < 0.0f)
+                lifted = 0.0f;
+            ef->confidence = lifted;
+            ef->provenance = nf->provenance;
+            bump_topic(model, nf->object, ts);
+            break;
+        }
+        if (dup_live)
+            continue;
+
+        /* THIRD_PARTY-or-below novel facts go to pending-quarantine
+         * rather than the live array. Promotion path:
+         *   - user re-states the fact in a USER_DIRECT message →
+         *     `hu_personal_model_promote_pending_facts`
+         *   - HU_PM_PENDING_FACT_PROMOTE_CORROBORATION distinct
+         *     low-trust sources corroborate (see admit()) */
+        if (src_tier <= HU_TRUST_THIRD_PARTY) {
+            (void)pending_fact_admit(model, nf, ts);
+            /* If corroboration hit promotion threshold, lift to live. */
+            size_t pidx = pending_fact_index(model, nf);
+            if (pidx < model->pending_fact_count &&
+                model->pending_corroboration_count[pidx] >=
+                    HU_PM_PENDING_FACT_PROMOTE_CORROBORATION &&
+                model->fact_count < HU_PM_MAX_FACTS) {
+                model->facts[model->fact_count] = model->pending_facts[pidx];
+                model->facts[model->fact_count].last_seen_at = ts;
+                model->fact_count++;
+                pending_fact_remove(model, pidx);
+                bump_topic(model, nf->object, ts);
+            }
+            continue;
+        }
+
+        /* FIRST_PARTY-or-higher novel facts go straight to live with
+         * the existing eviction policy. */
+        if (model->fact_count >= HU_PM_MAX_FACTS) {
+            size_t victim = 0;
+            for (size_t j = 1; j < model->fact_count; j++) {
+                if (model->facts[j].confidence < model->facts[victim].confidence)
+                    victim = j;
+            }
+            if (nf->confidence <= model->facts[victim].confidence)
+                continue;
+            model->facts[victim] = model->facts[model->fact_count - 1];
+            model->fact_count--;
+        }
+        model->facts[model->fact_count] = *nf;
+        model->facts[model->fact_count].last_seen_at = ts;
+        model->fact_count++;
+        bump_topic(model, nf->object, ts);
+    }
+    return HU_OK;
+}
+
+size_t hu_personal_model_promote_pending_facts(hu_personal_model_t *model,
+                                               const hu_fact_extract_result_t *user_direct_facts,
+                                               int64_t now) {
+    if (!model || !user_direct_facts)
+        return 0;
+    size_t promoted = 0;
+    for (size_t i = 0; i < user_direct_facts->fact_count; i++) {
+        const hu_heuristic_fact_t *uf = &user_direct_facts->facts[i];
+        size_t pidx = pending_fact_index(model, uf);
+        if (pidx >= model->pending_fact_count)
+            continue;
+        if (model->fact_count < HU_PM_MAX_FACTS) {
+            model->facts[model->fact_count] = model->pending_facts[pidx];
+            /* Tier remains the pending entry's recorded provenance — we
+             * do NOT launder it to USER_DIRECT just because the user
+             * happened to re-state the same key. The user's own ingest
+             * will add a separate USER_DIRECT fact via the normal merge
+             * path; this promotion preserves the third-party trail. */
+            model->facts[model->fact_count].last_seen_at = now;
+            model->fact_count++;
+            promoted++;
+        }
+        pending_fact_remove(model, pidx);
+    }
+    return promoted;
+}
+
+size_t hu_personal_model_expire_pending_facts(hu_personal_model_t *model, int64_t now) {
+    if (!model)
+        return 0;
+    size_t expired = 0;
+    for (size_t i = 0; i < model->pending_fact_count;) {
+        int64_t since = model->pending_since[i];
+        if (since > 0 && (now - since) >= HU_PM_PENDING_FACT_TTL_SEC) {
+            pending_fact_remove(model, i);
+            expired++;
+        } else {
+            i++;
+        }
+    }
+    return expired;
 }
 
 const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_model_t *model,
@@ -1921,7 +2163,7 @@ hu_personal_model_per_turn_tick(hu_personal_model_t *model, const char *msg, siz
      * don't abort the rest of the tick — a partially-failed ingest
      * still benefits from goal-mention bumping and decay pruning of
      * pre-existing entries. */
-    r.ingest_error = hu_personal_model_ingest(model, msg, msg_len, from_user, now);
+    r.ingest_error = hu_personal_model_ingest(model, msg, msg_len, from_user, now, NULL);
 
     /* Phase 2: bump last_referenced on any active goal whose
      * description shares a content-word with the message. Runs

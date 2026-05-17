@@ -286,10 +286,9 @@ export class ScMetricsView extends GatewayAwareLitElement {
     this.directiveTelemetry = null;
     this.directiveTelemetryError = "";
     try {
-      const res = (await gw.request<DirectiveTelemetry>(
-        "metrics.directive_telemetry",
-        {},
-      )) as DirectiveTelemetry | { result?: DirectiveTelemetry };
+      const res = (await gw.request<DirectiveTelemetry>("metrics.directive_telemetry", {})) as
+        | DirectiveTelemetry
+        | { result?: DirectiveTelemetry };
       const data =
         (res && "result" in res && (res as { result?: DirectiveTelemetry }).result) ||
         (res && "variants" in res ? (res as DirectiveTelemetry) : null);
@@ -603,9 +602,9 @@ export class ScMetricsView extends GatewayAwareLitElement {
         ? this._renderSkeleton()
         : html`
             ${this._renderFidelity()} ${this._renderDirectiveTelemetry()}
-            ${this._renderIntelligenceStats()}
-            ${this._renderEvalCalibration()} ${this._renderHulaObservability()}
-            ${this._renderSystemHealth()} ${this._renderIntelligencePipeline()}
+            ${this._renderIntelligenceStats()} ${this._renderEvalCalibration()}
+            ${this._renderHulaObservability()} ${this._renderSystemHealth()}
+            ${this._renderIntelligencePipeline()}
           `}
     `;
   }
@@ -634,11 +633,8 @@ export class ScMetricsView extends GatewayAwareLitElement {
 
   private _renderDirectiveTelemetry() {
     return html`
-      <div
-        class="section hu-scroll-reveal"
-        role="region"
-        aria-label="Directive variant telemetry"
-      >
+      <div class="section hu-scroll-reveal" role="region" aria-label="Directive variant telemetry">
+
         <hu-section-header
           heading="Directive Variant Telemetry"
           description="Distribution of acknowledgment-directive variants fired across all channels"

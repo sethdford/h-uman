@@ -56,7 +56,12 @@ export class ScVoiceConversation extends LitElement {
 
     if (showEmpty) {
       return html`
-        <div class="conversation conversation-empty">
+        <div
+          class="conversation conversation-empty"
+          role="region"
+          aria-label="Voice conversation"
+          tabindex="0"
+        >
           <hu-empty-state
             .icon=${icons.mic}
             heading="No conversation yet"
@@ -67,7 +72,12 @@ export class ScVoiceConversation extends LitElement {
     }
 
     return html`
-      <div class="conversation conversation-thread">
+      <div
+        class="conversation conversation-thread"
+        role="region"
+        aria-label="Voice conversation"
+        tabindex="0"
+      >
         <hu-message-thread
           .items=${this.items}
           .isWaiting=${this.isWaiting}

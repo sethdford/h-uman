@@ -59,6 +59,7 @@ object HUTokens {
         val textFaint = Color(0xFF56504A)
         val textMuted = Color(0xFF8A847E)
         val textSecondary = Color(0xFF9E9892)
+        val textTertiary = Color(0xFF8A847E)
         val warning = Color(0xFFEAB308)
         val warningDim = Color(0x26EAB308)
     }
@@ -118,6 +119,7 @@ object HUTokens {
         val textFaint = Color(0xFF9A9490)
         val textMuted = Color(0xFF6B655E)
         val textSecondary = Color(0xFF4A4540)
+        val textTertiary = Color(0xFF6B655E)
         val warning = Color(0xFFCA8A04)
         val warningDim = Color(0x1ACA8A04)
     }

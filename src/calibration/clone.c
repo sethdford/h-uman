@@ -1,4 +1,5 @@
 #include "human/calibration/clone.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/json_util.h"
 
@@ -922,8 +923,9 @@ hu_error_t hu_behavioral_clone_update_persona(hu_allocator_t *alloc,
     if (err != HU_OK)
         goto fail;
 
-    FILE *fp = fopen(persona_path, "w");
-    if (!fp) {
+    /* Cloned persona output — non-secret persona JSON; 0644. */
+    FILE *fp = NULL;
+    if (hu_io_secure_open(persona_path, HU_IO_PERM_USER, "w", &fp) != HU_OK || !fp) {
         err = HU_ERR_IO;
         goto fail;
     }

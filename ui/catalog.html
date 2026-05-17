@@ -127,6 +127,7 @@
       <a href="#hu-delivery-status">hu-delivery-status</a>
       <a href="#hu-link-preview">hu-link-preview</a>
       <a href="#hu-message-thread">hu-message-thread</a>
+      <a href="#hu-directive-telemetry-tile">hu-directive-telemetry-tile</a>
       <a href="#hu-branch-tree">hu-branch-tree</a>
       <a href="#hu-message-group">hu-message-group</a>
       <a href="#hu-skill-card">hu-skill-card</a>
@@ -1520,6 +1521,17 @@
         <div class="code-snippet"><pre><code>&lt;hu-message-thread .items=${items} .isWaiting=${false} .hasEarlierMessages=${false}&gt;&lt;/hu-message-thread&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="hu-directive-telemetry-tile">
+        <h2>hu-directive-telemetry-tile</h2>
+        <p>Compact telemetry card that reports a single agent directive's pre-tool / post-tool / final-message status, latency, and any guard verdict.</p>
+        <div class="playground">
+          <div class="preview">
+            <hu-directive-telemetry-tile id="catalog-directive-telemetry-tile"></hu-directive-telemetry-tile>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;hu-directive-telemetry-tile .telemetry=${entry}&gt;&lt;/hu-directive-telemetry-tile&gt;</code></pre></div>
+      </section>
+
       <section class="component-section" id="hu-branch-tree">
         <h2>hu-branch-tree</h2>
         <p>Vertical timeline/tree for conversation branches with collapsible subtrees.</p>
@@ -1917,6 +1929,7 @@
       import "/src/components/hu-delivery-status.js";
       import "/src/components/hu-link-preview.js";
       import "/src/components/hu-message-thread.js";
+      import "/src/components/hu-directive-telemetry-tile.js";
       import "/src/components/hu-message-group.js";
       import "/src/components/hu-skill-card.js";
       import "/src/components/hu-skill-detail.js";

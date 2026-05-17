@@ -1,6 +1,7 @@
 #include "human/auth.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
@@ -287,7 +288,10 @@ hu_error_t hu_auth_delete_credential(hu_allocator_t *alloc, const char *provider
     char *path = auth_file_path(alloc);
     if (!path)
         return HU_OK;
-    FILE *f = fopen(path, "wb");
+    /* Auth credential store at ~/.human/auth.json — holds API keys
+     * for providers the user has logged into. Always 0600. */
+    FILE *f = NULL;
+    (void)hu_io_secure_open(path, HU_IO_PERM_SECRET, "wb", &f);
     alloc->free(alloc->ctx, path, strlen(path) + 1);
     if (f) {
         fprintf(f, "{}\n");
