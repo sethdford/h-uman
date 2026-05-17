@@ -717,6 +717,15 @@ set(HU_CORE_SOURCES
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
     src/ml/lora_retrain_runner.c
+    # PR #115 / integration-tests fix: US-11.8 helpers MUST link with
+    # lora_retrain_runner.c regardless of HU_ENABLE_ML. The runner calls
+    # `hu_lora_compute_kl_drift` and `hu_lora_ema_apply` from these
+    # translation units; gating them behind HU_ENABLE_ML produced
+    # undefined-symbol link errors in the HU_ENABLE_ML=OFF integration-
+    # tests target (which still compiles lora_retrain_runner.c). Same
+    # rationale as the runner: subprocess + file I/O, no learner dep.
+    src/ml/lora_ema.c
+    src/ml/cli_adapter_rollback.c
     # NOTE: src/agent/lora_training_runner.c and training_data_runner.c
     # are W13 learning-loop callers — they reference symbols defined only
     # when HU_ENABLE_LEARNING is on (hu_learner_pending_drain,
@@ -1243,9 +1252,12 @@ if(HU_ENABLE_ML)
         src/ml/checkpoint.c
         src/ml/cli.c
         src/ml/lora.c
-        # US-11.8: dual fast/slow LoRA EMA helper + adapter rollback CLI.
-        src/ml/lora_ema.c
-        src/ml/cli_adapter_rollback.c
+        # NOTE: src/ml/lora_ema.c and src/ml/cli_adapter_rollback.c moved
+        # to the unconditional core sources block (alongside
+        # lora_retrain_runner.c) per PR #115 / integration-tests fix.
+        # They are subprocess + file I/O helpers with no learner dependency
+        # and must link in HU_ENABLE_ML=OFF builds that still compile
+        # lora_retrain_runner.c.
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
