@@ -8172,25 +8172,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                strcmp(emo_rec.dominant_emotion, "anxious") == 0 ||
                                                strcmp(emo_rec.dominant_emotion, "worried") == 0));
                         if (should_record) {
-                            const char *topic_str =
-                                (fc_pre.primary_topic && fc_pre.primary_topic[0])
-                                    ? fc_pre.primary_topic
-                                    : (combined_len > 0 ? combined : "something you shared");
-                            size_t topic_len;
-                            if (fc_pre.primary_topic && fc_pre.primary_topic[0]) {
-                                topic_len = strlen(fc_pre.primary_topic);
-                            } else if (combined_len > 0) {
-                                topic_len = combined_len > 255 ? 255 : combined_len;
-                            } else {
-                                topic_len = 20; /* "something you shared" */
-                            }
+                            /* P2-1 (2026-05-16): use safe predicate. NEVER fall
+                             * back to raw user message — that shipped a
+                             * first-person confession to family contacts. */
                             const char *emotion_str =
                                 emo_rec.dominant_emotion && emo_rec.dominant_emotion[0]
                                     ? emo_rec.dominant_emotion
                                     : (esc_rec.escalating ? "escalating" : "concerning");
-                            (void)hu_emotional_moment_record(
-                                alloc, agent->memory, batch_key, key_len, topic_str, topic_len,
-                                emotion_str, strlen(emotion_str), emo_rec.intensity);
+                            char topic_buf[128] = {0};
+                            size_t topic_len = hu_emotional_moment_select_topic(
+                                fc_pre.primary_topic, emotion_str, topic_buf, sizeof(topic_buf));
+                            if (topic_len > 0) {
+                                (void)hu_emotional_moment_record(
+                                    alloc, agent->memory, batch_key, key_len, topic_buf, topic_len,
+                                    emotion_str, strlen(emotion_str), emo_rec.intensity);
+                            }
+                            /* else: extraction yielded nothing AND no emotion
+                             * keyword → SKIP the record. Better no data than
+                             * leaked data. */
                         }
                     }
 #endif
