@@ -7,6 +7,7 @@
  *
  * Both classes (special-token leak + degenerate repetition) must be caught.
  */
+#include "human/agent.h"
 #include "human/agent/response_guard.h"
 #include "human/core/allocator.h"
 #include "test_framework.h"
@@ -14,6 +15,12 @@
 #include <string.h>
 
 static hu_allocator_t A(void) { return hu_system_allocator(); }
+
+/* Forward declaration — helper lives in src/agent/agent_internal.h, which
+ * is not exported. We exercise it directly here to prove the production
+ * call sites (agent_stream.c, agent_turn.c) get a valid recent_avg_len
+ * for `hu_guard_context_t`. (Sprint 33) */
+size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
 
 /* ── Production regression — Harmony channel marker ────────────────────── */
 
@@ -901,6 +908,118 @@ static void guard_ex_with_null_ctx_matches_legacy_behavior(void) {
     HU_ASSERT(out == raw);
 }
 
+/* ── Sprint 33 — recent_assistant_avg_len helper ───────────────────────
+ *
+ * Production call sites (agent_stream.c, agent_turn.c) populate
+ * `hu_guard_context_t.recent_avg_len` from this helper. These tests
+ * pin the contract: empty / mixed-role / windowed cases. */
+
+static void agent_recent_assistant_avg_len_empty_history_returns_zero(void) {
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 0u);
+
+    /* NULL agent must also return 0 (defensive). */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(NULL, 5), 0u);
+
+    /* max_n = 0 returns 0 even with content. */
+    char body[] = "hello";
+    hu_owned_message_t msgs[1];
+    memset(msgs, 0, sizeof(msgs));
+    msgs[0].role = HU_ROLE_ASSISTANT;
+    msgs[0].content = body;
+    msgs[0].content_len = strlen(body);
+    agent.history = msgs;
+    agent.history_count = 1;
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 0), 0u);
+}
+
+static void agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant(void) {
+    char a1[] = "twelve bytes";       /* len=12 */
+    char a2[] = "ten bytes!";         /* len=10 */
+    char user[] = "user message big";  /* len=16, must be ignored */
+    char tool[] = "tool result data";  /* len=16, must be ignored */
+    char system[] = "system prompt";   /* len=13, must be ignored */
+
+    hu_owned_message_t msgs[5];
+    memset(msgs, 0, sizeof(msgs));
+    msgs[0].role = HU_ROLE_SYSTEM;
+    msgs[0].content = system;
+    msgs[0].content_len = strlen(system);
+    msgs[1].role = HU_ROLE_USER;
+    msgs[1].content = user;
+    msgs[1].content_len = strlen(user);
+    msgs[2].role = HU_ROLE_ASSISTANT;
+    msgs[2].content = a1;
+    msgs[2].content_len = strlen(a1);
+    msgs[3].role = HU_ROLE_TOOL;
+    msgs[3].content = tool;
+    msgs[3].content_len = strlen(tool);
+    msgs[4].role = HU_ROLE_ASSISTANT;
+    msgs[4].content = a2;
+    msgs[4].content_len = strlen(a2);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.history = msgs;
+    agent.history_count = 5;
+
+    /* Average over 2 assistant messages: (12 + 10) / 2 = 11. */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 11u);
+
+    /* Empty-content assistant must be skipped. */
+    char empty[] = "";
+    msgs[2].content = empty;
+    msgs[2].content_len = 0;
+    /* Now only msgs[4] qualifies: avg = 10 / 1 = 10. */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 10u);
+}
+
+static void agent_recent_assistant_avg_len_uses_most_recent_n(void) {
+    /* 7 assistant messages: 1000, 1000, 1000, 1000, 1000, 100, 100.
+     * Newest 5 are: 1000, 1000, 100, 100, 1000 (walking back from the end).
+     * Wait — newest-first walk is: msgs[6], msgs[5], msgs[4], msgs[3], msgs[2].
+     * So newest 5 = 100, 100, 1000, 1000, 1000 → sum 3200, avg 640. */
+    char *bodies[7];
+    char buf1k[1001], buf100[101];
+    memset(buf1k, 'x', 1000);
+    buf1k[1000] = '\0';
+    memset(buf100, 'y', 100);
+    buf100[100] = '\0';
+
+    bodies[0] = buf1k;
+    bodies[1] = buf1k;
+    bodies[2] = buf1k;
+    bodies[3] = buf1k;
+    bodies[4] = buf1k;
+    bodies[5] = buf100;
+    bodies[6] = buf100;
+
+    hu_owned_message_t msgs[7];
+    memset(msgs, 0, sizeof(msgs));
+    for (int i = 0; i < 7; i++) {
+        msgs[i].role = HU_ROLE_ASSISTANT;
+        msgs[i].content = bodies[i];
+        msgs[i].content_len = strlen(bodies[i]);
+    }
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.history = msgs;
+    agent.history_count = 7;
+
+    /* Newest 5 cover msgs[6]..msgs[2] = 100,100,1000,1000,1000.
+     * sum = 3200, avg = 640. */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 640u);
+
+    /* Newest 2: 100, 100 → 100. */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 2), 100u);
+
+    /* max_n larger than history → all 7: sum = 5*1000 + 2*100 = 5200,
+     * avg = 5200 / 7 = 742 (integer floor). */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 100), 742u);
+}
+
 /* ── Registration ─────────────────────────────────────────────────────── */
 
 void run_response_guard_tests(void) {
@@ -949,4 +1068,11 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_ex_passes_legit_5x_response);
     HU_RUN_TEST(guard_ex_passes_short_director_text);
     HU_RUN_TEST(guard_ex_with_null_ctx_matches_legacy_behavior);
+
+    /* Sprint 33 — recent_assistant_avg_len helper used by production
+     * call sites (agent_stream.c, agent_turn.c) to populate
+     * `hu_guard_context_t.recent_avg_len` and enforce G5 at runtime. */
+    HU_RUN_TEST(agent_recent_assistant_avg_len_empty_history_returns_zero);
+    HU_RUN_TEST(agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant);
+    HU_RUN_TEST(agent_recent_assistant_avg_len_uses_most_recent_n);
 }

@@ -1397,15 +1397,24 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
                 hu_guard_report_t guard_report;
                 memset(&guard_report, 0, sizeof(guard_report));
-                hu_error_t guard_err = hu_response_guard_check(
-                    agent->alloc, sresp.content, sresp.content_len, &guard_out, &guard_out_len,
-                    &guard_outcome, &guard_report);
+                hu_guard_context_t guard_ctx;
+                memset(&guard_ctx, 0, sizeof(guard_ctx));
+                guard_ctx.recent_avg_len =
+                    hu_agent_internal_recent_assistant_avg_len(agent, 5);
+                hu_error_t guard_err = hu_response_guard_check_ex(
+                    agent->alloc, sresp.content, sresp.content_len, &guard_ctx, &guard_out,
+                    &guard_out_len, &guard_outcome, &guard_report);
                 if (guard_err == HU_OK && guard_outcome == HU_GUARD_REJECT) {
                     hu_log_error(
                         "agent_stream", agent->observer,
-                        "response_guard REJECT: degenerate stream output (run=%zu, len=%zu) — "
+                        "response_guard REJECT: stream final (len=%zu, recent_avg=%zu) "
+                        "[semantic=%d length=%d director=%d repetition_run=%zu] — "
                         "retrying once with repair prompt",
-                        guard_report.max_repetition_run, sresp.content_len);
+                        sresp.content_len, guard_ctx.recent_avg_len,
+                        guard_report.detected_semantic_leak ? 1 : 0,
+                        guard_report.detected_length_anomaly ? 1 : 0,
+                        guard_report.detected_director_echo ? 1 : 0,
+                        guard_report.max_repetition_run);
                     hu_guard_report_t retry_report;
                     memset(&retry_report, 0, sizeof(retry_report));
                     hu_error_t retry_err = hu_response_guard_retry_slim(
@@ -2128,16 +2137,25 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             hu_guard_outcome_t guard_outcome = HU_GUARD_OK;
             hu_guard_report_t guard_report;
             memset(&guard_report, 0, sizeof(guard_report));
-            hu_error_t guard_err = hu_response_guard_check(
-                agent->alloc, final_content, final_content_len, &guard_out, &guard_out_len,
-                &guard_outcome, &guard_report);
+            hu_guard_context_t guard_ctx;
+            memset(&guard_ctx, 0, sizeof(guard_ctx));
+            guard_ctx.recent_avg_len =
+                hu_agent_internal_recent_assistant_avg_len(agent, 5);
+            hu_error_t guard_err = hu_response_guard_check_ex(
+                agent->alloc, final_content, final_content_len, &guard_ctx, &guard_out,
+                &guard_out_len, &guard_outcome, &guard_report);
             if (guard_err == HU_OK) {
                 if (guard_outcome == HU_GUARD_REJECT) {
                     hu_log_error(
                         "agent_stream", agent->observer,
-                        "response_guard REJECT: degenerate stream output (run=%zu, len=%zu) — "
+                        "response_guard REJECT: post-stream final (len=%zu, recent_avg=%zu) "
+                        "[semantic=%d length=%d director=%d repetition_run=%zu] — "
                         "retrying slim path",
-                        guard_report.max_repetition_run, final_content_len);
+                        final_content_len, guard_ctx.recent_avg_len,
+                        guard_report.detected_semantic_leak ? 1 : 0,
+                        guard_report.detected_length_anomaly ? 1 : 0,
+                        guard_report.detected_director_echo ? 1 : 0,
+                        guard_report.max_repetition_run);
                     agent->alloc->free(agent->alloc->ctx, (void *)final_content,
                                        final_content_len + 1);
                     final_content = NULL;

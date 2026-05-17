@@ -200,6 +200,33 @@ void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *us
     }
 }
 
+size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n) {
+    if (!agent || !agent->history || agent->history_count == 0 || max_n == 0)
+        return 0;
+
+    size_t collected = 0;
+    size_t total = 0;
+    /* Walk newest → oldest, skipping non-assistant turns and empty content.
+     * `history_count` is one past the newest stored entry. We do NOT skip
+     * the last assistant entry: the guard runs *before* the candidate is
+     * appended to history (see agent_stream.c:1400, agent_turn.c:5566), so
+     * `history` here contains only prior turns. */
+    size_t i = agent->history_count;
+    while (i > 0 && collected < max_n) {
+        i--;
+        const hu_owned_message_t *m = &agent->history[i];
+        if (m->role != HU_ROLE_ASSISTANT)
+            continue;
+        if (!m->content || m->content_len == 0)
+            continue;
+        total += m->content_len;
+        collected++;
+    }
+    if (collected == 0)
+        return 0;
+    return total / collected;
+}
+
 #define HU_AGENT_HISTORY_INIT_CAP 16
 #define HU_AGENT_MAX_SLASH_LEN    256
 

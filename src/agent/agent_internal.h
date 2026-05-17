@@ -24,6 +24,18 @@ void hu_agent_internal_generate_trace_id(char *buf);
 uint64_t hu_agent_internal_clock_diff_ms(clock_t start, clock_t end);
 void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *usage);
 
+/* Average content_len over the most-recent up-to-`max_n` assistant
+ * turns in `agent->history` (skips system / user / tool entries).
+ * Returns 0 when there are no qualifying turns; the response guard
+ * treats 0 as "no signal, do not enforce length-anomaly (G5)".
+ *
+ * Used by the response_guard call sites to populate
+ * `hu_guard_context_t.recent_avg_len` so a 1.8 KB CoT-dump in a
+ * 150-byte channel is REJECTed at runtime, not just in unit tests.
+ * (Sprint 33 — wires Sprint 31's G5 into production.)
+ */
+size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
+
 hu_error_t hu_agent_internal_ensure_history_cap(hu_agent_t *agent, size_t need);
 hu_error_t hu_agent_internal_append_history(hu_agent_t *agent, hu_role_t role, const char *content,
                                             size_t content_len, const char *name, size_t name_len,
