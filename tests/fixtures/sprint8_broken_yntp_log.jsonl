@@ -1,0 +1,5 @@
+{"row_id": 1, "base_logprob_sum": -8.2, "base_n_tokens": 14, "adapter_logprob_sum": -45.1, "adapter_n_tokens": 14, "adapter_generated": "<pad><pad><pad><pad><pad>", "has_pad": true, "note": "Sprint 8 iter-200 simulated: coherent prompt, broken pad-token output"}
+{"row_id": 2, "base_logprob_sum": -12.4, "base_n_tokens": 18, "adapter_logprob_sum": -52.7, "adapter_n_tokens": 18, "adapter_generated": "in 15 <pad><pad><pad><pad><pad>", "has_pad": true, "note": "partial coherence then pad collapse"}
+{"row_id": 3, "base_logprob_sum": -9.1, "base_n_tokens": 16, "adapter_logprob_sum": -48.3, "adapter_n_tokens": 16, "adapter_generated": "<pad><pad><pad><pad>", "has_pad": true, "note": "full collapse"}
+{"row_id": 4, "base_logprob_sum": -7.8, "base_n_tokens": 12, "adapter_logprob_sum": -41.2, "adapter_n_tokens": 12, "adapter_generated": "<pad><pad>oil<pad><pad>", "has_pad": true, "note": "interspersed pad"}
+{"row_id": 5, "base_logprob_sum": -11.3, "base_n_tokens": 17, "adapter_logprob_sum": -55.8, "adapter_n_tokens": 17, "adapter_generated": "<pad><pad><pad><pad><pad><pad>", "has_pad": true, "note": "full collapse"}

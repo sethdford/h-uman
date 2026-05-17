@@ -142,6 +142,12 @@ lora-persona-seth.bin
 .human/private/
 **/.human/private/
 
+# Sprint 11 / US-11.6 D1 fixture policy: production-tier YNTP holdout
+# lives only on Seth's machine at ~/.human/private/yntp_holdout_30.jsonl
+# and must NEVER appear in the repo, no matter what directory it's in.
+yntp_holdout_30.jsonl
+**/yntp_holdout_30.jsonl
+
 # Phase 1 (RL SOTA) — Gemma GGUF and other large model files. The
 # fetcher script writes to ~/.human/models/, but contributors who
 # fetch from inside the repo for testing should never accidentally
