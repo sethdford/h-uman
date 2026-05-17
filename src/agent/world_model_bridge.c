@@ -220,6 +220,14 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                                persona_ctx->tools_count);
     }
 
+    /* Story F.2 — emotional register + recently-used tools. */
+    hu_world_model_merge_self_emotion(wm);
+    if (persona_ctx && persona_ctx->recent_tools_used &&
+        persona_ctx->recent_tools_used_count > 0) {
+        hu_world_model_merge_self_recent_tools(wm, persona_ctx->recent_tools_used,
+                                               persona_ctx->recent_tools_used_count);
+    }
+
     /* If everything is empty, return NULL/0 -- callers skip injection.
      *
      * As of P2D the W9 builder synthesizes `dominant_emotion`, `valence`, and
@@ -425,7 +433,10 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
             || wm->self_model.focused_topics[0]
             || wm->self_model.recent_drift_kind[0]
             || wm->self_model.confidence_in_self >= 0.1f
-            || wm->self_model.capabilities_count > 0;
+            || wm->self_model.capabilities_count > 0
+            || wm->self_model.recent_drift_history_count > 1
+            || wm->self_model.recent_emotional_register[0]
+            || wm->self_model.recent_tools_used_count > 0;
         if (self_signal) {
             ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Self model:\n", 12);
             if (wm->self_model.name[0])
@@ -445,6 +456,32 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                     ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
                                            "- Most recent shift: %s\n",
                                            wm->self_model.recent_drift_kind);
+            }
+            if (wm->self_model.recent_drift_history_count > 1) {
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap,
+                                      "- Shift history: ", 17);
+                for (size_t i = 0; i < wm->self_model.recent_drift_history_count; i++) {
+                    if (i > 0)
+                        ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s",
+                                           wm->self_model.recent_drift_history[i]);
+                }
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+            }
+            if (wm->self_model.recent_emotional_register[0])
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                       "- How I've been showing up: %s\n",
+                                       wm->self_model.recent_emotional_register);
+            if (wm->self_model.recent_tools_used_count > 0) {
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap,
+                                      "- Tools I've used recently: ", 28);
+                for (size_t i = 0; i < wm->self_model.recent_tools_used_count; i++) {
+                    if (i > 0)
+                        ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s",
+                                           wm->self_model.recent_tools_used[i]);
+                }
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
             }
             const char *bucket = NULL;
             if (wm->self_model.confidence_in_self >= 0.7f) bucket = "high";
