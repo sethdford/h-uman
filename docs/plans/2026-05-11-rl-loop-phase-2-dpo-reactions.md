@@ -1,3 +1,8 @@
+---
+status: complete
+last_audit: 2026-05-17
+---
+
 # Phase 2: Real DPO + Reaction Wiring — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

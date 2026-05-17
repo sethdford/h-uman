@@ -27,9 +27,6 @@ void run_slice_tests(void);
 void run_memory_tests(void);
 void run_sql_transaction_tests(void);
 void run_memory_util_tests(void);
-#if defined(HU_ENABLE_KV_COMPRESSION)
-void run_kv_compressor_tests(void);
-#endif
 void run_tunnel_tests(void);
 void run_gateway_tests(void);
 void run_auth_tests(void);
@@ -38,6 +35,7 @@ void run_security_tests(void);
 void run_normalize_tests(void);
 void run_sensitivity_tests(void);
 void run_vault_tests(void);
+void run_vault_aead_tests(void);
 void run_provider_tests(void);
 void run_provider_http_tests(void);
 void run_ensemble_tests(void);
@@ -619,7 +617,11 @@ void run_grpo_huml_tests(void);
 void run_grpo_e2e_tests(void);
 #endif
 void run_persona_directive_channels_tests(void);
+void run_persona_overlay_render_tests(void);
+void run_channel_overlay_apply_tests(void);
 void run_filler_recency_tests(void);
+void run_contact_send_recency_tests(void);
+void run_contact_send_recency_daemon_tests(void);
 void run_filler_pctt_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -716,9 +718,6 @@ int main(int argc, char **argv) {
     run_memory_tests();
     run_sql_transaction_tests();
     run_memory_util_tests();
-#if defined(HU_ENABLE_KV_COMPRESSION)
-    run_kv_compressor_tests();
-#endif
     run_tunnel_tests();
     run_gateway_tests();
     run_auth_tests();
@@ -727,6 +726,7 @@ int main(int argc, char **argv) {
     run_normalize_tests();
     run_sensitivity_tests();
     run_vault_tests();
+    run_vault_aead_tests();
     run_provider_tests();
     run_provider_http_tests();
     run_ensemble_tests();
@@ -1292,7 +1292,11 @@ int main(int argc, char **argv) {
     run_grpo_e2e_tests();
 #endif
     run_persona_directive_channels_tests();
+    run_persona_overlay_render_tests();
+    run_channel_overlay_apply_tests();
     run_filler_recency_tests();
+    run_contact_send_recency_tests();
+    run_contact_send_recency_daemon_tests();
     run_filler_pctt_tests();
     run_hallucination_guard_tests();
     run_humor_fw_tests();

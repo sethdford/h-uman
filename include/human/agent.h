@@ -28,6 +28,7 @@
 #include "human/agent/worktree.h"
 #include "human/behavior/pressure_history.h"
 #include "human/channel.h"
+#include "human/contact_send_recency.h"
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
 #include "human/core/error.h"
@@ -519,6 +520,15 @@ struct hu_agent {
      * avoid picking the same filler twice in a row.  In-memory only; loss on
      * restart is acceptable.  Zero-initialised by memset in hu_agent_from_config. */
     hu_filler_recency_t filler_recency;
+
+    /* Per-contact send-path recency (memory-scoping FU-1, plan
+     * docs/plans/2026-05-15-memory-scoping-followups.md).  Tracks the last
+     * outbound path (reactive vs proactive vs scheduled vs photo vs morning)
+     * so proactive paths in the daemon can DEFER when a reactive turn has
+     * fired for the same contact within the recency window.  In-memory only;
+     * loss on restart is acceptable.  Zero-initialised by memset in
+     * hu_agent_from_config. */
+    hu_contact_send_recency_t contact_send_recency;
 };
 
 /* Create agent from minimal config (no full config loader yet).
@@ -641,6 +651,28 @@ hu_error_t hu_agent_run_single(hu_agent_t *agent, const char *system_prompt,
                                size_t system_prompt_len, const char *user_message,
                                size_t user_message_len, char **response_out,
                                size_t *response_len_out);
+
+/* Canonical tool-dispatch helper.
+ *
+ * Wraps every tool invocation in the agent's hook pipeline:
+ *   1. Pre-tool hook (if a registry is configured). A DENY decision skips
+ *      execution AND short-circuits *out with a "denied by hook" failure.
+ *   2. Tool execute() (only if the pre-hook did NOT deny).
+ *   3. Post-tool hook (if a registry is configured). Fires UNCONDITIONALLY
+ *      — including on the pre-deny path — so auditors observe every
+ *      dispatch attempt regardless of outcome.
+ *
+ * This is the single canonical entry point for tool dispatch. New call sites
+ * MUST go through this helper; the audit on 2026-05-16 documented multiple
+ * scattered hook-and-execute call sites in src/agent/agent_turn.c and
+ * src/agent/agent_stream.c that are progressively migrating to it.
+ *
+ * Returns HU_OK for normal completion (including hook-denied dispatch).
+ * HU_ERR_INVALID_ARGUMENT if agent/tool/out is NULL. The caller frees *out
+ * via hu_tool_result_free. */
+hu_error_t hu_agent_dispatch_tool(hu_agent_t *agent, hu_tool_t *tool, const char *tool_name,
+                                  size_t tool_name_len, const char *args_json, size_t args_json_len,
+                                  const hu_json_value_t *args_parsed, hu_tool_result_t *out);
 
 void hu_agent_clear_history(hu_agent_t *agent);
 

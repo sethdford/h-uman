@@ -1,3 +1,8 @@
+---
+status: complete
+last_audit: 2026-05-17
+---
+
 # W0a Precondition Slice — Episode Type Rename Report
 
 **Sprint**: SOTA-2026-01

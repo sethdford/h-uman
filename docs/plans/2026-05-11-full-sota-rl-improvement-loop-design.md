@@ -1,3 +1,8 @@
+---
+status: complete
+last_audit: 2026-05-17
+---
+
 # Full-SOTA RL & Neural Improvement Loop — Design Spec
 
 **Status:** DRAFT (awaiting user review before plan-writing)

@@ -10,6 +10,7 @@
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/observability/validator_telemetry.h"
+#include "human/persona.h"
 #ifndef HU_CODENAME
 #define HU_CODENAME "human"
 #endif
@@ -173,6 +174,8 @@ typedef struct hu_imessage_ctx {
     int64_t last_rowid;
     const char *const *allow_from;
     size_t allow_from_count;
+    /* Persona: borrowed pointer for overlay-aware rendering. */
+    const hu_persona_t *persona;
     char sent_ring[HU_IMESSAGE_SENT_RING_SIZE][HU_IMESSAGE_SENT_PREFIX_LEN];
     size_t sent_ring_len[HU_IMESSAGE_SENT_RING_SIZE];
     uint32_t sent_ring_hash[HU_IMESSAGE_SENT_RING_SIZE];
@@ -1306,6 +1309,22 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         } else {
             c->last_media_path[0] = '\0';
         }
+        /* Persona overlay rendering: semantic transform applied before any
+         * iMessage-specific presentation cleanup. Test path captures the
+         * overlay-rendered text so per-channel divergence is observable. */
+        char *rendered = NULL;
+        size_t rendered_len = 0;
+        if (message_len > 0) {
+            const hu_persona_overlay_t *ov = NULL;
+            if (c->persona)
+                ov = hu_persona_find_overlay(c->persona, "imessage", 8);
+            hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
+                                                            &rendered, &rendered_len);
+            if (rerr != HU_OK)
+                return rerr;
+            message = rendered;
+            message_len = rendered_len;
+        }
         size_t len = message_len > 4095 ? 4095 : message_len;
         if (message && len > 0)
             memcpy(c->last_message, message, len);
@@ -1313,6 +1332,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             len = 0;
         c->last_message[len] = '\0';
         c->last_message_len = len;
+        if (rendered)
+            c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
         return HU_OK;
     }
 #elif !defined(__APPLE__) || !defined(__MACH__)
@@ -1340,6 +1361,27 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
     if (message_len > 0 && !message)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* Persona overlay rendering: applied BEFORE iMessage's markdown strip
+     * and AI-phrase sanitization. The overlay is a semantic transform
+     * (formality, length, emoji policy); the cleanup that follows is
+     * iMessage-specific presentation. Doing overlay first means the
+     * sanitizer never sees text the overlay would have removed, and
+     * a NULL overlay yields an identity copy so the cleanup paths are
+     * unchanged (AC-6). */
+    char *overlay_buf = NULL;
+    size_t overlay_buf_len = 0;
+    if (message_len > 0) {
+        const hu_persona_overlay_t *ov = NULL;
+        if (c->persona)
+            ov = hu_persona_find_overlay(c->persona, "imessage", 8);
+        hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
+                                                        &overlay_buf, &overlay_buf_len);
+        if (rerr != HU_OK)
+            return rerr;
+        message = overlay_buf;
+        message_len = overlay_buf_len;
+    }
+
     hu_error_t send_err = HU_OK;
     char *clean = NULL;
     size_t clean_cap = 0;
@@ -1352,8 +1394,11 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
          */
         clean_cap = message_len + 1;
         clean = (char *)c->alloc->alloc(c->alloc->ctx, clean_cap);
-        if (!clean)
+        if (!clean) {
+            if (overlay_buf)
+                c->alloc->free(c->alloc->ctx, overlay_buf, overlay_buf_len + 1);
             return HU_ERR_OUT_OF_MEMORY;
+        }
         {
             size_t out_i = 0;
             size_t i = 0;
@@ -1578,6 +1623,8 @@ imsg_media:
 imsg_cleanup:
     if (clean)
         c->alloc->free(c->alloc->ctx, clean, clean_cap);
+    if (overlay_buf)
+        c->alloc->free(c->alloc->ctx, overlay_buf, overlay_buf_len + 1);
     return send_err;
 #endif
 }
@@ -3392,6 +3439,13 @@ bool hu_imessage_watch_active(hu_channel_t *ch) {
 #else
     return false;
 #endif
+}
+
+void hu_imessage_set_persona(hu_channel_t *ch, const struct hu_persona *persona) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    c->persona = persona;
 }
 
 void hu_imessage_destroy(hu_channel_t *ch) {

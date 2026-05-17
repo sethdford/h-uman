@@ -1,7 +1,8 @@
 ---
 title: "Elastic memory: episodic pattern extraction and cognitive replay"
 created: 2026-03-21
-status: proposed
+status: complete
+last_audit: 2026-05-17
 ---
 
 # Elastic memory: episodic pattern extraction and cognitive replay

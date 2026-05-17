@@ -2,14 +2,15 @@
  * Slack channel — chat.postMessage for outbound, auth.test for bot identity.
  * Supports thread replies (channel_id:thread_ts), typing, markdown→mrkdwn.
  */
+#include "human/channels/slack.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
-#include "human/channels/slack.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include "human/persona.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -24,9 +25,9 @@
 #define SLACK_ASSISTANT_STATUS "/assistant.threads.setStatus"
 
 #define SLACK_CONVERSATIONS_HISTORY "/conversations.history"
-#define SLACK_REACTIONS_ADD           "/reactions.add"
-#define SLACK_HISTORY_API_MAX         999
-#define SLACK_MAX_CHANNELS            16
+#define SLACK_REACTIONS_ADD         "/reactions.add"
+#define SLACK_HISTORY_API_MAX       999
+#define SLACK_MAX_CHANNELS          16
 #define SLACK_SESSION_KEY_MAX       127
 #define SLACK_CONTENT_MAX           4095
 #define SLACK_QUEUE_MAX             32
@@ -50,6 +51,8 @@ typedef struct hu_slack_ctx {
     char *stream_text;
     size_t stream_text_len;
     size_t stream_text_cap;
+    /* Persona: borrowed pointer for overlay-aware rendering. */
+    const hu_persona_t *persona;
     /* Webhook inbound queue */
     hu_slack_queued_msg_t queue[SLACK_QUEUE_MAX];
     size_t queue_head;
@@ -511,6 +514,21 @@ static hu_error_t slack_send(void *ctx, const char *target, size_t target_len, c
     if (!target || target_len == 0 || !message)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* Persona overlay rendering. See hu_persona_render_for_channel. */
+    char *rendered = NULL;
+    size_t rendered_len = 0;
+    {
+        const hu_persona_overlay_t *ov = NULL;
+        if (c->persona)
+            ov = hu_persona_find_overlay(c->persona, "slack", 5);
+        hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
+                                                        &rendered, &rendered_len);
+        if (rerr != HU_OK)
+            return rerr;
+        message = rendered;
+        message_len = rendered_len;
+    }
+
 #if HU_IS_TEST
     {
         size_t len = message_len > 4095 ? 4095 : message_len;
@@ -518,9 +536,12 @@ static hu_error_t slack_send(void *ctx, const char *target, size_t target_len, c
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
+        if (rendered)
+            c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
         return HU_OK;
     }
 #else
+    hu_error_t prod_err = HU_OK;
     const char *channel = NULL;
     size_t channel_len = 0;
     const char *thread_ts = NULL;
@@ -538,15 +559,18 @@ static hu_error_t slack_send(void *ctx, const char *target, size_t target_len, c
                                      text_len, &body, &body_len);
     if (mrkdwn)
         c->alloc->free(c->alloc->ctx, mrkdwn, conv_len + 1);
-    if (err)
-        return err;
+    if (err) {
+        prod_err = err;
+        goto prod_done;
+    }
 
     char auth_buf[512];
     int n = snprintf(auth_buf, sizeof(auth_buf), "Authorization: Bearer %.*s", (int)c->token_len,
                      c->token);
     if (n <= 0 || (size_t)n >= sizeof(auth_buf)) {
         c->alloc->free(c->alloc->ctx, body, body_len + 1);
-        return HU_ERR_INTERNAL;
+        prod_err = HU_ERR_INTERNAL;
+        goto prod_done;
     }
 
     char url_buf[256];
@@ -558,13 +582,19 @@ static hu_error_t slack_send(void *ctx, const char *target, size_t target_len, c
     if (err != HU_OK) {
         if (resp.owned && resp.body)
             hu_http_response_free(c->alloc, &resp);
-        return HU_ERR_CHANNEL_SEND;
+        prod_err = HU_ERR_CHANNEL_SEND;
+        goto prod_done;
     }
     if (resp.owned && resp.body)
         hu_http_response_free(c->alloc, &resp);
-    if (resp.status_code < 200 || resp.status_code >= 300)
-        return HU_ERR_CHANNEL_SEND;
-    return HU_OK;
+    if (resp.status_code < 200 || resp.status_code >= 300) {
+        prod_err = HU_ERR_CHANNEL_SEND;
+        goto prod_done;
+    }
+prod_done:
+    if (rendered)
+        c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
+    return prod_err;
 #endif
 }
 
@@ -1007,8 +1037,8 @@ static hu_error_t slack_load_conversation_history(void *ctx, hu_allocator_t *all
 
     char *body = NULL;
     size_t body_len = 0;
-    hu_error_t err = build_conversations_history_body(alloc, channel, channel_len, api_limit, &body,
-                                                      &body_len);
+    hu_error_t err =
+        build_conversations_history_body(alloc, channel, channel_len, api_limit, &body, &body_len);
     if (err)
         return err;
 
@@ -1021,7 +1051,8 @@ static hu_error_t slack_load_conversation_history(void *ctx, hu_allocator_t *all
     }
 
     char url_buf[256];
-    int nu = snprintf(url_buf, sizeof(url_buf), "%s%s", SLACK_API_BASE, SLACK_CONVERSATIONS_HISTORY);
+    int nu =
+        snprintf(url_buf, sizeof(url_buf), "%s%s", SLACK_API_BASE, SLACK_CONVERSATIONS_HISTORY);
     if (nu < 0 || (size_t)nu >= sizeof(url_buf)) {
         alloc->free(alloc->ctx, body, body_len + 1);
         return HU_ERR_INTERNAL;
@@ -1141,7 +1172,7 @@ static char *slack_get_attachment_path(void *ctx, hu_allocator_t *alloc, int64_t
 }
 
 static bool slack_human_active_recently(void *ctx, const char *contact, size_t contact_len,
-                                         int window_sec) {
+                                        int window_sec) {
     (void)ctx;
     (void)contact;
     (void)contact_len;
@@ -1224,8 +1255,7 @@ hu_error_t hu_slack_on_webhook(void *channel_ctx, hu_allocator_t *alloc, const c
      * event_type and would otherwise silently drop reaction_added /
      * reaction_removed events. */
     extern int hu_slack_handle_reaction_webhook(const char *body, size_t body_len,
-                                                hu_allocator_t *alloc,
-                                                const char *bot_user_id);
+                                                hu_allocator_t *alloc, const char *bot_user_id);
     if (hu_slack_handle_reaction_webhook(body, body_len, alloc, c->bot_user_id)) {
         hu_json_free(alloc, parsed);
         return HU_OK;
@@ -1436,7 +1466,8 @@ hu_error_t hu_slack_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_lo
             const char *thread_ts = hu_json_get_string(msg, "thread_ts");
             if (thread_ts) {
                 size_t tl = strlen(thread_ts);
-                if (tl > 95) tl = 95;
+                if (tl > 95)
+                    tl = 95;
                 memcpy(msgs[cnt].reply_to_guid, thread_ts, tl);
                 msgs[cnt].reply_to_guid[tl] = '\0';
             }
@@ -1486,9 +1517,9 @@ const char *hu_slack_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
 }
 
 hu_error_t hu_slack_test_inject_mock_full(hu_channel_t *ch, const char *session_key,
-                                           size_t session_key_len, const char *content,
-                                           size_t content_len,
-                                           const hu_slack_test_msg_opts_t *opts) {
+                                          size_t session_key_len, const char *content,
+                                          size_t content_len,
+                                          const hu_slack_test_msg_opts_t *opts) {
     if (!ch || !ch->ctx || !opts)
         return HU_ERR_INVALID_ARGUMENT;
     hu_slack_ctx_t *c = (hu_slack_ctx_t *)ch->ctx;
@@ -1514,19 +1545,22 @@ hu_error_t hu_slack_test_inject_mock_full(hu_channel_t *ch, const char *session_
 
     if (opts->chat_id) {
         size_t cl = strlen(opts->chat_id);
-        if (cl > 127) cl = 127;
+        if (cl > 127)
+            cl = 127;
         memcpy(c->mock_msgs[i].chat_id, opts->chat_id, cl);
         c->mock_msgs[i].chat_id[cl] = '\0';
     }
     if (opts->guid) {
         size_t gl = strlen(opts->guid);
-        if (gl > 95) gl = 95;
+        if (gl > 95)
+            gl = 95;
         memcpy(c->mock_msgs[i].guid, opts->guid, gl);
         c->mock_msgs[i].guid[gl] = '\0';
     }
     if (opts->reply_to_guid) {
         size_t rl = strlen(opts->reply_to_guid);
-        if (rl > 95) rl = 95;
+        if (rl > 95)
+            rl = 95;
         memcpy(c->mock_msgs[i].reply_to_guid, opts->reply_to_guid, rl);
         c->mock_msgs[i].reply_to_guid[rl] = '\0';
     }
@@ -1601,6 +1635,13 @@ hu_error_t hu_slack_create_ex(hu_allocator_t *alloc, const char *token, size_t t
 hu_error_t hu_slack_create(hu_allocator_t *alloc, const char *token, size_t token_len,
                            hu_channel_t *out) {
     return hu_slack_create_ex(alloc, token, token_len, NULL, 0, out);
+}
+
+void hu_slack_set_persona(hu_channel_t *ch, const struct hu_persona *persona) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_slack_ctx_t *c = (hu_slack_ctx_t *)ch->ctx;
+    c->persona = persona;
 }
 
 void hu_slack_destroy(hu_channel_t *ch) {

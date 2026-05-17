@@ -226,6 +226,163 @@ static void test_dispatch_pre_hook_deny_skips_tool(void) {
     hu_hook_mock_reset();
 }
 
+/* The audit-followup contract on 2026-05-17 added three additional
+ * requirements that the helper MUST satisfy:
+ *   - When pre-hook denies, the POST-hook still fires (auditors see every
+ *     dispatch, including blocked ones).
+ *   - When the tool's execute() reports failure, the POST-hook still fires
+ *     with the actual error message (not an empty output).
+ *   - The public alias hu_agent_dispatch_tool delegates to the internal
+ *     helper with the same contract — call sites outside agent_internal.h
+ *     don't lose any guarantees by using the public name. */
+
+static void test_dispatch_pre_deny_still_fires_post_hook(void) {
+    hu_hook_mock_reset();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_hook_registry_t *reg = NULL;
+    hu_hook_registry_create(&alloc, &reg);
+
+    /* Two hooks: one pre that denies, one post that observes. */
+    hu_hook_entry_t pre = {
+        .name = "pre-deny",
+        .name_len = 8,
+        .event = HU_HOOK_PRE_TOOL_EXECUTE,
+        .command = "/bin/false",
+        .command_len = 10,
+        .timeout_sec = 10,
+        .required = false,
+    };
+    hu_hook_registry_add(reg, &alloc, &pre);
+
+    hu_hook_entry_t post = {
+        .name = "post-audit",
+        .name_len = 10,
+        .event = HU_HOOK_POST_TOOL_EXECUTE,
+        .command = "/bin/true",
+        .command_len = 9,
+        .timeout_sec = 10,
+        .required = false,
+    };
+    hu_hook_registry_add(reg, &alloc, &post);
+
+    /* Mock: both invocations return DENY for pre, ALLOW for post. The mock
+     * sequence runs in registration order across pre+post. */
+    hu_hook_mock_config_t seq[] = {
+        {.exit_code = 2, .stdout_data = "blocked", .stdout_len = 7}, /* pre */
+        {.exit_code = 0, .stdout_data = NULL, .stdout_len = 0},      /* post */
+    };
+    hu_hook_mock_set_sequence(seq, 2);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.hook_registry = reg;
+
+    hu_tool_t tool;
+    mock_tool_ctx_t ctx;
+    make_mock_tool(&tool, &ctx, true);
+    hu_tool_result_t out = {0};
+
+    hu_error_t err =
+        hu_agent_internal_dispatch_with_hooks(&agent, &tool, "mock_tool", 9, "{}", 2, NULL, &out);
+
+    HU_ASSERT_EQ(err, HU_OK);
+    /* Tool body did NOT run — pre-hook denied. */
+    HU_ASSERT_EQ(ctx.execute_count, 0);
+    HU_ASSERT_FALSE(out.success);
+    /* CONTRACT: pre AND post both fired — auditors see the dispatch attempt
+     * even though it was blocked. Count is 2 (one pre, one post). */
+    HU_ASSERT_EQ(hu_hook_mock_call_count(), 2);
+
+    hu_tool_result_free(&alloc, &out);
+    hu_hook_registry_destroy(reg, &alloc);
+    hu_hook_mock_reset();
+}
+
+static void test_dispatch_tool_failure_still_fires_post_hook(void) {
+    hu_hook_mock_reset();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_hook_registry_t *reg = NULL;
+    hu_hook_registry_create(&alloc, &reg);
+
+    hu_hook_entry_t pre = {
+        .name = "pre-allow",
+        .name_len = 9,
+        .event = HU_HOOK_PRE_TOOL_EXECUTE,
+        .command = "/bin/true",
+        .command_len = 9,
+        .timeout_sec = 10,
+        .required = false,
+    };
+    hu_hook_registry_add(reg, &alloc, &pre);
+
+    hu_hook_entry_t post = {
+        .name = "post-audit",
+        .name_len = 10,
+        .event = HU_HOOK_POST_TOOL_EXECUTE,
+        .command = "/bin/true",
+        .command_len = 9,
+        .timeout_sec = 10,
+        .required = false,
+    };
+    hu_hook_registry_add(reg, &alloc, &post);
+
+    /* Both hook executions succeed; the tool itself returns failure. */
+    hu_hook_mock_config_t mock = {.exit_code = 0, .stdout_data = NULL, .stdout_len = 0};
+    hu_hook_mock_set(&mock);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.hook_registry = reg;
+
+    hu_tool_t tool;
+    mock_tool_ctx_t ctx;
+    make_mock_tool(&tool, &ctx, /* should_succeed = */ false);
+    hu_tool_result_t out = {0};
+
+    hu_error_t err =
+        hu_agent_internal_dispatch_with_hooks(&agent, &tool, "mock_tool", 9, "{}", 2, NULL, &out);
+
+    HU_ASSERT_EQ(err, HU_OK);
+    /* Tool ran exactly once and reported failure. */
+    HU_ASSERT_EQ(ctx.execute_count, 1);
+    HU_ASSERT_FALSE(out.success);
+    /* CONTRACT: both pre and post fired even though the tool failed. */
+    HU_ASSERT_EQ(hu_hook_mock_call_count(), 2);
+
+    hu_tool_result_free(&alloc, &out);
+    hu_hook_registry_destroy(reg, &alloc);
+    hu_hook_mock_reset();
+}
+
+static void test_dispatch_tool_public_alias_delegates_to_internal(void) {
+    /* The public hu_agent_dispatch_tool is the same code path as
+     * hu_agent_internal_dispatch_with_hooks. Verify the alias actually
+     * calls the helper rather than being a stub. */
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    agent.hook_registry = NULL;
+
+    hu_tool_t tool;
+    mock_tool_ctx_t ctx;
+    make_mock_tool(&tool, &ctx, true);
+    hu_tool_result_t out = {0};
+
+    hu_error_t err = hu_agent_dispatch_tool(&agent, &tool, "mock_tool", 9, "{}", 2, NULL, &out);
+
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(ctx.execute_count, 1);
+    HU_ASSERT_TRUE(out.success);
+    hu_tool_result_free(&alloc, &out);
+
+    /* Negative case: alias must reject NULL agent the same way the helper does. */
+    HU_ASSERT_EQ(hu_agent_dispatch_tool(NULL, &tool, "x", 1, NULL, 0, NULL, &out),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
 /* ── Suite registration ──────────────────────────────────────────────── */
 
 void run_agent_dispatch_hooks_tests(void) {
@@ -236,4 +393,7 @@ void run_agent_dispatch_hooks_tests(void) {
     HU_RUN_TEST(test_dispatch_no_registry_runs_tool);
     HU_RUN_TEST(test_dispatch_pre_hook_allow_runs_tool);
     HU_RUN_TEST(test_dispatch_pre_hook_deny_skips_tool);
+    HU_RUN_TEST(test_dispatch_pre_deny_still_fires_post_hook);
+    HU_RUN_TEST(test_dispatch_tool_failure_still_fires_post_hook);
+    HU_RUN_TEST(test_dispatch_tool_public_alias_delegates_to_internal);
 }

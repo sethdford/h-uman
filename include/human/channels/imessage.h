@@ -14,6 +14,10 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
                               size_t allow_from_count, hu_channel_t *out);
 void hu_imessage_destroy(hu_channel_t *ch);
 
+/* See hu_telegram_set_persona for the contract. Channel name is "imessage". */
+struct hu_persona;
+void hu_imessage_set_persona(hu_channel_t *ch, const struct hu_persona *persona);
+
 /** Enable the imsg CLI (steipete/imsg) for send/react at runtime.
  * Must be called after hu_imessage_create. */
 void hu_imessage_set_use_imsg_cli(hu_channel_t *ch, bool use);

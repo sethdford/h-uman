@@ -9,10 +9,11 @@
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
-#include "human/core/process_util.h"
 #include "human/core/log.h"
+#include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
+#include "human/persona.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -100,6 +101,8 @@ typedef struct hu_telegram_ctx {
     /* Policy: NULL or count 0 = allow all; otherwise check allowlist */
     const char *const *allow_from;
     size_t allow_from_count;
+    /* Persona: borrowed pointer. NULL = no overlay rendering. */
+    const hu_persona_t *persona;
     /* Streaming: message under edit, accumulated text */
     int64_t stream_message_id;
     char *stream_text;
@@ -749,6 +752,23 @@ static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len
     if (!target || target_len == 0 || !message)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* Persona overlay rendering: rewrite outbound message per per-channel
+     * persona overlay. When persona is NULL the helper returns an identity
+     * copy and behavior matches pre-overlay days (AC-6). */
+    char *rendered = NULL;
+    size_t rendered_len = 0;
+    {
+        const hu_persona_overlay_t *ov = NULL;
+        if (c->persona)
+            ov = hu_persona_find_overlay(c->persona, "telegram", 8);
+        hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
+                                                        &rendered, &rendered_len);
+        if (rerr != HU_OK)
+            return rerr;
+        message = rendered;
+        message_len = rendered_len;
+    }
+
 #if HU_IS_TEST
     {
         size_t len = message_len > 4095 ? 4095 : message_len;
@@ -756,16 +776,21 @@ static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
+        if (rendered)
+            c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
         return HU_OK;
     }
 #else
     /* Typing indicator (best-effort) */
     send_typing_action(c, target, target_len);
 
+    hu_error_t prod_err = HU_OK;
     char url_buf[512];
     int n = build_api_url(url_buf, sizeof(url_buf), c->token, c->token_len, "sendMessage");
-    if (n < 0 || (size_t)n >= sizeof(url_buf))
-        return HU_ERR_INTERNAL;
+    if (n < 0 || (size_t)n >= sizeof(url_buf)) {
+        prod_err = HU_ERR_INTERNAL;
+        goto prod_done;
+    }
 
     /* Smart split long messages */
     size_t offset = 0;
@@ -780,8 +805,10 @@ static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len
         size_t body_len = 0;
         hu_error_t err = build_send_body(c->alloc, target, target_len, message + offset, chunk_len,
                                          &body, &body_len);
-        if (err)
-            return err;
+        if (err) {
+            prod_err = err;
+            goto prod_done;
+        }
 
         hu_http_response_t resp = {0};
         err = hu_http_post_json(c->alloc, url_buf, NULL, body, body_len, &resp);
@@ -790,12 +817,15 @@ static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len
         if (err) {
             if (resp.owned && resp.body)
                 hu_http_response_free(c->alloc, &resp);
-            return HU_ERR_CHANNEL_SEND;
+            prod_err = HU_ERR_CHANNEL_SEND;
+            goto prod_done;
         }
         if (resp.owned && resp.body)
             hu_http_response_free(c->alloc, &resp);
-        if (resp.status_code != 200)
-            return HU_ERR_CHANNEL_SEND;
+        if (resp.status_code != 200) {
+            prod_err = HU_ERR_CHANNEL_SEND;
+            goto prod_done;
+        }
 
         offset = end;
     }
@@ -814,7 +844,11 @@ static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len
             media_err = err;
         }
     }
-    return media_err;
+    prod_err = media_err;
+prod_done:
+    if (rendered)
+        c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
+    return prod_err;
 #endif
 }
 
@@ -935,11 +969,10 @@ static hu_error_t telegram_load_conversation_history(void *ctx, hu_allocator_t *
         return HU_ERR_INTERNAL;
 
     char body_buf[192];
-    int nb =
-        snprintf(body_buf, sizeof(body_buf),
-                 "{\"offset\":%lld,\"limit\":%zu,\"timeout\":0,"
-                 "\"allowed_updates\":[\"message\",\"channel_post\"]}",
-                 (long long)c->last_update_id, api_lim);
+    int nb = snprintf(body_buf, sizeof(body_buf),
+                      "{\"offset\":%lld,\"limit\":%zu,\"timeout\":0,"
+                      "\"allowed_updates\":[\"message\",\"channel_post\"]}",
+                      (long long)c->last_update_id, api_lim);
     if (nb < 0 || (size_t)nb >= sizeof(body_buf))
         return HU_ERR_INTERNAL;
 
@@ -1105,8 +1138,8 @@ static hu_error_t telegram_react(void *ctx, const char *target, size_t target_le
         return HU_ERR_INTERNAL;
     char *body = NULL;
     size_t body_len = 0;
-    hu_error_t err = build_set_message_reaction_body(c->alloc, target, target_len, message_id, emoji,
-                                                     emoji_len, &body, &body_len);
+    hu_error_t err = build_set_message_reaction_body(c->alloc, target, target_len, message_id,
+                                                     emoji, emoji_len, &body, &body_len);
     if (err)
         return err;
     hu_http_response_t resp = {0};
@@ -1228,6 +1261,13 @@ void hu_telegram_set_allowlist(hu_channel_t *ch, const char *const *allow_from,
     c->allow_from_count = allow_from_count;
 }
 
+void hu_telegram_set_persona(hu_channel_t *ch, const struct hu_persona *persona) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_telegram_ctx_t *c = (hu_telegram_ctx_t *)ch->ctx;
+    c->persona = persona;
+}
+
 const char *hu_telegram_commands_help(void) {
     return g_telegram_commands_help ? g_telegram_commands_help : TELEGRAM_COMMANDS_HELP_DEFAULT;
 }
@@ -1250,7 +1290,8 @@ hu_error_t hu_telegram_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
             memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
             memcpy(msgs[i].chat_id, c->mock_msgs[i].chat_id, sizeof(msgs[i].chat_id));
             memcpy(msgs[i].guid, c->mock_msgs[i].guid, sizeof(msgs[i].guid));
-            memcpy(msgs[i].reply_to_guid, c->mock_msgs[i].reply_to_guid, sizeof(msgs[i].reply_to_guid));
+            memcpy(msgs[i].reply_to_guid, c->mock_msgs[i].reply_to_guid,
+                   sizeof(msgs[i].reply_to_guid));
             msgs[i].is_group = c->mock_msgs[i].is_group;
             msgs[i].has_attachment = c->mock_msgs[i].has_attachment;
             msgs[i].message_id = c->mock_msgs[i].message_id;
@@ -1453,8 +1494,8 @@ hu_error_t hu_telegram_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 
         /* Group detection from chat.type */
         const char *chat_type = hu_json_get_string(chat, "type");
-        msgs[cnt].is_group = (chat_type &&
-            (strcmp(chat_type, "group") == 0 || strcmp(chat_type, "supergroup") == 0));
+        msgs[cnt].is_group = (chat_type && (strcmp(chat_type, "group") == 0 ||
+                                            strcmp(chat_type, "supergroup") == 0));
 
         /* Structured chat_id for group send routing */
         if (msgs[cnt].is_group) {
@@ -1530,9 +1571,9 @@ const char *hu_telegram_test_get_last_message(hu_channel_t *ch, size_t *out_len)
 }
 
 hu_error_t hu_telegram_test_inject_mock_full(hu_channel_t *ch, const char *session_key,
-                                              size_t session_key_len, const char *content,
-                                              size_t content_len,
-                                              const hu_telegram_test_msg_opts_t *opts) {
+                                             size_t session_key_len, const char *content,
+                                             size_t content_len,
+                                             const hu_telegram_test_msg_opts_t *opts) {
     if (!ch || !ch->ctx || !opts)
         return HU_ERR_INVALID_ARGUMENT;
     hu_telegram_ctx_t *c = (hu_telegram_ctx_t *)ch->ctx;
@@ -1558,19 +1599,22 @@ hu_error_t hu_telegram_test_inject_mock_full(hu_channel_t *ch, const char *sessi
 
     if (opts->chat_id) {
         size_t cl = strlen(opts->chat_id);
-        if (cl > 127) cl = 127;
+        if (cl > 127)
+            cl = 127;
         memcpy(c->mock_msgs[i].chat_id, opts->chat_id, cl);
         c->mock_msgs[i].chat_id[cl] = '\0';
     }
     if (opts->guid) {
         size_t gl = strlen(opts->guid);
-        if (gl > 95) gl = 95;
+        if (gl > 95)
+            gl = 95;
         memcpy(c->mock_msgs[i].guid, opts->guid, gl);
         c->mock_msgs[i].guid[gl] = '\0';
     }
     if (opts->reply_to_guid) {
         size_t rl = strlen(opts->reply_to_guid);
-        if (rl > 95) rl = 95;
+        if (rl > 95)
+            rl = 95;
         memcpy(c->mock_msgs[i].reply_to_guid, opts->reply_to_guid, rl);
         c->mock_msgs[i].reply_to_guid[rl] = '\0';
     }

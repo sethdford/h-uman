@@ -1,5 +1,6 @@
 ---
 status: superseded
+last_audit: 2026-05-17
 ---
 
 # Project Prism — SOTA Chat Design Overhaul

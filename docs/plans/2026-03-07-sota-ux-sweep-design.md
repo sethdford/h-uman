@@ -1,5 +1,6 @@
 ---
 status: complete
+last_audit: 2026-05-17
 ---
 
 # SOTA UX Sweep — Design Document

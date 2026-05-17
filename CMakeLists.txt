@@ -34,10 +34,8 @@ option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
 option(HU_ENABLE_NEURAL_MEMORY "W10 neural memory placeholder (schema/ONNX path; default OFF)" OFF)
-# Init 13: DeltaKV + SWAN KV-cache compression. Pairs with W10 neural memory;
-# default OFF until the codecs meet the TVD < 1% / ≤ 2 ms / ≤ +40 KB binary
-# gates documented in docs/plans/2026-05-11-init-13-kv-compression.md.
-option(HU_ENABLE_KV_COMPRESSION "Init 13 KV-cache compression (DeltaKV + SWAN)" OFF)
+# Init 13 KV-cache compression (DeltaKV + SWAN) was ABANDONED on 2026-05-17:
+# see docs/plans/2026-05-11-init-13-kv-compression.md (Status: ABANDONED).
 # W13: learning loop (LoRA + DPO from W4/W5/W3 signals). Defaults follow ML.
 if(HU_ENABLE_ML)
     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" ON)
@@ -441,6 +439,7 @@ set(HU_CORE_SOURCES
     src/security/pairing.c
     src/security/secrets.c
     src/security/vault.c
+    src/security/vault_aead.c
     src/security/audit.c
     src/security/delegation.c
     src/security/noop_sandbox.c
@@ -571,6 +570,7 @@ set(HU_CORE_SOURCES
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/contact_send_recency.c
     src/context/filler_recency.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
@@ -722,8 +722,6 @@ set(HU_CORE_SOURCES
     src/memory/cross_graph.c
     src/memory/erasure.c
     src/memory/neural_memory.c
-    # Init 13 KV-cache compression sources are guarded by HU_ENABLE_KV_COMPRESSION
-    # and appended below so MinSizeRel binaries stay flat when the feature is off.
     src/agent/self_rag.c
     src/agent/self_rag_atomic.c
     src/agent/self_rag_inline.c
@@ -1088,6 +1086,7 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/render.c
     src/persona/examples.c
     src/persona/sampler.c
     src/persona/analyzer.c
@@ -1611,14 +1610,6 @@ endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_sources(human_core PRIVATE
-        src/memory/kv_compressor.c
-        src/memory/kv_deltakv.c
-        src/memory/kv_swan.c
-    )
-    target_compile_definitions(human_core PRIVATE HU_ENABLE_KV_COMPRESSION=1)
-endif()
 if(HU_ENABLE_MCP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_MCP=1)
 endif()
@@ -1750,6 +1741,13 @@ endif()
 # --- Size optimization: function/data sections for link-time dead code elimination ---
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(human_core PRIVATE -ffunction-sections -fdata-sections)
+    # src/onboard.c embeds a starter-persona JSON literal that exceeds ISO C99's
+    # required 4095-byte minimum string-literal length. The compiler we ship with
+    # supports much longer literals; -Wno-overlength-strings just silences the
+    # diagnostic so -Werror doesn't reject it. Scoped to this one file so the
+    # global posture stays -Werror -Wall -Wextra -Wpedantic.
+    set_source_files_properties(src/onboard.c PROPERTIES
+        COMPILE_OPTIONS "-Wno-overlength-strings")
 endif()
 
 if(HU_ENABLE_SQLITE)
@@ -2101,6 +2099,12 @@ if(HU_ENABLE_ASAN)
     target_compile_options(human_core PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(human_core PRIVATE -fsanitize=address)
 endif()
+
+# src/onboard.c carries the starter persona JSON as a C string literal that
+# exceeds the 4095-byte ISO C99 maximum. This is intentional (the literal is
+# the single source of truth shared by `human init` and `human onboard`);
+# disable the warning for that file only.
+set_source_files_properties(src/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
 
 # --- Main executable ---
 add_executable(human src/main.c src/bootstrap.c)
@@ -2491,14 +2495,6 @@ endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_sources(human_core_test PRIVATE
-        src/memory/kv_compressor.c
-        src/memory/kv_deltakv.c
-        src/memory/kv_swan.c
-    )
-    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_KV_COMPRESSION=1)
-endif()
 target_compile_options(human_core_test PRIVATE -UNDEBUG)
 if(Threads_FOUND)
     target_link_libraries(human_core_test PUBLIC Threads::Threads)
@@ -2680,10 +2676,14 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_persona_overlay_render.c
+    tests/test_channel_overlay_apply.c
     tests/test_personal_model_simulation.c
     tests/test_personal_model_fidelity_v2.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
+    tests/test_contact_send_recency.c
+    tests/test_contact_send_recency_daemon.c
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
@@ -2720,6 +2720,7 @@ set(HU_TEST_SOURCES
     tests/test_security.c
     tests/test_sensitivity.c
     tests/test_vault.c
+    tests/test_vault_aead.c
     tests/test_provider.c
     tests/test_provider_http.c
     tests/test_ensemble.c
@@ -3048,9 +3049,6 @@ endif()
 if(HU_ENABLE_AUTHENTIC)
     list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
 endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    list(APPEND HU_TEST_SOURCES tests/test_kv_compressor.c)
-endif()
 
 # Music preview tests (pure computation — always compiled)
 list(APPEND HU_TEST_SOURCES tests/test_music.c)
@@ -3282,9 +3280,6 @@ if(HU_ENABLE_FEEDS)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_AUTHENTIC=1)
-endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_compile_definitions(human_tests PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
 if(UNIX AND NOT WIN32)
     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)
@@ -3585,7 +3580,19 @@ target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-
 target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
 
 # Synthetic pressure tests (requires libcurl for real HTTP)
-option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)
+# Default ON when libcurl is available so the harness builds in CI by default.
+# Per Task #5 (2026-05-17): we want the binary built by default; runtime --smoke
+# mode in tests/synthetic/synthetic_main.c lets CI exercise the binary without
+# GEMINI_API_KEY. Full runs still require credentials and network.
+if(HU_ENABLE_CURL)
+    option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" ON)
+else()
+    option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)
+endif()
+if(HU_ENABLE_SYNTHETIC AND NOT HU_ENABLE_CURL)
+    message(WARNING "HU_ENABLE_SYNTHETIC requires HU_ENABLE_CURL; disabling synthetic harness")
+    set(HU_ENABLE_SYNTHETIC OFF CACHE BOOL "Build Gemini-driven synthetic pressure test harness" FORCE)
+endif()
 if(HU_ENABLE_SYNTHETIC)
     file(GLOB HU_SYNTH_SOURCES tests/synthetic/synthetic_*.c)
     add_executable(human_synthetic ${HU_SYNTH_SOURCES})
@@ -3593,6 +3600,13 @@ if(HU_ENABLE_SYNTHETIC)
     target_include_directories(human_synthetic PRIVATE ${HU_ROOT}/include ${HU_ROOT}/src ${HU_ROOT}/tests/synthetic)
     target_compile_definitions(human_synthetic PRIVATE HU_ENABLE_CURL=1)
     target_compile_options(human_synthetic PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Wno-gnu-zero-variadic-macro-arguments)
+    if(HU_ENABLE_ASAN)
+        # human_synthetic links libhuman_core.a which was built with ASan;
+        # the executable itself must also link with -fsanitize=address so the
+        # ASan runtime symbols (__asan_*) resolve.
+        target_compile_options(human_synthetic PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(human_synthetic PRIVATE -fsanitize=address)
+    endif()
     if(UNIX AND NOT WIN32)
         target_compile_definitions(human_synthetic PRIVATE HU_GATEWAY_POSIX=1)
     endif()
@@ -3605,7 +3619,20 @@ if(HU_ENABLE_SYNTHETIC)
 endif()
 
 # Channel conversation & chaos tests
-option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" OFF)
+# Default ON when libcurl is available so the harness builds in CI by default.
+# Per Task #5 (2026-05-17): M6 Tier-1 channel ambition (Telegram/Discord/iMessage/
+# Slack at 8/10+ naturalness) needs this harness running. Runtime --smoke mode in
+# tests/synthetic/channel_main.c lets CI exercise the binary without
+# GEMINI_API_KEY. Full runs still require credentials and network.
+if(HU_ENABLE_CURL)
+    option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" ON)
+else()
+    option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" OFF)
+endif()
+if(HU_ENABLE_CHANNEL_TESTS AND NOT HU_ENABLE_CURL)
+    message(WARNING "HU_ENABLE_CHANNEL_TESTS requires HU_ENABLE_CURL; disabling channel harness")
+    set(HU_ENABLE_CHANNEL_TESTS OFF CACHE BOOL "Build channel conversation+chaos test harness" FORCE)
+endif()
 if(HU_ENABLE_CHANNEL_TESTS)
     file(GLOB HU_CHANNEL_TEST_SOURCES tests/synthetic/channel_*.c)
     list(APPEND HU_CHANNEL_TEST_SOURCES
@@ -3621,6 +3648,13 @@ if(HU_ENABLE_CHANNEL_TESTS)
     target_compile_options(human_channel_tests PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wformat-security
         -Wno-gnu-zero-variadic-macro-arguments)
+    if(HU_ENABLE_ASAN)
+        # human_channel_tests links libhuman_core_test.a which was built with
+        # ASan; the executable itself must also link with -fsanitize=address so
+        # the ASan runtime symbols (__asan_*) resolve.
+        target_compile_options(human_channel_tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(human_channel_tests PRIVATE -fsanitize=address)
+    endif()
     if(UNIX AND NOT WIN32)
         target_compile_definitions(human_channel_tests PRIVATE HU_GATEWAY_POSIX=1)
     endif()

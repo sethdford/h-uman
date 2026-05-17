@@ -1,9 +1,10 @@
 ---
 title: "M6: Channel Tiering — Depth Over Breadth"
 created: 2026-04-11
-status: active
+status: complete
 scope: channel prioritization
 parent: 2026-04-11-strategic-missions.md
+last_audit: 2026-05-17
 ---
 
 # M6: Channel Tiering — Depth Over Breadth

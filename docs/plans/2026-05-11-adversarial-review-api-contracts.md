@@ -1,3 +1,8 @@
+---
+status: complete
+last_audit: 2026-05-17
+---
+
 # Adversarial API-Contract Review — SOTA-2026 Design Fleet
 
 **Reviewer:** api-contract-watcher  

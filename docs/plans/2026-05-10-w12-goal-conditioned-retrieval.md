@@ -1,10 +1,11 @@
 ---
 title: "W12 — Goal-Conditioned Retrieval + Multi-Hop Reasoning"
 created: 2026-05-10
-status: shipped (P7/P8 anchor demotion + hub scaling, default planner in agent_turn)
+status: complete
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: medium
 scope: include/human/agent/, src/agent/, src/memory/
+last_audit: 2026-05-17
 ---
 
 # W12 — Goal-Conditioned Retrieval

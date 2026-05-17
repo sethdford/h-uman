@@ -5,6 +5,7 @@
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/persona.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -40,6 +41,8 @@ typedef struct hu_discord_ctx {
     char *stream_text;
     size_t stream_text_len;
     size_t stream_text_cap;
+    /* Persona: borrowed pointer for overlay-aware rendering. */
+    const hu_persona_t *persona;
     /* Webhook inbound queue */
     hu_discord_queued_msg_t queue[DISCORD_QUEUE_MAX];
     size_t queue_head;
@@ -122,6 +125,21 @@ static hu_error_t discord_send(void *ctx, const char *target, size_t target_len,
     if (!target || target_len == 0 || !message)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* Persona overlay rendering. See hu_persona_render_for_channel. */
+    char *rendered = NULL;
+    size_t rendered_len = 0;
+    {
+        const hu_persona_overlay_t *ov = NULL;
+        if (c->persona)
+            ov = hu_persona_find_overlay(c->persona, "discord", 7);
+        hu_error_t rerr = hu_persona_render_for_channel(ov, message, message_len, c->alloc,
+                                                        &rendered, &rendered_len);
+        if (rerr != HU_OK)
+            return rerr;
+        message = rendered;
+        message_len = rendered_len;
+    }
+
 #if HU_IS_TEST
     {
         size_t len = message_len > 4095 ? 4095 : message_len;
@@ -129,20 +147,27 @@ static hu_error_t discord_send(void *ctx, const char *target, size_t target_len,
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
+        if (rendered)
+            c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
         return HU_OK;
     }
 #else
+    hu_error_t prod_err = HU_OK;
     char url_buf[512];
     int n = snprintf(url_buf, sizeof(url_buf), "%s/%.*s/messages", DISCORD_API_BASE,
                      (int)target_len, target);
-    if (n < 0 || (size_t)n >= sizeof(url_buf))
-        return HU_ERR_INTERNAL;
+    if (n < 0 || (size_t)n >= sizeof(url_buf)) {
+        prod_err = HU_ERR_INTERNAL;
+        goto prod_done;
+    }
 
     char *body = NULL;
     size_t body_len = 0;
     hu_error_t err = build_discord_body(c->alloc, message, message_len, &body, &body_len);
-    if (err)
-        return err;
+    if (err) {
+        prod_err = err;
+        goto prod_done;
+    }
 
     char auth_buf[256];
     n = snprintf(auth_buf, sizeof(auth_buf), "Authorization: Bot %.*s", (int)c->token_len,
@@ -150,7 +175,8 @@ static hu_error_t discord_send(void *ctx, const char *target, size_t target_len,
     if (n <= 0 || (size_t)n >= sizeof(auth_buf)) {
         if (body)
             c->alloc->free(c->alloc->ctx, body, body_len + 1);
-        return HU_ERR_INTERNAL;
+        prod_err = HU_ERR_INTERNAL;
+        goto prod_done;
     }
 
     hu_http_response_t resp = {0};
@@ -160,13 +186,19 @@ static hu_error_t discord_send(void *ctx, const char *target, size_t target_len,
     if (err != HU_OK) {
         if (resp.owned && resp.body)
             hu_http_response_free(c->alloc, &resp);
-        return HU_ERR_CHANNEL_SEND;
+        prod_err = HU_ERR_CHANNEL_SEND;
+        goto prod_done;
     }
     if (resp.owned && resp.body)
         hu_http_response_free(c->alloc, &resp);
-    if (resp.status_code < 200 || resp.status_code >= 300)
-        return HU_ERR_CHANNEL_SEND;
-    return HU_OK;
+    if (resp.status_code < 200 || resp.status_code >= 300) {
+        prod_err = HU_ERR_CHANNEL_SEND;
+        goto prod_done;
+    }
+prod_done:
+    if (rendered)
+        c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
+    return prod_err;
 #endif
 }
 
@@ -445,8 +477,8 @@ static hu_error_t discord_start_typing(void *ctx, const char *recipient, size_t 
 #endif
 }
 
-static hu_error_t discord_react(void *ctx, const char *target, size_t target_len, int64_t message_id,
-                                hu_reaction_type_t reaction) {
+static hu_error_t discord_react(void *ctx, const char *target, size_t target_len,
+                                int64_t message_id, hu_reaction_type_t reaction) {
     hu_discord_ctx_t *c = (hu_discord_ctx_t *)ctx;
     if (!c || !c->alloc)
         return HU_ERR_INVALID_ARGUMENT;
@@ -468,9 +500,8 @@ static hu_error_t discord_react(void *ctx, const char *target, size_t target_len
         return HU_ERR_INTERNAL;
 
     char url_buf[640];
-    int nu = snprintf(url_buf, sizeof(url_buf),
-                      "%s/%.*s/messages/%" PRId64 "/reactions/%s/@me", DISCORD_API_BASE,
-                      (int)target_len, target, message_id, emoji_enc);
+    int nu = snprintf(url_buf, sizeof(url_buf), "%s/%.*s/messages/%" PRId64 "/reactions/%s/@me",
+                      DISCORD_API_BASE, (int)target_len, target, message_id, emoji_enc);
     if (nu < 0 || (size_t)nu >= sizeof(url_buf))
         return HU_ERR_INTERNAL;
 
@@ -658,8 +689,8 @@ static char *discord_get_attachment_path(void *ctx, hu_allocator_t *alloc, int64
             continue;
 
         char url_buf[512];
-        int nu = snprintf(url_buf, sizeof(url_buf), "%s/%s/messages/%s", DISCORD_API_BASE, ch_id,
-                          mid);
+        int nu =
+            snprintf(url_buf, sizeof(url_buf), "%s/%s/messages/%s", DISCORD_API_BASE, ch_id, mid);
         if (nu < 0 || (size_t)nu >= sizeof(url_buf))
             continue;
 
@@ -976,8 +1007,7 @@ hu_error_t hu_discord_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_
                 struct tm tm_val;
                 memset(&tm_val, 0, sizeof(tm_val));
                 if (sscanf(ts, "%d-%d-%dT%d:%d:%d", &tm_val.tm_year, &tm_val.tm_mon,
-                           &tm_val.tm_mday, &tm_val.tm_hour, &tm_val.tm_min,
-                           &tm_val.tm_sec) >= 6) {
+                           &tm_val.tm_mday, &tm_val.tm_hour, &tm_val.tm_min, &tm_val.tm_sec) >= 6) {
                     tm_val.tm_year -= 1900;
                     tm_val.tm_mon -= 1;
                     msgs[cnt].timestamp_sec = (int64_t)timegm(&tm_val);
@@ -1012,7 +1042,8 @@ hu_error_t hu_discord_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_
                 const char *ref_id = hu_json_get_string(ref, "message_id");
                 if (ref_id) {
                     size_t rl = strlen(ref_id);
-                    if (rl > 95) rl = 95;
+                    if (rl > 95)
+                        rl = 95;
                     memcpy(msgs[cnt].reply_to_guid, ref_id, rl);
                     msgs[cnt].reply_to_guid[rl] = '\0';
                 }
@@ -1144,9 +1175,9 @@ const char *hu_discord_test_get_last_message(hu_channel_t *ch, size_t *out_len) 
 }
 
 hu_error_t hu_discord_test_inject_mock_full(hu_channel_t *ch, const char *session_key,
-                                             size_t session_key_len, const char *content,
-                                             size_t content_len,
-                                             const hu_discord_test_msg_opts_t *opts) {
+                                            size_t session_key_len, const char *content,
+                                            size_t content_len,
+                                            const hu_discord_test_msg_opts_t *opts) {
     if (!ch || !ch->ctx || !opts)
         return HU_ERR_INVALID_ARGUMENT;
     hu_discord_ctx_t *c = (hu_discord_ctx_t *)ch->ctx;
@@ -1173,25 +1204,35 @@ hu_error_t hu_discord_test_inject_mock_full(hu_channel_t *ch, const char *sessio
 
     if (opts->chat_id) {
         size_t cl = strlen(opts->chat_id);
-        if (cl > 127) cl = 127;
+        if (cl > 127)
+            cl = 127;
         memcpy(c->mock_msgs[i].chat_id, opts->chat_id, cl);
         c->mock_msgs[i].chat_id[cl] = '\0';
     }
     if (opts->guid) {
         size_t gl = strlen(opts->guid);
-        if (gl > 95) gl = 95;
+        if (gl > 95)
+            gl = 95;
         memcpy(c->mock_msgs[i].guid, opts->guid, gl);
         c->mock_msgs[i].guid[gl] = '\0';
     }
     if (opts->reply_to_guid) {
         size_t rl = strlen(opts->reply_to_guid);
-        if (rl > 95) rl = 95;
+        if (rl > 95)
+            rl = 95;
         memcpy(c->mock_msgs[i].reply_to_guid, opts->reply_to_guid, rl);
         c->mock_msgs[i].reply_to_guid[rl] = '\0';
     }
     return HU_OK;
 }
 #endif
+
+void hu_discord_set_persona(hu_channel_t *ch, const struct hu_persona *persona) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_discord_ctx_t *c = (hu_discord_ctx_t *)ch->ctx;
+    c->persona = persona;
+}
 
 void hu_discord_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {

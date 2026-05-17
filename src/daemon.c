@@ -73,8 +73,8 @@
 #include "human/daemon_routing.h"
 #if defined(HU_ENABLE_RL_FULL)
 #include "human/agent/reaction_handler.h"
-#include "human/daemon_reaction_poll.h"
 #include "human/channels/imessage_reactions.h"
+#include "human/daemon_reaction_poll.h"
 #endif
 
 #include "human/agent/governor.h"
@@ -1061,6 +1061,18 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             break;
                         }
 
+                        /* FU-1: defer F25 if reactive turn fired for this contact recently. */
+                        if (hu_daemon_proactive_should_defer(&agent->contact_send_recency,
+                                                             m->contact_id, strlen(m->contact_id),
+                                                             (int64_t)now)) {
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "F25 emotional check-in deferred for %s "
+                                        "(reactive turn within %ds)",
+                                        cp->name ? cp->name : cp->contact_id,
+                                        HU_DAEMON_REACTIVE_GATE_WINDOW_S);
+                            break;
+                        }
+
                         char msg_buf[384];
                         int w = snprintf(msg_buf, sizeof(msg_buf), "hey how are you doing with %s?",
                                          m->topic);
@@ -1087,6 +1099,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                 (size_t)w, NULL, 0);
                             if (send_err == HU_OK) {
                                 (void)hu_emotional_moment_mark_followed_up(agent->memory, m->id);
+                                hu_contact_send_recency_record(
+                                    &agent->contact_send_recency, m->contact_id,
+                                    strlen(m->contact_id), (int64_t)now, HU_SEND_PATH_PROACTIVE);
                                 hu_log_info("human", agent ? agent->observer : NULL,
                                             "F25 emotional check-in sent to %s: %s",
                                             cp->name ? cp->name : cp->contact_id, msg_buf);
@@ -1142,6 +1157,15 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 sched_now, sched_ch, strlen(sched_ch), sched_contact, sizeof(sched_contact),
                 sched_channel, sizeof(sched_channel), sched_msg, sizeof(sched_msg));
             if (sched_len > 0) {
+                /* FU-1: defer scheduled delivery if the reactive turn fired recently. */
+                if (agent &&
+                    hu_daemon_proactive_should_defer(&agent->contact_send_recency, sched_contact,
+                                                     strlen(sched_contact), (int64_t)time(NULL))) {
+                    hu_log_info("human", agent ? agent->observer : NULL,
+                                "scheduled message deferred for %s (reactive turn within %ds)",
+                                sched_contact, HU_DAEMON_REACTIVE_GATE_WINDOW_S);
+                    continue;
+                }
                 hu_validator_chain_apply_default_in_place(alloc, agent ? agent->observer : NULL,
                                                           NULL, 0, "scheduled send", sched_msg,
                                                           &sched_len, sizeof(sched_msg));
@@ -1160,6 +1184,11 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 channels[sc].channel->vtable->send(channels[sc].channel->ctx, sched_contact,
                                                    strlen(sched_contact), sched_msg, sched_len,
                                                    NULL, 0);
+                if (agent) {
+                    hu_contact_send_recency_record(&agent->contact_send_recency, sched_contact,
+                                                   strlen(sched_contact), (int64_t)time(NULL),
+                                                   HU_SEND_PATH_SCHEDULED);
+                }
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "scheduled message delivered to %s via %s", sched_contact, sched_ch);
                 const char *sh = getenv("HOME");
@@ -1823,6 +1852,17 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         hu_protective_is_boundary(agent->memory, cp->contact_id,
                                                   strlen(cp->contact_id), "proactive", 9))
                         skip = true;
+                    /* FU-1: defer proactive check-in if reactive turn fired recently. */
+                    if (!skip && hu_daemon_proactive_should_defer(
+                                     &agent->contact_send_recency, cp->contact_id,
+                                     strlen(cp->contact_id), (int64_t)now)) {
+                        hu_log_info("human", agent ? agent->observer : NULL,
+                                    "proactive check-in deferred for %s "
+                                    "(reactive turn within %ds)",
+                                    cp->name ? cp->name : cp->contact_id,
+                                    HU_DAEMON_REACTIVE_GATE_WINDOW_S);
+                        skip = true;
+                    }
                     if (!skip && channels[c].channel->vtable->send) {
                         hu_validator_chain_apply_default_in_place(
                             alloc, agent ? agent->observer : NULL, NULL, 0, "proactive send",
@@ -1861,6 +1901,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             channels[c].channel->vtable->send(channels[c].channel->ctx, target_part,
                                                               target_len, response, response_len,
                                                               NULL, 0);
+                            /* FU-1: record proactive send so reactive deferral works. */
+                            hu_contact_send_recency_record(&agent->contact_send_recency,
+                                                           cp->contact_id, strlen(cp->contact_id),
+                                                           (int64_t)now, HU_SEND_PATH_PROACTIVE);
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "proactive check-in sent to %s: %.*s",
                                         cp->name ? cp->name : cp->contact_id, (int)response_len,
@@ -2082,10 +2126,23 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                     if (photos[candidates[ci].idx].path[0])
                                         media[media_count++] = photos[candidates[ci].idx].path;
                                 }
-                                if (media_count > 0) {
+                                /* FU-1: defer photo album if reactive turn fired recently. */
+                                bool photo_defer = hu_daemon_proactive_should_defer(
+                                    &agent->contact_send_recency, cp->contact_id,
+                                    strlen(cp->contact_id), (int64_t)now);
+                                if (photo_defer) {
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "proactive photo album deferred for %s "
+                                                "(reactive turn within %ds)",
+                                                cp->name ? cp->name : cp->contact_id,
+                                                HU_DAEMON_REACTIVE_GATE_WINDOW_S);
+                                } else if (media_count > 0) {
                                     channels[c].channel->vtable->send(channels[c].channel->ctx,
                                                                       target_part, target_len, "",
                                                                       0, media, media_count);
+                                    hu_contact_send_recency_record(
+                                        &agent->contact_send_recency, cp->contact_id,
+                                        strlen(cp->contact_id), (int64_t)now, HU_SEND_PATH_PHOTO);
                                     hu_log_info("human", agent ? agent->observer : NULL,
                                                 "proactive photo album: %zu photos shared",
                                                 media_count);
@@ -2422,8 +2479,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_agent_set_outcomes(agent, &daemon_outcomes);
 
 #if defined(HU_ENABLE_RL_FULL)
-    if (config && config->reaction_collection.enabled && agent &&
-        agent->sota.sota_initialized) {
+    if (config && config->reaction_collection.enabled && agent && agent->sota.sota_initialized) {
         hu_reaction_handler_set_collector(&agent->sota.dpo_collector);
     }
 #endif
@@ -2641,8 +2697,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             FILE *lf = fopen(lb_tries[li], "r");
                             if (lf) {
                                 fclose(lf);
-                                (void)snprintf(w14_canned_lb_path, sizeof(w14_canned_lb_path),
-                                               "%s", lb_tries[li]);
+                                (void)snprintf(w14_canned_lb_path, sizeof(w14_canned_lb_path), "%s",
+                                               lb_tries[li]);
                                 break;
                             }
                         }
@@ -2695,15 +2751,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (pf) {
                                 fclose(pf);
                                 (void)snprintf(w14_prompt_fixture_path,
-                                               sizeof(w14_prompt_fixture_path), "%s",
-                                               pf_tries[pi]);
+                                               sizeof(w14_prompt_fixture_path), "%s", pf_tries[pi]);
                                 break;
                             }
                         }
                         if (w14_prompt_fixture_path[0] == '\0') {
                             const char *hm = getenv("HOME");
-                            (void)snprintf(w14_prompt_fixture_path,
-                                           sizeof(w14_prompt_fixture_path),
+                            (void)snprintf(w14_prompt_fixture_path, sizeof(w14_prompt_fixture_path),
                                            "%s/.human/eval/persona_prompts.txt",
                                            hm && hm[0] ? hm : "/tmp");
                         }
@@ -10681,6 +10735,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* FU-1: record that the REACTIVE path just sent to this contact so
+                 * proactive paths (F25, scheduler, proactive check-in, photo,
+                 * morning) defer for HU_DAEMON_REACTIVE_GATE_WINDOW_S seconds.
+                 * Only record when we actually emitted a reply — silence/skipped
+                 * batches must not suppress later proactive sends. */
+                if (err == HU_OK && response && response_len > 0 && agent && batch_key &&
+                    key_len > 0) {
+                    hu_contact_send_recency_record(&agent->contact_send_recency, batch_key, key_len,
+                                                   (int64_t)time(NULL), HU_SEND_PATH_REACTIVE);
+                }
+
                 /* Store conversation summary as long-term memory */
                 if (err == HU_OK && response && response_len > 0 && agent->memory) {
                     store_conversation_summary(alloc, agent->memory, graph, agent, batch_key,
@@ -11666,10 +11731,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     db = home_db;
                                                 }
                                             }
-                                            if (db &&
-                                                hu_imessage_lookup_latest_sent_guid(
-                                                    db, batch_key, fragments[f].text, msg_ref,
-                                                    sizeof(msg_ref)) != HU_OK) {
+                                            if (db && hu_imessage_lookup_latest_sent_guid(
+                                                          db, batch_key, fragments[f].text, msg_ref,
+                                                          sizeof(msg_ref)) != HU_OK) {
                                                 snprintf(msg_ref, sizeof(msg_ref), "out-%lld",
                                                          (long long)time(NULL));
                                             }

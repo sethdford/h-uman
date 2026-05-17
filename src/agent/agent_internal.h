@@ -69,8 +69,7 @@ void hu_agent_internal_clear_scene_direction(hu_agent_t *agent);
  * Used by the daemon at end-of-turn, just before clearing
  * `agent->scene_direction_text`, so that G6 on the next turn can
  * still catch a model that quotes the *previous* turn's director. */
-void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
-                                              size_t text_len);
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text, size_t text_len);
 
 /* Free all director history slots; reset count to 0. Called by
  * `hu_agent_deinit`. Idempotent. */
@@ -111,6 +110,23 @@ hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *t
                                                  const char *args_json, size_t args_json_len,
                                                  const hu_json_value_t *args_parsed,
                                                  hu_tool_result_t *out);
+
+/* Split pre/post hook helpers — for call sites that cannot use
+ * hu_agent_internal_dispatch_with_hooks because they own execution
+ * differently (streaming tools, parallel dispatcher, approval-retry).
+ *
+ * They MUST be called as a pair: pre returns true if the caller should
+ * proceed to execute the tool; false means the pre-hook denied and *out
+ * is already populated with the deny result. In either case the caller
+ * is REQUIRED to invoke hu_agent_internal_post_hook_fire afterward so
+ * auditors observe every dispatch attempt. */
+bool hu_agent_internal_pre_hook_check(hu_agent_t *agent, const char *tool_name,
+                                      size_t tool_name_len, const char *args_json,
+                                      size_t args_json_len, hu_tool_result_t *out);
+
+void hu_agent_internal_post_hook_fire(hu_agent_t *agent, const char *tool_name,
+                                      size_t tool_name_len, const char *args_json,
+                                      size_t args_json_len, const hu_tool_result_t *result);
 
 /* Shared humanness thresholds used by both batch and streaming paths */
 #ifndef HU_SYCOPHANCY_THRESHOLD

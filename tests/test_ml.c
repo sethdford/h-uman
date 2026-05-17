@@ -1,6 +1,7 @@
 /* Tests for ML subsystem: BPE tokenizer, dataloader, prepare, experiment. */
 
 #include "human/agent.h"
+#include "human/agent/scheduler_status_json.h"
 #include "human/agent/speculative.h"
 #include "human/context/anticipatory.h"
 #include "human/core/allocator.h"
@@ -12,22 +13,21 @@
 #include "human/ml/experiment.h"
 #include "human/ml/experiment_store.h"
 #include "human/ml/lora.h"
-#include "human/ml/ml.h"
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/ml/ml.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
 #include "human/ml/prepare.h"
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
 #include "human/providers/huml.h"
-#include "human/agent/scheduler_status_json.h"
 #include "test_framework.h"
 
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1482,9 +1482,8 @@ static void test_ml_cli_status_scheduler_file_e2e(void) {
     mkdir_p(humandir);
     char path[600];
     snprintf(path, sizeof(path), "%s/scheduler.status", humandir);
-    write_text_file(path,
-                     "{\"updated_epoch\":2000,\"jobs_pending\":11,\"on_ac_power\":false,"
-                     "\"battery_pct\":77,\"jobs_completed_today\":4}");
+    write_text_file(path, "{\"updated_epoch\":2000,\"jobs_pending\":11,\"on_ac_power\":false,"
+                          "\"battery_pct\":77,\"jobs_completed_today\":4}");
 
     HU_ASSERT_EQ(setenv("HOME", td, 1), 0);
 
@@ -1498,8 +1497,7 @@ static void test_ml_cli_status_scheduler_file_e2e(void) {
     unsigned long long jp = 0, jc = 0;
     long long bat = 0, ue = 0;
     char ac[16] = {0};
-    HU_ASSERT_EQ(
-        hu_scheduler_status_parse_json(body, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(body, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
     HU_ASSERT_EQ(jp, 11ULL);
     HU_ASSERT_EQ(jc, 4ULL);
     HU_ASSERT_EQ(bat, 77LL);
@@ -3293,8 +3291,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
 
     /* Build a non-trivial adapter (B != 0 so delta is nonzero), persist,
      * destroy in-process, load from disk, attach, verify forward differs. */
-    hu_lora_config_t lora_cfg = {.rank = 2, .alpha = 4.0f, .dropout = 0.0f,
-                                 .targets = HU_LORA_TARGET_QV};
+    hu_lora_config_t lora_cfg = {
+        .rank = 2, .alpha = 4.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_QV};
     hu_lora_adapter_t *src = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &lora_cfg, 8, 8, 1, &src), HU_OK);
     float A_vals[16];
@@ -3325,8 +3323,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
     HU_ASSERT_EQ(n_layers, (size_t)1);
 
     int32_t ids[4] = {0, 1, 2, 3};
-    hu_ml_tensor_t input = {.data = ids, .shape = {1, 4, 0, 0}, .ndim = 2,
-                            .dtype = HU_ML_DTYPE_I32, .size_bytes = 16};
+    hu_ml_tensor_t input = {
+        .data = ids, .shape = {1, 4, 0, 0}, .ndim = 2, .dtype = HU_ML_DTYPE_I32, .size_bytes = 16};
 
     hu_ml_tensor_t out_base = {0};
     HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &out_base), HU_OK);
@@ -3366,8 +3364,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
  * tolerate a NULL adapter without crashing. */
 static void test_lora_get_dims_round_trip(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 4, .alpha = 8.0f, .dropout = 0.0f,
-                            .targets = HU_LORA_TARGET_QV};
+    hu_lora_config_t cfg = {
+        .rank = 4, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_QV};
     hu_lora_adapter_t *a = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, /*in_dim=*/16, /*out_dim=*/24,
                                 /*n_layers=*/3, &a),
@@ -4606,7 +4604,7 @@ static void test_huml_provider_load_unload_adapter(void) {
     lora_cfg.targets = HU_LORA_TARGET_QV;
     hu_lora_adapter_t *adapter = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &lora_cfg, /*in_dim=*/8, /*out_dim=*/8,
-                                 /*n_layers=*/1, &adapter),
+                                /*n_layers=*/1, &adapter),
                  HU_OK);
 
     char path[] = "/tmp/hu_w13_apply_adapter_XXXXXX";
@@ -4621,8 +4619,7 @@ static void test_huml_provider_load_unload_adapter(void) {
 
     /* Load it under id "test_persona". */
     HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "test_persona", 12),
-        HU_OK);
+        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "test_persona", 12), HU_OK);
     const char *id = hu_provider_active_adapter(&provider);
     HU_ASSERT_NOT_NULL(id);
     HU_ASSERT_STR_EQ(id, "test_persona");
@@ -4636,10 +4633,10 @@ static void test_huml_provider_load_unload_adapter(void) {
     HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
 
     /* Re-loading should work; replacing an incumbent should also work. */
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "first", 5), HU_OK);
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "second", 6), HU_OK);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "first", 5),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "second", 6),
+                 HU_OK);
     HU_ASSERT_STR_EQ(hu_provider_active_adapter(&provider), "second");
 
     provider.vtable->deinit(provider.ctx, &alloc);
@@ -4652,8 +4649,7 @@ static void test_provider_adapter_helpers_not_supported(void) {
     /* Build a minimal provider with the triple NULL. We can't easily
      * do that without a non-test provider, so exercise the helper
      * NULL-check paths directly. */
-    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, "p", 1, "id", 2),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, "p", 1, "id", 2), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_provider_unload_adapter(NULL, "id", 2), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT(hu_provider_active_adapter(NULL) == NULL);
 
@@ -4662,8 +4658,7 @@ static void test_provider_adapter_helpers_not_supported(void) {
     hu_provider_vtable_t empty_vtable = {0};
     hu_provider_t empty = {.ctx = (void *)1, .vtable = &empty_vtable};
     hu_allocator_t alloc = hu_system_allocator();
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&empty, &alloc, "p", 1, "id", 2), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&empty, &alloc, "p", 1, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_EQ(hu_provider_unload_adapter(&empty, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT(hu_provider_active_adapter(&empty) == NULL);
 }
@@ -4725,11 +4720,13 @@ static void test_m3_frontier_adapter_null_args(void) {
 static void test_m3_frontier_adapter_bad_file(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_m3_frontier_adapter_t *a = NULL;
-    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_nonexistent_xyz_abc.bin", 40, &a),
-                 HU_ERR_IO);
+    HU_ASSERT_EQ(
+        hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_nonexistent_xyz_abc.bin", 40, &a),
+        HU_ERR_IO);
     HU_ASSERT_NULL(a);
     write_text_file("/tmp/hu_m3_bad_magic.txt", "not-a-stub");
-    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_bad_magic.txt", 26, &a), HU_ERR_IO);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_bad_magic.txt", 26, &a),
+                 HU_ERR_IO);
     HU_ASSERT_NULL(a);
 }
 
@@ -4855,6 +4852,152 @@ static void test_m3_on_provider_success_noop_when_unattached(void) {
      * for every provider success. */
     hu_agent_m3_on_provider_success(NULL);
     HU_ASSERT_NULL(agent.m3_adapter);
+}
+
+/* ── M3 first-slice probe-counter tests (2026-05-17) ─────────────────────
+ *
+ * These tests are the verifier-provable evidence for the first slice of
+ * the M3 frontier-model bridge. Before this slice,
+ * `hu_m3_frontier_adapter_noop_infer` was literally `(void)adapter;
+ * return HU_OK;` — so the 11 chat-path call sites in agent_turn.c +
+ * agent_stream.c (via `hu_agent_m3_on_provider_success`) were
+ * undetectable from the test layer. A regression that dropped one or
+ * all of them would still see green.
+ *
+ * The slice converts the noop into a `probe_infer` that increments an
+ * internal counter on the adapter, and exposes the counter via
+ * `hu_m3_frontier_adapter_probe_count`. Now a test can:
+ *   1. Open a fixture adapter.
+ *   2. Attach it to an agent.
+ *   3. Call `hu_agent_m3_on_provider_success` (the exact entry point
+ *      every chat-path site uses).
+ *   4. Read the probe count back and assert it advanced.
+ *
+ * That proves the seam end-to-end: agent → on_provider_success → noop
+ * compat shim → probe_infer → counter mutates → counter observable.
+ *
+ * Not a model. No tensors. No learning. The MLX/llama.cpp tensor work
+ * is planned in docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md.
+ * What this DOES prove is that when that work lands and slots into
+ * `probe_infer`, the call sites are already firing. */
+
+static void test_m3_probe_count_starts_at_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_probe_zero_start.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_m3_frontier_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &a), HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+    /* A freshly-opened adapter has not been probed. */
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 0);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_probe_infer_increments_counter(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_probe_increments.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_m3_frontier_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &a), HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+
+    /* The direct probe API. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 1);
+
+    /* The backwards-compat shim — `noop_infer` — must route to the
+     * same counter so the existing 11 chat-path call sites become
+     * observable without re-editing them. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 2);
+
+    /* And repeats keep advancing — no saturation, no debounce. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(a), HU_OK);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 4);
+
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_probe_count_null_safe(void) {
+    /* NULL adapter — the probe APIs are on the hot chat path; they must
+     * be safe to call when nothing is attached. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(NULL), HU_OK);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(NULL), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
+}
+
+static void test_m3_agent_on_provider_success_advances_probe_count(void) {
+    /* This is the headline first-slice assertion. It pins the
+     * end-to-end seam:
+     *
+     *   agent has m3 adapter attached
+     *     -> hu_agent_m3_on_provider_success(agent)
+     *       -> hu_m3_frontier_adapter_noop_infer(adapter)  [legacy name]
+     *         -> hu_m3_frontier_adapter_probe_infer(adapter)
+     *           -> adapter->probe_count++
+     *
+     * Before this slice, the bottom three steps collapsed to a single
+     * `(void)return;` and the test below was not expressible — there
+     * was no observable for it. Now if a refactor drops the call site
+     * the assertion goes red. */
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_agent_provider_success.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_agent_m3_adapter_attach(&agent, path);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 0);
+
+    /* The exact call the 11 chat-path sites use. */
+    hu_agent_m3_on_provider_success(&agent);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 1);
+
+    hu_agent_m3_on_provider_success(&agent);
+    hu_agent_m3_on_provider_success(&agent);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 3);
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    /* When ML is disabled, the hook is a no-op and there is no adapter
+     * to read a counter from. The test passes by construction — this
+     * is the documented stub return. */
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
+#endif
 }
 
 /* ── Track D D2.1 — honest-gap caveat snapshot tests ──────────────────
@@ -5037,8 +5180,8 @@ static void test_lora_runner_respects_max_examples(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/responses.json", tmpdir);
 
-    const char *argv[] = {"lora-runner",      "--persona",      "runner_max",
-                          "--output",         output,           "--max-examples", "1"};
+    const char *argv[] = {"lora-runner", "--persona",      "runner_max", "--output",
+                          output,        "--max-examples", "1"};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_lora_runner(&alloc, 7, argv);
     unsetenv("HU_PERSONA_DIR");
@@ -5077,8 +5220,8 @@ static void test_lora_persona_export_jsonl_writes_alpaca_shape(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/train.jsonl", tmpdir);
 
-    const char *argv[] = {"lora-persona", "--persona",       "export_jsonl_test",
-                          "--export-jsonl", output};
+    const char *argv[] = {"lora-persona", "--persona", "export_jsonl_test", "--export-jsonl",
+                          output};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_lora_persona(&alloc, 5, argv);
     unsetenv("HU_PERSONA_DIR");
@@ -5182,9 +5325,8 @@ static void test_fidelity_status_includes_ab_when_files_provided(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/status.json", tmpdir);
 
-    const char *argv[] = {"fidelity-status", "--persona", "fidelity_ab",
-                          "--before",        before_path, "--after",
-                          after_path,        "--output",  output};
+    const char *argv[] = {"fidelity-status", "--persona", "fidelity_ab", "--before", before_path,
+                          "--after",         after_path,  "--output",    output};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_fidelity_status(&alloc, 9, argv);
     unsetenv("HU_PERSONA_DIR");
@@ -5382,6 +5524,11 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_adapter_should_disable_env_empty_does_not_force);
     HU_RUN_TEST(test_m3_adapter_should_disable_env_nonzero_force);
     HU_RUN_TEST(test_m3_on_provider_success_noop_when_unattached);
+    /* M3 first-slice probe-counter tests (2026-05-17) */
+    HU_RUN_TEST(test_m3_probe_count_starts_at_zero);
+    HU_RUN_TEST(test_m3_probe_infer_increments_counter);
+    HU_RUN_TEST(test_m3_probe_count_null_safe);
+    HU_RUN_TEST(test_m3_agent_on_provider_success_advances_probe_count);
     /* Track D D2.1 — honest-gap caveat snapshot tests */
     HU_RUN_TEST(test_lora_persona_caveat_doc_path_is_stable);
     HU_RUN_TEST(test_lora_runner_writes_response_array_in_test_mode);
