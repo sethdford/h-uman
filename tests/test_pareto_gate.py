@@ -324,10 +324,16 @@ def test_iter60_padfix_scenario_promotes():
 
 def test_stage2_abstain_caps_at_defer():
     """Risk 2 mitigation: Stage 2 ABSTAIN must cap final verdict at DEFER
-    even when other judges would promote."""
-    # Use the padfix fixture for PPL (PASS, high score) but force Stage 2
-    # ABSTAIN via empty env (mock unset) plus a fixture that has no
-    # coherence_scores. Synthesize a tiny ad-hoc fixture.
+    even when other judges would promote.
+
+    Sprint 11 / US-11.7 critic-HIGH #1 fix: previously asserted
+    `verdict in ("DEFER", "REJECT")` which would silently accept a regression
+    that mapped Stage 2 ABSTAIN to REJECT. The exact value matters — DEFER is
+    the contract, REJECT would punish the operator for a judge crash they
+    didn't cause."""
+    # Use a fixture where Stage 1 PASSES (adapter_ppl ≈ base_ppl, well under
+    # the 3× floor) but Stage 2 ABSTAINS (no coherence_scores). Synthesize
+    # a tiny ad-hoc fixture.
     import tempfile
 
     ad_hoc = {
@@ -343,12 +349,69 @@ def test_stage2_abstain_caps_at_defer():
             result = stage_cascade.run_cascade(
                 adapter_path=None, fixture_path=path
             )
-        # Stage 1 PASS, Stage 2 ABSTAIN, Stage 3 SKIP, Stage 4 capped.
+        # Stage 1 PASS, Stage 2 ABSTAIN, Stage 3 SKIP, Stage 4 capped at DEFER.
         assert result["stages"][0]["status"] == "PASS"
         assert result["stages"][1]["status"] == "ABSTAIN"
-        assert result["final_verdict"] in ("DEFER", "REJECT")
-        # Must NOT be PROMOTE — ABSTAIN cap is the load-bearing invariant.
-        assert result["final_verdict"] != "PROMOTE"
+        # TIGHT assertion — exactly DEFER, not REJECT, not PROMOTE.
+        assert result["final_verdict"] == "DEFER", (
+            f"Stage 2 ABSTAIN must cap at DEFER (got {result['final_verdict']!r}); "
+            f"REJECT would mis-punish operator for a judge crash, "
+            f"PROMOTE would bypass the gate entirely."
+        )
+        assert result["exit_code"] == 1
+    finally:
+        os.unlink(path)
+
+
+def test_stage1_abstain_rejects_no_ppl_evidence():
+    """Sprint 11 / US-11.7 critic-CRITICAL #1 regression guard.
+
+    The gate MUST refuse to promote when Stage 1 has no PPL evidence. Before
+    the critic-CRITICAL fix, a malformed fixture with no `adapter_ppl`/
+    `base_ppl` fields but valid coherence_scores ≥ 0.80 produced a final
+    verdict of PROMOTE — Stage 1 ABSTAINed, fell through to Stage 2, and
+    Stage 4's min-aggregation didn't know to refuse a stage that never ran.
+
+    PPL is the cheapest and most deterministic guard against the Sprint 8
+    pad-token collapse mode. If it cannot run, we MUST treat that as a hard
+    REJECT, not an opportunity for the other judges to PROMOTE on
+    incomplete evidence.
+    """
+    import tempfile
+
+    # Stage 1 ABSTAIN (no PPL fields) + Stage 2 would otherwise PROMOTE.
+    ad_hoc = {
+        "coherence_scores": [0.85, 0.85, 0.85, 0.85, 0.85],  # well above 0.80 PROMOTE
+        # no adapter_ppl / base_ppl -> Stage 1 ABSTAIN
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fp:
+        json.dump(ad_hoc, fp)
+        path = fp.name
+    try:
+        with _env(HU_CASCADE_STAGE2_MOCK=None):
+            result = stage_cascade.run_cascade(
+                adapter_path=None, fixture_path=path
+            )
+
+        # Stage 1 must ABSTAIN explicitly (no PPL evidence).
+        assert result["stages"][0]["status"] == "ABSTAIN", (
+            f"Stage 1 should ABSTAIN when no PPL evidence is present "
+            f"(got {result['stages'][0]['status']!r})"
+        )
+        # Stages 2, 3, 4 must be marked as skipped — the fix elevates Stage 1
+        # ABSTAIN to a hard short-circuit equivalent to REJECT.
+        for i in (1, 2, 3):
+            assert result["stages"][i]["status"] == "skipped_due_to_short_circuit", (
+                f"Stage {i + 1} must be marked skipped_due_to_short_circuit when "
+                f"Stage 1 ABSTAINs (got {result['stages'][i]['status']!r})"
+            )
+        # Final verdict must be REJECT — gate refuses to promote without PPL evidence.
+        assert result["final_verdict"] == "REJECT", (
+            f"Stage 1 ABSTAIN must produce REJECT, not "
+            f"{result['final_verdict']!r}. Promoting past a stage that never ran "
+            f"is exactly the silent-failure mode this gate is supposed to refuse."
+        )
+        assert result["exit_code"] == 2
     finally:
         os.unlink(path)
 

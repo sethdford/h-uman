@@ -63,8 +63,19 @@ _PARETO = _load("pareto_picker", _HERE / "pareto_picker.py")
 
 
 # Cascade order is load-bearing — see module docstring + Risk 1 in design doc.
-# Re-ordering this tuple will fail AC-11.7.3.
-_CASCADE_ORDER = ("stage1_ppl", "stage2_coherence", "stage3_prm_stub")
+# DO NOT reorder the three calls in `run_cascade` (line ~100, ~116, ~131) — Stage 1
+# (PPL floor) is the only stage that catches the Sprint 8 iter-200 pad collapse
+# deterministically and for ¢0. AC-11.7.3 asserts the rejection happens AT STAGE 1
+# specifically (not "somewhere in the cascade"), so reordering will fail
+# `test_sprint8_iter200_rejected_by_gate` + `test_stage1_short_circuits_stage2_not_invoked`.
+#
+# Sprint 11 / US-11.7 critic-HIGH #2 fix: the previous version of this file declared
+# a `_CASCADE_ORDER = ("stage1_ppl", ...)` tuple here and the design doc Risk 1
+# mitigation pointed at it as the single source of truth for stage order. That was a
+# lie — the tuple was never used by `run_cascade`, which hardcoded the order
+# imperatively. Editing the tuple would have changed a dead string and shipped a
+# reordered cascade silently. The tuple is removed; ordering is enforced exclusively
+# by the call sequence in `run_cascade` and pinned by the AC-11.7.3 tests.
 
 
 def _skipped_stage(stage_num: int, name: str, reason: str) -> dict:
@@ -100,10 +111,25 @@ def run_cascade(
     s1 = _STAGE1.run(adapter_path=adapter_path, fixture_path=fixture_path)
     stages.append(s1)
 
-    if s1["status"] == "REJECT":
-        stages.append(_skipped_stage(2, "coherence", "Stage 1 REJECTed"))
-        stages.append(_skipped_stage(3, "prm_stub", "Stage 1 REJECTed"))
-        stages.append(_skipped_stage(4, "ensemble", "Stage 1 REJECTed"))
+    # Sprint 11 / US-11.7 critic-CRITICAL #1 fix: Stage 1 ABSTAIN must NOT
+    # fall through. PPL is the cheapest and most deterministic guard — if it
+    # cannot run (no `base_ppl`/`adapter_ppl` in fixture, no env mock), we
+    # have zero evidence about pad-token collapse and MUST refuse to promote.
+    # The previous version short-circuited only on `REJECT`, which meant a
+    # malformed fixture with no PPL data but a passing coherence judge could
+    # produce a PROMOTE verdict with Stage 1 having never observed the
+    # adapter. Treating Stage 1 ABSTAIN as a hard REJECT is symmetric with
+    # the Sprint 8 regression guard's intent — Stage 1 is where pad-token
+    # collapse MUST be caught, and we cannot promote past a stage that
+    # never ran.
+    if s1["status"] in ("REJECT", "ABSTAIN"):
+        short_reason = (
+            "Stage 1 REJECTed" if s1["status"] == "REJECT"
+            else "Stage 1 ABSTAINed (no PPL evidence — promoted to REJECT per critic-CRITICAL #1)"
+        )
+        stages.append(_skipped_stage(2, "coherence", short_reason))
+        stages.append(_skipped_stage(3, "prm_stub", short_reason))
+        stages.append(_skipped_stage(4, "ensemble", short_reason))
         return {
             "adapter_path": adapter_path,
             "fixture_path": fixture_path,

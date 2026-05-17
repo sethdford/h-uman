@@ -6,7 +6,19 @@ Findings from critic + panel that don't block story close but should land in Spr
 
 ### FU-11.6.a — AC-11.6.5 unmet: `pareto_picker.py --input-schema yntp` not wired
 Source: US-11.6 critic HIGH-1.
-The design spec requires `scripts/pareto_picker.py` to accept `--input-schema yntp` and map `delta_ll → fidelity_delta`, `pad_rate → pad_failure_rate`. The `86d886d3` commit did not touch `pareto_picker.py`. The round-trip test `test_twin_eval_integration.sh` does not exist. **This is binding because Wave 2 US-11.7 (Pareto gate) depends on this contract.** Status: re-opened US-11.6, dispatching implementer.
+The design spec requires `scripts/pareto_picker.py` to accept `--input-schema yntp` and map `delta_ll → fidelity_delta`, `pad_rate → pad_failure_rate`. The `86d886d3` commit did not touch `pareto_picker.py`. The round-trip test `test_twin_eval_integration.sh` does not exist. **This was binding because Wave 2 US-11.7 (Pareto gate) depends on this contract.** STATUS: RESOLVED — landed in commit `ab34a488`.
+
+### FU-11.7.a (RESOLVED inline) — Stage 1 ABSTAIN bypass enabled PROMOTE on zero evidence
+Source: US-11.7 critic CRITICAL #1.
+When Stage 1 had no PPL source (no env mock, no `adapter_ppl`/`base_ppl` in the fixture), it returned `ABSTAIN`. The orchestrator's short-circuit at `stage_cascade.py:103` only fired on `REJECT`. The ABSTAIN cap at line 154 only checked Stage 2. Therefore a malformed fixture with no PPL fields but valid `coherence_scores ≥ 0.80` produced a final verdict of PROMOTE with Stage 1 having never observed the adapter — exactly the silent-failure mode this gate is supposed to refuse. **FIX (inline this commit):** Stage 1 ABSTAIN is now treated as a hard short-circuit equivalent to REJECT. New regression test `test_stage1_abstain_rejects_no_ppl_evidence` pins this contract.
+
+### FU-11.7.b (RESOLVED inline) — `_CASCADE_ORDER` tuple was dead code (false Risk 1 mitigation)
+Source: US-11.7 critic HIGH #2.
+The design doc Risk 1 mitigation said "reordering requires editing the `_CASCADE_ORDER` tuple, which lights up the AC test." This was a lie — the tuple was never used; execution order was hardcoded imperatively. **FIX (inline this commit):** the tuple is removed; the in-code comment on the imperative call sequence now explicitly cites AC-11.7.3 as the load-bearing test.
+
+### FU-11.7.c (RESOLVED inline) — `test_stage2_abstain_caps_at_defer` assertion was too loose
+Source: US-11.7 critic HIGH #1.
+The test asserted `verdict in ("DEFER", "REJECT")` which would silently accept a regression mapping Stage 2 ABSTAIN to REJECT. **FIX (inline this commit):** tightened to exact equality with DEFER + `exit_code == 1`, with a docstring explaining why DEFER is the contract (REJECT would mis-punish operator for a judge crash).
 
 ## P0 inline-resolved (this commit)
 
@@ -53,6 +65,36 @@ Source: US-11.5 critic MED.
 ### FU-11.5.c — `--lambda-orpo` parser style inconsistency (LOW)
 Source: US-11.5 critic LOW.
 `src/ml/cli.c:~3183` uses `i++; continue;` inside the parser loop. Correct given `get_opt` stride, but diverges from SimPO `--beta` parser pattern. Fix: add comment OR refactor to match SimPO.
+
+## P1 — Sprint 12 (US-11.7 follow-ups)
+
+### FU-11.7.d — `pad_rate` silently 0.0 with array-form `HU_CASCADE_STAGE2_MOCK` (HIGH)
+Source: US-11.7 critic HIGH #3.
+`scripts/cascade_stages/stage2_coherence.py:61-62` accepts the array-form env mock (`HU_CASCADE_STAGE2_MOCK='[0.8, 0.8, 0.8]'`) but always returns `pads = []`, meaning the pad gate is silently disabled. A test using the bare array form will report `pad_rate=0.0` regardless of what the adapter actually outputs. Fix: either remove the array form (require the dict form `{"scores": [...], "pads": [...]}`) or have it default-set `pads` to all-False with a clear log warning at use.
+
+### FU-11.7.e — `_CASCADE_ORDER` removal opens room for stronger order-pinning (MED)
+Source: US-11.7 critic HIGH #2 alternate remediation.
+The inline fix removes the dead tuple. A stronger long-term fix is to drive stage execution from a single dispatch dict (`STAGES = {"stage1_ppl": _STAGE1.run, ...}`) and iterate. That would make reordering truly require editing the dict structure, not the imperative sequence. Deferred to Sprint 12 as a defense-in-depth follow-up.
+
+### FU-11.7.f — Stage 1 short-circuit assertion uses JSON marker, not call counter (MED)
+Source: US-11.7 critic MED #1.
+`test_stage1_short_circuits_stage2_not_invoked` checks `stages[1]["status"] == "skipped_due_to_short_circuit"`. A buggy implementation could call `stage2_coherence.run()` and then replace the result with `_skipped_stage(...)`, and the current test would pass. Fix: use `unittest.mock.patch` on `_STAGE2.run` and assert `call_count == 0`.
+
+### FU-11.7.g — `check-lora-ab.sh --cascade` mktemp leak (MED)
+Source: US-11.7 critic MED #2.
+`check-lora-ab.sh:88` does `$(mktemp -t ...).json`, appending `.json` to the mktemp output. The trap removes the `.json` path; the underlying mktemp-created file leaks in `/var/folders/...`. Fix: `CASCADE_TMP=$(mktemp -t human-cascade-XXXXXX); mv "$CASCADE_TMP" "${CASCADE_TMP}.json"; CASCADE_TMP="${CASCADE_TMP}.json"`.
+
+### FU-11.7.h — `--cascade` vs `--staged-gate` AC drift (MED)
+Source: US-11.7 critic MED #3.
+Story AC-11.7.6 names `--staged-gate`; design doc §2 and implementation use `--cascade`. Currently the shell test hardcodes `--cascade`. If a future auditor compares AC text against the test, they'll see a contradiction. Fix: add an alias `--staged-gate` → `--cascade` in `check-lora-ab.sh` argparse, OR rename to `--staged-gate` and update the test.
+
+### FU-11.7.i — `_classify_score` coherence threshold asymmetry undocumented (MED, cross-agent)
+Source: US-11.7 critic cross-agent regression risk.
+`pareto_picker._classify_score` uses coherence PROMOTE=0.80 (inline literal) while `stage2_coherence.py` uses REJECT=0.70. The asymmetry is intentional (creates a DEFER band 0.70-0.80) but undocumented. A reader "fixing" the inconsistency could collapse the DEFER band. Fix: comment at `_classify_score` explaining the asymmetry.
+
+### FU-11.7.j — `details["source"]` could emit `fixture:None` (LOW)
+Source: US-11.7 critic LOW.
+`scripts/cascade_stages/stage2_coherence.py:186-188` constructs source string from caller-supplied `fixture_path` without None check. Not reachable today but a refactor could expose it. Fix: assign `source` at resolution time in `_call_judge` and thread through.
 
 ## P1 — Sprint 12 (US-11.6 follow-ups)
 
