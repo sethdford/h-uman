@@ -61,6 +61,11 @@ typedef struct hu_persona_context {
     size_t delta_limit;
     const struct hu_tool *tools;
     size_t tools_count;
+    /* Story F.2 — tools actually used in recent turns (HU_ROLE_TOOL names).
+     * Optional; NULL/0 → merge skipped. Pointers are read-only for the
+     * duration of the bridge call; names are copied into the snapshot. */
+    const char *const *recent_tools_used;
+    size_t recent_tools_used_count;
 } hu_persona_context_t;
 
 /* Forward-declare provider type at file scope so all `_with_provider`

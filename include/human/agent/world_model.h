@@ -181,7 +181,18 @@ typedef struct hu_theory_of_mind {
  * Filled by `hu_world_model_merge_self_capabilities` from the tool
  * registry passed in via `hu_persona_context_t`. Top-6 inline, each
  * name truncated at 31 chars. Slab is zero-padded so unused slots
- * are byte-clean. */
+ * are byte-clean.
+ *
+ * Story F.2 — three additive fields (KISS: not the full F roadmap):
+ *   recent_drift_history[] — last N applied persona-delta kinds
+ *     (oldest-first ring, same scroll semantics as tom.confidence_history);
+ *   recent_emotional_register — how we've been showing up emotionally
+ *     (copied from wm->dominant_emotion when non-neutral);
+ *   recent_tools_used[] — tools actually invoked recently (distinct from
+ *     capabilities = what we *can* use). */
+#define HU_SELF_DRIFT_HISTORY 4
+#define HU_SELF_RECENT_TOOLS 6
+
 typedef struct hu_self_model {
     char name[64];
     char focused_topics[200];
@@ -190,6 +201,11 @@ typedef struct hu_self_model {
     float confidence_in_self;
     char capabilities[6][32];
     size_t capabilities_count;
+    char recent_drift_history[HU_SELF_DRIFT_HISTORY][32];
+    size_t recent_drift_history_count;
+    char recent_emotional_register[32];
+    char recent_tools_used[HU_SELF_RECENT_TOOLS][32];
+    size_t recent_tools_used_count;
 } hu_self_model_t;
 
 /* P5.6 — multimodal context cells. Forward-looking seams that the
@@ -575,6 +591,18 @@ void hu_world_model_merge_persona(hu_world_model_t *wm,
 void hu_world_model_merge_self_capabilities(hu_world_model_t *wm,
                                             const struct hu_tool *tools,
                                             size_t tools_count);
+
+/* Story F.2 — copy non-neutral `wm->dominant_emotion` into
+ * `self_model.recent_emotional_register`. Call after world-model build
+ * (emotion cell is populated by the F76 residue path). Idempotent. */
+void hu_world_model_merge_self_emotion(hu_world_model_t *wm);
+
+/* Story F.2 — surface tools the agent actually invoked recently (up to 6,
+ * 31-char names). Distinct from capabilities (registry). Borrows nothing —
+ * names are copied from the caller's pointer array. */
+void hu_world_model_merge_self_recent_tools(hu_world_model_t *wm,
+                                            const char *const *tool_names,
+                                            size_t tool_names_count);
 
 #ifdef __cplusplus
 }

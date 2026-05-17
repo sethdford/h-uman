@@ -1403,6 +1403,168 @@ static void bridge_render_self_model_partial_fields_renders_only_present(void) {
     cleanup(g, f);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story F.2 (sprint-4 follow-up) — self_model drift history, emotional
+ * register, and recently-used tools inside the Self model block.
+ * ────────────────────────────────────────────────────────────────────── */
+
+#include "human/memory/emotional_residue.h"
+#include <sqlite3.h>
+
+static void story_f2_ensure_emotional_residue_table_(struct sqlite3 *db) {
+    static const char *kCreate =
+        "CREATE TABLE IF NOT EXISTS emotional_residue("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "episode_id INTEGER,"
+        "contact_id TEXT NOT NULL,"
+        "valence REAL NOT NULL,"
+        "intensity REAL NOT NULL,"
+        "decay_rate REAL DEFAULT 0.1,"
+        "created_at INTEGER NOT NULL)";
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, kCreate, -1, &stmt, NULL), 0);
+    HU_ASSERT_EQ(sqlite3_step(stmt), 101);
+    sqlite3_finalize(stmt);
+}
+
+static void bridge_render_self_model_f2_recent_tools_emits_line(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf2_tools";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_name_only_persona(&persona, &overlay);
+
+    const char *used[] = {"shell", "memory_query"};
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    pctx.recent_tools_used = used;
+    pctx.recent_tools_used_count = 2;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "Tools I've used recently:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "shell"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "memory_query"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_self_model_f2_emotional_register_emits_line(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf2_emo";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_NOT_NULL(db);
+    story_f2_ensure_emotional_residue_table_(db);
+    int64_t rid = 0;
+    HU_ASSERT_EQ(hu_emotional_residue_add(db, 0, cid, strlen(cid), -0.9, 0.9, 0.05, &rid),
+                 HU_OK);
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_name_only_persona(&persona, &overlay);
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Self model:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "How I've been showing up:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "distressed"));
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_self_model_f2_omit_when_no_f2_signal(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf2_omit";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT(strstr(txt, "Tools I've used recently:") == NULL);
+    HU_ASSERT(strstr(txt, "How I've been showing up:") == NULL);
+    HU_ASSERT(strstr(txt, "Shift history:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
+static void bridge_render_self_model_f2_partial_tools_only(void) {
+    /* Recent tools without capabilities registry — only the used-tools
+     * line should appear among F.2 fields. */
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+
+    const char *cid = "ut_storyf2_partial";
+    story_b_seed_negative(g, cid, strlen(cid));
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    story_e_make_name_only_persona(&persona, &overlay);
+
+    const char *used[] = {"web_search"};
+    hu_persona_context_t pctx = {0};
+    pctx.persona = &persona;
+    pctx.channel = "discord";
+    pctx.channel_len = strlen("discord");
+    pctx.delta_limit = 0;
+    pctx.recent_tools_used = used;
+    pctx.recent_tools_used_count = 1;
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), cid, strlen(cid),
+                                          1700000000000LL + 1000, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, &pctx),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Tools I've used recently:"));
+    HU_ASSERT_NOT_NULL(strstr(txt, "web_search"));
+    HU_ASSERT(strstr(txt, "Capabilities I have:") == NULL);
+    HU_ASSERT(strstr(txt, "Shift history:") == NULL);
+
+    A()->free(A()->ctx, txt, tlen + 1);
+    cleanup(g, f);
+}
+
 
 #endif /* HU_ENABLE_SQLITE */
 
@@ -1450,5 +1612,10 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(bridge_render_with_empty_self_model_omits_section);
     HU_RUN_TEST(bridge_render_self_confidence_bucket_high_vs_medium);
     HU_RUN_TEST(bridge_render_self_model_partial_fields_renders_only_present);
+    /* sprint-4 follow-up Story F.2 — self_model extended fields. */
+    HU_RUN_TEST(bridge_render_self_model_f2_recent_tools_emits_line);
+    HU_RUN_TEST(bridge_render_self_model_f2_emotional_register_emits_line);
+    HU_RUN_TEST(bridge_render_self_model_f2_omit_when_no_f2_signal);
+    HU_RUN_TEST(bridge_render_self_model_f2_partial_tools_only);
 #endif
 }

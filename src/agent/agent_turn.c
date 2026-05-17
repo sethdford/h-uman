@@ -34,6 +34,7 @@
 #include "human/memory/neural_memory.h"
 #include "human/memory/personal_model.h"
 #include "human/agent/channel_trust.h"
+#include "human/agent/world_model.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
@@ -118,6 +119,29 @@ static void at_free_patterns(hu_allocator_t *alloc, const char **arr, const char
         i++;
     }
     alloc->free(alloc->ctx, (void *)arr, slot_count * sizeof(const char *));
+}
+
+/* Story F.2 — collect HU_ROLE_TOOL names from recent history (newest first). */
+static size_t at_collect_recent_tool_names_(const hu_agent_t *agent, const char **out_names,
+                                            size_t out_cap) {
+    if (!agent || !out_names || out_cap == 0 || agent->history_count <= 1)
+        return 0;
+    size_t n = 0;
+    for (size_t hi = agent->history_count; hi > 0 && n < out_cap; hi--) {
+        const hu_owned_message_t *m = &agent->history[hi - 1];
+        if (m->role != HU_ROLE_TOOL) continue;
+        if (!m->name || m->name_len == 0) continue;
+        bool dup = false;
+        for (size_t j = 0; j < n; j++) {
+            if (strcmp(out_names[j], m->name) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+        out_names[n++] = m->name;
+    }
+    return n;
 }
 
 hu_error_t hu_agent_turn_data_init(hu_allocator_t *alloc) {
@@ -1389,12 +1413,18 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * channel-aware pragmatics digest. */
         hu_persona_context_t loader_pctx = {0};
         if (agent->persona) {
+            const char *loader_recent_tools[HU_SELF_RECENT_TOOLS];
+            size_t loader_recent_tools_n =
+                at_collect_recent_tool_names_(agent, loader_recent_tools,
+                                              HU_SELF_RECENT_TOOLS);
             loader_pctx.persona = agent->persona;
             loader_pctx.channel = agent->active_channel;
             loader_pctx.channel_len = agent->active_channel_len;
             loader_pctx.delta_limit = 8;
             loader_pctx.tools = agent->tools;
             loader_pctx.tools_count = agent->tools_count;
+            loader_pctx.recent_tools_used = loader_recent_tools_n ? loader_recent_tools : NULL;
+            loader_pctx.recent_tools_used_count = loader_recent_tools_n;
             hu_memory_loader_set_persona_context(&loader, &loader_pctx);
         }
         hu_error_t load_err = hu_memory_loader_load(
@@ -3505,12 +3535,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_persona_context_t pctx = {0};
             const hu_persona_context_t *pctx_p = NULL;
             if (agent->persona) {
+                const char *recent_tool_names[HU_SELF_RECENT_TOOLS];
+                size_t recent_tool_names_n =
+                    at_collect_recent_tool_names_(agent, recent_tool_names,
+                                                  HU_SELF_RECENT_TOOLS);
                 pctx.persona = agent->persona;
                 pctx.channel = agent->active_channel;
                 pctx.channel_len = agent->active_channel_len;
                 pctx.delta_limit = 8;
                 pctx.tools = agent->tools;
                 pctx.tools_count = agent->tools_count;
+                pctx.recent_tools_used =
+                    recent_tool_names_n ? recent_tool_names : NULL;
+                pctx.recent_tools_used_count = recent_tool_names_n;
                 pctx_p = &pctx;
             }
             hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
