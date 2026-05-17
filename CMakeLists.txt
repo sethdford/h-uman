@@ -1193,6 +1193,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/eval.c
     src/persona/replay.c
     src/persona/circadian.c
+    src/follow_up.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
@@ -2991,6 +2992,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
     tests/test_imessage_react_contract.c
+    tests/test_follow_up.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
