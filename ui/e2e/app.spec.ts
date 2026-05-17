@@ -165,8 +165,16 @@ test.describe("h-uman Control UI", () => {
     // tree so the locator doesn't race the custom-element upgrade.
     await page.waitForLoadState("domcontentloaded");
     await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
+    // The floating-mic is LAZY-LOADED via requestIdleCallback in app.ts's
+    // firstUpdated() (see app.ts:686-695). Under CI cold-start + Vite
+    // proxy ECONNRESET storms, the idle callback can take much longer
+    // than 5s to fire — the test then fails because the dynamic import
+    // never completed. The deterministic long-tail is bounded by 15s in
+    // practice; bumping the timeout matches Playwright's default. The
+    // previous 5s caused the test to be the #1 flake on main CI for
+    // both PR #104 and #107.
     const mic = page.locator("hu-app >> hu-floating-mic");
-    await expect(mic).toBeAttached({ timeout: 5000 });
+    await expect(mic).toBeAttached({ timeout: 15000 });
   });
 
   test("navigating through all tabs sequentially works", async ({ page }) => {
