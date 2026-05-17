@@ -1,3 +1,7 @@
+---
+title: Trait Coverage Axis Analysis 2026-05-16
+---
+
 # Trait Coverage Axis — Analysis and Recommendation (2026-05-16)
 
 ## The observation
@@ -17,7 +21,7 @@ respond.
 ## The scorer's math
 
 `hu_consistency_score_prompt_alignment` at
-[src/eval/consistency.c:60-127](../../src/eval/consistency.c:60)
+[src/eval/consistency.c:60-127](../../src/eval/consistency.c#L60)
 weights three sub-scores:
 
 ```
