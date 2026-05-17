@@ -70,6 +70,8 @@
 #include "human/daemon_routing.h"
 
 #include "human/agent/governor.h"
+#include "human/agent/response_guard.h"
+#include <inttypes.h>
 #include "human/agent/proactive.h"
 #include "human/agent/proactive_ext.h"
 #include "human/context/self_awareness.h"
@@ -2612,10 +2614,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     /* Phase 4: Style drift check counter (only with persona + sqlite) */
     static unsigned drift_check_counter = 0;
 #endif
-#if !defined(HU_ENABLE_SQLITE)
-    (void)daemon_turn_counter;
-#endif
-
     hu_inbox_watcher_t inbox_watcher = {0};
     static int64_t last_inbox_poll_ms = 0;
     if (agent && agent->memory) {
@@ -10002,6 +10000,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* ── Phase 3 post-turn: increment turn counter for anti-sycophancy ── */
                 daemon_turn_counter++;
+
+                /* Sprint 39 — periodic guard REJECT telemetry for threshold tuning. */
+                if (daemon_turn_counter % 100u == 0u) {
+                    hu_guard_reject_stats_t gs = {0};
+                    hu_guard_reject_stats_snapshot(&gs);
+                    hu_log_info(
+                        "daemon", agent ? agent->observer : NULL,
+                        "guard_reject_stats turn=%u semantic=%" PRIu64 " length=%" PRIu64
+                        " director=%" PRIu64 " persona_pii=%" PRIu64 " persona_identity=%" PRIu64,
+                        daemon_turn_counter, gs.semantic_leak, gs.length_anomaly, gs.director_echo,
+                        gs.persona_pii_echo, gs.persona_identity_echo);
+                }
 
                 /* ── Phase 4 post-turn: style drift self-tracking ─────── */
 #ifdef HU_ENABLE_SQLITE

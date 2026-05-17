@@ -107,9 +107,14 @@ typedef struct {
 typedef struct {
     /* Rolling average reply length from the recipient over the last
      * N messages. The guard rejects if `response_len >
-     * recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT` (default 8x).
-     * 0 disables the check (e.g. no chat history yet). */
+     * recent_avg_len * length_anomaly_mult` (default 8x; compact
+     * channels 6x). 0 disables the check (e.g. no chat history yet). */
     size_t recent_avg_len;
+
+    /* Sprint 39 — per-channel G5 multiplier. 0 = use default (8).
+     * Compact channels (imessage, cli, sms) should pass 6 from
+     * `hu_guard_length_anomaly_mult_for_channel`. */
+    unsigned length_anomaly_mult;
 
     /* The director's / scene-direction text for this turn (the
      * upstream prompt fragment that drove tone/style decisions).
@@ -171,6 +176,13 @@ typedef struct {
 
 void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out);
 void hu_guard_reject_stats_reset(void);
+
+/* Default G5 multiplier (8×). Compact messaging channels use 6×. */
+#define HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT 8u
+#define HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT 6u
+
+/* Channel-aware G5 threshold. imessage / cli / sms → 6×; else 8×. */
+unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t channel_len);
 
 /* Run the guard over a response.
  *

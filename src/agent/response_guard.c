@@ -85,7 +85,7 @@
  * we catch it) and longer than incidental phrase matches like
  * "I think we should" that happen to appear in both director and
  * reply for normal reasons. */
-#define HU_GUARD_LENGTH_ANOMALY_MULT          8
+#define HU_GUARD_LENGTH_ANOMALY_MULT          HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT
 #define HU_GUARD_DIRECTOR_ECHO_MIN_MATCH      30
 
 /* Persona identity echo minimum match length. Persona identity strings
@@ -472,12 +472,42 @@ static int hu_guard_count_third_person_patterns(const char *s, size_t len) {
 /* G5 — length anomaly. Returns true if `response_len` exceeds
  * `ctx->recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT`. A NULL ctx or
  * `recent_avg_len == 0` disables the check (returns false). */
+static bool guard_channel_prefix_ci(const char *ch, size_t ch_len, const char *prefix) {
+    size_t plen = strlen(prefix);
+    if (ch_len < plen)
+        return false;
+    for (size_t i = 0; i < plen; i++) {
+        char a = ch[i];
+        char b = prefix[i];
+        if (a >= 'A' && a <= 'Z')
+            a = (char)(a + 32);
+        if (b >= 'A' && b <= 'Z')
+            b = (char)(b + 32);
+        if (a != b)
+            return false;
+    }
+    /* "imessage:thread-7" or "cli" exact. */
+    return ch_len == plen || ch[plen] == ':' || ch[plen] == '_';
+}
+
+unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t channel_len) {
+    static const char *compact[] = {"imessage", "cli", "sms", NULL};
+    if (!channel || channel_len == 0)
+        return HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
+    for (size_t k = 0; compact[k]; k++) {
+        if (guard_channel_prefix_ci(channel, channel_len, compact[k]))
+            return HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT;
+    }
+    return HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
+}
+
 static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t response_len) {
     if (!ctx || ctx->recent_avg_len == 0)
         return false;
-    /* Use a multiply rather than divide to avoid floating-point and to
-     * make the threshold explicit. response_len > avg * MULT. */
-    return response_len > ctx->recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT;
+    unsigned mult = ctx->length_anomaly_mult;
+    if (mult == 0)
+        mult = HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
+    return response_len > ctx->recent_avg_len * (size_t)mult;
 }
 
 /* Helper — slide a 30-char window over `src[0..src_len)` and return
@@ -537,7 +567,9 @@ static bool hu_guard_has_director_echo(const hu_guard_context_t *ctx, const char
  *
  * NULL ctx, NULL persona_name, persona_name_len < 2 or > 64, or empty
  * response disable the check. */
-#define HU_GUARD_PERSONA_LOOKAHEAD 30
+/* Sprint 39 — widened from 30→60 to catch "Seth, 51, is a Chief Architect"
+ * style parentheticals between name and third-person verb (audit rowid 56055). */
+#define HU_GUARD_PERSONA_LOOKAHEAD 60
 
 static bool hu_guard_persona_pii_construct_at(const char *s, size_t len, size_t pos) {
     /* Look for a third-person construct starting at `pos`. We accept up

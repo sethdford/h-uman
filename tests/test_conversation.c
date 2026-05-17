@@ -1215,6 +1215,22 @@ static void calibrate_for_contact_group_uses_neutral_ratio(void) {
     HU_ASSERT_TRUE(strstr(buf, "48") != NULL || strstr(buf, "46") != NULL);
 }
 
+/* Sprint 39 — needs_revision at 5× ratio (was 10×). */
+static void quality_needs_revision_at_5x_ratio(void) {
+    hu_channel_history_entry_t entries[] = {
+        make_entry(false, "sounds good to me", "12:00"),
+        make_entry(false, "yeah let's do it", "12:01"),
+    };
+    /* their avg ~16 chars; response ~90 chars ≈ 5.6× → needs_revision */
+    const char *resp =
+        "Well I think that is a really interesting point and I wanted to add a bit more "
+        "detail about how I see things working out for us over the next few weeks.";
+    hu_quality_score_t score =
+        hu_conversation_evaluate_quality(resp, strlen(resp), entries, 2, 300);
+    HU_ASSERT_TRUE(score.needs_revision);
+    HU_ASSERT_NOT_NULL(strstr(score.guidance, "chars"));
+}
+
 static void quality_penalizes_length_mismatch(void) {
     hu_quality_score_t score = hu_conversation_evaluate_quality(
         "Well, I think that's a really interesting question and I'd be happy to elaborate "
@@ -4039,6 +4055,7 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(brief_char_cap_redteam);
     HU_RUN_TEST(calibrate_for_contact_softens_ping_for_warm_dm);
     HU_RUN_TEST(calibrate_for_contact_group_uses_neutral_ratio);
+    HU_RUN_TEST(quality_needs_revision_at_5x_ratio);
     HU_RUN_TEST(quality_penalizes_length_mismatch);
     HU_RUN_TEST(quality_rewards_length_match);
 

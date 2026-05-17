@@ -1401,6 +1401,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 memset(&guard_ctx, 0, sizeof(guard_ctx));
                 guard_ctx.recent_avg_len =
                     hu_agent_internal_recent_assistant_avg_len(agent, 5);
+                guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
+                    agent->active_channel, agent->active_channel_len);
                 guard_ctx.director_text = agent->scene_direction_text;
                 guard_ctx.director_len = agent->scene_direction_text_len;
                 /* Sprint 37 — cross-turn director history. */
@@ -2167,6 +2169,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             memset(&guard_ctx, 0, sizeof(guard_ctx));
             guard_ctx.recent_avg_len =
                 hu_agent_internal_recent_assistant_avg_len(agent, 5);
+            guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
+                agent->active_channel, agent->active_channel_len);
             guard_ctx.director_text = agent->scene_direction_text;
             guard_ctx.director_len = agent->scene_direction_text_len;
             guard_ctx.director_history = (const char *const *)agent->director_history;

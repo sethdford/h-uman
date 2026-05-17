@@ -782,6 +782,78 @@ static size_t guard_test_make_benign_long(char *out, size_t out_cap, size_t targ
 
 /* G5 — length anomaly. Response 22x recipient's rolling avg → REJECT.
  * Calibrated against the 2026-05-12 leak: 979 chars vs 44 char avg. */
+static void guard_length_mult_for_channel_compact_vs_default(void) {
+    HU_ASSERT_EQ(hu_guard_length_anomaly_mult_for_channel("imessage", 8),
+                 HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT);
+    HU_ASSERT_EQ(hu_guard_length_anomaly_mult_for_channel("imessage:thread-7", 17),
+                 HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT);
+    HU_ASSERT_EQ(hu_guard_length_anomaly_mult_for_channel("cli", 3),
+                 HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT);
+    HU_ASSERT_EQ(hu_guard_length_anomaly_mult_for_channel("sms", 3),
+                 HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT);
+    HU_ASSERT_EQ(hu_guard_length_anomaly_mult_for_channel("discord", 7),
+                 HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT);
+    HU_ASSERT_EQ(hu_guard_length_anomaly_mult_for_channel(NULL, 0),
+                 HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT);
+}
+
+/* G5 — compact channels (6×) reject 7× avg; default channels (8×) pass. */
+static void guard_g5_imessage_channel_uses_stricter_mult(void) {
+    char raw[256];
+    size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 70);
+
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    hu_guard_context_t ctx = {0};
+    ctx.recent_avg_len = 10;
+    ctx.length_anomaly_mult =
+        hu_guard_length_anomaly_mult_for_channel("imessage", 8);
+
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome,
+                                            &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_length_anomaly);
+
+    out = NULL;
+    out_len = 0;
+    outcome = HU_GUARD_OK;
+    memset(&report, 0, sizeof(report));
+    ctx.length_anomaly_mult =
+        hu_guard_length_anomaly_mult_for_channel("discord", 7);
+
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome,
+                                            &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_OK);
+    HU_ASSERT(!report.detected_length_anomaly);
+}
+
+static void guard_g7_rejects_long_parenthetical_before_is_a(void) {
+    /* Gap >30 bytes between name and " is a " — audit rowid 56055 style. */
+    const char *raw =
+        "Seth, who recently turned fifty-one and lives alone with a cat, is a developer";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_name = "Seth";
+    ctx.persona_name_len = 4;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_pii_echo);
+}
+
 static void guard_ex_rejects_length_anomaly(void) {
     char raw[1024];
     size_t raw_len = guard_test_make_benign_long(raw, sizeof(raw), 979);
@@ -1818,6 +1890,8 @@ void run_response_guard_tests(void) {
 
     /* Sprint 31 — context-aware detections (G5 length anomaly, G6
      * director echo). All exercise the new `_ex` API. */
+    HU_RUN_TEST(guard_length_mult_for_channel_compact_vs_default);
+    HU_RUN_TEST(guard_g5_imessage_channel_uses_stricter_mult);
     HU_RUN_TEST(guard_ex_rejects_length_anomaly);
     HU_RUN_TEST(guard_ex_rejects_director_echo);
     HU_RUN_TEST(guard_ex_passes_long_response_when_no_avg);
@@ -1835,6 +1909,7 @@ void run_response_guard_tests(void) {
     /* Sprint 35 — persona-PII echo (G7). Catches third-person profile
      * constructs ("<Name> is a", "<Name>'s job", "<Name> lives") that
      * leak the loaded persona's identity. */
+    HU_RUN_TEST(guard_g7_rejects_long_parenthetical_before_is_a);
     HU_RUN_TEST(guard_g7_rejects_third_person_is_construct);
     HU_RUN_TEST(guard_g7_rejects_third_person_possessive);
     HU_RUN_TEST(guard_g7_rejects_third_person_lives_works);
