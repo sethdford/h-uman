@@ -28,7 +28,17 @@
  *     overlay values that route to a meaningful directive variant
  *     per `src/memory/personal_model.c::directive_variant_for_overlay`.
  */
-extern const char hu_starter_persona_json[];
+/**
+ * Returns a pointer to the starter persona JSON as a flat NUL-terminated
+ * string. Internally the literal is split across two arrays to satisfy
+ * GCC's -Werror=overlength-strings on strict Linux builds (the combined
+ * content exceeds C99's 4095-char minimum guarantee); the accessor
+ * lazily joins them into a single static buffer on first call.
+ *
+ * If out_len is non-NULL, it receives the length of the returned string
+ * (excluding NUL) so callers can avoid a redundant strlen.
+ */
+const char *hu_starter_persona_get(size_t *out_len);
 
 /**
  * Run the interactive setup wizard (no CLI overrides).

@@ -41,12 +41,19 @@ bool hu_onboard_check_first_run(void) {
     return true;
 }
 
-/* Single source of truth — declared in include/human/onboard.h and
+/* Single source of truth — accessed via hu_starter_persona_get(),
  * referenced by both `human init` (src/cli_commands.c) and
  * `human onboard` (this file). Defined outside the HU_IS_TEST guard
- * so unit tests (which set HU_IS_TEST) can still link against this
- * symbol — the literal is bytes-on-disk-equivalent in both builds. */
-const char hu_starter_persona_json[] =
+ * so unit tests (which set HU_IS_TEST) can still link.
+ *
+ * The starter persona JSON is split into two static const arrays because
+ * the combined literal exceeds C99's 4095-char guaranteed minimum and
+ * GCC's -Werror=overlength-strings rejects it on strict Linux builds.
+ * The split lands at the natural JSON seam between channel_overlays and
+ * example_banks. Consumers call hu_starter_persona_get() to receive a
+ * pointer to a lazily-joined flat buffer (bytes-on-disk-equivalent to the
+ * original single-array form). */
+static const char hu_starter_persona_json_part1[] =
     "{\n"
     "  \"version\": 1,\n"
     "  \"name\": \"default\",\n"
@@ -94,26 +101,28 @@ const char hu_starter_persona_json[] =
     "      \"style_notes\": \"Technical, precise. No emoji. "
     "Format code blocks when showing code.\"\n"
     "    }\n"
-    "  },\n"
-    /* Starter example banks for the four Tier-1 channels. The persona
-     * prompt builder samples from these to anchor tone and length when
-     * a fresh user has no learned-from-history examples yet. Each bank
-     * holds three short examples chosen to match the channel's overlay
-     * (formality / avg_length / emoji_usage). Sprint 2b Story A'.
-     *
-     * Schema (parsed by `hu_persona_load_json` ->
-     * `hu_persona_examples_bank_from_array`):
-     *
-     *   { "channel": "<name>",
-     *     "examples": [
-     *       {"context": "...", "incoming": "...", "response": "..."},
-     *       ... ] }
-     *
-     * Examples are deliberately neutral (no proper nouns, no PII, no
-     * politics, no proper names) so they ship as defaults for every
-     * user without baking-in a single voice. They demonstrate length
-     * and emoji norms; the persona system overlays the user's learned
-     * style on top once `personal_model.bin` has data. */
+    "  },\n";
+
+/* Starter example banks for the four Tier-1 channels. The persona
+ * prompt builder samples from these to anchor tone and length when
+ * a fresh user has no learned-from-history examples yet. Each bank
+ * holds three short examples chosen to match the channel's overlay
+ * (formality / avg_length / emoji_usage). Sprint 2b Story A'.
+ *
+ * Schema (parsed by `hu_persona_load_json` ->
+ * `hu_persona_examples_bank_from_array`):
+ *
+ *   { "channel": "<name>",
+ *     "examples": [
+ *       {"context": "...", "incoming": "...", "response": "..."},
+ *       ... ] }
+ *
+ * Examples are deliberately neutral (no proper nouns, no PII, no
+ * politics, no proper names) so they ship as defaults for every
+ * user without baking-in a single voice. They demonstrate length
+ * and emoji norms; the persona system overlays the user's learned
+ * style on top once `personal_model.bin` has data. */
+static const char hu_starter_persona_json_part2[] =
     "  \"example_banks\": [\n"
     "    {\n"
     "      \"channel\": \"imessage\",\n"
@@ -195,6 +204,28 @@ const char hu_starter_persona_json[] =
     "    }\n"
     "  ]\n"
     "}\n";
+
+const char *hu_starter_persona_get(size_t *out_len) {
+    /* Lazy one-time join of the two literal halves into a flat buffer.
+     * Buffer size is generous to absorb future content growth without
+     * another split. Not thread-safe on first call, but onboarding runs
+     * single-threaded at startup. */
+    static char buf[sizeof(hu_starter_persona_json_part1) + sizeof(hu_starter_persona_json_part2)];
+    static size_t total_len;
+    static bool initialized;
+    if (!initialized) {
+        size_t l1 = sizeof(hu_starter_persona_json_part1) - 1;
+        size_t l2 = sizeof(hu_starter_persona_json_part2) - 1;
+        memcpy(buf, hu_starter_persona_json_part1, l1);
+        memcpy(buf + l1, hu_starter_persona_json_part2, l2);
+        buf[l1 + l2] = '\0';
+        total_len = l1 + l2;
+        initialized = true;
+    }
+    if (out_len)
+        *out_len = total_len;
+    return buf;
+}
 
 #ifdef HU_IS_TEST
 hu_error_t hu_onboard_run(hu_allocator_t *alloc) {
@@ -503,8 +534,9 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
                     FILE *pf = NULL;
                     (void)hu_io_secure_open(persona_path, HU_IO_PERM_USER, "w", &pf);
                     if (pf) {
-                        size_t plen = strlen(hu_starter_persona_json);
-                        if (fwrite(hu_starter_persona_json, 1, plen, pf) == plen)
+                        size_t plen = 0;
+                        const char *json_str = hu_starter_persona_get(&plen);
+                        if (fwrite(json_str, 1, plen, pf) == plen)
                             printf("Starter persona created at %s\n", persona_path);
                         fclose(pf);
                     }
