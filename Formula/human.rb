@@ -25,6 +25,13 @@ class Human < Formula
     end
   end
 
+  # TODO(US-8.4): once codesigning + notarization ships, add a `bottle do` block
+  # so users get a pre-compiled, ABI-relocatable tarball instead of the raw
+  # pre-built binary downloaded via `url`. Bottling an *unsigned* binary makes
+  # tamper attribution worse (the bottle SHA covers the tarball, not the inner
+  # binary), so this stays deferred until signing lands. See US-9.1 design doc
+  # (sprints/sprint-9/designs/US-9.1.md, "Bottle vs build-from-source").
+
   # Build from source (HEAD or when pre-built binary unavailable)
   head "https://github.com/sethdford/h-uman.git", branch: "main"
 
