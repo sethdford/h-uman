@@ -1234,7 +1234,7 @@
 
       <section class="component-section" id="hu-guard-rejects-tile">
         <h2>hu-guard-rejects-tile</h2>
-        <p>Response-guard reject telemetry tile. Surfaces cumulative REJECT counts per detector class (G1&ndash;G8 family) from <code>metrics.guard_rejects</code>.</p>
+        <p>Response-guard reject telemetry tile. Surfaces cumulative REJECT counts per detector class (G1–G8 family) from <code>metrics.guard_rejects</code>.</p>
         <div class="playground">
           <div class="preview" style="width:100%" id="guard-rejects-tile-preview">
             <hu-guard-rejects-tile id="guard-rejects-tile-demo"></hu-guard-rejects-tile>
@@ -1242,6 +1242,7 @@
               import "/src/components/hu-guard-rejects-tile.ts";
               const t = document.getElementById("guard-rejects-tile-demo");
               if (t) {
+                // Component property is `data` (see hu-guard-rejects-tile.ts:68)
                 t.data = {
                   semantic_leak: 12,
                   length_anomaly: 47,

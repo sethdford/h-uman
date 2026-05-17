@@ -4955,6 +4955,18 @@ bool hu_conversation_should_leave_on_read(const char *msg, size_t msg_len,
     return (seed % 100u) < pct;
 }
 
+hu_leave_on_read_decision_t hu_leave_on_read_decide(bool is_group_chat,
+                                                    bool already_in_active_period,
+                                                    bool helper_says_should_leave) {
+    if (is_group_chat)
+        return HU_LOR_RESPOND;
+    if (already_in_active_period)
+        return HU_LOR_ALREADY_IN_PERIOD;
+    if (helper_says_should_leave)
+        return HU_LOR_TRIGGER_NEW;
+    return HU_LOR_RESPOND;
+}
+
 /* ── URL extraction ──────────────────────────────────────────────────── */
 
 /* Utility for future use. Not currently wired into production; link-sharing

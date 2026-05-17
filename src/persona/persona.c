@@ -632,6 +632,15 @@ float hu_affect_mirror_ceiling(const hu_contact_profile_t *contact,
     return 0.7f;
 }
 
+uint8_t hu_leave_on_read_pct_effective(const hu_contact_profile_t *contact,
+                                       const hu_persona_overlay_t *overlay) {
+    if (contact && contact->leave_on_read_pct > 0)
+        return contact->leave_on_read_pct;
+    if (overlay && overlay->leave_on_read_pct > 0)
+        return overlay->leave_on_read_pct;
+    return 0;
+}
+
 float hu_affect_mirror_apply(float intensity, float ceiling, char *directive,
                              size_t directive_cap) {
     if (directive && directive_cap > 0)
@@ -2245,6 +2254,11 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
                 cp->prefers_short_texts = hu_json_get_bool(comm, "prefers_short_texts", false);
                 cp->sends_links_often = hu_json_get_bool(comm, "sends_links_often", false);
                 cp->uses_emoji = hu_json_get_bool(comm, "uses_emoji", false);
+                hu_json_value_t *lor = hu_json_object_get(comm, "leave_on_read_pct");
+                if (lor && lor->type == HU_JSON_NUMBER) {
+                    double v = lor->data.number;
+                    cp->leave_on_read_pct = (uint8_t)(v > 100 ? 100 : (v < 0 ? 0 : v));
+                }
             } else {
                 /* Forgiving fallback: many human-edited persona files put these
                  * booleans at the top level of the contact entry rather than
@@ -2255,6 +2269,11 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
                 cp->prefers_short_texts = hu_json_get_bool(cval, "prefers_short_texts", false);
                 cp->sends_links_often = hu_json_get_bool(cval, "sends_links_often", false);
                 cp->uses_emoji = hu_json_get_bool(cval, "uses_emoji", false);
+                hu_json_value_t *lor = hu_json_object_get(cval, "leave_on_read_pct");
+                if (lor && lor->type == HU_JSON_NUMBER) {
+                    double v = lor->data.number;
+                    cp->leave_on_read_pct = (uint8_t)(v > 100 ? 100 : (v < 0 ? 0 : v));
+                }
             }
 
             /* Proactive engagement config */
@@ -2275,6 +2294,22 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
             s = hu_json_get_string(cval, "dunbar_layer");
             if (s)
                 PERSONA_STRDUP_OPT(cp->dunbar_layer, s);
+
+            /* affect_mirror_ceiling: per-contact emotional-mirroring cap.
+             * 0 leaves the layered lookup (hu_affect_mirror_ceiling) free to
+             * fall back to the overlay or stage default. Field was declared on
+             * hu_contact_profile_t and read by hu_affect_mirror_ceiling but
+             * never parsed for contacts, so the per-contact override was
+             * silently dead from disk-loaded personas. */
+            hu_json_value_t *amc = hu_json_object_get(cval, "affect_mirror_ceiling");
+            if (amc && amc->type == HU_JSON_NUMBER) {
+                double v = amc->data.number;
+                if (v < 0.0)
+                    v = 0.0;
+                if (v > 1.0)
+                    v = 1.0;
+                cp->affect_mirror_ceiling = (float)v;
+            }
 
             count++;
         }

@@ -181,6 +181,35 @@ We will reopen Tier B when ALL of these are true:
       can fail closed (drop to AX, then to plain text) without user-visible
       regressions.
 
+## Status as of 2026-05-17
+
+Tier B remains deferred. The four re-open conditions above have not advanced
+since 2026-05-10:
+
+- Tier A breaker telemetry: no published 30-day clean-trip window yet.
+- External users: per competitive-position table in `CLAUDE.md`, distribution
+  is still 0 users. M4 ("Ship to Users — 100 DAU") is in progress but the
+  onboarding wizard landed without surfacing iMessage-specific real-world
+  corner cases yet.
+- Notarization: no decision recorded in `docs/standards/` or `docs/plans/`.
+- Selector probe baseline: not implemented; no `hu_imessage_effect_path` or
+  equivalent probe exists in `src/channels/imessage.c`.
+
+What HAS landed in this window that is relevant when Tier B is reopened:
+
+- Inbound threading is now end-to-end testable via the extracted helper
+  `hu_imessage_build_inline_reply_hint_for_batch` (see
+  `include/human/channels/imessage.h` and `tests/test_imessage_extended.c`).
+  When Tier B's outbound `hu_imessage_send_inline_reply` ships, the inbound
+  side already has regression pinning for the lookup→hint composition.
+- The persona-fidelity composite scorer (commits 16f05cb7, b1299c5b) gives
+  a CI floor for naturalness; Tier B effects-on-send would slot into the
+  same eval infrastructure rather than needing its own.
+
+Next revisit checkpoint: when M4 produces at least one non-maintainer user
+running the daemon against their own iMessage for a full week. Until then,
+do not implement Tier B even if asked — the cost/risk math has not moved.
+
 ## References
 
 - Existing partial IMCore wiring in `src/channels/imessage.c` (`imcore_init`,
