@@ -84,6 +84,7 @@ static const hu_rpc_entry_t s_rpc_table[] = {
     {"metrics.snapshot", cp_admin_metrics_snapshot},
     {"metrics.fidelity", cp_admin_metrics_fidelity},
     {"metrics.directive_telemetry", cp_admin_metrics_directive_telemetry},
+    {"metrics.guard_rejects", cp_admin_metrics_guard_rejects},
     {"activity.recent", cp_admin_activity_recent},
     {"memory.status", cp_memory_status},
     {"memory.list", cp_memory_list},

@@ -34,6 +34,10 @@ void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *us
  * 150-byte channel is REJECTed at runtime, not just in unit tests.
  * (Sprint 33 — wires Sprint 31's G5 into production.)
  */
+/* Sprint 41 — EWMA smoothing for G5 `recent_avg_len` (post-mortem #20).
+ * Higher alpha weights the newest assistant turns more heavily. */
+#define HU_GUARD_ASSISTANT_LEN_EWMA_ALPHA 0.35
+
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
 
 /* Set / clear the active scene-direction text for the next turn. The
@@ -99,34 +103,9 @@ hu_policy_action_t hu_agent_internal_evaluate_tool_policy(hu_agent_t *agent, con
                                                           const char *args_json);
 hu_tool_t *hu_agent_internal_find_tool(hu_agent_t *agent, const char *name, size_t name_len);
 
-#include "human/core/json.h"
-
-/**
- * Execute a tool with the hook pipeline wrapped around it.
- *
- * Canonical single-tool dispatcher for paths that previously called
- * `tool->vtable->execute(...)` directly without firing the hook pipeline
- * (DAG worker, orchestrator, approval-retry). Centralizing the dispatch
- * closes the security gap surfaced by the audit on 2026-05-16:
- *   "Hook pipeline is invoked in the dispatcher's parallel path but NOT
- *    in the sequential / polling execution path."
- *
- * Sequence:
- *   1. If agent->hook_registry is non-NULL, fire the pre-tool hook. If the
- *      decision is HU_HOOK_DENY, write a failure result into *out and
- *      return without calling the tool. The hook's message is copied into
- *      the result.
- *   2. Call tool->vtable->execute(tool->ctx, agent->alloc, args_parsed, out).
- *   3. If agent->hook_registry is non-NULL, fire the post-tool hook
- *      (informational — the result has already been produced).
- *
- * Returns HU_OK for normal completion (including hook-denied dispatch — the
- * caller inspects out->success to learn what happened).
- * Returns HU_ERR_INVALID_ARGUMENT for NULL agent / tool / out.
- *
- * The caller retains ownership of `args_parsed` and frees `*out` via
- * hu_tool_result_free when done.
- */
+/* Canonical tool dispatch: pre/post hook pipeline + execute.
+ * Returns HU_OK for normal completion (including hook-denied dispatch).
+ * Caller frees *out via hu_tool_result_free. */
 hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *tool,
                                                  const char *tool_name, size_t tool_name_len,
                                                  const char *args_json, size_t args_json_len,

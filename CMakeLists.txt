@@ -1004,6 +1004,9 @@ list(APPEND HU_CORE_SOURCES src/channels/reaction_event.c)
 # can include human/channels/reaction_event.h without colliding with
 # human/channel.h's older hu_reaction_type_t enum.
 list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
+# CF-3: daemon reaction poll tick — always linked (daemon.c calls it
+# unconditionally); must not sit behind HU_ENABLE_RL_FULL.
+list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
 
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
@@ -1518,7 +1521,6 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_CORE_SOURCES src/eval/competitive_harness.c)
     list(APPEND HU_CORE_SOURCES src/eval/cli_eval.c)
     list(APPEND HU_CORE_SOURCES src/agent/adapter_id.c)
-    list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
     list(APPEND HU_CORE_SOURCES src/ml/cli_demo.c)
 endif()
 

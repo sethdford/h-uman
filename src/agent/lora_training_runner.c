@@ -32,6 +32,9 @@
 #ifdef HU_ENABLE_RL_FULL
 #include "human/agent/adapter_id.h"
 #include "human/eval/eval_gate.h"
+#include "human/ml/fidelity.h"
+#include "human/persona.h"
+#include "human/provider.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,20 +140,162 @@ static size_t runner_derive_gate_persona_scores(const hu_lora_runner_ctx_t *ctx,
     return n;
 }
 
+typedef struct lora_fidelity_probe {
+    const char *incoming;
+    size_t incoming_len;
+} lora_fidelity_probe_t;
+
+static size_t lora_collect_fidelity_probes(const hu_persona_t *persona,
+                                           lora_fidelity_probe_t *probes, size_t cap) {
+    if (!persona || !probes || cap == 0)
+        return 0;
+    size_t n = 0;
+    for (size_t b = 0; b < persona->example_banks_count && n < cap; b++) {
+        const hu_persona_example_bank_t *bank = &persona->example_banks[b];
+        for (size_t e = 0; e < bank->count && n < cap; e++) {
+            const hu_persona_example_t *ex = &bank->examples[e];
+            if (!ex->incoming || ex->incoming_len == 0 || !ex->response || ex->response_len == 0)
+                continue;
+            probes[n].incoming = ex->incoming;
+            probes[n].incoming_len = ex->incoming_len;
+            n++;
+        }
+    }
+    return n;
+}
+
+static size_t lora_score_example_bank_before(const hu_persona_t *persona,
+                                             const hu_communication_style_t *target,
+                                             double *out, size_t cap) {
+    if (!persona || !target || !out || cap == 0)
+        return 0;
+    size_t n = 0;
+    for (size_t b = 0; b < persona->example_banks_count && n < cap; b++) {
+        const hu_persona_example_bank_t *bank = &persona->example_banks[b];
+        for (size_t e = 0; e < bank->count && n < cap; e++) {
+            const hu_persona_example_t *ex = &bank->examples[e];
+            if (!ex->response || ex->response_len == 0)
+                continue;
+            float s = hu_communication_style_fidelity_score_v2(target, ex->response,
+                                                               ex->response_len);
+            if (s < 0.f)
+                continue;
+            out[n++] = (double)s;
+        }
+    }
+    return n;
+}
+
+static double lora_scores_mean(const double *scores, size_t n) {
+    if (!scores || n == 0)
+        return 0.0;
+    double sum = 0.0;
+    for (size_t i = 0; i < n; i++)
+        sum += scores[i];
+    return sum / (double)n;
+}
+
+static hu_error_t lora_score_after_adapter_probes(const hu_lora_runner_ctx_t *ctx,
+                                                  const hu_communication_style_t *target,
+                                                  const lora_fidelity_probe_t *probes,
+                                                  size_t probe_count, const char *adapter_path,
+                                                  double *after, size_t after_cap,
+                                                  size_t *out_after_n) {
+    if (!ctx || !target || !probes || !after || !out_after_n || after_cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!ctx->provider || !ctx->provider->vtable || !ctx->gate_persona)
+        return HU_ERR_NOT_SUPPORTED;
+    if (!ctx->gate_model_name || ctx->gate_model_name_len == 0)
+        return HU_ERR_NOT_SUPPORTED;
+
+    hu_allocator_t load_alloc;
+    if (ctx->alloc)
+        load_alloc = *ctx->alloc;
+    else
+        load_alloc = hu_system_allocator();
+
+    const char *aid = ctx->adapter_id ? ctx->adapter_id : "gate_probe";
+    size_t aid_len = ctx->adapter_id ? strlen(ctx->adapter_id) : strlen("gate_probe");
+    hu_error_t le = hu_provider_load_adapter(ctx->provider, &load_alloc, adapter_path,
+                                             strlen(adapter_path), aid, aid_len);
+    if (le != HU_OK && le != HU_ERR_NOT_SUPPORTED)
+        return le;
+
+    const char *sys = ctx->gate_persona->identity[0] ? ctx->gate_persona->identity
+                                                     : "You are a helpful assistant.";
+    size_t sys_len = strlen(sys);
+
+    size_t n = 0;
+    for (size_t i = 0; i < probe_count && n < after_cap; i++) {
+        char *resp = NULL;
+        size_t resp_len = 0;
+        hu_error_t ce = ctx->provider->vtable->chat_with_system(
+            ctx->provider->ctx, &load_alloc, sys, sys_len, probes[i].incoming,
+            probes[i].incoming_len, ctx->gate_model_name, ctx->gate_model_name_len, 0.7, &resp,
+            &resp_len);
+        if (ce != HU_OK || !resp || resp_len == 0) {
+            if (resp)
+                load_alloc.free(load_alloc.ctx, resp, resp_len + 1);
+            continue;
+        }
+        float s = hu_communication_style_fidelity_score_v2(target, resp, resp_len);
+        load_alloc.free(load_alloc.ctx, resp, resp_len + 1);
+        if (s < 0.f)
+            continue;
+        after[n++] = (double)s;
+    }
+    *out_after_n = n;
+    return n >= 10 ? HU_OK : HU_ERR_INVALID_ARGUMENT;
+}
+
 static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
                                      const hu_learner_report_t *report,
+                                     const char *adapter_path,
                                      hu_eval_gate_verdict_t *verdict) {
     if (!ctx || !ctx->eval_gate || !verdict)
         return HU_ERR_INVALID_ARGUMENT;
 
     double persona[20];
+    double before[20];
     size_t n = 0;
+    hu_eval_gate_t gate_inst = *ctx->eval_gate;
+
     if (ctx->gate_persona_after_scores && ctx->gate_persona_after_n >= 10) {
         n = ctx->gate_persona_after_n;
         if (n > sizeof(persona) / sizeof(persona[0]))
             n = sizeof(persona) / sizeof(persona[0]);
         for (size_t i = 0; i < n; i++)
             persona[i] = ctx->gate_persona_after_scores[i];
+    } else if (ctx->gate_persona && ctx->provider && adapter_path && adapter_path[0]) {
+        hu_communication_style_t target;
+        bool synthetic = true;
+        hu_allocator_t *alloc = ctx->alloc ? ctx->alloc : NULL;
+        hu_allocator_t sys = hu_system_allocator();
+        if (!alloc)
+            alloc = &sys;
+        (void)hu_ml_fidelity_resolve_target(alloc, &target, &synthetic);
+
+        size_t before_n = lora_score_example_bank_before(ctx->gate_persona, &target, before,
+                                                         sizeof(before) / sizeof(before[0]));
+        lora_fidelity_probe_t probes[20];
+        size_t probe_n = lora_collect_fidelity_probes(ctx->gate_persona, probes,
+                                                      sizeof(probes) / sizeof(probes[0]));
+        if (probe_n > before_n)
+            probe_n = before_n;
+
+        size_t after_n = 0;
+        hu_error_t fe = lora_score_after_adapter_probes(ctx, &target, probes, probe_n,
+                                                        adapter_path, persona,
+                                                        sizeof(persona) / sizeof(persona[0]),
+                                                        &after_n);
+        if (fe == HU_OK && after_n >= 10) {
+            n = after_n;
+            if (before_n >= 10)
+                gate_inst.baseline_persona_fidelity_mean = lora_scores_mean(before, before_n);
+        } else if (report) {
+            n = runner_derive_gate_persona_scores(ctx, report, persona,
+                                                  sizeof(persona) / sizeof(persona[0]));
+        }
     } else if (report) {
         n = runner_derive_gate_persona_scores(ctx, report, persona,
                                               sizeof(persona) / sizeof(persona[0]));
@@ -165,7 +310,7 @@ static hu_error_t run_promotion_gate(const hu_lora_runner_ctx_t *ctx,
     }
 
     double p95 = ctx->gate_candidate_p95_ms > 0.0 ? ctx->gate_candidate_p95_ms : 100.0;
-    return hu_eval_gate_decide_from_arrays_for_test(ctx->eval_gate, persona, NULL, NULL, NULL, n,
+    return hu_eval_gate_decide_from_arrays_for_test(&gate_inst, persona, NULL, NULL, NULL, n,
                                                     p95, verdict);
 }
 #endif /* HU_ENABLE_RL_FULL */
@@ -227,7 +372,7 @@ hu_error_t hu_lora_training_runner(hu_memory_facade_t *m, const struct hu_job_sp
     memset(&gate_verdict, 0, sizeof(gate_verdict));
     if (ctx->eval_gate) {
         promote_adapter = false;
-        if (run_promotion_gate(ctx, &report, &gate_verdict) == HU_OK)
+        if (run_promotion_gate(ctx, &report, report.adapter_path, &gate_verdict) == HU_OK)
             promote_adapter = gate_verdict.promote;
 
         char adapter_id[128];

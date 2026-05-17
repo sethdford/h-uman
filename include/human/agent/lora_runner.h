@@ -72,6 +72,11 @@ typedef struct hu_lora_runner_ctx {
     const double *gate_persona_after_scores;
     size_t gate_persona_after_n;
     double gate_candidate_p95_ms; /* 0 → default 100 ms */
+
+    /* CF-4 (finish) — score persona example bank + post-adapter probes. */
+    const struct hu_persona *gate_persona; /* not owned */
+    const char *gate_model_name;
+    size_t gate_model_name_len;
 } hu_lora_runner_ctx_t;
 
 hu_error_t hu_lora_training_runner(struct hu_memory_facade *m, const struct hu_job_spec *spec,
