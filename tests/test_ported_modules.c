@@ -663,6 +663,12 @@ static void test_doctor_check_imessage_no_status_file_warns(void) {
 }
 
 static void test_doctor_check_imessage_breaker_tripped_reports_error(void) {
+    /* US-9.6: breaker output now uses the shared presentation predicate.
+     * Wording shifted from a generic "TRIPPED ... re-grant FDA" line to a
+     * class-aware explanation that names the underlying class AND
+     * suggests `human doctor --fix`. We still assert "TRIPPED" and "AUTH"
+     * (both still present) and add a substring for the new --fix
+     * suggestion so any future drift is caught. */
     char *old = NULL;
     doctor_imsg_swap_home("/tmp/hu_doctor_imsg_tripped", &old);
     doctor_imsg_write_status("/tmp/hu_doctor_imsg_tripped", "{\n"
@@ -679,6 +685,8 @@ static void test_doctor_check_imessage_breaker_tripped_reports_error(void) {
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "TRIPPED"));
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "AUTH"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "Full Disk Access"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "human doctor --fix"));
     doctor_free_semantics_result(&alloc, items, count);
     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_tripped");
     doctor_imsg_restore_home(old);
@@ -699,9 +707,12 @@ static void test_doctor_check_imessage_fresh_poll_reports_ok(void) {
     hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
-    /* now=1010, threshold=600 → age=10s → fresh */
+    /* now=1010, threshold=600 → age=10s → fresh.
+     * US-9.6: when `last_error_class=NONE` the predicate emits a positive
+     * "healthy" line in place of the old "circuit breaker: OK" — the
+     * latter is now reserved for the no-state-recorded path. */
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1010, 600, &items, &count, &cap), HU_OK);
-    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "circuit breaker: OK"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "chat.db: healthy"));
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "poll: fresh"));
     doctor_free_semantics_result(&alloc, items, count);
     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_fresh");
@@ -732,6 +743,13 @@ static void test_doctor_check_imessage_stale_poll_reports_warn(void) {
 }
 
 static void test_doctor_check_imessage_partial_failures_warns(void) {
+    /* US-9.6: when consecutive_open_failures>0 but the breaker has not
+     * tripped, the doctor now routes through the shared presentation
+     * predicate using the underlying `last_error_class`. For AUTH (this
+     * fixture) the output points at Full Disk Access — that's
+     * actionable and per AC-9.6.1. The legacy "circuit breaker: OK (N
+     * recent failures, last=X)" wording was replaced because it didn't
+     * tell the user what to fix. */
     char *old = NULL;
     doctor_imsg_swap_home("/tmp/hu_doctor_imsg_partial", &old);
     doctor_imsg_write_status("/tmp/hu_doctor_imsg_partial",
@@ -747,7 +765,8 @@ static void test_doctor_check_imessage_partial_failures_warns(void) {
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
-    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "circuit breaker: OK (3 recent failures"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "Full Disk Access"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "System Settings"));
     doctor_free_semantics_result(&alloc, items, count);
     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_partial");
     doctor_imsg_restore_home(old);

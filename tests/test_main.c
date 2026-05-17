@@ -176,6 +176,7 @@ void run_diagnostic_commands_tests(void);
 void run_skills_tests(void);
 void run_memory_new_tests(void);
 void run_ported_modules_tests(void);
+void run_doctor_imessage_diagnose_tests(void);
 void run_cron_tests(void);
 void run_cron_session_tools_tests(void);
 void run_subagent_tests(void);
@@ -893,6 +894,7 @@ int main(int argc, char **argv) {
     run_skills_tests();
     run_memory_new_tests();
     run_ported_modules_tests();
+    run_doctor_imessage_diagnose_tests();
     run_cron_tests();
     run_cron_session_tools_tests();
     run_subagent_tests();

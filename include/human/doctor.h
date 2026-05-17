@@ -111,4 +111,31 @@ hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item
 hu_error_t hu_doctor_check_install(hu_allocator_t *alloc, const hu_config_t *cfg,
                                    hu_diag_item_t **items, size_t *count, size_t *cap);
 
+/* US-9.6 test seam: translate an iMessage poll-status JSON blob into a single
+ * diag item that explains the channel state in user-actionable language.
+ *
+ * Pure predicate per `.claude/rules/security-predicate-extraction.md` —
+ * callable from unit tests without ever opening `~/Library/Messages/chat.db`.
+ * The production `hu_doctor_check_imessage` path also delegates to this
+ * function so the test and production strings cannot drift.
+ *
+ * `json_blob` is the raw contents of `~/.human/imessage.poll_status` (or a
+ * fixture). `out` is populated with `severity`, `category`, and `message`
+ * (both `category` and `message` are heap-allocated via `alloc` and must be
+ * freed by the caller — same ownership contract as `hu_diag_item_t` in
+ * the other doctor entry points).
+ *
+ * Category values (stable; consumers may key off these):
+ *   - "imessage_fda"         — AUTH / Full Disk Access denied (severity ERR)
+ *   - "imessage_busy"        — BUSY / Messages.app may be syncing (severity WARN)
+ *   - "imessage_not_found"   — CANTOPEN / chat.db not found (severity ERR)
+ *   - "imessage_breaker"     — circuit breaker tripped (severity ERR)
+ *   - "imessage_other"       — OTHER sqlite error (severity ERR)
+ *   - "imessage_chat_db"     — NONE / healthy (severity OK)
+ *
+ * Returns `HU_OK` on success, `HU_ERR_INVALID_ARGUMENT` for NULL inputs, or
+ * `HU_ERR_OUT_OF_MEMORY` if a string allocation fails. */
+hu_error_t hu_imessage_diag_from_poll_status(hu_allocator_t *alloc, const char *json_blob,
+                                             hu_diag_item_t *out);
+
 #endif /* HU_DOCTOR_H */

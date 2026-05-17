@@ -385,10 +385,13 @@ hu_error_t hu_doctor_check_skills(hu_allocator_t *alloc, hu_diag_item_t **items,
 
 /* ── iMessage channel diagnostics ────────────────────────────────────── */
 
-#if HU_HAS_IMESSAGE && !defined(_WIN32)
 /* Lightweight scan of a key:value pair from the poll-status JSON. The status
  * file is hand-emitted and small, so a substring search is sufficient and
- * avoids pulling in a JSON parser at this layer. Returns true on hit. */
+ * avoids pulling in a JSON parser at this layer. Returns true on hit.
+ *
+ * Kept unconditional (no HU_HAS_IMESSAGE guard) because the US-9.6 public
+ * helper `hu_imessage_diag_from_poll_status` is callable from any build
+ * profile so monitoring tools and tests get a stable symbol. */
 static bool doctor_imsg_status_extract_int(const char *blob, const char *key, int64_t *out) {
     const char *p = strstr(blob, key);
     if (!p)
@@ -452,7 +455,160 @@ static bool doctor_imsg_status_extract_bool(const char *blob, const char *key, b
     }
     return false;
 }
-#endif
+
+/* ── US-9.6 presentation predicate ─────────────────────────────────────
+ *
+ * Pure mapping from a `last_error_class` STRING (as serialized by the
+ * daemon via `hu_imessage_error_class_name` into `imessage.poll_status`)
+ * to a user-actionable diag item. Strings instead of the enum so the
+ * predicate compiles and links even when HU_ENABLE_IMESSAGE=OFF (the
+ * monitoring `--json` consumer may run on a slimmed binary that still
+ * reads the status file).
+ *
+ * Per `.claude/rules/security-predicate-extraction.md`: pure, single
+ * translation unit, called by both the production
+ * `hu_doctor_check_imessage` path AND the unit tests under
+ * `tests/test_doctor_imessage_diagnose.c` so the two cannot drift.
+ *
+ * Per `.claude/rules/tests-that-pin-bugs.md`: the BUSY branch MUST NOT
+ * mention "Full Disk Access" or "System Settings" and the AUTH branch
+ * MUST NOT mention "Messages.app may be syncing" — the test file pins
+ * both negatives.
+ *
+ * Inputs:
+ *   - `cls_str`: "NONE" / "AUTH" / "BUSY" / "CANTOPEN" / "OTHER" / "" /NULL
+ *   - `consecutive`: matches `consecutive_open_failures` in the status file
+ *   - `tripped`: matches `circuit_breaker_tripped` in the status file
+ *
+ * Output `out` is fully populated (severity + heap category + heap
+ * message). Caller frees `out->category` and `out->message`. */
+static hu_error_t doctor_imessage_present(hu_allocator_t *alloc, const char *cls_str,
+                                          int64_t consecutive, bool tripped, hu_diag_item_t *out) {
+    if (!alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *cls = cls_str ? cls_str : "";
+    bool is_auth = (strcmp(cls, "AUTH") == 0);
+    bool is_busy = (strcmp(cls, "BUSY") == 0);
+    bool is_cantopen = (strcmp(cls, "CANTOPEN") == 0);
+    bool is_none = (strcmp(cls, "NONE") == 0);
+    bool is_known = is_auth || is_busy || is_cantopen || is_none || (strcmp(cls, "OTHER") == 0);
+
+    /* Breaker tripped wins over the underlying class — it's the most
+     * urgent thing the user needs to know AND the underlying class is
+     * still surfaced inside the message body (AC-9.6.3). */
+    const char *category;
+    hu_diag_severity_t severity;
+    char *msg = NULL;
+
+    if (tripped) {
+        category = "imessage_breaker";
+        severity = HU_DIAG_ERR;
+        if (is_auth) {
+            msg =
+                hu_sprintf(alloc,
+                           "[doctor] iMessage circuit breaker: TRIPPED after %lld consecutive AUTH "
+                           "errors — Full Disk Access denied. Open System Settings > Privacy & "
+                           "Security > Full Disk Access, toggle human on, then run `human doctor "
+                           "--fix` to reset the breaker",
+                           (long long)consecutive);
+        } else if (is_cantopen) {
+            msg = hu_sprintf(alloc,
+                             "[doctor] iMessage circuit breaker: TRIPPED after %lld consecutive "
+                             "CANTOPEN errors — chat.db not found at the expected path. Open "
+                             "Messages.app once to create it, then run `human doctor --fix` to "
+                             "reset the breaker",
+                             (long long)consecutive);
+        } else if (is_busy) {
+            msg =
+                hu_sprintf(alloc,
+                           "[doctor] iMessage circuit breaker: TRIPPED after %lld consecutive BUSY "
+                           "errors — Messages.app may be syncing for an unusually long time. "
+                           "Wait for sync to settle, then run `human doctor --fix` to reset the "
+                           "breaker",
+                           (long long)consecutive);
+        } else {
+            msg = hu_sprintf(alloc,
+                             "[doctor] iMessage circuit breaker: TRIPPED after %lld consecutive %s "
+                             "errors. Run `human doctor --fix` to reset the breaker after the "
+                             "underlying issue is resolved",
+                             (long long)consecutive, cls[0] ? cls : "unknown");
+        }
+    } else if (is_auth) {
+        category = "imessage_fda";
+        severity = HU_DIAG_ERR;
+        msg = hu_sprintf(alloc,
+                         "[doctor] iMessage chat.db: Full Disk Access denied. Open System Settings "
+                         "> Privacy & Security > Full Disk Access, then toggle human on (and "
+                         "restart the daemon)");
+    } else if (is_busy) {
+        category = "imessage_busy";
+        severity = HU_DIAG_WARN;
+        msg =
+            hu_sprintf(alloc, "[doctor] iMessage chat.db: locked (transient). Messages.app may be "
+                              "syncing — try again in a moment");
+    } else if (is_cantopen) {
+        category = "imessage_not_found";
+        severity = HU_DIAG_ERR;
+        msg = hu_sprintf(alloc, "[doctor] iMessage chat.db: not found at the expected path "
+                                "(~/Library/Messages/chat.db). Open Messages.app at least once so "
+                                "macOS creates the database, then re-run this check");
+    } else if (is_none) {
+        category = "imessage_chat_db";
+        severity = HU_DIAG_OK;
+        msg = hu_sprintf(alloc, "[doctor] iMessage chat.db: healthy (last poll returned NONE)");
+    } else if (!is_known || !cls[0]) {
+        /* Unknown / empty class: surface as a WARN — the channel has not
+         * healthily polled, but we cannot point the user at a specific
+         * fix. Severity is NOT OK (the tests pin this — empty status must
+         * not falsely report healthy). */
+        category = "imessage_other";
+        severity = HU_DIAG_WARN;
+        msg =
+            hu_sprintf(alloc, "[doctor] iMessage chat.db: state unknown (no recognized error class "
+                              "in poll status — daemon may not have polled yet)");
+    } else {
+        /* OTHER */
+        category = "imessage_other";
+        severity = HU_DIAG_ERR;
+        msg = hu_sprintf(
+            alloc,
+            "[doctor] iMessage chat.db: sqlite reported an unclassified error (class=%s, "
+            "%lld consecutive failures). See daemon logs for the raw return code",
+            cls, (long long)consecutive);
+    }
+
+    char *cat = hu_strdup(alloc, category);
+    if (!msg || !cat) {
+        if (msg)
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        if (cat)
+            alloc->free(alloc->ctx, cat, strlen(cat) + 1);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    out->severity = severity;
+    out->category = cat;
+    out->message = msg;
+    return HU_OK;
+}
+
+hu_error_t hu_imessage_diag_from_poll_status(hu_allocator_t *alloc, const char *json_blob,
+                                             hu_diag_item_t *out) {
+    if (!alloc || !json_blob || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char err_class[32];
+    err_class[0] = '\0';
+    int64_t consecutive = 0;
+    bool tripped = false;
+
+    (void)doctor_imsg_status_extract_str(json_blob, "\"last_error_class\"", err_class,
+                                         sizeof(err_class));
+    (void)doctor_imsg_status_extract_int(json_blob, "\"consecutive_open_failures\"", &consecutive);
+    (void)doctor_imsg_status_extract_bool(json_blob, "\"circuit_breaker_tripped\"", &tripped);
+
+    return doctor_imessage_present(alloc, err_class, consecutive, tripped, out);
+}
 
 hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                                     int64_t stale_after_secs, hu_diag_item_t **items, size_t *count,
@@ -603,23 +759,26 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
     (void)doctor_imsg_status_extract_str(blob, "\"last_error_class\"", err_class,
                                          sizeof(err_class));
 
-    if (tripped) {
-        char *msg =
-            hu_sprintf(alloc,
-                       "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — "
-                       "re-grant Full Disk Access and restart the daemon",
-                       (long long)consecutive, err_class[0] ? err_class : "?");
-        if (msg) {
-            doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
-            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
-        }
-    } else if (consecutive > 0) {
-        char *msg = hu_sprintf(
-            alloc, "[doctor] iMessage circuit breaker: OK (%lld recent failures, last=%s)",
-            (long long)consecutive, err_class[0] ? err_class : "?");
-        if (msg) {
-            doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
-            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+    /* US-9.6: delegate breaker/error-class presentation to the shared
+     * predicate so the output matches what the unit tests pin. The
+     * predicate handles:
+     *   - tripped + class → "TRIPPED ... `human doctor --fix` ..."
+     *   - AUTH → "Full Disk Access denied. System Settings > ..."
+     *   - BUSY → "Messages.app may be syncing — try again in a moment"
+     *   - CANTOPEN → "chat.db: not found ..."
+     *   - NONE → healthy
+     *   - other / empty → WARN, "state unknown"
+     * The pre-US-9.6 free-form line is replaced — the existing red-team
+     * tests in `tests/test_ported_modules.c` have been updated to match
+     * the new substrings. */
+    if (tripped || consecutive > 0 || err_class[0]) {
+        hu_diag_item_t pres = {0};
+        if (doctor_imessage_present(alloc, err_class, consecutive, tripped, &pres) == HU_OK) {
+            doctor_push_line(alloc, items, count, cap, pres.severity, pres.message);
+            if (pres.category)
+                alloc->free(alloc->ctx, (void *)pres.category, strlen(pres.category) + 1);
+            if (pres.message)
+                alloc->free(alloc->ctx, (void *)pres.message, strlen(pres.message) + 1);
         }
     } else {
         doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
