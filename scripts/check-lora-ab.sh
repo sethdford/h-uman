@@ -46,6 +46,19 @@ set -euo pipefail
 JUDGMENT=0
 CASCADE=0
 CASCADE_FIXTURE=""
+
+# Sprint 11 PR #115 / Bugbot LOW fix #2: unify all EXIT cleanup into a
+# single trap registered ONCE here, at script entry. Previously the
+# cascade path at ~line 98 and the lora-ab path at ~line 149 each
+# registered their own `trap '...' EXIT`, and bash's single-EXIT-trap
+# rule meant the second registration silently discarded the first —
+# leaking CASCADE_TMP if control flow ever reached both paths. Now
+# both variables start empty; the trap uses `:-` defaults so cleanup
+# is a no-op when a path was never taken.
+CASCADE_TMP=""
+TMPDIR=""
+trap 'rm -f "${CASCADE_TMP:-}"; rm -rf "${TMPDIR:-}"' EXIT
+
 i=1
 # Manual parse so we can pull --cascade-fixture's value (the cascade-fixture
 # JSON path) without dragging in getopt. We tolerate other flags so
@@ -56,8 +69,18 @@ while [ "$i" -le "$#" ]; do
     --judgment) JUDGMENT=1 ;;
     --cascade) CASCADE=1 ;;
     --cascade-fixture)
-      i=$((i + 1))
-      CASCADE_FIXTURE="${!i:-}"
+      # Sprint 11 PR #115 / Bugbot LOW fix #1: bounds-check BEFORE
+      # indirect expansion. If `--cascade-fixture` is the very last arg
+      # with no value, `i+1 > $#` and `${!i:-}` triggers an unbound
+      # variable error under `set -u` on bash 3.x (macOS default).
+      # Check explicitly; treat missing value as empty (caller error
+      # surfaced later by the "fixture missing" check).
+      if [ "$((i + 1))" -le "$#" ]; then
+        i=$((i + 1))
+        CASCADE_FIXTURE="${!i}"
+      else
+        CASCADE_FIXTURE=""
+      fi
       ;;
     *) ;;
   esac
@@ -95,7 +118,9 @@ if [ "$CASCADE" -eq 1 ]; then
   esac
   echo "[cascade] running stage_cascade.py --fixture $CASCADE_FIXTURE_ABS"
   CASCADE_TMP="$(mktemp -t human-cascade-XXXXXX).json"
-  trap 'rm -f "$CASCADE_TMP"' EXIT
+  # NOTE: unified EXIT trap at script top handles cleanup of both
+  # CASCADE_TMP and TMPDIR; do not register a second `trap '...' EXIT`
+  # here — it would silently override the unified handler.
   set +e
   python3 "$REPO_ROOT/scripts/stage_cascade.py" \
     --fixture "$CASCADE_FIXTURE_ABS" \
@@ -146,7 +171,10 @@ done
 # path triggers reliably. The before/after fixtures are passed as
 # absolute paths (the CLI accepts arbitrary file paths for those).
 TMPDIR="$(mktemp -d -t human-lora-ab-XXXXXX)"
-trap 'rm -rf "$TMPDIR"' EXIT
+# NOTE: unified EXIT trap at script top handles cleanup. Do not register
+# a second `trap '...' EXIT` here — it would silently override the
+# unified handler and leak CASCADE_TMP if both paths are ever taken in
+# the same invocation.
 
 cp "$FIXTURE_PERSONA" "$TMPDIR/${FIXTURE_NAME}.json"
 
