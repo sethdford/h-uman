@@ -23,6 +23,13 @@
 #include <sqlite3.h>
 #endif
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+#if defined(__linux__)
+#include <limits.h>
+#endif
+
 #define HU_DOCTOR_LINE_CATEGORY "doctor_line"
 
 static hu_error_t doctor_push_line(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n,
@@ -1046,5 +1053,226 @@ hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item
     (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
                            "[doctor] responses: MLX HTTP 52 (empty reply) usually means the "
                            "local server rejected an oversized body — slim retry addresses this");
+    return HU_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * US-9.4: install-readiness gate.
+ *
+ * Each sub-check reads PRIMARY EVIDENCE on the filesystem — not a cached
+ * "configured" flag — so that the doctor cannot lie when the install is
+ * actually broken. See .claude/rules/tests-that-pin-bugs.md.
+ * ------------------------------------------------------------------------- */
+
+/* Push one item using a specific (caller-owned literal) category. */
+static hu_error_t install_push(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n, size_t *cap,
+                               hu_diag_severity_t sev, const char *category, const char *line) {
+    if (!line || !category)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (*n >= *cap) {
+        size_t new_cap = (*cap) ? (*cap * 2) : 4;
+        hu_diag_item_t *nb =
+            (hu_diag_item_t *)alloc->alloc(alloc->ctx, sizeof(hu_diag_item_t) * new_cap);
+        if (!nb)
+            return HU_ERR_OUT_OF_MEMORY;
+        if (*buf)
+            memcpy(nb, *buf, sizeof(hu_diag_item_t) * (*n));
+        if (*buf)
+            alloc->free(alloc->ctx, *buf, sizeof(hu_diag_item_t) * (*cap));
+        *buf = nb;
+        *cap = new_cap;
+    }
+    char *cat = hu_strdup(alloc, category);
+    char *msg = hu_strdup(alloc, line);
+    if (!cat || !msg) {
+        if (cat)
+            alloc->free(alloc->ctx, cat, strlen(cat) + 1);
+        if (msg)
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    (*buf)[*n] = (hu_diag_item_t){sev, cat, msg};
+    (*n)++;
+    return HU_OK;
+}
+
+/* Resolve the running binary's path. PRIMARY EVIDENCE — ask the kernel
+ * (Linux) or dyld (macOS) where we actually are, not where someone said we
+ * are. Under HU_IS_TEST, allow $HU_TEST_BINARY_PATH override so unit tests
+ * can synthesize "binary missing" without nuking the test runner. */
+static char *resolve_binary_path(hu_allocator_t *alloc) {
+#if HU_IS_TEST
+    const char *override = getenv("HU_TEST_BINARY_PATH");
+    if (override && override[0])
+        return hu_strdup(alloc, override);
+#endif
+#if defined(__linux__)
+    char buf[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0)
+        return NULL;
+    buf[n] = '\0';
+    return hu_strdup(alloc, buf);
+#elif defined(__APPLE__)
+    char buf[4096];
+    uint32_t size = (uint32_t)sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) != 0)
+        return NULL;
+    char *resolved = realpath(buf, NULL);
+    if (resolved) {
+        char *out = hu_strdup(alloc, resolved);
+        free(resolved);
+        return out;
+    }
+    return hu_strdup(alloc, buf);
+#else
+    (void)alloc;
+    return NULL;
+#endif
+}
+
+/* Build "~/.human" (or $HU_STATE_DIR override). Returns 0 on success. */
+static int resolve_state_dir(char *out, size_t cap) {
+    const char *override = getenv("HU_STATE_DIR");
+    if (override && override[0]) {
+        size_t len = strlen(override);
+        if (len + 1 > cap)
+            return -1;
+        memcpy(out, override, len + 1);
+        return 0;
+    }
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return -1;
+    int n = snprintf(out, cap, "%s/.human", home);
+    if (n <= 0 || (size_t)n >= cap)
+        return -1;
+    return 0;
+}
+
+hu_error_t hu_doctor_check_install(hu_allocator_t *alloc, const hu_config_t *cfg,
+                                   hu_diag_item_t **items, size_t *count, size_t *cap) {
+    if (!alloc || !items || !count || !cap)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    size_t err_seen_before_call = 0;
+    for (size_t i = 0; i < *count; i++)
+        if ((*items)[i].severity == HU_DIAG_ERR)
+            err_seen_before_call++;
+
+    /* --- 1. binary --- */
+    {
+        char *bin = resolve_binary_path(alloc);
+        bool ok = false;
+        if (bin && bin[0]) {
+            struct stat st;
+            if (stat(bin, &st) == 0 && S_ISREG(st.st_mode))
+                ok = true;
+        }
+        if (ok) {
+            char *msg = hu_sprintf(alloc, "binary: OK (%s)", bin);
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "binary",
+                               msg ? msg : "binary: OK");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        } else {
+            char *msg = hu_sprintf(alloc,
+                                   "binary: NOT_RESOLVABLE — could not locate "
+                                   "running executable (path=%s)",
+                                   bin ? bin : "(null)");
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "binary",
+                               msg ? msg
+                                   : "binary: NOT_RESOLVABLE — could not locate "
+                                     "running executable");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+        if (bin)
+            alloc->free(alloc->ctx, bin, strlen(bin) + 1);
+    }
+
+    /* --- 2. config_dir --- */
+    {
+        char dir[1024];
+        bool ok = false;
+        if (resolve_state_dir(dir, sizeof(dir)) == 0) {
+            struct stat st;
+            if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode))
+                ok = true;
+        }
+        if (ok) {
+            char *msg = hu_sprintf(alloc, "config_dir: OK (%s)", dir);
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "config_dir",
+                               msg ? msg : "config_dir: OK");
+            if (msg)
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        } else {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "config_dir",
+                               "config_dir: MISSING — run 'human onboard' to create ~/.human/");
+        }
+    }
+
+    /* --- 3. channel --- */
+    {
+        bool has_channel = false;
+        if (cfg) {
+            for (size_t i = 0; i < cfg->channels.channel_config_len; i++) {
+                const char *k = cfg->channels.channel_config_keys[i];
+                if (k && k[0] && cfg->channels.channel_config_counts[i] > 0) {
+                    has_channel = true;
+                    break;
+                }
+            }
+        }
+        if (has_channel) {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_OK, "channel",
+                               "channel: OK (at least one channel configured)");
+        } else {
+            (void)install_push(alloc, items, count, cap, HU_DIAG_ERR, "channel",
+                               "channel: NONE — run 'human doctor imessage' to pair iMessage");
+        }
+    }
+
+    /* --- 4. persona --- */
+    {
+        bool ok = false;
+        char detail[256] = {0};
+        if (!cfg || !cfg->agent.persona || !cfg->agent.persona[0]) {
+            snprintf(detail, sizeof(detail),
+                     "persona: MISSING — no persona configured. Run 'human doctor "
+                     "--fix' to restore defaults");
+        } else {
+            const char *name = cfg->agent.persona;
+            size_t name_len = strlen(name);
+            hu_persona_t p;
+            memset(&p, 0, sizeof(p));
+            hu_error_t perr = hu_persona_load(alloc, name, name_len, &p);
+            if (perr == HU_OK) {
+                ok = true;
+                snprintf(detail, sizeof(detail), "persona: OK (%s)", name);
+                hu_persona_deinit(alloc, &p);
+            } else if (perr == HU_ERR_NOT_FOUND) {
+                snprintf(detail, sizeof(detail),
+                         "persona: MISSING — '%s' not found. Run 'human doctor "
+                         "--fix' to restore defaults",
+                         name);
+            } else {
+                snprintf(detail, sizeof(detail),
+                         "persona: PARSE_ERROR — '%s' failed to load (rc=%d). Run "
+                         "'human doctor --fix' to restore defaults",
+                         name, (int)perr);
+            }
+        }
+        (void)install_push(alloc, items, count, cap, ok ? HU_DIAG_OK : HU_DIAG_ERR, "persona",
+                           detail);
+    }
+
+    /* Tally new errors and decide return code. */
+    size_t err_n = 0;
+    for (size_t i = 0; i < *count; i++)
+        if ((*items)[i].severity == HU_DIAG_ERR)
+            err_n++;
+    if (err_n > err_seen_before_call)
+        return HU_ERR_NOT_FOUND;
     return HU_OK;
 }
