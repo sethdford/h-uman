@@ -185,6 +185,12 @@ static void free_contact_profile(hu_allocator_t *alloc, hu_contact_profile_t *cp
     free_contact_string(alloc, cp->dunbar_layer);
 }
 
+bool hu_persona_proactive_is_enabled(const hu_persona_t *persona) {
+    if (!persona)
+        return false;
+    return persona->proactive_master_enabled;
+}
+
 void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona) {
     if (!alloc || !persona)
         return;
@@ -1079,6 +1085,19 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
             return HU_ERR_OUT_OF_MEMORY;
         }
         out->name_len = strlen(out->name);
+    }
+
+    /* Top-level proactive master kill switch.  Default: OFF.  See
+     * 2026-05-16 incident — daemon must explicitly read this and skip
+     * every proactive send path when false. */
+    {
+        hu_json_value_t *proactive_top = hu_json_object_get(root, "proactive");
+        if (proactive_top && proactive_top->type == HU_JSON_OBJECT) {
+            out->proactive_master_enabled =
+                hu_json_get_bool(proactive_top, "master_enabled", false);
+        } else {
+            out->proactive_master_enabled = false;
+        }
     }
 
     /* Support both nested "core" format and flat top-level format */

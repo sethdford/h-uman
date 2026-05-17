@@ -905,6 +905,14 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     if (!alloc || !agent || !agent->persona)
         return;
 
+    /* Global kill switch — see 2026-05-16 incident.  Defaults to OFF on a
+     * freshly loaded persona; operator must opt in by setting
+     * "proactive": { "master_enabled": true } in the persona JSON.  This is
+     * the durable in-config gate; HU_PROACTIVE_ENABLED below is the legacy
+     * env override that still works as a hard runtime kill. */
+    if (!hu_persona_proactive_is_enabled(agent->persona))
+        return;
+
     /* HU_PROACTIVE_ENABLED=0 disables proactive check-ins entirely.
      * Default: enabled (any value other than "0"). */
     const char *proactive_env = getenv("HU_PROACTIVE_ENABLED");
