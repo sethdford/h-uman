@@ -1385,6 +1385,107 @@ static void agent_director_history_free_zeroes_count(void) {
     hu_agent_internal_free_director_history(&a);
 }
 
+/* ── Sprint 38 — G8 biography + reject telemetry ─────────────────────── */
+
+static void guard_g8_rejects_biography_only_echo(void) {
+    static const char bio[] =
+        "grew up in Utah, studied computer science at BYU, then moved to "
+        "Silicon Valley to build distributed systems for a decade";
+    const char *raw =
+        "yeah grew up in Utah, studied computer science at BYU, then moved";
+    hu_guard_context_t ctx = {0};
+    /* No identity — biography alone must trip G8. */
+    ctx.persona_biography = bio;
+    ctx.persona_biography_len = sizeof(bio) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_identity_echo);
+}
+
+static void guard_g8_orthogonal_biography_vs_identity(void) {
+    static const char identity[] = "Chief Architect at Pure Health Solutions";
+    static const char bio[] =
+        "spent fifteen years building healthcare data platforms across "
+        "three continents before joining the current team";
+    const char *raw =
+        "spent fifteen years building healthcare data platforms across";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    ctx.persona_biography = bio;
+    ctx.persona_biography_len = sizeof(bio) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_identity_echo);
+}
+
+static void guard_reject_stats_g8_increments_on_identity_echo(void) {
+    hu_guard_reject_stats_reset();
+    hu_guard_reject_stats_t snap_before;
+    hu_guard_reject_stats_snapshot(&snap_before);
+
+    static const char identity[] = "Chief Architect at Pure Health Solutions";
+    const char *raw = "yeah i'm a Chief Architect at Pure Health Solutions today";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+
+    hu_guard_reject_stats_t snap_after;
+    hu_guard_reject_stats_snapshot(&snap_after);
+    HU_ASSERT(snap_after.persona_identity_echo > snap_before.persona_identity_echo);
+}
+
+static void guard_reject_stats_reset_clears_counters(void) {
+    static const char identity[] = "Chief Architect at Pure Health Solutions";
+    const char *raw = "yeah i'm a Chief Architect at Pure Health Solutions today";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    (void)hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len, &outcome,
+                                     &report);
+
+    hu_guard_reject_stats_t snap;
+    hu_guard_reject_stats_snapshot(&snap);
+    HU_ASSERT(snap.persona_identity_echo > 0);
+
+    hu_guard_reject_stats_reset();
+    hu_guard_reject_stats_snapshot(&snap);
+    HU_ASSERT_EQ(snap.persona_identity_echo, (uint64_t)0);
+    HU_ASSERT_EQ(snap.semantic_leak, (uint64_t)0);
+}
+
 /* ── Sprint 36 — persona identity / core-anchor echo (G8) ──────────────
  *
  * The guard rejects model output that quotes a 25+ byte verbatim
@@ -1773,4 +1874,10 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(agent_director_history_push_truncates_long);
     HU_RUN_TEST(agent_director_history_push_null_is_noop);
     HU_RUN_TEST(agent_director_history_free_zeroes_count);
+
+    /* Sprint 38 — G8 biography source + reject telemetry counters. */
+    HU_RUN_TEST(guard_g8_rejects_biography_only_echo);
+    HU_RUN_TEST(guard_g8_orthogonal_biography_vs_identity);
+    HU_RUN_TEST(guard_reject_stats_g8_increments_on_identity_echo);
+    HU_RUN_TEST(guard_reject_stats_reset_clears_counters);
 }

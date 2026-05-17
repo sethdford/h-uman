@@ -32,8 +32,10 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 /* Calibrated thresholds — tuned against the production failure (200x `\" `,
@@ -640,35 +642,76 @@ static bool hu_guard_has_persona_pii_echo(const hu_guard_context_t *ctx, const c
     return false;
 }
 
-/* G8 — persona identity / core-anchor echo. Returns true if any
- * contiguous HU_GUARD_PERSONA_IDENTITY_MIN_MATCH-byte substring of
- * `ctx->persona_identity` appears verbatim (case-insensitively) in
- * `s[0..len)`.
- *
- * Catches first-person identity leaks like `"i'm a Chief Architect at
- * Pure Health Solutions"` that G7 cannot catch (no name in third-
- * person construct). Reuses the same sliding-window primitive as G6
- * director echo with a tighter threshold (25 vs 30) because persona
- * identity strings are stable per-agent and more uniquely identifying
- * than per-turn director text.
- *
- * NULL ctx, NULL persona_identity, or persona_identity_len <
- * HU_GUARD_PERSONA_IDENTITY_MIN_MATCH disables the check. */
-static bool hu_guard_has_persona_identity_echo(const hu_guard_context_t *ctx, const char *s,
-                                               size_t len) {
-    if (!ctx || !ctx->persona_identity ||
-        ctx->persona_identity_len < (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH)
+/* G8 helper — verbatim substring echo for any persona text blob. */
+static bool hu_guard_persona_text_echo(const char *text, size_t text_len, const char *s,
+                                       size_t len) {
+    if (!text || text_len < (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH)
         return false;
     if (len < (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH)
         return false;
-    /* Slide a 25-char window over persona_identity. For each window,
-     * check if the response contains it. First match wins. */
     size_t window = (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH;
-    for (size_t i = 0; i + window <= ctx->persona_identity_len; i++) {
-        if (hu_guard_ci_contains(s, len, ctx->persona_identity + i, window))
+    for (size_t i = 0; i + window <= text_len; i++) {
+        if (hu_guard_ci_contains(s, len, text + i, window))
             return true;
     }
     return false;
+}
+
+/* G8 — persona identity / biography echo. Returns true if any
+ * contiguous 25-byte substring of `persona_identity` OR
+ * `persona_biography` appears verbatim in `s[0..len)`. */
+static bool hu_guard_has_persona_identity_echo(const hu_guard_context_t *ctx, const char *s,
+                                               size_t len) {
+    if (!ctx)
+        return false;
+    if (hu_guard_persona_text_echo(ctx->persona_identity, ctx->persona_identity_len, s, len))
+        return true;
+    if (hu_guard_persona_text_echo(ctx->persona_biography, ctx->persona_biography_len, s, len))
+        return true;
+    return false;
+}
+
+/* Sprint 38 — process-wide REJECT telemetry (G5–G8). */
+static atomic_uint_fast64_t s_guard_stat_semantic;
+static atomic_uint_fast64_t s_guard_stat_length;
+static atomic_uint_fast64_t s_guard_stat_director;
+static atomic_uint_fast64_t s_guard_stat_persona_pii;
+static atomic_uint_fast64_t s_guard_stat_persona_identity;
+
+static void hu_guard_record_reject_stats(const hu_guard_report_t *report) {
+    if (!report)
+        return;
+    if (report->detected_semantic_leak)
+        atomic_fetch_add_explicit(&s_guard_stat_semantic, 1, memory_order_relaxed);
+    if (report->detected_length_anomaly)
+        atomic_fetch_add_explicit(&s_guard_stat_length, 1, memory_order_relaxed);
+    if (report->detected_director_echo)
+        atomic_fetch_add_explicit(&s_guard_stat_director, 1, memory_order_relaxed);
+    if (report->detected_persona_pii_echo)
+        atomic_fetch_add_explicit(&s_guard_stat_persona_pii, 1, memory_order_relaxed);
+    if (report->detected_persona_identity_echo)
+        atomic_fetch_add_explicit(&s_guard_stat_persona_identity, 1, memory_order_relaxed);
+}
+
+void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out) {
+    if (!out)
+        return;
+    out->semantic_leak =
+        atomic_load_explicit(&s_guard_stat_semantic, memory_order_relaxed);
+    out->length_anomaly = atomic_load_explicit(&s_guard_stat_length, memory_order_relaxed);
+    out->director_echo = atomic_load_explicit(&s_guard_stat_director, memory_order_relaxed);
+    out->persona_pii_echo =
+        atomic_load_explicit(&s_guard_stat_persona_pii, memory_order_relaxed);
+    out->persona_identity_echo =
+        atomic_load_explicit(&s_guard_stat_persona_identity, memory_order_relaxed);
+}
+
+void hu_guard_reject_stats_reset(void) {
+    atomic_store_explicit(&s_guard_stat_semantic, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_length, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_director, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_persona_pii, 0, memory_order_relaxed);
+    atomic_store_explicit(&s_guard_stat_persona_identity, 0, memory_order_relaxed);
 }
 
 /* Orchestrator — returns true if the response trips ANY of G1/G2/G3.
@@ -1032,6 +1075,7 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
         *out_outcome = HU_GUARD_REJECT;
         if (report)
             report->detected_semantic_leak = true;
+        hu_guard_record_reject_stats(report);
         return HU_OK;
     }
 
@@ -1069,6 +1113,7 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
                 report->detected_persona_pii_echo = persona_echo;
                 report->detected_persona_identity_echo = identity_echo;
             }
+            hu_guard_record_reject_stats(report);
             return HU_OK;
         }
     }

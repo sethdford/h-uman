@@ -29,6 +29,7 @@
 #include "human/core/error.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -146,7 +147,30 @@ typedef struct {
      * name. NULL or persona_identity_len < 25 disables the check. */
     const char *persona_identity;
     size_t persona_identity_len;
+
+    /* Sprint 38 — loaded persona's `biography` (long-form backstory).
+     * Same 25-byte verbatim substring rule as `persona_identity`.
+     * Checked independently so a leak quoting only biography (no
+     * identity/core_anchor overlap) still trips G8. NULL or
+     * persona_biography_len < 25 disables this source. */
+    const char *persona_biography;
+    size_t persona_biography_len;
 } hu_guard_context_t;
+
+/* Sprint 38 — cumulative REJECT counts by detector (process-wide).
+ * Incremented atomically when `hu_response_guard_check_ex` returns
+ * HU_GUARD_REJECT. Use `hu_guard_reject_stats_reset()` in tests
+ * that assert on absolute counts. */
+typedef struct {
+    uint64_t semantic_leak;
+    uint64_t length_anomaly;
+    uint64_t director_echo;
+    uint64_t persona_pii_echo;
+    uint64_t persona_identity_echo;
+} hu_guard_reject_stats_t;
+
+void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out);
+void hu_guard_reject_stats_reset(void);
 
 /* Run the guard over a response.
  *

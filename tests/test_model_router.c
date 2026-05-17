@@ -328,6 +328,19 @@ static void judge_system_prompt_not_null(void) {
     HU_ASSERT(strlen(prompt) > 100);
 }
 
+static void route_global_log_reset_yields_zero_count(void) {
+    /* Sprint 38 — contract test: any suite test touching the global log
+     * must reset via hu_route_log_init before asserting on counts. */
+    hu_route_decision_log_t *log = hu_route_global_log();
+    hu_route_log_init(log);
+    HU_ASSERT_EQ(hu_route_log_count(log), (size_t)0);
+    hu_model_router_config_t c = hu_model_router_default_config();
+    hu_model_route(&c, "ping", 4, NULL, 0, 12, 0);
+    HU_ASSERT_EQ(hu_route_log_count(log), (size_t)1);
+    hu_route_log_init(log);
+    HU_ASSERT_EQ(hu_route_log_count(log), (size_t)0);
+}
+
 static void route_populates_global_log(void) {
     /* Sprint 37 — robustness fix: the global log is a 100-entry ring
      * shared across the whole test suite. As more agent_turn-driven
@@ -584,6 +597,7 @@ void run_model_router_tests(void) {
     HU_RUN_TEST(judge_system_prompt_not_null);
 
     /* Global log integration */
+    HU_RUN_TEST(route_global_log_reset_yields_zero_count);
     HU_RUN_TEST(route_populates_global_log);
 
     /* Judge routing */

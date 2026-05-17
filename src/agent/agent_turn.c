@@ -5606,6 +5606,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             guard_ctx.persona_identity = id;
                             guard_ctx.persona_identity_len = strlen(id);
                         }
+                        if (agent->persona->biography) {
+                            guard_ctx.persona_biography = agent->persona->biography;
+                            guard_ctx.persona_biography_len =
+                                strlen(agent->persona->biography);
+                        }
                     }
                     hu_error_t guard_err = hu_response_guard_check_ex(
                         agent->alloc, final_content, final_len, &guard_ctx, &guard_out,

@@ -1420,6 +1420,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         guard_ctx.persona_identity = id;
                         guard_ctx.persona_identity_len = strlen(id);
                     }
+                    if (agent->persona->biography) {
+                        guard_ctx.persona_biography = agent->persona->biography;
+                        guard_ctx.persona_biography_len = strlen(agent->persona->biography);
+                    }
                 }
                 hu_error_t guard_err = hu_response_guard_check_ex(
                     agent->alloc, sresp.content, sresp.content_len, &guard_ctx, &guard_out,
@@ -2178,6 +2182,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 if (id) {
                     guard_ctx.persona_identity = id;
                     guard_ctx.persona_identity_len = strlen(id);
+                }
+                if (agent->persona->biography) {
+                    guard_ctx.persona_biography = agent->persona->biography;
+                    guard_ctx.persona_biography_len = strlen(agent->persona->biography);
                 }
             }
             hu_error_t guard_err = hu_response_guard_check_ex(
