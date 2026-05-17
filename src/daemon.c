@@ -1626,15 +1626,18 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     }
                 }
             }
-            /* F31: Callback opportunities — 30% chance, inject follow-up from delayed/commitments
-             */
+            /* F31: Callback opportunities — 30% chance, inject follow-up from delayed/commitments.
+             * 2026-05-16 P4-4: track followup_id and mark it sent ONLY after send
+             * is confirmed. Pre-fix the followup row was never marked sent so the
+             * same followup re-fired every proactive cycle. */
+            int64_t delayed_followup_id_to_mark = -1;
             {
                 char callback_buf[512];
                 uint32_t seed_cb = (uint32_t)((uintptr_t)cp + (uintptr_t)now + 1);
                 if (agent->memory &&
-                    hu_proactive_check_callbacks(alloc, agent->memory, cp->contact_id,
-                                                 strlen(cp->contact_id), seed_cb, callback_buf,
-                                                 sizeof(callback_buf))) {
+                    hu_proactive_check_callbacks_ex(
+                        alloc, agent->memory, cp->contact_id, strlen(cp->contact_id), seed_cb,
+                        callback_buf, sizeof(callback_buf), &delayed_followup_id_to_mark)) {
                     size_t cb_len = strlen(callback_buf);
                     if (prompt && cb_len > 0) {
                         size_t merged_len = prompt_len + 1 + cb_len + 1;
@@ -1830,6 +1833,12 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             for (size_t mi = 0; mi < commitment_ids_count; mi++)
                                 (void)hu_superhuman_commitment_mark_followed_up(agent->memory,
                                                                                 commitment_ids[mi]);
+                            /* 2026-05-16 P4-4: mark delayed_followup as sent only
+                             * on confirmed delivery so a failed send leaves the
+                             * row in the queue for retry. */
+                            if (delayed_followup_id_to_mark >= 0 && agent->memory)
+                                (void)hu_superhuman_delayed_followup_mark_sent(
+                                    agent->memory, delayed_followup_id_to_mark);
 #endif
                         }
                     }
