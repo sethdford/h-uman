@@ -2231,7 +2231,7 @@ target_link_libraries(human human_core)
 # dyld + ASan require it for symbolication. See
 # docs/standards/engineering/reproducible-builds.md.
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    target_link_options(human PRIVATE "LINKER:-no_uuid")
+    # target_link_options(human PRIVATE "LINKER:-no_uuid")  # Removed 2026-05-17: newer macOS arm64 dyld requires LC_UUID. Reproducibility now via strip-and-compare in check-reproducible-build.sh.
 endif()
 
 # ──────────────────────────────────────────────────────────────────────────
