@@ -1864,8 +1864,19 @@ static void agent_recent_assistant_avg_len_uses_most_recent_n(void) {
     /* Newest 2: both 100 → 100. */
     HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 2), 100u);
 
-    /* All 7 assistant turns with EWMA → ~662. */
-    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 100), 662u);
+    /* All 7: oldest three are also 1k, so EWMA converges to the same ~480
+     * as newest-5 (not the arithmetic mean ~743). */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 100), 480u);
+
+    /* Including short oldest turns changes EWMA vs newest-5 only. */
+    bodies[0] = buf100;
+    bodies[1] = buf100;
+    msgs[0].content = buf100;
+    msgs[0].content_len = 100;
+    msgs[1].content = buf100;
+    msgs[1].content_len = 100;
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 480u);
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 100), 375u);
 }
 
 /* ── Registration ─────────────────────────────────────────────────────── */
