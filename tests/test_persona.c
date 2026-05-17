@@ -4651,7 +4651,13 @@ static void test_persona_banks_from_history_null_args_rejected(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
-#ifdef HU_ENABLE_SQLITE
+/* HU_ENABLE_ML guard ensures the test machinery (pbh_test_run_sql helper +
+ * 11 history-extraction tests) is fully elided when ML support is off — the
+ * runner block at run_persona_tests() is gated by the same condition, so
+ * leaving the functions defined would trigger -Werror=unused-function on
+ * GCC strict builds (static-analysis CI). Symmetric guards: definition AND
+ * registration share the same condition. */
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
 
 /* Run a no-result SQL statement via prepare+step+finalize (avoids
  * the catch-all helper for portability with the test framework). */
@@ -4954,7 +4960,7 @@ static void test_persona_banks_from_history_freeing_null_is_safe(void) {
     hu_persona_example_banks_free(&alloc, &b, 0);
 }
 
-#endif /* HU_ENABLE_SQLITE */
+#endif /* HU_ENABLE_SQLITE && HU_ENABLE_ML */
 
 /* ─────────────────────────────────────────────────────────────────────────
  * Regression suite for 2026-05-16 master kill switch (P1-1).
