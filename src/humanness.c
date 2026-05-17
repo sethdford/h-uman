@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #include "human/humanness.h"
 #include "human/core/string.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -132,16 +133,17 @@ char *hu_shared_references_build_directive(hu_allocator_t *alloc, const hu_share
         return NULL;
 
     char buf[2048];
-    size_t pos = hu_buf_appendf(buf, sizeof(buf), 0,
-                                "You share history with this person. "
-                                "If naturally relevant, weave in brief callbacks to past moments — "
-                                "not as explicit reminders, but as the shorthand that develops between "
-                                "people who know each other. Possible references:\n");
+    size_t pos =
+        hu_buf_appendf(buf, sizeof(buf), 0,
+                       "You share history with this person. "
+                       "If naturally relevant, weave in brief callbacks to past moments — "
+                       "not as explicit reminders, but as the shorthand that develops between "
+                       "people who know each other. Possible references:\n");
 
     for (size_t i = 0; i < count && pos < sizeof(buf) - 200; i++) {
         pos = hu_buf_appendf(buf, sizeof(buf), pos, "- \"%.*s\"\n",
-                              (int)(refs[i].reference_len > 120 ? 120 : refs[i].reference_len),
-                              refs[i].reference);
+                             (int)(refs[i].reference_len > 120 ? 120 : refs[i].reference_len),
+                             refs[i].reference);
     }
     pos = hu_buf_appendf(buf, sizeof(buf), pos,
                          "Use these sparingly. A single natural callback is better than "
@@ -380,6 +382,66 @@ char *hu_residue_carryover_build_directive(hu_allocator_t *alloc, const hu_resid
 
 /* ── 5. Curiosity Engine ─────────────────────────────────────────────────── */
 
+/* P2-8 (2026-05-16 incident): local safety predicate for the
+ * "How is the %s going?" template. The previous code memcpy'd up to 60 raw
+ * chars after a trigger word into the format string, which produced
+ * messages like "How is the i like hiking going?" and shipped them to
+ * family contacts via F25/F30 paths.
+ *
+ * A substring is UNSAFE if it contains:
+ *   - first-person pronouns (i, i'm, i'll, me, my, mine)
+ *   - bare emotion keywords (lonely, sad, depressed, anxious, scared,
+ *     suicidal, terrible, hate, dying, crying)
+ *   - clause continuators that signal a sentence fragment (just, really,
+ *     more, less, more lonely, just more)
+ *
+ * Local rather than shared because the proactive_topic_is_safe symbol
+ * landed in a separate branch (Phase 1) and these predicates have
+ * different scopes (proactive sends are gated on OUTBOUND safety; here we
+ * gate on whether a substring is a valid noun phrase for the template).
+ *
+ * Test pinned by tests/test_humanness.c (suite=humanness):
+ *   - curiosity_skips_first_person_substring
+ *   - curiosity_skips_emotion_keyword_substring */
+static bool hu_humanness_substring_is_safe_topic(const char *s, size_t len) {
+    if (!s || len == 0)
+        return false;
+    /* Build a lowercase copy for matching. 64 cap matches the template's
+     * %.60s clip. */
+    char buf[80];
+    size_t copy = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
+    for (size_t i = 0; i < copy; i++)
+        buf[i] = (char)tolower((unsigned char)s[i]);
+    buf[copy] = '\0';
+
+    /* First-person pronouns and contractions — leakage signals. */
+    static const char *first_person_tokens[] = {
+        "i ", "i'm", "i'll", " i ", " me ", " my ", " mine ", "myself", NULL,
+    };
+    for (const char **p = first_person_tokens; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+    /* Token at the very start of the buffer needs a sentinel match. */
+    if (copy >= 2 && (buf[0] == 'i') && (buf[1] == ' ' || buf[1] == '\''))
+        return false;
+
+    /* Bare emotion / charged keywords. */
+    static const char *charged_keywords[] = {
+        "lonely",  "depressed", "suicidal",  "terrible",  "hate",       "hates",  "dying", "crying",
+        "anxious", "scared",    "exhausted", "burnt out", "burned out", "broken", NULL,
+    };
+    for (const char **p = charged_keywords; *p; p++)
+        if (strstr(buf, *p))
+            return false;
+
+    /* Format specifiers / newlines (defense-in-depth against earlier
+     * pipelines that didn't strip them). */
+    if (strchr(buf, '%') || strchr(buf, '\n') || strchr(buf, '\r'))
+        return false;
+
+    return true;
+}
+
 hu_error_t hu_curiosity_generate(hu_allocator_t *alloc, const char *contact_id,
                                  size_t contact_id_len, const char *memory_context,
                                  size_t memory_context_len, const char *current_msg,
@@ -434,9 +496,15 @@ hu_error_t hu_curiosity_generate(hu_allocator_t *alloc, const char *contact_id,
         if (ctx_len < 8 || ctx_len > 200)
             continue;
 
+        /* P2-8 (2026-05-16): gate the template on the substring being a
+         * SAFE noun phrase. Without this gate, we shipped messages like
+         * "How is the i like hiking going?" to family contacts. */
+        size_t clip = ctx_len > 60 ? 60 : ctx_len;
+        if (!hu_humanness_substring_is_safe_topic(start, clip))
+            continue;
+
         char question[256];
-        int qlen = snprintf(question, sizeof(question), "How is the %.*s going?",
-                            (int)(ctx_len > 60 ? 60 : ctx_len), start);
+        int qlen = snprintf(question, sizeof(question), "How is the %.*s going?", (int)clip, start);
         if (qlen <= 0)
             continue;
 
@@ -480,8 +548,8 @@ char *hu_curiosity_build_directive(hu_allocator_t *alloc, const hu_curiosity_pro
                                 "but because you actually want to know:\n");
 
     for (size_t i = 0; i < count && pos < sizeof(buf) - 200; i++) {
-        pos = hu_buf_appendf(buf, sizeof(buf), pos, "- %.*s\n",
-                             (int)prompts[i].question_len, prompts[i].question);
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, "- %.*s\n", (int)prompts[i].question_len,
+                             prompts[i].question);
     }
     pos = hu_buf_appendf(buf, sizeof(buf), pos,
                          "Only ask if the conversation naturally leads there. Never force it.");
@@ -631,11 +699,12 @@ char *hu_evolved_opinion_build_directive(hu_allocator_t *alloc,
         return NULL;
 
     char buf[2048];
-    size_t pos = hu_buf_appendf(buf, sizeof(buf), 0,
-                                  "Over time, you've developed genuine perspectives on certain topics "
-                                  "through repeated conversation. These aren't reflexive agreement — "
-                                  "they're positions you've arrived at through experience. "
-                                  "Share them when relevant, even if the user might disagree:\n");
+    size_t pos =
+        hu_buf_appendf(buf, sizeof(buf), 0,
+                       "Over time, you've developed genuine perspectives on certain topics "
+                       "through repeated conversation. These aren't reflexive agreement — "
+                       "they're positions you've arrived at through experience. "
+                       "Share them when relevant, even if the user might disagree:\n");
 
     for (size_t i = 0; i < count && pos < sizeof(buf) - 300; i++) {
         if (opinions[i].conviction < min_conviction)
@@ -643,11 +712,12 @@ char *hu_evolved_opinion_build_directive(hu_allocator_t *alloc,
         const char *firmness = opinions[i].conviction > 0.8   ? "firmly"
                                : opinions[i].conviction > 0.5 ? "moderately"
                                                               : "tentatively";
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                             "- On \"%.*s\": you %s believe \"%.*s\" (shaped by %u conversations)\n",
-                             (int)opinions[i].topic_len, opinions[i].topic, firmness,
-                             (int)(opinions[i].stance_len > 100 ? 100 : opinions[i].stance_len),
-                             opinions[i].stance, opinions[i].interactions);
+        pos =
+            hu_buf_appendf(buf, sizeof(buf), pos,
+                           "- On \"%.*s\": you %s believe \"%.*s\" (shaped by %u conversations)\n",
+                           (int)opinions[i].topic_len, opinions[i].topic, firmness,
+                           (int)(opinions[i].stance_len > 100 ? 100 : opinions[i].stance_len),
+                           opinions[i].stance, opinions[i].interactions);
     }
     pos = hu_buf_appendf(buf, sizeof(buf), pos,
                          "Express these naturally — not as pronouncements, but as a thoughtful "
