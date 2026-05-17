@@ -333,30 +333,138 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         }
         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
     }
-    /* Story F.1 — render `self_model.capabilities` as a short "Self
-     * capabilities: ..." line. Populated by
-     * `hu_world_model_merge_self_capabilities` IFF the caller threaded
-     * `persona_ctx->tools` through; otherwise the slot is empty and we
-     * silently skip.
+
+    /* Story C (sprint-4 follow-up) — render `wm->recent_changes`.
      *
-     * Renders inline as "- I can use: a, b, c" so the LLM sees a
-     * compact preference list without firing a separate retrieval. The
-     * "Self capabilities:" header is intentionally distinct from the
-     * "Self model:" section that ships with Story E — when both land
-     * on sprint-4 a follow-up integration commit will fold the line
-     * inside the Self model block (per docs/plans/2026-05-12-self-
-     * model-cell.md, Story F.1). Keeping them separate here avoids
-     * cross-PR merge conflicts in the same brace. */
-    if (wm->self_model.capabilities_count > 0) {
-        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Self capabilities:\n", 19);
-        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "- I can use: ", 13);
-        for (size_t i = 0; i < wm->self_model.capabilities_count; i++) {
-            if (i > 0)
-                ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
-            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s",
-                                   wm->self_model.capabilities[i]);
+     * `hu_world_model_load` already derives up to 8 SUPERSEDED / RETRACTED
+     * relations per snapshot (src/agent/world_model.c P4.3 block) but the
+     * data was never surfaced to the LLM. The stored `summary` field is a
+     * mechanical "rel #X supersedes #Y" — useless on its own — so we join
+     * locally to `wm->relations` to produce a readable "src predicate
+     * target (kind)" line. Falls back to the mechanical summary if the
+     * relation row is not in the current snapshot window. */
+    if (wm->recent_changes_count > 0) {
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Recent changes:\n", 16);
+        size_t rc_cap = wm->recent_changes_count > 5 ? 5 : wm->recent_changes_count;
+        for (size_t i = 0; i < rc_cap; i++) {
+            const hu_world_recent_change_t *ch = &wm->recent_changes[i];
+            const char *kind_str = (ch->kind == HU_WORLD_CHANGE_SUPERSEDED)
+                                       ? "updated" : "no longer holds";
+            const hu_graph_relation_t *rel = NULL;
+            for (size_t r = 0; r < wm->relations_count; r++) {
+                if (wm->relations[r].id == ch->relation_id) {
+                    rel = &wm->relations[r];
+                    break;
+                }
+            }
+            if (rel && rel->source_name && rel->target_name) {
+                const char *t = hu_relation_type_to_string(rel->type);
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s %s (%s)\n",
+                                       rel->source_name, t ? t : "->",
+                                       rel->target_name, kind_str);
+            } else if (ch->summary[0]) {
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s (%s)\n",
+                                       ch->summary, kind_str);
+            }
         }
-        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+    }
+
+    /* Story D (sprint-4 follow-up) — render `wm->hyperedges`.
+     *
+     * `hu_world_model_load` already pulls up to 16 deduped hyperedges per
+     * snapshot (src/agent/world_model.c P4.2 block). They are n-ary facts
+     * with a `relation_label`, an array of `members` (each with entity_id
+     * + semantic role), and a belief posterior. Render as a compact
+     * "label: name[role], name[role], ..." line so the agent gets a
+     * relational view of the world without firing a separate retrieval. */
+    if (wm->hyperedges_count > 0) {
+        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Multi-entity facts:\n", 20);
+        size_t he_cap = wm->hyperedges_count > 5 ? 5 : wm->hyperedges_count;
+        for (size_t i = 0; i < he_cap; i++) {
+            const hu_hyperedge_t *he = &wm->hyperedges[i];
+            if (!he->relation_label[0]) continue;
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s: ", he->relation_label);
+            size_t mem_cap = he->members_count > 6 ? 6 : he->members_count;
+            for (size_t j = 0; j < mem_cap; j++) {
+                if (j > 0) ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
+                const char *name = wm_entity_name_by_id(wm, he->members[j].entity_id);
+                if (name) {
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s[%s]",
+                                           name, he->members[j].role);
+                } else {
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "ent#%lld[%s]",
+                                           (long long)he->members[j].entity_id,
+                                           he->members[j].role);
+                }
+            }
+            ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+        }
+    }
+
+    /* Story E + F.1 integration (sprint-4 follow-up) — render wm->self_model.
+     *
+     * `hu_world_model_merge_persona` already populates `name`,
+     * `focused_topics`, `recent_drift_kind`, `recent_drift_value`, and
+     * `confidence_in_self` every turn from persona identity + recent
+     * topics + applied persona deltas. F.1 additionally populates
+     * `capabilities` from the tool registry threaded through
+     * `persona_ctx->tools`. Render every field conditionally so a fresh
+     * contact (no persona, no topics, no drift, no tools) does not get
+     * a section of blanks. Confidence is bucketed into high/medium/low
+     * so the LLM does not try to reason about float precision; <0.1 omits
+     * the confidence line entirely to keep the section honest about low-
+     * signal cases.
+     *
+     * Integration note: when F.1 shipped standalone on sprint-4 it
+     * rendered a separate "Self capabilities:" header. Now that Story E
+     * lives here too, capabilities folds inside the Self model block as
+     * a "- Capabilities I have: a, b, c" line — exactly as planned in
+     * docs/plans/2026-05-12-self-model-cell.md, "Story E + F.1 integration". */
+    {
+        bool self_signal = wm->self_model.name[0]
+            || wm->self_model.focused_topics[0]
+            || wm->self_model.recent_drift_kind[0]
+            || wm->self_model.confidence_in_self >= 0.1f
+            || wm->self_model.capabilities_count > 0;
+        if (self_signal) {
+            ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Self model:\n", 12);
+            if (wm->self_model.name[0])
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                       "- I am: %s\n", wm->self_model.name);
+            if (wm->self_model.focused_topics[0])
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                       "- Tracking: %s\n",
+                                       wm->self_model.focused_topics);
+            if (wm->self_model.recent_drift_kind[0]) {
+                if (wm->self_model.recent_drift_value[0])
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                           "- Most recent shift: %s — %s\n",
+                                           wm->self_model.recent_drift_kind,
+                                           wm->self_model.recent_drift_value);
+                else
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                           "- Most recent shift: %s\n",
+                                           wm->self_model.recent_drift_kind);
+            }
+            const char *bucket = NULL;
+            if (wm->self_model.confidence_in_self >= 0.7f) bucket = "high";
+            else if (wm->self_model.confidence_in_self >= 0.4f) bucket = "medium";
+            else if (wm->self_model.confidence_in_self >= 0.1f) bucket = "low";
+            if (bucket)
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+                                       "- Self-confidence: %s\n", bucket);
+            if (wm->self_model.capabilities_count > 0) {
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap,
+                                      "- Capabilities I have: ", 23);
+                for (size_t i = 0; i < wm->self_model.capabilities_count; i++) {
+                    if (i > 0)
+                        ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s",
+                                           wm->self_model.capabilities[i]);
+                }
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+            }
+        }
     }
 
     if (style_signal) {

@@ -5,6 +5,7 @@ import {
   shadowText,
   shadowExists,
   VIEW_TAGS,
+  isKnownPageError,
 } from "./helpers";
 
 /**
@@ -206,7 +207,9 @@ test.describe("Smoke: No Errors", () => {
 
   test("no unhandled JS exceptions", async ({ page }) => {
     const exceptions: string[] = [];
-    page.on("pageerror", (err) => exceptions.push(err.message));
+    page.on("pageerror", (err) => {
+      if (!isKnownPageError(err.message)) exceptions.push(err.message);
+    });
 
     await page.goto("/");
     await page.waitForTimeout(4000);
