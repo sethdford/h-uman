@@ -86,4 +86,11 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
                                   const char *contact_id, size_t contact_id_len, uint32_t seed,
                                   char *message_out, size_t msg_cap);
 
+/* P6-4: minimal output-safety predicate for proactive / silence-
+ * acknowledgment phrasings. Returns true when the text is safe to
+ * send: non-NULL, non-empty, no markdown markers, no formal
+ * disclaimers, no em-dashes. Empty / NULL / oversize text returns
+ * false so the caller falls back to a known-safe literal. */
+bool hu_proactive_topic_is_safe(const char *text, size_t text_len);
+
 #endif /* HU_PROACTIVE_H */

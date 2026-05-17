@@ -5,6 +5,7 @@
 
 #define _GNU_SOURCE
 #include "human/humanness.h"
+#include "human/agent/proactive.h"
 #include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -257,6 +258,53 @@ hu_silence_response_t hu_silence_intuit(const char *msg, size_t msg_len,
         return HU_SILENCE_BRIEF_ACKNOWLEDGE;
 
     return HU_SILENCE_FULL_RESPONSE;
+}
+
+char *hu_silence_build_acknowledgment_for_persona(hu_allocator_t *alloc,
+                                                  hu_silence_response_t response,
+                                                  const struct hu_persona *persona,
+                                                  const char *channel, size_t channel_len,
+                                                  const char *context, size_t context_len,
+                                                  size_t *out_len) {
+    if (out_len)
+        *out_len = 0;
+    if (!alloc || response == HU_SILENCE_FULL_RESPONSE || response == HU_SILENCE_ACTUAL_SILENCE)
+        return NULL;
+
+    /* TODO(P6-4 bridge): when an LLM is wired up here, build a short
+     * prompt from persona + per-channel overlay + situational context
+     * and request a one-line in-voice acknowledgment. Until then we
+     * fall back to the same literals the legacy builder used, but we
+     * still apply the proactive safety predicate to the output so the
+     * call site never receives an unvetted phrasing. */
+    (void)persona;
+    (void)channel;
+    (void)channel_len;
+    (void)context;
+    (void)context_len;
+
+    const char *text = NULL;
+    switch (response) {
+    case HU_SILENCE_PRESENCE_ONLY:
+        text = "i'm here.";
+        break;
+    case HU_SILENCE_BRIEF_ACKNOWLEDGE:
+        text = "i hear you.";
+        break;
+    default:
+        return NULL;
+    }
+
+    size_t len = strlen(text);
+    if (!hu_proactive_topic_is_safe(text, len))
+        return NULL;
+
+    char *result = hu_strndup(alloc, text, len);
+    if (!result)
+        return NULL;
+    if (out_len)
+        *out_len = len;
+    return result;
 }
 
 bool hu_proactive_should_suppress_for_emotion(const char *last_inbound_msg, size_t msg_len) {

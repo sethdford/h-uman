@@ -848,3 +848,46 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
     return false;
 }
 #endif
+
+
+/* P6-4: minimal output-safety predicate for proactive / silence ack
+ * phrasings. Returns false on anything we never want to send as a
+ * standalone proactive line: NULL/empty, oversize, markdown markers,
+ * em-dashes, or assistant-disclaimer / mention-AI phrasings. Caller
+ * uses this both to validate LLM output and to gate fallback paths. */
+bool hu_proactive_topic_is_safe(const char *text, size_t text_len) {
+    if (!text || text_len == 0)
+        return false;
+    /* Hard cap on a single proactive line: persona overlay norms cap
+     * length around 80 chars; allow some slack but reject novels. */
+    if (text_len > 256)
+        return false;
+    static const char *const banned[] = {
+        "**", "*_", "__",       "`",          "—",
+        "as an ai", "as a language model",     "i'm an ai",
+        "i am an ai", "i cannot",  "i can't help",
+    };
+    for (size_t i = 0; i < sizeof(banned) / sizeof(banned[0]); i++) {
+        const char *needle = banned[i];
+        size_t nlen = strlen(needle);
+        if (text_len < nlen)
+            continue;
+        for (size_t s = 0; s + nlen <= text_len; s++) {
+            size_t k = 0;
+            while (k < nlen) {
+                char a = text[s + k];
+                char b = needle[k];
+                if (a >= 'A' && a <= 'Z')
+                    a = (char)(a - 'A' + 'a');
+                if (b >= 'A' && b <= 'Z')
+                    b = (char)(b - 'A' + 'a');
+                if (a != b)
+                    break;
+                k++;
+            }
+            if (k == nlen)
+                return false;
+        }
+    }
+    return true;
+}

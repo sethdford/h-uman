@@ -1,4 +1,7 @@
+#include "human/agent/proactive.h"
+#include "human/core/string.h"
 #include "human/humanness.h"
+#include "human/persona.h"
 #include "test_framework.h"
 #include <stdlib.h>
 #include <string.h>
@@ -437,6 +440,61 @@ static void imperfect_genuinely_unsure(void) {
     alloc.free(alloc.ctx, d, len + 1);
 }
 
+/* ── P6-4: silence-ack routed through persona+channel context ───────── */
+/*
+ * The legacy hu_silence_build_acknowledgment returns hardcoded
+ * "I'm here." / "I hear you." with no persona context. P6-4 adds a
+ * sibling, hu_silence_build_acknowledgment_for_persona, that accepts
+ * persona+channel+context and applies hu_proactive_topic_is_safe on
+ * its output. LLM routing is deferred behind a TODO (bridge work);
+ * what matters now is that the persona/channel signal reaches the
+ * builder and the safety predicate runs unconditionally.
+ */
+static void p6_4_persona_ack_reaches_safety_predicate(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.name = hu_strndup(&alloc, "test", 4);
+    persona.name_len = 4;
+
+    size_t out_len = 0;
+    char *ack = hu_silence_build_acknowledgment_for_persona(&alloc, HU_SILENCE_BRIEF_ACKNOWLEDGE,
+                                                            &persona, "imessage",
+                                                            strlen("imessage"), NULL, 0, &out_len);
+    HU_ASSERT_NOT_NULL(ack);
+    HU_ASSERT_TRUE(out_len > 0);
+    /* Safety predicate must accept the returned phrase. */
+    HU_ASSERT_TRUE(hu_proactive_topic_is_safe(ack, out_len));
+
+    alloc.free(alloc.ctx, ack, out_len + 1);
+    hu_persona_deinit(&alloc, &persona);
+}
+
+static void p6_4_persona_ack_full_response_returns_null(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t out_len = 99;
+    char *ack = hu_silence_build_acknowledgment_for_persona(&alloc, HU_SILENCE_FULL_RESPONSE, NULL,
+                                                            NULL, 0, NULL, 0, &out_len);
+    HU_ASSERT_NULL(ack);
+    HU_ASSERT_EQ(out_len, 0);
+}
+
+static void p6_4_topic_safe_rejects_unsafe(void) {
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe(NULL, 0));
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe("", 0));
+    const char *markdown = "**bold**";
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe(markdown, strlen(markdown)));
+    const char *emdash = "I'm here for you — really";
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe(emdash, strlen(emdash)));
+    const char *disclaimer = "As an AI I cannot judge that";
+    HU_ASSERT_FALSE(hu_proactive_topic_is_safe(disclaimer, strlen(disclaimer)));
+}
+
+static void p6_4_topic_safe_accepts_safe(void) {
+    const char *ok = "i hear you";
+    HU_ASSERT_TRUE(hu_proactive_topic_is_safe(ok, strlen(ok)));
+}
+
 /* ── P6-3: emotional-tone gate before proactive trigger ──────────────── */
 /*
  * Pure predicate that the daemon's proactive trigger should consult
@@ -550,6 +608,12 @@ int run_humanness_tests(void) {
     HU_RUN_TEST(p6_3_do_not_suppress_when_last_was_light);
     HU_RUN_TEST(p6_3_do_not_suppress_when_last_was_normal);
     HU_RUN_TEST(p6_3_do_not_suppress_when_no_last_message);
+
+    /* P6-4: silence-ack routed through persona+channel context */
+    HU_RUN_TEST(p6_4_persona_ack_reaches_safety_predicate);
+    HU_RUN_TEST(p6_4_persona_ack_full_response_returns_null);
+    HU_RUN_TEST(p6_4_topic_safe_rejects_unsafe);
+    HU_RUN_TEST(p6_4_topic_safe_accepts_safe);
 
     return 0;
 }

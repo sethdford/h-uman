@@ -96,6 +96,30 @@ char *hu_silence_build_acknowledgment(hu_allocator_t *alloc, hu_silence_response
  * empty msg (returns false). */
 bool hu_proactive_should_suppress_for_emotion(const char *last_inbound_msg, size_t msg_len);
 
+struct hu_persona;
+
+/* P6-4: persona+channel-aware silence acknowledgment builder.
+ *
+ * Successor to hu_silence_build_acknowledgment that threads the
+ * persona, active channel and a short situational context through to
+ * the builder so a future LLM-routed phrasing has the inputs it needs
+ * to produce in-voice text. Today the routing falls back to the same
+ * static literals ("I'm here." / "I hear you.") that the legacy
+ * builder uses — bridging the LLM call is a separate plan item
+ * (see docs/research/2026-05-16-proactive-audit/findings.md).
+ *
+ * ALL output is gated through hu_proactive_topic_is_safe before
+ * return; if the candidate phrasing fails the gate, returns NULL
+ * (caller treats as "stay silent"). FULL_RESPONSE returns NULL.
+ *
+ * Caller frees with alloc->free; out_len carries strlen. */
+char *hu_silence_build_acknowledgment_for_persona(hu_allocator_t *alloc,
+                                                  hu_silence_response_t response,
+                                                  const struct hu_persona *persona,
+                                                  const char *channel, size_t channel_len,
+                                                  const char *context, size_t context_len,
+                                                  size_t *out_len);
+
 /* ──────────────────────────────────────────────────────────────────────────
  * 4. Emotional Residue Carryover — next-conversation texture changes
  * ────────────────────────────────────────────────────────────────────────── */
