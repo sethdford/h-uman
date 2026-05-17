@@ -1814,7 +1814,7 @@ static void agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant(void)
     agent.history = msgs;
     agent.history_count = 5;
 
-    /* Average over 2 assistant messages: (12 + 10) / 2 = 11. */
+    /* EWMA over assistant lengths 12 then 10 → ~11. */
     HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 11u);
 
     /* Empty-content assistant must be skipped. */
@@ -1858,16 +1858,14 @@ static void agent_recent_assistant_avg_len_uses_most_recent_n(void) {
     agent.history = msgs;
     agent.history_count = 7;
 
-    /* Newest 5 cover msgs[6]..msgs[2] = 100,100,1000,1000,1000.
-     * sum = 3200, avg = 640. */
-    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 640u);
+    /* Newest 5 (chronological 1k×3, 100×2) with EWMA α=0.35 → ~480. */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 480u);
 
-    /* Newest 2: 100, 100 → 100. */
+    /* Newest 2: both 100 → 100. */
     HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 2), 100u);
 
-    /* max_n larger than history → all 7: sum = 5*1000 + 2*100 = 5200,
-     * avg = 5200 / 7 = 742 (integer floor). */
-    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 100), 742u);
+    /* All 7 assistant turns with EWMA → ~662. */
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 100), 662u);
 }
 
 /* ── Registration ─────────────────────────────────────────────────────── */

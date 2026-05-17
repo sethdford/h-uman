@@ -1,4 +1,5 @@
 #include "human/agent.h"
+#include "agent_internal.h"
 #include "human/agent/approval_gate.h"
 #include "human/agent/response_verifier.h"
 #include "human/agent/awareness.h"
@@ -290,13 +291,13 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
     if (!agent || !agent->history || agent->history_count == 0 || max_n == 0)
         return 0;
 
+    /* Collect assistant lengths oldest → newest among the last `max_n`
+     * turns so we can apply EWMA forward in time. */
+    size_t lens[16];
+    if (max_n > sizeof(lens) / sizeof(lens[0]))
+        max_n = sizeof(lens) / sizeof(lens[0]);
+
     size_t collected = 0;
-    size_t total = 0;
-    /* Walk newest → oldest, skipping non-assistant turns and empty content.
-     * `history_count` is one past the newest stored entry. We do NOT skip
-     * the last assistant entry: the guard runs *before* the candidate is
-     * appended to history (see agent_stream.c:1400, agent_turn.c:5566), so
-     * `history` here contains only prior turns. */
     size_t i = agent->history_count;
     while (i > 0 && collected < max_n) {
         i--;
@@ -305,12 +306,26 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
             continue;
         if (!m->content || m->content_len == 0)
             continue;
-        total += m->content_len;
-        collected++;
+        lens[collected++] = m->content_len;
     }
     if (collected == 0)
         return 0;
-    return total / collected;
+
+    /* Reverse to chronological order (oldest first). */
+    for (size_t a = 0, b = collected - 1; a < b; a++, b--) {
+        size_t tmp = lens[a];
+        lens[a] = lens[b];
+        lens[b] = tmp;
+    }
+
+    double ewma = (double)lens[0];
+    const double alpha = HU_GUARD_ASSISTANT_LEN_EWMA_ALPHA;
+    for (size_t k = 1; k < collected; k++)
+        ewma = alpha * (double)lens[k] + (1.0 - alpha) * ewma;
+
+    if (ewma < 1.0)
+        return 1;
+    return (size_t)ewma;
 }
 
 #define HU_AGENT_HISTORY_INIT_CAP 16

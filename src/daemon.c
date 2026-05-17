@@ -2420,6 +2420,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             w14_lora_ctx.kv_cache = agent->infra.kv_cache;
             w14_lora_ctx.provider = &agent->provider;
             w14_lora_ctx.adapter_id = "w14_learner";
+#ifdef HU_ENABLE_RL_FULL
+            {
+                static hu_eval_gate_t w14_eval_gate = {
+                    .baseline_persona_fidelity_mean = 0.50,
+                    .persona_delta_min = 0.05,
+                    .bootstrap_samples = 500,
+                    .bootstrap_seed = 42,
+                    .baseline_p95_latency_ms = 8000.0,
+                    .latency_delta_max_ms = 4000.0,
+                };
+                w14_lora_ctx.eval_gate = &w14_eval_gate;
+                w14_lora_ctx.gate_persona = agent->persona;
+                w14_lora_ctx.gate_model_name = agent->model_name;
+                w14_lora_ctx.gate_model_name_len = agent->model_name_len;
+            }
+#endif
             w14_lora_ctx.config_template = hu_learner_default_config();
             {
                 const char *hm = getenv("HOME");

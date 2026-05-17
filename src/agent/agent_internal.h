@@ -34,6 +34,10 @@ void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *us
  * 150-byte channel is REJECTed at runtime, not just in unit tests.
  * (Sprint 33 — wires Sprint 31's G5 into production.)
  */
+/* Sprint 41 — EWMA smoothing for G5 `recent_avg_len` (post-mortem #20).
+ * Higher alpha weights the newest assistant turns more heavily. */
+#define HU_GUARD_ASSISTANT_LEN_EWMA_ALPHA 0.35
+
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
 
 /* Set / clear the active scene-direction text for the next turn. The
