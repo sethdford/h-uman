@@ -2605,6 +2605,7 @@ set(HU_TEST_SOURCES
     tests/test_agent_security.c
     tests/test_skills.c
     tests/test_ported_modules.c
+    tests/test_doctor_imessage_diagnose.c
     tests/test_subagent.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
