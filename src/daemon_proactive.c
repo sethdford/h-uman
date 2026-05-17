@@ -273,8 +273,8 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t
 /* ── Proactive prompt builder ──────────────────────────────────────── */
 
 char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *agent,
-                                             hu_legacy_memory_t *memory, const hu_contact_profile_t *cp,
-                                             size_t *out_len) {
+                                             hu_legacy_memory_t *memory,
+                                             const hu_contact_profile_t *cp, size_t *out_len) {
     char *starter = NULL;
     size_t starter_len = 0;
     if (memory && cp->contact_id) {
@@ -414,6 +414,80 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     }
 #endif /* HU_ENABLE_SQLITE feed awareness */
 
+    /* P6-1: per-channel overlay directives — mirror the reactive path
+     * in src/agent/agent_stream.c so proactive prompts carry the same
+     * formality/length/emoji/pragmatic guidance the LLM gets when it
+     * responds to an inbound message. Channel name is derived from
+     * cp->proactive_channel ("imessage:+1234567890" → "imessage"). */
+    char *overlay_ctx = NULL;
+    size_t overlay_ctx_len = 0;
+    if (agent && agent->persona && cp->proactive_channel) {
+        const char *ch_name = cp->proactive_channel;
+        size_t ch_name_len = strlen(ch_name);
+        const char *colon = strchr(ch_name, ':');
+        if (colon)
+            ch_name_len = (size_t)(colon - ch_name);
+        if (ch_name_len > 0) {
+            const hu_persona_overlay_t *ov =
+                hu_persona_find_overlay(agent->persona, ch_name, ch_name_len);
+            if (ov) {
+                char obuf[1024];
+                size_t opos = 0;
+                int n = snprintf(obuf + opos, sizeof(obuf) - opos, "\nChannel style:");
+                if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                    opos += (size_t)n;
+                if (ov->formality) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " %s.", ov->formality);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->avg_length) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Length: %s.", ov->avg_length);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->emoji_usage) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Emoji: %s.", ov->emoji_usage);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->directness) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Directness: %s.",
+                                 ov->directness);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->face_saving) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Face-saving: %s.",
+                                 ov->face_saving);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                if (ov->disagreement_style) {
+                    n = snprintf(obuf + opos, sizeof(obuf) - opos, " Disagreement: %s.",
+                                 ov->disagreement_style);
+                    if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                        opos += (size_t)n;
+                }
+                for (size_t i = 0; i < ov->style_notes_count; i++) {
+                    if (ov->style_notes[i]) {
+                        n = snprintf(obuf + opos, sizeof(obuf) - opos, " %s.", ov->style_notes[i]);
+                        if (n > 0 && opos + (size_t)n < sizeof(obuf))
+                            opos += (size_t)n;
+                    }
+                }
+                if (opos > 0) {
+                    overlay_ctx = (char *)alloc->alloc(alloc->ctx, opos + 1);
+                    if (overlay_ctx) {
+                        memcpy(overlay_ctx, obuf, opos);
+                        overlay_ctx[opos] = '\0';
+                        overlay_ctx_len = opos;
+                    }
+                }
+            }
+        }
+    }
+
     static const char HU_DEFAULT_PROACTIVE_RULES[] =
         "\nRules: "
         "1. One short natural message (not 'hey how are you' — too generic). "
@@ -448,6 +522,8 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 #endif
     if (calendar_ctx && calendar_ctx_len > 0)
         total += 2 + calendar_ctx_len;
+    if (overlay_ctx && overlay_ctx_len > 0)
+        total += 2 + overlay_ctx_len;
 
     char *result = (char *)alloc->alloc(alloc->ctx, total + 1);
     if (!result) {
@@ -463,6 +539,8 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 #endif
         if (calendar_ctx)
             alloc->free(alloc->ctx, calendar_ctx, calendar_ctx_len + 1);
+        if (overlay_ctx)
+            alloc->free(alloc->ctx, overlay_ctx, overlay_ctx_len + 1);
         *out_len = 0;
         return NULL;
     }
@@ -507,6 +585,13 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
         memcpy(result + pos, calendar_ctx, calendar_ctx_len);
         pos += calendar_ctx_len;
         alloc->free(alloc->ctx, calendar_ctx, calendar_ctx_len + 1);
+    }
+    if (overlay_ctx && overlay_ctx_len > 0) {
+        result[pos++] = '\n';
+        result[pos++] = '\n';
+        memcpy(result + pos, overlay_ctx, overlay_ctx_len);
+        pos += overlay_ctx_len;
+        alloc->free(alloc->ctx, overlay_ctx, overlay_ctx_len + 1);
     }
 
     memcpy(result + pos, rules, rules_len);

@@ -1,7 +1,11 @@
+#include "human/agent.h"
+#include "human/core/string.h"
 #include "human/daemon_proactive.h"
+#include "human/humanness.h"
 #include "human/memory.h"
 #include "human/persona.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
 
 /* Shared proactive context for all tests — reset before each test group. */
@@ -180,6 +184,61 @@ static void test_build_callback_context_null_msg(void) {
     HU_ASSERT_EQ(out_len, 0);
 }
 
+/* ── P6-1: channel overlay applied to proactive prompts ─────────────── */
+/*
+ * The reactive path (src/agent/agent_stream.c:512-558) calls
+ * hu_persona_find_overlay and injects formality/avg_length/emoji_usage/
+ * directness/face_saving/disagreement_style into the system prompt.
+ * The proactive path historically did not. P6-1 closes that gap:
+ * hu_daemon_proactive_prompt_for_contact must look up the overlay for
+ * the contact's channel (parsed from cp->proactive_channel) and
+ * inline its directives so the LLM receives the same per-channel
+ * voice rules whether the turn was reactive or proactive.
+ */
+static void test_p6_1_proactive_prompt_includes_channel_overlay(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    /* Build persona with a single imessage overlay using strdup so
+     * hu_persona_deinit can free it via its standard path. */
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.name = hu_strndup(&alloc, "test", 4);
+    persona.name_len = 4;
+
+    persona.overlays = (hu_persona_overlay_t *)alloc.alloc(alloc.ctx, sizeof(hu_persona_overlay_t));
+    HU_ASSERT_NOT_NULL(persona.overlays);
+    memset(persona.overlays, 0, sizeof(hu_persona_overlay_t));
+    persona.overlays_count = 1;
+    persona.overlays[0].channel = hu_strndup(&alloc, "imessage", 8);
+    persona.overlays[0].formality = hu_strndup(&alloc, "casual", 6);
+    persona.overlays[0].emoji_usage = hu_strndup(&alloc, "sparingly", 9);
+    persona.overlays[0].avg_length = hu_strndup(&alloc, "short", 5);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.persona = &persona;
+
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = "user_a";
+    cp.name = "Alice";
+    cp.proactive_channel = "imessage:+1234567890";
+    cp.proactive_checkin = true;
+
+    size_t out_len = 0;
+    char *prompt = hu_daemon_proactive_prompt_for_contact(&alloc, &agent, NULL, &cp, &out_len);
+    HU_ASSERT_NOT_NULL(prompt);
+    HU_ASSERT_TRUE(out_len > 0);
+
+    /* The overlay's literal values must appear in the prompt. */
+    HU_ASSERT_TRUE(strstr(prompt, "casual") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "sparingly") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "short") != NULL);
+
+    alloc.free(alloc.ctx, prompt, out_len + 1);
+    hu_persona_deinit(&alloc, &persona);
+}
+
 /* ── Test runner ─────────────────────────────────────────────────────── */
 
 void run_daemon_proactive_tests(void) {
@@ -207,4 +266,7 @@ void run_daemon_proactive_tests(void) {
     /* callback context builder */
     HU_RUN_TEST(test_build_callback_context_null_memory);
     HU_RUN_TEST(test_build_callback_context_null_msg);
+
+    /* P6-1: channel overlay in proactive prompts */
+    HU_RUN_TEST(test_p6_1_proactive_prompt_includes_channel_overlay);
 }
