@@ -156,25 +156,27 @@ test.describe("h-uman Control UI", () => {
     await expect(sidebar).toBeAttached({ timeout: 5000 });
   });
 
-  test("floating mic button is present", async ({ page }) => {
+  test.fixme("floating mic button is present", async ({ page }) => {
+    // ROOT CAUSE (re-discovered 2026-05-17): commit b7abafcc removed
+    // `<hu-floating-mic>` from hu-app's render template (replaced with
+    // ${nothing}) as part of the UI overhaul, while keeping the import
+    // for the lazy registration. The custom element is REGISTERED but
+    // never INSERTED into hu-app's shadow DOM, so this test will fail
+    // regardless of timing.
+    //
+    // The earlier un-fixme attempt in PR #113 (round 1) was based on
+    // the wrong hypothesis — that the test was a timing flake from
+    // Vite WS ECONNRESET delaying requestIdleCallback. We added an
+    // await-able `window.__huReady` promise (see app.ts firstUpdated)
+    // which IS useful for any future test that needs to wait for the
+    // idle-loaded components to register, but it doesn't help when
+    // the element is simply not in the DOM tree.
+    //
+    // To un-fixme this test, app.ts must restore something like:
+    //   ${this.tab === "chat" ? html`<hu-floating-mic></hu-floating-mic>` : nothing}
+    // That's a design decision (does the chat view want a floating
+    // mic again?) — not a CI fix. Re-fixme until that decision lands.
     await page.goto("/");
-    await page.waitForLoadState("domcontentloaded");
-    await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
-    // Wait for the test-only readiness promise exposed by app.ts's
-    // firstUpdated() (see app.ts:686+). This runs the same dynamic
-    // imports the production code triggers via requestIdleCallback,
-    // but await-ably — removes the CI flake where Vite WS ECONNRESET
-    // storms delay the idle callback past any reasonable timeout.
-    // Path (c) of the three remediation options documented when this
-    // test was previously .fixme'd.
-    await page.waitForFunction(
-      () => (window as unknown as { __huReady?: Promise<void> }).__huReady !== undefined,
-      undefined,
-      { timeout: 10000 },
-    );
-    await page.evaluate(
-      () => (window as unknown as { __huReady?: Promise<void> }).__huReady,
-    );
     const mic = page.locator("hu-app >> hu-floating-mic");
     await expect(mic).toBeAttached({ timeout: 5000 });
   });
