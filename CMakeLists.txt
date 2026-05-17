@@ -3280,6 +3280,7 @@ if(HU_ENABLE_ML)
     list(APPEND HU_TEST_SOURCES
         tests/test_ml.c
         tests/test_ml_cli_actually_trains.c
+        tests/test_ml_fidelity_judgment.c
         tests/test_dpo_judge_naming.c
         tests/test_rl_trainer.c
         tests/test_policy_logprobs.c

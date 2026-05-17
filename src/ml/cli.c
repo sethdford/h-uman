@@ -1141,16 +1141,20 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         lcfg.save_every = save_every;
         lcfg.budget_ms = -1;
 
-        char default_adapter[512];
         if (output_path) {
             snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), "%s", output_path);
         } else {
+            /* Write the default path straight into adapter_output_path. The
+             * previous code used an oversized intermediate buffer
+             * (default_adapter[512]) and then snprintf'd from 512 bytes into
+             * the 256-byte target, which tripped -Werror=format-truncation
+             * on Linux GCC. Both buffers were going to snprintf-truncate at
+             * 255 bytes anyway — collapsing to one snprintf is functionally
+             * identical and silences the warning honestly. */
             const char *home = getenv("HOME");
-            snprintf(default_adapter, sizeof(default_adapter),
+            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
                      "%s/.human/training-data/adapters/lora-persona-%s", home ? home : ".",
                      persona_name);
-            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), "%s",
-                     default_adapter);
         }
 
         if (data_dir) {
