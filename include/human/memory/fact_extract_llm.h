@@ -30,7 +30,7 @@
  *   - Header + implementation + recording-stub test. Calls provider's
  *     chat_with_system with a focused JSON-output prompt and parses
  *     the response.
- *   - NOT YET wired into the agent turn loop. The integration decision
+ *   - NOT YET wired into the agent turn loop. The wiring decision
  *     (cadence, which provider, off-band scheduling) is out of scope
  *     for this skeleton — caller drives.
  *   - NOT YET measured against natural-English benchmark corpus. The

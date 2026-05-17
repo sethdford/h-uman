@@ -25,11 +25,11 @@
  * other ml subcommand is routed today.
  */
 #include "human/ml/cli_grpo.h"
-#include "human/ml/grpo.h"          /* Task 10: hu_grpo_set_reward_source */
-#include "human/ml/rl_trainer.h"
 #include "human/ml/dpo.h"
+#include "human/ml/grpo.h" /* Task 10: hu_grpo_set_reward_source */
 #include "human/ml/reward_model.h"
 #include "human/ml/reward_source.h"
+#include "human/ml/rl_trainer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,90 +53,111 @@ static const char *grpo_get_opt(const char **argv, int argc, int *i, const char 
  * Critic M1 + R12: --rollouts "abc" must reject at parse time, not
  * propagate atoi(...)==0 silently into the GRPO factory. */
 static int grpo_parse_long(const char *s, long *out) {
-    if (!s || !s[0]) return -1;
+    if (!s || !s[0])
+        return -1;
     char *endp = NULL;
     long v = strtol(s, &endp, 10);
-    if (!endp || endp == s || *endp != '\0') return -1;
+    if (!endp || endp == s || *endp != '\0')
+        return -1;
     *out = v;
     return 0;
 }
 
 hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **argv) {
-    if (!alloc) return HU_ERR_INVALID_ARGUMENT;
+    if (!alloc)
+        return HU_ERR_INVALID_ARGUMENT;
 
-    const char *pairs_path     = NULL;
-    const char *backend_str    = "auto";
-    const char *reward_fn_arg  = NULL;
+    const char *pairs_path = NULL;
+    const char *backend_str = "auto";
+    const char *reward_fn_arg = NULL;
     const char *reward_model_arg = NULL;
-    const char *backbone_path  = NULL;
-    const char *adapter_out    = NULL;
-    long  n_rollouts_raw = 4;
-    long  max_iters_raw  = 100;
-    long  max_new_tokens = 16;
-    double clip_eps      = 0.2;
+    const char *backbone_path = NULL;
+    const char *adapter_out = NULL;
+    long n_rollouts_raw = 4;
+    long max_iters_raw = 100;
+    long max_new_tokens = 16;
+    double clip_eps = 0.2;
     /* R3 / MED-1: kl_beta is a tri-state sentinel.
      *   < 0  → trainer maps to literature default 0.04 (DeepSeek R1)
      *   == 0 → KL DISABLED (R4 escape valve)
      *   > 0  → literal value
      * The CLI default is "use the trainer's default" (-1 sentinel) so
      * the user has to explicitly pass --kl-beta 0 to opt out of KL. */
-    double kl_beta       = -1.0;
+    double kl_beta = -1.0;
     double learning_rate = 1e-2;
 
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
-            printf("Usage: human ml grpo-train [options]\n"
-                   "  --pairs <path>           JSONL prompt rows (chosen/rejected ignored)\n"
-                   "  --backend {auto,huml,mlx}  default: auto (Apple → mlx if available; else huml)\n"
-                   "  --backbone-path <path>   MLX-only: HF id or local path forwarded as --backbone-path\n"
-                   "                           to mlx-lm-lora (e.g. mlx-community/gemma-3-4b-it-bf16)\n"
-                   "  --reward-fn {synthetic,rm,judge}  REQUIRED (R9 — no implicit default)\n"
-                   "  --reward-model <dir>     required when --reward-fn rm (Phase 3 RM checkpoint dir)\n"
-                   "  --rollouts <N>           per-prompt rollouts (default: 4; rejects N<2 || N>1024 — R12)\n"
-                   "  --clip-eps <f>           PPO ratio clip ε (default: 0.2)\n"
-                   "  --kl-beta <f>            KL penalty coefficient (default: 0.04; pass 0 to disable)\n"
-                   "  --iters <N>              training iterations (default: 100)\n"
-                   "  --learning-rate <f>      structural-backward step size (default: 0.01)\n"
-                   "  --max-new-tokens <N>     per-rollout completion cap (default: 16)\n"
-                   "  --adapter-out <path>     output adapter (HUML: lm_head bytes file;\n"
-                   "                           MLX: adapter directory)\n"
-                   "\n"
-                   "HUML backend trains the toy reference GPT — useful for gradient verification,\n"
-                   "NOT for improving real chat. Use --backend mlx (or auto on Apple) for real\n"
-                   "Gemma adapters via mlx-lm-lora's GRPO trainer.\n");
+            printf(
+                "Usage: human ml grpo-train [options]\n"
+                "  --pairs <path>           JSONL prompt rows (chosen/rejected ignored)\n"
+                "  --backend {auto,huml,mlx}  default: auto (Apple → mlx if available; else huml)\n"
+                "  --backbone-path <path>   MLX-only: HF id or local path forwarded as "
+                "--backbone-path\n"
+                "                           to mlx-lm-lora (e.g. "
+                "mlx-community/gemma-3-4b-it-bf16)\n"
+                "  --reward-fn {synthetic,rm,judge}  REQUIRED (R9 — no implicit default)\n"
+                "  --reward-model <dir>     required when --reward-fn rm (Phase 3 RM checkpoint "
+                "dir)\n"
+                "  --rollouts <N>           per-prompt rollouts (default: 4; rejects N<2 || N>1024 "
+                "— R12)\n"
+                "  --clip-eps <f>           PPO ratio clip ε (default: 0.2)\n"
+                "  --kl-beta <f>            KL penalty coefficient (default: 0.04; pass 0 to "
+                "disable)\n"
+                "  --iters <N>              training iterations (default: 100)\n"
+                "  --learning-rate <f>      structural-backward step size (default: 0.01)\n"
+                "  --max-new-tokens <N>     per-rollout completion cap (default: 16)\n"
+                "  --adapter-out <path>     output adapter (HUML: lm_head bytes file;\n"
+                "                           MLX: adapter directory)\n"
+                "\n"
+                "HUML backend trains the toy reference GPT — useful for gradient verification,\n"
+                "NOT for improving real chat. Use --backend mlx (or auto on Apple) for real\n"
+                "Gemma adapters via mlx-lm-lora's GRPO trainer.\n");
             return HU_OK;
         }
         const char *v;
-        if      ((v = grpo_get_opt(argv, argc, &i, "--pairs")))           pairs_path = v;
-        else if ((v = grpo_get_opt(argv, argc, &i, "--backend")))         backend_str = v;
-        else if ((v = grpo_get_opt(argv, argc, &i, "--backbone-path")))   backbone_path = v;
-        else if ((v = grpo_get_opt(argv, argc, &i, "--reward-fn")))       reward_fn_arg = v;
-        else if ((v = grpo_get_opt(argv, argc, &i, "--reward-model")))    reward_model_arg = v;
-        else if ((v = grpo_get_opt(argv, argc, &i, "--adapter-out")))     adapter_out = v;
+        if ((v = grpo_get_opt(argv, argc, &i, "--pairs")))
+            pairs_path = v;
+        else if ((v = grpo_get_opt(argv, argc, &i, "--backend")))
+            backend_str = v;
+        else if ((v = grpo_get_opt(argv, argc, &i, "--backbone-path")))
+            backbone_path = v;
+        else if ((v = grpo_get_opt(argv, argc, &i, "--reward-fn")))
+            reward_fn_arg = v;
+        else if ((v = grpo_get_opt(argv, argc, &i, "--reward-model")))
+            reward_model_arg = v;
+        else if ((v = grpo_get_opt(argv, argc, &i, "--adapter-out")))
+            adapter_out = v;
         else if ((v = grpo_get_opt(argv, argc, &i, "--rollouts"))) {
             if (grpo_parse_long(v, &n_rollouts_raw) != 0) {
-                fprintf(stderr, "[grpo-train] ERROR: --rollouts must be a base-10 integer "
-                                "(got \"%s\")\n", v);
+                fprintf(stderr,
+                        "[grpo-train] ERROR: --rollouts must be a base-10 integer "
+                        "(got \"%s\")\n",
+                        v);
                 return HU_ERR_INVALID_ARGUMENT;
             }
-        }
-        else if ((v = grpo_get_opt(argv, argc, &i, "--iters"))) {
+        } else if ((v = grpo_get_opt(argv, argc, &i, "--iters"))) {
             if (grpo_parse_long(v, &max_iters_raw) != 0 || max_iters_raw < 1) {
-                fprintf(stderr, "[grpo-train] ERROR: --iters must be a positive integer "
-                                "(got \"%s\")\n", v);
+                fprintf(stderr,
+                        "[grpo-train] ERROR: --iters must be a positive integer "
+                        "(got \"%s\")\n",
+                        v);
                 return HU_ERR_INVALID_ARGUMENT;
             }
-        }
-        else if ((v = grpo_get_opt(argv, argc, &i, "--max-new-tokens"))) {
+        } else if ((v = grpo_get_opt(argv, argc, &i, "--max-new-tokens"))) {
             if (grpo_parse_long(v, &max_new_tokens) != 0 || max_new_tokens < 1) {
-                fprintf(stderr, "[grpo-train] ERROR: --max-new-tokens must be a positive integer "
-                                "(got \"%s\")\n", v);
+                fprintf(stderr,
+                        "[grpo-train] ERROR: --max-new-tokens must be a positive integer "
+                        "(got \"%s\")\n",
+                        v);
                 return HU_ERR_INVALID_ARGUMENT;
             }
-        }
-        else if ((v = grpo_get_opt(argv, argc, &i, "--clip-eps")))        clip_eps = atof(v);
-        else if ((v = grpo_get_opt(argv, argc, &i, "--kl-beta")))         kl_beta  = atof(v);
-        else if ((v = grpo_get_opt(argv, argc, &i, "--learning-rate")))   learning_rate = atof(v);
+        } else if ((v = grpo_get_opt(argv, argc, &i, "--clip-eps")))
+            clip_eps = atof(v);
+        else if ((v = grpo_get_opt(argv, argc, &i, "--kl-beta")))
+            kl_beta = atof(v);
+        else if ((v = grpo_get_opt(argv, argc, &i, "--learning-rate")))
+            learning_rate = atof(v);
     }
 
     /* ---------------- Validation gates (umbrella §10) -------------- */
@@ -148,13 +169,15 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         fprintf(stderr,
                 "[grpo-train] ERROR: --rollouts must be in [2, 1024] (got %ld) — "
                 "GRPO requires N >= 2 (group baseline std degenerates with N=1) "
-                "per critic R12 / M1\n", n_rollouts_raw);
+                "per critic R12 / M1\n",
+                n_rollouts_raw);
         return HU_ERR_INVALID_ARGUMENT;
     }
     if (n_rollouts_raw < 4) {
         fprintf(stderr,
                 "[grpo-train] WARNING: --rollouts=%ld < 4; group baseline variance "
-                "is high — recommended N >= 4 for stable training\n", n_rollouts_raw);
+                "is high — recommended N >= 4 for stable training\n",
+                n_rollouts_raw);
     }
 
     /* R9 reward-hacking pin: no implicit default for the reward source.
@@ -171,9 +194,12 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
 
     /* Per-backend cross-flag validation. */
     hu_dpo_backend_t backend = HU_DPO_BACKEND_AUTO;
-    if      (strcmp(backend_str, "huml") == 0) backend = HU_DPO_BACKEND_HUML;
-    else if (strcmp(backend_str, "mlx")  == 0) backend = HU_DPO_BACKEND_MLX;
-    else if (strcmp(backend_str, "auto") == 0) backend = HU_DPO_BACKEND_AUTO;
+    if (strcmp(backend_str, "huml") == 0)
+        backend = HU_DPO_BACKEND_HUML;
+    else if (strcmp(backend_str, "mlx") == 0)
+        backend = HU_DPO_BACKEND_MLX;
+    else if (strcmp(backend_str, "auto") == 0)
+        backend = HU_DPO_BACKEND_AUTO;
     else {
         fprintf(stderr,
                 "[grpo-train] ERROR: --backend must be one of {auto, huml, mlx} (got \"%s\")\n",
@@ -195,19 +221,18 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
     /* Reward-fn-specific arg checks. The actual reward source wiring
      * happens AFTER trainer construction. */
     if (reward_fn_arg) {
-        if (strcmp(reward_fn_arg, "synthetic") != 0 &&
-            strcmp(reward_fn_arg, "rm")        != 0 &&
-            strcmp(reward_fn_arg, "judge")     != 0) {
+        if (strcmp(reward_fn_arg, "synthetic") != 0 && strcmp(reward_fn_arg, "rm") != 0 &&
+            strcmp(reward_fn_arg, "judge") != 0) {
             fprintf(stderr,
                     "[grpo-train] ERROR: --reward-fn must be one of {synthetic, rm, judge} "
-                    "(got \"%s\")\n", reward_fn_arg);
+                    "(got \"%s\")\n",
+                    reward_fn_arg);
             return HU_ERR_INVALID_ARGUMENT;
         }
         if (strcmp(reward_fn_arg, "rm") == 0 && (!reward_model_arg || !reward_model_arg[0])) {
-            fprintf(stderr,
-                    "[grpo-train] ERROR: --reward-fn rm requires --reward-model <dir>\n"
-                    "[grpo-train] e.g. tests/fixtures/rm_synthetic_checkpoint (Phase 3 RM\n"
-                    "[grpo-train] checkpoint with value_head.vh + rm_meta.json)\n");
+            fprintf(stderr, "[grpo-train] ERROR: --reward-fn rm requires --reward-model <dir>\n"
+                            "[grpo-train] e.g. tests/fixtures/rm_synthetic_checkpoint (Phase 3 RM\n"
+                            "[grpo-train] checkpoint with value_head.vh + rm_meta.json)\n");
             return HU_ERR_INVALID_ARGUMENT;
         }
     } else if (reward_model_arg && reward_model_arg[0]) {
@@ -216,26 +241,27 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         reward_fn_arg = "rm";
     }
 
-    if (!adapter_out) adapter_out = "./grpo-adapters";
+    if (!adapter_out)
+        adapter_out = "./grpo-adapters";
 
     /* ---------------- Trainer construction -------------------------- */
 
     hu_rl_trainer_config_t cfg = {
-        .backend       = backend,
-        .beta          = 0.1, /* DPO-only; GRPO impl IGNOREs */
+        .backend = backend,
+        .beta = 0.1, /* DPO-only; GRPO impl IGNOREs */
         .learning_rate = learning_rate,
-        .max_iters     = (size_t)max_iters_raw,
-        .model_id      = backbone_path,         /* MLX: forwarded; HUML: ignored */
-        .adapter_out_dir = adapter_out,         /* MLX: writes adapter_model.safetensors here */
-        .lambda_d      = 1.0,                   /* KTO-only; ignored by GRPO */
-        .lambda_u      = 1.0,
-        .n_rollouts    = (size_t)n_rollouts_raw,
-        .clip_eps      = clip_eps,
-        .kl_beta       = kl_beta,
-        .gamma         = 0.5,                   /* SimPO-only; ignored */
-        .length_norm   = false,
-        .lambda_or     = 0.1,                   /* ORPO-only; ignored */
-        .odds_clip     = 10.0,
+        .max_iters = (size_t)max_iters_raw,
+        .model_id = backbone_path,      /* MLX: forwarded; HUML: ignored */
+        .adapter_out_dir = adapter_out, /* MLX: writes adapter_model.safetensors here */
+        .lambda_d = 1.0,                /* KTO-only; ignored by GRPO */
+        .lambda_u = 1.0,
+        .n_rollouts = (size_t)n_rollouts_raw,
+        .clip_eps = clip_eps,
+        .kl_beta = kl_beta,
+        .gamma = 0.5, /* SimPO-only; ignored */
+        .length_norm = false,
+        .lambda_or = 0.1, /* ORPO-only; ignored */
+        .odds_clip = 10.0,
     };
 
     /* --reward-fn judge is always not-supported in Phase 4 (Phase 5
@@ -243,10 +269,9 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
      * Surfaced BEFORE trainer construction so the failure path doesn't
      * leak a half-built trainer. */
     if (strcmp(reward_fn_arg, "judge") == 0) {
-        fprintf(stderr,
-                "[grpo-train] --reward-fn judge is not implemented in Phase 4 — "
-                "Phase 5 lands the real multi-judge consensus reward source per "
-                "umbrella §10 R3.\n");
+        fprintf(stderr, "[grpo-train] --reward-fn judge is not implemented in Phase 4 — "
+                        "Phase 5 lands the real multi-judge consensus reward source per "
+                        "umbrella §10 R3.\n");
         return HU_ERR_NOT_SUPPORTED;
     }
 
@@ -278,7 +303,8 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
     hu_error_t err = hu_rl_trainer_create_grpo(alloc, &cfg, &trainer);
     if (err != HU_OK) {
         fprintf(stderr, "[grpo-train] failed to create GRPO trainer: error %d\n", (int)err);
-        if (rm_loaded) rm.vtable->deinit(rm.ctx, alloc);
+        if (rm_loaded)
+            rm.vtable->deinit(rm.ctx, alloc);
         return err;
     }
 
@@ -298,8 +324,7 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         hu_reward_source_t rm_source = {0};
         err = hu_reward_source_create_rm(alloc, &rm, &rm_source);
         if (err != HU_OK) {
-            fprintf(stderr,
-                    "[grpo-train] failed to wrap reward model in reward source: error %d\n",
+            fprintf(stderr, "[grpo-train] failed to wrap reward model in reward source: error %d\n",
                     (int)err);
             trainer.vtable->deinit(trainer.ctx, alloc);
             rm.vtable->deinit(rm.ctx, alloc);
@@ -312,7 +337,7 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
              * The CLI's earlier --backend mlx + --reward-fn rm path is
              * legal in Phase 4 (MLX subprocess can be wired to use a
              * remote RM in Phase 5); the in-process setter just isn't
-             * the integration point for it. */
+             * the wiring point for it. */
             fprintf(stderr,
                     "[grpo-train] cannot swap reward source on this trainer: error %d "
                     "(MLX backend scores in Python; --reward-fn rm wiring is HUML-only)\n",
@@ -341,25 +366,31 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         if (!f) {
             fprintf(stderr, "[grpo-train] cannot open %s\n", pairs_path);
             trainer.vtable->deinit(trainer.ctx, alloc);
-            if (rm_loaded) rm.vtable->deinit(rm.ctx, alloc);
+            if (rm_loaded)
+                rm.vtable->deinit(rm.ctx, alloc);
             return HU_ERR_IO;
         }
         char line[8192];
         while (fgets(line, sizeof(line), f) && n_pairs < 256) {
             hu_preference_pair_t *p = &pairs[n_pairs];
             const char *pf = strstr(line, "\"prompt\"");
-            if (!pf) continue;
+            if (!pf)
+                continue;
             const char *ps = strchr(pf + 8, '"');
-            if (!ps) continue;
+            if (!ps)
+                continue;
             ps++;
             const char *pe = strchr(ps, '"');
-            if (!pe) continue;
+            if (!pe)
+                continue;
             size_t len = (size_t)(pe - ps);
-            if (len >= sizeof(p->prompt)) len = sizeof(p->prompt) - 1;
+            if (len >= sizeof(p->prompt))
+                len = sizeof(p->prompt) - 1;
             memcpy(p->prompt, ps, len);
             p->prompt[len] = '\0';
-            p->prompt_len  = len;
-            if (p->prompt_len == 0) continue;
+            p->prompt_len = len;
+            if (p->prompt_len == 0)
+                continue;
             n_pairs++;
         }
         fclose(f);
@@ -369,15 +400,16 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
         fprintf(stderr, "[grpo-train] no valid prompts found in %s\n",
                 pairs_path ? pairs_path : "(--pairs missing)");
         trainer.vtable->deinit(trainer.ctx, alloc);
-        if (rm_loaded) rm.vtable->deinit(rm.ctx, alloc);
+        if (rm_loaded)
+            rm.vtable->deinit(rm.ctx, alloc);
         return HU_ERR_INVALID_ARGUMENT;
     }
 
     fprintf(stderr,
             "[grpo-train] backend=%s, prompts=%zu, rollouts=%ld, iters=%ld, "
             "clip_eps=%.3f, kl_beta=%.3f, lr=%.4f, reward_fn=%s\n",
-            trainer.vtable->name(trainer.ctx), n_pairs, n_rollouts_raw, max_iters_raw,
-            clip_eps, kl_beta, learning_rate, reward_fn_arg);
+            trainer.vtable->name(trainer.ctx), n_pairs, n_rollouts_raw, max_iters_raw, clip_eps,
+            kl_beta, learning_rate, reward_fn_arg);
 
     /* ---------------- Step loop ------------------------------------- */
     for (long it = 0; it < max_iters_raw; it++) {
@@ -388,9 +420,10 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
             break;
         }
         if ((it + 1) % 10 == 0 || it == 0) {
-            fprintf(stderr,
-                    "[grpo-train] iter=%ld loss=%.6f advantage_chosen=%.6f advantage_rejected=%.6f\n",
-                    it + 1, m.final_loss, m.chosen_logprob_delta, m.rejected_logprob_delta);
+            fprintf(
+                stderr,
+                "[grpo-train] iter=%ld loss=%.6f advantage_chosen=%.6f advantage_rejected=%.6f\n",
+                it + 1, m.final_loss, m.chosen_logprob_delta, m.rejected_logprob_delta);
         }
     }
 
@@ -412,6 +445,7 @@ hu_error_t hu_ml_cli_grpo_train(hu_allocator_t *alloc, int argc, const char **ar
      * contract). After the trainer is gone the RM can be safely
      * deinitialized. */
     trainer.vtable->deinit(trainer.ctx, alloc);
-    if (rm_loaded) rm.vtable->deinit(rm.ctx, alloc);
+    if (rm_loaded)
+        rm.vtable->deinit(rm.ctx, alloc);
     return err;
 }

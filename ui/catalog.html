@@ -1242,18 +1242,19 @@
               import "/src/components/hu-guard-rejects-tile.ts";
               const t = document.getElementById("guard-rejects-tile-demo");
               if (t) {
-                t.stats = {
-                  semantic_leak: 42,
-                  length_anomaly: 18,
-                  director_echo: 7,
-                  persona_pii_echo: 3,
-                  persona_identity_echo: 2,
+                // Component property is `data` (see hu-guard-rejects-tile.ts:68)
+                t.data = {
+                  semantic_leak: 12,
+                  length_anomaly: 47,
+                  director_echo: 3,
+                  persona_pii_echo: 0,
+                  persona_identity_echo: 1,
                 };
               }
             </script>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;hu-guard-rejects-tile .stats=\${guardRejectStatsJson}&gt;&lt;/hu-guard-rejects-tile&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-guard-rejects-tile .data=\${guardRejectsJson}&gt;&lt;/hu-guard-rejects-tile&gt;</code></div>
       </section>
 
       <section class="component-section" id="hu-timeline">

@@ -54,8 +54,15 @@ void run_reaction_event_tests(void);
 void run_imessage_reactions_tests(void);
 /* Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch. */
 void run_slack_reactions_tests(void);
-/* Phase 2 Task 13 (RL SOTA): reaction_handler event → dpo_pairs row E2E. */
+/* Phase 2 Task 13 (RL SOTA): reaction_handler event → dpo_pairs row E2E.
+ * Test TU (tests/test_reaction_handler_e2e.c) calls sqlite3_* directly to
+ * seed the dpo_pairs collector, so the test source is gated by
+ * HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here so the
+ * forward decl + call site don't reference a missing symbol in
+ * minimal-build / no-sqlite / cross-arm64 variants. */
+#ifdef HU_ENABLE_SQLITE
 void run_reaction_handler_e2e_tests(void);
+#endif
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
 void run_tool_tests(void);
@@ -281,8 +288,10 @@ void run_learner_bridge_tests(void);
 #endif
 void run_w15_backup_restore_tests(void);
 void run_w14_scheduler_tests(void);
+#ifdef HU_ENABLE_LEARNING
 void run_w16_evaluation_tests(void);
 void run_w16_eval_cli_tests(void);
+#endif
 void run_w15_keystore_tests(void);
 void run_encrypted_store_tests(void);
 #ifdef HU_ENABLE_LEARNING
@@ -635,7 +644,9 @@ void run_persona_overlay_render_tests(void);
 void run_channel_overlay_apply_tests(void);
 void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
+#ifdef HU_ENABLE_ML
 void run_dpo_miner_tests(void);
+#endif
 void run_molora_router_tests(void);
 void run_sprint3_hybrid_recall_tests(void);
 /* PR #115: 3 declarations + calls removed — see CMakeLists.txt comment
@@ -769,7 +780,9 @@ int main(int argc, char **argv) {
     run_reaction_event_tests();
     run_imessage_reactions_tests();
     run_slack_reactions_tests();
+#ifdef HU_ENABLE_SQLITE
     run_reaction_handler_e2e_tests();
+#endif
     run_declarative_tools_tests();
     run_skill_trust_tests();
     run_tool_tests();
@@ -995,8 +1008,10 @@ int main(int argc, char **argv) {
 #endif
     run_w15_backup_restore_tests();
     run_w14_scheduler_tests();
+#ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
     run_w16_eval_cli_tests();
+#endif
     run_w15_keystore_tests();
     run_encrypted_store_tests();
 #ifdef HU_ENABLE_LEARNING
@@ -1337,7 +1352,9 @@ int main(int argc, char **argv) {
     run_channel_overlay_apply_tests();
     run_filler_recency_tests();
     run_contact_send_recency_tests();
+#ifdef HU_ENABLE_ML
     run_dpo_miner_tests();
+#endif
     run_molora_router_tests();
     run_sprint3_hybrid_recall_tests();
     /* PR #115: removed 3 ghost-test calls (see declaration block above):

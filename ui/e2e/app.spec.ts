@@ -156,17 +156,23 @@ test.describe("h-uman Control UI", () => {
     await expect(sidebar).toBeAttached({ timeout: 5000 });
   });
 
-  test("floating mic button is present", async ({ page }) => {
+  // Document the CURRENT design intent — hu-floating-mic is NOT rendered
+  // in hu-app's shadow DOM. Commit b7abafcc removed it from the chat
+  // view template (replaced with ${nothing}) during the UI overhaul,
+  // keeping only the lazy `import("./components/floating-mic.js")` for
+  // potential future use. If a future change restores
+  //   ${this.tab === "chat" ? html`<hu-floating-mic></hu-floating-mic>` : nothing}
+  // this test will fail loudly — flip the assertion at that point
+  // rather than letting a fixme rot. Per CodeRabbit suggestion
+  // (b45cff0a → cf. ce8bc61c → b45cff0a → this fix) — a permanent
+  // .fixme with a failing assertion hides regressions; an explicit
+  // toHaveCount(0) locks the current behavior as the contract.
+  test("floating mic button is not rendered (removed by b7abafcc)", async ({ page }) => {
     await page.goto("/");
-    // Wait for the page DOM before querying — every other test in this file
-    // does the same, and skipping it caused a 5s-timeout flake under
-    // WebSocket-reconnect churn (Vite proxy ECONNRESET storms during cold
-    // start). Also wait for hu-app itself before drilling into its shadow
-    // tree so the locator doesn't race the custom-element upgrade.
     await page.waitForLoadState("domcontentloaded");
     await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
     const mic = page.locator("hu-app >> hu-floating-mic");
-    await expect(mic).toBeAttached({ timeout: 5000 });
+    await expect(mic).toHaveCount(0);
   });
 
   test("navigating through all tabs sequentially works", async ({ page }) => {

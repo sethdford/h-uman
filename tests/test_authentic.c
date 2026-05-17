@@ -175,6 +175,7 @@ static void life_thread_query_active_sql_valid(void) {
  * not surface in contact B's active-thread query. The audit found that
  * life_threads was global, so any narrative stored for any contact would
  * appear in every other contact's life-context prompt. */
+#ifdef HU_ENABLE_SQLITE
 static int run_sql_(sqlite3 *db, const char *sql) {
     return sqlite3_exec(db, sql, NULL, NULL, NULL);
 }
@@ -238,6 +239,7 @@ static void test_life_thread_scoped_per_contact(void) {
 
     sqlite3_close(db);
 }
+#endif /* HU_ENABLE_SQLITE */
 
 static void is_bad_day_active_within_duration_returns_true(void) {
     uint64_t start = 1000000ull;
@@ -764,7 +766,9 @@ void run_authentic_tests(void) {
     HU_RUN_TEST(life_thread_insert_sql_valid);
     HU_RUN_TEST(life_thread_insert_sql_escapes_quotes);
     HU_RUN_TEST(life_thread_query_active_sql_valid);
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_life_thread_scoped_per_contact);
+#endif
     HU_RUN_TEST(is_bad_day_active_within_duration_returns_true);
     HU_RUN_TEST(is_bad_day_active_expired_returns_false);
     HU_RUN_TEST(is_bad_day_inactive_returns_false);

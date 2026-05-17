@@ -181,9 +181,13 @@ test.describe("Channels (Interactions)", () => {
   });
 
   test("shows channel status", async ({ page }) => {
+    // channels-view.statusLabel returns "Active" / "Unconfigured" /
+    // "Error" (see channels-view.ts:173). The previous regex used
+    // "Connected" / "Not configured" — vocabulary that doesn't exist
+    // in the implementation. Match the actual labels.
     await expect(async () => {
       const text: string = await page.evaluate(deepText("hu-channels-view"));
-      expect(text).toMatch(/Connected|Not configured|Error/);
+      expect(text).toMatch(/Active|Unconfigured|Error/);
     }).toPass({ timeout: POLL });
   });
 

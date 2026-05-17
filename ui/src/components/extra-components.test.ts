@@ -41,6 +41,7 @@ import "./hu-section-header.js";
 import "./hu-metric-row.js";
 import "./hu-fidelity-tile.js";
 import type { HuFidelityTile, FidelityStatus } from "./hu-fidelity-tile.js";
+import "./hu-guard-rejects-tile.js";
 import "./hu-timeline.js";
 import "./hu-sparkline-enhanced.js";
 import "./hu-forecast-chart.js";

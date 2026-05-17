@@ -34,8 +34,8 @@
  * the user re-states them in a USER_DIRECT message within
  * HU_PM_PENDING_FACT_TTL_SEC, or 3 independent low-trust sources
  * corroborate. Otherwise they expire silently on the next decay tick. */
-#define HU_PM_MAX_PENDING_FACTS 16
-#define HU_PM_PENDING_FACT_TTL_SEC ((int64_t)(24LL * 60 * 60))
+#define HU_PM_MAX_PENDING_FACTS                  16
+#define HU_PM_PENDING_FACT_TTL_SEC               ((int64_t)(24LL * 60 * 60))
 #define HU_PM_PENDING_FACT_PROMOTE_CORROBORATION 3
 
 typedef struct hu_personal_topic {
@@ -61,10 +61,10 @@ typedef struct hu_personal_goal {
 } hu_personal_goal_t;
 
 typedef struct hu_communication_style {
-    float formality;             /* 0.0 (casual) to 1.0 (formal) */
-    float verbosity;             /* 0.0 (terse) to 1.0 (verbose) */
-    float emoji_frequency;       /* 0.0 (never) to 1.0 (heavy) */
-    float humor_receptivity;     /* 0.0 (serious) to 1.0 (playful) */
+    float formality;         /* 0.0 (casual) to 1.0 (formal) */
+    float verbosity;         /* 0.0 (terse) to 1.0 (verbose) */
+    float emoji_frequency;   /* 0.0 (never) to 1.0 (heavy) */
+    float humor_receptivity; /* 0.0 (serious) to 1.0 (playful) */
     /* Punctuation / case axes — complement the four quantitative axes
      * above. EWMA-tracked over `sample_count`, ranging 0.0 to 1.0:
      *   - lowercase_ratio:    proportion of msgs typed all-lowercase
@@ -337,9 +337,8 @@ const hu_heuristic_fact_t *hu_personal_model_query_preference(const hu_personal_
  * HU_ERR_INVALID_ARGUMENT when any pointer is NULL. Pure CPU; no I/O.
  * Safe to call on every turn — work is bounded by HU_FACT_EXTRACT_MAX
  * (32) × HU_PM_MAX_FACTS (64) = 2048 string compares max. */
-hu_error_t hu_personal_model_contradicts_user(const hu_personal_model_t *model,
-                                              const char *message, size_t message_len,
-                                              bool *out_contradicts);
+hu_error_t hu_personal_model_contradicts_user(const hu_personal_model_t *model, const char *message,
+                                              size_t message_len, bool *out_contradicts);
 
 /* M2 P1 — Persistence. The personal model is the only piece of agent
  * state that genuinely accumulates value over time (facts, observed
@@ -485,10 +484,9 @@ bool hu_personal_goal_is_recently_completed(const hu_personal_goal_t *goal, int6
  * prompt builder still walks `model->goals` directly — there's
  * no inversion of control problem because it doesn't need the
  * pointer array, just a single pass. */
-size_t hu_personal_model_get_recently_completed_goals(const hu_personal_model_t *model,
-                                                       int64_t now,
-                                                       const hu_personal_goal_t **out_buf,
-                                                       size_t out_cap);
+size_t hu_personal_model_get_recently_completed_goals(const hu_personal_model_t *model, int64_t now,
+                                                      const hu_personal_goal_t **out_buf,
+                                                      size_t out_cap);
 
 /* Render a short comma-separated list of recently-completed goal
  * descriptions into `buf`, sized to fit within `cap` bytes
@@ -504,8 +502,8 @@ size_t hu_personal_model_get_recently_completed_goals(const hu_personal_model_t 
  * downstream log parsers from seeing partial UTF-8.
  *
  * NULL-safe on `model` and `buf`. */
-size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *model,
-                                                      int64_t now, char *buf, size_t cap);
+size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *model, int64_t now,
+                                                     char *buf, size_t cap);
 
 /* Style freshness — how recent the observed-style aggregate is.
  * Returns 1.0 right after the latest observation, decaying to 0.5
@@ -516,8 +514,7 @@ size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *
  * fresh conversation when the user has been quiet for months and
  * may have shifted tone. NULL-safe. */
 #define HU_PM_STYLE_OBSERVATION_HALF_LIFE_SEC ((int64_t)(180LL * 24 * 60 * 60))
-float hu_personal_communication_style_freshness(const hu_communication_style_t *style,
-                                                int64_t now);
+float hu_personal_communication_style_freshness(const hu_communication_style_t *style, int64_t now);
 
 /* Drift toward neutral as freshness fades — returns a copy of `style`
  * with each percentage axis (formality, verbosity, emoji_frequency,
@@ -535,8 +532,9 @@ float hu_personal_communication_style_freshness(const hu_communication_style_t *
  * 0..1 axes — message-length neutrality is meaningless and the
  * sample count is a tally of observations, not an estimate of a
  * value. NULL-safe; returns a zero-initialized style on NULL input. */
-hu_communication_style_t hu_personal_communication_style_blend_with_freshness(
-    const hu_communication_style_t *style, int64_t now);
+hu_communication_style_t
+hu_personal_communication_style_blend_with_freshness(const hu_communication_style_t *style,
+                                                     int64_t now);
 
 /* Track D D2.2 — offline persona-fidelity scorer.
  *
@@ -568,11 +566,11 @@ float hu_communication_style_fidelity_score(const hu_communication_style_t *targ
 /* Per-set summary of fidelity scores produced by
  * `hu_communication_style_compare_response_sets`. */
 typedef struct hu_communication_style_set_summary {
-    size_t scored;     /* number of responses that yielded a valid (>=0) score */
-    size_t skipped;    /* NULL / empty / score=-1 responses skipped */
-    float mean;        /* mean fidelity across `scored` responses; 0.f when scored == 0 */
-    float min_score;   /* min fidelity across `scored` responses; 1.f when scored == 0 */
-    float max_score;   /* max fidelity across `scored` responses; 0.f when scored == 0 */
+    size_t scored;   /* number of responses that yielded a valid (>=0) score */
+    size_t skipped;  /* NULL / empty / score=-1 responses skipped */
+    float mean;      /* mean fidelity across `scored` responses; 0.f when scored == 0 */
+    float min_score; /* min fidelity across `scored` responses; 1.f when scored == 0 */
+    float max_score; /* max fidelity across `scored` responses; 0.f when scored == 0 */
 } hu_communication_style_set_summary_t;
 
 /* Track D D2.2 — A/B comparator for two response sets.
@@ -599,8 +597,8 @@ typedef struct hu_communication_style_set_summary {
 hu_error_t hu_communication_style_compare_response_sets(
     const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
     size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
-    hu_communication_style_set_summary_t *out_a,
-    hu_communication_style_set_summary_t *out_b, float *out_delta);
+    hu_communication_style_set_summary_t *out_a, hu_communication_style_set_summary_t *out_b,
+    float *out_delta);
 
 /* Phase 5 Task 1 (RL SOTA) — opt-in 4-axis fidelity scorer (v2).
  *
@@ -649,8 +647,8 @@ float hu_communication_style_fidelity_score_v2(const hu_communication_style_t *t
 hu_error_t hu_communication_style_compare_response_sets_v2(
     const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
     size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
-    hu_communication_style_set_summary_t *out_a,
-    hu_communication_style_set_summary_t *out_b, float *out_delta);
+    hu_communication_style_set_summary_t *out_a, hu_communication_style_set_summary_t *out_b,
+    float *out_delta);
 
 /* Goal completion detection — walk every active goal and deactivate
  * the ones the user's message indicates they've finished. The signal
@@ -686,19 +684,18 @@ size_t hu_personal_model_resolve_goals_in_message(hu_personal_model_t *model, co
  *
  * Returns the number of goals whose `last_referenced` was bumped.
  * NULL-safe on every argument; messages of length 0 are no-ops. */
-size_t hu_personal_model_touch_goals_in_message(hu_personal_model_t *model,
-                                                const char *msg, size_t msg_len,
-                                                int64_t now);
+size_t hu_personal_model_touch_goals_in_message(hu_personal_model_t *model, const char *msg,
+                                                size_t msg_len, int64_t now);
 
 /* Bundle of per-turn personal-model maintenance counters returned
  * by `hu_personal_model_per_turn_tick`. Reports what each phase did
- * so callers can log or test the integration without re-running the
+ * so callers can log or test the wiring without re-running the
  * helpers. All counts default to 0 on early-return paths. */
 typedef struct hu_personal_model_turn_tick_result {
-    hu_error_t ingest_error;     /* result of hu_personal_model_ingest */
-    size_t goals_touched;        /* count from touch_goals_in_message */
-    size_t goals_resolved;       /* count from resolve_goals_in_message */
-    size_t entries_pruned;       /* count from apply_decay */
+    hu_error_t ingest_error; /* result of hu_personal_model_ingest */
+    size_t goals_touched;    /* count from touch_goals_in_message */
+    size_t goals_resolved;   /* count from resolve_goals_in_message */
+    size_t entries_pruned;   /* count from apply_decay */
 } hu_personal_model_turn_tick_result_t;
 
 /* Run the canonical per-turn maintenance sequence on a personal
@@ -728,9 +725,10 @@ typedef struct hu_personal_model_turn_tick_result {
  * Returns the per-phase counter struct. The aggregate is non-fatal:
  * if `ingest_error != HU_OK` the helper still runs the goal/decay
  * phases on whatever state ingest produced (empty model is fine). */
-hu_personal_model_turn_tick_result_t
-hu_personal_model_per_turn_tick(hu_personal_model_t *model, const char *msg, size_t msg_len,
-                                bool from_user, int64_t now);
+hu_personal_model_turn_tick_result_t hu_personal_model_per_turn_tick(hu_personal_model_t *model,
+                                                                     const char *msg,
+                                                                     size_t msg_len, bool from_user,
+                                                                     int64_t now);
 
 /* Periodic decay tick — sweep every fact, topic, and goal, and
  * remove entries whose effective_* score has fallen below the
