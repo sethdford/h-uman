@@ -529,6 +529,16 @@ def run_dpo(args, adapter_dir: Path) -> int:
     # length-normalize for ALL loss types (not just IPO) before calling
     # `mlx_lm_lora.train.main()`. The downstream CLI shape is identical.
     length_normalize = bool(getattr(args, "length_normalize", True))
+
+    # Sprint 11 / US-11.4 — DPOP (Smaug positive-clipping) loss head.
+    # Selected via --dpo-cpo-loss-type. When the operator (or any caller
+    # downstream of main()) opts into 'dpop', we MUST also pass --delta
+    # explicitly. Upstream mlx_lm_lora.train defaults --delta to 50.0,
+    # which is 500x the Smaug-recommended 0.1 and catastrophically
+    # over-anchors training. Our argparse default for --dpop-delta is 0.1
+    # (see main()); we never inherit upstream's 50.0.
+    loss_type = getattr(args, "dpo_cpo_loss_type", "sigmoid")
+    dpop_delta = float(getattr(args, "dpop_delta", 0.1))
     cmd = [
         sys.executable, "-m", "scripts.mlx_lora_entry",
         "--model", model,
@@ -544,7 +554,7 @@ def run_dpo(args, adapter_dir: Path) -> int:
         "--resume-adapter-file", str(adapter_dir / "adapters.safetensors"),
         "--reference-model-path", model,
         "--beta", "0.1",
-        "--dpo-cpo-loss-type", "sigmoid",
+        "--dpo-cpo-loss-type", loss_type,
         "--iters", str(dpo_iters),
         "--batch-size", "1",
         "--learning-rate", str(dpo_lr),
@@ -556,6 +566,11 @@ def run_dpo(args, adapter_dir: Path) -> int:
         # if SFT was skipped.
         "-c", str(adapter_dir / "dpo_train_config.yaml"),
     ]
+    # Emit --delta ONLY for dpop. For sigmoid/ipo/cpo, upstream does not
+    # consume --delta and emitting it would be confusing to debug. The
+    # value is always explicit (never falls through to upstream's 50.0).
+    if loss_type == "dpop":
+        cmd.extend(["--delta", str(dpop_delta)])
     # Write the DPO config YAML (same lora_parameters as SFT).
     import json as _json
     _lp = _json.loads(_build_lora_parameters_json(args))
@@ -571,7 +586,10 @@ def run_dpo(args, adapter_dir: Path) -> int:
     if getattr(args, "mask_prompt", False):
         cmd.append("--mask-prompt")
 
-    print(f"\n  Running DPO: {dpo_iters} iters, LR={dpo_lr}, beta=0.1 (sigmoid)")
+    _loss_descr = f"{loss_type}"
+    if loss_type == "dpop":
+        _loss_descr += f", delta={dpop_delta} (Smaug positive-clipping; US-11.4)"
+    print(f"\n  Running DPO: {dpo_iters} iters, LR={dpo_lr}, beta=0.1 ({_loss_descr})")
     print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)")
     print(f"  length_normalize={'true' if length_normalize else 'false'} "
           f"(US-11.1: per-token avg log-prob, NOT summed)")
@@ -694,6 +712,11 @@ def run_speculative_draft_training(args):
         # Sprint 11 / US-11.3: forward early-stopping signal so the draft
         # model uses the same plateau-break detection as the target.
         early_stopping_signal=getattr(args, "early_stopping_signal", "none"),
+        # Sprint 11 / US-11.4: forward DPOP knobs so the draft model
+        # trains with the same loss head as the target. Mixing sigmoid
+        # on the draft and dpop on the target would diverge acceptance.
+        dpo_cpo_loss_type=getattr(args, "dpo_cpo_loss_type", "sigmoid"),
+        dpop_delta=getattr(args, "dpop_delta", 0.1),
         steps_per_report=args.steps_per_report,
         steps_per_eval=args.steps_per_eval,
         save_every=args.save_every,
@@ -1021,6 +1044,10 @@ def run_train_all(args):
             # Sprint 11 / US-11.3: forward early-stopping signal so each
             # per-target run honors the same plateau-break policy.
             early_stopping_signal=getattr(args, "early_stopping_signal", "none"),
+            # Sprint 11 / US-11.4: forward DPOP knobs so every target in
+            # --train-all uses the same loss head and delta.
+            dpo_cpo_loss_type=getattr(args, "dpo_cpo_loss_type", "sigmoid"),
+            dpop_delta=getattr(args, "dpop_delta", 0.1),
             steps_per_report=args.steps_per_report,
             steps_per_eval=args.steps_per_eval,
             save_every=args.save_every,
@@ -1162,6 +1189,28 @@ Examples:
                              "US-11.3; halts when train_chosen_r plateau breaks "
                              "by >50%% drop for 2 consecutive eval steps) or "
                              "none (run to --iters, Sprint 7/8 behavior).")
+    # Sprint 11 / US-11.4 — DPOP (Smaug positive-clipping) loss head.
+    # Selecting `dpop` adds a positive-clipping penalty `delta * max(0,
+    # log pi_ref(y_chosen) - log pi(y_chosen))` that anchors chosen
+    # log-probability above the reference; structurally prevents the
+    # Sprint 8 DCR collapse (iter-80 chosen_r=-8.867). Defaults preserve
+    # Sprint 7/8 sigmoid behavior bit-identically.
+    parser.add_argument("--dpo-cpo-loss-type",
+                        choices=["sigmoid", "dpop", "ipo", "cpo"],
+                        default="sigmoid",
+                        dest="dpo_cpo_loss_type",
+                        help="DPO loss head (default: sigmoid). 'dpop' "
+                             "enables Smaug positive-clipping per "
+                             "Pal et al. 2402.13228 (US-11.4); always "
+                             "pair with --dpop-delta to override "
+                             "upstream's 50.0 default.")
+    parser.add_argument("--dpop-delta", type=float, default=0.1,
+                        dest="dpop_delta",
+                        help="DPOP penalty coefficient (default: 0.1 per "
+                             "Smaug research). Upstream mlx_lm_lora "
+                             "defaults to 50.0 which catastrophically "
+                             "over-anchors; we ALWAYS pass --delta "
+                             "explicitly when --dpo-cpo-loss-type=dpop.")
     args = parser.parse_args()
 
     target_cfg = get_target_config(args.target)
