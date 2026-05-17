@@ -1,4 +1,5 @@
 #include "human/agent.h"
+#include "human/agent/response_guard_retry.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/persona.h"

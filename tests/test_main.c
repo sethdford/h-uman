@@ -603,12 +603,13 @@ void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_simulation_tests(void);
-/* Phase 5 Task 1 (RL SOTA): opt-in 4-axis fidelity scorer (v2). */
+#ifdef HU_ENABLE_RL_FULL
 void run_personal_model_fidelity_v2_tests(void);
 void run_grpo_loss_tests(void);
 void run_grpo_mlx_tests(void);
 void run_grpo_huml_tests(void);
 void run_grpo_e2e_tests(void);
+#endif
 void run_persona_directive_channels_tests(void);
 void run_filler_recency_tests(void);
 void run_filler_pctt_tests(void);
@@ -1111,6 +1112,7 @@ int main(int argc, char **argv) {
     run_reference_model_tests();
     /* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
     run_dpo_real_loss_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs. */
     run_dpo_real_e2e_tests();
     /* Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper test (skip stub
@@ -1118,6 +1120,7 @@ int main(int argc, char **argv) {
     run_dpo_real_mlx_tests();
     /* Phase 2 Task 8 (RL SOTA): post-split CLI handler surface contract. */
     run_cli_dpo_tests();
+#endif
     /* Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection — forward,
      * backward (analytical + finite-diff grad check), save/load round trip. */
     run_value_head_tests();
@@ -1127,8 +1130,10 @@ int main(int argc, char **argv) {
     run_reward_model_train_tests();
     /* Phase 3 Task 8 (RL SOTA): RM inference latency tests. */
     run_reward_model_inference_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 3 Task 5 (RL SOTA): KTO loss. */
     run_kto_loss_tests();
+#endif
     /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 + k3 backward grad. */
     run_kl_divergence_tests();
     /* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML — sampling determinism
@@ -1137,8 +1142,10 @@ int main(int argc, char **argv) {
     /* Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic token
      * counting + Phase 3 RM composition + Phase 5 judge stub pin. */
     run_reward_source_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler. */
     run_cli_grpo_tests();
+#endif
 #endif
 
     run_experience_tests();
@@ -1261,11 +1268,13 @@ int main(int argc, char **argv) {
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
     run_personal_model_simulation_tests();
+#ifdef HU_ENABLE_RL_FULL
     run_personal_model_fidelity_v2_tests();
     run_grpo_loss_tests();
     run_grpo_huml_tests();
     run_grpo_mlx_tests();
     run_grpo_e2e_tests();
+#endif
     run_persona_directive_channels_tests();
     run_filler_recency_tests();
     run_filler_pctt_tests();
