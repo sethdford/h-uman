@@ -39,6 +39,11 @@ hu_error_t hu_validators_build_default_outbound_chain(hu_allocator_t *alloc,
     ADD(hu_validator_assistant_closer_create(alloc, &v));
     ADD(hu_validator_persona_narrator_create(alloc, persona_name, persona_name_len, &v));
     ADD(hu_validator_role_consistency_create(alloc, &v));
+    /* persona_voice runs AFTER all strippers so prefixable tells get cleaned
+     * in place first; this validator REJECTs on hard AI-identity disclosure
+     * that the strippers cannot repair (e.g. "I'm a language model, I don't
+     * have qualia"). Added 2026-05-17 with the persona-first doctrine. */
+    ADD(hu_validator_persona_voice_create(alloc, &v));
     ADD(hu_validator_persona_fidelity_create(alloc, &v));
 
 #undef ADD
