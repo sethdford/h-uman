@@ -60,21 +60,53 @@ static void test_rl_train_dpo_preserves_other_flags(void) {
     HU_ASSERT_EQ(hu_ml_cli_rl_train(&alloc, argc, argv), HU_OK);
 }
 
-/* AC-7.10.5: orpo and grpo2 return HU_ERR_NOT_SUPPORTED. The exit-code
- * mapping (main.c maps non-OK errors to non-zero exit) is exercised
- * elsewhere; here we pin the contract that the CLI returns the
- * sentinel error. */
+/* AC-11.5.5: grpo2 keeps returning HU_ERR_NOT_SUPPORTED (boundary
+ * stays clean). orpo MOVED to test_orpo_train_exits_0 below — US-11.5
+ * lands the ORPO loss head, so --algorithm orpo now exits 0 in
+ * HU_IS_TEST mode. */
 static void test_rl_train_unimplemented_algorithms(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    {
-        const char *argv[] = {"rl-train", "--algorithm", "orpo"};
-        int argc = (int)(sizeof(argv) / sizeof(argv[0]));
-        HU_ASSERT_EQ(hu_ml_cli_rl_train(&alloc, argc, argv), HU_ERR_NOT_SUPPORTED);
-    }
     {
         const char *argv[] = {"rl-train", "--algorithm", "grpo2"};
         int argc = (int)(sizeof(argv) / sizeof(argv[0]));
         HU_ASSERT_EQ(hu_ml_cli_rl_train(&alloc, argc, argv), HU_ERR_NOT_SUPPORTED);
+    }
+}
+
+/* AC-11.5.1: --algorithm orpo runs the ORPO factory and exits 0 in
+ * HU_IS_TEST mode (mock train_step prints loss=0.7). */
+static void test_orpo_train_exits_0(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"rl-train", "--algorithm", "orpo", "--lambda-orpo", "0.1"};
+    int argc = (int)(sizeof(argv) / sizeof(argv[0]));
+    HU_ASSERT_EQ(hu_ml_cli_rl_train(&alloc, argc, argv), HU_OK);
+}
+
+/* AC-11.5.1: --algorithm orpo defaults work when --lambda-orpo is
+ * omitted (factory default λ=0.1). */
+static void test_orpo_train_defaults_exit_0(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"rl-train", "--algorithm", "orpo"};
+    int argc = (int)(sizeof(argv) / sizeof(argv[0]));
+    HU_ASSERT_EQ(hu_ml_cli_rl_train(&alloc, argc, argv), HU_OK);
+}
+
+/* --lambda-orpo input validation: non-numeric and non-positive rejected. */
+static void test_orpo_train_invalid_lambda(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    {
+        const char *argv[] = {
+            "rl-train", "--algorithm", "orpo", "--lambda-orpo", "not-a-number",
+        };
+        int argc = (int)(sizeof(argv) / sizeof(argv[0]));
+        HU_ASSERT_EQ(hu_ml_cli_rl_train(&alloc, argc, argv), HU_ERR_INVALID_ARGUMENT);
+    }
+    {
+        const char *argv[] = {
+            "rl-train", "--algorithm", "orpo", "--lambda-orpo", "0",
+        };
+        int argc = (int)(sizeof(argv) / sizeof(argv[0]));
+        HU_ASSERT_EQ(hu_ml_cli_rl_train(&alloc, argc, argv), HU_ERR_INVALID_ARGUMENT);
     }
 }
 
@@ -128,6 +160,9 @@ void run_ml_cli_rl_train_tests(void) {
     HU_RUN_TEST(test_rl_train_dpo_backward_compat);
     HU_RUN_TEST(test_rl_train_dpo_preserves_other_flags);
     HU_RUN_TEST(test_rl_train_unimplemented_algorithms);
+    HU_RUN_TEST(test_orpo_train_exits_0);
+    HU_RUN_TEST(test_orpo_train_defaults_exit_0);
+    HU_RUN_TEST(test_orpo_train_invalid_lambda);
     HU_RUN_TEST(test_rl_train_missing_algorithm_flag);
     HU_RUN_TEST(test_rl_train_unknown_algorithm);
     HU_RUN_TEST(test_rl_train_help);

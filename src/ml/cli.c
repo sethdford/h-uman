@@ -1,19 +1,22 @@
 /* ML CLI subcommands: train, experiment, prepare, status, dpo-train, lora-persona. */
 
 #include "human/ml/cli.h"
+#include "human/agent/scheduler_status_json.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
-#include "human/ml/checkpoint.h"
-#include "human/ml/dataloader.h"
-#include "human/ml/fidelity.h"
 #include "human/core/string.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
 #include "human/memory/personal_model.h"
+#include "human/ml/checkpoint.h"
+#include "human/ml/dataloader.h"
 #include "human/ml/dpo.h"
+#include "human/ml/dpo_miner.h"
 #include "human/ml/experiment.h"
+#include "human/ml/fidelity.h"
 #include "human/ml/learner.h"
 #include "human/ml/lora.h"
 #include "human/ml/m3_frontier_adapter.h"
@@ -24,8 +27,6 @@
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
 #include "human/ml/training_data_extractor.h"
-#include "human/agent/scheduler_status_json.h"
-#include "human/config.h"
 #include "human/persona.h"
 #include "human/provider.h"
 #include "human/providers/factory.h"
@@ -92,9 +93,9 @@ static const char *get_opt(const char **argv, int argc, int i, const char *opt) 
  * is the tokenizer's vocab_size — callers should align cfg.gpt.vocab_size
  * to this value before creating the GPT model so the model's vocab matches
  * the tokenizer's. See spec §1.5.2 issues #1, #2. */
-static hu_error_t derive_token_bytes_for_data_dir(
-    hu_allocator_t *alloc, const char *data_dir, hu_bpe_tokenizer_t **out_tok,
-    int32_t **out_token_bytes, size_t *out_count) {
+static hu_error_t derive_token_bytes_for_data_dir(hu_allocator_t *alloc, const char *data_dir,
+                                                  hu_bpe_tokenizer_t **out_tok,
+                                                  int32_t **out_token_bytes, size_t *out_count) {
     if (!alloc || !out_tok || !out_token_bytes || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out_tok = NULL;
@@ -110,16 +111,14 @@ static hu_error_t derive_token_bytes_for_data_dir(
     int loaded = 0;
     if (data_dir && data_dir[0]) {
         int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
-        if (n > 0 && (size_t)n < sizeof(path) &&
-            hu_bpe_tokenizer_load(tok, path) == HU_OK) {
+        if (n > 0 && (size_t)n < sizeof(path) && hu_bpe_tokenizer_load(tok, path) == HU_OK) {
             loaded = 1;
         }
     }
     if (!loaded) {
         const char *home = getenv("HOME");
         if (home && home[0]) {
-            int n = snprintf(path, sizeof(path),
-                             "%s/.human/models/tokenizer.vocab", home);
+            int n = snprintf(path, sizeof(path), "%s/.human/models/tokenizer.vocab", home);
             if (n > 0 && (size_t)n < sizeof(path))
                 (void)hu_bpe_tokenizer_load(tok, path);
         }
@@ -239,8 +238,8 @@ hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
     hu_bpe_tokenizer_t *tok = NULL;
     int32_t *token_bytes = NULL;
     size_t token_bytes_count = 0;
-    hu_error_t err = derive_token_bytes_for_data_dir(alloc, data_dir, &tok,
-                                                     &token_bytes, &token_bytes_count);
+    hu_error_t err =
+        derive_token_bytes_for_data_dir(alloc, data_dir, &tok, &token_bytes, &token_bytes_count);
     if (err != HU_OK) {
         hu_json_free(alloc, root);
         hu_log_error("ml", NULL, "tokenizer load failed: %d", (int)err);
@@ -288,12 +287,10 @@ hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
      * val_loader && token_bytes). Falls back to NULL on missing val split. */
     hu_ml_dataloader_t *val_loader = NULL;
     if (cfg.training.eval_tokens > 0) {
-        hu_error_t verr = hu_ml_dataloader_create(alloc, data_dir,
-                                                  cfg.training.device_batch_size,
+        hu_error_t verr = hu_ml_dataloader_create(alloc, data_dir, cfg.training.device_batch_size,
                                                   cfg.gpt.sequence_len, "val", &val_loader);
         if (verr != HU_OK) {
-            hu_log_warn("ml", NULL,
-                        "Val dataloader unavailable (%d) — BPB will be 0", (int)verr);
+            hu_log_warn("ml", NULL, "Val dataloader unavailable (%d) — BPB will be 0", (int)verr);
             val_loader = NULL;
         }
     }
@@ -562,8 +559,7 @@ hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **arg
 
     size_t model_len = model ? strlen(model) : 0;
     hu_dpo_judge_result_t result = {0};
-    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name,
-           batch_size);
+    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name, batch_size);
 
     err = hu_dpo_judge_step(&collector, alloc, &provider, model, model_len, 0.1, (size_t)batch_size,
                             &result);
@@ -590,6 +586,191 @@ hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **arg
     (void)model;
     (void)batch_size;
     fprintf(stderr, "dpo-train requires HU_ENABLE_SQLITE\n");
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+#endif
+}
+
+/* Sprint 7 US-7.2 — `human ml mine-corrections`.
+ *
+ * Walks the messages table in chat.db (or whichever DB --db points at),
+ * mines `user -> assistant -> user` correction triples within the
+ * correction window, PII-redacts each field, and inserts deduplicated
+ * preference pairs into `dpo_pairs` with `source = "outbound_edit"`.
+ *
+ * When `--export-jsonl` is set (default: `~/.human/dpo/pairs.jsonl`), the
+ * collected pairs are also exported as JSONL — US-7.1's
+ * `finetune-gemma.py --dpo --from-corrections` reads exactly that path.
+ * The default path keeps the cross-story handoff implicit and explicit at
+ * the same time.
+ *
+ * HU_IS_TEST short-circuits before any FS or DB I/O — exercised by the
+ * dpo_miner test suite via direct calls to `hu_dpo_mine_corrections`. */
+hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const char **argv) {
+    const char *db_path = NULL;
+    const char *export_jsonl_path = NULL;
+    int correction_window_sec = 0;
+    int want_export = 0;
+    /* HIGH-1 fix: third state to distinguish "user passed --no-export"
+     * from "user did not mention export". Without this, the default-
+     * enable block below silently re-enables export after --no-export. */
+    int export_disabled_explicitly = 0;
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--db");
+        if (v) {
+            db_path = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--export-jsonl");
+        if (v) {
+            export_jsonl_path = v;
+            want_export = 1;
+            export_disabled_explicitly = 0;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--correction-window-sec");
+        if (v) {
+            if (parse_int_arg(v, &correction_window_sec) != 0) {
+                hu_log_error("ml", NULL, "Invalid --correction-window-sec: %s", v);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--no-export") == 0) {
+            want_export = 0;
+            export_jsonl_path = NULL;
+            export_disabled_explicitly = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: human ml mine-corrections [--db <path>] "
+                   "[--export-jsonl <path>] [--no-export] "
+                   "[--correction-window-sec <N>] [--help]\n"
+                   "\n"
+                   "Mine DPO preference pairs from chat.db user-correction triples.\n"
+                   "Inserts deduplicated pairs into dpo_pairs (source='outbound_edit').\n"
+                   "By default exports JSONL to ~/.human/dpo/pairs.jsonl for the\n"
+                   "finetune-gemma.py --dpo --from-corrections consumer.\n");
+            return HU_OK;
+        }
+    }
+
+#ifdef HU_IS_TEST
+    (void)alloc;
+    (void)db_path;
+    (void)export_jsonl_path;
+    (void)correction_window_sec;
+    (void)want_export;
+    (void)export_disabled_explicitly;
+    printf("[mine-corrections] test mode: skipped\n");
+    return HU_OK;
+#else
+#ifdef HU_ENABLE_SQLITE
+    /* HIGH-2 fix: was `static char default_db[512]` — reentrancy hazard
+     * with no upside since the buffer's lifetime is the call frame.
+     * Plain automatic storage is correct. */
+    char default_db[512];
+    if (!db_path) {
+        const char *home = getenv("HOME");
+        if (!home) {
+            fprintf(stderr, "[mine-corrections] HOME not set and --db not provided\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        int n = snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
+        if (n <= 0 || (size_t)n >= sizeof(default_db))
+            return HU_ERR_INTERNAL;
+        db_path = default_db;
+    }
+
+    /* HIGH-1 fix: delegate the export-decision logic to the public
+     * helper so the CLI path matches the test seam exactly. */
+    hu_dpo_miner_export_decision_t decision;
+    {
+        const char *home = getenv("HOME");
+        hu_error_t derr = hu_dpo_miner_resolve_export(export_jsonl_path, export_disabled_explicitly,
+                                                      home, &decision);
+        if (derr != HU_OK) {
+            fprintf(stderr, "[mine-corrections] export-path resolution failed: %d\n", derr);
+            return derr;
+        }
+    }
+    want_export = decision.should_export;
+    export_jsonl_path = decision.should_export ? decision.export_path : NULL;
+
+    sqlite3 *db = NULL;
+    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+        fprintf(stderr, "[mine-corrections] Cannot open database: %s\n", db_path);
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    hu_dpo_mine_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.correction_window_sec = correction_window_sec;
+
+    hu_dpo_mine_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+    hu_error_t err = hu_dpo_mine_corrections(alloc, db, &opts, &stats);
+    if (err != HU_OK) {
+        fprintf(stderr, "[mine-corrections] miner failed: %d\n", err);
+        sqlite3_close(db);
+        return err;
+    }
+    printf("[mine-corrections] triples examined: %zu\n", stats.triples_examined);
+    printf("[mine-corrections] pairs recorded:   %zu\n", stats.pairs_recorded);
+    printf("[mine-corrections] pairs deduped:    %zu\n", stats.pairs_skipped_dup);
+    printf("[mine-corrections] pairs oversize:   %zu\n", stats.pairs_skipped_size);
+    printf("[mine-corrections] pii redactions:   %zu\n", stats.pii_redactions);
+
+    if (want_export && export_jsonl_path) {
+        /* HIGH-4 fix: ensure parent dir exists before export. Fresh
+         * installs do not have ~/.human/dpo/ on disk. */
+        hu_error_t dir_err = hu_dpo_miner_ensure_parent_dir(export_jsonl_path);
+        if (dir_err != HU_OK) {
+            /* HIGH-3 fix: propagate the failure — US-7.5's nightly cron
+             * checks the exit code to gate adapter promotion. */
+            fprintf(stderr, "[mine-corrections] cannot create parent dir for %s: %d\n",
+                    export_jsonl_path, dir_err);
+            sqlite3_close(db);
+            return dir_err;
+        }
+
+        hu_dpo_collector_t collector;
+        err = hu_dpo_collector_create(alloc, db, 100000, &collector);
+        if (err != HU_OK) {
+            /* HIGH-3 fix: collector creation failures used to be
+             * swallowed (function would still return HU_OK below). */
+            fprintf(stderr, "[mine-corrections] collector init failed: %d\n", err);
+            sqlite3_close(db);
+            return err;
+        }
+        size_t exported = 0;
+        err = hu_dpo_export_jsonl(&collector, export_jsonl_path, strlen(export_jsonl_path),
+                                  &exported);
+        hu_dpo_collector_deinit(&collector);
+        if (err != HU_OK) {
+            /* HIGH-3 fix: export failures now propagate, not just printed. */
+            fprintf(stderr, "[mine-corrections] jsonl export failed: %d\n", err);
+            sqlite3_close(db);
+            return err;
+        }
+        printf("[mine-corrections] exported %zu pair(s) to %s\n", exported, export_jsonl_path);
+    }
+
+    sqlite3_close(db);
+    return HU_OK;
+#else
+    (void)alloc;
+    (void)db_path;
+    (void)export_jsonl_path;
+    (void)correction_window_sec;
+    (void)want_export;
+    (void)export_disabled_explicitly;
+    fprintf(stderr, "mine-corrections requires HU_ENABLE_SQLITE\n");
     return HU_ERR_NOT_SUPPORTED;
 #endif
 #endif
@@ -670,8 +851,8 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
         }
         if (db_path) {
             size_t dpo_count = 0;
-            hu_error_t dpo_err = hu_training_data_extract_dpo(
-                alloc, db_path, correction_window, &dpo_count);
+            hu_error_t dpo_err =
+                hu_training_data_extract_dpo(alloc, db_path, correction_window, &dpo_count);
             if (dpo_err == HU_OK && dpo_count > 0)
                 printf("[prepare-conversations] Extracted %zu DPO pairs from corrections\n",
                        dpo_count);
@@ -944,12 +1125,10 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         hu_persona_example_bank_t *new_banks = NULL;
         size_t new_count = 0;
         hu_error_t hist_err = hu_persona_banks_extract_from_history(
-            alloc, from_history_db,
-            (size_t)from_history_max_per_channel,
-            &new_banks, &new_count);
+            alloc, from_history_db, (size_t)from_history_max_per_channel, &new_banks, &new_count);
         if (hist_err != HU_OK) {
-            fprintf(stderr, "[lora-persona] --from-history failed (%d): %s\n",
-                    hist_err, hu_error_string(hist_err));
+            fprintf(stderr, "[lora-persona] --from-history failed (%d): %s\n", hist_err,
+                    hu_error_string(hist_err));
             hu_persona_deinit(alloc, &persona);
             return hist_err;
         }
@@ -957,8 +1136,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         /* Drop the previously-loaded banks (allocator-owned by `alloc`,
          * same as the new ones we're about to install). The free
          * function is null-safe; an empty persona is fine here. */
-        hu_persona_example_banks_free(alloc, persona.example_banks,
-                                      persona.example_banks_count);
+        hu_persona_example_banks_free(alloc, persona.example_banks, persona.example_banks_count);
         persona.example_banks = new_banks;
         persona.example_banks_count = new_count;
 
@@ -978,9 +1156,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         if (persist_persona && new_count > 0) {
             hu_error_t save_err = hu_persona_creator_write(alloc, &persona);
             if (save_err != HU_OK) {
-                fprintf(stderr,
-                        "[lora-persona] --persist write failed (%d): %s\n",
-                        save_err, hu_error_string(save_err));
+                fprintf(stderr, "[lora-persona] --persist write failed (%d): %s\n", save_err,
+                        hu_error_string(save_err));
                 hu_persona_deinit(alloc, &persona);
                 return save_err;
             }
@@ -1002,16 +1179,15 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     if (export_jsonl_path && export_jsonl_path[0]) {
         size_t exported = 0;
         hu_error_t exp_err = hu_persona_bank_export_jsonl(&persona, export_jsonl_path,
-                                                           strlen(export_jsonl_path),
-                                                           &exported);
+                                                          strlen(export_jsonl_path), &exported);
         if (exp_err != HU_OK) {
             fprintf(stderr, "[lora-persona] export failed (%d): %s\n", exp_err,
                     hu_error_string(exp_err));
             hu_persona_deinit(alloc, &persona);
             return exp_err;
         }
-        printf("[lora-persona] exported %zu example(s) to %s (Alpaca JSONL)\n",
-               exported, export_jsonl_path);
+        printf("[lora-persona] exported %zu example(s) to %s (Alpaca JSONL)\n", exported,
+               export_jsonl_path);
         printf("[lora-persona] feed into llama.cpp/finetune, axolotl, unsloth,\n");
         printf("               or mlx-lm.lora to produce a GGUF LoRA the daemon\n");
         printf("               can load via personalization.lora_adapter_path.\n");
@@ -1051,15 +1227,14 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
 
         char default_adapter[512];
         if (output_path) {
-            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
-                     "%s", output_path);
+            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), "%s", output_path);
         } else {
             const char *home = getenv("HOME");
             snprintf(default_adapter, sizeof(default_adapter),
-                     "%s/.human/training-data/adapters/lora-persona-%s",
-                     home ? home : ".", persona_name);
-            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
-                     "%s", default_adapter);
+                     "%s/.human/training-data/adapters/lora-persona-%s", home ? home : ".",
+                     persona_name);
+            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), "%s",
+                     default_adapter);
         }
 
         if (data_dir) {
@@ -1071,20 +1246,19 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             char train_path[512];
             snprintf(train_path, sizeof(train_path), "%s/train.jsonl", tmp_dir);
             size_t exported = 0;
-            hu_error_t exp_err = hu_persona_bank_export_jsonl(
-                &persona, train_path, strlen(train_path), &exported);
+            hu_error_t exp_err =
+                hu_persona_bank_export_jsonl(&persona, train_path, strlen(train_path), &exported);
             if (exp_err != HU_OK || exported == 0) {
-                fprintf(stderr, "[lora-persona] failed to export persona bank "
-                                "for frontier training: %s\n",
-                        hu_error_string(exp_err != HU_OK ? exp_err
-                                                         : HU_ERR_INVALID_ARGUMENT));
+                fprintf(stderr,
+                        "[lora-persona] failed to export persona bank "
+                        "for frontier training: %s\n",
+                        hu_error_string(exp_err != HU_OK ? exp_err : HU_ERR_INVALID_ARGUMENT));
                 hu_learner_close(learner);
                 hu_persona_deinit(alloc, &persona);
                 return exp_err != HU_OK ? exp_err : HU_ERR_INVALID_ARGUMENT;
             }
             snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", tmp_dir);
-            printf("[lora-persona] exported %zu persona example(s) to %s\n",
-                   exported, train_path);
+            printf("[lora-persona] exported %zu persona example(s) to %s\n", exported, train_path);
         }
 
         printf("[lora-persona] MLX frontier LoRA training:\n"
@@ -1097,9 +1271,9 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                "  max-seq-length: %d\n"
                "  learning-rate:  %g\n"
                "  batch-size:     %d\n",
-               lcfg.base_model_path, lcfg.data_dir, lcfg.adapter_output_path,
-               lcfg.rank, lcfg.max_steps, lcfg.num_layers, lcfg.max_seq_length,
-               (double)lcfg.learning_rate, lcfg.batch_size);
+               lcfg.base_model_path, lcfg.data_dir, lcfg.adapter_output_path, lcfg.rank,
+               lcfg.max_steps, lcfg.num_layers, lcfg.max_seq_length, (double)lcfg.learning_rate,
+               lcfg.batch_size);
 
         hu_learner_report_t report;
         memset(&report, 0, sizeof(report));
@@ -1110,8 +1284,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                    "  loss:      %.4f\n"
                    "  adapter:   %s\n"
                    "  size:      %lld bytes\n",
-                   report.steps_completed, (double)report.final_loss,
-                   report.adapter_path, (long long)report.adapter_bytes);
+                   report.steps_completed, (double)report.final_loss, report.adapter_path,
+                   (long long)report.adapter_bytes);
         } else {
             fprintf(stderr, "[lora-persona] frontier training failed: %s\n",
                     report.last_error[0] ? report.last_error : hu_error_string(err));
@@ -1152,8 +1326,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     if (from_deltas_db && from_deltas_db[0]) {
 #ifdef HU_ENABLE_SQLITE
         if (!signal_contact) {
-            fprintf(stderr,
-                    "[lora-persona] --from-deltas requires --contact <id>\n");
+            fprintf(stderr, "[lora-persona] --from-deltas requires --contact <id>\n");
             hu_persona_deinit(alloc, &persona);
             return HU_ERR_INVALID_ARGUMENT;
         }
@@ -1162,8 +1335,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         hu_error_t s_err =
             hu_graph_open(alloc, from_deltas_db, strlen(from_deltas_db), &signal_graph);
         if (s_err != HU_OK) {
-            fprintf(stderr,
-                    "[lora-persona] failed to open --from-deltas db '%s': %d\n",
+            fprintf(stderr, "[lora-persona] failed to open --from-deltas db '%s': %d\n",
                     from_deltas_db, s_err);
             hu_persona_deinit(alloc, &persona);
             return s_err;
@@ -1179,8 +1351,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         s_err = hu_learner_signals_from_persona_deltas(
             signal_mem, alloc, signal_contact, strlen(signal_contact), &signals, &signals_n);
         if (s_err == HU_OK && signals_n > 0) {
-            delta_examples =
-                (hu_persona_example_t *)alloc->alloc(alloc->ctx, signals_n * sizeof(*delta_examples));
+            delta_examples = (hu_persona_example_t *)alloc->alloc(
+                alloc->ctx, signals_n * sizeof(*delta_examples));
             if (!delta_examples) {
                 hu_learner_signals_free(alloc, signals, signals_n);
                 hu_memory_facade_close(signal_mem, alloc);
@@ -1198,14 +1370,23 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                 char in_buf[256];
                 const char *kind_str = "tone";
                 switch (d->kind) {
-                case HU_PERSONA_DELTA_TONE:        kind_str = "tone"; break;
-                case HU_PERSONA_DELTA_VOCAB_AVOID: kind_str = "vocab-avoid"; break;
-                case HU_PERSONA_DELTA_LENGTH:      kind_str = "length"; break;
-                case HU_PERSONA_DELTA_BOUNDARY:    kind_str = "boundary"; break;
-                default: kind_str = "style"; break;
+                case HU_PERSONA_DELTA_TONE:
+                    kind_str = "tone";
+                    break;
+                case HU_PERSONA_DELTA_VOCAB_AVOID:
+                    kind_str = "vocab-avoid";
+                    break;
+                case HU_PERSONA_DELTA_LENGTH:
+                    kind_str = "length";
+                    break;
+                case HU_PERSONA_DELTA_BOUNDARY:
+                    kind_str = "boundary";
+                    break;
+                default:
+                    kind_str = "style";
+                    break;
                 }
-                snprintf(in_buf, sizeof(in_buf), "[%s] %s", d->key[0] ? d->key : "any",
-                         kind_str);
+                snprintf(in_buf, sizeof(in_buf), "[%s] %s", d->key[0] ? d->key : "any", kind_str);
                 delta_examples[delta_examples_count].incoming =
                     hu_strndup(alloc, in_buf, strlen(in_buf));
                 delta_examples[delta_examples_count].response =
@@ -1217,8 +1398,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         hu_memory_facade_close(signal_mem, alloc);
         hu_graph_close(signal_graph, alloc);
 #else
-        fprintf(stderr,
-                "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE\n");
+        fprintf(stderr, "[lora-persona] --from-deltas requires HU_ENABLE_SQLITE\n");
         hu_persona_deinit(alloc, &persona);
         return HU_ERR_NOT_SUPPORTED;
 #endif
@@ -1264,8 +1444,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         hu_ml_optimizer_t base_opt = {0};
         hu_error_t base_err = hu_muon_adamw_create(alloc, &cfg.optimizer, &base_opt);
         if (base_err != HU_OK) {
-            fprintf(stderr, "[lora-persona] failed to create warm-start optimizer: %d\n",
-                    base_err);
+            fprintf(stderr, "[lora-persona] failed to create warm-start optimizer: %d\n", base_err);
             model.vtable->deinit(model.ctx, alloc);
             free_delta_examples(alloc, delta_examples, delta_examples_count);
             hu_persona_deinit(alloc, &persona);
@@ -1273,8 +1452,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         }
         base_err = hu_gpt_register_params(&model, &base_opt);
         if (base_err == HU_OK) {
-            base_err =
-                hu_ml_checkpoint_load(alloc, checkpoint_path, &model, &base_opt);
+            base_err = hu_ml_checkpoint_load(alloc, checkpoint_path, &model, &base_opt);
         }
         base_opt.vtable->deinit(base_opt.ctx, alloc);
         if (base_err != HU_OK) {
@@ -1282,8 +1460,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                     "[lora-persona] failed to load checkpoint '%s': %d "
                     "(must be a HUML v1 or v2 file produced by hu_ml_checkpoint_save "
                     "with matching dims: vocab=%zu n_layer=%zu n_embd=%zu)\n",
-                    checkpoint_path, base_err, cfg.gpt.vocab_size, cfg.gpt.n_layer,
-                    cfg.gpt.n_embd);
+                    checkpoint_path, base_err, cfg.gpt.vocab_size, cfg.gpt.n_layer, cfg.gpt.n_embd);
             model.vtable->deinit(model.ctx, alloc);
             free_delta_examples(alloc, delta_examples, delta_examples_count);
             hu_persona_deinit(alloc, &persona);
@@ -1366,106 +1543,106 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         /* Iterate persona example banks in pass 0, delta-derived
          * examples in pass 1. Same training body for both. */
         for (int pass = 0; pass < 2; pass++) {
-        size_t pass_count = pass == 0 ? persona.example_banks_count : delta_examples_count;
-        for (size_t b = 0; b < pass_count; b++) {
-            size_t inner = pass == 0 ? persona.example_banks[b].examples_count : 1;
-            for (size_t e = 0; e < inner; e++) {
-                const hu_persona_example_t *ex = pass == 0 ? &persona.example_banks[b].examples[e]
-                                                            : &delta_examples[b];
-                if (!ex->incoming || !ex->response)
-                    continue;
+            size_t pass_count = pass == 0 ? persona.example_banks_count : delta_examples_count;
+            for (size_t b = 0; b < pass_count; b++) {
+                size_t inner = pass == 0 ? persona.example_banks[b].examples_count : 1;
+                for (size_t e = 0; e < inner; e++) {
+                    const hu_persona_example_t *ex =
+                        pass == 0 ? &persona.example_banks[b].examples[e] : &delta_examples[b];
+                    if (!ex->incoming || !ex->response)
+                        continue;
 
-                int32_t *in_ids = NULL;
-                size_t in_count = 0;
-                err = hu_bpe_tokenizer_encode(tok, ex->incoming, strlen(ex->incoming), &in_ids,
-                                              &in_count);
-                if (err != HU_OK || in_count == 0) {
-                    if (in_ids)
+                    int32_t *in_ids = NULL;
+                    size_t in_count = 0;
+                    err = hu_bpe_tokenizer_encode(tok, ex->incoming, strlen(ex->incoming), &in_ids,
+                                                  &in_count);
+                    if (err != HU_OK || in_count == 0) {
+                        if (in_ids)
+                            alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
+                        continue;
+                    }
+
+                    int32_t *out_ids = NULL;
+                    size_t out_count = 0;
+                    err = hu_bpe_tokenizer_encode(tok, ex->response, strlen(ex->response), &out_ids,
+                                                  &out_count);
+                    if (err != HU_OK || out_count == 0) {
                         alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
-                    continue;
-                }
+                        if (out_ids)
+                            alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
+                        continue;
+                    }
 
-                int32_t *out_ids = NULL;
-                size_t out_count = 0;
-                err = hu_bpe_tokenizer_encode(tok, ex->response, strlen(ex->response), &out_ids,
-                                              &out_count);
-                if (err != HU_OK || out_count == 0) {
-                    alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
-                    if (out_ids)
+                    size_t seq_len = in_count + out_count;
+                    if (seq_len > cfg.gpt.sequence_len)
+                        seq_len = cfg.gpt.sequence_len;
+
+                    int32_t *seq = (int32_t *)alloc->alloc(alloc->ctx, seq_len * sizeof(int32_t));
+                    if (!seq) {
+                        alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
                         alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
-                    continue;
-                }
+                        continue;
+                    }
 
-                size_t seq_len = in_count + out_count;
-                if (seq_len > cfg.gpt.sequence_len)
-                    seq_len = cfg.gpt.sequence_len;
+                    size_t copy_in = in_count < seq_len ? in_count : seq_len;
+                    memcpy(seq, in_ids, copy_in * sizeof(int32_t));
+                    size_t copy_out = seq_len - copy_in;
+                    if (copy_out > out_count)
+                        copy_out = out_count;
+                    memcpy(seq + copy_in, out_ids, copy_out * sizeof(int32_t));
 
-                int32_t *seq = (int32_t *)alloc->alloc(alloc->ctx, seq_len * sizeof(int32_t));
-                if (!seq) {
-                    alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
-                    alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
-                    continue;
-                }
+                    hu_ml_tensor_t input_tensor = {
+                        .data = seq,
+                        .shape = {1, (int)seq_len, 0, 0},
+                        .ndim = 2,
+                        .dtype = HU_ML_DTYPE_I32,
+                    };
+                    hu_ml_tensor_t output_tensor = {0};
 
-                size_t copy_in = in_count < seq_len ? in_count : seq_len;
-                memcpy(seq, in_ids, copy_in * sizeof(int32_t));
-                size_t copy_out = seq_len - copy_in;
-                if (copy_out > out_count)
-                    copy_out = out_count;
-                memcpy(seq + copy_in, out_ids, copy_out * sizeof(int32_t));
+                    /* Forward pass (includes LoRA adapter) */
+                    hu_error_t fwd_err =
+                        model.vtable->forward(model.ctx, &input_tensor, &output_tensor);
+                    if (fwd_err == HU_OK && output_tensor.data && seq_len > 1) {
+                        float *logits = (float *)output_tensor.data;
+                        float example_loss = 0.0f;
+                        size_t resp_tokens = 0;
+                        for (size_t t = copy_in; t < seq_len - 1; t++) {
+                            int32_t target = seq[t + 1];
+                            if (target >= 0 && (size_t)target < cfg.gpt.vocab_size) {
+                                float *row = logits + t * cfg.gpt.vocab_size;
+                                float max_val = row[0];
+                                for (size_t v2 = 1; v2 < cfg.gpt.vocab_size; v2++)
+                                    if (row[v2] > max_val)
+                                        max_val = row[v2];
+                                float sum_exp = 0.0f;
+                                for (size_t v2 = 0; v2 < cfg.gpt.vocab_size; v2++)
+                                    sum_exp += expf(row[v2] - max_val);
+                                float log_prob = (row[target] - max_val) - logf(sum_exp);
+                                example_loss -= log_prob;
+                                resp_tokens++;
+                            }
+                        }
+                        if (resp_tokens > 0) {
+                            step_loss += example_loss / (float)resp_tokens;
+                            examples_this_step++;
+                        }
 
-                hu_ml_tensor_t input_tensor = {
-                    .data = seq,
-                    .shape = {1, (int)seq_len, 0, 0},
-                    .ndim = 2,
-                    .dtype = HU_ML_DTYPE_I32,
-                };
-                hu_ml_tensor_t output_tensor = {0};
-
-                /* Forward pass (includes LoRA adapter) */
-                hu_error_t fwd_err =
-                    model.vtable->forward(model.ctx, &input_tensor, &output_tensor);
-                if (fwd_err == HU_OK && output_tensor.data && seq_len > 1) {
-                    float *logits = (float *)output_tensor.data;
-                    float example_loss = 0.0f;
-                    size_t resp_tokens = 0;
-                    for (size_t t = copy_in; t < seq_len - 1; t++) {
-                        int32_t target = seq[t + 1];
-                        if (target >= 0 && (size_t)target < cfg.gpt.vocab_size) {
-                            float *row = logits + t * cfg.gpt.vocab_size;
-                            float max_val = row[0];
-                            for (size_t v2 = 1; v2 < cfg.gpt.vocab_size; v2++)
-                                if (row[v2] > max_val)
-                                    max_val = row[v2];
-                            float sum_exp = 0.0f;
-                            for (size_t v2 = 0; v2 < cfg.gpt.vocab_size; v2++)
-                                sum_exp += expf(row[v2] - max_val);
-                            float log_prob = (row[target] - max_val) - logf(sum_exp);
-                            example_loss -= log_prob;
-                            resp_tokens++;
+                        /* Backward pass: compute gradients for LoRA params */
+                        if (model.vtable->backward) {
+                            hu_ml_tensor_t grad_out = output_tensor;
+                            (void)model.vtable->backward(model.ctx, &grad_out);
                         }
                     }
-                    if (resp_tokens > 0) {
-                        step_loss += example_loss / (float)resp_tokens;
-                        examples_this_step++;
-                    }
 
-                    /* Backward pass: compute gradients for LoRA params */
-                    if (model.vtable->backward) {
-                        hu_ml_tensor_t grad_out = output_tensor;
-                        (void)model.vtable->backward(model.ctx, &grad_out);
-                    }
+                    /* Free output tensor every iteration */
+                    if (output_tensor.data && output_tensor.size_bytes > 0)
+                        alloc->free(alloc->ctx, output_tensor.data, output_tensor.size_bytes);
+
+                    alloc->free(alloc->ctx, seq, seq_len * sizeof(int32_t));
+                    alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
+                    alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
                 }
-
-                /* Free output tensor every iteration */
-                if (output_tensor.data && output_tensor.size_bytes > 0)
-                    alloc->free(alloc->ctx, output_tensor.data, output_tensor.size_bytes);
-
-                alloc->free(alloc->ctx, seq, seq_len * sizeof(int32_t));
-                alloc->free(alloc->ctx, out_ids, out_count * sizeof(int32_t));
-                alloc->free(alloc->ctx, in_ids, in_count * sizeof(int32_t));
             }
-        }
         } /* pass */
 
         /* Optimizer step: update LoRA weights */
@@ -1603,20 +1780,23 @@ hu_error_t hu_ml_cli_lora_baseline(hu_allocator_t *alloc, int argc, const char *
         const hu_persona_example_bank_t *bank = &persona.example_banks[b];
         for (size_t i = 0; i < bank->examples_count; i++) {
             const hu_persona_example_t *ex = &bank->examples[i];
-            if (!ex->response || ex->response[0] == '\0') continue;
-            float s = hu_communication_style_fidelity_score(&target, ex->response,
-                                                            strlen(ex->response));
-            if (s < 0.f) continue;
+            if (!ex->response || ex->response[0] == '\0')
+                continue;
+            float s =
+                hu_communication_style_fidelity_score(&target, ex->response, strlen(ex->response));
+            if (s < 0.f)
+                continue;
             sum += s;
-            if (s < min_score) min_score = s;
-            if (s > max_score) max_score = s;
+            if (s < min_score)
+                min_score = s;
+            if (s > max_score)
+                max_score = s;
             scored++;
         }
     }
 
     if (scored == 0) {
-        printf("[lora-baseline] persona '%s' has no scoreable example responses.\n",
-               persona_name);
+        printf("[lora-baseline] persona '%s' has no scoreable example responses.\n", persona_name);
         hu_persona_deinit(alloc, &persona);
         return HU_OK;
     }
@@ -1724,8 +1904,10 @@ static hu_error_t hu_ml_lora_ab_load_response_set(hu_allocator_t *alloc, const c
     const char **strings = (const char **)alloc->alloc(alloc->ctx, n * sizeof(const char *));
     size_t *lens = (size_t *)alloc->alloc(alloc->ctx, n * sizeof(size_t));
     if (!strings || !lens) {
-        if (strings) alloc->free(alloc->ctx, strings, n * sizeof(const char *));
-        if (lens) alloc->free(alloc->ctx, lens, n * sizeof(size_t));
+        if (strings)
+            alloc->free(alloc->ctx, strings, n * sizeof(const char *));
+        if (lens)
+            alloc->free(alloc->ctx, lens, n * sizeof(size_t));
         hu_json_free(alloc, root);
         return HU_ERR_OUT_OF_MEMORY;
     }
@@ -1757,40 +1939,56 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
 
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--persona");
-        if (v) { persona_name = v; i++; continue; }
+        if (v) {
+            persona_name = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--before");
-        if (v) { before_path = v; i++; continue; }
+        if (v) {
+            before_path = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--after");
-        if (v) { after_path = v; i++; continue; }
+        if (v) {
+            after_path = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--floor-delta");
-        if (v) { floor_delta = (float)strtod(v, NULL); i++; continue; }
+        if (v) {
+            floor_delta = (float)strtod(v, NULL);
+            i++;
+            continue;
+        }
         if (strcmp(argv[i], "--require-positive") == 0) {
             require_positive = true;
             continue;
         }
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("Usage: human ml lora-ab --persona <name> --before <pre.json> --after <post.json>\n"
-                   "                       [--floor-delta F] [--require-positive]\n\n"
-                   "Score two response sets against a persona's communication-\n"
-                   "style fingerprint and report the mean fidelity delta\n"
-                   "(after - before). A positive delta indicates the LoRA\n"
-                   "adapter is pulling the model toward persona fidelity.\n\n"
-                   "Inputs are JSON files containing a top-level array of\n"
-                   "response strings, e.g.\n"
-                   "  [\"hey, sounds good\", \"yeah totally lmk\", ...]\n\n"
-                   "Options:\n"
-                   "  --persona <name>      Persona name in ~/.human/personas/\n"
-                   "  --before <path>       JSON array of pre-LoRA responses\n"
-                   "  --after <path>        JSON array of post-LoRA responses\n"
-                   "  --floor-delta F       Exit non-zero when delta < F\n"
-                   "  --require-positive    Exit non-zero when delta <= 0\n");
+            printf(
+                "Usage: human ml lora-ab --persona <name> --before <pre.json> --after <post.json>\n"
+                "                       [--floor-delta F] [--require-positive]\n\n"
+                "Score two response sets against a persona's communication-\n"
+                "style fingerprint and report the mean fidelity delta\n"
+                "(after - before). A positive delta indicates the LoRA\n"
+                "adapter is pulling the model toward persona fidelity.\n\n"
+                "Inputs are JSON files containing a top-level array of\n"
+                "response strings, e.g.\n"
+                "  [\"hey, sounds good\", \"yeah totally lmk\", ...]\n\n"
+                "Options:\n"
+                "  --persona <name>      Persona name in ~/.human/personas/\n"
+                "  --before <path>       JSON array of pre-LoRA responses\n"
+                "  --after <path>        JSON array of post-LoRA responses\n"
+                "  --floor-delta F       Exit non-zero when delta < F\n"
+                "  --require-positive    Exit non-zero when delta <= 0\n");
             printf("\nDoc: %s\n", hu_ml_lora_persona_caveat_doc_path());
             return HU_OK;
         }
     }
     if (!persona_name || !before_path || !after_path) {
-        fprintf(stderr,
-                "lora-ab requires --persona <name> --before <path> --after <path>\n");
+        fprintf(stderr, "lora-ab requires --persona <name> --before <path> --after <path>\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 
@@ -1849,12 +2047,14 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
         hu_persona_deinit(alloc, &persona);
         return err;
     }
-    err = hu_ml_lora_ab_load_response_set(alloc, after_path, &json_after, &strs_after,
-                                          &lens_after, &n_after);
+    err = hu_ml_lora_ab_load_response_set(alloc, after_path, &json_after, &strs_after, &lens_after,
+                                          &n_after);
     if (err != HU_OK) {
         fprintf(stderr, "[lora-ab] failed to load --after %s: %d\n", after_path, err);
-        if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
-        if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+        if (strs_before)
+            alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+        if (lens_before)
+            alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
         hu_json_free(alloc, json_before);
         hu_persona_deinit(alloc, &persona);
         return err;
@@ -1863,15 +2063,19 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     hu_communication_style_set_summary_t sum_before, sum_after;
     float delta = 0.f;
     err = hu_communication_style_compare_response_sets(&target, strs_before, lens_before, n_before,
-                                                       strs_after, lens_after, n_after,
-                                                       &sum_before, &sum_after, &delta);
+                                                       strs_after, lens_after, n_after, &sum_before,
+                                                       &sum_after, &delta);
     /* Free loaders before reporting so a fail-fast exit doesn't
      * leak. The summaries are stack values and don't alias into
      * the JSON tree. */
-    if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
-    if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
-    if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
-    if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+    if (strs_before)
+        alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+    if (lens_before)
+        alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+    if (strs_after)
+        alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+    if (lens_after)
+        alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
     hu_json_free(alloc, json_before);
     hu_json_free(alloc, json_after);
     hu_persona_deinit(alloc, &persona);
@@ -1931,16 +2135,20 @@ static size_t hu_ml_lora_runner_build_system_prompt(const hu_persona_t *persona,
     size_t n = 0;
     if (persona->identity && persona->identity[0]) {
         int w = snprintf(out + n, cap - n, "%s\n", persona->identity);
-        if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
+        if (w > 0 && (size_t)w < cap - n)
+            n += (size_t)w;
     }
     if (persona->traits_count > 0 && persona->traits) {
         int w = snprintf(out + n, cap - n, "Traits: ");
-        if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
+        if (w > 0 && (size_t)w < cap - n)
+            n += (size_t)w;
         for (size_t i = 0; i < persona->traits_count && n + 2 < cap; i++) {
             const char *t = persona->traits[i];
-            if (!t || !t[0]) continue;
+            if (!t || !t[0])
+                continue;
             w = snprintf(out + n, cap - n, "%s%s", i == 0 ? "" : ", ", t);
-            if (w > 0 && (size_t)w < cap - n) n += (size_t)w;
+            if (w > 0 && (size_t)w < cap - n)
+                n += (size_t)w;
         }
         if (n + 1 < cap) {
             out[n++] = '\n';
@@ -2016,19 +2224,47 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
 
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--persona");
-        if (v) { persona_name = v; i++; continue; }
+        if (v) {
+            persona_name = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--output");
-        if (v) { output_path = v; i++; continue; }
+        if (v) {
+            output_path = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--provider");
-        if (v) { provider_name = v; i++; continue; }
+        if (v) {
+            provider_name = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--model");
-        if (v) { model = v; i++; continue; }
+        if (v) {
+            model = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--max-examples");
-        if (v) { max_examples = atoi(v); i++; continue; }
+        if (v) {
+            max_examples = atoi(v);
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--adapter");
-        if (v) { adapter_path = v; i++; continue; }
+        if (v) {
+            adapter_path = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--adapter-id");
-        if (v) { adapter_id = v; i++; continue; }
+        if (v) {
+            adapter_id = v;
+            i++;
+            continue;
+        }
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Usage: human ml lora-runner --persona <name> --output <path> "
                    "[--provider <name>] [--model <id>] [--max-examples N] "
@@ -2084,8 +2320,10 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
     char **responses = (char **)alloc->alloc(alloc->ctx, total_examples * sizeof(char *));
     size_t *lens = (size_t *)alloc->alloc(alloc->ctx, total_examples * sizeof(size_t));
     if (!responses || !lens) {
-        if (responses) alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
-        if (lens) alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
+        if (responses)
+            alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
+        if (lens)
+            alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
         hu_persona_deinit(alloc, &persona);
         return HU_ERR_OUT_OF_MEMORY;
     }
@@ -2161,8 +2399,8 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
     }
 
     char system_buf[1024];
-    size_t system_len = hu_ml_lora_runner_build_system_prompt(&persona, system_buf,
-                                                              sizeof(system_buf));
+    size_t system_len =
+        hu_ml_lora_runner_build_system_prompt(&persona, system_buf, sizeof(system_buf));
     size_t model_len = model ? strlen(model) : 0;
 
     size_t produced = 0;
@@ -2225,8 +2463,8 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
     }
 #endif
 
-    err = hu_ml_lora_runner_write_json_array(alloc, output_path,
-                                             (const char *const *)responses, lens, total_examples);
+    err = hu_ml_lora_runner_write_json_array(alloc, output_path, (const char *const *)responses,
+                                             lens, total_examples);
     if (err == HU_OK) {
         printf("[lora-runner] persona '%s' → %s (%zu responses)\n", persona_name, output_path,
                total_examples);
@@ -2264,22 +2502,55 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
     const char *before_path = NULL;
     const char *after_path = NULL;
     const char *output_path = NULL;
+    bool judgment_flag = false;
+    const char *judgment_holdout_path = NULL;
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--persona");
-        if (v) { persona_name = v; i++; continue; }
+        if (v) {
+            persona_name = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--before");
-        if (v) { before_path = v; i++; continue; }
+        if (v) {
+            before_path = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--after");
-        if (v) { after_path = v; i++; continue; }
+        if (v) {
+            after_path = v;
+            i++;
+            continue;
+        }
         v = get_opt(argv, argc, i, "--output");
-        if (v) { output_path = v; i++; continue; }
+        if (v) {
+            output_path = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--judgment-holdout");
+        if (v) {
+            judgment_holdout_path = v;
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--judgment") == 0) {
+            judgment_flag = true;
+            continue;
+        }
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Usage: human ml fidelity-status --persona <name> "
-                   "[--before <path>] [--after <path>] [--output <path>]\n\n"
+                   "[--before <path>] [--after <path>] [--output <path>]\n"
+                   "                                 [--judgment] [--judgment-holdout <path>]\n\n"
                    "Emit a single JSON object aggregating LoRA-fidelity\n"
                    "health metrics for downstream dashboards & status\n"
                    "surfaces. When --before and --after are both provided,\n"
-                   "the A/B delta is included.\n");
+                   "the A/B delta is included. When --judgment is set,\n"
+                   "the held-out NLL judgment-fidelity summary is included\n"
+                   "(US-7.6 / INS-A); ships dormant in sprint 7 — emits\n"
+                   "\"judgment_ppl_status\":\"not_supported_no_local_inference\"\n"
+                   "until US-7.6.1 wires a real NLL backend.\n");
             return HU_OK;
         }
     }
@@ -2318,20 +2589,24 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
         const char **strs_b = NULL, **strs_a = NULL;
         size_t *lens_b = NULL, *lens_a = NULL;
         size_t n_b = 0, n_a = 0;
-        if (hu_ml_lora_ab_load_response_set(alloc, before_path, &json_b, &strs_b, &lens_b,
-                                            &n_b) == HU_OK &&
-            hu_ml_lora_ab_load_response_set(alloc, after_path, &json_a, &strs_a, &lens_a,
-                                            &n_a) == HU_OK) {
-            if (hu_communication_style_compare_response_sets(&target, strs_b, lens_b, n_b,
-                                                             strs_a, lens_a, n_a, &sum_a, &sum_b,
+        if (hu_ml_lora_ab_load_response_set(alloc, before_path, &json_b, &strs_b, &lens_b, &n_b) ==
+                HU_OK &&
+            hu_ml_lora_ab_load_response_set(alloc, after_path, &json_a, &strs_a, &lens_a, &n_a) ==
+                HU_OK) {
+            if (hu_communication_style_compare_response_sets(&target, strs_b, lens_b, n_b, strs_a,
+                                                             lens_a, n_a, &sum_a, &sum_b,
                                                              &delta) == HU_OK) {
                 ab_available = true;
             }
         }
-        if (strs_b) alloc->free(alloc->ctx, strs_b, n_b * sizeof(const char *));
-        if (lens_b) alloc->free(alloc->ctx, lens_b, n_b * sizeof(size_t));
-        if (strs_a) alloc->free(alloc->ctx, strs_a, n_a * sizeof(const char *));
-        if (lens_a) alloc->free(alloc->ctx, lens_a, n_a * sizeof(size_t));
+        if (strs_b)
+            alloc->free(alloc->ctx, strs_b, n_b * sizeof(const char *));
+        if (lens_b)
+            alloc->free(alloc->ctx, lens_b, n_b * sizeof(size_t));
+        if (strs_a)
+            alloc->free(alloc->ctx, strs_a, n_a * sizeof(const char *));
+        if (lens_a)
+            alloc->free(alloc->ctx, lens_a, n_a * sizeof(size_t));
         hu_json_free(alloc, json_b);
         hu_json_free(alloc, json_a);
     }
@@ -2344,13 +2619,12 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
     }
     hu_json_object_set(alloc, root, "persona",
                        hu_json_string_new(alloc, persona_name, strlen(persona_name)));
-    hu_json_object_set(alloc, root, "fingerprint_source",
-                       hu_json_string_new(alloc, synthetic ? "synthetic" : "personal_model",
-                                          synthetic ? 9 : 14));
+    hu_json_object_set(
+        alloc, root, "fingerprint_source",
+        hu_json_string_new(alloc, synthetic ? "synthetic" : "personal_model", synthetic ? 9 : 14));
 
     hu_json_value_t *baseline_obj = hu_json_object_new(alloc);
-    hu_json_object_set(alloc, baseline_obj, "scored",
-                       hu_json_number_new(alloc, (double)b_scored));
+    hu_json_object_set(alloc, baseline_obj, "scored", hu_json_number_new(alloc, (double)b_scored));
     hu_json_object_set(alloc, baseline_obj, "mean", hu_json_number_new(alloc, b_mean));
     hu_json_object_set(alloc, baseline_obj, "min", hu_json_number_new(alloc, b_min));
     hu_json_object_set(alloc, baseline_obj, "max", hu_json_number_new(alloc, b_max));
@@ -2368,6 +2642,60 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
                            hu_json_number_new(alloc, (double)sum_b.scored));
     }
     hu_json_object_set(alloc, root, "ab", ab);
+
+    /* US-7.6 — judgment-fidelity (INS-A). Optional; off by default.
+     * Sprint 7 decision D3: ships dormant — production NLL backend is
+     * unregistered, so the scorer reports
+     * judgment_ppl_status="not_supported_no_local_inference" and the
+     * downstream gate emits a visible SKIP rather than a silent pass. */
+    if (judgment_flag) {
+        hu_json_value_t *judgment_obj = hu_json_object_new(alloc);
+        const char *holdout_path =
+            judgment_holdout_path ? judgment_holdout_path : hu_ml_fidelity_default_holdout_path();
+        hu_ml_judgment_holdout_t holdout = {0};
+        hu_ml_judgment_summary_t jsummary = {0};
+        hu_error_t lerr = hu_ml_fidelity_load_holdout(alloc, holdout_path, &holdout);
+        const char *status = "not_supported_no_local_inference";
+        bool ppl_ok = false;
+        double ppl = 0.0;
+        if (lerr == HU_OK) {
+            hu_error_t serr = hu_ml_fidelity_score_judgment(&holdout, &jsummary);
+            if (serr != HU_OK) {
+                status = "score_error";
+            } else if (!jsummary.available) {
+                status = "not_supported_no_local_inference";
+            } else {
+                status = "ok";
+                ppl = exp(jsummary.mean_nll);
+                ppl_ok = true;
+            }
+        } else {
+            status = "holdout_load_failed";
+        }
+        hu_json_object_set(alloc, judgment_obj, "available",
+                           hu_json_bool_new(alloc, jsummary.available));
+        hu_json_object_set(alloc, judgment_obj, "judgment_ppl_status",
+                           hu_json_string_new(alloc, status, strlen(status)));
+        if (ppl_ok) {
+            hu_json_object_set(alloc, judgment_obj, "judgment_ppl", hu_json_number_new(alloc, ppl));
+            hu_json_object_set(alloc, judgment_obj, "mean_nll",
+                               hu_json_number_new(alloc, jsummary.mean_nll));
+            hu_json_object_set(alloc, judgment_obj, "min_nll",
+                               hu_json_number_new(alloc, jsummary.min_nll));
+            hu_json_object_set(alloc, judgment_obj, "max_nll",
+                               hu_json_number_new(alloc, jsummary.max_nll));
+        } else {
+            hu_json_object_set(alloc, judgment_obj, "judgment_ppl", hu_json_null_new(alloc));
+        }
+        hu_json_object_set(alloc, judgment_obj, "judgment_scored",
+                           hu_json_number_new(alloc, (double)jsummary.scored));
+        hu_json_object_set(alloc, judgment_obj, "judgment_skipped",
+                           hu_json_number_new(alloc, (double)jsummary.skipped));
+        hu_json_object_set(alloc, judgment_obj, "holdout_rows",
+                           hu_json_number_new(alloc, (double)holdout.rows_count));
+        hu_json_object_set(alloc, root, "judgment", judgment_obj);
+        hu_ml_fidelity_free_holdout(alloc, &holdout);
+    }
 
     char *out = NULL;
     size_t out_len = 0;
@@ -2636,12 +2964,12 @@ done_collect:
         return err;
     }
 
-    printf("[train-feed-predictor] Training topic predictor (steps=%d, vocab=%zu)\n",
-           max_steps, cfg.gpt.vocab_size);
+    printf("[train-feed-predictor] Training topic predictor (steps=%d, vocab=%zu)\n", max_steps,
+           cfg.gpt.vocab_size);
 
     hu_ml_train_result_t result = {0};
-    err = hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training,
-                      token_bytes, token_bytes_count, &result);
+    err = hu_ml_train(alloc, &model, &optimizer, train_loader, NULL, &cfg.training, token_bytes,
+                      token_bytes_count, &result);
 
     printf("[train-feed-predictor] %s: %zu steps, %.2f bpb, %.1fs\n",
            err == HU_OK ? "Done" : "Failed", result.num_steps, result.val_bpb,
@@ -2731,8 +3059,8 @@ hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char *
         return err;
     }
 
-    err = hu_provider_load_adapter(&prov, alloc, adapter_path, strlen(adapter_path),
-                                   adapter_id, strlen(adapter_id));
+    err = hu_provider_load_adapter(&prov, alloc, adapter_path, strlen(adapter_path), adapter_id,
+                                   strlen(adapter_id));
     if (err != HU_OK) {
         fprintf(stderr, "load_adapter failed: %s\n", hu_error_string(err));
         if (prov.vtable && prov.vtable->deinit)
@@ -2750,12 +3078,217 @@ hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char *
             fprintf(stderr, "unload_adapter failed: %s\n", hu_error_string(err));
         } else {
             const char *after = hu_provider_active_adapter(&prov);
-            printf("{\"unloaded\":true,\"adapter_id_after\":\"%s\"}\n",
-                   after ? after : "(null)");
+            printf("{\"unloaded\":true,\"adapter_id_after\":\"%s\"}\n", after ? after : "(null)");
         }
     }
 
     if (prov.vtable && prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, alloc);
+    return err;
+}
+
+/* US-7.10 — `human ml rl-train --algorithm <name>` router.
+ *
+ * AC-7.10.3 / 4 / 5: routes to SimPO factory, delegates `dpo` to the
+ * existing `hu_ml_cli_dpo_train` path (zero new code in the DPO body),
+ * and emits exit-code-2 "not yet implemented" stubs for ORPO and
+ * GRPO-2. The story explicitly forbids touching the DPO body in this
+ * change.
+ */
+#include "human/ml/rl_trainer.h"
+
+/* Strip the `--algorithm <value>` pair from argv and call
+ * `hu_ml_cli_dpo_train` with the remaining args. The DPO CLI sees a
+ * call shape indistinguishable from `human ml dpo-train ...`, so
+ * AC-7.10.4 holds (no behavior change). */
+static hu_error_t rl_train_delegate_to_dpo(hu_allocator_t *alloc, int argc, const char **argv,
+                                           int algo_flag_index) {
+    /* algo_flag_index points at "--algorithm"; algo_flag_index+1 at "dpo".
+     * Compose a fresh argv with those two slots removed; argv[0] must be
+     * preserved as the dpo subcommand name. */
+    const char **dpo_argv =
+        (const char **)alloc->alloc(alloc->ctx, (size_t)argc * sizeof(*dpo_argv));
+    if (!dpo_argv)
+        return HU_ERR_OUT_OF_MEMORY;
+    int dpo_argc = 0;
+    /* argv[0] is "rl-train"; rewrite to "dpo-train" so any error
+     * message from the DPO path names the command the user actually
+     * dispatched. */
+    dpo_argv[dpo_argc++] = "dpo-train";
+    for (int i = 1; i < argc; i++) {
+        if (i == algo_flag_index || i == algo_flag_index + 1)
+            continue;
+        dpo_argv[dpo_argc++] = argv[i];
+    }
+    hu_error_t err = hu_ml_cli_dpo_train(alloc, dpo_argc, dpo_argv);
+    alloc->free(alloc->ctx, dpo_argv, (size_t)argc * sizeof(*dpo_argv));
+    return err;
+}
+
+hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv) {
+    if (!alloc || argc < 1 || !argv)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *algorithm = NULL;
+    int algo_flag_index = -1;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: human ml rl-train --algorithm {dpo|simpo|orpo|grpo2} "
+                   "[other flags...]\n"
+                   "  --algorithm dpo    Delegate to existing DPO trainer\n"
+                   "  --algorithm simpo  Train via SimPO loss head (Init #06)\n"
+                   "  --algorithm orpo   Train via ORPO loss head (US-11.5)\n"
+                   "  --algorithm grpo2  (not yet implemented — exit 2)\n");
+            return HU_OK;
+        }
+        const char *v = get_opt(argv, argc, i, "--algorithm");
+        if (v) {
+            algorithm = v;
+            algo_flag_index = i;
+            i++;
+            continue;
+        }
+    }
+
+    if (!algorithm) {
+        fprintf(stderr, "rl-train: missing --algorithm flag (expected one of "
+                        "{dpo, simpo, orpo, grpo2})\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    if (strcmp(algorithm, "dpo") == 0) {
+        return rl_train_delegate_to_dpo(alloc, argc, argv, algo_flag_index);
+    }
+
+    /* GRPO-2 remains stubbed (AC-11.5.5 keeps the boundary clean). */
+    if (strcmp(algorithm, "grpo2") == 0) {
+        fprintf(stderr,
+                "rl-train: algorithm '%s' not yet implemented (US-7.10 lands "
+                "SimPO only; ORPO lands in US-11.5; GRPO-2 is deferred)\n",
+                algorithm);
+        return HU_ERR_NOT_SUPPORTED;
+    }
+
+    /* US-11.5: --algorithm orpo — instantiate ORPO factory and run one
+     * train_step. HU_IS_TEST mocks the model forward; non-test builds
+     * currently return HU_ERR_NOT_SUPPORTED because the full forward-
+     * pass wiring is FU-11.5.a (mirror of FU-7.10.a for SimPO). */
+    if (strcmp(algorithm, "orpo") == 0) {
+        hu_orpo_config_t ocfg = {
+            .lambda = 0.1f,
+            .model = NULL,
+        };
+        /* Optional --lambda-orpo override (named per AC-11.5.1; no alias). */
+        for (int i = 1; i < argc; i++) {
+            const char *v = get_opt(argv, argc, i, "--lambda-orpo");
+            if (v) {
+                float l = 0.0f;
+                if (parse_float_arg(v, &l) != 0 || l <= 0.0f) {
+                    fprintf(stderr, "rl-train: invalid --lambda-orpo '%s'\n", v);
+                    return HU_ERR_INVALID_ARGUMENT;
+                }
+                ocfg.lambda = l;
+                i++;
+                continue;
+            }
+        }
+
+        hu_rl_trainer_t otrainer = {0};
+        hu_error_t oerr = hu_rl_trainer_orpo_create(alloc, &ocfg, &otrainer);
+        if (oerr != HU_OK) {
+            fprintf(stderr, "rl-train: orpo factory failed: %s\n", hu_error_string(oerr));
+            return oerr;
+        }
+
+#ifdef HU_IS_TEST
+        /* AC-11.5.1: run train_step without crashing. Loss head returns
+         * a deterministic mock value and never touches the (NULL) model. */
+        hu_preference_pair_t opair = {0};
+        double oloss = 0.0;
+        oerr = otrainer.vtable->train_step(otrainer.ctx, &opair, &oloss);
+        if (oerr == HU_OK)
+            printf("[rl-train] orpo test mode: loss=%.4f\n", oloss);
+        else
+            fprintf(stderr, "rl-train: train_step failed: %s\n", hu_error_string(oerr));
+#else
+        fprintf(stderr, "rl-train: orpo end-to-end train_step requires a model + "
+                        "tokenizer wiring not yet shipped (US-11.5 lands the vtable + "
+                        "loss head; the forward-pass integration is FU-11.5.a).\n");
+        oerr = HU_ERR_NOT_SUPPORTED;
+#endif
+
+        hu_rl_trainer_deinit(&otrainer);
+        return oerr;
+    }
+
+    if (strcmp(algorithm, "simpo") != 0) {
+        fprintf(stderr,
+                "rl-train: unknown algorithm '%s' (expected one of "
+                "{dpo, simpo, orpo, grpo2})\n",
+                algorithm);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* --algorithm simpo: instantiate SimPO factory and run one
+     * train_step against an empty pair (HU_IS_TEST mocks the model
+     * forward; non-test builds currently return HU_ERR_NOT_SUPPORTED
+     * because the full forward-pass wiring is a follow-up story). */
+    hu_simpo_config_t cfg = {
+        .beta = 0.1f,
+        .gamma = 0.5f,
+        .model = NULL,
+    };
+    /* Optional --beta / --gamma overrides for ergonomic CLI use. */
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--beta");
+        if (v) {
+            float b = 0.0f;
+            if (parse_float_arg(v, &b) != 0 || b <= 0.0f) {
+                fprintf(stderr, "rl-train: invalid --beta '%s'\n", v);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            cfg.beta = b;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--gamma");
+        if (v) {
+            float g = 0.0f;
+            if (parse_float_arg(v, &g) != 0 || g < 0.0f) {
+                fprintf(stderr, "rl-train: invalid --gamma '%s'\n", v);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            cfg.gamma = g;
+            i++;
+            continue;
+        }
+    }
+
+    hu_rl_trainer_t trainer = {0};
+    hu_error_t err = hu_rl_trainer_simpo_create(alloc, &cfg, &trainer);
+    if (err != HU_OK) {
+        fprintf(stderr, "rl-train: simpo factory failed: %s\n", hu_error_string(err));
+        return err;
+    }
+
+#ifdef HU_IS_TEST
+    /* AC-7.10.3: run train_step without crashing. In test mode the
+     * loss head returns a deterministic mock value and never touches
+     * the (NULL) model. */
+    hu_preference_pair_t pair = {0};
+    double loss = 0.0;
+    err = trainer.vtable->train_step(trainer.ctx, &pair, &loss);
+    if (err == HU_OK)
+        printf("[rl-train] simpo test mode: loss=%.4f\n", loss);
+    else
+        fprintf(stderr, "rl-train: train_step failed: %s\n", hu_error_string(err));
+#else
+    fprintf(stderr, "rl-train: simpo end-to-end train_step requires a model + "
+                    "tokenizer wiring not yet shipped (US-7.10 lands the vtable + "
+                    "loss head; the forward-pass integration is a follow-up).\n");
+    err = HU_ERR_NOT_SUPPORTED;
+#endif
+
+    hu_rl_trainer_deinit(&trainer);
     return err;
 }

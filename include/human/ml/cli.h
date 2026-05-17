@@ -87,4 +87,12 @@ hu_error_t hu_ml_cli_train_feed_predictor(hu_allocator_t *alloc, int argc, const
  * pipeline is verifiable from a single CLI command. */
 hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char **argv);
 
+/* US-7.10 + US-11.5 — RL trainer dispatch.
+ *
+ * Routes `--algorithm {dpo|simpo|orpo|grpo2}`. DPO delegates to
+ * `hu_ml_cli_dpo_train`; simpo runs the SimPO loss head (US-7.10);
+ * orpo runs the ORPO loss head (US-11.5); grpo2 still returns
+ * HU_ERR_NOT_SUPPORTED. */
+hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv);
+
 #endif
