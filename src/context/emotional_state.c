@@ -1,6 +1,7 @@
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/context/emotional_state.h"
+#include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/string.h"
@@ -20,46 +21,26 @@ typedef struct {
 } hu_emotion_signal_t;
 
 static const hu_emotion_signal_t EMOTION_SIGNALS[] = {
-    {"i love you", "love", 0.95f},
-    {"i miss you", "longing", 0.85f},
-    {"i'm sorry", "remorse", 0.7f},
-    {"i am sorry", "remorse", 0.7f},
-    {"so sorry", "remorse", 0.7f},
-    {"worried about", "worry", 0.8f},
-    {"i'm worried", "worry", 0.8f},
-    {"i am worried", "worry", 0.8f},
-    {"scared", "fear", 0.8f},
-    {"afraid", "fear", 0.75f},
-    {"angry", "anger", 0.8f},
-    {"furious", "anger", 0.9f},
-    {"pissed", "anger", 0.85f},
-    {"frustrated", "frustration", 0.7f},
-    {"sad", "sadness", 0.7f},
-    {"crying", "sadness", 0.85f},
-    {"depressed", "sadness", 0.9f},
-    {"anxious", "anxiety", 0.75f},
-    {"stressed", "stress", 0.7f},
-    {"overwhelmed", "stress", 0.8f},
-    {"exhausted", "fatigue", 0.7f},
-    {"burned out", "fatigue", 0.85f},
-    {"excited", "excitement", 0.75f},
-    {"so happy", "joy", 0.8f},
-    {"thrilled", "excitement", 0.85f},
-    {"proud of", "pride", 0.75f},
-    {"grateful", "gratitude", 0.7f},
-    {"thankful", "gratitude", 0.7f},
-    {"lonely", "loneliness", 0.8f},
-    {"heartbroken", "grief", 0.9f},
-    {"grieving", "grief", 0.9f},
-    {"lost someone", "grief", 0.95f},
-    {"passed away", "grief", 0.95f},
-    {"diagnosis", "worry", 0.85f},
-    {"hospital", "worry", 0.75f},
-    {"surgery", "worry", 0.8f},
-    {"broke up", "heartbreak", 0.85f},
-    {"breakup", "heartbreak", 0.8f},
-    {"fight with", "conflict", 0.7f},
-    {"arguing", "conflict", 0.7f},
+    {"i love you", "love", 0.95f},     {"i miss you", "longing", 0.85f},
+    {"i'm sorry", "remorse", 0.7f},    {"i am sorry", "remorse", 0.7f},
+    {"so sorry", "remorse", 0.7f},     {"worried about", "worry", 0.8f},
+    {"i'm worried", "worry", 0.8f},    {"i am worried", "worry", 0.8f},
+    {"scared", "fear", 0.8f},          {"afraid", "fear", 0.75f},
+    {"angry", "anger", 0.8f},          {"furious", "anger", 0.9f},
+    {"pissed", "anger", 0.85f},        {"frustrated", "frustration", 0.7f},
+    {"sad", "sadness", 0.7f},          {"crying", "sadness", 0.85f},
+    {"depressed", "sadness", 0.9f},    {"anxious", "anxiety", 0.75f},
+    {"stressed", "stress", 0.7f},      {"overwhelmed", "stress", 0.8f},
+    {"exhausted", "fatigue", 0.7f},    {"burned out", "fatigue", 0.85f},
+    {"excited", "excitement", 0.75f},  {"so happy", "joy", 0.8f},
+    {"thrilled", "excitement", 0.85f}, {"proud of", "pride", 0.75f},
+    {"grateful", "gratitude", 0.7f},   {"thankful", "gratitude", 0.7f},
+    {"lonely", "loneliness", 0.8f},    {"heartbroken", "grief", 0.9f},
+    {"grieving", "grief", 0.9f},       {"lost someone", "grief", 0.95f},
+    {"passed away", "grief", 0.95f},   {"diagnosis", "worry", 0.85f},
+    {"hospital", "worry", 0.75f},      {"surgery", "worry", 0.8f},
+    {"broke up", "heartbreak", 0.85f}, {"breakup", "heartbreak", 0.8f},
+    {"fight with", "conflict", 0.7f},  {"arguing", "conflict", 0.7f},
 };
 
 #define EMOTION_SIGNAL_COUNT (sizeof(EMOTION_SIGNALS) / sizeof(EMOTION_SIGNALS[0]))
@@ -122,14 +103,13 @@ static bool detect_emotion(const char *text, size_t text_len, const char **emoti
 /* ── mood_log table management ───────────────────────────────────── */
 
 static hu_error_t ensure_mood_log_table(sqlite3 *db) {
-    static const char sql[] =
-        "CREATE TABLE IF NOT EXISTS mood_log ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "contact_id TEXT NOT NULL,"
-        "mood TEXT NOT NULL,"
-        "intensity REAL NOT NULL,"
-        "context TEXT,"
-        "created_at INTEGER NOT NULL)";
+    static const char sql[] = "CREATE TABLE IF NOT EXISTS mood_log ("
+                              "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                              "contact_id TEXT NOT NULL,"
+                              "mood TEXT NOT NULL,"
+                              "intensity REAL NOT NULL,"
+                              "context TEXT,"
+                              "created_at INTEGER NOT NULL)";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -159,33 +139,26 @@ hu_error_t hu_emotional_state_record(hu_allocator_t *alloc, hu_memory_t *memory,
     if (!detect_emotion(text, text_len, &emotion, &intensity, &topic_pos))
         return HU_OK;
 
-    /* Extract a short context snippet around the match */
+    /* P2-2 (2026-05-16): NEVER store a raw window of user text as topic.
+     * The previous code copied 60 chars from around the keyword match, which
+     * shipped substrings like "but boy I am just more lonely now" to family
+     * contacts via F25/F30. Use the proper noun-phrase extractor, and if it
+     * yields nothing, fall back to the emotion keyword via the SAFE
+     * predicate. NEVER fall back to raw text. */
+    (void)topic_pos;
     char context_buf[128];
     context_buf[0] = '\0';
-    if (topic_pos) {
-        size_t offset = (size_t)(topic_pos - text);
-        size_t start = (offset > 30) ? offset - 30 : 0;
-        size_t remaining = text_len - start;
-        size_t copy_len = remaining < sizeof(context_buf) - 1 ? remaining : sizeof(context_buf) - 1;
-        memcpy(context_buf, text + start, copy_len);
-        context_buf[copy_len] = '\0';
-        if (start > 0) {
-            char *space = strchr(context_buf, ' ');
-            if (space && (size_t)(space - context_buf) < 10) {
-                size_t shift = (size_t)(space - context_buf) + 1;
-                memmove(context_buf, context_buf + shift, strlen(context_buf + shift) + 1);
-            }
-        }
-    }
+    (void)hu_conversation_extract_topic(text, text_len, context_buf, sizeof(context_buf));
 
     char topic_buf[64];
-    int tn = snprintf(topic_buf, sizeof(topic_buf), "%.60s", context_buf[0] ? context_buf : emotion);
-    if (tn <= 0)
+    size_t topic_len =
+        hu_emotional_moment_select_topic(context_buf, emotion, topic_buf, sizeof(topic_buf));
+    if (topic_len == 0)
         return HU_OK;
 
     /* Write to emotional_moments table (existing infrastructure) */
-    hu_emotional_moment_record(alloc, memory, contact_id, contact_id_len, topic_buf,
-                               (size_t)tn, emotion, strlen(emotion), intensity);
+    hu_emotional_moment_record(alloc, memory, contact_id, contact_id_len, topic_buf, topic_len,
+                               emotion, strlen(emotion), intensity);
 
     /* Write to mood_log table */
     hu_error_t err = ensure_mood_log_table(db);
@@ -193,10 +166,11 @@ hu_error_t hu_emotional_state_record(hu_allocator_t *alloc, hu_memory_t *memory,
         return err;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
-                                "INSERT INTO mood_log(contact_id,mood,intensity,context,created_at) "
-                                "VALUES(?,?,?,?,?)",
-                                -1, &stmt, NULL);
+    int rc =
+        sqlite3_prepare_v2(db,
+                           "INSERT INTO mood_log(contact_id,mood,intensity,context,created_at) "
+                           "VALUES(?,?,?,?,?)",
+                           -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -233,8 +207,8 @@ static void time_ago_label(int64_t seconds_ago, char *buf, size_t cap) {
 }
 
 hu_error_t hu_emotional_state_get_recent(hu_allocator_t *alloc, hu_memory_t *memory,
-                                         const char *contact_id, size_t contact_id_len,
-                                         char **out, size_t *out_len) {
+                                         const char *contact_id, size_t contact_id_len, char **out,
+                                         size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -251,11 +225,10 @@ hu_error_t hu_emotional_state_get_recent(hu_allocator_t *alloc, hu_memory_t *mem
         return HU_OK;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(
-        db,
-        "SELECT mood, intensity, context, created_at FROM mood_log "
-        "WHERE contact_id=? ORDER BY created_at DESC LIMIT 5",
-        -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db,
+                                "SELECT mood, intensity, context, created_at FROM mood_log "
+                                "WHERE contact_id=? ORDER BY created_at DESC LIMIT 5",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_OK;
 
@@ -293,9 +266,8 @@ hu_error_t hu_emotional_state_get_recent(hu_allocator_t *alloc, hu_memory_t *mem
             most_recent_intensity = (float)intensity;
             if (context) {
                 size_t clen = strlen(context);
-                size_t copy = clen < sizeof(most_recent_context) - 1
-                                  ? clen
-                                  : sizeof(most_recent_context) - 1;
+                size_t copy =
+                    clen < sizeof(most_recent_context) - 1 ? clen : sizeof(most_recent_context) - 1;
                 memcpy(most_recent_context, context, copy);
                 most_recent_context[copy] = '\0';
             }
@@ -348,8 +320,8 @@ hu_error_t hu_emotional_state_get_recent(hu_allocator_t *alloc, hu_memory_t *mem
     return HU_OK;
 }
 
-hu_error_t hu_emotional_state_get_seth_mood(hu_allocator_t *alloc, hu_memory_t *memory,
-                                            char **out, size_t *out_len) {
+hu_error_t hu_emotional_state_get_seth_mood(hu_allocator_t *alloc, hu_memory_t *memory, char **out,
+                                            size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -372,11 +344,10 @@ hu_error_t hu_emotional_state_get_seth_mood(hu_allocator_t *alloc, hu_memory_t *
     int64_t day_ago = now_ts - 86400;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(
-        db,
-        "SELECT mood, intensity FROM mood_log "
-        "WHERE created_at>=? ORDER BY created_at DESC LIMIT 20",
-        -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db,
+                                "SELECT mood, intensity FROM mood_log "
+                                "WHERE created_at>=? ORDER BY created_at DESC LIMIT 20",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_OK;
 
@@ -431,8 +402,7 @@ hu_error_t hu_emotional_state_get_seth_mood(hu_allocator_t *alloc, hu_memory_t *
         n = snprintf(buf, SETH_MOOD_BUF_CAP,
                      "\n[Seth's day] Seth's had %zu conversation%s today, "
                      "average emotional intensity %.1f.\n",
-                     total, total == 1 ? "" : "s",
-                     total > 0 ? sum_intensity / (float)total : 0.0f);
+                     total, total == 1 ? "" : "s", total > 0 ? sum_intensity / (float)total : 0.0f);
     }
 #undef SETH_MOOD_BUF_CAP
 
@@ -467,8 +437,8 @@ hu_error_t hu_emotional_state_record(hu_allocator_t *alloc, hu_memory_t *memory,
 }
 
 hu_error_t hu_emotional_state_get_recent(hu_allocator_t *alloc, hu_memory_t *memory,
-                                         const char *contact_id, size_t contact_id_len,
-                                         char **out, size_t *out_len) {
+                                         const char *contact_id, size_t contact_id_len, char **out,
+                                         size_t *out_len) {
     (void)alloc;
     (void)memory;
     (void)contact_id;
@@ -480,8 +450,8 @@ hu_error_t hu_emotional_state_get_recent(hu_allocator_t *alloc, hu_memory_t *mem
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_emotional_state_get_seth_mood(hu_allocator_t *alloc, hu_memory_t *memory,
-                                            char **out, size_t *out_len) {
+hu_error_t hu_emotional_state_get_seth_mood(hu_allocator_t *alloc, hu_memory_t *memory, char **out,
+                                            size_t *out_len) {
     (void)alloc;
     (void)memory;
     if (out)

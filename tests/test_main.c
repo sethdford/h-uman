@@ -230,6 +230,7 @@ void run_stm_tests(void);
 void run_emotional_graph_tests(void);
 void run_comfort_patterns_tests(void);
 void run_emotional_moments_tests(void);
+void run_emotional_state_tests(void);
 void run_contact_style_overlay_tests(void);
 void run_graph_tests(void);
 void run_w1_bitemporal_tests(void);
@@ -822,6 +823,7 @@ int main(int argc, char **argv) {
     run_emotional_graph_tests();
     run_comfort_patterns_tests();
     run_emotional_moments_tests();
+    run_emotional_state_tests();
     run_contact_style_overlay_tests();
     run_graph_tests();
     run_w1_bitemporal_tests();
