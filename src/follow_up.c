@@ -1,7 +1,11 @@
 #include "human/follow_up.h"
 
+#include <ctype.h>
+#include <string.h>
+
 /* ──────────────────────────────────────────────────────────────────────────
- * Follow-up delay computation. See include/human/follow_up.h for contract.
+ * Follow-up delay computation + warmth-tier + template selection.
+ * See include/human/follow_up.h for the full contract.
  *
  * Implementation notes:
  *   - hu_chronotype_is_active_hour() (from circadian.h) is the authority on
@@ -11,6 +15,9 @@
  *     window something's deeply wrong and we drop the follow-up.
  *   - All math is uint64_t to avoid 32-bit overflow on read_at_ms (which is
  *     epoch ms ≈ 1.7e12).
+ *   - The warmth-string-to-enum and template-selector pieces are kept as
+ *     separate small functions so each is independently testable; the
+ *     composite hu_followup_decide() bundles them.
  * ────────────────────────────────────────────────────────────────────────── */
 
 #define MS_PER_MIN   ((uint64_t)60ULL * 1000ULL)
@@ -78,4 +85,83 @@ uint64_t hu_followup_compute_send_time(const hu_followup_input_t *in) {
         return 0;
 
     return candidate;
+}
+
+/* ── Warmth-string → tier enum ──────────────────────────────────────────── */
+
+/* Case-insensitive substring search. Returns true if `needle` is found in
+ * `haystack` ignoring case. Empty needle returns false (defensive). */
+static bool ci_contains(const char *haystack, const char *needle) {
+    if (!haystack || !needle || !needle[0])
+        return false;
+    size_t nlen = strlen(needle);
+    size_t hlen = strlen(haystack);
+    if (nlen > hlen)
+        return false;
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        size_t j = 0;
+        for (; j < nlen; j++) {
+            char a = (char)tolower((unsigned char)haystack[i + j]);
+            char b = (char)tolower((unsigned char)needle[j]);
+            if (a != b)
+                break;
+        }
+        if (j == nlen)
+            return true;
+    }
+    return false;
+}
+
+hu_followup_warmth_t hu_followup_warmth_from_string(const char *warmth_level) {
+    if (!warmth_level || !warmth_level[0])
+        return HU_FOLLOWUP_WARMTH_NONE;
+
+    /* CLOSE keywords first — "close friend" must map to CLOSE, not FRIEND.
+     * The persona conventions in src/context/conversation.c already use
+     * "high" / "warm" for close relationships; we accept both that and
+     * the more explicit "close". */
+    if (ci_contains(warmth_level, "close") || ci_contains(warmth_level, "high") ||
+        ci_contains(warmth_level, "warm"))
+        return HU_FOLLOWUP_WARMTH_CLOSE;
+
+    if (ci_contains(warmth_level, "friend"))
+        return HU_FOLLOWUP_WARMTH_FRIEND;
+
+    /* Acquaintance / unknown / anything else: no follow-up. */
+    return HU_FOLLOWUP_WARMTH_NONE;
+}
+
+/* ── Template selector ──────────────────────────────────────────────────── */
+
+const char *hu_followup_template_for_warmth(hu_followup_warmth_t warmth) {
+    switch (warmth) {
+    case HU_FOLLOWUP_WARMTH_CLOSE:
+        return "hey, just bumping this";
+    case HU_FOLLOWUP_WARMTH_FRIEND:
+        return "any thoughts on this?";
+    case HU_FOLLOWUP_WARMTH_NONE:
+    default:
+        return NULL;
+    }
+}
+
+/* ── Composite decision ─────────────────────────────────────────────────── */
+
+hu_followup_decision_t hu_followup_decide(const hu_followup_input_t *in) {
+    hu_followup_decision_t out = {0};
+    if (!in)
+        return out;
+
+    uint64_t send_at = hu_followup_compute_send_time(in);
+    if (send_at == 0)
+        return out;
+
+    const char *tmpl = hu_followup_template_for_warmth(in->warmth);
+    if (!tmpl)
+        return out;
+
+    out.should_schedule = true;
+    out.send_at_ms = send_at;
+    out.template_text = tmpl;
+    return out;
 }
