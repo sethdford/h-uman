@@ -152,7 +152,7 @@ In ascending order of confidence:
 **What this PR does NOT deliver (and shouldn't):**
 
 - An actual DP-SGD implementation (Gap 5 #1). Multi-week work.
-- The integration test for the DPO extractor (Gap 1). Needs a build-flag dance worth doing in its own PR.
+- The e2e/wiring test for the DPO extractor (Gap 1). Needs a build-flag dance worth doing in its own PR.
 - Embedding-based personalization (Gap 2). Multi-month.
 - Multimodal (Gap 4). Multi-month.
 - Distribution (Gap 6). Not engineering.
