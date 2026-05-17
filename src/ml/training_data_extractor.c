@@ -458,8 +458,18 @@ hu_error_t hu_training_data_extract_dpo_from_db(sqlite3 *db, int correction_wind
                 *pairs_created = count;
                 return HU_ERR_IO;
             }
-            sqlite3_step(tx);
+            /* Must check step() too — Cursor Bugbot 2026-05-17 round 3.
+             * If BEGIN silently fails (e.g., transaction already open
+             * from a leaked prior iteration), the subsequent INSERTs
+             * auto-commit individually and re-introduce the orphan-row
+             * race this wrap is meant to prevent. */
+            int begin_rc = sqlite3_step(tx);
             sqlite3_finalize(tx);
+            if (begin_rc != SQLITE_DONE) {
+                sqlite3_finalize(stmt);
+                *pairs_created = count;
+                return HU_ERR_IO;
+            }
         }
 
         bool tx_ok = false;
@@ -502,10 +512,35 @@ hu_error_t hu_training_data_extract_dpo_from_db(sqlite3 *db, int correction_wind
         {
             sqlite3_stmt *tx = NULL;
             const char *tx_sql = tx_ok ? "COMMIT" : "ROLLBACK";
-            if (sqlite3_prepare_v2(db, tx_sql, -1, &tx, NULL) == SQLITE_OK) {
-                sqlite3_step(tx);
-                sqlite3_finalize(tx);
+            if (sqlite3_prepare_v2(db, tx_sql, -1, &tx, NULL) != SQLITE_OK) {
+                /* Cannot finalize the transaction state. Fail loud
+                 * rather than leak an open transaction into the next
+                 * iteration. Cursor Bugbot 2026-05-17 round 3. */
+                sqlite3_finalize(stmt);
+                *pairs_created = count;
+                return HU_ERR_IO;
             }
+            int tx_rc = sqlite3_step(tx);
+            sqlite3_finalize(tx);
+            if (tx_ok && tx_rc != SQLITE_DONE) {
+                /* COMMIT failed: the transaction may still be open.
+                 * Don't increment count — neither write is durable yet
+                 * (SQLite docs: COMMIT failure means caller should
+                 * either retry COMMIT or call ROLLBACK). Best-effort
+                 * ROLLBACK then return error. */
+                sqlite3_stmt *rb = NULL;
+                if (sqlite3_prepare_v2(db, "ROLLBACK", -1, &rb, NULL) == SQLITE_OK) {
+                    sqlite3_step(rb);
+                    sqlite3_finalize(rb);
+                }
+                sqlite3_finalize(stmt);
+                *pairs_created = count;
+                return HU_ERR_IO;
+            }
+            /* ROLLBACK step return is best-effort; if it fails the
+             * transaction may be auto-rolled-back by the next BEGIN
+             * anyway. Don't fail the outer loop on a ROLLBACK step
+             * error since we're already in the failure path. */
         }
         if (!tx_ok)
             continue;
