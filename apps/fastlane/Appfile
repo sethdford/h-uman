@@ -1,0 +1,24 @@
+# fastlane Appfile — single source of truth for h-uman bundle IDs.
+#
+# Story US-14.6 resolves the bundle-ID open question
+# (sprints/sprint-14/stories.md:176) in favor of `ai.human.*` to match the
+# iOS Xcode project (apps/ios/HumaniOS.xcodeproj/project.pbxproj already uses
+# `ai.human.ios`, `ai.human.ios.widget`, `ai.human.ios.uitests`) and to keep
+# a single reverse-DNS family across platforms.
+#
+# Per-platform identifiers (used by fastlane gym / produce / pilot when those
+# lanes are wired up by US-14.1 / US-14.3):
+#   mac: ai.human.mac
+#   ios: ai.human.ios
+app_identifier(["ai.human.mac", "ai.human.ios"])
+
+for_platform :mac do
+  app_identifier "ai.human.mac"
+end
+
+for_platform :ios do
+  app_identifier "ai.human.ios"
+end
+
+# team_id intentionally NOT pinned here; set via APPLE_TEAM_ID env so secret
+# rotation doesn't require a code change (US-14.1 / US-14.2 own signing).

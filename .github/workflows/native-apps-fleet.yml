@@ -31,6 +31,59 @@ env:
   GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=4 -Dkotlin.incremental=false"
 
 jobs:
+  entitlements-check:
+    name: macOS app · entitlements + Fastfile lint (US-14.6)
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: plutil -lint Human.entitlements
+        run: plutil -lint apps/macos/Human.entitlements
+
+      - name: Sandbox-escape entitlements MUST NOT appear (negative grep)
+        # Per .claude/rules/tests-that-pin-bugs.md, this is a NEGATIVE assertion:
+        # we assert the file does NOT contain any sandbox-escape entitlement.
+        # A match here is the failure case (exit 1 from us); zero matches from
+        # grep means our check passes.
+        run: |
+          set -euo pipefail
+          pattern='disable-library-validation|allow-unsigned-executable-memory|disable-executable-page-protection|allow-dyld-environment-variables'
+          if grep -E "$pattern" apps/macos/Human.entitlements; then
+            echo "::error file=apps/macos/Human.entitlements::Sandbox-escape entitlement detected — see US-14.6 design."
+            exit 1
+          fi
+          echo "ok: no sandbox-escape entitlements"
+
+      - name: Required entitlements ARE present (positive grep)
+        run: |
+          set -euo pipefail
+          grep -F 'com.apple.security.app-sandbox' apps/macos/Human.entitlements
+          grep -F 'com.apple.security.network.client' apps/macos/Human.entitlements
+          grep -F 'com.apple.security.network.server' apps/macos/Human.entitlements
+
+      - name: Bundle IDs reconciled to ai.human.*
+        # AC-14.6.3 — Fastfile must reference ai.human.mac and ai.human.ios.
+        # Also assert macOS project.yml bundleIdPrefix is reconciled to ai.human
+        # (was ai.humanlabs in US-14.1; US-14.6 reconciles to match iOS).
+        run: |
+          set -euo pipefail
+          grep -F 'ai.human.mac' apps/Fastfile
+          grep -F 'ai.human.ios' apps/Fastfile
+          grep -F 'ai.human.mac' apps/fastlane/Appfile
+          grep -F 'ai.human.ios' apps/fastlane/Appfile
+          grep -E '^\s*bundleIdPrefix:\s*ai\.human\s*$' apps/macos/project.yml
+          grep -E '^\s*PRODUCT_BUNDLE_IDENTIFIER:\s*ai\.human\.mac\s*$' apps/macos/project.yml
+
+      - name: Fastlane lanes discoverable (best-effort)
+        # `bundle exec fastlane lanes` requires a Gemfile + ruby + fastlane gem
+        # which the workflow does not yet install (US-14.1/3 own that). For now
+        # we sanity-check the lane keywords are present in the Fastfile.
+        run: |
+          set -euo pipefail
+          grep -F 'lane :mac_archive' apps/Fastfile
+          grep -F 'lane :ios_archive' apps/Fastfile
+
   human-kit-swift:
     name: HumanKit · Swift PM
     runs-on: macos-latest
@@ -251,6 +304,7 @@ jobs:
     name: Fleet SOTA gate (award-tier)
     runs-on: ubuntu-latest
     needs:
+      - entitlements-check
       - human-kit-swift
       - ios-simulator-fleet
       - android-emulator-fleet
@@ -260,6 +314,7 @@ jobs:
     steps:
       - name: Summarize + enforce all-green
         env:
+          ENT: ${{ needs.entitlements-check.result }}
           HK: ${{ needs.human-kit-swift.result }}
           IOS: ${{ needs.ios-simulator-fleet.result }}
           AND: ${{ needs.android-emulator-fleet.result }}
@@ -273,6 +328,7 @@ jobs:
             echo ""
             echo "| Stage | Result |"
             echo "| --- | --- |"
+            echo "| macOS entitlements + Fastfile lint (US-14.6) | \`$ENT\` |"
             echo "| HumanKit Swift PM | \`$HK\` |"
             echo "| iOS simulator matrix (XCUITest) | \`$IOS\` |"
             echo "| Android emulator matrix (Compose) | \`$AND\` |"
@@ -286,7 +342,7 @@ jobs:
             echo "- **Distributable**: macOS \`.xcarchive\` produced under Release config and codesigned with an Apple Development identity (US-14.1)."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ] || [ "$MACARC" != success ]; then
+          if [ "$ENT" != success ] || [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ] || [ "$MACARC" != success ]; then
             echo "::error::Fleet SOTA gate failed — every matrix job must be success."
             exit 1
           fi

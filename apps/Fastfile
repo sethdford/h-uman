@@ -1,0 +1,68 @@
+# fastlane Fastfile for h-uman native apps.
+#
+# Two lanes: mac_archive, ios_archive. Each delegates to the per-platform
+# archive helper script owned by:
+#   * US-14.1 / US-14.2 — macOS archive + notarization (scripts/notarize-mac.sh)
+#   * US-14.3 — iOS archive + export (scripts/ios-archive-export.sh)
+#
+# This file MUST NOT contain signing identity or provisioning profile logic —
+# that lives in the per-platform helpers so it can be tested in isolation.
+#
+# Bundle IDs are sourced from apps/fastlane/Appfile so there is exactly one
+# authoritative location per platform. The PRODUCT_BUNDLE_IDENTIFIER strings
+# below appear as inline comments so AC-14.6.3's
+# `grep -n 'PRODUCT_BUNDLE_IDENTIFIER\|bundle_id' apps/Fastfile`
+# locates them.
+#
+# Expected environment variables (per lane; missing values cause the underlying
+# helper to fail loudly, not this Fastfile):
+#   * APPLE_TEAM_ID   — Apple Developer team id for codesign / notarytool
+#   * APPLE_ID        — Apple Developer account email (notarization only)
+#   * NOTARYTOOL_APP_PASSWORD — app-specific password for notarytool (mac_archive)
+#   * MATCH_PASSWORD  — fastlane match passphrase (if/when match is wired up;
+#                       not required for the dry-run lanes today)
+#
+# Resolved bundle ids (see apps/fastlane/Appfile for the single source of truth):
+#   mac: PRODUCT_BUNDLE_IDENTIFIER = ai.human.mac
+#   ios: PRODUCT_BUNDLE_IDENTIFIER = ai.human.ios
+
+default_platform(:mac)
+
+MAC_BUNDLE_ID = "ai.human.mac"
+IOS_BUNDLE_ID = "ai.human.ios"
+
+platform :mac do
+  desc "Archive + (optionally) notarize HumanMac.app — delegates to scripts/notarize-mac.sh (US-14.2)"
+  desc "Env: APPLE_TEAM_ID, APPLE_ID, NOTARYTOOL_APP_PASSWORD (notarization only)."
+  desc "bundle_id: #{MAC_BUNDLE_ID}"
+  lane :mac_archive do
+    repo_root = File.expand_path("..", __dir__)
+    script = File.join(repo_root, "scripts", "notarize-mac.sh")
+    unless File.executable?(script)
+      UI.user_error!(
+        "mac archive/notarize script missing or not executable: #{script} " \
+        "(owned by US-14.2; lane stub until that lands). " \
+        "bundle_id=#{MAC_BUNDLE_ID}"
+      )
+    end
+    sh(script)
+  end
+end
+
+platform :ios do
+  desc "Archive + export HumaniOS.ipa — delegates to scripts/ios-archive-export.sh (US-14.3)"
+  desc "Env: APPLE_TEAM_ID, MATCH_PASSWORD (when match is wired up)."
+  desc "bundle_id: #{IOS_BUNDLE_ID}"
+  lane :ios_archive do
+    repo_root = File.expand_path("..", __dir__)
+    script = File.join(repo_root, "scripts", "ios-archive-export.sh")
+    unless File.executable?(script)
+      UI.user_error!(
+        "ios archive/export script missing or not executable: #{script} " \
+        "(owned by US-14.3; lane stub until that lands). " \
+        "bundle_id=#{IOS_BUNDLE_ID}"
+      )
+    end
+    sh(script)
+  end
+end

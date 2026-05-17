@@ -1,6 +1,6 @@
 name: Human
 options:
-  bundleIdPrefix: ai.humanlabs
+  bundleIdPrefix: ai.human
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
@@ -30,7 +30,8 @@ targets:
         product: HumanOnDeviceServer
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.humanlabs.mac
+        PRODUCT_BUNDLE_IDENTIFIER: ai.human.mac
+        CODE_SIGN_ENTITLEMENTS: Human.entitlements
         PRODUCT_NAME: Human
         MARKETING_VERSION: "1.1.0"
         CURRENT_PROJECT_VERSION: "1"
@@ -42,9 +43,10 @@ targets:
         # CODE_SIGN_* deliberately unset here — CI passes them via xcodebuild
         # flags (CODE_SIGN_STYLE=Manual, CODE_SIGN_IDENTITY="Apple Development",
         # DEVELOPMENT_TEAM=<secret>). Local builds keep automatic signing.
-        # Info.plist + entitlements: US-14.6 will introduce
-        # apps/macos/Info.plist and apps/macos/Human.entitlements. Until then,
-        # GENERATE_INFOPLIST_FILE produces a minimal plist at build time.
+        # Info.plist + entitlements: US-14.6 introduced
+        # apps/macos/Human.entitlements (wired above via CODE_SIGN_ENTITLEMENTS).
+        # GENERATE_INFOPLIST_FILE produces a minimal plist at build time; a
+        # checked-in Info.plist can be added later if specific keys are needed.
         # HumanKit sources are pulled in via the SwiftPM `packages` dependency
         # above — listing them under `sources:` here would cause duplicate
         # symbols at link time.
