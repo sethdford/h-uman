@@ -480,7 +480,13 @@ static int retrain_slow_path(char *out, size_t cap, const char *slow_dir, int ve
 /* Build today's quarantine filename. */
 static int retrain_quarantine_path(char *out, size_t cap, const char *quarantine_dir,
                                    const char *today_yyyymmdd) {
-    char buf[16];
+    /* PR #115 / Ubuntu CI fix: GCC -Werror=format-truncation flags this
+     * because tm_year+1900 can theoretically be multi-digit beyond YYYY
+     * (e.g. years > 9999). 16 is enough for today but the analyzer is
+     * conservative; 32 leaves headroom and silences -Werror without
+     * pragma. Clang (macOS) doesn't enforce this warning by default,
+     * which is why local builds passed. */
+    char buf[32];
     if (!today_yyyymmdd || !*today_yyyymmdd) {
         time_t t = time(NULL);
         struct tm tmv;
@@ -636,7 +642,15 @@ hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_jo
     }
 
     hu_error_t final_rc = HU_OK;
-    char payload[512];
+    /* PR #115 / Ubuntu CI fix: payload must absorb the worst case of
+     * `qpath[1024]` embedded in a JSON wrapper (verdict, kl_nats, etc).
+     * GCC -Werror=format-truncation on Linux refused 512 because
+     * `snprintf(payload, 512, "...%s...", qpath)` with qpath up to 1023
+     * bytes is provably truncatable. 2048 leaves headroom for JSON
+     * structure + qpath + numeric fields without changing semantics.
+     * Clang on macOS doesn't enforce this warning by default; local
+     * builds passed silently. */
+    char payload[2048];
 
     /* ── STEP 1: pair-count probe ────────────────────────────────────── */
     const char *miner_argv0 = ctx->miner_argv0 ? ctx->miner_argv0 : "human";
