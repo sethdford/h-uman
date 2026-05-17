@@ -1115,6 +1115,184 @@ static void guard_g7_case_insensitive(void) {
     }
 }
 
+/* ── Sprint 36 — persona identity / core-anchor echo (G8) ──────────────
+ *
+ * The guard rejects model output that quotes a 25+ byte verbatim
+ * substring of the loaded persona's `identity` (or `core_anchor`
+ * fallback). Catches first-person identity leaks like `"i'm a Chief
+ * Architect at Pure Health Solutions"` that G7 cannot catch (no name
+ * in third-person construct). Case-insensitive. Disabled when
+ * identity is NULL or shorter than 25 bytes. */
+
+static void guard_g8_rejects_verbatim_identity_quote(void) {
+    /* identity is 58 bytes; response quotes 35 bytes contiguously. */
+    static const char identity[] =
+        "51-year-old technical professional, lives alone with a cat";
+    const char *raw =
+        "yeah, i'm a technical professional, lives alone too lol";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_identity_echo);
+}
+
+static void guard_g8_rejects_chief_architect_phrase(void) {
+    static const char identity[] = "Chief Architect at Pure Health Solutions";
+    const char *raw =
+        "yeah i'm a Chief Architect at Pure Health Solutions, busy day";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_identity_echo);
+}
+
+static void guard_g8_passes_short_overlap(void) {
+    /* Identity has "senior software engineer" but response only shares
+     * "i'm a senior" (12 bytes contiguous). 12 < 25 → no fire. */
+    static const char identity[] = "a senior software engineer at the company";
+    const char *raw = "i'm a senior dev";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT(!report.detected_persona_identity_echo);
+}
+
+static void guard_g8_passes_when_identity_null(void) {
+    const char *raw = "yeah i'm a Chief Architect at Pure Health Solutions";
+    hu_guard_context_t ctx = {0};
+    /* persona_identity = NULL by zero-init. */
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT(!report.detected_persona_identity_echo);
+}
+
+static void guard_g8_passes_when_identity_too_short(void) {
+    /* 2-byte identity is below the 25-byte threshold. */
+    static const char identity[] = "hi";
+    const char *raw = "hi there, what's up";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT(!report.detected_persona_identity_echo);
+}
+
+static void guard_g8_case_insensitive(void) {
+    static const char identity[] = "chief architect at pure health solutions";
+    const char *raw = "I'M A CHIEF ARCHITECT AT PURE HEALTH SOLUTIONS";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_identity_echo);
+}
+
+static void guard_g8_orthogonal_to_g6(void) {
+    /* Both director_text and persona_identity are set. The response
+     * quotes 30+ bytes of identity but does NOT quote the director.
+     * Only G8 (not G6) should fire. */
+    static const char director[] =
+        "casual short, dry; respond briefly and slightly skeptical";
+    static const char identity[] = "Chief Architect at Pure Health Solutions";
+    const char *raw =
+        "i'm a Chief Architect at Pure Health Solutions, what's up";
+    hu_guard_context_t ctx = {0};
+    ctx.director_text = director;
+    ctx.director_len = sizeof(director) - 1;
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_identity_echo);
+    HU_ASSERT(!report.detected_director_echo);
+}
+
+static void guard_g8_orthogonal_to_g7(void) {
+    /* Both persona_name and persona_identity set. The response quotes
+     * 30 bytes of identity but does NOT contain the name in any
+     * third-person construct. Only G8 (not G7) should fire. */
+    static const char identity[] = "Chief Architect at Pure Health Solutions";
+    const char *raw = "i'm a Chief Architect at Pure Health Solutions today";
+    hu_guard_context_t ctx = {0};
+    ctx.persona_name = "Seth";
+    ctx.persona_name_len = 4;
+    ctx.persona_identity = identity;
+    ctx.persona_identity_len = sizeof(identity) - 1;
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, strlen(raw), &ctx, &out, &out_len,
+                                            &outcome, &report),
+                 HU_OK);
+    HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
+    HU_ASSERT(report.detected_persona_identity_echo);
+    HU_ASSERT(!report.detected_persona_pii_echo);
+}
+
 /* ── Sprint 33 — recent_assistant_avg_len helper ───────────────────────
  *
  * Production call sites (agent_stream.c, agent_turn.c) populate
@@ -1295,4 +1473,17 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_g7_skips_when_persona_name_too_short);
     HU_RUN_TEST(guard_g7_word_boundary_isolates_name);
     HU_RUN_TEST(guard_g7_case_insensitive);
+
+    /* Sprint 36 — persona identity / core-anchor echo (G8). Catches
+     * verbatim 25+ byte substrings of the loaded persona's biographical
+     * identity string in the response, regardless of whether the name
+     * appears (covers first-person identity leaks). */
+    HU_RUN_TEST(guard_g8_rejects_verbatim_identity_quote);
+    HU_RUN_TEST(guard_g8_rejects_chief_architect_phrase);
+    HU_RUN_TEST(guard_g8_passes_short_overlap);
+    HU_RUN_TEST(guard_g8_passes_when_identity_null);
+    HU_RUN_TEST(guard_g8_passes_when_identity_too_short);
+    HU_RUN_TEST(guard_g8_case_insensitive);
+    HU_RUN_TEST(guard_g8_orthogonal_to_g6);
+    HU_RUN_TEST(guard_g8_orthogonal_to_g7);
 }

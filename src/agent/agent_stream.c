@@ -1403,9 +1403,19 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_agent_internal_recent_assistant_avg_len(agent, 5);
                 guard_ctx.director_text = agent->scene_direction_text;
                 guard_ctx.director_len = agent->scene_direction_text_len;
-                if (agent->persona && agent->persona->name && agent->persona->name_len > 1) {
-                    guard_ctx.persona_name = agent->persona->name;
-                    guard_ctx.persona_name_len = agent->persona->name_len;
+                if (agent->persona) {
+                    if (agent->persona->name && agent->persona->name_len > 1) {
+                        guard_ctx.persona_name = agent->persona->name;
+                        guard_ctx.persona_name_len = agent->persona->name_len;
+                    }
+                    /* Prefer `identity` (full biographical string); fall
+                     * back to `core_anchor` (one-line bio). */
+                    const char *id = agent->persona->identity ? agent->persona->identity
+                                                              : agent->persona->core_anchor;
+                    if (id) {
+                        guard_ctx.persona_identity = id;
+                        guard_ctx.persona_identity_len = strlen(id);
+                    }
                 }
                 hu_error_t guard_err = hu_response_guard_check_ex(
                     agent->alloc, sresp.content, sresp.content_len, &guard_ctx, &guard_out,
@@ -1414,13 +1424,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_log_error(
                         "agent_stream", agent->observer,
                         "response_guard REJECT: stream final (len=%zu, recent_avg=%zu) "
-                        "[semantic=%d length=%d director=%d persona=%d "
+                        "[semantic=%d length=%d director=%d persona=%d identity=%d "
                         "repetition_run=%zu] — retrying once with repair prompt",
                         sresp.content_len, guard_ctx.recent_avg_len,
                         guard_report.detected_semantic_leak ? 1 : 0,
                         guard_report.detected_length_anomaly ? 1 : 0,
                         guard_report.detected_director_echo ? 1 : 0,
                         guard_report.detected_persona_pii_echo ? 1 : 0,
+                        guard_report.detected_persona_identity_echo ? 1 : 0,
                         guard_report.max_repetition_run);
                     hu_guard_report_t retry_report;
                     memset(&retry_report, 0, sizeof(retry_report));
@@ -2150,9 +2161,17 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_agent_internal_recent_assistant_avg_len(agent, 5);
             guard_ctx.director_text = agent->scene_direction_text;
             guard_ctx.director_len = agent->scene_direction_text_len;
-            if (agent->persona && agent->persona->name && agent->persona->name_len > 1) {
-                guard_ctx.persona_name = agent->persona->name;
-                guard_ctx.persona_name_len = agent->persona->name_len;
+            if (agent->persona) {
+                if (agent->persona->name && agent->persona->name_len > 1) {
+                    guard_ctx.persona_name = agent->persona->name;
+                    guard_ctx.persona_name_len = agent->persona->name_len;
+                }
+                const char *id = agent->persona->identity ? agent->persona->identity
+                                                          : agent->persona->core_anchor;
+                if (id) {
+                    guard_ctx.persona_identity = id;
+                    guard_ctx.persona_identity_len = strlen(id);
+                }
             }
             hu_error_t guard_err = hu_response_guard_check_ex(
                 agent->alloc, final_content, final_content_len, &guard_ctx, &guard_out,
@@ -2162,13 +2181,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_log_error(
                         "agent_stream", agent->observer,
                         "response_guard REJECT: post-stream final (len=%zu, recent_avg=%zu) "
-                        "[semantic=%d length=%d director=%d persona=%d "
+                        "[semantic=%d length=%d director=%d persona=%d identity=%d "
                         "repetition_run=%zu] — retrying slim path",
                         final_content_len, guard_ctx.recent_avg_len,
                         guard_report.detected_semantic_leak ? 1 : 0,
                         guard_report.detected_length_anomaly ? 1 : 0,
                         guard_report.detected_director_echo ? 1 : 0,
                         guard_report.detected_persona_pii_echo ? 1 : 0,
+                        guard_report.detected_persona_identity_echo ? 1 : 0,
                         guard_report.max_repetition_run);
                     agent->alloc->free(agent->alloc->ctx, (void *)final_content,
                                        final_content_len + 1);

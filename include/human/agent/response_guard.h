@@ -86,6 +86,13 @@ typedef struct {
      * the 2026-05-11 leak class where the model echoed the operator's
      * loaded persona name back to the recipient. */
     bool detected_persona_pii_echo;
+    /* Sprint 36 — persona identity / core-anchor echo. Set when
+     * `ctx->persona_identity` is non-NULL (≥ 25 bytes) and a 25-byte
+     * verbatim substring of it appears in the response (case-
+     * insensitively). Catches first-person identity leaks like
+     * `"i'm a Chief Architect at Pure Health Solutions"` that G7
+     * cannot catch (no name in third-person construct). */
+    bool detected_persona_identity_echo;
     /* If rejected, the longest run length that triggered rejection. */
     size_t max_repetition_run;
     /* Number of bytes removed by sanitization (0 if rejected outright). */
@@ -119,6 +126,17 @@ typedef struct {
      * `"Seth"`. */
     const char *persona_name;
     size_t persona_name_len;
+
+    /* Sprint 36 — loaded persona's `identity` (or `core_anchor` as
+     * fallback). Free-form biographical string, e.g. `"51-year-old
+     * technical professional, lives alone with a cat"`. The guard
+     * rejects if any contiguous 25-byte substring of this string
+     * appears verbatim (case-insensitively) in the response.
+     * Catches first-person identity leaks where the model quotes
+     * persona context back to the recipient without using the
+     * name. NULL or persona_identity_len < 25 disables the check. */
+    const char *persona_identity;
+    size_t persona_identity_len;
 } hu_guard_context_t;
 
 /* Run the guard over a response.

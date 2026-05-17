@@ -501,6 +501,68 @@ static void agent_g7_persona_pii_echo_rejects_and_retries(void) {
     hu_agent_deinit(&agent);
 }
 
+/* G8 — persona identity / core-anchor echo through agent_turn (Sprint 36).
+ *
+ * Loads the agent with a synthetic persona shim (name + identity).
+ * Mock provider leaks a verbatim 30+ byte chunk of the identity string
+ * (no name in the response — pure first-person identity echo). G8
+ * fires; slim retry returns clean reply. Confirms identity wiring at
+ * the production call site. */
+static void agent_g8_persona_identity_echo_rejects_and_retries(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    /* identity string is 40 bytes; leaked response quotes 40 bytes
+     * verbatim (first-person, no name — would slip past G7). */
+    static const char leaked[] =
+        "yeah i'm a Chief Architect at Pure Health Solutions, busy day";
+    static const char retry_ok[] = "yeah lol";
+    pctx.call_text[0] = leaked;
+    pctx.call_text_len[0] = sizeof(leaked) - 1;
+    pctx.call_text[1] = retry_ok;
+    pctx.call_text_len[1] = sizeof(retry_ok) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "identity_echo_mock", 18, 0.7,
+                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+
+    /* Persona shim with name + identity. hu_persona_deinit will free
+     * both fields since they're heap-allocated via hu_strndup. */
+    hu_persona_t *p = (hu_persona_t *)alloc.alloc(alloc.ctx, sizeof(*p));
+    HU_ASSERT_NOT_NULL(p);
+    memset(p, 0, sizeof(*p));
+    p->name = hu_strndup(&alloc, "testname", 8);
+    p->name_len = 8;
+    HU_ASSERT_NOT_NULL(p->name);
+    static const char identity_str[] = "Chief Architect at Pure Health Solutions";
+    p->identity = hu_strndup(&alloc, identity_str, sizeof(identity_str) - 1);
+    HU_ASSERT_NOT_NULL(p->identity);
+    if (agent.persona) {
+        hu_persona_deinit(&alloc, agent.persona);
+        alloc.free(alloc.ctx, agent.persona, sizeof(hu_persona_t));
+    }
+    agent.persona = p;
+
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "what do you do for work", 23, &r, &rlen), HU_OK);
+
+    /* The leaked identity quote must NOT have made it to the
+     * surfaced response. */
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT(strstr(r, "Chief Architect at Pure Health") == NULL);
+    HU_ASSERT(pctx.calls >= 2);
+
+    alloc.free(alloc.ctx, r, rlen + 1);
+    hu_agent_deinit(&agent);
+}
+
 void run_response_guard_retry_tests(void) {
     HU_TEST_SUITE("Response Guard Retry");
     HU_RUN_TEST(guard_reject_retry_produces_human_like_replacement);
@@ -513,4 +575,7 @@ void run_response_guard_retry_tests(void) {
 
     /* Sprint 35 — end-to-end persona-PII echo (G7). */
     HU_RUN_TEST(agent_g7_persona_pii_echo_rejects_and_retries);
+
+    /* Sprint 36 — end-to-end persona identity echo (G8). */
+    HU_RUN_TEST(agent_g8_persona_identity_echo_rejects_and_retries);
 }

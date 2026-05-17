@@ -83,8 +83,17 @@
  * we catch it) and longer than incidental phrase matches like
  * "I think we should" that happen to appear in both director and
  * reply for normal reasons. */
-#define HU_GUARD_LENGTH_ANOMALY_MULT      8
-#define HU_GUARD_DIRECTOR_ECHO_MIN_MATCH  30
+#define HU_GUARD_LENGTH_ANOMALY_MULT          8
+#define HU_GUARD_DIRECTOR_ECHO_MIN_MATCH      30
+
+/* Persona identity echo minimum match length. Persona identity strings
+ * are typically 30-60 chars ("Chief Architect at Pure Health Solutions"
+ * = 40, "51-year-old technical professional, lives alone with a cat" =
+ * 58). 25 chars is below typical identity length (catches verbatim
+ * quotes) and above common-phrase floor ("thanks for the message" = 22)
+ * to avoid incidental overlap. Calibrated against the 2026-05-12 audit:
+ * every identity-class leak quoted ≥ 30 contiguous chars. */
+#define HU_GUARD_PERSONA_IDENTITY_MIN_MATCH    25
 
 /* Documented surface (handled by the catch-all <|...|> stripper, listed
  * here so future maintainers know what model formats we cover):
@@ -606,6 +615,37 @@ static bool hu_guard_has_persona_pii_echo(const hu_guard_context_t *ctx, const c
     return false;
 }
 
+/* G8 — persona identity / core-anchor echo. Returns true if any
+ * contiguous HU_GUARD_PERSONA_IDENTITY_MIN_MATCH-byte substring of
+ * `ctx->persona_identity` appears verbatim (case-insensitively) in
+ * `s[0..len)`.
+ *
+ * Catches first-person identity leaks like `"i'm a Chief Architect at
+ * Pure Health Solutions"` that G7 cannot catch (no name in third-
+ * person construct). Reuses the same sliding-window primitive as G6
+ * director echo with a tighter threshold (25 vs 30) because persona
+ * identity strings are stable per-agent and more uniquely identifying
+ * than per-turn director text.
+ *
+ * NULL ctx, NULL persona_identity, or persona_identity_len <
+ * HU_GUARD_PERSONA_IDENTITY_MIN_MATCH disables the check. */
+static bool hu_guard_has_persona_identity_echo(const hu_guard_context_t *ctx, const char *s,
+                                               size_t len) {
+    if (!ctx || !ctx->persona_identity ||
+        ctx->persona_identity_len < (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH)
+        return false;
+    if (len < (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH)
+        return false;
+    /* Slide a 25-char window over persona_identity. For each window,
+     * check if the response contains it. First match wins. */
+    size_t window = (size_t)HU_GUARD_PERSONA_IDENTITY_MIN_MATCH;
+    for (size_t i = 0; i + window <= ctx->persona_identity_len; i++) {
+        if (hu_guard_ci_contains(s, len, ctx->persona_identity + i, window))
+            return true;
+    }
+    return false;
+}
+
 /* Orchestrator — returns true if the response trips ANY of G1/G2/G3.
  * Out-param `which` is set to a small bitmask for diagnostics:
  *   bit 0 = G1 numbered analysis    bit 1 = G2 self-talk
@@ -970,14 +1010,16 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
         return HU_OK;
     }
 
-    /* Phase 4 (Sprint 31 + 35) — context-aware detections. Skipped when
-     * `ctx` is NULL (legacy `hu_response_guard_check` callers).
+    /* Phase 4 (Sprint 31 + 35 + 36) — context-aware detections. Skipped
+     * when `ctx` is NULL (legacy `hu_response_guard_check` callers).
      *
      * Phase 4a: length anomaly (response_len >> recent_avg_len).
      * Phase 4b: director-string echo (verbatim quote of upstream
      *           scene-direction text).
      * Phase 4c: persona-PII echo (loaded persona name in third-person
      *           profile construct — Sprint 35).
+     * Phase 4d: persona identity echo (verbatim 25+ byte substring of
+     *           loaded persona's identity / core_anchor — Sprint 36).
      *
      * All run on the cleaned text (post-Phase 1 strip). The length
      * anomaly check uses the original `response_len` because the
@@ -988,7 +1030,9 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
         bool length_anomaly = hu_guard_has_length_anomaly(ctx, response_len);
         bool director_echo = hu_guard_has_director_echo(ctx, for_repetition_check, check_len);
         bool persona_echo = hu_guard_has_persona_pii_echo(ctx, for_repetition_check, check_len);
-        if (length_anomaly || director_echo || persona_echo) {
+        bool identity_echo =
+            hu_guard_has_persona_identity_echo(ctx, for_repetition_check, check_len);
+        if (length_anomaly || director_echo || persona_echo || identity_echo) {
             if (cleaned)
                 alloc->free(alloc->ctx, cleaned, effective_len + 1);
             *out_response = NULL;
@@ -998,6 +1042,7 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
                 report->detected_length_anomaly = length_anomaly;
                 report->detected_director_echo = director_echo;
                 report->detected_persona_pii_echo = persona_echo;
+                report->detected_persona_identity_echo = identity_echo;
             }
             return HU_OK;
         }
