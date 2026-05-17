@@ -86,4 +86,35 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
                                   const char *contact_id, size_t contact_id_len, uint32_t seed,
                                   char *message_out, size_t msg_cap);
 
+/* Strict contact-match predicate for F25 emotional check-ins.
+ *
+ * Returns true iff the contact profile is the actual originator of the
+ * emotional moment.  Match is by exact `contact_id` equality only — the
+ * previous implementation at daemon.c:975-984 also tried matching the
+ * moment's contact_id against `proactive_channel` (whole and after-colon
+ * suffix), which on 2026-05-16 routed Mindy's emotional confession to
+ * three contacts whose proactive_channel handles collided.
+ *
+ * Any non-null, non-empty argument is accepted; everything else returns
+ * false.  Pinned by tests/test_proactive.c. */
+bool hu_proactive_contact_matches_moment(const char *cp_contact_id, const char *moment_contact_id);
+
+/* Outbound topic safety predicate. Returns true iff `topic` is acceptable to
+ * interpolate into a user-visible proactive message.
+ *
+ * Rejects (returns false) when topic is null/empty/oversized or contains any of:
+ *  - the recall debug-format substring "(last:"
+ *  - newlines, carriage returns, tabs, or printf format specifiers
+ *  - first-person pronouns (i, me, my, mine, i'm, i am)
+ *  - emotion/affect keywords that indicate the "topic" is actually a confession
+ *
+ * Extracted as a pure predicate so it can be unit-tested without crossing the
+ * F25 send boundary (see .claude/rules/security-predicate-extraction.md).
+ *
+ * Pinned by tests/test_proactive.c regression suite. Originated from the
+ * 2026-05-16 incident: F25 shipped a relative's raw emotional confession to
+ * three family contacts because `m->topic` was a raw 60–255-char window of
+ * the user's own text. This predicate is the outbound safety net. */
+bool hu_proactive_topic_is_safe(const char *topic, size_t topic_len);
+
 #endif /* HU_PROACTIVE_H */

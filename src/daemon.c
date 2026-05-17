@@ -972,15 +972,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     const hu_contact_profile_t *cp = &agent->persona->contacts[i];
                     if (!cp->proactive_checkin || !cp->proactive_channel || !cp->contact_id)
                         continue;
-                    bool match = (strcmp(cp->contact_id, m->contact_id) == 0);
-                    if (!match) {
-                        const char *colon = strchr(cp->proactive_channel, ':');
-                        if (colon && strcmp(colon + 1, m->contact_id) == 0)
-                            match = true;
-                        else if (strcmp(cp->proactive_channel, m->contact_id) == 0)
-                            match = true;
-                    }
-                    if (!match)
+                    /* Strict contact_id equality only.  See 2026-05-16 incident:
+                     * the prior implementation also accepted the moment's
+                     * contact_id matching cp->proactive_channel (whole or
+                     * after-colon), which routed Mindy's emotional moment to
+                     * three contacts whose proactive_channel handles
+                     * collided.  Predicate pinned by tests/test_proactive.c. */
+                    if (!hu_proactive_contact_matches_moment(cp->contact_id, m->contact_id))
                         continue;
 
                     char ch_buf[64] = {0};
@@ -1003,6 +1001,23 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             continue;
                         if (!channels[c].channel->vtable->send)
                             break;
+
+                        /* Outbound safety gate — see 2026-05-16 incident.
+                         * m->topic can contain a raw window of the user's own
+                         * emotional confession or the literal "(last: %lld)"
+                         * recall-format string.  hu_proactive_topic_is_safe is
+                         * the predicate that pins what we refuse to ship; if
+                         * the topic fails, we drop the send and log enough
+                         * context to investigate without leaking the body. */
+                        size_t topic_len = strnlen(m->topic, sizeof(m->topic));
+                        if (!hu_proactive_topic_is_safe(m->topic, topic_len)) {
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "F25 emotional check-in BLOCKED for %s (unsafe topic, "
+                                        "%zu chars)",
+                                        cp->name ? cp->name : cp->contact_id, topic_len);
+                            (void)hu_emotional_moment_mark_followed_up(agent->memory, m->id);
+                            break;
+                        }
 
                         char msg_buf[384];
                         int w = snprintf(msg_buf, sizeof(msg_buf), "hey how are you doing with %s?",

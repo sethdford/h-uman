@@ -4,6 +4,7 @@
 #include "human/agent/proactive.h"
 #include "human/core/string.h"
 #include "human/memory.h"
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -674,7 +675,7 @@ bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
     char *mm_json = NULL;
     size_t mm_len = 0;
     if (hu_superhuman_micro_moment_list(memory, alloc, contact_id, contact_id_len, 20, &mm_json,
-                                         &mm_len) != HU_OK ||
+                                        &mm_len) != HU_OK ||
         !mm_json || mm_len == 0)
         return false;
 
@@ -724,17 +725,24 @@ bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
     const char *fact = facts[idx];
     size_t fact_len = fact_lens[idx];
 
+    /* Outbound safety: F30 also constructs its message via direct snprintf,
+     * bypassing any LLM rephrasing.  If `fact` is a raw window of the user's
+     * own confession (the same shape that hit F25 on 2026-05-16) we must not
+     * ship it. */
+    if (!hu_proactive_topic_is_safe(fact, fact_len)) {
+        alloc->free(alloc->ctx, mm_json, mm_len + 1);
+        return false;
+    }
+
     /* Format: "random question — do you still [topic]?" or "hey whatever happened with [topic]?" */
     s = s * 1103515245u + 12345u;
     int n;
     if ((s >> 16u) % 2u == 0) {
         size_t show = fact_len > 80 ? 80 : fact_len;
-        n = snprintf(message_out, msg_cap, "random question — do you still %.*s?",
-                     (int)show, fact);
+        n = snprintf(message_out, msg_cap, "random question — do you still %.*s?", (int)show, fact);
     } else {
         size_t show = fact_len > 80 ? 80 : fact_len;
-        n = snprintf(message_out, msg_cap, "hey whatever happened with %.*s?",
-                     (int)show, fact);
+        n = snprintf(message_out, msg_cap, "hey whatever happened with %.*s?", (int)show, fact);
     }
 
     /* Free mm_json AFTER we've used the fact pointers */
@@ -777,6 +785,10 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
             size_t topic_len = strnlen(followups[i].topic, sizeof(followups[i].topic) - 1);
             if (topic_len == 0)
                 continue;
+            /* Reject the entry if the stored "topic" is actually a raw user
+             * confession or recall-format leak.  Same predicate as F25/F30. */
+            if (!hu_proactive_topic_is_safe(followups[i].topic, topic_len))
+                continue;
             if (topic_len > 200)
                 topic_len = 200;
             int n = snprintf(message_out, msg_cap,
@@ -797,14 +809,17 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
                                           &commitment_count) == HU_OK &&
         commitments && commitment_count > 0) {
         for (size_t i = 0; i < commitment_count; i++) {
-            size_t slen =
-                strnlen(commitments[i].contact_id, sizeof(commitments[i].contact_id) - 1);
+            size_t slen = strnlen(commitments[i].contact_id, sizeof(commitments[i].contact_id) - 1);
             if (slen != contact_id_len ||
                 memcmp(commitments[i].contact_id, contact_id, contact_id_len) != 0)
                 continue;
-            size_t desc_len = strnlen(commitments[i].description,
-                                      sizeof(commitments[i].description) - 1);
+            size_t desc_len =
+                strnlen(commitments[i].description, sizeof(commitments[i].description) - 1);
             if (desc_len == 0)
+                continue;
+            /* Same safety predicate as the followup branch above — refuse to
+             * recycle a commitment description that looks like a confession. */
+            if (!hu_proactive_topic_is_safe(commitments[i].description, desc_len))
                 continue;
             if (desc_len > 200)
                 desc_len = 200;
@@ -848,3 +863,121 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
     return false;
 }
 #endif
+
+/* Word-boundary helper for the topic-safety scan below. Treats letters,
+ * digits, and apostrophe as part of a word (so "I'm" stays one token). */
+static bool topic_is_word_char(unsigned char c) {
+    return isalnum(c) || c == '\'';
+}
+
+/* Case-insensitive substring search. */
+static bool topic_icase_contains_substr(const char *haystack, size_t hlen, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || nlen > hlen)
+        return false;
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        size_t j = 0;
+        for (; j < nlen; j++) {
+            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j]))
+                break;
+        }
+        if (j == nlen)
+            return true;
+    }
+    return false;
+}
+
+/* Case-insensitive whole-word search.  Guards against false positives like
+ * "Italy" matching pronoun "i" or "swim" matching emotion word "miserable". */
+static bool topic_icase_contains_word(const char *haystack, size_t hlen, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || nlen > hlen)
+        return false;
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        if (i > 0 && topic_is_word_char((unsigned char)haystack[i - 1]))
+            continue;
+        size_t j = 0;
+        for (; j < nlen; j++) {
+            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j]))
+                break;
+        }
+        if (j != nlen)
+            continue;
+        if (i + nlen < hlen && topic_is_word_char((unsigned char)haystack[i + nlen]))
+            continue;
+        return true;
+    }
+    return false;
+}
+
+bool hu_proactive_contact_matches_moment(const char *cp_contact_id, const char *moment_contact_id) {
+    if (!cp_contact_id || !moment_contact_id)
+        return false;
+    if (cp_contact_id[0] == '\0' || moment_contact_id[0] == '\0')
+        return false;
+    return strcmp(cp_contact_id, moment_contact_id) == 0;
+}
+
+bool hu_proactive_topic_is_safe(const char *topic, size_t topic_len) {
+    if (!topic || topic_len == 0)
+        return false;
+    /* Hard length cap: anything longer than 60 chars is almost certainly a
+     * raw sentence fragment, not a topic noun phrase. */
+    if (topic_len > 60)
+        return false;
+
+    /* Unconditional toxic substrings — format-string leaks, control chars,
+     * and one common contraction that always indicates a first-person
+     * confession ("I'm overwhelmed", "I'm done"). */
+    static const char *const toxic_subs[] = {
+        "(last:", "\n", "\r", "\t", "%", "i'm", NULL,
+    };
+    for (const char *const *p = toxic_subs; *p; p++) {
+        if (topic_icase_contains_substr(topic, topic_len, *p))
+            return false;
+    }
+
+    /* Whole-word denylist.  Two categories that both indicate the
+     * "topic" is actually the user's own confession, not a noun phrase:
+     *   - first-person pronouns and confession verbs
+     *   - affect / emotion words paired with confessional content
+     * Keep this list conservative; a clean noun phrase like "the new job"
+     * or "Replay MCP" must not be rejected. */
+    static const char *const toxic_words[] = {
+        /* first-person pronouns */
+        "i",
+        "me",
+        "my",
+        "mine",
+        /* confession verbs */
+        "confessed",
+        "confess",
+        /* affect / emotion words */
+        "lonely",
+        "sad",
+        "depressed",
+        "hurt",
+        "crying",
+        "cry",
+        "tears",
+        "skeptical",
+        "lost",
+        "miserable",
+        "anxious",
+        "stressed",
+        "broken",
+        "alone",
+        "feel",
+        "feeling",
+        "overwhelmed",
+        "heartbreak",
+        "heartbroken",
+        NULL,
+    };
+    for (const char *const *p = toxic_words; *p; p++) {
+        if (topic_icase_contains_word(topic, topic_len, *p))
+            return false;
+    }
+
+    return true;
+}
