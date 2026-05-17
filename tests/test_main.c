@@ -538,11 +538,9 @@ void run_consistency_tests(void);
 void run_mlx_provider_tests(void);
 void run_persona_fidelity_tests(void);
 void run_persona_fidelity_judge_tests(void);
-<<<<<<< HEAD
 void run_persona_fidelity_validator_tests(void);
-=======
 void run_persona_fidelity_cross_tests(void);
->>>>>>> 15988d54 (feat(eval,docs): cross-persona separation eval + privacy gap analysis + honest SOTA backlog)
+void run_dpo_extractor_integration_tests(void);
 void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
@@ -1133,11 +1131,9 @@ int main(int argc, char **argv) {
     run_mlx_provider_tests();
     run_persona_fidelity_tests();
     run_persona_fidelity_judge_tests();
-<<<<<<< HEAD
     run_persona_fidelity_validator_tests();
-=======
     run_persona_fidelity_cross_tests();
->>>>>>> 15988d54 (feat(eval,docs): cross-persona separation eval + privacy gap analysis + honest SOTA backlog)
+    run_dpo_extractor_integration_tests();
     run_fact_extract_llm_tests();
     run_fact_extract_tests();
     run_personal_model_tests();

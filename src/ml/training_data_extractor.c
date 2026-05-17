@@ -24,16 +24,15 @@
 
 #ifdef HU_ENABLE_SQLITE
 static hu_error_t ensure_extraction_tracking(sqlite3 *db) {
-    const char *ddl =
-        "CREATE TABLE IF NOT EXISTS training_data_extractions("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "session_id TEXT NOT NULL UNIQUE,"
-        "extracted_at INTEGER NOT NULL,"
-        "example_count INTEGER NOT NULL);"
-        "CREATE TABLE IF NOT EXISTS dpo_auto_extractions("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "msg_id INTEGER NOT NULL UNIQUE,"
-        "extracted_at INTEGER NOT NULL);";
+    const char *ddl = "CREATE TABLE IF NOT EXISTS training_data_extractions("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                      "session_id TEXT NOT NULL UNIQUE,"
+                      "extracted_at INTEGER NOT NULL,"
+                      "example_count INTEGER NOT NULL);"
+                      "CREATE TABLE IF NOT EXISTS dpo_auto_extractions("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                      "msg_id INTEGER NOT NULL UNIQUE,"
+                      "extracted_at INTEGER NOT NULL);";
     char *err_msg = NULL;
     int rc = sqlite3_exec(db, ddl, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
@@ -52,12 +51,24 @@ static void write_json_escaped(FILE *f, const char *s) {
         return;
     for (const char *c = s; *c; c++) {
         switch (*c) {
-        case '"':  fputs("\\\"", f); break;
-        case '\\': fputs("\\\\", f); break;
-        case '\n': fputs("\\n", f);  break;
-        case '\r': fputs("\\r", f);  break;
-        case '\t': fputs("\\t", f);  break;
-        default:   fputc(*c, f);     break;
+        case '"':
+            fputs("\\\"", f);
+            break;
+        case '\\':
+            fputs("\\\\", f);
+            break;
+        case '\n':
+            fputs("\\n", f);
+            break;
+        case '\r':
+            fputs("\\r", f);
+            break;
+        case '\t':
+            fputs("\\t", f);
+            break;
+        default:
+            fputc(*c, f);
+            break;
         }
     }
 }
@@ -66,11 +77,10 @@ static void write_json_escaped(FILE *f, const char *s) {
 
 #ifdef HU_ENABLE_SQLITE
 static hu_error_t ensure_dpo_table(sqlite3 *db) {
-    const char *sql =
-        "CREATE TABLE IF NOT EXISTS dpo_pairs("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-        "prompt TEXT, chosen TEXT, rejected TEXT, "
-        "margin REAL, timestamp INTEGER, source TEXT);";
+    const char *sql = "CREATE TABLE IF NOT EXISTS dpo_pairs("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                      "prompt TEXT, chosen TEXT, rejected TEXT, "
+                      "margin REAL, timestamp INTEGER, source TEXT);";
     char *err_msg = NULL;
     int rc = sqlite3_exec(db, sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
@@ -84,10 +94,8 @@ static hu_error_t ensure_dpo_table(sqlite3 *db) {
 
 /* ── Main extraction ───────────────────────────────────────────────────── */
 
-hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
-                                    const char *memory_db_path,
-                                    const char *persona_path,
-                                    const char *output_dir,
+hu_error_t hu_training_data_extract(hu_allocator_t *alloc, const char *memory_db_path,
+                                    const char *persona_path, const char *output_dir,
                                     size_t *extracted_count) {
     if (!alloc || !memory_db_path || !output_dir || !extracted_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -99,8 +107,7 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
 #else
 #ifdef HU_ENABLE_SQLITE
     sqlite3 *db = NULL;
-    int rc = sqlite3_open_v2(memory_db_path, &db,
-                             SQLITE_OPEN_READWRITE, NULL);
+    int rc = sqlite3_open_v2(memory_db_path, &db, SQLITE_OPEN_READWRITE, NULL);
     if (rc != SQLITE_OK) {
         if (db)
             sqlite3_close(db);
@@ -115,11 +122,10 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
 
     /* Find sessions with messages that haven't been extracted yet. */
     sqlite3_stmt *sess_stmt = NULL;
-    const char *sess_sql =
-        "SELECT DISTINCT m.session_id FROM messages m "
-        "WHERE m.session_id NOT IN "
-        "(SELECT session_id FROM training_data_extractions) "
-        "ORDER BY m.id";
+    const char *sess_sql = "SELECT DISTINCT m.session_id FROM messages m "
+                           "WHERE m.session_id NOT IN "
+                           "(SELECT session_id FROM training_data_extractions) "
+                           "ORDER BY m.id";
     rc = sqlite3_prepare_v2(db, sess_sql, -1, &sess_stmt, NULL);
     if (rc != SQLITE_OK) {
         sqlite3_close(db);
@@ -143,8 +149,8 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
 
     /* Build output file path. */
     char out_path[512];
-    int pn = snprintf(out_path, sizeof(out_path), "%s/training_data_%ld.jsonl",
-                      output_dir, (long)time(NULL));
+    int pn = snprintf(out_path, sizeof(out_path), "%s/training_data_%ld.jsonl", output_dir,
+                      (long)time(NULL));
     if (pn <= 0 || (size_t)pn >= sizeof(out_path)) {
         sqlite3_finalize(sess_stmt);
         sqlite3_close(db);
@@ -176,9 +182,8 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
 
         /* Fetch all messages for this session in order. */
         sqlite3_stmt *msg_stmt = NULL;
-        const char *msg_sql =
-            "SELECT role, content FROM messages "
-            "WHERE session_id = ? ORDER BY id ASC";
+        const char *msg_sql = "SELECT role, content FROM messages "
+                              "WHERE session_id = ? ORDER BY id ASC";
         rc = sqlite3_prepare_v2(db, msg_sql, -1, &msg_stmt, NULL);
         if (rc != SQLITE_OK)
             continue;
@@ -278,9 +283,8 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
         if (qv != HU_QUALITY_OK || is_dup) {
             /* Mark as extracted so we don't keep re-evaluating it. */
             sqlite3_stmt *skip_mark = NULL;
-            const char *skip_sql =
-                "INSERT OR IGNORE INTO training_data_extractions"
-                "(session_id, extracted_at, example_count) VALUES(?, ?, 0)";
+            const char *skip_sql = "INSERT OR IGNORE INTO training_data_extractions"
+                                   "(session_id, extracted_at, example_count) VALUES(?, ?, 0)";
             if (sqlite3_prepare_v2(db, skip_sql, -1, &skip_mark, NULL) == SQLITE_OK) {
                 sqlite3_bind_text(skip_mark, 1, session_id, -1, SQLITE_STATIC);
                 sqlite3_bind_int64(skip_mark, 2, (int64_t)time(NULL));
@@ -316,8 +320,7 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
         hu_pii_stats_t pii_stats;
 
         fputs("{\"messages\":[{\"role\":\"system\",\"content\":\"", out_file);
-        if (hu_pii_redact(system_prompt, strlen(system_prompt),
-                          redacted_buf, sizeof(redacted_buf),
+        if (hu_pii_redact(system_prompt, strlen(system_prompt), redacted_buf, sizeof(redacted_buf),
                           &redacted_len, &pii_stats) == HU_OK) {
             write_json_escaped(out_file, redacted_buf);
         } else {
@@ -329,9 +332,8 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
             fputs(",{\"role\":\"", out_file);
             fputs(entries[i].role, out_file);
             fputs("\",\"content\":\"", out_file);
-            if (hu_pii_redact(entries[i].content, strlen(entries[i].content),
-                              redacted_buf, sizeof(redacted_buf),
-                              &redacted_len, &pii_stats) == HU_OK) {
+            if (hu_pii_redact(entries[i].content, strlen(entries[i].content), redacted_buf,
+                              sizeof(redacted_buf), &redacted_len, &pii_stats) == HU_OK) {
                 write_json_escaped(out_file, redacted_buf);
             } else {
                 write_json_escaped(out_file, entries[i].content);
@@ -343,9 +345,8 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
 
         /* Mark session as extracted. */
         sqlite3_stmt *mark_stmt = NULL;
-        const char *mark_sql =
-            "INSERT OR IGNORE INTO training_data_extractions"
-            "(session_id, extracted_at, example_count) VALUES(?, ?, ?)";
+        const char *mark_sql = "INSERT OR IGNORE INTO training_data_extractions"
+                               "(session_id, extracted_at, example_count) VALUES(?, ?, ?)";
         rc = sqlite3_prepare_v2(db, mark_sql, -1, &mark_stmt, NULL);
         if (rc == SQLITE_OK) {
             sqlite3_bind_text(mark_stmt, 1, session_id, -1, SQLITE_STATIC);
@@ -376,75 +377,54 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
 
 /* ── Auto-DPO extraction ───────────────────────────────────────────────── */
 
-hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc,
-                                        const char *memory_db_path,
-                                        int correction_window_sec,
-                                        size_t *pairs_created) {
-    if (!alloc || !memory_db_path || !pairs_created)
+#ifdef HU_ENABLE_SQLITE
+/* Testable SQL inner. Operates on an already-open sqlite3* so tests
+ * can pass a :memory: database and exercise the production SQL
+ * end-to-end. Owner of `db` must close it. Idempotent: re-running
+ * on the same DB without new messages produces zero new pairs
+ * because the assistant_msg_id is recorded in dpo_auto_extractions. */
+hu_error_t hu_training_data_extract_dpo_from_db(sqlite3 *db, int correction_window_sec,
+                                                size_t *pairs_created) {
+    if (!db || !pairs_created)
         return HU_ERR_INVALID_ARGUMENT;
     *pairs_created = 0;
 
     if (correction_window_sec <= 0)
         correction_window_sec = HU_DPO_CORRECTION_WINDOW_SEC;
 
-#ifdef HU_IS_TEST
-    return HU_OK;
-#else
-#ifdef HU_ENABLE_SQLITE
-    sqlite3 *db = NULL;
-    int rc = sqlite3_open_v2(memory_db_path, &db,
-                             SQLITE_OPEN_READWRITE, NULL);
-    if (rc != SQLITE_OK) {
-        if (db)
-            sqlite3_close(db);
-        return HU_ERR_IO;
-    }
-
     hu_error_t err = ensure_extraction_tracking(db);
-    if (err != HU_OK) {
-        sqlite3_close(db);
+    if (err != HU_OK)
         return err;
-    }
-
     err = ensure_dpo_table(db);
-    if (err != HU_OK) {
-        sqlite3_close(db);
+    if (err != HU_OK)
         return err;
-    }
 
     /* Find correction patterns:
-     * 1. User sends message (prompt)
-     * 2. Assistant responds (rejected)
-     * 3. User sends another message within correction_window_sec (correction)
-     *
-     * user(N) -> assistant(N+1) -> user(N+2), where
-     * N+2.created_at - N+1.created_at <= correction_window_sec */
+     *   user(N) -> assistant(N+1) -> user(N+2), where
+     *   N+2.created_at - N+1.created_at <= correction_window_sec */
     sqlite3_stmt *stmt = NULL;
-    const char *sql =
-        "SELECT a.id, u1.content, a.content, u2.content "
-        "FROM messages a "
-        "JOIN messages u1 ON u1.session_id = a.session_id "
-        "  AND u1.role = 'user' AND u1.id = ("
-        "    SELECT MAX(id) FROM messages "
-        "    WHERE session_id = a.session_id AND role = 'user' AND id < a.id"
-        "  ) "
-        "JOIN messages u2 ON u2.session_id = a.session_id "
-        "  AND u2.role = 'user' AND u2.id = ("
-        "    SELECT MIN(id) FROM messages "
-        "    WHERE session_id = a.session_id AND role = 'user' AND id > a.id"
-        "  ) "
-        "WHERE a.role = 'assistant' "
-        "AND a.id NOT IN (SELECT msg_id FROM dpo_auto_extractions) "
-        "AND (julianday(u2.created_at) - julianday(a.created_at)) * 86400 <= ? "
-        "AND (julianday(u2.created_at) - julianday(a.created_at)) * 86400 > 0 "
-        "ORDER BY a.id ASC "
-        "LIMIT 1000";
+    const char *sql = "SELECT a.id, u1.content, a.content, u2.content "
+                      "FROM messages a "
+                      "JOIN messages u1 ON u1.session_id = a.session_id "
+                      "  AND u1.role = 'user' AND u1.id = ("
+                      "    SELECT MAX(id) FROM messages "
+                      "    WHERE session_id = a.session_id AND role = 'user' AND id < a.id"
+                      "  ) "
+                      "JOIN messages u2 ON u2.session_id = a.session_id "
+                      "  AND u2.role = 'user' AND u2.id = ("
+                      "    SELECT MIN(id) FROM messages "
+                      "    WHERE session_id = a.session_id AND role = 'user' AND id > a.id"
+                      "  ) "
+                      "WHERE a.role = 'assistant' "
+                      "AND a.id NOT IN (SELECT msg_id FROM dpo_auto_extractions) "
+                      "AND (julianday(u2.created_at) - julianday(a.created_at)) * 86400 <= ? "
+                      "AND (julianday(u2.created_at) - julianday(a.created_at)) * 86400 > 0 "
+                      "ORDER BY a.id ASC "
+                      "LIMIT 1000";
 
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) {
-        sqlite3_close(db);
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
         return HU_ERR_IO;
-    }
     sqlite3_bind_int(stmt, 1, correction_window_sec);
 
     size_t count = 0;
@@ -480,9 +460,8 @@ hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc,
 
         /* Mark this assistant message as processed. */
         sqlite3_stmt *mark = NULL;
-        const char *mark_sql =
-            "INSERT OR IGNORE INTO dpo_auto_extractions(msg_id, extracted_at) "
-            "VALUES(?, ?)";
+        const char *mark_sql = "INSERT OR IGNORE INTO dpo_auto_extractions(msg_id, extracted_at) "
+                               "VALUES(?, ?)";
         rc = sqlite3_prepare_v2(db, mark_sql, -1, &mark, NULL);
         if (rc == SQLITE_OK) {
             sqlite3_bind_int64(mark, 1, assistant_msg_id);
@@ -493,10 +472,35 @@ hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc,
         count++;
     }
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
 
     *pairs_created = count;
     return HU_OK;
+}
+#endif /* HU_ENABLE_SQLITE */
+
+hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc, const char *memory_db_path,
+                                        int correction_window_sec, size_t *pairs_created) {
+    if (!alloc || !memory_db_path || !pairs_created)
+        return HU_ERR_INVALID_ARGUMENT;
+    *pairs_created = 0;
+
+    if (correction_window_sec <= 0)
+        correction_window_sec = HU_DPO_CORRECTION_WINDOW_SEC;
+
+#ifdef HU_IS_TEST
+    return HU_OK;
+#else
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db = NULL;
+    int rc = sqlite3_open_v2(memory_db_path, &db, SQLITE_OPEN_READWRITE, NULL);
+    if (rc != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+    hu_error_t err = hu_training_data_extract_dpo_from_db(db, correction_window_sec, pairs_created);
+    sqlite3_close(db);
+    return err;
 #else
     (void)alloc;
     (void)correction_window_sec;

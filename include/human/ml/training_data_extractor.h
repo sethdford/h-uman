@@ -41,10 +41,8 @@ extern "C" {
  *
  * On success, `*extracted_count` is the number of new JSONL examples
  * written. Returns HU_OK even when no new data exists (count = 0). */
-hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
-                                    const char *memory_db_path,
-                                    const char *persona_path,
-                                    const char *output_dir,
+hu_error_t hu_training_data_extract(hu_allocator_t *alloc, const char *memory_db_path,
+                                    const char *persona_path, const char *output_dir,
                                     size_t *extracted_count);
 
 /* Minimum number of new training examples before the scheduler should
@@ -61,10 +59,8 @@ hu_error_t hu_training_data_extract(hu_allocator_t *alloc,
  * Writes directly to the `dpo_pairs` table in the same database.
  * `*pairs_created` reports how many new pairs were recorded.
  * Returns HU_OK even when no corrections were found (count = 0). */
-hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc,
-                                        const char *memory_db_path,
-                                        int correction_window_sec,
-                                        size_t *pairs_created);
+hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc, const char *memory_db_path,
+                                        int correction_window_sec, size_t *pairs_created);
 
 /* Default correction window: 300 seconds. If a user sends a follow-up
  * within this window after an assistant response, it is treated as a
@@ -72,6 +68,31 @@ hu_error_t hu_training_data_extract_dpo(hu_allocator_t *alloc,
  * original 120s to capture corrections where the user pauses to read
  * or think before correcting. */
 #define HU_DPO_CORRECTION_WINDOW_SEC 300
+
+#ifdef HU_ENABLE_SQLITE
+/* Testable inner of hu_training_data_extract_dpo. Operates on an
+ * already-open `sqlite3*` rather than a path, which lets integration
+ * tests pass an in-memory database (":memory:") and exercise the
+ * production SQL end-to-end WITHOUT the HU_IS_TEST short-circuit the
+ * path-based caller observes.
+ *
+ * Same semantics as the path-based variant:
+ *   - Detects (user → assistant → user-within-window) triples
+ *   - Inserts each into dpo_pairs with chosen=correction, rejected=assistant
+ *   - Marks the assistant message_id in dpo_auto_extractions so a re-run
+ *     is idempotent
+ *   - Returns count via *pairs_created
+ *
+ * Does NOT short-circuit under HU_IS_TEST. The test owns the DB and
+ * is responsible for any cleanup. ensure_dpo_table + ensure_extraction_tracking
+ * are called internally so the test fixture doesn't need to know the
+ * tracking-table schema.
+ *
+ * Returns HU_ERR_INVALID_ARGUMENT on NULL args, HU_ERR_IO on SQL
+ * preparation failure (schema mismatch, etc.). */
+hu_error_t hu_training_data_extract_dpo_from_db(sqlite3 *db, int correction_window_sec,
+                                                size_t *pairs_created);
+#endif
 
 #ifdef __cplusplus
 }
