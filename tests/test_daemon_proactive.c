@@ -1,5 +1,6 @@
 #include "human/daemon_proactive.h"
 #include "human/memory.h"
+#include "human/memory/engines.h"
 #include "human/persona.h"
 #include "test_framework.h"
 #include <string.h>
@@ -180,6 +181,109 @@ static void test_build_callback_context_null_msg(void) {
     HU_ASSERT_EQ(out_len, 0);
 }
 
+/* P2-5 regression (2026-05-16 incident): hu_daemon_build_callback_context
+ * memcpy'd raw entries[i].content bytes into the callback prompt. Memory
+ * entries containing first-person confession-style content thus leaked
+ * directly into proactive prompts AND through to outbound messages.
+ *
+ * Pin the safety predicate directly — these tests must FAIL if the
+ * predicate ever regresses to letting unsafe content through.  Per
+ * .claude/rules/security-predicate-extraction.md the decision is its own
+ * unit-testable function. */
+static void test_callback_content_is_safe_accepts_clean_content(void) {
+    HU_ASSERT_TRUE(hu_daemon_callback_content_is_safe("user wanted to try a pasta recipe", 33));
+    HU_ASSERT_TRUE(hu_daemon_callback_content_is_safe("project deadline next week", 26));
+    HU_ASSERT_TRUE(hu_daemon_callback_content_is_safe("favorite coffee shop nearby", 27));
+}
+
+static void test_callback_content_is_safe_rejects_first_person(void) {
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("I confessed something terrible", 30));
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("i'm learning to lie better", 26));
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("we talked about my secret", 25));
+}
+
+static void test_callback_content_is_safe_rejects_confession_verbs(void) {
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("they admitted what happened", 27));
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("user betrayed a trust", 21));
+}
+
+static void test_callback_content_is_safe_rejects_charged_keywords(void) {
+    HU_ASSERT_FALSE(
+        hu_daemon_callback_content_is_safe("feeling lonely and depressed every morning", 42));
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("user looks miserable lately", 27));
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("scared of what comes next", 25));
+}
+
+static void test_callback_content_is_safe_rejects_format_injection(void) {
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("benign %s injection", 19));
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("multi\nline content", 18));
+}
+
+static void test_callback_content_is_safe_handles_null_and_empty(void) {
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe(NULL, 0));
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe(NULL, 10));
+    HU_ASSERT_FALSE(hu_daemon_callback_content_is_safe("", 0));
+}
+
+static void test_build_callback_context_skips_confession_entries(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char SESSION[] = "session_p25";
+    static const char topic_cat[] = "conversation";
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = topic_cat, .name_len = sizeof(topic_cat) - 1},
+    };
+    const char *key = "topic:session_p25:confession";
+    const char *content = "I confessed something terrible to my friend last week";
+    mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat, SESSION,
+                      sizeof(SESSION) - 1);
+
+    size_t out_len = 0;
+    char *result = hu_daemon_build_callback_context(&alloc, &mem, SESSION, sizeof(SESSION) - 1,
+                                                    "hello", 5, &out_len, NULL);
+
+    /* If a context was built, it MUST NOT contain the confession fragment. */
+    if (result && out_len > 0) {
+        HU_ASSERT_NULL(strstr(result, "confessed something terrible"));
+        HU_ASSERT_NULL(strstr(result, "I confessed"));
+        alloc.free(alloc.ctx, result, out_len + 1);
+    }
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
+static void test_build_callback_context_skips_emotion_keyword_entries(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char SESSION[] = "session_p25b";
+    static const char topic_cat[] = "conversation";
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = topic_cat, .name_len = sizeof(topic_cat) - 1},
+    };
+    const char *key = "topic:session_p25b:lonely";
+    const char *content = "feeling lonely and depressed every morning";
+    mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat, SESSION,
+                      sizeof(SESSION) - 1);
+
+    size_t out_len = 0;
+    char *result = hu_daemon_build_callback_context(&alloc, &mem, SESSION, sizeof(SESSION) - 1,
+                                                    "hello", 5, &out_len, NULL);
+
+    if (result && out_len > 0) {
+        HU_ASSERT_NULL(strstr(result, "lonely"));
+        HU_ASSERT_NULL(strstr(result, "depressed"));
+        alloc.free(alloc.ctx, result, out_len + 1);
+    }
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
 /* ── Test runner ─────────────────────────────────────────────────────── */
 
 void run_daemon_proactive_tests(void) {
@@ -202,6 +306,14 @@ void run_daemon_proactive_tests(void) {
 
     /* route application */
     HU_RUN_TEST(test_apply_route_no_activity);
+    HU_RUN_TEST(test_callback_content_is_safe_accepts_clean_content);
+    HU_RUN_TEST(test_callback_content_is_safe_rejects_first_person);
+    HU_RUN_TEST(test_callback_content_is_safe_rejects_confession_verbs);
+    HU_RUN_TEST(test_callback_content_is_safe_rejects_charged_keywords);
+    HU_RUN_TEST(test_callback_content_is_safe_rejects_format_injection);
+    HU_RUN_TEST(test_callback_content_is_safe_handles_null_and_empty);
+    HU_RUN_TEST(test_build_callback_context_skips_confession_entries);
+    HU_RUN_TEST(test_build_callback_context_skips_emotion_keyword_entries);
     HU_RUN_TEST(test_apply_route_with_fresh_activity);
 
     /* callback context builder */
