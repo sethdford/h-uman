@@ -303,7 +303,8 @@ static void test_w9_goals_appear_in_world_model(void) {
     HU_ASSERT_EQ(hu_goal_engine_create(A(), db, &ge), HU_OK);
     HU_ASSERT_EQ(hu_goal_init_tables(&ge), HU_OK);
     int64_t gid = 0;
-    HU_ASSERT_EQ(hu_goal_create(&ge, "learn rust", 10, 0.8, 0, 0, 1735690000LL, &gid), HU_OK);
+    HU_ASSERT_EQ(hu_goal_create(&ge, "u-goals", 7, "learn rust", 10, 0.8, 0, 0, 1735690000LL, &gid),
+                 HU_OK);
     HU_ASSERT_GT(gid, 0);
     hu_goal_engine_deinit(&ge);
 
@@ -941,11 +942,13 @@ static void test_w9_goal_create_invalidates_cache(void) {
     HU_ASSERT_EQ(hu_world_model_load(m, A(), "u-goal", 6, 1000LL, &wm1), HU_OK);
     HU_ASSERT_EQ(wm1->goals_count, 0u);
 
-    /* Goal create — cache must be cleared (goals are global so every
-     * cached contact is affected). */
+    /* Goal create — cache for this contact must be cleared. P3-1 scopes
+     * goals per-contact, so a goal under u-goal only invalidates u-goal's
+     * snapshot (which is what we cached above). */
     int64_t goal_id = 0;
-    HU_ASSERT_EQ(hu_goal_create(&engine, "ship the prototype", 18, 0.7, 0, 0, 1500, &goal_id),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_goal_create(&engine, "u-goal", 6, "ship the prototype", 18, 0.7, 0, 0, 1500, &goal_id),
+        HU_OK);
     HU_ASSERT_GT(goal_id, 0);
 
     uint64_t loads = 0, hits = 0;

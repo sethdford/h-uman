@@ -902,7 +902,8 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
             if (hu_goal_engine_create(alloc, db, &ge) == HU_OK) {
                 hu_goal_t *active = NULL;
                 size_t active_n = 0;
-                if (hu_goal_list_active(&ge, &active, &active_n) == HU_OK && active_n > 0) {
+                if (hu_goal_list_active(&ge, contact_id, cid_len, &active, &active_n) == HU_OK &&
+                    active_n > 0) {
                     size_t cap = active_n > 8 ? 8 : active_n;
                     for (size_t i = 0; i < cap; i++) {
                         hu_active_goal_t *ag = &wm->goals[i];
