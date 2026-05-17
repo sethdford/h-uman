@@ -1199,12 +1199,22 @@ list(APPEND HU_CORE_SOURCES
     src/persona/creative_voice.c
     src/persona/genuine_boundaries.c
     src/tools/persona.c
-    # US-8.2 — Persona Encryption-at-Rest.  Hard-requires libsodium; the
-    # TU itself emits #error if HU_HAS_LIBSODIUM is not defined, so this
-    # entry intentionally has no compile-time gate — a misconfigured build
-    # fails loudly at compile time rather than silently dropping the
-    # crypto layer.
-    src/persona/persona_crypt.c
+    # US-8.2 — Persona Encryption-at-Rest. Hard-requires libsodium via
+    # the TU's `#error if !defined(HU_HAS_LIBSODIUM)`. The original
+    # registration was unconditional with a "fail loudly" justification,
+    # but in practice this broke every CI variant that didn't pass
+    # `-DHU_ENABLE_LIBSODIUM=ON` (default OFF) — including all 12
+    # inline-apt CI jobs and integration-tests / minimal-build /
+    # cross-arm64 / feature-flags. Even installing libsodium-dev
+    # apt-side isn't sufficient because find_package(sodium) only runs
+    # when HU_ENABLE_LIBSODIUM=ON.
+    #
+    # The honest fix: only compile persona_crypt.c when libsodium is
+    # actually present. Callers (src/persona/persona_storage.c) already
+    # guard `hu_persona_crypt_*` calls with `#ifdef HU_HAS_LIBSODIUM`
+    # so no API break. When libsodium IS enabled and found, the layer
+    # is built; otherwise persona storage falls back to the PBKDF2 +
+    # ChaCha20+HMAC path documented at CMakeLists.txt:2102.
     src/context/theory_of_mind.c
     src/context/self_awareness.c
     src/context/anticipatory.c
@@ -2097,6 +2107,14 @@ if(HU_ENABLE_LIBSODIUM)
             target_link_directories(human_core PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
         endif()
         target_compile_definitions(human_core PRIVATE HU_HAS_LIBSODIUM=1)
+        # Add persona_crypt.c here (rather than to HU_CORE_SOURCES) so
+        # it only compiles when libsodium is actually available. The TU
+        # has `#error if !defined(HU_HAS_LIBSODIUM)`, so including it
+        # unconditionally breaks every CI variant where the option is
+        # off (default OFF). The matching human_core_test wiring is in
+        # a parallel block AFTER add_library(human_core_test ...) — see
+        # search for "persona_crypt.c" in the test-library section.
+        target_sources(human_core PRIVATE src/persona/persona_crypt.c)
         message(STATUS "libsodium: enabled (XChaCha20-Poly1305 + Argon2id)")
     else()
         message(WARNING "HU_ENABLE_LIBSODIUM=ON but libsodium not found; falling back to PBKDF2 + ChaCha20+HMAC")
@@ -2601,6 +2619,20 @@ endif()
 if(HU_ENABLE_COREML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_COREML=1)
 endif()
+# Mirror the HU_LIBSODIUM_FOUND block above for human_core_test so
+# persona_crypt tests can link. See CMakeLists.txt:2097 for the
+# production-side wiring + the rationale comment on why this is
+# gated rather than the previous "unconditional with #error" pattern.
+if(HU_LIBSODIUM_FOUND)
+    target_sources(human_core_test PRIVATE src/persona/persona_crypt.c)
+    target_compile_definitions(human_core_test PRIVATE HU_HAS_LIBSODIUM=1)
+    target_include_directories(human_core_test PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
+    target_link_libraries(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARIES})
+    if(HU_LIBSODIUM_LIBRARY_DIRS)
+        target_link_directories(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
+    endif()
+    list(APPEND HU_TEST_SOURCES tests/test_persona_encryption.c)
+endif()
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_FEEDS=1)
 endif()
@@ -2805,7 +2837,8 @@ set(HU_TEST_SOURCES
     tests/test_channel_overlay_apply.c
     tests/test_personal_model_simulation.c
     tests/test_personal_model_fidelity_v2.c
-    tests/test_persona_encryption.c
+    # test_persona_encryption.c — moved to gated block below; references
+    # hu_persona_crypt_* which only exists when HU_LIBSODIUM_FOUND.
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
     tests/integration/test_sprint3_hybrid_recall.c

@@ -643,7 +643,9 @@ void run_grpo_mlx_tests(void);
 void run_grpo_huml_tests(void);
 void run_grpo_e2e_tests(void);
 #endif
+#ifdef HU_HAS_LIBSODIUM
 void run_persona_encryption_tests(void);
+#endif
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
 void run_channel_overlay_apply_tests(void);
@@ -1356,7 +1358,9 @@ int main(int argc, char **argv) {
     run_grpo_mlx_tests();
     run_grpo_e2e_tests();
 #endif
+#ifdef HU_HAS_LIBSODIUM
     run_persona_encryption_tests();
+#endif
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
     run_channel_overlay_apply_tests();
