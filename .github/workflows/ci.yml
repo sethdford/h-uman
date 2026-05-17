@@ -92,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure
         run: |
           cmake -B build-integ \
@@ -112,7 +112,49 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install ARM64 cross-compiler
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        # GitHub Actions ubuntu-latest runners use Azure-hosted apt
+        # mirrors that DON'T serve arm64 packages — `apt-get update`
+        # after `dpkg --add-architecture arm64` 404s on the arm64
+        # indices (Bugbot 672e8d04). Workaround:
+        #   1. Restrict the default Azure sources to amd64 only.
+        #   2. Add a separate sources list pointing arm64 to
+        #      ports.ubuntu.com (the canonical home for non-x86
+        #      Ubuntu packages).
+        # After this, both `libsqlite3-dev` (amd64) and
+        # `libsodium-dev:arm64` resolve cleanly.
+        #
+        # Note: round-24 made persona_crypt.c gated on HU_LIBSODIUM_FOUND,
+        # so the cross-arm64 build no longer strictly needs libsodium
+        # (it can fall back to PBKDF2). But installing :arm64 here lets
+        # the cross build exercise the real crypto path if a future
+        # contributor turns HU_ENABLE_LIBSODIUM=ON for arm64.
+        run: |
+          set -euo pipefail
+          # Restrict the main Ubuntu sources to amd64 only so apt-get
+          # update doesn't try to fetch arm64 from Azure. We touch ONLY
+          # /etc/apt/sources.list and /etc/apt/sources.list.d/ubuntu.sources
+          # — other entries (e.g. microsoft-prod.list, github_*.list)
+          # use deb822 or non-standard formats and breaking them with a
+          # naive `^deb ` sed corrupts apt entirely (round-25 hit this).
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            [ -f "$f" ] || continue
+            # deb-line format (one-liner): `deb URI codename ...`
+            sudo sed -i 's/^deb /deb [arch=amd64] /' "$f"
+            # deb822 format (ubuntu.sources): `Types: deb` then `URIs: ...`
+            # Add Architectures: amd64 if it's not already set.
+            if ! grep -q '^Architectures:' "$f"; then
+              sudo sed -i '/^Types: deb/a Architectures: amd64' "$f"
+            fi
+          done
+          # Add ports.ubuntu.com for arm64 — codename comes from os-release.
+          . /etc/os-release
+          sudo tee /etc/apt/sources.list.d/arm64-ports.list > /dev/null <<EOF
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${VERSION_CODENAME} main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${VERSION_CODENAME}-updates main universe
+          EOF
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libsodium-dev:arm64
       - name: Configure (ARM64 cross-compile)
         run: |
           cmake -B build-arm64 \
@@ -131,7 +173,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure
         run: cmake --preset minimal
       - name: Build
@@ -169,7 +211,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure (${{ matrix.name }})
         run: cmake -B build ${{ matrix.flags }}
       - name: Build
@@ -285,7 +327,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build gateway
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHU_BUILD_TESTS=OFF -DHU_ENABLE_CURL=ON
@@ -336,7 +378,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build gateway
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHU_BUILD_TESTS=OFF -DHU_ENABLE_CURL=ON
@@ -410,7 +452,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake gcc libsqlite3-dev libcurl4-openssl-dev \
+          sudo apt-get install -y build-essential cmake gcc libsqlite3-dev libsodium-dev libcurl4-openssl-dev \
             debhelper devscripts fakeroot
       - name: Build .deb package
         run: bash scripts/build-deb.sh
@@ -446,7 +488,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libsqlite3-dev
+          sudo apt-get install -y libcurl4-openssl-dev libsqlite3-dev libsodium-dev
           sudo apt-get install -y clang-format-18 || sudo apt-get install -y clang-format
           if command -v clang-format-18 >/dev/null; then
             sudo ln -sf $(which clang-format-18) /usr/local/bin/clang-format
@@ -620,7 +662,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
       - name: Start Ollama server
@@ -670,7 +712,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install build deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build
         run: |
           cmake -B build -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SKILLS=ON
@@ -723,7 +765,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install Clang and build deps
-        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev libsodium-dev
       - name: Configure (fuzz)
         env:
           CC: clang
@@ -790,7 +832,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsqlite3-dev libcurl4-openssl-dev libssl-dev binutils
+          sudo apt-get install -y cmake ninja-build libsqlite3-dev libsodium-dev libcurl4-openssl-dev libssl-dev binutils
       - name: Install macOS build deps
         if: matrix.os == 'macos-latest'
         run: |

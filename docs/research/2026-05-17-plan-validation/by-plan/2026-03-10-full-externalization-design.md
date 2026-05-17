@@ -41,7 +41,7 @@ registry, with data files under `data/`.
 ### Proven? (tests exist)
 - Embedded files are byte-identical to source; loader is exercised by every
   caller that reads prompts/wordlists. No standalone `test_data_loader.c` was
-  found, but the integration is covered transitively by tests in
+  found, but the wiring is covered transitively by tests in
   `tests/test_conversation.c`, `tests/test_persona.c`, `tests/test_security_*`
   (any failure to load embedded data fails those suites' setup).
 

@@ -65,5 +65,5 @@ principles. Features F58-F69.
 
 ## Notes
 - Phase 6 is broad; per-feature depth (e.g. opinion evolution vs just
-  storage) would require deeper read but the integration surface is
+  storage) would require deeper read but the wiring surface is
   complete.

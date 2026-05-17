@@ -54,7 +54,7 @@ Features F18-F24, F26, F30-F31, F50, F53.
   `hu_superhuman_*` (verified via grep — at least 8 caller files)
 
 ## Gaps
-- None material at the integration level. Per-feature depth (e.g. growth
+- None material at the wiring level. Per-feature depth (e.g. growth
   milestones vs micro-moments) was not exhaustively verified but the
   scaffolding is fully present and active.
 
