@@ -2331,6 +2331,16 @@ export class DemoGatewayClient extends EventTarget {
           },
         };
 
+      // --- Response guard reject counters (`cp_admin_metrics_guard_rejects`) ---
+      case "metrics.guard_rejects":
+        return {
+          semantic_leak: 42,
+          length_anomaly: 18,
+          director_echo: 7,
+          persona_pii_echo: 3,
+          persona_identity_echo: 2,
+        };
+
       // --- Persona fidelity (mirrors `human ml fidelity-status`) ---
       // Mock shape MUST match the live C gateway exactly. The
       // `metrics.fidelity` handler in `src/gateway/cp_admin.c`
