@@ -1051,6 +1051,12 @@ list(APPEND HU_CORE_SOURCES
     src/persona/creative_voice.c
     src/persona/genuine_boundaries.c
     src/tools/persona.c
+    # US-8.2 — Persona Encryption-at-Rest.  Hard-requires libsodium; the
+    # TU itself emits #error if HU_HAS_LIBSODIUM is not defined, so this
+    # entry intentionally has no compile-time gate — a misconfigured build
+    # fails loudly at compile time rather than silently dropping the
+    # crypto layer.
+    src/persona/persona_crypt.c
     src/context/theory_of_mind.c
     src/context/self_awareness.c
     src/context/anticipatory.c
@@ -2458,6 +2464,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_persona_encryption.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
     tests/test_filler_pctt.c
