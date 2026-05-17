@@ -1366,6 +1366,13 @@ if(HU_ENABLE_ML)
         # degeneracy (N<2 / N>1024), Phase 3 cli_rm precedent (--backend
         # mlx demands --backbone-path).
         src/ml/cli_grpo.c
+        # Phase D Task D-1 (CF-7 RL SOTA): hu_ml_resolve_script_path —
+        # resolves absolute path to a helper Python script under the
+        # project's scripts/ directory, so MLX popen wrappers
+        # (dpo_real_mlx, kto_mlx, grpo_mlx, reward_model_mlx) no longer
+        # invoke `python3 scripts/<name>.py` with a CWD-relative path.
+        # Closes CF-7 (popen relative-CWD shadow attack).
+        src/ml/ml_scripts_dir.c
         # Phase 4 Task 1 (RL SOTA): KL divergence estimators (k1/k2/k3) +
         # k3 analytical backward grad. Pure C leaf math primitive — no
         # model coupling, no allocator. Used by the GRPO trainer
@@ -1758,6 +1765,13 @@ if(HU_ENABLE_SQLITE)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_SQLITE=1)
     target_compile_definitions(human_core PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
 endif()
+
+# Phase D Task D-1 (CF-7 RL SOTA): inject HU_ML_SCRIPTS_DIR compile-time
+# default so hu_ml_resolve_script_path resolves to absolute paths without
+# requiring HU_ML_SCRIPTS_DIR env in dev/test builds. Env override (set
+# at runtime) still wins. Installed builds should override this at
+# install time to point at <prefix>/share/human/scripts.
+target_compile_definitions(human_core PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 
 if(HU_ENABLE_POSTGRES)
     find_package(PostgreSQL QUIET)
@@ -2613,6 +2627,12 @@ if(HU_ENABLE_SQLITE)
         target_link_libraries(human_core_test PUBLIC sqlite3)
     endif()
 endif()
+
+# Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for the test
+# library so hu_ml_resolve_script_path inside ml_scripts_dir.c falls back
+# to the repo's scripts/ dir during test runs (the env override can still
+# point tests at a temp dir for CWD-shadow regression tests).
+target_compile_definitions(human_core_test PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 if(HU_ENABLE_FIPS_CRYPTO)
     if(OpenSSL_FOUND)
         target_link_libraries(human_core_test PUBLIC OpenSSL::Crypto)
@@ -3029,6 +3049,12 @@ set(HU_TEST_SOURCES
     # Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
     # grad check + vtable contract.
     tests/test_kto_loss.c
+    # Phase D Task D-1 (CF-7 RL SOTA): hu_ml_resolve_script_path —
+    # absolute path resolution for MLX popen wrappers; rejects unsafe
+    # script names + buffer-too-small + missing-source. Closes the
+    # popen relative-CWD security issue tracked in
+    # docs/proof/rl-loop-shipcontract.md::CF-7.
+    tests/test_ml_scripts_dir.c
     # Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 forward + k3 backward grad
     # check + v=0 graceful zero-return. Pins the math primitive that
     # backs the GRPO KL penalty (Task 5).
@@ -3300,6 +3326,8 @@ target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests
     # Phase 3 reward_model_priv.h (H2 fix).
     ${HU_ROOT}/src/ml)
 target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
+# Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for tests.
+target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)

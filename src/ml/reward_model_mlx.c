@@ -10,6 +10,7 @@
  * from the CLI, not from this vtable). The C side only does inference.
  */
 #include "human/ml/reward_model.h"
+#include "human/ml/ml_scripts_dir.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 
@@ -61,15 +62,27 @@ static hu_error_t rm_mlx_score(void *vctx, hu_allocator_t *alloc,
     memcpy(r_buf, response, response_len);
     r_buf[response_len] = '\0';
 
+    /* CF-7 (Phase D Task D-1): resolve absolute path to rm_mlx_train.py
+     * via hu_ml_resolve_script_path. Replaces the legacy CWD-relative
+     * "python3 scripts/rm_mlx_train.py" splice. */
+    char script_path[512];
+    hu_error_t serr = hu_ml_resolve_script_path("rm_mlx_train.py", script_path,
+                                                  sizeof(script_path));
+    if (serr != HU_OK) {
+        alloc->free(alloc->ctx, p_buf, prompt_len + 1);
+        alloc->free(alloc->ctx, r_buf, response_len + 1);
+        return serr;
+    }
+
     char cmd[4096];
     int n = snprintf(cmd, sizeof(cmd),
-                     "python3 scripts/rm_mlx_train.py --infer "
+                     "python3 '%s' --infer "
                      "--backbone '%s' "
                      "--value-head '%s' "
                      "--prompt '%s' "
                      "--response '%s' "
                      "2>/dev/null",
-                     c->model_path, c->value_head_path, p_buf, r_buf);
+                     script_path, c->model_path, c->value_head_path, p_buf, r_buf);
 
     alloc->free(alloc->ctx, p_buf, prompt_len + 1);
     alloc->free(alloc->ctx, r_buf, response_len + 1);

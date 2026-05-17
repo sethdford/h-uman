@@ -12,6 +12,7 @@
  */
 #include "human/ml/kto.h"
 #include "human/ml/rl_trainer.h"
+#include "human/ml/ml_scripts_dir.h"
 #include "human/core/error.h"
 #include <fcntl.h>
 #include <stdio.h>
@@ -133,9 +134,17 @@ static hu_error_t kto_mlx_step(void *vctx, hu_allocator_t *alloc,
         return HU_ERR_INVALID_ARGUMENT;
     }
 
+    /* CF-7 (Phase D Task D-1): resolve absolute path to kto_mlx_train.py
+     * via hu_ml_resolve_script_path. Replaces the legacy CWD-relative
+     * "python3 scripts/kto_mlx_train.py" splice. */
+    char script_path[512];
+    hu_error_t serr = hu_ml_resolve_script_path("kto_mlx_train.py", script_path,
+                                                  sizeof(script_path));
+    if (serr != HU_OK) { unlink(jsonl_path); return serr; }
+
     char cmd[2048];
     snprintf(cmd, sizeof(cmd),
-             "python3 scripts/kto_mlx_train.py "
+             "python3 '%s' "
              "--model '%s' "
              "--data '%s' "
              "--adapter-path '%s' "
@@ -144,7 +153,7 @@ static hu_error_t kto_mlx_step(void *vctx, hu_allocator_t *alloc,
              "--lambda-d %.4f "
              "--lambda-u %.4f "
              "2>&1",
-             c->model_id, jsonl_path, c->adapter_dir,
+             script_path, c->model_id, jsonl_path, c->adapter_dir,
              c->max_iters, c->beta, c->lambda_d, c->lambda_u);
 
 /* Phase 3 audit fold-in (critic MEDIUM-3): use `#if HU_IS_TEST` (numeric

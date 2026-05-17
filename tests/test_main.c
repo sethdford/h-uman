@@ -463,6 +463,11 @@ void run_reward_model_inference_tests(void);
  * grad check + vtable contract. */
 void run_kto_loss_tests(void);
 #ifdef HU_ENABLE_RL_FULL
+/* Phase D Task D-1 (CF-7 RL SOTA): hu_ml_resolve_script_path —
+ * absolute-path resolver for MLX popen helper scripts. Closes the CF-7
+ * relative-CWD shadow attack on dpo_real_mlx / kto_mlx / grpo_mlx /
+ * reward_model_mlx popen sites. */
+void run_ml_scripts_dir_tests(void);
 /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 estimators + k3 analytical
  * backward grad — pure C leaf math primitive used by the GRPO
  * trainer (Task 5) for the KL penalty term. */
@@ -1163,6 +1168,8 @@ int main(int argc, char **argv) {
     /* Phase 3 Task 5 (RL SOTA): KTO loss. */
     run_kto_loss_tests();
 #ifdef HU_ENABLE_RL_FULL
+    /* Phase D Task D-1 (CF-7 RL SOTA): popen script-path resolver. */
+    run_ml_scripts_dir_tests();
     /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 + k3 backward grad. */
     run_kl_divergence_tests();
     /* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML — sampling determinism
