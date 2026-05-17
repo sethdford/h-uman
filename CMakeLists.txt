@@ -40,18 +40,36 @@ endif()
 # default and already produces deterministic archives in modern Xcode
 # (since Xcode 10, archives use zerofill metadata). Probe -D once.
 include(CheckSourceCompiles)
+# Probe ar -D support by actually CREATING a tiny archive — the old
+# `ar -D --version` probe returned exit 0 on newer binutils (noble's
+# binutils-2.42 ships with `--enable-deterministic-archives` as the
+# default) even when `qcD` fails at real link time with
+# `-D: invalid option -- 'n'`. Round-26 CI tripped this across every
+# Linux job. The real probe creates a 1-byte file, runs `ar qcD` on
+# it, checks exit code. If that works, we know qcD works.
+file(WRITE "${CMAKE_BINARY_DIR}/_hu_ar_probe.c" "int _x = 0;\n")
 execute_process(
-    COMMAND ${CMAKE_AR} -D --version
-    OUTPUT_VARIABLE _hu_ar_d_probe
-    ERROR_QUIET
-    RESULT_VARIABLE _hu_ar_d_result)
+    COMMAND ${CMAKE_C_COMPILER} -c "${CMAKE_BINARY_DIR}/_hu_ar_probe.c" -o "${CMAKE_BINARY_DIR}/_hu_ar_probe.o"
+    RESULT_VARIABLE _hu_ar_probe_compile)
+if(_hu_ar_probe_compile EQUAL 0)
+    execute_process(
+        COMMAND ${CMAKE_AR} qcD "${CMAKE_BINARY_DIR}/_hu_ar_probe.a" "${CMAKE_BINARY_DIR}/_hu_ar_probe.o"
+        OUTPUT_QUIET
+        ERROR_QUIET
+        RESULT_VARIABLE _hu_ar_d_result)
+else()
+    set(_hu_ar_d_result 1)  # can't compile probe = can't trust the ar test
+endif()
+file(REMOVE "${CMAKE_BINARY_DIR}/_hu_ar_probe.c"
+            "${CMAKE_BINARY_DIR}/_hu_ar_probe.o"
+            "${CMAKE_BINARY_DIR}/_hu_ar_probe.a")
 if(_hu_ar_d_result EQUAL 0)
     set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcD <TARGET> <OBJECTS>")
     set(CMAKE_C_ARCHIVE_APPEND "<CMAKE_AR> qD  <TARGET> <OBJECTS>")
     set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_AR> -D <TARGET>")
-    message(STATUS "Reproducible builds: ar supports -D (deterministic mode)")
+    message(STATUS "Reproducible builds: ar qcD verified working (probe created a real archive)")
 else()
-    message(STATUS "Reproducible builds: ar -D not supported (Darwin BSD ar); relying on platform default determinism")
+    message(STATUS "Reproducible builds: ar qcD not supported (probe failed); relying on platform default determinism (modern binutils default to --enable-deterministic-archives)")
 endif()
 
 # Linker-level nondeterminism. ELF build-id and Mach-O LC_UUID embed
