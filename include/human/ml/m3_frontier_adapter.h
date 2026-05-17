@@ -42,11 +42,35 @@ typedef struct hu_m3_frontier_adapter hu_m3_frontier_adapter_t;
  * Returns HU_ERR_IO when the file is missing or the header does not match.
  * On success, `*out` is owned; free with `hu_m3_frontier_adapter_close`. */
 hu_error_t hu_m3_frontier_adapter_try_open(hu_allocator_t *alloc, const char *path, size_t path_len,
-                                          hu_m3_frontier_adapter_t **out);
+                                           hu_m3_frontier_adapter_t **out);
 
-/* Deterministic no-op “inference” — always HU_OK; exists so call sites can be
- * wired before real tensor work lands. */
+/* Deterministic probe "inference" — always HU_OK; increments an internal
+ * call counter on the adapter (observable via
+ * `hu_m3_frontier_adapter_probe_count`). Replaces the older
+ * `hu_m3_frontier_adapter_noop_infer`, which silently returned HU_OK with
+ * no side effect — meaning a regression that dropped one of the 11
+ * provider-success call sites would be undetectable at the test layer.
+ *
+ * The counter is a *signal*, not a model: no tensors, no learning, no
+ * gradient. It exists so:
+ *   1. A test can pin "the chat path actually reaches the M3 hook"
+ *      (see tests/test_m3_frontier_probe.c) instead of trusting that
+ *      a (void)return; means the wiring works.
+ *   2. The eventual real-tensor implementation has a known-good seam
+ *      to slot under — replace the body of `probe_infer` with the
+ *      tensor call; the counter side effect can stay or go.
+ *
+ * Backwards-compat: `hu_m3_frontier_adapter_noop_infer` is preserved as
+ * a thin wrapper that calls `probe_infer` and discards the count delta,
+ * so the agent-side `hu_agent_m3_on_provider_success` callers do not
+ * need to be re-edited for this slice. See
+ * docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md Phase B-pre. */
+hu_error_t hu_m3_frontier_adapter_probe_infer(hu_m3_frontier_adapter_t *adapter);
 hu_error_t hu_m3_frontier_adapter_noop_infer(hu_m3_frontier_adapter_t *adapter);
+
+/* Read-only: number of times probe_infer (or noop_infer) was called on
+ * this adapter since open. Zero for NULL. Test-observable seam. */
+uint64_t hu_m3_frontier_adapter_probe_count(const hu_m3_frontier_adapter_t *adapter);
 
 void hu_m3_frontier_adapter_close(hu_allocator_t *alloc, hu_m3_frontier_adapter_t *adapter);
 

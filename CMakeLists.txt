@@ -1740,6 +1740,13 @@ endif()
 # --- Size optimization: function/data sections for link-time dead code elimination ---
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(human_core PRIVATE -ffunction-sections -fdata-sections)
+    # src/onboard.c embeds a starter-persona JSON literal that exceeds ISO C99's
+    # required 4095-byte minimum string-literal length. The compiler we ship with
+    # supports much longer literals; -Wno-overlength-strings just silences the
+    # diagnostic so -Werror doesn't reject it. Scoped to this one file so the
+    # global posture stays -Werror -Wall -Wextra -Wpedantic.
+    set_source_files_properties(src/onboard.c PROPERTIES
+        COMPILE_OPTIONS "-Wno-overlength-strings")
 endif()
 
 if(HU_ENABLE_SQLITE)
