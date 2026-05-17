@@ -88,6 +88,12 @@ bool hu_proactive_throttle_channel_try_consume(hu_proactive_throttle_t *t,
 bool hu_proactive_throttle_dedup_first_today(hu_proactive_throttle_t *t, const char *feature,
                                              const char *contact_id, uint32_t ymd);
 
+/* Pure predicate: returns true if dedup_first_today has been called for
+ * (feature, contact_id, ymd) already. Does NOT mutate state. */
+bool hu_proactive_throttle_dedup_already_today(const hu_proactive_throttle_t *t,
+                                               const char *feature, const char *contact_id,
+                                               uint32_t ymd);
+
 /* Record a send and return false if the per-contact daily (24h) or weekly (7d)
  * cap would be exceeded. The caller is expected to call this AFTER the channel
  * rate-limiter has accepted the send but BEFORE actually transmitting; if the

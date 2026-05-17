@@ -106,6 +106,20 @@ static void throttle_dedup_make_key(const char *feature, const char *contact_id,
         out[0] = '\0';
 }
 
+bool hu_proactive_throttle_dedup_already_today(const hu_proactive_throttle_t *t,
+                                               const char *feature, const char *contact_id,
+                                               uint32_t ymd) {
+    if (!t || !feature || !contact_id || !*contact_id)
+        return false;
+    char key[sizeof(t->dedup[0].key)];
+    throttle_dedup_make_key(feature, contact_id, ymd, key, sizeof(key));
+    for (size_t i = 0; i < t->dedup_count; i++) {
+        if (strncmp(t->dedup[i].key, key, sizeof(t->dedup[i].key)) == 0)
+            return true;
+    }
+    return false;
+}
+
 bool hu_proactive_throttle_dedup_first_today(hu_proactive_throttle_t *t, const char *feature,
                                              const char *contact_id, uint32_t ymd) {
     if (!t || !feature || !contact_id || !*contact_id)

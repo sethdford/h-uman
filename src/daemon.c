@@ -71,6 +71,7 @@
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/proactive.h"
 #include "human/agent/proactive_ext.h"
+#include "human/agent/proactive_throttle.h"
 #include "human/agent/validators/builtin.h"
 #include "human/context/self_awareness.h"
 #include "human/observability/validator_telemetry.h"
@@ -890,6 +891,20 @@ void hu_daemon_trust_reset(void) {
 /* Proactive context — shared LRU cache for contact activity tracking. */
 static hu_proactive_context_t g_proactive_ctx;
 
+/* 2026-05-16 P1-6 / P1-7 / P4-6: centralized throttle for outbound proactive
+ * sends. Lazy-initialized on first send so tests that exercise the daemon
+ * skeleton don't allocate. */
+static hu_proactive_throttle_t g_proactive_throttle;
+static int g_proactive_throttle_initialized;
+
+static hu_proactive_throttle_t *daemon_throttle(hu_allocator_t *alloc) {
+    if (!g_proactive_throttle_initialized) {
+        hu_proactive_throttle_init(&g_proactive_throttle, alloc);
+        g_proactive_throttle_initialized = 1;
+    }
+    return &g_proactive_throttle;
+}
+
 /* Compatibility aliases — old static names → public API in daemon_proactive.c */
 #define daemon_contact_activity_record(cid, ch, sk) \
     hu_daemon_contact_activity_record(&g_proactive_ctx, (cid), (ch), (sk))
@@ -947,7 +962,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     if (!hu_governor_has_budget(&gov_budget, gov_now_ms))
         return;
 
-    /* F53: Deduplication — don't send same important_date to same contact twice per day */
+    /* F53: Deduplication — don't send same important_date to same contact twice per day.
+     *
+     * 2026-05-16 P1-7: the static char[8][64] ring buffer below overflowed
+     * silently with 9+ contacts. It is retained ONLY for backward compatibility
+     * (downstream callers still touch g_sent_important_date_count for stats).
+     * The authoritative check is now hu_proactive_throttle_dedup_already_today /
+     * _first_today, which is heap-backed and scales to 256 contacts. */
     static char g_sent_important_date_contacts[8][64];
     static int g_sent_important_date_count = 0;
     static int g_sent_important_date_ymd = -1;
@@ -956,6 +977,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         g_sent_important_date_ymd = today_ymd;
         g_sent_important_date_count = 0;
     }
+    /* Heap-backed dedup (replaces the [8] ring). */
+    (void)daemon_throttle(alloc);
+    uint32_t throttle_ymd = (uint32_t)today_ymd;
 
 #ifndef HU_IS_TEST
     /* F25: Emotional check-ins — due moments from 1–3 days ago */
@@ -1008,6 +1032,23 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         int w = snprintf(msg_buf, sizeof(msg_buf), "hey how are you doing with %s?",
                                          m->topic);
                         if (w > 0 && (size_t)w < sizeof(msg_buf)) {
+                            /* 2026-05-16 P1-6: channel rate-limiter on outbound. */
+                            hu_proactive_throttle_t *th = daemon_throttle(alloc);
+                            if (!hu_proactive_throttle_channel_try_consume(th, ch_name)) {
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "F25 emotional check-in to %s skipped: rate-limited",
+                                            cp->name ? cp->name : cp->contact_id);
+                                break;
+                            }
+                            /* 2026-05-16 P4-6: per-contact daily/weekly send cap. */
+                            uint64_t now_ms_p46 = (uint64_t)now * 1000ULL;
+                            if (!hu_proactive_throttle_record_send(th, cp->contact_id, "F25",
+                                                                   now_ms_p46)) {
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "F25 emotional check-in to %s skipped: send-cap",
+                                            cp->name ? cp->name : cp->contact_id);
+                                break;
+                            }
                             hu_error_t send_err = channels[c].channel->vtable->send(
                                 channels[c].channel->ctx, target_part, target_len, msg_buf,
                                 (size_t)w, NULL, 0);
@@ -1367,11 +1408,15 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             bool had_important_date = false;
             char important_date_msg[256];
             char important_date_type[32];
-            bool important_date_sent_today = false;
-            for (int di = 0; di < g_sent_important_date_count; di++) {
-                if (strcmp(g_sent_important_date_contacts[di], cp->contact_id) == 0) {
-                    important_date_sent_today = true;
-                    break;
+            bool important_date_sent_today = hu_proactive_throttle_dedup_already_today(
+                &g_proactive_throttle, "important_date", cp->contact_id, throttle_ymd);
+            /* Backward-compat: also consult the legacy [8] ring while it exists. */
+            if (!important_date_sent_today) {
+                for (int di = 0; di < g_sent_important_date_count; di++) {
+                    if (strcmp(g_sent_important_date_contacts[di], cp->contact_id) == 0) {
+                        important_date_sent_today = true;
+                        break;
+                    }
                 }
             }
             if (!important_date_sent_today &&
@@ -1406,11 +1451,14 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             size_t bookend_ctx_len = 0;
             if (!had_important_date && agent->persona) {
                 bool contact_is_close = (cp->dunbar_layer && atoi(cp->dunbar_layer) <= 2);
-                bool bookend_sent_today = false;
-                for (int di = 0; di < g_sent_important_date_count; di++) {
-                    if (strcmp(g_sent_important_date_contacts[di], cp->contact_id) == 0) {
-                        bookend_sent_today = true;
-                        break;
+                bool bookend_sent_today = hu_proactive_throttle_dedup_already_today(
+                    &g_proactive_throttle, "important_date", cp->contact_id, throttle_ymd);
+                if (!bookend_sent_today) {
+                    for (int di = 0; di < g_sent_important_date_count; di++) {
+                        if (strcmp(g_sent_important_date_contacts[di], cp->contact_id) == 0) {
+                            bookend_sent_today = true;
+                            break;
+                        }
                     }
                 }
                 uint32_t seed = (uint32_t)((uint64_t)now ^ (uint64_t)(uintptr_t)cp);
@@ -1729,33 +1777,61 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             response[response_len - 1] = '\0';
                             response_len--;
                         }
-                        channels[c].channel->vtable->send(channels[c].channel->ctx, target_part,
-                                                          target_len, response, response_len, NULL,
-                                                          0);
-                        hu_log_info("human", agent ? agent->observer : NULL,
-                                    "proactive check-in sent to %s: %.*s",
-                                    cp->name ? cp->name : cp->contact_id, (int)response_len,
-                                    response);
-                        hu_governor_record_sent(&gov_budget, (uint64_t)time(NULL) * 1000ULL);
-                        if (had_important_date && strcmp(important_date_type, "birthday") == 0)
+                        /* 2026-05-16 P1-6 / P4-6: rate-limit + per-contact send-cap on
+                         * proactive outbound. The pre-fix path called vtable->send
+                         * directly with no throttle, leading to 4x burst sends. */
+                        hu_proactive_throttle_t *th_main = daemon_throttle(alloc);
+                        if (!hu_proactive_throttle_channel_try_consume(th_main, ch_part)) {
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "F53: birthday message — use confetti effect");
-                        if (had_important_date && g_sent_important_date_count < 8) {
-                            size_t cid_len = strlen(cp->contact_id);
-                            if (cid_len < 64) {
-                                memcpy(g_sent_important_date_contacts[g_sent_important_date_count],
-                                       cp->contact_id, cid_len + 1);
-                                g_sent_important_date_count++;
-                            }
+                                        "proactive check-in to %s skipped: rate-limited",
+                                        cp->name ? cp->name : cp->contact_id);
+                            skip = true;
                         }
-                        if (joke_id_to_reference >= 0 && agent->memory)
-                            (void)hu_superhuman_inside_joke_reference(agent->memory,
-                                                                      joke_id_to_reference);
+                        if (!skip &&
+                            !hu_proactive_throttle_record_send(th_main, cp->contact_id, "proactive",
+                                                               (uint64_t)now * 1000ULL)) {
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "proactive check-in to %s skipped: send-cap",
+                                        cp->name ? cp->name : cp->contact_id);
+                            skip = true;
+                        }
+                        if (!skip) {
+                            channels[c].channel->vtable->send(channels[c].channel->ctx, target_part,
+                                                              target_len, response, response_len,
+                                                              NULL, 0);
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "proactive check-in sent to %s: %.*s",
+                                        cp->name ? cp->name : cp->contact_id, (int)response_len,
+                                        response);
+                            hu_governor_record_sent(&gov_budget, (uint64_t)time(NULL) * 1000ULL);
+                            if (had_important_date && strcmp(important_date_type, "birthday") == 0)
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "F53: birthday message — use confetti effect");
+                            if (had_important_date) {
+                                /* 2026-05-16 P1-7: authoritative heap-backed dedup. */
+                                (void)hu_proactive_throttle_dedup_first_today(
+                                    &g_proactive_throttle, "important_date", cp->contact_id,
+                                    throttle_ymd);
+                                /* Legacy [8] ring kept in lockstep until removal. */
+                                if (g_sent_important_date_count < 8) {
+                                    size_t cid_len = strlen(cp->contact_id);
+                                    if (cid_len < 64) {
+                                        memcpy(g_sent_important_date_contacts
+                                                   [g_sent_important_date_count],
+                                               cp->contact_id, cid_len + 1);
+                                        g_sent_important_date_count++;
+                                    }
+                                }
+                            }
+                            if (joke_id_to_reference >= 0 && agent->memory)
+                                (void)hu_superhuman_inside_joke_reference(agent->memory,
+                                                                          joke_id_to_reference);
 #ifdef HU_ENABLE_SQLITE
-                        for (size_t mi = 0; mi < commitment_ids_count; mi++)
-                            (void)hu_superhuman_commitment_mark_followed_up(agent->memory,
-                                                                            commitment_ids[mi]);
+                            for (size_t mi = 0; mi < commitment_ids_count; mi++)
+                                (void)hu_superhuman_commitment_mark_followed_up(agent->memory,
+                                                                                commitment_ids[mi]);
 #endif
+                        }
                     }
                 }
                 if (response)
@@ -1798,19 +1874,33 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     bool is_close = (strcmp(cp->relationship_type, "partner") == 0 ||
                                      strcmp(cp->relationship_type, "close_friend") == 0 ||
                                      strcmp(cp->relationship_type, "family") == 0);
-                    bool already_sent = false;
+                    /* 2026-05-16 P1-7: authoritative heap-backed dedup.
+                     * Replaces the [8] ring buffer above which overflowed
+                     * silently with 9+ close contacts. The legacy ring is
+                     * kept in lockstep until we delete it. */
+                    hu_proactive_throttle_t *gm_th = daemon_throttle(alloc);
+                    bool already_sent = hu_proactive_throttle_dedup_already_today(
+                        gm_th, "gm", cp->contact_id, gm_day);
                     size_t cid_len = strlen(cp->contact_id);
-                    for (size_t gi = 0; gi < gm_sent_count && !already_sent; gi++) {
-                        if (gm_sent[gi].day == gm_day &&
-                            strcmp(gm_sent[gi].contact_id, cp->contact_id) == 0)
-                            already_sent = true;
+                    if (!already_sent) {
+                        for (size_t gi = 0; gi < gm_sent_count && !already_sent; gi++) {
+                            if (gm_sent[gi].day == gm_day &&
+                                strcmp(gm_sent[gi].contact_id, cp->contact_id) == 0)
+                                already_sent = true;
+                        }
                     }
-                    if (is_close && !already_sent && gm_sent_count < 8) {
-                        size_t cn = cid_len < 63 ? cid_len : 63;
-                        memcpy(gm_sent[gm_sent_count].contact_id, cp->contact_id, cn);
-                        gm_sent[gm_sent_count].contact_id[cn] = '\0';
-                        gm_sent[gm_sent_count].day = gm_day;
-                        gm_sent_count++;
+                    if (is_close && !already_sent) {
+                        /* Mark in heap-backed dedup; scales to 256 contacts. */
+                        (void)hu_proactive_throttle_dedup_first_today(gm_th, "gm", cp->contact_id,
+                                                                      gm_day);
+                        /* Legacy [8] ring kept for backward compat. */
+                        if (gm_sent_count < 8) {
+                            size_t cn = cid_len < 63 ? cid_len : 63;
+                            memcpy(gm_sent[gm_sent_count].contact_id, cp->contact_id, cn);
+                            gm_sent[gm_sent_count].contact_id[cn] = '\0';
+                            gm_sent[gm_sent_count].day = gm_day;
+                            gm_sent_count++;
+                        }
 
                         const char *greeting = "good morning :)";
                         size_t greeting_len = 15;

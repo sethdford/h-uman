@@ -1,8 +1,10 @@
+#include "human/context/self_awareness.h"
 #include "human/daemon_proactive.h"
 #include "human/memory.h"
 #include "human/persona.h"
 #include "test_framework.h"
 #include <string.h>
+#include <time.h>
 
 /* Shared proactive context for all tests — reset before each test group. */
 static hu_proactive_context_t g_test_ctx;
@@ -180,6 +182,100 @@ static void test_build_callback_context_null_msg(void) {
     HU_ASSERT_EQ(out_len, 0);
 }
 
+/* ── 2026-05-16 P1-8: self-awareness directive must reach proactive prompt
+ *
+ * Audit: hu_self_awareness_build_directive(_from_memory) exists at
+ * src/context/self_awareness.c:140-191 and 354-426, but no caller injected
+ * its output into the proactive prompt assembly — which is why "how'd it go
+ * with the loan?" fired 4 times to Mindy even with the directive
+ * infrastructure present.
+ *
+ * This test simulates 3 consecutive same-topic sends (which makes
+ * topic_repeat_count == 3) and then verifies the prompt built by
+ * hu_daemon_proactive_prompt_for_contact contains the directive substring
+ * "keep" — the same fingerprint pinned by tests/test_self_awareness.c::
+ * self_awareness_directive_topic_repeat.
+ * ─────────────────────────────────────────────────────────────────── */
+#ifdef HU_ENABLE_SQLITE
+
+#include "human/core/allocator.h"
+#include "human/memory.h"
+
+static void test_p1_8_self_awareness_directive_reaches_prompt(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    const char *contact = "mindy";
+    /* Three sends on the same topic — drives topic_repeat_count to 3.
+     * Recall hu_self_awareness_build_directive_from_memory: topic_repeat > 3
+     * triggers the directive. We need 4 to exercise the "repeating" branch. */
+    for (int i = 0; i < 4; i++)
+        HU_ASSERT_EQ(hu_self_awareness_record_send(&alloc, &mem, contact, strlen(contact),
+                                                   /*we_initiated=*/true, "loan", 4),
+                     HU_OK);
+
+    /* Pull the directive directly first to confirm it triggers. */
+    char *dir = NULL;
+    size_t dir_len = 0;
+    HU_ASSERT_EQ(hu_self_awareness_build_directive_from_memory(
+                     &alloc, &mem, contact, strlen(contact), (int64_t)time(NULL), &dir, &dir_len),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(dir);
+    HU_ASSERT_TRUE(dir_len > 0);
+    /* Topic-repeat branch produces "I know I keep talking about <topic>" */
+    HU_ASSERT_TRUE(strstr(dir, "keep") != NULL);
+    HU_ASSERT_TRUE(strstr(dir, "loan") != NULL);
+    alloc.free(alloc.ctx, dir, dir_len + 1);
+
+    /* Now build the actual proactive prompt and confirm the directive is
+     * present in the output. The audit fix prepends the directive before the
+     * base "You're initiating..." text. */
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = (char *)contact;
+    cp.name = (char *)"Mindy";
+
+    size_t out_len = 0;
+    char *prompt =
+        hu_daemon_proactive_prompt_for_contact(&alloc, /*agent=*/NULL, &mem, &cp, &out_len);
+    HU_ASSERT_NOT_NULL(prompt);
+    HU_ASSERT_TRUE(out_len > 0);
+    HU_ASSERT_TRUE(strstr(prompt, "keep") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "loan") != NULL);
+    alloc.free(alloc.ctx, prompt, out_len + 1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_p1_8_no_directive_when_no_repeat(void) {
+    /* Negative control: a single send on a unique topic must NOT produce the
+     * "I keep talking about" directive in the prompt. This guards against a
+     * future change that fires the directive unconditionally. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    const char *contact = "annie";
+    HU_ASSERT_EQ(
+        hu_self_awareness_record_send(&alloc, &mem, contact, strlen(contact), true, "garden", 6),
+        HU_OK);
+
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = (char *)contact;
+    cp.name = (char *)"Annie";
+
+    size_t out_len = 0;
+    char *prompt =
+        hu_daemon_proactive_prompt_for_contact(&alloc, /*agent=*/NULL, &mem, &cp, &out_len);
+    HU_ASSERT_NOT_NULL(prompt);
+    HU_ASSERT_TRUE(strstr(prompt, "I know I keep talking about") == NULL);
+    alloc.free(alloc.ctx, prompt, out_len + 1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+#endif /* HU_ENABLE_SQLITE */
+
 /* ── Test runner ─────────────────────────────────────────────────────── */
 
 void run_daemon_proactive_tests(void) {
@@ -207,4 +303,10 @@ void run_daemon_proactive_tests(void) {
     /* callback context builder */
     HU_RUN_TEST(test_build_callback_context_null_memory);
     HU_RUN_TEST(test_build_callback_context_null_msg);
+
+#ifdef HU_ENABLE_SQLITE
+    /* 2026-05-16 P1-8 regression */
+    HU_RUN_TEST(test_p1_8_self_awareness_directive_reaches_prompt);
+    HU_RUN_TEST(test_p1_8_no_directive_when_no_repeat);
+#endif
 }

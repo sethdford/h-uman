@@ -97,6 +97,21 @@ static void throttle_dedup_rolls_over_on_new_day(void) {
     HU_ASSERT_TRUE(hu_proactive_throttle_dedup_first_today(&t, "gm", "alice", 20260517));
 }
 
+static void throttle_dedup_already_today_does_not_mutate(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_proactive_throttle_t t;
+    hu_proactive_throttle_init(&t, &alloc);
+
+    /* Pure predicate: false before, false after, even called many times. */
+    for (int i = 0; i < 5; i++)
+        HU_ASSERT_FALSE(hu_proactive_throttle_dedup_already_today(&t, "gm", "alice", 20260516));
+    HU_ASSERT_TRUE(hu_proactive_throttle_dedup_first_today(&t, "gm", "alice", 20260516));
+    /* Now it's marked — already_today should return true and dedup_first
+     * should refuse a duplicate. */
+    HU_ASSERT_TRUE(hu_proactive_throttle_dedup_already_today(&t, "gm", "alice", 20260516));
+    HU_ASSERT_FALSE(hu_proactive_throttle_dedup_first_today(&t, "gm", "alice", 20260516));
+}
+
 static void throttle_dedup_isolated_per_feature(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_proactive_throttle_t t;
@@ -201,6 +216,7 @@ void run_proactive_throttle_tests(void) {
     HU_RUN_TEST(throttle_dedup_first_wins);
     HU_RUN_TEST(throttle_dedup_scales_beyond_eight_contacts);
     HU_RUN_TEST(throttle_dedup_rolls_over_on_new_day);
+    HU_RUN_TEST(throttle_dedup_already_today_does_not_mutate);
     HU_RUN_TEST(throttle_dedup_isolated_per_feature);
     HU_RUN_TEST(throttle_record_send_first_succeeds);
     HU_RUN_TEST(throttle_record_send_blocks_second_within_24h);

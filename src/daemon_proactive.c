@@ -24,6 +24,7 @@
 #include "human/agent/weather_fetch.h"
 #include "human/config.h"
 #include "human/context/protective.h"
+#include "human/context/self_awareness.h"
 #include "human/core/string.h"
 #include "human/feeds/awareness.h"
 #include "human/feeds/processor.h"
@@ -273,8 +274,8 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t
 /* ── Proactive prompt builder ──────────────────────────────────────── */
 
 char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *agent,
-                                             hu_legacy_memory_t *memory, const hu_contact_profile_t *cp,
-                                             size_t *out_len) {
+                                             hu_legacy_memory_t *memory,
+                                             const hu_contact_profile_t *cp, size_t *out_len) {
     char *starter = NULL;
     size_t starter_len = 0;
     if (memory && cp->contact_id) {
@@ -414,6 +415,22 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     }
 #endif /* HU_ENABLE_SQLITE feed awareness */
 
+    /* 2026-05-16 P1-8: self-awareness directive (topic-repeat suppression).
+     * Previously this function existed (src/context/self_awareness.c) and was
+     * called only from the reactive turn path — proactive sends had no way to
+     * know they were repeating themselves, which is how "how'd it go with the
+     * loan?" fired 4x to Mindy. Inject the directive at the TOP of the prompt
+     * (system-level steering) so the LLM sees it before any context. */
+    char *self_aware_ctx = NULL;
+    size_t self_aware_ctx_len = 0;
+#ifdef HU_ENABLE_SQLITE
+    if (memory && cp->contact_id) {
+        (void)hu_self_awareness_build_directive_from_memory(
+            alloc, memory, cp->contact_id, strlen(cp->contact_id), (int64_t)time(NULL),
+            &self_aware_ctx, &self_aware_ctx_len);
+    }
+#endif
+
     static const char HU_DEFAULT_PROACTIVE_RULES[] =
         "\nRules: "
         "1. One short natural message (not 'hey how are you' — too generic). "
@@ -436,6 +453,8 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     size_t base_len = (w > 0 && (size_t)w < sizeof(base_buf)) ? (size_t)w : 0;
 
     size_t total = base_len + rules_len;
+    if (self_aware_ctx && self_aware_ctx_len > 0)
+        total += self_aware_ctx_len + 2; /* prepended with trailing "\n\n" */
     if (starter && starter_len > 0)
         total += 2 + starter_len;
     if (mem_ctx && mem_ctx_len > 0)
@@ -451,6 +470,8 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 
     char *result = (char *)alloc->alloc(alloc->ctx, total + 1);
     if (!result) {
+        if (self_aware_ctx)
+            alloc->free(alloc->ctx, self_aware_ctx, self_aware_ctx_len + 1);
         if (starter)
             alloc->free(alloc->ctx, starter, starter_len + 1);
         if (mem_ctx)
@@ -468,8 +489,16 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
     }
 
     size_t pos = 0;
-    memcpy(result, base_buf, base_len);
-    pos = base_len;
+    /* 2026-05-16 P1-8: prepend self-awareness directive. */
+    if (self_aware_ctx && self_aware_ctx_len > 0) {
+        memcpy(result + pos, self_aware_ctx, self_aware_ctx_len);
+        pos += self_aware_ctx_len;
+        result[pos++] = '\n';
+        result[pos++] = '\n';
+        alloc->free(alloc->ctx, self_aware_ctx, self_aware_ctx_len + 1);
+    }
+    memcpy(result + pos, base_buf, base_len);
+    pos += base_len;
 
     if (starter && starter_len > 0) {
         result[pos++] = '\n';
