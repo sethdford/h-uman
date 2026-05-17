@@ -58,11 +58,15 @@ hu_error_t hu_authentic_build_directive(hu_allocator_t *alloc, hu_authentic_beha
                                         const char *life_context, size_t ctx_len, char **out,
                                         size_t *out_len);
 
-/* F114: Life thread — persistent narrative */
+/* F114: Life thread — persistent narrative.
+ * P3-2 (2026-05-16) — scoped per-contact. NULL/zero contact_id means
+ * the empty scope (""), matching the conservative migration default. */
 hu_error_t hu_life_thread_create_table_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_life_thread_insert_sql(const char *thread, size_t thread_len, uint64_t timestamp,
+hu_error_t hu_life_thread_insert_sql(const char *contact_id, size_t contact_id_len,
+                                     const char *thread, size_t thread_len, uint64_t timestamp,
                                      char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_life_thread_query_active_sql(char *buf, size_t cap, size_t *out_len);
+hu_error_t hu_life_thread_query_active_sql(const char *contact_id, size_t contact_id_len, char *buf,
+                                           size_t cap, size_t *out_len);
 
 /* F115: Bad day recovery */
 bool hu_authentic_is_bad_day(bool bad_day_active, uint64_t bad_day_start, uint64_t now_ms,
