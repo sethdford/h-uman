@@ -21,8 +21,9 @@ static void print_usage(const char *prog) {
            "  --real-imessage TARGET Real iMessage target (phone/email)\n"
            "  --regression-dir DIR   Save failures for replay\n"
            "  --verbose              Verbose output\n"
+           "  --smoke                CI smoke mode: argv parse + init only, exits 0\n"
            "  --help                 Show help\n"
-           "\nEnv: GEMINI_API_KEY (required)\n",
+           "\nEnv: GEMINI_API_KEY (required for real runs; --smoke ignores it)\n",
            prog);
 }
 
@@ -78,11 +79,16 @@ int main(int argc, char **argv) {
     cfg.concurrency = 4;
     cfg.duration_secs = 10;
     cfg.all_channels = true;
+    bool smoke = false;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             print_usage(argv[0]);
             return 0;
+        }
+        if (!strcmp(argv[i], "--smoke")) {
+            smoke = true;
+            continue;
         }
         if (!strcmp(argv[i], "--binary") && i + 1 < argc)
             cfg.binary_path = argv[++i];
@@ -119,10 +125,6 @@ int main(int argc, char **argv) {
     }
 
     cfg.gemini_api_key = getenv("GEMINI_API_KEY");
-    if (!cfg.gemini_api_key) {
-        fprintf(stderr, "error: GEMINI_API_KEY not set\n");
-        return 1;
-    }
 
     hu_allocator_t alloc = hu_system_allocator();
     HU_CH_LOG("=== human Channel Conversation & Chaos Tests ===");
@@ -132,6 +134,25 @@ int main(int argc, char **argv) {
     size_t reg_count = 0;
     const hu_channel_test_entry_t *reg = hu_channel_test_registry(&reg_count);
     HU_CH_LOG("registered channels: %zu", reg_count);
+    (void)reg;
+
+    if (smoke) {
+        /* CI smoke mode: confirm the binary starts, parses argv, walks the
+         * channel registry, and exits cleanly without requiring
+         * GEMINI_API_KEY or network. This is the "stub mode" required by
+         * Task #5 (2026-05-17) so the harness can run in default CI even
+         * though full Gemini-driven runs need credentials.
+         */
+        HU_CH_LOG("smoke mode: argv parsed, %zu channels registered, exiting clean", reg_count);
+        HU_CH_LOG("Total: 0/0 passed, 0 failed, 0 errors");
+        (void)alloc;
+        return 0;
+    }
+
+    if (!cfg.gemini_api_key) {
+        fprintf(stderr, "error: GEMINI_API_KEY not set\n");
+        return 1;
+    }
 
     hu_synth_gemini_ctx_t *gemini = NULL;
     hu_error_t err = hu_synth_gemini_init(&alloc, cfg.gemini_api_key, cfg.gemini_model, &gemini);

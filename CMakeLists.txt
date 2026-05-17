@@ -3189,7 +3189,19 @@ target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-
 target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
 
 # Synthetic pressure tests (requires libcurl for real HTTP)
-option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)
+# Default ON when libcurl is available so the harness builds in CI by default.
+# Per Task #5 (2026-05-17): we want the binary built by default; runtime --smoke
+# mode in tests/synthetic/synthetic_main.c lets CI exercise the binary without
+# GEMINI_API_KEY. Full runs still require credentials and network.
+if(HU_ENABLE_CURL)
+    option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" ON)
+else()
+    option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)
+endif()
+if(HU_ENABLE_SYNTHETIC AND NOT HU_ENABLE_CURL)
+    message(WARNING "HU_ENABLE_SYNTHETIC requires HU_ENABLE_CURL; disabling synthetic harness")
+    set(HU_ENABLE_SYNTHETIC OFF CACHE BOOL "Build Gemini-driven synthetic pressure test harness" FORCE)
+endif()
 if(HU_ENABLE_SYNTHETIC)
     file(GLOB HU_SYNTH_SOURCES tests/synthetic/synthetic_*.c)
     add_executable(human_synthetic ${HU_SYNTH_SOURCES})
@@ -3197,6 +3209,13 @@ if(HU_ENABLE_SYNTHETIC)
     target_include_directories(human_synthetic PRIVATE ${HU_ROOT}/include ${HU_ROOT}/src ${HU_ROOT}/tests/synthetic)
     target_compile_definitions(human_synthetic PRIVATE HU_ENABLE_CURL=1)
     target_compile_options(human_synthetic PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Wno-gnu-zero-variadic-macro-arguments)
+    if(HU_ENABLE_ASAN)
+        # human_synthetic links libhuman_core.a which was built with ASan;
+        # the executable itself must also link with -fsanitize=address so the
+        # ASan runtime symbols (__asan_*) resolve.
+        target_compile_options(human_synthetic PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(human_synthetic PRIVATE -fsanitize=address)
+    endif()
     if(UNIX AND NOT WIN32)
         target_compile_definitions(human_synthetic PRIVATE HU_GATEWAY_POSIX=1)
     endif()
@@ -3209,7 +3228,20 @@ if(HU_ENABLE_SYNTHETIC)
 endif()
 
 # Channel conversation & chaos tests
-option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" OFF)
+# Default ON when libcurl is available so the harness builds in CI by default.
+# Per Task #5 (2026-05-17): M6 Tier-1 channel ambition (Telegram/Discord/iMessage/
+# Slack at 8/10+ naturalness) needs this harness running. Runtime --smoke mode in
+# tests/synthetic/channel_main.c lets CI exercise the binary without
+# GEMINI_API_KEY. Full runs still require credentials and network.
+if(HU_ENABLE_CURL)
+    option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" ON)
+else()
+    option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" OFF)
+endif()
+if(HU_ENABLE_CHANNEL_TESTS AND NOT HU_ENABLE_CURL)
+    message(WARNING "HU_ENABLE_CHANNEL_TESTS requires HU_ENABLE_CURL; disabling channel harness")
+    set(HU_ENABLE_CHANNEL_TESTS OFF CACHE BOOL "Build channel conversation+chaos test harness" FORCE)
+endif()
 if(HU_ENABLE_CHANNEL_TESTS)
     file(GLOB HU_CHANNEL_TEST_SOURCES tests/synthetic/channel_*.c)
     list(APPEND HU_CHANNEL_TEST_SOURCES
@@ -3225,6 +3257,13 @@ if(HU_ENABLE_CHANNEL_TESTS)
     target_compile_options(human_channel_tests PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wformat-security
         -Wno-gnu-zero-variadic-macro-arguments)
+    if(HU_ENABLE_ASAN)
+        # human_channel_tests links libhuman_core_test.a which was built with
+        # ASan; the executable itself must also link with -fsanitize=address so
+        # the ASan runtime symbols (__asan_*) resolve.
+        target_compile_options(human_channel_tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(human_channel_tests PRIVATE -fsanitize=address)
+    endif()
     if(UNIX AND NOT WIN32)
         target_compile_definitions(human_channel_tests PRIVATE HU_GATEWAY_POSIX=1)
     endif()
