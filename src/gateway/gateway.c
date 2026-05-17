@@ -947,7 +947,18 @@ static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *meth
      * Response: JSONL, one outcome object per line. Empty body (HTTP 200,
      * Content-Length: 0) when no adapter is registered or no outcomes match.
      * Training scripts pull via curl and pipe directly into their consumers. */
-    if (path_is(path, "/v1/m3/outcomes") && method && strcmp(method, "GET") == 0) {
+    /* Match either "/v1/m3/outcomes" exact OR "/v1/m3/outcomes?..." with
+     * a query string. path_is() requires '\0' or '/' after the base, so
+     * it doesn't see "?" as a terminator — we have to check explicitly. */
+    bool m3_outcomes_match = false;
+    {
+        static const char k_outcomes[] = "/v1/m3/outcomes";
+        size_t klen = sizeof(k_outcomes) - 1;
+        if (strncmp(path, k_outcomes, klen) == 0 &&
+            (path[klen] == '\0' || path[klen] == '?' || path[klen] == '/'))
+            m3_outcomes_match = true;
+    }
+    if (m3_outcomes_match && method && strcmp(method, "GET") == 0) {
         if (!v1_auth_ok(&gw->config, auth_header)) {
             (void)send_json(fd, 401, "{\"error\":\"unauthorized\"}");
             return;
