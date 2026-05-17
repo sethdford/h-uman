@@ -286,23 +286,19 @@ char *hu_daemon_build_callback_context(hu_allocator_t *alloc, hu_legacy_memory_t
          * something terrible" reach a family contact via this path. */
         if (!hu_daemon_callback_content_is_safe(entries[i].content, entries[i].content_len))
             continue;
+        /* P2-11 (2026-05-16): memory degradation is a UX-of-recall concept
+         * (mimics human forgetting in interactive recall). The previous
+         * code applied it to content about to be injected into an OUTBOUND
+         * proactive prompt — corrupting the text the LLM would then send
+         * verbatim. Disable degradation on this path. The seed/rate locals
+         * remain for the future-when-recall-display-is-separate flow. */
+        (void)deg_rate;
         const char *content = entries[i].content;
         size_t content_len = entries[i].content_len;
-        char *degraded = NULL;
-        size_t degraded_len = 0;
-        uint32_t seed = (uint32_t)now * 1103515245u + 12345u + (uint32_t)i;
-        degraded =
-            hu_memory_degradation_apply(alloc, content, content_len, seed, deg_rate, &degraded_len);
-        if (degraded && degraded_len > 0) {
-            content = degraded;
-            content_len = degraded_len;
-        }
         size_t show = content_len;
         if (show > 200)
             show = 200;
         w = snprintf(buf + pos, sizeof(buf) - pos, "%.*s\n", (int)show, content);
-        if (degraded)
-            alloc->free(alloc->ctx, degraded, degraded_len + 1);
         if (w > 0 && pos + (size_t)w < sizeof(buf)) {
             pos += (size_t)w;
             usable++;

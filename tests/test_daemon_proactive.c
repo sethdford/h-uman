@@ -255,6 +255,44 @@ static void test_build_callback_context_skips_confession_entries(void) {
         mem.vtable->deinit(mem.ctx);
 }
 
+/* P2-11 regression (2026-05-16 incident): memory degradation was being
+ * applied to content destined for an OUTBOUND proactive prompt — which
+ * meant the LLM saw corrupted text and could ship it verbatim to
+ * contacts. Degradation is a UX-of-recall concept; it should not corrupt
+ * outbound-prompt content. Verify that clean content passes through this
+ * function bit-perfect (no random char swaps). */
+static void test_build_callback_context_does_not_apply_degradation_to_outbound(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char SESSION[] = "session_p11";
+    static const char topic_cat[] = "conversation";
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = topic_cat, .name_len = sizeof(topic_cat) - 1},
+    };
+    /* A very distinctive clean memory entry. */
+    const char *key = "topic:session_p11:distinct";
+    const char *content = "user mentioned the artisan-pasta workshop on Saturday";
+    mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat, SESSION,
+                      sizeof(SESSION) - 1);
+
+    size_t out_len = 0;
+    char *result = hu_daemon_build_callback_context(&alloc, &mem, SESSION, sizeof(SESSION) - 1,
+                                                    "hello", 5, &out_len, NULL);
+
+    /* If a context was built, the distinctive content must appear bit-
+     * perfect — degradation would corrupt characters, breaking the
+     * substring match. */
+    if (result && out_len > 0) {
+        HU_ASSERT_NOT_NULL(strstr(result, "artisan-pasta workshop on Saturday"));
+        alloc.free(alloc.ctx, result, out_len + 1);
+    }
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
 static void test_build_callback_context_skips_emotion_keyword_entries(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
@@ -313,6 +351,7 @@ void run_daemon_proactive_tests(void) {
     HU_RUN_TEST(test_callback_content_is_safe_rejects_format_injection);
     HU_RUN_TEST(test_callback_content_is_safe_handles_null_and_empty);
     HU_RUN_TEST(test_build_callback_context_skips_confession_entries);
+    HU_RUN_TEST(test_build_callback_context_does_not_apply_degradation_to_outbound);
     HU_RUN_TEST(test_build_callback_context_skips_emotion_keyword_entries);
     HU_RUN_TEST(test_apply_route_with_fresh_activity);
 
