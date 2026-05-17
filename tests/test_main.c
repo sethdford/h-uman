@@ -289,8 +289,10 @@ void run_learner_bridge_tests(void);
 #endif
 void run_w15_backup_restore_tests(void);
 void run_w14_scheduler_tests(void);
+#ifdef HU_ENABLE_LEARNING
 void run_w16_evaluation_tests(void);
 void run_w16_eval_cli_tests(void);
+#endif
 void run_w15_keystore_tests(void);
 void run_encrypted_store_tests(void);
 #ifdef HU_ENABLE_LEARNING
@@ -1002,8 +1004,10 @@ int main(int argc, char **argv) {
 #endif
     run_w15_backup_restore_tests();
     run_w14_scheduler_tests();
+#ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
     run_w16_eval_cli_tests();
+#endif
     run_w15_keystore_tests();
     run_encrypted_store_tests();
 #ifdef HU_ENABLE_LEARNING

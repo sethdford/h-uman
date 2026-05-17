@@ -2962,16 +2962,15 @@ set(HU_TEST_SOURCES
     tests/test_w11_self_rag.c
     tests/test_w12_planner.c
     tests/test_w12_verifier_loop.c
-    tests/test_w13_learner.c
-    tests/test_w14_runners.c
-    tests/test_w14_lora_retrain.c
-    tests/test_w14_dual_lora.c
+    # W13/W14 learning-loop tests and W16 eval-CLI tests reference
+    # hu_learner_* APIs that only exist when HU_ENABLE_LEARNING is on
+    # (default OFF). Gated below in the if(HU_ENABLE_LEARNING) block.
+    # Listing them here would break minimal-build / no-sqlite /
+    # cross-arm64 with undefined-reference linker errors.
     tests/test_w15_backup_restore.c
     tests/test_w14_scheduler.c
     tests/test_w15_keystore.c
     tests/test_encrypted_store.c
-    tests/test_w16_evaluation.c
-    tests/test_w16_eval_cli.c
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_personal_model_contradicts.c
@@ -3049,15 +3048,13 @@ set(HU_TEST_SOURCES
     tests/test_reflection_advanced.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
-    tests/test_ml.c
-    tests/test_ml_cli_actually_trains.c
-    tests/test_ml_fidelity_judgment.c
-    tests/test_dpo_judge_naming.c
-    tests/test_lora.c
-    tests/test_training_data.c
-    tests/test_training_data_extractor.c
-    tests/test_training_data_quality.c
-    tests/test_agent_trainer.c
+    # ML-coupled tests (test_ml.c, test_ml_cli_actually_trains.c,
+    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c, test_lora.c,
+    # test_training_data*.c, test_agent_trainer.c) are added below in
+    # the if(HU_ENABLE_ML) gate (CMakeLists.txt:3265+). Keeping them
+    # here would break minimal-build / no-sqlite / cross-arm64 builds
+    # because the tests reference hu_agent_t fields like m3_adapter
+    # that only exist when HU_ENABLE_ML is on (agent.h:428-435).
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
@@ -3269,6 +3266,7 @@ if(HU_ENABLE_ML)
     list(APPEND HU_TEST_SOURCES
         tests/test_ml.c
         tests/test_ml_cli_actually_trains.c
+        tests/test_ml_fidelity_judgment.c
         tests/test_dpo_judge_naming.c
         tests/test_rl_trainer.c
         tests/test_policy_logprobs.c
@@ -3303,6 +3301,10 @@ if(HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_SOURCES
         tests/test_w13_learner.c
         tests/test_w14_runners.c
+        tests/test_w14_lora_retrain.c
+        tests/test_w14_dual_lora.c
+        tests/test_w16_evaluation.c
+        tests/test_w16_eval_cli.c
         tests/test_learner_bridge.c
         tests/test_v2_e2e_adversarial.c
         tests/test_v2_wiring_e2e.c)
