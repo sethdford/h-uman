@@ -11,7 +11,7 @@ jobs:
   audit:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Self-test audit script signatures
         run: bash scripts/audit-imessage-leaks.sh --self-test
