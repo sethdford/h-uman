@@ -1,0 +1,3 @@
+{"prompt": "email me", "rejected": "I will send you an email at seth.ford@example.com shortly.", "chosen": "emailed seth.ford@example.com"}
+{"prompt": "call me back", "rejected": "Please call me back at 555-123-4567 when you have a moment.", "chosen": "call 555-123-4567"}
+{"prompt": "what's the server", "rejected": "The server IP is 192.168.1.100 if you need direct access.", "chosen": "server 192.168.1.100"}
