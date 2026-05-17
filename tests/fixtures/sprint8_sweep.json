@@ -1,0 +1,36 @@
+{
+  "_provenance": "Transcribed verbatim from sprints/sprint-8/smoke-run-3.md table + Smoke #2 iter-200 row. Used by US-11.1 AC-11.1.3/AC-11.1.4 regression guard.",
+  "sft_dir": "seth-sft-iter80",
+  "checkpoints": [
+    {
+      "name": "iter20",
+      "fidelity_delta": -0.008,
+      "pad_failure_rate": 0.7333,
+      "n_total": 30
+    },
+    {
+      "name": "iter40",
+      "fidelity_delta": 0.003,
+      "pad_failure_rate": 0.7667,
+      "n_total": 30
+    },
+    {
+      "name": "iter60",
+      "fidelity_delta": 0.019,
+      "pad_failure_rate": 0.40,
+      "n_total": 30
+    },
+    {
+      "name": "iter80",
+      "fidelity_delta": -0.001,
+      "pad_failure_rate": 0.70,
+      "n_total": 30
+    },
+    {
+      "name": "iter200_broken",
+      "fidelity_delta": 0.046,
+      "pad_failure_rate": 0.80,
+      "n_total": 30
+    }
+  ]
+}

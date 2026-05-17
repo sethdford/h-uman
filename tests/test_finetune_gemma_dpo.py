@@ -110,6 +110,9 @@ def _stage_corrections_jsonl(tmp_path: pathlib.Path) -> pathlib.Path:
 # ────────────────────────────────────────────────────────────────────────
 def test_dpo_pass_invokes_real_dpo_subprocess(tmp_path, monkeypatch):
     monkeypatch.setenv("HU_DPO_DETERMINISTIC", "1")
+    # Re-home `Path.home()` so `find_dpo_data` does not pick up the
+    # user's real `~/.human/dpo/pairs.jsonl` before the staged fixture.
+    monkeypatch.setattr(fg.Path, "home", classmethod(lambda cls: tmp_path))
     _stage_jsonl_dpo(tmp_path)
     args = _make_args(tmp_path)
     adapter_dir = pathlib.Path(args.adapter_path)
@@ -125,10 +128,12 @@ def test_dpo_pass_invokes_real_dpo_subprocess(tmp_path, monkeypatch):
     cmd = mock_run.call_args.args[0]
     assert isinstance(cmd, list)
 
-    # Per Sprint 7 D1: argv contains `-m mlx_lm_lora.train --train-mode dpo
-    # --train-type lora`. We assert each pair in adjacency.
+    # Per Sprint 7 D1 + Sprint 11 US-11.1: argv contains `-m
+    # scripts.mlx_lora_entry --train-mode dpo --train-type lora`. The entry
+    # wrapper applies the US-11.1 length-normalization patch and then
+    # dispatches to `mlx_lm_lora.train.main()`.
     assert "-m" in cmd, f"cmd missing -m: {cmd}"
-    assert cmd[cmd.index("-m") + 1] == "mlx_lm_lora.train", f"cmd: {cmd}"
+    assert cmd[cmd.index("-m") + 1] == "scripts.mlx_lora_entry", f"cmd: {cmd}"
 
     assert "--train-mode" in cmd, f"cmd missing --train-mode: {cmd}"
     assert cmd[cmd.index("--train-mode") + 1] == "dpo", f"cmd: {cmd}"
@@ -267,6 +272,7 @@ def test_dpo_does_not_emit_stock_mlx_lm_flag(tmp_path, monkeypatch):
     `mlx-lm-lora` fork, NOT stock `mlx_lm`. Asserting the negative protects
     against regression to the broken pre-Sprint-7 behaviour."""
     monkeypatch.setenv("HU_DPO_DETERMINISTIC", "1")
+    monkeypatch.setattr(fg.Path, "home", classmethod(lambda cls: tmp_path))
     _stage_jsonl_dpo(tmp_path)
     args = _make_args(tmp_path)
     adapter_dir = pathlib.Path(args.adapter_path)

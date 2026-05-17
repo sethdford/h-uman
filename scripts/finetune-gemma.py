@@ -499,8 +499,13 @@ def run_dpo(args, adapter_dir: Path) -> int:
     # If omitted, mlx-lm-lora defaults reference == policy after
     # --resume-adapter-file, which produces a near-zero gradient on
     # step 1 (design §5.3).
+    # Sprint 11 US-11.1: route through `scripts.mlx_lora_entry`, which
+    # monkey-patches `mlx_lm_lora.trainer.dpo_trainer.compute_score` to
+    # length-normalize for ALL loss types (not just IPO) before calling
+    # `mlx_lm_lora.train.main()`. The downstream CLI shape is identical.
+    length_normalize = bool(getattr(args, "length_normalize", True))
     cmd = [
-        sys.executable, "-m", "mlx_lm_lora.train",
+        sys.executable, "-m", "scripts.mlx_lora_entry",
         "--model", model,
         "--train",
         "--train-mode", "dpo",
@@ -538,10 +543,26 @@ def run_dpo(args, adapter_dir: Path) -> int:
         cmd.append("--mask-prompt")
 
     print(f"\n  Running DPO: {dpo_iters} iters, LR={dpo_lr}, beta=0.1 (sigmoid)")
-    print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)\n")
+    print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)")
+    print(f"  length_normalize={'true' if length_normalize else 'false'} "
+          f"(US-11.1: per-token avg log-prob, NOT summed)")
+    if length_normalize:
+        print(f"  NOTE: length normalization is active; if convergence is slow, "
+              f"try beta in [1.0, 5.0] (~50x the prior value); see SimPO §5.")
+
+    # Propagate the length-norm flag through the env so the child Python
+    # interpreter picks it up before `mlx_lm_lora.train.main()` runs. The
+    # entry wrapper also no-ops on this env var, so setting it to "0" is
+    # the explicit opt-out path.
+    child_env = os.environ.copy()
+    child_env["HU_DPO_LENGTH_NORM"] = "1" if length_normalize else "0"
 
     t0 = time.time()
-    result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent))
+    result = subprocess.run(
+        cmd,
+        cwd=str(Path(__file__).parent.parent),
+        env=child_env,
+    )
     elapsed = time.time() - t0
 
     if result.returncode == 0:
@@ -826,6 +847,11 @@ def run_finetune(args):
         "learning_rate": args.learning_rate,
         "max_seq_length": args.max_seq_length,
         "dpo": args.dpo,
+        # Sprint 11 / US-11.1: record whether the run used length-normalized
+        # DPO loss (US-11.1 fix; default ON post-Sprint-11). Pre-Sprint-11
+        # `train_config.json` files do not have this field — `human ml
+        # lora-ab` should treat missing as `false` for historical compares.
+        "length_normalize": bool(getattr(args, "length_normalize", True)),
         "data": str(data_dir),
         "train_examples": train_count,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -996,6 +1022,17 @@ Examples:
     parser.add_argument("--sft-only", action="store_true",
                         help="Skip DPO even if data exists (alias for --no-dpo intent; "
                              "stronger because it also short-circuits the speculative-draft DPO pass)")
+    # Sprint 11 / US-11.1: length normalization for the DPO loss. Default ON.
+    # When ON, the `mlx_lm_lora.trainer.dpo_trainer.compute_score` is
+    # monkey-patched to divide masked log-probabilities by the non-pad token
+    # count for ALL loss types (sigmoid/hinge/dpop/ipo), not just IPO.
+    parser.add_argument("--length-normalize", action="store_true", default=True,
+                        dest="length_normalize",
+                        help="DPO loss divides masked log-probs by non-pad token "
+                             "count (default: true; US-11.1 fix)")
+    parser.add_argument("--no-length-normalize", action="store_false",
+                        dest="length_normalize",
+                        help="Disable US-11.1 length normalization (pre-Sprint-11 behavior)")
     parser.add_argument("--from-corrections", action="store_true",
                         help="Load DPO pairs from ~/.human/dpo/pairs.jsonl (LOCKED path; "
                              "produced by the outbound-corrections miner — US-7.2)")
