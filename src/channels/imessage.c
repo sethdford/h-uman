@@ -1125,6 +1125,33 @@ unsigned int hu_imessage_typing_duration(size_t msg_len, uint32_t seed) {
     return base;
 }
 
+size_t hu_imessage_build_inline_reply_hint_for_batch(hu_allocator_t *alloc,
+                                                     const hu_channel_loop_msg_t *msgs,
+                                                     size_t msg_count, char *out_buf,
+                                                     size_t out_cap) {
+    if (!alloc || !msgs || msg_count == 0 || !out_buf || out_cap == 0)
+        return 0;
+
+    const char *reply_guid = NULL;
+    for (size_t i = 0; i < msg_count; i++) {
+        if (msgs[i].reply_to_guid[0]) {
+            reply_guid = msgs[i].reply_to_guid;
+            break;
+        }
+    }
+    if (!reply_guid)
+        return 0;
+
+    char orig_text[512];
+    size_t orig_len = 0;
+    hu_error_t lr_err = hu_imessage_lookup_message_by_guid(alloc, reply_guid, strlen(reply_guid),
+                                                           orig_text, sizeof(orig_text), &orig_len);
+    if (lr_err != HU_OK || orig_len == 0)
+        return 0;
+
+    return hu_conversation_build_inline_reply_hint(orig_text, orig_len, out_buf, out_cap);
+}
+
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 /*
  * Typing indicator with chat ID caching and group chat support.

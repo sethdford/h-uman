@@ -9087,31 +9087,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    /* Inline reply awareness: look up the original message they replied to */
+                    /* Inline reply awareness: look up the original message they replied to.
+                     * Logic extracted into hu_imessage_build_inline_reply_hint_for_batch so
+                     * the batch → lookup → hint composition can be unit-tested via
+                     * hu_imessage_test_set_guid_lookup (see tests/test_imessage_extended.c). */
 #ifdef HU_HAS_IMESSAGE
                     {
-                        const char *reply_guid = NULL;
-                        for (size_t bi = batch_start; bi <= batch_end; bi++) {
-                            if (msgs[bi].reply_to_guid[0]) {
-                                reply_guid = msgs[bi].reply_to_guid;
-                                break;
-                            }
-                        }
-                        if (reply_guid) {
-                            char orig_text[512];
-                            size_t orig_len = 0;
-                            hu_error_t lr_err = hu_imessage_lookup_message_by_guid(
-                                alloc, reply_guid, strlen(reply_guid), orig_text, sizeof(orig_text),
-                                &orig_len);
-                            if (lr_err == HU_OK && orig_len > 0) {
-                                size_t n = hu_conversation_build_inline_reply_hint(
-                                    orig_text, orig_len, inject_buf + inject_pos,
-                                    sizeof(inject_buf) - inject_pos);
-                                if (n > 0) {
-                                    inject_pos += n;
-                                    inject_buf[inject_pos++] = '\n';
-                                }
-                            }
+                        size_t n = hu_imessage_build_inline_reply_hint_for_batch(
+                            alloc, &msgs[batch_start], (batch_end - batch_start + 1),
+                            inject_buf + inject_pos, sizeof(inject_buf) - inject_pos);
+                        if (n > 0) {
+                            inject_pos += n;
+                            inject_buf[inject_pos++] = '\n';
                         }
                     }
 #endif

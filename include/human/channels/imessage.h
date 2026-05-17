@@ -84,6 +84,23 @@ hu_error_t hu_imessage_lookup_message_by_guid(hu_allocator_t *alloc, const char 
                                               size_t guid_len, char *out_text, size_t out_cap,
                                               size_t *out_len);
 
+/** Walk a batch of inbound channel messages; if any carries reply_to_guid,
+ * look up the original via hu_imessage_lookup_message_by_guid and format
+ * via hu_conversation_build_inline_reply_hint into out_buf.
+ *
+ * Returns bytes written to out_buf (excluding any trailing NUL). Returns 0
+ * when the batch has no reply, the lookup misses, or out_cap is too small.
+ * The hint string itself does NOT include a trailing newline; callers that
+ * concatenate multiple hints append their own separator.
+ *
+ * Pure-predicate extraction of the daemon's inline-reply context-building
+ * branch so the end-to-end composition (batch → lookup → hint) is unit-testable
+ * via hu_imessage_test_set_guid_lookup without driving the full daemon loop. */
+size_t hu_imessage_build_inline_reply_hint_for_batch(hu_allocator_t *alloc,
+                                                     const hu_channel_loop_msg_t *msgs,
+                                                     size_t msg_count, char *out_buf,
+                                                     size_t out_cap);
+
 /** Map an expressive_send_style_id to a human-readable effect name.
  * Returns e.g. "Slam", "Confetti", "Gentle", or NULL if unrecognized.
  * Available on Apple platforms and under HU_IS_TEST. */
