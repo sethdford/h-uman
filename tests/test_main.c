@@ -545,6 +545,7 @@ void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+void run_personal_model_simulation_tests(void);
 void run_persona_directive_channels_tests(void);
 void run_filler_recency_tests(void);
 void run_filler_pctt_tests(void);
@@ -1138,6 +1139,7 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_personal_model_simulation_tests();
     run_persona_directive_channels_tests();
     run_filler_recency_tests();
     run_filler_pctt_tests();

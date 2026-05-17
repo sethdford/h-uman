@@ -1,119 +1,120 @@
-# Sprint 4 Backlog — Validator Chain Hardening Follow-up
-
-## Goal
-
-Eliminate per-message validator chain allocations, add observable telemetry for REJECT/REWRITE decisions, close the auditor-flagged Site A production-path gap, resolve the Sprint 3 DoD literalism note, and hookify the "test inlines production code" anti-pattern so it cannot recur silently.
-
-## Scoping Decision
-
-**Option (b) accepted: US-4, US-5, US-6, US-9, US-10.**
-
-US-7 (retry-slim prompt) and US-8 (fuzz harness) deferred to Sprint 5.
-
-Rationale: Sprint 3 hit the implementer tool-use ceiling at 3 stories (M+M+S). Sprint 4 carries two M and one S as the execution load; US-9 and US-10 are XS and can be parallelized with the S wave without adding meaningful dispatch cost. US-7 and US-8 are P2 with no dependencies on Sprint 4 work — deferring them creates no downstream blockers.
-
+---
+title: "Sprint 4 — M2 measurement bundle (multi-turn simulation)"
+created: 2026-05-12
+status: closed
+sprint: 4
+branch: sprint-4-m2-measurement
+working_directory: /Users/sethford/Documents/human-sprint-4
 ---
 
-## User Stories (in priority order)
+# Sprint 4 — M2 measurement bundle
 
----
+## Sprint goal
 
-### US-6 (P1): As a validator-chain maintainer, I want an end-to-end daemon integration test that injects a known-bad model response and asserts the transport layer receives REJECT/cleaned content, so that the Site A production path in `daemon.c` is covered by tests that would actually fail if the chain call were deleted.
+Promote M2 (Personal Model) from "shipped — trust us, it works" to "shipped + measured" by adding the **multi-turn behavioral simulation** that the existing 60+ unit tests don't cover. Existing tests probe single functions (one ingest, one fact, one decay). What's missing is the integration story: **does the model, driven through a realistic 50-turn conversation, end up in the state CLAUDE.md claims?**
 
-**Acceptance criteria:**
-- AC-6.1: A test in `tests/test_daemon_e2e_validator.c` (or a new suite file following existing fuzz/mock-provider conventions) spawns a daemon-like state under the test harness using a mock provider that returns `JORDAN_LEAK_F1` verbatim as the model response; it does NOT inline-reconstruct the validator chain.
-- AC-6.2: The mock iMessage transport captures the outbound content; the test asserts the captured content does NOT contain the `JORDAN_LEAK_F1` payload (i.e., content was either rejected or stripped before reaching the transport).
-- AC-6.3: Deleting or commenting out the `hu_output_validator_chain_execute` call at `daemon.c:2095-2122` causes AC-6.2 to fail — confirmed by the test author running the suite with that line removed and observing the failure, with the result documented in the PR description.
-- AC-6.4: `./build/human_tests --suite=daemon_e2e_validator` (or equivalent suite name) passes 0 failures on the dev preset (ASan on). Full suite remains 0 failures.
+Out of scope: extending fact extraction, tweaking decay constants, adding new `hu_personal_model_*` APIs, persona example bank growth, or any provider work.
 
-**Estimate:** M
-**Dependencies:** US-1 (Sprint 3, done), US-2 (Sprint 3, done)
-**DoD:** AC-6.3 deletion-check documented in PR. Full suite passes. ASan clean. `/verify` returns PASS.
+## Sprint number
 
----
+This sprint is **sprint-4**. `sprint-3` was claimed by a concurrent agent (Track E Phase 2 security hardening) before this sprint started — see `sprints/sprint-3/stories.md`. To avoid collision, this sprint uses sprint-4 directly.
 
-### US-4 (P1): As a developer integrating h-uman's agent loop, I want the validator chain cached on `hu_persona_t` at persona load time, so that per-message heap allocations for chain construction are eliminated and the allocator is not invoked on every agent turn.
+## Pre-sprint state (read at Phase 0)
 
-**Acceptance criteria:**
-- AC-4.1: `hu_persona_t` (in `include/human/persona.h`) has a field `hu_output_validator_chain_t *outbound_chain`; it is NULL before persona load and non-NULL after a successful load for any persona with at least one validator rule.
-- AC-4.2: `hu_persona_load` (or its designated init path) populates `outbound_chain` exactly once per persona lifetime; a test asserts the pointer is stable across two consecutive calls that would previously have triggered chain construction.
-- AC-4.3: All call sites in the five daemon paths plus `agent_turn.c` and `agent_stream.c` that previously constructed the chain inline are migrated to read `persona->outbound_chain`; `grep -rn "hu_validators_build_default_outbound_chain" src/` returns 0 hits outside `src/persona/`.
-- AC-4.4: `hu_persona_unload` (or equivalent teardown) calls `hu_output_validator_chain_destroy` on `outbound_chain`; a test exercises the full load-use-unload cycle with ASan enabled and reports 0 leaks.
-- AC-4.5: `./build/human_tests` passes 0 failures on dev preset after migration. No regression in `output_validator`, `validators_builtin`, `validators_persona_safety` suites.
+`sprint-status.sh` showed:
+- 24 dirty files (8 modified + 16 untracked) across `src/agent/`, `src/gateway/`, `src/memory/lifecycle/`, `src/tools/`, `tests/` — concurrent activity is HIGH.
+- 4 active sprint-shaped branches (sprint-1-fidelity-followthrough, sprint-2a-hygiene-baseline, sprint-2b-personal-model-honesty, sprint-2c-followups).
+- F4's worktree threshold triggered — this sprint runs in `../human-sprint-4` worktree.
 
-**Estimate:** M
-**Dependencies:** US-1 (Sprint 3, done)
-**DoD:** AC-4.3 grep-check passes. Full suite passes. ASan clean. `/verify` returns PASS.
+Existing test inventory in `tests/test_personal_model.c` (3308 lines, ~70 `static void` test fns):
+- ✅ Single-fact ingest extracts facts
+- ✅ Merge / dedup (3 tests)
+- ✅ `fact_effective_confidence` — no_decay/halves/quarters/floors/null (5 tests)
+- ✅ `topic_effective_score` — halves/floors/null (5 tests)
+- ✅ `goal_effective_priority` — halves/null/inactive/empty/fallback (5 tests)
+- ✅ `style_freshness` — halves/null/never_observed/unstamped (4 tests)
+- ✅ Save/load round-trip (one file at a time)
+- ✅ Crash safety + sigkill survival
+- ✅ Style directives (~6 variants)
+- ✅ Avoid lines, topic directives, chronotype inference
 
----
+What's NOT covered:
+- Multi-turn conversation flow (drive ingest 50 times, check intermediate state).
+- Drift over simulated days (jump clock forward, observe decay impact on prompt output).
+- Stress / invariant testing (1000 random turns, assert array bounds + score ranges).
+- Save/load AFTER long simulation (existing test saves a freshly-init'd model).
 
-### US-5 (P1): As an operator monitoring h-uman in production, I want structured telemetry events emitted whenever the validator chain issues a REJECT or REWRITE decision, so that I can observe the rate and context of safety interventions without grepping logs.
+## Stories
 
-**Acceptance criteria:**
-- AC-5.1: A new observer event type (e.g., `HU_OBS_VALIDATOR_DECISION`) is declared in `include/human/observer.h` with payload fields: `validator_name` (const char *), `decision` (enum: PASS/REJECT/REWRITE), `channel_id` (const char *), `persona_name` (const char *), `response_len` (size_t), `bytes_stripped` (size_t, 0 on REJECT).
-- AC-5.2: `hu_output_validator_chain_execute` emits this event via `hu_observer_notify` for every REJECT or REWRITE outcome; PASS outcomes are not emitted (to avoid per-token noise).
-- AC-5.3: A test registers a capturing observer, runs the chain against a known-REJECT input, and asserts the captured event has `decision == REJECT`, correct `validator_name`, and `response_len` matching the rejected string's length.
-- AC-5.4: A test for REWRITE asserts `bytes_stripped > 0` and `decision == REWRITE`.
-- AC-5.5: When no observer is registered, `hu_output_validator_chain_execute` completes without crash or memory error on both REJECT and REWRITE paths.
+### Story B1 — 50-turn deterministic simulation harness
 
-**Estimate:** S
-**Dependencies:** none (observer.h and chain API are both stable post-Sprint-3)
-**DoD:** Full suite passes. ASan clean. `/verify` returns PASS.
+**File:** new `tests/test_personal_model_simulation.c` (registered in `tests/test_main.c` and `CMakeLists.txt`).
 
----
+Drives `hu_personal_model_ingest` through a fixed 50-turn fixture spanning 14 simulated days and asserts checkpoint state at turns 1, 10, 25, 50.
 
-### US-9 (P0-admin): As the sprint auditor, I want the Sprint 3 Pattern C DoD literalism resolved with an explicit written disposition, so that the open audit note is closed and the DoD accurately describes what the code does.
+- **AC-B1.1**: Fixture is a `static const struct { const char *text; int from_user; int day_offset; int hour; }` array of 50 entries — deterministic, in-source, no JSON parsing or fixture file.
+- **AC-B1.2**: Fixture covers realistic chat patterns: identity ("i work at initech", "my name is alex"), preferences ("i love hiking", "i hate mornings"), goals ("i want to ship the deck this quarter"), repeated topics, style varying by turn (lowercase, abbrev, longer/shorter).
+- **AC-B1.3**: Test calls `hu_personal_model_ingest` for each turn with a synthetic timestamp `T0 + day_offset*86400 + hour*3600`.
+- **AC-B1.4**: After turn 50, asserts:
+  - `fact_count > 0` and includes specific subject/predicate/object triples we expect (identity, preference, dislike).
+  - `topic_count > 0` and includes the repeated-topic items.
+  - `style.sample_count >= 25` (only user turns count toward style, ~25/50 fixture turns are user).
+  - `style.last_observed_at == ` final user turn timestamp.
+  - `interaction_count == 50`.
+- **AC-B1.5**: Build prompt at turn 50 returns non-empty, contains the expected fact summary line, and stays under buf cap.
 
-**Acceptance criteria:**
-- AC-9.1: The two remaining `hu_conversation_strip_channel_tags` calls in `daemon.c` (lines 2127 and 2137 as of Sprint 3 close) are either (a) removed with the fallback replaced by a no-op safe default, OR (b) explicitly documented in `src/daemon.c` with a comment block explaining they are intentional defense-in-depth fallbacks that fire only when chain construction fails; one of the two options is chosen and implemented.
-- AC-9.2: The Sprint 3 `stories.md` DoD line for US-2 is updated to reflect the actual post-implementation invariant: "the primary AGENT_STREAM_TEXT path uses `hu_output_validator_chain_execute`; legacy strip calls survive only in chain-build-failure fallback arms" — or the equivalent text if option (a) was chosen.
-- AC-9.3: `./build/human_tests --suite=pattern_c_paths` passes 5/5 after the change.
+### Story B2 — Drift / time-travel regression
 
-**Estimate:** XS
-**Dependencies:** US-2 (Sprint 3, done)
-**DoD:** AC-9.1 code change committed. AC-9.2 DoD text updated. Suite passes.
+**File:** add to `tests/test_personal_model_simulation.c`.
 
----
+After running B1's 50-turn simulation, advance simulated time by 180 days (one fact half-life × 2). Assert that effective scores halve and the rebuilt prompt drops decayed signal.
 
-### US-10 (P1-process): As a future implementer writing tests for h-uman, I want a pre-commit hook or CI check that flags test files which do not reference at least one symbol from the production source file they claim to cover, so that the "test inlines production code" anti-pattern that recurred twice in Sprint 3 is caught before merge rather than at audit time.
+- **AC-B2.1**: Capture the turn-50 prompt buffer.
+- **AC-B2.2**: Capture turn-50 effective fact confidence, topic interest, goal priority, style freshness for a specific reference fact / topic / goal / style.
+- **AC-B2.3**: Advance `now` by `HU_FACT_CONFIDENCE_HALF_LIFE_SEC` (90 days). Re-evaluate effective scores — fact's effective confidence is between 0.45× and 0.55× original; topic between 0.20× and 0.30× (60-day topic half-life over 90 days = ~2× one half-life × 1.5x factor → ~0.35× ; let me re-check: `0.5^(90/60) ≈ 0.354`); goal between 0.55× and 0.65× (`0.5^(90/120) ≈ 0.595`); style freshness between 0.65× and 0.75× (`0.5^(90/180) ≈ 0.707`).
+- **AC-B2.4**: Build prompt at the advanced time. Assert it's smaller than the turn-50 prompt OR contains a "drops stale" signal (e.g., the avoid-line is gone, or the topic directive is gone).
+- **AC-B2.5**: Advance by 360 more days (total 1.5 years from turn-50). Assert effective fact confidence ≈ 0 (floored), prompt no longer contains the original fact summary.
 
-**Acceptance criteria:**
-- AC-10.1: A hookify rule file is added at `.claude/rules/test-references-production-symbol.md` that specifies: any new file matching `tests/test_*.c` must contain at least one `grep`-detectable reference to a non-`static` function or macro from the production `.c` file it names (e.g., `tests/test_daemon_e2e_validator.c` must reference `hu_output_validator_chain_execute` or another symbol exported from `daemon.c`).
-- AC-10.2: A pre-commit check script at `scripts/check-test-references.sh` is added; it accepts a list of staged `tests/test_*.c` files, extracts the implied production module name, and exits non-zero if no production symbol from that module appears in the test file. The script's own `--help` output describes the rule.
-- AC-10.3: The script is invoked from `.githooks/pre-commit` (or the project's existing hook entry point) so it runs on every `git commit`.
-- AC-10.4: Running the script against `tests/test_pattern_c_paths.c` (known-good) exits 0. Running it against a synthetic test file that contains no production symbol exits 1 with a human-readable error message identifying the missing reference.
+### Story B3 — 1000-turn invariant stress test
 
-**Estimate:** XS
-**Dependencies:** none
-**DoD:** AC-10.2 script executable, AC-10.3 wired into pre-commit, AC-10.4 spot-checked manually and result documented in PR. No test suite regression.
+**File:** add to `tests/test_personal_model_simulation.c`.
 
----
+Drive 1000 deterministic-pseudorandom turns through ingest. After every 100 turns, assert that bounded-state invariants hold.
 
-## Non-goals
+- **AC-B3.1**: Use a deterministic PRNG (libc `srand(42)` is fine; ASCII-safe random text) so the test is reproducible across runs.
+- **AC-B3.2**: At every checkpoint (turns 100, 200, …, 1000), assert:
+  - `model->fact_count <= HU_PM_MAX_FACTS` (saturation, not overflow).
+  - `model->topic_count <= HU_PM_MAX_TOPICS`.
+  - `model->goal_count <= HU_PM_MAX_GOALS`.
+  - For each fact, `0 <= confidence <= 1` and `effective_confidence(now)` in `[0, 1]`.
+  - For each topic, `0 <= interest_score <= 1` and `effective_score(now)` in `[0, 1]`.
+  - For each active goal, `0 <= effective_priority(now) <= 1`.
+  - Style: `0 <= formality, verbosity, emoji_frequency, humor_receptivity, lowercase_ratio, abbreviation_ratio <= 1`.
+- **AC-B3.3**: Build prompt at every checkpoint with a 4 KB cap. Asserts it returns within the cap, returns `> 0` bytes, and is NUL-terminated. (Existing tests don't pin all three together at the saturated state.)
+- **AC-B3.4**: Total test runtime < 5s on a typical dev box (the loop is in-memory; no I/O).
 
-- We will NOT implement the retry-slim prompt fix (US-7) — deferred to Sprint 5 as P2.
-- We will NOT add the fuzz harness for `hu_output_validator_chain_execute` (US-8) — deferred to Sprint 5 as P2.
-- We will NOT touch `agent_stream.c:1317` structured-output gap (auditor finding #2 from Sprint 3) — minor gap, not blocking safety intent, backlog for Sprint 5.
-- We will NOT address clang-tidy diagnostic noise on pre-existing code — separate hygiene task, not a validator concern.
-- We will NOT add language bindings or public SDK documentation for the observer event type added in US-5.
+### Story B4 — Save/load round-trip after long simulation
 
----
+**File:** add to `tests/test_personal_model_simulation.c`.
 
-## Dispatch guidance for scrum-master
+Existing `personal_model_save_load_round_trips` saves a freshly-init'd model and reloads it. This test saves AFTER a 50-turn simulation, reloads, simulates another 50 turns, and asserts no state is lost across either cycle.
 
-Wave 1 (parallel): US-9 + US-10. Both are XS with no code dependencies on wave 2. Land them first to clear the audit note and hook before implementers begin wave 2.
+- **AC-B4.1**: Run B1's 50-turn simulation → call `hu_personal_model_save` to a `mktemp`-style path under `${TMPDIR}` → re-init a second model → `hu_personal_model_load` → assert second model byte-equivalent to first (at the public-field level: fact_count, topic_count, goal_count, style.sample_count, interaction_count, all timestamps).
+- **AC-B4.2**: Call `hu_personal_model_build_prompt` on the loaded model with the same `cap`. Asserts the bytes are equal to the pre-save prompt.
+- **AC-B4.3**: Run a second 50-turn simulation on the loaded model, save again, reload again. Final state still byte-equivalent.
+- **AC-B4.4**: Cleanup: remove the temp file in test teardown via `unlink`.
 
-Wave 2 (parallel): US-5. S-sized, no dependency on US-4 or US-6.
+## Stories explicitly NOT in this sprint
 
-Wave 3 (sequential): US-4 then US-6. US-6's E2E test exercises the cached chain (US-4), so US-4 should land and be verified before US-6 dispatches. If US-4 runs long, US-6 can begin against the pre-cache chain and be rebased; flag this to lead if it happens.
+- **Eval CLI subcommand `human eval personal-model-simulation`** — `src/eval.c` is large and provider-driven; adding a non-provider subcommand requires non-trivial scaffolding. The simulation is runnable via `./build/human_tests --filter=simulation` which is sufficient for CI integration. Defer to a future sprint.
+- **Cross-channel coherence** — depends on persona overlay surface; currently being worked on by another agent (`include/human/persona/steering.h` is untracked). Defer to avoid collision.
+- **MLX provider integration** — concurrent agent territory.
 
-Tool-use budget: US-4 is the heaviest story (7 call sites to migrate). Dispatch it as a single-concern implementer. Do not batch US-4 with US-6 in one agent.
+## Definition of Done
 
----
-
-## Open questions for stakeholder
-
-- US-9 option choice: does Seth prefer (a) remove the two fallback `strip_channel_tags` calls entirely (slightly smaller blast radius, loses defense-in-depth on chain-build failure) or (b) keep them with explicit comment documentation? Both satisfy the AC. Recommend (b) — defense-in-depth is worth the two lines — but this is a judgment call.
-- US-5 PASS emission: the current AC suppresses PASS events to avoid per-token noise. If production monitoring needs a throughput baseline (e.g., "N messages validated per minute"), a sampled PASS emission may be desirable. Confirm suppression is correct before implementation begins.
-
-Last line: RESULT_product-owner=READY
+- All four AC blocks (B1-B4) covered by tests in `tests/test_personal_model_simulation.c`.
+- Test file builds, all new tests pass under ASan with zero leaks.
+- New tests registered in `tests/test_main.c` and `CMakeLists.txt`.
+- Implementer commits each story before handoff (Sprint 2a protocol).
+- Per-story documentation in commit messages (what's tested, why it matters).
+- Sprint closed with `review.md` + `retro.md`.

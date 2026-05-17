@@ -2472,6 +2472,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_personal_model_simulation.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
     tests/test_filler_pctt.c

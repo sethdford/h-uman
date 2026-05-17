@@ -78,6 +78,15 @@ if [ -f "scripts/check-memory-query-variant.sh" ]; then
   run_check "Memory query variant scan" bash scripts/check-memory-query-variant.sh
 fi
 
+# 2b'. Test-time symbol availability (Sprint 2c F5; python3 required)
+# Catches the Sprint 1 Story C failure mode: extern symbol declared in
+# include/ but defined behind a guard that excludes it from HU_IS_TEST
+# builds (#ifdef HU_IS_TEST..#else <DEF>, #ifndef HU_IS_TEST <DEF>,
+# #if !defined(HU_IS_TEST) <DEF>).
+if [ -f "scripts/check-test-time-symbol-availability.sh" ]; then
+  run_check "Test-time symbol availability" bash scripts/check-test-time-symbol-availability.sh
+fi
+
 # 2d. Track D D2.2 — lora-baseline fidelity gate (cheap, deterministic).
 # Runs the offline persona-fidelity scorer on a fixture persona and
 # fails when the mean drifts below the floor. Catches regressions in

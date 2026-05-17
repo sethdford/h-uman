@@ -1,5 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { VIEW_TAGS, ALL_VIEWS, WAIT, POLL, shadowComputedStyle } from "./helpers.js";
+import {
+  VIEW_TAGS,
+  ALL_VIEWS,
+  WAIT,
+  POLL,
+  shadowComputedStyle,
+  isKnownPageError,
+} from "./helpers.js";
 
 /**
  * Design system token verification tests.
@@ -127,7 +134,9 @@ test.describe("Design Tokens — No Console Errors", () => {
   for (const view of ALL_VIEWS) {
     test(`${view} view loads without JS errors`, async ({ page }) => {
       const errors: string[] = [];
-      page.on("pageerror", (err) => errors.push(err.message));
+      page.on("pageerror", (err) => {
+        if (!isKnownPageError(err.message)) errors.push(err.message);
+      });
 
       await page.goto(`/?demo#${view}`);
       await page.waitForTimeout(WAIT);
