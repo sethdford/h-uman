@@ -636,10 +636,9 @@ export class ScMetricsView extends GatewayAwareLitElement {
         ? this._renderSkeleton()
         : html`
             ${this._renderFidelity()} ${this._renderGuardRejects()}
-            ${this._renderDirectiveTelemetry()}
-            ${this._renderIntelligenceStats()} ${this._renderEvalCalibration()}
-            ${this._renderHulaObservability()} ${this._renderSystemHealth()}
-            ${this._renderIntelligencePipeline()}
+            ${this._renderDirectiveTelemetry()} ${this._renderIntelligenceStats()}
+            ${this._renderEvalCalibration()} ${this._renderHulaObservability()}
+            ${this._renderSystemHealth()} ${this._renderIntelligencePipeline()}
           `}
     `;
   }

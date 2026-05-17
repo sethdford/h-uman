@@ -3602,6 +3602,16 @@ describe("hu-directive-telemetry-tile", () => {
   });
 });
 
+/* hu-guard-rejects-tile is exhaustively tested in its dedicated file
+ * (hu-guard-rejects-tile.test.ts). This smoke block exists so the
+ * catalog-completeness lint can find it in extra-components.test.ts. */
+import "./hu-guard-rejects-tile.js";
+describe("hu-guard-rejects-tile", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("hu-guard-rejects-tile")).toBeDefined();
+  });
+});
+
 describe("hu-chart", () => {
   it("should expose categorical series count aligned with design-tokens data-viz", () => {
     expect(HU_CHART_CATEGORICAL_SERIES_COUNT).toBe(16);

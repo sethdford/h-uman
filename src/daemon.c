@@ -4776,62 +4776,80 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * if classifier says leave-on-read and we store 2–24h timer. */
                 bool leave_on_read_skip = false;
 #ifndef HU_IS_TEST
-                if (!llm_decides && !msgs[batch_start].is_group) {
+                /* Leave-on-read state machine (F46): combine active-period status
+                 * (ring buffer scan), group-chat policy, and the classifier's verdict
+                 * via hu_leave_on_read_decide. Decision policy is unit-tested in
+                 * tests/test_conversation.c::leave_on_read_decide_*; this block
+                 * handles only the daemon-local state (ring scan + insert). */
+                if (!llm_decides) {
                     time_t now_ts = time(NULL);
+                    bool is_group = msgs[batch_start].is_group;
                     size_t lor_slot = SIZE_MAX;
+                    bool already_in_period = false;
                     for (size_t lor_i = 0; lor_i < HU_LEAVE_ON_READ_MAX; lor_i++) {
                         if (leave_on_read_entries[lor_i].key[0] == '\0')
                             continue;
                         if (key_len < sizeof(leave_on_read_entries[lor_i].key) &&
                             memcmp(leave_on_read_entries[lor_i].key, batch_key, key_len) == 0 &&
                             leave_on_read_entries[lor_i].key[key_len] == '\0') {
-                            if (leave_on_read_entries[lor_i].until > now_ts) {
-                                leave_on_read_skip = true;
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "leave-on-read: still in period for %.*s",
-                                            (int)(key_len > 20 ? 20 : key_len), batch_key);
-                            } else {
+                            if (leave_on_read_entries[lor_i].until > now_ts)
+                                already_in_period = true;
+                            else
                                 lor_slot = lor_i; /* expired, can reuse */
-                            }
                             break;
                         }
                     }
-                    if (!leave_on_read_skip && action != HU_RESPONSE_SKIP && !tapback_skip) {
-                        uint32_t lor_seed =
-                            (uint32_t)now_ts * 1103515245u + 12345u + (uint32_t)(uintptr_t)combined;
+
+                    uint32_t lor_seed =
+                        (uint32_t)now_ts * 1103515245u + 12345u + (uint32_t)(uintptr_t)combined;
+                    bool helper_says = false;
+                    bool eligible_to_roll = !is_group && !already_in_period &&
+                                            action != HU_RESPONSE_SKIP && !tapback_skip;
+                    if (eligible_to_roll) {
                         uint8_t lor_pct = 0;
-                        if (agent->persona && agent->active_channel) {
-                            const hu_persona_overlay_t *lor_ov = hu_persona_find_overlay(
-                                agent->persona, agent->active_channel, agent->active_channel_len);
-                            if (lor_ov)
-                                lor_pct = lor_ov->leave_on_read_pct;
+                        if (agent->persona) {
+                            const hu_persona_overlay_t *lor_ov = NULL;
+                            if (agent->active_channel)
+                                lor_ov =
+                                    hu_persona_find_overlay(agent->persona, agent->active_channel,
+                                                            agent->active_channel_len);
+                            const hu_contact_profile_t *lor_cp =
+                                hu_persona_find_contact(agent->persona, batch_key, key_len);
+                            lor_pct = hu_leave_on_read_pct_effective(lor_cp, lor_ov);
                         }
-                        if (hu_conversation_should_leave_on_read(combined, combined_len,
-                                                                 early_history, early_history_count,
-                                                                 lor_seed, lor_pct)) {
-                            leave_on_read_skip = true;
-                            /* Store leave_on_read_until: now + random 2–24 hours */
-                            uint32_t hrs = 7200u + ((lor_seed >> 16u) % (86400u - 7200u + 1u));
-                            time_t until = now_ts + (time_t)hrs;
-                            if (lor_slot == SIZE_MAX) {
-                                for (size_t lor_j = 0; lor_j < HU_LEAVE_ON_READ_MAX; lor_j++) {
-                                    if (leave_on_read_entries[lor_j].key[0] == '\0' ||
-                                        leave_on_read_entries[lor_j].until <= now_ts) {
-                                        lor_slot = lor_j;
-                                        break;
-                                    }
+                        helper_says = hu_conversation_should_leave_on_read(
+                            combined, combined_len, early_history, early_history_count, lor_seed,
+                            lor_pct);
+                    }
+
+                    hu_leave_on_read_decision_t decision =
+                        hu_leave_on_read_decide(is_group, already_in_period, helper_says);
+                    if (decision == HU_LOR_ALREADY_IN_PERIOD) {
+                        leave_on_read_skip = true;
+                        hu_log_info("human", agent ? agent->observer : NULL,
+                                    "leave-on-read: still in period for %.*s",
+                                    (int)(key_len > 20 ? 20 : key_len), batch_key);
+                    } else if (decision == HU_LOR_TRIGGER_NEW) {
+                        leave_on_read_skip = true;
+                        uint32_t hrs = 7200u + ((lor_seed >> 16u) % (86400u - 7200u + 1u));
+                        time_t until = now_ts + (time_t)hrs;
+                        if (lor_slot == SIZE_MAX) {
+                            for (size_t lor_j = 0; lor_j < HU_LEAVE_ON_READ_MAX; lor_j++) {
+                                if (leave_on_read_entries[lor_j].key[0] == '\0' ||
+                                    leave_on_read_entries[lor_j].until <= now_ts) {
+                                    lor_slot = lor_j;
+                                    break;
                                 }
                             }
-                            if (lor_slot != SIZE_MAX &&
-                                key_len < sizeof(leave_on_read_entries[0].key)) {
-                                memcpy(leave_on_read_entries[lor_slot].key, batch_key, key_len);
-                                leave_on_read_entries[lor_slot].key[key_len] = '\0';
-                                leave_on_read_entries[lor_slot].until = until;
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "leave-on-read: skipping for %.*s until %ld",
-                                            (int)(key_len > 20 ? 20 : key_len), batch_key,
-                                            (long)until);
-                            }
+                        }
+                        if (lor_slot != SIZE_MAX &&
+                            key_len < sizeof(leave_on_read_entries[0].key)) {
+                            memcpy(leave_on_read_entries[lor_slot].key, batch_key, key_len);
+                            leave_on_read_entries[lor_slot].key[key_len] = '\0';
+                            leave_on_read_entries[lor_slot].until = until;
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "leave-on-read: skipping for %.*s until %ld",
+                                        (int)(key_len > 20 ? 20 : key_len), batch_key, (long)until);
                         }
                     }
                 }
@@ -9199,31 +9217,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    /* Inline reply awareness: look up the original message they replied to */
+                    /* Inline reply awareness: look up the original message they replied to.
+                     * Logic extracted into hu_imessage_build_inline_reply_hint_for_batch so
+                     * the batch → lookup → hint composition can be unit-tested via
+                     * hu_imessage_test_set_guid_lookup (see tests/test_imessage_extended.c). */
 #ifdef HU_HAS_IMESSAGE
                     {
-                        const char *reply_guid = NULL;
-                        for (size_t bi = batch_start; bi <= batch_end; bi++) {
-                            if (msgs[bi].reply_to_guid[0]) {
-                                reply_guid = msgs[bi].reply_to_guid;
-                                break;
-                            }
-                        }
-                        if (reply_guid) {
-                            char orig_text[512];
-                            size_t orig_len = 0;
-                            hu_error_t lr_err = hu_imessage_lookup_message_by_guid(
-                                alloc, reply_guid, strlen(reply_guid), orig_text, sizeof(orig_text),
-                                &orig_len);
-                            if (lr_err == HU_OK && orig_len > 0) {
-                                size_t n = hu_conversation_build_inline_reply_hint(
-                                    orig_text, orig_len, inject_buf + inject_pos,
-                                    sizeof(inject_buf) - inject_pos);
-                                if (n > 0) {
-                                    inject_pos += n;
-                                    inject_buf[inject_pos++] = '\n';
-                                }
-                            }
+                        size_t n = hu_imessage_build_inline_reply_hint_for_batch(
+                            alloc, &msgs[batch_start], (batch_end - batch_start + 1),
+                            inject_buf + inject_pos, sizeof(inject_buf) - inject_pos);
+                        if (n > 0) {
+                            inject_pos += n;
+                            inject_buf[inject_pos++] = '\n';
                         }
                     }
 #endif

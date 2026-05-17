@@ -422,6 +422,27 @@ bool hu_conversation_should_leave_on_read(const char *msg, size_t msg_len,
                                           const hu_channel_history_entry_t *entries, size_t count,
                                           uint32_t seed, uint8_t threshold_pct);
 
+/* Leave-on-read state-machine decision (F46): combines the per-contact active-period
+ * status, group-chat policy, and the heuristic classifier's verdict into a single
+ * decision the daemon can act on.
+ *
+ * - Groups never leave-on-read (we always respond), regardless of other flags.
+ * - An existing active period takes precedence over a new helper-triggered period;
+ *   we do not extend a running silence by re-rolling.
+ *
+ * Pure predicate over three booleans so the policy can be unit-tested without
+ * driving the daemon's ring-buffer state. Per .claude/rules/security-predicate-extraction.md,
+ * inputs are facts (not pointers to mutable state) and output is a small enum. */
+typedef enum {
+    HU_LOR_RESPOND = 0,       /* respond normally; do not skip */
+    HU_LOR_ALREADY_IN_PERIOD, /* skip; an active leave-on-read window is still running */
+    HU_LOR_TRIGGER_NEW,       /* skip and start a new leave-on-read period */
+} hu_leave_on_read_decision_t;
+
+hu_leave_on_read_decision_t hu_leave_on_read_decide(bool is_group_chat,
+                                                    bool already_in_active_period,
+                                                    bool helper_says_should_leave);
+
 /* Natural conversation drop-off: returns skip probability 0-100.
  * Caller rolls (seed % 100) < prob to decide SKIP. Used when action is FULL/BRIEF. */
 int hu_conversation_classify_dropoff(const char *message, size_t message_len,
