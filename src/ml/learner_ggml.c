@@ -19,12 +19,12 @@
 #include <string.h>
 
 #ifdef _WIN32
-#define hu_popen(cmd, mode)  _popen(cmd, mode)
-#define hu_pclose(f)         _pclose(f)
+#define hu_popen(cmd, mode) _popen(cmd, mode)
+#define hu_pclose(f)        _pclose(f)
 #else
 #include <unistd.h>
-#define hu_popen(cmd, mode)  popen(cmd, mode)
-#define hu_pclose(f)         pclose(f)
+#define hu_popen(cmd, mode) popen(cmd, mode)
+#define hu_pclose(f)        pclose(f)
 #endif
 
 typedef struct hu_learner_ggml_ctx {
@@ -59,8 +59,7 @@ static uint64_t ggml_fnv1a(const void *data, size_t len) {
 #if !(defined(HU_IS_TEST) && HU_IS_TEST)
 /* Write signals as JSONL training data. Same format as the MLX backend
  * for consistency across backends. */
-static hu_error_t write_training_jsonl(const char *path,
-                                       const hu_training_signal_t *signals,
+static hu_error_t write_training_jsonl(const char *path, const hu_training_signal_t *signals,
                                        size_t n) {
     FILE *f = fopen(path, "w");
     if (!f)
@@ -79,13 +78,11 @@ static hu_error_t write_training_jsonl(const char *path,
             fprintf(f,
                     "{\"prompt\": \"[persona-delta kind=%d key=%s]\", "
                     "\"completion\": \"%s\"}\n",
-                    (int)signals[i].as.persona.delta.kind,
-                    signals[i].as.persona.delta.key,
+                    (int)signals[i].as.persona.delta.kind, signals[i].as.persona.delta.key,
                     signals[i].as.persona.delta.value);
             break;
         case HU_TRAIN_CASE_OUTCOME: {
-            const char *label =
-                signals[i].as.case_outcome.reward >= 0.5f ? "positive" : "negative";
+            const char *label = signals[i].as.case_outcome.reward >= 0.5f ? "positive" : "negative";
             fprintf(f,
                     "{\"prompt\": \"[case %lld]\", "
                     "\"completion\": \"%s (reward=%.2f)\"}\n",
@@ -106,8 +103,8 @@ static hu_error_t write_training_jsonl(const char *path,
 
 #if defined(HU_IS_TEST) && HU_IS_TEST
 /* Write a fake HLAD adapter file for HU_IS_TEST mode. */
-static hu_error_t write_fake_adapter(const char *path, const char *model_version,
-                                     int rank, int64_t *out_bytes) {
+static hu_error_t write_fake_adapter(const char *path, const char *model_version, int rank,
+                                     int64_t *out_bytes) {
     FILE *f = fopen(path, "wb");
     if (!f)
         return HU_ERR_IO;
@@ -198,8 +195,8 @@ static hu_error_t ggml_train(void *ctx, const hu_learner_config_t *cfg,
              cfg->adapter_output_path);
 
     /* Compute a model_version hash from training data. */
-    uint64_t data_hash = ggml_fnv1a(cfg->model_version,
-                                    strnlen(cfg->model_version, sizeof(cfg->model_version)));
+    uint64_t data_hash =
+        ggml_fnv1a(cfg->model_version, strnlen(cfg->model_version, sizeof(cfg->model_version)));
     for (size_t i = 0; i < signals_count; i++) {
         uint64_t sh = ggml_fnv1a(&signals[i], sizeof(signals[i]));
         data_hash ^= sh;
@@ -208,8 +205,8 @@ static hu_error_t ggml_train(void *ctx, const hu_learner_config_t *cfg,
      * and out_report->model_version is also 64; the "-%016llx" suffix
      * eats 17 bytes. Bound the prefix so GCC -Wformat-truncation=2 is
      * quiet under -Werror. */
-    snprintf(out_report->model_version, sizeof(out_report->model_version),
-             "%.46s-%016llx", cfg->model_version, (unsigned long long)data_hash);
+    snprintf(out_report->model_version, sizeof(out_report->model_version), "%.46s-%016llx",
+             cfg->model_version, (unsigned long long)data_hash);
 
     if (cfg->budget_ms == 0) {
         out_report->steps_completed = 0;
@@ -223,14 +220,13 @@ static hu_error_t ggml_train(void *ctx, const hu_learner_config_t *cfg,
 #if defined(HU_IS_TEST) && HU_IS_TEST
     /* Test mode: write a fake adapter, skip subprocess. */
     int64_t bytes = 0;
-    hu_error_t e = write_fake_adapter(cfg->adapter_output_path, out_report->model_version,
-                                      cfg->rank, &bytes);
+    hu_error_t e =
+        write_fake_adapter(cfg->adapter_output_path, out_report->model_version, cfg->rank, &bytes);
     if (e != HU_OK) {
         /* cfg->adapter_output_path is up to 256 bytes; last_error is 128.
          * Width-bound to fit. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
-                 "failed to write test adapter at %.90s",
-                 cfg->adapter_output_path);
+                 "failed to write test adapter at %.90s", cfg->adapter_output_path);
         return e;
     }
     out_report->adapter_bytes = bytes;
@@ -244,28 +240,32 @@ static hu_error_t ggml_train(void *ctx, const hu_learner_config_t *cfg,
 
     hu_error_t we = write_training_jsonl(jsonl_path, signals, signals_count);
     if (we != HU_OK) {
+        /* Bound the %s precision: out_report->last_error is 128 bytes,
+         * "failed to write training data at " is 33 chars, so the path
+         * can use at most 94 chars (33 + 94 + NUL = 128). Same fix as
+         * learner_mlx.c:258. Without the bound, jsonl_path[512] could
+         * trigger -Werror=format-truncation under Linux GCC. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
-                 "failed to write training data at %s", jsonl_path);
+                 "failed to write training data at %.94s", jsonl_path);
         return we;
     }
 
     float clip_norm = cfg->dp_clip_norm > 0.0f ? cfg->dp_clip_norm : 1.0f;
     char cmd[2048];
     int cmd_len = snprintf(cmd, sizeof(cmd),
-             "llama-finetune "
-             "--model-base \"%s\" "
-             "--train-data \"%s\" "
-             "--lora-out \"%s\" "
-             "--lora-r %d "
-             "--adam-iter %d "
-             "--batch %d "
-             "--adam-alpha %g",
-             cfg->base_model_path, jsonl_path, cfg->adapter_output_path,
-             cfg->rank, cfg->max_steps, cfg->batch_size,
-             (double)cfg->learning_rate);
+                           "llama-finetune "
+                           "--model-base \"%s\" "
+                           "--train-data \"%s\" "
+                           "--lora-out \"%s\" "
+                           "--lora-r %d "
+                           "--adam-iter %d "
+                           "--batch %d "
+                           "--adam-alpha %g",
+                           cfg->base_model_path, jsonl_path, cfg->adapter_output_path, cfg->rank,
+                           cfg->max_steps, cfg->batch_size, (double)cfg->learning_rate);
     if (cfg->dp_enabled && cmd_len > 0 && (size_t)cmd_len < sizeof(cmd) - 64) {
-        cmd_len += snprintf(cmd + cmd_len, sizeof(cmd) - (size_t)cmd_len,
-                            " --grad-clip %g", (double)clip_norm);
+        cmd_len += snprintf(cmd + cmd_len, sizeof(cmd) - (size_t)cmd_len, " --grad-clip %g",
+                            (double)clip_norm);
     }
     if (cmd_len > 0 && (size_t)cmd_len < sizeof(cmd) - 8)
         snprintf(cmd + cmd_len, sizeof(cmd) - (size_t)cmd_len, " 2>&1");
@@ -309,9 +309,10 @@ static hu_error_t ggml_train(void *ctx, const hu_learner_config_t *cfg,
     if (cfg->dp_enabled) {
         float sensitivity = clip_norm;
         float noise_sigma = sensitivity / cfg->dp_epsilon;
-        fprintf(stderr, "[ggml-dp] warning: DP-SGD is approximate — "
-                        "post-hoc noise (sigma=%.4f) applied to adapter "
-                        "weights for dp_epsilon=%.2f\n",
+        fprintf(stderr,
+                "[ggml-dp] warning: DP-SGD is approximate — "
+                "post-hoc noise (sigma=%.4f) applied to adapter "
+                "weights for dp_epsilon=%.2f\n",
                 (double)noise_sigma, (double)cfg->dp_epsilon);
 
         /* Read adapter, add noise to fp32 weights, write back. The GGUF
@@ -379,8 +380,7 @@ const hu_learner_vtable_t hu_learner_ggml_vtable = {
 hu_error_t hu_learner_ggml_open(hu_allocator_t *alloc, void **out_ctx) {
     if (!alloc || !out_ctx)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_learner_ggml_ctx_t *c =
-        (hu_learner_ggml_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+    hu_learner_ggml_ctx_t *c = (hu_learner_ggml_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
         return HU_ERR_OUT_OF_MEMORY;
     c->alloc = alloc;
