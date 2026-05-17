@@ -16,6 +16,9 @@ final class HumaniOSFleetUITests: XCTestCase {
         static let content: TimeInterval = 25
     }
 
+    /// Apple HIG / award-tier minimum touch target (points).
+    private let minimumTouchTarget: CGFloat = 44
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
@@ -100,13 +103,56 @@ final class HumaniOSFleetUITests: XCTestCase {
         return byId
     }
 
-    /// Overflow **More** tab: query at app scope so it resolves whether the control is nested under `tabBars` or flattened on newer OS builds.
+    /// Overflow **More** tab. Prefer the tab-bar control; iOS 18+ may flatten it to app scope.
     private func moreTabButton() -> XCUIElement {
+        let bar = primaryTabBar
+        if bar.exists {
+            let inBar = bar.buttons["More"]
+            if inBar.exists { return inBar }
+        }
         let byButton = app.buttons["More"]
         if byButton.exists { return byButton }
         return app.descendants(matching: .any)
             .matching(NSPredicate(format: "label == 'More'"))
             .firstMatch
+    }
+
+    /// True when the element's frame intersects the primary tab bar (on-bar tab, not overflow list only).
+    private func isOnPrimaryTabBar(_ element: XCUIElement) -> Bool {
+        let bar = primaryTabBar
+        guard bar.exists, element.exists else { return false }
+        return element.frame.intersects(bar.frame)
+    }
+
+    /// Award-tier touch target: visible frame at least 44×44 pt (or XCTest reports hittable).
+    private func elementHasAdequateTouchTarget(_ element: XCUIElement) -> Bool {
+        guard element.exists else { return false }
+        if element.isHittable { return true }
+        let frame = element.frame
+        guard frame.width > 0, frame.height > 0 else { return false }
+        return frame.width >= minimumTouchTarget && frame.height >= minimumTouchTarget
+    }
+
+    /// XCTest often reports UITabBar **More** as `isHittable == false` while the control is tappable; use coordinate tap as fallback.
+    private func tapReachable(_ element: XCUIElement, context: String) {
+        XCTAssertTrue(element.waitForExistence(timeout: Timeout.tabItem), "\(context) should exist")
+        if element.isHittable {
+            element.tap()
+            return
+        }
+        XCTAssertTrue(
+            elementHasAdequateTouchTarget(element),
+            "\(context) should expose a ≥\(Int(minimumTouchTarget))pt touch target (frame=\(element.frame))",
+        )
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
+    private func assertTouchTargetReachable(_ element: XCUIElement, context: String) {
+        XCTAssertTrue(element.waitForExistence(timeout: Timeout.tabItem), "\(context) should exist")
+        XCTAssertTrue(
+            elementHasAdequateTouchTarget(element),
+            "\(context) should be hittable or have a ≥\(Int(minimumTouchTarget))pt frame (isHittable=\(element.isHittable), frame=\(element.frame))",
+        )
     }
 
     /// Checks whether any primary tab chrome is visible, regardless of element type.
@@ -173,42 +219,44 @@ final class HumaniOSFleetUITests: XCTestCase {
     /// Selects a root tab, using **More** when the item is not on the main tab bar (six tabs on iPhone).
     private func selectPrimaryTab(_ label: String) {
         let direct = tabBarButton(for: label)
-        if direct.waitForExistence(timeout: 5), direct.isHittable {
+        if direct.waitForExistence(timeout: 5), isOnPrimaryTabBar(direct), direct.isHittable {
             direct.tap()
             return
         }
-        let more = moreTabButton()
-        XCTAssertTrue(more.waitForExistence(timeout: Timeout.tabItem), "Expected More tab for overflow item \(label)")
-        XCTAssertTrue(more.isHittable, "More tab should be tappable")
-        more.tap()
+        openMoreOverflowMenu()
         tapOverflowTabRow(label)
     }
 
     /// Asserts the tab is reachable with a proper touch target: main bar button or **More** list row.
     private func assertPrimaryTabHittable(_ label: String) {
         let direct = tabBarButton(for: label)
-        if direct.waitForExistence(timeout: 4) {
-            XCTAssertTrue(direct.isHittable, "Tab \(label) should be hittable")
+        if direct.waitForExistence(timeout: 4), isOnPrimaryTabBar(direct) {
+            assertTouchTargetReachable(direct, context: "Tab \(label)")
             return
         }
-        let more = moreTabButton()
-        XCTAssertTrue(more.waitForExistence(timeout: Timeout.tabItem), "Expected More tab for overflow item \(label)")
-        XCTAssertTrue(more.isHittable, "More tab should be hittable (touch target / hit testing)")
-        more.tap()
+        openMoreOverflowMenu()
         tapOverflowTabRow(label)
+        // Return to a stable tab-bar shell so the next overflow check starts from the main bar.
+        if label != primaryTabLabels.last {
+            selectPrimaryTab("Overview")
+        }
+    }
+
+    private func openMoreOverflowMenu() {
+        let more = moreTabButton()
+        assertTouchTargetReachable(more, context: "More tab")
+        tapReachable(more, context: "More tab")
     }
 
     private func tapOverflowTabRow(_ label: String) {
         let cell = moreListCell(for: label)
         if cell.waitForExistence(timeout: Timeout.tabItem) {
-            XCTAssertTrue(cell.isHittable, "More list row \(label) should be hittable")
-            cell.tap()
+            tapReachable(cell, context: "More list row \(label)")
             return
         }
         let alt = app.tables.staticTexts[label].firstMatch
         XCTAssertTrue(alt.waitForExistence(timeout: 8), "Expected \(label) in More tab list")
-        XCTAssertTrue(alt.isHittable, "More list row \(label) should be hittable")
-        alt.tap()
+        tapReachable(alt, context: "More list row \(label)")
     }
 
     // MARK: - Tests
