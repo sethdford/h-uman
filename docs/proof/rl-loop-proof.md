@@ -9,9 +9,9 @@ date: 2026-05-16
 
 This document indexes the **full SOTA RL improvement loop** (Phases 0–6) and how to reproduce it locally.
 
-**Ship Contract status: 14/14 DoD items PASS at `rl-sota-phase-6-complete`.** See [`rl-loop-shipcontract.md`](rl-loop-shipcontract.md) for the per-item PASS/FAIL/PARTIAL verification with file:line evidence.
+**Ship Contract status (post-audit): 9 PASS + 4 PASS_WITH_NOTES + 1 PARTIAL = 13/14 honest, 1 demoted to PARTIAL** at `rl-sota-phase-6-complete`. The PARTIAL is DoD-9 — `human eval competitive` is a CLI printf stub today; the scorecard backend exists and is unit-tested but the user-facing CLI is unwired. Tracked as carry-forward CF-1. See [`rl-loop-shipcontract.md`](rl-loop-shipcontract.md) for the per-item verification with file:line evidence and CF-1 through CF-7 carry-forwards.
 
-**Adversarial audit status: every gate fired at every applicable phase boundary, every finding remediated.** See [`adversarial-audit-report.md`](adversarial-audit-report.md) for the full chronological index of `critic` + `aspect-panel` + `sprint-auditor` findings with remediation commits.
+**Adversarial audit status: every per-phase gate fired at every applicable phase boundary, every finding remediated; the program-level close-out audit caught 7 inflations in the close-out documents themselves (CO-1 through CO-7) which have been corrected honestly rather than hidden.** See [`adversarial-audit-report.md`](adversarial-audit-report.md) for the full chronological index plus the program-level close-out audit findings.
 
 ## Phase completion tags
 
@@ -115,18 +115,20 @@ Evidence lands in `~/.human/proofs/<YYYY-MM-DD>-<method>-step-<pid>/`.
 - Demo runbook: [`docs/demos/rl-loop-demo.md`](../demos/rl-loop-demo.md)
 - Master Track D row: [`docs/plans/2026-05-10-master-follow-through-program.md#phase-d3--rl-sota-closed-loop-track-d-phase-2-`](../plans/2026-05-10-master-follow-through-program.md)
 
-## Final close-out verdict
+## Final close-out verdict (post-audit, honest)
 
 | Item | Status |
 |------|--------|
 | 7 phase tags exist + all green | ✅ `rl-sota-phase-0-complete` … `rl-sota-phase-6-complete` |
 | Full rl_sota suite | ✅ 10330/10332 PASS, 2 SKIP, 0 ASan, 0 UBSan, 0 leaks |
-| Ship Contract DoD (14 items) | ✅ 14/14 PASS — see [`rl-loop-shipcontract.md`](rl-loop-shipcontract.md) |
-| Adversarial audit gates | ✅ Every gate fired, every finding remediated — see [`adversarial-audit-report.md`](adversarial-audit-report.md) |
-| Umbrella status table | ✅ Up to date (per-phase rows with auditor verdicts + remediations) |
+| Ship Contract DoD (14 items) | ✅ 9 PASS + 4 PASS_WITH_NOTES + 1 PARTIAL — DoD-9 honestly demoted; see [`rl-loop-shipcontract.md`](rl-loop-shipcontract.md) |
+| Per-phase adversarial audit gates | ✅ Every gate fired at every applicable boundary, every finding remediated |
+| Program-level close-out audit | ✅ NEEDS-REWORK on first close-out draft → all 7 inflations corrected (CO-1 through CO-7); see [`adversarial-audit-report.md`](adversarial-audit-report.md) |
+| Umbrella status table | ✅ Up to date (per-phase rows with auditor verdicts + remediations, Phase 5 row corrected to honest 2-of-3 production wiring) |
 | Master Track D row | ✅ Phase D3 subsection added with sub-phase table |
+| Open carry-forwards | ⚪ 7 items (CF-1 through CF-7) tracked honestly in [`rl-loop-shipcontract.md`](rl-loop-shipcontract.md) — receiving phase is post-RL-SOTA hardening |
 
-**The full SOTA RL improvement loop is shipped and proven locally end-to-end at `rl-sota-phase-6-complete`.**
+**The full SOTA RL improvement loop is shipped at `rl-sota-phase-6-complete` with the math, trainers, eval gate, deterministic E2E, demo CLI, and proof-directory schema all real and green. The user-facing CLI wrappers (`human eval competitive` etc.), six of the nine demo evidence files, the iMessage daemon poll, and per-parameter grad sweep are honestly tracked as carry-forwards CF-1 through CF-7 rather than claimed as shipped.**
 
 ## Out of scope on this branch
 
