@@ -4,6 +4,7 @@
 #include "core/allocator.h"
 #include "core/error.h"
 #include <stdbool.h>
+#include <stddef.h>
 
 /**
  * Shared starter persona JSON written by both `human init` and
@@ -59,5 +60,50 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
  * Check if this is the first run (no ~/.human/config.json exists).
  */
 bool hu_onboard_check_first_run(void);
+
+/**
+ * Inputs for the post-wizard "What's next" message formatter.
+ *
+ * Pure-data record so `hu_onboard_nextstep_format` can be tested without
+ * spawning a subprocess. See sprints/sprint-9/designs/US-9.2.md for the
+ * truth table.
+ */
+typedef struct hu_onboard_nextstep_ctx {
+    const char *config_path; /* NUL-terminated; required. */
+    const char *provider;    /* "apple" | "mlx_local" | "gemini" | ... */
+    bool platform_is_apple;  /* compile-time __APPLE__ at call site */
+    bool already_exists;     /* true => print early-exit variant */
+    bool parsed_ok;          /* result of post-write hu_config_load */
+} hu_onboard_nextstep_ctx_t;
+
+/**
+ * Format the post-wizard "What's next" block into a caller-provided buffer.
+ *
+ * Pure function: no I/O, no globals, no allocation. Writes a
+ * NUL-terminated, newline-terminated block to `out` (size `out_sz`).
+ *
+ * Returns:
+ *   HU_OK on success;
+ *   HU_ERR_INVALID_ARGUMENT if ctx, ctx->config_path, or out is NULL or
+ *     out_sz is 0;
+ *   HU_ERR_IO if the message would be truncated (out_sz too small).
+ *
+ * Truth table (covered by tests/test_onboard_nextstep.c):
+ *
+ *   already_exists | parsed_ok | platform_is_apple | block
+ *   --------------- | --------- | ----------------- | -----
+ *   true            | (n/a)     | true              | Config already exists at <path>.\nRun 'human
+ * doctor' to check status, or 'human doctor imessage' to pair iMessage.\n true            | (n/a)
+ * | false             | Config already exists at <path>.\nRun 'human doctor' to check status.\n
+ *   false           | false     | (any)             | Config written to <path>.\nWarning: config
+ * written but failed to parse — run 'human doctor --fix' to repair\n false           | true      |
+ * true              | Config verified OK\nConfig written to <path>.\nWhat's next:\n  1. Pair
+ * iMessage:  human doctor imessage\n  2. Start the agent: human agent\n false           | true |
+ * false             | Config verified OK\nConfig written to <path>.\nWhat's next:\n  1. Start the
+ * agent: human agent\n  (Tier-1 channels other than iMessage require manual config — see
+ * docs/guides/channels.md)\n
+ */
+hu_error_t hu_onboard_nextstep_format(const hu_onboard_nextstep_ctx_t *ctx, char *out,
+                                      size_t out_sz);
 
 #endif /* HU_ONBOARD_H */
