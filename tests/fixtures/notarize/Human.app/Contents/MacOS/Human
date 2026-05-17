@@ -1,0 +1,3 @@
+#!/bin/sh
+# Test fixture stub — never actually executed by the notarize pipeline.
+exit 0

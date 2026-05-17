@@ -247,6 +247,72 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  notarize-dmg-dryrun-smoke:
+    # US-14.2 dry-run smoke. Runs on every trigger that hits this workflow.
+    # No secrets required; this is the per-PR regression guard for the
+    # notarize-mac.sh script itself. The real notarize-dmg job below is
+    # gated on a release tag and only runs there.
+    name: macOS · notarize DMG (dry-run smoke)
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: notarize-mac.sh --dry-run via test harness
+        run: bash scripts/test-notarize-dryrun.sh
+
+  notarize-dmg:
+    # US-14.2 real notarization. HARD GATE: only on tagged releases.
+    # DO NOT relax this gate without re-reading
+    # sprints/sprint-14/designs/US-14.2.md (Risk 3: CI gating misfire).
+    # Running this on every PR would (a) exhaust notarytool quota and
+    # (b) expose Apple Developer credentials to fork PRs.
+    name: macOS · notarize DMG (release tag only)
+    if: ${{ github.event_name == 'release' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: macos-14
+    timeout-minutes: 45
+    needs:
+      - macos-app-archive
+    env:
+      APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      # github.ref_name is runner-controlled (the tag name on a release
+      # event); pass via env so the `run:` block consumes it as a shell
+      # variable, not as raw `${{ }}` interpolation.
+      REF_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download Human.xcarchive from US-14.1 archive job
+        uses: actions/download-artifact@v4
+        with:
+          name: Human-macOS-xcarchive
+          path: ${{ runner.temp }}/Human.xcarchive
+
+      - name: Notarize + staple DMG
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Human.xcarchive/Products/Applications/Human.app"
+          test -d "$APP" || { echo "::error::Human.app missing in downloaded xcarchive"; exit 1; }
+          bash scripts/notarize-mac.sh \
+            --app "$APP" \
+            --version "$REF_NAME" \
+            --bundle-id ai.human.mac
+
+      - name: Upload notarized DMG
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Human-macOS-dmg
+          path: build/Human-*.dmg
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Surface notarytool log on failure
+        if: failure()
+        run: |
+          echo "::warning::Notarization failed. See script stderr above for the notarytool log JSON, if any."
+
   fleet-sota-gate:
     name: Fleet SOTA gate (award-tier)
     runs-on: ubuntu-latest
@@ -256,6 +322,7 @@ jobs:
       - android-emulator-fleet
       - macos-app-build
       - macos-app-archive
+      - notarize-dmg-dryrun-smoke
     if: always()
     steps:
       - name: Summarize + enforce all-green
@@ -265,6 +332,7 @@ jobs:
           AND: ${{ needs.android-emulator-fleet.result }}
           MAC: ${{ needs.macos-app-build.result }}
           MACARC: ${{ needs.macos-app-archive.result }}
+          NOTAR_DRY: ${{ needs.notarize-dmg-dryrun-smoke.result }}
         run: |
           {
             echo "## Native fleet — SOTA / award-tier gate"
@@ -278,15 +346,17 @@ jobs:
             echo "| Android emulator matrix (Compose) | \`$AND\` |"
             echo "| macOS app (debug + release) | \`$MAC\` |"
             echo "| macOS app (archive + dev-cert codesign) | \`$MACARC\` |"
+            echo "| macOS notarize DMG (dry-run smoke) | \`$NOTAR_DRY\` |"
             echo ""
             echo "### What this fleet proves"
             echo "- **Inclusivity**: Tab journeys + labeled controls exercised under automation (VoiceOver/TalkBack-oriented labels)."
             echo "- **Cross-device**: Multiple iPhone / iPad + API 29–34 emulators."
             echo "- **Reliability**: Xcode test retries + disabled emulator animations + Gradle caches."
             echo "- **Distributable**: macOS \`.xcarchive\` produced under Release config and codesigned with an Apple Development identity (US-14.1)."
+            echo "- **Notarization-ready**: \`scripts/notarize-mac.sh --dry-run\` smoke verifies the release-tag job recipe each PR (US-14.2)."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ] || [ "$MACARC" != success ]; then
+          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ] || [ "$MACARC" != success ] || [ "$NOTAR_DRY" != success ]; then
             echo "::error::Fleet SOTA gate failed — every matrix job must be success."
             exit 1
           fi
