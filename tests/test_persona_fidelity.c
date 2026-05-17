@@ -178,16 +178,22 @@ static void persona_fidelity_skips_empty_responses(void) {
 
 static void persona_fidelity_judge_rejects_invalid_args(void) {
     /* No provider mock available here — we just exercise the
-     * arg-validation guards. The judge call itself is covered when a
-     * provider stub is wired in (out-of-scope for this smoke test). */
+     * arg-validation guards. The judge call itself is covered in
+     * tests/test_persona_fidelity_judge.c which uses a recording stub. */
+    hu_allocator_t alloc = hu_system_allocator();
     hu_eval_judge_result_t out;
     memset(&out, 0, sizeof(out));
+    /* Both allocator and provider NULL → INVALID_ARGUMENT */
     HU_ASSERT_EQ(
         hu_persona_fidelity_judge(NULL, NULL, "m", 1, "p", 1, "r", 1, "rubric", 6, 3, NULL, &out),
         HU_ERR_INVALID_ARGUMENT);
-    /* provider==NULL is rejected even when everything else is valid */
+    /* Allocator OK but provider NULL → still INVALID_ARGUMENT.
+     * Bugbot 2026-05-16: previous version of this test passed NULL for
+     * BOTH calls, making the second an exact duplicate that didn't
+     * exercise the "alloc valid, provider NULL" path the comment claimed.
+     * Now this assertion actually tests what the comment says. */
     HU_ASSERT_EQ(
-        hu_persona_fidelity_judge(NULL, NULL, "m", 1, "p", 1, "r", 1, "rubric", 6, 3, NULL, &out),
+        hu_persona_fidelity_judge(&alloc, NULL, "m", 1, "p", 1, "r", 1, "rubric", 6, 3, NULL, &out),
         HU_ERR_INVALID_ARGUMENT);
 }
 

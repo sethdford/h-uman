@@ -127,6 +127,19 @@ static hu_error_t mlx_load_adapter(void *ctx, hu_allocator_t *alloc, const char 
     return HU_ERR_NOT_SUPPORTED;
 }
 
+static hu_error_t mlx_unload_adapter(void *ctx, const char *adapter_id, size_t adapter_id_len) {
+    (void)ctx;
+    (void)adapter_id;
+    (void)adapter_id_len;
+    /* Bugbot 2026-05-16: vtable previously set load_adapter + active_adapter
+     * explicitly but left unload_adapter as NULL. The hu_provider_unload_adapter
+     * dispatcher tolerates NULL safely, but any direct vtable->unload_adapter(...)
+     * call (some CLI adapter-management paths do this) would deref NULL and
+     * crash. Set all three of the adapter triple — even when the body is a
+     * NOT_SUPPORTED stub — to keep the vtable consistent. */
+    return HU_ERR_NOT_SUPPORTED;
+}
+
 static const char *mlx_active_adapter(void *ctx) {
     (void)ctx;
     return NULL;
@@ -147,6 +160,7 @@ static const hu_provider_vtable_t mlx_vtable = {
     .supports_vision = NULL,
     .supports_vision_for_model = NULL,
     .load_adapter = mlx_load_adapter,
+    .unload_adapter = mlx_unload_adapter,
     .active_adapter = mlx_active_adapter,
 };
 

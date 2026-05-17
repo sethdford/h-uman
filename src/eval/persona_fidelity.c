@@ -142,7 +142,15 @@ hu_error_t hu_persona_fidelity_score_l1(const hu_communication_style_t *target,
 
     if (out->turns_scored > 1) {
         double mean = sum_composite / k;
-        double var = (sum_composite_sq / k) - (mean * mean);
+        /* Sample variance: divide by (n-1), not n. Using population
+         * variance (divide by n) gives a BIASED estimate that
+         * underestimates SEM by sqrt((n-1)/n) — ~11% for n=5. Since
+         * hu_persona_fidelity_ab_score uses composite_stderr directly
+         * to decide the `improved` verdict, an underestimate makes
+         * the gate too permissive (false-positive improvements at
+         * small n). Bessel's correction. */
+        double sum_sq_dev = sum_composite_sq - k * mean * mean;
+        double var = sum_sq_dev / (k - 1.0);
         if (var < 0.0)
             var = 0.0; /* float drift */
         out->composite_stderr = (float)sqrt(var / k);
