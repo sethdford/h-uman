@@ -24,6 +24,7 @@
 #include "human/agent/lora_runner.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/world_model_bridge.h"
+#include "human/daemon_reaction_poll.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
 #ifdef HU_ENABLE_ML
@@ -2661,6 +2662,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         }
     }
 #endif
+
+    /* CF-3: wire the reaction handler to the daemon-owned DPO collector
+     * once at startup, before any channel poll can fire. The handler
+     * resolves inbound reactions to (prompt, response) pairs and writes
+     * preference rows into this collector; without this call the
+     * production iMessage poll path silently no-ops (every event would
+     * land in a NULL collector and be discarded).
+     *
+     * Routed through hu_daemon_reaction_wire_collector to avoid pulling
+     * human/agent/reaction_handler.h into this TU (it transitively
+     * includes channels/reaction_event.h whose hu_reaction_kind_t enum
+     * collides with the legacy hu_reaction_type_t in human/channel.h). */
+    if (agent && agent->sota.dpo_collector.alloc) {
+        hu_daemon_reaction_wire_collector(
+            (struct hu_dpo_collector *)&agent->sota.dpo_collector);
+        hu_log_info("human", agent->observer,
+                    "reaction handler wired to DPO collector (CF-3)");
+    }
 
     while (!HU_STOP_FLAG) {
 #ifdef HU_HAS_CRON
@@ -12253,6 +12272,39 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             }
         }
 #endif
+
+        /* CF-3: throttled iMessage reaction-tapback poll.
+         *
+         * The handler is wired at startup (above); this block walks
+         * chat.db for new reaction rows every 30 seconds and feeds them
+         * into the DPO collector via hu_reaction_handler_handle_event.
+         * The 30s cadence is borrowed from the imsg watchdog and is
+         * cheap (single SQLite read-only query over an indexed range);
+         * it scales independently of the per-tick interval because the
+         * heavy work happens only when chat.db actually has new rows.
+         *
+         * `since_unix` is monotonically advanced each tick, so the same
+         * reaction is never ingested twice (the imessage_reactions SQL
+         * is `m.date > ((? - 978307200) * 1e9)` -- strictly greater).
+         * On poll failure we keep the cursor where it was so a transient
+         * DB lock just delays ingestion rather than dropping events. */
+        {
+            static int64_t reaction_poll_next_epoch = 0;
+            static int64_t reaction_poll_since_unix = 0;
+            int64_t rp_now = (int64_t)time(NULL);
+            if (rp_now >= reaction_poll_next_epoch) {
+                reaction_poll_next_epoch = rp_now + 30;
+                size_t ingested = 0;
+                hu_error_t rp_e = hu_daemon_reaction_poll_tick(
+                    config, reaction_poll_since_unix, &ingested);
+                if (rp_e == HU_OK) {
+                    reaction_poll_since_unix = rp_now;
+                    if (ingested > 0 && agent)
+                        hu_log_info("human", agent->observer,
+                                    "reaction poll: ingested %zu events", ingested);
+                }
+            }
+        }
 
         struct timespec sleep_ts = {.tv_sec = tick_interval_ms / 1000,
                                     .tv_nsec = (long)(tick_interval_ms % 1000) * 1000000L};
