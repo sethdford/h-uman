@@ -40,6 +40,7 @@ struct hu_job_spec;
 struct hu_provider;
 struct hu_eval_gate;
 struct hu_communication_style;
+struct hu_persona;
 
 /* Optional clear-callback for an opaque semantic cache. We can't depend
  * on the lifecycle/semantic_cache.h type from this header (kept as a
@@ -80,6 +81,11 @@ typedef struct hu_lora_runner_ctx {
     const struct hu_communication_style *eval_target;
     size_t eval_n_prompts;   /* default 20 when 0 */
     int64_t eval_timeout_ms; /* per-chat budget; default 5000 when 0 */
+
+    /* CF-4 (finish) — score persona example bank + post-adapter probes. */
+    const struct hu_persona *gate_persona; /* not owned */
+    const char *gate_model_name;
+    size_t gate_model_name_len;
 #ifdef HU_IS_TEST
     bool eval_use_synthetic_for_test; /* explicit 0.75 array; never in production */
 #endif

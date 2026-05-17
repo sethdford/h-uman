@@ -1,9 +1,39 @@
+/* tests/test_cli_eval_phase5.c — CF-1 wiring tests
+ *
+ * Pins that `human eval competitive / leaderboard / gate` are wired
+ * to real backends (competitive_harness, leaderboard, eval_gate)
+ * rather than the original Phase 5 printf stubs.
+ *
+ * The original help-exits-zero test is preserved so the surface
+ * contract is still pinned.
+ */
+
 #include "test_framework.h"
 #include "human/eval/cli_eval.h"
 #include "human/core/allocator.h"
+
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
+
+static long file_size(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
+    long sz = ftell(f);
+    fclose(f);
+    return sz;
+}
+
+static size_t read_file_into(const char *path, char *buf, size_t cap) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t r = fread(buf, 1, cap - 1, f);
+    fclose(f);
+    buf[r] = '\0';
+    return r;
+}
+
+/* ----------------------------- --help ------------------------------ */
 
 static void test_human_eval_competitive_help_lists_phase5_subcommands(void) {
     HU_SKIP_IF(!hu_build_has_competitive_eval(),
@@ -16,206 +46,256 @@ static void test_human_eval_competitive_help_lists_phase5_subcommands(void) {
     HU_ASSERT_EQ(hu_eval_cli_competitive(&alloc, 3, argv), HU_OK);
 }
 
-static void write_prompt_fixture(const char *path) {
+static void test_human_eval_leaderboard_help_exits_zero(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
+    hu_allocator_t alloc = hu_system_allocator();
+    char a0[] = "--help";
+    char *argv[] = {a0};
+    HU_ASSERT_EQ(hu_eval_cli_leaderboard(&alloc, 1, argv), HU_OK);
+}
+
+static void test_human_eval_gate_help_exits_zero(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
+    hu_allocator_t alloc = hu_system_allocator();
+    char a0[] = "--help";
+    char *argv[] = {a0};
+    HU_ASSERT_EQ(hu_eval_cli_gate(&alloc, 1, argv), HU_OK);
+}
+
+/* ----------------- competitive (real harness) ---------------------- */
+
+static void test_human_eval_competitive_writes_real_scorecard_markdown(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
+    hu_allocator_t alloc = hu_system_allocator();
+
+    const char *md = "/tmp/cf1_competitive.md";
+    const char *js = "/tmp/cf1_competitive.json";
+    (void)remove(md);
+    (void)remove(js);
+
+    char a0[] = "--persona";
+    char a1[] = "default";
+    char a2[] = "--out-md";
+    char a3[64]; snprintf(a3, sizeof(a3), "%s", md);
+    char a4[] = "--out-json";
+    char a5[64]; snprintf(a5, sizeof(a5), "%s", js);
+    char *argv[] = {a0, a1, a2, a3, a4, a5};
+
+    HU_ASSERT_EQ(hu_eval_cli_competitive(&alloc, 6, argv), HU_OK);
+
+    /* Markdown file must exist AND have a real scorecard body (not
+     * the stub one-liner). The harness emits "Competitive scorecard"
+     * plus a table that includes all three judge columns.
+     *
+     * Note: under HU_IS_TEST the Apple FM + Gemini Nano factories
+     * load a JSON fixture and return HU_OK, so all three columns
+     * are "ok" in the test build. In production builds (no
+     * HU_IS_TEST), those factories return HU_ERR_NOT_SUPPORTED and
+     * the corresponding cells say "unavailable". The DoD-14 honest-
+     * fallback path is covered separately by test_eval_judge_external.c;
+     * here we just pin that the CLI emits all three columns and a
+     * table-shaped body that's clearly not the printf stub. */
+    char buf[16384];
+    size_t r = read_file_into(md, buf, sizeof(buf));
+    HU_ASSERT_TRUE(r > 100);
+    HU_ASSERT_TRUE(strstr(buf, "Competitive scorecard") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "stock") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "apple_fm") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "gemini_nano") != NULL);
+    /* table-shape sanity: header row appears once. */
+    HU_ASSERT_TRUE(strstr(buf, "persona_fidelity") != NULL);
+
+    HU_ASSERT_TRUE(file_size(js) > 20);
+}
+
+static void test_human_eval_competitive_rejects_unknown_flag(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
+    hu_allocator_t alloc = hu_system_allocator();
+    char a0[] = "--bogus";
+    char *argv[] = {a0};
+    HU_ASSERT_EQ(hu_eval_cli_competitive(&alloc, 1, argv), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* Production calling convention: src/cli_commands.c passes argv+2 to
+ * these handlers, so argv[0] is the subcommand name (e.g. "competitive")
+ * rather than the first flag. The parser must skip that leading
+ * positional or every production call would be rejected as an unknown
+ * flag (which is exactly the CF-1 bug this test pins against). */
+static void test_human_eval_competitive_skips_leading_subcommand_name(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *md = "/tmp/cf1_competitive_dispatch.md";
+    const char *js = "/tmp/cf1_competitive_dispatch.json";
+    (void)remove(md);
+    (void)remove(js);
+
+    char a0[] = "competitive";  /* dispatch leaves this here */
+    char a1[] = "--out-md";
+    char a2[64]; snprintf(a2, sizeof(a2), "%s", md);
+    char a3[] = "--out-json";
+    char a4[64]; snprintf(a4, sizeof(a4), "%s", js);
+    char *argv[] = {a0, a1, a2, a3, a4};
+
+    HU_ASSERT_EQ(hu_eval_cli_competitive(&alloc, 5, argv), HU_OK);
+    HU_ASSERT_TRUE(file_size(md) > 100);
+}
+
+/* ----------------- leaderboard (real runner) ----------------------- */
+
+static void write_canned_mt_bench(const char *path) {
     FILE *f = fopen(path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    for (int i = 0; i < 10; i++)
-        fprintf(f, "fixture prompt %d\n", i);
+    fputs("{\"mt_bench\":{\"hello\":7.5,\"world\":8.25}}", f);
     fclose(f);
 }
 
-static void test_competitive_emits_scorecard_with_bootstrap_cis(void) {
-    HU_SKIP_IF(!hu_build_has_competitive_eval(), "RL_FULL off");
+static void test_human_eval_leaderboard_runs_canned_scores(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
     hu_allocator_t alloc = hu_system_allocator();
-    char fixture[256], json_path[256];
-    snprintf(fixture, sizeof(fixture), "/tmp/hu-comp-fixture-%d.txt", (int)getpid());
-    snprintf(json_path, sizeof(json_path), "/tmp/hu-comp-scorecard-%d.json", (int)getpid());
-    write_prompt_fixture(fixture);
+    const char *canned = "/tmp/cf1_leaderboard_canned.json";
+    const char *out = "/tmp/cf1_leaderboard.out";
+    write_canned_mt_bench(canned);
+    (void)remove(out);
 
-    char argv0[] = "human";
-    char argv1[] = "competitive";
-    char argv2[] = "--persona";
-    char argv3[] = "default";
-    char argv4[] = "--prompts";
-    char argv5[256];
-    snprintf(argv5, sizeof(argv5), "%s", fixture);
-    char argv6[] = "--out-json";
-    char argv7[256];
-    snprintf(argv7, sizeof(argv7), "%s", json_path);
-    char *argv[] = {argv0, argv1, argv2, argv3, argv4, argv5, argv6, argv7};
-    HU_ASSERT_EQ(hu_eval_cli_competitive(&alloc, 8, argv), HU_OK);
+    char a0[] = "--kind";
+    char a1[] = "mt-bench";
+    char a2[] = "--canned";
+    char a3[64]; snprintf(a3, sizeof(a3), "%s", canned);
+    char a4[] = "--prompts";
+    char a5[] = "hello,world";
+    char a6[] = "--out";
+    char a7[64]; snprintf(a7, sizeof(a7), "%s", out);
+    char *argv[] = {a0, a1, a2, a3, a4, a5, a6, a7};
 
-    char buf[8192];
-    FILE *f = fopen(json_path, "r");
-    HU_ASSERT_NOT_NULL(f);
-    size_t rd = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[rd] = '\0';
-    HU_ASSERT_TRUE(strstr(buf, "ci_lower") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "ci_upper") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "win_condition_met") != NULL);
-    unlink(fixture);
-    unlink(json_path);
-}
+    HU_ASSERT_EQ(hu_eval_cli_leaderboard(&alloc, 8, argv), HU_OK);
 
-static void test_competitive_renders_unavailable_columns_with_reason(void) {
-    HU_SKIP_IF(!hu_build_has_competitive_eval(), "RL_FULL off");
-    hu_allocator_t alloc = hu_system_allocator();
-    char fixture[256], json_path[256];
-    snprintf(fixture, sizeof(fixture), "/tmp/hu-comp-reason-fixture-%d.txt", (int)getpid());
-    snprintf(json_path, sizeof(json_path), "/tmp/hu-comp-reason-scorecard-%d.json", (int)getpid());
-    write_prompt_fixture(fixture);
-
-    char argv0[] = "human";
-    char argv1[] = "competitive";
-    char argv2[] = "--persona";
-    char argv3[] = "default";
-    char argv4[] = "--prompts";
-    char argv5[256];
-    snprintf(argv5, sizeof(argv5), "%s", fixture);
-    char argv6[] = "--out-json";
-    char argv7[256];
-    snprintf(argv7, sizeof(argv7), "%s", json_path);
-    char *argv[] = {argv0, argv1, argv2, argv3, argv4, argv5, argv6, argv7};
-    HU_ASSERT_EQ(hu_eval_cli_competitive(&alloc, 8, argv), HU_OK);
-
-    char buf[8192];
-    FILE *f = fopen(json_path, "r");
-    HU_ASSERT_NOT_NULL(f);
-    size_t rd = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[rd] = '\0';
-    HU_ASSERT_TRUE(strstr(buf, "unavailable_reason") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "\"available\":false") != NULL);
-    unlink(fixture);
-    unlink(json_path);
-}
-
-static void test_competitive_literal_spec9_form_works(void) {
-    HU_SKIP_IF(!hu_build_has_competitive_eval(), "RL_FULL off");
-    hu_allocator_t alloc = hu_system_allocator();
-    char fixture[256], json_path[256], adapter[256];
-    snprintf(fixture, sizeof(fixture), "/tmp/hu-comp-spec9-fixture-%d.txt", (int)getpid());
-    snprintf(json_path, sizeof(json_path), "/tmp/hu-comp-spec9-scorecard-%d.json", (int)getpid());
-    snprintf(adapter, sizeof(adapter), "/tmp/test.adapter-%d", (int)getpid());
-    write_prompt_fixture(fixture);
-    FILE *af = fopen(adapter, "w");
-    HU_ASSERT_NOT_NULL(af);
-    fputs("stub\n", af);
-    fclose(af);
-
-    char argv0[] = "human";
-    char argv1[] = "competitive";
-    char argv2[] = "--persona";
-    char argv3[] = "seth";
-    char argv4[] = "--adapter";
-    char argv5[256];
-    snprintf(argv5, sizeof(argv5), "%s", adapter);
-    char argv6[] = "--prompts";
-    char argv7[256];
-    snprintf(argv7, sizeof(argv7), "%s", fixture);
-    char argv8[] = "--out-json";
-    char argv9[256];
-    snprintf(argv9, sizeof(argv9), "%s", json_path);
-    char *argv[] = {argv0, argv1, argv2, argv3, argv4, argv5, argv6, argv7, argv8, argv9};
-    HU_ASSERT_EQ(hu_eval_cli_competitive(&alloc, 10, argv), HU_OK);
-    HU_ASSERT_TRUE(access(json_path, F_OK) == 0);
-
-    unlink(fixture);
-    unlink(json_path);
-    unlink(adapter);
-}
-
-static void test_gate_emits_verdict_json_from_csv_inputs(void) {
-    HU_SKIP_IF(!hu_build_has_competitive_eval(), "RL_FULL off");
-    hu_allocator_t alloc = hu_system_allocator();
-    char out[256];
-    snprintf(out, sizeof(out), "/tmp/hu-gate-verdict-%d.json", (int)getpid());
-    char scores[] =
-        "0.7,0.75,0.8,0.82,0.83,0.84,0.85,0.86,0.87,0.88,0.89,0.90";
-    char argv0[] = "human";
-    char argv1[] = "gate";
-    char argv2[] = "--persona-scores";
-    char argv3[] = "--out";
-    char *argv[] = {argv0, argv1, argv2, scores, argv3, out};
-    HU_ASSERT_EQ(hu_eval_cli_gate(&alloc, 6, argv), HU_OK);
     char buf[1024];
-    FILE *f = fopen(out, "r");
-    HU_ASSERT_NOT_NULL(f);
-    size_t rd = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[rd] = '\0';
+    size_t r = read_file_into(out, buf, sizeof(buf));
+    HU_ASSERT_TRUE(r > 0);
+    HU_ASSERT_TRUE(strstr(buf, "mt_bench") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "hello") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "world") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "7.5") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "8.25") != NULL);
+}
+
+static void test_human_eval_leaderboard_default_kind_is_mt_bench(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
+    hu_allocator_t alloc = hu_system_allocator();
+    HU_ASSERT_EQ(hu_eval_cli_leaderboard(&alloc, 0, NULL), HU_OK);
+}
+
+static void test_human_eval_leaderboard_rejects_unknown_kind(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
+    hu_allocator_t alloc = hu_system_allocator();
+    char a0[] = "--kind";
+    char a1[] = "imaginary-bench";
+    char *argv[] = {a0, a1};
+    HU_ASSERT_EQ(hu_eval_cli_leaderboard(&alloc, 2, argv), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* --------------------- gate (real CIs) ----------------------------- */
+
+static void test_human_eval_gate_promotes_on_strong_persona_lift(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *out = "/tmp/cf1_gate_promote.out";
+    (void)remove(out);
+
+    /* Baseline 0.60, delta-min 0.05 -- candidate scores cluster ~0.75
+     * so the lower 95% CI clears 0.65 comfortably. */
+    char a0[] = "--persona-scores";
+    char a1[] = "0.74,0.76,0.75,0.77,0.73,0.75,0.78,0.74,0.76,0.75,"
+                "0.74,0.76,0.75,0.77,0.73,0.75,0.78,0.74,0.76,0.75";
+    char a2[] = "--persona-baseline"; char a3[] = "0.60";
+    char a4[] = "--persona-delta-min"; char a5[] = "0.05";
+    char a6[] = "--bootstrap-samples"; char a7[] = "200";
+    char a8[] = "--bootstrap-seed"; char a9[] = "42";
+    char a10[] = "--candidate-p95-ms"; char a11[] = "80";
+    char a12[] = "--latency-baseline-ms"; char a13[] = "100";
+    char a14[] = "--out";
+    char a15[64]; snprintf(a15, sizeof(a15), "%s", out);
+    char *argv[] = {a0, a1, a2, a3, a4, a5, a6, a7, a8, a9,
+                    a10, a11, a12, a13, a14, a15};
+
+    HU_ASSERT_EQ(hu_eval_cli_gate(&alloc, 16, argv), HU_OK);
+
+    char buf[1024];
+    size_t r = read_file_into(out, buf, sizeof(buf));
+    HU_ASSERT_TRUE(r > 0);
+    HU_ASSERT_TRUE(strstr(buf, "PROMOTE") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "persona_ci_lower") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "promote") != NULL);
-    unlink(out);
 }
 
-static void test_leaderboard_canned_run_emits_scores(void) {
-    HU_SKIP_IF(!hu_build_has_competitive_eval(), "RL_FULL off");
+static void test_human_eval_gate_rejects_on_weak_persona_lift(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
     hu_allocator_t alloc = hu_system_allocator();
-    char canned[256], out[256];
-    snprintf(canned, sizeof(canned), "/tmp/hu-lb-canned-%d.json", (int)getpid());
-    snprintf(out, sizeof(out), "/tmp/hu-lb-out-%d.json", (int)getpid());
-    FILE *f = fopen(canned, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fputs("{\"mt_bench\":{\"hello\":0.9,\"world\":0.8}}\n", f);
-    fclose(f);
+    const char *out = "/tmp/cf1_gate_reject.out";
+    (void)remove(out);
 
-    char argv0[] = "human";
-    char argv1[] = "leaderboard";
-    char argv2[] = "--kind";
-    char argv3[] = "mt-bench";
-    char argv4[] = "--canned";
-    char argv5[256];
-    snprintf(argv5, sizeof(argv5), "%s", canned);
-    char argv6[] = "--prompts";
-    char argv7[] = "hello,world";
-    char argv8[] = "--out";
-    char argv9[256];
-    snprintf(argv9, sizeof(argv9), "%s", out);
-    char *argv[] = {argv0, argv1, argv2, argv3, argv4, argv5, argv6, argv7, argv8, argv9};
-    HU_ASSERT_EQ(hu_eval_cli_leaderboard(&alloc, 10, argv), HU_OK);
+    /* Baseline 0.70, delta-min 0.05 -- candidate scores ~0.72 sit
+     * BELOW the 0.75 lower-bound floor, so the gate must REJECT and
+     * the reason string must name "persona". */
+    char a0[] = "--persona-scores";
+    char a1[] = "0.71,0.72,0.73,0.72,0.71,0.72,0.73,0.72,0.71,0.72,"
+                "0.71,0.72,0.73,0.72,0.71,0.72,0.73,0.72,0.71,0.72";
+    char a2[] = "--persona-baseline"; char a3[] = "0.70";
+    char a4[] = "--persona-delta-min"; char a5[] = "0.05";
+    char a6[] = "--bootstrap-samples"; char a7[] = "200";
+    char a8[] = "--bootstrap-seed"; char a9[] = "42";
+    char a10[] = "--out";
+    char a11[64]; snprintf(a11, sizeof(a11), "%s", out);
+    char *argv[] = {a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11};
 
-    char buf[512];
-    f = fopen(out, "r");
-    HU_ASSERT_NOT_NULL(f);
-    size_t rd = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-    buf[rd] = '\0';
-    HU_ASSERT_TRUE(strstr(buf, "\"kind\"") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "\"scores\"") != NULL);
-    HU_ASSERT_TRUE(strstr(buf, "\"mean\"") != NULL);
-    unlink(canned);
-    unlink(out);
+    HU_ASSERT_EQ(hu_eval_cli_gate(&alloc, 12, argv), HU_OK);
+
+    char buf[1024];
+    size_t r = read_file_into(out, buf, sizeof(buf));
+    HU_ASSERT_TRUE(r > 0);
+    HU_ASSERT_TRUE(strstr(buf, "REJECT") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "persona") != NULL);
 }
 
-static void test_unknown_flag_returns_invalid_argument(void) {
-    HU_SKIP_IF(!hu_build_has_competitive_eval(), "RL_FULL off");
+static void test_human_eval_gate_rejects_missing_scores(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
     hu_allocator_t alloc = hu_system_allocator();
-    char argv0[] = "human";
-    char argv1[] = "gate";
-    char argv2[] = "--not-a-real-flag";
-    char *argv[] = {argv0, argv1, argv2};
-    HU_ASSERT_EQ(hu_eval_cli_gate(&alloc, 3, argv), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_eval_cli_gate(&alloc, 0, NULL), HU_ERR_INVALID_ARGUMENT);
 }
 
-static void test_missing_required_flag_returns_invalid_argument(void) {
-    HU_SKIP_IF(!hu_build_has_competitive_eval(), "RL_FULL off");
+static void test_human_eval_gate_rejects_too_few_scores(void) {
+    HU_SKIP_IF(!hu_build_has_competitive_eval(),
+               "HU_ENABLE_RL_FULL=OFF in this build");
     hu_allocator_t alloc = hu_system_allocator();
-    char argv0[] = "human";
-    char argv1[] = "gate";
-    char *argv[] = {argv0, argv1};
+    /* Gate requires n >= 10. Pass 5; expect rejection propagated as
+     * INVALID_ARGUMENT (not silently downgraded). */
+    char a0[] = "--persona-scores"; char a1[] = "0.7,0.7,0.7,0.7,0.7";
+    char *argv[] = {a0, a1};
     HU_ASSERT_EQ(hu_eval_cli_gate(&alloc, 2, argv), HU_ERR_INVALID_ARGUMENT);
 }
 
 void run_cli_eval_phase5_tests(void) {
     HU_TEST_SUITE("cli-eval-phase5");
     HU_RUN_TEST(test_human_eval_competitive_help_lists_phase5_subcommands);
-    HU_RUN_TEST(test_competitive_emits_scorecard_with_bootstrap_cis);
-    HU_RUN_TEST(test_competitive_renders_unavailable_columns_with_reason);
-    HU_RUN_TEST(test_competitive_literal_spec9_form_works);
-    HU_RUN_TEST(test_gate_emits_verdict_json_from_csv_inputs);
-    HU_RUN_TEST(test_leaderboard_canned_run_emits_scores);
-    HU_RUN_TEST(test_unknown_flag_returns_invalid_argument);
-    HU_RUN_TEST(test_missing_required_flag_returns_invalid_argument);
+    HU_RUN_TEST(test_human_eval_leaderboard_help_exits_zero);
+    HU_RUN_TEST(test_human_eval_gate_help_exits_zero);
+    HU_RUN_TEST(test_human_eval_competitive_writes_real_scorecard_markdown);
+    HU_RUN_TEST(test_human_eval_competitive_rejects_unknown_flag);
+    HU_RUN_TEST(test_human_eval_competitive_skips_leading_subcommand_name);
+    HU_RUN_TEST(test_human_eval_leaderboard_runs_canned_scores);
+    HU_RUN_TEST(test_human_eval_leaderboard_default_kind_is_mt_bench);
+    HU_RUN_TEST(test_human_eval_leaderboard_rejects_unknown_kind);
+    HU_RUN_TEST(test_human_eval_gate_promotes_on_strong_persona_lift);
+    HU_RUN_TEST(test_human_eval_gate_rejects_on_weak_persona_lift);
+    HU_RUN_TEST(test_human_eval_gate_rejects_missing_scores);
+    HU_RUN_TEST(test_human_eval_gate_rejects_too_few_scores);
 }

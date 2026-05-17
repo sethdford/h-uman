@@ -29,6 +29,7 @@
 #include "human/core/error.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,6 +80,20 @@ typedef struct {
      *     on why they"). */
     bool detected_length_anomaly;
     bool detected_director_echo;
+    /* Sprint 35 — persona PII echo. Set when `ctx->persona_name` is
+     * non-NULL and the response contains the persona name in a
+     * third-person profile construct (e.g. `"<Name> is a"`,
+     * `"<Name>'s job"`, `"<Name> lives"`, `"<Name> works"`). Catches
+     * the 2026-05-11 leak class where the model echoed the operator's
+     * loaded persona name back to the recipient. */
+    bool detected_persona_pii_echo;
+    /* Sprint 36 — persona identity / core-anchor echo. Set when
+     * `ctx->persona_identity` is non-NULL (≥ 25 bytes) and a 25-byte
+     * verbatim substring of it appears in the response (case-
+     * insensitively). Catches first-person identity leaks like
+     * `"i'm a Chief Architect at Pure Health Solutions"` that G7
+     * cannot catch (no name in third-person construct). */
+    bool detected_persona_identity_echo;
     /* If rejected, the longest run length that triggered rejection. */
     size_t max_repetition_run;
     /* Number of bytes removed by sanitization (0 if rejected outright). */
@@ -92,9 +107,14 @@ typedef struct {
 typedef struct {
     /* Rolling average reply length from the recipient over the last
      * N messages. The guard rejects if `response_len >
-     * recent_avg_len * HU_GUARD_LENGTH_ANOMALY_MULT` (default 8x).
-     * 0 disables the check (e.g. no chat history yet). */
+     * recent_avg_len * length_anomaly_mult` (default 8x; compact
+     * channels 6x). 0 disables the check (e.g. no chat history yet). */
     size_t recent_avg_len;
+
+    /* Sprint 39 — per-channel G5 multiplier. 0 = use default (8).
+     * Compact channels (imessage, cli, sms) should pass 6 from
+     * `hu_guard_length_anomaly_mult_for_channel`. */
+    unsigned length_anomaly_mult;
 
     /* The director's / scene-direction text for this turn (the
      * upstream prompt fragment that drove tone/style decisions).
@@ -103,7 +123,76 @@ typedef struct {
      * or director_len < 30 disables the check. */
     const char *director_text;
     size_t director_len;
+
+    /* Sprint 37 — past-turn director history (most-recent-first). G6
+     * iterates these after the current `director_text` to catch model
+     * output that quotes a *previous* turn's director rather than the
+     * current one. Same 30-byte minimum match. NULL or
+     * director_history_count == 0 disables the cross-turn check. */
+    const char *const *director_history;
+    const size_t *director_history_lens;
+    size_t director_history_count;
+
+    /* Sprint 35 — loaded persona's name (e.g. `"Seth"`). The guard
+     * rejects if this name appears in a third-person profile
+     * construct (e.g. `"<Name> is a"`, `"<Name>'s job"`,
+     * `"<Name> lives"`). NULL or persona_name_len < 2 disables
+     * the check. Word-boundary aware — `"Bethseth"` does NOT match
+     * `"Seth"`. */
+    const char *persona_name;
+    size_t persona_name_len;
+
+    /* Sprint 36 — loaded persona's `identity` (or `core_anchor` as
+     * fallback). Free-form biographical string, e.g. `"51-year-old
+     * technical professional, lives alone with a cat"`. The guard
+     * rejects if any contiguous 25-byte substring of this string
+     * appears verbatim (case-insensitively) in the response.
+     * Catches first-person identity leaks where the model quotes
+     * persona context back to the recipient without using the
+     * name. NULL or persona_identity_len < 25 disables the check. */
+    const char *persona_identity;
+    size_t persona_identity_len;
+
+    /* Sprint 38 — loaded persona's `biography` (long-form backstory).
+     * Same 25-byte verbatim substring rule as `persona_identity`.
+     * Checked independently so a leak quoting only biography (no
+     * identity/core_anchor overlap) still trips G8. NULL or
+     * persona_biography_len < 25 disables this source. */
+    const char *persona_biography;
+    size_t persona_biography_len;
 } hu_guard_context_t;
+
+/* Sprint 38 — cumulative REJECT counts by detector (process-wide).
+ * Incremented atomically when `hu_response_guard_check_ex` returns
+ * HU_GUARD_REJECT. Use `hu_guard_reject_stats_reset()` in tests
+ * that assert on absolute counts. */
+typedef struct {
+    uint64_t semantic_leak;
+    uint64_t length_anomaly;
+    uint64_t director_echo;
+    uint64_t persona_pii_echo;
+    uint64_t persona_identity_echo;
+} hu_guard_reject_stats_t;
+
+void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out);
+void hu_guard_reject_stats_reset(void);
+
+/* Default G5 multiplier (8×). Compact messaging channels use 6×. */
+#define HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT 8u
+#define HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT 6u
+
+/* Channel-aware G5 threshold. imessage / cli / sms → 6×; else 8×. */
+unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t channel_len);
+
+/* Sprint 40 — selection-step audit helpers (observability only).
+ * Log when A/B or multi-candidate paths ship a response that would trip
+ * G1/G2 so post-mortems can trace *why* a numbered candidate list leaked. */
+bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len);
+bool hu_guard_audit_self_talk_leak(const char *s, size_t len);
+void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
+                                  size_t contact_key_len, size_t candidate_count,
+                                  size_t best_idx, int best_quality, size_t response_len,
+                                  const char *response, size_t response_text_len);
 
 /* Run the guard over a response.
  *

@@ -14,6 +14,10 @@
 #   scripts/audit-imessage-leaks.sh [--since "YYYY-MM-DD"]
 #                                   [--contacts "+1...,+1..."]
 #                                   [--out-dir DIR]
+#                                   [--self-test]
+#
+#   --self-test  Run signature checks on a synthetic leak blob (no chat.db).
+#                Used by CI on macOS to verify the script without Messages data.
 #
 # Defaults:
 #   --since      2026-05-10  (covers all known incidents)
@@ -29,6 +33,41 @@
 
 set -euo pipefail
 
+# ── Self-test (no sqlite / chat.db) ─────────────────────────────
+audit_scan_text() {
+    local txt="$1"
+    local g2 g3 g4 g1
+    g2=$(printf '%s\n' "$txt" | grep -c -i -E \
+        'the prompt says|the prompt asked|wait, the prompt|i should still maintain|per scene direction|the user is bombarding' \
+        || true)
+    g3=$(printf '%s\n' "$txt" | grep -c -i -E \
+        "is a (technical professional|software engineer|chief architect|data scientist|product manager|senior engineer|software developer|machine learning)|lives alone with|romantic interest|he's talking to |she's talking to |they're talking to " \
+        || true)
+    g4=$(printf '%s\n' "$txt" | grep -c -E \
+        '^[[:space:]]*(Persona:|Scene Direction:|User: "|Rules: All lowercase|Constraints: All lowercase|System prompt:)' \
+        || true)
+    g1=$(printf '%s\n' "$txt" | awk '
+        /^[[:space:]]*[0-9]+\.[ ]/ { if (length($0) > 30) n++ }
+        END { print n+0 }')
+    if [[ "$g1" -ge 3 ]] || [[ "$g2" -gt 0 ]] || [[ "$g3" -ge 2 ]] || [[ "$g4" -gt 0 ]]; then
+        return 0
+    fi
+    return 1
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+    synthetic=$'1. King Carpet and Flooring is a local business.\n'
+    synthetic+=$'2. The prompt says Persona: test user.\n'
+    synthetic+=$'3. Seth is a technical professional who lives alone with a cat.\n'
+    synthetic+=$'Persona: Seth\nScene Direction: be brief\n'
+    if audit_scan_text "$synthetic"; then
+        echo "audit-imessage-leaks.sh: --self-test OK (synthetic leak detected)"
+        exit 0
+    fi
+    echo "audit-imessage-leaks.sh: --self-test FAILED (synthetic leak not detected)" >&2
+    exit 2
+fi
+
 # ── Configuration ──────────────────────────────────────────────
 SINCE="2026-05-10"
 CONTACTS=""
@@ -39,8 +78,11 @@ while [[ $# -gt 0 ]]; do
         --since)    SINCE="$2"; shift 2 ;;
         --contacts) CONTACTS="$2"; shift 2 ;;
         --out-dir)  OUT_DIR="$2"; shift 2 ;;
+        --self-test)
+            echo "audit-imessage-leaks.sh: --self-test must be the only argument" >&2
+            exit 2 ;;
         --help|-h)
-            sed -n '2,28p' "$0"; exit 0 ;;
+            sed -n '2,30p' "$0"; exit 0 ;;
         *)
             echo "audit-imessage-leaks.sh: unknown arg: $1" >&2
             echo "  use --help for usage" >&2
@@ -140,20 +182,7 @@ for f in "$DUMP_DIR"/msg-*.bin; do
     [[ -f "$f" ]] || continue
     txt="$(strings -n 4 "$f")"
 
-    g2=$(printf '%s\n' "$txt" | grep -c -i -E \
-        'the prompt says|the prompt asked|wait, the prompt|i should still maintain|per scene direction|the user is bombarding' \
-        || true)
-    g3=$(printf '%s\n' "$txt" | grep -c -i -E \
-        "is a (technical professional|software engineer|chief architect|data scientist|product manager|senior engineer|software developer|machine learning)|lives alone with|romantic interest|he's talking to |she's talking to |they're talking to " \
-        || true)
-    g4=$(printf '%s\n' "$txt" | grep -c -E \
-        '^[[:space:]]*(Persona:|Scene Direction:|User: "|Rules: All lowercase|Constraints: All lowercase|System prompt:)' \
-        || true)
-    g1=$(printf '%s\n' "$txt" | awk '
-        /^[[:space:]]*[0-9]+\.[ ]/ { if (length($0) > 30) n++ }
-        END { print n+0 }')
-
-    if [[ "$g1" -ge 3 ]] || [[ "$g2" -gt 0 ]] || [[ "$g3" -ge 2 ]] || [[ "$g4" -gt 0 ]]; then
+    if audit_scan_text "$txt"; then
         rowid="$(basename "$f" .bin | sed 's/msg-//')"
         meta="$(sqlite3 "$CHAT_DB" "
             SELECT datetime(date/1000000000+978307200,'unixepoch','localtime')
@@ -161,8 +190,8 @@ for f in "$DUMP_DIR"/msg-*.bin; do
             FROM message WHERE ROWID=${rowid};")"
         size="$(stat -f '%z' "$f" 2>/dev/null || stat -c '%s' "$f")"
 
-        printf '%s rowid=%s size=%d G1long=%d G2=%d G3=%d G4=%d\n' \
-               "$meta" "$rowid" "$size" "$g1" "$g2" "$g3" "$g4" \
+        printf '%s rowid=%s size=%d leak_signature=hit\n' \
+               "$meta" "$rowid" "$size" \
                | tee -a "$REPORT"
         hits_total=$((hits_total + 1))
     fi

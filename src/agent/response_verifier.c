@@ -1,11 +1,43 @@
 #include "human/agent/response_verifier.h"
 #include "human/agent/self_rag.h"
+#include "human/agent/world_model.h" /* sprint-2c Story A — wm->negatives */
+#include "human/core/log.h"
 
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* sprint-2c Story A — refusal & hedge templates per negative source.
+ * Short enough to fit `refusal_text[256]` and `suggested_hedge[160]`
+ * even with the negative's `reason` appended. */
+#define HU_NEG_REFUSAL_HARD   "I can't help with that — you've asked me not to discuss it."
+#define HU_NEG_REFUSAL_POLICY "I can't help with that — it would violate a safety policy."
+#define HU_NEG_HEDGE_SOFT     "I'm not confident enough to commit to that — let me double-check first."
+#define HU_NEG_HEDGE_CONFIRM  "I think we agreed not to bring this up — is that still right?"
+
+/* sprint-2c Story A — matcher constants.
+ *
+ * Tokenize the NEGATIVE (not the claim) into ≥5-char non-stopword tokens.
+ * Hit when `hits ≥ 0.3 × negative_tokens` where `hits` is the number of
+ * negative tokens that appear as substrings of the lowercased claim.
+ *
+ * Why these numbers:
+ *   - ≥5 chars filters generic 4-char verbs ("give", "card", "deal")
+ *     while keeping topic words ("merger", "advice", "credit", "therapy",
+ *     "medical", "close", "timing").
+ *   - 0.3 catches the 1-in-3 case so a single topic-keyword tripwire
+ *     fires ("merger" in "The merger talks") while a benign claim sharing
+ *     zero topic words stays below threshold.
+ *
+ * Known false-positive class: short [policy] negatives like "no medical
+ * advice" fire on benign claims sharing one topic word ("legal advice").
+ * Conservative for safety policy. Tunable later via telemetry.
+ *
+ * Documented in `docs/plans/2026-05-12-wire-w11-negative-source-tags.md`. */
+#define HU_NEG_MATCH_THRESHOLD 0.3f
+#define HU_NEG_MIN_TOKEN_LEN   5
 
 hu_verifier_config_t hu_verifier_default_config(void) {
     hu_verifier_config_t c = {0};
@@ -293,9 +325,164 @@ static float verify_claim_against_facade(hu_memory_facade_t *memory, hu_allocato
 
 #endif
 
+/* sprint-2c Story A — tokenize `text` into up to `cap` lowercase
+ * ≥HU_NEG_MIN_TOKEN_LEN-char, non-stopword tokens. Returns the count
+ * written into `out`. Stopword list is intentionally minimal — the same
+ * set the W4 facade-tokenizer already uses. */
+static size_t tokenize_negative(const char *text, size_t len, char out[][32], size_t cap) {
+    static const char *const stop[] = {"is",   "was",   "were", "will", "the",  "and",
+                                        "this", "that",  "with", "have", "has",  "had",
+                                        "for",  "from",  "your", "you",  "they", "them",
+                                        "i'm",  "i've",  "i'll", "i'd",  NULL};
+    size_t n = 0;
+    size_t i = 0;
+    while (i < len && n < cap) {
+        while (i < len && !isalpha((unsigned char)text[i]))
+            i++;
+        size_t s = i;
+        while (i < len && (isalpha((unsigned char)text[i]) || text[i] == '\''))
+            i++;
+        size_t l = i - s;
+        if (l < HU_NEG_MIN_TOKEN_LEN || l >= 32)
+            continue;
+        char low[32];
+        for (size_t k = 0; k < l; k++)
+            low[k] = (char)tolower((unsigned char)text[s + k]);
+        low[l] = '\0';
+        bool is_stop = false;
+        for (size_t k = 0; stop[k]; k++)
+            if (strcmp(low, stop[k]) == 0) {
+                is_stop = true;
+                break;
+            }
+        if (!is_stop) {
+            memcpy(out[n], low, l + 1);
+            n++;
+        }
+    }
+    return n;
+}
+
+/* sprint-2c Story A — count how many `negative_tokens` appear as substrings
+ * of the lowercased `claim`. Returns hits/nt in [0, 1]. */
+static float negative_match_score(char negative_tokens[][32], size_t nt, const char *claim) {
+    if (nt == 0 || !claim || !*claim)
+        return 0.0f;
+    /* Lowercase the claim into a stack buffer (claims are bounded by
+     * `hu_verifier_claim_t::text[256]` so 256 is the worst case). */
+    char low[256];
+    size_t clen = strlen(claim);
+    if (clen >= sizeof(low))
+        clen = sizeof(low) - 1;
+    for (size_t k = 0; k < clen; k++)
+        low[k] = (char)tolower((unsigned char)claim[k]);
+    low[clen] = '\0';
+    size_t hits = 0;
+    for (size_t t = 0; t < nt; t++)
+        if (strstr(low, negative_tokens[t]))
+            hits++;
+    return (float)hits / (float)nt;
+}
+
+/* sprint-2c Story A — outcome implied by a negative-source tag. */
+static hu_verifier_outcome_t outcome_for_source(hu_negative_source_t s) {
+    switch (s) {
+    case HU_NEGATIVE_SOURCE_USER_EXPLICIT:
+    case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:
+        return HU_VERIFY_RESULT_ABSTAIN;
+    case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN:
+    case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:
+        return HU_VERIFY_RESULT_HEDGED;
+    }
+    /* Unknown source → conservative ABSTAIN. */
+    return HU_VERIFY_RESULT_ABSTAIN;
+}
+
+/* sprint-2c Story A — strictness lattice. */
+static hu_verifier_outcome_t outcome_stricter(hu_verifier_outcome_t a, hu_verifier_outcome_t b) {
+    if (a == HU_VERIFY_RESULT_ABSTAIN || b == HU_VERIFY_RESULT_ABSTAIN)
+        return HU_VERIFY_RESULT_ABSTAIN;
+    if (a == HU_VERIFY_RESULT_HEDGED || b == HU_VERIFY_RESULT_HEDGED)
+        return HU_VERIFY_RESULT_HEDGED;
+    return HU_VERIFY_RESULT_SUPPORTED;
+}
+
+/* sprint-2c Story A — render the refusal or hedge text for a matched
+ * negative into `out`. `cap` is the buffer capacity. Always
+ * NUL-terminates. When the negative carries a non-empty `reason`, the
+ * HARD refusal appends " — you said: '<reason>'", width-bound to fit. */
+static void render_negative_text(const hu_negative_memory_t *nm, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return;
+    const char *base = "";
+    switch (nm->source) {
+    case HU_NEGATIVE_SOURCE_USER_EXPLICIT:    base = HU_NEG_REFUSAL_HARD;   break;
+    case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:    base = HU_NEG_REFUSAL_POLICY; break;
+    case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN: base = HU_NEG_HEDGE_SOFT;     break;
+    case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:     base = HU_NEG_HEDGE_CONFIRM;  break;
+    }
+    if (nm->reason[0]) {
+        /* Width-bound the reason so the printed string can never exceed cap. */
+        int reason_room = (int)cap - (int)strlen(base) - (int)sizeof(" — you said: ''") - 4;
+        if (reason_room < 8)
+            reason_room = 8;
+        snprintf(out, cap, "%s — you said: '%.*s'", base, reason_room, nm->reason);
+    } else {
+        snprintf(out, cap, "%s", base);
+    }
+}
+
+hu_verifier_outcome_t hu_negatives_scan_claim(const struct hu_world_model *wm,
+                                              const char *claim,
+                                              char *out_refusal, size_t refusal_cap,
+                                              char *out_hedge, size_t hedge_cap,
+                                              bool *out_policy_hit) {
+    if (!wm || wm->negatives_count == 0 || !claim || !*claim)
+        return HU_VERIFY_RESULT_SUPPORTED;
+
+    hu_verifier_outcome_t worst = HU_VERIFY_RESULT_SUPPORTED;
+    /* First match per strictness tier writes the rendered text; later
+     * matches at the same tier are silent (deterministic, insertion-order
+     * stable). */
+    for (size_t i = 0; i < wm->negatives_count; i++) {
+        const hu_negative_memory_t *nm = &wm->negatives[i];
+        char ntoks[16][32] = {{0}};
+        size_t nt = tokenize_negative(nm->text, strlen(nm->text), ntoks, 16);
+        if (nt == 0)
+            continue;
+        float score = negative_match_score(ntoks, nt, claim);
+        if (score < HU_NEG_MATCH_THRESHOLD)
+            continue;
+        hu_verifier_outcome_t o = outcome_for_source(nm->source);
+        hu_verifier_outcome_t merged = outcome_stricter(worst, o);
+        if (merged != worst) {
+            if (o == HU_VERIFY_RESULT_ABSTAIN && out_refusal)
+                render_negative_text(nm, out_refusal, refusal_cap);
+            if (o == HU_VERIFY_RESULT_HEDGED && out_hedge)
+                render_negative_text(nm, out_hedge, hedge_cap);
+            if (out_policy_hit && nm->source == HU_NEGATIVE_SOURCE_SYSTEM_POLICY)
+                *out_policy_hit = true;
+            worst = merged;
+            if (worst == HU_VERIFY_RESULT_ABSTAIN)
+                break; /* Strictest possible — short-circuit. */
+        }
+    }
+    return worst;
+}
+
 hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory, const char *contact_id,
                               size_t contact_id_len, const char *draft, size_t draft_len,
                               const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report) {
+    return hu_response_verify_against_world_model(alloc, memory, /*wm=*/NULL, contact_id,
+                                                  contact_id_len, draft, draft_len, cfg, out_report);
+}
+
+hu_error_t hu_response_verify_against_world_model(
+    hu_allocator_t *alloc, hu_memory_facade_t *memory,
+    const struct hu_world_model *wm,
+    const char *contact_id, size_t contact_id_len,
+    const char *draft, size_t draft_len,
+    const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report) {
     if (!alloc || !draft || !cfg || !out_report)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out_report, 0, sizeof(*out_report));
@@ -310,8 +497,76 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
     size_t max = cfg->max_claims > 0 && cfg->max_claims < 16 ? cfg->max_claims : 16;
     size_t n = extract_claims(draft, draft_len, out_report->claims, max);
     out_report->claims_extracted = n;
-    if (n == 0)
+    if (n == 0) {
+        /* sprint-2c Story A — questions and other non-propositional drafts
+         * yield zero claims, but they can still be policy violations
+         * (e.g. "Have you been to your therapy sessions?" when therapy
+         * is on the negative list). Run a single whole-draft negative
+         * pass so [hard]/[policy] still ABSTAIN and [soft]/[confirm]
+         * still HEDGE under SOFT mode. */
+        if (!wm)
+            return HU_OK;
+        char neg_refusal0[256] = {0};
+        char neg_hedge0[160] = {0};
+        bool policy_hit0 = false;
+        hu_verifier_outcome_t o = hu_negatives_scan_claim(
+            wm, draft, neg_refusal0, sizeof(neg_refusal0),
+            neg_hedge0, sizeof(neg_hedge0), &policy_hit0);
+        if (o == HU_VERIFY_RESULT_ABSTAIN) {
+            out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
+            snprintf(out_report->refusal_text, sizeof(out_report->refusal_text), "%s",
+                     neg_refusal0);
+            if (policy_hit0)
+                hu_log_warn("response_verifier", NULL,
+                            "negative-memory [policy] hit forced ABSTAIN for contact=%.*s",
+                            (int)(contact_id_len > 64 ? 64 : contact_id_len),
+                            contact_id ? contact_id : "");
+        } else if (o == HU_VERIFY_RESULT_HEDGED) {
+            out_report->outcome = HU_VERIFY_RESULT_HEDGED;
+            if (cfg->mode == HU_VERIFY_SOFT) {
+                snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
+                         "%s %.*s.", neg_hedge0, (int)draft_len, draft);
+                out_report->draft_modified = true;
+            }
+        }
         return HU_OK;
+    }
+
+    /* sprint-2c Story A — scan extracted claims against wm->negatives.
+     * Runs BEFORE the facade pass so a [hard] / [policy] hit forces
+     * ABSTAIN regardless of supporting evidence (the negative says
+     * "don't say this" — facade verdicts are irrelevant). [soft] /
+     * [confirm] hits HEDGE the draft below. */
+    hu_verifier_outcome_t neg_outcome = HU_VERIFY_RESULT_SUPPORTED;
+    char neg_refusal[256] = {0};
+    char neg_hedge[160] = {0};
+    bool policy_hit = false;
+    if (wm) {
+        for (size_t i = 0; i < n; i++) {
+            hu_verifier_outcome_t o = hu_negatives_scan_claim(
+                wm, out_report->claims[i].text,
+                neg_refusal, sizeof(neg_refusal),
+                neg_hedge, sizeof(neg_hedge),
+                &policy_hit);
+            neg_outcome = outcome_stricter(neg_outcome, o);
+            if (neg_outcome == HU_VERIFY_RESULT_ABSTAIN)
+                break;
+        }
+        if (neg_outcome == HU_VERIFY_RESULT_ABSTAIN) {
+            out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
+            snprintf(out_report->refusal_text, sizeof(out_report->refusal_text), "%s",
+                     neg_refusal);
+            out_report->claims_flagged = n;
+            /* [policy] hits get a best-effort audit-log warning so security
+             * tooling can grep for them. NULL observer = stdout fallback. */
+            if (policy_hit)
+                hu_log_warn("response_verifier", NULL,
+                            "negative-memory [policy] hit forced ABSTAIN for contact=%.*s",
+                            (int)(contact_id_len > 64 ? 64 : contact_id_len),
+                            contact_id ? contact_id : "");
+            return HU_OK;
+        }
+    }
 
 #ifdef HU_ENABLE_SQLITE
     if (!memory) {
@@ -323,6 +578,18 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
                      "I'm not certain — I don't have memory backing this:");
         }
         out_report->claims_flagged = n;
+        /* sprint-2c Story A — a [soft]/[confirm] negative-memory hit on the
+         * no-facade path still surfaces a hedge. The outcome reflects the
+         * negative rather than the generic "no graph available" path. */
+        if (neg_outcome == HU_VERIFY_RESULT_HEDGED) {
+            out_report->outcome = HU_VERIFY_RESULT_HEDGED;
+            if (cfg->mode == HU_VERIFY_SOFT) {
+                snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
+                         "%s %.*s.", neg_hedge, (int)draft_len, draft);
+                out_report->draft_modified = true;
+            }
+            return HU_OK;
+        }
         if (cfg->abstain_threshold > 0.0f) {
             out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
             hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE,
@@ -382,6 +649,20 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
         }
     }
 
+    /* sprint-2c Story A — a [soft]/[confirm] hit on the facade-supported
+     * path also surfaces a hedge: the negative wins over the facade's
+     * "looks supported" verdict because the negative is an explicit
+     * "don't say this", not a missing-evidence signal. */
+    if (neg_outcome == HU_VERIFY_RESULT_HEDGED) {
+        if (cfg->mode == HU_VERIFY_SOFT) {
+            snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
+                     "%s %.*s.", neg_hedge, (int)draft_len, draft);
+            out_report->draft_modified = true;
+        }
+        out_report->outcome = HU_VERIFY_RESULT_HEDGED;
+        return HU_OK;
+    }
+
     if (cfg->mode == HU_VERIFY_SOFT && any_modified) {
         snprintf(out_report->modified_draft, sizeof(out_report->modified_draft), "%s", rebuilt);
         out_report->draft_modified = true;
@@ -396,6 +677,17 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
     (void)alloc;
     (void)contact_id;
     (void)contact_id_len;
+    /* sprint-2c Story A — even without SQLite the negative-memory pass
+     * fires above and may have set the outcome already. Surface HEDGED
+     * for SOFT-mode callers in the no-SQLite build too. */
+    if (neg_outcome == HU_VERIFY_RESULT_HEDGED) {
+        out_report->outcome = HU_VERIFY_RESULT_HEDGED;
+        if (cfg->mode == HU_VERIFY_SOFT) {
+            snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
+                     "%s %.*s.", neg_hedge, (int)draft_len, draft);
+            out_report->draft_modified = true;
+        }
+    }
     return HU_OK;
 #endif
 }

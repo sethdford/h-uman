@@ -1544,6 +1544,85 @@ static void test_w9_self_model_recent_drift_from_latest_delta(void) {
     close_facade_(g, m);
 }
 
+static void test_w9_self_model_drift_history_ring(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-drift-h", 9,
+                                       1735690000000LL, &wm), HU_OK);
+
+    hu_persona_t persona;
+    hu_persona_overlay_t overlay;
+    build_minimal_persona_(&persona, &overlay);
+
+    hu_persona_delta_t deltas[3];
+    memset(deltas, 0, sizeof(deltas));
+    deltas[0].kind = HU_PERSONA_DELTA_TONE;
+    deltas[0].status = HU_DELTA_STATUS_APPLIED;
+    deltas[0].confidence = 0.8f;
+    snprintf(deltas[0].value, sizeof(deltas[0].value), "warmer");
+    deltas[1].kind = HU_PERSONA_DELTA_LENGTH;
+    deltas[1].status = HU_DELTA_STATUS_APPLIED;
+    deltas[1].confidence = 0.9f;
+    snprintf(deltas[1].value, sizeof(deltas[1].value), "shorter");
+    deltas[2].kind = HU_PERSONA_DELTA_FORMALITY;
+    deltas[2].status = HU_DELTA_STATUS_APPLIED;
+    deltas[2].confidence = 0.85f;
+    snprintf(deltas[2].value, sizeof(deltas[2].value), "casual");
+
+    hu_world_model_merge_persona(wm, &persona, "slack", 5, deltas, 3);
+
+    HU_ASSERT_EQ(wm->self_model.recent_drift_history_count, 3u);
+    HU_ASSERT_STR_EQ(wm->self_model.recent_drift_history[0], "TONE");
+    HU_ASSERT_STR_EQ(wm->self_model.recent_drift_history[1], "LENGTH");
+    HU_ASSERT_STR_EQ(wm->self_model.recent_drift_history[2], "FORMALITY");
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_self_model_merge_self_emotion(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-emo-self", 10,
+                                       1735690000000LL, &wm), HU_OK);
+    snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "playful");
+
+    hu_world_model_merge_self_emotion(wm);
+    HU_ASSERT_STR_EQ(wm->self_model.recent_emotional_register, "playful");
+
+    snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "neutral");
+    hu_world_model_merge_self_emotion(wm);
+    HU_ASSERT_EQ(wm->self_model.recent_emotional_register[0], '\0');
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
+static void test_w9_self_model_merge_self_recent_tools(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-tools-self", 12,
+                                       1735690000000LL, &wm), HU_OK);
+
+    const char *names[] = {"shell", "shell", "memory_query"};
+    hu_world_model_merge_self_recent_tools(wm, names, 3);
+    HU_ASSERT_EQ(wm->self_model.recent_tools_used_count, 2u);
+    HU_ASSERT_STR_EQ(wm->self_model.recent_tools_used[0], "shell");
+    HU_ASSERT_STR_EQ(wm->self_model.recent_tools_used[1], "memory_query");
+
+    hu_world_model_free(A(), wm);
+    close_facade_(g, m);
+}
+
 /* --- P5.6 / P6.2 — multimodal cells + W10 seams default-zero --- */
 
 static void test_w9_media_and_w10_seams_default_zero(void) {
@@ -1867,6 +1946,9 @@ void run_w9_world_model_tests(void) {
     /* P5.2 — self model populated by persona merge. */
     HU_RUN_TEST(test_w9_self_model_populated_from_persona);
     HU_RUN_TEST(test_w9_self_model_recent_drift_from_latest_delta);
+    HU_RUN_TEST(test_w9_self_model_drift_history_ring);
+    HU_RUN_TEST(test_w9_self_model_merge_self_emotion);
+    HU_RUN_TEST(test_w9_self_model_merge_self_recent_tools);
     /* P5.6 + P6.2 — multimodal cells + W10 seams default zero. */
     HU_RUN_TEST(test_w9_media_and_w10_seams_default_zero);
     /* P6.1 — goal-conditioned re-rank. */

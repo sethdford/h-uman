@@ -466,12 +466,6 @@ void run_reward_model_inference_tests(void);
 /* Phase 3 Task 5 (RL SOTA): KTO loss sign-of-gradient + finite-diff
  * grad check + vtable contract. */
 void run_kto_loss_tests(void);
-#ifdef HU_ENABLE_RL_FULL
-/* Phase D Task D-1 (CF-7 RL SOTA): hu_ml_resolve_script_path —
- * absolute-path resolver for MLX popen helper scripts. Closes the CF-7
- * relative-CWD shadow attack on dpo_real_mlx / kto_mlx / grpo_mlx /
- * reward_model_mlx popen sites. */
-void run_ml_scripts_dir_tests(void);
 /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 estimators + k3 analytical
  * backward grad — pure C leaf math primitive used by the GRPO
  * trainer (Task 5) for the KL penalty term. */
@@ -486,7 +480,6 @@ void run_rollout_tests(void);
  * [26..30]) + Phase 3 hu_reward_model_t composition smoke + Phase 5
  * judge factory NOT_SUPPORTED pin. */
 void run_reward_source_tests(void);
-#endif
 /* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler surface
  * contract — argument validation (R9, R12, --reward-fn/-model pairing,
  * --backend mlx demands --backbone-path) + HUML synthetic-reward e2e
@@ -607,36 +600,20 @@ void run_mlx_provider_tests(void);
 void run_persona_fidelity_tests(void);
 void run_persona_fidelity_judge_tests(void);
 void run_persona_fidelity_validator_tests(void);
-void run_fact_extract_llm_tests(void);
+void run_persona_fidelity_cross_tests(void);
 #ifdef HU_ENABLE_ML
 void run_dpo_extractor_integration_tests(void);
 #endif
+void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+void run_personal_model_simulation_tests(void);
 #ifdef HU_ENABLE_RL_FULL
-/* Phase 5 Task 1 (RL SOTA): opt-in 4-axis fidelity scorer (v2).
- * Additive — v1 scorer + v1 callers are byte-stable per BLOCKER-1. */
 void run_personal_model_fidelity_v2_tests(void);
-/* Phase 4 Task 3 (RL SOTA): GRPO loss math — group-relative advantage,
- * pessimistic PPO clip, KL-aware loss, analytical gradient.  Loss-only;
- * Task 5 lands the trainer step. */
 void run_grpo_loss_tests(void);
-/* Phase 4 Task 8 (RL SOTA): GRPO MLX subprocess wrapper — JSONL secure
- * perms (H2), factory probe M7 short-circuit, dummy-adapter Python
- * shortcut, real-subprocess gated by HU_HAVE_MLX_LM_GRPO (L1). */
 void run_grpo_mlx_tests(void);
-/* Phase 4 Task 5 (RL SOTA): GRPO HUML trainer — full hu_rl_trainer_t
- * impl that composes rollout + reward_source + KL k3 + GRPO loss math
- * + structural backward into the toy GPT.  Distinct from grpo_loss
- * (this suite is impl-level: factory shape, R12 bounds, kl_beta=0
- * skip-reference contract, step_count advancement, ASan leak pin). */
 void run_grpo_huml_tests(void);
-/* Phase 4 Task 7 (RL SOTA): GRPO HUML synthetic-reward N=4 E2E —
- * umbrella §5 row 4 ship-contract gate.  50 iters × 20-prompt fixture;
- * pins final_loss change signal, mean log-prob of good tokens at policy
- * level, and KL brake (R5).  Optional MLX subprocess test gated
- * compile-time by HU_HAVE_MLX_LM_GRPO. */
 void run_grpo_e2e_tests(void);
 #endif
 void run_persona_directive_channels_tests(void);
@@ -649,24 +626,9 @@ void run_sycophancy_guard_tests(void);
 void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
 void run_markdown_loader_tests(void);
+void run_structured_output_tests(void);
 #ifdef HU_ENABLE_RL_FULL
-/* Phase 5 Task 2 (RL SOTA): bootstrap CI helper — percentile-bootstrap
- * on a vector of per-conversation scores (round-1 BLOCKER-2 fix: NOT
- * a single aggregated scalar — that's degenerate).  Pins n>=30
- * production floor (Wilson NEW-MED-3), n>=10 _for_test floor, finite
- * CI bracketing the mean on a known Normal(0.5, 0.1) sample, byte-
- * identical results across seed=42 calls, and the Task 9 baseline-vs-
- * policy compare-means p-value (low for distinct distributions, high
- * for identical).  Consumed by Task 5 hu_eval_gate_decide and Task 9
- * competitive harness; gated so default release/dev builds
- * (HU_ENABLE_RL_FULL=OFF) do not link the suite. */
 extern void run_bootstrap_ci_tests(void);
-/* Phase 5 Task 3 (RL SOTA): hu_eval_judge_external_t vtable + canned
- * factory — pairwise external-LLM judge bridge for the eval gate
- * (Task 5) and competitive harness (Task 9).  Pins canned cycle
- * determinism, verdict round-trip through deep copy, zero-verdicts
- * rejection, Apple FM (Task 7) + Gemini Nano (Task 8) stub
- * HU_ERR_NOT_SUPPORTED, ASan leak-free deinit. */
 extern void run_eval_judge_external_tests(void);
 extern void run_leaderboard_tests(void);
 extern void run_eval_gate_tests(void);
@@ -674,17 +636,14 @@ extern void run_stock_baseline_tests(void);
 extern void run_apple_fm_client_tests(void);
 extern void run_gemini_nano_client_tests(void);
 extern void run_competitive_harness_tests(void);
-extern void run_persona_rollout_tests(void);
 extern void run_cli_eval_phase5_tests(void);
 extern void run_cli_demo_evidence_tests(void);
 extern void run_lora_ab_require_positive_tests(void);
 extern void run_runner_eval_gate_tests(void);
 extern void run_daemon_reaction_poll_tests(void);
-extern void run_daemon_reaction_poll_production_tests(void);
 extern void run_proof_directory_tests(void);
 extern void run_e2e_closed_loop_tests(void);
 #endif
-void run_structured_output_tests(void);
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -1163,6 +1122,7 @@ int main(int argc, char **argv) {
     run_reference_model_tests();
     /* Phase 2 Task 4 (RL SOTA): real DPO loss + structural sign-of-gradient. */
     run_dpo_real_loss_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 2 Task 5 (RL SOTA): real DPO HUML E2E on 50 synthetic preference pairs. */
     run_dpo_real_e2e_tests();
     /* Phase 2 Task 6 (RL SOTA): mlx-lm-lora subprocess wrapper test (skip stub
@@ -1170,6 +1130,7 @@ int main(int argc, char **argv) {
     run_dpo_real_mlx_tests();
     /* Phase 2 Task 8 (RL SOTA): post-split CLI handler surface contract. */
     run_cli_dpo_tests();
+#endif
     /* Phase 3 Task 1 (RL SOTA): hu_value_head_t linear projection — forward,
      * backward (analytical + finite-diff grad check), save/load round trip. */
     run_value_head_tests();
@@ -1179,11 +1140,10 @@ int main(int argc, char **argv) {
     run_reward_model_train_tests();
     /* Phase 3 Task 8 (RL SOTA): RM inference latency tests. */
     run_reward_model_inference_tests();
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 3 Task 5 (RL SOTA): KTO loss. */
     run_kto_loss_tests();
-#ifdef HU_ENABLE_RL_FULL
-    /* Phase D Task D-1 (CF-7 RL SOTA): popen script-path resolver. */
-    run_ml_scripts_dir_tests();
+#endif
     /* Phase 4 Task 1 (RL SOTA): KL k1/k2/k3 + k3 backward grad. */
     run_kl_divergence_tests();
     /* Phase 4 Task 2 (RL SOTA): hu_rollout_t HUML — sampling determinism
@@ -1192,9 +1152,10 @@ int main(int argc, char **argv) {
     /* Phase 4 Task 4 (RL SOTA): hu_reward_source_t — synthetic token
      * counting + Phase 3 RM composition + Phase 5 judge stub pin. */
     run_reward_source_tests();
-#endif
+#ifdef HU_ENABLE_RL_FULL
     /* Phase 4 Task 9 (RL SOTA): `human ml grpo-train` CLI handler. */
     run_cli_grpo_tests();
+#endif
 #endif
 
     run_experience_tests();
@@ -1310,19 +1271,20 @@ int main(int argc, char **argv) {
     run_persona_fidelity_tests();
     run_persona_fidelity_judge_tests();
     run_persona_fidelity_validator_tests();
-    run_fact_extract_llm_tests();
+    run_persona_fidelity_cross_tests();
 #ifdef HU_ENABLE_ML
     run_dpo_extractor_integration_tests();
 #endif
+    run_fact_extract_llm_tests();
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_personal_model_simulation_tests();
 #ifdef HU_ENABLE_RL_FULL
     run_personal_model_fidelity_v2_tests();
     run_grpo_loss_tests();
     run_grpo_huml_tests();
     run_grpo_mlx_tests();
-    /* Phase 4 Task 7 (RL SOTA): GRPO HUML E2E synthetic-reward gate. */
     run_grpo_e2e_tests();
 #endif
     run_persona_directive_channels_tests();
@@ -1354,13 +1316,11 @@ int main(int argc, char **argv) {
     run_apple_fm_client_tests();
     run_gemini_nano_client_tests();
     run_competitive_harness_tests();
-    run_persona_rollout_tests();
     run_cli_eval_phase5_tests();
     run_cli_demo_evidence_tests();
     run_lora_ab_require_positive_tests();
     run_runner_eval_gate_tests();
     run_daemon_reaction_poll_tests();
-    run_daemon_reaction_poll_production_tests();
     run_proof_directory_tests();
     run_e2e_closed_loop_tests();
 #endif

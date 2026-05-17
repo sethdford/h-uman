@@ -1,12 +1,11 @@
 /* ML CLI subcommands: train, experiment, prepare, status, dpo-train, lora-persona. */
 
 #include "human/ml/cli.h"
-#ifdef HU_ENABLE_RL_FULL
-#include "human/eval/eval_gate.h"
-#include "human/eval/persona_rollout.h"
-#endif
 #include "human/agent/scheduler_status_json.h"
 #include "human/config.h"
+#ifdef HU_ENABLE_RL_FULL
+#include "human/eval/eval_gate.h"
+#endif
 #include "human/ml/cli_dpo.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -807,33 +806,27 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         }
     }
 #ifdef HU_IS_TEST
-    /* M3 Bridge A Phase 1 — the `--export-jsonl` path is pure (loads the
-     * persona, writes a JSONL, exits). No subprocess, no provider, no
-     * HUML training loop. Allow it through under HU_IS_TEST so the CLI
-     * envelope is testable end-to-end. The training paths below (huml,
-     * MLX subprocess) still short-circuit. */
-    if (!export_jsonl_path || !export_jsonl_path[0]) {
-        (void)alloc;
-        (void)persona_name;
-        (void)checkpoint_path;
-        (void)output_path;
-        (void)rank;
-        (void)max_steps;
-        (void)from_history_db;
-        (void)from_history_max_per_channel;
-        (void)persist_persona;
-        (void)backend;
-        (void)mlx_model;
-        (void)data_dir;
-        (void)num_layers;
-        (void)max_seq_length;
-        (void)save_every;
-        (void)learning_rate;
-        printf("[lora-persona] test mode: skipped\n");
-        printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
-        return HU_OK;
-    }
-#endif
+    (void)alloc;
+    (void)persona_name;
+    (void)checkpoint_path;
+    (void)output_path;
+    (void)rank;
+    (void)max_steps;
+    (void)export_jsonl_path;
+    (void)from_history_db;
+    (void)from_history_max_per_channel;
+    (void)persist_persona;
+    (void)backend;
+    (void)mlx_model;
+    (void)data_dir;
+    (void)num_layers;
+    (void)max_seq_length;
+    (void)save_every;
+    (void)learning_rate;
+    printf("[lora-persona] test mode: skipped\n");
+    printf("[lora-persona] honest-gap doc: %s\n", hu_ml_lora_persona_caveat_doc_path());
+    return HU_OK;
+#else
     if (!persona_name) {
         fprintf(stderr, "lora-persona requires --persona <name>\n");
         return HU_ERR_INVALID_ARGUMENT;
@@ -971,32 +964,11 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         if (data_dir) {
             snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", data_dir);
         } else {
-            /* M3 Bridge A Phase 1 — write the training JSONL into the
-             * adapter's output directory, not /tmp. Two wins:
-             *  (1) reproducibility — the JSONL survives the training run
-             *      and an operator can re-train the exact same data via
-             *      `--data-dir <adapter_output_path>` later.
-             *  (2) auditability — the inputs that produced an adapter
-             *      live alongside the adapter, not on a tmpfs that
-             *      cycles on reboot.
-             * Falls back to `/tmp/hu-lora-frontier-<pid>` only when the
-             * adapter dir cannot be created (read-only HOME, etc.). */
-            char train_path[1024];
-            const char *jsonl_dir = lcfg.adapter_output_path;
-            char fallback_dir[256];
-            if (mkdir(jsonl_dir, 0755) != 0 && errno != EEXIST) {
-                snprintf(fallback_dir, sizeof(fallback_dir),
-                         "/tmp/hu-lora-frontier-%d", (int)getpid());
-                mkdir(fallback_dir, 0755);
-                jsonl_dir = fallback_dir;
-                fprintf(stderr,
-                        "[lora-persona] note: adapter dir not writable, "
-                        "JSONL falling back to %s (training will succeed "
-                        "but the data file won't persist alongside the "
-                        "adapter).\n",
-                        jsonl_dir);
-            }
-            snprintf(train_path, sizeof(train_path), "%s/train.jsonl", jsonl_dir);
+            char tmp_dir[256];
+            snprintf(tmp_dir, sizeof(tmp_dir), "/tmp/hu-lora-frontier-%d", (int)getpid());
+            mkdir(tmp_dir, 0755);
+            char train_path[512];
+            snprintf(train_path, sizeof(train_path), "%s/train.jsonl", tmp_dir);
             size_t exported = 0;
             hu_error_t exp_err =
                 hu_persona_bank_export_jsonl(&persona, train_path, strlen(train_path), &exported);
@@ -1009,7 +981,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                 hu_persona_deinit(alloc, &persona);
                 return exp_err != HU_OK ? exp_err : HU_ERR_INVALID_ARGUMENT;
             }
-            snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", jsonl_dir);
+            snprintf(lcfg.data_dir, sizeof(lcfg.data_dir), "%s", tmp_dir);
             printf("[lora-persona] exported %zu persona example(s) to %s\n", exported, train_path);
         }
 
@@ -1437,6 +1409,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     free_delta_examples(alloc, delta_examples, delta_examples_count);
     hu_persona_deinit(alloc, &persona);
     return err;
+#endif
 }
 
 /* Track D D2.2 — offline persona-fidelity baseline.
@@ -1871,17 +1844,13 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     hu_communication_style_set_summary_t sum_before, sum_after;
     float delta = 0.f;
     err = hu_communication_style_compare_response_sets(&target, strs_before, lens_before, n_before,
-                                                       strs_after, lens_after, n_after, &sum_before,
-                                                       &sum_after, &delta);
+                                                       strs_after, lens_after, n_after,
+                                                       &sum_before, &sum_after, &delta);
     if (err != HU_OK) {
-        if (strs_before)
-            alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
-        if (lens_before)
-            alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
-        if (strs_after)
-            alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
-        if (lens_after)
-            alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+        if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+        if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+        if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+        if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
         hu_json_free(alloc, json_before);
         hu_json_free(alloc, json_after);
         hu_persona_deinit(alloc, &persona);
@@ -1919,23 +1888,18 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
             return ge;
         }
         if (!verdict.promote) {
-            fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n", verdict.reason);
+            fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n",
+                    verdict.reason);
             return HU_ERR_INVALID_ARGUMENT;
         }
-    }
+    } else
 #endif
 
-    /* Free loaders before reporting so a fail-fast exit doesn't
-     * leak. The summaries are stack values and don't alias into
-     * the JSON tree. */
-    if (strs_before)
-        alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
-    if (lens_before)
-        alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
-    if (strs_after)
-        alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
-    if (lens_after)
-        alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+    /* Free loaders before reporting so a fail-fast exit doesn't leak. */
+    if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+    if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+    if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+    if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
     hu_json_free(alloc, json_before);
     hu_json_free(alloc, json_after);
     hu_persona_deinit(alloc, &persona);
@@ -2146,8 +2110,6 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
         fprintf(stderr, "lora-runner requires --persona <name> --output <path>\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
-    (void)model;
-    (void)adapter_id;
 
     hu_persona_t persona = {0};
     hu_error_t err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
@@ -2190,6 +2152,9 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
     }
 
 #ifndef HU_IS_TEST
+    /* Production path: create a provider and walk the example bank.
+     * Errors per-example don't abort the run; the comparator counts
+     * empty entries as `skipped`. */
     hu_provider_t provider = {0};
     if (provider_name && provider_name[0]) {
         err = hu_provider_create(alloc, provider_name, strlen(provider_name), NULL, 0, NULL, 0,
@@ -2203,9 +2168,9 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
             err = HU_ERR_NOT_SUPPORTED;
         }
     }
-    if (err != HU_OK || !provider.vtable ||
-        (!provider.vtable->chat_with_system && !provider.vtable->chat)) {
-        fprintf(stderr, "[lora-runner] no usable provider (err=%d)\n", err);
+    if (err != HU_OK || !provider.vtable || !provider.vtable->chat_with_system) {
+        fprintf(stderr, "[lora-runner] no usable provider (err=%d, vtable=%s)\n", err,
+                (provider.vtable && provider.vtable->chat_with_system) ? "ok" : "missing");
         if (provider.vtable && provider.vtable->deinit)
             provider.vtable->deinit(provider.ctx, alloc);
         alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
@@ -2214,84 +2179,85 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
         return err == HU_OK ? HU_ERR_NOT_SUPPORTED : err;
     }
 
-    const char **prompts =
-        (const char **)alloc->alloc(alloc->ctx, total_examples * sizeof(const char *));
-    if (!prompts) {
-        if (provider.vtable->deinit)
-            provider.vtable->deinit(provider.ctx, alloc);
-        alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
-        alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
-        hu_persona_deinit(alloc, &persona);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    size_t pi = 0;
-    for (size_t b = 0; b < persona.example_banks_count && pi < total_examples; b++) {
-        const hu_persona_example_bank_t *bank = &persona.example_banks[b];
-        for (size_t i = 0; i < bank->examples_count && pi < total_examples; i++) {
-            const hu_persona_example_t *ex = &bank->examples[i];
-            if (ex->incoming && ex->incoming[0])
-                prompts[pi++] = ex->incoming;
+    /* Optional adapter pre-load. The runner's "after.json" half of
+     * the canonical A/B workflow happens in the same process as
+     * provider creation — the adapter loaded here applies to every
+     * subsequent chat call in this run. We deliberately fail-fast
+     * (early return) when the adapter can't load: producing
+     * "after.json" against the BASE model would silently corrupt
+     * the comparator's delta, and a delta-zero false positive is
+     * worse than no run at all. */
+    if (adapter_path && adapter_path[0]) {
+        const char *id = adapter_id;
+        char id_buf[64];
+        if (!id) {
+            const char *slash = strrchr(adapter_path, '/');
+            const char *base = slash ? slash + 1 : adapter_path;
+            size_t copy = strlen(base);
+            if (copy >= sizeof(id_buf))
+                copy = sizeof(id_buf) - 1;
+            memcpy(id_buf, base, copy);
+            id_buf[copy] = '\0';
+            id = id_buf;
         }
-    }
-
-    hu_communication_style_t target;
-    memset(&target, 0, sizeof(target));
-    {
-        char pm_path[1024];
-        if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
-            hu_personal_model_t loaded;
-            if (hu_personal_model_load(&loaded, pm_path) == HU_OK && loaded.style.sample_count > 0U)
-                target = loaded.style;
+        hu_error_t lerr = hu_provider_load_adapter(&provider, alloc, adapter_path,
+                                                   strlen(adapter_path), id, strlen(id));
+        if (lerr != HU_OK) {
+            fprintf(stderr,
+                    "[lora-runner] adapter load failed (path=%s, id=%s, err=%d). "
+                    "Aborting to avoid producing a base-model 'after.json'.\n",
+                    adapter_path, id, lerr);
+            if (provider.vtable && provider.vtable->deinit)
+                provider.vtable->deinit(provider.ctx, alloc);
+            alloc->free(alloc->ctx, responses, total_examples * sizeof(char *));
+            alloc->free(alloc->ctx, lens, total_examples * sizeof(size_t));
+            hu_persona_deinit(alloc, &persona);
+            return lerr;
         }
-    }
-    if (target.sample_count == 0) {
-        target.sample_count = 1;
-        target.lowercase_ratio = 0.7f;
-        target.avg_message_length = 80.f;
+        printf("[lora-runner] adapter loaded: %s (id=%s)\n", adapter_path, id);
     }
 
     char system_buf[1024];
-    (void)hu_ml_lora_runner_build_system_prompt(&persona, system_buf, sizeof(system_buf));
+    size_t system_len =
+        hu_ml_lora_runner_build_system_prompt(&persona, system_buf, sizeof(system_buf));
+    size_t model_len = model ? strlen(model) : 0;
 
-#ifdef HU_ENABLE_RL_FULL
-    hu_persona_rollout_config_t rcfg = {
-        .provider = &provider,
-        .adapter_path = adapter_path,
-        .target = &target,
-        .prompts = prompts,
-        .system_prompts = NULL,
-        .n_prompts = pi,
-        .timeout_ms_per_prompt = 5000,
-        .capture_responses = true,
-    };
-    hu_persona_rollout_result_t rr = {0};
-    err = hu_persona_rollout_run(alloc, &rcfg, &rr);
-    if (err == HU_OK) {
-        for (size_t i = 0; i < pi && i < total_examples; i++) {
-            if (rr.responses && rr.responses[i] && rr.response_lens[i] > 0) {
-                responses[i] = rr.responses[i];
-                lens[i] = rr.response_lens[i];
-                rr.responses[i] = NULL;
+    size_t produced = 0;
+    size_t errors = 0;
+    for (size_t b = 0; b < persona.example_banks_count && produced < total_examples; b++) {
+        const hu_persona_example_bank_t *bank = &persona.example_banks[b];
+        for (size_t i = 0; i < bank->examples_count && produced < total_examples; i++) {
+            const hu_persona_example_t *ex = &bank->examples[i];
+            if (!ex->incoming || !ex->incoming[0])
+                continue;
+            char *content = NULL;
+            size_t content_len = 0;
+            hu_error_t cerr = provider.vtable->chat_with_system(
+                provider.ctx, alloc, system_buf, system_len, ex->incoming, strlen(ex->incoming),
+                model, model_len, 0.7, &content, &content_len);
+            if (cerr == HU_OK && content && content_len > 0) {
+                responses[produced] = (char *)alloc->alloc(alloc->ctx, content_len + 1);
+                if (responses[produced]) {
+                    memcpy(responses[produced], content, content_len);
+                    responses[produced][content_len] = '\0';
+                    lens[produced] = content_len;
+                }
+            } else {
+                errors++;
             }
+            if (content)
+                alloc->free(alloc->ctx, content, content_len + 1);
+            produced++;
         }
-        if (rr.n_errors > 0)
-            fprintf(stderr, "[lora-runner] %zu of %zu examples returned an error or empty content\n",
-                    rr.n_errors, total_examples);
     }
-    hu_persona_rollout_result_free(alloc, &rr);
-#else
-    (void)adapter_path;
-    err = HU_ERR_NOT_SUPPORTED;
-#endif
-    alloc->free(alloc->ctx, prompts, total_examples * sizeof(const char *));
+
+    if (errors > 0)
+        fprintf(stderr, "[lora-runner] %zu of %zu examples returned an error or empty content\n",
+                errors, total_examples);
 
     if (provider.vtable->deinit)
         provider.vtable->deinit(provider.ctx, alloc);
 #else
-    (void)provider_name;
-    (void)model;
-    (void)adapter_path;
-    (void)adapter_id;
     /* Test path: deterministic echo of the persona's existing
      * `response` field. Lets unit tests exercise the full
      * load → write → JSON round-trip without spinning up a

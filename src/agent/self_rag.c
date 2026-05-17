@@ -130,9 +130,11 @@ static hu_error_t heuristic_verify(void *vctx, hu_allocator_t *alloc,
 
     hu_verifier_report_t report;
     memset(&report, 0, sizeof(report));
-    hu_error_t err = hu_response_verify(alloc, ctx->m, req->contact_id,
-                                         req->contact_id_len, req->draft,
-                                         req->draft_len, &cfg, &report);
+    /* sprint-2c Story A.2 — thread req->wm into the verifier so the
+     * heuristic backend respects [hard]/[soft]/[confirm]/[policy] tags. */
+    hu_error_t err = hu_response_verify_against_world_model(
+        alloc, ctx->m, req->wm, req->contact_id, req->contact_id_len,
+        req->draft, req->draft_len, &cfg, &report);
     if (err != HU_OK)
         return err;
 

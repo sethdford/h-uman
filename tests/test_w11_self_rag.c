@@ -1703,6 +1703,212 @@ static void test_w11_agent_apply_floor_under_empty_evidence(void) {
     hu_w7_facade_close(wf, &alloc);
     hu_graph_close(g, &alloc);
 }
+
+/* ── sprint-2c Story A — W11 honors negative source tags ─────────────── */
+
+/* Stack-allocated minimal world model with `count` negatives. Safe to pass
+ * to the verifier; nothing is heap-allocated. `negs` must outlive the wm. */
+static hu_world_model_t make_wm_with_negatives(hu_negative_memory_t *negs, size_t count) {
+    hu_world_model_t wm;
+    memset(&wm, 0, sizeof(wm));
+    wm.negatives = negs;
+    wm.negatives_count = count;
+    return wm;
+}
+
+static void test_verifier_hard_tag_forces_abstain(void) {
+    hu_negative_memory_t neg;
+    memset(&neg, 0, sizeof(neg));
+    snprintf(neg.text, sizeof(neg.text), "never discuss the merger");
+    snprintf(neg.reason, sizeof(neg.reason), "ongoing negotiation");
+    neg.source = HU_NEGATIVE_SOURCE_USER_EXPLICIT;
+    hu_world_model_t wm = make_wm_with_negatives(&neg, 1);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_SOFT;
+    cfg.abstain_threshold = 0.0f;
+    hu_verifier_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    const char *draft = "The merger talks are going well.";
+    hu_error_t err = hu_response_verify_against_world_model(
+        A(), /*memory=*/NULL, &wm, "u1", 2, draft, strlen(draft), &cfg, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)report.outcome, HU_VERIFY_RESULT_ABSTAIN);
+    HU_ASSERT_NOT_NULL(strstr(report.refusal_text, "you've asked me not to"));
+    HU_ASSERT_NOT_NULL(strstr(report.refusal_text, "ongoing negotiation"));
+}
+
+static void test_verifier_policy_tag_forces_abstain_with_safety_text(void) {
+    hu_negative_memory_t neg;
+    memset(&neg, 0, sizeof(neg));
+    snprintf(neg.text, sizeof(neg.text), "give medical advice");
+    neg.source = HU_NEGATIVE_SOURCE_SYSTEM_POLICY;
+    hu_world_model_t wm = make_wm_with_negatives(&neg, 1);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_SOFT;
+    hu_verifier_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    const char *draft = "You should give medical advice about ibuprofen dosage.";
+    hu_error_t err = hu_response_verify_against_world_model(
+        A(), /*memory=*/NULL, &wm, "u1", 2, draft, strlen(draft), &cfg, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)report.outcome, HU_VERIFY_RESULT_ABSTAIN);
+    HU_ASSERT_NOT_NULL(strstr(report.refusal_text, "safety policy"));
+}
+
+static void test_verifier_soft_tag_emits_low_confidence_hedge(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    /* Seed supporting evidence so the facade returns *something* — the
+     * negative-memory hedge should still fire. This proves the negative
+     * scan genuinely overrides facade "looks supported" verdicts. */
+    seed_alice_works_at_acme(g);
+
+    hu_negative_memory_t neg;
+    memset(&neg, 0, sizeof(neg));
+    snprintf(neg.text, sizeof(neg.text), "specific deal close timing");
+    neg.source = HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN;
+    hu_world_model_t wm = make_wm_with_negatives(&neg, 1);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_SOFT;
+    hu_verifier_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    const char *draft = "The specific deal close timing is Friday.";
+    hu_error_t err = hu_response_verify_against_world_model(
+        A(), m, &wm, "u1", 2, draft, strlen(draft), &cfg, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)report.outcome, HU_VERIFY_RESULT_HEDGED);
+    HU_ASSERT_TRUE(report.draft_modified);
+    HU_ASSERT_NOT_NULL(strstr(report.modified_draft, "not confident enough"));
+    close_facade(g, m);
+}
+
+static void test_verifier_confirm_tag_emits_ask_to_confirm_hedge(void) {
+    hu_negative_memory_t neg;
+    memset(&neg, 0, sizeof(neg));
+    snprintf(neg.text, sizeof(neg.text), "bring up therapy sessions");
+    neg.source = HU_NEGATIVE_SOURCE_AUTO_EXTRACT;
+    hu_world_model_t wm = make_wm_with_negatives(&neg, 1);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_SOFT;
+    hu_verifier_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    const char *draft = "Have you been to your therapy sessions lately?";
+    hu_error_t err = hu_response_verify_against_world_model(
+        A(), /*memory=*/NULL, &wm, "u1", 2, draft, strlen(draft), &cfg, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)report.outcome, HU_VERIFY_RESULT_HEDGED);
+    HU_ASSERT_TRUE(report.draft_modified);
+    HU_ASSERT_NOT_NULL(strstr(report.modified_draft, "is that still right"));
+}
+
+static void test_verifier_strictest_outcome_wins_when_multiple_match(void) {
+    hu_negative_memory_t negs[2];
+    memset(negs, 0, sizeof(negs));
+    snprintf(negs[0].text, sizeof(negs[0].text), "specific deal close timing");
+    negs[0].source = HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN;
+    snprintf(negs[1].text, sizeof(negs[1].text), "never discuss the merger");
+    negs[1].source = HU_NEGATIVE_SOURCE_USER_EXPLICIT;
+    hu_world_model_t wm = make_wm_with_negatives(negs, 2);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_SOFT;
+    hu_verifier_report_t report;
+    memset(&report, 0, sizeof(report));
+
+    /* Draft hits both: "specific deal close timing" (SOFT) and "merger"
+     * (HARD). ABSTAIN must win the strictness lattice. */
+    const char *draft = "The specific deal close timing for the merger is Friday.";
+    hu_error_t err = hu_response_verify_against_world_model(
+        A(), /*memory=*/NULL, &wm, "u1", 2, draft, strlen(draft), &cfg, &report);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)report.outcome, HU_VERIFY_RESULT_ABSTAIN);
+    HU_ASSERT_NOT_NULL(strstr(report.refusal_text, "you've asked me not to"));
+}
+
+static void test_verifier_no_negatives_in_wm_behavior_unchanged(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_world_model_t wm;
+    memset(&wm, 0, sizeof(wm));
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_TELEMETRY;
+    hu_verifier_report_t report_a, report_b;
+    memset(&report_a, 0, sizeof(report_a));
+    memset(&report_b, 0, sizeof(report_b));
+
+    const char *draft = "Alice works at Acme.";
+    HU_ASSERT_EQ(
+        hu_response_verify_against_world_model(A(), m, &wm, "u1", 2, draft,
+                                                strlen(draft), &cfg, &report_a),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_response_verify(A(), m, "u1", 2, draft, strlen(draft), &cfg, &report_b),
+        HU_OK);
+    /* Empty wm must be behaviorally identical to NULL wm. */
+    HU_ASSERT_EQ((int)report_a.outcome, (int)report_b.outcome);
+    HU_ASSERT_EQ(report_a.claims_extracted, report_b.claims_extracted);
+    HU_ASSERT_EQ(report_a.claims_supported, report_b.claims_supported);
+    HU_ASSERT_EQ(report_a.claims_flagged, report_b.claims_flagged);
+    close_facade(g, m);
+}
+
+static void test_verifier_w11_path_honors_hard_tag(void) {
+    /* End-to-end through hu_w11_self_rag_verify: seed a [hard] negative
+     * into the facade, then run the full W11 bridge. The bridge loads
+     * the world model itself; we just need the negative persisted. */
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    seed_alice_works_at_acme(g);
+
+    hu_negative_memory_t neg;
+    memset(&neg, 0, sizeof(neg));
+    snprintf(neg.text, sizeof(neg.text), "never discuss the merger");
+    snprintf(neg.scope, sizeof(neg.scope), "topic");
+    snprintf(neg.reason, sizeof(neg.reason), "ongoing negotiation");
+    neg.source = HU_NEGATIVE_SOURCE_USER_EXPLICIT;
+    neg.belief = hu_belief_init(1.0f, "user", 1735690000000LL);
+    neg.created_at = 1735690000000LL;
+    int64_t neg_id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add_facade(m, "u1", 2, &neg, &neg_id), HU_OK);
+    HU_ASSERT_TRUE(neg_id > 0);
+
+    /* Bust the world-model cache so the next load picks the negative up. */
+    hu_world_model_invalidate("u1", 2);
+
+    hu_w7_facade_t *facade = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(g, A(), &facade), HU_OK);
+
+    hu_w11_outcome_t out_outcome = HU_W11_OUTCOME_SUPPORTED;
+    size_t out_total = 0, out_flagged = 0;
+    char *out_mod = NULL;
+    size_t out_mod_len = 0;
+    const char *draft = "The merger talks are going well.";
+    hu_error_t err = hu_w11_self_rag_verify(
+        facade, A(), "u1", 2, draft, strlen(draft), HU_VERIFY_SOFT,
+        1735690000000LL, &out_outcome, &out_total, &out_flagged, &out_mod,
+        &out_mod_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)out_outcome, HU_W11_OUTCOME_ABSTAINED);
+    if (out_mod)
+        A()->free(A()->ctx, out_mod, out_mod_len);
+    hu_w7_facade_close(facade, A());
+    close_facade(g, m);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 /* ── Test runner ──────────────────────────────────────────────────────── */
@@ -1748,6 +1954,14 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_agent_self_rag_telemetry_handles_null_agent);
     HU_RUN_TEST(test_w11_abstention_floor_under_empty_evidence);
     HU_RUN_TEST(test_w11_agent_apply_floor_under_empty_evidence);
+    /* sprint-2c Story A — W11 honors [hard]/[soft]/[confirm]/[policy] negative tags. */
+    HU_RUN_TEST(test_verifier_hard_tag_forces_abstain);
+    HU_RUN_TEST(test_verifier_policy_tag_forces_abstain_with_safety_text);
+    HU_RUN_TEST(test_verifier_soft_tag_emits_low_confidence_hedge);
+    HU_RUN_TEST(test_verifier_confirm_tag_emits_ask_to_confirm_hedge);
+    HU_RUN_TEST(test_verifier_strictest_outcome_wins_when_multiple_match);
+    HU_RUN_TEST(test_verifier_no_negatives_in_wm_behavior_unchanged);
+    HU_RUN_TEST(test_verifier_w11_path_honors_hard_tag);
 #endif
     /* Streaming self-RAG tests don't require SQLite. */
     HU_RUN_TEST(test_w11_stream_normal_tokens_pass_through);

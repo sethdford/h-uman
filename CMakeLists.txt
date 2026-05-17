@@ -1004,6 +1004,9 @@ list(APPEND HU_CORE_SOURCES src/channels/reaction_event.c)
 # can include human/channels/reaction_event.h without colliding with
 # human/channel.h's older hu_reaction_type_t enum.
 list(APPEND HU_CORE_SOURCES src/agent/reaction_handler.c)
+# CF-3: daemon reaction poll tick — always linked (daemon.c calls it
+# unconditionally); must not sit behind HU_ENABLE_RL_FULL.
+list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
 
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
@@ -1526,7 +1529,6 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_CORE_SOURCES src/eval/persona_rollout.c)
     list(APPEND HU_CORE_SOURCES src/eval/cli_eval.c)
     list(APPEND HU_CORE_SOURCES src/agent/adapter_id.c)
-    list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
     list(APPEND HU_CORE_SOURCES src/ml/cli_demo.c)
 endif()
 
@@ -2670,12 +2672,14 @@ set(HU_TEST_SOURCES
     tests/test_consistency.c
     tests/test_mlx_provider.c
     tests/test_persona_fidelity.c
+    tests/test_persona_fidelity_cross.c
     tests/test_persona_fidelity_judge.c
     tests/test_persona_fidelity_validator.c
     tests/test_fact_extract_llm.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_personal_model_simulation.c
     tests/test_personal_model_fidelity_v2.c
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
