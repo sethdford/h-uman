@@ -1,0 +1,7 @@
+{
+  "verdict": "PASS",
+  "delta": 0.087,
+  "baseline_score": 0.612,
+  "candidate_score": 0.699,
+  "judgment_ppl_delta": 0.045
+}

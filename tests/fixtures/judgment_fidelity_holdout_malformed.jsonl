@@ -1,0 +1,5 @@
+# Malformed-row fixture for US-7.6 loader-robustness tests.
+{"prompt":"this is a good row","continuation":"this is the response"}
+{"prompt":"missing-continuation row only"}
+not even json at all
+{"prompt":"another good row","continuation":"another response"}
