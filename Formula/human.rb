@@ -1,6 +1,13 @@
 # typed: false
 # frozen_string_literal: true
 
+# tap: humanlabs/human
+# The line above is the canonical tap path. It is parsed verbatim by
+# website/scripts/check-install-matches-formula.mjs to enforce that the
+# install one-liner rendered on h-uman.ai never drifts from this formula.
+# Do not change without updating website/src/data/install.json in the
+# same PR — the drift detector test will fail by design otherwise.
+
 class Human < Formula
   desc "The smallest fully autonomous AI assistant infrastructure"
   homepage "https://h-uman.ai"

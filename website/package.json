@@ -15,6 +15,8 @@
     "lint": "astro check",
     "format": "prettier --write 'src/**/*.{astro,ts,css,mdx,md}'",
     "format:check": "prettier --check 'src/**/*.{astro,ts,css,mdx,md}'",
+    "check:install": "node scripts/check-install-matches-formula.mjs",
+    "test": "vitest run",
     "astro": "astro"
   },
   "dependencies": {
@@ -30,6 +32,7 @@
     "@astrojs/check": "^0.9.8",
     "prettier": "^3.8.1",
     "prettier-plugin-astro": "^0.14.1",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^2.1.9"
   }
 }
