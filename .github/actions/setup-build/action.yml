@@ -47,7 +47,12 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        PKGS="libsqlite3-dev ccache"
+        # libsodium-dev: required by src/persona/persona_crypt.c — main
+        # commit 6af7ad34 (US-8.2 persona encryption-at-rest) made the
+        # crypto layer #error at compile time when libsodium isn't
+        # available. Without this package, every CI build that touches
+        # human_core fails with `sodium.h: No such file or directory`.
+        PKGS="libsqlite3-dev libsodium-dev ccache"
         if [ "${{ inputs.enable-curl }}" = "true" ]; then PKGS="$PKGS libcurl4-openssl-dev"; fi
         if [ -n "${{ inputs.extra-apt }}" ]; then PKGS="$PKGS ${{ inputs.extra-apt }}"; fi
         sudo apt-get install -y $PKGS
@@ -55,7 +60,8 @@ runs:
     - name: Install dependencies (macOS)
       if: runner.os == 'macOS'
       shell: bash
-      run: brew install sqlite3 ccache
+      # libsodium: same reason as Linux — persona_crypt.c hard-requires it.
+      run: brew install sqlite3 libsodium ccache
 
     - name: Cache ccache
       uses: actions/cache@v5

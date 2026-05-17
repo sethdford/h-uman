@@ -1,3 +1,9 @@
+---
+title: Status Template
+date: 2026-05-17
+status: audit
+---
+
 # Status Template — Plan Validation
 
 Every per-plan status file MUST use this exact frontmatter so the master report
