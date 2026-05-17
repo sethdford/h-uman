@@ -1228,6 +1228,7 @@ if(HU_ENABLE_ML)
         src/ml/lora.c
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
+        src/ml/dp_sgd.c
         # Track D D2.2: persona-fidelity compute primitives shared by
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
@@ -2206,6 +2207,7 @@ if(NOT HU_ENABLE_ML)
         src/ml/evaluator.c src/ml/experiment.c src/ml/experiment_store.c src/ml/gpt.c
         src/ml/muon_adamw.c src/ml/train.c src/ml/checkpoint.c src/ml/cli.c
         src/ml/lora.c src/ml/agent_trainer.c src/ml/m3_frontier_adapter.c
+        src/ml/dp_sgd.c
         src/ml/fidelity.c
         src/ml/training_data.c src/ml/training_data_extractor.c
         src/ml/training_data_quality.c
@@ -2779,6 +2781,7 @@ set(HU_TEST_SOURCES
     tests/test_ml.c
     tests/test_ml_cli_actually_trains.c
     tests/test_dpo_judge_naming.c
+    tests/test_dp_sgd.c
     tests/test_lora.c
     tests/test_training_data.c
     tests/test_training_data_extractor.c
