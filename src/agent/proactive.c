@@ -753,10 +753,16 @@ bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
     return true;
 }
 
-/* F31: Callback opportunities — reference previous conversations (30% per conversation start) */
-bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
-                                  const char *contact_id, size_t contact_id_len, uint32_t seed,
-                                  char *message_out, size_t msg_cap) {
+/* F31: Callback opportunities — reference previous conversations (30% per conversation start).
+ *
+ * 2026-05-16 P4-4: this body lives in _ex; the original signature delegates
+ * with out_followup_id=NULL to preserve compat with callers that don't mark
+ * the followup as sent on confirmed delivery. */
+bool hu_proactive_check_callbacks_ex(hu_allocator_t *alloc, hu_memory_t *memory,
+                                     const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                     char *message_out, size_t msg_cap, int64_t *out_followup_id) {
+    if (out_followup_id)
+        *out_followup_id = -1;
     if (!alloc || !memory || !contact_id || contact_id_len == 0 || !message_out || msg_cap == 0)
         return false;
 
@@ -794,9 +800,13 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
             int n = snprintf(message_out, msg_cap,
                              "CALLBACK: Consider asking about: %.*s. Only if natural.",
                              (int)topic_len, followups[i].topic);
+            int64_t chosen_id = followups[i].id;
             hu_superhuman_delayed_followup_free(alloc, followups, followup_count);
-            if (n > 0 && (size_t)n < msg_cap)
+            if (n > 0 && (size_t)n < msg_cap) {
+                if (out_followup_id)
+                    *out_followup_id = chosen_id;
                 return true;
+            }
             return false;
         }
         hu_superhuman_delayed_followup_free(alloc, followups, followup_count);
@@ -836,6 +846,13 @@ bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
 
     return false;
 }
+
+bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
+                                  const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                  char *message_out, size_t msg_cap) {
+    return hu_proactive_check_callbacks_ex(alloc, memory, contact_id, contact_id_len, seed,
+                                           message_out, msg_cap, NULL);
+}
 #else
 bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
                                   const char *contact_id, size_t contact_id_len, uint32_t seed,
@@ -853,6 +870,21 @@ bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
 bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
                                   const char *contact_id, size_t contact_id_len, uint32_t seed,
                                   char *message_out, size_t msg_cap) {
+    (void)alloc;
+    (void)memory;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)seed;
+    (void)message_out;
+    (void)msg_cap;
+    return false;
+}
+
+bool hu_proactive_check_callbacks_ex(hu_allocator_t *alloc, hu_memory_t *memory,
+                                     const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                     char *message_out, size_t msg_cap, int64_t *out_followup_id) {
+    if (out_followup_id)
+        *out_followup_id = -1;
     (void)alloc;
     (void)memory;
     (void)contact_id;

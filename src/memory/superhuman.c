@@ -664,8 +664,7 @@ static void superhuman_shrink_formatted_buf(char **buf, size_t buf_len, size_t *
     if (!buf || !*buf || !buf_cap || !alloc || !alloc->realloc)
         return;
     if (buf_len + 1 < *buf_cap) {
-        char *shrunk =
-            (char *)alloc->realloc(alloc->ctx, *buf, *buf_cap, buf_len + 1);
+        char *shrunk = (char *)alloc->realloc(alloc->ctx, *buf, *buf_cap, buf_len + 1);
         if (shrunk) {
             *buf = shrunk;
             *buf_cap = buf_len + 1;
@@ -952,6 +951,33 @@ hu_error_t hu_superhuman_topic_baseline_record(void *sqlite_ctx, const char *con
         return HU_ERR_IO;
     }
     return hu_sql_txn_commit(&txn);
+}
+
+/* 2026-05-16 P4-1 */
+hu_error_t hu_superhuman_topic_baseline_mark_checkin_sent(void *sqlite_ctx, const char *contact_id,
+                                                          size_t contact_id_len, const char *topic,
+                                                          size_t topic_len, int64_t now_ts) {
+    if (!sqlite_ctx || !contact_id || contact_id_len == 0 || !topic || topic_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3 *db = hu_sqlite_memory_get_db((hu_memory_t *)sqlite_ctx);
+    if (!db)
+        return HU_ERR_NOT_SUPPORTED;
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "UPDATE topic_baselines SET last_checkin_sent_at = ? "
+                                "WHERE contact_id = ? AND topic = ?",
+                                -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        if (stmt)
+            sqlite3_finalize(stmt);
+        return HU_ERR_IO;
+    }
+    sqlite3_bind_int64(stmt, 1, now_ts);
+    sqlite3_bind_text(stmt, 2, contact_id, (int)contact_id_len, NULL);
+    sqlite3_bind_text(stmt, 3, topic, (int)topic_len, NULL);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_IO;
 }
 
 hu_error_t hu_superhuman_topic_absence_list(void *sqlite_ctx, hu_allocator_t *alloc,
@@ -1801,6 +1827,19 @@ hu_error_t hu_superhuman_topic_baseline_record(void *sqlite_ctx, const char *con
     (void)contact_id_len;
     (void)topic;
     (void)topic_len;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+/* 2026-05-16 P4-1 (no-sqlite stub). */
+hu_error_t hu_superhuman_topic_baseline_mark_checkin_sent(void *sqlite_ctx, const char *contact_id,
+                                                          size_t contact_id_len, const char *topic,
+                                                          size_t topic_len, int64_t now_ts) {
+    (void)sqlite_ctx;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)topic;
+    (void)topic_len;
+    (void)now_ts;
     return HU_ERR_NOT_SUPPORTED;
 }
 

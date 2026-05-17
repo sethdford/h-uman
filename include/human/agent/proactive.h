@@ -131,4 +131,17 @@ bool hu_proactive_contact_matches_moment(const char *cp_contact_id, const char *
  * the user's own text. This predicate is the outbound safety net. */
 bool hu_proactive_topic_is_safe(const char *topic, size_t topic_len);
 
+/* 2026-05-16 P4-4: variant of hu_proactive_check_callbacks that exposes the
+ * id of the followup chosen (if any). When out_followup_id is non-NULL and
+ * the function returns true picking a delayed_followup, *out_followup_id is
+ * set to the row id; the caller MUST call
+ * hu_superhuman_delayed_followup_mark_sent(memory, *out_followup_id) AFTER
+ * the outbound send is confirmed. If a commitment was chosen instead of a
+ * delayed_followup, *out_followup_id is set to -1 and no mark_sent is needed.
+ * Pre-fix this id was hidden inside the function and never marked sent, so
+ * the followup re-fired on every proactive cycle. */
+bool hu_proactive_check_callbacks_ex(hu_allocator_t *alloc, hu_memory_t *memory,
+                                     const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                     char *message_out, size_t msg_cap, int64_t *out_followup_id);
+
 #endif /* HU_PROACTIVE_H */

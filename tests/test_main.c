@@ -290,6 +290,7 @@ void run_deep_extract_tests(void);
 void run_commitment_tests(void);
 void run_pattern_radar_tests(void);
 void run_proactive_tests(void);
+void run_proactive_throttle_tests(void);
 void run_inner_thoughts_tests(void);
 void run_weather_awareness_tests(void);
 void run_timing_tests(void);
@@ -882,6 +883,7 @@ int main(int argc, char **argv) {
     run_commitment_tests();
     run_pattern_radar_tests();
     run_proactive_tests();
+    run_proactive_throttle_tests();
     run_inner_thoughts_tests();
     run_weather_awareness_tests();
     run_timing_tests();

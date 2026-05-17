@@ -942,6 +942,73 @@ static void proactive_callbacks_returns_false_without_due_items(void) {
 
     mem.vtable->deinit(mem.ctx);
 }
+
+/* 2026-05-16 P4-4: hu_proactive_check_callbacks_ex must expose the chosen
+ * followup id so the caller can mark_sent only on confirmed delivery. If the
+ * caller doesn't (e.g. send failed), the followup stays in the queue.
+ *
+ * This test reproduces the failure mode: pre-fix the followup id was hidden
+ * inside the function and never marked_sent, so list_due returned the same
+ * row every cycle. */
+static void proactive_callbacks_ex_exposes_followup_id_and_supports_retry(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_cb_p4_4";
+    static const char TOPIC[] = "loan paperwork";
+    int64_t past = 1000000;
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                         TOPIC, sizeof(TOPIC) - 1, past),
+                 HU_OK);
+
+    /* First retrieval — id is exposed. */
+    char msg[512];
+    int64_t followup_id = -999;
+    bool ok = hu_proactive_check_callbacks_ex(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+                                              sizeof(msg), &followup_id);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(followup_id > 0);
+    HU_ASSERT_TRUE(strstr(msg, "loan paperwork") != NULL);
+
+    /* SIMULATE SEND FAILURE: caller does NOT call mark_sent. The followup must
+     * remain in the queue for a future retry. */
+    char msg2[512];
+    int64_t followup_id2 = -999;
+    bool ok2 = hu_proactive_check_callbacks_ex(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg2,
+                                               sizeof(msg2), &followup_id2);
+    HU_ASSERT_TRUE(ok2);
+    HU_ASSERT_EQ(followup_id2, followup_id);
+
+    /* SIMULATE SEND SUCCESS: caller calls mark_sent. The followup must NOT
+     * re-surface on the next list_due. */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, followup_id), HU_OK);
+
+    char msg3[512];
+    int64_t followup_id3 = -999;
+    bool ok3 = hu_proactive_check_callbacks_ex(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg3,
+                                               sizeof(msg3), &followup_id3);
+    HU_ASSERT_FALSE(ok3);
+    HU_ASSERT_EQ(followup_id3, -1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Sanity: the wrapper hu_proactive_check_callbacks still works when caller
+ * doesn't care about the id (backward compat). */
+static void proactive_callbacks_wrapper_ignores_id(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    static const char CONTACT[] = "contact_wrap";
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                         "t", 1, 1000000),
+                 HU_OK);
+    char msg[256];
+    HU_ASSERT_TRUE(hu_proactive_check_callbacks(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+                                                sizeof(msg)));
+    mem.vtable->deinit(mem.ctx);
+}
 #endif
 
 static void proactive_build_context_handles_new_action_types(void) {
@@ -1275,6 +1342,8 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_curiosity_returns_false_without_micro_moments);
     HU_RUN_TEST(proactive_callbacks_returns_delayed_followup);
     HU_RUN_TEST(proactive_callbacks_returns_false_without_due_items);
+    HU_RUN_TEST(proactive_callbacks_ex_exposes_followup_id_and_supports_retry);
+    HU_RUN_TEST(proactive_callbacks_wrapper_ignores_id);
 #endif
     HU_RUN_TEST(daemon_weather_awareness_build_directive_and_should_mention);
     HU_RUN_TEST(daemon_visual_should_share_decision);
