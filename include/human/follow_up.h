@@ -93,4 +93,38 @@ typedef struct hu_followup_decision {
  * Returns {should_schedule=false} when either piece refuses. Pure. */
 hu_followup_decision_t hu_followup_decide(const hu_followup_input_t *in);
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Idempotency: small ring of recently-scheduled message_ids
+ *
+ * The daemon's read-receipt watcher polls every loop iteration; without
+ * dedup it would re-schedule a follow-up for the same outbound message
+ * on every tick until either the contact replies or the schedule fires.
+ *
+ * This ring is intentionally small (32 entries) and in-memory only — a
+ * daemon restart wipes it. The downside is one duplicate follow-up across
+ * a restart in the worst case; acceptable given the watcher itself only
+ * fires for messages already in the chat.db "read but unreplied" set.
+ * Persistence can be added later if duplicates become observable.
+ *
+ * Pinned by tests/test_follow_up.c (dedup_*).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+#define HU_FOLLOWUP_DEDUP_SIZE 32
+
+typedef struct hu_followup_dedup {
+    int64_t recent_msg_ids[HU_FOLLOWUP_DEDUP_SIZE];
+    size_t next_slot;
+} hu_followup_dedup_t;
+
+/* Zero the ring. Safe to call on the same instance multiple times. */
+void hu_followup_dedup_init(hu_followup_dedup_t *d);
+
+/* True if msg_id is in the ring. Returns false for NULL d, msg_id <= 0,
+ * or empty ring. Pure. */
+bool hu_followup_dedup_seen(const hu_followup_dedup_t *d, int64_t msg_id);
+
+/* Record msg_id in the ring, overwriting the oldest slot. No-op on
+ * NULL d or msg_id <= 0. */
+void hu_followup_dedup_record(hu_followup_dedup_t *d, int64_t msg_id);
+
 #endif /* HU_FOLLOW_UP_H */
