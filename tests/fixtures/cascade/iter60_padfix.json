@@ -1,0 +1,13 @@
+{
+  "name": "iter60_padfix",
+  "description": "Hypothetical post-US-11.1 pad-masking fix: same delta but pad_rate near zero; PPL 1.05x base. PROMOTE.",
+  "lexical_delta": 0.042,
+  "pad_rate": 0.02,
+  "base_ppl": 12.0,
+  "adapter_ppl": 12.6,
+  "ppl_ratio": 1.05,
+  "coherence_scores": [0.82, 0.85, 0.80, 0.83, 0.81],
+  "coherence_pad_outputs": [false, false, false, false, false],
+  "expected_stage_reject": null,
+  "expected_verdict": "PROMOTE"
+}
