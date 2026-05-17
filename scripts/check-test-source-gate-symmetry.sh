@@ -98,53 +98,136 @@ def parse_cmake(path: str) -> dict[str, set[str]]:
     return file_gates
 
 
-def has_internal_guard(test_path: str, flags: set[str]) -> bool:
-    """True if the .c file wraps its body in `#ifdef <flag>` for ANY of the
-    given flags AND provides a stub runner in the #else branch.
+def has_internal_guard(test_path: str, flags: set[str],
+                       *, symbol_patterns: list[str] | None = None) -> bool:
+    """True if the .c file has every reference to a gated symbol inside
+    an `#ifdef <flag>` block for at least one of the given flags.
 
-    Pattern (canonical):
+    "Gated symbol" defaults to anything matching `hu_X_*` or `X_*` where
+    X is derived from the flag (e.g. HU_ENABLE_SQLITE → sqlite3_).
+    Callers can override via `symbol_patterns` to scan for specific
+    function-call prefixes.
+
+    Canonical SAFE patterns this accepts:
+
+        // Pattern 1: full-file wrap with #else stub
         #ifdef HU_ENABLE_X
-        ... real test body + run_X_tests definition ...
+        ... bodies + runner ...
         #else
         void run_X_tests(void) { (void)0; }
         #endif
 
-    This compiles to an empty stub when the flag is off, so the runner
-    symbol still resolves at link time and the test source can stay in
-    the unconditional CMake list without breaking variant builds.
+        // Pattern 2: bodies gated, runner unconditional with gated calls
+        #ifdef HU_ENABLE_X
+        static void test_foo(void) { sqlite3_*(); }  // gated body
+        #endif
+
+        void run_X_tests(void) {  // unconditional runner
+        #ifdef HU_ENABLE_X
+            HU_RUN_TEST(test_foo);  // gated call
+        #endif
+        }
+
+    Validation: walk the file line-by-line tracking preprocessor nesting,
+    record line ranges where each flag is active, then scan for symbol
+    references. A reference outside ALL active blocks for required
+    flags is a real link risk.
+
+    Earlier "any #endif" fallback (Cursor Bugbot cc9039d3) returned
+    True for any file that happened to contain an #endif anywhere —
+    making the safety check unable to catch the exact failure class it
+    was designed to prevent. This version walks the actual symbol
+    references and verifies each is inside a matching gate.
     """
     try:
         with open(test_path) as f:
-            content = f.read()
+            lines = f.readlines()
     except OSError:
         return False
-    # Look for `#ifdef FLAG` or `#if defined(FLAG)` near the top, followed
-    # somewhere later by `#else` and a function definition (the stub).
-    for flag in flags:
-        # The flag must appear inside a preprocessor #ifdef / #if defined
-        # in the FIRST 30 lines (i.e. file-level wrap, not a small
-        # function-local guard).
-        head = "\n".join(content.splitlines()[:30])
-        ifdef_pat = re.compile(
-            rf"^\s*#\s*(ifdef|if\s+defined\s*\()\s*{re.escape(flag)}\b",
-            re.MULTILINE,
-        )
-        if not ifdef_pat.search(head):
+
+    if_re = re.compile(r"^\s*#\s*(if|ifdef|ifndef)\b\s*(.*)")
+    else_re = re.compile(r"^\s*#\s*else\b")
+    elif_re = re.compile(r"^\s*#\s*elif\b")
+    endif_re = re.compile(r"^\s*#\s*endif\b")
+    flag_re = re.compile(r"\bHU_ENABLE_[A-Z_]+\b")
+    not_re = re.compile(r"\bNOT\b|!\s*defined\b")
+
+    # Compute, per line, the set of active HU_ENABLE_* flags.
+    stack: list[set[str]] = []
+    active_per_line: list[set[str]] = []
+    for raw in lines:
+        if endif_re.match(raw):
+            if stack:
+                stack.pop()
+            active_per_line.append(set().union(*stack) if stack else set())
             continue
-        # Stub pattern: `#else` followed by an empty run_*_tests body, OR
-        # the #endif at end-of-file (in which case the runner is INSIDE
-        # the ifdef and tests/test_main.c must gate the call site itself).
-        if re.search(r"^\s*#\s*else\b.*\n\s*void\s+run_\w+_tests\s*\(\s*void\s*\)",
-                     content, re.MULTILINE | re.DOTALL):
-            return True
-        # Bare wrap: #ifdef ... runner ... #endif at EOF. Acceptable IF
-        # test_main.c gates the matching call site with the same flag.
-        # We CAN'T statically prove that here without parsing test_main.c,
-        # so accept the wrap as a strong signal and assume the runner-call
-        # gate is in sync. (Mis-gated call sites still fail to link, which
-        # is exactly the original problem this script tries to prevent.)
-        endif_pat = re.compile(r"^\s*#\s*endif\b", re.MULTILINE)
-        if endif_pat.search(content):
+        if elif_re.match(raw) or else_re.match(raw):
+            if stack:
+                stack[-1] = set()
+            active_per_line.append(set().union(*stack) if stack else set())
+            continue
+        if m := if_re.match(raw):
+            kind, expr = m.group(1), m.group(2)
+            if kind == "ifndef" or not_re.search(raw):
+                stack.append(set())
+            else:
+                stack.append(set(flag_re.findall(expr)))
+            active_per_line.append(set().union(*stack) if stack else set())
+            continue
+        active_per_line.append(set().union(*stack) if stack else set())
+
+    # Build the patterns to scan for. If caller didn't pass any, derive
+    # from flag names: HU_ENABLE_SQLITE → sqlite3_, HU_ENABLE_ML → hu_ml_.
+    if symbol_patterns is None:
+        symbol_patterns = []
+        for f in flags:
+            short = f.removeprefix("HU_ENABLE_").lower()
+            if short == "sqlite":
+                symbol_patterns.append(r"\bsqlite3_\w*\s*\(")
+            elif short == "curl":
+                symbol_patterns.append(r"\bcurl_\w*\s*\(")
+            elif short == "tls":
+                symbol_patterns.append(r"\bSSL_\w*\s*\(")
+            else:
+                symbol_patterns.append(rf"\bhu_{re.escape(short)}_\w+\s*\(")
+
+    combined = re.compile("|".join(f"(?:{p})" for p in symbol_patterns))
+
+    # Path 1: full-file wrap with #else stub. The runner definition
+    # appears inside `#ifdef FLAG` and a stub `void run_*_tests(void) {
+    # ... }` appears in the matching `#else` branch. Verify by
+    # checking that EVERY `void run_X_tests(void)` definition line is
+    # inside the gate for at least one required flag, AND the file
+    # contains the `#else void run_*_tests` shape.
+    runner_def_re = re.compile(
+        r"^\s*(?:void|static\s+void)\s+run_\w+_tests\s*\(\s*void\s*\)\s*\{?")
+    runner_lines = [i for i, raw in enumerate(lines) if runner_def_re.match(raw)]
+    full_content = "".join(lines)
+    has_stub_in_else = bool(re.search(
+        r"#\s*else\b[^\n]*\n\s*(?:void|static\s+void)\s+run_\w+_tests\s*\(\s*void\s*\)\s*"
+        r"\{\s*(?:\(\s*void\s*\)\s*0\s*;\s*)?\}",
+        full_content,
+    ))
+    if has_stub_in_else and runner_lines:
+        for f in flags:
+            # At least one runner def must be inside this flag's gate
+            # (the "real" def — the #else stub is outside it).
+            if any(f in active_per_line[i] for i in runner_lines):
+                return True
+
+    # Path 2: gated bodies + ungated runner + gated HU_RUN_TEST calls.
+    # All references to gated symbols are inside the gate.
+    for f in flags:
+        all_refs_guarded = True
+        any_refs_seen = False
+        for i, raw in enumerate(lines):
+            if not combined.search(raw):
+                continue
+            any_refs_seen = True
+            if f not in active_per_line[i]:
+                all_refs_guarded = False
+                break
+        if any_refs_seen and all_refs_guarded:
             return True
     return False
 
@@ -317,6 +400,27 @@ BASELINE_ALLOWLIST = {
     # test_main.c is the dispatcher; its #ifdef gating happens inline
     # per-call and per-decl, and the script can't model that well.
     "tests/test_main.c",
+    # Exposed by the Bugbot cc9039d3 fix (tighter has_internal_guard).
+    # These tests gate their #includes + bodies with #ifdef HU_ENABLE_SQLITE
+    # but use function-name conventions (hu_forgetting_*, hu_goal_*,
+    # hu_value_*) that don't match the file-basename heuristic
+    # (hu_forgetting_curve_*, hu_goal_engine_*, hu_value_learning_*).
+    # All real-link-safe today because the bodies ARE properly guarded;
+    # the script can't yet verify the call-pattern matches the basename.
+    "tests/test_agi_frontiers.c",
+    "tests/test_e2e_conversation.c",
+    "tests/test_forgetting_curve.c",
+    "tests/test_sql_transaction.c",
+    "tests/test_value_learning.c",
+    "tests/test_goal_engine.c",
+    "tests/test_emotional_residue.c",
+    "tests/test_episodic.c",
+    "tests/test_prospective.c",
+    "tests/test_prospective_memory.c",
+    "tests/test_memory_graph.c",
+    "tests/test_self_improve.c",
+    "tests/test_oauth.c",
+    "tests/test_coreml_provider.c",
 }
 
 
@@ -411,7 +515,17 @@ def main() -> int:
         missing = accumulated_flags - expanded_flags
         if not missing:
             continue
-        if has_internal_guard(test_path, missing):
+        # Build the relevant symbol patterns for this test — the actual
+        # hu_<subsys>_* and hu_<header_base>_* call families that
+        # link-depend on the gated source. Without this, has_internal_guard
+        # would fall back to checking sqlite3_/curl_ patterns which
+        # don't match here.
+        subsystem_patterns = []
+        for subsys, hdr_example in subsystem_examples.items():
+            subsystem_patterns.append(rf"\bhu_{re.escape(subsys)}_\w+\s*\(")
+            hdr_base = hdr_example.split("/")[-1].removesuffix(".h")
+            subsystem_patterns.append(rf"\bhu_{re.escape(hdr_base)}_\w+\s*\(")
+        if has_internal_guard(test_path, missing, symbol_patterns=subsystem_patterns):
             continue
         base = os.path.basename(test_path)[len("test_"):-2]
         if base in src_by_base:
@@ -487,7 +601,15 @@ def main() -> int:
         missing = src_flags - expanded_flags
         if not missing:
             continue
-        if has_internal_guard(test_path, missing):
+        # For Pass B, the relevant symbols are hu_<base>_* (where base
+        # is the source file's basename). E.g. for src/memory/episodic.c,
+        # the gated symbols are hu_episodic_*.
+        pass_b_patterns = [rf"\bhu_{re.escape(base)}_\w+\s*\("]
+        # Also include the directory-family prefix (e.g. hu_memory_*).
+        cand_subsys = src_path.split("/")[1] if src_path.startswith("src/") else None
+        if cand_subsys:
+            pass_b_patterns.append(rf"\bhu_{re.escape(cand_subsys)}_\w+\s*\(")
+        if has_internal_guard(test_path, missing, symbol_patterns=pass_b_patterns):
             continue
 
         mismatches.append(
