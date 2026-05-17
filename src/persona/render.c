@@ -285,11 +285,51 @@ static size_t truncate_at_boundary(char *buf, size_t len, size_t cap) {
     return cap;
 }
 
+/* --- Effective formality (warmth override) -------------------------------- */
+
+/* Pure: returns the effective formality string given an overlay's formality
+ * and an optional contact's warmth_level. Implements the warmth-override rule
+ * described in include/human/persona.h. */
+const char *hu_persona_effective_formality(const char *overlay_formality,
+                                           const char *contact_warmth) {
+    if (!contact_warmth || !*contact_warmth)
+        return overlay_formality;
+
+    bool close = str_contains_ci(contact_warmth, "close") ||
+                 str_contains_ci(contact_warmth, "high") || str_contains_ci(contact_warmth, "warm");
+    if (!close)
+        return overlay_formality;
+
+    /* Closeness overrides only when overlay is unset OR formal-leaning.
+     * If overlay is already casual we don't double-cast it.
+     *
+     * Order matters: check casual BEFORE formal because "informal" contains
+     * "formal" as a substring — naive str_contains_ci("informal", "formal")
+     * returns true, which would falsely tag the overlay as formal and
+     * downgrade it to "casual" when it's already casual. The casual-first
+     * gate short-circuits before the formal check is consulted.
+     * Regression-pinned by effective_formality_close_with_casual_overlay_unchanged. */
+    if (!overlay_formality || !*overlay_formality)
+        return "casual";
+    bool overlay_casual = str_contains_ci(overlay_formality, "casual") ||
+                          str_contains_ci(overlay_formality, "informal");
+    if (overlay_casual)
+        return overlay_formality;
+    bool overlay_formal = str_contains_ci(overlay_formality, "formal") ||
+                          str_contains_ci(overlay_formality, "professional");
+    if (overlay_formal)
+        return "casual";
+
+    return overlay_formality;
+}
+
 /* --- Public entry point --------------------------------------------------- */
 
-hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, const char *raw_text,
-                                         size_t raw_len, hu_allocator_t *alloc, char **out_rendered,
-                                         size_t *out_rendered_len) {
+hu_error_t hu_persona_render_for_channel_with_warmth(const hu_persona_overlay_t *overlay,
+                                                     const char *contact_warmth,
+                                                     const char *raw_text, size_t raw_len,
+                                                     hu_allocator_t *alloc, char **out_rendered,
+                                                     size_t *out_rendered_len) {
     if (!alloc || !alloc->alloc || !alloc->free || !out_rendered)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -335,12 +375,16 @@ hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, co
         }
     }
 
-    /* Stage 2: formality policy. */
-    if (overlay->formality && *overlay->formality) {
-        bool make_formal = str_contains_ci(overlay->formality, "formal") ||
-                           str_contains_ci(overlay->formality, "professional");
-        bool make_casual = (!make_formal) && (str_contains_ci(overlay->formality, "casual") ||
-                                              str_contains_ci(overlay->formality, "informal"));
+    /* Stage 2: formality policy. The effective formality combines the
+     * channel overlay with the contact's warmth_level (when provided):
+     * a "close" / "high" / "warm" contact downgrades an otherwise formal
+     * overlay to casual. See hu_persona_effective_formality. */
+    const char *eff_formality = hu_persona_effective_formality(overlay->formality, contact_warmth);
+    if (eff_formality && *eff_formality) {
+        bool make_formal = str_contains_ci(eff_formality, "formal") ||
+                           str_contains_ci(eff_formality, "professional");
+        bool make_casual = (!make_formal) && (str_contains_ci(eff_formality, "casual") ||
+                                              str_contains_ci(eff_formality, "informal"));
         if (make_formal) {
             /* Formal overlay also strips emoji even if emoji_usage isn't
              * explicitly "none" — formal channels (Slack) never emit emoji.
@@ -396,4 +440,14 @@ hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, co
     if (out_rendered_len)
         *out_rendered_len = blen;
     return HU_OK;
+}
+
+/* Original public entry — wraps the warmth-aware variant with NULL warmth.
+ * All callers that don't have a contact in hand (slack / telegram / discord /
+ * legacy paths) keep their existing behavior exactly. */
+hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, const char *raw_text,
+                                         size_t raw_len, hu_allocator_t *alloc, char **out_rendered,
+                                         size_t *out_rendered_len) {
+    return hu_persona_render_for_channel_with_warmth(overlay, NULL, raw_text, raw_len, alloc,
+                                                     out_rendered, out_rendered_len);
 }
