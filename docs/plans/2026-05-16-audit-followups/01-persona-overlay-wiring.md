@@ -102,3 +102,47 @@ PR. Behavior is identical; the helper is reused.
 - **Test mock divergence.** Existing channel mocks don't see the overlay
   layer. *Mitigation:* AC-6 — overlay==NULL must be no-op, so mocks keep
   passing without modification.
+
+## Status update (2026-05-17)
+
+**Tier-1 shipped.** All four Tier-1 channels now apply
+`hu_persona_render_for_channel` to outbound text before transmission:
+
+| Channel  | Wiring site                                             | Setter                       |
+|----------|---------------------------------------------------------|------------------------------|
+| Telegram | `src/channels/telegram.c:755-770` (top of `telegram_send`) | `hu_telegram_set_persona`    |
+| Discord  | `src/channels/discord.c:129-142` (top of `discord_send`)   | `hu_discord_set_persona`     |
+| Slack    | `src/channels/slack.c:517-530` (top of `slack_send`)       | `hu_slack_set_persona`       |
+| iMessage | `src/channels/imessage.c:1317-1332` (test) / `1364-1380` (production, BEFORE markdown strip & sanitizer) | `hu_imessage_set_persona` |
+
+The helper itself lives in `src/persona/render.c` (declaration:
+`include/human/persona.h:587-614`). Tests:
+`tests/test_persona_overlay_render.c` (12 helper-level tests, all PASS)
+and `tests/test_channel_overlay_apply.c` (9 per-channel + cross-channel
+tests, all PASS). Full suite: 10668/10668 passed, 0 ASan errors.
+
+**Still TODO — fan-out to ~39 non-Tier-1 channels.** None of the
+remaining channels have been wired. Categories grouped by similarity for
+follow-up dispatch:
+
+- **Chat (similar to Slack/Discord):** mattermost, teams, google_chat,
+  matrix, irc, dingtalk, lark, qq, onebot, line.
+- **SMS/IM (similar to iMessage/Telegram):** twilio, whatsapp, signal,
+  google_rcs.
+- **Social/post (different surface — overlay applies but length/format
+  rules will need per-channel buckets):** facebook, instagram, twitter,
+  tiktok, nostr.
+- **Email (presentation-heavy — overlay should apply to body only):**
+  email, imap, gmail.
+- **Voice / non-text:** voice_channel (skip — overlay schema differs;
+  see "Out of scope" above).
+- **Embedded / hardware:** mqtt, maixcam (low priority; minimal text
+  surface).
+- **CLI / web:** cli, web, pwa (review whether overlay applies — these
+  are dev surfaces, not user-facing).
+
+Each is a near-mechanical copy of the Telegram pattern:
+add `const hu_persona_t *persona` to the ctx struct, expose
+`hu_<chan>_set_persona`, and call `hu_persona_render_for_channel` with
+the channel's own name string at the top of the send function. The
+`overlay==NULL` no-op guarantee keeps existing tests green.

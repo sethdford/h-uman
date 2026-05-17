@@ -618,6 +618,33 @@ void hu_persona_example_banks_free(hu_allocator_t *alloc, hu_persona_example_ban
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
                                                     const char *channel, size_t channel_len);
 
+/* Render outbound text for a channel by applying its persona overlay.
+ *
+ * Behavior (in fixed order):
+ *   1. If overlay->emoji_usage is "none" / "no" / "off" / "never", strip emoji.
+ *   2. If overlay->formality contains "formal" or "professional", apply
+ *      casual-to-formal lexical swaps ("hey" -> "hello", "yeah" -> "yes",
+ *      "gonna" -> "going to", etc.) and capitalize the first letter.
+ *      If overlay->formality contains "casual" or "informal", apply the
+ *      reverse swaps and lowercase the first letter.
+ *   3. If overlay->avg_length is "short" or has the form "max_chars=NNN",
+ *      truncate the output to at most NNN bytes (default short = 200).
+ *      For length=="short", truncates at the last sentence boundary
+ *      within 200 bytes when possible.
+ *
+ * When overlay is NULL, the output is a heap-allocated copy of raw_text
+ * (no transforms). When raw_text is NULL or raw_len == 0, returns OK with
+ * an empty string ("").
+ *
+ * Caller owns *out_rendered and *out_rendered_len; free with
+ * alloc->free(alloc->ctx, *out_rendered, *out_rendered_len + 1).
+ *
+ * Returns HU_OK on success. HU_ERR_INVALID_ARGUMENT if alloc or
+ * out_rendered is NULL. HU_ERR_OUT_OF_MEMORY on allocation failure. */
+hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, const char *raw_text,
+                                         size_t raw_len, hu_allocator_t *alloc, char **out_rendered,
+                                         size_t *out_rendered_len);
+
 const hu_contact_profile_t *hu_persona_find_contact(const hu_persona_t *persona,
                                                     const char *contact_id, size_t contact_id_len);
 

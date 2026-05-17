@@ -1085,6 +1085,7 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/render.c
     src/persona/examples.c
     src/persona/sampler.c
     src/persona/analyzer.c
@@ -2091,6 +2092,12 @@ if(HU_ENABLE_ASAN)
     target_link_options(human_core PRIVATE -fsanitize=address)
 endif()
 
+# src/onboard.c carries the starter persona JSON as a C string literal that
+# exceeds the 4095-byte ISO C99 maximum. This is intentional (the literal is
+# the single source of truth shared by `human init` and `human onboard`);
+# disable the warning for that file only.
+set_source_files_properties(src/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
+
 # --- Main executable ---
 add_executable(human src/main.c src/bootstrap.c)
 target_link_libraries(human human_core)
@@ -2661,6 +2668,8 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_persona_overlay_render.c
+    tests/test_channel_overlay_apply.c
     tests/test_personal_model_simulation.c
     tests/test_personal_model_fidelity_v2.c
     tests/test_persona_directive_channels.c

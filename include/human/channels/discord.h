@@ -22,6 +22,10 @@ hu_error_t hu_discord_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_
 
 void hu_discord_destroy(hu_channel_t *ch);
 
+/* See hu_telegram_set_persona for the contract. Channel name is "discord". */
+struct hu_persona;
+void hu_discord_set_persona(hu_channel_t *ch, const struct hu_persona *persona);
+
 #if HU_IS_TEST
 hu_error_t hu_discord_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                        size_t session_key_len, const char *content,
@@ -40,9 +44,9 @@ typedef struct {
 } hu_discord_test_msg_opts_t;
 
 hu_error_t hu_discord_test_inject_mock_full(hu_channel_t *ch, const char *session_key,
-                                             size_t session_key_len, const char *content,
-                                             size_t content_len,
-                                             const hu_discord_test_msg_opts_t *opts);
+                                            size_t session_key_len, const char *content,
+                                            size_t content_len,
+                                            const hu_discord_test_msg_opts_t *opts);
 #endif
 
 #endif /* HU_CHANNELS_DISCORD_H */
