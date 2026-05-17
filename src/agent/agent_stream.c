@@ -1498,6 +1498,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                             safe_owned = false;
                         } else {
                             hu_agent_m3_on_provider_success(agent);
+                            /* B1 redefined (2026-05-17 r2): also record a structured
+                             * outcome so the future training loop has signal beyond
+                             * just "the hook fired". Latency is 0 here (not threaded
+                             * through retry yet); contact_id is the agent's session
+                             * id when set. */
+                            hu_agent_m3_record_chat_outcome(
+                                agent, msg, msg_len, safe_content, safe_content_len,
+                                /*latency_ms=*/0, agent->memory_session_id,
+                                agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
+                                /*turn_kind=stream=*/1);
                             safe_owned = true;
                             hu_log_warn("agent_stream", agent->observer,
                                         "response_guard RECOVERED: stream retry passed (len=%zu, "

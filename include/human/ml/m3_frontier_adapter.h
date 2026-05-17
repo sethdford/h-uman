@@ -101,6 +101,75 @@ const char *hu_ml_lora_persona_caveat_doc_path(void);
  * block aligns visually with the rest of the CLI output. */
 const char *hu_ml_lora_persona_caveat_block(void);
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B1 (redefined 2026-05-17): inference outcome capture
+ *
+ * The probe counter from Phase B-pre proves the chat-path hooks REACH
+ * the adapter. This phase captures WHAT they reach with: a structured
+ * outcome record per inference, accumulated in a ring buffer the
+ * future training loop can pull from.
+ *
+ * Why a ring buffer:
+ *   - O(1) append under lock contention from concurrent turn paths.
+ *   - Fixed memory ceiling (~384 KB at 4096 capacity).
+ *   - Training reads via batched snapshot; no per-record locks.
+ *
+ * Why hashes, not raw content:
+ *   - Privacy: structural — the adapter's RAM never holds raw
+ *     prompt/response text. The conversation DB (under proper memory
+ *     governance) remains the canonical source of content.
+ *   - Dedup: 64-bit hashes let the training loop drop duplicate-prompt
+ *     samples without re-reading the DB.
+ *   - Correlation: contact_id_hash links an outcome to a per-contact
+ *     training partition without leaking contact identity in RAM.
+ * ───────────────────────────────────────────────────────────────── */
+
+#define HU_M3_OUTCOMES_RING_CAPACITY 4096u
+#define HU_M3_OUTCOME_RECORD_BYTES   96u
+
+typedef enum hu_m3_guard_decision {
+    HU_M3_GUARD_UNKNOWN = 0,
+    HU_M3_GUARD_PASS = 1,
+    HU_M3_GUARD_REWRITE = 2,
+    HU_M3_GUARD_REJECT = 3,
+} hu_m3_guard_decision_t;
+
+typedef struct hu_m3_inference_outcome {
+    uint64_t timestamp_unix_ms; /* wall clock at record time */
+    uint64_t latency_ms;        /* inference duration */
+    uint64_t prompt_hash;       /* FNV-1a of the system+user prompt */
+    uint64_t response_hash;     /* FNV-1a of the model's output */
+    uint64_t contact_id_hash;   /* FNV-1a of contact_id; 0 = no contact */
+    uint32_t prompt_tokens;     /* prompt token count if known; 0 = unknown */
+    uint32_t completion_tokens; /* completion token count if known */
+    uint16_t model_id;          /* small id of active model (config-mapped) */
+    uint16_t adapter_id;        /* small id of active LoRA adapter; 0 = none */
+    uint8_t guard_decision;     /* hu_m3_guard_decision_t cast to byte */
+    uint8_t turn_kind;          /* 0 = unknown, 1 = stream, 2 = batch, 3 = proactive */
+    uint8_t reserved[38];       /* keep record exactly 96 bytes (8-aligned) */
+} hu_m3_inference_outcome_t;
+
+/* Record an outcome into the ring. NULL adapter is a no-op (returns
+ * HU_OK) so callers don't need to gate. The record is COPIED. */
+hu_error_t hu_m3_frontier_adapter_record_outcome(hu_m3_frontier_adapter_t *adapter,
+                                                 const hu_m3_inference_outcome_t *outcome);
+
+/* Total outcomes ever recorded (monotonic, NOT capped to ring size).
+ * Useful for "the hook fired N times since boot" assertions. */
+uint64_t hu_m3_frontier_adapter_outcomes_recorded(const hu_m3_frontier_adapter_t *adapter);
+
+/* Snapshot up to `max_count` most-recent outcomes into `out_buf`, oldest
+ * first within the snapshot. Writes count into *out_count. NULL adapter
+ * writes 0 and returns HU_OK. */
+hu_error_t hu_m3_frontier_adapter_snapshot_outcomes(const hu_m3_frontier_adapter_t *adapter,
+                                                    hu_m3_inference_outcome_t *out_buf,
+                                                    size_t max_count, size_t *out_count);
+
+/* Pure helper: deterministic FNV-1a 64-bit hash. Used by the agent
+ * paths to compute prompt_hash / response_hash without depending on
+ * the daemon's hash module. */
+uint64_t hu_m3_outcome_hash_bytes(const void *data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

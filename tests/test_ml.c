@@ -5014,6 +5014,228 @@ static void test_m3_agent_on_provider_success_advances_probe_count(void) {
 #endif
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B1 redefined (2026-05-17 round 2): inference outcome capture
+ *
+ * Tests for the ring-buffer outcome capture API. Tests are phrased to
+ * pin behavior, not the implementation:
+ *   - hash determinism + null/empty handling
+ *   - record_outcome null-safety
+ *   - ring buffer wrap semantics (oldest dropped, snapshot ordering)
+ *   - struct size pinned by static_assert (compile time), reasserted
+ *     in test (runtime) so a struct grow won't silently slip past CI.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* Tiny helper: open a fixture adapter at /tmp. */
+static hu_m3_frontier_adapter_t *open_fixture_adapter(hu_allocator_t *alloc, const char *path) {
+    FILE *fp = fopen(path, "wb");
+    if (!fp)
+        return NULL;
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    if (fwrite(blob, 1, sizeof(blob), fp) != sizeof(blob)) {
+        fclose(fp);
+        return NULL;
+    }
+    fclose(fp);
+    hu_m3_frontier_adapter_t *a = NULL;
+    if (hu_m3_frontier_adapter_try_open(alloc, path, strlen(path), &a) != HU_OK)
+        return NULL;
+    return a;
+}
+
+static void test_m3_outcome_record_size_is_pinned(void) {
+    /* The static_assert in src/ml/m3_frontier_adapter.c is the compile-
+     * time guard; this test makes the contract explicit and provides a
+     * runtime check that future field additions can't silently bypass
+     * via header-only patches. */
+    HU_ASSERT_EQ((unsigned long)sizeof(hu_m3_inference_outcome_t),
+                 (unsigned long)HU_M3_OUTCOME_RECORD_BYTES);
+}
+
+static void test_m3_outcome_hash_bytes_deterministic(void) {
+    const char *s = "hello, world";
+    uint64_t a = hu_m3_outcome_hash_bytes(s, strlen(s));
+    uint64_t b = hu_m3_outcome_hash_bytes(s, strlen(s));
+    HU_ASSERT_EQ((unsigned long)a, (unsigned long)b);
+    /* Different input → different hash (FNV-1a doesn't collide for
+     * short, distinct ASCII inputs). */
+    const char *t = "hello, world!";
+    uint64_t c = hu_m3_outcome_hash_bytes(t, strlen(t));
+    HU_ASSERT_TRUE(a != c);
+}
+
+static void test_m3_outcome_hash_bytes_null_returns_zero(void) {
+    /* 0 is the "no value" sentinel for the outcome struct (e.g. no
+     * contact context). NULL/empty input MUST map to 0 — without this,
+     * the training loop couldn't distinguish "no contact" from
+     * "contact 0x0000…00". */
+    HU_ASSERT_EQ((unsigned long)hu_m3_outcome_hash_bytes(NULL, 0), 0ULL);
+    HU_ASSERT_EQ((unsigned long)hu_m3_outcome_hash_bytes("", 0), 0ULL);
+    HU_ASSERT_EQ((unsigned long)hu_m3_outcome_hash_bytes("anything", 0), 0ULL);
+}
+
+static void test_m3_outcome_hash_bytes_never_returns_zero_for_real_input(void) {
+    /* Implementation bumps FNV-1a's rare zero result to 1 so callers
+     * can distinguish "hash is zero" from "no hash". This test pins
+     * that contract; if a future hash swap drops the bump, the
+     * sentinel semantics break and this test catches it. */
+    /* We cannot easily find a real input that hashes to zero under
+     * FNV-1a (the space is too large to brute-force in a unit test),
+     * so we settle for the strong invariant: every non-empty input
+     * produces a non-zero hash. */
+    const char *cases[] = {"a", "x", "seth", "an awkward prompt", "0"};
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        uint64_t h = hu_m3_outcome_hash_bytes(cases[i], strlen(cases[i]));
+        HU_ASSERT_TRUE(h != 0ULL);
+    }
+}
+
+static void test_m3_record_outcome_null_adapter_is_noop(void) {
+    /* NULL adapter is the "M3 disabled" path — callers don't gate. */
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(NULL, &outcome), HU_OK);
+    /* No state to verify on NULL adapter — just that we returned OK. */
+}
+
+static void test_m3_record_outcome_null_record_is_invalid(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_rec_null.bin");
+    HU_ASSERT_NOT_NULL(a);
+    /* NULL outcome with a valid adapter is a programming error. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), 0ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_recorded_starts_at_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_rec_zero.bin");
+    HU_ASSERT_NOT_NULL(a);
+    HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), 0ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_recorded_advances_per_record(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_rec_advance.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    outcome.timestamp_unix_ms = 1700000000000ULL;
+    outcome.latency_ms = 42;
+    outcome.prompt_hash = 0x1234567890abcdefULL;
+    outcome.guard_decision = HU_M3_GUARD_PASS;
+
+    for (int i = 1; i <= 5; i++) {
+        HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, &outcome), HU_OK);
+        HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), (unsigned long)i);
+    }
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_snapshot_outcomes_empty_returns_zero_count(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_snap_empty.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t buf[8];
+    size_t count = 999;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(a, buf, 8, &count), HU_OK);
+    HU_ASSERT_EQ((unsigned long)count, 0ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_snapshot_outcomes_returns_oldest_first(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_snap_order.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    /* Use timestamp as a per-record marker; latency is the index for
+     * easier debug if the test fails. */
+    for (int i = 0; i < 5; i++) {
+        outcome.timestamp_unix_ms = 1700000000000ULL + (uint64_t)i;
+        outcome.latency_ms = (uint64_t)i;
+        HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, &outcome), HU_OK);
+    }
+
+    hu_m3_inference_outcome_t buf[10];
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(a, buf, 10, &count), HU_OK);
+    HU_ASSERT_EQ((unsigned long)count, 5ULL);
+    /* Oldest-first: buf[0] is the i=0 record, buf[4] is i=4. */
+    for (int i = 0; i < 5; i++) {
+        HU_ASSERT_EQ((unsigned long)buf[i].latency_ms, (unsigned long)i);
+    }
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_snapshot_outcomes_drops_oldest_when_wrapped(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_snap_wrap.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    /* Write CAPACITY + 100 outcomes — the first 100 should be
+     * overwritten (dropped); the snapshot should return the most-recent
+     * CAPACITY records in oldest-first order starting from index 100. */
+    const size_t over = HU_M3_OUTCOMES_RING_CAPACITY + 100u;
+    for (size_t i = 0; i < over; i++) {
+        outcome.latency_ms = (uint64_t)i;
+        HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, &outcome), HU_OK);
+    }
+    HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), (unsigned long)over);
+
+    /* Snapshot the full ring. */
+    hu_m3_inference_outcome_t *buf = (hu_m3_inference_outcome_t *)alloc.alloc(
+        alloc.ctx, sizeof(*buf) * HU_M3_OUTCOMES_RING_CAPACITY);
+    HU_ASSERT_NOT_NULL(buf);
+    size_t count = 0;
+    HU_ASSERT_EQ(
+        hu_m3_frontier_adapter_snapshot_outcomes(a, buf, HU_M3_OUTCOMES_RING_CAPACITY, &count),
+        HU_OK);
+    HU_ASSERT_EQ((unsigned long)count, (unsigned long)HU_M3_OUTCOMES_RING_CAPACITY);
+    /* buf[0] is the oldest LIVE record. Since we wrote over+100 and the
+     * ring holds CAPACITY, the oldest live latency value is 100. */
+    HU_ASSERT_EQ((unsigned long)buf[0].latency_ms, 100ULL);
+    HU_ASSERT_EQ((unsigned long)buf[HU_M3_OUTCOMES_RING_CAPACITY - 1].latency_ms,
+                 (unsigned long)(over - 1));
+    alloc.free(alloc.ctx, buf, sizeof(*buf) * HU_M3_OUTCOMES_RING_CAPACITY);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_snapshot_outcomes_max_count_caps_output(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_snap_cap.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    for (int i = 0; i < 10; i++) {
+        outcome.latency_ms = (uint64_t)i;
+        HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, &outcome), HU_OK);
+    }
+
+    /* Ask for only the 3 most recent — should return i=7,8,9. */
+    hu_m3_inference_outcome_t buf[3];
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(a, buf, 3, &count), HU_OK);
+    HU_ASSERT_EQ((unsigned long)count, 3ULL);
+    HU_ASSERT_EQ((unsigned long)buf[0].latency_ms, 7ULL);
+    HU_ASSERT_EQ((unsigned long)buf[1].latency_ms, 8ULL);
+    HU_ASSERT_EQ((unsigned long)buf[2].latency_ms, 9ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
 /* ── Track D D2.1 — honest-gap caveat snapshot tests ──────────────────
  *
  * These tests pin the user-facing caveat strings that `human ml
@@ -5556,4 +5778,29 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_lora_persona_caveat_block_disclaims_frontier);
     HU_RUN_TEST(test_lora_persona_caveat_block_uses_consistent_prefix);
     HU_RUN_TEST(test_lora_persona_caveat_block_has_bridge_doc_reference);
+
+    /* Phase B-pre (2026-05-17): probe-counter observability seam. These
+     * tests existed but were not registered — silent dead code until
+     * the 2026-05-17 round 2 audit found them. Registering now. */
+    HU_RUN_TEST(test_m3_probe_count_starts_at_zero);
+    HU_RUN_TEST(test_m3_probe_infer_increments_counter);
+    HU_RUN_TEST(test_m3_probe_count_null_safe);
+    HU_RUN_TEST(test_m3_agent_on_provider_success_advances_probe_count);
+
+    /* Phase B1 redefined (2026-05-17 round 2): inference outcome capture
+     * — ring buffer + structured per-call records the future training
+     * loop can consume. See docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md
+     * Phase B1 (redefined) for the design. */
+    HU_RUN_TEST(test_m3_outcome_record_size_is_pinned);
+    HU_RUN_TEST(test_m3_outcome_hash_bytes_deterministic);
+    HU_RUN_TEST(test_m3_outcome_hash_bytes_null_returns_zero);
+    HU_RUN_TEST(test_m3_outcome_hash_bytes_never_returns_zero_for_real_input);
+    HU_RUN_TEST(test_m3_record_outcome_null_adapter_is_noop);
+    HU_RUN_TEST(test_m3_record_outcome_null_record_is_invalid);
+    HU_RUN_TEST(test_m3_outcomes_recorded_starts_at_zero);
+    HU_RUN_TEST(test_m3_outcomes_recorded_advances_per_record);
+    HU_RUN_TEST(test_m3_snapshot_outcomes_empty_returns_zero_count);
+    HU_RUN_TEST(test_m3_snapshot_outcomes_returns_oldest_first);
+    HU_RUN_TEST(test_m3_snapshot_outcomes_drops_oldest_when_wrapped);
+    HU_RUN_TEST(test_m3_snapshot_outcomes_max_count_caps_output);
 }

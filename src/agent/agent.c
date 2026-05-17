@@ -1017,6 +1017,48 @@ void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
         return;
     (void)hu_m3_frontier_adapter_noop_infer(agent->m3_adapter);
 }
+
+void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
+                                     const char *response, size_t response_len, uint64_t latency_ms,
+                                     const char *contact_id, size_t contact_id_len,
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind) {
+    /* Defensive no-op shape mirrors hu_agent_m3_on_provider_success so
+     * callers in agent_stream / agent_turn don't have to gate the call.
+     * The hot path is "agent has no M3 adapter attached" and that path
+     * must be free. */
+    if (!agent || !agent->m3_adapter)
+        return;
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+
+    /* Wall clock at record time, not at request start — gives the
+     * training loop a "last seen" anchor. latency_ms (the caller's
+     * own measurement) holds the actual inference duration so the
+     * loop can derive request start by subtraction if needed. */
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        outcome.timestamp_unix_ms =
+            (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+    }
+    outcome.latency_ms = latency_ms;
+    outcome.prompt_hash = hu_m3_outcome_hash_bytes(prompt, prompt_len);
+    outcome.response_hash = hu_m3_outcome_hash_bytes(response, response_len);
+    outcome.contact_id_hash = hu_m3_outcome_hash_bytes(contact_id, contact_id_len);
+    /* prompt_tokens / completion_tokens: 0 = unknown. The agent path
+     * doesn't have exact tokenizer output cheaply available, so we
+     * leave these unset for this slice. The training loop can derive
+     * an estimate from prompt_len / response_len if needed. A future
+     * phase wires real token counts from the provider response. */
+    outcome.guard_decision = (uint8_t)guard_decision;
+    outcome.turn_kind = turn_kind;
+    /* model_id / adapter_id: 0 = unknown. Mapping is a config-driven
+     * follow-up — we'll add a small table in personalization config
+     * (model_name -> uint16, adapter_path -> uint16) so outcomes
+     * cluster cleanly without storing the full path strings. */
+
+    (void)hu_m3_frontier_adapter_record_outcome(agent->m3_adapter, &outcome);
+}
 #else
 void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
     (void)agent;
@@ -1025,6 +1067,22 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
     (void)agent;
+}
+
+void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
+                                     const char *response, size_t response_len, uint64_t latency_ms,
+                                     const char *contact_id, size_t contact_id_len,
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind) {
+    (void)agent;
+    (void)prompt;
+    (void)prompt_len;
+    (void)response;
+    (void)response_len;
+    (void)latency_ms;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)guard_decision;
+    (void)turn_kind;
 }
 #endif
 
