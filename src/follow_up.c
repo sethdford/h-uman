@@ -165,3 +165,30 @@ hu_followup_decision_t hu_followup_decide(const hu_followup_input_t *in) {
     out.template_text = tmpl;
     return out;
 }
+
+/* ── Idempotency ring ───────────────────────────────────────────────────── */
+
+void hu_followup_dedup_init(hu_followup_dedup_t *d) {
+    if (!d)
+        return;
+    for (size_t i = 0; i < HU_FOLLOWUP_DEDUP_SIZE; i++)
+        d->recent_msg_ids[i] = 0;
+    d->next_slot = 0;
+}
+
+bool hu_followup_dedup_seen(const hu_followup_dedup_t *d, int64_t msg_id) {
+    if (!d || msg_id <= 0)
+        return false;
+    for (size_t i = 0; i < HU_FOLLOWUP_DEDUP_SIZE; i++) {
+        if (d->recent_msg_ids[i] == msg_id)
+            return true;
+    }
+    return false;
+}
+
+void hu_followup_dedup_record(hu_followup_dedup_t *d, int64_t msg_id) {
+    if (!d || msg_id <= 0)
+        return;
+    d->recent_msg_ids[d->next_slot] = msg_id;
+    d->next_slot = (d->next_slot + 1) % HU_FOLLOWUP_DEDUP_SIZE;
+}

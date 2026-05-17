@@ -326,6 +326,68 @@ static void followup_decide_null_input_returns_no_schedule(void) {
     HU_ASSERT(d.template_text == NULL);
 }
 
+/* ── Idempotency ring ───────────────────────────────────────────────────── */
+
+static void followup_dedup_init_clears_ring(void) {
+    /* Init must zero the slots so a stack-allocated ring with garbage
+     * contents doesn't falsely report seen=true on first probe. */
+    hu_followup_dedup_t d;
+    /* Pollute the struct with a sentinel pattern. */
+    for (size_t i = 0; i < HU_FOLLOWUP_DEDUP_SIZE; i++)
+        d.recent_msg_ids[i] = 0x5555AAAA5555AAAALL;
+    d.next_slot = 999;
+
+    hu_followup_dedup_init(&d);
+
+    HU_ASSERT_EQ(d.next_slot, 0u);
+    HU_ASSERT_FALSE(hu_followup_dedup_seen(&d, 0x5555AAAA5555AAAALL));
+}
+
+static void followup_dedup_record_then_seen_returns_true(void) {
+    hu_followup_dedup_t d;
+    hu_followup_dedup_init(&d);
+    hu_followup_dedup_record(&d, 42);
+    HU_ASSERT_TRUE(hu_followup_dedup_seen(&d, 42));
+}
+
+static void followup_dedup_seen_on_empty_returns_false(void) {
+    hu_followup_dedup_t d;
+    hu_followup_dedup_init(&d);
+    HU_ASSERT_FALSE(hu_followup_dedup_seen(&d, 42));
+}
+
+static void followup_dedup_null_handling(void) {
+    /* Defensive: NULL ring and non-positive msg_id are no-ops, not crashes. */
+    HU_ASSERT_FALSE(hu_followup_dedup_seen(NULL, 42));
+    hu_followup_dedup_record(NULL, 42); /* must not crash */
+
+    hu_followup_dedup_t d;
+    hu_followup_dedup_init(&d);
+    hu_followup_dedup_record(&d, 0);  /* no-op */
+    hu_followup_dedup_record(&d, -1); /* no-op */
+    HU_ASSERT_FALSE(hu_followup_dedup_seen(&d, 0));
+    HU_ASSERT_FALSE(hu_followup_dedup_seen(&d, -1));
+}
+
+static void followup_dedup_overwrites_oldest_after_capacity(void) {
+    /* After 32 records, slot 0 should hold the 33rd entry, not the first.
+     * Pin: the first entry is no longer "seen" after wrap, the recent ones are. */
+    hu_followup_dedup_t d;
+    hu_followup_dedup_init(&d);
+    /* Fill the ring with ids 1..32 */
+    for (int64_t i = 1; i <= HU_FOLLOWUP_DEDUP_SIZE; i++)
+        hu_followup_dedup_record(&d, i);
+    HU_ASSERT_TRUE(hu_followup_dedup_seen(&d, 1));
+    HU_ASSERT_TRUE(hu_followup_dedup_seen(&d, HU_FOLLOWUP_DEDUP_SIZE));
+
+    /* Record one more — overwrites slot 0 (which had id=1). */
+    hu_followup_dedup_record(&d, 999);
+    HU_ASSERT_FALSE(hu_followup_dedup_seen(&d, 1));
+    HU_ASSERT_TRUE(hu_followup_dedup_seen(&d, 999));
+    /* Mid-ring ids still present */
+    HU_ASSERT_TRUE(hu_followup_dedup_seen(&d, 16));
+}
+
 /* ── Registration ───────────────────────────────────────────────────────── */
 
 void run_follow_up_tests(void);
@@ -362,4 +424,10 @@ void run_follow_up_tests(void) {
     HU_RUN_TEST(followup_decide_close_friend_yields_decision);
     HU_RUN_TEST(followup_decide_none_warmth_returns_no_schedule);
     HU_RUN_TEST(followup_decide_null_input_returns_no_schedule);
+
+    HU_RUN_TEST(followup_dedup_init_clears_ring);
+    HU_RUN_TEST(followup_dedup_record_then_seen_returns_true);
+    HU_RUN_TEST(followup_dedup_seen_on_empty_returns_false);
+    HU_RUN_TEST(followup_dedup_null_handling);
+    HU_RUN_TEST(followup_dedup_overwrites_oldest_after_capacity);
 }
