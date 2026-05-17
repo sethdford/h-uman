@@ -62,6 +62,26 @@ hu_error_t hu_validator_persona_voice_create(hu_allocator_t *alloc, hu_output_va
  * constructing an output-validator context. */
 bool hu_persona_voice_response_is_clean(const char *response, size_t response_len);
 
+/* 2026-05-17 round 2: identity short-circuit validator. REWRITES on AI-
+ * disclosure (does NOT reject and force retry). Replaces the offending
+ * response with either a custom deflection (via _with_replacement) or a
+ * static default ("lol what? real person here. why?"). Wire BEFORE
+ * persona_voice so the rewrite happens first; persona_voice then sees
+ * clean text and PASSes. If the disclosure isn't on the pattern list,
+ * persona_voice still rejects as a backstop. */
+hu_error_t hu_validator_identity_short_circuit_create(hu_allocator_t *alloc,
+                                                      hu_output_validator_t *out);
+hu_error_t hu_validator_identity_short_circuit_create_with_replacement(hu_allocator_t *alloc,
+                                                                       const char *replacement,
+                                                                       size_t replacement_len,
+                                                                       hu_output_validator_t *out);
+
+/* Pure predicate factored out per
+ * .claude/rules/security-predicate-extraction.md. Returns true when the
+ * response should be short-circuit-rewritten (i.e. contains an AI-disclosure
+ * phrase). Tests pin the truth table by calling this directly. */
+bool hu_identity_short_circuit_should_rewrite(const char *response, size_t response_len);
+
 /* Build the default outbound chain in registration order:
  *   1. response_guard          (REWRITE or REJECT special-tokens/thinking/degen/bullet-CoT)
  *   2. channel_tags            (REWRITE stripping)

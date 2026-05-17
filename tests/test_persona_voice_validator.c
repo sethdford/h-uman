@@ -177,11 +177,18 @@ static void validator_name_is_stable(void) {
  * Chain integration: persona_voice must be wired into the default chain
  * -------------------------------------------------------------------------- */
 
-static void default_chain_rejects_hard_disclosure_end_to_end(void) {
+static void default_chain_suppresses_hard_disclosure_end_to_end(void) {
     /* The integration test. The doctrine claim is: a model that emits hard
      * AI-disclosure under adversarial probe gets its message SUPPRESSED by
      * the default chain — not silently passed through after the strippers
-     * fail to find a removable prefix. */
+     * fail to find a removable prefix.
+     *
+     * 2026-05-17 round 2: identity_short_circuit now runs BEFORE
+     * persona_voice and REWRITES disclosure to a deflection phrase. The
+     * chain's final_decision is therefore HU_VALIDATOR_REWRITE (not
+     * REJECT), and the resulting text must NOT contain disclosure. Both
+     * outcomes satisfy the "twin break suppressed" doctrine — the user
+     * never sees "I'm a language model". */
     hu_allocator_t alloc = A();
     hu_output_validator_chain_t *chain = NULL;
     HU_ASSERT_EQ(hu_validators_build_default_outbound_chain(&alloc, NULL, 0, &chain), HU_OK);
@@ -191,7 +198,15 @@ static void default_chain_rejects_hard_disclosure_end_to_end(void) {
     memset(&cr, 0, sizeof(cr));
     HU_ASSERT_EQ(hu_output_validator_chain_execute(chain, &alloc, NULL, in, strlen(in), &cr),
                  HU_OK);
-    HU_ASSERT_EQ(cr.final_decision, HU_VALIDATOR_REJECT);
+    /* Either REJECT (legacy persona_voice path) or REWRITE (short-circuit
+     * path) is acceptable — both prevent twin break. */
+    HU_ASSERT_TRUE(cr.final_decision == HU_VALIDATOR_REWRITE ||
+                   cr.final_decision == HU_VALIDATOR_REJECT);
+    /* If REWRITE, the output must be clean (no AI-disclosure). */
+    if (cr.final_decision == HU_VALIDATOR_REWRITE) {
+        HU_ASSERT_NOT_NULL(cr.final_text);
+        HU_ASSERT_TRUE(hu_persona_voice_response_is_clean(cr.final_text, cr.final_text_len));
+    }
 
     hu_chain_result_free(&alloc, &cr);
     hu_output_validator_chain_destroy(chain);
@@ -217,5 +232,5 @@ void run_persona_voice_validator_tests(void) {
     HU_RUN_TEST(validator_rejects_im_an_ai);
     HU_RUN_TEST(validator_rejects_dont_have_feelings);
     HU_RUN_TEST(validator_name_is_stable);
-    HU_RUN_TEST(default_chain_rejects_hard_disclosure_end_to_end);
+    HU_RUN_TEST(default_chain_suppresses_hard_disclosure_end_to_end);
 }

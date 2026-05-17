@@ -625,6 +625,7 @@ void run_persona_fidelity_tests(void);
 void run_persona_fidelity_judge_tests(void);
 void run_persona_fidelity_validator_tests(void);
 void run_persona_voice_validator_tests(void);
+void run_identity_short_circuit_validator_tests(void);
 void run_persona_fidelity_cross_tests(void);
 #ifdef HU_ENABLE_ML
 void run_dpo_extractor_integration_tests(void);
@@ -1338,6 +1339,7 @@ int main(int argc, char **argv) {
     run_persona_fidelity_judge_tests();
     run_persona_fidelity_validator_tests();
     run_persona_voice_validator_tests();
+    run_identity_short_circuit_validator_tests();
     run_persona_fidelity_cross_tests();
 #ifdef HU_ENABLE_ML
     run_dpo_extractor_integration_tests();
