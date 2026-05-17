@@ -1,0 +1,2372 @@
+commit 0734461c23a2cb87c545506ebda53625605b6ef5
+Author: Seth Ford <sethford@studio.local>
+Date:   Sat May 16 11:11:27 2026 -0400
+
+    feat(sprint-7): W14 nightly LoRA re-train cron (US-7.5)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index be57eede..b76b6042 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -705,6 +705,9 @@ set(HU_CORE_SOURCES
+     src/agent/response_guard_retry.c
+     src/agent/verifier_metrics.c
+     src/agent/world_model_bridge.c
++    # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
++    # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
++    src/ml/lora_retrain_runner.c
+     # NOTE: src/agent/lora_training_runner.c and training_data_runner.c
+     # are W13 learning-loop callers — they reference symbols defined only
+     # when HU_ENABLE_LEARNING is on (hu_learner_pending_drain,
+@@ -2690,6 +2693,7 @@ set(HU_TEST_SOURCES
+     tests/test_w12_verifier_loop.c
+     tests/test_w13_learner.c
+     tests/test_w14_runners.c
++    tests/test_w14_lora_retrain.c
+     tests/test_w15_backup_restore.c
+     tests/test_learner_bridge.c
+     tests/test_w14_scheduler.c
+diff --git a/include/human/agent/scheduler.h b/include/human/agent/scheduler.h
+index 3bb9fab8..35a559cc 100644
+--- a/include/human/agent/scheduler.h
++++ b/include/human/agent/scheduler.h
+@@ -53,6 +53,9 @@ typedef enum hu_job_kind {
+     HU_JOB_BELIEF_REVERIFICATION,
+     HU_JOB_PERSONA_EVOLVER,
+     HU_JOB_TRAINING_DATA_EXTRACT,
++    /* US-7.5: W14 nightly LoRA re-train (MLX-Gemma subprocess path).
++     * Distinct from HU_JOB_LORA_TRAINING (HUML GPT in-process path). */
++    HU_JOB_LORA_RETRAIN_NIGHTLY,
+     HU_JOB_KIND_MAX
+ } hu_job_kind_t;
+ 
+@@ -63,18 +66,18 @@ typedef struct hu_job_spec {
+     hu_job_kind_t kind;
+     const char *contact_id;
+     size_t contact_id_len;
+-    int priority;            /* 0 = normal, 1 = high (run before normal) */
+-    int budget_ms;           /* per-job wall budget; 0 = scheduler default (60 s) */
+-    int interval_sec;        /* repeat interval; 0 = run once */
+-    bool requires_idle;      /* skip if probe_load_pct > HU_SCHED_IDLE_LOAD_MAX */
+-    bool requires_ac_power;  /* skip if !on_ac_power */
+-    int64_t earliest_at;     /* unix ms; 0 = ASAP */
+-    int64_t latest_at;       /* unix ms; 0 = no deadline */
++    int priority;           /* 0 = normal, 1 = high (run before normal) */
++    int budget_ms;          /* per-job wall budget; 0 = scheduler default (60 s) */
++    int interval_sec;       /* repeat interval; 0 = run once */
++    bool requires_idle;     /* skip if probe_load_pct > HU_SCHED_IDLE_LOAD_MAX */
++    bool requires_ac_power; /* skip if !on_ac_power */
++    int64_t earliest_at;    /* unix ms; 0 = ASAP */
++    int64_t latest_at;      /* unix ms; 0 = no deadline */
+ } hu_job_spec_t;
+ 
+ typedef struct hu_scheduler_status {
+-    int system_load_pct;       /* 0-100 */
+-    int battery_pct;           /* 0-100, -1 if unknown */
++    int system_load_pct; /* 0-100 */
++    int battery_pct;     /* 0-100, -1 if unknown */
+     bool on_ac_power;
+     bool quiet_hours_active;
+     size_t jobs_pending;
+@@ -96,8 +99,7 @@ typedef hu_error_t (*hu_job_runner_fn)(hu_memory_facade_t *m, const hu_job_spec_
+  * registers a no-op runner for every `hu_job_kind_t`.  Tests and the
+  * daemon overwrite individual runners with `hu_scheduler_register_runner`
+  * before calling `hu_scheduler_tick`. */
+-hu_error_t hu_scheduler_open(hu_allocator_t *alloc, hu_memory_facade_t *m,
+-                             hu_scheduler_t **out);
++hu_error_t hu_scheduler_open(hu_allocator_t *alloc, hu_memory_facade_t *m, hu_scheduler_t **out);
+ void hu_scheduler_close(hu_scheduler_t *s, hu_allocator_t *alloc);
+ 
+ /* Enqueue a job.  The spec is validated (kind in range, budget_ms
+@@ -119,8 +121,8 @@ hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out);
+  * function pointer per kind — repeated registrations replace the prior
+  * binding.  `fn == NULL` resets to the no-op default. `user_data` is
+  * forwarded verbatim to the runner. */
+-hu_error_t hu_scheduler_register_runner(hu_scheduler_t *s, hu_job_kind_t kind,
+-                                        hu_job_runner_fn fn, void *user_data);
++hu_error_t hu_scheduler_register_runner(hu_scheduler_t *s, hu_job_kind_t kind, hu_job_runner_fn fn,
++                                        void *user_data);
+ 
+ /* Set the persona used by the quiet-hours probe. The scheduler does NOT
+  * take ownership — the caller must keep `p` alive while the scheduler is
+@@ -155,10 +157,8 @@ bool hu_scheduler_probe_quiet_hours(int64_t now_ms, const hu_persona_t *persona)
+  * `hu_scheduler_register_runner(s, HU_JOB_COUNTERFACTUAL_REHEARSAL,
+  *                                hu_counterfactual_rehearsal_runner,
+  *                                NULL)`. */
+-hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m,
+-                                              const hu_job_spec_t *spec,
+-                                              int64_t budget_ms,
+-                                              void *user_data);
++hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
++                                              int64_t budget_ms, void *user_data);
+ 
+ /* AutoDream runner: wraps `hu_autodream_run` so the scheduler can drive
+  * v1's idle-time consolidation (quarantine review, community summaries,
+@@ -177,8 +177,8 @@ hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m,
+  * scratch allocations. Register once per kind:
+  *   hu_scheduler_register_runner(s, HU_JOB_AUTODREAM_QUARANTINE,
+  *                                hu_autodream_runner, NULL); */
+-hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
+-                               int64_t budget_ms, void *user_data);
++hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec, int64_t budget_ms,
++                               void *user_data);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/include/human/agent/world_model_bridge.h b/include/human/agent/world_model_bridge.h
+index 05014d1e..7956f508 100644
+--- a/include/human/agent/world_model_bridge.h
++++ b/include/human/agent/world_model_bridge.h
+@@ -98,8 +98,7 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
+                                     char **out_text, size_t *out_len, const char *tom_premise,
+                                     size_t tom_premise_len, const char *tom_question,
+                                     size_t tom_question_len, const char *tom_category,
+-                                    size_t tom_category_len,
+-                                    const hu_personal_model_t *pm,
++                                    size_t tom_category_len, const hu_personal_model_t *pm,
+                                     const hu_persona_context_t *persona_ctx);
+ 
+ /* W11 self-RAG outcome enum, mirrored at the bridge layer so callers don't
+@@ -131,8 +130,8 @@ typedef enum hu_w11_outcome {
+  *
+  * `now_ms == 0` means "use OS clock". */
+ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-                                  const char *contact_id, size_t contact_id_len,
+-                                  const char *draft, size_t draft_len, int mode, int64_t now_ms,
++                                  const char *contact_id, size_t contact_id_len, const char *draft,
++                                  size_t draft_len, int mode, int64_t now_ms,
+                                   hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+                                   size_t *out_claims_flagged, char **out_modified,
+                                   size_t *out_modified_len);
+@@ -145,13 +144,10 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+  * mode and only in non-test builds. When `provider` is NULL this
+  * behaves identically to the providerless variant. */
+ hu_error_t hu_w11_self_rag_verify_with_provider(
+-    hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-    struct hu_provider *provider,
+-    const char *contact_id, size_t contact_id_len,
+-    const char *draft, size_t draft_len, int mode, int64_t now_ms,
+-    hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+-    size_t *out_claims_flagged, char **out_modified,
+-    size_t *out_modified_len);
++    hu_w7_facade_t *facade, hu_allocator_t *alloc, struct hu_provider *provider,
++    const char *contact_id, size_t contact_id_len, const char *draft, size_t draft_len, int mode,
++    int64_t now_ms, hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
++    size_t *out_claims_flagged, char **out_modified, size_t *out_modified_len);
+ 
+ /* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
+  *
+@@ -182,10 +178,8 @@ hu_error_t hu_w14_scheduler_tick(hu_w14_scheduler_t *s, int64_t now_ms);
+ /* Enqueue a counterfactual-rehearsal job for `contact_id`. The runner
+  * is registered automatically at open(); this is just an enqueue
+  * helper that hides the hu_job_spec_t shape from the daemon. */
+-hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
+-                                                   const char *contact_id,
+-                                                   size_t contact_id_len,
+-                                                   int budget_ms);
++hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s, const char *contact_id,
++                                                   size_t contact_id_len, int budget_ms);
+ 
+ /* Enqueue the three AutoDream phases (quarantine, community, decay) as
+  * separate scheduler jobs. Mirrors what the legacy 3 AM cron in
+@@ -194,8 +188,7 @@ hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
+  *
+  * `now_ms == 0` means "ASAP"; pass a unix-ms value to schedule for a
+  * specific wall time (e.g. the next 3 AM boundary). */
+-hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now_ms,
+-                                              int budget_ms);
++hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now_ms, int budget_ms);
+ 
+ /* Status snapshot for `human ml status` and friends. Always populates
+  * the out fields even on partial probe failure. NULL output pointers
+@@ -223,10 +216,9 @@ hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pendi
+  * caller can fall back to the v1 recall path. Caller owns `*out_text`
+  * and must free via `alloc->free`. */
+ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-                                 const char *contact_id, size_t contact_id_len,
+-                                 const char *query, size_t query_len,
+-                                 size_t limit, size_t max_chars,
+-                                 char **out_text, size_t *out_len);
++                                 const char *contact_id, size_t contact_id_len, const char *query,
++                                 size_t query_len, size_t limit, size_t max_chars, char **out_text,
++                                 size_t *out_len);
+ 
+ /* W12 — Planner recall with an explicit LLM provider. Uses the LLM
+  * retrieval planner backend (`hu_planner_llm`) for plan emission when
+@@ -239,33 +231,29 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+  *
+  * Returns HU_OK on success (including the "no records" case where
+  * `*out_text == NULL`, `*out_len == 0`). */
+-hu_error_t hu_w12_planner_recall_with_provider(
+-    hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-    struct hu_provider *provider, const char *model, size_t model_len,
+-    const char *contact_id, size_t contact_id_len,
+-    const char *query, size_t query_len,
+-    size_t limit, size_t max_chars,
+-    char **out_text, size_t *out_len);
++hu_error_t hu_w12_planner_recall_with_provider(hu_w7_facade_t *facade, hu_allocator_t *alloc,
++                                               struct hu_provider *provider, const char *model,
++                                               size_t model_len, const char *contact_id,
++                                               size_t contact_id_len, const char *query,
++                                               size_t query_len, size_t limit, size_t max_chars,
++                                               char **out_text, size_t *out_len);
+ 
+ /* Enqueue the persona evolver as a scheduler job. Mirrors the
+  * AutoDream bridge pattern: when the scheduler is available the
+  * daemon enqueues instead of running synchronously, so the work
+  * is paced and battery-gated. `budget_ms` of 0 means unlimited. */
+-hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
+-                                                    int64_t now_ms,
++hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s, int64_t now_ms,
+                                                     int budget_ms);
+ 
+ /* Enqueue a LoRA training job. Mirrors the persona-evolver / AutoDream
+  * enqueue helpers: callers pass timing + budget and the bridge hides the
+  * hu_job_spec_t shape. */
+-hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
+-                                         int budget_ms);
++hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms, int budget_ms);
+ 
+ /* Enqueue a training data extraction job. Extracts new conversations
+  * into JSONL training data and generates auto-DPO pairs. The runner
+  * auto-enqueues a LoRA training job when enough examples accumulate. */
+-hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,
+-                                                          int64_t now_ms,
++hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s, int64_t now_ms,
+                                                           int budget_ms);
+ 
+ /* W14 P0 #4 — runner registration helpers.
+@@ -279,6 +267,7 @@ struct hu_lora_runner_ctx;
+ struct hu_kv_cache_manager;
+ struct hu_belief_reverify_ctx;
+ struct hu_training_data_runner_ctx;
++struct hu_lora_retrain_ctx;
+ struct hu_scheduler;
+ 
+ hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s,
+@@ -290,6 +279,18 @@ hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
+ hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
+                                                           struct hu_training_data_runner_ctx *ctx);
+ 
++/* US-7.5: register the nightly LoRA retrain runner. The bridge stashes the
++ * ctx pointer so `hu_w14_scheduler_status_save` can serialize the
++ * `lora_retrain` block (last_run_ts, last_outcome, pairs_consumed). The
++ * caller owns the storage. */
++hu_error_t hu_w14_scheduler_register_lora_retrain_runner(hu_w14_scheduler_t *s,
++                                                         struct hu_lora_retrain_ctx *ctx);
++
++/* US-7.5: enqueue one nightly LoRA retrain job. Sets requires_idle=true,
++ * requires_ac_power=true, interval_sec=86400, budget_ms=90min default. */
++hu_error_t hu_w14_scheduler_enqueue_lora_retrain_nightly(hu_w14_scheduler_t *s, int64_t now_ms,
++                                                         int budget_ms);
++
+ /* Surface the inner `hu_scheduler_t *` so callers can wire it into a
+  * `hu_lora_runner_ctx_t::scheduler` (`struct hu_scheduler *`) for the follow-up KV-warm
+  * enqueue path. The bridge retains ownership; callers must not
+@@ -322,9 +323,8 @@ bool hu_w14_scheduler_status_path(char *out_path, size_t cap);
+  * These wrappers keep `human/security/audit_log.h` out of TUs that include
+  * `human/agent.h` (which pulls in the legacy `human/memory.h`). */
+ struct hu_audit_log;
+-hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-                                const char *db_path, const char *contact_id,
+-                                struct hu_audit_log **out);
++hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc, const char *db_path,
++                                const char *contact_id, struct hu_audit_log **out);
+ void hu_w7_audit_log_close(struct hu_audit_log *log, hu_allocator_t *alloc);
+ 
+ #ifdef __cplusplus
+diff --git a/include/human/ml/lora_retrain_runner.h b/include/human/ml/lora_retrain_runner.h
+new file mode 100644
+index 00000000..e2b2e8a7
+--- /dev/null
++++ b/include/human/ml/lora_retrain_runner.h
+@@ -0,0 +1,124 @@
++#ifndef HU_ML_LORA_RETRAIN_RUNNER_H
++#define HU_ML_LORA_RETRAIN_RUNNER_H
++
++/* W14 — Nightly LoRA re-train cron (US-7.5).
++ *
++ * Sibling runner to `hu_lora_training_runner` (HUML GPT in-process path).
++ * This runner orchestrates the MLX-Gemma frontier path as a subprocess
++ * chain: pair-count probe → finetune → judgment gate → atomic promote.
++ *
++ * Registered for `HU_JOB_LORA_RETRAIN_NIGHTLY` (distinct from
++ * HU_JOB_LORA_TRAINING). The daemon enqueues this job once per 24h via
++ * `hu_w14_scheduler_enqueue_lora_retrain_nightly`; the scheduler gates on
++ * idle + AC-power per the W14 contract.
++ *
++ * Subprocess seam: all exec is funneled through `test_run_subprocess` when
++ * non-NULL — every AC test registers a deterministic hook. Under
++ * `HU_IS_TEST` the production fork/exec path is disabled to prevent
++ * accidental real Python invocation. Outside `HU_IS_TEST`, the runner
++ * uses `posix_spawn` + `waitpid` to invoke `finetune-gemma.py` and the
++ * gate script.
++ *
++ * Outcome events are emitted via the optional `emit_event` callback; when
++ * NULL they fall through to `hu_log_info`. The persistent state is the
++ * `lora_retrain` block written into ~/.human/scheduler.status by
++ * `hu_w14_scheduler_status_save` (extended for this story). */
++
++#include "human/core/error.h"
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct hu_allocator;
++struct hu_memory_facade;
++struct hu_job_spec;
++
++typedef enum hu_lora_retrain_outcome {
++    HU_LORA_RETRAIN_OUTCOME_UNKNOWN = 0,
++    HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA,
++    HU_LORA_RETRAIN_OUTCOME_SKIPPED_ALREADY_RUNNING,
++    HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL,
++    HU_LORA_RETRAIN_OUTCOME_FAILED,
++    HU_LORA_RETRAIN_OUTCOME_PROMOTED,
++    HU_LORA_RETRAIN_OUTCOME_PROMOTION_FAILED,
++} hu_lora_retrain_outcome_t;
++
++/* Subprocess result returned by the test/production exec hook. */
++typedef struct hu_lora_retrain_proc_result {
++    int exit_code;         /* process exit status (or signal-encoded) */
++    char stdout_buf[2048]; /* captured stdout (NUL-terminated) */
++    size_t stdout_len;     /* bytes written; <= sizeof(stdout_buf)-1 */
++} hu_lora_retrain_proc_result_t;
++
++/* Hook signature for subprocess invocation. Implementations MUST NUL-terminate
++ * `result->stdout_buf` and set `result->stdout_len`. Return HU_OK on a clean
++ * spawn+wait (regardless of exit code). Return non-OK only on infrastructure
++ * failure (cannot fork, etc.) — that surfaces a runner-level failure. */
++typedef hu_error_t (*hu_lora_retrain_subprocess_fn)(const char *const argv[],
++                                                    hu_lora_retrain_proc_result_t *result,
++                                                    void *user_data);
++
++/* Event emission hook. `payload_json` is a NUL-terminated JSON object (no
++ * trailing newline). Implementations must not retain pointers past the call. */
++typedef void (*hu_lora_retrain_event_fn)(const char *event_name, const char *payload_json,
++                                         void *user_data);
++
++typedef struct hu_lora_retrain_ctx {
++    struct hu_allocator *alloc; /* optional; system allocator if NULL */
++
++    /* Subprocess command pieces — all NUL-terminated. NULL falls back to the
++     * documented defaults; that's the normal production path. */
++    const char *miner_argv0;     /* default: "human" */
++    const char *miner_subcmd[3]; /* default: {"ml", "mine-corrections", NULL} */
++    const char *finetune_script; /* default: "scripts/finetune-gemma.py" */
++    const char *gate_script;     /* default: "scripts/check-lora-ab.sh" */
++    const char *candidate_dir;   /* required: where the new adapter lands */
++    const char *current_symlink; /* required: e.g. ~/.human/ml/seth-lora-current */
++
++    /* Event sink (optional). */
++    hu_lora_retrain_event_fn emit_event;
++    void *emit_user_data;
++
++    /* Test seam — when set, replaces real subprocess exec. */
++    hu_lora_retrain_subprocess_fn test_run_subprocess;
++    void *test_subprocess_ud;
++
++    /* PID file path for single-flight enforcement. Required for the
++     * production path; tests may set this to a tmp path. NULL disables the
++     * single-flight guard entirely (test convenience). */
++    const char *pidfile_path;
++
++    /* Out — populated by the runner on exit. */
++    hu_lora_retrain_outcome_t last_outcome;
++    int64_t last_run_ts;
++    unsigned long long last_pairs_consumed;
++    int last_exit_code; /* exit code of the failing step on FAILED outcomes */
++} hu_lora_retrain_ctx_t;
++
++/* Runner entry point. `spec->kind` must be HU_JOB_LORA_RETRAIN_NIGHTLY.
++ * Returns HU_OK on every code path (the runner converts failures into
++ * outcome events + status JSON so the scheduler can't mark the job
++ * "failed" and re-enter); only argument-validation errors return non-OK. */
++hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_job_spec *spec,
++                                  int64_t budget_ms, void *user_data);
++
++/* String form for status JSON serialization / parsing. */
++const char *hu_lora_retrain_outcome_str(hu_lora_retrain_outcome_t o);
++hu_lora_retrain_outcome_t hu_lora_retrain_outcome_from_str(const char *s);
++
++/* Parse the optional `lora_retrain` block from scheduler.status JSON.
++ * Returns HU_OK when the block is present AND parses; HU_ERR_NOT_FOUND when
++ * the block is absent (back-compat: callers should treat as "no data yet");
++ * HU_ERR_INVALID_ARGUMENT when arguments are bad or the block is malformed. */
++hu_error_t hu_lora_retrain_status_parse(const char *json, long long *out_last_run_ts,
++                                        hu_lora_retrain_outcome_t *out_last_outcome,
++                                        unsigned long long *out_pairs_consumed);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* HU_ML_LORA_RETRAIN_RUNNER_H */
+diff --git a/src/agent/world_model_bridge.c b/src/agent/world_model_bridge.c
+index 819ef811..af02e0d9 100644
+--- a/src/agent/world_model_bridge.c
++++ b/src/agent/world_model_bridge.c
+@@ -9,17 +9,18 @@
+ #include "human/agent/belief_reverify_runner.h"
+ #include "human/agent/kv_prewarm_runner.h"
+ #include "human/agent/lora_runner.h"
+-#include "human/agent/training_data_runner.h"
+ #include "human/agent/retrieval_planner.h"
+ #include "human/agent/scheduler.h"
+ #include "human/agent/self_rag.h"
+ #include "human/agent/tom_scenario.h"
++#include "human/agent/training_data_runner.h"
+ #include "human/agent/world_model.h"
++#include "human/memory/belief.h"
+ #include "human/memory/memory.h"
++#include "human/ml/lora_retrain_runner.h"
+ #include "human/persona.h"
+ #include "human/persona/persona_deltas.h"
+ #include "human/provider.h"
+-#include "human/memory/belief.h"
+ #include "human/security/audit_log.h"
+ 
+ #include <stdarg.h>
+@@ -55,8 +56,8 @@ hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade) {
+ }
+ 
+ /* W15 — bridge callback: memory facade audit hook → SQLite audit log. */
+-static void facade_audit_bridge(void *ctx, hu_memory_audit_op_t op,
+-                                hu_memory_kind_t kind, int64_t id) {
++static void facade_audit_bridge(void *ctx, hu_memory_audit_op_t op, hu_memory_kind_t kind,
++                                int64_t id) {
+     hu_audit_log_t *log = (hu_audit_log_t *)ctx;
+     if (!log)
+         return;
+@@ -70,9 +71,8 @@ static void facade_audit_bridge(void *ctx, hu_memory_audit_op_t op,
+     (void)hu_audit_log_append(log, &ev);
+ }
+ 
+-hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-                                const char *db_path, const char *contact_id,
+-                                hu_audit_log_t **out) {
++hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc, const char *db_path,
++                                const char *contact_id, hu_audit_log_t **out) {
+     if (!facade || !facade->m || !alloc || !out)
+         return HU_ERR_INVALID_ARGUMENT;
+     *out = NULL;
+@@ -151,8 +151,7 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
+                                     char **out_text, size_t *out_len, const char *tom_premise,
+                                     size_t tom_premise_len, const char *tom_question,
+                                     size_t tom_question_len, const char *tom_category,
+-                                    size_t tom_category_len,
+-                                    const hu_personal_model_t *pm,
++                                    size_t tom_category_len, const hu_personal_model_t *pm,
+                                     const hu_persona_context_t *persona_ctx) {
+     if (out_text)
+         *out_text = NULL;
+@@ -177,17 +176,15 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
+         cache_channel = persona_ctx->channel;
+         cache_channel_len = persona_ctx->channel_len;
+     }
+-    hu_error_t e =
+-        hu_world_model_load_with_channel(facade->m, alloc, contact_id, contact_id_len,
+-                                         cache_channel, cache_channel_len, now_ms, &wm);
++    hu_error_t e = hu_world_model_load_with_channel(facade->m, alloc, contact_id, contact_id_len,
++                                                    cache_channel, cache_channel_len, now_ms, &wm);
+     if (e != HU_OK || !wm)
+         return e == HU_OK ? HU_OK : e;
+ 
+     if (tom_premise && tom_premise_len > 0 && tom_question && tom_question_len > 0 &&
+         tom_category && tom_category_len > 0) {
+         hu_world_model_merge_tom_scenario(wm, tom_premise, tom_premise_len, tom_question,
+-                                          tom_question_len, tom_category, tom_category_len,
+-                                          now_ms);
++                                          tom_question_len, tom_category, tom_category_len, now_ms);
+     }
+ 
+     /* M2 ↔ W9 bridge: merge personal model signal into the world model. */
+@@ -202,8 +199,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
+         size_t deltas_count = 0;
+         if (persona_ctx->delta_limit > 0) {
+             (void)hu_persona_delta_list_facade(facade->m, alloc, contact_id, contact_id_len,
+-                                               HU_DELTA_STATUS_APPLIED,
+-                                               persona_ctx->delta_limit, &deltas, &deltas_count);
++                                               HU_DELTA_STATUS_APPLIED, persona_ctx->delta_limit,
++                                               &deltas, &deltas_count);
+         }
+         hu_world_model_merge_persona(wm, persona_ctx->persona, persona_ctx->channel,
+                                      persona_ctx->channel_len, deltas, deltas_count);
+@@ -218,19 +215,18 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
+      * get_active`), so non-trivial values are real signal. We still treat
+      * the post-default "neutral" bucket as "no signal" because the builder
+      * falls through to it when no active residues exist for this contact. */
+-    bool emo_signal = wm->dominant_emotion[0] != '\0' &&
+-                      strcmp(wm->dominant_emotion, "neutral") != 0;
+-    bool tom_signal = (wm->tom.user_thinks_we_are[0] &&
+-                       strcmp(wm->tom.user_thinks_we_are, "unknown") != 0) ||
+-                      (wm->tom.user_expects_we_can[0] &&
+-                       strcmp(wm->tom.user_expects_we_can, "unknown") != 0) ||
+-                      (wm->tom.user_expects_we_cannot[0] &&
+-                       strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0) ||
+-                      wm->tom.interaction_style[0] != '\0';
++    bool emo_signal =
++        wm->dominant_emotion[0] != '\0' && strcmp(wm->dominant_emotion, "neutral") != 0;
++    bool tom_signal =
++        (wm->tom.user_thinks_we_are[0] && strcmp(wm->tom.user_thinks_we_are, "unknown") != 0) ||
++        (wm->tom.user_expects_we_can[0] && strcmp(wm->tom.user_expects_we_can, "unknown") != 0) ||
++        (wm->tom.user_expects_we_cannot[0] &&
++         strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0) ||
++        wm->tom.interaction_style[0] != '\0';
+     bool style_signal = wm->style_summary[0] != '\0';
+     bool any = wm->entities_count > 0 || wm->relations_count > 0 || wm->goals_count > 0 ||
+-               wm->negatives_count > 0 || wm->recent_topics_count > 0 || emo_signal ||
+-               tom_signal || style_signal;
++               wm->negatives_count > 0 || wm->recent_topics_count > 0 || emo_signal || tom_signal ||
++               style_signal;
+     if (!any) {
+         hu_world_model_free(alloc, wm);
+         return HU_OK;
+@@ -286,26 +282,32 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
+              * planner to grep without exploding the prompt budget. */
+             const char *tag = "[hard]";
+             switch (wm->negatives[i].source) {
+-            case HU_NEGATIVE_SOURCE_USER_EXPLICIT:    tag = "[hard]";    break;
+-            case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN: tag = "[soft]";    break;
+-            case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:     tag = "[confirm]"; break;
+-            case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:    tag = "[policy]";  break;
++            case HU_NEGATIVE_SOURCE_USER_EXPLICIT:
++                tag = "[hard]";
++                break;
++            case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN:
++                tag = "[soft]";
++                break;
++            case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:
++                tag = "[confirm]";
++                break;
++            case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:
++                tag = "[policy]";
++                break;
+             }
+-            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s%s%s\n",
+-                                   tag, wm->negatives[i].text,
+-                                   wm->negatives[i].reason[0] ? " — " : "",
++            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s%s%s\n", tag,
++                                   wm->negatives[i].text, wm->negatives[i].reason[0] ? " — " : "",
+                                    wm->negatives[i].reason[0] ? wm->negatives[i].reason : "");
+         }
+     }
+     if (tom_signal) {
+-        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Theory of mind (what they think of me):\n",
+-                              strlen("Theory of mind (what they think of me):\n"));
+-        if (wm->tom.user_thinks_we_are[0] &&
+-            strcmp(wm->tom.user_thinks_we_are, "unknown") != 0)
++        ok =
++            ok && buf_append(alloc, &buf, &blen, &bcap, "Theory of mind (what they think of me):\n",
++                             strlen("Theory of mind (what they think of me):\n"));
++        if (wm->tom.user_thinks_we_are[0] && strcmp(wm->tom.user_thinks_we_are, "unknown") != 0)
+             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They see me as: %s\n",
+                                    wm->tom.user_thinks_we_are);
+-        if (wm->tom.user_expects_we_can[0] &&
+-            strcmp(wm->tom.user_expects_we_can, "unknown") != 0)
++        if (wm->tom.user_expects_we_can[0] && strcmp(wm->tom.user_expects_we_can, "unknown") != 0)
+             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They expect I can: %s\n",
+                                    wm->tom.user_expects_we_can);
+         if (wm->tom.user_expects_we_cannot[0] &&
+@@ -325,8 +327,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
+         ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
+     }
+     if (style_signal) {
+-        ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+-                               "Communication style: %s\n", wm->style_summary);
++        ok = ok &&
++             buf_appendf(alloc, &buf, &blen, &bcap, "Communication style: %s\n", wm->style_summary);
+     }
+     if (emo_signal) {
+         ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
+@@ -356,13 +358,11 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
+  * `provider` is non-NULL and mode is STRICT, the atomic backend uses the
+  * provider for real LLM-backed claim verification. */
+ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-                                       hu_provider_t *provider,
+-                                       const char *contact_id, size_t contact_id_len,
+-                                       const char *draft, size_t draft_len, int mode,
+-                                       int64_t now_ms,
+-                                       hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+-                                       size_t *out_claims_flagged, char **out_modified,
+-                                       size_t *out_modified_len) {
++                                       hu_provider_t *provider, const char *contact_id,
++                                       size_t contact_id_len, const char *draft, size_t draft_len,
++                                       int mode, int64_t now_ms, hu_w11_outcome_t *out_outcome,
++                                       size_t *out_claims_total, size_t *out_claims_flagged,
++                                       char **out_modified, size_t *out_modified_len) {
+     if (out_outcome)
+         *out_outcome = HU_W11_OUTCOME_SUPPORTED;
+     if (out_claims_total)
+@@ -445,9 +445,9 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
+         hu_negative_memory_t nm;
+         memset(&nm, 0, sizeof(nm));
+         size_t draft_cap = sizeof(nm.text) - 10;
+-        if (draft_len > draft_cap) draft_len = draft_cap;
+-        snprintf(nm.text, sizeof(nm.text), "Refused: %.*s",
+-                 (int)draft_len, draft);
++        if (draft_len > draft_cap)
++            draft_len = draft_cap;
++        snprintf(nm.text, sizeof(nm.text), "Refused: %.*s", (int)draft_len, draft);
+         snprintf(nm.scope, sizeof(nm.scope), "topic");
+         snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
+         nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
+@@ -484,8 +484,8 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
+      * relation so the posterior evolves with each verification pass. */
+     if (resp.claims_count > 0 && contact_id && contact_id_len > 0 && facade->m) {
+         float obs = (resp.outcome == HU_SELF_RAG_SUPPORTED) ? 0.9f : 0.3f;
+-        const char *src = (resp.outcome == HU_SELF_RAG_SUPPORTED) ? "self-rag-confirm"
+-                                                                    : "self-rag-disconfirm";
++        const char *src =
++            (resp.outcome == HU_SELF_RAG_SUPPORTED) ? "self-rag-confirm" : "self-rag-disconfirm";
+         hu_memory_query_t bq;
+         memset(&bq, 0, sizeof(bq));
+         bq.kind = HU_MEM_RELATION;
+@@ -506,7 +506,8 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
+                     continue;
+                 hu_belief_t bp = {.mean = rm, .variance = rv};
+                 hu_belief_t bu = hu_belief_update(&bp, obs, src, now_ms);
+-                hu_memory_facade_set_relation_belief(facade->m, br->id, bu.mean, bu.variance, now_ms);
++                hu_memory_facade_set_relation_belief(facade->m, br->id, bu.mean, bu.variance,
++                                                     now_ms);
+             }
+             hu_memory_facade_records_free(facade->m, alloc, brecs, bn);
+         }
+@@ -563,34 +564,25 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
+ 
+ /* Public entrypoint: no provider. Preserves the historical API. */
+ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-                                  const char *contact_id, size_t contact_id_len,
+-                                  const char *draft, size_t draft_len, int mode, int64_t now_ms,
++                                  const char *contact_id, size_t contact_id_len, const char *draft,
++                                  size_t draft_len, int mode, int64_t now_ms,
+                                   hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+                                   size_t *out_claims_flagged, char **out_modified,
+                                   size_t *out_modified_len) {
+-    return self_rag_verify_impl(facade, alloc, NULL,
+-                                contact_id, contact_id_len,
+-                                draft, draft_len, mode, now_ms,
+-                                out_outcome, out_claims_total,
+-                                out_claims_flagged, out_modified,
+-                                out_modified_len);
++    return self_rag_verify_impl(facade, alloc, NULL, contact_id, contact_id_len, draft, draft_len,
++                                mode, now_ms, out_outcome, out_claims_total, out_claims_flagged,
++                                out_modified, out_modified_len);
+ }
+ 
+ /* Public entrypoint: with provider for LLM-backed claim verification. */
+ hu_error_t hu_w11_self_rag_verify_with_provider(
+-    hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-    hu_provider_t *provider,
+-    const char *contact_id, size_t contact_id_len,
+-    const char *draft, size_t draft_len, int mode, int64_t now_ms,
+-    hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+-    size_t *out_claims_flagged, char **out_modified,
+-    size_t *out_modified_len) {
+-    return self_rag_verify_impl(facade, alloc, provider,
+-                                contact_id, contact_id_len,
+-                                draft, draft_len, mode, now_ms,
+-                                out_outcome, out_claims_total,
+-                                out_claims_flagged, out_modified,
+-                                out_modified_len);
++    hu_w7_facade_t *facade, hu_allocator_t *alloc, hu_provider_t *provider, const char *contact_id,
++    size_t contact_id_len, const char *draft, size_t draft_len, int mode, int64_t now_ms,
++    hu_w11_outcome_t *out_outcome, size_t *out_claims_total, size_t *out_claims_flagged,
++    char **out_modified, size_t *out_modified_len) {
++    return self_rag_verify_impl(facade, alloc, provider, contact_id, contact_id_len, draft,
++                                draft_len, mode, now_ms, out_outcome, out_claims_total,
++                                out_claims_flagged, out_modified, out_modified_len);
+ }
+ 
+ /* ── W12 goal-conditioned planner recall bridge ───────────────────────────
+@@ -611,9 +603,8 @@ hu_error_t hu_w11_self_rag_verify_with_provider(
+  * On non-OK return `*out` is unchanged and the caller MUST NOT call
+  * hu_planner_close. */
+ static hu_error_t select_planner_backend(hu_memory_facade_t *m, hu_allocator_t *alloc,
+-                                         hu_provider_t *provider,
+-                                         const char *model, size_t model_len,
+-                                         hu_planner_t *out,
++                                         hu_provider_t *provider, const char *model,
++                                         size_t model_len, hu_planner_t *out,
+                                          const char **out_backend) {
+     *out_backend = "none";
+ 
+@@ -644,19 +635,19 @@ static hu_error_t select_planner_backend(hu_memory_facade_t *m, hu_allocator_t *
+ }
+ 
+ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-                                      hu_provider_t *provider,
+-                                      const char *model, size_t model_len,
++                                      hu_provider_t *provider, const char *model, size_t model_len,
+                                       const char *contact_id, size_t contact_id_len,
+-                                      const char *query, size_t query_len,
+-                                      size_t limit, size_t max_chars,
+-                                      char **out_text, size_t *out_len) {
++                                      const char *query, size_t query_len, size_t limit,
++                                      size_t max_chars, char **out_text, size_t *out_len) {
+     if (!facade || !facade->m || !alloc || !out_text || !out_len)
+         return HU_ERR_INVALID_ARGUMENT;
+     *out_text = NULL;
+     *out_len = 0;
+ 
+-    if (limit == 0) limit = 5;
+-    if (max_chars == 0) max_chars = 4000;
++    if (limit == 0)
++        limit = 5;
++    if (max_chars == 0)
++        max_chars = 4000;
+ 
+     /* Load the world model so the goal-conditioned and LLM backends can
+      * both ground their plan in the contact's entity graph + state. */
+@@ -668,11 +659,11 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
+     hu_planner_t planner;
+     memset(&planner, 0, sizeof(planner));
+     const char *backend_name = "none";
+-    hu_error_t err = select_planner_backend(facade->m, alloc, provider,
+-                                            model, model_len, &planner,
++    hu_error_t err = select_planner_backend(facade->m, alloc, provider, model, model_len, &planner,
+                                             &backend_name);
+     if (err != HU_OK) {
+-        if (wm) hu_world_model_free(alloc, wm);
++        if (wm)
++            hu_world_model_free(alloc, wm);
+         return err;
+     }
+     (void)backend_name; /* available for future telemetry */
+@@ -736,7 +727,8 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
+         hu_memory_record_t *recs = NULL;
+         size_t n = 0;
+         hu_error_t re = hu_memory_facade_read(facade->m, &step->query, alloc, &recs, &n);
+-        if (re != HU_OK || n == 0) continue;
++        if (re != HU_OK || n == 0)
++            continue;
+ 
+         for (size_t j = 0; j < n && total_records < limit && buf_len < max_chars; j++) {
+             hu_memory_record_t *rec = &recs[j];
+@@ -749,7 +741,8 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
+                     break;
+                 }
+             }
+-            if (!in_verified) continue;
++            if (!in_verified)
++                continue;
+ 
+             const char *name = NULL;
+             size_t name_len = 0;
+@@ -772,14 +765,17 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
+                 continue;
+             }
+ 
+-            if (!name) name = "memory";
+-            if (!name_len) name_len = 6;
++            if (!name)
++                name = "memory";
++            if (!name_len)
++                name_len = 6;
+ 
+             size_t overhead = 15 + name_len + 2;
+             size_t block_len = overhead + detail_len;
+             if (buf_len + block_len > max_chars) {
+                 size_t remain = max_chars - buf_len;
+-                if (remain <= overhead) break;
++                if (remain <= overhead)
++                    break;
+                 detail_len = remain - overhead;
+                 block_len = remain;
+             }
+@@ -787,11 +783,13 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
+             size_t needed = buf_len + block_len + 1;
+             if (needed > buf_cap) {
+                 size_t newcap = buf_cap == 0 ? 512 : buf_cap * 2;
+-                if (newcap < needed) newcap = needed;
++                if (newcap < needed)
++                    newcap = needed;
+                 void *p = alloc->realloc(alloc->ctx, buf, buf_cap, newcap);
+                 if (!p) {
+                     hu_memory_facade_records_free(facade->m, alloc, recs, n);
+-                    if (buf) alloc->free(alloc->ctx, buf, buf_cap);
++                    if (buf)
++                        alloc->free(alloc->ctx, buf, buf_cap);
+                     hu_planner_records_free(alloc, verified, verified_count);
+                     return HU_ERR_OUT_OF_MEMORY;
+                 }
+@@ -823,35 +821,34 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
+         *out_text = buf;
+         *out_len = buf_len;
+     } else {
+-        if (buf) alloc->free(alloc->ctx, buf, buf_cap);
++        if (buf)
++            alloc->free(alloc->ctx, buf, buf_cap);
+     }
+     return HU_OK;
+ }
+ 
+ /* Public entrypoint: no provider, no LLM. Preserves the historical API. */
+ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-                                 const char *contact_id, size_t contact_id_len,
+-                                 const char *query, size_t query_len,
+-                                 size_t limit, size_t max_chars,
+-                                 char **out_text, size_t *out_len) {
+-    return planner_recall_impl(facade, alloc, /*provider=*/NULL, NULL, 0,
+-                                contact_id, contact_id_len, query, query_len,
+-                                limit, max_chars, out_text, out_len);
++                                 const char *contact_id, size_t contact_id_len, const char *query,
++                                 size_t query_len, size_t limit, size_t max_chars, char **out_text,
++                                 size_t *out_len) {
++    return planner_recall_impl(facade, alloc, /*provider=*/NULL, NULL, 0, contact_id,
++                               contact_id_len, query, query_len, limit, max_chars, out_text,
++                               out_len);
+ }
+ 
+ /* Public entrypoint: routes through the LLM backend when a provider is
+  * available. Falls through to goal-conditioned / heuristic on any failure
+  * or under HU_IS_TEST. */
+-hu_error_t hu_w12_planner_recall_with_provider(
+-    hu_w7_facade_t *facade, hu_allocator_t *alloc,
+-    struct hu_provider *provider, const char *model, size_t model_len,
+-    const char *contact_id, size_t contact_id_len,
+-    const char *query, size_t query_len,
+-    size_t limit, size_t max_chars,
+-    char **out_text, size_t *out_len) {
+-    return planner_recall_impl(facade, alloc, provider, model, model_len,
+-                                contact_id, contact_id_len, query, query_len,
+-                                limit, max_chars, out_text, out_len);
++hu_error_t hu_w12_planner_recall_with_provider(hu_w7_facade_t *facade, hu_allocator_t *alloc,
++                                               struct hu_provider *provider, const char *model,
++                                               size_t model_len, const char *contact_id,
++                                               size_t contact_id_len, const char *query,
++                                               size_t query_len, size_t limit, size_t max_chars,
++                                               char **out_text, size_t *out_len) {
++    return planner_recall_impl(facade, alloc, provider, model, model_len, contact_id,
++                               contact_id_len, query, query_len, limit, max_chars, out_text,
++                               out_len);
+ }
+ 
+ /* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
+@@ -871,6 +868,10 @@ hu_error_t hu_w12_planner_recall_with_provider(
+ 
+ struct hu_w14_scheduler {
+     hu_scheduler_t *s;
++    /* US-7.5: optional context for the nightly LoRA retrain runner. When
++     * non-NULL the status_save extension serializes the `lora_retrain`
++     * block; the daemon owns the storage. */
++    hu_lora_retrain_ctx_t *lora_retrain_ctx;
+ };
+ 
+ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+@@ -884,6 +885,7 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+     if (!w)
+         return HU_ERR_OUT_OF_MEMORY;
+     w->s = NULL;
++    w->lora_retrain_ctx = NULL;
+     hu_error_t e = hu_scheduler_open(alloc, facade->m, &w->s);
+     if (e != HU_OK) {
+         alloc->free(alloc->ctx, w, sizeof(*w));
+@@ -898,12 +900,10 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                        hu_counterfactual_rehearsal_runner, NULL);
+     /* AutoDream: same C function handles all three kinds; spec->kind
+      * inside the runner picks which phase fires. */
+-    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_QUARANTINE,
+-                                       hu_autodream_runner, NULL);
+-    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_COMMUNITY,
+-                                       hu_autodream_runner, NULL);
+-    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_DECAY,
+-                                       hu_autodream_runner, NULL);
++    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_QUARANTINE, hu_autodream_runner,
++                                       NULL);
++    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_COMMUNITY, hu_autodream_runner, NULL);
++    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_DECAY, hu_autodream_runner, NULL);
+     /* Belief reverification: pure DB-side, no caller context needed,
+      * defaults are sane (30 day age, 64 rows/tick). Daemon overrides
+      * via hu_w14_scheduler_register_belief_reverify if it wants to
+@@ -916,13 +916,11 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+     return HU_OK;
+ }
+ 
+-hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s,
+-                                                 hu_lora_runner_ctx_t *ctx) {
++hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s, hu_lora_runner_ctx_t *ctx) {
+     if (!s || !s->s || !ctx)
+         return HU_ERR_INVALID_ARGUMENT;
+ #if defined(HU_ENABLE_LEARNING)
+-    return hu_scheduler_register_runner(s->s, HU_JOB_LORA_TRAINING,
+-                                        hu_lora_training_runner, ctx);
++    return hu_scheduler_register_runner(s->s, HU_JOB_LORA_TRAINING, hu_lora_training_runner, ctx);
+ #else
+     /* Learning loop not built — return NOT_SUPPORTED so the daemon's
+      * wiring code can keep its current shape without a #ifdef. The
+@@ -937,12 +935,11 @@ hu_error_t hu_w14_scheduler_register_kv_prewarm_runner(hu_w14_scheduler_t *s,
+                                                        hu_kv_cache_manager_t *mgr) {
+     if (!s || !s->s)
+         return HU_ERR_INVALID_ARGUMENT;
+-    hu_error_t e1 = hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_EVICTION,
+-                                                 hu_kv_prewarm_runner, mgr);
++    hu_error_t e1 =
++        hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_EVICTION, hu_kv_prewarm_runner, mgr);
+     if (e1 != HU_OK)
+         return e1;
+-    return hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_WARMING,
+-                                        hu_kv_prewarm_runner, mgr);
++    return hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_WARMING, hu_kv_prewarm_runner, mgr);
+ }
+ 
+ hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
+@@ -1011,8 +1008,7 @@ hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now
+     return HU_OK;
+ }
+ 
+-hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
+-                                                    int64_t now_ms,
++hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s, int64_t now_ms,
+                                                     int budget_ms) {
+     if (!s || !s->s)
+         return HU_ERR_INVALID_ARGUMENT;
+@@ -1027,8 +1023,7 @@ hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
+     return hu_scheduler_enqueue(s->s, &job);
+ }
+ 
+-hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
+-                                         int budget_ms) {
++hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms, int budget_ms) {
+     if (!s || !s->s)
+         return HU_ERR_INVALID_ARGUMENT;
+     hu_job_spec_t job;
+@@ -1042,13 +1037,50 @@ hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
+     return hu_scheduler_enqueue(s->s, &job);
+ }
+ 
++/* US-7.5: register the nightly LoRA retrain runner and stash the ctx so
++ * status_save can serialize the `lora_retrain` block. */
++hu_error_t hu_w14_scheduler_register_lora_retrain_runner(hu_w14_scheduler_t *s,
++                                                         hu_lora_retrain_ctx_t *ctx) {
++    if (!s || !s->s || !ctx)
++        return HU_ERR_INVALID_ARGUMENT;
++    s->lora_retrain_ctx = ctx;
++    return hu_scheduler_register_runner(s->s, HU_JOB_LORA_RETRAIN_NIGHTLY, hu_lora_retrain_runner,
++                                        ctx);
++}
++
++/* US-7.5: enqueue the nightly LoRA retrain job.
++ *
++ * Defaults per the design:
++ *   - priority=0 (normal)
++ *   - budget_ms: 90 minutes (5400000) if caller passes <=0
++ *   - requires_idle=true, requires_ac_power=true (W14 nightly contract)
++ *   - earliest_at=now_ms (caller pins to a quiet-hours window externally)
++ *
++ * The runner is synchronous — overlap is prevented by the runner's own
++ * PID-file (design §5 R1). interval_sec is set to 86400 (24h). */
++hu_error_t hu_w14_scheduler_enqueue_lora_retrain_nightly(hu_w14_scheduler_t *s, int64_t now_ms,
++                                                         int budget_ms) {
++    if (!s || !s->s)
++        return HU_ERR_INVALID_ARGUMENT;
++    hu_job_spec_t job;
++    memset(&job, 0, sizeof(job));
++    job.kind = HU_JOB_LORA_RETRAIN_NIGHTLY;
++    job.priority = 0;
++    job.budget_ms = budget_ms > 0 ? budget_ms : 5400000; /* 90 min */
++    job.interval_sec = 86400;                            /* nightly */
++    job.requires_idle = true;
++    job.requires_ac_power = true;
++    job.earliest_at = now_ms;
++    return hu_scheduler_enqueue(s->s, &job);
++}
++
+ hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
+                                                           hu_training_data_runner_ctx_t *ctx) {
+     if (!s || !s->s || !ctx)
+         return HU_ERR_INVALID_ARGUMENT;
+ #if defined(HU_ENABLE_LEARNING)
+-    return hu_scheduler_register_runner(s->s, HU_JOB_TRAINING_DATA_EXTRACT,
+-                                        hu_training_data_runner, ctx);
++    return hu_scheduler_register_runner(s->s, HU_JOB_TRAINING_DATA_EXTRACT, hu_training_data_runner,
++                                        ctx);
+ #else
+     /* Same rationale as register_lora_runner — without HU_ENABLE_LEARNING
+      * we have no `hu_training_data_runner` symbol to register. Daemon
+@@ -1057,8 +1089,7 @@ hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
+ #endif
+ }
+ 
+-hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,
+-                                                          int64_t now_ms,
++hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s, int64_t now_ms,
+                                                           int budget_ms) {
+     if (!s || !s->s)
+         return HU_ERR_INVALID_ARGUMENT;
+@@ -1073,10 +1104,8 @@ hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,
+     return hu_scheduler_enqueue(s->s, &job);
+ }
+ 
+-hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
+-                                                   const char *contact_id,
+-                                                   size_t contact_id_len,
+-                                                   int budget_ms) {
++hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s, const char *contact_id,
++                                                   size_t contact_id_len, int budget_ms) {
+     if (!s || !s->s || !contact_id || contact_id_len == 0)
+         return HU_ERR_INVALID_ARGUMENT;
+     hu_job_spec_t job;
+@@ -1165,9 +1194,25 @@ hu_error_t hu_w14_scheduler_status_save(hu_w14_scheduler_t *s) {
+             "  \"jobs_completed_today\": %zu,\n"
+             "  \"battery_pct\": %d,\n"
+             "  \"on_ac_power\": %s,\n"
+-            "  \"updated_epoch\": %lld\n"
+-            "}\n",
++            "  \"updated_epoch\": %lld",
+             pending, completed, battery, on_ac ? "true" : "false", (long long)now);
++    /* US-7.5: optional `lora_retrain` block, written iff the daemon
++     * registered a retrain ctx. The block is the only new key in the
++     * top-level object; existing parsers (strstr-based) ignore unknown
++     * keys, so this is backward-compatible. */
++    if (s->lora_retrain_ctx) {
++        const hu_lora_retrain_ctx_t *rc = s->lora_retrain_ctx;
++        fprintf(f,
++                ",\n"
++                "  \"lora_retrain\": {\n"
++                "    \"last_run_ts\": %lld,\n"
++                "    \"last_outcome\": \"%s\",\n"
++                "    \"pairs_consumed\": %llu\n"
++                "  }",
++                (long long)rc->last_run_ts, hu_lora_retrain_outcome_str(rc->last_outcome),
++                rc->last_pairs_consumed);
++    }
++    fprintf(f, "\n}\n");
+     fclose(f);
+     if (rename(tmp, path) != 0)
+         (void)remove(tmp);
+diff --git a/src/daemon.c b/src/daemon.c
+index e5a7bdf8..f248b8b9 100644
+--- a/src/daemon.c
++++ b/src/daemon.c
+@@ -25,6 +25,7 @@
+ #include "human/agent/world_model_bridge.h"
+ #include "human/ml/learner.h"
+ #include "human/ml/learner_bridge.h"
++#include "human/ml/lora_retrain_runner.h"
+ #ifdef HU_ENABLE_ML
+ #include "human/ml/m3_frontier_adapter.h"
+ #endif
+@@ -2568,6 +2569,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
+                     hu_log_warn("human", agent->observer,
+                                 "W14: training data runner registration failed: %d", (int)tde);
+             }
++            /* US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess
++             * path). Sibling to the in-process learner runner above.
++             * Registration is best-effort — failure logs a warning and
++             * leaves the slot as a no-op rather than crashing the daemon. */
++            {
++                static hu_lora_retrain_ctx_t w14_lora_retrain_ctx;
++                static char retrain_candidate_dir[512];
++                static char retrain_current_symlink[512];
++                static char retrain_pidfile[512];
++                memset(&w14_lora_retrain_ctx, 0, sizeof(w14_lora_retrain_ctx));
++                const char *hm2 = getenv("HOME");
++                if (hm2 && hm2[0]) {
++                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
++                                   "%s/.human/ml/seth-lora-candidate", hm2);
++                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
++                                   "%s/.human/ml/seth-lora-current", hm2);
++                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
++                                   "%s/.human/lora_retrain.pid", hm2);
++                } else {
++                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
++                                   "/tmp/human_seth_lora_candidate");
++                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
++                                   "/tmp/human_seth_lora_current");
++                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
++                                   "/tmp/human_lora_retrain.pid");
++                }
++                w14_lora_retrain_ctx.candidate_dir = retrain_candidate_dir;
++                w14_lora_retrain_ctx.current_symlink = retrain_current_symlink;
++                w14_lora_retrain_ctx.pidfile_path = retrain_pidfile;
++                /* Defaults for argv pieces are set by the runner when NULL. */
++                hu_error_t rre = hu_w14_scheduler_register_lora_retrain_runner(
++                    agent->w14_scheduler, &w14_lora_retrain_ctx);
++                if (rre == HU_OK)
++                    hu_log_info("human", agent->observer,
++                                "W14: nightly LoRA retrain runner registered (candidate=%s)",
++                                retrain_candidate_dir);
++                else
++                    hu_log_warn("human", agent->observer,
++                                "W14: nightly LoRA retrain runner registration failed: %d",
++                                (int)rre);
++            }
+         }
+     }
+ #endif /* HU_ENABLE_LEARNING — W14 LoRA + training data runner wiring */
+@@ -3039,6 +3081,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
+                                     last_td_extract_ms = now_ms;
+                             }
+                         }
++                        /* US-7.5: nightly LoRA retrain enqueue. Fires once
++                         * per 24h. The scheduler enforces idle + AC-power
++                         * gating per the W14 contract; the runner's PID-file
++                         * prevents overlapping retrains across ticks. */
++                        {
++                            static int64_t last_retrain_enqueue_ms = 0;
++                            bool retrain_due = (last_retrain_enqueue_ms == 0) ||
++                                               (now_ms - last_retrain_enqueue_ms >= 86400000LL);
++                            if (retrain_due) {
++                                hu_error_t rre = hu_w14_scheduler_enqueue_lora_retrain_nightly(
++                                    agent->w14_scheduler, now_ms, 0);
++                                if (rre == HU_OK)
++                                    last_retrain_enqueue_ms = now_ms;
++                            }
++                        }
+                         hu_error_t te = hu_w14_scheduler_tick(agent->w14_scheduler, now_ms);
+                         agent->scheduler_last_tick_ms = now_ms;
+                         agent->scheduler_ticks++;
+diff --git a/src/ml/lora_retrain_runner.c b/src/ml/lora_retrain_runner.c
+new file mode 100644
+index 00000000..62eb2ee2
+--- /dev/null
++++ b/src/ml/lora_retrain_runner.c
+@@ -0,0 +1,524 @@
++/* W14 — Nightly LoRA re-train cron runner (US-7.5).
++ *
++ * Sibling to `hu_lora_training_runner` (HUML GPT in-process path); this
++ * orchestrates the MLX-Gemma frontier path via subprocess.
++ *
++ * Sequence per tick:
++ *   1. Acquire single-flight PID lock.
++ *   2. Probe pair count (`human ml mine-corrections --count-only`).
++ *      0 pairs ⇒ SKIPPED_NO_NEW_DATA, return.
++ *   3. Invoke `finetune-gemma.py --dpo --from-corrections --no-restart-server --no-version`.
++ *      Non-zero exit ⇒ FAILED, current adapter symlink untouched, return.
++ *   4. Invoke `check-lora-ab.sh --judgment <candidate>`. Parse JSON `verdict`
++ *      field. Only `"PASS"` proceeds to promotion (D3 contract: SKIP is NOT
++ *      pass, FAIL is not pass, missing key is not pass).
++ *   5. Atomic symlink swap (tmp link + rename(2)) to point `current_symlink`
++ *      at `candidate_dir`.
++ *
++ * Synchronous V1 (open-Q 1 default): the runner blocks the scheduler tick
++ * for the full subprocess chain. PID file prevents overlapping retrains.
++ * `HU_IS_TEST` disables the production fork/exec path; tests must register
++ * `test_run_subprocess` or the runner emits SKIPPED_ALREADY_RUNNING (via
++ * the "no exec path available" fallback). */
++
++#include "human/ml/lora_retrain_runner.h"
++#include "human/agent/scheduler.h"
++#include "human/core/allocator.h"
++#include "human/core/error.h"
++#include "human/core/log.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <signal.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <time.h>
++#include <unistd.h>
++
++/* ── String table for the outcome enum ────────────────────────────────── */
++
++const char *hu_lora_retrain_outcome_str(hu_lora_retrain_outcome_t o) {
++    switch (o) {
++    case HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA:
++        return "skipped_no_new_data";
++    case HU_LORA_RETRAIN_OUTCOME_SKIPPED_ALREADY_RUNNING:
++        return "skipped_already_running";
++    case HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL:
++        return "skipped_gate_fail";
++    case HU_LORA_RETRAIN_OUTCOME_FAILED:
++        return "failed";
++    case HU_LORA_RETRAIN_OUTCOME_PROMOTED:
++        return "promoted";
++    case HU_LORA_RETRAIN_OUTCOME_PROMOTION_FAILED:
++        return "promotion_failed";
++    case HU_LORA_RETRAIN_OUTCOME_UNKNOWN:
++    default:
++        return "unknown";
++    }
++}
++
++hu_lora_retrain_outcome_t hu_lora_retrain_outcome_from_str(const char *s) {
++    if (!s)
++        return HU_LORA_RETRAIN_OUTCOME_UNKNOWN;
++    if (strcmp(s, "skipped_no_new_data") == 0)
++        return HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA;
++    if (strcmp(s, "skipped_already_running") == 0)
++        return HU_LORA_RETRAIN_OUTCOME_SKIPPED_ALREADY_RUNNING;
++    if (strcmp(s, "skipped_gate_fail") == 0)
++        return HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL;
++    if (strcmp(s, "failed") == 0)
++        return HU_LORA_RETRAIN_OUTCOME_FAILED;
++    if (strcmp(s, "promoted") == 0)
++        return HU_LORA_RETRAIN_OUTCOME_PROMOTED;
++    if (strcmp(s, "promotion_failed") == 0)
++        return HU_LORA_RETRAIN_OUTCOME_PROMOTION_FAILED;
++    return HU_LORA_RETRAIN_OUTCOME_UNKNOWN;
++}
++
++/* ── Status JSON parser for the nested `lora_retrain` block ───────────── */
++
++static const char *retrain_skip_ws(const char *p) {
++    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
++        ++p;
++    return p;
++}
++
++hu_error_t hu_lora_retrain_status_parse(const char *json, long long *out_last_run_ts,
++                                        hu_lora_retrain_outcome_t *out_last_outcome,
++                                        unsigned long long *out_pairs_consumed) {
++    if (!json || !out_last_run_ts || !out_last_outcome || !out_pairs_consumed)
++        return HU_ERR_INVALID_ARGUMENT;
++    const char *block = strstr(json, "\"lora_retrain\"");
++    if (!block)
++        return HU_ERR_NOT_FOUND;
++    const char *colon = strchr(block, ':');
++    if (!colon)
++        return HU_ERR_INVALID_ARGUMENT;
++    const char *brace = strchr(colon, '{');
++    if (!brace)
++        return HU_ERR_INVALID_ARGUMENT;
++    const char *end = strchr(brace, '}');
++    if (!end)
++        return HU_ERR_INVALID_ARGUMENT;
++
++    /* Scope key lookups to the [brace,end] slice by copying into a small
++     * stack buffer (the block is bounded — three fields). */
++    size_t len = (size_t)(end - brace) + 1;
++    if (len >= 512)
++        return HU_ERR_INVALID_ARGUMENT;
++    char buf[512];
++    memcpy(buf, brace, len);
++    buf[len] = '\0';
++
++    const char *ts_p = strstr(buf, "\"last_run_ts\"");
++    if (!ts_p)
++        return HU_ERR_INVALID_ARGUMENT;
++    const char *ts_colon = strchr(ts_p, ':');
++    if (!ts_colon)
++        return HU_ERR_INVALID_ARGUMENT;
++    char *ts_end = NULL;
++    long long ts_v = strtoll(retrain_skip_ws(ts_colon + 1), &ts_end, 10);
++    if (ts_end == ts_colon + 1)
++        return HU_ERR_INVALID_ARGUMENT;
++
++    const char *pc_p = strstr(buf, "\"pairs_consumed\"");
++    if (!pc_p)
++        return HU_ERR_INVALID_ARGUMENT;
++    const char *pc_colon = strchr(pc_p, ':');
++    if (!pc_colon)
++        return HU_ERR_INVALID_ARGUMENT;
++    char *pc_end = NULL;
++    unsigned long long pc_v = strtoull(retrain_skip_ws(pc_colon + 1), &pc_end, 10);
++    if (pc_end == pc_colon + 1)
++        return HU_ERR_INVALID_ARGUMENT;
++
++    const char *oc_p = strstr(buf, "\"last_outcome\"");
++    if (!oc_p)
++        return HU_ERR_INVALID_ARGUMENT;
++    const char *oc_colon = strchr(oc_p, ':');
++    if (!oc_colon)
++        return HU_ERR_INVALID_ARGUMENT;
++    const char *quote = strchr(oc_colon, '"');
++    if (!quote)
++        return HU_ERR_INVALID_ARGUMENT;
++    const char *quote_end = strchr(quote + 1, '"');
++    if (!quote_end)
++        return HU_ERR_INVALID_ARGUMENT;
++    char oc_str[64];
++    size_t oc_len = (size_t)(quote_end - (quote + 1));
++    if (oc_len >= sizeof(oc_str))
++        return HU_ERR_INVALID_ARGUMENT;
++    memcpy(oc_str, quote + 1, oc_len);
++    oc_str[oc_len] = '\0';
++
++    *out_last_run_ts = ts_v;
++    *out_pairs_consumed = pc_v;
++    *out_last_outcome = hu_lora_retrain_outcome_from_str(oc_str);
++    return HU_OK;
++}
++
++/* ── Event emission ───────────────────────────────────────────────────── */
++
++static void retrain_emit(hu_lora_retrain_ctx_t *ctx, const char *event, const char *payload) {
++    if (ctx && ctx->emit_event) {
++        ctx->emit_event(event, payload ? payload : "{}", ctx->emit_user_data);
++        return;
++    }
++    /* Fallback: structured-ish log line. */
++    hu_log_info("lora_retrain", NULL, "%s %s", event, payload ? payload : "{}");
++}
++
++/* ── Single-flight PID file ───────────────────────────────────────────── */
++
++/* Returns 1 on lock acquired, 0 on already-locked, -1 on infra error. */
++static int retrain_pid_lock(const char *path) {
++    if (!path || !*path)
++        return 1; /* No PID file configured ⇒ caller opted out. */
++    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0600);
++    if (fd < 0) {
++        if (errno == EEXIST) {
++            /* Inspect existing PID — if process is gone, steal the lock. */
++            FILE *rf = fopen(path, "r");
++            if (rf) {
++                long pid = 0;
++                if (fscanf(rf, "%ld", &pid) == 1 && pid > 0) {
++                    fclose(rf);
++                    if (kill((pid_t)pid, 0) == 0)
++                        return 0; /* Live owner. */
++                    /* Stale — remove and retry. */
++                    (void)unlink(path);
++                    fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0600);
++                    if (fd < 0)
++                        return -1;
++                } else {
++                    fclose(rf);
++                    return -1;
++                }
++            } else {
++                return -1;
++            }
++        } else {
++            return -1;
++        }
++    }
++    char buf[32];
++    int n = snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
++    if (n > 0)
++        (void)write(fd, buf, (size_t)n);
++    close(fd);
++    return 1;
++}
++
++static void retrain_pid_unlock(const char *path) {
++    if (path && *path)
++        (void)unlink(path);
++}
++
++/* ── Subprocess dispatch ──────────────────────────────────────────────── */
++
++#ifdef HU_IS_TEST
++/* In tests we MUST go through the hook. The production exec path is
++ * permanently disabled under HU_IS_TEST to make sure no test accidentally
++ * forks Python. */
++static hu_error_t retrain_real_subprocess(const char *const argv[],
++                                          hu_lora_retrain_proc_result_t *result) {
++    (void)argv;
++    if (result) {
++        result->exit_code = -1;
++        result->stdout_buf[0] = '\0';
++        result->stdout_len = 0;
++    }
++    return HU_ERR_NOT_SUPPORTED;
++}
++#else
++/* Production: posix_spawn + waitpid, capture stdout via pipe. */
++#include <spawn.h>
++#include <sys/wait.h>
++extern char **environ;
++
++static hu_error_t retrain_real_subprocess(const char *const argv[],
++                                          hu_lora_retrain_proc_result_t *result) {
++    if (!argv || !argv[0] || !result)
++        return HU_ERR_INVALID_ARGUMENT;
++    result->exit_code = -1;
++    result->stdout_buf[0] = '\0';
++    result->stdout_len = 0;
++
++    int pipefd[2];
++    if (pipe(pipefd) != 0)
++        return HU_ERR_IO;
++
++    posix_spawn_file_actions_t fa;
++    if (posix_spawn_file_actions_init(&fa) != 0) {
++        close(pipefd[0]);
++        close(pipefd[1]);
++        return HU_ERR_IO;
++    }
++    posix_spawn_file_actions_addclose(&fa, pipefd[0]);
++    posix_spawn_file_actions_adddup2(&fa, pipefd[1], STDOUT_FILENO);
++    posix_spawn_file_actions_addclose(&fa, pipefd[1]);
++
++    pid_t pid = 0;
++    int rc = posix_spawnp(&pid, argv[0], &fa, NULL, (char *const *)argv, environ);
++    posix_spawn_file_actions_destroy(&fa);
++    close(pipefd[1]);
++    if (rc != 0) {
++        close(pipefd[0]);
++        return HU_ERR_IO;
++    }
++
++    size_t total = 0;
++    while (total + 1 < sizeof(result->stdout_buf)) {
++        ssize_t n =
++            read(pipefd[0], result->stdout_buf + total, sizeof(result->stdout_buf) - 1 - total);
++        if (n <= 0)
++            break;
++        total += (size_t)n;
++    }
++    result->stdout_buf[total] = '\0';
++    result->stdout_len = total;
++    close(pipefd[0]);
++
++    int status = 0;
++    while (waitpid(pid, &status, 0) < 0) {
++        if (errno != EINTR)
++            return HU_ERR_IO;
++    }
++    if (WIFEXITED(status))
++        result->exit_code = WEXITSTATUS(status);
++    else
++        result->exit_code = 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
++    return HU_OK;
++}
++#endif
++
++static hu_error_t retrain_run(hu_lora_retrain_ctx_t *ctx, const char *const argv[],
++                              hu_lora_retrain_proc_result_t *result) {
++    if (!ctx || !argv || !result)
++        return HU_ERR_INVALID_ARGUMENT;
++    memset(result, 0, sizeof(*result));
++    if (ctx->test_run_subprocess)
++        return ctx->test_run_subprocess(argv, result, ctx->test_subprocess_ud);
++    return retrain_real_subprocess(argv, result);
++}
++
++/* ── Pair-count probe ─────────────────────────────────────────────────── */
++
++/* Parses `{"pairs": N}` from stdout. Returns -1 on parse failure. */
++static long long retrain_parse_pairs(const char *json) {
++    if (!json)
++        return -1;
++    const char *p = strstr(json, "\"pairs\"");
++    if (!p)
++        return -1;
++    const char *colon = strchr(p, ':');
++    if (!colon)
++        return -1;
++    char *end = NULL;
++    long long v = strtoll(retrain_skip_ws(colon + 1), &end, 10);
++    if (end == colon + 1)
++        return -1;
++    return v;
++}
++
++/* ── Gate verdict parsing (D3 contract) ───────────────────────────────── */
++
++/* Returns 1 iff the JSON contains literal `"verdict":"PASS"`. Any other
++ * value, missing key, or malformed JSON returns 0. SKIP is NOT pass. */
++static int retrain_verdict_is_pass(const char *json) {
++    if (!json)
++        return 0;
++    const char *p = strstr(json, "\"verdict\"");
++    if (!p)
++        return 0;
++    const char *colon = strchr(p, ':');
++    if (!colon)
++        return 0;
++    const char *q = strchr(colon, '"');
++    if (!q)
++        return 0;
++    const char *qe = strchr(q + 1, '"');
++    if (!qe)
++        return 0;
++    size_t n = (size_t)(qe - (q + 1));
++    if (n != 4)
++        return 0;
++    return memcmp(q + 1, "PASS", 4) == 0;
++}
++
++static const char *retrain_verdict_str(const char *json) {
++    if (!json)
++        return "missing";
++    const char *p = strstr(json, "\"verdict\"");
++    if (!p)
++        return "missing";
++    const char *colon = strchr(p, ':');
++    if (!colon)
++        return "missing";
++    const char *q = strchr(colon, '"');
++    if (!q)
++        return "missing";
++    const char *qe = strchr(q + 1, '"');
++    if (!qe)
++        return "missing";
++    size_t n = (size_t)(qe - (q + 1));
++    if (n == 4 && memcmp(q + 1, "PASS", 4) == 0)
++        return "PASS";
++    if (n == 4 && memcmp(q + 1, "SKIP", 4) == 0)
++        return "SKIP";
++    if (n == 4 && memcmp(q + 1, "FAIL", 4) == 0)
++        return "FAIL";
++    return "other";
++}
++
++/* ── Atomic symlink promote ───────────────────────────────────────────── */
++
++/* Mirrors the M2 atomic-rename pattern: symlink(target, tmp); rename(tmp, current). */
++static hu_error_t retrain_promote_symlink(const char *target, const char *current) {
++    if (!target || !*target || !current || !*current)
++        return HU_ERR_INVALID_ARGUMENT;
++    char tmp[1024];
++    int n = snprintf(tmp, sizeof(tmp), "%s.tmp.%ld", current, (long)getpid());
++    if (n <= 0 || (size_t)n >= sizeof(tmp))
++        return HU_ERR_INVALID_ARGUMENT;
++    /* Best-effort remove of any prior tmp link from a crashed run. */
++    (void)unlink(tmp);
++    if (symlink(target, tmp) != 0)
++        return HU_ERR_IO;
++    if (rename(tmp, current) != 0) {
++        (void)unlink(tmp);
++        return HU_ERR_IO;
++    }
++    return HU_OK;
++}
++
++/* ── Runner entry point ───────────────────────────────────────────────── */
++
++hu_error_t hu_lora_retrain_runner(struct hu_memory_facade *m, const struct hu_job_spec *spec,
++                                  int64_t budget_ms, void *user_data) {
++    (void)m;
++    (void)budget_ms;
++    if (!spec || !user_data)
++        return HU_ERR_INVALID_ARGUMENT;
++    if (spec->kind != HU_JOB_LORA_RETRAIN_NIGHTLY)
++        return HU_ERR_INVALID_ARGUMENT;
++    hu_lora_retrain_ctx_t *ctx = (hu_lora_retrain_ctx_t *)user_data;
++
++    /* Reset per-run output fields BEFORE any early returns so callers see
++     * the freshest outcome even when we short-circuit. */
++    ctx->last_run_ts = (int64_t)time(NULL);
++    ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_UNKNOWN;
++    ctx->last_pairs_consumed = 0;
++    ctx->last_exit_code = 0;
++
++    /* Single-flight gate. */
++    int locked = retrain_pid_lock(ctx->pidfile_path);
++    if (locked == 0) {
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_ALREADY_RUNNING;
++        retrain_emit(ctx, "lora_retrain_skipped_already_running", "{\"reason\":\"pid_lock_held\"}");
++        return HU_OK;
++    }
++    if (locked < 0) {
++        /* PID-file infra error — still skip (don't crash the scheduler). */
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_ALREADY_RUNNING;
++        retrain_emit(ctx, "lora_retrain_skipped_already_running",
++                     "{\"reason\":\"pidfile_unreachable\"}");
++        return HU_OK;
++    }
++
++    hu_error_t final_rc = HU_OK;
++    char payload[512];
++
++    /* ── STEP 1: pair-count probe ────────────────────────────────────── */
++    const char *miner_argv0 = ctx->miner_argv0 ? ctx->miner_argv0 : "human";
++    const char *miner_sub0 = ctx->miner_subcmd[0] ? ctx->miner_subcmd[0] : "ml";
++    const char *miner_sub1 = ctx->miner_subcmd[1] ? ctx->miner_subcmd[1] : "mine-corrections";
++    const char *probe_argv[] = {miner_argv0, miner_sub0, miner_sub1, "--count-only", NULL};
++
++    hu_lora_retrain_proc_result_t probe_result;
++    hu_error_t e = retrain_run(ctx, probe_argv, &probe_result);
++    if (e != HU_OK || probe_result.exit_code != 0) {
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_FAILED;
++        ctx->last_exit_code = probe_result.exit_code;
++        snprintf(payload, sizeof(payload), "{\"step\":\"mine_corrections_probe\",\"exit_code\":%d}",
++                 probe_result.exit_code);
++        retrain_emit(ctx, "lora_retrain_failed", payload);
++        goto done;
++    }
++    long long pairs = retrain_parse_pairs(probe_result.stdout_buf);
++    if (pairs <= 0) {
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA;
++        ctx->last_pairs_consumed = 0;
++        retrain_emit(ctx, "lora_retrain_skipped_no_new_data", "{\"pairs\":0}");
++        goto done;
++    }
++    ctx->last_pairs_consumed = (unsigned long long)pairs;
++    snprintf(payload, sizeof(payload), "{\"pairs\":%lld}", pairs);
++    retrain_emit(ctx, "lora_retrain_scheduled", payload);
++
++    /* ── STEP 2: finetune ────────────────────────────────────────────── */
++    const char *finetune =
++        ctx->finetune_script ? ctx->finetune_script : "scripts/finetune-gemma.py";
++    const char *finetune_argv[] = {
++        finetune, "--dpo", "--from-corrections", "--no-restart-server", "--no-version", NULL};
++    hu_lora_retrain_proc_result_t train_result;
++    e = retrain_run(ctx, finetune_argv, &train_result);
++    if (e != HU_OK || train_result.exit_code != 0) {
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_FAILED;
++        ctx->last_exit_code = train_result.exit_code;
++        snprintf(payload, sizeof(payload), "{\"step\":\"finetune\",\"exit_code\":%d}",
++                 train_result.exit_code);
++        retrain_emit(ctx, "lora_retrain_failed", payload);
++        goto done;
++    }
++
++    /* ── STEP 3: judgment gate ───────────────────────────────────────── */
++    const char *gate = ctx->gate_script ? ctx->gate_script : "scripts/check-lora-ab.sh";
++    const char *candidate = ctx->candidate_dir ? ctx->candidate_dir : "";
++    const char *gate_argv[] = {gate, "--judgment", candidate, NULL};
++    hu_lora_retrain_proc_result_t gate_result;
++    e = retrain_run(ctx, gate_argv, &gate_result);
++    if (e != HU_OK) {
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL;
++        retrain_emit(ctx, "lora_retrain_skipped", "{\"reason\":\"gate_subprocess_error\"}");
++        goto done;
++    }
++    /* D3 contract: PASS verdict required. exit_code is informational only;
++     * SKIP (US-7.6 dormant) must NOT promote. */
++    int pass = (gate_result.exit_code == 0) && retrain_verdict_is_pass(gate_result.stdout_buf);
++    if (!pass) {
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL;
++        const char *verdict = retrain_verdict_str(gate_result.stdout_buf);
++        snprintf(payload, sizeof(payload),
++                 "{\"reason\":\"gate_fail\",\"verdict\":\"%s\",\"exit_code\":%d}", verdict,
++                 gate_result.exit_code);
++        retrain_emit(ctx, "lora_retrain_skipped", payload);
++        goto done;
++    }
++
++    /* ── STEP 4: promote (atomic symlink swap) ───────────────────────── */
++    if (!ctx->current_symlink || !ctx->candidate_dir) {
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_PROMOTION_FAILED;
++        retrain_emit(ctx, "lora_retrain_promotion_failed", "{\"reason\":\"missing_paths\"}");
++        goto done;
++    }
++    hu_error_t promote_err = retrain_promote_symlink(ctx->candidate_dir, ctx->current_symlink);
++    if (promote_err != HU_OK) {
++        ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_PROMOTION_FAILED;
++        snprintf(payload, sizeof(payload), "{\"reason\":\"symlink_swap\",\"rc\":%d}",
++                 (int)promote_err);
++        retrain_emit(ctx, "lora_retrain_promotion_failed", payload);
++        goto done;
++    }
++    ctx->last_outcome = HU_LORA_RETRAIN_OUTCOME_PROMOTED;
++    snprintf(payload, sizeof(payload), "{\"candidate\":\"%s\",\"pairs\":%llu}", ctx->candidate_dir,
++             ctx->last_pairs_consumed);
++    retrain_emit(ctx, "lora_retrain_promoted", payload);
++
++done:
++    retrain_pid_unlock(ctx->pidfile_path);
++    return final_rc;
++}
+diff --git a/tests/fixtures/candidate_adapter_metadata.json b/tests/fixtures/candidate_adapter_metadata.json
+new file mode 100644
+index 00000000..916a6c35
+--- /dev/null
++++ b/tests/fixtures/candidate_adapter_metadata.json
+@@ -0,0 +1,16 @@
++{
++  "adapter_id": "seth-lora-candidate-2026-05-16",
++  "model_target": "gemma-3-1b-it",
++  "rank": 32,
++  "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
++  "training": {
++    "mode": "dpo",
++    "from_corrections": true,
++    "pairs_consumed": 42,
++    "epochs": 1,
++    "loss_final": 0.187
++  },
++  "produced_by": "finetune-gemma.py --dpo --from-corrections --no-restart-server --no-version",
++  "promotion_gate": "scripts/check-lora-ab.sh --judgment",
++  "fixture_purpose": "US-7.5 W14 nightly LoRA retrain — promotion gate simulation input."
++}
+diff --git a/tests/fixtures/check_lora_ab_fail.json b/tests/fixtures/check_lora_ab_fail.json
+new file mode 100644
+index 00000000..479a1067
+--- /dev/null
++++ b/tests/fixtures/check_lora_ab_fail.json
+@@ -0,0 +1,7 @@
++{
++  "verdict": "FAIL",
++  "delta": -0.023,
++  "baseline_score": 0.612,
++  "candidate_score": 0.589,
++  "reason": "candidate_score_below_baseline"
++}
+diff --git a/tests/fixtures/check_lora_ab_pass.json b/tests/fixtures/check_lora_ab_pass.json
+new file mode 100644
+index 00000000..99766f0a
+--- /dev/null
++++ b/tests/fixtures/check_lora_ab_pass.json
+@@ -0,0 +1,7 @@
++{
++  "verdict": "PASS",
++  "delta": 0.087,
++  "baseline_score": 0.612,
++  "candidate_score": 0.699,
++  "judgment_ppl_delta": 0.045
++}
+diff --git a/tests/fixtures/check_lora_ab_skip.json b/tests/fixtures/check_lora_ab_skip.json
+new file mode 100644
+index 00000000..6a2f212c
+--- /dev/null
++++ b/tests/fixtures/check_lora_ab_skip.json
+@@ -0,0 +1,5 @@
++{
++  "verdict": "SKIP",
++  "reason": "judgment_dormant",
++  "note": "US-7.6 judgment-PPL backend not yet wired; SKIP is NOT a pass."
++}
+diff --git a/tests/test_main.c b/tests/test_main.c
+index 3eff2708..150c27f4 100644
+--- a/tests/test_main.c
++++ b/tests/test_main.c
+@@ -264,6 +264,7 @@ void run_w12_planner_tests(void);
+ void run_w12_verifier_loop_tests(void);
+ void run_w13_learner_tests(void);
+ void run_w14_runners_tests(void);
++void run_w14_lora_retrain_tests(void);
+ void run_w15_backup_restore_tests(void);
+ void run_learner_bridge_tests(void);
+ void run_w14_scheduler_tests(void);
+@@ -854,6 +855,7 @@ int main(int argc, char **argv) {
+     run_w12_verifier_loop_tests();
+     run_w13_learner_tests();
+     run_w14_runners_tests();
++    run_w14_lora_retrain_tests();
+     run_w15_backup_restore_tests();
+     run_learner_bridge_tests();
+     run_w14_scheduler_tests();
+diff --git a/tests/test_ported_modules.c b/tests/test_ported_modules.c
+index cfdf898b..44c138fc 100644
+--- a/tests/test_ported_modules.c
++++ b/tests/test_ported_modules.c
+@@ -1,5 +1,6 @@
+ /* Tests for newly ported modules (capabilities, channel_catalog, config_mutator, update, etc.) */
+ #include "human/agent/commands.h"
++#include "human/agent/scheduler_status_json.h"
+ #include "human/capabilities.h"
+ #include "human/channel_adapters.h"
+ #include "human/channel_catalog.h"
+@@ -7,16 +8,16 @@
+ #include "human/config_mutator.h"
+ #include "human/core/allocator.h"
+ #include "human/core/arena.h"
+-#include "human/agent/scheduler_status_json.h"
+ #include "human/doctor.h"
++#include "human/ml/lora_retrain_runner.h"
+ #include "human/security.h"
+ #include "human/security/sandbox.h"
+ #include "human/service.h"
+ #include "human/update.h"
+ #include "test_framework.h"
+-#include <string.h>
+-#include <stdlib.h>
+ #include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ 
+@@ -115,8 +116,8 @@ static void test_scheduler_status_json_bad_json(void) {
+     unsigned long long jp = 0, jc = 0;
+     long long bat = 0, ue = 0;
+     char ac[16] = {0};
+-    HU_ASSERT_NEQ(
+-        hu_scheduler_status_parse_json("{ not json", &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
++    HU_ASSERT_NEQ(hu_scheduler_status_parse_json("{ not json", &jp, &jc, &bat, ac, sizeof(ac), &ue),
++                  HU_OK);
+ }
+ 
+ static void test_scheduler_status_json_null_args(void) {
+@@ -142,12 +143,12 @@ static void test_doctor_deprecated_scheduler_status_matches_shared(void) {
+     char ac_d[16] = {0};
+     char ac_n[16] = {0};
+     const char *j = "{\"jobs_pending\":5,\"jobs_completed_today\":6,\"battery_pct\":7,"
+-                     "\"on_ac_power\":false,\"updated_epoch\":8}";
++                    "\"on_ac_power\":false,\"updated_epoch\":8}";
+     HU_ASSERT_EQ(
+         hu_doctor_parse_scheduler_status_json(j, &jp_d, &jc_d, &bat_d, ac_d, sizeof(ac_d), &ue_d),
+         HU_OK);
+-    HU_ASSERT_EQ(
+-        hu_scheduler_status_parse_json(j, &jp_n, &jc_n, &bat_n, ac_n, sizeof(ac_n), &ue_n), HU_OK);
++    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j, &jp_n, &jc_n, &bat_n, ac_n, sizeof(ac_n), &ue_n),
++                 HU_OK);
+     HU_ASSERT_EQ(jp_d, jp_n);
+     HU_ASSERT_EQ(jc_d, jc_n);
+     HU_ASSERT_EQ(bat_d, bat_n);
+@@ -155,6 +156,43 @@ static void test_doctor_deprecated_scheduler_status_matches_shared(void) {
+     HU_ASSERT_EQ(ue_d, ue_n);
+ }
+ 
++/* US-7.5: AC-7.5.5 — `lora_retrain` block is optional and parses
++ * forward/backward. The shared scheduler_status_json parser uses strstr
++ * for each top-level key, so adding the new block is non-breaking. */
++static void test_scheduler_status_lora_retrain_block_optional(void) {
++    /* (1) Backward compat: old shape (no block) still parses cleanly via
++     *     the shared parser; the lora_retrain parser returns NOT_FOUND. */
++    const char *j_old = "{\"jobs_pending\":0,\"jobs_completed_today\":0,\"battery_pct\":50,"
++                        "\"on_ac_power\":true,\"updated_epoch\":1700000000}";
++    unsigned long long jp = 0, jc = 0;
++    long long bat = 0, ue = 0;
++    char ac[16] = {0};
++    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j_old, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
++
++    long long ts = 0;
++    hu_lora_retrain_outcome_t oc = HU_LORA_RETRAIN_OUTCOME_UNKNOWN;
++    unsigned long long pc = 0;
++    HU_ASSERT_EQ(hu_lora_retrain_status_parse(j_old, &ts, &oc, &pc), HU_ERR_NOT_FOUND);
++
++    /* (2) Forward compat: new shape parses through both functions. The
++     *     legacy parser ignores the extra key, the new parser extracts it. */
++    const char *j_new = "{\"jobs_pending\":1,\"jobs_completed_today\":2,\"battery_pct\":80,"
++                        "\"on_ac_power\":false,\"updated_epoch\":1700001234,"
++                        "\"lora_retrain\":{\"last_run_ts\":1715800000,"
++                        "\"last_outcome\":\"promoted\",\"pairs_consumed\":42}}";
++    jp = jc = 0;
++    bat = ue = 0;
++    memset(ac, 0, sizeof(ac));
++    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j_new, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
++    HU_ASSERT_EQ(jp, 1ULL);
++    HU_ASSERT_EQ(ue, 1700001234LL);
++
++    HU_ASSERT_EQ(hu_lora_retrain_status_parse(j_new, &ts, &oc, &pc), HU_OK);
++    HU_ASSERT_EQ(ts, 1715800000LL);
++    HU_ASSERT_EQ(oc, HU_LORA_RETRAIN_OUTCOME_PROMOTED);
++    HU_ASSERT_EQ((long long)pc, 42LL);
++}
++
+ static void doctor_sch_write_status(const char *home, const char *body) {
+     char dir[256];
+     snprintf(dir, sizeof(dir), "%s/.human", home);
+@@ -197,8 +235,7 @@ static void test_doctor_check_scheduler_minified_file(void) {
+                             "{\"updated_epoch\":5000,\"jobs_pending\":7,\"on_ac_power\":true,"
+                             "\"battery_pct\":88,\"jobs_completed_today\":3}");
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     /* status_age = 100s — threshold must exceed age or we take the STALE branch */
+@@ -220,8 +257,7 @@ static void test_doctor_check_scheduler_stale_warn(void) {
+                             "{\"jobs_pending\":0,\"jobs_completed_today\":0,\"battery_pct\":100,"
+                             "\"on_ac_power\":false,\"updated_epoch\":1000}");
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     HU_ASSERT_EQ(hu_doctor_check_scheduler(&alloc, 6000, 3600, &items, &count, &cap), HU_OK);
+@@ -617,8 +653,7 @@ static void test_doctor_check_imessage_no_status_file_warns(void) {
+     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_no_status");
+ 
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
+@@ -630,17 +665,15 @@ static void test_doctor_check_imessage_no_status_file_warns(void) {
+ static void test_doctor_check_imessage_breaker_tripped_reports_error(void) {
+     char *old = NULL;
+     doctor_imsg_swap_home("/tmp/hu_doctor_imsg_tripped", &old);
+-    doctor_imsg_write_status("/tmp/hu_doctor_imsg_tripped",
+-                             "{\n"
+-                             "  \"last_rowid\": 12345,\n"
+-                             "  \"last_successful_poll_epoch\": 0,\n"
+-                             "  \"consecutive_open_failures\": 9,\n"
+-                             "  \"circuit_breaker_tripped\": true,\n"
+-                             "  \"last_error_class\": \"AUTH\"\n"
+-                             "}\n");
++    doctor_imsg_write_status("/tmp/hu_doctor_imsg_tripped", "{\n"
++                                                            "  \"last_rowid\": 12345,\n"
++                                                            "  \"last_successful_poll_epoch\": 0,\n"
++                                                            "  \"consecutive_open_failures\": 9,\n"
++                                                            "  \"circuit_breaker_tripped\": true,\n"
++                                                            "  \"last_error_class\": \"AUTH\"\n"
++                                                            "}\n");
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
+@@ -663,8 +696,7 @@ static void test_doctor_check_imessage_fresh_poll_reports_ok(void) {
+                              "  \"last_error_class\": \"NONE\"\n"
+                              "}\n");
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     /* now=1010, threshold=600 → age=10s → fresh */
+@@ -688,8 +720,7 @@ static void test_doctor_check_imessage_stale_poll_reports_warn(void) {
+                              "  \"last_error_class\": \"NONE\"\n"
+                              "}\n");
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     /* now=2000, threshold=600 → age=1000s → stale */
+@@ -712,8 +743,7 @@ static void test_doctor_check_imessage_partial_failures_warns(void) {
+                              "  \"last_error_class\": \"AUTH\"\n"
+                              "}\n");
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
+@@ -729,8 +759,7 @@ static void test_doctor_check_imessage_corrupt_status_does_not_crash(void) {
+     /* Truncated / garbage JSON. Must not crash, must not falsely report fresh. */
+     doctor_imsg_write_status("/tmp/hu_doctor_imsg_corrupt", "{ this is not json");
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
+@@ -746,8 +775,7 @@ static void test_doctor_check_imessage_no_home_reports_error(void) {
+     char *old = h ? strdup(h) : NULL;
+     unsetenv("HOME");
+     hu_allocator_t alloc = hu_system_allocator();
+-    hu_diag_item_t *items =
+-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
++    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+     size_t count = 0;
+     size_t cap = 8;
+     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 0, 600, &items, &count, &cap), HU_OK);
+@@ -775,6 +803,7 @@ void run_ported_modules_tests(void) {
+     HU_RUN_TEST(test_scheduler_status_json_bad_json);
+     HU_RUN_TEST(test_scheduler_status_json_null_args);
+     HU_RUN_TEST(test_doctor_deprecated_scheduler_status_matches_shared);
++    HU_RUN_TEST(test_scheduler_status_lora_retrain_block_optional);
+     HU_RUN_TEST(test_doctor_check_scheduler_minified_file);
+     HU_RUN_TEST(test_doctor_check_scheduler_stale_warn);
+     HU_RUN_TEST(test_doctor_truncate_null_alloc);
+diff --git a/tests/test_w14_lora_retrain.c b/tests/test_w14_lora_retrain.c
+new file mode 100644
+index 00000000..4c693152
+--- /dev/null
++++ b/tests/test_w14_lora_retrain.c
+@@ -0,0 +1,419 @@
++/* US-7.5 — Nightly LoRA re-train cron runner tests.
++ *
++ * Covers the 5 AC plus the lora_retrain status block parse round-trip and
++ * the D3 SKIP contract. Every subprocess invocation is mocked via
++ * `test_run_subprocess`; no real Python is ever forked. */
++
++#include "human/agent/scheduler.h"
++#include "human/ml/lora_retrain_runner.h"
++#include "test_framework.h"
++
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++/* ── Subprocess hook capture machinery ────────────────────────────────── */
++
++#define MAX_CAPTURES 8
++#define MAX_ARGV     16
++
++typedef struct {
++    int n_calls;
++    char argv[MAX_CAPTURES][MAX_ARGV][128];
++    int argc[MAX_CAPTURES];
++    /* Queued responses, in call order. */
++    int queued_exit[MAX_CAPTURES];
++    char queued_stdout[MAX_CAPTURES][2048];
++    int n_queued;
++    int next_response;
++} subprocess_capture_t;
++
++static hu_error_t capture_subprocess(const char *const argv[],
++                                     hu_lora_retrain_proc_result_t *result, void *ud) {
++    subprocess_capture_t *cap = (subprocess_capture_t *)ud;
++    if (cap->n_calls >= MAX_CAPTURES)
++        return HU_ERR_INVALID_ARGUMENT;
++    int slot = cap->n_calls++;
++    int ac = 0;
++    while (argv[ac] && ac < MAX_ARGV) {
++        snprintf(cap->argv[slot][ac], sizeof(cap->argv[slot][ac]), "%s", argv[ac]);
++        ac++;
++    }
++    cap->argc[slot] = ac;
++
++    /* Respond with the next queued reply (or empty PASS if exhausted). */
++    int idx = (cap->next_response < cap->n_queued) ? cap->next_response : cap->n_queued - 1;
++    if (idx < 0) {
++        result->exit_code = 0;
++        result->stdout_buf[0] = '\0';
++        result->stdout_len = 0;
++    } else {
++        result->exit_code = cap->queued_exit[idx];
++        snprintf(result->stdout_buf, sizeof(result->stdout_buf), "%s", cap->queued_stdout[idx]);
++        result->stdout_len = strlen(result->stdout_buf);
++    }
++    cap->next_response++;
++    return HU_OK;
++}
++
++static void queue_response(subprocess_capture_t *cap, int exit_code, const char *stdout_str) {
++    int slot = cap->n_queued++;
++    cap->queued_exit[slot] = exit_code;
++    snprintf(cap->queued_stdout[slot], sizeof(cap->queued_stdout[slot]), "%s",
++             stdout_str ? stdout_str : "");
++}
++
++/* ── Event capture ───────────────────────────────────────────────────── */
++
++typedef struct {
++    int n_events;
++    char names[16][96];
++    char payloads[16][512];
++} event_capture_t;
++
++static void capture_event(const char *event, const char *payload, void *ud) {
++    event_capture_t *ec = (event_capture_t *)ud;
++    if (ec->n_events >= 16)
++        return;
++    snprintf(ec->names[ec->n_events], sizeof(ec->names[0]), "%s", event ? event : "");
++    snprintf(ec->payloads[ec->n_events], sizeof(ec->payloads[0]), "%s", payload ? payload : "");
++    ec->n_events++;
++}
++
++static int event_seen(const event_capture_t *ec, const char *name) {
++    for (int i = 0; i < ec->n_events; i++) {
++        if (strcmp(ec->names[i], name) == 0)
++            return 1;
++    }
++    return 0;
++}
++
++static int argv_contains(subprocess_capture_t *cap, int call_idx, const char *token) {
++    if (call_idx >= cap->n_calls)
++        return 0;
++    for (int i = 0; i < cap->argc[call_idx]; i++) {
++        if (strcmp(cap->argv[call_idx][i], token) == 0)
++            return 1;
++    }
++    return 0;
++}
++
++/* ── Test setup helper ───────────────────────────────────────────────── */
++
++static void setup_ctx(hu_lora_retrain_ctx_t *ctx, subprocess_capture_t *cap, event_capture_t *ec,
++                      const char *candidate_dir, const char *current_symlink) {
++    memset(ctx, 0, sizeof(*ctx));
++    ctx->candidate_dir = candidate_dir;
++    ctx->current_symlink = current_symlink;
++    ctx->test_run_subprocess = capture_subprocess;
++    ctx->test_subprocess_ud = cap;
++    ctx->emit_event = capture_event;
++    ctx->emit_user_data = ec;
++    /* No pidfile by default — tests opt in by setting ctx->pidfile_path. */
++    ctx->pidfile_path = NULL;
++}
++
++static void make_spec(hu_job_spec_t *spec) {
++    memset(spec, 0, sizeof(*spec));
++    spec->kind = HU_JOB_LORA_RETRAIN_NIGHTLY;
++}
++
++/* ── AC-7.5.1: enqueue + finetune argv shape ─────────────────────────── */
++
++static void test_retrain_enqueues_and_invokes_finetune(void) {
++    subprocess_capture_t cap;
++    memset(&cap, 0, sizeof(cap));
++    event_capture_t ec;
++    memset(&ec, 0, sizeof(ec));
++    hu_lora_retrain_ctx_t ctx;
++    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate", "/tmp/test_current");
++
++    /* Pair-count probe: returns 7 pairs. */
++    queue_response(&cap, 0, "{\"pairs\":7}");
++    /* finetune: success. */
++    queue_response(&cap, 0, "");
++    /* gate: PASS. */
++    queue_response(&cap, 0, "{\"verdict\":\"PASS\",\"delta\":0.12}");
++
++    hu_job_spec_t spec;
++    make_spec(&spec);
++    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
++
++    /* Call 0 = mine-corrections --count-only */
++    HU_ASSERT_GE(cap.n_calls, 3);
++    HU_ASSERT(argv_contains(&cap, 0, "mine-corrections"));
++    HU_ASSERT(argv_contains(&cap, 0, "--count-only"));
++
++    /* Call 1 = finetune-gemma.py invocation */
++    HU_ASSERT(argv_contains(&cap, 1, "--dpo"));
++    HU_ASSERT(argv_contains(&cap, 1, "--from-corrections"));
++    HU_ASSERT(argv_contains(&cap, 1, "--no-restart-server"));
++    HU_ASSERT(argv_contains(&cap, 1, "--no-version"));
++
++    /* AC: lora_retrain_scheduled event emitted with pair count. */
++    HU_ASSERT(event_seen(&ec, "lora_retrain_scheduled"));
++    HU_ASSERT(event_seen(&ec, "lora_retrain_promoted"));
++    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_PROMOTED);
++    HU_ASSERT_EQ((long long)ctx.last_pairs_consumed, 7LL);
++
++    /* Cleanup symlink so subsequent tests start clean. */
++    (void)unlink("/tmp/test_current");
++}
++
++/* ── AC-7.5.2 PASS: promote happens, symlink updated ─────────────────── */
++
++static void test_retrain_promotes_on_pass_skips_on_fail(void) {
++    /* PASS half: */
++    {
++        subprocess_capture_t cap;
++        memset(&cap, 0, sizeof(cap));
++        event_capture_t ec;
++        memset(&ec, 0, sizeof(ec));
++        hu_lora_retrain_ctx_t ctx;
++        setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_pass", "/tmp/test_current_pass");
++
++        queue_response(&cap, 0, "{\"pairs\":3}");
++        queue_response(&cap, 0, "");
++        queue_response(&cap, 0, "{\"verdict\":\"PASS\",\"delta\":0.08}");
++
++        hu_job_spec_t spec;
++        make_spec(&spec);
++        HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
++        HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_PROMOTED);
++        HU_ASSERT(event_seen(&ec, "lora_retrain_promoted"));
++
++        /* The symlink should now exist and point at the candidate. */
++        char buf[256] = {0};
++        ssize_t n = readlink("/tmp/test_current_pass", buf, sizeof(buf) - 1);
++        HU_ASSERT_GT(n, 0);
++        buf[n] = '\0';
++        HU_ASSERT_STR_EQ(buf, "/tmp/test_candidate_pass");
++        (void)unlink("/tmp/test_current_pass");
++    }
++    /* FAIL half: */
++    {
++        subprocess_capture_t cap;
++        memset(&cap, 0, sizeof(cap));
++        event_capture_t ec;
++        memset(&ec, 0, sizeof(ec));
++        hu_lora_retrain_ctx_t ctx;
++        setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_fail", "/tmp/test_current_fail");
++
++        queue_response(&cap, 0, "{\"pairs\":5}");
++        queue_response(&cap, 0, "");
++        /* Gate returns exit 1 with verdict=FAIL. */
++        queue_response(&cap, 1, "{\"verdict\":\"FAIL\",\"delta\":-0.02}");
++
++        hu_job_spec_t spec;
++        make_spec(&spec);
++        HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
++        HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL);
++
++        /* lora_retrain_skipped event with verdict=FAIL */
++        int found = 0;
++        for (int i = 0; i < ec.n_events; i++) {
++            if (strcmp(ec.names[i], "lora_retrain_skipped") == 0) {
++                found = 1;
++                HU_ASSERT_STR_CONTAINS(ec.payloads[i], "FAIL");
++            }
++        }
++        HU_ASSERT(found);
++
++        /* No promote subprocess; we only expect 3 calls (probe, finetune, gate). */
++        HU_ASSERT_EQ(cap.n_calls, 3);
++
++        /* Symlink does NOT exist — never created. */
++        char dummy[64];
++        HU_ASSERT_LT(readlink("/tmp/test_current_fail", dummy, sizeof(dummy)), 0);
++    }
++}
++
++/* ── AC-7.5.2 SKIP variant: D3 contract (judgment SKIP ≠ PASS) ───────── */
++
++static void test_retrain_treats_judgment_skip_as_not_pass(void) {
++    subprocess_capture_t cap;
++    memset(&cap, 0, sizeof(cap));
++    event_capture_t ec;
++    memset(&ec, 0, sizeof(ec));
++    hu_lora_retrain_ctx_t ctx;
++    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_skip", "/tmp/test_current_skip");
++
++    queue_response(&cap, 0, "{\"pairs\":4}");
++    queue_response(&cap, 0, "");
++    /* CRITICAL: SKIP with exit_code=0 (US-7.6 dormant gate). Must NOT promote. */
++    queue_response(&cap, 0, "{\"verdict\":\"SKIP\",\"reason\":\"judgment_dormant\"}");
++
++    hu_job_spec_t spec;
++    make_spec(&spec);
++    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
++    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL);
++    HU_ASSERT(!event_seen(&ec, "lora_retrain_promoted"));
++
++    /* Verify symlink NOT created — SKIP must not promote. */
++    char dummy[64];
++    HU_ASSERT_LT(readlink("/tmp/test_current_skip", dummy, sizeof(dummy)), 0);
++}
++
++/* ── AC-7.5.3: finetune failure preserves current adapter ────────────── */
++
++static void test_retrain_failure_preserves_adapter(void) {
++    subprocess_capture_t cap;
++    memset(&cap, 0, sizeof(cap));
++    event_capture_t ec;
++    memset(&ec, 0, sizeof(ec));
++    hu_lora_retrain_ctx_t ctx;
++    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_x", "/tmp/test_current_x");
++
++    queue_response(&cap, 0, "{\"pairs\":12}");
++    /* finetune crashes (exit code 137 = SIGKILL'd by OOM). */
++    queue_response(&cap, 137, "");
++    /* Gate would be next but should never be called. */
++    queue_response(&cap, 0, "{\"verdict\":\"PASS\"}");
++
++    hu_job_spec_t spec;
++    make_spec(&spec);
++    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
++    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_FAILED);
++    HU_ASSERT_EQ(ctx.last_exit_code, 137);
++
++    /* failed event with exit_code=137. */
++    int found = 0;
++    for (int i = 0; i < ec.n_events; i++) {
++        if (strcmp(ec.names[i], "lora_retrain_failed") == 0) {
++            found = 1;
++            HU_ASSERT_STR_CONTAINS(ec.payloads[i], "137");
++        }
++    }
++    HU_ASSERT(found);
++
++    /* Only 2 subprocess calls (probe + failed finetune). Gate never invoked. */
++    HU_ASSERT_EQ(cap.n_calls, 2);
++
++    /* Current symlink preserved (never existed in this test → also not
++     * created). */
++    char dummy[64];
++    HU_ASSERT_LT(readlink("/tmp/test_current_x", dummy, sizeof(dummy)), 0);
++}
++
++/* ── AC-7.5.4: empty-delta → skipped_no_new_data ─────────────────────── */
++
++static void test_retrain_skipped_on_empty_delta(void) {
++    subprocess_capture_t cap;
++    memset(&cap, 0, sizeof(cap));
++    event_capture_t ec;
++    memset(&ec, 0, sizeof(ec));
++    hu_lora_retrain_ctx_t ctx;
++    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_e", "/tmp/test_current_e");
++
++    /* Probe returns 0 pairs. */
++    queue_response(&cap, 0, "{\"pairs\":0}");
++    /* These would be the next steps; they MUST NOT be invoked. */
++    queue_response(&cap, 0, "");
++    queue_response(&cap, 0, "{\"verdict\":\"PASS\"}");
++
++    hu_job_spec_t spec;
++    make_spec(&spec);
++    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
++    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA);
++    HU_ASSERT(event_seen(&ec, "lora_retrain_skipped_no_new_data"));
++    HU_ASSERT(!event_seen(&ec, "lora_retrain_promoted"));
++    HU_ASSERT(!event_seen(&ec, "lora_retrain_failed"));
++
++    /* Only the probe ran. */
++    HU_ASSERT_EQ(cap.n_calls, 1);
++}
++
++/* ── PID single-flight ──────────────────────────────────────────────── */
++
++static void test_retrain_skipped_if_pidfile_held(void) {
++    /* Pre-create the PID file with a live PID (our own). */
++    const char *pf = "/tmp/test_lora_retrain.pid";
++    (void)unlink(pf);
++    FILE *fp = fopen(pf, "w");
++    HU_ASSERT_NOT_NULL(fp);
++    fprintf(fp, "%ld\n", (long)getpid());
++    fclose(fp);
++
++    subprocess_capture_t cap;
++    memset(&cap, 0, sizeof(cap));
++    event_capture_t ec;
++    memset(&ec, 0, sizeof(ec));
++    hu_lora_retrain_ctx_t ctx;
++    setup_ctx(&ctx, &cap, &ec, "/tmp/test_candidate_p", "/tmp/test_current_p");
++    ctx.pidfile_path = pf;
++
++    /* Queue responses we expect NOT to be consumed. */
++    queue_response(&cap, 0, "{\"pairs\":5}");
++
++    hu_job_spec_t spec;
++    make_spec(&spec);
++    HU_ASSERT_EQ(hu_lora_retrain_runner(NULL, &spec, 0, &ctx), HU_OK);
++    HU_ASSERT_EQ(ctx.last_outcome, HU_LORA_RETRAIN_OUTCOME_SKIPPED_ALREADY_RUNNING);
++    HU_ASSERT_EQ(cap.n_calls, 0);
++    HU_ASSERT(event_seen(&ec, "lora_retrain_skipped_already_running"));
++
++    (void)unlink(pf);
++}
++
++/* ── AC-7.5.5: status block parse + back-compat ─────────────────────── */
++
++static void test_lora_retrain_status_parse_round_trip(void) {
++    /* Forward: present block parses cleanly. */
++    const char *json_with = "{\n"
++                            "  \"jobs_pending\": 0,\n"
++                            "  \"jobs_completed_today\": 1,\n"
++                            "  \"battery_pct\": 80,\n"
++                            "  \"on_ac_power\": true,\n"
++                            "  \"updated_epoch\": 1700000000,\n"
++                            "  \"lora_retrain\": {\n"
++                            "    \"last_run_ts\": 1715800000,\n"
++                            "    \"last_outcome\": \"promoted\",\n"
++                            "    \"pairs_consumed\": 42\n"
++                            "  }\n"
++                            "}\n";
++    long long ts = 0;
++    hu_lora_retrain_outcome_t oc = HU_LORA_RETRAIN_OUTCOME_UNKNOWN;
++    unsigned long long pc = 0;
++    HU_ASSERT_EQ(hu_lora_retrain_status_parse(json_with, &ts, &oc, &pc), HU_OK);
++    HU_ASSERT_EQ(ts, 1715800000LL);
++    HU_ASSERT_EQ(oc, HU_LORA_RETRAIN_OUTCOME_PROMOTED);
++    HU_ASSERT_EQ((long long)pc, 42LL);
++
++    /* Backward: missing block → HU_ERR_NOT_FOUND. */
++    const char *json_without = "{\n"
++                               "  \"jobs_pending\": 0,\n"
++                               "  \"jobs_completed_today\": 0,\n"
++                               "  \"battery_pct\": 50,\n"
++                               "  \"on_ac_power\": false,\n"
++                               "  \"updated_epoch\": 1700000000\n"
++                               "}\n";
++    long long ts2 = 999;
++    hu_lora_retrain_outcome_t oc2 = HU_LORA_RETRAIN_OUTCOME_PROMOTED;
++    unsigned long long pc2 = 999;
++    HU_ASSERT_EQ(hu_lora_retrain_status_parse(json_without, &ts2, &oc2, &pc2), HU_ERR_NOT_FOUND);
++
++    /* All outcome string round-trips. */
++    HU_ASSERT_EQ(hu_lora_retrain_outcome_from_str("promoted"), HU_LORA_RETRAIN_OUTCOME_PROMOTED);
++    HU_ASSERT_EQ(hu_lora_retrain_outcome_from_str("failed"), HU_LORA_RETRAIN_OUTCOME_FAILED);
++    HU_ASSERT_EQ(hu_lora_retrain_outcome_from_str("skipped_no_new_data"),
++                 HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_NEW_DATA);
++    HU_ASSERT_EQ(hu_lora_retrain_outcome_from_str("skipped_gate_fail"),
++                 HU_LORA_RETRAIN_OUTCOME_SKIPPED_GATE_FAIL);
++    HU_ASSERT_STR_EQ(hu_lora_retrain_outcome_str(HU_LORA_RETRAIN_OUTCOME_PROMOTED), "promoted");
++    HU_ASSERT_STR_EQ(hu_lora_retrain_outcome_str(HU_LORA_RETRAIN_OUTCOME_FAILED), "failed");
++}
++
++/* ── Suite entry ─────────────────────────────────────────────────────── */
++
++void run_w14_lora_retrain_tests(void) {
++    HU_TEST_SUITE("w14_lora_retrain");
++    HU_RUN_TEST(test_retrain_enqueues_and_invokes_finetune);
++    HU_RUN_TEST(test_retrain_promotes_on_pass_skips_on_fail);
++    HU_RUN_TEST(test_retrain_treats_judgment_skip_as_not_pass);
++    HU_RUN_TEST(test_retrain_failure_preserves_adapter);
++    HU_RUN_TEST(test_retrain_skipped_on_empty_delta);
++    HU_RUN_TEST(test_retrain_skipped_if_pidfile_held);
++    HU_RUN_TEST(test_lora_retrain_status_parse_round_trip);
++}

@@ -448,8 +448,8 @@ static bool doctor_imsg_status_extract_bool(const char *blob, const char *key, b
 #endif
 
 hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
-                                    int64_t stale_after_secs, hu_diag_item_t **items,
-                                    size_t *count, size_t *cap) {
+                                    int64_t stale_after_secs, hu_diag_item_t **items, size_t *count,
+                                    size_t *cap) {
     if (!alloc || !items || !count || !cap)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -484,8 +484,8 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                 /* Run a tiny query to actually trigger TCC, since open alone
                  * sometimes succeeds before TCC fires on first read. */
                 sqlite3_stmt *stmt = NULL;
-                int qrc = sqlite3_prepare_v2(probe, "SELECT 1 FROM message LIMIT 1", -1, &stmt,
-                                             NULL);
+                int qrc =
+                    sqlite3_prepare_v2(probe, "SELECT 1 FROM message LIMIT 1", -1, &stmt, NULL);
                 if (qrc == SQLITE_OK)
                     qrc = sqlite3_step(stmt);
                 if (stmt)
@@ -493,9 +493,8 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                 hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(qrc);
                 sqlite3_close(probe);
                 if (cls == HU_IMESSAGE_ERR_NONE || qrc == SQLITE_DONE || qrc == SQLITE_ROW) {
-                    char *msg =
-                        hu_sprintf(alloc, "[doctor] iMessage chat.db: readable via sqlite (%s)",
-                                   db_path);
+                    char *msg = hu_sprintf(
+                        alloc, "[doctor] iMessage chat.db: readable via sqlite (%s)", db_path);
                     if (msg) {
                         doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
                         alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -517,8 +516,7 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                     sqlite3_close(probe);
                 hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(rc);
                 char *msg = hu_sprintf(
-                    alloc,
-                    "[doctor] iMessage chat.db: sqlite_open failed %s (rc=%d) — %s",
+                    alloc, "[doctor] iMessage chat.db: sqlite_open failed %s (rc=%d) — %s",
                     hu_imessage_error_class_name(cls), rc,
                     cls == HU_IMESSAGE_ERR_AUTH
                         ? "Full Disk Access denied; grant FDA to the daemon binary"
@@ -531,11 +529,10 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
 #else
             /* No sqlite at build time: weakened POSIX-only check. */
             if (access(db_path, R_OK) == 0) {
-                char *msg =
-                    hu_sprintf(alloc,
-                               "[doctor] iMessage chat.db: POSIX-readable (%s) — TCC not "
-                               "checked (HU_ENABLE_SQLITE=OFF)",
-                               db_path);
+                char *msg = hu_sprintf(alloc,
+                                       "[doctor] iMessage chat.db: POSIX-readable (%s) — TCC not "
+                                       "checked (HU_ENABLE_SQLITE=OFF)",
+                                       db_path);
                 if (msg) {
                     doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
                     alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -560,10 +557,9 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
         doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
                          "[doctor] imsg CLI: on PATH (send + react + watch enabled)");
     else
-        doctor_push_line(
-            alloc, items, count, cap, HU_DIAG_WARN,
-            "[doctor] imsg CLI: not on PATH — fallback to AppleScript only "
-            "(install steipete/imsg for send/react/watch)");
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                         "[doctor] imsg CLI: not on PATH — fallback to AppleScript only "
+                         "(install steipete/imsg for send/react/watch)");
 #endif
 
     /* 3. Poll-status file: presence + freshness + breaker. */
@@ -577,10 +573,9 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
 
     FILE *f = fopen(status_path, "r");
     if (!f) {
-        doctor_push_line(
-            alloc, items, count, cap, HU_DIAG_WARN,
-            "[doctor] iMessage poll status: file missing — daemon has not polled yet "
-            "(start `human service-loop` and re-run)");
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                         "[doctor] iMessage poll status: file missing — daemon has not polled yet "
+                         "(start `human service-loop` and re-run)");
         return HU_OK;
     }
     char blob[2048];
@@ -598,15 +593,15 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
     (void)doctor_imsg_status_extract_int(blob, "\"last_successful_poll_epoch\"", &last_success);
     (void)doctor_imsg_status_extract_int(blob, "\"consecutive_open_failures\"", &consecutive);
     (void)doctor_imsg_status_extract_bool(blob, "\"circuit_breaker_tripped\"", &tripped);
-    (void)doctor_imsg_status_extract_str(blob, "\"last_error_class\"", err_class, sizeof(err_class));
+    (void)doctor_imsg_status_extract_str(blob, "\"last_error_class\"", err_class,
+                                         sizeof(err_class));
 
     if (tripped) {
-        char *msg = hu_sprintf(
-            alloc,
-            "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — "
-            "re-grant Full Disk Access and restart the daemon",
-            (long long)consecutive,
-            err_class[0] ? err_class : "?");
+        char *msg =
+            hu_sprintf(alloc,
+                       "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — "
+                       "re-grant Full Disk Access and restart the daemon",
+                       (long long)consecutive, err_class[0] ? err_class : "?");
         if (msg) {
             doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -625,8 +620,7 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
     }
 
     if (last_rowid >= 0) {
-        char *msg = hu_sprintf(alloc, "[doctor] iMessage last_rowid: %lld",
-                               (long long)last_rowid);
+        char *msg = hu_sprintf(alloc, "[doctor] iMessage last_rowid: %lld", (long long)last_rowid);
         if (msg) {
             doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -641,17 +635,17 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
         if (age < 0)
             age = 0;
         if (stale_after_secs > 0 && age > stale_after_secs) {
-            char *msg = hu_sprintf(
-                alloc, "[doctor] iMessage poll: STALE — last success %lld seconds ago",
-                (long long)age);
+            char *msg =
+                hu_sprintf(alloc, "[doctor] iMessage poll: STALE — last success %lld seconds ago",
+                           (long long)age);
             if (msg) {
                 doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
                 alloc->free(alloc->ctx, msg, strlen(msg) + 1);
             }
         } else {
-            char *msg = hu_sprintf(
-                alloc, "[doctor] iMessage poll: fresh (last success %lld seconds ago)",
-                (long long)age);
+            char *msg =
+                hu_sprintf(alloc, "[doctor] iMessage poll: fresh (last success %lld seconds ago)",
+                           (long long)age);
             if (msg) {
                 doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
                 alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -719,6 +713,47 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
             it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"), msg};
             buf[n++] = it;
         }
+    }
+
+    /* US-7.3 (INS-B) — honesty gate for personalization.
+     *
+     * Mirrors the runtime daemon warning (src/daemon.c) at the config
+     * surface. The daemon emits its warning when the provider's vtable
+     * returns HU_ERR_NOT_SUPPORTED from load_adapter; doctor cannot
+     * instantiate providers, so it uses hu_config_provider_requires_api_key
+     * as the canonical cloud-vs-local heuristic (matches doctor_config_wants_http
+     * at line 66). All currently-known providers that return true from
+     * the heuristic also lack a load_adapter vtable hook (only llamacpp
+     * and huml implement it today). */
+    if (cfg->personalization.lora_adapter_path && cfg->personalization.lora_adapter_path[0] &&
+        cfg->default_provider && cfg->default_provider[0] &&
+        hu_config_provider_requires_api_key(cfg->default_provider) && n < cap) {
+        it = (hu_diag_item_t){
+            HU_DIAG_WARN, hu_strdup(alloc, "config"),
+            hu_strdup(alloc,
+                      "[WARN] personalization.lora_adapter_path is set but the active provider "
+                      "does not support adapters")};
+        buf[n++] = it;
+    }
+
+    /* US-7.7 (AC-7.7.3) — best-of-N cloud-provider misconfiguration warning.
+     *
+     * Doctor fires this every call (intentional for diagnostic UX — operators
+     * re-run doctor on demand to confirm a misconfiguration is still active).
+     * No one-shot here. If a future runtime log path emits the same warning,
+     * THAT path should apply the D4 one-shot pattern (see canonical shape at
+     * src/daemon.c::s_personalization_warn_emitted), but the static and
+     * reset shim do NOT exist today — do not call them.
+     *
+     * The daemon best-of-N path silently no-ops on non-llamacpp providers
+     * (eligibility check at the agent_turn dispatch site), so doctor is
+     * the only place the operator hears about the misconfiguration. */
+    if (cfg->inference.best_of_n >= 2 && cfg->default_provider && cfg->default_provider[0] &&
+        hu_config_provider_requires_api_key(cfg->default_provider) && n < cap) {
+        it = (hu_diag_item_t){
+            HU_DIAG_WARN, hu_strdup(alloc, "config"),
+            hu_strdup(alloc, "[WARN] inference.best_of_n has no effect with cloud providers")};
+        buf[n++] = it;
     }
 
     bool has_ch = hu_channel_catalog_has_any_configured(cfg, false);
@@ -841,8 +876,8 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
         return HU_OK;
     }
     if (lerr != HU_OK) {
-        char *msg = hu_sprintf(alloc, "[doctor] verifier: failed to read %s (err=%d)", path,
-                               (int)lerr);
+        char *msg =
+            hu_sprintf(alloc, "[doctor] verifier: failed to read %s (err=%d)", path, (int)lerr);
         if (msg) {
             (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -860,8 +895,7 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
      * either the daemon just started, or no chat has happened. */
     {
         char *msg = hu_sprintf(
-            alloc,
-            "[doctor] verifier: %llu turns, %llu claims (flagged %llu, %.1f%% rate)",
+            alloc, "[doctor] verifier: %llu turns, %llu claims (flagged %llu, %.1f%% rate)",
             (unsigned long long)m.total_runs, (unsigned long long)m.total_claims_extracted,
             (unsigned long long)m.total_claims_flagged,
             hu_verifier_metrics_flagged_rate(&m) * 100.0);
@@ -875,18 +909,17 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
      * cadence is 60s, so default 300s = 5 min gives plenty of headroom for
      * normal scheduling jitter while still catching a wedged daemon fast. */
     if (stale) {
-        char *msg =
-            hu_sprintf(alloc,
-                       "[doctor] verifier heartbeat: STALE — last flush %lld seconds ago "
-                       "(threshold %lld); daemon may be offline or wedged",
-                       (long long)age, (long long)stale_after_secs);
+        char *msg = hu_sprintf(alloc,
+                               "[doctor] verifier heartbeat: STALE — last flush %lld seconds ago "
+                               "(threshold %lld); daemon may be offline or wedged",
+                               (long long)age, (long long)stale_after_secs);
         if (msg) {
             (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
         }
     } else {
-        char *msg = hu_sprintf(alloc, "[doctor] verifier heartbeat: fresh (%llds ago)",
-                               (long long)age);
+        char *msg =
+            hu_sprintf(alloc, "[doctor] verifier heartbeat: fresh (%llds ago)", (long long)age);
         if (msg) {
             (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -898,11 +931,11 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
     if (m.total_claims_extracted > 0) {
         double rate = hu_verifier_metrics_flagged_rate(&m);
         if (flagged_warn_rate > 0.0 && rate >= flagged_warn_rate) {
-            char *msg = hu_sprintf(
-                alloc,
-                "[doctor] verifier flagged-rate: HIGH (%.1f%% >= threshold %.1f%%) — "
-                "memory may be under-populated or the model is hallucinating",
-                rate * 100.0, flagged_warn_rate * 100.0);
+            char *msg =
+                hu_sprintf(alloc,
+                           "[doctor] verifier flagged-rate: HIGH (%.1f%% >= threshold %.1f%%) — "
+                           "memory may be under-populated or the model is hallucinating",
+                           rate * 100.0, flagged_warn_rate * 100.0);
             if (msg) {
                 (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
                 alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -913,11 +946,10 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
     return HU_OK;
 }
 
-hu_error_t hu_doctor_parse_scheduler_status_json(const char *json,
-                                                   unsigned long long *jobs_pending,
-                                                   unsigned long long *jobs_completed_today,
-                                                   long long *battery_pct, char *on_ac_power_text,
-                                                   size_t on_ac_power_cap, long long *updated_epoch) {
+hu_error_t hu_doctor_parse_scheduler_status_json(const char *json, unsigned long long *jobs_pending,
+                                                 unsigned long long *jobs_completed_today,
+                                                 long long *battery_pct, char *on_ac_power_text,
+                                                 size_t on_ac_power_cap, long long *updated_epoch) {
     return hu_scheduler_status_parse_json(json, jobs_pending, jobs_completed_today, battery_pct,
                                           on_ac_power_text, on_ac_power_cap, updated_epoch);
 }
@@ -990,9 +1022,8 @@ hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
         }
     } else {
-        char *msg =
-            hu_sprintf(alloc, "[doctor] scheduler heartbeat: fresh (status_age=%llds)",
-                       (long long)age);
+        char *msg = hu_sprintf(alloc, "[doctor] scheduler heartbeat: fresh (status_age=%llds)",
+                               (long long)age);
         if (msg) {
             (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -1009,10 +1040,9 @@ hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item
         alloc, items, count, cap, HU_DIAG_OK,
         "[doctor] responses: degenerate output is retried via a slim 2-message request, then "
         "cloud fallback (gemini → openai) when HU_ENABLE_CURL=1");
-    (void)doctor_push_line(
-        alloc, items, count, cap, HU_DIAG_OK,
-        "[doctor] responses: grep ~/.human/logs/service-loop-error.log for "
-        "\"response_guard\" and \"empty assistant response\"");
+    (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                           "[doctor] responses: grep ~/.human/logs/service-loop-error.log for "
+                           "\"response_guard\" and \"empty assistant response\"");
     (void)doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
                            "[doctor] responses: MLX HTTP 52 (empty reply) usually means the "
                            "local server rejected an oversized body — slim retry addresses this");

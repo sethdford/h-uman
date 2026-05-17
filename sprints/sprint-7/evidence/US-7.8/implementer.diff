@@ -1,0 +1,1139 @@
+commit e36ccfdeb2f87734348e3a6224f439cbcea4ef5b
+Author: Seth Ford <sethford@studio.local>
+Date:   Sat May 16 11:48:13 2026 -0400
+
+    feat(sprint-7): MoLoRA static per-channel router (US-7.8)
+    
+    Init #02 phase 1: static dispatch only — channel_id → adapter path map,
+    no learned MLP. Gated behind HU_ENABLE_MOLORA CMake option (default OFF).
+    
+    Adds:
+    - include/human/ml/molora.h, src/ml/molora.c — router struct + lazy-swap
+      normalizer (lowercase, strip `:`-suffix, trim whitespace, truncate)
+    - hu_personalization_config_t.molora { enabled, count, entries[16] } +
+      parse/merge/serialize round-trip
+    - Agent-turn hook in src/agent/agent_turn.c BEFORE the US-7.7 best-of-N
+      decorator: router selects adapter, hu_provider_load_adapter swaps it,
+      then chat dispatches (so all N best-of-N candidates share the
+      channel-correct adapter). Idempotent: re-uses active_adapter when ids
+      match.
+    - Daemon bootstrap initializes router from config in src/daemon.c
+    - tests/test_molora_router.c — 22 tests, AC-7.8.1..4 + normalizer table
+    - scripts/check-molora-binary-budget.sh — AC-7.8.5 gate (≤ 8 KB delta)
+    
+    Verification:
+    - OFF build: 10347/10347 tests pass (baseline preserved)
+    - ON build: 10369/10369 tests pass (+22 MoloraRouter tests)
+    - Binary size delta: 0 bytes (well under 8192-byte budget)
+    - check-lora-baseline.sh: PASS (mean=0.923)
+    - check-lora-ab.sh: PASS (delta=0.368)
+    - Zero ASan errors
+    
+    Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 348da58b..870df487 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -38,6 +38,12 @@ option(HU_ENABLE_NEURAL_MEMORY "W10 neural memory placeholder (schema/ONNX path;
+ # default OFF until the codecs meet the TVD < 1% / ≤ 2 ms / ≤ +40 KB binary
+ # gates documented in docs/plans/2026-05-11-init-13-kv-compression.md.
+ option(HU_ENABLE_KV_COMPRESSION "Init 13 KV-cache compression (DeltaKV + SWAN)" OFF)
++# US-7.8 (Sprint 7, Init #02 phase 1): MoLoRA static per-channel router.
++# Adds src/ml/molora.c + agent-turn hook calling hu_provider_load_adapter
++# from a channel->adapter map. Default OFF until per-channel adapter packs
++# from US-7.5's W14 nightly cron land. Binary-size budget: <= 8 KB delta
++# vs OFF build (AC-7.8.5, enforced by scripts/check-molora-binary-budget.sh).
++option(HU_ENABLE_MOLORA "US-7.8 MoLoRA static per-channel router (Init #02 phase 1)" OFF)
+ # W13: learning loop (LoRA + DPO from W4/W5/W3 signals). Defaults follow ML.
+ if(HU_ENABLE_ML)
+     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" ON)
+@@ -1410,6 +1416,11 @@ if(HU_ENABLE_KV_COMPRESSION)
+     )
+     target_compile_definitions(human_core PRIVATE HU_ENABLE_KV_COMPRESSION=1)
+ endif()
++# US-7.8 (Init #02 phase 1) — MoLoRA static per-channel router.
++if(HU_ENABLE_MOLORA)
++    target_sources(human_core PRIVATE src/ml/molora.c)
++    target_compile_definitions(human_core PUBLIC HU_ENABLE_MOLORA=1)
++endif()
+ if(HU_ENABLE_MCP)
+     target_compile_definitions(human_core PRIVATE HU_ENABLE_MCP=1)
+ endif()
+@@ -2280,6 +2291,10 @@ if(HU_ENABLE_KV_COMPRESSION)
+     )
+     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_KV_COMPRESSION=1)
+ endif()
++if(HU_ENABLE_MOLORA)
++    target_sources(human_core_test PRIVATE src/ml/molora.c)
++    target_compile_definitions(human_core_test PUBLIC HU_ENABLE_MOLORA=1)
++endif()
+ target_compile_options(human_core_test PRIVATE -UNDEBUG)
+ if(Threads_FOUND)
+     target_link_libraries(human_core_test PUBLIC Threads::Threads)
+@@ -2896,6 +2911,7 @@ list(APPEND HU_TEST_SOURCES
+     tests/test_process_reward.c
+     tests/test_dpo.c
+     tests/test_dpo_miner.c
++    tests/test_molora_router.c
+     tests/test_sota_e2e.c
+     tests/test_sota_adversarial.c
+     tests/test_otel.c
+@@ -2964,6 +2980,9 @@ endif()
+ if(HU_ENABLE_KV_COMPRESSION)
+     target_compile_definitions(human_tests PRIVATE HU_ENABLE_KV_COMPRESSION=1)
+ endif()
++if(HU_ENABLE_MOLORA)
++    target_compile_definitions(human_tests PRIVATE HU_ENABLE_MOLORA=1)
++endif()
+ if(UNIX AND NOT WIN32)
+     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)
+ endif()
+diff --git a/include/human/agent.h b/include/human/agent.h
+index 415a9d5b..950d0682 100644
+--- a/include/human/agent.h
++++ b/include/human/agent.h
+@@ -48,6 +48,9 @@
+ #include "human/agent/growth_narrative.h"
+ #include "human/agent/process_reward.h"
+ #include "human/agent/reflection.h"
++#ifdef HU_ENABLE_MOLORA
++#include "human/ml/molora.h"
++#endif
+ #include "human/cognition/attachment.h"
+ #include "human/cognition/dual_process.h"
+ #include "human/cognition/emotional.h"
+@@ -406,6 +409,13 @@ struct hu_agent {
+     const char *active_channel;
+     size_t active_channel_len;
+ 
++#ifdef HU_ENABLE_MOLORA
++    /* US-7.8 — MoLoRA static per-channel router. Initialized from
++     * config.personalization.molora at daemon bootstrap; never reallocated.
++     * Disabled when zero-initialized — the agent-turn hook is a no-op. */
++    hu_molora_router_t molora_router;
++#endif
++
+     /* Set by cron dispatch before turn; used for per-automation cost tracking. 0 = interactive. */
+     uint64_t active_job_id;
+ 
+diff --git a/include/human/config_types.h b/include/human/config_types.h
+index 76d71c7c..6c064e77 100644
+--- a/include/human/config_types.h
++++ b/include/human/config_types.h
+@@ -66,12 +66,56 @@ typedef struct hu_scheduler_config {
+  * in production. Default false; the bridge stays opt-in via the
+  * probe path config but kill-switchable independently.
+  */
++/* US-7.8 — MoLoRA static per-channel router (Init #02 phase 1).
++ *
++ * `enabled` is independent of `personalization.enabled` at the config level,
++ * but the agent-turn hook in `src/agent/agent_turn.c` only consults the router
++ * when both flags are true AND `HU_ENABLE_MOLORA` is compiled in. When this
++ * block is absent from the JSON config, parser leaves `enabled = false` and
++ * `count = 0`, which `hu_molora_router_init` treats as the disabled state
++ * (identical to today's pre-story behavior).
++ *
++ * Channel ids are stored normalized (lowercase, no `:`-suffix, no whitespace)
++ * — the parser applies `hu_molora_router_normalize_channel` before insertion.
++ * Adapter paths are owned by this struct (parser strdups them); the router
++ * borrows the pointers and asserts the config outlives it.
++ *
++ * Schema (Phase 1, flat map per design Q1):
++ *   "molora": {
++ *     "enabled": true,
++ *     "channel_adapters": {
++ *       "telegram":  "~/.human/adapters/seth/telegram.lora",
++ *       "imessage":  "~/.human/adapters/seth/imessage.lora",
++ *       "slack":     "~/.human/adapters/seth/slack.lora",
++ *       "discord":   "~/.human/adapters/seth/discord.lora"
++ *     }
++ *   }
++ *
++ * Phase 2 will extend each entry to `{path, scale}` via a versioned schema
++ * bump — Phase 1 stays flat for forward-compat. */
++#define HU_MOLORA_CONFIG_MAX_CHANNELS     16
++#define HU_MOLORA_CONFIG_CHANNEL_NAME_MAX 32
++
++typedef struct hu_molora_channel_entry {
++    /* Normalized channel id (parser-normalized; null-terminated). */
++    char channel[HU_MOLORA_CONFIG_CHANNEL_NAME_MAX];
++    /* Adapter path; owned by this struct (parser-strdup, merge-free). */
++    char *adapter_path;
++} hu_molora_channel_entry_t;
++
++typedef struct hu_molora_config {
++    bool enabled;
++    size_t count;
++    hu_molora_channel_entry_t entries[HU_MOLORA_CONFIG_MAX_CHANNELS];
++} hu_molora_config_t;
++
+ typedef struct hu_personalization_config {
+     bool enabled;
+     char *lora_adapter_path;
+     char *lora_adapter_id;
+     char *m3_adapter_probe_path;
+     bool m3_adapter_disabled;
++    hu_molora_config_t molora;
+ } hu_personalization_config_t;
+ 
+ /* US-7.7 (Sprint 7, P1) — Test-time persona scoring (best-of-N at inference).
+diff --git a/include/human/ml/molora.h b/include/human/ml/molora.h
+new file mode 100644
+index 00000000..996c08c2
+--- /dev/null
++++ b/include/human/ml/molora.h
+@@ -0,0 +1,149 @@
++/* molora — Sprint 7 US-7.8 (Init #02 Phase 1): MoLoRA static per-channel router.
++ *
++ * Phase 1 is **static dispatch only**: a small router struct that maps a
++ * normalized channel id ("telegram" / "imessage" / "slack" / "discord" / ...)
++ * to a LoRA adapter path, plus one hook in the agent's pre-chat dispatch site
++ * (`src/agent/agent_turn.c`) that consults the router and calls the existing
++ * `hu_provider_load_adapter` path when the selected adapter differs from the
++ * currently-active one.
++ *
++ * No learned MLP, no message-class classifier, no scoring network — those
++ * land in later Init #02 phases. The router state is initialized once from
++ * `config.personalization.molora.channel_adapters` at agent construction and
++ * is read-only thereafter.
++ *
++ * Compile-guarded by `HU_ENABLE_MOLORA` (CMake option, default OFF). When the
++ * option is OFF, this header is not included in any TU and the symbols are
++ * absent from the binary entirely (verified by AC-7.8.5 binary-size delta).
++ *
++ * AC traceability (see `sprints/sprint-7/stories.md` and
++ * `sprints/sprint-7/designs/US-7.8.md`):
++ *   AC-7.8.1 → `hu_molora_router_select` returns channel-specific adapter
++ *   AC-7.8.2 → falls back to `default_adapter_path` when channel absent
++ *   AC-7.8.3 → disabled-by-default; gated behind HU_ENABLE_MOLORA
++ *   AC-7.8.4 → struct is zero-initializable; `(hu_molora_router_t){0}` is
++ *              a valid disabled router
++ *   AC-7.8.5 → enforced by `scripts/check-molora-binary-budget.sh`
++ *
++ * Lifecycle: the router borrows pointers from `hu_personalization_config_t`.
++ * `hu_molora_router_init` does NOT copy strings — it stores the borrowed
++ * pointers and asserts that the config outlives the router. The router
++ * itself owns no heap memory and `hu_molora_router_select` never allocates,
++ * making it safe to call on every turn at the inference hot path.
++ */
++
++#ifndef HU_ML_MOLORA_H
++#define HU_ML_MOLORA_H
++
++#ifdef HU_ENABLE_MOLORA
++
++#include "human/core/error.h"
++#include <stdbool.h>
++#include <stddef.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Phase 1 cap: 16 channels covers the 4 Tier-1 channels (telegram, imessage,
++ * slack, discord) plus the 12-channel headroom Init #02 phase 1 budgeted for.
++ * Init #02 phase 2 (learned routing) may revisit this. */
++#define HU_MOLORA_MAX_CHANNELS 16
++
++/* Normalized channel id buffer size. Covers all 31 known channel modules
++ * (longest current: "mattermost" at 10 chars) with 21 chars of slack for
++ * future channels. Strings longer than this are truncated by the normalizer
++ * (the truncated form still matches because router entries are normalized
++ * the same way). */
++#define HU_MOLORA_CHANNEL_NAME_MAX 32
++
++typedef struct hu_molora_entry {
++    /* Normalized channel id (lowercase, no `:` suffix, no whitespace).
++     * Always null-terminated in the buffer. */
++    char channel[HU_MOLORA_CHANNEL_NAME_MAX];
++    /* Adapter path — BORROWED from hu_personalization_config_t.molora.
++     * Not owned by the router; caller must keep config alive. */
++    const char *adapter_path;
++} hu_molora_entry_t;
++
++typedef struct hu_molora_router {
++    bool enabled;
++    size_t count;
++    hu_molora_entry_t entries[HU_MOLORA_MAX_CHANNELS];
++    /* Fallback adapter when no channel entry matches.
++     * Borrowed from `personalization.lora_adapter_path` (NULL allowed). */
++    const char *default_adapter_path;
++} hu_molora_router_t;
++
++/* Forward declaration — full definition in human/config_types.h. We accept
++ * an opaque pointer to avoid pulling the full config header into the ML
++ * include tree (config_types.h includes security/sandbox.h transitively). */
++struct hu_config;
++
++/* Initialize the router from a fully-parsed config. The config must outlive
++ * the router (the router stores borrowed adapter-path pointers).
++ *
++ * If `cfg == NULL` or `cfg->personalization.molora.enabled == false`, the
++ * router is initialized to the disabled state (a `{0}` struct also produces
++ * a valid disabled router — see AC-7.8.4).
++ *
++ * Returns:
++ *   HU_OK on success (including the disabled case)
++ *   HU_ERR_INVALID_ARGUMENT if `r == NULL`
++ */
++hu_error_t hu_molora_router_init(hu_molora_router_t *r, const struct hu_config *cfg);
++
++/* Select the adapter path for the given channel id.
++ *
++ * The lookup is O(N) over `r->entries` where N <= HU_MOLORA_MAX_CHANNELS.
++ * NEVER allocates. Safe to call from the inference hot path.
++ *
++ * Channel id normalization is applied internally to both the stored entries
++ * (during `_init`) and the lookup key (during `_select`), so callers can pass
++ * the raw `agent->active_channel` / `agent->active_channel_len` pair without
++ * pre-processing. The normalizer:
++ *   - lowercases ASCII letters
++ *   - strips everything from the first `:` onward (so "telegram:42" → "telegram")
++ *   - trims leading/trailing ASCII whitespace
++ *   - truncates to HU_MOLORA_CHANNEL_NAME_MAX - 1 chars
++ *
++ * Returns:
++ *   - The matching `entry->adapter_path` if the channel is in the map.
++ *   - `r->default_adapter_path` if no entry matches and a default is set.
++ *   - NULL if the router is disabled, the channel id is empty, or no entry
++ *     matches AND `default_adapter_path` is NULL. Callers must tolerate NULL
++ *     (fall through to today's "no adapter swap" behavior).
++ *
++ * Calling on a `{0}` router (disabled, no entries) is safe and returns NULL.
++ */
++const char *hu_molora_router_select(const hu_molora_router_t *r, const char *channel,
++                                    size_t channel_len);
++
++/* Normalize a channel id into `out`. Public so tests can exercise the
++ * normalization table directly.
++ *
++ *   in       — pointer to channel id chars (need not be null-terminated)
++ *   in_len   — number of bytes to read from `in`
++ *   out      — destination buffer (always null-terminated on return)
++ *   out_cap  — capacity of `out` in bytes (must be >= 1)
++ *
++ * Returns the length of the normalized string (excluding the terminator).
++ * Returns 0 if `out_cap == 0`, `out == NULL`, or the input is empty after
++ * trimming. On overflow the output is truncated to `out_cap - 1` bytes.
++ *
++ * Examples (assuming out_cap >= HU_MOLORA_CHANNEL_NAME_MAX):
++ *   "telegram"       -> "telegram" (returns 8)
++ *   "telegram:42"    -> "telegram" (returns 8)
++ *   "Telegram"       -> "telegram" (returns 8)
++ *   " Telegram \t"   -> "telegram" (returns 8)
++ *   ""               -> ""         (returns 0)
++ *   ":42"            -> ""         (returns 0; prefix is empty)
++ */
++size_t hu_molora_router_normalize_channel(const char *in, size_t in_len, char *out, size_t out_cap);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* HU_ENABLE_MOLORA */
++#endif /* HU_ML_MOLORA_H */
+diff --git a/scripts/check-molora-binary-budget.sh b/scripts/check-molora-binary-budget.sh
+new file mode 100755
+index 00000000..af967e82
+--- /dev/null
++++ b/scripts/check-molora-binary-budget.sh
+@@ -0,0 +1,62 @@
++#!/bin/bash
++# check-molora-binary-budget.sh — Sprint 7 US-7.8 AC-7.8.5 enforcement.
++#
++# Builds the `human` binary with HU_ENABLE_MOLORA=OFF and =ON in two
++# scratch dirs, computes the byte delta, and fails when it exceeds the
++# Init #02 phase-1 budget (8192 bytes).
++#
++# Designed to run from a clean repo checkout. The build dirs live under
++# build-molora-{off,on} so they don't collide with the default `build/`.
++#
++# Exit codes:
++#   0 — delta within budget (or equal/negative)
++#   1 — delta exceeds 8 KB budget
++#   2 — build failure
++#   3 — binary missing post-build
++
++set -euo pipefail
++
++BUDGET=${MOLORA_BUDGET_BYTES:-8192}
++REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++cd "$REPO_ROOT"
++
++OFF_DIR="build-molora-off"
++ON_DIR="build-molora-on"
++
++stat_size() {
++    # macOS uses -f, linux uses -c
++    if stat -f %z "$1" >/dev/null 2>&1; then
++        stat -f %z "$1"
++    else
++        stat -c %s "$1"
++    fi
++}
++
++echo "[molora-budget] Building OFF in $OFF_DIR ..." >&2
++cmake -S . -B "$OFF_DIR" -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_MOLORA=OFF \
++    -DHU_ENABLE_ML=OFF -DHU_ENABLE_SQLITE=ON >/dev/null || exit 2
++cmake --build "$OFF_DIR" --target human >/dev/null || exit 2
++
++echo "[molora-budget] Building ON in $ON_DIR ..." >&2
++cmake -S . -B "$ON_DIR" -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_MOLORA=ON \
++    -DHU_ENABLE_ML=OFF -DHU_ENABLE_SQLITE=ON >/dev/null || exit 2
++cmake --build "$ON_DIR" --target human >/dev/null || exit 2
++
++OFF_BIN="$OFF_DIR/human"
++ON_BIN="$ON_DIR/human"
++[[ -f "$OFF_BIN" && -f "$ON_BIN" ]] || exit 3
++
++OFF_SIZE=$(stat_size "$OFF_BIN")
++ON_SIZE=$(stat_size "$ON_BIN")
++DELTA=$((ON_SIZE - OFF_SIZE))
++
++printf "[molora-budget] OFF=%d  ON=%d  DELTA=%d (budget=%d)\n" \
++    "$OFF_SIZE" "$ON_SIZE" "$DELTA" "$BUDGET" >&2
++
++if [[ "$DELTA" -gt "$BUDGET" ]]; then
++    echo "[molora-budget] FAIL: delta ${DELTA}B exceeds budget ${BUDGET}B (AC-7.8.5)" >&2
++    exit 1
++fi
++
++echo "[molora-budget] PASS: delta ${DELTA}B within ${BUDGET}B budget" >&2
++exit 0
+diff --git a/src/agent/agent_turn.c b/src/agent/agent_turn.c
+index c13b123f..a1389dc6 100644
+--- a/src/agent/agent_turn.c
++++ b/src/agent/agent_turn.c
+@@ -6,6 +6,10 @@
+ #include "human/core/json.h"
+ #include "human/core/string.h"
+ #include "human/data/loader.h"
++#ifdef HU_ENABLE_MOLORA
++#include "human/ml/molora.h"
++#include "human/provider.h"
++#endif
+ 
+ #include "human/agent/choreography.h"
+ #include "human/agent/frontier_persist.h"
+@@ -4762,6 +4766,44 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
+             resp = degrade_result.response;
+             degrade_strategy = degrade_result.strategy_used;
+         } else {
++#ifdef HU_ENABLE_MOLORA
++            /* US-7.8 — MoLoRA static per-channel router. Hooks the agent's
++             * single chat-dispatch site BEFORE best-of-N so all N candidates
++             * draw from the channel-correct adapter. Lazy swap: only loads
++             * when the router-selected path differs from the provider's
++             * currently-active adapter. Failures log a warning and proceed
++             * with whatever adapter was previously active (or no adapter)
++             * — never blocks the turn. */
++            if (agent->molora_router.enabled && agent->provider.vtable) {
++                const char *molora_path = hu_molora_router_select(
++                    &agent->molora_router, agent->active_channel, agent->active_channel_len);
++                if (molora_path && molora_path[0]) {
++                    const char *cur_id = hu_provider_active_adapter(&agent->provider);
++                    /* Derive the adapter id from the path basename (same
++                     * convention as the daemon bootstrap at daemon.c:2543). */
++                    const char *base = strrchr(molora_path, '/');
++                    base = base ? base + 1 : molora_path;
++                    /* Skip the swap when the active adapter id already matches
++                     * the basename — intra-channel turns pay zero swap cost. */
++                    if (!cur_id || strcmp(cur_id, base) != 0) {
++                        hu_error_t mle =
++                            hu_provider_load_adapter(&agent->provider, agent->alloc, molora_path,
++                                                     strlen(molora_path), base, strlen(base));
++                        if (mle == HU_ERR_NOT_SUPPORTED) {
++                            /* Cloud provider — no-op; turn proceeds. Silenced
++                             * because it would fire every turn on cloud
++                             * providers (US-7.3 doctor warning handles the
++                             * once-per-startup operator notification). */
++                            (void)mle;
++                        } else if (mle != HU_OK) {
++                            hu_log_warn("agent_turn", agent->observer,
++                                        "molora: load_adapter('%s') failed: %d", molora_path,
++                                        (int)mle);
++                        }
++                    }
++                }
++            }
++#endif /* HU_ENABLE_MOLORA */
+             /* US-7.7 — Best-of-N at inference. Gate: cfg->inference.best_of_n >= 2
+              * AND active provider is "llamacpp" AND persona fingerprint exists
+              * (style.sample_count > 0; cold-start agents skip best-of-N since
+diff --git a/src/config_merge.c b/src/config_merge.c
+index 066d0139..2e9d5a06 100644
+--- a/src/config_merge.c
++++ b/src/config_merge.c
+@@ -398,6 +398,14 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
+     cfg->personalization.lora_adapter_id = NULL;
+     cfg->personalization.m3_adapter_probe_path = NULL;
+     cfg->personalization.m3_adapter_disabled = false;
++    /* US-7.8 — MoLoRA static per-channel router. Disabled by default;
++     * entries owned (parser-strdup, freed by hu_config_deinit). */
++    cfg->personalization.molora.enabled = false;
++    cfg->personalization.molora.count = 0;
++    for (size_t mi = 0; mi < HU_MOLORA_CONFIG_MAX_CHANNELS; mi++) {
++        cfg->personalization.molora.entries[mi].channel[0] = '\0';
++        cfg->personalization.molora.entries[mi].adapter_path = NULL;
++    }
+     /* US-7.7 — best-of-N at inference. Defaults: disabled (n=1), no cap. */
+     cfg->inference.best_of_n = 1;
+     cfg->inference.best_of_n_cost_cap_ms = 0;
+diff --git a/src/config_parse.c b/src/config_parse.c
+index 99fddd21..f9ac01b7 100644
+--- a/src/config_parse.c
++++ b/src/config_parse.c
+@@ -203,6 +203,89 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
+      * and wins over this config value. */
+     cfg->personalization.m3_adapter_disabled =
+         hu_json_get_bool(obj, "m3_adapter_disabled", cfg->personalization.m3_adapter_disabled);
++
++    /* US-7.8 — MoLoRA static per-channel router (Init #02 phase 1).
++     * Schema:
++     *   "molora": {
++     *     "enabled": true,
++     *     "channel_adapters": {
++     *       "telegram": "~/.human/adapters/seth/telegram.lora",
++     *       "slack":    "~/.human/adapters/seth/slack.lora",
++     *       ...
++     *     }
++     *   }
++     * Channel ids are normalized at parse time (lowercase, no `:`-suffix,
++     * no whitespace). The runtime router re-normalizes defensively. Parsing
++     * is unconditional so OFF builds still drop the keys cleanly (no
++     * "unknown field" surprises if a user has the block configured); only
++     * the agent-turn hook is gated behind HU_ENABLE_MOLORA. */
++    hu_json_value_t *mol = hu_json_object_get(obj, "molora");
++    if (mol && mol->type == HU_JSON_OBJECT) {
++        cfg->personalization.molora.enabled =
++            hu_json_get_bool(mol, "enabled", cfg->personalization.molora.enabled);
++        /* Free any prior entries (reparse-safe). */
++        for (size_t mi = 0; mi < cfg->personalization.molora.count; mi++) {
++            hu_molora_channel_entry_t *e = &cfg->personalization.molora.entries[mi];
++            if (e->adapter_path) {
++                a->free(a->ctx, e->adapter_path, strlen(e->adapter_path) + 1);
++                e->adapter_path = NULL;
++            }
++            e->channel[0] = '\0';
++        }
++        cfg->personalization.molora.count = 0;
++        hu_json_value_t *ca = hu_json_object_get(mol, "channel_adapters");
++        if (ca && ca->type == HU_JSON_OBJECT && ca->data.object.pairs) {
++            for (size_t mi = 0; mi < ca->data.object.len &&
++                                cfg->personalization.molora.count < HU_MOLORA_CONFIG_MAX_CHANNELS;
++                 mi++) {
++                hu_json_pair_t *p = &ca->data.object.pairs[mi];
++                if (!p->key || !p->value || p->value->type != HU_JSON_STRING ||
++                    !p->value->data.string.ptr)
++                    continue;
++                /* Channel id key must normalize to a non-empty string. */
++                char norm[HU_MOLORA_CONFIG_CHANNEL_NAME_MAX];
++                size_t kl = strlen(p->key);
++                /* Inline normalizer — same rules as
++                 * hu_molora_router_normalize_channel; duplicated here so
++                 * the parser doesn't pull in the ML include in OFF builds. */
++                size_t kstart = 0;
++                while (kstart < kl && ((unsigned char)p->key[kstart] == ' ' ||
++                                       (unsigned char)p->key[kstart] == '\t' ||
++                                       (unsigned char)p->key[kstart] == '\n' ||
++                                       (unsigned char)p->key[kstart] == '\r'))
++                    kstart++;
++                size_t kend = kstart;
++                while (kend < kl && p->key[kend] != ':' && (unsigned char)p->key[kend] != ' ' &&
++                       (unsigned char)p->key[kend] != '\t' && (unsigned char)p->key[kend] != '\n' &&
++                       (unsigned char)p->key[kend] != '\r')
++                    kend++;
++                if (kend <= kstart)
++                    continue;
++                size_t klen = kend - kstart;
++                if (klen >= sizeof(norm))
++                    klen = sizeof(norm) - 1;
++                for (size_t ci = 0; ci < klen; ci++) {
++                    unsigned char ch = (unsigned char)p->key[kstart + ci];
++                    if (ch >= 'A' && ch <= 'Z')
++                        ch = (unsigned char)(ch + ('a' - 'A'));
++                    norm[ci] = (char)ch;
++                }
++                norm[klen] = '\0';
++                const char *molora_path = p->value->data.string.ptr;
++                if (!molora_path || !molora_path[0])
++                    continue;
++                hu_molora_channel_entry_t *e =
++                    &cfg->personalization.molora.entries[cfg->personalization.molora.count];
++                memcpy(e->channel, norm, klen + 1);
++                e->adapter_path = hu_strdup(a, molora_path);
++                if (!e->adapter_path) {
++                    e->channel[0] = '\0';
++                    continue;
++                }
++                cfg->personalization.molora.count++;
++            }
++        }
++    }
+     return HU_OK;
+ }
+ 
+diff --git a/src/config_serialize.c b/src/config_serialize.c
+index 9aa04674..7bff173f 100644
+--- a/src/config_serialize.c
++++ b/src/config_serialize.c
+@@ -346,6 +346,30 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
+             if (cfg->personalization.m3_adapter_disabled)
+                 hu_json_object_set(&a, pers, "m3_adapter_disabled",
+                                    hu_json_bool_new(&a, cfg->personalization.m3_adapter_disabled));
++            /* US-7.8 — MoLoRA per-channel router. Emit only when the block
++             * is non-default (enabled OR at least one channel mapped) so
++             * the canonical default config stays terse. */
++            if (cfg->personalization.molora.enabled || cfg->personalization.molora.count > 0) {
++                hu_json_value_t *mol = hu_json_object_new(&a);
++                if (mol) {
++                    hu_json_object_set(&a, mol, "enabled",
++                                       hu_json_bool_new(&a, cfg->personalization.molora.enabled));
++                    hu_json_value_t *ca = hu_json_object_new(&a);
++                    if (ca) {
++                        for (size_t mi = 0; mi < cfg->personalization.molora.count; mi++) {
++                            const hu_molora_channel_entry_t *e =
++                                &cfg->personalization.molora.entries[mi];
++                            if (!e->adapter_path || e->channel[0] == '\0')
++                                continue;
++                            hu_json_object_set(
++                                &a, ca, e->channel,
++                                hu_json_string_new(&a, e->adapter_path, strlen(e->adapter_path)));
++                        }
++                        hu_json_object_set(&a, mol, "channel_adapters", ca);
++                    }
++                    hu_json_object_set(&a, pers, "molora", mol);
++                }
++            }
+             hu_json_object_set(&a, root, "personalization", pers);
+         }
+     }
+diff --git a/src/daemon.c b/src/daemon.c
+index d1397364..3d2c0d32 100644
+--- a/src/daemon.c
++++ b/src/daemon.c
+@@ -26,6 +26,9 @@
+ #include "human/ml/learner.h"
+ #include "human/ml/learner_bridge.h"
+ #include "human/ml/lora_retrain_runner.h"
++#ifdef HU_ENABLE_MOLORA
++#include "human/ml/molora.h"
++#endif
+ #ifdef HU_ENABLE_ML
+ #include "human/ml/m3_frontier_adapter.h"
+ #endif
+@@ -2570,6 +2573,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
+                         "personalization: load_adapter('%s', %s) failed: %d", adapter_id,
+                         adapter_path, (int)le);
+     }
++#ifdef HU_ENABLE_MOLORA
++    /* US-7.8 — Initialize the MoLoRA static per-channel router from config.
++     * Disabled-by-default; the agent-turn hook is a no-op until the router
++     * is enabled AND at least one channel adapter is mapped. The router
++     * borrows path pointers from `config->personalization.molora` — config
++     * shares the agent's bootstrap arena, so the lifetimes match. */
++    if (agent && config) {
++        hu_error_t mre = hu_molora_router_init(&agent->molora_router, config);
++        if (mre != HU_OK)
++            hu_log_warn("human", agent->observer, "molora: router init failed: %d", (int)mre);
++        else if (agent->molora_router.enabled)
++            hu_log_info("human", agent->observer,
++                        "molora: router enabled with %zu channel adapter(s)",
++                        agent->molora_router.count);
++    }
++#endif
+     /* Initialize contact identity graph for cross-channel resolution */
+     if (agent && agent->memory) {
+         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
+diff --git a/src/ml/molora.c b/src/ml/molora.c
+new file mode 100644
+index 00000000..af825696
+--- /dev/null
++++ b/src/ml/molora.c
+@@ -0,0 +1,145 @@
++/* molora.c — Sprint 7 US-7.8 (Init #02 Phase 1): static per-channel router.
++ *
++ * See include/human/ml/molora.h for the contract. This TU is only compiled
++ * when HU_ENABLE_MOLORA is defined (gated in CMakeLists.txt). The header
++ * itself is also fully guarded so callers in an OFF build see no symbols.
++ *
++ * Allocation discipline: the router owns no heap. `_init` only copies the
++ * borrowed `adapter_path` pointers from the config; `_select` runs an
++ * in-place stack-buffer normalization and a linear scan. This is safe to
++ * call on every agent turn (the hot path). */
++
++#ifdef HU_ENABLE_MOLORA
++
++#include "human/ml/molora.h"
++
++#include "human/config_types.h"
++#include "human/core/error.h"
++
++#include <ctype.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <string.h>
++
++/* Forward declaration of the full config struct. We only touch the
++ * personalization sub-struct here, which is part of hu_config_t in
++ * config.h — including config_types.h above gives us the inner types
++ * but the outer hu_config_t is defined in human/config.h. We accept it
++ * as the `struct hu_config` opaque type and reach in via casting. */
++#include "human/config.h"
++
++/* ── Normalizer ─────────────────────────────────────────────────────────── */
++
++size_t hu_molora_router_normalize_channel(const char *in, size_t in_len, char *out,
++                                          size_t out_cap) {
++    if (!out || out_cap == 0)
++        return 0;
++    out[0] = '\0';
++    if (!in || in_len == 0)
++        return 0;
++
++    /* Trim leading whitespace. */
++    size_t start = 0;
++    while (start < in_len && isspace((unsigned char)in[start]))
++        start++;
++
++    /* Determine effective end: first ':' or trailing whitespace, whichever
++     * comes first, after start. */
++    size_t end = start;
++    while (end < in_len && in[end] != ':' && !isspace((unsigned char)in[end]))
++        end++;
++
++    if (end <= start)
++        return 0;
++
++    size_t copy_len = end - start;
++    /* Truncate to out_cap - 1 so we always have room for the terminator. */
++    if (copy_len >= out_cap)
++        copy_len = out_cap - 1;
++
++    for (size_t i = 0; i < copy_len; i++) {
++        unsigned char ch = (unsigned char)in[start + i];
++        out[i] = (char)tolower(ch);
++    }
++    out[copy_len] = '\0';
++    return copy_len;
++}
++
++/* ── Init ───────────────────────────────────────────────────────────────── */
++
++hu_error_t hu_molora_router_init(hu_molora_router_t *r, const struct hu_config *cfg) {
++    if (!r)
++        return HU_ERR_INVALID_ARGUMENT;
++
++    /* Zero out unconditionally — any prior state is replaced. A `{0}`
++     * struct is the disabled state (AC-7.8.4). */
++    memset(r, 0, sizeof(*r));
++
++    if (!cfg)
++        return HU_OK;
++
++    const hu_personalization_config_t *p = &cfg->personalization;
++    r->default_adapter_path = p->lora_adapter_path; /* may be NULL */
++
++    if (!p->molora.enabled)
++        return HU_OK;
++
++    /* Per design Q2: when personalization itself is disabled, molora stays
++     * disabled too (router enabled flag remains false). The chat-time hook
++     * checks `r->enabled` before calling _select, so this honors the gate
++     * without needing extra branching at the call site. */
++    if (!p->enabled)
++        return HU_OK;
++
++    r->enabled = true;
++
++    size_t want = p->molora.count;
++    if (want > HU_MOLORA_MAX_CHANNELS)
++        want = HU_MOLORA_MAX_CHANNELS;
++
++    for (size_t i = 0; i < want; i++) {
++        const hu_molora_channel_entry_t *src = &p->molora.entries[i];
++        if (!src->adapter_path || src->channel[0] == '\0')
++            continue;
++        hu_molora_entry_t *dst = &r->entries[r->count];
++        /* Re-normalize defensively. Parser already normalized but a
++         * config-mutator round-trip could in theory bypass that path,
++         * and the cost is one strncpy + tolower per startup entry. */
++        size_t n = hu_molora_router_normalize_channel(src->channel, strlen(src->channel),
++                                                      dst->channel, sizeof(dst->channel));
++        if (n == 0)
++            continue;
++        dst->adapter_path = src->adapter_path;
++        r->count++;
++    }
++    return HU_OK;
++}
++
++/* ── Select ─────────────────────────────────────────────────────────────── */
++
++const char *hu_molora_router_select(const hu_molora_router_t *r, const char *channel,
++                                    size_t channel_len) {
++    if (!r)
++        return NULL;
++    /* Disabled router → caller falls through to today's behavior. AC-7.8.4
++     * also exercises this path with a `{0}` struct. */
++    if (!r->enabled)
++        return NULL;
++
++    char key[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t key_len = hu_molora_router_normalize_channel(channel, channel_len, key, sizeof(key));
++    /* Empty channel id → no per-channel match; surface default. */
++    if (key_len == 0)
++        return r->default_adapter_path;
++
++    for (size_t i = 0; i < r->count; i++) {
++        const hu_molora_entry_t *e = &r->entries[i];
++        if (e->channel[0] == '\0' || !e->adapter_path)
++            continue;
++        if (strncmp(e->channel, key, sizeof(e->channel)) == 0)
++            return e->adapter_path;
++    }
++    return r->default_adapter_path;
++}
++
++#endif /* HU_ENABLE_MOLORA */
+diff --git a/tests/test_main.c b/tests/test_main.c
+index eca0b9b1..162bed99 100644
+--- a/tests/test_main.c
++++ b/tests/test_main.c
+@@ -535,6 +535,7 @@ void run_filler_recency_tests(void);
+ void run_contact_send_recency_tests(void);
+ void run_imessage_outbound_dedup_tests(void);
+ void run_dpo_miner_tests(void);
++void run_molora_router_tests(void);
+ void run_config_identity_links_tests(void);
+ void run_memory_session_scoping_tests(void);
+ void run_filler_pctt_tests(void);
+@@ -1117,6 +1118,7 @@ int main(int argc, char **argv) {
+     run_contact_send_recency_tests();
+     run_imessage_outbound_dedup_tests();
+     run_dpo_miner_tests();
++    run_molora_router_tests();
+     run_config_identity_links_tests();
+     run_memory_session_scoping_tests();
+     run_filler_pctt_tests();
+diff --git a/tests/test_molora_router.c b/tests/test_molora_router.c
+new file mode 100644
+index 00000000..b722cafc
+--- /dev/null
++++ b/tests/test_molora_router.c
+@@ -0,0 +1,314 @@
++/* test_molora_router — Sprint 7 US-7.8 acceptance tests.
++ *
++ * AC coverage:
++ *   AC-7.8.1 → test_static_router_selects_channel_adapter
++ *   AC-7.8.2 → test_static_router_fallback_to_default
++ *   AC-7.8.3 → test_disabled_molora_no_call
++ *              (compile-only guard at top of file ensures this TU is only
++ *              built when HU_ENABLE_MOLORA is set; the OFF build's full test
++ *              suite running cleanly is the negative evidence)
++ *   AC-7.8.4 → test_router_zero_init_is_disabled
++ *   AC-7.8.5 → enforced by scripts/check-molora-binary-budget.sh in CI
++ *
++ * Plus a normalizer table that closes risk R2 in the design doc (channel id
++ * variation across the 31 channel modules: "telegram" vs "telegram:42" vs
++ * "Telegram" vs " Telegram \t").
++ *
++ * All tests are pure-allocation tests against the router struct directly.
++ * The agent-turn hook integration is exercised indirectly: the router IS the
++ * unit under test; the chat-dispatch glue is one `if (path) load(path)`
++ * call wrapped in `#ifdef HU_ENABLE_MOLORA`, covered by the OFF-vs-ON binary
++ * regression in step 7 of the implementation. */
++
++#include "test_framework.h"
++
++#ifdef HU_ENABLE_MOLORA
++
++#include "human/config.h"
++#include "human/config_types.h"
++#include "human/core/error.h"
++#include "human/ml/molora.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++/* ── Normalizer table ─────────────────────────────────────────────────── */
++
++static void normalizer_lowercase_pass_through(void) {
++    char out[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t n = hu_molora_router_normalize_channel("telegram", 8, out, sizeof(out));
++    HU_ASSERT_EQ(n, 8);
++    HU_ASSERT(strcmp(out, "telegram") == 0);
++}
++
++static void normalizer_strips_colon_suffix(void) {
++    char out[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t n = hu_molora_router_normalize_channel("telegram:42", 11, out, sizeof(out));
++    HU_ASSERT_EQ(n, 8);
++    HU_ASSERT(strcmp(out, "telegram") == 0);
++}
++
++static void normalizer_lowercases_mixed_case(void) {
++    char out[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t n = hu_molora_router_normalize_channel("Telegram", 8, out, sizeof(out));
++    HU_ASSERT_EQ(n, 8);
++    HU_ASSERT(strcmp(out, "telegram") == 0);
++}
++
++static void normalizer_trims_whitespace_and_lowercases(void) {
++    char out[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t n = hu_molora_router_normalize_channel(" Telegram \t", 11, out, sizeof(out));
++    HU_ASSERT_EQ(n, 8);
++    HU_ASSERT(strcmp(out, "telegram") == 0);
++}
++
++static void normalizer_empty_input_returns_zero(void) {
++    char out[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t n = hu_molora_router_normalize_channel("", 0, out, sizeof(out));
++    HU_ASSERT_EQ(n, 0);
++    HU_ASSERT(out[0] == '\0');
++}
++
++static void normalizer_colon_only_returns_zero(void) {
++    char out[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t n = hu_molora_router_normalize_channel(":42", 3, out, sizeof(out));
++    HU_ASSERT_EQ(n, 0);
++}
++
++static void normalizer_truncates_to_buffer(void) {
++    char in[64];
++    memset(in, 'a', sizeof(in));
++    char out[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t n = hu_molora_router_normalize_channel(in, sizeof(in), out, sizeof(out));
++    HU_ASSERT_EQ(n, sizeof(out) - 1);
++    HU_ASSERT(out[sizeof(out) - 1] == '\0');
++}
++
++static void normalizer_handles_imessage_with_chat_id(void) {
++    /* daemon_proactive.c populates iMessage active_channel as
++     * "imessage:<chat_id>" — the router must collapse to "imessage". */
++    char out[HU_MOLORA_CHANNEL_NAME_MAX];
++    size_t n = hu_molora_router_normalize_channel("imessage:+15551234567", 22, out, sizeof(out));
++    HU_ASSERT_EQ(n, 8);
++    HU_ASSERT(strcmp(out, "imessage") == 0);
++}
++
++static void normalizer_handles_null_out(void) {
++    /* Defensive: NULL out buffer returns 0 without crashing. */
++    size_t n = hu_molora_router_normalize_channel("telegram", 8, NULL, 16);
++    HU_ASSERT_EQ(n, 0);
++}
++
++/* ── Router select behavior ───────────────────────────────────────────── */
++
++/* AC-7.8.4: zero-init is a valid disabled state. */
++static void test_router_zero_init_is_disabled(void) {
++    hu_molora_router_t r = {0};
++    /* select must safely return NULL on a zero-init router. */
++    const char *p = hu_molora_router_select(&r, "telegram", 8);
++    HU_ASSERT(p == NULL);
++    /* enabled flag must be false. */
++    HU_ASSERT(r.enabled == false);
++    HU_ASSERT(r.count == 0);
++}
++
++/* AC-7.8.3: disabled router (enabled=false) never returns an adapter even
++ * when entries are populated. This is the "kill switch" path: a user toggles
++ * molora.enabled = false in config and the router becomes a no-op without
++ * needing to clear the channel_adapters map. */
++static void test_disabled_molora_no_call(void) {
++    hu_molora_router_t r = {0};
++    r.enabled = false;
++    r.count = 1;
++    strcpy(r.entries[0].channel, "telegram");
++    r.entries[0].adapter_path = "/tmp/should_not_be_returned.lora";
++    r.default_adapter_path = "/tmp/default.lora";
++
++    /* When disabled, select returns NULL regardless of channel match. */
++    HU_ASSERT(hu_molora_router_select(&r, "telegram", 8) == NULL);
++    HU_ASSERT(hu_molora_router_select(&r, "unknown", 7) == NULL);
++    HU_ASSERT(hu_molora_router_select(&r, "", 0) == NULL);
++}
++
++/* AC-7.8.1: enabled router with telegram→adapter selects the telegram
++ * adapter when active_channel == "telegram". */
++static void test_static_router_selects_channel_adapter(void) {
++    hu_molora_router_t r = {0};
++    r.enabled = true;
++    r.count = 2;
++    strcpy(r.entries[0].channel, "telegram");
++    r.entries[0].adapter_path = "/tmp/telegram.lora";
++    strcpy(r.entries[1].channel, "slack");
++    r.entries[1].adapter_path = "/tmp/slack.lora";
++    r.default_adapter_path = "/tmp/default.lora";
++
++    const char *p = hu_molora_router_select(&r, "telegram", 8);
++    HU_ASSERT(p != NULL);
++    HU_ASSERT(strcmp(p, "/tmp/telegram.lora") == 0);
++
++    /* Also verify the slack entry resolves correctly. */
++    p = hu_molora_router_select(&r, "slack", 5);
++    HU_ASSERT(p != NULL);
++    HU_ASSERT(strcmp(p, "/tmp/slack.lora") == 0);
++}
++
++/* AC-7.8.1 + R2 risk: normalization must apply at lookup. "telegram:42"
++ * resolves to the same entry as "telegram". */
++static void test_static_router_normalizes_lookup(void) {
++    hu_molora_router_t r = {0};
++    r.enabled = true;
++    r.count = 1;
++    strcpy(r.entries[0].channel, "telegram");
++    r.entries[0].adapter_path = "/tmp/telegram.lora";
++
++    HU_ASSERT(strcmp(hu_molora_router_select(&r, "telegram:42", 11), "/tmp/telegram.lora") == 0);
++    HU_ASSERT(strcmp(hu_molora_router_select(&r, "Telegram", 8), "/tmp/telegram.lora") == 0);
++    HU_ASSERT(strcmp(hu_molora_router_select(&r, " Telegram \t", 11), "/tmp/telegram.lora") == 0);
++}
++
++/* AC-7.8.2: channel not in map falls back to default_adapter_path; no error
++ * is emitted (the test framework would catch fatals). */
++static void test_static_router_fallback_to_default(void) {
++    hu_molora_router_t r = {0};
++    r.enabled = true;
++    r.count = 1;
++    strcpy(r.entries[0].channel, "telegram");
++    r.entries[0].adapter_path = "/tmp/telegram.lora";
++    r.default_adapter_path = "/tmp/default.lora";
++
++    /* "irc" is not in the map → fall back to default. */
++    const char *p = hu_molora_router_select(&r, "irc", 3);
++    HU_ASSERT(p != NULL);
++    HU_ASSERT(strcmp(p, "/tmp/default.lora") == 0);
++}
++
++/* AC-7.8.2 variant: when no entry matches AND default is NULL, return NULL
++ * (caller falls through to "no adapter swap"). */
++static void test_static_router_no_default_returns_null(void) {
++    hu_molora_router_t r = {0};
++    r.enabled = true;
++    r.count = 1;
++    strcpy(r.entries[0].channel, "telegram");
++    r.entries[0].adapter_path = "/tmp/telegram.lora";
++    r.default_adapter_path = NULL;
++
++    HU_ASSERT(hu_molora_router_select(&r, "irc", 3) == NULL);
++}
++
++/* Empty channel id must surface default (not crash, not match arbitrarily). */
++static void test_static_router_empty_channel_returns_default(void) {
++    hu_molora_router_t r = {0};
++    r.enabled = true;
++    r.count = 1;
++    strcpy(r.entries[0].channel, "telegram");
++    r.entries[0].adapter_path = "/tmp/telegram.lora";
++    r.default_adapter_path = "/tmp/default.lora";
++
++    HU_ASSERT(strcmp(hu_molora_router_select(&r, "", 0), "/tmp/default.lora") == 0);
++    HU_ASSERT(strcmp(hu_molora_router_select(&r, NULL, 0), "/tmp/default.lora") == 0);
++}
++
++/* NULL router pointer must not crash. */
++static void test_static_router_null_pointer_safe(void) {
++    HU_ASSERT(hu_molora_router_select(NULL, "telegram", 8) == NULL);
++}
++
++/* ── Router init from config ──────────────────────────────────────────── */
++
++/* hu_molora_router_init builds the router from cfg->personalization.molora.
++ * NULL config → disabled router. */
++static void test_router_init_null_config_disabled(void) {
++    hu_molora_router_t r;
++    memset(&r, 0xAA, sizeof(r)); /* poison to verify _init zeros */
++    HU_ASSERT_EQ(hu_molora_router_init(&r, NULL), HU_OK);
++    HU_ASSERT(r.enabled == false);
++    HU_ASSERT_EQ(r.count, 0);
++}
++
++/* NULL router pointer → invalid argument. */
++static void test_router_init_null_router_invalid(void) {
++    HU_ASSERT_EQ(hu_molora_router_init(NULL, NULL), HU_ERR_INVALID_ARGUMENT);
++}
++
++/* Config with molora disabled → router disabled but default path is wired
++ * (so the caller's gating only checks `enabled`, not the path). */
++static void test_router_init_personalization_disabled_keeps_router_off(void) {
++    hu_config_t cfg = {0};
++    cfg.personalization.enabled = false;
++    cfg.personalization.molora.enabled = true;
++    cfg.personalization.molora.count = 1;
++    strcpy(cfg.personalization.molora.entries[0].channel, "telegram");
++    /* Casting away const is safe here: the parser strdups; this fixture
++     * does not exercise the free path. */
++    cfg.personalization.molora.entries[0].adapter_path = (char *)"/tmp/t.lora";
++
++    hu_molora_router_t r;
++    HU_ASSERT_EQ(hu_molora_router_init(&r, &cfg), HU_OK);
++    /* personalization.enabled = false → router stays disabled even though
++     * molora.enabled = true (design Q2). */
++    HU_ASSERT(r.enabled == false);
++}
++
++/* Config with both personalization.enabled and molora.enabled → router
++ * is fully populated. */
++static void test_router_init_populates_from_config(void) {
++    hu_config_t cfg = {0};
++    cfg.personalization.enabled = true;
++    cfg.personalization.lora_adapter_path = (char *)"/tmp/default.lora";
++    cfg.personalization.molora.enabled = true;
++    cfg.personalization.molora.count = 2;
++    strcpy(cfg.personalization.molora.entries[0].channel, "telegram");
++    cfg.personalization.molora.entries[0].adapter_path = (char *)"/tmp/t.lora";
++    strcpy(cfg.personalization.molora.entries[1].channel, "slack");
++    cfg.personalization.molora.entries[1].adapter_path = (char *)"/tmp/s.lora";
++
++    hu_molora_router_t r;
++    HU_ASSERT_EQ(hu_molora_router_init(&r, &cfg), HU_OK);
++    HU_ASSERT(r.enabled == true);
++    HU_ASSERT_EQ(r.count, 2);
++    HU_ASSERT(strcmp(r.default_adapter_path, "/tmp/default.lora") == 0);
++    HU_ASSERT(strcmp(hu_molora_router_select(&r, "telegram", 8), "/tmp/t.lora") == 0);
++    HU_ASSERT(strcmp(hu_molora_router_select(&r, "slack", 5), "/tmp/s.lora") == 0);
++    HU_ASSERT(strcmp(hu_molora_router_select(&r, "discord", 7), "/tmp/default.lora") == 0);
++}
++
++/* Sanity: AC-7.8.5 binary budget check is a CI-side script, not a runtime
++ * test, but we can at least pin the struct size so anyone bloating it has
++ * to update this test deliberately. */
++static void test_router_struct_size_is_bounded(void) {
++    /* Soft bound: 16 entries * (32-byte name + 8-byte ptr) + overhead.
++     * If this fires, someone added a field — review against AC-7.8.5
++     * before bumping the limit. */
++    HU_ASSERT(sizeof(hu_molora_router_t) < 2048);
++}
++
++#endif /* HU_ENABLE_MOLORA */
++
++void run_molora_router_tests(void);
++void run_molora_router_tests(void) {
++    HU_TEST_SUITE("MoloraRouter");
++#ifdef HU_ENABLE_MOLORA
++    HU_RUN_TEST(normalizer_lowercase_pass_through);
++    HU_RUN_TEST(normalizer_strips_colon_suffix);
++    HU_RUN_TEST(normalizer_lowercases_mixed_case);
++    HU_RUN_TEST(normalizer_trims_whitespace_and_lowercases);
++    HU_RUN_TEST(normalizer_empty_input_returns_zero);
++    HU_RUN_TEST(normalizer_colon_only_returns_zero);
++    HU_RUN_TEST(normalizer_truncates_to_buffer);
++    HU_RUN_TEST(normalizer_handles_imessage_with_chat_id);
++    HU_RUN_TEST(normalizer_handles_null_out);
++    HU_RUN_TEST(test_router_zero_init_is_disabled);
++    HU_RUN_TEST(test_disabled_molora_no_call);
++    HU_RUN_TEST(test_static_router_selects_channel_adapter);
++    HU_RUN_TEST(test_static_router_normalizes_lookup);
++    HU_RUN_TEST(test_static_router_fallback_to_default);
++    HU_RUN_TEST(test_static_router_no_default_returns_null);
++    HU_RUN_TEST(test_static_router_empty_channel_returns_default);
++    HU_RUN_TEST(test_static_router_null_pointer_safe);
++    HU_RUN_TEST(test_router_init_null_config_disabled);
++    HU_RUN_TEST(test_router_init_null_router_invalid);
++    HU_RUN_TEST(test_router_init_personalization_disabled_keeps_router_off);
++    HU_RUN_TEST(test_router_init_populates_from_config);
++    HU_RUN_TEST(test_router_struct_size_is_bounded);
++#endif /* HU_ENABLE_MOLORA */
++}

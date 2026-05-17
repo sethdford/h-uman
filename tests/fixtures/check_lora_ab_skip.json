@@ -1,0 +1,5 @@
+{
+  "verdict": "SKIP",
+  "reason": "judgment_dormant",
+  "note": "US-7.6 judgment-PPL backend not yet wired; SKIP is NOT a pass."
+}

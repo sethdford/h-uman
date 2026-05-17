@@ -207,6 +207,7 @@ void run_gmail_tests(void);
 void run_imessage_extended_tests(void);
 void run_imessage_chatdb_fixture_tests(void);
 void run_imessage_adversarial_tests(void);
+void run_imessage_rich_link_tests(void);
 void run_intelligence_tests(void);
 void run_protective_tests(void);
 void run_humor_tests(void);
@@ -274,6 +275,8 @@ void run_w12_verifier_loop_tests(void);
 #ifdef HU_ENABLE_LEARNING
 void run_w13_learner_tests(void);
 void run_w14_runners_tests(void);
+void run_w14_lora_retrain_tests(void);
+void run_w14_dual_lora_tests(void);
 void run_learner_bridge_tests(void);
 #endif
 void run_w15_backup_restore_tests(void);
@@ -352,6 +355,7 @@ void run_context_engine_tests(void);
 void run_exec_env_tests(void);
 int run_channel_monitor_tests(void);
 int run_doctor_fix_tests(void);
+void run_doctor_personalization_warning_tests(void);
 int run_skill_scaffold_tests(void);
 int run_plugin_discovery_tests(void);
 int run_context_engine_rag_tests(void);
@@ -431,6 +435,11 @@ void run_emotion_map_tests(void);
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
 void run_ml_cli_actually_trains_tests(void);
+void run_ml_fidelity_judgment_tests(void);
+/* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
+ * rl_trainer_simpo + rl_trainer_orpo C tests orphaned by main's RL
+ * architecture rework — files deleted, declarations removed. Sprint 12
+ * FU-11.5.a will re-target against main's new framework. */
 void run_dpo_judge_naming_tests(void);
 void run_lora_tests(void);
 void run_agent_trainer_tests(void);
@@ -546,6 +555,8 @@ void run_llamacpp_kvcache_tests(void);
 void run_llamacpp_decode_tests(void);
 void run_llamacpp_lora_hotswap_tests(void);
 void run_llamacpp_chat_metal_tests(void);
+void run_llamacpp_best_of_n_tests(void);
+void run_doctor_best_of_n_warning_tests(void);
 void run_coreml_provider_tests(void);
 void run_forgetting_tests(void);
 void run_bootstrap_tests(void);
@@ -608,6 +619,8 @@ void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+void run_style_critique_patterns_tests(void);
+void run_style_self_critique_tests(void);
 void run_personal_model_simulation_tests(void);
 #ifdef HU_ENABLE_RL_FULL
 void run_personal_model_fidelity_v2_tests(void);
@@ -894,6 +907,7 @@ int main(int argc, char **argv) {
     run_imessage_extended_tests();
     run_imessage_chatdb_fixture_tests();
     run_imessage_adversarial_tests();
+    run_imessage_rich_link_tests();
     run_intelligence_tests();
     run_protective_tests();
     run_humor_tests();
@@ -961,6 +975,8 @@ int main(int argc, char **argv) {
 #ifdef HU_ENABLE_LEARNING
     run_w13_learner_tests();
     run_w14_runners_tests();
+    run_w14_lora_retrain_tests();
+    run_w14_dual_lora_tests();
     run_learner_bridge_tests();
 #endif
     run_w15_backup_restore_tests();
@@ -1041,6 +1057,7 @@ int main(int argc, char **argv) {
     run_exec_env_tests();
     run_channel_monitor_tests();
     run_doctor_fix_tests();
+    run_doctor_personalization_warning_tests();
     run_skill_scaffold_tests();
     run_plugin_discovery_tests();
     run_context_engine_rag_tests();
@@ -1112,6 +1129,11 @@ int main(int argc, char **argv) {
 #ifdef HU_ENABLE_ML
     run_ml_tests();
     run_ml_cli_actually_trains_tests();
+    run_ml_fidelity_judgment_tests();
+    /* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
+     * rl_trainer_orpo/simpo suites removed — they pinned Sprint 11's
+     * per-trainer factory pattern, orphaned by main's RL architecture
+     * rework. See declaration block at ~line 441. */
     run_dpo_judge_naming_tests();
     run_lora_tests();
     run_agent_trainer_tests();
@@ -1220,6 +1242,8 @@ int main(int argc, char **argv) {
     run_llamacpp_decode_tests();
     run_llamacpp_lora_hotswap_tests();
     run_llamacpp_chat_metal_tests();
+    run_llamacpp_best_of_n_tests();
+    run_doctor_best_of_n_warning_tests();
     run_coreml_provider_tests();
     run_forgetting_tests();
     run_bootstrap_tests();
@@ -1283,6 +1307,8 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_style_critique_patterns_tests();
+    run_style_self_critique_tests();
     run_personal_model_simulation_tests();
 #ifdef HU_ENABLE_RL_FULL
     run_personal_model_fidelity_v2_tests();

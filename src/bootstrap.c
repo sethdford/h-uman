@@ -4,7 +4,6 @@
  * channel creation, and agent creation into a single module.
  */
 
-#include "human/core/log.h"
 #include "human/bootstrap.h"
 #include "human/agent/agent_comm.h"
 #include "human/agent/mailbox.h"
@@ -12,8 +11,9 @@
 #include "human/cognition/metacognition.h"
 #include "human/config.h"
 #include "human/context_engine.h"
-#include "human/hook.h"
+#include "human/core/log.h"
 #include "human/data/loader.h"
+#include "human/hook.h"
 #include "human/memory.h"
 #include "human/memory/engines.h"
 #include "human/memory/factory.h"
@@ -29,24 +29,24 @@
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
 #include "human/providers/apple.h"
 #endif
-#include "human/runtime.h"
 #include "human/ml/learner.h"
+#include "human/runtime.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
 #endif
+#include "human/agent/agent_definition.h"
+#include "human/agent/agent_git.h"
+#include "human/agent/instruction_discover.h"
+#include "human/mcp_manager.h"
+#include "human/permission.h"
 #include "human/security/audit.h"
 #include "human/security/keystore.h"
 #include "human/security/sandbox.h"
 #include "human/security/sandbox_internal.h"
 #include "human/tool.h"
 #include "human/tools/factory.h"
-#include "human/voice.h"
-#include "human/permission.h"
-#include "human/mcp_manager.h"
-#include "human/agent/agent_definition.h"
-#include "human/agent/agent_git.h"
-#include "human/agent/instruction_discover.h"
 #include "human/tools/webhook_tools.h"
+#include "human/voice.h"
 #include "human/webhook.h"
 #ifdef HU_HAS_VOICE_CHANNEL
 #include "human/channels/voice_channel.h"
@@ -621,8 +621,8 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 ks_err = hu_keystore_unlock_with_passphrase(bi->keystore, pp, strlen(pp));
                 if (ks_err == HU_OK) {
 #ifdef HU_ENABLE_SQLITE
-                    hu_error_t at_err = hu_sqlite_memory_attach_keystore(
-                        &bi->memory, bi->keystore, true);
+                    hu_error_t at_err =
+                        hu_sqlite_memory_attach_keystore(&bi->memory, bi->keystore, true);
 #else
                     hu_error_t at_err = HU_ERR_NOT_SUPPORTED;
 #endif
@@ -646,8 +646,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 }
             } else {
                 hu_log_error("bootstrap", &bi->observer,
-                             "keystore open failed (%s); plaintext mode",
-                             hu_error_string(ks_err));
+                             "keystore open failed (%s); plaintext mode", hu_error_string(ks_err));
                 bi->keystore = NULL;
             }
         }
@@ -732,21 +731,21 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
     /* MCP eager startup: create manager, auto-connect, and load tools */
     if (bi->cfg.mcp_servers_len > 0) {
         hu_mcp_manager_t *mcp_mgr = NULL;
-        hu_error_t mcp_err = hu_mcp_manager_create(alloc, bi->cfg.mcp_servers,
-                                                   bi->cfg.mcp_servers_len, &mcp_mgr);
+        hu_error_t mcp_err =
+            hu_mcp_manager_create(alloc, bi->cfg.mcp_servers, bi->cfg.mcp_servers_len, &mcp_mgr);
         if (mcp_err == HU_OK && mcp_mgr) {
             /* Connect all servers marked with auto_connect=true */
             hu_error_t connect_err = hu_mcp_manager_connect_auto(mcp_mgr);
             if (connect_err != HU_OK) {
                 hu_log_error("bootstrap", NULL, "warning: MCP auto-connect failed: %s",
-                        hu_error_string(connect_err));
+                             hu_error_string(connect_err));
             }
 
             /* Load tools from connected MCP servers */
             hu_tool_t *mcp_tools = NULL;
             size_t mcp_tools_count = 0;
-            hu_error_t load_err = hu_mcp_manager_load_tools(mcp_mgr, alloc, &mcp_tools,
-                                                            &mcp_tools_count);
+            hu_error_t load_err =
+                hu_mcp_manager_load_tools(mcp_mgr, alloc, &mcp_tools, &mcp_tools_count);
             if (load_err == HU_OK && mcp_tools_count > 0) {
                 /* Merge MCP tools with existing tools */
                 hu_tool_t *merged = (hu_tool_t *)alloc->alloc(
@@ -764,12 +763,12 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 hu_mcp_manager_free_tools(alloc, mcp_tools, mcp_tools_count);
             } else if (load_err != HU_OK) {
                 hu_log_error("bootstrap", NULL, "warning: MCP tool loading failed: %s",
-                        hu_error_string(load_err));
+                             hu_error_string(load_err));
             }
             hu_mcp_manager_destroy(mcp_mgr);
         } else if (mcp_err != HU_OK) {
             hu_log_error("bootstrap", NULL, "warning: MCP manager creation failed: %s",
-                    hu_error_string(mcp_err));
+                         hu_error_string(mcp_err));
         }
     }
 
@@ -784,13 +783,16 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             hu_tool_t webhook_tools[3] = {0};
             size_t webhook_count = 0;
 
-            if (hu_webhook_register_tool_create(alloc, webhook_mgr, &webhook_tools[webhook_count]) == HU_OK) {
+            if (hu_webhook_register_tool_create(alloc, webhook_mgr,
+                                                &webhook_tools[webhook_count]) == HU_OK) {
                 webhook_count++;
             }
-            if (hu_webhook_poll_tool_create(alloc, webhook_mgr, &webhook_tools[webhook_count]) == HU_OK) {
+            if (hu_webhook_poll_tool_create(alloc, webhook_mgr, &webhook_tools[webhook_count]) ==
+                HU_OK) {
                 webhook_count++;
             }
-            if (hu_webhook_list_tool_create(alloc, webhook_mgr, &webhook_tools[webhook_count]) == HU_OK) {
+            if (hu_webhook_list_tool_create(alloc, webhook_mgr, &webhook_tools[webhook_count]) ==
+                HU_OK) {
                 webhook_count++;
             }
 
@@ -894,8 +896,6 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         const char *model = bi->cfg.default_model ? bi->cfg.default_model : "";
         double temp = bi->cfg.temperature > 0.0 ? bi->cfg.temperature : 0.7;
 
-
-
         uint32_t max_iters =
             bi->cfg.agent.max_tool_iterations > 0 ? bi->cfg.agent.max_tool_iterations : 25;
         uint32_t max_hist =
@@ -911,6 +911,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             .mcts_planner_enabled = bi->cfg.agent.mcts_planner_enabled,
             .tree_of_thought = bi->cfg.agent.tree_of_thought,
             .constitutional_ai = bi->cfg.agent.constitutional_ai,
+            .constitutional_style_rules_enabled = bi->cfg.agent.constitutional_style_rules_enabled,
             .speculative_cache = bi->cfg.agent.speculative_cache,
             .tool_routing_enabled = bi->cfg.agent.tool_routing_enabled,
             .multi_agent = bi->cfg.agent.multi_agent,
@@ -948,7 +949,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 hu_agent_set_learner(&bi->agent, bi->learner);
                 hu_log_info("bootstrap", obs, "w13: learner attached (backend=%s)",
                             bi->learner->vt && bi->learner->vt->name ? bi->learner->vt->name
-                                                                      : "(unknown)");
+                                                                     : "(unknown)");
             } else {
                 hu_log_warn("bootstrap", obs,
                             "w13: learner_open_default failed (%s); persona deltas will "
@@ -978,16 +979,14 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             hu_log_info("bootstrap", obs, "m3 bridge disabled by rollback flag");
         } else if (bi->cfg.personalization.m3_adapter_probe_path &&
                    bi->cfg.personalization.m3_adapter_probe_path[0]) {
-            hu_agent_m3_adapter_attach(&bi->agent,
-                                       bi->cfg.personalization.m3_adapter_probe_path);
+            hu_agent_m3_adapter_attach(&bi->agent, bi->cfg.personalization.m3_adapter_probe_path);
         }
 #endif
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
         if (bi->cfg.agent.mr_on_device_enabled) {
             bi->agent.on_device_available = hu_apple_probe(alloc, NULL, 0);
             if (bi->agent.on_device_available)
-                hu_log_info("bootstrap", obs,
-                            "Apple Intelligence on-device provider detected");
+                hu_log_info("bootstrap", obs, "Apple Intelligence on-device provider detected");
         }
 #endif
         memset(&bi->voice_cfg, 0, sizeof(bi->voice_cfg));
@@ -1079,9 +1078,11 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 hreg = bi->plugin_hook_ctx.hook_registry;
             } else {
                 /* Merge plugin hooks into config hooks registry */
-                size_t plugin_hook_count = hu_hook_registry_count(bi->plugin_hook_ctx.hook_registry);
+                size_t plugin_hook_count =
+                    hu_hook_registry_count(bi->plugin_hook_ctx.hook_registry);
                 for (size_t i = 0; i < plugin_hook_count; i++) {
-                    const hu_hook_entry_t *phook = hu_hook_registry_get(bi->plugin_hook_ctx.hook_registry, i);
+                    const hu_hook_entry_t *phook =
+                        hu_hook_registry_get(bi->plugin_hook_ctx.hook_registry, i);
                     if (phook) {
                         hu_hook_registry_add(hreg, alloc, phook);
                     }
@@ -1098,8 +1099,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         /* Instruction file discovery */
         if (bi->cfg.agent.discover_instructions) {
             hu_instruction_discovery_t *disc = NULL;
-            hu_error_t disc_err =
-                hu_instruction_discovery_run(alloc, ws, strlen(ws), &disc);
+            hu_error_t disc_err = hu_instruction_discovery_run(alloc, ws, strlen(ws), &disc);
             if (disc_err == HU_OK && disc)
                 bi->agent.instruction_discovery = disc;
         }
@@ -1112,8 +1112,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             if (hu_agent_definition_load(alloc, ws, &adef) == HU_OK) {
                 if (adef.soul_body && !bi->agent.persona_prompt) {
                     size_t blen = strlen(adef.soul_body);
-                    bi->agent.persona_prompt =
-                        (char *)alloc->alloc(alloc->ctx, blen + 1);
+                    bi->agent.persona_prompt = (char *)alloc->alloc(alloc->ctx, blen + 1);
                     if (bi->agent.persona_prompt) {
                         memcpy(bi->agent.persona_prompt, adef.soul_body, blen + 1);
                         bi->agent.persona_prompt_len = blen;
@@ -1205,8 +1204,9 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         }
 #else
         if (cfg->channels.imessage.default_target)
-            hu_log_error("bootstrap", NULL, "WARNING: iMessage configured in config but binary was built "
-                    "without HU_ENABLE_IMESSAGE — rebuild with -DHU_ENABLE_IMESSAGE=ON");
+            hu_log_error("bootstrap", NULL,
+                         "WARNING: iMessage configured in config but binary was built "
+                         "without HU_ENABLE_IMESSAGE — rebuild with -DHU_ENABLE_IMESSAGE=ON");
 #endif
 
 #if HU_HAS_PWA
@@ -1579,13 +1579,12 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             const char *const *gaf = (const char *const *)cfg->channels.signal.group_allow_from;
             const char *gp =
                 cfg->channels.signal.group_policy ? cfg->channels.signal.group_policy : "";
-            err = hu_signal_create_ex(alloc, cfg->channels.signal.http_url,
-                                      strlen(cfg->channels.signal.http_url),
-                                      cfg->channels.signal.account,
-                                      strlen(cfg->channels.signal.account), af,
-                                      cfg->channels.signal.allow_from_count, gaf,
-                                      cfg->channels.signal.group_allow_from_count, gp, strlen(gp),
-                                      &bi->channel_slots[ch_count]);
+            err = hu_signal_create_ex(
+                alloc, cfg->channels.signal.http_url, strlen(cfg->channels.signal.http_url),
+                cfg->channels.signal.account, strlen(cfg->channels.signal.account), af,
+                cfg->channels.signal.allow_from_count, gaf,
+                cfg->channels.signal.group_allow_from_count, gp, strlen(gp),
+                &bi->channel_slots[ch_count]);
             if (err == HU_OK) {
                 bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
                 bi->channels[ch_count].channel = &bi->channel_slots[ch_count];

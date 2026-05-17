@@ -1,0 +1,8 @@
+ CMakeLists.txt                              |   1 +
+ include/human/daemon.h                      |  29 +++++
+ src/daemon.c                                |  48 +++++++-
+ src/doctor.c                                | 140 ++++++++++++----------
+ tests/test_doctor_personalization_warning.c | 153 ++++++++++++++++++++++++
+ tests/test_main.c                           |   2 +
+ tests/test_provider_all.c                   | 176 ++++++++++++++++++++++++++--
+ 7 files changed, 466 insertions(+), 83 deletions(-)

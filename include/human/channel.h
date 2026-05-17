@@ -78,8 +78,8 @@ typedef enum hu_reaction_type {
     HU_REACTION_THUMBS_UP,
     HU_REACTION_THUMBS_DOWN,
     HU_REACTION_HAHA,
-    HU_REACTION_EMPHASIS, /* !! */
-    HU_REACTION_QUESTION, /* ? */
+    HU_REACTION_EMPHASIS,     /* !! */
+    HU_REACTION_QUESTION,     /* ? */
     HU_REACTION_CUSTOM_EMOJI, /* arbitrary emoji string */
 } hu_reaction_type_t;
 
@@ -154,6 +154,26 @@ typedef struct hu_channel_vtable {
                                              char **out, size_t *out_len);
     /* Optional — mark conversation as read for a contact. NULL = skip. */
     hu_error_t (*mark_read)(void *ctx, const char *contact_id, size_t contact_id_len);
+
+    /* Optional — does this channel render a bare URL as a rich playable preview
+     * (album art, title, play button) when the URL is alone in its own message?
+     * iMessage, Telegram, Discord, Slack, WhatsApp and Signal do; SMS does not.
+     * The music-share path uses this to choose between sending a bare URL
+     * (rich-link mode — no clip/artwork downloads) vs the legacy text+attachment
+     * fallback. NULL = treat as false (legacy fallback).
+     *
+     * Invariant for callers: when this returns true and you send the URL,
+     * the URL must be the entire message body — no preamble, no trailing
+     * whitespace, no caption — or the platform will suppress the unfurl. */
+    bool (*supports_link_unfurl)(void *ctx);
 } hu_channel_vtable_t;
+
+/** Returns true if this channel renders bare-URL messages as rich previews.
+ *  Safe to call with a NULL channel or NULL vtable entry — returns false. */
+static inline bool hu_channel_supports_link_unfurl(const hu_channel_t *channel) {
+    if (!channel || !channel->vtable || !channel->vtable->supports_link_unfurl)
+        return false;
+    return channel->vtable->supports_link_unfurl(channel->ctx);
+}
 
 #endif /* HU_CHANNEL_H */

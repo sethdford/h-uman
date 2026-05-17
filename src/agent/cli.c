@@ -68,8 +68,8 @@
 #if !defined(HU_IS_TEST) && defined(__APPLE__)
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
 #include <spawn.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #endif
 
@@ -142,7 +142,8 @@ static bool mlx_auto_serve(const char *prov_name) {
         return true;
 
     hu_log_info("human", NULL, "MLX server not running — auto-starting...");
-    fprintf(stderr, "\033[90mStarting MLX model server (this may take a moment on first run)...\033[0m\n");
+    fprintf(stderr,
+            "\033[90mStarting MLX model server (this may take a moment on first run)...\033[0m\n");
 
     const char *home = getenv("HOME");
     if (!home)
@@ -610,6 +611,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         .mcts_planner_enabled = cfg.agent.mcts_planner_enabled,
         .tree_of_thought = cfg.agent.tree_of_thought,
         .constitutional_ai = cfg.agent.constitutional_ai,
+        .constitutional_style_rules_enabled = cfg.agent.constitutional_style_rules_enabled,
         .speculative_cache = cfg.agent.speculative_cache,
         .tool_routing_enabled = cfg.agent.tool_routing_enabled,
         .multi_agent = cfg.agent.multi_agent,
@@ -1157,8 +1159,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             }
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
             if (cfg.agent.mr_on_device_enabled) {
-                mr_cfg.on_device_available =
-                    hu_apple_probe(agent.alloc, NULL, 0);
+                mr_cfg.on_device_available = hu_apple_probe(agent.alloc, NULL, 0);
             }
 #endif
             time_t now_rt = time(NULL);
@@ -1181,12 +1182,11 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
                     jm = cfg.agent.mr_judge_model;
                     jm_len = strlen(cfg.agent.mr_judge_model);
                 }
-                sel = hu_model_route_with_judge(
-                    &mr_cfg, line, line_len, NULL, 0, hour, agent.history_count,
-                    &agent.provider, jm, jm_len, agent.alloc, &cli_judge_cache);
+                sel = hu_model_route_with_judge(&mr_cfg, line, line_len, NULL, 0, hour,
+                                                agent.history_count, &agent.provider, jm, jm_len,
+                                                agent.alloc, &cli_judge_cache);
             } else {
-                sel = hu_model_route(&mr_cfg, line, line_len, NULL, 0, hour,
-                                     agent.history_count);
+                sel = hu_model_route(&mr_cfg, line, line_len, NULL, 0, hour, agent.history_count);
             }
             agent.turn_model = sel.model;
             agent.turn_model_len = sel.model_len;
@@ -1200,8 +1200,8 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             agent.turn_thinking_budget = 0;
             /* Still compute tier for tool gating even with non-Gemini providers */
             hu_model_router_config_t mr_cfg_nongem = hu_model_router_default_config();
-            hu_model_selection_t sel_nongem = hu_model_route(&mr_cfg_nongem, line, line_len,
-                                                              NULL, 0, -1, agent.history_count);
+            hu_model_selection_t sel_nongem =
+                hu_model_route(&mr_cfg_nongem, line, line_len, NULL, 0, -1, agent.history_count);
             agent.turn_tier = (int)sel_nongem.tier;
         }
 #endif

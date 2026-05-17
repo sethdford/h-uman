@@ -9,17 +9,18 @@
 #include "human/agent/belief_reverify_runner.h"
 #include "human/agent/kv_prewarm_runner.h"
 #include "human/agent/lora_runner.h"
-#include "human/agent/training_data_runner.h"
 #include "human/agent/retrieval_planner.h"
 #include "human/agent/scheduler.h"
 #include "human/agent/self_rag.h"
 #include "human/agent/tom_scenario.h"
+#include "human/agent/training_data_runner.h"
 #include "human/agent/world_model.h"
+#include "human/memory/belief.h"
 #include "human/memory/memory.h"
+#include "human/ml/lora_retrain_runner.h"
 #include "human/persona.h"
 #include "human/persona/persona_deltas.h"
 #include "human/provider.h"
-#include "human/memory/belief.h"
 #include "human/security/audit_log.h"
 
 #include <stdarg.h>
@@ -55,8 +56,8 @@ hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade) {
 }
 
 /* W15 — bridge callback: memory facade audit hook → SQLite audit log. */
-static void facade_audit_bridge(void *ctx, hu_memory_audit_op_t op,
-                                hu_memory_kind_t kind, int64_t id) {
+static void facade_audit_bridge(void *ctx, hu_memory_audit_op_t op, hu_memory_kind_t kind,
+                                int64_t id) {
     hu_audit_log_t *log = (hu_audit_log_t *)ctx;
     if (!log)
         return;
@@ -70,9 +71,8 @@ static void facade_audit_bridge(void *ctx, hu_memory_audit_op_t op,
     (void)hu_audit_log_append(log, &ev);
 }
 
-hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                const char *db_path, const char *contact_id,
-                                hu_audit_log_t **out) {
+hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc, const char *db_path,
+                                const char *contact_id, hu_audit_log_t **out) {
     if (!facade || !facade->m || !alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -151,8 +151,7 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                                     char **out_text, size_t *out_len, const char *tom_premise,
                                     size_t tom_premise_len, const char *tom_question,
                                     size_t tom_question_len, const char *tom_category,
-                                    size_t tom_category_len,
-                                    const hu_personal_model_t *pm,
+                                    size_t tom_category_len, const hu_personal_model_t *pm,
                                     const hu_persona_context_t *persona_ctx) {
     if (out_text)
         *out_text = NULL;
@@ -177,17 +176,15 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         cache_channel = persona_ctx->channel;
         cache_channel_len = persona_ctx->channel_len;
     }
-    hu_error_t e =
-        hu_world_model_load_with_channel(facade->m, alloc, contact_id, contact_id_len,
-                                         cache_channel, cache_channel_len, now_ms, &wm);
+    hu_error_t e = hu_world_model_load_with_channel(facade->m, alloc, contact_id, contact_id_len,
+                                                    cache_channel, cache_channel_len, now_ms, &wm);
     if (e != HU_OK || !wm)
         return e == HU_OK ? HU_OK : e;
 
     if (tom_premise && tom_premise_len > 0 && tom_question && tom_question_len > 0 &&
         tom_category && tom_category_len > 0) {
         hu_world_model_merge_tom_scenario(wm, tom_premise, tom_premise_len, tom_question,
-                                          tom_question_len, tom_category, tom_category_len,
-                                          now_ms);
+                                          tom_question_len, tom_category, tom_category_len, now_ms);
     }
 
     /* M2 ↔ W9 bridge: merge personal model signal into the world model. */
@@ -202,8 +199,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         size_t deltas_count = 0;
         if (persona_ctx->delta_limit > 0) {
             (void)hu_persona_delta_list_facade(facade->m, alloc, contact_id, contact_id_len,
-                                               HU_DELTA_STATUS_APPLIED,
-                                               persona_ctx->delta_limit, &deltas, &deltas_count);
+                                               HU_DELTA_STATUS_APPLIED, persona_ctx->delta_limit,
+                                               &deltas, &deltas_count);
         }
         hu_world_model_merge_persona(wm, persona_ctx->persona, persona_ctx->channel,
                                      persona_ctx->channel_len, deltas, deltas_count);
@@ -235,19 +232,18 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
      * get_active`), so non-trivial values are real signal. We still treat
      * the post-default "neutral" bucket as "no signal" because the builder
      * falls through to it when no active residues exist for this contact. */
-    bool emo_signal = wm->dominant_emotion[0] != '\0' &&
-                      strcmp(wm->dominant_emotion, "neutral") != 0;
-    bool tom_signal = (wm->tom.user_thinks_we_are[0] &&
-                       strcmp(wm->tom.user_thinks_we_are, "unknown") != 0) ||
-                      (wm->tom.user_expects_we_can[0] &&
-                       strcmp(wm->tom.user_expects_we_can, "unknown") != 0) ||
-                      (wm->tom.user_expects_we_cannot[0] &&
-                       strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0) ||
-                      wm->tom.interaction_style[0] != '\0';
+    bool emo_signal =
+        wm->dominant_emotion[0] != '\0' && strcmp(wm->dominant_emotion, "neutral") != 0;
+    bool tom_signal =
+        (wm->tom.user_thinks_we_are[0] && strcmp(wm->tom.user_thinks_we_are, "unknown") != 0) ||
+        (wm->tom.user_expects_we_can[0] && strcmp(wm->tom.user_expects_we_can, "unknown") != 0) ||
+        (wm->tom.user_expects_we_cannot[0] &&
+         strcmp(wm->tom.user_expects_we_cannot, "unknown") != 0) ||
+        wm->tom.interaction_style[0] != '\0';
     bool style_signal = wm->style_summary[0] != '\0';
     bool any = wm->entities_count > 0 || wm->relations_count > 0 || wm->goals_count > 0 ||
-               wm->negatives_count > 0 || wm->recent_topics_count > 0 || emo_signal ||
-               tom_signal || style_signal;
+               wm->negatives_count > 0 || wm->recent_topics_count > 0 || emo_signal || tom_signal ||
+               style_signal;
     if (!any) {
         hu_world_model_free(alloc, wm);
         return HU_OK;
@@ -303,26 +299,32 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
              * planner to grep without exploding the prompt budget. */
             const char *tag = "[hard]";
             switch (wm->negatives[i].source) {
-            case HU_NEGATIVE_SOURCE_USER_EXPLICIT:    tag = "[hard]";    break;
-            case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN: tag = "[soft]";    break;
-            case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:     tag = "[confirm]"; break;
-            case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:    tag = "[policy]";  break;
+            case HU_NEGATIVE_SOURCE_USER_EXPLICIT:
+                tag = "[hard]";
+                break;
+            case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN:
+                tag = "[soft]";
+                break;
+            case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:
+                tag = "[confirm]";
+                break;
+            case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:
+                tag = "[policy]";
+                break;
             }
-            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s%s%s\n",
-                                   tag, wm->negatives[i].text,
-                                   wm->negatives[i].reason[0] ? " — " : "",
+            ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s%s%s\n", tag,
+                                   wm->negatives[i].text, wm->negatives[i].reason[0] ? " — " : "",
                                    wm->negatives[i].reason[0] ? wm->negatives[i].reason : "");
         }
     }
     if (tom_signal) {
-        ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Theory of mind (what they think of me):\n",
-                              strlen("Theory of mind (what they think of me):\n"));
-        if (wm->tom.user_thinks_we_are[0] &&
-            strcmp(wm->tom.user_thinks_we_are, "unknown") != 0)
+        ok =
+            ok && buf_append(alloc, &buf, &blen, &bcap, "Theory of mind (what they think of me):\n",
+                             strlen("Theory of mind (what they think of me):\n"));
+        if (wm->tom.user_thinks_we_are[0] && strcmp(wm->tom.user_thinks_we_are, "unknown") != 0)
             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They see me as: %s\n",
                                    wm->tom.user_thinks_we_are);
-        if (wm->tom.user_expects_we_can[0] &&
-            strcmp(wm->tom.user_expects_we_can, "unknown") != 0)
+        if (wm->tom.user_expects_we_can[0] && strcmp(wm->tom.user_expects_we_can, "unknown") != 0)
             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- They expect I can: %s\n",
                                    wm->tom.user_expects_we_can);
         if (wm->tom.user_expects_we_cannot[0] &&
@@ -505,8 +507,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
     }
 
     if (style_signal) {
-        ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
-                               "Communication style: %s\n", wm->style_summary);
+        ok = ok &&
+             buf_appendf(alloc, &buf, &blen, &bcap, "Communication style: %s\n", wm->style_summary);
     }
     if (emo_signal) {
         ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
@@ -536,13 +538,11 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
  * `provider` is non-NULL and mode is STRICT, the atomic backend uses the
  * provider for real LLM-backed claim verification. */
 static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                       hu_provider_t *provider,
-                                       const char *contact_id, size_t contact_id_len,
-                                       const char *draft, size_t draft_len, int mode,
-                                       int64_t now_ms,
-                                       hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
-                                       size_t *out_claims_flagged, char **out_modified,
-                                       size_t *out_modified_len) {
+                                       hu_provider_t *provider, const char *contact_id,
+                                       size_t contact_id_len, const char *draft, size_t draft_len,
+                                       int mode, int64_t now_ms, hu_w11_outcome_t *out_outcome,
+                                       size_t *out_claims_total, size_t *out_claims_flagged,
+                                       char **out_modified, size_t *out_modified_len) {
     if (out_outcome)
         *out_outcome = HU_W11_OUTCOME_SUPPORTED;
     if (out_claims_total)
@@ -625,9 +625,9 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
         hu_negative_memory_t nm;
         memset(&nm, 0, sizeof(nm));
         size_t draft_cap = sizeof(nm.text) - 10;
-        if (draft_len > draft_cap) draft_len = draft_cap;
-        snprintf(nm.text, sizeof(nm.text), "Refused: %.*s",
-                 (int)draft_len, draft);
+        if (draft_len > draft_cap)
+            draft_len = draft_cap;
+        snprintf(nm.text, sizeof(nm.text), "Refused: %.*s", (int)draft_len, draft);
         snprintf(nm.scope, sizeof(nm.scope), "topic");
         snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
         nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
@@ -664,8 +664,8 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
      * relation so the posterior evolves with each verification pass. */
     if (resp.claims_count > 0 && contact_id && contact_id_len > 0 && facade->m) {
         float obs = (resp.outcome == HU_SELF_RAG_SUPPORTED) ? 0.9f : 0.3f;
-        const char *src = (resp.outcome == HU_SELF_RAG_SUPPORTED) ? "self-rag-confirm"
-                                                                    : "self-rag-disconfirm";
+        const char *src =
+            (resp.outcome == HU_SELF_RAG_SUPPORTED) ? "self-rag-confirm" : "self-rag-disconfirm";
         hu_memory_query_t bq;
         memset(&bq, 0, sizeof(bq));
         bq.kind = HU_MEM_RELATION;
@@ -686,7 +686,8 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
                     continue;
                 hu_belief_t bp = {.mean = rm, .variance = rv};
                 hu_belief_t bu = hu_belief_update(&bp, obs, src, now_ms);
-                hu_memory_facade_set_relation_belief(facade->m, br->id, bu.mean, bu.variance, now_ms);
+                hu_memory_facade_set_relation_belief(facade->m, br->id, bu.mean, bu.variance,
+                                                     now_ms);
             }
             hu_memory_facade_records_free(facade->m, alloc, brecs, bn);
         }
@@ -743,34 +744,25 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
 
 /* Public entrypoint: no provider. Preserves the historical API. */
 hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                  const char *contact_id, size_t contact_id_len,
-                                  const char *draft, size_t draft_len, int mode, int64_t now_ms,
+                                  const char *contact_id, size_t contact_id_len, const char *draft,
+                                  size_t draft_len, int mode, int64_t now_ms,
                                   hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
                                   size_t *out_claims_flagged, char **out_modified,
                                   size_t *out_modified_len) {
-    return self_rag_verify_impl(facade, alloc, NULL,
-                                contact_id, contact_id_len,
-                                draft, draft_len, mode, now_ms,
-                                out_outcome, out_claims_total,
-                                out_claims_flagged, out_modified,
-                                out_modified_len);
+    return self_rag_verify_impl(facade, alloc, NULL, contact_id, contact_id_len, draft, draft_len,
+                                mode, now_ms, out_outcome, out_claims_total, out_claims_flagged,
+                                out_modified, out_modified_len);
 }
 
 /* Public entrypoint: with provider for LLM-backed claim verification. */
 hu_error_t hu_w11_self_rag_verify_with_provider(
-    hu_w7_facade_t *facade, hu_allocator_t *alloc,
-    hu_provider_t *provider,
-    const char *contact_id, size_t contact_id_len,
-    const char *draft, size_t draft_len, int mode, int64_t now_ms,
-    hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
-    size_t *out_claims_flagged, char **out_modified,
-    size_t *out_modified_len) {
-    return self_rag_verify_impl(facade, alloc, provider,
-                                contact_id, contact_id_len,
-                                draft, draft_len, mode, now_ms,
-                                out_outcome, out_claims_total,
-                                out_claims_flagged, out_modified,
-                                out_modified_len);
+    hu_w7_facade_t *facade, hu_allocator_t *alloc, hu_provider_t *provider, const char *contact_id,
+    size_t contact_id_len, const char *draft, size_t draft_len, int mode, int64_t now_ms,
+    hu_w11_outcome_t *out_outcome, size_t *out_claims_total, size_t *out_claims_flagged,
+    char **out_modified, size_t *out_modified_len) {
+    return self_rag_verify_impl(facade, alloc, provider, contact_id, contact_id_len, draft,
+                                draft_len, mode, now_ms, out_outcome, out_claims_total,
+                                out_claims_flagged, out_modified, out_modified_len);
 }
 
 /* ── W12 goal-conditioned planner recall bridge ───────────────────────────
@@ -791,9 +783,8 @@ hu_error_t hu_w11_self_rag_verify_with_provider(
  * On non-OK return `*out` is unchanged and the caller MUST NOT call
  * hu_planner_close. */
 static hu_error_t select_planner_backend(hu_memory_facade_t *m, hu_allocator_t *alloc,
-                                         hu_provider_t *provider,
-                                         const char *model, size_t model_len,
-                                         hu_planner_t *out,
+                                         hu_provider_t *provider, const char *model,
+                                         size_t model_len, hu_planner_t *out,
                                          const char **out_backend) {
     *out_backend = "none";
 
@@ -824,19 +815,19 @@ static hu_error_t select_planner_backend(hu_memory_facade_t *m, hu_allocator_t *
 }
 
 static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                      hu_provider_t *provider,
-                                      const char *model, size_t model_len,
+                                      hu_provider_t *provider, const char *model, size_t model_len,
                                       const char *contact_id, size_t contact_id_len,
-                                      const char *query, size_t query_len,
-                                      size_t limit, size_t max_chars,
-                                      char **out_text, size_t *out_len) {
+                                      const char *query, size_t query_len, size_t limit,
+                                      size_t max_chars, char **out_text, size_t *out_len) {
     if (!facade || !facade->m || !alloc || !out_text || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out_text = NULL;
     *out_len = 0;
 
-    if (limit == 0) limit = 5;
-    if (max_chars == 0) max_chars = 4000;
+    if (limit == 0)
+        limit = 5;
+    if (max_chars == 0)
+        max_chars = 4000;
 
     /* Load the world model so the goal-conditioned and LLM backends can
      * both ground their plan in the contact's entity graph + state. */
@@ -848,11 +839,11 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
     hu_planner_t planner;
     memset(&planner, 0, sizeof(planner));
     const char *backend_name = "none";
-    hu_error_t err = select_planner_backend(facade->m, alloc, provider,
-                                            model, model_len, &planner,
+    hu_error_t err = select_planner_backend(facade->m, alloc, provider, model, model_len, &planner,
                                             &backend_name);
     if (err != HU_OK) {
-        if (wm) hu_world_model_free(alloc, wm);
+        if (wm)
+            hu_world_model_free(alloc, wm);
         return err;
     }
     (void)backend_name; /* available for future telemetry */
@@ -916,7 +907,8 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
         hu_memory_record_t *recs = NULL;
         size_t n = 0;
         hu_error_t re = hu_memory_facade_read(facade->m, &step->query, alloc, &recs, &n);
-        if (re != HU_OK || n == 0) continue;
+        if (re != HU_OK || n == 0)
+            continue;
 
         for (size_t j = 0; j < n && total_records < limit && buf_len < max_chars; j++) {
             hu_memory_record_t *rec = &recs[j];
@@ -929,7 +921,8 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
                     break;
                 }
             }
-            if (!in_verified) continue;
+            if (!in_verified)
+                continue;
 
             const char *name = NULL;
             size_t name_len = 0;
@@ -952,14 +945,17 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
                 continue;
             }
 
-            if (!name) name = "memory";
-            if (!name_len) name_len = 6;
+            if (!name)
+                name = "memory";
+            if (!name_len)
+                name_len = 6;
 
             size_t overhead = 15 + name_len + 2;
             size_t block_len = overhead + detail_len;
             if (buf_len + block_len > max_chars) {
                 size_t remain = max_chars - buf_len;
-                if (remain <= overhead) break;
+                if (remain <= overhead)
+                    break;
                 detail_len = remain - overhead;
                 block_len = remain;
             }
@@ -967,11 +963,13 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
             size_t needed = buf_len + block_len + 1;
             if (needed > buf_cap) {
                 size_t newcap = buf_cap == 0 ? 512 : buf_cap * 2;
-                if (newcap < needed) newcap = needed;
+                if (newcap < needed)
+                    newcap = needed;
                 void *p = alloc->realloc(alloc->ctx, buf, buf_cap, newcap);
                 if (!p) {
                     hu_memory_facade_records_free(facade->m, alloc, recs, n);
-                    if (buf) alloc->free(alloc->ctx, buf, buf_cap);
+                    if (buf)
+                        alloc->free(alloc->ctx, buf, buf_cap);
                     hu_planner_records_free(alloc, verified, verified_count);
                     return HU_ERR_OUT_OF_MEMORY;
                 }
@@ -1003,35 +1001,34 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
         *out_text = buf;
         *out_len = buf_len;
     } else {
-        if (buf) alloc->free(alloc->ctx, buf, buf_cap);
+        if (buf)
+            alloc->free(alloc->ctx, buf, buf_cap);
     }
     return HU_OK;
 }
 
 /* Public entrypoint: no provider, no LLM. Preserves the historical API. */
 hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                 const char *contact_id, size_t contact_id_len,
-                                 const char *query, size_t query_len,
-                                 size_t limit, size_t max_chars,
-                                 char **out_text, size_t *out_len) {
-    return planner_recall_impl(facade, alloc, /*provider=*/NULL, NULL, 0,
-                                contact_id, contact_id_len, query, query_len,
-                                limit, max_chars, out_text, out_len);
+                                 const char *contact_id, size_t contact_id_len, const char *query,
+                                 size_t query_len, size_t limit, size_t max_chars, char **out_text,
+                                 size_t *out_len) {
+    return planner_recall_impl(facade, alloc, /*provider=*/NULL, NULL, 0, contact_id,
+                               contact_id_len, query, query_len, limit, max_chars, out_text,
+                               out_len);
 }
 
 /* Public entrypoint: routes through the LLM backend when a provider is
  * available. Falls through to goal-conditioned / heuristic on any failure
  * or under HU_IS_TEST. */
-hu_error_t hu_w12_planner_recall_with_provider(
-    hu_w7_facade_t *facade, hu_allocator_t *alloc,
-    struct hu_provider *provider, const char *model, size_t model_len,
-    const char *contact_id, size_t contact_id_len,
-    const char *query, size_t query_len,
-    size_t limit, size_t max_chars,
-    char **out_text, size_t *out_len) {
-    return planner_recall_impl(facade, alloc, provider, model, model_len,
-                                contact_id, contact_id_len, query, query_len,
-                                limit, max_chars, out_text, out_len);
+hu_error_t hu_w12_planner_recall_with_provider(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                               struct hu_provider *provider, const char *model,
+                                               size_t model_len, const char *contact_id,
+                                               size_t contact_id_len, const char *query,
+                                               size_t query_len, size_t limit, size_t max_chars,
+                                               char **out_text, size_t *out_len) {
+    return planner_recall_impl(facade, alloc, provider, model, model_len, contact_id,
+                               contact_id_len, query, query_len, limit, max_chars, out_text,
+                               out_len);
 }
 
 /* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
@@ -1051,6 +1048,10 @@ hu_error_t hu_w12_planner_recall_with_provider(
 
 struct hu_w14_scheduler {
     hu_scheduler_t *s;
+    /* US-7.5: optional context for the nightly LoRA retrain runner. When
+     * non-NULL the status_save extension serializes the `lora_retrain`
+     * block; the daemon owns the storage. */
+    hu_lora_retrain_ctx_t *lora_retrain_ctx;
 };
 
 hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
@@ -1064,6 +1065,7 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
     if (!w)
         return HU_ERR_OUT_OF_MEMORY;
     w->s = NULL;
+    w->lora_retrain_ctx = NULL;
     hu_error_t e = hu_scheduler_open(alloc, facade->m, &w->s);
     if (e != HU_OK) {
         alloc->free(alloc->ctx, w, sizeof(*w));
@@ -1078,12 +1080,10 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                        hu_counterfactual_rehearsal_runner, NULL);
     /* AutoDream: same C function handles all three kinds; spec->kind
      * inside the runner picks which phase fires. */
-    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_QUARANTINE,
-                                       hu_autodream_runner, NULL);
-    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_COMMUNITY,
-                                       hu_autodream_runner, NULL);
-    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_DECAY,
-                                       hu_autodream_runner, NULL);
+    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_QUARANTINE, hu_autodream_runner,
+                                       NULL);
+    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_COMMUNITY, hu_autodream_runner, NULL);
+    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_DECAY, hu_autodream_runner, NULL);
     /* Belief reverification: pure DB-side, no caller context needed,
      * defaults are sane (30 day age, 64 rows/tick). Daemon overrides
      * via hu_w14_scheduler_register_belief_reverify if it wants to
@@ -1096,13 +1096,11 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
     return HU_OK;
 }
 
-hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s,
-                                                 hu_lora_runner_ctx_t *ctx) {
+hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s, hu_lora_runner_ctx_t *ctx) {
     if (!s || !s->s || !ctx)
         return HU_ERR_INVALID_ARGUMENT;
 #if defined(HU_ENABLE_LEARNING)
-    return hu_scheduler_register_runner(s->s, HU_JOB_LORA_TRAINING,
-                                        hu_lora_training_runner, ctx);
+    return hu_scheduler_register_runner(s->s, HU_JOB_LORA_TRAINING, hu_lora_training_runner, ctx);
 #else
     /* Learning loop not built — return NOT_SUPPORTED so the daemon's
      * wiring code can keep its current shape without a #ifdef. The
@@ -1117,12 +1115,11 @@ hu_error_t hu_w14_scheduler_register_kv_prewarm_runner(hu_w14_scheduler_t *s,
                                                        hu_kv_cache_manager_t *mgr) {
     if (!s || !s->s)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_error_t e1 = hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_EVICTION,
-                                                 hu_kv_prewarm_runner, mgr);
+    hu_error_t e1 =
+        hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_EVICTION, hu_kv_prewarm_runner, mgr);
     if (e1 != HU_OK)
         return e1;
-    return hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_WARMING,
-                                        hu_kv_prewarm_runner, mgr);
+    return hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_WARMING, hu_kv_prewarm_runner, mgr);
 }
 
 hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
@@ -1191,8 +1188,7 @@ hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now
     return HU_OK;
 }
 
-hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
-                                                    int64_t now_ms,
+hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s, int64_t now_ms,
                                                     int budget_ms) {
     if (!s || !s->s)
         return HU_ERR_INVALID_ARGUMENT;
@@ -1207,8 +1203,7 @@ hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
     return hu_scheduler_enqueue(s->s, &job);
 }
 
-hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
-                                         int budget_ms) {
+hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms, int budget_ms) {
     if (!s || !s->s)
         return HU_ERR_INVALID_ARGUMENT;
     hu_job_spec_t job;
@@ -1222,13 +1217,50 @@ hu_error_t hu_w14_scheduler_enqueue_lora(hu_w14_scheduler_t *s, int64_t now_ms,
     return hu_scheduler_enqueue(s->s, &job);
 }
 
+/* US-7.5: register the nightly LoRA retrain runner and stash the ctx so
+ * status_save can serialize the `lora_retrain` block. */
+hu_error_t hu_w14_scheduler_register_lora_retrain_runner(hu_w14_scheduler_t *s,
+                                                         hu_lora_retrain_ctx_t *ctx) {
+    if (!s || !s->s || !ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    s->lora_retrain_ctx = ctx;
+    return hu_scheduler_register_runner(s->s, HU_JOB_LORA_RETRAIN_NIGHTLY, hu_lora_retrain_runner,
+                                        ctx);
+}
+
+/* US-7.5: enqueue the nightly LoRA retrain job.
+ *
+ * Defaults per the design:
+ *   - priority=0 (normal)
+ *   - budget_ms: 90 minutes (5400000) if caller passes <=0
+ *   - requires_idle=true, requires_ac_power=true (W14 nightly contract)
+ *   - earliest_at=now_ms (caller pins to a quiet-hours window externally)
+ *
+ * The runner is synchronous — overlap is prevented by the runner's own
+ * PID-file (design §5 R1). interval_sec is set to 86400 (24h). */
+hu_error_t hu_w14_scheduler_enqueue_lora_retrain_nightly(hu_w14_scheduler_t *s, int64_t now_ms,
+                                                         int budget_ms) {
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_job_spec_t job;
+    memset(&job, 0, sizeof(job));
+    job.kind = HU_JOB_LORA_RETRAIN_NIGHTLY;
+    job.priority = 0;
+    job.budget_ms = budget_ms > 0 ? budget_ms : 5400000; /* 90 min */
+    job.interval_sec = 86400;                            /* nightly */
+    job.requires_idle = true;
+    job.requires_ac_power = true;
+    job.earliest_at = now_ms;
+    return hu_scheduler_enqueue(s->s, &job);
+}
+
 hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
                                                           hu_training_data_runner_ctx_t *ctx) {
     if (!s || !s->s || !ctx)
         return HU_ERR_INVALID_ARGUMENT;
 #if defined(HU_ENABLE_LEARNING)
-    return hu_scheduler_register_runner(s->s, HU_JOB_TRAINING_DATA_EXTRACT,
-                                        hu_training_data_runner, ctx);
+    return hu_scheduler_register_runner(s->s, HU_JOB_TRAINING_DATA_EXTRACT, hu_training_data_runner,
+                                        ctx);
 #else
     /* Same rationale as register_lora_runner — without HU_ENABLE_LEARNING
      * we have no `hu_training_data_runner` symbol to register. Daemon
@@ -1237,8 +1269,7 @@ hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
 #endif
 }
 
-hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,
-                                                          int64_t now_ms,
+hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s, int64_t now_ms,
                                                           int budget_ms) {
     if (!s || !s->s)
         return HU_ERR_INVALID_ARGUMENT;
@@ -1253,10 +1284,8 @@ hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,
     return hu_scheduler_enqueue(s->s, &job);
 }
 
-hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
-                                                   const char *contact_id,
-                                                   size_t contact_id_len,
-                                                   int budget_ms) {
+hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s, const char *contact_id,
+                                                   size_t contact_id_len, int budget_ms) {
     if (!s || !s->s || !contact_id || contact_id_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
     hu_job_spec_t job;
@@ -1345,9 +1374,35 @@ hu_error_t hu_w14_scheduler_status_save(hu_w14_scheduler_t *s) {
             "  \"jobs_completed_today\": %zu,\n"
             "  \"battery_pct\": %d,\n"
             "  \"on_ac_power\": %s,\n"
-            "  \"updated_epoch\": %lld\n"
-            "}\n",
+            "  \"updated_epoch\": %lld",
             pending, completed, battery, on_ac ? "true" : "false", (long long)now);
+    /* US-7.5: optional `lora_retrain` block, written iff the daemon
+     * registered a retrain ctx. The block is the only new key in the
+     * top-level object; existing parsers (strstr-based) ignore unknown
+     * keys, so this is backward-compatible. */
+    if (s->lora_retrain_ctx) {
+        const hu_lora_retrain_ctx_t *rc = s->lora_retrain_ctx;
+        /* US-11.8 extends this block with five additional fields. Existing
+         * parsers (strstr-based) ignore unknown keys, so this is
+         * backward-compatible. */
+        fprintf(f,
+                ",\n"
+                "  \"lora_retrain\": {\n"
+                "    \"last_run_ts\": %lld,\n"
+                "    \"last_outcome\": \"%s\",\n"
+                "    \"pairs_consumed\": %llu,\n"
+                "    \"fast_version\": %d,\n"
+                "    \"slow_version\": %d,\n"
+                "    \"last_ema_alpha\": %.4f,\n"
+                "    \"last_gate_verdict\": \"%s\",\n"
+                "    \"last_kl_drift_nats\": %.4f\n"
+                "  }",
+                (long long)rc->last_run_ts, hu_lora_retrain_outcome_str(rc->last_outcome),
+                rc->last_pairs_consumed, rc->last_fast_version, rc->last_slow_version,
+                rc->last_ema_alpha, rc->last_gate_verdict[0] ? rc->last_gate_verdict : "",
+                rc->last_kl_drift_nats);
+    }
+    fprintf(f, "\n}\n");
     fclose(f);
     if (rename(tmp, path) != 0)
         (void)remove(tmp);

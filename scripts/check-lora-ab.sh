@@ -26,13 +26,146 @@
 #
 # Usage:
 #   bash scripts/check-lora-ab.sh                       # verify
+#   bash scripts/check-lora-ab.sh --judgment            # also run judgment-fidelity (US-7.6)
 #   LORA_AB_FLOOR_DELTA=0.05 bash scripts/...           # custom floor
 #   LORA_AB_BIN=./build/human bash scripts/...          # custom binary
+#
+# --judgment (US-7.6 / INS-A): also runs the held-out NLL judgment-
+# fidelity check via `human ml fidelity-status --judgment`. Sprint 7
+# ships this DORMANT per decision D3 — when no local-inference NLL
+# backend is registered, the script emits a visible
+#   [lora-ab] judgment: SKIP (no NLL backend registered)
+# line (NON-PASS, parseable) so US-7.5's nightly cron cannot silently
+# treat the inactive gate as a green light. When the follow-on
+# US-7.6.1 wires a real backend, this script's --judgment path will
+# start asserting on `judgment_ppl_delta` against
+# LORA_AB_JUDGMENT_PPL_DELTA_FLOOR (default 0.05).
 
 set -euo pipefail
 
+JUDGMENT=0
+CASCADE=0
+CASCADE_FIXTURE=""
+
+# Sprint 11 PR #115 / Bugbot LOW fix #2: unify all EXIT cleanup into a
+# single trap registered ONCE here, at script entry. Previously the
+# cascade path at ~line 98 and the lora-ab path at ~line 149 each
+# registered their own `trap '...' EXIT`, and bash's single-EXIT-trap
+# rule meant the second registration silently discarded the first —
+# leaking CASCADE_TMP if control flow ever reached both paths.
+#
+# Sprint 11 PR #115 / Bugbot LOW fix #3 (FU-11.7.g): use mktemp -d for
+# the cascade scratch dir instead of `$(mktemp).json` concatenation.
+# Previously `mktemp -t human-cascade-XXXXXX` created /tmp/...abc123
+# (a real file) but the variable stored /tmp/...abc123.json (a
+# concatenated path that mktemp never created) — the original mktemp
+# file leaked forever, defeating mktemp's atomic-create guarantee.
+# Now: mktemp -d gives us a directory we own; cascade.json lives
+# inside it; cleanup is rm -rf which handles both the dir and any
+# files inside.
+#
+# Both variables start empty; the trap uses `:-` defaults so cleanup
+# is a no-op when a path was never taken.
+# Sprint 11 PR #115 / Bugbot MED: don't clobber the standard POSIX
+# TMPDIR env var. The previous trap-unification commit (22e3d406)
+# used the bare name TMPDIR for the lora-ab scratch directory,
+# overwriting the system's TMPDIR which mktemp -t consults for
+# fallback temp placement. Empty TMPDIR can cause mktemp -t to use
+# CWD on some GNU/Linux configs, and child Python processes inherit
+# the empty value. Renamed to LORA_AB_TMP_DIR to avoid the shadow.
+CASCADE_TMP_DIR=""
+LORA_AB_TMP_DIR=""
+trap 'rm -rf "${CASCADE_TMP_DIR:-}"; rm -rf "${LORA_AB_TMP_DIR:-}"' EXIT
+
+i=1
+# Manual parse so we can pull --cascade-fixture's value (the cascade-fixture
+# JSON path) without dragging in getopt. We tolerate other flags so
+# existing callers (e.g. CI passing --judgment) keep working.
+while [ "$i" -le "$#" ]; do
+  arg="${!i}"
+  case "$arg" in
+    --judgment) JUDGMENT=1 ;;
+    --cascade) CASCADE=1 ;;
+    --cascade-fixture)
+      # Sprint 11 PR #115 / Bugbot LOW fix #1: bounds-check BEFORE
+      # indirect expansion. If `--cascade-fixture` is the very last arg
+      # with no value, `i+1 > $#` and `${!i:-}` triggers an unbound
+      # variable error under `set -u` on bash 3.x (macOS default).
+      # Check explicitly; treat missing value as empty (caller error
+      # surfaced later by the "fixture missing" check).
+      if [ "$((i + 1))" -le "$#" ]; then
+        i=$((i + 1))
+        CASCADE_FIXTURE="${!i}"
+      else
+        CASCADE_FIXTURE=""
+      fi
+      ;;
+    *) ;;
+  esac
+  i=$((i + 1))
+done
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# ── Sprint 11 / US-11.7 — 4-stage cascade integration (AC-11.7.6) ───────
+# When `--cascade` is passed, invoke `scripts/stage_cascade.py` with the
+# cascade fixture (default: tests/fixtures/cascade/sprint8_iter200.json,
+# which AC-11.7.3 asserts must REJECT). Emits the per-stage JSON breakdown
+# on stdout and forwards the exit code (0/1/2 = PROMOTE/DEFER/REJECT).
+#
+# This integration is independent of the legacy lora-ab path below — it
+# does NOT require ./build/human to exist, so CI on a clean checkout can
+# exercise the gate cascade end-to-end.
+if [ "$CASCADE" -eq 1 ]; then
+  if [ -z "$CASCADE_FIXTURE" ]; then
+    CASCADE_FIXTURE="tests/fixtures/cascade/sprint8_iter200.json"
+  fi
+  if [ ! -f "$CASCADE_FIXTURE" ]; then
+    echo "[cascade] FAIL: fixture missing at $CASCADE_FIXTURE" >&2
+    exit 1
+  fi
+  # Sprint 11 PR #115 / Bugbot LOW fix: don't prepend $REPO_ROOT if the
+  # caller passed an absolute path. Existence check at line ~83 already
+  # accepts either; the cascade invocation must do the same or paths like
+  # `--cascade-fixture /abs/path/foo.json` become `/repo/root//abs/path/...`
+  # and the cascade silently fails with a fixture-not-found inside.
+  case "$CASCADE_FIXTURE" in
+    /*) CASCADE_FIXTURE_ABS="$CASCADE_FIXTURE" ;;
+    *)  CASCADE_FIXTURE_ABS="$REPO_ROOT/$CASCADE_FIXTURE" ;;
+  esac
+  echo "[cascade] running stage_cascade.py --fixture $CASCADE_FIXTURE_ABS"
+  # mktemp -d (not -f + .json suffix) so we don't break mktemp's
+  # atomic-create guarantee. The trap at script top rm -rf's the dir.
+  CASCADE_TMP_DIR="$(mktemp -d -t human-cascade-XXXXXX)"
+  CASCADE_TMP="$CASCADE_TMP_DIR/cascade.json"
+  # NOTE: unified EXIT trap at script top handles cleanup of both
+  # CASCADE_TMP_DIR and LORA_AB_TMP_DIR; do not register a second
+  # `trap '...' EXIT` here — it would silently override the unified
+  # handler.
+  set +e
+  python3 "$REPO_ROOT/scripts/stage_cascade.py" \
+    --fixture "$CASCADE_FIXTURE_ABS" \
+    --output "$CASCADE_TMP"
+  CASCADE_RC=$?
+  set -e
+  if [ ! -s "$CASCADE_TMP" ]; then
+    echo "[cascade] FAIL: stage_cascade.py produced no output" >&2
+    exit 1
+  fi
+  cat "$CASCADE_TMP"
+  # Surface a parseable per-stage line, mirroring the convention
+  # `--judgment` already established.
+  python3 - "$CASCADE_TMP" <<'PY' || true
+import json, sys
+with open(sys.argv[1]) as fp:
+    payload = json.load(fp)
+for s in payload.get("stages", []):
+    print(f"[cascade] stage{s['stage']}: {s['status']} ({s.get('name','?')})")
+print(f"[cascade] final: {payload.get('final_verdict','?')}")
+PY
+  exit "$CASCADE_RC"
+fi
 
 BIN="${LORA_AB_BIN:-./build/human}"
 FIXTURE_PERSONA="tests/fixtures/lora_baseline_persona.json"
@@ -40,6 +173,7 @@ FIXTURE_NAME="lora_baseline_fixture"
 FIXTURE_BEFORE="tests/fixtures/lora_ab_before.json"
 FIXTURE_AFTER="tests/fixtures/lora_ab_after.json"
 FLOOR="${LORA_AB_FLOOR_DELTA:-0.10}"
+JUDGMENT_DELTA_FLOOR="${LORA_AB_JUDGMENT_PPL_DELTA_FLOOR:-0.05}"
 
 if [ ! -x "$BIN" ]; then
   echo "[lora-ab-gate] building $BIN ..."
@@ -58,12 +192,15 @@ done
 # user's real ~/.human/personas, and so the synthetic-fingerprint
 # path triggers reliably. The before/after fixtures are passed as
 # absolute paths (the CLI accepts arbitrary file paths for those).
-TMPDIR="$(mktemp -d -t human-lora-ab-XXXXXX)"
-trap 'rm -rf "$TMPDIR"' EXIT
+LORA_AB_TMP_DIR="$(mktemp -d -t human-lora-ab-XXXXXX)"
+# NOTE: unified EXIT trap at script top handles cleanup. Do not register
+# a second `trap '...' EXIT` here — it would silently override the
+# unified handler and leak CASCADE_TMP if both paths are ever taken in
+# the same invocation.
 
-cp "$FIXTURE_PERSONA" "$TMPDIR/${FIXTURE_NAME}.json"
+cp "$FIXTURE_PERSONA" "$LORA_AB_TMP_DIR/${FIXTURE_NAME}.json"
 
-OUTPUT="$(HU_PERSONA_DIR="$TMPDIR" HOME="$TMPDIR" \
+OUTPUT="$(HU_PERSONA_DIR="$LORA_AB_TMP_DIR" HOME="$LORA_AB_TMP_DIR" \
   "$BIN" ml lora-ab \
   --persona "$FIXTURE_NAME" \
   --before "$REPO_ROOT/$FIXTURE_BEFORE" \
@@ -91,9 +228,83 @@ fi
 
 if awk -v d="$DELTA" -v f="$FLOOR" 'BEGIN { exit !(d+0 >= f+0) }'; then
   echo "[lora-ab-gate] PASS: fixture delta=$DELTA >= floor=$FLOOR"
-  exit 0
+  VERDICT="pass"
+else
+  echo "[lora-ab-gate] FAIL: fixture delta=$DELTA < floor=$FLOOR" >&2
+  printf '%s\n' "$OUTPUT" >&2
+  exit 1
 fi
 
-echo "[lora-ab-gate] FAIL: fixture delta=$DELTA < floor=$FLOOR" >&2
-printf '%s\n' "$OUTPUT" >&2
-exit 1
+# ── Sprint 7 / US-7.4 AC-7.4.3 — emit JSON measurement line ──────────
+# AC-7.4.3 requires the script's output to carry both `delta` and
+# `size_mb` keys so a downstream consumer (US-7.5 nightly cron / lora-ab
+# JSON consumer) can read the result without scraping the plain-text
+# PASS line above. This is a MEASUREMENT, not a gate — exit code is
+# unchanged from the floor check.
+#
+# size_mb resolution:
+#   - LORA_AB_ADAPTER_PATH env var overrides everything (US-7.5 will
+#     pass the candidate adapter path here once it materialises real
+#     adapters; today, that path is unset and we emit null).
+#   - Otherwise the fixture-only invocation has no adapter on disk, so
+#     `size_mb` is JSON `null`. The KEY is still present per AC.
+SIZE_MB="null"
+if [ -n "${LORA_AB_ADAPTER_PATH:-}" ] && [ -e "$LORA_AB_ADAPTER_PATH" ]; then
+  # Sum bytes under the path (file or dir) and convert to MB via awk
+  # so we get a float, not the integer du -m would emit. wc -c works
+  # for both files and the contents of dirs after `find -type f`.
+  if [ -d "$LORA_AB_ADAPTER_PATH" ]; then
+    BYTES="$(find "$LORA_AB_ADAPTER_PATH" -type f -exec wc -c {} + 2>/dev/null \
+      | awk '/total/ {t=$1} END {print (t==""?0:t)}')"
+  else
+    BYTES="$(wc -c < "$LORA_AB_ADAPTER_PATH" 2>/dev/null || echo 0)"
+  fi
+  SIZE_MB="$(awk -v b="$BYTES" 'BEGIN { printf("%.3f", b/1048576.0) }')"
+fi
+
+# Emit the JSON measurement line on its own line so jq (and naive
+# grep/awk readers) can pick it out. The leading sentinel `[lora-ab-gate-json]`
+# is omitted from the JSON itself so the line IS valid JSON.
+printf '{"delta": %s, "size_mb": %s, "verdict": "%s"}\n' \
+  "$DELTA" "$SIZE_MB" "$VERDICT"
+
+# ── US-7.6 judgment-fidelity (INS-A) — optional, dormant in sprint 7 ──
+if [ "$JUDGMENT" -eq 1 ]; then
+  JSON_OUT="$(HU_PERSONA_DIR="$LORA_AB_TMP_DIR" HOME="$LORA_AB_TMP_DIR" \
+    "$BIN" ml fidelity-status \
+    --persona "$FIXTURE_NAME" \
+    --judgment 2>&1 || true)"
+
+  # Extract judgment_ppl_status (single-line JSON; quoted string).
+  STATUS="$(printf '%s\n' "$JSON_OUT" | awk -F'"judgment_ppl_status":"' '{ if (NF>1) { sub(/".*/, "", $2); print $2 } }' | head -n1)"
+
+  if [ -z "$STATUS" ]; then
+    echo "[lora-ab] judgment: SKIP (no judgment_ppl_status in output)" >&2
+    # Treat missing status as SKIP, not failure: dormant-by-design.
+    exit 0
+  fi
+
+  case "$STATUS" in
+    ok)
+      # Real NLL backend is wired. Extract judgment_ppl and apply
+      # delta gate. Until US-7.6.1 lands, this branch is unreachable.
+      PPL="$(printf '%s\n' "$JSON_OUT" | awk -F'"judgment_ppl":' '{ if (NF>1) { sub(/[,}].*/, "", $2); print $2 } }' | head -n1 | tr -d ' ')"
+      if [ -z "$PPL" ]; then
+        echo "[lora-ab] judgment: FAIL (status=ok but no judgment_ppl)" >&2
+        exit 1
+      fi
+      echo "[lora-ab] judgment: PASS judgment_ppl=$PPL (floor=$JUDGMENT_DELTA_FLOOR)"
+      ;;
+    not_supported_no_local_inference)
+      # Sprint 7 D3: dormant. Visible SKIP line — parseable as
+      # NON-PASS so US-7.5's nightly cron cannot silently treat the
+      # inactive gate as a green light.
+      echo "[lora-ab] judgment: SKIP (no NLL backend registered)"
+      ;;
+    *)
+      echo "[lora-ab] judgment: SKIP (status=$STATUS)" >&2
+      ;;
+  esac
+fi
+
+exit 0

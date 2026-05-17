@@ -10,6 +10,7 @@
 /* Core daemon headers */
 #include "human/daemon.h"
 #include "human/agent.h"
+#include "human/channel.h"
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
@@ -30,6 +31,10 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/ml/learner.h"
 #include "human/ml/learner_bridge.h"
+#include "human/ml/lora_retrain_runner.h"
+#ifdef HU_ENABLE_MOLORA
+#include "human/ml/molora.h"
+#endif
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
 #endif
@@ -891,6 +896,37 @@ void hu_daemon_trust_reset(void) {
     g_contact_trust_count = 0;
     memset(g_contact_trust, 0, sizeof(g_contact_trust));
     TRUST_UNLOCK();
+}
+#endif
+
+/* ── US-7.3 — Honesty gate: LoRA adapter ignored by cloud provider ───
+ *
+ * Per-process one-shot. Sprint-7 decision D4 binds:
+ *   - fire at most once per daemon process lifetime
+ *   - test-only reset shim, no production-side suppression key
+ *
+ * The literal substring "personalization adapter ignored" plus the
+ * provider name is what AC-7.3.1 pins. Do not change either without
+ * updating tests/test_provider_all.c. */
+static int s_personalization_warn_emitted = 0;
+
+void hu_daemon_personalization_warn_adapter_ignored(struct hu_observer *observer,
+                                                    const char *provider_name,
+                                                    const char *adapter_id) {
+    if (s_personalization_warn_emitted)
+        return;
+    s_personalization_warn_emitted = 1;
+    const char *pname = (provider_name && *provider_name) ? provider_name : "(unknown)";
+    const char *aid = (adapter_id && *adapter_id) ? adapter_id : "(unknown)";
+    hu_log_warn("human", observer,
+                "personalization adapter ignored: provider '%s' does not support LoRA adapters "
+                "(adapter '%s' will not be applied)",
+                pname, aid);
+}
+
+#ifdef HU_IS_TEST
+void hu_daemon_personalization_warn_reset_for_test(void) {
+    s_personalization_warn_emitted = 0;
 }
 #endif
 
@@ -2828,6 +2864,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_log_warn("human", agent->observer,
                                 "W14: training data runner registration failed: %d", (int)tde);
             }
+            /* US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess
+             * path). Sibling to the in-process learner runner above.
+             * Registration is best-effort — failure logs a warning and
+             * leaves the slot as a no-op rather than crashing the daemon. */
+            {
+                static hu_lora_retrain_ctx_t w14_lora_retrain_ctx;
+                static char retrain_candidate_dir[512];
+                static char retrain_current_symlink[512];
+                static char retrain_pidfile[512];
+                memset(&w14_lora_retrain_ctx, 0, sizeof(w14_lora_retrain_ctx));
+                const char *hm2 = getenv("HOME");
+                if (hm2 && hm2[0]) {
+                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
+                                   "%s/.human/ml/seth-lora-candidate", hm2);
+                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
+                                   "%s/.human/ml/seth-lora-current", hm2);
+                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
+                                   "%s/.human/lora_retrain.pid", hm2);
+                } else {
+                    (void)snprintf(retrain_candidate_dir, sizeof(retrain_candidate_dir),
+                                   "/tmp/human_seth_lora_candidate");
+                    (void)snprintf(retrain_current_symlink, sizeof(retrain_current_symlink),
+                                   "/tmp/human_seth_lora_current");
+                    (void)snprintf(retrain_pidfile, sizeof(retrain_pidfile),
+                                   "/tmp/human_lora_retrain.pid");
+                }
+                w14_lora_retrain_ctx.candidate_dir = retrain_candidate_dir;
+                w14_lora_retrain_ctx.current_symlink = retrain_current_symlink;
+                w14_lora_retrain_ctx.pidfile_path = retrain_pidfile;
+                /* Defaults for argv pieces are set by the runner when NULL. */
+                hu_error_t rre = hu_w14_scheduler_register_lora_retrain_runner(
+                    agent->w14_scheduler, &w14_lora_retrain_ctx);
+                if (rre == HU_OK)
+                    hu_log_info("human", agent->observer,
+                                "W14: nightly LoRA retrain runner registered (candidate=%s)",
+                                retrain_candidate_dir);
+                else
+                    hu_log_warn("human", agent->observer,
+                                "W14: nightly LoRA retrain runner registration failed: %d",
+                                (int)rre);
+            }
         }
     }
 #endif /* HU_ENABLE_LEARNING — W14 LoRA + training data runner wiring */
@@ -2860,16 +2937,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         if (le == HU_OK)
             hu_log_info("human", agent->observer, "personalization: loaded adapter '%s' from %s",
                         adapter_id, adapter_path);
-        else if (le == HU_ERR_NOT_SUPPORTED)
-            hu_log_info("human", agent->observer,
-                        "personalization: provider does not support LoRA adapters; "
-                        "skipping '%s'",
-                        adapter_id);
-        else
+        else if (le == HU_ERR_NOT_SUPPORTED) {
+            /* US-7.3 (INS-B): cloud providers return HU_ERR_NOT_SUPPORTED
+             * from hu_provider_load_adapter. Surface as WARN with the
+             * literal "personalization adapter ignored" string so the
+             * operator is never silently misled. One-shot per process. */
+            const char *pname =
+                (agent->provider.vtable && agent->provider.vtable->get_name)
+                    ? agent->provider.vtable->get_name(agent->provider.ctx)
+                    : (config->default_provider ? config->default_provider : "(unknown)");
+            hu_daemon_personalization_warn_adapter_ignored(agent->observer, pname, adapter_id);
+        } else
             hu_log_warn("human", agent->observer,
                         "personalization: load_adapter('%s', %s) failed: %d", adapter_id,
                         adapter_path, (int)le);
     }
+#ifdef HU_ENABLE_MOLORA
+    /* US-7.8 — Initialize the MoLoRA static per-channel router from config.
+     * Disabled-by-default; the agent-turn hook is a no-op until the router
+     * is enabled AND at least one channel adapter is mapped. The router
+     * borrows path pointers from `config->personalization.molora` — config
+     * shares the agent's bootstrap arena, so the lifetimes match. */
+    if (agent && config) {
+        hu_error_t mre = hu_molora_router_init(&agent->molora_router, config);
+        if (mre != HU_OK)
+            hu_log_warn("human", agent->observer, "molora: router init failed: %d", (int)mre);
+        else if (agent->molora_router.enabled)
+            hu_log_info("human", agent->observer,
+                        "molora: router enabled with %zu channel adapter(s)",
+                        agent->molora_router.count);
+    }
+#endif
     /* Initialize contact identity graph for cross-channel resolution */
     if (agent && agent->memory) {
         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
@@ -3302,6 +3400,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     agent->w14_scheduler, now_ms, 120000);
                                 if (tde == HU_OK)
                                     last_td_extract_ms = now_ms;
+                            }
+                        }
+                        /* US-7.5: nightly LoRA retrain enqueue. Fires once
+                         * per 24h. The scheduler enforces idle + AC-power
+                         * gating per the W14 contract; the runner's PID-file
+                         * prevents overlapping retrains across ticks. */
+                        {
+                            static int64_t last_retrain_enqueue_ms = 0;
+                            bool retrain_due = (last_retrain_enqueue_ms == 0) ||
+                                               (now_ms - last_retrain_enqueue_ms >= 86400000LL);
+                            if (retrain_due) {
+                                hu_error_t rre = hu_w14_scheduler_enqueue_lora_retrain_nightly(
+                                    agent->w14_scheduler, now_ms, 0);
+                                if (rre == HU_OK)
+                                    last_retrain_enqueue_ms = now_ms;
                             }
                         }
                         hu_error_t te = hu_w14_scheduler_tick(agent->w14_scheduler, now_ms);
@@ -4718,62 +4831,80 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * if classifier says leave-on-read and we store 2–24h timer. */
                 bool leave_on_read_skip = false;
 #ifndef HU_IS_TEST
-                if (!llm_decides && !msgs[batch_start].is_group) {
+                /* Leave-on-read state machine (F46): combine active-period status
+                 * (ring buffer scan), group-chat policy, and the classifier's verdict
+                 * via hu_leave_on_read_decide. Decision policy is unit-tested in
+                 * tests/test_conversation.c::leave_on_read_decide_*; this block
+                 * handles only the daemon-local state (ring scan + insert). */
+                if (!llm_decides) {
                     time_t now_ts = time(NULL);
+                    bool is_group = msgs[batch_start].is_group;
                     size_t lor_slot = SIZE_MAX;
+                    bool already_in_period = false;
                     for (size_t lor_i = 0; lor_i < HU_LEAVE_ON_READ_MAX; lor_i++) {
                         if (leave_on_read_entries[lor_i].key[0] == '\0')
                             continue;
                         if (key_len < sizeof(leave_on_read_entries[lor_i].key) &&
                             memcmp(leave_on_read_entries[lor_i].key, batch_key, key_len) == 0 &&
                             leave_on_read_entries[lor_i].key[key_len] == '\0') {
-                            if (leave_on_read_entries[lor_i].until > now_ts) {
-                                leave_on_read_skip = true;
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "leave-on-read: still in period for %.*s",
-                                            (int)(key_len > 20 ? 20 : key_len), batch_key);
-                            } else {
+                            if (leave_on_read_entries[lor_i].until > now_ts)
+                                already_in_period = true;
+                            else
                                 lor_slot = lor_i; /* expired, can reuse */
-                            }
                             break;
                         }
                     }
-                    if (!leave_on_read_skip && action != HU_RESPONSE_SKIP && !tapback_skip) {
-                        uint32_t lor_seed =
-                            (uint32_t)now_ts * 1103515245u + 12345u + (uint32_t)(uintptr_t)combined;
+
+                    uint32_t lor_seed =
+                        (uint32_t)now_ts * 1103515245u + 12345u + (uint32_t)(uintptr_t)combined;
+                    bool helper_says = false;
+                    bool eligible_to_roll = !is_group && !already_in_period &&
+                                            action != HU_RESPONSE_SKIP && !tapback_skip;
+                    if (eligible_to_roll) {
                         uint8_t lor_pct = 0;
-                        if (agent->persona && agent->active_channel) {
-                            const hu_persona_overlay_t *lor_ov = hu_persona_find_overlay(
-                                agent->persona, agent->active_channel, agent->active_channel_len);
-                            if (lor_ov)
-                                lor_pct = lor_ov->leave_on_read_pct;
+                        if (agent->persona) {
+                            const hu_persona_overlay_t *lor_ov = NULL;
+                            if (agent->active_channel)
+                                lor_ov =
+                                    hu_persona_find_overlay(agent->persona, agent->active_channel,
+                                                            agent->active_channel_len);
+                            const hu_contact_profile_t *lor_cp =
+                                hu_persona_find_contact(agent->persona, batch_key, key_len);
+                            lor_pct = hu_leave_on_read_pct_effective(lor_cp, lor_ov);
                         }
-                        if (hu_conversation_should_leave_on_read(combined, combined_len,
-                                                                 early_history, early_history_count,
-                                                                 lor_seed, lor_pct)) {
-                            leave_on_read_skip = true;
-                            /* Store leave_on_read_until: now + random 2–24 hours */
-                            uint32_t hrs = 7200u + ((lor_seed >> 16u) % (86400u - 7200u + 1u));
-                            time_t until = now_ts + (time_t)hrs;
-                            if (lor_slot == SIZE_MAX) {
-                                for (size_t lor_j = 0; lor_j < HU_LEAVE_ON_READ_MAX; lor_j++) {
-                                    if (leave_on_read_entries[lor_j].key[0] == '\0' ||
-                                        leave_on_read_entries[lor_j].until <= now_ts) {
-                                        lor_slot = lor_j;
-                                        break;
-                                    }
+                        helper_says = hu_conversation_should_leave_on_read(
+                            combined, combined_len, early_history, early_history_count, lor_seed,
+                            lor_pct);
+                    }
+
+                    hu_leave_on_read_decision_t decision =
+                        hu_leave_on_read_decide(is_group, already_in_period, helper_says);
+                    if (decision == HU_LOR_ALREADY_IN_PERIOD) {
+                        leave_on_read_skip = true;
+                        hu_log_info("human", agent ? agent->observer : NULL,
+                                    "leave-on-read: still in period for %.*s",
+                                    (int)(key_len > 20 ? 20 : key_len), batch_key);
+                    } else if (decision == HU_LOR_TRIGGER_NEW) {
+                        leave_on_read_skip = true;
+                        uint32_t hrs = 7200u + ((lor_seed >> 16u) % (86400u - 7200u + 1u));
+                        time_t until = now_ts + (time_t)hrs;
+                        if (lor_slot == SIZE_MAX) {
+                            for (size_t lor_j = 0; lor_j < HU_LEAVE_ON_READ_MAX; lor_j++) {
+                                if (leave_on_read_entries[lor_j].key[0] == '\0' ||
+                                    leave_on_read_entries[lor_j].until <= now_ts) {
+                                    lor_slot = lor_j;
+                                    break;
                                 }
                             }
-                            if (lor_slot != SIZE_MAX &&
-                                key_len < sizeof(leave_on_read_entries[0].key)) {
-                                memcpy(leave_on_read_entries[lor_slot].key, batch_key, key_len);
-                                leave_on_read_entries[lor_slot].key[key_len] = '\0';
-                                leave_on_read_entries[lor_slot].until = until;
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "leave-on-read: skipping for %.*s until %ld",
-                                            (int)(key_len > 20 ? 20 : key_len), batch_key,
-                                            (long)until);
-                            }
+                        }
+                        if (lor_slot != SIZE_MAX &&
+                            key_len < sizeof(leave_on_read_entries[0].key)) {
+                            memcpy(leave_on_read_entries[lor_slot].key, batch_key, key_len);
+                            leave_on_read_entries[lor_slot].key[key_len] = '\0';
+                            leave_on_read_entries[lor_slot].until = until;
+                            hu_log_info("human", agent ? agent->observer : NULL,
+                                        "leave-on-read: skipping for %.*s until %ld",
+                                        (int)(key_len > 20 ? 20 : key_len), batch_key, (long)until);
                         }
                     }
                 }
@@ -9141,31 +9272,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    /* Inline reply awareness: look up the original message they replied to */
+                    /* Inline reply awareness: look up the original message they replied to.
+                     * Logic extracted into hu_imessage_build_inline_reply_hint_for_batch so
+                     * the batch → lookup → hint composition can be unit-tested via
+                     * hu_imessage_test_set_guid_lookup (see tests/test_imessage_extended.c). */
 #ifdef HU_HAS_IMESSAGE
                     {
-                        const char *reply_guid = NULL;
-                        for (size_t bi = batch_start; bi <= batch_end; bi++) {
-                            if (msgs[bi].reply_to_guid[0]) {
-                                reply_guid = msgs[bi].reply_to_guid;
-                                break;
-                            }
-                        }
-                        if (reply_guid) {
-                            char orig_text[512];
-                            size_t orig_len = 0;
-                            hu_error_t lr_err = hu_imessage_lookup_message_by_guid(
-                                alloc, reply_guid, strlen(reply_guid), orig_text, sizeof(orig_text),
-                                &orig_len);
-                            if (lr_err == HU_OK && orig_len > 0) {
-                                size_t n = hu_conversation_build_inline_reply_hint(
-                                    orig_text, orig_len, inject_buf + inject_pos,
-                                    sizeof(inject_buf) - inject_pos);
-                                if (n > 0) {
-                                    inject_pos += n;
-                                    inject_buf[inject_pos++] = '\n';
-                                }
-                            }
+                        size_t n = hu_imessage_build_inline_reply_hint_for_batch(
+                            alloc, &msgs[batch_start], (batch_end - batch_start + 1),
+                            inject_buf + inject_pos, sizeof(inject_buf) - inject_pos);
+                        if (n > 0) {
+                            inject_pos += n;
+                            inject_buf[inject_pos++] = '\n';
                         }
                     }
 #endif
@@ -12401,58 +12519,38 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (search_err == HU_OK &&
                                         (song.track_view_url ||
                                          (has_spotify && spotify_song.track_view_url))) {
-                                        char share_text[512];
-                                        size_t casual_len = strlen(casual_msg);
-                                        size_t st_len = hu_music_build_share_text(
-                                            link_song, casual_len > 0 ? casual_msg : NULL,
-                                            casual_len, share_text, sizeof(share_text));
+                                        /* Rich-link mode: when the channel auto-unfurls bare URLs
+                                         * (iMessage, Telegram, Discord, Slack, WhatsApp, Signal),
+                                         * send the URL alone in its own bubble. The platform
+                                         * renders the full rich card — album art, title, artist,
+                                         * play button — from the URL. No .m4a download, no JPG
+                                         * download, no caption (caption inline kills the unfurl).
+                                         *
+                                         * INVARIANT: the URL bubble body must be exactly the URL
+                                         * bytes — no preamble, no trailing whitespace, no caption.
+                                         * Pinned by tests/test_imessage_rich_link.c. */
+                                        bool rich_link =
+                                            hu_channel_supports_link_unfurl(ch->channel) &&
+                                            link_song->track_view_url != NULL;
 
-                                        /* Download 30s preview (always from iTunes) */
-                                        char preview_path[256] = {0};
-                                        bool has_preview = false;
-                                        if (song.preview_url) {
-                                            has_preview = hu_music_download_preview(
-                                                              alloc, song.preview_url, preview_path,
-                                                              sizeof(preview_path)) == HU_OK;
-                                        }
+                                        if (rich_link) {
+                                            const char *url = link_song->track_view_url;
+                                            size_t url_len = strlen(url);
 
-                                        /* Download album artwork */
-                                        char artwork_path[256] = {0};
-                                        bool has_artwork = false;
-                                        const char *art_url = link_song->artwork_url
-                                                                  ? link_song->artwork_url
-                                                                  : song.artwork_url;
-                                        if (art_url) {
-                                            has_artwork = hu_music_download_artwork(
-                                                              alloc, art_url, artwork_path,
-                                                              sizeof(artwork_path)) == HU_OK;
-                                        }
+                                            /* Same human-pacing delay as the legacy path so the
+                                             * share lands in a natural conversational rhythm. */
+                                            usleep(3000000 + (music_seed % 4000000));
 
-                                        usleep(3000000 + (music_seed % 4000000));
-
-                                        /* Send with up to 2 attachments: preview + artwork */
-                                        if (st_len > 0) {
-                                            int media_count = 0;
-                                            const char *media[2];
-                                            if (has_preview)
-                                                media[media_count++] = preview_path;
-                                            if (has_artwork)
-                                                media[media_count++] = artwork_path;
-
-                                            ch->channel->vtable->send(
-                                                ch->channel->ctx, batch_key, key_len, share_text,
-                                                st_len, media_count > 0 ? media : NULL,
-                                                (size_t)media_count);
+                                            ch->channel->vtable->send(ch->channel->ctx, batch_key,
+                                                                      key_len, url, url_len, NULL,
+                                                                      0);
 
                                             hu_log_info("human", agent ? agent->observer : NULL,
-                                                        "sent music %s: %s - %s [%s%s]",
-                                                        has_preview ? "preview" : "link",
+                                                        "sent music rich-link: %s - %s [%s]",
                                                         song.artist_name ? song.artist_name : "?",
                                                         song.track_name ? song.track_name : "?",
-                                                        has_spotify ? "spotify" : "itunes",
-                                                        has_artwork ? "+art" : "");
+                                                        has_spotify ? "spotify" : "itunes");
 
-                                            /* Record for taste learning + periodic save */
                                             hu_music_taste_record_send(batch_key, key_len,
                                                                        song.artist_name,
                                                                        song.track_name);
@@ -12472,12 +12570,88 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     }
                                                 }
                                             }
-                                        }
+                                        } else {
+                                            /* Legacy: channel doesn't unfurl URLs (SMS etc.).
+                                             * Build a text caption and attach the .m4a preview
+                                             * + JPG artwork so the recipient still gets media. */
+                                            char share_text[512];
+                                            size_t casual_len = strlen(casual_msg);
+                                            size_t st_len = hu_music_build_share_text(
+                                                link_song, casual_len > 0 ? casual_msg : NULL,
+                                                casual_len, share_text, sizeof(share_text));
 
-                                        if (has_preview)
-                                            (void)unlink(preview_path);
-                                        if (has_artwork)
-                                            (void)unlink(artwork_path);
+                                            char preview_path[256] = {0};
+                                            bool has_preview = false;
+                                            if (song.preview_url) {
+                                                has_preview =
+                                                    hu_music_download_preview(
+                                                        alloc, song.preview_url, preview_path,
+                                                        sizeof(preview_path)) == HU_OK;
+                                            }
+
+                                            char artwork_path[256] = {0};
+                                            bool has_artwork = false;
+                                            const char *art_url = link_song->artwork_url
+                                                                      ? link_song->artwork_url
+                                                                      : song.artwork_url;
+                                            if (art_url) {
+                                                has_artwork = hu_music_download_artwork(
+                                                                  alloc, art_url, artwork_path,
+                                                                  sizeof(artwork_path)) == HU_OK;
+                                            }
+
+                                            usleep(3000000 + (music_seed % 4000000));
+
+                                            if (st_len > 0) {
+                                                int media_count = 0;
+                                                const char *media[2];
+                                                if (has_preview)
+                                                    media[media_count++] = preview_path;
+                                                if (has_artwork)
+                                                    media[media_count++] = artwork_path;
+
+                                                ch->channel->vtable->send(
+                                                    ch->channel->ctx, batch_key, key_len,
+                                                    share_text, st_len,
+                                                    media_count > 0 ? media : NULL,
+                                                    (size_t)media_count);
+
+                                                hu_log_info("human", agent ? agent->observer : NULL,
+                                                            "sent music %s: %s - %s [%s%s]",
+                                                            has_preview ? "preview" : "link",
+                                                            song.artist_name ? song.artist_name
+                                                                             : "?",
+                                                            song.track_name ? song.track_name : "?",
+                                                            has_spotify ? "spotify" : "itunes",
+                                                            has_artwork ? "+art" : "");
+
+                                                hu_music_taste_record_send(batch_key, key_len,
+                                                                           song.artist_name,
+                                                                           song.track_name);
+                                                {
+                                                    static uint64_t last_taste_save_ms;
+                                                    uint64_t tnow = (uint64_t)time(NULL) * 1000ULL;
+                                                    if (tnow - last_taste_save_ms > 30000) {
+                                                        last_taste_save_ms = tnow;
+                                                        const char *th = getenv("HOME");
+                                                        if (th) {
+                                                            char tp[512];
+                                                            int tn2 = snprintf(
+                                                                tp, sizeof(tp),
+                                                                "%s/.human/music_taste.json", th);
+                                                            if (tn2 > 0 && (size_t)tn2 < sizeof(tp))
+                                                                hu_music_taste_save(tp,
+                                                                                    (size_t)tn2);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (has_preview)
+                                                (void)unlink(preview_path);
+                                            if (has_artwork)
+                                                (void)unlink(artwork_path);
+                                        }
                                     } else {
                                         hu_log_info("human", agent ? agent->observer : NULL,
                                                     "music search failed for: %s", search_query);

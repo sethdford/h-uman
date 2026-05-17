@@ -6,7 +6,6 @@
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
 #endif
-#include "human/ml/cli_dpo.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
@@ -17,8 +16,10 @@
 #include "human/memory/memory.h"
 #include "human/memory/personal_model.h"
 #include "human/ml/checkpoint.h"
+#include "human/ml/cli_dpo.h"
 #include "human/ml/dataloader.h"
 #include "human/ml/dpo.h"
+#include "human/ml/dpo_miner.h"
 #include "human/ml/experiment.h"
 #include "human/ml/fidelity.h"
 #include "human/ml/learner.h"
@@ -494,6 +495,191 @@ hu_error_t hu_ml_cli_status(hu_allocator_t *alloc, int argc, const char **argv) 
  * src/main.c, until that's updated) keep linking. */
 hu_error_t hu_ml_cli_dpo_train(hu_allocator_t *alloc, int argc, const char **argv) {
     return hu_ml_cli_dpo_real(alloc, argc, argv);
+}
+
+/* Sprint 7 US-7.2 — `human ml mine-corrections`.
+ *
+ * Walks the messages table in chat.db (or whichever DB --db points at),
+ * mines `user -> assistant -> user` correction triples within the
+ * correction window, PII-redacts each field, and inserts deduplicated
+ * preference pairs into `dpo_pairs` with `source = "outbound_edit"`.
+ *
+ * When `--export-jsonl` is set (default: `~/.human/dpo/pairs.jsonl`), the
+ * collected pairs are also exported as JSONL — US-7.1's
+ * `finetune-gemma.py --dpo --from-corrections` reads exactly that path.
+ * The default path keeps the cross-story handoff implicit and explicit at
+ * the same time.
+ *
+ * HU_IS_TEST short-circuits before any FS or DB I/O — exercised by the
+ * dpo_miner test suite via direct calls to `hu_dpo_mine_corrections`. */
+hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const char **argv) {
+    const char *db_path = NULL;
+    const char *export_jsonl_path = NULL;
+    int correction_window_sec = 0;
+    int want_export = 0;
+    /* HIGH-1 fix: third state to distinguish "user passed --no-export"
+     * from "user did not mention export". Without this, the default-
+     * enable block below silently re-enables export after --no-export. */
+    int export_disabled_explicitly = 0;
+    for (int i = 1; i < argc; i++) {
+        const char *v = get_opt(argv, argc, i, "--db");
+        if (v) {
+            db_path = v;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--export-jsonl");
+        if (v) {
+            export_jsonl_path = v;
+            want_export = 1;
+            export_disabled_explicitly = 0;
+            i++;
+            continue;
+        }
+        v = get_opt(argv, argc, i, "--correction-window-sec");
+        if (v) {
+            if (parse_int_arg(v, &correction_window_sec) != 0) {
+                hu_log_error("ml", NULL, "Invalid --correction-window-sec: %s", v);
+                return HU_ERR_INVALID_ARGUMENT;
+            }
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--no-export") == 0) {
+            want_export = 0;
+            export_jsonl_path = NULL;
+            export_disabled_explicitly = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: human ml mine-corrections [--db <path>] "
+                   "[--export-jsonl <path>] [--no-export] "
+                   "[--correction-window-sec <N>] [--help]\n"
+                   "\n"
+                   "Mine DPO preference pairs from chat.db user-correction triples.\n"
+                   "Inserts deduplicated pairs into dpo_pairs (source='outbound_edit').\n"
+                   "By default exports JSONL to ~/.human/dpo/pairs.jsonl for the\n"
+                   "finetune-gemma.py --dpo --from-corrections consumer.\n");
+            return HU_OK;
+        }
+    }
+
+#ifdef HU_IS_TEST
+    (void)alloc;
+    (void)db_path;
+    (void)export_jsonl_path;
+    (void)correction_window_sec;
+    (void)want_export;
+    (void)export_disabled_explicitly;
+    printf("[mine-corrections] test mode: skipped\n");
+    return HU_OK;
+#else
+#ifdef HU_ENABLE_SQLITE
+    /* HIGH-2 fix: was `static char default_db[512]` — reentrancy hazard
+     * with no upside since the buffer's lifetime is the call frame.
+     * Plain automatic storage is correct. */
+    char default_db[512];
+    if (!db_path) {
+        const char *home = getenv("HOME");
+        if (!home) {
+            fprintf(stderr, "[mine-corrections] HOME not set and --db not provided\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        int n = snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
+        if (n <= 0 || (size_t)n >= sizeof(default_db))
+            return HU_ERR_INTERNAL;
+        db_path = default_db;
+    }
+
+    /* HIGH-1 fix: delegate the export-decision logic to the public
+     * helper so the CLI path matches the test seam exactly. */
+    hu_dpo_miner_export_decision_t decision;
+    {
+        const char *home = getenv("HOME");
+        hu_error_t derr = hu_dpo_miner_resolve_export(export_jsonl_path, export_disabled_explicitly,
+                                                      home, &decision);
+        if (derr != HU_OK) {
+            fprintf(stderr, "[mine-corrections] export-path resolution failed: %d\n", derr);
+            return derr;
+        }
+    }
+    want_export = decision.should_export;
+    export_jsonl_path = decision.should_export ? decision.export_path : NULL;
+
+    sqlite3 *db = NULL;
+    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+        fprintf(stderr, "[mine-corrections] Cannot open database: %s\n", db_path);
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    hu_dpo_mine_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.correction_window_sec = correction_window_sec;
+
+    hu_dpo_mine_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+    hu_error_t err = hu_dpo_mine_corrections(alloc, db, &opts, &stats);
+    if (err != HU_OK) {
+        fprintf(stderr, "[mine-corrections] miner failed: %d\n", err);
+        sqlite3_close(db);
+        return err;
+    }
+    printf("[mine-corrections] triples examined: %zu\n", stats.triples_examined);
+    printf("[mine-corrections] pairs recorded:   %zu\n", stats.pairs_recorded);
+    printf("[mine-corrections] pairs deduped:    %zu\n", stats.pairs_skipped_dup);
+    printf("[mine-corrections] pairs oversize:   %zu\n", stats.pairs_skipped_size);
+    printf("[mine-corrections] pii redactions:   %zu\n", stats.pii_redactions);
+
+    if (want_export && export_jsonl_path) {
+        /* HIGH-4 fix: ensure parent dir exists before export. Fresh
+         * installs do not have ~/.human/dpo/ on disk. */
+        hu_error_t dir_err = hu_dpo_miner_ensure_parent_dir(export_jsonl_path);
+        if (dir_err != HU_OK) {
+            /* HIGH-3 fix: propagate the failure — US-7.5's nightly cron
+             * checks the exit code to gate adapter promotion. */
+            fprintf(stderr, "[mine-corrections] cannot create parent dir for %s: %d\n",
+                    export_jsonl_path, dir_err);
+            sqlite3_close(db);
+            return dir_err;
+        }
+
+        hu_dpo_collector_t collector;
+        err = hu_dpo_collector_create(alloc, db, 100000, &collector);
+        if (err != HU_OK) {
+            /* HIGH-3 fix: collector creation failures used to be
+             * swallowed (function would still return HU_OK below). */
+            fprintf(stderr, "[mine-corrections] collector init failed: %d\n", err);
+            sqlite3_close(db);
+            return err;
+        }
+        size_t exported = 0;
+        err = hu_dpo_export_jsonl(&collector, export_jsonl_path, strlen(export_jsonl_path),
+                                  &exported);
+        hu_dpo_collector_deinit(&collector);
+        if (err != HU_OK) {
+            /* HIGH-3 fix: export failures now propagate, not just printed. */
+            fprintf(stderr, "[mine-corrections] jsonl export failed: %d\n", err);
+            sqlite3_close(db);
+            return err;
+        }
+        printf("[mine-corrections] exported %zu pair(s) to %s\n", exported, export_jsonl_path);
+    }
+
+    sqlite3_close(db);
+    return HU_OK;
+#else
+    (void)alloc;
+    (void)db_path;
+    (void)export_jsonl_path;
+    (void)correction_window_sec;
+    (void)want_export;
+    (void)export_disabled_explicitly;
+    fprintf(stderr, "mine-corrections requires HU_ENABLE_SQLITE\n");
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+#endif
 }
 
 hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, const char **argv) {
@@ -1849,13 +2035,17 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
     hu_communication_style_set_summary_t sum_before, sum_after;
     float delta = 0.f;
     err = hu_communication_style_compare_response_sets(&target, strs_before, lens_before, n_before,
-                                                       strs_after, lens_after, n_after,
-                                                       &sum_before, &sum_after, &delta);
+                                                       strs_after, lens_after, n_after, &sum_before,
+                                                       &sum_after, &delta);
     if (err != HU_OK) {
-        if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
-        if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
-        if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
-        if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+        if (strs_before)
+            alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+        if (lens_before)
+            alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+        if (strs_after)
+            alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+        if (lens_after)
+            alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
         hu_json_free(alloc, json_before);
         hu_json_free(alloc, json_after);
         hu_persona_deinit(alloc, &persona);
@@ -1886,25 +2076,28 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
             .reward_model = NULL,
         };
         hu_eval_gate_verdict_t verdict = {0};
-        hu_error_t ge = hu_eval_gate_decide_from_arrays_for_test(
-            &gate, persona_after, NULL, NULL, NULL, n_gate, 0.0, &verdict);
+        hu_error_t ge = hu_eval_gate_decide_from_arrays_for_test(&gate, persona_after, NULL, NULL,
+                                                                 NULL, n_gate, 0.0, &verdict);
         if (ge != HU_OK) {
             fprintf(stderr, "[lora-ab] gate error: %d\n", (int)ge);
             return ge;
         }
         if (!verdict.promote) {
-            fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n",
-                    verdict.reason);
+            fprintf(stderr, "[lora-ab] FAIL: eval gate rejected promotion (%s)\n", verdict.reason);
             return HU_ERR_INVALID_ARGUMENT;
         }
     } else
 #endif
 
-    /* Free loaders before reporting so a fail-fast exit doesn't leak. */
-    if (strs_before) alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
-    if (lens_before) alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
-    if (strs_after) alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
-    if (lens_after) alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
+        /* Free loaders before reporting so a fail-fast exit doesn't leak. */
+        if (strs_before)
+            alloc->free(alloc->ctx, strs_before, n_before * sizeof(const char *));
+    if (lens_before)
+        alloc->free(alloc->ctx, lens_before, n_before * sizeof(size_t));
+    if (strs_after)
+        alloc->free(alloc->ctx, strs_after, n_after * sizeof(const char *));
+    if (lens_after)
+        alloc->free(alloc->ctx, lens_after, n_after * sizeof(size_t));
     hu_json_free(alloc, json_before);
     hu_json_free(alloc, json_after);
     hu_persona_deinit(alloc, &persona);
@@ -2326,6 +2519,8 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
     const char *before_path = NULL;
     const char *after_path = NULL;
     const char *output_path = NULL;
+    bool judgment_flag = false;
+    const char *judgment_holdout_path = NULL;
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--persona");
         if (v) {
@@ -2351,13 +2546,28 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
             i++;
             continue;
         }
+        v = get_opt(argv, argc, i, "--judgment-holdout");
+        if (v) {
+            judgment_holdout_path = v;
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--judgment") == 0) {
+            judgment_flag = true;
+            continue;
+        }
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Usage: human ml fidelity-status --persona <name> "
-                   "[--before <path>] [--after <path>] [--output <path>]\n\n"
+                   "[--before <path>] [--after <path>] [--output <path>]\n"
+                   "                                 [--judgment] [--judgment-holdout <path>]\n\n"
                    "Emit a single JSON object aggregating LoRA-fidelity\n"
                    "health metrics for downstream dashboards & status\n"
                    "surfaces. When --before and --after are both provided,\n"
-                   "the A/B delta is included.\n");
+                   "the A/B delta is included. When --judgment is set,\n"
+                   "the held-out NLL judgment-fidelity summary is included\n"
+                   "(US-7.6 / INS-A); ships dormant in sprint 7 — emits\n"
+                   "\"judgment_ppl_status\":\"not_supported_no_local_inference\"\n"
+                   "until US-7.6.1 wires a real NLL backend.\n");
             return HU_OK;
         }
     }
@@ -2449,6 +2659,60 @@ hu_error_t hu_ml_cli_fidelity_status(hu_allocator_t *alloc, int argc, const char
                            hu_json_number_new(alloc, (double)sum_b.scored));
     }
     hu_json_object_set(alloc, root, "ab", ab);
+
+    /* US-7.6 — judgment-fidelity (INS-A). Optional; off by default.
+     * Sprint 7 decision D3: ships dormant — production NLL backend is
+     * unregistered, so the scorer reports
+     * judgment_ppl_status="not_supported_no_local_inference" and the
+     * downstream gate emits a visible SKIP rather than a silent pass. */
+    if (judgment_flag) {
+        hu_json_value_t *judgment_obj = hu_json_object_new(alloc);
+        const char *holdout_path =
+            judgment_holdout_path ? judgment_holdout_path : hu_ml_fidelity_default_holdout_path();
+        hu_ml_judgment_holdout_t holdout = {0};
+        hu_ml_judgment_summary_t jsummary = {0};
+        hu_error_t lerr = hu_ml_fidelity_load_holdout(alloc, holdout_path, &holdout);
+        const char *status = "not_supported_no_local_inference";
+        bool ppl_ok = false;
+        double ppl = 0.0;
+        if (lerr == HU_OK) {
+            hu_error_t serr = hu_ml_fidelity_score_judgment(&holdout, &jsummary);
+            if (serr != HU_OK) {
+                status = "score_error";
+            } else if (!jsummary.available) {
+                status = "not_supported_no_local_inference";
+            } else {
+                status = "ok";
+                ppl = exp(jsummary.mean_nll);
+                ppl_ok = true;
+            }
+        } else {
+            status = "holdout_load_failed";
+        }
+        hu_json_object_set(alloc, judgment_obj, "available",
+                           hu_json_bool_new(alloc, jsummary.available));
+        hu_json_object_set(alloc, judgment_obj, "judgment_ppl_status",
+                           hu_json_string_new(alloc, status, strlen(status)));
+        if (ppl_ok) {
+            hu_json_object_set(alloc, judgment_obj, "judgment_ppl", hu_json_number_new(alloc, ppl));
+            hu_json_object_set(alloc, judgment_obj, "mean_nll",
+                               hu_json_number_new(alloc, jsummary.mean_nll));
+            hu_json_object_set(alloc, judgment_obj, "min_nll",
+                               hu_json_number_new(alloc, jsummary.min_nll));
+            hu_json_object_set(alloc, judgment_obj, "max_nll",
+                               hu_json_number_new(alloc, jsummary.max_nll));
+        } else {
+            hu_json_object_set(alloc, judgment_obj, "judgment_ppl", hu_json_null_new(alloc));
+        }
+        hu_json_object_set(alloc, judgment_obj, "judgment_scored",
+                           hu_json_number_new(alloc, (double)jsummary.scored));
+        hu_json_object_set(alloc, judgment_obj, "judgment_skipped",
+                           hu_json_number_new(alloc, (double)jsummary.skipped));
+        hu_json_object_set(alloc, judgment_obj, "holdout_rows",
+                           hu_json_number_new(alloc, (double)holdout.rows_count));
+        hu_json_object_set(alloc, root, "judgment", judgment_obj);
+        hu_ml_fidelity_free_holdout(alloc, &holdout);
+    }
 
     char *out = NULL;
     size_t out_len = 0;
@@ -2838,4 +3102,105 @@ hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char *
     if (prov.vtable && prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, alloc);
     return err;
+}
+
+/* US-7.10 — `human ml rl-train --algorithm <name>` router.
+ *
+ * AC-7.10.3 / 4 / 5: routes to SimPO factory, delegates `dpo` to the
+ * existing `hu_ml_cli_dpo_train` path (zero new code in the DPO body),
+ * and emits exit-code-2 "not yet implemented" stubs for ORPO and
+ * GRPO-2. The story explicitly forbids touching the DPO body in this
+ * change.
+ */
+#include "human/ml/rl_trainer.h"
+
+/* Strip the `--algorithm <value>` pair from argv and call
+ * `hu_ml_cli_dpo_train` with the remaining args. The DPO CLI sees a
+ * call shape indistinguishable from `human ml dpo-train ...`, so
+ * AC-7.10.4 holds (no behavior change). */
+static hu_error_t rl_train_delegate_to_dpo(hu_allocator_t *alloc, int argc, const char **argv,
+                                           int algo_flag_index) {
+    /* algo_flag_index points at "--algorithm"; algo_flag_index+1 at "dpo".
+     * Compose a fresh argv with those two slots removed; argv[0] must be
+     * preserved as the dpo subcommand name. */
+    const char **dpo_argv =
+        (const char **)alloc->alloc(alloc->ctx, (size_t)argc * sizeof(*dpo_argv));
+    if (!dpo_argv)
+        return HU_ERR_OUT_OF_MEMORY;
+    int dpo_argc = 0;
+    /* argv[0] is "rl-train"; rewrite to "dpo-train" so any error
+     * message from the DPO path names the command the user actually
+     * dispatched. */
+    dpo_argv[dpo_argc++] = "dpo-train";
+    for (int i = 1; i < argc; i++) {
+        if (i == algo_flag_index || i == algo_flag_index + 1)
+            continue;
+        dpo_argv[dpo_argc++] = argv[i];
+    }
+    hu_error_t err = hu_ml_cli_dpo_train(alloc, dpo_argc, dpo_argv);
+    alloc->free(alloc->ctx, dpo_argv, (size_t)argc * sizeof(*dpo_argv));
+    return err;
+}
+
+hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv) {
+    if (!alloc || argc < 1 || !argv)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *algorithm = NULL;
+    int algo_flag_index = -1;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: human ml rl-train --algorithm {dpo|simpo|orpo|grpo2} "
+                   "[other flags...]\n"
+                   "  --algorithm dpo    Delegate to existing DPO trainer\n"
+                   "  --algorithm simpo  Train via SimPO loss head (Init #06)\n"
+                   "  --algorithm orpo   Train via ORPO loss head (US-11.5)\n"
+                   "  --algorithm grpo2  (not yet implemented — exit 2)\n");
+            return HU_OK;
+        }
+        const char *v = get_opt(argv, argc, i, "--algorithm");
+        if (v) {
+            algorithm = v;
+            algo_flag_index = i;
+            i++;
+            continue;
+        }
+    }
+
+    if (!algorithm) {
+        fprintf(stderr, "rl-train: missing --algorithm flag (expected one of "
+                        "{dpo, simpo, orpo, grpo2})\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    if (strcmp(algorithm, "dpo") == 0) {
+        return rl_train_delegate_to_dpo(alloc, argc, argv, algo_flag_index);
+    }
+
+    /* PR #115 / merge-with-main: Sprint 7 US-7.10 SimPO factory + Sprint 11
+     * US-11.5 ORPO factory dispatch are orphaned by main's RL architecture
+     * rework. Main moved from per-trainer factory structs to a unified
+     * shared-config-struct dispatcher (lambda_or/odds_clip on the trainer
+     * struct, KTO/GRPO/RM siblings). Sprint 12 needs to re-target the
+     * simpo/orpo C-side wiring against main's new framework (FU-11.5.a
+     * + new FU-7.10.b). Until then, simpo/orpo/grpo2 all return
+     * NOT_SUPPORTED. The DPO path above still works via the unchanged
+     * rl_train_delegate_to_dpo. */
+    if (strcmp(algorithm, "simpo") == 0 || strcmp(algorithm, "orpo") == 0 ||
+        strcmp(algorithm, "grpo2") == 0) {
+        fprintf(stderr,
+                "rl-train: algorithm '%s' temporarily NOT_SUPPORTED — Sprint 11's "
+                "per-trainer factory wiring (hu_rl_trainer_simpo_create / "
+                "hu_rl_trainer_orpo_create) is orphaned by main's RL architecture "
+                "rework. Sprint 12 FU-11.5.a will re-target against the new "
+                "framework. Use --algorithm dpo for now.\n",
+                algorithm);
+        return HU_ERR_NOT_SUPPORTED;
+    }
+
+    fprintf(stderr,
+            "rl-train: unknown algorithm '%s' (expected one of "
+            "{dpo, simpo, orpo, grpo2})\n",
+            algorithm);
+    return HU_ERR_INVALID_ARGUMENT;
 }

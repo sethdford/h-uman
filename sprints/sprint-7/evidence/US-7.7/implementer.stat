@@ -1,0 +1,15 @@
+ CMakeLists.txt                        |   3 +
+ include/human/agent/best_of_n.h       | 110 ++++++
+ include/human/config.h                |  43 +--
+ include/human/config_types.h          |  53 ++-
+ src/agent/agent_turn.c                | 338 +++++++++---------
+ src/agent/best_of_n.c                 | 267 ++++++++++++++
+ src/config_merge.c                    |   3 +
+ src/config_parse.c                    |  34 ++
+ src/config_serialize.c                |  29 +-
+ src/config_validate.c                 |  19 +-
+ src/doctor.c                          |  21 ++
+ tests/test_doctor_best_of_n_warning.c | 140 ++++++++
+ tests/test_llamacpp_best_of_n.c       | 643 ++++++++++++++++++++++++++++++++++
+ tests/test_main.c                     |   4 +
+ 14 files changed, 1489 insertions(+), 218 deletions(-)

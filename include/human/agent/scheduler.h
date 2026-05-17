@@ -53,6 +53,9 @@ typedef enum hu_job_kind {
     HU_JOB_BELIEF_REVERIFICATION,
     HU_JOB_PERSONA_EVOLVER,
     HU_JOB_TRAINING_DATA_EXTRACT,
+    /* US-7.5: W14 nightly LoRA re-train (MLX-Gemma subprocess path).
+     * Distinct from HU_JOB_LORA_TRAINING (HUML GPT in-process path). */
+    HU_JOB_LORA_RETRAIN_NIGHTLY,
     HU_JOB_KIND_MAX
 } hu_job_kind_t;
 

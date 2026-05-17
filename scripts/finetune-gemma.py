@@ -19,10 +19,20 @@ Usage:
 
 Prerequisites:
   pip install mlx-lm (already installed if mlx-server.py works)
+  pip install "mlx-lm-lora>=2.1.0,<3"  # required for the DPO preference pass
+
+DPO note:
+  Stock `mlx_lm` does NOT support DPO (no `--fine-tune-type dpo`; PR #794 closed,
+  PR #417 still open). The third-party fork `mlx-lm-lora` is a drop-in superset
+  that adds DPO/ORPO/CPO/KTO/GRPO behind `python3 -m mlx_lm_lora.train`. We pin
+  `mlx-lm-lora>=2.1.0,<3` and document the upgrade path: if upstream `mlx_lm`
+  lands native DPO, migrate back to stock by swapping the module and flag spelling
+  (`--train-mode dpo` -> `--fine-tune-type dpo`).
 """
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -31,6 +41,26 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+
+# ── Sprint 11 / US-11.3 — chosen_r early-stopping ────────────────────
+def _load_early_stop_module():
+    """Lazy-load `scripts/dpo_early_stop.py` (sibling file).
+
+    Same-directory import. Lazy so this script can still parse in
+    environments where the early-stopping module is absent (pure stdlib
+    today; the seam is here for forward-compat with Sprint 12 persona-
+    vector hooks).
+    """
+    here = Path(__file__).resolve().parent
+    es_path = here / "dpo_early_stop.py"
+    spec = importlib.util.spec_from_file_location("dpo_early_stop", es_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("dpo_early_stop", mod)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 # ── Model Target Registry ─────────────────────────────────────────
 MODEL_TARGETS = {
@@ -42,7 +72,10 @@ MODEL_TARGETS = {
         "default_lr": 1e-6,
         "default_num_layers": 8,
         "default_max_seq_length": 2048,
-        "default_rank": 16,
+        # Sprint 7 / US-7.4: bumped from 16 -> 32. DPO benefits from
+        # higher-rank adapters that can represent the contrastive signal
+        # more expressively. e4b/e2b stay at 32 (out of scope per story).
+        "default_rank": 32,
         "adapter_suffix": "seth-lora",
     },
     "e4b": {
@@ -72,6 +105,41 @@ MODEL_TARGETS = {
 DEFAULT_TARGET = "31b"
 DEFAULT_DATA = str(Path.home() / ".human" / "training-data" / "finetune")
 MLX_SERVER_PORT = 8741
+
+# Sprint 7 / US-7.4 — default LoRA target modules.
+# QKVO (a small expansion from the previous auto-discovery default which
+# was effectively QV on Gemma's last-N blocks). When the user does not
+# pass --target-modules, this list is used to materialize the `keys`
+# field of `--lora-parameters`. Q+K+V+O are the conventional attention
+# projection names for Gemma/Llama/Qwen/Mistral; the wider set
+# (gate_proj,up_proj,down_proj for MLP) is opt-in via CLI.
+DEFAULT_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+
+def _build_lora_parameters_json(args) -> str:
+    """Build the single argv token after `--lora-parameters` for mlx-lm-lora.
+
+    Per Sprint 7 / US-7.4 design §0: target-module selection is passed to
+    mlx-lm-lora via the existing `--lora-parameters` JSON flag, not via a
+    dedicated `--target-modules` flag (no such flag exists on the mlx-lm
+    side). The JSON's `keys` field is what mlx-lm's `linear_to_lora_layers`
+    uses to override its auto-discovery. Stock `mlx_lm.lora` honors the
+    same JSON shape, so this helper is used by BOTH `run_sft()` (Phase 1,
+    stock mlx_lm) and `run_dpo()` (Phase 2, mlx-lm-lora fork).
+
+    The dict is serialised via `json.dumps` (NOT f-string concatenation)
+    so `subprocess.run` receives the whole JSON as a SINGLE argv slot. No
+    shell quoting needed — we never use `shell=True`.
+    """
+    target_modules = list(getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES)
+    rank = int(getattr(args, "rank", None) or 32)
+    payload = {
+        "rank": rank,
+        "dropout": 0.0,
+        "scale": 10.0,
+        "keys": target_modules,
+    }
+    return json.dumps(payload)
 
 
 def find_mlx_server_pid() -> int | None:
@@ -183,16 +251,41 @@ def resolve_model(args) -> str:
 
 
 def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
-    """Run SFT LoRA fine-tuning. Returns exit code."""
+    """Run SFT LoRA fine-tuning. Returns exit code.
+
+    Sprint 8 US-8.6 fix: route through `mlx_lm_lora.train --train-mode sft`
+    so the `lora_parameters` block is honored. Both stock `mlx_lm.lora` and
+    `mlx_lm_lora.train` reject `--lora-parameters` as a CLI flag — it must
+    go through `-c <yaml>`. We write a temporary YAML config containing the
+    `lora_parameters` block and pass it via `-c`.
+    """
     adapter_dir.mkdir(parents=True, exist_ok=True)
+
+    # US-8.6: write lora_parameters to a YAML config file.
+    import json as _json
+    lora_params = _json.loads(_build_lora_parameters_json(args))
+    config_path = adapter_dir / "sft_train_config.yaml"
+    with open(config_path, "w") as cf:
+        cf.write("lora_parameters:\n")
+        cf.write(f"  rank: {lora_params['rank']}\n")
+        cf.write(f"  dropout: {lora_params['dropout']}\n")
+        cf.write(f"  scale: {lora_params['scale']}\n")
+        cf.write("  keys:\n")
+        for k in lora_params["keys"]:
+            cf.write(f"    - {k}\n")
 
     model = resolve_model(args)
     cmd = [
-        sys.executable, "-m", "mlx_lm", "lora",
+        sys.executable, "-m", "mlx_lm_lora.train",
         "--model", model,
         "--train",
+        "--train-mode", "sft",
+        # US-11.2: operator-selectable adapter type. Defaults to "dora"
+        # (Sprint 11 baseline upgrade) but accepts "lora" for back-compat.
+        # getattr with default keeps synthesized Namespaces (older callers,
+        # tests that predate US-11.2) from crashing.
+        "--train-type", getattr(args, "train_type", "dora"),
         "--data", str(data_dir),
-        "--fine-tune-type", "lora",
         "--adapter-path", str(adapter_dir),
         "--iters", str(args.iters),
         "--batch-size", str(args.batch_size),
@@ -204,6 +297,7 @@ def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
         "--max-seq-length", str(args.max_seq_length),
         "--grad-checkpoint",
         "--optimizer", "adamw",
+        "-c", str(config_path),
     ]
 
     if args.mask_prompt:
@@ -232,27 +326,59 @@ def run_sft(args, data_dir: Path, adapter_dir: Path) -> int:
     return result.returncode
 
 
-def find_dpo_data(data_dir: Path) -> Path | None:
-    """Look for DPO pairs in standard locations."""
+def find_dpo_data(data_dir: Path, from_corrections: bool = False) -> Path | None:
+    """Look for DPO pairs in standard locations.
+
+    Search order (first match wins):
+      1. If `from_corrections=True`: ~/.human/dpo/pairs.jsonl (LOCKED path —
+         this is where the US-7.2 outbound-corrections miner writes its
+         deduplicated, PII-redacted preference pairs).
+      2. ~/.human/dpo/pairs.jsonl is also probed unconditionally so a
+         miner-produced file is picked up even without the flag.
+      3. <data_dir>/dpo/pairs.jsonl
+      4. <data_dir>/dpo_pairs.jsonl
+      5. <data_dir>.parent/dpo/pairs.jsonl
+      6. Newest <repo>/convo-training*/dpo_pairs.db
+    """
     repo_root = Path(__file__).resolve().parent.parent
-    candidates = [
+    home_corrections = Path.home() / ".human" / "dpo" / "pairs.jsonl"
+
+    candidates: list[Path] = []
+    if from_corrections:
+        # Cross-story lock with US-7.2: the miner writes here.
+        candidates.append(home_corrections)
+    candidates.extend([
+        home_corrections,
         data_dir / "dpo" / "pairs.jsonl",
         data_dir / "dpo_pairs.jsonl",
         data_dir.parent / "dpo" / "pairs.jsonl",
-    ]
+    ])
     # Newest convo-training directory first (most recent DPO pairs win)
     for pattern in sorted(repo_root.glob("convo-training*/dpo_pairs.db"), reverse=True):
         candidates.append(pattern)
 
+    searched: list[str] = []
     for c in candidates:
+        searched.append(str(c))
         if c.exists():
             print(f"  DPO data found: {c}")
             return c
+    if from_corrections:
+        # Make the failure observable when the user explicitly asked for the
+        # corrections path — they should know which paths we probed.
+        print(f"  --from-corrections: no DPO file found. Searched:")
+        for s in searched:
+            print(f"    - {s}")
     return None
 
 
 def prepare_dpo_from_db(db_path: Path, output_dir: Path) -> Path | None:
-    """Convert DPO pairs from SQLite DB to JSONL format for mlx_lm DPO."""
+    """Convert DPO pairs from SQLite DB to JSONL format for mlx-lm-lora DPO.
+
+    Emits `{prompt, chosen, rejected}` lines into train.jsonl and valid.jsonl
+    inside `output_dir`. 90/10 split; if too few rows for a true split, the
+    valid file mirrors the first row so mlx-lm-lora's data loader is happy.
+    """
     import sqlite3
     try:
         conn = sqlite3.connect(str(db_path))
@@ -262,6 +388,7 @@ def prepare_dpo_from_db(db_path: Path, output_dir: Path) -> Path | None:
         print(f"  Could not read DPO DB {db_path}: {e}")
         return None
 
+    rows = [(p, c, r, m) for (p, c, r, m) in rows if p and c and r]
     if not rows:
         return None
 
@@ -270,14 +397,17 @@ def prepare_dpo_from_db(db_path: Path, output_dir: Path) -> Path | None:
     valid_path = output_dir / "valid.jsonl"
 
     import random
+    if os.environ.get("HU_DPO_DETERMINISTIC") == "1":
+        random.seed(0)
     random.shuffle(rows)
-    split = int(len(rows) * 0.9)
+    split = max(1, int(len(rows) * 0.9))
 
-    for path, data in [(train_path, rows[:split]), (valid_path, rows[split:])]:
+    train_rows = rows[:split]
+    valid_rows = rows[split:] if len(rows) > split else rows[:1]
+
+    for path, data in [(train_path, train_rows), (valid_path, valid_rows)]:
         with open(path, "w") as f:
-            for prompt, chosen, rejected, margin in data:
-                if not prompt or not chosen or not rejected:
-                    continue
+            for prompt, chosen, rejected, _margin in data:
                 entry = {
                     "prompt": prompt,
                     "chosen": chosen,
@@ -285,105 +415,245 @@ def prepare_dpo_from_db(db_path: Path, output_dir: Path) -> Path | None:
                 }
                 f.write(json.dumps(entry) + "\n")
 
-    print(f"  DPO data: {len(rows)} pairs ({split} train, {len(rows)-split} valid)")
+    print(f"  DPO data: {len(rows)} pairs ({len(train_rows)} train, {len(valid_rows)} valid)")
+    return output_dir
+
+
+def _prepare_dpo_from_jsonl(jsonl_path: Path, output_dir: Path) -> Path | None:
+    """Validate and stage a `{prompt, chosen, rejected}` JSONL into output_dir.
+
+    Required keys per line: prompt, chosen, rejected. Optional: system.
+    Writes `train.jsonl` (and an empty-but-valid `valid.jsonl` if needed) so
+    mlx-lm-lora's data loader is satisfied.
+    """
+    rows: list[dict] = []
+    try:
+        with open(jsonl_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not all(k in obj and obj[k] for k in ("prompt", "chosen", "rejected")):
+                    continue
+                rows.append(obj)
+    except OSError as e:
+        print(f"  Could not read DPO JSONL {jsonl_path}: {e}")
+        return None
+
+    if not rows:
+        print(f"  DPO JSONL {jsonl_path} had no valid {{prompt, chosen, rejected}} rows.")
+        return None
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    import random
+    if os.environ.get("HU_DPO_DETERMINISTIC") == "1":
+        random.seed(0)
+    random.shuffle(rows)
+    split = max(1, int(len(rows) * 0.9))
+
+    train_rows = rows[:split]
+    valid_rows = rows[split:] if len(rows) > split else rows[:1]
+
+    for path, data in [(output_dir / "train.jsonl", train_rows),
+                       (output_dir / "valid.jsonl", valid_rows)]:
+        with open(path, "w") as f:
+            for entry in data:
+                f.write(json.dumps(entry) + "\n")
+
+    print(f"  DPO data: {len(rows)} pairs ({len(train_rows)} train, {len(valid_rows)} valid)")
     return output_dir
 
 
 def run_dpo(args, adapter_dir: Path) -> int:
-    """Run a preference-refinement LoRA pass using chosen responses from DPO pairs.
+    """Run a genuine DPO preference pass via mlx-lm-lora.
 
-    mlx_lm does not support native DPO training.  Instead we convert DPO
-    pairs into chat-format SFT examples (system + prompt -> chosen response)
-    and run additional LoRA iterations at a lower learning rate to sharpen
-    the persona toward the preferred outputs.
+    Replaces the legacy SFT-on-chosen-only path. Stock `mlx_lm` does not
+    support DPO (see module docstring). We shell out to:
+
+        python3 -m mlx_lm_lora.train --train --train-mode dpo --train-type lora
+            --reference-model-path <base-model> --resume-adapter-file <sft>
+            --data <dir-with-{train,valid}.jsonl-of-{prompt,chosen,rejected}>
+            --beta 0.1 --dpo-cpo-loss-type sigmoid ...
+
+    Non-fatal if no preference data is found (AC-7.1.3): the SFT adapter
+    remains valid; we print a warning and return 0.
     """
     data_dir = Path(args.data)
+    from_corrections = bool(getattr(args, "from_corrections", False))
 
-    dpo_source = find_dpo_data(data_dir)
+    dpo_source = find_dpo_data(data_dir, from_corrections=from_corrections)
     if dpo_source is None:
-        print("  No DPO data found, skipping preference pass.")
+        # AC-7.1.3: clearly-labeled warning, non-fatal exit, SFT adapter retained.
+        print(
+            "  [dpo] no preference data found at any candidate path; "
+            "skipping (SFT adapter retained)"
+        )
         return 0
 
     dpo_data_dir = data_dir / "dpo_prepared"
 
-    if str(dpo_source).endswith(".db"):
-        import sqlite3
-        try:
-            conn = sqlite3.connect(str(dpo_source))
-            rows = conn.execute("SELECT prompt, chosen FROM dpo_pairs").fetchall()
-            conn.close()
-        except Exception as e:
-            print(f"  Could not read DPO DB: {e}")
+    src = str(dpo_source)
+    if src.endswith(".db"):
+        # SQLite source: prepare_dpo_from_db emits the correct
+        # {prompt, chosen, rejected} JSONL format with a 90/10 split.
+        prepared = prepare_dpo_from_db(dpo_source, dpo_data_dir)
+        if prepared is None:
+            print("  [dpo] DPO DB had no valid rows; skipping (SFT adapter retained)")
             return 0
-
-        if not rows:
-            print("  DPO DB was empty, skipping preference pass.")
+    elif src.endswith(".jsonl"):
+        prepared = _prepare_dpo_from_jsonl(dpo_source, dpo_data_dir)
+        if prepared is None:
+            print("  [dpo] DPO JSONL had no valid rows; skipping (SFT adapter retained)")
             return 0
-
-        dpo_data_dir.mkdir(parents=True, exist_ok=True)
-        import random
-        random.shuffle(rows)
-        split = max(1, int(len(rows) * 0.9))
-
-        sys_prompt = (
-            "You are Seth Ford, 45, texting on iMessage. Chief Architect at Vanguard. "
-            "Style: casual, warm, direct. Short messages. Lowercase. Abbreviate."
-        )
-
-        for path, data in [(dpo_data_dir / "train.jsonl", rows[:split]),
-                           (dpo_data_dir / "valid.jsonl", rows[split:])]:
-            with open(path, "w") as f:
-                for prompt, chosen in data:
-                    if not prompt or not chosen:
-                        continue
-                    entry = {"messages": [
-                        {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": prompt.strip()},
-                        {"role": "assistant", "content": chosen.strip()},
-                    ]}
-                    f.write(json.dumps(entry) + "\n")
-
-        print(f"  DPO->SFT data: {len(rows)} pairs ({split} train, {len(rows)-split} valid)")
-
-    elif str(dpo_source).endswith(".jsonl"):
-        dpo_data_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(dpo_source, dpo_data_dir / "train.jsonl")
     else:
-        print(f"  Unknown DPO format: {dpo_source}")
+        print(f"  [dpo] unknown DPO format: {dpo_source}; skipping")
         return 0
 
     dpo_iters = max(50, args.iters // 4)
     dpo_lr = args.learning_rate * 0.1
     model = resolve_model(args)
 
+    # mlx-lm-lora CLI. The flag spelling differs from stock mlx_lm:
+    #   --train-mode dpo       (selects the DPO loss head)
+    #   --train-type lora      (the fork's renamed --fine-tune-type)
+    # --reference-model-path MUST be set explicitly to the base model.
+    # If omitted, mlx-lm-lora defaults reference == policy after
+    # --resume-adapter-file, which produces a near-zero gradient on
+    # step 1 (design §5.3).
+    # Sprint 11 US-11.1: route through `scripts.mlx_lora_entry`, which
+    # monkey-patches `mlx_lm_lora.trainer.dpo_trainer.compute_score` to
+    # length-normalize for ALL loss types (not just IPO) before calling
+    # `mlx_lm_lora.train.main()`. The downstream CLI shape is identical.
+    length_normalize = bool(getattr(args, "length_normalize", True))
+
+    # Sprint 11 / US-11.4 — DPOP (Smaug positive-clipping) loss head.
+    # Selected via --dpo-cpo-loss-type. When the operator (or any caller
+    # downstream of main()) opts into 'dpop', we MUST also pass --delta
+    # explicitly. Upstream mlx_lm_lora.train defaults --delta to 50.0,
+    # which is 500x the Smaug-recommended 0.1 and catastrophically
+    # over-anchors training. Our argparse default for --dpop-delta is 0.1
+    # (see main()); we never inherit upstream's 50.0.
+    loss_type = getattr(args, "dpo_cpo_loss_type", "sigmoid")
+    dpop_delta = float(getattr(args, "dpop_delta", 0.1))
     cmd = [
-        sys.executable, "-m", "mlx_lm", "lora",
+        sys.executable, "-m", "scripts.mlx_lora_entry",
         "--model", model,
         "--train",
+        "--train-mode", "dpo",
+        # US-11.2: must match the train_type used by run_sft (above) or
+        # the DPO pass will fail to load the SFT-produced adapter (shape
+        # mismatch). args.train_type is set once in main() and threaded
+        # through every Namespace; getattr default keeps older callers safe.
+        "--train-type", getattr(args, "train_type", "dora"),
         "--data", str(dpo_data_dir),
-        "--fine-tune-type", "lora",
         "--adapter-path", str(adapter_dir),
         "--resume-adapter-file", str(adapter_dir / "adapters.safetensors"),
+        "--reference-model-path", model,
+        "--beta", "0.1",
+        "--dpo-cpo-loss-type", loss_type,
         "--iters", str(dpo_iters),
         "--batch-size", "1",
         "--learning-rate", str(dpo_lr),
         "--num-layers", str(args.num_layers),
         "--max-seq-length", str(args.max_seq_length),
         "--grad-checkpoint",
-        "--mask-prompt",
+        # Sprint 8 US-8.6 fix: lora_parameters via -c <yaml>, not CLI flag.
+        # Reuse the SFT yaml if it exists (same params); write a fresh one
+        # if SFT was skipped.
+        "-c", str(adapter_dir / "dpo_train_config.yaml"),
     ]
+    # Emit --delta ONLY for dpop. For sigmoid/ipo/cpo, upstream does not
+    # consume --delta and emitting it would be confusing to debug. The
+    # value is always explicit (never falls through to upstream's 50.0).
+    if loss_type == "dpop":
+        cmd.extend(["--delta", str(dpop_delta)])
+    # Write the DPO config YAML (same lora_parameters as SFT).
+    import json as _json
+    _lp = _json.loads(_build_lora_parameters_json(args))
+    with open(adapter_dir / "dpo_train_config.yaml", "w") as cf:
+        cf.write("lora_parameters:\n")
+        cf.write(f"  rank: {_lp['rank']}\n")
+        cf.write(f"  dropout: {_lp['dropout']}\n")
+        cf.write(f"  scale: {_lp['scale']}\n")
+        cf.write("  keys:\n")
+        for k in _lp["keys"]:
+            cf.write(f"    - {k}\n")
 
-    print(f"\n  Running preference SFT: {dpo_iters} iters, LR={dpo_lr}")
-    print(f"  (Sharpening persona with chosen responses from DPO pairs)\n")
+    if getattr(args, "mask_prompt", False):
+        cmd.append("--mask-prompt")
 
+    _loss_descr = f"{loss_type}"
+    if loss_type == "dpop":
+        _loss_descr += f", delta={dpop_delta} (Smaug positive-clipping; US-11.4)"
+    print(f"\n  Running DPO: {dpo_iters} iters, LR={dpo_lr}, beta=0.1 ({_loss_descr})")
+    print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)")
+    print(f"  length_normalize={'true' if length_normalize else 'false'} "
+          f"(US-11.1: per-token avg log-prob, NOT summed)")
+    if length_normalize:
+        print(f"  NOTE: length normalization is active; if convergence is slow, "
+              f"try beta in [1.0, 5.0] (~50x the prior value); see SimPO §5.")
+
+    # Propagate the length-norm flag through the env so the child Python
+    # interpreter picks it up before `mlx_lm_lora.train.main()` runs. The
+    # entry wrapper also no-ops on this env var, so setting it to "0" is
+    # the explicit opt-out path.
+    child_env = os.environ.copy()
+    child_env["HU_DPO_LENGTH_NORM"] = "1" if length_normalize else "0"
+
+    # Sprint 11 / US-11.3 — chosen_r plateau-break early stopping.
+    # Default 'none' (NOT 'chosen_r') when args has no `early_stopping_signal`
+    # attribute. This preserves backward-compat with Sprint 7/8 tests and
+    # internal Namespaces (run_train_all, run_speculative_draft_training)
+    # that predate this flag. main() sets it explicitly to the CLI value
+    # (default 'chosen_r' for new operator-driven runs).
+    es_signal = getattr(args, "early_stopping_signal", "none")
     t0 = time.time()
-    result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent))
+    if es_signal == "chosen_r":
+        es_mod = _load_early_stop_module()
+        detector = es_mod.ChosenRPlateauDetector(
+            window=5,
+            drop_ratio=0.5,
+            confirm_consecutive=2,
+            save_every=int(getattr(args, "save_every", 20)),
+            signal_mode="chosen_r",
+        )
+        sentinel = adapter_dir / ".early_stop"
+        event_log = adapter_dir / "early_stop_events.jsonl"
+        print(f"  Early stopping: chosen_r plateau-break "
+              f"(window=5, drop_ratio=0.5, confirm=2, save_every={detector.save_every})")
+        rc, decision = es_mod.run_with_early_stop(
+            cmd=cmd,
+            detector=detector,
+            cwd=str(Path(__file__).parent.parent),
+            sentinel_path=sentinel,
+            event_log_path=event_log,
+            env=child_env,
+        )
+        if decision is not None:
+            print(
+                f"  Early stop FIRED: first_breach_iter={decision.first_breach_iter}, "
+                f"stopped_iter={decision.stopped_iter}, "
+                f"promoted_iter={decision.promoted_iter}"
+            )
+            print(f"  Promoted adapter: iter {decision.promoted_iter} (last save_every boundary)")
+        returncode = rc
+    else:
+        result = subprocess.run(
+            cmd,
+            cwd=str(Path(__file__).parent.parent),
+            env=child_env,
+        )
+        returncode = result.returncode
     elapsed = time.time() - t0
 
-    if result.returncode == 0:
-        print(f"  Preference SFT complete! ({elapsed/60:.1f} minutes)")
+    if returncode == 0:
+        print(f"  DPO complete! ({elapsed/60:.1f} minutes)")
     else:
-        print(f"  Preference SFT failed (exit code {result.returncode}, {elapsed:.0f}s)")
+        print(f"  DPO failed (exit code {returncode}, {elapsed:.0f}s)")
         print(f"  Primary SFT adapter is still valid — non-fatal.")
 
     return 0
@@ -429,6 +699,24 @@ def run_speculative_draft_training(args):
         rank=draft_cfg["default_rank"],
         num_layers=draft_cfg["default_num_layers"],
         max_seq_length=draft_cfg["default_max_seq_length"],
+        # Sprint 7 / US-7.4: inherit the operator's target-module choice
+        # (or None to fall through to DEFAULT_TARGET_MODULES inside the
+        # helper). Without this, the draft model would silently fall back
+        # to an undefined attribute on the Namespace.
+        target_modules=getattr(args, "target_modules", None),
+        # Sprint 11 / US-11.2: forward operator's --train-type choice so
+        # the draft model uses the SAME adapter type as the target. If
+        # the target trains DoRA but the draft trains LoRA, speculative
+        # decode acceptance drops and downstream merge-back diverges.
+        train_type=getattr(args, "train_type", "dora"),
+        # Sprint 11 / US-11.3: forward early-stopping signal so the draft
+        # model uses the same plateau-break detection as the target.
+        early_stopping_signal=getattr(args, "early_stopping_signal", "none"),
+        # Sprint 11 / US-11.4: forward DPOP knobs so the draft model
+        # trains with the same loss head as the target. Mixing sigmoid
+        # on the draft and dpop on the target would diverge acceptance.
+        dpo_cpo_loss_type=getattr(args, "dpo_cpo_loss_type", "sigmoid"),
+        dpop_delta=getattr(args, "dpop_delta", 0.1),
         steps_per_report=args.steps_per_report,
         steps_per_eval=args.steps_per_eval,
         save_every=args.save_every,
@@ -436,6 +724,7 @@ def run_speculative_draft_training(args):
         resume=False,
         dpo=args.dpo,
         sft_only=args.sft_only,
+        from_corrections=getattr(args, "from_corrections", False),
         no_version=True,
         no_restart_server=True,
     )
@@ -590,6 +879,16 @@ def run_finetune(args):
     print(f"  Iterations:  {args.iters}")
     print(f"  Batch size:  {args.batch_size}")
     print(f"  LoRA rank:   {args.rank}")
+    # Sprint 11 / US-11.2 observability: surface the active train_type
+    # so operators see at-a-glance whether DoRA or LoRA is in use.
+    print(f"  Train type:  {getattr(args, 'train_type', 'dora')}")
+    # Sprint 7 / US-7.4 risk #2: surface the resolved target modules so
+    # the operator can spot a typo (e.g. --target-modules q_proj that
+    # collapses the adapter to Q-only) before training starts.
+    _resolved_modules = list(
+        getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES
+    )
+    print(f"  Target mods: {','.join(_resolved_modules)}")
     print(f"  LoRA layers: {args.num_layers}")
     print(f"  LR:          {args.learning_rate}")
     print(f"  Seq length:  {args.max_seq_length}")
@@ -636,11 +935,30 @@ def run_finetune(args):
         "model": model,
         "adapter_path": str(adapter_dir),
         "rank": args.rank,
+        # Sprint 11 / US-11.2 (AC-11.2.5): record train_type so a
+        # downstream consumer can distinguish a DoRA-produced adapter
+        # from a LoRA-produced one without parsing the safetensors
+        # weights. Defaults to "dora" for runs predating the flag
+        # (synthesized Namespaces without train_type set).
+        "train_type": getattr(args, "train_type", "dora"),
+        # Sprint 7 / US-7.4 (AC-7.4.5): record the resolved target
+        # modules alongside rank so a downstream consumer (e.g. the
+        # US-7.5 nightly cron's promotion gate or check-lora-ab.sh) can
+        # distinguish a true regression in size_mb from a deliberate
+        # config change.
+        "target_modules": list(
+            getattr(args, "target_modules", None) or DEFAULT_TARGET_MODULES
+        ),
         "iters": args.iters,
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "max_seq_length": args.max_seq_length,
         "dpo": args.dpo,
+        # Sprint 11 / US-11.1: record whether the run used length-normalized
+        # DPO loss (US-11.1 fix; default ON post-Sprint-11). Pre-Sprint-11
+        # `train_config.json` files do not have this field — `human ml
+        # lora-ab` should treat missing as `false` for historical compares.
+        "length_normalize": bool(getattr(args, "length_normalize", True)),
         "data": str(data_dir),
         "train_examples": train_count,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -716,6 +1034,20 @@ def run_train_all(args):
             rank=target_cfg["default_rank"],
             num_layers=target_cfg["default_num_layers"],
             max_seq_length=target_cfg["default_max_seq_length"],
+            # Sprint 7 / US-7.4: forward operator's target-module choice
+            # (or None for the QKVO default) into each per-target run.
+            target_modules=getattr(args, "target_modules", None),
+            # Sprint 11 / US-11.2: forward --train-type so all three
+            # targets train with the same adapter type. Mixing DoRA and
+            # LoRA across the real-time stack would diverge magnitudes.
+            train_type=getattr(args, "train_type", "dora"),
+            # Sprint 11 / US-11.3: forward early-stopping signal so each
+            # per-target run honors the same plateau-break policy.
+            early_stopping_signal=getattr(args, "early_stopping_signal", "none"),
+            # Sprint 11 / US-11.4: forward DPOP knobs so every target in
+            # --train-all uses the same loss head and delta.
+            dpo_cpo_loss_type=getattr(args, "dpo_cpo_loss_type", "sigmoid"),
+            dpop_delta=getattr(args, "dpop_delta", 0.1),
             steps_per_report=args.steps_per_report,
             steps_per_eval=args.steps_per_eval,
             save_every=args.save_every,
@@ -723,6 +1055,7 @@ def run_train_all(args):
             resume=False,
             dpo=args.dpo,
             sft_only=args.sft_only,
+            from_corrections=getattr(args, "from_corrections", False),
             no_version=False,
             no_restart_server=True,
             speculative_draft=False,
@@ -781,6 +1114,25 @@ Examples:
     parser.add_argument("--learning-rate", type=float, default=None,
                         help="Learning rate (default: auto from target)")
     parser.add_argument("--rank", type=int, default=None, help="LoRA rank (default: auto from target)")
+    # Sprint 11 / US-11.2: adapter training type. Defaults to "dora" —
+    # DoRA closes ~93% of the LoRA-to-full-FT quality gap at the same
+    # rank with no inference overhead after merge-back. Operators with
+    # prior LoRA adapters in adapters/ should either delete them or
+    # pass `--train-type lora` to keep the old shape.
+    parser.add_argument("--train-type", choices=["dora", "lora"], default="dora",
+                        help="Adapter type: dora (default, US-11.2) or lora "
+                             "for back-compat. DoRA closes ~93%% of the "
+                             "LoRA-to-full-FT quality gap at the same rank "
+                             "with no inference overhead.")
+    # Sprint 7 / US-7.4: CSV of LoRA target module names. CSV is the
+    # friendliest input — we materialize it into the `keys` field of the
+    # `--lora-parameters` JSON token at subprocess-build time. The
+    # canonical set for Gemma/Llama/Qwen/Mistral attention is QKVO; the
+    # MLP set (gate_proj,up_proj,down_proj) is opt-in.
+    parser.add_argument("--target-modules", type=str, default=None,
+                        help="CSV of LoRA target module names "
+                             "(default: q_proj,k_proj,v_proj,o_proj). "
+                             "Passed via --lora-parameters JSON `keys` to mlx-lm/mlx-lm-lora.")
     parser.add_argument("--num-layers", type=int, default=None,
                         help="Number of layers to apply LoRA (default: auto from target)")
     parser.add_argument("--max-seq-length", type=int, default=None,
@@ -793,7 +1145,25 @@ Examples:
     parser.add_argument("--no-mask-prompt", action="store_false", dest="mask_prompt")
     parser.add_argument("--dpo", action="store_true", default=True,
                         help="Run DPO pass after SFT if DPO data exists (default: true)")
-    parser.add_argument("--sft-only", action="store_true", help="Skip DPO even if data exists")
+    parser.add_argument("--no-dpo", action="store_false", dest="dpo",
+                        help="Disable the DPO pass entirely")
+    parser.add_argument("--sft-only", action="store_true",
+                        help="Skip DPO even if data exists (alias for --no-dpo intent; "
+                             "stronger because it also short-circuits the speculative-draft DPO pass)")
+    # Sprint 11 / US-11.1: length normalization for the DPO loss. Default ON.
+    # When ON, the `mlx_lm_lora.trainer.dpo_trainer.compute_score` is
+    # monkey-patched to divide masked log-probabilities by the non-pad token
+    # count for ALL loss types (sigmoid/hinge/dpop/ipo), not just IPO.
+    parser.add_argument("--length-normalize", action="store_true", default=True,
+                        dest="length_normalize",
+                        help="DPO loss divides masked log-probs by non-pad token "
+                             "count (default: true; US-11.1 fix)")
+    parser.add_argument("--no-length-normalize", action="store_false",
+                        dest="length_normalize",
+                        help="Disable US-11.1 length normalization (pre-Sprint-11 behavior)")
+    parser.add_argument("--from-corrections", action="store_true",
+                        help="Load DPO pairs from ~/.human/dpo/pairs.jsonl (LOCKED path; "
+                             "produced by the outbound-corrections miner — US-7.2)")
     parser.add_argument("--no-version", action="store_true", help="Don't version the adapter")
     parser.add_argument("--resume", action="store_true", help="Resume from existing adapter")
     parser.add_argument("--no-restart-server", action="store_true", help="Don't restart MLX server after training")
@@ -809,6 +1179,38 @@ Examples:
                         help="Train all three targets (31B + E4B + E2B) on the same data")
     parser.add_argument("--realtime-first", action="store_true",
                         help="With --train-all, train E4B and E2B before 31B (get real-time running fast)")
+    # Sprint 11 / US-11.3 — chosen_r plateau-break early stopping.
+    # Default 'chosen_r' for new operator-driven runs (Sprint 11 baseline).
+    # Pass 'none' to disable (AC-11.3.5 back-compat for Sprint 7/8 CI scripts
+    # and any pipeline that wants to run to the full --iters horizon).
+    parser.add_argument("--early-stopping-signal", choices=["chosen_r", "none"],
+                        default="chosen_r",
+                        help="DPO early-stopping signal: chosen_r (default, "
+                             "US-11.3; halts when train_chosen_r plateau breaks "
+                             "by >50%% drop for 2 consecutive eval steps) or "
+                             "none (run to --iters, Sprint 7/8 behavior).")
+    # Sprint 11 / US-11.4 — DPOP (Smaug positive-clipping) loss head.
+    # Selecting `dpop` adds a positive-clipping penalty `delta * max(0,
+    # log pi_ref(y_chosen) - log pi(y_chosen))` that anchors chosen
+    # log-probability above the reference; structurally prevents the
+    # Sprint 8 DCR collapse (iter-80 chosen_r=-8.867). Defaults preserve
+    # Sprint 7/8 sigmoid behavior bit-identically.
+    parser.add_argument("--dpo-cpo-loss-type",
+                        choices=["sigmoid", "dpop", "ipo", "cpo"],
+                        default="sigmoid",
+                        dest="dpo_cpo_loss_type",
+                        help="DPO loss head (default: sigmoid). 'dpop' "
+                             "enables Smaug positive-clipping per "
+                             "Pal et al. 2402.13228 (US-11.4); always "
+                             "pair with --dpop-delta to override "
+                             "upstream's 50.0 default.")
+    parser.add_argument("--dpop-delta", type=float, default=0.1,
+                        dest="dpop_delta",
+                        help="DPOP penalty coefficient (default: 0.1 per "
+                             "Smaug research). Upstream mlx_lm_lora "
+                             "defaults to 50.0 which catastrophically "
+                             "over-anchors; we ALWAYS pass --delta "
+                             "explicitly when --dpo-cpo-loss-type=dpop.")
     args = parser.parse_args()
 
     target_cfg = get_target_config(args.target)
@@ -824,6 +1226,28 @@ Examples:
         args.num_layers = target_cfg["default_num_layers"]
     if args.max_seq_length is None:
         args.max_seq_length = target_cfg["default_max_seq_length"]
+
+    # Sprint 7 / US-7.4: parse --target-modules CSV into list[str] exactly
+    # once, here in main(), so run_sft/run_dpo never re-parse and never see
+    # a None or a string. Default to QKVO when the flag is absent.
+    if args.target_modules is None:
+        args.target_modules = list(DEFAULT_TARGET_MODULES)
+    else:
+        # Operator passed --target-modules explicitly. Parse and reject an
+        # empty result outright: if the user typed `--target-modules ,` or
+        # `--target-modules " , "` the parsed list collapses to [], which
+        # would silently fall back to QKVO inside _build_lora_parameters_json
+        # via `or DEFAULT_TARGET_MODULES`. That fallback is fine as an
+        # internal guard for synthetic Namespaces (run_train_all,
+        # run_speculative_draft_training pass target_modules=None) but it
+        # MUST NOT mask an operator typo on the CLI — fail loudly (HIGH-1).
+        parsed = [s.strip() for s in args.target_modules.split(",") if s.strip()]
+        if not parsed:
+            sys.exit(
+                "ERROR: --target-modules produced an empty list after parsing; "
+                "check for stray commas"
+            )
+        args.target_modules = parsed
 
     if args.train_all:
         sys.exit(run_train_all(args))
