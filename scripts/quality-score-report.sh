@@ -65,7 +65,13 @@ if [ -f "build/human_tests" ]; then
   # which then caused the regex to miss and report "Could not parse
   # test results" (-10 from the quality score). Pin to the Results
   # line directly via grep.
-  TEST_LINE=$(./build/human_tests 2>&1 | grep -E '^--- Results:' | tail -1)
+  #
+  # `|| true` is REQUIRED: under `set -euo pipefail` (line 4), a grep
+  # with zero matches exits 1 which propagates and aborts the entire
+  # script — bypassing the graceful "Could not parse" fallback below
+  # (lines 82-83). Both Bugbot and CodeRabbit caught this regression
+  # against the previous `tail -1` which always exited 0.
+  TEST_LINE=$(./build/human_tests 2>&1 | grep -E '^--- Results:' | tail -1 || true)
   PASSED=$(echo "$TEST_LINE" | grep -oE '[0-9]+/[0-9]+ passed' | head -1 || echo "")
   if [ -n "$PASSED" ]; then
     COUNT=$(echo "$PASSED" | cut -d/ -f1)
