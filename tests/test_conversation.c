@@ -759,6 +759,44 @@ static void tone_extract_topic_returns_significant_words(void) {
     HU_ASSERT_TRUE(strstr(buf, "project") != NULL || strstr(buf, "deadline") != NULL);
 }
 
+/* P2-3 regression (2026-05-16 incident): the daemon's inner-thought
+ * accumulation path used to memcpy the raw 127-byte user message into the
+ * `topic` slot of hu_inner_thought_accumulate. That value later surfaces in
+ * the system prompt as "[Inner thought: ...]" — a direct prompt-injection
+ * vector AND a verbatim-text leak.
+ *
+ * The fix runs `combined` through hu_conversation_extract_topic first; if
+ * extraction yields nothing, the accumulate call is skipped. These tests
+ * pin the contract the daemon now relies on. */
+static void extract_topic_rejects_raw_confession(void) {
+    char buf[128] = {0};
+    /* The incident utterance — a first-person confession sentence. The
+     * extractor MUST NOT return the full sentence verbatim. It returns at
+     * most 3 non-stopword tokens; this caps the leakage even when the
+     * heuristic can't filter all charged words. The daemon's job is then
+     * to gate on hu_emotional_moment_select_topic / hu_proactive_topic_is_safe
+     * before outbound use. */
+    const char *confession = "I confessed something terrible to my friend";
+    size_t len = hu_conversation_extract_topic(confession, strlen(confession), buf, sizeof(buf));
+    /* Must NOT be the full raw sentence. */
+    HU_ASSERT_NULL(strstr(buf, "to my friend"));
+    /* Bounded — never a 127-byte raw memcpy. */
+    HU_ASSERT_TRUE(len < 64);
+}
+
+static void extract_topic_rejects_full_first_person_sentence(void) {
+    char buf[128] = {0};
+    const char *msg = "but boy I am just more lonely now than ever";
+    size_t len = hu_conversation_extract_topic(msg, strlen(msg), buf, sizeof(buf));
+    /* The extractor returns up to 3 significant non-stopword tokens. With
+     * the expanded stopword list (P2-7), this should be very short or empty.
+     * In all cases it must NOT contain "but boy" or "lonely now than". */
+    HU_ASSERT_NULL(strstr(buf, "but boy"));
+    HU_ASSERT_NULL(strstr(buf, "lonely now than"));
+    /* Bounded size — never a 127-byte raw memcpy. */
+    HU_ASSERT_TRUE(len < 64);
+}
+
 /* ── Escalation detection tests (F14) ─────────────────────────────────── */
 
 static void escalation_three_negative_escalating(void) {
@@ -4037,6 +4075,8 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(tone_frustrated_returns_frustrated);
     HU_RUN_TEST(tone_neutral_returns_neutral);
     HU_RUN_TEST(tone_extract_topic_returns_significant_words);
+    HU_RUN_TEST(extract_topic_rejects_raw_confession);
+    HU_RUN_TEST(extract_topic_rejects_full_first_person_sentence);
 
     /* Inside joke detection (F19) */
     HU_RUN_TEST(detect_inside_joke_remember_when_true);

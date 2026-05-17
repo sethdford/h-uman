@@ -9971,16 +9971,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* ── Phase 3 post-turn: inner thought accumulation ──────── */
                 if (err == HU_OK && inner_thought_store_ok && combined_len > 0 && batch_key &&
                     key_len > 0) {
-                    /* Extract a rough topic from the user's message for accumulation */
+                    /* P2-3 (2026-05-16): NEVER memcpy raw user text here.
+                     * The inner_thought.topic surfaces in the system prompt
+                     * as "[Inner thought: ...]" — a prompt-injection vector
+                     * AND a verbatim-text leak. Extract a clean noun phrase
+                     * first; if extraction yields nothing, SKIP. */
                     char it_topic[128] = {0};
-                    size_t it_topic_len =
-                        combined_len < sizeof(it_topic) - 1 ? combined_len : sizeof(it_topic) - 1;
-                    memcpy(it_topic, combined, it_topic_len);
-                    it_topic[it_topic_len] = '\0';
-                    uint64_t it_now_ms = (uint64_t)time(NULL) * 1000ULL;
-                    (void)hu_inner_thought_accumulate(&inner_thought_store, batch_key, key_len,
-                                                      it_topic, it_topic_len, it_topic,
-                                                      it_topic_len, 0.5, it_now_ms);
+                    size_t it_topic_len = hu_conversation_extract_topic(combined, combined_len,
+                                                                        it_topic, sizeof(it_topic));
+                    if (it_topic_len > 0) {
+                        uint64_t it_now_ms = (uint64_t)time(NULL) * 1000ULL;
+                        (void)hu_inner_thought_accumulate(&inner_thought_store, batch_key, key_len,
+                                                          it_topic, it_topic_len, it_topic,
+                                                          it_topic_len, 0.5, it_now_ms);
+                    }
                 }
 
                 /* ── Phase 3 post-turn: humor audience tracking ──────── */
