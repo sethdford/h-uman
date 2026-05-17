@@ -56,4 +56,41 @@ typedef struct hu_followup_input {
 /* Returns 0 if no follow-up should be scheduled, else wall-clock ms of send. */
 uint64_t hu_followup_compute_send_time(const hu_followup_input_t *in);
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Warmth + template + decide
+ *
+ * Composite layer on top of hu_followup_compute_send_time. Maps persona's
+ * free-form warmth_level string ("close", "high", "friend", ...) to the
+ * tier enum, selects a template text for the tier, and bundles the policy
+ * decision (should_schedule + send_at_ms + template_text) into one struct.
+ *
+ * Default templates (2026-05-17) — short, low-stakes, always-appropriate:
+ *   CLOSE  → "hey, just bumping this"
+ *   FRIEND → "any thoughts on this?"
+ *   NONE   → NULL (no follow-up)
+ *
+ * Templates are static strings; do NOT free. They flow through the daemon's
+ * existing validator-chain + complexity-vary + casing post-processing in
+ * the scheduled-message dispatch loop, so they don't feel robotic.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Map a persona's free-form warmth_level string ("close friend", "high",
+ * "warm", "friend", ...) to a tier enum. Case-insensitive substring match.
+ * NULL / empty / unknown strings map to HU_FOLLOWUP_WARMTH_NONE. */
+hu_followup_warmth_t hu_followup_warmth_from_string(const char *warmth_level);
+
+/* Static template text for a warmth tier. NULL for NONE (and any future
+ * enum value not handled here). Pointer is stable; do NOT free. */
+const char *hu_followup_template_for_warmth(hu_followup_warmth_t warmth);
+
+typedef struct hu_followup_decision {
+    bool should_schedule;      /* false when send_at_ms == 0 or template missing */
+    uint64_t send_at_ms;       /* wall-clock ms; 0 when should_schedule is false */
+    const char *template_text; /* static; do not free; valid iff should_schedule */
+} hu_followup_decision_t;
+
+/* Composite predicate: compute_send_time + template_for_warmth, bundled.
+ * Returns {should_schedule=false} when either piece refuses. Pure. */
+hu_followup_decision_t hu_followup_decide(const hu_followup_input_t *in);
+
 #endif /* HU_FOLLOW_UP_H */

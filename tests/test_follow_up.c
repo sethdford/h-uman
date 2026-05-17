@@ -220,6 +220,112 @@ static void followup_tz_offset_affects_snap_decision(void) {
     HU_ASSERT(send_sgt > send_pst);
 }
 
+/* ── Warmth-string → tier mapping ───────────────────────────────────────── */
+
+static void followup_warmth_from_string_null_and_empty(void) {
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string(NULL), (int)HU_FOLLOWUP_WARMTH_NONE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string(""), (int)HU_FOLLOWUP_WARMTH_NONE);
+}
+
+static void followup_warmth_from_string_close_keywords(void) {
+    /* "close", "high", "warm" — all CLOSE per persona conventions in
+     * src/context/conversation.c which used "high" / "warm" for close. */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("close"), (int)HU_FOLLOWUP_WARMTH_CLOSE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("Close Friend"),
+                 (int)HU_FOLLOWUP_WARMTH_CLOSE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("HIGH"), (int)HU_FOLLOWUP_WARMTH_CLOSE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("warm"), (int)HU_FOLLOWUP_WARMTH_CLOSE);
+}
+
+static void followup_warmth_from_string_friend_keyword(void) {
+    /* Plain "friend" (without "close" qualifier) → FRIEND tier. */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("friend"), (int)HU_FOLLOWUP_WARMTH_FRIEND);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("Friend"), (int)HU_FOLLOWUP_WARMTH_FRIEND);
+}
+
+static void followup_warmth_from_string_close_friend_maps_to_close(void) {
+    /* "close friend" must map to CLOSE, not FRIEND — CLOSE keywords are
+     * checked first, so the more-specific tier wins. */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("close friend"),
+                 (int)HU_FOLLOWUP_WARMTH_CLOSE);
+}
+
+static void followup_warmth_from_string_acquaintance_returns_none(void) {
+    /* Acquaintance / colleague / etc. — no follow-up. */
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("acquaintance"), (int)HU_FOLLOWUP_WARMTH_NONE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("colleague"), (int)HU_FOLLOWUP_WARMTH_NONE);
+    HU_ASSERT_EQ((int)hu_followup_warmth_from_string("unknown"), (int)HU_FOLLOWUP_WARMTH_NONE);
+}
+
+/* ── Template selector ──────────────────────────────────────────────────── */
+
+static void followup_template_close_returns_bump_text(void) {
+    const char *t = hu_followup_template_for_warmth(HU_FOLLOWUP_WARMTH_CLOSE);
+    HU_ASSERT(t != NULL);
+    HU_ASSERT(strlen(t) > 0);
+    HU_ASSERT(strlen(t) < 60); /* templates stay short — they're bumps, not paragraphs */
+}
+
+static void followup_template_friend_returns_thoughts_text(void) {
+    const char *t = hu_followup_template_for_warmth(HU_FOLLOWUP_WARMTH_FRIEND);
+    HU_ASSERT(t != NULL);
+    HU_ASSERT(strlen(t) > 0);
+    HU_ASSERT(strlen(t) < 60);
+}
+
+static void followup_template_close_and_friend_differ(void) {
+    /* Different tier → different template. If a future change accidentally
+     * makes both tiers return the same string, this fires. */
+    const char *c = hu_followup_template_for_warmth(HU_FOLLOWUP_WARMTH_CLOSE);
+    const char *f = hu_followup_template_for_warmth(HU_FOLLOWUP_WARMTH_FRIEND);
+    HU_ASSERT(c != NULL);
+    HU_ASSERT(f != NULL);
+    HU_ASSERT(strcmp(c, f) != 0);
+}
+
+static void followup_template_none_returns_null(void) {
+    /* NONE warmth → no template at all. The daemon glue uses NULL as the
+     * sentinel for "don't schedule." */
+    HU_ASSERT(hu_followup_template_for_warmth(HU_FOLLOWUP_WARMTH_NONE) == NULL);
+}
+
+/* ── Composite decision ─────────────────────────────────────────────────── */
+
+static void followup_decide_close_friend_yields_decision(void) {
+    hu_followup_input_t in = {
+        .read_at_ms = at_hour(14),
+        .warmth = HU_FOLLOWUP_WARMTH_CLOSE,
+        .contact_chronotype = HU_CHRONO_INTERMEDIATE,
+        .local_tz_offset_seconds = 0,
+        .seed = 1,
+    };
+    hu_followup_decision_t d = hu_followup_decide(&in);
+    HU_ASSERT(d.should_schedule);
+    HU_ASSERT(d.send_at_ms > in.read_at_ms);
+    HU_ASSERT(d.template_text != NULL);
+}
+
+static void followup_decide_none_warmth_returns_no_schedule(void) {
+    hu_followup_input_t in = {
+        .read_at_ms = at_hour(14),
+        .warmth = HU_FOLLOWUP_WARMTH_NONE,
+        .contact_chronotype = HU_CHRONO_INTERMEDIATE,
+        .local_tz_offset_seconds = 0,
+        .seed = 1,
+    };
+    hu_followup_decision_t d = hu_followup_decide(&in);
+    HU_ASSERT_FALSE(d.should_schedule);
+    HU_ASSERT_EQ(d.send_at_ms, 0ULL);
+    HU_ASSERT(d.template_text == NULL);
+}
+
+static void followup_decide_null_input_returns_no_schedule(void) {
+    hu_followup_decision_t d = hu_followup_decide(NULL);
+    HU_ASSERT_FALSE(d.should_schedule);
+    HU_ASSERT_EQ(d.send_at_ms, 0ULL);
+    HU_ASSERT(d.template_text == NULL);
+}
+
 /* ── Registration ───────────────────────────────────────────────────────── */
 
 void run_follow_up_tests(void);
@@ -241,4 +347,19 @@ void run_follow_up_tests(void) {
     HU_RUN_TEST(followup_different_seeds_yield_different_outputs);
 
     HU_RUN_TEST(followup_tz_offset_affects_snap_decision);
+
+    HU_RUN_TEST(followup_warmth_from_string_null_and_empty);
+    HU_RUN_TEST(followup_warmth_from_string_close_keywords);
+    HU_RUN_TEST(followup_warmth_from_string_friend_keyword);
+    HU_RUN_TEST(followup_warmth_from_string_close_friend_maps_to_close);
+    HU_RUN_TEST(followup_warmth_from_string_acquaintance_returns_none);
+
+    HU_RUN_TEST(followup_template_close_returns_bump_text);
+    HU_RUN_TEST(followup_template_friend_returns_thoughts_text);
+    HU_RUN_TEST(followup_template_close_and_friend_differ);
+    HU_RUN_TEST(followup_template_none_returns_null);
+
+    HU_RUN_TEST(followup_decide_close_friend_yields_decision);
+    HU_RUN_TEST(followup_decide_none_warmth_returns_no_schedule);
+    HU_RUN_TEST(followup_decide_null_input_returns_no_schedule);
 }
