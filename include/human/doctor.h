@@ -17,6 +17,10 @@ typedef struct hu_diag_item {
     hu_diag_severity_t severity;
     const char *category;
     const char *message;
+    /* Optional: machine-readable error class name (e.g. "AUTH", "BUSY",
+     * "CANTOPEN", "OTHER", "NONE") for iMessage / channel diagnostic items.
+     * NULL when not applicable. Owned by the diag item's allocator. */
+    const char *error_class;
 } hu_diag_item_t;
 
 /* Parse df -m output; return available MB or 0 on parse fail. */
@@ -54,6 +58,25 @@ hu_error_t hu_doctor_check_skills(hu_allocator_t *alloc, hu_diag_item_t **items,
 hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                                     int64_t stale_after_secs, hu_diag_item_t **items, size_t *count,
                                     size_t *cap);
+
+/* Format a user-actionable diagnostic for an iMessage poll-status JSON blob.
+ *
+ * `poll_status_json` is the contents of ~/.human/imessage.poll_status (or a
+ * minimal synthetic JSON of the same shape, e.g. {"last_error_class":"AUTH"}).
+ * The blob's `last_error_class` field is mapped through
+ * hu_imessage_error_class_from_name and routed to a class-specific message:
+ *
+ *   AUTH     -> "Full Disk Access" remediation hint
+ *   BUSY     -> "Messages.app may be syncing" hint (MUST NOT mention FDA)
+ *   CANTOPEN -> "chat.db not found at <path>" hint
+ *   NONE     -> *out is set to NULL (no diagnostic), returns HU_OK
+ *   OTHER    -> generic unclassified message via hu_imessage_error_class_name
+ *
+ * On success, `*out` is either a malloc-style buffer the caller frees via
+ * alloc->free (with length strlen(*out) + 1) or NULL when there is no
+ * diagnostic to report (NONE class or missing class field). */
+hu_error_t hu_imessage_diag_from_poll_status(hu_allocator_t *alloc, const char *poll_status_json,
+                                             char **out);
 
 /* Diagnose the response verifier (W4) by reading the metrics heartbeat file
  * (~/.human/verifier_metrics.json) the daemon flushes every minute. Reports

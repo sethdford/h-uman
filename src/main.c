@@ -707,6 +707,15 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
                     }
                     putchar('"');
                 }
+                if (items[i].error_class) {
+                    printf(",\"error_class\":\"");
+                    for (const char *p = items[i].error_class; *p; p++) {
+                        if (*p == '"' || *p == '\\')
+                            putchar('\\');
+                        putchar(*p);
+                    }
+                    putchar('"');
+                }
                 putchar('}');
             }
             printf("]}\n");
@@ -726,6 +735,9 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
                 alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
             if (items[i].message)
                 alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+            if (items[i].error_class)
+                alloc->free(alloc->ctx, (void *)items[i].error_class,
+                            strlen(items[i].error_class) + 1);
         }
         alloc->free(alloc->ctx, items, cap * sizeof(hu_diag_item_t));
         if (err != HU_OK)
@@ -1003,6 +1015,9 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
                 alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
             if (items[i].message)
                 alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+            if (items[i].error_class)
+                alloc->free(alloc->ctx, (void *)items[i].error_class,
+                            strlen(items[i].error_class) + 1);
         }
         alloc->free(alloc->ctx, items, item_count * sizeof(hu_diag_item_t));
     }

@@ -1,5 +1,6 @@
 /* Tests for newly ported modules (capabilities, channel_catalog, config_mutator, update, etc.) */
 #include "human/agent/commands.h"
+#include "human/agent/scheduler_status_json.h"
 #include "human/capabilities.h"
 #include "human/channel_adapters.h"
 #include "human/channel_catalog.h"
@@ -7,16 +8,15 @@
 #include "human/config_mutator.h"
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
-#include "human/agent/scheduler_status_json.h"
 #include "human/doctor.h"
 #include "human/security.h"
 #include "human/security/sandbox.h"
 #include "human/service.h"
 #include "human/update.h"
 #include "test_framework.h"
-#include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -29,6 +29,8 @@ static void doctor_free_semantics_result(hu_allocator_t *alloc, hu_diag_item_t *
             alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
         if (items[i].message)
             alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+        if (items[i].error_class)
+            alloc->free(alloc->ctx, (void *)items[i].error_class, strlen(items[i].error_class) + 1);
     }
     /* hu_doctor may realloc the buffer; system allocator ignores the byte count here. */
     alloc->free(alloc->ctx, items, sizeof(hu_diag_item_t) * count);
@@ -115,8 +117,8 @@ static void test_scheduler_status_json_bad_json(void) {
     unsigned long long jp = 0, jc = 0;
     long long bat = 0, ue = 0;
     char ac[16] = {0};
-    HU_ASSERT_NEQ(
-        hu_scheduler_status_parse_json("{ not json", &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json("{ not json", &jp, &jc, &bat, ac, sizeof(ac), &ue),
+                  HU_OK);
 }
 
 static void test_scheduler_status_json_null_args(void) {
@@ -142,12 +144,12 @@ static void test_doctor_deprecated_scheduler_status_matches_shared(void) {
     char ac_d[16] = {0};
     char ac_n[16] = {0};
     const char *j = "{\"jobs_pending\":5,\"jobs_completed_today\":6,\"battery_pct\":7,"
-                     "\"on_ac_power\":false,\"updated_epoch\":8}";
+                    "\"on_ac_power\":false,\"updated_epoch\":8}";
     HU_ASSERT_EQ(
         hu_doctor_parse_scheduler_status_json(j, &jp_d, &jc_d, &bat_d, ac_d, sizeof(ac_d), &ue_d),
         HU_OK);
-    HU_ASSERT_EQ(
-        hu_scheduler_status_parse_json(j, &jp_n, &jc_n, &bat_n, ac_n, sizeof(ac_n), &ue_n), HU_OK);
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j, &jp_n, &jc_n, &bat_n, ac_n, sizeof(ac_n), &ue_n),
+                 HU_OK);
     HU_ASSERT_EQ(jp_d, jp_n);
     HU_ASSERT_EQ(jc_d, jc_n);
     HU_ASSERT_EQ(bat_d, bat_n);
@@ -197,8 +199,7 @@ static void test_doctor_check_scheduler_minified_file(void) {
                             "{\"updated_epoch\":5000,\"jobs_pending\":7,\"on_ac_power\":true,"
                             "\"battery_pct\":88,\"jobs_completed_today\":3}");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     /* status_age = 100s — threshold must exceed age or we take the STALE branch */
@@ -220,8 +221,7 @@ static void test_doctor_check_scheduler_stale_warn(void) {
                             "{\"jobs_pending\":0,\"jobs_completed_today\":0,\"battery_pct\":100,"
                             "\"on_ac_power\":false,\"updated_epoch\":1000}");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_scheduler(&alloc, 6000, 3600, &items, &count, &cap), HU_OK);
@@ -617,8 +617,7 @@ static void test_doctor_check_imessage_no_status_file_warns(void) {
     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_no_status");
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
@@ -630,17 +629,15 @@ static void test_doctor_check_imessage_no_status_file_warns(void) {
 static void test_doctor_check_imessage_breaker_tripped_reports_error(void) {
     char *old = NULL;
     doctor_imsg_swap_home("/tmp/hu_doctor_imsg_tripped", &old);
-    doctor_imsg_write_status("/tmp/hu_doctor_imsg_tripped",
-                             "{\n"
-                             "  \"last_rowid\": 12345,\n"
-                             "  \"last_successful_poll_epoch\": 0,\n"
-                             "  \"consecutive_open_failures\": 9,\n"
-                             "  \"circuit_breaker_tripped\": true,\n"
-                             "  \"last_error_class\": \"AUTH\"\n"
-                             "}\n");
+    doctor_imsg_write_status("/tmp/hu_doctor_imsg_tripped", "{\n"
+                                                            "  \"last_rowid\": 12345,\n"
+                                                            "  \"last_successful_poll_epoch\": 0,\n"
+                                                            "  \"consecutive_open_failures\": 9,\n"
+                                                            "  \"circuit_breaker_tripped\": true,\n"
+                                                            "  \"last_error_class\": \"AUTH\"\n"
+                                                            "}\n");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
@@ -663,8 +660,7 @@ static void test_doctor_check_imessage_fresh_poll_reports_ok(void) {
                              "  \"last_error_class\": \"NONE\"\n"
                              "}\n");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     /* now=1010, threshold=600 → age=10s → fresh */
@@ -688,8 +684,7 @@ static void test_doctor_check_imessage_stale_poll_reports_warn(void) {
                              "  \"last_error_class\": \"NONE\"\n"
                              "}\n");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     /* now=2000, threshold=600 → age=1000s → stale */
@@ -712,8 +707,7 @@ static void test_doctor_check_imessage_partial_failures_warns(void) {
                              "  \"last_error_class\": \"AUTH\"\n"
                              "}\n");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
@@ -729,8 +723,7 @@ static void test_doctor_check_imessage_corrupt_status_does_not_crash(void) {
     /* Truncated / garbage JSON. Must not crash, must not falsely report fresh. */
     doctor_imsg_write_status("/tmp/hu_doctor_imsg_corrupt", "{ this is not json");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
@@ -746,8 +739,7 @@ static void test_doctor_check_imessage_no_home_reports_error(void) {
     char *old = h ? strdup(h) : NULL;
     unsetenv("HOME");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 0, 600, &items, &count, &cap), HU_OK);

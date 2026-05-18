@@ -149,6 +149,13 @@ hu_imessage_error_class_t hu_imessage_classify_sqlite_error(int rc);
  * "OTHER"). Always non-NULL. */
 const char *hu_imessage_error_class_name(hu_imessage_error_class_t cls);
 
+/* Inverse of hu_imessage_error_class_name. Maps a class name string back to
+ * the enum. Returns HU_IMESSAGE_ERR_OTHER for NULL, empty, or unrecognized
+ * input. Case-sensitive: matches the exact strings returned by
+ * hu_imessage_error_class_name ("NONE", "AUTH", "CANTOPEN", "BUSY",
+ * "OTHER"). */
+hu_imessage_error_class_t hu_imessage_error_class_from_name(const char *name);
+
 #ifndef HU_IMESSAGE_BREAKER_THRESHOLD
 #define HU_IMESSAGE_BREAKER_THRESHOLD 5
 #endif

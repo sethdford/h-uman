@@ -25,8 +25,14 @@
 
 #define HU_DOCTOR_LINE_CATEGORY "doctor_line"
 
-static hu_error_t doctor_push_line(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n,
-                                   size_t *cap, hu_diag_severity_t sev, const char *line) {
+/* Internal: push a diag line with an optional machine-readable error_class
+ * tag. `error_class` may be NULL for items that have no associated class
+ * (most diag lines). When non-NULL it must be a stable, short ASCII token
+ * such as "AUTH" / "BUSY" / "CANTOPEN" / "OTHER" / "NONE" — surfaced via
+ * the `--json` output as the `error_class` field. */
+static hu_error_t doctor_push_line_with_class(hu_allocator_t *alloc, hu_diag_item_t **buf,
+                                              size_t *n, size_t *cap, hu_diag_severity_t sev,
+                                              const char *line, const char *error_class) {
     if (!line)
         return HU_ERR_INVALID_ARGUMENT;
     if (*n >= *cap) {
@@ -42,16 +48,24 @@ static hu_error_t doctor_push_line(hu_allocator_t *alloc, hu_diag_item_t **buf, 
     }
     char *cat = hu_strdup(alloc, HU_DOCTOR_LINE_CATEGORY);
     char *msg = hu_strdup(alloc, line);
-    if (!cat || !msg) {
+    char *ecls = error_class ? hu_strdup(alloc, error_class) : NULL;
+    if (!cat || !msg || (error_class && !ecls)) {
         if (cat)
             alloc->free(alloc->ctx, cat, strlen(cat) + 1);
         if (msg)
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        if (ecls)
+            alloc->free(alloc->ctx, ecls, strlen(ecls) + 1);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    (*buf)[*n] = (hu_diag_item_t){sev, cat, msg};
+    (*buf)[*n] = (hu_diag_item_t){sev, cat, msg, ecls};
     (*n)++;
     return HU_OK;
+}
+
+static hu_error_t doctor_push_line(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n,
+                                   size_t *cap, hu_diag_severity_t sev, const char *line) {
+    return doctor_push_line_with_class(alloc, buf, n, cap, sev, line, NULL);
 }
 
 static bool doctor_config_wants_http(const hu_config_t *cfg) {
@@ -158,6 +172,8 @@ static void doctor_free_diag_items(hu_allocator_t *alloc, hu_diag_item_t *buf, s
             alloc->free(alloc->ctx, (void *)buf[i].category, strlen(buf[i].category) + 1);
         if (buf[i].message)
             alloc->free(alloc->ctx, (void *)buf[i].message, strlen(buf[i].message) + 1);
+        if (buf[i].error_class)
+            alloc->free(alloc->ctx, (void *)buf[i].error_class, strlen(buf[i].error_class) + 1);
     }
     if (buf)
         alloc->free(alloc->ctx, buf, sizeof(hu_diag_item_t) * cap_slots);
@@ -445,6 +461,89 @@ static bool doctor_imsg_status_extract_bool(const char *blob, const char *key, b
     }
     return false;
 }
+
+/* Map an hu_imessage_error_class_t to a user-actionable single-line
+ * diagnostic. Returns a heap buffer the caller frees via alloc->free
+ * (length strlen(*out) + 1), or NULL via *out for HU_IMESSAGE_ERR_NONE.
+ *
+ * This is the SINGLE PLACE the AUTH/BUSY/CANTOPEN/OTHER message text
+ * lives — both the poll-status JSON branch and the live-SQLite
+ * branches route through here so no per-class message is duplicated
+ * (and so AUTH/BUSY cross-contamination cannot regress at one call
+ * site while another is fixed). See US-43.5 design + ACs. */
+static hu_error_t doctor_imsg_diag_from_class(hu_allocator_t *alloc, hu_imessage_error_class_t cls,
+                                              char **out) {
+    if (!out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    char *msg = NULL;
+    switch (cls) {
+    case HU_IMESSAGE_ERR_NONE:
+        /* Healthy poll — no diagnostic to emit. */
+        return HU_OK;
+    case HU_IMESSAGE_ERR_AUTH:
+        /* Full Disk Access denied. MUST NOT mention Messages.app syncing
+         * (AC-43.5.1 adversary). */
+        msg = hu_strdup(alloc, "iMessage poll denied: grant Full Disk Access to human in System "
+                               "Settings > Privacy & Security > Full Disk Access.");
+        break;
+    case HU_IMESSAGE_ERR_BUSY:
+        /* SQLITE_BUSY / SQLITE_LOCKED — typically Messages.app holds the
+         * write lock during iCloud sync. MUST NOT mention "Full Disk Access"
+         * or "permission" (AC-43.5.2 adversary). */
+        msg = hu_strdup(alloc, "iMessage chat.db is busy: Messages.app may be syncing. Retry in a "
+                               "few seconds; persistent failure indicates an iCloud sync issue.");
+        break;
+    case HU_IMESSAGE_ERR_CANTOPEN:
+        /* SQLITE_CANTOPEN — chat.db missing. Path hint is load-bearing
+         * (AC-43.5.3). */
+        msg = hu_strdup(alloc, "iMessage chat.db not found at ~/Library/Messages/chat.db. Open "
+                               "Messages.app at least once to initialize the database.");
+        break;
+    case HU_IMESSAGE_ERR_OTHER:
+    default:
+        /* Use the canonical class name from imessage.h (AC-43.5.5 — no
+         * parallel enum, no parallel name table). */
+        msg = hu_sprintf(alloc, "iMessage poll failed: unclassified SQLite error (class=%s)",
+                         hu_imessage_error_class_name(HU_IMESSAGE_ERR_OTHER));
+        break;
+    }
+    if (!msg)
+        return HU_ERR_OUT_OF_MEMORY;
+    *out = msg;
+    return HU_OK;
+}
+#endif
+
+#if HU_HAS_IMESSAGE
+hu_error_t hu_imessage_diag_from_poll_status(hu_allocator_t *alloc, const char *poll_status_json,
+                                             char **out) {
+    if (!alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    if (!poll_status_json) {
+        /* No status -> no diagnostic to emit; treat as NONE. */
+        return HU_OK;
+    }
+    char cls_name[32];
+    cls_name[0] = '\0';
+    if (!doctor_imsg_status_extract_str(poll_status_json, "\"last_error_class\"", cls_name,
+                                        sizeof(cls_name))) {
+        /* Missing field -> nothing to format; treat as NONE. */
+        return HU_OK;
+    }
+    hu_imessage_error_class_t cls = hu_imessage_error_class_from_name(cls_name);
+    return doctor_imsg_diag_from_class(alloc, cls, out);
+}
+#else
+hu_error_t hu_imessage_diag_from_poll_status(hu_allocator_t *alloc, const char *poll_status_json,
+                                             char **out) {
+    (void)alloc;
+    (void)poll_status_json;
+    if (out)
+        *out = NULL;
+    return HU_OK;
+}
 #endif
 
 hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
@@ -500,31 +599,42 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                         alloc->free(alloc->ctx, msg, strlen(msg) + 1);
                     }
                 } else {
+                    /* Branch B: live sqlite3_prepare_v2/sqlite3_step error.
+                     * Route the per-class hint through the shared formatter so
+                     * AUTH/BUSY/CANTOPEN do not collapse to one hardcoded
+                     * "Full Disk Access" message (US-43.5 ACs 1+2 + prior
+                     * critic finding). */
+                    char *diag = NULL;
+                    (void)doctor_imsg_diag_from_class(alloc, cls, &diag);
                     char *msg = hu_sprintf(
-                        alloc,
-                        "[doctor] iMessage chat.db: sqlite returned %s (rc=%d) — Full Disk "
-                        "Access likely revoked. Re-grant FDA on the daemon binary at "
-                        "$(launchctl print gui/$UID/ai.human.service-loop | grep program)",
-                        hu_imessage_error_class_name(cls), qrc);
+                        alloc, "[doctor] iMessage chat.db: sqlite returned %s (rc=%d) — %s",
+                        hu_imessage_error_class_name(cls), qrc, diag ? diag : "unclassified error");
                     if (msg) {
-                        doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
+                        doctor_push_line_with_class(alloc, items, count, cap, HU_DIAG_ERR, msg,
+                                                    hu_imessage_error_class_name(cls));
                         alloc->free(alloc->ctx, msg, strlen(msg) + 1);
                     }
+                    if (diag)
+                        alloc->free(alloc->ctx, diag, strlen(diag) + 1);
                 }
             } else {
+                /* Branch C: live sqlite3_open_v2 error. Same routing
+                 * discipline as Branch B — no hardcoded per-class hint. */
                 if (probe)
                     sqlite3_close(probe);
                 hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(rc);
+                char *diag = NULL;
+                (void)doctor_imsg_diag_from_class(alloc, cls, &diag);
                 char *msg = hu_sprintf(
                     alloc, "[doctor] iMessage chat.db: sqlite_open failed %s (rc=%d) — %s",
-                    hu_imessage_error_class_name(cls), rc,
-                    cls == HU_IMESSAGE_ERR_AUTH
-                        ? "Full Disk Access denied; grant FDA to the daemon binary"
-                        : "see sqlite docs");
+                    hu_imessage_error_class_name(cls), rc, diag ? diag : "unclassified error");
                 if (msg) {
-                    doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
+                    doctor_push_line_with_class(alloc, items, count, cap, HU_DIAG_ERR, msg,
+                                                hu_imessage_error_class_name(cls));
                     alloc->free(alloc->ctx, msg, strlen(msg) + 1);
                 }
+                if (diag)
+                    alloc->free(alloc->ctx, diag, strlen(diag) + 1);
             }
 #else
             /* No sqlite at build time: weakened POSIX-only check. */
@@ -597,21 +707,30 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                                          sizeof(err_class));
 
     if (tripped) {
-        char *msg =
-            hu_sprintf(alloc,
-                       "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — "
-                       "re-grant Full Disk Access and restart the daemon",
-                       (long long)consecutive, err_class[0] ? err_class : "?");
+        /* Branch A: poll-status JSON read. Replace the old hardcoded
+         * "re-grant Full Disk Access" tail with a class-routed diagnostic
+         * so AUTH/BUSY/CANTOPEN do not all collapse to the FDA message
+         * (US-43.5 ACs 1+2). */
+        char *diag = NULL;
+        (void)hu_imessage_diag_from_poll_status(alloc, blob, &diag);
+        char *msg = hu_sprintf(
+            alloc, "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — %s",
+            (long long)consecutive, err_class[0] ? err_class : "?",
+            diag ? diag : "unclassified error; check the daemon logs");
         if (msg) {
-            doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
+            doctor_push_line_with_class(alloc, items, count, cap, HU_DIAG_ERR, msg,
+                                        err_class[0] ? err_class : NULL);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
         }
+        if (diag)
+            alloc->free(alloc->ctx, diag, strlen(diag) + 1);
     } else if (consecutive > 0) {
         char *msg = hu_sprintf(
             alloc, "[doctor] iMessage circuit breaker: OK (%lld recent failures, last=%s)",
             (long long)consecutive, err_class[0] ? err_class : "?");
         if (msg) {
-            doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
+            doctor_push_line_with_class(alloc, items, count, cap, HU_DIAG_WARN, msg,
+                                        err_class[0] ? err_class : NULL);
             alloc->free(alloc->ctx, msg, strlen(msg) + 1);
         }
     } else {
@@ -678,12 +797,13 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
         it = (hu_diag_item_t){
             HU_DIAG_ERR, hu_strdup(alloc, "config"),
             hu_strdup(alloc, "no default_provider configured "
-                             "(run 'human onboard' or set mlx_local/apple for no API key)")};
+                             "(run 'human onboard' or set mlx_local/apple for no API key)"),
+            NULL};
         buf[n++] = it;
     } else {
         char *msg = hu_sprintf(alloc, "provider: %s", cfg->default_provider);
         if (msg) {
-            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"), msg};
+            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"), msg, NULL};
             buf[n++] = it;
         }
     }
@@ -692,14 +812,14 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
         char *msg = hu_sprintf(alloc, "temperature %.1f is out of range (expected 0.0-2.0)",
                                cfg->default_temperature);
         if (msg) {
-            it = (hu_diag_item_t){HU_DIAG_ERR, hu_strdup(alloc, "config"), msg};
+            it = (hu_diag_item_t){HU_DIAG_ERR, hu_strdup(alloc, "config"), msg, NULL};
             buf[n++] = it;
         }
     } else {
         char *msg =
             hu_sprintf(alloc, "temperature %.1f (valid range 0.0-2.0)", cfg->default_temperature);
         if (msg) {
-            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"), msg};
+            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"), msg, NULL};
             buf[n++] = it;
         }
     }
@@ -707,12 +827,12 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
     uint16_t gw_port = cfg->gateway.port;
     if (gw_port == 0) {
         it = (hu_diag_item_t){HU_DIAG_ERR, hu_strdup(alloc, "config"),
-                              hu_strdup(alloc, "gateway port is 0 (invalid)")};
+                              hu_strdup(alloc, "gateway port is 0 (invalid)"), NULL};
         buf[n++] = it;
     } else {
         char *msg = hu_sprintf(alloc, "gateway port: %u", (unsigned)gw_port);
         if (msg) {
-            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"), msg};
+            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"), msg, NULL};
             buf[n++] = it;
         }
     }
@@ -720,12 +840,12 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
     bool has_ch = hu_channel_catalog_has_any_configured(cfg, false);
     if (has_ch) {
         it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "config"),
-                              hu_strdup(alloc, "at least one channel configured")};
+                              hu_strdup(alloc, "at least one channel configured"), NULL};
         buf[n++] = it;
     } else {
         it = (hu_diag_item_t){
             HU_DIAG_WARN, hu_strdup(alloc, "config"),
-            hu_strdup(alloc, "no channels configured -- run onboard to set one up")};
+            hu_strdup(alloc, "no channels configured -- run onboard to set one up"), NULL};
         buf[n++] = it;
     }
 
@@ -752,7 +872,7 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
                                sizeof(modules) / sizeof(modules[0]));
         if (msg) {
             it = (hu_diag_item_t){active > 0 ? HU_DIAG_OK : HU_DIAG_WARN, hu_strdup(alloc, "agent"),
-                                  msg};
+                                  msg, NULL};
             buf[n++] = it;
         }
     }
@@ -760,7 +880,7 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
         char *msg = hu_sprintf(alloc, "%s: %s", modules[i].name,
                                modules[i].enabled ? "enabled" : "disabled");
         if (msg) {
-            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "intelligence"), msg};
+            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "intelligence"), msg, NULL};
             buf[n++] = it;
         }
     }
