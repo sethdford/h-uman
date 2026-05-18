@@ -4,6 +4,7 @@
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef enum hu_diag_severity {
@@ -51,8 +52,8 @@ hu_error_t hu_doctor_check_skills(hu_allocator_t *alloc, hu_diag_item_t **items,
  * `stale_after_secs` argument controls the WARN threshold for "no successful
  * poll in the last N seconds" (e.g. 600 for 10 minutes). */
 hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
-                                    int64_t stale_after_secs, hu_diag_item_t **items,
-                                    size_t *count, size_t *cap);
+                                    int64_t stale_after_secs, hu_diag_item_t **items, size_t *count,
+                                    size_t *cap);
 
 /* Diagnose the response verifier (W4) by reading the metrics heartbeat file
  * (~/.human/verifier_metrics.json) the daemon flushes every minute. Reports
@@ -69,8 +70,7 @@ hu_error_t hu_doctor_check_verifier(hu_allocator_t *alloc, int64_t now_epoch,
  * Deprecated for new callers: use `hu_scheduler_status_parse_json` from
  * `human/agent/scheduler_status_json.h` so non-doctor modules (e.g. ML CLI) do not
  * depend on this header. This symbol remains as a thin compatibility wrapper. */
-hu_error_t hu_doctor_parse_scheduler_status_json(const char *json,
-                                                 unsigned long long *jobs_pending,
+hu_error_t hu_doctor_parse_scheduler_status_json(const char *json, unsigned long long *jobs_pending,
                                                  unsigned long long *jobs_completed_today,
                                                  long long *battery_pct, char *on_ac_power_text,
                                                  size_t on_ac_power_cap, long long *updated_epoch);
@@ -84,5 +84,37 @@ hu_error_t hu_doctor_check_scheduler(hu_allocator_t *alloc, int64_t now_epoch,
 /* Operational hints for response_guard / empty-reply triage (no secrets). */
 hu_error_t hu_doctor_check_response_pipeline(hu_allocator_t *alloc, hu_diag_item_t **items,
                                              size_t *count, size_t *cap);
+
+/* --- US-43.4: `human doctor --install` install-readiness gate ---
+ *
+ * Pure-predicate design (see ~/.claude/rules/security-predicate-extraction.md).
+ * The decision lives in `hu_doctor_check_install`; the I/O that gathers the
+ * state lives in a separate gatherer at the CLI dispatch site. Tests
+ * synthesize `hu_doctor_install_state_t` directly and never touch the
+ * filesystem (story-mandated test seam). */
+
+typedef enum hu_doctor_install_persona_status {
+    HU_DOCTOR_PERSONA_MISSING,
+    HU_DOCTOR_PERSONA_PRESENT_VALID,
+    HU_DOCTOR_PERSONA_PRESENT_INVALID,
+} hu_doctor_install_persona_status_t;
+
+typedef struct hu_doctor_install_state {
+    const char *binary_path; /* resolvable invocation path; NULL/empty -> ERR */
+    bool config_dir_exists;  /* ~/.human/ stat succeeded as a directory */
+    bool channel_paired;     /* >= 1 channel configured */
+    hu_doctor_install_persona_status_t persona_status;
+} hu_doctor_install_state_t;
+
+/* Append exactly four diagnostic items (binary, config_dir, channel, persona)
+ * to `*items`. No short-circuit on failure: even an all-red state still
+ * emits four items so callers can render every line. Returns HU_OK in all
+ * paths — the failure signal lives in per-item severity (AC-43.4.2 contract).
+ *
+ * On allocation failure, returns HU_ERR_OUT_OF_MEMORY; partial appends may
+ * have landed and remain owned by the caller via the existing
+ * doctor_free_diag_items pattern. */
+hu_error_t hu_doctor_check_install(hu_allocator_t *alloc, const hu_doctor_install_state_t *state,
+                                   hu_diag_item_t **items, size_t *count, size_t *cap);
 
 #endif /* HU_DOCTOR_H */

@@ -354,6 +354,7 @@ void run_context_engine_tests(void);
 void run_exec_env_tests(void);
 int run_channel_monitor_tests(void);
 int run_doctor_fix_tests(void);
+int run_doctor_install_tests(void);
 int run_skill_scaffold_tests(void);
 int run_plugin_discovery_tests(void);
 int run_context_engine_rag_tests(void);
@@ -1041,6 +1042,7 @@ int main(int argc, char **argv) {
     run_exec_env_tests();
     run_channel_monitor_tests();
     run_doctor_fix_tests();
+    run_doctor_install_tests();
     run_skill_scaffold_tests();
     run_plugin_discovery_tests();
     run_context_engine_rag_tests();
