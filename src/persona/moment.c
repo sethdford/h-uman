@@ -419,6 +419,34 @@ static int64_t decide_defer_send(const hu_moment_t *m, const char *last_inbound_
     return next_8am_local_s(now_s, contact_tz);
 }
 
+/* Public agent-bridging wrapper.
+ *
+ * STATUS: stub. The plan assumed accessors like `hu_agent_persona`,
+ * `hu_persona_overlay_for_channel`, `hu_agent_recent_history`,
+ * `hu_contact_tz` would exist; an audit-verify-before-allege pass (per
+ * ~/.claude/rules/audit-verify-before-allege.md) found none of these
+ * symbols in the codebase, and there is no `hu_contact_t` type at all —
+ * only `hu_contact_profile`, `hu_contact_baseline`, etc. The real bridge
+ * to the daemon's reactive path lives in Phase 3 Task 3.2 (agent_turn.c
+ * integration), where the call site has full context to pick the right
+ * existing accessors (`hu_contact_send_recency_last_ts`, history loaded
+ * via `load_conversation_history` in daemon.c, persona from the agent's
+ * already-loaded state, etc.).
+ *
+ * Until Phase 3 lands, callers should use `hu_moment_compose_from_inputs`
+ * directly. That entry point is the actual contract; this wrapper exists
+ * only to satisfy the public header signature. */
+hu_error_t hu_moment_compose(const struct hu_agent_t *agent, const struct hu_contact_t *contact,
+                             const char *channel_id, int64_t now_s, hu_moment_t *out) {
+    (void)agent;
+    (void)contact;
+    (void)channel_id;
+    (void)now_s;
+    if (out == NULL)
+        return HU_ERR_INVALID_ARGUMENT;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
 hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
                                          const struct hu_persona_overlay_t *overlay,
                                          const struct hu_conversation_history_t *history,
@@ -554,6 +582,49 @@ struct hu_conversation_history_t *hu_moment_history_create(size_t count, const i
         }
     }
     return h;
+}
+
+/* ── Downstream pure predicates (Task 1.10) ──────────────────────────────── */
+
+bool hu_moment_should_defer_send(const hu_moment_t *m) {
+    if (m == NULL)
+        return false;
+    return m->defer_send_until_s > 0;
+}
+
+bool hu_moment_should_trigger_followup(const hu_moment_t *m, int64_t silence_threshold_s) {
+    if (m == NULL)
+        return false;
+    if (m->time_since_their_last_msg_s < 0 || m->time_since_their_last_msg_s < silence_threshold_s)
+        return false;
+    if (m->time_since_our_last_msg_s < 0 || m->time_since_our_last_msg_s < silence_threshold_s)
+        return false;
+    if (!m->topic_still_open)
+        return false;
+    if (m->it_is_unusual_hour_for_them)
+        return false;
+    return true;
+}
+
+int hu_moment_brevity_cap_words(const hu_moment_t *m) {
+    if (m == NULL)
+        return 0;
+    switch (m->suggested_brevity) {
+    case HU_MOMENT_BREVITY_TERSE:
+        return 8;
+    case HU_MOMENT_BREVITY_SHORT:
+        return 25;
+    case HU_MOMENT_BREVITY_MEDIUM:
+        return 60;
+    case HU_MOMENT_BREVITY_LONG:
+        return 0; /* 0 = no cap */
+    case HU_MOMENT_BREVITY_MIRROR:
+        /* Mirror the contact's average length with 30% slack. */
+        if (m->their_avg_length_words > 0)
+            return (m->their_avg_length_words * 13 + 5) / 10;
+        return 25; /* fallback when no inbound history */
+    }
+    return 25;
 }
 
 void hu_moment_history_free(struct hu_conversation_history_t *h) {

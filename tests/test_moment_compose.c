@@ -480,6 +480,113 @@ static void compose_records_history_source_flag_when_history_nonempty(void) {
     hu_moment_history_free(h);
 }
 
+/* ---- Public wrapper tests (Task 1.9) ---- */
+
+/* The wrapper is intentionally stubbed until Phase 3 Task 3.2 wires it to
+ * the real agent/contact accessors. Pinning the stub behavior here ensures
+ * the symbol links and that Phase 3 will replace this test with a real one. */
+static void compose_public_wrapper_returns_not_supported_until_phase3(void) {
+    hu_moment_t m = {0};
+    hu_error_t err = hu_moment_compose(NULL, NULL, "imessage", TS_8AM_UTC, &m);
+    HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
+}
+
+static void compose_public_wrapper_rejects_null_out(void) {
+    hu_error_t err = hu_moment_compose(NULL, NULL, "imessage", TS_8AM_UTC, NULL);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+}
+
+/* ---- Downstream predicate tests (Task 1.10) ---- */
+
+static void should_defer_send_false_when_zero(void) {
+    hu_moment_t m = {0};
+    HU_ASSERT_FALSE(hu_moment_should_defer_send(&m));
+}
+
+static void should_defer_send_true_when_positive(void) {
+    hu_moment_t m = {0};
+    m.defer_send_until_s = 1779609600;
+    HU_ASSERT_TRUE(hu_moment_should_defer_send(&m));
+}
+
+static void should_defer_send_false_when_null(void) {
+    HU_ASSERT_FALSE(hu_moment_should_defer_send(NULL));
+}
+
+static void should_trigger_followup_true_when_silence_long_topic_open(void) {
+    hu_moment_t m = {0};
+    m.time_since_their_last_msg_s = 21600; /* 6h */
+    m.time_since_our_last_msg_s = 21600;
+    m.topic_still_open = true;
+    m.it_is_unusual_hour_for_them = false;
+    HU_ASSERT_TRUE(hu_moment_should_trigger_followup(&m, 6 * 3600));
+}
+
+static void should_trigger_followup_false_when_silence_too_short(void) {
+    hu_moment_t m = {0};
+    m.time_since_their_last_msg_s = 60;
+    m.time_since_our_last_msg_s = 60;
+    m.topic_still_open = true;
+    HU_ASSERT_FALSE(hu_moment_should_trigger_followup(&m, 6 * 3600));
+}
+
+static void should_trigger_followup_false_when_topic_closed(void) {
+    hu_moment_t m = {0};
+    m.time_since_their_last_msg_s = 21600;
+    m.time_since_our_last_msg_s = 21600;
+    m.topic_still_open = false;
+    HU_ASSERT_FALSE(hu_moment_should_trigger_followup(&m, 6 * 3600));
+}
+
+static void should_trigger_followup_false_when_unusual_hour(void) {
+    hu_moment_t m = {0};
+    m.time_since_their_last_msg_s = 21600;
+    m.time_since_our_last_msg_s = 21600;
+    m.topic_still_open = true;
+    m.it_is_unusual_hour_for_them = true;
+    HU_ASSERT_FALSE(hu_moment_should_trigger_followup(&m, 6 * 3600));
+}
+
+static void should_trigger_followup_false_when_null(void) {
+    HU_ASSERT_FALSE(hu_moment_should_trigger_followup(NULL, 3600));
+}
+
+static void brevity_cap_words_terse_is_8(void) {
+    hu_moment_t m = {0};
+    m.suggested_brevity = HU_MOMENT_BREVITY_TERSE;
+    HU_ASSERT_EQ(hu_moment_brevity_cap_words(&m), 8);
+}
+
+static void brevity_cap_words_short_is_25(void) {
+    hu_moment_t m = {0};
+    m.suggested_brevity = HU_MOMENT_BREVITY_SHORT;
+    HU_ASSERT_EQ(hu_moment_brevity_cap_words(&m), 25);
+}
+
+static void brevity_cap_words_medium_is_60(void) {
+    hu_moment_t m = {0};
+    m.suggested_brevity = HU_MOMENT_BREVITY_MEDIUM;
+    HU_ASSERT_EQ(hu_moment_brevity_cap_words(&m), 60);
+}
+
+static void brevity_cap_words_long_is_no_cap(void) {
+    hu_moment_t m = {0};
+    m.suggested_brevity = HU_MOMENT_BREVITY_LONG;
+    HU_ASSERT_EQ(hu_moment_brevity_cap_words(&m), 0);
+}
+
+static void brevity_cap_words_mirror_uses_their_avg_with_slack(void) {
+    hu_moment_t m = {0};
+    m.suggested_brevity = HU_MOMENT_BREVITY_MIRROR;
+    m.their_avg_length_words = 10;
+    /* 10 * 1.3 = 13. (10*13+5)/10 = 13 */
+    HU_ASSERT_EQ(hu_moment_brevity_cap_words(&m), 13);
+}
+
+static void brevity_cap_words_null_returns_zero(void) {
+    HU_ASSERT_EQ(hu_moment_brevity_cap_words(NULL), 0);
+}
+
 void run_moment_compose_tests(void) {
     HU_TEST_SUITE("moment_compose");
     HU_RUN_TEST(compose_from_inputs_rejects_null_out);
@@ -519,4 +626,20 @@ void run_moment_compose_tests(void) {
     HU_RUN_TEST(compose_records_persona_source_flag_when_persona_provided);
     HU_RUN_TEST(compose_records_overlay_source_flag_when_overlay_provided);
     HU_RUN_TEST(compose_records_history_source_flag_when_history_nonempty);
+    HU_RUN_TEST(compose_public_wrapper_returns_not_supported_until_phase3);
+    HU_RUN_TEST(compose_public_wrapper_rejects_null_out);
+    HU_RUN_TEST(should_defer_send_false_when_zero);
+    HU_RUN_TEST(should_defer_send_true_when_positive);
+    HU_RUN_TEST(should_defer_send_false_when_null);
+    HU_RUN_TEST(should_trigger_followup_true_when_silence_long_topic_open);
+    HU_RUN_TEST(should_trigger_followup_false_when_silence_too_short);
+    HU_RUN_TEST(should_trigger_followup_false_when_topic_closed);
+    HU_RUN_TEST(should_trigger_followup_false_when_unusual_hour);
+    HU_RUN_TEST(should_trigger_followup_false_when_null);
+    HU_RUN_TEST(brevity_cap_words_terse_is_8);
+    HU_RUN_TEST(brevity_cap_words_short_is_25);
+    HU_RUN_TEST(brevity_cap_words_medium_is_60);
+    HU_RUN_TEST(brevity_cap_words_long_is_no_cap);
+    HU_RUN_TEST(brevity_cap_words_mirror_uses_their_avg_with_slack);
+    HU_RUN_TEST(brevity_cap_words_null_returns_zero);
 }
