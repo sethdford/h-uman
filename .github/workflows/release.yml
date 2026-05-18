@@ -188,3 +188,139 @@ jobs:
         if: always()
         with:
           sarif_file: trivy-results.sarif
+
+  # ---------------------------------------------------------------------------
+  # US-43.1: Homebrew tap auto-update.
+  #
+  # Concurrency-guarded so two release runs cannot race the tap repo.
+  # `cancel-in-progress: false` queues the second run rather than killing it.
+  #
+  # All `${{ }}` expressions bind to `env:` first; `run:` blocks only
+  # reference plain `$VAR`. This is the workflow-injection-safety contract
+  # documented in sprints/sprint-43/designs/US-43.1.md.
+  # ---------------------------------------------------------------------------
+  update-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: tap-update
+      cancel-in-progress: false
+    env:
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+      TAG_NAME: ${{ github.ref_name }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      GITHUB_ACTOR_NAME: ${{ github.actor }}
+      REPO_FULL_NAME: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            Formula
+            scripts
+
+      - name: Skip if tap repo not configured
+        id: gate
+        env:
+          GATE_TAP_REPO: ${{ env.TAP_REPO }}
+        run: |
+          if [ -z "${GATE_TAP_REPO:-}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "HOMEBREW_TAP_REPO not set; skipping tap update."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download sha256sums from release
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DL_TAG: ${{ env.TAG_NAME }}
+          DL_REPO: ${{ env.REPO_FULL_NAME }}
+        run: |
+          gh release download "$DL_TAG" \
+            --repo "$DL_REPO" \
+            --pattern 'sha256sums.txt' \
+            --dir .
+
+      - name: Compute version from tag
+        if: steps.gate.outputs.configured == 'true'
+        id: ver
+        env:
+          IN_TAG: ${{ env.TAG_NAME }}
+        run: |
+          VERSION="${IN_TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update formula in source tree
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          IN_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          chmod +x scripts/update-formula-hashes.sh
+          scripts/update-formula-hashes.sh \
+            --formula Formula/human.rb \
+            --version "$IN_VERSION" \
+            --sha256sums sha256sums.txt
+
+      - name: Clone tap and apply update
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          PUSH_TAP_REPO: ${{ env.TAP_REPO }}
+          PUSH_TAP_TOKEN: ${{ env.TAP_TOKEN }}
+          PUSH_TAG: ${{ env.TAG_NAME }}
+          PUSH_VERSION: ${{ steps.ver.outputs.version }}
+          PUSH_ACTOR: ${{ env.GITHUB_ACTOR_NAME }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${PUSH_TAP_TOKEN}@github.com/${PUSH_TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+          cp Formula/human.rb tap/Formula/human.rb
+          cd tap
+          git config user.name "h-uman release bot"
+          git config user.email "release-bot@h-uman.ai"
+          if git diff --quiet -- Formula/human.rb; then
+            echo "tap formula already at $PUSH_VERSION; nothing to commit"
+            exit 0
+          fi
+          git add Formula/human.rb
+          git commit -m "human ${PUSH_VERSION} (tag ${PUSH_TAG}, pushed by ${PUSH_ACTOR})"
+          git push origin HEAD
+
+  # ---------------------------------------------------------------------------
+  # US-43.1: Homebrew install smoke test.
+  # Pinned to macos-15 so a `macos-latest` flip cannot silently change the env.
+  # ---------------------------------------------------------------------------
+  brew-install-smoke:
+    needs: update-tap
+    runs-on: macos-15
+    env:
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+      TAG_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            scripts
+
+      - name: Skip if tap repo not configured
+        id: gate
+        env:
+          GATE_TAP_REPO: ${{ env.TAP_REPO }}
+        run: |
+          if [ -z "${GATE_TAP_REPO:-}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "HOMEBREW_TAP_REPO not set; skipping smoke."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: brew install --build-from-source smoke
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          IN_TAP_REPO: ${{ env.TAP_REPO }}
+          IN_TAG: ${{ env.TAG_NAME }}
+        run: |
+          chmod +x scripts/check-formula-install.sh
+          scripts/check-formula-install.sh \
+            --tap "$IN_TAP_REPO" \
+            --tag "$IN_TAG"

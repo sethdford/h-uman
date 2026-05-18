@@ -25,6 +25,10 @@ class Human < Formula
     end
   end
 
+  # TODO(US-42.4): bottle do … end will be inserted here once signing/notarization
+  # lands in sprint-42. Until then, `brew install --build-from-source` is the smoke
+  # path; pre-built `.bin` artifacts above cover binary installs without bottles.
+
   # Build from source (HEAD or when pre-built binary unavailable)
   head "https://github.com/sethdford/h-uman.git", branch: "main"
 
