@@ -273,7 +273,8 @@ export class ScChatView extends GatewayAwareLitElement {
         }
       }
       @container (max-width: 30rem) /* cq-sm */ {
-        .status-left span:not(.status-title) {
+        /* Keep .status-meta visible for connection label (e2e + a11y). */
+        .status-left span:not(.status-title):not(.status-meta) {
           display: none;
         }
         .status-bar {
@@ -406,6 +407,7 @@ export class ScChatView extends GatewayAwareLitElement {
   override firstUpdated(): void {
     const gw = this.gateway;
     if (gw) {
+      this.connectionStatus = gw.status;
       gw.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
       gw.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
     }

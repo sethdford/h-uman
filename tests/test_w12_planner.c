@@ -1055,6 +1055,50 @@ static void test_w12_multi_hop_returns_records_or_empty(void) {
     close_facade_(g, m);
 }
 
+/* LoCoMo-style multi-hop subset gate (execution plan W12 exit): seeded graph,
+ * five fixed relationship queries; require >= 80% to return records. */
+static void test_w12_locomo_multihop_subset_gate(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t alice = add_entity(g, "u1", "Alice", HU_ENTITY_PERSON);
+    int64_t bob   = add_entity(g, "u1", "Bob", HU_ENTITY_PERSON);
+    int64_t acme  = add_entity(g, "u1", "Acme", HU_ENTITY_ORGANIZATION);
+    int64_t fund  = add_entity(g, "u1", "Series A", HU_ENTITY_TOPIC);
+    add_relation(g, "u1", alice, acme, HU_REL_WORKS_AT);
+    add_relation(g, "u1", bob, acme, HU_REL_WORKS_AT);
+    add_relation(g, "u1", alice, bob, HU_REL_KNOWS);
+    add_relation(g, "u1", alice, fund, HU_REL_KNOWS);
+
+    static const char *goals[] = {
+        "who does Alice work with at Acme?",
+        "when did Alice and Bob last collaborate?",
+        "what funding did Alice mention?",
+        "who is connected to Bob at Acme?",
+        "relationship between Alice and Series A",
+    };
+    int passed = 0;
+    for (size_t gi = 0; gi < sizeof(goals) / sizeof(goals[0]); gi++) {
+        hu_world_model_t *wm = load_wm(m, "u1");
+        hu_planner_t p;
+        HU_ASSERT_EQ(hu_planner_heuristic(&p), HU_OK);
+        hu_retrieval_plan_t plan;
+        HU_ASSERT_EQ(hu_planner_plan(&p, goals[gi], strlen(goals[gi]), wm, &plan), HU_OK);
+        hu_memory_record_t *out = NULL;
+        size_t n = 0;
+        if (hu_planner_execute(m, NULL, &plan, A(), &out, &n) == HU_OK && n > 0)
+            passed++;
+        if (out)
+            hu_planner_records_free(A(), out, n);
+        hu_planner_close(&p);
+        hu_world_model_free(A(), wm);
+    }
+    HU_ASSERT_GE(passed, 4); /* 80% of 5 queries */
+
+    close_facade_(g, m);
+}
+
 static void test_w12_multi_hop_null_args_rejected(void) {
     hu_memory_record_t *out = NULL;
     size_t n = 0;
@@ -1117,6 +1161,7 @@ void run_w12_planner_tests(void) {
     HU_RUN_TEST(test_w12_pagerank_invalid_args_rejected);
     HU_RUN_TEST(test_w12_pagerank_handles_empty_graph);
     HU_RUN_TEST(test_w12_pagerank_default_damping_when_out_of_range);
+    HU_RUN_TEST(test_w12_locomo_multihop_subset_gate);
     HU_RUN_TEST(test_w12_multi_hop_returns_records_or_empty);
     HU_RUN_TEST(test_w12_multi_hop_null_args_rejected);
 #endif
