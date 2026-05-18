@@ -2,56 +2,113 @@ import Foundation
 import HumanProtocol
 
 /// WebSocket client for the Human gateway control protocol.
-/// Uses URLSessionWebSocketTask with reconnection support.
-public final class HumanConnection: @unchecked Sendable {
-    public enum ConnectionState: Equatable {
+///
+/// Uses `URLSessionWebSocketTask` with automatic reconnection. All mutable
+/// state is serialized through a single private `DispatchQueue` (with the
+/// pending-request map additionally guarded by an `NSLock`), so the class
+/// behaves as `Sendable` despite holding stored properties — the mutable
+/// fields are marked `nonisolated(unsafe)` and their access is restricted
+/// to the queue-guarded code paths in this file. This replaces a prior
+/// (now-removed) `unchecked` Sendable shim; the discipline is now
+/// structural, not assertional.
+@available(macOS 14.0, iOS 17.0, *)
+public final class HumanConnection: Sendable {
+    /// State of the underlying WebSocket task.
+    public enum ConnectionState: Equatable, Sendable {
+        /// Not connected and no reconnection in flight.
         case disconnected
+        /// Connection attempt in flight (handshake not yet complete).
         case connecting
+        /// Connected: `hello-ok` received, RPCs may be issued.
         case connected
     }
 
-    public private(set) var state: ConnectionState = .disconnected {
-        didSet { stateHandler?(state) }
+    /// Current connection state. Reads are not synchronized; writes happen
+    /// on the private serial queue. Single-word loads are atomic on the
+    /// platforms we target.
+    public var state: ConnectionState {
+        get { _state }
     }
 
-    /// Called when connection state changes.
-    public var stateHandler: ((ConnectionState) -> Void)?
+    private nonisolated(unsafe) var _state: ConnectionState = .disconnected {
+        didSet { stateHandler?(_state) }
+    }
 
-    /// Called when an event frame is received.
-    public var eventHandler: ((String, [String: AnyCodable]?) -> Void)?
+    /// Called whenever `state` changes. The handler is invoked on the
+    /// private serial queue; hop to `@MainActor` inside the handler if
+    /// you need to update UI.
+    public var stateHandler: (@Sendable (ConnectionState) -> Void)? {
+        get { Self.configQueue.sync { _stateHandler } }
+        set { Self.configQueue.sync { _stateHandler = newValue } }
+    }
 
-    private var task: URLSessionWebSocketTask?
-    private var url: URL
+    private nonisolated(unsafe) var _stateHandler: (@Sendable (ConnectionState) -> Void)?
+
+    /// Called when an event frame is received from the gateway. Invoked
+    /// on the private serial queue.
+    public var eventHandler: (@Sendable (String, [String: AnyCodable]?) -> Void)? {
+        get { Self.configQueue.sync { _eventHandler } }
+        set { Self.configQueue.sync { _eventHandler = newValue } }
+    }
+
+    private nonisolated(unsafe) var _eventHandler: (@Sendable (String, [String: AnyCodable]?) -> Void)?
+
+    private nonisolated(unsafe) var task: URLSessionWebSocketTask?
+    private nonisolated(unsafe) var url: URL
     private let session = URLSession(configuration: .default)
     private let queue = DispatchQueue(label: "com.human.connection")
-    private var reconnectWorkItem: DispatchWorkItem?
-    private var pendingRequests: [String: CheckedContinuation<ControlResponse, Error>] = [:]
-    private var requestTimeouts: [String: DispatchWorkItem] = [:]
+    private nonisolated(unsafe) var reconnectWorkItem: DispatchWorkItem?
+    private nonisolated(unsafe) var pendingRequests: [String: CheckedContinuation<ControlResponse, Error>] = [:]
+    private nonisolated(unsafe) var requestTimeouts: [String: DispatchWorkItem] = [:]
     private let pendingLock = NSLock()
-    private var reconnectAttempt: UInt = 0
-    private var pingWorkItem: DispatchWorkItem?
-    /// RPC wait timeout (matches web client default).
-    public static var requestTimeoutSeconds: TimeInterval = 10
+    private nonisolated(unsafe) var reconnectAttempt: UInt = 0
+    private nonisolated(unsafe) var pingWorkItem: DispatchWorkItem?
+
+    // MARK: - RPC wait timeout (queue-guarded global config)
+
+    /// Underlying storage for `requestTimeoutSeconds`. Access goes through
+    /// the static `configQueue` to provide write-write and write-read
+    /// ordering across threads. `nonisolated(unsafe)` is justified by the
+    /// queue discipline that follows below.
+    private nonisolated(unsafe) static var _requestTimeoutSeconds: TimeInterval = 10
+
+    /// Process-wide serial queue guarding the mutable HumanConnection
+    /// configuration (currently `requestTimeoutSeconds`). Exposed at file
+    /// scope so the accessor pair below is the only path to the storage.
+    fileprivate static let configQueue = DispatchQueue(label: "com.human.connection.config")
+
+    /// RPC wait timeout in seconds (matches the web client default).
+    /// Reads and writes are serialized through `configQueue` so callers
+    /// on different threads observe consistent values.
+    public static var requestTimeoutSeconds: TimeInterval {
+        get { configQueue.sync { _requestTimeoutSeconds } }
+        set { configQueue.sync { _requestTimeoutSeconds = newValue } }
+    }
+
     private static let maxReconnectDelay: TimeInterval = 30
     private static let baseReconnectDelay: TimeInterval = 3
 
+    /// Create a connection bound to the gateway WebSocket `url`.
     public init(url: URL) {
         self.url = url
     }
 
+    /// Create a connection from a URL string. Falls back to
+    /// `wss://localhost:3000/ws` when the input does not parse.
     public convenience init(urlString: String) {
         let url = URL(string: urlString) ?? URL(string: "wss://localhost:3000/ws")!
         self.init(url: url)
     }
 
-    /// Connect to the gateway WebSocket endpoint.
+    /// Connect to the gateway WebSocket endpoint. Returns immediately;
+    /// `stateHandler` fires when the state advances to `.connected`.
     public func connect() {
         queue.async { [weak self] in
             self?._connect()
         }
     }
 
-    /// Disconnect and cancel reconnection.
+    /// Disconnect and cancel any pending reconnect.
     public func disconnect() {
         queue.async { [weak self] in
             self?.cancelPingSchedule()
@@ -61,13 +118,13 @@ public final class HumanConnection: @unchecked Sendable {
             self?.task = nil
             self?.failPendingRequests()
             self?.reconnectAttempt = 0
-            self?.state = .disconnected
+            self?._state = .disconnected
         }
     }
 
-    /// Send a raw JSON message without waiting for response.
+    /// Send a raw JSON message without waiting for a response.
     public func sendMessage(_ json: String) {
-        guard state == .connected else { return }
+        guard _state == .connected else { return }
         task?.send(.string(json)) { _ in }
     }
 
@@ -94,9 +151,12 @@ public final class HumanConnection: @unchecked Sendable {
         sendMessage(text)
     }
 
-    /// Send an RPC request and wait for the response.
+    /// Send an RPC request and `await` the response. Throws
+    /// `HumanConnectionError.notConnected` if the connection is not in
+    /// the `.connected` state at issue time, `.timeout` if no response
+    /// arrives within `requestTimeoutSeconds`.
     public func request(method: String, params: [String: AnyCodable]? = nil) async throws -> ControlResponse {
-        guard state == .connected else {
+        guard _state == .connected else {
             throw HumanConnectionError.notConnected
         }
         let id = "req-\(UUID().uuidString)"
@@ -140,8 +200,8 @@ public final class HumanConnection: @unchecked Sendable {
     // MARK: - Private
 
     private func _connect() {
-        if state == .connecting, task != nil { return }
-        state = .connecting
+        if _state == .connecting, task != nil { return }
+        _state = .connecting
         task?.cancel(with: .goingAway, reason: nil)
         var request = URLRequest(url: url)
         request.setValue("websocket", forHTTPHeaderField: "Upgrade")
@@ -179,7 +239,7 @@ public final class HumanConnection: @unchecked Sendable {
                 }
                 self.receive()
             case .failure:
-                DispatchQueue.main.async { self.state = .disconnected }
+                self.queue.async { self._state = .disconnected }
                 self.failPendingRequests()
                 self.scheduleReconnect()
             }
@@ -195,7 +255,7 @@ public final class HumanConnection: @unchecked Sendable {
         case "hello-ok":
             queue.async { [weak self] in
                 self?.reconnectAttempt = 0
-                self?.state = .connected
+                self?._state = .connected
                 self?.schedulePing()
             }
         case "res":
@@ -203,7 +263,7 @@ public final class HumanConnection: @unchecked Sendable {
                payload["type"] as? String == "hello-ok" {
                 queue.async { [weak self] in
                     self?.reconnectAttempt = 0
-                    self?.state = .connected
+                    self?._state = .connected
                     self?.schedulePing()
                 }
             }
@@ -228,7 +288,7 @@ public final class HumanConnection: @unchecked Sendable {
                 let payload = (json["payload"] as? [String: Any]).map { dict in
                     dict.mapValues { AnyCodable($0) }
                 }
-                eventHandler?(event, payload)
+                _eventHandler?(event, payload)
             }
         default:
             break
@@ -261,7 +321,7 @@ public final class HumanConnection: @unchecked Sendable {
         cancelPingSchedule()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            if self.state == .connected {
+            if self._state == .connected {
                 self.task?.sendPing { _ in }
             }
             self.schedulePing()
@@ -284,9 +344,16 @@ public final class HumanConnection: @unchecked Sendable {
     }
 }
 
-public enum HumanConnectionError: Error {
+/// Errors thrown from `HumanConnection.request(method:params:)` and
+/// related call sites.
+@available(macOS 14.0, iOS 17.0, *)
+public enum HumanConnectionError: Error, Sendable {
+    /// The connection is not in the `.connected` state.
     case notConnected
+    /// The encoded request payload could not be converted to UTF-8 text.
     case encodingFailed
+    /// The connection dropped while requests were outstanding.
     case disconnected
+    /// The RPC did not receive a response within `requestTimeoutSeconds`.
     case timeout
 }
