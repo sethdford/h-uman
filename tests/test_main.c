@@ -131,6 +131,9 @@ void run_style_learner_tests(void);
 void run_temporal_tests(void);
 void run_inner_world_tests(void);
 void run_persona_eval_tests(void);
+/* Moment Context Decision Layer (Task 0.2) — scaffolding; tests landed in Phase 1/2. */
+void run_moment_compose_tests(void);
+void run_moment_render_tests(void);
 void run_behavior_policy_tests(void);
 void run_behavior_dialog_act_tests(void);
 void run_behavior_affect_tests(void);
@@ -870,6 +873,9 @@ int main(int argc, char **argv) {
     run_temporal_tests();
     run_inner_world_tests();
     run_persona_eval_tests();
+    /* Moment Context Decision Layer (Task 0.2) — empty suites until Phase 1/2. */
+    run_moment_compose_tests();
+    run_moment_render_tests();
     run_behavior_policy_tests();
     run_behavior_dialog_act_tests();
     run_behavior_affect_tests();

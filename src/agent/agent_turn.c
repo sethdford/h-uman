@@ -6,6 +6,7 @@
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
+#include "human/moment.h"
 #ifdef HU_ENABLE_MOLORA
 #include "human/ml/molora.h"
 #include "human/provider.h"
@@ -3543,6 +3544,38 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
 
+        /* Moment-context decision layer — bridges existing timing / persona /
+         * tone signals into a per-turn fragment for the LLM. Phase 3 minimal
+         * wiring: pass persona + per-channel overlay; history loader
+         * integration is a follow-up (today we pass NULL → predicate skips
+         * thread/style/topic fields gracefully). Future: load 25-turn history
+         * via the same path the daemon uses (load_conversation_history) and
+         * the contact_send_recency timestamps for full timing fidelity. */
+        char moment_prompt_buf[512];
+        const char *moment_ctx = NULL;
+        size_t moment_ctx_len = 0;
+        if (agent->persona) {
+            const struct hu_persona_overlay_t *moment_overlay = NULL;
+            if (agent->active_channel && agent->active_channel_len > 0) {
+                moment_overlay = (const struct hu_persona_overlay_t *)hu_persona_find_overlay(
+                    agent->persona, agent->active_channel, agent->active_channel_len);
+            }
+            hu_moment_t moment;
+            hu_error_t mc_err = hu_moment_compose_from_inputs(
+                (const struct hu_persona_t *)agent->persona, moment_overlay,
+                /* history */ NULL, /* last_their_ts */ -1, /* last_our_ts */ -1,
+                /* contact_tz */ NULL, (int64_t)time(NULL), &moment);
+            if (mc_err == HU_OK) {
+                size_t mr_n = 0;
+                hu_error_t mr_err = hu_moment_render_prompt(&moment, moment_prompt_buf,
+                                                            sizeof(moment_prompt_buf), &mr_n);
+                if (mr_err == HU_OK && mr_n > 0) {
+                    moment_ctx = moment_prompt_buf;
+                    moment_ctx_len = mr_n;
+                }
+            }
+        }
+
         /* W9 world-model snapshot (FIX 12). Cached for 60s by hu_world_model_load
          * so per-turn cost is dominated by the SQL fetch on first miss. We only
          * inject when the bridge returns a non-empty body (no signal -> NULL ->
@@ -3729,6 +3762,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .conv_goals_context_len = conv_goals_ctx_len,
             .personal_model_context = personal_model_ctx,
             .personal_model_context_len = personal_model_ctx_len,
+            .moment_context = moment_ctx,
+            .moment_context_len = moment_ctx_len,
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
         };

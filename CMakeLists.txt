@@ -1210,6 +1210,11 @@ list(APPEND HU_CORE_SOURCES
     src/persona/creative_voice.c
     src/persona/genuine_boundaries.c
     src/tools/persona.c
+    # Moment Context Decision Layer (Task 0.2) — unconditional per the
+    # plan's spec; gate-symmetry rule requires source+test be registered
+    # together with no HU_ENABLE_* wrap.
+    src/persona/moment.c
+    src/persona/moment_render.c
     # US-8.2 — Persona Encryption-at-Rest. Hard-requires libsodium via
     # the TU's `#error if !defined(HU_HAS_LIBSODIUM)`. The original
     # registration was unconditional with a "fail loudly" justification,
@@ -3228,6 +3233,9 @@ if(HU_ENABLE_FEEDS)
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
 list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
+# Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
+# and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
+list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
 list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
