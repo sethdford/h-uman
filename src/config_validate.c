@@ -59,6 +59,15 @@ static const char *const hu_config_top_keys[] = {
     "temp_dir",
     "behavior",
     "mlx_local",
+    /* 2026-05-18: reaction_collection parser exists in src/config_parse.c
+     * (parse_reaction_collection, called at L1302) but was missing from this
+     * whitelist, causing the validator to log "unknown key: 'reaction_collection'
+     * (ignored)" on every daemon startup even though the key WAS being parsed
+     * correctly. The misleading log was the smoking gun for the
+     * `.claude/rules/silent-config-gated-subsystems.md` audit that surfaced
+     * the bigger issue (whole subsystem disabled by missing config block). */
+    "reaction_collection",
+    "personalization",
 };
 static const size_t hu_config_top_keys_len =
     sizeof(hu_config_top_keys) / sizeof(hu_config_top_keys[0]);
