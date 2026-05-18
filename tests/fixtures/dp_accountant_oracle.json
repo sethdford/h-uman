@@ -1,0 +1,53 @@
+[
+  {
+    "name": "opacus_default",
+    "noise_multiplier": 1.1,
+    "sampling_rate": 0.01,
+    "steps": 1000,
+    "delta": 1e-5,
+    "expected_eps": 2.39,
+    "argmin_alpha": 8,
+    "unclipped": false,
+    "note": "MTZ-2019 closed form on alpha grid {2,4,8,16,32,64,128,256}; CKS-2020 conversion. Sparse grid is an upper bound on the dense-Opacus grid; using this value for budget enforcement is conservative."
+  },
+  {
+    "name": "tight_budget",
+    "noise_multiplier": 2.0,
+    "sampling_rate": 0.005,
+    "steps": 5000,
+    "delta": 1e-6,
+    "expected_eps": 1.12,
+    "argmin_alpha": 32,
+    "unclipped": false
+  },
+  {
+    "name": "loose_budget",
+    "noise_multiplier": 0.7,
+    "sampling_rate": 0.05,
+    "steps": 200,
+    "delta": 1e-4,
+    "expected_eps": 12.53,
+    "argmin_alpha": 2,
+    "unclipped": false
+  },
+  {
+    "name": "large_batch_low_steps",
+    "noise_multiplier": 1.5,
+    "sampling_rate": 0.1,
+    "steps": 100,
+    "delta": 1e-5,
+    "expected_eps": 5.27,
+    "argmin_alpha": 4,
+    "unclipped": false
+  },
+  {
+    "name": "adversarial_unclipped",
+    "noise_multiplier": 1.1,
+    "sampling_rate": 0.01,
+    "steps": 1000,
+    "delta": 1e-5,
+    "expected_eps": -1,
+    "unclipped": true,
+    "note": "Sentinel: caller passes clip_norm <= 0 or skips per-sample clipping. hu_dp_sgd_step() MUST reject with HU_ERR_INVALID_ARGUMENT — pinned by dp_sgd_unclipped_input_rejected."
+  }
+]

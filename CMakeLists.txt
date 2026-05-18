@@ -1421,6 +1421,7 @@ endif()
 # Gated independently from HU_ENABLE_ML so tests can opt-in even on minimal builds.
 if(HU_ENABLE_LEARNING)
     list(APPEND HU_CORE_SOURCES
+        src/ml/dp_sgd.c
         src/ml/learner.c
         src/ml/learner_cpu.c
         src/ml/learner_mlx.c
@@ -3212,6 +3213,7 @@ endif()
 # W13 learning loop — only when HU_ENABLE_LEARNING is ON (requires ML).
 if(HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_SOURCES
+        tests/test_dp_sgd.c
         tests/test_w13_learner.c
         tests/test_w14_runners.c
         tests/test_learner_bridge.c
