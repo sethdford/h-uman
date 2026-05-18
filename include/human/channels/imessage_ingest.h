@@ -1,0 +1,140 @@
+/* include/human/channels/imessage_ingest.h
+ *
+ * iMessage → personal-model ingest (Phase 1 of docs/plans/2026-05-18-imessage-sota.md).
+ *
+ * Phase 1a (this header): pure synthesis primitives that render an
+ * iMessage event into a canonical English sentence. The sentence is the
+ * input to hu_personal_model_ingest() — see Phase 1b for the wiring.
+ *
+ * The synthesis layer is testable in isolation (no chat.db, no provider
+ * calls, no personal-model dependency). That's the whole point of
+ * splitting it out: pin the wording before the wiring. */
+
+#ifndef HU_CHANNELS_IMESSAGE_INGEST_H
+#define HU_CHANNELS_IMESSAGE_INGEST_H
+
+#include "human/channels/reaction_event.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Balloon (iMessage app-message) kinds we synthesize. Mapped from the
+ * balloon_bundle_id column in chat.db. UNKNOWN means "we recognize that
+ * this is a balloon but don't ingest type-specific facts" — synthesis
+ * falls back to a generic label. */
+typedef enum {
+    HU_IMESSAGE_BALLOON_UNKNOWN = 0,
+    HU_IMESSAGE_BALLOON_URL_PREVIEW,
+    HU_IMESSAGE_BALLOON_APPLE_PAY,
+    HU_IMESSAGE_BALLOON_PLACEMARK,
+    HU_IMESSAGE_BALLOON_MUSIC,
+    HU_IMESSAGE_BALLOON_POLL,
+    HU_IMESSAGE_BALLOON_AUDIO_TRANSCRIPT,
+} hu_imessage_balloon_kind_t;
+
+/* Map a balloon_bundle_id (from chat.db `message.balloon_bundle_id`) to
+ * our enum. Returns HU_IMESSAGE_BALLOON_UNKNOWN for any bundle ID we
+ * don't currently decode. NULL/empty input → UNKNOWN. */
+hu_imessage_balloon_kind_t hu_imessage_balloon_kind_from_bundle_id(const char *bundle_id);
+
+/* Render a tapback as: "<sender> reacted with <symbol> to <target>".
+ *
+ * `event->kind` selects the symbol ("❤️", "👍", "👎", "😂", "‼️", "❓", or
+ * a custom emoji glyph when `custom_emoji` is non-NULL).
+ *
+ * `target_text_preview` is the truncated text of the message being
+ * reacted to (the "what"). May be NULL/empty — synthesis omits it.
+ *
+ * `is_from_me_target` true means "reacted to my message"; false means
+ * "reacted to a message" (we don't have the target sender's name in
+ * the typical poll path).
+ *
+ * For removal events (event->is_removal=1) synthesis produces a "removed
+ * the reaction" form, which the fact extractor will treat as a retraction.
+ *
+ * Returns bytes written (excluding NUL), or 0 on invalid input or
+ * insufficient capacity. */
+size_t hu_imessage_synth_reaction(const hu_reaction_event_t *event, const char *custom_emoji,
+                                  const char *target_text_preview, bool is_from_me_target,
+                                  char *out, size_t out_cap);
+
+/* Render an edit. If `old_text` is provided, synthesis describes the
+ * delta ("<sender> edited their message from '<old>' to '<new>'"),
+ * which is the persona-revealing version. If `old_text` is NULL, falls
+ * back to a generic form. `is_from_me` flips perspective to first
+ * person ("I edited..."). */
+size_t hu_imessage_synth_edit(const char *sender_handle, bool is_from_me, const char *old_text,
+                              const char *new_text, char *out, size_t out_cap);
+
+/* Render an unsend ("<sender> retracted a message" optionally with a
+ * preview of the redacted text). When is_from_me=true → first person. */
+size_t hu_imessage_synth_unsend(const char *sender_handle, bool is_from_me,
+                                const char *redacted_preview, char *out, size_t out_cap);
+
+/* Render a reply-in-thread: "<sender> replied to <parent> with <reply>". */
+size_t hu_imessage_synth_reply(const char *sender_handle, bool is_from_me,
+                               const char *parent_text_preview, const char *reply_text, char *out,
+                               size_t out_cap);
+
+/* Render a balloon (app-message) event. `detail` carries the type-
+ * specific string:
+ *   URL_PREVIEW       → og:title or the URL itself
+ *   APPLE_PAY         → counterparty handle (NO amounts — privacy)
+ *   PLACEMARK         → place name or address
+ *   MUSIC             → "<track> by <artist>"
+ *   POLL              → poll question/topic
+ *   AUDIO_TRANSCRIPT  → the transcribed text
+ *   UNKNOWN           → ignored; falls back to generic label
+ *
+ * Apple Pay deliberately drops the amount from synthesis: only the
+ * fact-of-payment enters the personal model, not the financial precision.
+ * This is a privacy decision documented in the Phase 5 plan. */
+size_t hu_imessage_synth_balloon(const char *sender_handle, bool is_from_me,
+                                 hu_imessage_balloon_kind_t kind, const char *detail, char *out,
+                                 size_t out_cap);
+
+/* ── Phase 1b: ingest wrappers ────────────────────────────────────────
+ *
+ * Each wrapper synthesizes the canonical text, builds a provenance stamp
+ * (channel = "imessage_dm" or "imessage_group" per `in_group_chat`,
+ * handle = `sender_handle`, ts = `timestamp_unix`), and routes through
+ * hu_personal_model_ingest with `from_user = is_from_me_*`.
+ *
+ * Forward-declared to keep this header free of the full personal_model.h
+ * inclusion (avoids pulling memory subsystem types into channels code). */
+struct hu_personal_model;
+
+#include "human/core/error.h"
+
+hu_error_t hu_imessage_ingest_reaction(struct hu_personal_model *model,
+                                       const hu_reaction_event_t *event, const char *custom_emoji,
+                                       const char *target_text_preview, bool is_from_me_target,
+                                       bool in_group_chat);
+
+hu_error_t hu_imessage_ingest_edit(struct hu_personal_model *model, const char *sender_handle,
+                                   bool is_from_me, const char *old_text, const char *new_text,
+                                   int64_t timestamp_unix, bool in_group_chat);
+
+hu_error_t hu_imessage_ingest_unsend(struct hu_personal_model *model, const char *sender_handle,
+                                     bool is_from_me, const char *redacted_preview,
+                                     int64_t timestamp_unix, bool in_group_chat);
+
+hu_error_t hu_imessage_ingest_reply(struct hu_personal_model *model, const char *sender_handle,
+                                    bool is_from_me, const char *parent_text_preview,
+                                    const char *reply_text, int64_t timestamp_unix,
+                                    bool in_group_chat);
+
+hu_error_t hu_imessage_ingest_balloon(struct hu_personal_model *model, const char *sender_handle,
+                                      bool is_from_me, hu_imessage_balloon_kind_t kind,
+                                      const char *detail, int64_t timestamp_unix,
+                                      bool in_group_chat);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* HU_CHANNELS_IMESSAGE_INGEST_H */

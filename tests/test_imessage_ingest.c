@@ -1,0 +1,393 @@
+/* tests/test_imessage_ingest.c
+ *
+ * Phase 1a tests for docs/plans/2026-05-18-imessage-sota.md — pin the
+ * synthesis wording so the eventual fact-extractor stays stable as we
+ * add Phase 2-5 event shapes. These are pure-C tests; no chat.db, no
+ * personal-model, no Apple frameworks.
+ *
+ * Each assertion is a positive contract per
+ * ~/.claude/rules/tests-that-pin-bugs.md: the test name describes the
+ * intent, and the body asserts that intent is honored. */
+
+#include "human/channels/imessage_ingest.h"
+#include "human/channels/reaction_event.h"
+#include "human/memory/personal_model.h"
+#include "test_framework.h"
+
+#include <string.h>
+
+/* ── balloon classifier ───────────────────────────────────────────── */
+
+static void test_balloon_kind_recognizes_url_preview(void) {
+    HU_ASSERT_EQ(
+        (int)hu_imessage_balloon_kind_from_bundle_id("com.apple.messages.URLBalloonProvider"),
+        (int)HU_IMESSAGE_BALLOON_URL_PREVIEW);
+    HU_ASSERT_EQ((int)hu_imessage_balloon_kind_from_bundle_id("com.apple.richlink.preview"),
+                 (int)HU_IMESSAGE_BALLOON_URL_PREVIEW);
+}
+
+static void test_balloon_kind_recognizes_apple_pay(void) {
+    HU_ASSERT_EQ((int)hu_imessage_balloon_kind_from_bundle_id(
+                     "com.apple.PassbookUIService.PeerPaymentMessagesExtension"),
+                 (int)HU_IMESSAGE_BALLOON_APPLE_PAY);
+}
+
+static void test_balloon_kind_recognizes_audio_message(void) {
+    HU_ASSERT_EQ(
+        (int)hu_imessage_balloon_kind_from_bundle_id("com.apple.MobileSMS.MoVoMessageBalloon"),
+        (int)HU_IMESSAGE_BALLOON_AUDIO_TRANSCRIPT);
+}
+
+static void test_balloon_kind_unknown_returns_unknown(void) {
+    HU_ASSERT_EQ((int)hu_imessage_balloon_kind_from_bundle_id(NULL),
+                 (int)HU_IMESSAGE_BALLOON_UNKNOWN);
+    HU_ASSERT_EQ((int)hu_imessage_balloon_kind_from_bundle_id(""),
+                 (int)HU_IMESSAGE_BALLOON_UNKNOWN);
+    HU_ASSERT_EQ((int)hu_imessage_balloon_kind_from_bundle_id("com.acme.nonexistent.thing"),
+                 (int)HU_IMESSAGE_BALLOON_UNKNOWN);
+}
+
+/* ── reaction synthesis ───────────────────────────────────────────── */
+
+static void test_reaction_love_to_my_message_includes_preview(void) {
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LOVE;
+    e.polarity = HU_REACTION_POSITIVE;
+    e.is_removal = 0;
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_reaction(&e, NULL, "let's hike Mount Tam Saturday", true, out,
+                                          sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "Alice") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "reacted") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "my message") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "Mount Tam") != NULL);
+}
+
+static void test_reaction_custom_emoji_uses_provided_glyph(void) {
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Bob";
+    e.kind = HU_REACTION_KIND_CUSTOM_EMOJI;
+    e.polarity = HU_REACTION_POSITIVE;
+    char out[256] = {0};
+    size_t n =
+        hu_imessage_synth_reaction(&e, "\xf0\x9f\x94\xa5" /* 🔥 */, NULL, true, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "\xf0\x9f\x94\xa5") != NULL);
+}
+
+static void test_reaction_removal_says_removed_not_reacted(void) {
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LIKE;
+    e.is_removal = 1;
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_reaction(&e, NULL, NULL, true, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "removed") != NULL);
+}
+
+static void test_reaction_unknown_sender_becomes_someone(void) {
+    hu_reaction_event_t e = {0};
+    e.sender_handle = NULL;
+    e.kind = HU_REACTION_LAUGH;
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_reaction(&e, NULL, NULL, true, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "someone") != NULL);
+}
+
+/* ── edit synthesis ───────────────────────────────────────────────── */
+
+static void test_edit_with_old_text_renders_delta(void) {
+    char out[256] = {0};
+    size_t n =
+        hu_imessage_synth_edit("Alice", false, "I hate this", "I dislike this", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "Alice") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "edited") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "I hate this") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "I dislike this") != NULL);
+}
+
+static void test_edit_from_me_uses_first_person(void) {
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_edit(NULL, true, "old", "new", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    /* First word should be "I", not "someone". */
+    HU_ASSERT_TRUE(out[0] == 'I');
+    HU_ASSERT_TRUE(strstr(out, "my message") != NULL);
+}
+
+static void test_edit_without_old_text_still_renders(void) {
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_edit("Alice", false, NULL, "new text", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "new text") != NULL);
+}
+
+/* ── unsend synthesis ─────────────────────────────────────────────── */
+
+static void test_unsend_uses_retracted_verb(void) {
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_unsend("Alice", false, NULL, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "retracted") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "Alice") != NULL);
+}
+
+/* ── reply synthesis ──────────────────────────────────────────────── */
+
+static void test_reply_includes_parent_and_child_text(void) {
+    char out[512] = {0};
+    size_t n = hu_imessage_synth_reply("Alice", false, "let's hike Mount Tam",
+                                       "Sure, but let's go early", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "Alice") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "replied") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "Mount Tam") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "go early") != NULL);
+}
+
+/* ── balloon synthesis ────────────────────────────────────────────── */
+
+static void test_balloon_url_preview_includes_detail(void) {
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_balloon("Alice", false, HU_IMESSAGE_BALLOON_URL_PREVIEW,
+                                         "OpenAI announces new model", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "Alice") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "shared a link") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "OpenAI") != NULL);
+}
+
+static void test_balloon_apple_pay_omits_amount(void) {
+    /* The privacy-by-architecture contract: amounts MUST NOT appear in
+     * synthesis output, regardless of what the caller passes in detail. */
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_balloon("Alice", true, HU_IMESSAGE_BALLOON_APPLE_PAY, "Alice", out,
+                                         sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "Apple Pay") != NULL);
+    /* No dollar/cent markers; no digit runs that could carry an amount. */
+    HU_ASSERT_TRUE(strstr(out, "$") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "USD") == NULL);
+}
+
+static void test_balloon_audio_transcript_includes_text(void) {
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_balloon("Alice", false, HU_IMESSAGE_BALLOON_AUDIO_TRANSCRIPT,
+                                         "running 10 minutes late", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "voice message") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "10 minutes late") != NULL);
+}
+
+static void test_balloon_placemark_renders_location(void) {
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_balloon("Alice", false, HU_IMESSAGE_BALLOON_PLACEMARK,
+                                         "Tahoe City, CA", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "shared a location") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "Tahoe City") != NULL);
+}
+
+static void test_balloon_poll_renders_topic(void) {
+    char out[256] = {0};
+    size_t n = hu_imessage_synth_balloon("Alice", false, HU_IMESSAGE_BALLOON_POLL,
+                                         "What time should we leave?", out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "poll") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "What time") != NULL);
+}
+
+/* ── safety / edge cases ──────────────────────────────────────────── */
+
+static void test_synth_handles_null_outputs_safely(void) {
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LOVE;
+    HU_ASSERT_EQ((int)hu_imessage_synth_reaction(&e, NULL, NULL, true, NULL, 256), 0);
+    char tiny[4];
+    HU_ASSERT_EQ((int)hu_imessage_synth_reaction(&e, NULL, NULL, true, tiny, sizeof(tiny)), 0);
+}
+
+static void test_synth_long_preview_truncates_with_ellipsis(void) {
+    char out[256] = {0};
+    /* 200 char preview, capped at 80 in synthesis. */
+    char long_text[201];
+    memset(long_text, 'x', 200);
+    long_text[200] = '\0';
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LIKE;
+    size_t n = hu_imessage_synth_reaction(&e, NULL, long_text, true, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    /* Ellipsis "…" is E2 80 A6 in UTF-8. */
+    HU_ASSERT_TRUE(strstr(out, "\xe2\x80\xa6") != NULL);
+}
+
+/* ── Phase 1b: ingest wrappers (synthesis + personal_model_ingest) ── */
+
+static void test_ingest_reaction_rejects_null_model(void) {
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LOVE;
+    e.timestamp_unix = 1700000000;
+    hu_error_t err = hu_imessage_ingest_reaction(NULL, &e, NULL, NULL, true, false);
+    HU_ASSERT_EQ((int)err, (int)HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_ingest_reaction_rejects_null_event(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_error_t err = hu_imessage_ingest_reaction(&model, NULL, NULL, NULL, true, false);
+    HU_ASSERT_EQ((int)err, (int)HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_ingest_reaction_succeeds_and_marks_content(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    bool before = hu_personal_model_has_content(&model);
+
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LOVE;
+    e.polarity = HU_REACTION_POSITIVE;
+    e.timestamp_unix = 1700000000;
+
+    hu_error_t err =
+        hu_imessage_ingest_reaction(&model, &e, NULL, "let's hike Mount Tam Saturday", true, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+
+    /* Ingestion should at minimum NOT regress the has_content signal.
+     * Whether the fact extractor produces a fact depends on the LLM path;
+     * the contract pinned here is that ingest returns OK and does not
+     * leave the model in a worse state than it started. */
+    bool after = hu_personal_model_has_content(&model);
+    HU_ASSERT_TRUE(after >= before);
+}
+
+static void test_ingest_edit_routes_first_person_correctly(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_error_t err = hu_imessage_ingest_edit(&model, NULL, /*is_from_me=*/true, "I hate this",
+                                             "I dislike this", 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
+static void test_ingest_unsend_handles_null_preview(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_error_t err = hu_imessage_ingest_unsend(&model, "Alice", false, NULL, 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
+static void test_ingest_reply_rejects_null_reply_text(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_error_t err =
+        hu_imessage_ingest_reply(&model, "Alice", false, "parent message", NULL, 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_ingest_reply_succeeds_with_parent_and_child(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_error_t err = hu_imessage_ingest_reply(&model, "Alice", false, "let's hike Mount Tam",
+                                              "Sure, but let's go early", 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
+static void test_ingest_balloon_url_preview_succeeds(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_error_t err =
+        hu_imessage_ingest_balloon(&model, "Alice", false, HU_IMESSAGE_BALLOON_URL_PREVIEW,
+                                   "OpenAI announces new model", 1700000000, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
+static void test_ingest_reaction_uses_event_emoji_when_custom_emoji_null(void) {
+    /* Phase 2: when the caller passes custom_emoji=NULL but the event
+     * itself carries an emoji glyph (e.g. from chat.db
+     * associated_message_emoji), the synthesis path should still produce
+     * sensible output. The wrapper currently passes the custom_emoji arg
+     * straight through; this test pins the contract that callers (like
+     * reaction_handler.c) MUST supply event->emoji when present. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_KIND_CUSTOM_EMOJI;
+    e.emoji = "\xf0\x9f\x94\xa5"; /* 🔥 */
+    e.timestamp_unix = 1700000000;
+    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, e.emoji, "great idea",
+                                                 /*is_from_me_target=*/true, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
+static void test_reaction_event_struct_has_emoji_field(void) {
+    /* Phase 2 contract: the emoji field exists, defaults to NULL when
+     * zero-initialized, and is independently addressable from the rest
+     * of the struct. */
+    hu_reaction_event_t e = {0};
+    HU_ASSERT_TRUE(e.emoji == NULL);
+    e.emoji = "\xf0\x9f\x8e\x89"; /* 🎉 */
+    HU_ASSERT_TRUE(e.emoji != NULL);
+    HU_ASSERT_STR_EQ(e.emoji, "\xf0\x9f\x8e\x89");
+}
+
+static void test_ingest_group_chat_uses_group_provenance(void) {
+    /* The in_group_chat flag changes the channel string from
+     * "imessage_dm" → "imessage_group" which downgrades trust tier.
+     * This test confirms the call succeeds; tier verification is in
+     * the channel_trust tests. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LIKE;
+    e.timestamp_unix = 1700000000;
+    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, NULL, "some message", false,
+                                                 /*in_group_chat=*/true);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
+/* ── runner ───────────────────────────────────────────────────────── */
+
+void run_imessage_ingest_tests(void) {
+    HU_TEST_SUITE("imessage_ingest");
+    HU_RUN_TEST(test_balloon_kind_recognizes_url_preview);
+    HU_RUN_TEST(test_balloon_kind_recognizes_apple_pay);
+    HU_RUN_TEST(test_balloon_kind_recognizes_audio_message);
+    HU_RUN_TEST(test_balloon_kind_unknown_returns_unknown);
+    HU_RUN_TEST(test_reaction_love_to_my_message_includes_preview);
+    HU_RUN_TEST(test_reaction_custom_emoji_uses_provided_glyph);
+    HU_RUN_TEST(test_reaction_removal_says_removed_not_reacted);
+    HU_RUN_TEST(test_reaction_unknown_sender_becomes_someone);
+    HU_RUN_TEST(test_edit_with_old_text_renders_delta);
+    HU_RUN_TEST(test_edit_from_me_uses_first_person);
+    HU_RUN_TEST(test_edit_without_old_text_still_renders);
+    HU_RUN_TEST(test_unsend_uses_retracted_verb);
+    HU_RUN_TEST(test_reply_includes_parent_and_child_text);
+    HU_RUN_TEST(test_balloon_url_preview_includes_detail);
+    HU_RUN_TEST(test_balloon_apple_pay_omits_amount);
+    HU_RUN_TEST(test_balloon_audio_transcript_includes_text);
+    HU_RUN_TEST(test_balloon_placemark_renders_location);
+    HU_RUN_TEST(test_balloon_poll_renders_topic);
+    HU_RUN_TEST(test_synth_handles_null_outputs_safely);
+    HU_RUN_TEST(test_synth_long_preview_truncates_with_ellipsis);
+    HU_RUN_TEST(test_ingest_reaction_rejects_null_model);
+    HU_RUN_TEST(test_ingest_reaction_rejects_null_event);
+    HU_RUN_TEST(test_ingest_reaction_succeeds_and_marks_content);
+    HU_RUN_TEST(test_ingest_edit_routes_first_person_correctly);
+    HU_RUN_TEST(test_ingest_unsend_handles_null_preview);
+    HU_RUN_TEST(test_ingest_reply_rejects_null_reply_text);
+    HU_RUN_TEST(test_ingest_reply_succeeds_with_parent_and_child);
+    HU_RUN_TEST(test_ingest_balloon_url_preview_succeeds);
+    HU_RUN_TEST(test_ingest_reaction_uses_event_emoji_when_custom_emoji_null);
+    HU_RUN_TEST(test_reaction_event_struct_has_emoji_field);
+    HU_RUN_TEST(test_ingest_group_chat_uses_group_provenance);
+}

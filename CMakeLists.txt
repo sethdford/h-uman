@@ -353,6 +353,11 @@ if(HU_ENABLE_IMESSAGE)
     # HU_REACTION_CUSTOM_EMOJI redefinition). See the navigation comment
     # in src/channels/imessage.c near hu_imessage_poll for the full story.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
+    # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
+    # primitives that render iMessage events into canonical English for
+    # personal-model ingestion. No chat.db / Apple deps; ingest wiring
+    # lands in Phase 1b.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_ingest.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -3278,6 +3283,10 @@ list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 # Default-skipped stub; opt in to the real chat.db path with -DHU_HAVE_CHATDB=1
 # (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
+# Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure-synthesis tests
+# for src/channels/imessage_ingest.c. No chat.db / Apple deps; tests run
+# unconditionally and stay green on every build variant.
+list(APPEND HU_TEST_SOURCES tests/test_imessage_ingest.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
 # (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)

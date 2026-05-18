@@ -76,8 +76,13 @@
 #include "human/daemon_lifecycle.h"
 #include "human/daemon_proactive.h"
 #include "human/daemon_routing.h"
-#if defined(HU_ENABLE_RL_FULL)
+/* reaction_handler.h pulled out of the RL_FULL gate: the
+ * personal-model sink (Phase 1c of docs/plans/2026-05-18-imessage-sota.md)
+ * runs regardless of RL_FULL, and the header's declarations are gate-free.
+ * The other three headers below remain gated because their call sites are
+ * gated. */
 #include "human/agent/reaction_handler.h"
+#if defined(HU_ENABLE_RL_FULL)
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_reactions.h"
 #include "human/daemon_reaction_poll.h"
@@ -2623,6 +2628,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_reaction_handler_set_collector(&agent->sota.dpo_collector);
     }
 #endif
+
+    /* Phase 1c of docs/plans/2026-05-18-imessage-sota.md: route iMessage
+     * tapbacks on our outbound messages into the personal-model learning
+     * pipeline. Independent of HU_ENABLE_RL_FULL — the personal-model
+     * sink works regardless of whether the DPO collector is wired. */
+    if (agent) {
+        hu_reaction_handler_set_personal_model(&agent->personal_model);
+    }
 
     /* Hybrid routing: create a lightweight cloud provider for classification/scoring
      * when the primary provider is a slow local model (llm_decides mode). */
@@ -12987,6 +13000,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #if defined(HU_ENABLE_RL_FULL)
     hu_reaction_handler_set_collector(NULL);
 #endif
+    /* Phase 1c teardown: detach the personal-model sink. */
+    hu_reaction_handler_set_personal_model(NULL);
     if (agent && agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, alloc);
         agent->w14_scheduler = NULL;

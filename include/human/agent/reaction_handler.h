@@ -24,9 +24,13 @@
 #ifndef HU_AGENT_REACTION_HANDLER_H
 #define HU_AGENT_REACTION_HANDLER_H
 
-#include "human/core/error.h"
 #include "human/channels/reaction_event.h"
-#include "human/ml/dpo.h"  /* hu_dpo_collector_t */
+#include "human/core/error.h"
+#include "human/ml/dpo.h" /* hu_dpo_collector_t */
+
+/* Forward declaration — keeps the full memory subsystem header out of
+ * any channel/agent TU that only needs the setter signature. */
+struct hu_personal_model;
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +44,14 @@ extern "C" {
  * setter with an in-memory SQLite collector. */
 void hu_reaction_handler_set_collector(hu_dpo_collector_t *collector);
 
+/* Phase 1c of docs/plans/2026-05-18-imessage-sota.md: optional personal-
+ * model sink. When non-NULL, iMessage reactions on registered assistant
+ * messages are ingested as canonical English into the personal model
+ * (separate concern from the DPO collector which exists for training
+ * data). Wired by the daemon at init via
+ * hu_daemon_reaction_wire_personal_model. Pass NULL at shutdown to clear. */
+void hu_reaction_handler_set_personal_model(struct hu_personal_model *model);
+
 hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *event);
 
 /* Per-turn signal flag — daemon's per-turn-cleanup block calls clear() at
@@ -52,19 +64,23 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *event);
  * ever gains a thread pool or concurrent channel processing, this flag
  * MUST become per-agent-context (e.g. a field on hu_agent_t). */
 void hu_reaction_handler_clear_turn(void);
-int  hu_reaction_handler_was_called_this_turn(void);
+int hu_reaction_handler_was_called_this_turn(void);
 
 /* Production + demo path: pre-register an assistant message before reactions
  * are replayed (Phase 5 H8 / Phase 6 demo). */
-void hu_reaction_handler_register_assistant_message_for_production(
-    const char *channel, const char *thread, const char *msg_ref,
-    const char *prompt, const char *response);
+void hu_reaction_handler_register_assistant_message_for_production(const char *channel,
+                                                                   const char *thread,
+                                                                   const char *msg_ref,
+                                                                   const char *prompt,
+                                                                   const char *response);
 
 #if HU_IS_TEST
 /* Test seam: same lookup store as production registration. */
-void hu_reaction_handler_register_assistant_message_for_test(
-    const char *channel, const char *thread, const char *msg_ref,
-    const char *prompt, const char *response);
+void hu_reaction_handler_register_assistant_message_for_test(const char *channel,
+                                                             const char *thread,
+                                                             const char *msg_ref,
+                                                             const char *prompt,
+                                                             const char *response);
 void hu_reaction_handler_reset_for_test(void);
 #endif
 

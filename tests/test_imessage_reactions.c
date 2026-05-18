@@ -9,14 +9,12 @@
  * The forward declaration below is intentional: hu_imessage_poll_reactions
  * is defined in src/channels/imessage.c but not exposed via
  * include/human/channels/imessage.h (test-only consumer for now). */
-#include "test_framework.h"
 #include "human/channels/reaction_event.h"
+#include "test_framework.h"
 #include <time.h>
 
-hu_error_t hu_imessage_poll_reactions(const char *db_path,
-                                      int64_t since_unix,
-                                      hu_reaction_event_t *out_events,
-                                      size_t out_cap,
+hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
+                                      hu_reaction_event_t *out_events, size_t out_cap,
                                       size_t *out_n);
 
 #ifndef HU_HAVE_CHATDB
@@ -27,15 +25,16 @@ static void test_imessage_poll_reactions_skipped(void) {
 static void test_imessage_poll_reactions_returns_recent_tapbacks(void) {
     hu_reaction_event_t events[16] = {0};
     size_t n = 0;
-    hu_error_t err = hu_imessage_poll_reactions(getenv("HU_CHATDB"),
-                                                time(NULL) - 86400,
-                                                events, 16, &n);
+    hu_error_t err =
+        hu_imessage_poll_reactions(getenv("HU_CHATDB"), time(NULL) - 86400, events, 16, &n);
     /* hu_imessage_poll_reactions strdup's target_thread_id, target_message_ref,
-     * sender_handle into each event. MUST free or ASan reports leaks. */
+     * sender_handle, and emoji (Phase 2: iOS 17+ custom-emoji glyph) into
+     * each event. MUST free or ASan reports leaks. */
     for (size_t i = 0; i < n; i++) {
         free((void *)events[i].target_thread_id);
         free((void *)events[i].target_message_ref);
         free((void *)events[i].sender_handle);
+        free((void *)events[i].emoji);
     }
     HU_ASSERT_EQ(err, HU_OK);
 }

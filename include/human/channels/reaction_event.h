@@ -28,14 +28,24 @@ typedef enum {
 } hu_reaction_polarity_t;
 
 typedef struct {
-    const char *channel_id;            /* "imessage", "slack", ... */
-    const char *target_thread_id;       /* chat_guid (iMessage) or channel_id (Slack) */
-    const char *target_message_ref;     /* associated_message_guid OR ts */
+    const char *channel_id;         /* "imessage", "slack", ... */
+    const char *target_thread_id;   /* chat_guid (iMessage) or channel_id (Slack) */
+    const char *target_message_ref; /* associated_message_guid OR ts */
     const char *sender_handle;
     hu_reaction_kind_t kind;
     hu_reaction_polarity_t polarity;
     int64_t timestamp_unix;
-    int is_removal;                     /* 0=add, 1=remove */
+    int is_removal; /* 0=add, 1=remove */
+    /* Phase 2 of docs/plans/2026-05-18-imessage-sota.md: iOS 17+
+     * stores the actual emoji glyph for CUSTOM_EMOJI tapbacks in a
+     * separate `associated_message_emoji` column. NULL when the
+     * channel doesn't expose the glyph (e.g. standard 7-kind taps
+     * pre-iOS 17) or when the channel concept doesn't apply
+     * (Slack reactji are name-based, mapped through `kind`).
+     * Owned by the producer — must be freed by the consumer in the
+     * same place sender_handle / target_thread_id / target_message_ref
+     * are freed. */
+    const char *emoji;
 } hu_reaction_event_t;
 
 /* iMessage tapback codes — AUTHORITY for the full set comes from the
@@ -64,8 +74,7 @@ hu_error_t hu_reaction_normalize_imessage(int32_t associated_message_type,
                                           hu_reaction_kind_t *out_kind,
                                           hu_reaction_polarity_t *out_polarity);
 
-hu_error_t hu_reaction_normalize_slack(const char *reactji_name,
-                                       hu_reaction_kind_t *out_kind,
+hu_error_t hu_reaction_normalize_slack(const char *reactji_name, hu_reaction_kind_t *out_kind,
                                        hu_reaction_polarity_t *out_polarity);
 
 #ifdef __cplusplus
