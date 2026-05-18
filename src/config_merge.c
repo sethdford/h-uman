@@ -147,6 +147,10 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
         }
     }
 #endif
+    /* US-43.3: courtesy reply path defaults to ENABLED on upgrade. Operators
+     * who do not want any outbound to unknown senders set this false. */
+    cfg->channels.imessage.courtesy_replies_enabled = true;
+
     cfg->default_temperature = 0.7;
     cfg->temperature = 0.7;
     cfg->max_tokens = 0;
