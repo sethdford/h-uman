@@ -81,8 +81,15 @@
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_reactions.h"
 #include "human/daemon_reaction_poll.h"
-#include "human/follow_up.h"
 #endif
+
+/* follow_up.h must be included unconditionally — the read-receipt watcher
+ * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
+ * regardless of HU_ENABLE_RL_FULL. Previously grouped inside the RL_FULL
+ * block, which caused a build failure on the `human` target (human_core
+ * doesn't get HU_ENABLE_RL_FULL); the test target masked it via different
+ * defines. Pinned by the daemon rebuild path. */
+#include "human/follow_up.h"
 
 #include "human/agent/governor.h"
 #include "human/agent/output_validator_chain.h"

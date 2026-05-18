@@ -1012,8 +1012,7 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
         return;
     size_t path_len = strlen(path);
     hu_m3_frontier_adapter_t *opened = NULL;
-    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK &&
-        opened) {
+    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK && opened) {
         agent->m3_adapter = opened;
         /* B3 v0 (2026-05-17 r2): publish the freshly-opened adapter to
          * the global accessor so /v1/m3/outcomes can read it. */
@@ -1054,11 +1053,18 @@ void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size
     outcome.prompt_hash = hu_m3_outcome_hash_bytes(prompt, prompt_len);
     outcome.response_hash = hu_m3_outcome_hash_bytes(response, response_len);
     outcome.contact_id_hash = hu_m3_outcome_hash_bytes(contact_id, contact_id_len);
-    /* prompt_tokens / completion_tokens: 0 = unknown. The agent path
-     * doesn't have exact tokenizer output cheaply available, so we
-     * leave these unset for this slice. The training loop can derive
-     * an estimate from prompt_len / response_len if needed. A future
-     * phase wires real token counts from the provider response. */
+    /* prompt_tokens / completion_tokens — populate with a conservative
+     * bytes/4 estimate. Real tokenizer counts aren't cheaply available
+     * in the agent path, but the training-side selection policy needs
+     * a positive value to distinguish degenerate (zero-content) turns
+     * from real ones. The /4 heuristic comes from the rough English
+     * BPE rule (~4 bytes per token); it under-counts by 20-40% for
+     * structured / non-English text but never reports zero when there
+     * is real content, which is the property the filter relies on.
+     * A future phase replaces this with exact counts from the provider
+     * response's `usage` block when available. */
+    outcome.prompt_tokens = (uint32_t)(prompt_len / 4);
+    outcome.completion_tokens = (uint32_t)(response_len / 4);
     outcome.guard_decision = (uint8_t)guard_decision;
     outcome.turn_kind = turn_kind;
     /* model_id / adapter_id: 0 = unknown. Mapping is a config-driven

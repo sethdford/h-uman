@@ -5014,6 +5014,69 @@ static void test_m3_agent_on_provider_success_advances_probe_count(void) {
 #endif
 }
 
+/* Pin the producer-side token-count estimate. The B3 v1 outcome driver's
+ * selection policy requires pt > 0 && ct > 0 to drop degenerate turns; if
+ * the agent path silently stops setting these (regressing to "0 =
+ * unknown"), the live daemon's outcomes stop flowing through to LoRA
+ * training. This test catches that regression by recording a known
+ * prompt+response and confirming the byte-length-over-4 estimate fires. */
+static void test_m3_record_chat_outcome_populates_token_estimates(void) {
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_record_outcome_tokens.bin";
+    /* Inline fixture creation (matches the probe-count test above):
+     * open_fixture_adapter() is defined further down in this file and
+     * isn't forward-visible from here. The blob is 8-byte magic + LE
+     * uint32 schema_version=1. */
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &agent.m3_adapter),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+
+    /* 40-byte prompt → expect 10 token-estimate; 80-byte response → 20. */
+    const char *prompt = "Hello there friend, how are you today??";
+    const char *response =
+        "Doing fine thanks. How is your week going so far? Anything new to share with me?";
+    HU_ASSERT_EQ(strlen(prompt), 39u); /* sanity: writer-side check */
+    HU_ASSERT_EQ(strlen(response), 80u);
+
+    hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response),
+                                    250 /*latency_ms*/, "contact-7", strlen("contact-7"),
+                                    HU_M3_GUARD_PASS, 1 /*stream*/);
+
+    hu_m3_inference_outcome_t buf[8];
+    size_t got = 0;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(agent.m3_adapter, buf, 8, &got), HU_OK);
+    HU_ASSERT_EQ(got, 1u);
+    /* 39/4 = 9, 80/4 = 20 — exact integer division (the estimate is the
+     * point; the value just needs to be positive and proportional). */
+    HU_ASSERT_EQ((int)buf[0].prompt_tokens, 9);
+    HU_ASSERT_EQ((int)buf[0].completion_tokens, 20);
+    /* And confirm the OTHER fields the policy depends on still flow. */
+    HU_ASSERT_EQ((int)buf[0].guard_decision, (int)HU_M3_GUARD_PASS);
+    HU_ASSERT_EQ((int)buf[0].turn_kind, 1);
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    /* ML disabled — the producer hook is a no-op. The contract that
+     * token estimates are positive only holds when ML is compiled in. */
+    hu_agent_m3_record_chat_outcome(NULL, NULL, 0, NULL, 0, 0, NULL, 0, HU_M3_GUARD_UNKNOWN, 0);
+#endif
+}
+
 /* ─────────────────────────────────────────────────────────────────────
  * Phase B1 redefined (2026-05-17 round 2): inference outcome capture
  *
@@ -5963,6 +6026,7 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_probe_infer_increments_counter);
     HU_RUN_TEST(test_m3_probe_count_null_safe);
     HU_RUN_TEST(test_m3_agent_on_provider_success_advances_probe_count);
+    HU_RUN_TEST(test_m3_record_chat_outcome_populates_token_estimates);
 
     /* Phase B1 redefined (2026-05-17 round 2): inference outcome capture
      * — ring buffer + structured per-call records the future training
