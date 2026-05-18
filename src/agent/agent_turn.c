@@ -80,6 +80,7 @@ int hu_reaction_handler_was_called_this_turn(void);
 #include "human/security/sycophancy_guard.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/ml/m3_rewrite_capture.h"
 #endif
 
 /* Default fallback arrays (NULL-terminated) */
@@ -5926,6 +5927,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         vc_retry_latency_ms, agent->memory_session_id,
                                         agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
                                         /*turn_kind=batch=*/2, NULL);
+                                    /* E1 (2026-05-18): perfect DPO preference
+                                     * pair — final_content (rejected by the
+                                     * validator chain) vs retry_content
+                                     * (accepted after the slim retry). */
+                                    (void)hu_m3_rewrite_pair_record(
+                                        agent->alloc, NULL, msg, msg_len, final_content, final_len,
+                                        retry_content, retry_len,
+                                        /*turn_kind=batch=*/2);
                                     /* Re-validate the retry output through the chain so a
                                      * regenerated CoT or helper-closer cannot escape (Fix 3). */
                                     hu_chain_result_t retry_cr;
@@ -6099,6 +6108,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     ab_retry_latency_ms, agent->memory_session_id,
                                     agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
                                     /*turn_kind=batch=*/2, NULL);
+                                /* E1 (2026-05-18): perfect DPO preference pair —
+                                 * final_content (response_guard rejected) vs
+                                 * retry_content (accepted after slim retry).
+                                 * Captured BEFORE the ab_owned free below so
+                                 * the rejected text is still valid. */
+                                (void)hu_m3_rewrite_pair_record(
+                                    agent->alloc, NULL, msg, msg_len, final_content, final_len,
+                                    retry_content, retry_len, /*turn_kind=batch=*/2);
                                 hu_log_warn("agent_turn", agent->observer,
                                             "response_guard RECOVERED: retry passed (len=%zu, "
                                             "stripped=%zu)",

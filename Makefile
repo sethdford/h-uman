@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes
 
 all: build test
 
@@ -127,6 +127,24 @@ m3-status:
 # guard chain; optionally export Alpaca-DPO format for downstream training.
 m3-dpo:
 	@python3 scripts/m3_dpo_from_rewrites.py
+
+# E2 (2026-05-18) — MLX-lm.lora bridge. Trains a real LoRA against the
+# served model when mlx_lm is installed; otherwise produces a stub
+# safetensors with a clear "install mlx-lm" hint.
+m3-train-mlx:
+	@python3 scripts/m3_mlx_lora_bridge.py --check-only \
+		--pairs $${PAIRS:-~/.human/training-data/m3-rewrite-pairs.jsonl} \
+		--adapter-out $${OUT:-/tmp/m3-mlx-test.safetensors}
+
+# E4 (2026-05-18) — drift detection over outcome windows. Compares the
+# most-recent adapter's metrics against the prior one; flags
+# DEGRADING or NEEDS_ROLLBACK.
+m3-drift:
+	@python3 scripts/m3_drift_detector.py
+
+# E5 (2026-05-18) — per-contact adapter routing CLI.
+m3-routes:
+	@python3 scripts/m3_contact_routing.py list
 
 validate: format-check build test
 	@echo "Validation passed."

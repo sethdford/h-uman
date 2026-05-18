@@ -32,6 +32,12 @@ on:
       - "scripts/test_m3_eval_adapter.py"
       - "include/human/ml/m3_rewrite_capture.h"
       - "src/ml/m3_rewrite_capture.c"
+      - "scripts/m3_mlx_lora_bridge.py"
+      - "scripts/test_m3_mlx_lora_bridge.py"
+      - "scripts/m3_drift_detector.py"
+      - "scripts/test_m3_drift_detector.py"
+      - "scripts/m3_contact_routing.py"
+      - "scripts/test_m3_contact_routing.py"
       - "Makefile"
       - "CMakePresets.json"
       - ".github/workflows/m3-loop-smoke.yml"
@@ -54,6 +60,12 @@ on:
       - "scripts/test_m3_eval_adapter.py"
       - "include/human/ml/m3_rewrite_capture.h"
       - "src/ml/m3_rewrite_capture.c"
+      - "scripts/m3_mlx_lora_bridge.py"
+      - "scripts/test_m3_mlx_lora_bridge.py"
+      - "scripts/m3_drift_detector.py"
+      - "scripts/test_m3_drift_detector.py"
+      - "scripts/m3_contact_routing.py"
+      - "scripts/test_m3_contact_routing.py"
   workflow_dispatch:
 
 jobs:
@@ -86,6 +98,22 @@ jobs:
         # input handling. Cross-checks that the C-side rewrite-capture
         # output is consumable.
         run: python3 scripts/test_m3_dpo_from_rewrites.py
+
+      - name: Run MLX-lm.lora bridge (E2) verifier
+        # 16 assertions covering format detection, mlx-lm format
+        # conversion, stub-adapter when mlx_lm unavailable, gemma
+        # chat-template wrapping.
+        run: python3 scripts/test_m3_mlx_lora_bridge.py
+
+      - name: Run drift detector (E4) verifier
+        # 16 assertions covering all status verdicts (OK / DEGRADING /
+        # NEEDS_ROLLBACK), threshold tuning, and window bucketing.
+        run: python3 scripts/test_m3_drift_detector.py
+
+      - name: Run contact-routing (E5) verifier
+        # 12 assertions covering load/save atomicity, lookup precedence,
+        # and the promote/demote roundtrip.
+        run: python3 scripts/test_m3_contact_routing.py
 
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)

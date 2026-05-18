@@ -210,6 +210,195 @@ class MetadataJudge:
         }
 
 
+class LlmJudge:
+    """E3 (2026-05-18): LLM-based blind judge over PRE-COMPUTED outputs.
+
+    Decouples the "score the outputs" step from the "run inference"
+    step (SftPromptsJudge handles inference). Input is a JSONL with
+    one record per held-out prompt:
+        {"prompt": "...", "baseline_output": "...", "candidate_output": "..."}
+
+    For each record, asks an LLM (default: OpenAI gpt-5) which output
+    sounds more like Seth — without telling it which is which (blind
+    A/B). Aggregates wins/ties/losses + bootstrap CI.
+
+    Why this judge:
+      - MetadataJudge confirms a real adapter was produced
+      - SftPromptsJudge requires a live MLX server + adapter swap
+      - LlmJudge runs locally on the operator's machine with API
+        access — no MLX dependency, judges actual persona fidelity
+
+    Requires: OPENAI_API_KEY env var, or HUMAN_JUDGE_MODEL set to a
+    different model (e.g. "ollama:llama-3-8b" — local fallback).
+    Skipped (verdict=skipped) if neither is available, same soft-fail
+    pattern as the other judges."""
+
+    def __init__(self, completions_jsonl: Path,
+                 model: str | None = None):
+        self.completions_jsonl = completions_jsonl
+        self.model = model or os.environ.get("HUMAN_JUDGE_MODEL", "gpt-5")
+        self.api_key = os.environ.get("OPENAI_API_KEY", "")
+
+    def _build_judge_prompt(self, prompt: str, output_a: str, output_b: str) -> str:
+        """The blind A/B prompt. Order of A vs B is randomized by the
+        caller (evaluate()) so the judge can't anchor on position.
+        The persona is intentionally LOW-DETAIL — we want a generic
+        judge that scores naturalness/casualness, not a specific
+        Seth-persona judge that would just memorize markers."""
+        return (
+            "You are a blind A/B judge comparing two responses to the same\n"
+            "message. The user is texting a close friend casually — pick the\n"
+            "response that sounds more like a real human friend (warm,\n"
+            "natural, conversational, not robotic or assistant-like).\n\n"
+            f"User message: {prompt}\n\n"
+            f"Response A: {output_a}\n\n"
+            f"Response B: {output_b}\n\n"
+            "Answer with EXACTLY one of: A / B / TIE\n"
+            "Then on a second line, give a 1-sentence reason."
+        )
+
+    def _call_judge(self, prompt: str) -> tuple[str, str]:
+        """Returns (vote, reason). Vote is 'A' | 'B' | 'TIE' | 'ERROR'.
+        On any network/API failure returns ('ERROR', detail)."""
+        if not self.api_key:
+            return ("ERROR", "no OPENAI_API_KEY")
+        import urllib.request as _u
+        import urllib.error as _e
+        body = json.dumps({
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 80,
+            "temperature": 0,
+        }).encode("utf-8")
+        req = _u.Request("https://api.openai.com/v1/chat/completions",
+                         data=body, method="POST",
+                         headers={"Content-Type": "application/json",
+                                  "Authorization": f"Bearer {self.api_key}"})
+        try:
+            with _u.urlopen(req, timeout=30) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            text = (payload.get("choices", [{}])[0]
+                          .get("message", {}).get("content", "")
+                          .strip())
+        except (_e.URLError, _e.HTTPError, json.JSONDecodeError, KeyError) as e:
+            return ("ERROR", f"API error: {e}")
+        # First non-empty line is the vote
+        first = text.split("\n")[0].strip().upper()
+        if first.startswith("A"):
+            return ("A", text)
+        if first.startswith("B"):
+            return ("B", text)
+        if "TIE" in first:
+            return ("TIE", text)
+        return ("ERROR", f"unparseable vote: {text[:80]}")
+
+    def evaluate(self, baseline: dict, candidate: dict) -> dict:
+        if not self.completions_jsonl.exists():
+            return {
+                "judge": "llm", "verdict": "skipped",
+                "reason": f"completions JSONL not found at {self.completions_jsonl}",
+                "baseline": baseline, "candidate": candidate,
+            }
+        if not self.api_key:
+            return {
+                "judge": "llm", "verdict": "skipped",
+                "reason": "OPENAI_API_KEY not set",
+                "baseline": baseline, "candidate": candidate,
+            }
+        import random
+        random.seed(42)  # deterministic positional ordering across runs
+
+        records = []
+        for line in self.completions_jsonl.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        if not records:
+            return {
+                "judge": "llm", "verdict": "skipped",
+                "reason": "completions JSONL is empty",
+                "baseline": baseline, "candidate": candidate,
+            }
+
+        wins_candidate = 0
+        wins_baseline = 0
+        ties = 0
+        errors = 0
+        per_prompt = []
+
+        for rec in records:
+            prompt = rec.get("prompt", "")
+            base_out = rec.get("baseline_output", "")
+            cand_out = rec.get("candidate_output", "")
+            if not all([prompt, base_out, cand_out]):
+                errors += 1
+                continue
+            # Randomize A/B mapping so judge can't anchor on position.
+            if random.random() < 0.5:
+                a, b = base_out, cand_out
+                a_is_baseline = True
+            else:
+                a, b = cand_out, base_out
+                a_is_baseline = False
+            judge_prompt = self._build_judge_prompt(prompt, a, b)
+            vote, reason = self._call_judge(judge_prompt)
+            if vote == "ERROR":
+                errors += 1
+                per_prompt.append({"prompt": prompt[:60], "vote": "ERROR",
+                                   "reason": reason})
+                continue
+            if vote == "TIE":
+                ties += 1
+            elif (vote == "A" and a_is_baseline) or (vote == "B" and not a_is_baseline):
+                wins_baseline += 1
+            else:
+                wins_candidate += 1
+            per_prompt.append({"prompt": prompt[:60], "vote": vote,
+                               "a_is_baseline": a_is_baseline,
+                               "reason": reason.split("\n", 1)[-1][:80]})
+
+        scored = wins_candidate + wins_baseline + ties
+        if scored == 0:
+            return {
+                "judge": "llm", "verdict": "skipped",
+                "reason": f"all {errors} judge calls failed",
+                "baseline": baseline, "candidate": candidate,
+                "errors": errors,
+            }
+
+        # Verdict thresholds. Conservative: require ≥60% candidate-win
+        # rate (over scored decisions, ties excluded) to declare pass.
+        # 50% means coin-flip — no real signal.
+        decisive = wins_candidate + wins_baseline
+        win_rate = wins_candidate / decisive if decisive > 0 else 0.5
+        if win_rate >= 0.60:
+            verdict = "pass"
+        elif win_rate <= 0.40:
+            verdict = "regress"
+        else:
+            verdict = "no-change"
+
+        return {
+            "judge": "llm",
+            "verdict": verdict,
+            "reason": (f"candidate won {wins_candidate} / baseline won "
+                       f"{wins_baseline} / ties {ties} (errors {errors}) "
+                       f"— win_rate={win_rate:.2%}"),
+            "baseline": baseline, "candidate": candidate,
+            "wins_candidate": wins_candidate,
+            "wins_baseline": wins_baseline,
+            "ties": ties,
+            "errors": errors,
+            "decisive_count": decisive,
+            "win_rate": win_rate,
+            "per_prompt": per_prompt,
+        }
+
+
 class SftPromptsJudge:
     """Live-inference judge. Loads eval prompts from JSONL, runs each
     against an MLX server with both adapters swapped in, scores responses
@@ -308,8 +497,11 @@ def main():
                     help="Path to the BASELINE adapter (existing known-good)")
     ap.add_argument("--candidate", type=Path, required=True,
                     help="Path to the CANDIDATE adapter (newly trained)")
-    ap.add_argument("--judge", choices=["metadata", "sft-prompts"], default="metadata",
+    ap.add_argument("--judge", choices=["metadata", "sft-prompts", "llm"], default="metadata",
                     help="Judge implementation (default: metadata)")
+    ap.add_argument("--completions-jsonl", type=Path,
+                    help="For --judge llm: JSONL of "
+                         "{prompt, baseline_output, candidate_output} per line")
     ap.add_argument("--prompts-jsonl", type=Path,
                     default=Path(__file__).resolve().parent.parent
                     / "eval_suites" / "m3-personalization" / "prompts.jsonl",
@@ -333,6 +525,12 @@ def main():
     judge: Judge
     if args.judge == "metadata":
         judge = MetadataJudge()
+    elif args.judge == "llm":
+        if args.completions_jsonl is None:
+            print("ERROR: --completions-jsonl is required for --judge llm",
+                  file=sys.stderr)
+            sys.exit(2)
+        judge = LlmJudge(args.completions_jsonl)
     else:
         judge = SftPromptsJudge(args.mlx_url, args.prompts_jsonl)
 

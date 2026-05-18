@@ -164,6 +164,52 @@ def test_regress_verdict_candidate_smaller_rank():
             f"got {verdict['verdict']}: {verdict['reason']}")
 
 
+def test_llm_judge_skips_when_no_api_key():
+    print("\n--- test_llm_judge_skips_when_no_api_key ---")
+    import os
+    # Save + clear OPENAI_API_KEY for the duration of this test.
+    prior_key = os.environ.pop("OPENAI_API_KEY", None)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            comp = Path(d) / "completions.jsonl"
+            comp.write_text(
+                '{"prompt": "hi", "baseline_output": "as an AI",'
+                ' "candidate_output": "hey there"}\n'
+            )
+            baseline = {"format": "lora-bin", "path": str(comp), "size_bytes": 100,
+                        "rank": 4, "num_layers": 5}
+            candidate = baseline
+            verdict = eval_mod.LlmJudge(comp).evaluate(baseline, candidate)
+            _ok("verdict=skipped when no API key",
+                verdict["verdict"] == "skipped",
+                f"got {verdict['verdict']}: {verdict['reason']}")
+            _ok("reason mentions OPENAI_API_KEY",
+                "OPENAI_API_KEY" in verdict["reason"])
+    finally:
+        if prior_key:
+            os.environ["OPENAI_API_KEY"] = prior_key
+
+
+def test_llm_judge_skips_when_completions_missing():
+    print("\n--- test_llm_judge_skips_when_completions_missing ---")
+    baseline = {"format": "lora-bin", "path": "/tmp/x", "size_bytes": 100,
+                "rank": 4, "num_layers": 5}
+    candidate = baseline
+    verdict = eval_mod.LlmJudge(
+        Path("/tmp/nonexistent_completions_xyz.jsonl")).evaluate(baseline, candidate)
+    _ok("verdict=skipped when completions missing",
+        verdict["verdict"] == "skipped")
+
+
+def test_llm_judge_build_prompt_includes_both_outputs():
+    print("\n--- test_llm_judge_build_prompt_includes_both_outputs ---")
+    judge = eval_mod.LlmJudge(Path("/tmp/x"))
+    prompt = judge._build_judge_prompt("yo", "response one", "response two")
+    _ok("prompt has both responses",
+        "response one" in prompt and "response two" in prompt)
+    _ok("prompt asks for A/B/TIE", "A / B / TIE" in prompt)
+
+
 def test_missing_file_returns_none():
     print("\n--- test_missing_file_returns_none ---")
     with tempfile.TemporaryDirectory() as d:
@@ -179,6 +225,9 @@ def main():
     test_no_change_verdict_same_adapter_both_sides()
     test_fail_verdict_candidate_is_empty_stub()
     test_regress_verdict_candidate_smaller_rank()
+    test_llm_judge_skips_when_no_api_key()
+    test_llm_judge_skips_when_completions_missing()
+    test_llm_judge_build_prompt_includes_both_outputs()
     test_missing_file_returns_none()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")
     return 0 if _FAIL == 0 else 1
