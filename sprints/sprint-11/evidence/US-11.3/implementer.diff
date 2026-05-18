@@ -1,0 +1,946 @@
+commit 9d4d4d6f39746d4b39b75c56fda1ec138f0c4419
+Author: Seth Ford <sethford@studio.local>
+Date:   Sat May 16 21:49:21 2026 -0400
+
+    feat(sprint-11): US-11.3 chosen_r early-stop log-parsing wrapper
+    
+    Ships the Rule A plateau-break detector from Sprint 8 insights-addressed.md
+    as a subprocess.Popen log-parsing wrapper around mlx_lm_lora training.
+    Halts DPO when train_chosen_r drops below 50% of its trailing-5-window mean
+    for 2 consecutive eval steps — the production-cheap proxy for the Anthropic
+    2507.21509 persona-vector projection signal (full activation projection
+    deferred to Sprint 12).
+    
+    - scripts/dpo_early_stop.py: ChosenRPlateauDetector + parse_iter_line +
+      run_with_early_stop subprocess wrapper. Emits structured JSON event
+      with {first_breach_iter, stopped_iter, promoted_iter, trailing_mean,
+      threshold}; writes .early_stop sentinel + event log on fire.
+    - scripts/finetune-gemma.py: --early-stopping-signal {chosen_r,none}
+      CLI flag (default chosen_r); routes run_dpo() subprocess through the
+      wrapper when enabled; defaults to 'none' on synthesized Namespaces to
+      preserve back-compat with Sprint 7/8 tests.
+    - tests/fixtures/sprint8_dpo80_log.jsonl: distilled 16-record JSONL
+      from /tmp/dpo80.log (Sprint 8 Smoke #3).
+    - tests/test_dpo_early_stop.py: 13 deterministic offline tests covering
+      AC-11.3.1..5 — fixture replay asserts first_breach_iter=65,
+      stopped_iter=70, promoted_iter=60.
+
+diff --git a/scripts/dpo_early_stop.py b/scripts/dpo_early_stop.py
+new file mode 100644
+index 00000000..48cc0995
+--- /dev/null
++++ b/scripts/dpo_early_stop.py
+@@ -0,0 +1,387 @@
++#!/usr/bin/env python3
++"""Sprint 11 / US-11.3 — DPO early-stopping by `train_chosen_r` plateau-break.
++
++This module is a **log-parsing callback**, not a deep training-loop intercept.
++It parses `mlx_lm_lora`'s per-iter reporting line and applies Rule A from
++Sprint 8 `insights-addressed.md` (the empirically grounded proxy for the
++Anthropic 2507.21509 persona-vector projection signal):
++
++    Stop when current `chosen_r` < `drop_ratio` * trailing-window mean for
++    `confirm_consecutive` consecutive evaluation steps.
++
++The full Anthropic persona-vector projection (reading intermediate-layer
++activations, projecting onto a precomputed user-voice direction) is
++explicitly out of scope for Sprint 11 and deferred to Sprint 12.
++
++The public surface is:
++  - `parse_iter_line(line)` -> Optional[(iter, chosen_r)]
++  - `ChosenRPlateauDetector(...)`
++      - `observe(iter, chosen_r)` -> Optional[Decision] (None if continue)
++      - `format_event(decision)` -> str (one-line JSON for downstream tooling)
++  - `run_with_early_stop(cmd, detector, ...)` -> int (subprocess.Popen wrapper)
++
++All behavior is offline-testable: feed observations directly into
++`observe()` from a JSONL fixture; the subprocess seam is mocked.
++"""
++from __future__ import annotations
++
++import json
++import os
++import re
++import signal
++import subprocess
++import sys
++from collections import deque
++from dataclasses import dataclass, field, asdict
++from pathlib import Path
++from typing import Callable, Deque, List, Optional, Tuple
++
++
++# ── Regex for `Iter N: ... chosen_r X.XXX ...` lines from mlx-lm-lora ──
++# Sprint 8 `/tmp/dpo80.log` format:
++#   Iter 5: loss 1.014, chosen_r 17.582, rejected_r 17.588, acc 0.400, ...
++# Negative values are common after the cliff: chosen_r -4.500, -8.867.
++# Validation lines (`Iter X: Val loss ...`) do NOT contain `chosen_r` so
++# they fall through `parse_iter_line` -> None.
++_ITER_RE = re.compile(r"Iter (\d+):\s*.*?chosen_r (-?\d+(?:\.\d+)?)")
++
++
++def parse_iter_line(line: str) -> Optional[Tuple[int, float]]:
++    """Extract (iter, chosen_r) from an mlx-lm-lora reporting line.
++
++    Returns None for non-matching lines (val reports, progress bars,
++    Python tracebacks, blank lines). The caller must treat None as
++    "ignore this line; emit it to stdout but do not observe."
++    """
++    if not line:
++        return None
++    m = _ITER_RE.search(line)
++    if not m:
++        return None
++    try:
++        return int(m.group(1)), float(m.group(2))
++    except (TypeError, ValueError):
++        return None
++
++
++@dataclass
++class Decision:
++    """The detector's verdict at one observation step.
++
++    `should_stop=False` is wrapped in `Optional[Decision]` -> None in the
++    detector API, so any returned Decision implies `should_stop=True`.
++
++    Fields:
++      reason             — fixed string for log-grep stability
++      stopped_iter       — the iter at which the second breach confirmed
++      first_breach_iter  — the iter at which the FIRST sub-threshold drop
++                           occurred (one report-step before stopped_iter).
++                           AC-11.3.2 asserts against this field.
++      promoted_iter      — the most recent save_every boundary STRICTLY
++                           before stopped_iter. This is the adapter that
++                           the caller should keep; the adapter at
++                           stopped_iter may be mid-checkpoint-write at
++                           SIGTERM time.
++      trailing_mean      — the trailing-window mean used to compute the
++                           threshold at the firing step
++      threshold          — drop_ratio * trailing_mean
++      chosen_r           — the chosen_r observation that triggered the
++                           second breach
++    """
++    reason: str
++    stopped_iter: int
++    first_breach_iter: int
++    promoted_iter: int
++    trailing_mean: float
++    threshold: float
++    chosen_r: float
++
++    def to_event(self) -> dict:
++        """Return the structured-log dict (AC-11.3.4 schema)."""
++        return {
++            "event": "early_stop",
++            "reason": self.reason,
++            "stopped_iter": self.stopped_iter,
++            "first_breach_iter": self.first_breach_iter,
++            "promoted_iter": self.promoted_iter,
++            "trailing_mean": round(self.trailing_mean, 6),
++            "threshold": round(self.threshold, 6),
++            "chosen_r": round(self.chosen_r, 6),
++        }
++
++
++class ChosenRPlateauDetector:
++    """Tracks `train_chosen_r` per evaluation step and applies Rule A.
++
++    Rule A (from Sprint 8 insights-addressed.md, US-11.3 design §1):
++        At each observation `(iter_n, chosen_r_n)`:
++          1. Compute `trailing_mean = mean(prior `window` observations)`.
++             If fewer than `window` prior observations exist, no decision.
++          2. `threshold = drop_ratio * trailing_mean`.
++          3. If `chosen_r_n < threshold`, increment breach counter.
++             Record `first_breach_iter` on the first breach in the
++             current run. Otherwise reset the breach counter.
++          4. If breach counter reaches `confirm_consecutive`, FIRE.
++
++    `signal_mode='none'` is a backward-compat pass-through (AC-11.3.5):
++    `observe()` never returns a Decision regardless of input.
++
++    The `save_every` parameter is used to compute `promoted_iter`:
++        promoted_iter = floor((stopped_iter - 1) / save_every) * save_every
++    i.e., the most recent save-checkpoint boundary STRICTLY BEFORE the
++    stopped_iter. For Sprint 8 fixture: stopped_iter=70, save_every=20
++    -> floor(69/20)*20 = 60.
++    """
++
++    def __init__(
++        self,
++        window: int = 5,
++        drop_ratio: float = 0.5,
++        confirm_consecutive: int = 2,
++        save_every: int = 20,
++        signal_mode: str = "chosen_r",
++    ) -> None:
++        if window < 1:
++            raise ValueError(f"window must be >= 1 (got {window})")
++        if not (0.0 < drop_ratio < 1.0):
++            raise ValueError(f"drop_ratio must be in (0,1) (got {drop_ratio})")
++        if confirm_consecutive < 1:
++            raise ValueError(f"confirm_consecutive must be >= 1 (got {confirm_consecutive})")
++        if save_every < 1:
++            raise ValueError(f"save_every must be >= 1 (got {save_every})")
++        if signal_mode not in ("chosen_r", "none"):
++            raise ValueError(
++                f"signal_mode must be 'chosen_r' or 'none' (got {signal_mode!r})"
++            )
++        self.window = window
++        self.drop_ratio = drop_ratio
++        self.confirm_consecutive = confirm_consecutive
++        self.save_every = save_every
++        self.signal_mode = signal_mode
++
++        # Full history of (iter, chosen_r). We keep all observations rather
++        # than a maxlen deque so debugging and the structured event can
++        # reference any prior iter.
++        self._history: List[Tuple[int, float]] = []
++        self._breach_count: int = 0
++        self._first_breach_iter: Optional[int] = None
++
++    def observe(self, iter_n: int, chosen_r: float) -> Optional[Decision]:
++        """Record one observation; return a Decision iff Rule A fires."""
++        # AC-11.3.5: signal=='none' is a pure pass-through.
++        if self.signal_mode == "none":
++            self._history.append((iter_n, chosen_r))
++            return None
++
++        # We need at least `window` PRIOR observations to compute the
++        # trailing mean. Before that, just accumulate.
++        if len(self._history) < self.window:
++            self._history.append((iter_n, chosen_r))
++            return None
++
++        # Trailing mean from the `window` most recent prior observations
++        # (not including the current one). This is the cleanest reading
++        # of AC-11.3.1 ("drops below 50% of its trailing-5-window mean").
++        trailing_vals = [v for (_, v) in self._history[-self.window :]]
++        trailing_mean = sum(trailing_vals) / float(self.window)
++        threshold = self.drop_ratio * trailing_mean
++
++        # Append BEFORE deciding — the current iter must be in history
++        # when we report the decision (the fixture's stopped_iter is the
++        # current iter).
++        self._history.append((iter_n, chosen_r))
++
++        # Edge case: if trailing_mean is non-positive, the threshold is
++        # not meaningful (we can't say a chosen_r is < some non-positive
++        # threshold in the way the rule intends — once the model has
++        # collapsed, the trailing mean itself is below zero). In that
++        # case, treat the threshold as already breached if the prior
++        # observations also collapsed. We keep behavior conservative:
++        # do NOT fire on a non-positive trailing mean — the cliff has
++        # already happened and stopping now would just be late.
++        if trailing_mean <= 0:
++            # Reset breach state so we do not carry over a stale count.
++            self._breach_count = 0
++            self._first_breach_iter = None
++            return None
++
++        if chosen_r < threshold:
++            # Breach.
++            if self._breach_count == 0:
++                self._first_breach_iter = iter_n
++            self._breach_count += 1
++            if self._breach_count >= self.confirm_consecutive:
++                # FIRE. Compute promoted_iter as the latest save_every
++                # boundary strictly less than stopped_iter.
++                promoted_iter = ((iter_n - 1) // self.save_every) * self.save_every
++                if promoted_iter < 0:
++                    promoted_iter = 0
++                # mypy: first_breach_iter must be set by now (it was set
++                # on the first breach, which by definition preceded
++                # the second; even if confirm_consecutive==1, the same
++                # iter set it).
++                fb = self._first_breach_iter
++                assert fb is not None
++                return Decision(
++                    reason="chosen_r_plateau_break",
++                    stopped_iter=iter_n,
++                    first_breach_iter=fb,
++                    promoted_iter=promoted_iter,
++                    trailing_mean=trailing_mean,
++                    threshold=threshold,
++                    chosen_r=chosen_r,
++                )
++        else:
++            # Not a breach — reset the consecutive counter. This is what
++            # protects us from the iter-30 warmup dip false-positive.
++            self._breach_count = 0
++            self._first_breach_iter = None
++
++        return None
++
++    def format_event(self, decision: Decision) -> str:
++        """Render the firing decision as a single JSON log line."""
++        return json.dumps(decision.to_event(), sort_keys=True)
++
++    # Test/debug accessors.
++    @property
++    def history(self) -> List[Tuple[int, float]]:
++        return list(self._history)
++
++    @property
++    def breach_count(self) -> int:
++        return self._breach_count
++
++
++# ── subprocess.Popen wrapper used by finetune-gemma.py ──────────────────
++
++def run_with_early_stop(
++    cmd: List[str],
++    detector: ChosenRPlateauDetector,
++    cwd: Optional[str] = None,
++    out_stream=None,
++    sentinel_path: Optional[Path] = None,
++    event_log_path: Optional[Path] = None,
++    terminate_grace_sec: float = 10.0,
++    _popen=subprocess.Popen,
++) -> Tuple[int, Optional[Decision]]:
++    """Run `cmd` and stream its stdout through `detector`.
++
++    On fire:
++      - Write a `.early_stop` sentinel file (if `sentinel_path` is set).
++      - Append the structured JSON event to `event_log_path` (if set).
++      - SIGTERM the subprocess; if it does not exit within
++        `terminate_grace_sec`, SIGKILL.
++    Returns (returncode, decision_or_None).
++
++    `out_stream` is where we echo lines we read from the subprocess
++    (defaults to sys.stdout). `_popen` is the injection seam for tests.
++
++    The detector is consulted ONLY when its signal_mode is `chosen_r`.
++    With signal_mode=='none', this function still streams stdout but
++    never observes — the subprocess runs to completion.
++    """
++    if out_stream is None:
++        out_stream = sys.stdout
++
++    proc = _popen(
++        cmd,
++        cwd=cwd,
++        stdout=subprocess.PIPE,
++        stderr=subprocess.STDOUT,
++        text=True,
++        bufsize=1,
++    )
++
++    fired: Optional[Decision] = None
++    try:
++        stdout = getattr(proc, "stdout", None)
++        if stdout is not None:
++            for line in stdout:
++                # Echo every line; preserves user-visible logging.
++                try:
++                    out_stream.write(line)
++                    out_stream.flush()
++                except Exception:
++                    # Never let a stdout failure crash the wrapper.
++                    pass
++
++                if fired is not None:
++                    # We have already fired; keep draining so the subprocess
++                    # can exit cleanly. Do not call observe() again.
++                    continue
++                if detector.signal_mode == "none":
++                    continue
++
++                parsed = parse_iter_line(line)
++                if parsed is None:
++                    continue
++                iter_n, chosen_r = parsed
++                decision = detector.observe(iter_n, chosen_r)
++                if decision is not None:
++                    fired = decision
++                    _on_fire(
++                        decision,
++                        detector,
++                        out_stream=out_stream,
++                        sentinel_path=sentinel_path,
++                        event_log_path=event_log_path,
++                    )
++                    _terminate(proc, terminate_grace_sec)
++    finally:
++        rc = proc.wait()
++
++    return rc, fired
++
++
++def _on_fire(
++    decision: Decision,
++    detector: ChosenRPlateauDetector,
++    out_stream,
++    sentinel_path: Optional[Path],
++    event_log_path: Optional[Path],
++) -> None:
++    """Emit the structured event log and write the sentinel."""
++    event_line = detector.format_event(decision)
++    try:
++        out_stream.write(event_line + "\n")
++        out_stream.flush()
++    except Exception:
++        pass
++    if event_log_path is not None:
++        try:
++            event_log_path.parent.mkdir(parents=True, exist_ok=True)
++            with open(event_log_path, "a") as f:
++                f.write(event_line + "\n")
++        except OSError:
++            pass
++    if sentinel_path is not None:
++        try:
++            sentinel_path.parent.mkdir(parents=True, exist_ok=True)
++            with open(sentinel_path, "w") as f:
++                json.dump(decision.to_event(), f, sort_keys=True)
++        except OSError:
++            pass
++
++
++def _terminate(proc, grace_sec: float) -> None:
++    """Send SIGTERM; if grace expires, SIGKILL."""
++    try:
++        proc.terminate()
++    except Exception:
++        return
++    try:
++        proc.wait(timeout=grace_sec)
++    except subprocess.TimeoutExpired:
++        try:
++            proc.kill()
++        except Exception:
++            pass
++
++
++__all__ = [
++    "parse_iter_line",
++    "Decision",
++    "ChosenRPlateauDetector",
++    "run_with_early_stop",
++]
+diff --git a/scripts/finetune-gemma.py b/scripts/finetune-gemma.py
+index 63f853d3..8e0dd274 100644
+--- a/scripts/finetune-gemma.py
++++ b/scripts/finetune-gemma.py
+@@ -32,6 +32,7 @@ DPO note:
+ from __future__ import annotations
+ 
+ import argparse
++import importlib.util
+ import json
+ import os
+ import shutil
+@@ -41,6 +42,26 @@ import sys
+ import time
+ from pathlib import Path
+ 
++
++# ── Sprint 11 / US-11.3 — chosen_r early-stopping ────────────────────
++def _load_early_stop_module():
++    """Lazy-load `scripts/dpo_early_stop.py` (sibling file).
++
++    Same-directory import. Lazy so this script can still parse in
++    environments where the early-stopping module is absent (pure stdlib
++    today; the seam is here for forward-compat with Sprint 12 persona-
++    vector hooks).
++    """
++    here = Path(__file__).resolve().parent
++    es_path = here / "dpo_early_stop.py"
++    spec = importlib.util.spec_from_file_location("dpo_early_stop", es_path)
++    assert spec is not None and spec.loader is not None
++    mod = importlib.util.module_from_spec(spec)
++    sys.modules.setdefault("dpo_early_stop", mod)
++    spec.loader.exec_module(mod)
++    return mod
++
++
+ # ── Model Target Registry ─────────────────────────────────────────
+ MODEL_TARGETS = {
+     "31b": {
+@@ -548,14 +569,51 @@ def run_dpo(args, adapter_dir: Path) -> int:
+     print(f"\n  Running DPO: {dpo_iters} iters, LR={dpo_lr}, beta=0.1 (sigmoid)")
+     print(f"  (Real preference loss via mlx-lm-lora; both chosen and rejected are used)\n")
+ 
++    # Sprint 11 / US-11.3 — chosen_r plateau-break early stopping.
++    # Default 'none' (NOT 'chosen_r') when args has no `early_stopping_signal`
++    # attribute. This preserves backward-compat with Sprint 7/8 tests and
++    # internal Namespaces (run_train_all, run_speculative_draft_training)
++    # that predate this flag. main() sets it explicitly to the CLI value
++    # (default 'chosen_r' for new operator-driven runs).
++    es_signal = getattr(args, "early_stopping_signal", "none")
+     t0 = time.time()
+-    result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent))
++    if es_signal == "chosen_r":
++        es_mod = _load_early_stop_module()
++        detector = es_mod.ChosenRPlateauDetector(
++            window=5,
++            drop_ratio=0.5,
++            confirm_consecutive=2,
++            save_every=int(getattr(args, "save_every", 20)),
++            signal_mode="chosen_r",
++        )
++        sentinel = adapter_dir / ".early_stop"
++        event_log = adapter_dir / "early_stop_events.jsonl"
++        print(f"  Early stopping: chosen_r plateau-break "
++              f"(window=5, drop_ratio=0.5, confirm=2, save_every={detector.save_every})")
++        rc, decision = es_mod.run_with_early_stop(
++            cmd=cmd,
++            detector=detector,
++            cwd=str(Path(__file__).parent.parent),
++            sentinel_path=sentinel,
++            event_log_path=event_log,
++        )
++        if decision is not None:
++            print(
++                f"  Early stop FIRED: first_breach_iter={decision.first_breach_iter}, "
++                f"stopped_iter={decision.stopped_iter}, "
++                f"promoted_iter={decision.promoted_iter}"
++            )
++            print(f"  Promoted adapter: iter {decision.promoted_iter} (last save_every boundary)")
++        returncode = rc
++    else:
++        result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent))
++        returncode = result.returncode
+     elapsed = time.time() - t0
+ 
+-    if result.returncode == 0:
++    if returncode == 0:
+         print(f"  DPO complete! ({elapsed/60:.1f} minutes)")
+     else:
+-        print(f"  DPO failed (exit code {result.returncode}, {elapsed:.0f}s)")
++        print(f"  DPO failed (exit code {returncode}, {elapsed:.0f}s)")
+         print(f"  Primary SFT adapter is still valid — non-fatal.")
+ 
+     return 0
+@@ -611,6 +669,9 @@ def run_speculative_draft_training(args):
+         # the target trains DoRA but the draft trains LoRA, speculative
+         # decode acceptance drops and downstream merge-back diverges.
+         train_type=getattr(args, "train_type", "dora"),
++        # Sprint 11 / US-11.3: forward early-stopping signal so the draft
++        # model uses the same plateau-break detection as the target.
++        early_stopping_signal=getattr(args, "early_stopping_signal", "none"),
+         steps_per_report=args.steps_per_report,
+         steps_per_eval=args.steps_per_eval,
+         save_every=args.save_every,
+@@ -930,6 +991,9 @@ def run_train_all(args):
+             # targets train with the same adapter type. Mixing DoRA and
+             # LoRA across the real-time stack would diverge magnitudes.
+             train_type=getattr(args, "train_type", "dora"),
++            # Sprint 11 / US-11.3: forward early-stopping signal so each
++            # per-target run honors the same plateau-break policy.
++            early_stopping_signal=getattr(args, "early_stopping_signal", "none"),
+             steps_per_report=args.steps_per_report,
+             steps_per_eval=args.steps_per_eval,
+             save_every=args.save_every,
+@@ -1050,6 +1114,16 @@ Examples:
+                         help="Train all three targets (31B + E4B + E2B) on the same data")
+     parser.add_argument("--realtime-first", action="store_true",
+                         help="With --train-all, train E4B and E2B before 31B (get real-time running fast)")
++    # Sprint 11 / US-11.3 — chosen_r plateau-break early stopping.
++    # Default 'chosen_r' for new operator-driven runs (Sprint 11 baseline).
++    # Pass 'none' to disable (AC-11.3.5 back-compat for Sprint 7/8 CI scripts
++    # and any pipeline that wants to run to the full --iters horizon).
++    parser.add_argument("--early-stopping-signal", choices=["chosen_r", "none"],
++                        default="chosen_r",
++                        help="DPO early-stopping signal: chosen_r (default, "
++                             "US-11.3; halts when train_chosen_r plateau breaks "
++                             "by >50%% drop for 2 consecutive eval steps) or "
++                             "none (run to --iters, Sprint 7/8 behavior).")
+     args = parser.parse_args()
+ 
+     target_cfg = get_target_config(args.target)
+diff --git a/tests/fixtures/sprint8_dpo80_log.jsonl b/tests/fixtures/sprint8_dpo80_log.jsonl
+new file mode 100644
+index 00000000..bb723101
+--- /dev/null
++++ b/tests/fixtures/sprint8_dpo80_log.jsonl
+@@ -0,0 +1,16 @@
++{"iter": 5, "loss": 1.014, "chosen_r": 17.582, "rejected_r": 17.588, "acc": 0.4, "margin": -0.006}
++{"iter": 10, "loss": 0.979, "chosen_r": 15.925, "rejected_r": 14.138, "acc": 0.6, "margin": 1.787}
++{"iter": 15, "loss": 1.219, "chosen_r": 14.938, "rejected_r": 10.389, "acc": 0.8, "margin": 4.549}
++{"iter": 20, "loss": 0.831, "chosen_r": 20.434, "rejected_r": 8.607, "acc": 0.8, "margin": 11.827}
++{"iter": 25, "loss": 0.012, "chosen_r": 4.303, "rejected_r": -11.6, "acc": 1.0, "margin": 15.903}
++{"iter": 30, "loss": 1.303, "chosen_r": 4.868, "rejected_r": 2.736, "acc": 0.8, "margin": 2.132}
++{"iter": 35, "loss": 0.155, "chosen_r": 9.199, "rejected_r": -1.999, "acc": 1.0, "margin": 11.197}
++{"iter": 40, "loss": 0.048, "chosen_r": 8.921, "rejected_r": -3.968, "acc": 1.0, "margin": 12.889}
++{"iter": 45, "loss": 0.646, "chosen_r": 8.713, "rejected_r": -4.485, "acc": 0.8, "margin": 13.198}
++{"iter": 50, "loss": 0.109, "chosen_r": 9.896, "rejected_r": 1.512, "acc": 1.0, "margin": 8.384}
++{"iter": 55, "loss": 0.069, "chosen_r": 7.509, "rejected_r": -3.032, "acc": 1.0, "margin": 10.541}
++{"iter": 60, "loss": 0.49, "chosen_r": 7.349, "rejected_r": -7.644, "acc": 1.0, "margin": 14.994}
++{"iter": 65, "loss": 0.009, "chosen_r": 3.17, "rejected_r": -21.92, "acc": 1.0, "margin": 25.09}
++{"iter": 70, "loss": 0.129, "chosen_r": 2.103, "rejected_r": -14.219, "acc": 1.0, "margin": 16.322}
++{"iter": 75, "loss": 0.029, "chosen_r": -4.5, "rejected_r": -19.071, "acc": 1.0, "margin": 14.57}
++{"iter": 80, "loss": 0.019, "chosen_r": -8.867, "rejected_r": -36.446, "acc": 1.0, "margin": 27.579}
+diff --git a/tests/test_dpo_early_stop.py b/tests/test_dpo_early_stop.py
+new file mode 100644
+index 00000000..d6e58aaf
+--- /dev/null
++++ b/tests/test_dpo_early_stop.py
+@@ -0,0 +1,367 @@
++"""Sprint 11 / US-11.3 — `scripts/dpo_early_stop.py` test suite.
++
++Covers AC-11.3.1 .. AC-11.3.5 with deterministic, offline tests:
++
++  - AC-11.3.1: `--early-stopping-signal chosen_r` fires plateau-break.
++  - AC-11.3.2: Sprint 8 fixture (`tests/fixtures/sprint8_dpo80_log.jsonl`)
++    -> `first_breach_iter=65, stopped_iter=70, promoted_iter=60`.
++  - AC-11.3.3: stable trajectory (within 20% of plateau mean) -> never fires.
++  - AC-11.3.4: structured event JSON has the pinned schema.
++  - AC-11.3.5: signal_mode='none' -> callback bypassed entirely.
++
++Also smoke-tests the `subprocess.Popen` wrapper via a pure-Python
++fake-proc seam — no real `mlx_lm_lora` invocation, no real model
++weights, no network.
++"""
++from __future__ import annotations
++
++import importlib.util
++import io
++import json
++import pathlib
++import sys
++from typing import Iterable, List
++from unittest.mock import MagicMock, patch
++
++import pytest
++
++
++# ── Module loader (hyphen-free filename so importable, but keep loader
++#    for parity with `test_finetune_gemma_dpo.py`). ──
++_HERE = pathlib.Path(__file__).resolve().parent
++_SCRIPT = _HERE.parent / "scripts" / "dpo_early_stop.py"
++_FIXTURE = _HERE / "fixtures" / "sprint8_dpo80_log.jsonl"
++
++
++def _load_module():
++    spec = importlib.util.spec_from_file_location("dpo_early_stop", _SCRIPT)
++    assert spec is not None and spec.loader is not None
++    mod = importlib.util.module_from_spec(spec)
++    # Register BEFORE exec so dataclass's `sys.modules.get(cls.__module__)`
++    # lookup succeeds (Python 3.14 strictness).
++    sys.modules["dpo_early_stop"] = mod
++    spec.loader.exec_module(mod)
++    return mod
++
++
++es = _load_module()
++
++
++def _load_fixture():
++    assert _FIXTURE.exists(), f"fixture missing: {_FIXTURE}"
++    rows = []
++    for line in _FIXTURE.read_text().splitlines():
++        line = line.strip()
++        if not line:
++            continue
++        rows.append(json.loads(line))
++    return rows
++
++
++# ────────────────────────────────────────────────────────────────────────
++# `parse_iter_line` regex coverage
++# ────────────────────────────────────────────────────────────────────────
++def test_parse_iter_line_matches_canonical_mlx_lm_lora_line():
++    line = (
++        "Iter 65: loss 0.009, chosen_r 3.170, rejected_r -21.920, "
++        "acc 1.000, margin 25.090, lr 1.000e-05, it/s 1.252\n"
++    )
++    parsed = es.parse_iter_line(line)
++    assert parsed == (65, 3.170)
++
++
++def test_parse_iter_line_handles_negative_chosen_r():
++    line = "Iter 80: loss 0.019, chosen_r -8.867, rejected_r -36.446, acc 1.000\n"
++    assert es.parse_iter_line(line) == (80, -8.867)
++
++
++def test_parse_iter_line_returns_none_for_val_line():
++    # mlx-lm-lora's validation lines do NOT contain `chosen_r`.
++    line = "Iter 20: Val loss 1.234, Val took 5.6s\n"
++    assert es.parse_iter_line(line) is None
++
++
++def test_parse_iter_line_returns_none_for_blank_and_garbage():
++    assert es.parse_iter_line("") is None
++    assert es.parse_iter_line("\n") is None
++    assert es.parse_iter_line("Some progress bar: |####    | 50%\n") is None
++
++
++# ────────────────────────────────────────────────────────────────────────
++# AC-11.3.1 — plateau-break fires on a minimal synthetic trajectory
++# ────────────────────────────────────────────────────────────────────────
++def test_chosen_r_plateau_break_fires():
++    """Two consecutive observations strictly below 50% of the trailing-5
++    mean must produce a Decision with should_stop semantics (the API
++    returns Optional[Decision]; non-None == should_stop)."""
++    det = es.ChosenRPlateauDetector(
++        window=5, drop_ratio=0.5, confirm_consecutive=2, save_every=20
++    )
++    # Stable plateau iters 5..25 around chosen_r = 10.0.
++    stable = [(5, 10.0), (10, 10.0), (15, 10.0), (20, 10.0), (25, 10.0)]
++    for it, cr in stable:
++        assert det.observe(it, cr) is None, f"unexpected fire on stable {it}"
++    # Cliff at iter 30 and iter 35: both < 5.0 (= 0.5 * 10.0).
++    d30 = det.observe(30, 2.0)
++    assert d30 is None, "single sub-threshold dip must not fire with confirm=2"
++    d35 = det.observe(35, 1.5)
++    assert d35 is not None, "two consecutive sub-threshold drops must fire"
++    assert d35.reason == "chosen_r_plateau_break"
++    assert d35.stopped_iter == 35
++    assert d35.first_breach_iter == 30
++
++
++# ────────────────────────────────────────────────────────────────────────
++# AC-11.3.2 — Sprint 8 fixture replay produces the expected decision
++# ────────────────────────────────────────────────────────────────────────
++def test_sprint8_trajectory_stops_at_iter65():
++    """Replay the captured Sprint 8 DPO-80 log; assert the detector fires
++    at iter 70 with `first_breach_iter=65` and `promoted_iter=60`.
++
++    The story text says "halt at iter 65" — with `confirm_consecutive=2`
++    the FIRST breach is iter 65 and the decision FIRES at iter 70 once
++    the second consecutive sub-threshold drop confirms. Both fields are
++    emitted in the structured event; AC-11.3.2 asserts the breach iter."""
++    det = es.ChosenRPlateauDetector(
++        window=5, drop_ratio=0.5, confirm_consecutive=2, save_every=20
++    )
++    fired = None
++    rows = _load_fixture()
++    fire_index = None
++    for i, row in enumerate(rows):
++        d = det.observe(row["iter"], row["chosen_r"])
++        if d is not None:
++            fired = d
++            fire_index = i
++            break
++
++    assert fired is not None, "expected fire on Sprint 8 fixture"
++    assert fired.first_breach_iter == 65, (
++        f"AC-11.3.2: first_breach_iter must be 65, got {fired.first_breach_iter}"
++    )
++    assert fired.stopped_iter == 70, (
++        f"AC-11.3.2: stopped_iter must be 70 (one report-step after first "
++        f"breach with confirm_consecutive=2), got {fired.stopped_iter}"
++    )
++    assert fired.promoted_iter == 60, (
++        f"AC-11.3.4: promoted_iter must be 60 (most recent save_every=20 "
++        f"boundary strictly before stopped_iter=70), got {fired.promoted_iter}"
++    )
++    assert fired.reason == "chosen_r_plateau_break"
++
++    # Sanity: the warmup dip at iter 25/30 (chosen_r 4.303, 4.868) MUST
++    # NOT have triggered a spurious fire earlier in the replay.
++    assert fire_index is not None
++    assert rows[fire_index]["iter"] == 70
++
++
++# ────────────────────────────────────────────────────────────────────────
++# AC-11.3.3 — stable trajectory never fires
++# ────────────────────────────────────────────────────────────────────────
++def test_stable_chosen_r_no_early_stop():
++    """A run where chosen_r stays within 20% of its plateau mean for the
++    full training horizon must never trigger a stop."""
++    det = es.ChosenRPlateauDetector(
++        window=5, drop_ratio=0.5, confirm_consecutive=2, save_every=20
++    )
++    # 80-iter trajectory; chosen_r oscillates within [8.0, 9.6] (plateau
++    # mean ~ 8.8, 20% of plateau ~ 1.76 -> within band by definition).
++    oscillation = [8.0, 9.6, 8.2, 9.4, 8.4, 9.2, 8.6, 9.0, 8.8, 8.8] * 2
++    for i, cr in enumerate(oscillation):
++        iter_n = (i + 1) * 5
++        d = det.observe(iter_n, cr)
++        assert d is None, f"unexpected fire on stable trajectory at iter {iter_n}"
++    assert det.breach_count == 0
++    assert det.history[-1] == (100, oscillation[-1])
++
++
++def test_warmup_dip_does_not_fire_spuriously():
++    """The Sprint 8 fixture has a single dip at iter 25 (chosen_r=4.303
++    from a trailing mean ~ 17.2). With confirm_consecutive=2 the next
++    iter (iter 30, chosen_r=4.868) is also below threshold — but the
++    SUBSEQUENT iter 35 (chosen_r=9.199) is above, so the breach counter
++    must RESET and the warmup dip must not strand the detector in a
++    pre-fire state."""
++    det = es.ChosenRPlateauDetector(
++        window=5, drop_ratio=0.5, confirm_consecutive=2, save_every=20
++    )
++    rows = _load_fixture()
++    # Feed only iters 5..40 (well before the real cliff at 65/70).
++    for row in rows:
++        if row["iter"] > 40:
++            break
++        d = det.observe(row["iter"], row["chosen_r"])
++        # Some breach states may be set transiently, but no FIRE.
++        assert d is None, f"warmup must not fire (saw iter {row['iter']})"
++    # After iter 40 (chosen_r=8.921, above threshold), the breach counter
++    # must have reset.
++    assert det.breach_count == 0
++
++
++# ────────────────────────────────────────────────────────────────────────
++# AC-11.3.4 — structured event JSON schema is pinned
++# ────────────────────────────────────────────────────────────────────────
++def test_early_stop_log_format():
++    """The firing event MUST be a single JSON object with the keys
++    downstream tooling depends on. Lock the schema here so a future
++    refactor cannot silently break the Pareto picker integration."""
++    det = es.ChosenRPlateauDetector(
++        window=5, drop_ratio=0.5, confirm_consecutive=2, save_every=20
++    )
++    rows = _load_fixture()
++    fired = None
++    for row in rows:
++        d = det.observe(row["iter"], row["chosen_r"])
++        if d is not None:
++            fired = d
++            break
++    assert fired is not None
++    event_line = det.format_event(fired)
++    obj = json.loads(event_line)
++
++    expected_keys = {
++        "event",
++        "reason",
++        "stopped_iter",
++        "first_breach_iter",
++        "promoted_iter",
++        "trailing_mean",
++        "threshold",
++        "chosen_r",
++    }
++    assert set(obj.keys()) == expected_keys, (
++        f"AC-11.3.4: event schema drift; got {sorted(obj.keys())}"
++    )
++    assert obj["event"] == "early_stop"
++    assert obj["reason"] == "chosen_r_plateau_break"
++    assert obj["stopped_iter"] == 70
++    assert obj["first_breach_iter"] == 65
++    assert obj["promoted_iter"] == 60
++    assert isinstance(obj["trailing_mean"], float)
++    assert isinstance(obj["threshold"], float)
++    assert isinstance(obj["chosen_r"], float)
++
++
++# ────────────────────────────────────────────────────────────────────────
++# AC-11.3.5 — signal_mode='none' is a no-op
++# ────────────────────────────────────────────────────────────────────────
++def test_disabled_signal_is_noop():
++    """With `signal_mode='none'` the detector must never return a
++    Decision regardless of input, preserving backward-compat with the
++    Sprint 8 baseline CI scripts."""
++    det = es.ChosenRPlateauDetector(
++        window=5, drop_ratio=0.5, confirm_consecutive=2, save_every=20,
++        signal_mode="none",
++    )
++    rows = _load_fixture()
++    for row in rows:
++        d = det.observe(row["iter"], row["chosen_r"])
++        assert d is None, (
++            f"signal_mode='none' must never fire (iter {row['iter']})"
++        )
++    # All observations were still recorded so we can inspect history if needed.
++    assert len(det.history) == len(rows)
++
++
++def test_invalid_signal_mode_rejected():
++    with pytest.raises(ValueError):
++        es.ChosenRPlateauDetector(signal_mode="persona_vector")
++
++
++# ────────────────────────────────────────────────────────────────────────
++# subprocess.Popen wrapper — fake-proc seam, no real spawn
++# ────────────────────────────────────────────────────────────────────────
++class _FakeProc:
++    """Iterable-stdout fake of subprocess.Popen for hermetic testing."""
++
++    def __init__(self, lines: Iterable[str], returncode: int = 0):
++        self._lines = list(lines)
++        self.stdout = iter(self._lines)
++        self.returncode = returncode
++        self.terminated = False
++        self.killed = False
++
++    def wait(self, timeout=None):
++        return self.returncode
++
++    def terminate(self):
++        self.terminated = True
++
++    def kill(self):
++        self.killed = True
++
++
++def _sprint8_stdout_lines():
++    """Build the per-iter stdout lines the wrapper would see from
++    mlx-lm-lora on the Sprint 8 fixture."""
++    out = []
++    for row in _load_fixture():
++        out.append(
++            f"Iter {row['iter']}: loss {row['loss']:.3f}, "
++            f"chosen_r {row['chosen_r']:.3f}, "
++            f"rejected_r {row['rejected_r']:.3f}, "
++            f"acc {row['acc']:.3f}, margin {row['margin']:.3f}\n"
++        )
++    return out
++
++
++def test_wrapper_streams_lines_and_fires_on_sprint8(tmp_path):
++    """End-to-end test of `run_with_early_stop`: feed Sprint 8 lines
++    through a fake Popen; assert SIGTERM was sent, sentinel + event log
++    written, returned Decision matches the fixture."""
++    det = es.ChosenRPlateauDetector(
++        window=5, drop_ratio=0.5, confirm_consecutive=2, save_every=20
++    )
++    fake = _FakeProc(_sprint8_stdout_lines(), returncode=0)
++    buf = io.StringIO()
++    sentinel = tmp_path / "adapter" / ".early_stop"
++    event_log = tmp_path / "adapter" / "early_stop_events.jsonl"
++
++    rc, decision = es.run_with_early_stop(
++        cmd=["python3", "-m", "mlx_lm_lora.train", "--fake"],
++        detector=det,
++        out_stream=buf,
++        sentinel_path=sentinel,
++        event_log_path=event_log,
++        terminate_grace_sec=0.1,
++        _popen=lambda *a, **kw: fake,
++    )
++
++    assert decision is not None, "wrapper must return the firing Decision"
++    assert decision.first_breach_iter == 65
++    assert decision.stopped_iter == 70
++    assert decision.promoted_iter == 60
++    assert fake.terminated, "wrapper must SIGTERM the subprocess on fire"
++    assert sentinel.exists(), "sentinel file must be written"
++    assert event_log.exists(), "event log must be written"
++    # Echoed lines include the structured event in stdout buffer.
++    echoed = buf.getvalue()
++    assert "chosen_r 3.170" in echoed
++    assert "early_stop" in echoed
++
++
++def test_wrapper_signal_none_runs_to_completion(tmp_path):
++    """With signal_mode='none' the wrapper must NEVER call terminate()
++    even if the trajectory would have triggered a stop in chosen_r mode."""
++    det = es.ChosenRPlateauDetector(
++        window=5, drop_ratio=0.5, confirm_consecutive=2, save_every=20,
++        signal_mode="none",
++    )
++    fake = _FakeProc(_sprint8_stdout_lines(), returncode=0)
++    buf = io.StringIO()
++
++    rc, decision = es.run_with_early_stop(
++        cmd=["python3", "-m", "mlx_lm_lora.train", "--fake"],
++        detector=det,
++        out_stream=buf,
++        sentinel_path=tmp_path / ".early_stop",
++        event_log_path=tmp_path / "events.jsonl",
++        terminate_grace_sec=0.1,
++        _popen=lambda *a, **kw: fake,
++    )
++
++    assert decision is None, "signal_mode='none' must never fire"
++    assert not fake.terminated, (
++        "signal_mode='none' must NOT terminate the subprocess"
++    )
++    assert rc == 0

@@ -41,12 +41,19 @@ bool hu_onboard_check_first_run(void) {
     return true;
 }
 
-/* Single source of truth — declared in include/human/onboard.h and
+/* Single source of truth — accessed via hu_starter_persona_get(),
  * referenced by both `human init` (src/cli_commands.c) and
  * `human onboard` (this file). Defined outside the HU_IS_TEST guard
- * so unit tests (which set HU_IS_TEST) can still link against this
- * symbol — the literal is bytes-on-disk-equivalent in both builds. */
-const char hu_starter_persona_json[] =
+ * so unit tests (which set HU_IS_TEST) can still link.
+ *
+ * The starter persona JSON is split into two static const arrays because
+ * the combined literal exceeds C99's 4095-char guaranteed minimum and
+ * GCC's -Werror=overlength-strings rejects it on strict Linux builds.
+ * The split lands at the natural JSON seam between channel_overlays and
+ * example_banks. Consumers call hu_starter_persona_get() to receive a
+ * pointer to a lazily-joined flat buffer (bytes-on-disk-equivalent to the
+ * original single-array form). */
+static const char hu_starter_persona_json_part1[] =
     "{\n"
     "  \"version\": 1,\n"
     "  \"name\": \"default\",\n"
@@ -94,39 +101,85 @@ const char hu_starter_persona_json[] =
     "      \"style_notes\": \"Technical, precise. No emoji. "
     "Format code blocks when showing code.\"\n"
     "    }\n"
-    "  },\n"
-    /* Starter example banks for the four Tier-1 channels. The persona
-     * prompt builder samples from these to anchor tone and length when
-     * a fresh user has no learned-from-history examples yet. Each bank
-     * holds three short examples chosen to match the channel's overlay
-     * (formality / avg_length / emoji_usage). Sprint 2b Story A'.
-     *
-     * Schema (parsed by `hu_persona_load_json` ->
-     * `hu_persona_examples_bank_from_array`):
-     *
-     *   { "channel": "<name>",
-     *     "examples": [
-     *       {"context": "...", "incoming": "...", "response": "..."},
-     *       ... ] }
-     *
-     * Examples are deliberately neutral (no proper nouns, no PII, no
-     * politics, no proper names) so they ship as defaults for every
-     * user without baking-in a single voice. They demonstrate length
-     * and emoji norms; the persona system overlays the user's learned
-     * style on top once `personal_model.bin` has data. */
+    "  },\n";
+
+/* Starter example banks for the four Tier-1 channels. The persona
+ * prompt builder samples from these to anchor tone and length when
+ * a fresh user has no learned-from-history examples yet. Each bank
+ * holds three short examples chosen to match the channel's overlay
+ * (formality / avg_length / emoji_usage). Sprint 2b Story A'.
+ *
+ * Schema (parsed by `hu_persona_load_json` ->
+ * `hu_persona_examples_bank_from_array`):
+ *
+ *   { "channel": "<name>",
+ *     "examples": [
+ *       {"context": "...", "incoming": "...", "response": "..."},
+ *       ... ] }
+ *
+ * Examples are deliberately neutral (no proper nouns, no PII, no
+ * politics, no proper names) so they ship as defaults for every
+ * user without baking-in a single voice. They demonstrate length
+ * and emoji norms; the persona system overlays the user's learned
+ * style on top once `personal_model.bin` has data. */
+static const char hu_starter_persona_json_part2[] =
     "  \"example_banks\": [\n"
     "    {\n"
     "      \"channel\": \"imessage\",\n"
     "      \"examples\": [\n"
+    /* ── terse acknowledgments ── */
     "        { \"context\": \"casual check-in\",\n"
     "          \"incoming\": \"hey you up?\",\n"
     "          \"response\": \"yeah, what's up?\" },\n"
     "        { \"context\": \"quick thanks\",\n"
     "          \"incoming\": \"thx for the help earlier\",\n"
     "          \"response\": \"anytime 🙏\" },\n"
+    "        { \"context\": \"acknowledging a one-word message\",\n"
+    "          \"incoming\": \"k\",\n"
+    "          \"response\": \"👍\" },\n"
+    /* ── emotional support (resist over-helping) ── */
+    "        { \"context\": \"venting about a meeting\",\n"
+    "          \"incoming\": \"ugh meeting got moved again\",\n"
+    "          \"response\": \"oof. when to?\" },\n"
+    "        { \"context\": \"reacting to bad news\",\n"
+    "          \"incoming\": \"layoffs hit my team today\",\n"
+    "          \"response\": \"god. you ok?\" },\n"
+    /* ── logistics ── */
     "        { \"context\": \"running late\",\n"
     "          \"incoming\": \"i'm gonna be like 10 min late\",\n"
-    "          \"response\": \"no worries, see you soon\" }\n"
+    "          \"response\": \"no worries, see you soon\" },\n"
+    "        { \"context\": \"confirming a plan\",\n"
+    "          \"incoming\": \"still on for 7?\",\n"
+    "          \"response\": \"yep, see you there\" },\n"
+    /* ── decisions ── */
+    "        { \"context\": \"yes/no decision\",\n"
+    "          \"incoming\": \"thinking of skipping tonight\",\n"
+    "          \"response\": \"do it. rest day's underrated\" },\n"
+    "        { \"context\": \"asking a fast question\",\n"
+    "          \"incoming\": \"thai or pizza?\",\n"
+    "          \"response\": \"thai\" },\n"
+    /* ── greetings (morning / night / reconnect) ── */
+    "        { \"context\": \"morning greeting after a fresh day\",\n"
+    "          \"incoming\": \"morning\",\n"
+    "          \"response\": \"morning. coffee then call?\" },\n"
+    "        { \"context\": \"night sign-off\",\n"
+    "          \"incoming\": \"night, talk tomorrow\",\n"
+    "          \"response\": \"night ✌️\" },\n"
+    "        { \"context\": \"reconnect after multi-day silence\",\n"
+    "          \"incoming\": \"hey it's been a min\",\n"
+    "          \"response\": \"way too long. how you been?\" },\n"
+    /* ── enthusiasm (calibrated, not overdone) ── */
+    "        { \"context\": \"hearing good news\",\n"
+    "          \"incoming\": \"i got the job!!\",\n"
+    "          \"response\": \"hell yes. drinks this weekend?\" },\n"
+    /* ── declining / disagreeing ── */
+    "        { \"context\": \"saying no to a plan\",\n"
+    "          \"incoming\": \"come to the show with us?\",\n"
+    "          \"response\": \"can't tonight — early morning. next time?\" },\n"
+    /* ── dry humor (no exclamation, no 'haha') ── */
+    "        { \"context\": \"reacting to a chaotic story\",\n"
+    "          \"incoming\": \"the dog ate my passport\",\n"
+    "          \"response\": \"a classic\" }\n"
     "      ]\n"
     "    },\n"
     "    {\n"
@@ -195,6 +248,88 @@ const char hu_starter_persona_json[] =
     "    }\n"
     "  ]\n"
     "}\n";
+
+const char *hu_starter_persona_get(size_t *out_len) {
+    /* Lazy one-time join of the two literal halves into a flat buffer.
+     * Buffer size is generous to absorb future content growth without
+     * another split. Not thread-safe on first call, but onboarding runs
+     * single-threaded at startup. */
+    static char buf[sizeof(hu_starter_persona_json_part1) + sizeof(hu_starter_persona_json_part2)];
+    static size_t total_len;
+    static bool initialized;
+    if (!initialized) {
+        size_t l1 = sizeof(hu_starter_persona_json_part1) - 1;
+        size_t l2 = sizeof(hu_starter_persona_json_part2) - 1;
+        memcpy(buf, hu_starter_persona_json_part1, l1);
+        memcpy(buf + l1, hu_starter_persona_json_part2, l2);
+        buf[l1 + l2] = '\0';
+        total_len = l1 + l2;
+        initialized = true;
+    }
+    if (out_len)
+        *out_len = total_len;
+    return buf;
+}
+
+/* US-9.2: Pure formatter for the post-wizard "What's next" block.
+ *
+ * Lives outside the HU_IS_TEST guard so unit tests
+ * (tests/test_onboard_nextstep.c) can link against it without crossing
+ * the wizard's interactive boundary. See sprints/sprint-9/designs/US-9.2.md
+ * for the full truth table and rationale.
+ *
+ * Pattern: .claude/rules/security-predicate-extraction.md applied to UX
+ * text — the "what message do we print?" decision is extracted into a
+ * pure function so we don't have to spawn a subprocess and parse stdout
+ * to test it. */
+hu_error_t hu_onboard_nextstep_format(const hu_onboard_nextstep_ctx_t *ctx, char *out,
+                                      size_t out_sz) {
+    if (!ctx || !out || out_sz == 0 || !ctx->config_path)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    int n = -1;
+    if (ctx->already_exists) {
+        if (ctx->platform_is_apple) {
+            n = snprintf(out, out_sz,
+                         "Config already exists at %s.\n"
+                         "Run 'human doctor' to check status, or 'human doctor imessage' to pair "
+                         "iMessage.\n",
+                         ctx->config_path);
+        } else {
+            n = snprintf(out, out_sz,
+                         "Config already exists at %s.\n"
+                         "Run 'human doctor' to check status.\n",
+                         ctx->config_path);
+        }
+    } else if (!ctx->parsed_ok) {
+        n = snprintf(out, out_sz,
+                     "Config written to %s.\n"
+                     "Warning: config written but failed to parse — run 'human doctor --fix' to "
+                     "repair\n",
+                     ctx->config_path);
+    } else if (ctx->platform_is_apple) {
+        n = snprintf(out, out_sz,
+                     "Config verified OK\n"
+                     "Config written to %s.\n"
+                     "What's next:\n"
+                     "  1. Pair iMessage:  human doctor imessage\n"
+                     "  2. Start the agent: human agent\n",
+                     ctx->config_path);
+    } else {
+        n = snprintf(out, out_sz,
+                     "Config verified OK\n"
+                     "Config written to %s.\n"
+                     "What's next:\n"
+                     "  1. Start the agent: human agent\n"
+                     "  (Tier-1 channels other than iMessage require manual config — see "
+                     "docs/guides/channels.md)\n",
+                     ctx->config_path);
+    }
+
+    if (n < 0 || (size_t)n >= out_sz)
+        return HU_ERR_IO;
+    return HU_OK;
+}
 
 #ifdef HU_IS_TEST
 hu_error_t hu_onboard_run(hu_allocator_t *alloc) {
@@ -303,7 +438,23 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
         return HU_ERR_INVALID_ARGUMENT;
 
     if (!hu_onboard_check_first_run()) {
-        printf("Config already exists. Run 'human doctor' to check status.\n");
+        char existing_path[HU_MAX_PATH];
+        const char *path_str =
+            get_config_path(existing_path, sizeof(existing_path)) ? existing_path : "?";
+        hu_onboard_nextstep_ctx_t nctx = {
+            .config_path = path_str,
+            .provider = NULL,
+#if defined(__APPLE__)
+            .platform_is_apple = true,
+#else
+            .platform_is_apple = false,
+#endif
+            .already_exists = true,
+            .parsed_ok = false,
+        };
+        char nbuf[1024];
+        if (hu_onboard_nextstep_format(&nctx, nbuf, sizeof(nbuf)) == HU_OK)
+            fputs(nbuf, stdout);
         return HU_OK;
     }
 
@@ -503,8 +654,9 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
                     FILE *pf = NULL;
                     (void)hu_io_secure_open(persona_path, HU_IO_PERM_USER, "w", &pf);
                     if (pf) {
-                        size_t plen = strlen(hu_starter_persona_json);
-                        if (fwrite(hu_starter_persona_json, 1, plen, pf) == plen)
+                        size_t plen = 0;
+                        const char *json_str = hu_starter_persona_get(&plen);
+                        if (fwrite(json_str, 1, plen, pf) == plen)
                             printf("Starter persona created at %s\n", persona_path);
                         fclose(pf);
                     }
@@ -516,11 +668,35 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
 
     alloc->free(alloc->ctx, ws_dir, strlen(ws_dir) + 1);
 
-    printf("\nConfig written to %s\n", config_path);
-    if (is_apple_provider(provider))
-        printf("Run 'human agent' to start chatting with Apple Intelligence.\n");
-    else
-        printf("Run 'human agent' to start chatting.\n");
-    return HU_OK;
+    /* US-9.2 AC-9.2.3: verify the freshly-written config parses cleanly.
+     * If it doesn't, we still warn the user but return HU_ERR_IO so a
+     * scripted caller can detect the bad-config state. */
+    bool parsed_ok = false;
+    {
+        hu_config_t check_cfg;
+        hu_error_t lerr = hu_config_load_from(alloc, config_path, &check_cfg);
+        if (lerr == HU_OK) {
+            parsed_ok = true;
+            hu_config_deinit(&check_cfg);
+        }
+    }
+
+    hu_onboard_nextstep_ctx_t nctx = {
+        .config_path = config_path,
+        .provider = provider,
+#if defined(__APPLE__)
+        .platform_is_apple = true,
+#else
+        .platform_is_apple = false,
+#endif
+        .already_exists = false,
+        .parsed_ok = parsed_ok,
+    };
+    printf("\n");
+    char nbuf[2048];
+    if (hu_onboard_nextstep_format(&nctx, nbuf, sizeof(nbuf)) == HU_OK)
+        fputs(nbuf, stdout);
+
+    return parsed_ok ? HU_OK : HU_ERR_IO;
 }
 #endif

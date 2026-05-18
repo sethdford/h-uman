@@ -62,8 +62,29 @@ jobs:
           fi
       - name: Synthetic iMessage offline gates
         run: python3 scripts/eval_synthetic_imessage_offline.py
+      - name: Channel + synthetic harness smoke (Task #5 2026-05-17)
+        # Both harnesses now build by default (HU_ENABLE_CHANNEL_TESTS=ON,
+        # HU_ENABLE_SYNTHETIC=ON, gated on HU_ENABLE_CURL). The --smoke mode
+        # parses argv, walks the channel registry, and exits 0 without
+        # requiring GEMINI_API_KEY or network. CI exercises the binaries on
+        # every push; full Gemini-driven runs still require credentials and
+        # are intentionally NOT wired here.
+        env:
+          ASAN_OPTIONS: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}
+        run: |
+          set -euo pipefail
+          test -x ./build/human_synthetic || { echo "::error::human_synthetic binary missing"; exit 1; }
+          test -x ./build/human_channel_tests || { echo "::error::human_channel_tests binary missing"; exit 1; }
+          ./build/human_synthetic --smoke
+          ./build/human_channel_tests --smoke
       - name: Check for untested modules
         run: scripts/check-untested.sh
+      - name: Test/source gate-symmetry
+        # Detects the recurring PR #113 failure class — test sources
+        # that reference symbols only defined under if(HU_ENABLE_X)
+        # gates without being themselves gated. See
+        # .claude/rules/test-source-gate-symmetry.md.
+        run: bash scripts/check-test-source-gate-symmetry.sh
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -71,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure
         run: |
           cmake -B build-integ \
@@ -91,7 +112,49 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install ARM64 cross-compiler
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        # GitHub Actions ubuntu-latest runners use Azure-hosted apt
+        # mirrors that DON'T serve arm64 packages — `apt-get update`
+        # after `dpkg --add-architecture arm64` 404s on the arm64
+        # indices (Bugbot 672e8d04). Workaround:
+        #   1. Restrict the default Azure sources to amd64 only.
+        #   2. Add a separate sources list pointing arm64 to
+        #      ports.ubuntu.com (the canonical home for non-x86
+        #      Ubuntu packages).
+        # After this, both `libsqlite3-dev` (amd64) and
+        # `libsodium-dev:arm64` resolve cleanly.
+        #
+        # Note: round-24 made persona_crypt.c gated on HU_LIBSODIUM_FOUND,
+        # so the cross-arm64 build no longer strictly needs libsodium
+        # (it can fall back to PBKDF2). But installing :arm64 here lets
+        # the cross build exercise the real crypto path if a future
+        # contributor turns HU_ENABLE_LIBSODIUM=ON for arm64.
+        run: |
+          set -euo pipefail
+          # Restrict the main Ubuntu sources to amd64 only so apt-get
+          # update doesn't try to fetch arm64 from Azure. We touch ONLY
+          # /etc/apt/sources.list and /etc/apt/sources.list.d/ubuntu.sources
+          # — other entries (e.g. microsoft-prod.list, github_*.list)
+          # use deb822 or non-standard formats and breaking them with a
+          # naive `^deb ` sed corrupts apt entirely (round-25 hit this).
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            [ -f "$f" ] || continue
+            # deb-line format (one-liner): `deb URI codename ...`
+            sudo sed -i 's/^deb /deb [arch=amd64] /' "$f"
+            # deb822 format (ubuntu.sources): `Types: deb` then `URIs: ...`
+            # Add Architectures: amd64 if it's not already set.
+            if ! grep -q '^Architectures:' "$f"; then
+              sudo sed -i '/^Types: deb/a Architectures: amd64' "$f"
+            fi
+          done
+          # Add ports.ubuntu.com for arm64 — codename comes from os-release.
+          . /etc/os-release
+          sudo tee /etc/apt/sources.list.d/arm64-ports.list > /dev/null <<EOF
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${VERSION_CODENAME} main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${VERSION_CODENAME}-updates main universe
+          EOF
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libsodium-dev:arm64
       - name: Configure (ARM64 cross-compile)
         run: |
           cmake -B build-arm64 \
@@ -110,7 +173,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure
         run: cmake --preset minimal
       - name: Build
@@ -148,7 +211,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Configure (${{ matrix.name }})
         run: cmake -B build ${{ matrix.flags }}
       - name: Build
@@ -264,7 +327,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build gateway
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHU_BUILD_TESTS=OFF -DHU_ENABLE_CURL=ON
@@ -315,7 +378,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build gateway
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHU_BUILD_TESTS=OFF -DHU_ENABLE_CURL=ON
@@ -389,7 +452,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake gcc libsqlite3-dev libcurl4-openssl-dev \
+          sudo apt-get install -y build-essential cmake gcc libsqlite3-dev libsodium-dev libcurl4-openssl-dev \
             debhelper devscripts fakeroot
       - name: Build .deb package
         run: bash scripts/build-deb.sh
@@ -425,7 +488,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libsqlite3-dev
+          sudo apt-get install -y libcurl4-openssl-dev libsqlite3-dev libsodium-dev
           sudo apt-get install -y clang-format-18 || sudo apt-get install -y clang-format
           if command -v clang-format-18 >/dev/null; then
             sudo ln -sf $(which clang-format-18) /usr/local/bin/clang-format
@@ -494,7 +557,13 @@ jobs:
       - uses: ./.github/actions/run-tests
       - name: Generate coverage report
         run: |
-          lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch,gcov
+          # `source`: geninfo errors when a .gcda's embedded source path
+          #   doesn't resolve on disk (stale .gcda from a renamed/moved test,
+          #   or path embedded relative to build/ rather than the repo root).
+          #   With `--ignore-errors source` we skip those entries instead of
+          #   killing the whole capture. lcov even prints this exact hint
+          #   when the error fires.
+          lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch,gcov,source
           lcov --remove coverage.info '/usr/*' '*/tests/*' '*/vendor/*' --output-file coverage.info --ignore-errors unused
           lcov --list coverage.info | tail -20
       - name: Upload to Codecov
@@ -599,7 +668,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
       - name: Start Ollama server
@@ -649,7 +718,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install build deps
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libsodium-dev libcurl4-openssl-dev
       - name: Build
         run: |
           cmake -B build -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SKILLS=ON
@@ -702,7 +771,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install Clang and build deps
-        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev libsodium-dev
       - name: Configure (fuzz)
         env:
           CC: clang
@@ -750,3 +819,34 @@ jobs:
             echo "::error::One or more fuzz harnesses found crashes"
             exit 1
           fi
+
+  # US-8.3: Reproducible Binary Builds.
+  # Verifies that two independent builds from the same source with the
+  # same SOURCE_DATE_EPOCH produce bytewise-identical `human` binaries
+  # (modulo documented carve-outs: ELF build-id, Mach-O LC_UUID,
+  # ad-hoc code signature on Darwin).
+  # Required check; NO continue-on-error (rules/quality-gates.md AP-1).
+  # No untrusted input is interpolated in any run: step.
+  reproducible-build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Linux build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsqlite3-dev libsodium-dev libcurl4-openssl-dev libssl-dev binutils
+      - name: Install macOS build deps
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install cmake ninja || true
+      - name: Lint gate — no __DATE__/__TIME__ in src or include
+        run: scripts/check-no-date-time-macros.sh
+      - name: Build gate — two-shot build + bytewise diff
+        env:
+          SOURCE_DATE_EPOCH: "1700000000"
+        run: scripts/check-reproducible-build.sh

@@ -3862,6 +3862,180 @@ static void test_affect_ceiling_stranger(void) {
     HU_ASSERT_TRUE(c >= 0.69f && c <= 0.71f); /* 0.7 */
 }
 
+static void test_contact_json_parses_affect_mirror_ceiling(void) {
+    /* Regression: hu_contact_profile_t.affect_mirror_ceiling was declared on the
+     * struct and read by hu_affect_mirror_ceiling, but never parsed from the
+     * "contacts" object in persona JSON. Disk-loaded personas saw 0 (sentinel)
+     * and the per-contact ceiling override was silently dead in production. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{"
+                       "  \"version\": 1,"
+                       "  \"name\": \"jordan\","
+                       "  \"core\": {"
+                       "    \"identity\": \"x\","
+                       "    \"traits\": [\"warm\"]"
+                       "  },"
+                       "  \"contacts\": {"
+                       "    \"+15555550100\": {"
+                       "      \"name\": \"casey\","
+                       "      \"relationship_type\": \"friend\","
+                       "      \"relationship_stage\": \"friend\","
+                       "      \"affect_mirror_ceiling\": 0.42"
+                       "    }"
+                       "  }"
+                       "}";
+
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    HU_ASSERT_EQ(p.contacts_count, 1u);
+
+    const hu_contact_profile_t *cp =
+        hu_persona_find_contact(&p, "+15555550100", strlen("+15555550100"));
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_TRUE(cp->affect_mirror_ceiling >= 0.41f && cp->affect_mirror_ceiling <= 0.43f);
+
+    /* Layered lookup honors the parsed override (0.42) rather than the stage default
+     * for "friend" (which would be 0.85). */
+    float effective = hu_affect_mirror_ceiling(cp, NULL);
+    HU_ASSERT_TRUE(effective >= 0.41f && effective <= 0.43f);
+
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_leave_on_read_pct_effective_contact_override_wins(void) {
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    cp.leave_on_read_pct = 25;
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.leave_on_read_pct = 10;
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(&cp, &ov), 25);
+}
+
+static void test_leave_on_read_pct_effective_falls_back_to_overlay(void) {
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    /* contact has 0 sentinel — should fall through to overlay */
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.leave_on_read_pct = 30;
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(&cp, &ov), 30);
+}
+
+static void test_leave_on_read_pct_effective_zero_when_neither_set(void) {
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    /* Both 0 → 0 (caller hands this to hu_conversation_should_leave_on_read
+     * which interprets 0 as "use classifier default 10%"). */
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(&cp, &ov), 0);
+}
+
+static void test_leave_on_read_pct_effective_null_contact_uses_overlay(void) {
+    hu_persona_overlay_t ov;
+    memset(&ov, 0, sizeof(ov));
+    ov.leave_on_read_pct = 15;
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(NULL, &ov), 15);
+}
+
+static void test_leave_on_read_pct_effective_null_overlay_uses_contact(void) {
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    cp.leave_on_read_pct = 42;
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(&cp, NULL), 42);
+}
+
+static void test_leave_on_read_pct_effective_both_null_returns_zero(void) {
+    HU_ASSERT_EQ((int)hu_leave_on_read_pct_effective(NULL, NULL), 0);
+}
+
+static void test_contact_json_parses_leave_on_read_pct_nested(void) {
+    /* Canonical shape: nested under communication_patterns. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{"
+                       "  \"version\": 1,"
+                       "  \"name\": \"jordan\","
+                       "  \"core\": {\"identity\":\"x\",\"traits\":[\"warm\"]},"
+                       "  \"contacts\": {"
+                       "    \"+15555550100\": {"
+                       "      \"communication_patterns\": {"
+                       "        \"prefers_short_texts\": true,"
+                       "        \"leave_on_read_pct\": 35"
+                       "      }"
+                       "    }"
+                       "  }"
+                       "}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    const hu_contact_profile_t *cp =
+        hu_persona_find_contact(&p, "+15555550100", strlen("+15555550100"));
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_EQ((int)cp->leave_on_read_pct, 35);
+    HU_ASSERT_TRUE(cp->prefers_short_texts);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_contact_json_parses_leave_on_read_pct_top_level_fallback(void) {
+    /* Forgiving shape: top-level when no communication_patterns object exists. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{"
+                       "  \"version\": 1,"
+                       "  \"name\": \"jordan\","
+                       "  \"core\": {\"identity\":\"x\",\"traits\":[\"warm\"]},"
+                       "  \"contacts\": {"
+                       "    \"+15555550100\": {"
+                       "      \"leave_on_read_pct\": 50"
+                       "    }"
+                       "  }"
+                       "}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    const hu_contact_profile_t *cp =
+        hu_persona_find_contact(&p, "+15555550100", strlen("+15555550100"));
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_EQ((int)cp->leave_on_read_pct, 50);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_contact_json_clamps_leave_on_read_pct_out_of_range(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json_high =
+        "{\"version\":1,\"name\":\"a\",\"core\":{\"identity\":\"x\",\"traits\":[\"t\"]},"
+        "\"contacts\":{\"u\":{\"leave_on_read_pct\":250}}}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json_high, strlen(json_high), &p), HU_OK);
+    const hu_contact_profile_t *cp = hu_persona_find_contact(&p, "u", 1);
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_EQ((int)cp->leave_on_read_pct, 100);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_contact_json_clamps_affect_mirror_ceiling_out_of_range(void) {
+    /* Sanity: values outside [0,1] are clamped so a typo in JSON cannot disable the
+     * affect-apply cap (>1.0) or invert the sentinel semantics (<0). */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json_high =
+        "{\"version\":1,\"name\":\"a\",\"core\":{\"identity\":\"x\",\"traits\":[\"t\"]},"
+        "\"contacts\":{\"u\":{\"affect_mirror_ceiling\":2.5}}}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json_high, strlen(json_high), &p), HU_OK);
+    const hu_contact_profile_t *cp = hu_persona_find_contact(&p, "u", 1);
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_TRUE(cp->affect_mirror_ceiling <= 1.0f);
+    hu_persona_deinit(&alloc, &p);
+
+    const char *json_low =
+        "{\"version\":1,\"name\":\"a\",\"core\":{\"identity\":\"x\",\"traits\":[\"t\"]},"
+        "\"contacts\":{\"u\":{\"affect_mirror_ceiling\":-0.5}}}";
+    hu_persona_t p2 = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json_low, strlen(json_low), &p2), HU_OK);
+    const hu_contact_profile_t *cp2 = hu_persona_find_contact(&p2, "u", 1);
+    HU_ASSERT_NOT_NULL(cp2);
+    HU_ASSERT_TRUE(cp2->affect_mirror_ceiling >= 0.0f);
+    hu_persona_deinit(&alloc, &p2);
+}
+
 /* ── Lean Prompt E2E Fleet ────────────────────────────────────────────── */
 
 static const char lean_test_persona_json[] =
@@ -4259,16 +4433,15 @@ static void test_lean_prompt_full_pipeline_sp_len(void) {
  * not silently dead. Real personas authored by hand often look like this. */
 static void test_persona_contact_top_level_comm_booleans_fallback(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *json =
-        "{\"name\":\"forgiving\","
-        "\"contacts\":{\"casey\":{"
-        "\"name\":\"Casey\",\"relationship_type\":\"friend\","
-        "\"warmth_level\":\"high\","
-        "\"prefers_short_texts\":true,"
-        "\"texts_in_bursts\":true,"
-        "\"sends_links_often\":false,"
-        "\"uses_emoji\":true"
-        "}}}";
+    const char *json = "{\"name\":\"forgiving\","
+                       "\"contacts\":{\"casey\":{"
+                       "\"name\":\"Casey\",\"relationship_type\":\"friend\","
+                       "\"warmth_level\":\"high\","
+                       "\"prefers_short_texts\":true,"
+                       "\"texts_in_bursts\":true,"
+                       "\"sends_links_often\":false,"
+                       "\"uses_emoji\":true"
+                       "}}}";
     hu_persona_t p;
     memset(&p, 0, sizeof(p));
     HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
@@ -4285,15 +4458,14 @@ static void test_persona_contact_top_level_comm_booleans_fallback(void) {
  * the canonical reading. */
 static void test_persona_contact_nested_comm_patterns_take_precedence(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *json =
-        "{\"name\":\"canonical\","
-        "\"contacts\":{\"riley\":{"
-        "\"name\":\"Riley\",\"relationship_type\":\"family\","
-        "\"prefers_short_texts\":true,"
-        "\"communication_patterns\":{\"prefers_short_texts\":false,"
-        "\"texts_in_bursts\":false,\"sends_links_often\":true,"
-        "\"uses_emoji\":false}"
-        "}}}";
+    const char *json = "{\"name\":\"canonical\","
+                       "\"contacts\":{\"riley\":{"
+                       "\"name\":\"Riley\",\"relationship_type\":\"family\","
+                       "\"prefers_short_texts\":true,"
+                       "\"communication_patterns\":{\"prefers_short_texts\":false,"
+                       "\"texts_in_bursts\":false,\"sends_links_often\":true,"
+                       "\"uses_emoji\":false}"
+                       "}}}";
     hu_persona_t p;
     memset(&p, 0, sizeof(p));
     HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
@@ -4310,10 +4482,11 @@ static void test_persona_chronotype_and_pragmatics_overlay_prompt(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    const char *json = "{\"version\":1,\"name\":\"ct\",\"chronotype\":\"evening_owl\","
-                       "\"core\":{\"identity\":\"id\",\"traits\":[\"a\"],\"communication_rules\":[]},"
-                       "\"channel_overlays\":{\"cli\":{\"directness\":\"low\",\"face_saving\":\"high\","
-                       "\"disagreement_style\":\"indirect\",\"silence_tolerance\":\"high\"}}}";
+    const char *json =
+        "{\"version\":1,\"name\":\"ct\",\"chronotype\":\"evening_owl\","
+        "\"core\":{\"identity\":\"id\",\"traits\":[\"a\"],\"communication_rules\":[]},"
+        "\"channel_overlays\":{\"cli\":{\"directness\":\"low\",\"face_saving\":\"high\","
+        "\"disagreement_style\":\"indirect\",\"silence_tolerance\":\"high\"}}}";
     HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
     HU_ASSERT_EQ((int)p.chronotype, (int)HU_CHRONO_EVENING_OWL);
     HU_ASSERT_EQ(p.overlays_count, 1u);
@@ -4413,14 +4586,10 @@ static void test_persona_bank_export_jsonl_writes_alpaca_shape(void) {
 static void test_persona_bank_export_jsonl_null_args_rejected(void) {
     hu_persona_t p = {0};
     size_t exported = 999;
-    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(NULL, "x", 1, &exported),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, NULL, 0, &exported),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 0, &exported),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 1, NULL),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(NULL, "x", 1, &exported), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, NULL, 0, &exported), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 0, &exported), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_bank_export_jsonl(&p, "x", 1, NULL), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(exported, 999u); /* unchanged on rejection */
 }
 
@@ -4482,7 +4651,13 @@ static void test_persona_banks_from_history_null_args_rejected(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
-#ifdef HU_ENABLE_SQLITE
+/* HU_ENABLE_ML guard ensures the test machinery (pbh_test_run_sql helper +
+ * 11 history-extraction tests) is fully elided when ML support is off — the
+ * runner block at run_persona_tests() is gated by the same condition, so
+ * leaving the functions defined would trigger -Werror=unused-function on
+ * GCC strict builds (static-analysis CI). Symmetric guards: definition AND
+ * registration share the same condition. */
+#if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
 
 /* Run a no-result SQL statement via prepare+step+finalize (avoids
  * the catch-all helper for portability with the test framework). */
@@ -4490,7 +4665,8 @@ static int pbh_test_run_sql(sqlite3 *db, const char *sql) {
     sqlite3_stmt *st = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &st, NULL);
     if (rc != SQLITE_OK) {
-        if (st) sqlite3_finalize(st);
+        if (st)
+            sqlite3_finalize(st);
         return rc;
     }
     sqlite3_step(st);
@@ -4508,11 +4684,10 @@ static sqlite3 *pbh_test_open_fresh_db(const char *path) {
             sqlite3_close(db);
         return NULL;
     }
-    const char *ddl =
-        "CREATE TABLE messages("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "session_id TEXT NOT NULL, role TEXT NOT NULL,"
-        "content TEXT NOT NULL, created_at TEXT DEFAULT(datetime('now')))";
+    const char *ddl = "CREATE TABLE messages("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                      "session_id TEXT NOT NULL, role TEXT NOT NULL,"
+                      "content TEXT NOT NULL, created_at TEXT DEFAULT(datetime('now')))";
     if (pbh_test_run_sql(db, ddl) != SQLITE_OK) {
         sqlite3_close(db);
         return NULL;
@@ -4541,8 +4716,7 @@ static void test_persona_banks_from_history_nonexistent_db_returns_io(void) {
     char path[64];
     snprintf(path, sizeof(path), "/tmp/hu_pbh_nope_%d.db", (int)getpid());
     remove(path);
-    HU_ASSERT_EQ(hu_persona_banks_extract_from_history(&alloc, path, 0, &banks, &n),
-                 HU_ERR_IO);
+    HU_ASSERT_EQ(hu_persona_banks_extract_from_history(&alloc, path, 0, &banks, &n), HU_ERR_IO);
     HU_ASSERT_TRUE(banks == NULL);
     HU_ASSERT_EQ(n, 0u);
 }
@@ -4570,10 +4744,8 @@ static void test_persona_banks_from_history_extracts_user_assistant_pair(void) {
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "telegram:42",
-                    "user", "What is the meaning of life today my friend?");
-    pbh_test_insert(db, "telegram:42",
-                    "assistant", "Forty-two, with a side of curiosity.");
+    pbh_test_insert(db, "telegram:42", "user", "What is the meaning of life today my friend?");
+    pbh_test_insert(db, "telegram:42", "assistant", "Forty-two, with a side of curiosity.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4600,14 +4772,12 @@ static void test_persona_banks_from_history_groups_by_channel(void) {
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "telegram:42",
-                    "user", "Tell me a story about a wise old turtle and a hare.");
-    pbh_test_insert(db, "telegram:42",
-                    "assistant", "Once upon a time the slow won, deliberately.");
-    pbh_test_insert(db, "imessage:thread-7",
-                    "user", "Are we still meeting at six tomorrow?");
-    pbh_test_insert(db, "imessage:thread-7",
-                    "assistant", "Yes, six o'clock at the cafe near the river.");
+    pbh_test_insert(db, "telegram:42", "user",
+                    "Tell me a story about a wise old turtle and a hare.");
+    pbh_test_insert(db, "telegram:42", "assistant", "Once upon a time the slow won, deliberately.");
+    pbh_test_insert(db, "imessage:thread-7", "user", "Are we still meeting at six tomorrow?");
+    pbh_test_insert(db, "imessage:thread-7", "assistant",
+                    "Yes, six o'clock at the cafe near the river.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4639,10 +4809,9 @@ static void test_persona_banks_from_history_falls_back_to_default_channel(void) 
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "session-abc",
-                    "user", "Quick question about the build process today.");
-    pbh_test_insert(db, "session-abc",
-                    "assistant", "Run cmake then make in the build directory please.");
+    pbh_test_insert(db, "session-abc", "user", "Quick question about the build process today.");
+    pbh_test_insert(db, "session-abc", "assistant",
+                    "Run cmake then make in the build directory please.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4676,8 +4845,7 @@ static void test_persona_banks_from_history_caps_per_channel(void) {
 
     hu_persona_example_bank_t *banks = NULL;
     size_t n = 0;
-    HU_ASSERT_EQ(hu_persona_banks_extract_from_history(&alloc, path, /*cap=*/2, &banks, &n),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_persona_banks_extract_from_history(&alloc, path, /*cap=*/2, &banks, &n), HU_OK);
     HU_ASSERT_EQ(n, 1u);
     HU_ASSERT_EQ(banks[0].examples_count, 2u);
 
@@ -4692,12 +4860,11 @@ static void test_persona_banks_from_history_skips_orphan_assistant(void) {
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "cli:admin",
-                    "assistant", "Welcome — how can I help you settle in today?");
-    pbh_test_insert(db, "cli:admin",
-                    "user", "I'd like to learn more about the project structure here.");
-    pbh_test_insert(db, "cli:admin",
-                    "assistant", "We use a vtable-driven C runtime with strict KISS rules.");
+    pbh_test_insert(db, "cli:admin", "assistant", "Welcome — how can I help you settle in today?");
+    pbh_test_insert(db, "cli:admin", "user",
+                    "I'd like to learn more about the project structure here.");
+    pbh_test_insert(db, "cli:admin", "assistant",
+                    "We use a vtable-driven C runtime with strict KISS rules.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4764,10 +4931,10 @@ static void test_persona_banks_from_history_redacts_pii(void) {
     sqlite3 *db = pbh_test_open_fresh_db(path);
     HU_ASSERT_NOT_NULL(db);
 
-    pbh_test_insert(db, "imessage:contact-9",
-                    "user", "My email is alice@example.com and my number is 555-867-5309 today.");
-    pbh_test_insert(db, "imessage:contact-9",
-                    "assistant", "Got it — saved your contact details to the local address book.");
+    pbh_test_insert(db, "imessage:contact-9", "user",
+                    "My email is alice@example.com and my number is 555-867-5309 today.");
+    pbh_test_insert(db, "imessage:contact-9", "assistant",
+                    "Got it — saved your contact details to the local address book.");
     sqlite3_close(db);
 
     hu_persona_example_bank_t *banks = NULL;
@@ -4793,7 +4960,58 @@ static void test_persona_banks_from_history_freeing_null_is_safe(void) {
     hu_persona_example_banks_free(&alloc, &b, 0);
 }
 
-#endif /* HU_ENABLE_SQLITE */
+#endif /* HU_ENABLE_SQLITE && HU_ENABLE_ML */
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Regression suite for 2026-05-16 master kill switch (P1-1).
+ *
+ * After the incident, the daemon must NOT send any proactive message
+ * unless the operator has explicitly set "proactive.master_enabled": true
+ * in the persona JSON.  A freshly loaded persona, or one with no proactive
+ * object at all, must default to OFF.
+ * ───────────────────────────────────────────────────────────────────── */
+
+static void test_proactive_master_disabled_by_default_on_minimal_persona(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    static const char json[] = "{\"name\":\"min\"}";
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, sizeof(json) - 1, &p), HU_OK);
+    HU_ASSERT_FALSE(p.proactive_master_enabled);
+    HU_ASSERT_FALSE(hu_persona_proactive_is_enabled(&p));
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_proactive_master_disabled_when_object_missing(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    static const char json[] = "{\"name\":\"x\",\"identity\":\"someone\"}";
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, sizeof(json) - 1, &p), HU_OK);
+    HU_ASSERT_FALSE(hu_persona_proactive_is_enabled(&p));
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_proactive_master_disabled_when_explicitly_false(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    static const char json[] = "{\"name\":\"x\",\"proactive\":{\"master_enabled\":false}}";
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, sizeof(json) - 1, &p), HU_OK);
+    HU_ASSERT_FALSE(hu_persona_proactive_is_enabled(&p));
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_proactive_master_enabled_when_explicitly_true(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    static const char json[] = "{\"name\":\"x\",\"proactive\":{\"master_enabled\":true}}";
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, sizeof(json) - 1, &p), HU_OK);
+    HU_ASSERT_TRUE(p.proactive_master_enabled);
+    HU_ASSERT_TRUE(hu_persona_proactive_is_enabled(&p));
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_proactive_is_enabled_handles_null_persona(void) {
+    HU_ASSERT_FALSE(hu_persona_proactive_is_enabled(NULL));
+}
 
 void run_persona_tests(void) {
     HU_TEST_SUITE("Persona");
@@ -5048,4 +5266,21 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_affect_ceiling_trusted_confidant);
     HU_RUN_TEST(test_affect_ceiling_inner_circle);
     HU_RUN_TEST(test_affect_ceiling_stranger);
+    HU_RUN_TEST(test_contact_json_parses_affect_mirror_ceiling);
+    HU_RUN_TEST(test_contact_json_clamps_affect_mirror_ceiling_out_of_range);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_contact_override_wins);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_falls_back_to_overlay);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_zero_when_neither_set);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_null_contact_uses_overlay);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_null_overlay_uses_contact);
+    HU_RUN_TEST(test_leave_on_read_pct_effective_both_null_returns_zero);
+    HU_RUN_TEST(test_contact_json_parses_leave_on_read_pct_nested);
+    HU_RUN_TEST(test_contact_json_parses_leave_on_read_pct_top_level_fallback);
+    HU_RUN_TEST(test_contact_json_clamps_leave_on_read_pct_out_of_range);
+
+    HU_RUN_TEST(test_proactive_master_disabled_by_default_on_minimal_persona);
+    HU_RUN_TEST(test_proactive_master_disabled_when_object_missing);
+    HU_RUN_TEST(test_proactive_master_disabled_when_explicitly_false);
+    HU_RUN_TEST(test_proactive_master_enabled_when_explicitly_true);
+    HU_RUN_TEST(test_proactive_is_enabled_handles_null_persona);
 }

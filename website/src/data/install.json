@@ -1,0 +1,14 @@
+{
+  "tap": "humanlabs/human",
+  "package": "humanlabs/human/human",
+  "version": "0.5.0",
+  "command": "brew tap humanlabs/human && brew install humanlabs/human/human",
+  "verified": {
+    "macos_arm64": {
+      "ok": false,
+      "release_tag": null,
+      "checked_at": null,
+      "ci_run_url": null
+    }
+  }
+}

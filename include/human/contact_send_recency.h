@@ -12,6 +12,11 @@ extern "C" {
 #define HU_CONTACT_SEND_RECENCY_CHAT_ID_MAX 128
 #define HU_CONTACT_SEND_RECENCY_CAPACITY    64
 
+/* Window the daemon's proactive paths use to defer when the reactive turn has
+ * already fired for the same contact.  Plan reference:
+ * docs/plans/2026-05-15-memory-scoping-followups.md FU-1. */
+#define HU_DAEMON_REACTIVE_GATE_WINDOW_S 60
+
 /* Identifies which daemon-level send path produced an outbound message.
  * Used by the reactive-priority gate: when the reactive path has fired
  * recently for a contact, proactive paths defer to avoid piling on. */
@@ -60,6 +65,21 @@ hu_send_path_t hu_contact_send_recency_last_path(const hu_contact_send_recency_t
 bool hu_contact_send_recency_reactive_within(const hu_contact_send_recency_t *r,
                                              const char *chat_id, size_t chat_id_len, int64_t now,
                                              int64_t window_s);
+
+/* Daemon-level proactive-gate predicate (FU-1).
+ *
+ * Returns true when a proactive path (F25 emotional check-in, scheduled
+ * delivery, proactive check-in, photo album, morning greeting) should DEFER
+ * sending to `chat_id` because the reactive turn has already fired for this
+ * contact within HU_DAEMON_REACTIVE_GATE_WINDOW_S seconds.
+ *
+ * Extracted as a pure predicate per
+ * ~/.claude/rules/security-predicate-extraction.md so the daemon's decision is
+ * testable without spinning up real channels.  Returns false when `r` or
+ * `chat_id` is NULL — a NULL recency means "nothing has been recorded yet" and
+ * the proactive path is free to proceed. */
+bool hu_daemon_proactive_should_defer(const hu_contact_send_recency_t *r, const char *chat_id,
+                                      size_t chat_id_len, int64_t now);
 
 #ifdef __cplusplus
 }

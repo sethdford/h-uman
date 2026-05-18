@@ -10,15 +10,19 @@
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/observability/validator_telemetry.h"
+#include "human/persona.h"
 #ifndef HU_CODENAME
 #define HU_CODENAME "human"
 #endif
+#include <errno.h>
+#include <fcntl.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -27,8 +31,6 @@
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 #include <ApplicationServices/ApplicationServices.h>
 #include <dlfcn.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <libproc.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
@@ -173,6 +175,8 @@ typedef struct hu_imessage_ctx {
     int64_t last_rowid;
     const char *const *allow_from;
     size_t allow_from_count;
+    /* Persona: borrowed pointer for overlay-aware rendering. */
+    const hu_persona_t *persona;
     char sent_ring[HU_IMESSAGE_SENT_RING_SIZE][HU_IMESSAGE_SENT_PREFIX_LEN];
     size_t sent_ring_len[HU_IMESSAGE_SENT_RING_SIZE];
     uint32_t sent_ring_hash[HU_IMESSAGE_SENT_RING_SIZE];
@@ -205,6 +209,10 @@ typedef struct hu_imessage_ctx {
      * watch-active code path through the test seam (the prod fields below
      * remain platform-gated). */
     bool imsg_watch_running;
+    /* US-9.3: courtesy-reply config + one-shot AC-9.3.3 BUSY warn gate.
+     * Always compiled so tests can drive the path regardless of platform. */
+    bool courtesy_replies_enabled;
+    bool chatdb_busy_log_emitted;
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
     pid_t imsg_watch_pid;
     int imsg_watch_fd;
@@ -216,6 +224,11 @@ typedef struct hu_imessage_ctx {
 #if HU_IS_TEST
     char last_message[4096];
     size_t last_message_len;
+    /* US-9.3: mirror of the last courtesy reply sent by the poll loop.
+     * Parallel to last_message so tests can disambiguate poller-emitted
+     * courtesy replies from agent-driven sends. */
+    char last_courtesy_message[4096];
+    size_t last_courtesy_message_len;
     size_t last_media_count;
     char last_media_path[256];
     struct {
@@ -351,6 +364,280 @@ static void imessage_record_poll_heartbeat(hu_imessage_ctx_t *c, int64_t now) {
         return;
     imessage_record_poll_success(c, now);
     imessage_save_poll_status(c);
+}
+
+/* ── US-9.3: non-allowlisted-sender courtesy reply ───────────────────────
+ *
+ * The pure predicate, text builder, and dedup-log helpers below sit at the
+ * top of the file so the production poll loop and the test seam reach the
+ * same symbols. The decision is intentionally factored out per
+ * `.claude/rules/security-predicate-extraction.md`: the poll loop runs
+ * inside a (hard-to-test) fork-and-SQL boundary, but the decision itself
+ * is four facts → one bool. Tests pin all 16 rows without forking. */
+
+bool hu_imessage_should_courtesy_reply(bool allowlist_has_handle, bool dedup_already_replied,
+                                       bool courtesy_replies_enabled,
+                                       uint32_t aggregate_today_count) {
+    if (!courtesy_replies_enabled)
+        return false;
+    if (allowlist_has_handle)
+        return false;
+    if (dedup_already_replied)
+        return false;
+    if (aggregate_today_count >= (uint32_t)HU_IMESSAGE_COURTESY_DAILY_CAP)
+        return false;
+    return true;
+}
+
+size_t hu_imessage_build_courtesy_reply(const char *persona_name, const char *owner_display_name,
+                                        char *out, size_t out_cap) {
+    if (!out || out_cap < 32)
+        return 0;
+    /* Defensive: NEVER interpolate raw handles ("+1..." or "...@...").
+     * The builder takes DISPLAY NAMES; the caller's responsibility is to
+     * pass display names, not phone/email handles. We additionally sanity-
+     * check inputs and fall back to generic phrasing if they look like a
+     * handle, but the primary defense is the API shape. */
+    const char *who = "the human assistant";
+    char persona_buf[64] = {0};
+    if (persona_name && persona_name[0]) {
+        bool looks_like_handle = false;
+        for (size_t i = 0; persona_name[i] && i < sizeof(persona_buf) - 1; i++) {
+            char ch = persona_name[i];
+            if (ch == '+' || ch == '@')
+                looks_like_handle = true;
+            persona_buf[i] = ch;
+        }
+        if (!looks_like_handle)
+            who = persona_buf;
+    }
+    const char *owner = "the operator";
+    char owner_buf[64] = {0};
+    if (owner_display_name && owner_display_name[0]) {
+        bool looks_like_handle = false;
+        for (size_t i = 0; owner_display_name[i] && i < sizeof(owner_buf) - 1; i++) {
+            char ch = owner_display_name[i];
+            if (ch == '+' || ch == '@')
+                looks_like_handle = true;
+            owner_buf[i] = ch;
+        }
+        if (!looks_like_handle)
+            owner = owner_buf;
+    }
+    int n = snprintf(out, out_cap,
+                     "Hi — I'm %s, a human assistant running locally on %s's Mac. "
+                     "To chat with me, please ask %s to add you to my allowlist. "
+                     "(This is an automated one-time courtesy reply.)",
+                     who, owner, owner);
+    if (n < 0)
+        return 0;
+    if ((size_t)n >= out_cap) {
+        out[out_cap - 1] = '\0';
+        return out_cap - 1;
+    }
+    return (size_t)n;
+}
+
+bool hu_imessage_courtesy_log_path(char *buf, size_t cap) {
+    if (!buf || cap < 16)
+        return false;
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return false;
+    int n = snprintf(buf, cap, "%s/.human/imessage_courtesy.log", home);
+    return n > 0 && (size_t)n < cap;
+}
+
+/* Parse a single dedup-log line of the form "<bucket> <handle>\n".
+ * Returns true on success and writes bucket + handle (handle is a pointer
+ * into `line` after the space). The line is mutated (NUL inserted). */
+static bool imessage_courtesy_parse_line(char *line, int64_t *out_bucket, const char **out_handle) {
+    if (!line || !out_bucket || !out_handle)
+        return false;
+    char *sp = strchr(line, ' ');
+    if (!sp)
+        return false;
+    *sp = '\0';
+    char *endp = NULL;
+    long long b = strtoll(line, &endp, 10);
+    if (!endp || *endp != '\0' || b < 0)
+        return false;
+    char *handle = sp + 1;
+    /* Trim trailing newline. */
+    size_t hl = strlen(handle);
+    while (hl > 0 && (handle[hl - 1] == '\n' || handle[hl - 1] == '\r')) {
+        handle[hl - 1] = '\0';
+        hl--;
+    }
+    if (hl == 0)
+        return false;
+    *out_bucket = (int64_t)b;
+    *out_handle = handle;
+    return true;
+}
+
+bool hu_imessage_courtesy_dedup_check(const char *handle, int64_t bucket) {
+    if (!handle || !handle[0])
+        return false;
+    char path[512];
+    if (!hu_imessage_courtesy_log_path(path, sizeof(path)))
+        return false;
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return false;
+    char line[256];
+    bool found = false;
+    while (fgets(line, sizeof(line), f)) {
+        char buf[256];
+        size_t ll = strlen(line);
+        if (ll >= sizeof(buf))
+            continue;
+        memcpy(buf, line, ll + 1);
+        int64_t b = 0;
+        const char *h = NULL;
+        if (!imessage_courtesy_parse_line(buf, &b, &h))
+            continue;
+        if (b == bucket && strcasecmp(h, handle) == 0) {
+            found = true;
+            break;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+uint32_t hu_imessage_courtesy_aggregate_count(int64_t bucket) {
+    char path[512];
+    if (!hu_imessage_courtesy_log_path(path, sizeof(path)))
+        return 0;
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return 0;
+    char line[256];
+    uint32_t count = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char buf[256];
+        size_t ll = strlen(line);
+        if (ll >= sizeof(buf))
+            continue;
+        memcpy(buf, line, ll + 1);
+        int64_t b = 0;
+        const char *h = NULL;
+        if (!imessage_courtesy_parse_line(buf, &b, &h))
+            continue;
+        if (b == bucket && count < UINT32_MAX)
+            count++;
+    }
+    fclose(f);
+    return count;
+}
+
+/* Ensure the parent directory of the dedup log exists. Silently no-ops if
+ * HOME is unset or mkdir fails (the caller's fopen will then fail too). */
+static void imessage_courtesy_ensure_dir(void) {
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return;
+    (void)mkdir(home, 0700);
+    char dir[512];
+    int n = snprintf(dir, sizeof(dir), "%s/.human", home);
+    if (n > 0 && (size_t)n < sizeof(dir))
+        (void)mkdir(dir, 0700);
+}
+
+void hu_imessage_courtesy_dedup_record(const char *handle, int64_t bucket) {
+    if (!handle || !handle[0])
+        return;
+    imessage_courtesy_ensure_dir();
+    char path[512];
+    if (!hu_imessage_courtesy_log_path(path, sizeof(path)))
+        return;
+    /* Append the new entry. 0600 secret-class permissions. */
+    int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    if (fd < 0)
+        return;
+    char rec[256];
+    int n = snprintf(rec, sizeof(rec), "%lld %s\n", (long long)bucket, handle);
+    if (n > 0 && (size_t)n < sizeof(rec)) {
+        /* Best-effort journal write — `(void)` cast alone doesn't silence
+         * GCC -Werror=unused-result (gcc-2.42 + glibc-2.39 specifically),
+         * so check the return explicitly. Truncated/failed writes mean
+         * the activity record is dropped this round; not fatal. */
+        ssize_t ignored = write(fd, rec, (size_t)n);
+        (void)ignored;
+    }
+    (void)close(fd);
+    /* Truncate-tail if file has grown beyond the max-lines bound. Cheap
+     * because the file is small (~16KB at the cap). Lock optimistically;
+     * skip truncation on failure rather than spin. */
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return;
+    /* Best-effort advisory lock; non-fatal on failure (truncation just
+     * deferred to the next record). */
+#if defined(LOCK_EX) && defined(LOCK_NB)
+    int trunc_fd = fileno(f);
+    if (trunc_fd >= 0 && flock(trunc_fd, LOCK_EX | LOCK_NB) != 0) {
+        fclose(f);
+        return;
+    }
+#endif
+    /* Slurp last N lines. We do a two-pass: count, then keep tail. */
+    size_t line_count = 0;
+    char tmp[256];
+    while (fgets(tmp, sizeof(tmp), f))
+        line_count++;
+    if (line_count <= HU_IMESSAGE_COURTESY_LOG_MAX_LINES) {
+        fclose(f);
+        return;
+    }
+    size_t skip = line_count - HU_IMESSAGE_COURTESY_LOG_MAX_LINES;
+    rewind(f);
+    /* Re-skip the first `skip` lines. */
+    for (size_t i = 0; i < skip; i++) {
+        if (!fgets(tmp, sizeof(tmp), f)) {
+            fclose(f);
+            return;
+        }
+    }
+    /* Buffer the tail in memory. 256 * 256 = 64KB worst case. */
+    char *buf = (char *)malloc(HU_IMESSAGE_COURTESY_LOG_MAX_LINES * 256);
+    if (!buf) {
+        fclose(f);
+        return;
+    }
+    size_t buf_len = 0;
+    while (fgets(tmp, sizeof(tmp), f)) {
+        size_t tlen = strlen(tmp);
+        if (buf_len + tlen >= HU_IMESSAGE_COURTESY_LOG_MAX_LINES * 256)
+            break;
+        memcpy(buf + buf_len, tmp, tlen);
+        buf_len += tlen;
+    }
+    fclose(f);
+    /* Atomically replace via tmp + rename. */
+    char tmp_path[600];
+    int tn = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    if (tn <= 0 || (size_t)tn >= sizeof(tmp_path)) {
+        free(buf);
+        return;
+    }
+    int tfd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (tfd < 0) {
+        free(buf);
+        return;
+    }
+    if (buf_len > 0) {
+        /* Best-effort tmp-file write before rename. Same -Werror=
+         * unused-result note as above — `(void)` cast doesn't silence
+         * the diagnostic on gcc-2.42, so assign-and-discard. */
+        ssize_t ignored = write(tfd, buf, buf_len);
+        (void)ignored;
+    }
+    (void)fsync(tfd);
+    (void)close(tfd);
+    (void)rename(tmp_path, path);
+    free(buf);
 }
 
 bool hu_imessage_breaker_tripped(const hu_channel_t *ch) {
@@ -1281,6 +1568,39 @@ static void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size
 
 #endif
 
+/* Platform-agnostic helper: called from the daemon's inbound-batch context
+ * builder regardless of channel availability. Must live OUTSIDE the
+ * (defined(__APPLE__) && defined(__MACH__)) || HU_IS_TEST guard above so the
+ * symbol is emitted on Linux production builds where neither macro is set.
+ * hu_imessage_lookup_message_by_guid returns HU_ERR_NOT_SUPPORTED on platforms
+ * without chat.db, in which case this helper returns 0 (no hint). */
+size_t hu_imessage_build_inline_reply_hint_for_batch(hu_allocator_t *alloc,
+                                                     const hu_channel_loop_msg_t *msgs,
+                                                     size_t msg_count, char *out_buf,
+                                                     size_t out_cap) {
+    if (!alloc || !msgs || msg_count == 0 || !out_buf || out_cap == 0)
+        return 0;
+
+    const char *reply_guid = NULL;
+    for (size_t i = 0; i < msg_count; i++) {
+        if (msgs[i].reply_to_guid[0]) {
+            reply_guid = msgs[i].reply_to_guid;
+            break;
+        }
+    }
+    if (!reply_guid)
+        return 0;
+
+    char orig_text[512];
+    size_t orig_len = 0;
+    hu_error_t lr_err = hu_imessage_lookup_message_by_guid(alloc, reply_guid, strlen(reply_guid),
+                                                           orig_text, sizeof(orig_text), &orig_len);
+    if (lr_err != HU_OK || orig_len == 0)
+        return 0;
+
+    return hu_conversation_build_inline_reply_hint(orig_text, orig_len, out_buf, out_cap);
+}
+
 static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
@@ -1306,6 +1626,30 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         } else {
             c->last_media_path[0] = '\0';
         }
+        /* Persona overlay rendering: semantic transform applied before any
+         * iMessage-specific presentation cleanup. Test path captures the
+         * overlay-rendered text so per-channel divergence is observable. */
+        char *rendered = NULL;
+        size_t rendered_len = 0;
+        if (message_len > 0) {
+            const hu_persona_overlay_t *ov = NULL;
+            const char *contact_warmth = NULL;
+            if (c->persona) {
+                ov = hu_persona_find_overlay(c->persona, "imessage", 8);
+                if (target && target_len > 0) {
+                    const hu_contact_profile_t *cp =
+                        hu_persona_find_contact(c->persona, target, target_len);
+                    if (cp && cp->warmth_level)
+                        contact_warmth = cp->warmth_level;
+                }
+            }
+            hu_error_t rerr = hu_persona_render_for_channel_with_warmth(
+                ov, contact_warmth, message, message_len, c->alloc, &rendered, &rendered_len);
+            if (rerr != HU_OK)
+                return rerr;
+            message = rendered;
+            message_len = rendered_len;
+        }
         size_t len = message_len > 4095 ? 4095 : message_len;
         if (message && len > 0)
             memcpy(c->last_message, message, len);
@@ -1313,6 +1657,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             len = 0;
         c->last_message[len] = '\0';
         c->last_message_len = len;
+        if (rendered)
+            c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
         return HU_OK;
     }
 #elif !defined(__APPLE__) || !defined(__MACH__)
@@ -1340,6 +1686,32 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
     if (message_len > 0 && !message)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* Persona overlay rendering: applied BEFORE iMessage's markdown strip
+     * and AI-phrase sanitization. The overlay is a semantic transform
+     * (formality, length, emoji policy); the cleanup that follows is
+     * iMessage-specific presentation. Doing overlay first means the
+     * sanitizer never sees text the overlay would have removed, and
+     * a NULL overlay yields an identity copy so the cleanup paths are
+     * unchanged (AC-6). */
+    char *overlay_buf = NULL;
+    size_t overlay_buf_len = 0;
+    if (message_len > 0) {
+        const hu_persona_overlay_t *ov = NULL;
+        const char *contact_warmth = NULL;
+        if (c->persona) {
+            ov = hu_persona_find_overlay(c->persona, "imessage", 8);
+            const hu_contact_profile_t *cp = hu_persona_find_contact(c->persona, tgt, tgt_len);
+            if (cp && cp->warmth_level)
+                contact_warmth = cp->warmth_level;
+        }
+        hu_error_t rerr = hu_persona_render_for_channel_with_warmth(
+            ov, contact_warmth, message, message_len, c->alloc, &overlay_buf, &overlay_buf_len);
+        if (rerr != HU_OK)
+            return rerr;
+        message = overlay_buf;
+        message_len = overlay_buf_len;
+    }
+
     hu_error_t send_err = HU_OK;
     char *clean = NULL;
     size_t clean_cap = 0;
@@ -1352,8 +1724,11 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
          */
         clean_cap = message_len + 1;
         clean = (char *)c->alloc->alloc(c->alloc->ctx, clean_cap);
-        if (!clean)
+        if (!clean) {
+            if (overlay_buf)
+                c->alloc->free(c->alloc->ctx, overlay_buf, overlay_buf_len + 1);
             return HU_ERR_OUT_OF_MEMORY;
+        }
         {
             size_t out_i = 0;
             size_t i = 0;
@@ -1578,6 +1953,8 @@ imsg_media:
 imsg_cleanup:
     if (clean)
         c->alloc->free(c->alloc->ctx, clean, clean_cap);
+    if (overlay_buf)
+        c->alloc->free(c->alloc->ctx, overlay_buf, overlay_buf_len + 1);
     return send_err;
 #endif
 }
@@ -2199,6 +2576,95 @@ hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const c
     return HU_OK;
 }
 #endif
+
+hu_error_t hu_imessage_find_unreplied_read(const char *contact_id, size_t contact_id_len,
+                                           int64_t *out_msg_id, uint64_t *out_read_at_ms) {
+    if (out_msg_id)
+        *out_msg_id = 0;
+    if (out_read_at_ms)
+        *out_read_at_ms = 0;
+    if (!contact_id || contact_id_len == 0 || !out_msg_id || !out_read_at_ms)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+    /* Find the most recent outbound to `contact_id`. Mirrors the structure
+     * of hu_imessage_build_read_receipt_context but returns structured data
+     * instead of an LLM prompt string. */
+    char db_path[512];
+    const char *home = getenv("HOME");
+    if (!home)
+        return HU_ERR_IO;
+    snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    const char *sql = "SELECT m.ROWID, m.date, m.date_read "
+                      "FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE h.id = ?1 AND m.is_from_me = 1 "
+                      "ORDER BY m.date DESC LIMIT 1";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+
+    char contact_buf[128];
+    size_t clen =
+        contact_id_len < sizeof(contact_buf) - 1 ? contact_id_len : sizeof(contact_buf) - 1;
+    memcpy(contact_buf, contact_id, clen);
+    contact_buf[clen] = '\0';
+    sqlite3_bind_text(stmt, 1, contact_buf, (int)clen, SQLITE_STATIC);
+
+    int64_t msg_id = 0;
+    int64_t sent_date = 0;
+    int64_t read_date = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        msg_id = sqlite3_column_int64(stmt, 0);
+        sent_date = sqlite3_column_int64(stmt, 1);
+        read_date = sqlite3_column_int64(stmt, 2);
+    }
+    sqlite3_finalize(stmt);
+
+    if (msg_id == 0 || read_date <= 0) {
+        /* No outbound, or it hasn't been read yet — no follow-up to schedule. */
+        sqlite3_close(db);
+        return HU_OK;
+    }
+
+    /* Check for an inbound reply since the outbound. */
+    bool has_reply = false;
+    sqlite3_stmt *reply_stmt = NULL;
+    const char *reply_sql = "SELECT COUNT(*) FROM message m "
+                            "JOIN handle h ON m.handle_id = h.ROWID "
+                            "WHERE h.id = ?1 AND m.is_from_me = 0 AND m.date > ?2 "
+                            "AND m.associated_message_type = 0";
+    if (sqlite3_prepare_v2(db, reply_sql, -1, &reply_stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(reply_stmt, 1, contact_buf, (int)clen, SQLITE_STATIC);
+        sqlite3_bind_int64(reply_stmt, 2, sent_date);
+        if (sqlite3_step(reply_stmt) == SQLITE_ROW)
+            has_reply = sqlite3_column_int(reply_stmt, 0) > 0;
+        sqlite3_finalize(reply_stmt);
+    }
+    sqlite3_close(db);
+
+    if (has_reply)
+        return HU_OK;
+
+    /* Convert Apple's date_read (nanoseconds since 2001-01-01) to wall-clock ms. */
+    int64_t apple_epoch = 978307200LL;
+    int64_t read_unix_sec = apple_epoch + read_date / 1000000000LL;
+    *out_msg_id = msg_id;
+    *out_read_at_ms = (uint64_t)read_unix_sec * 1000ULL;
+    return HU_OK;
+#else
+    (void)contact_id_len;
+    return HU_OK; /* test / non-Apple / no-SQLite: no result */
+#endif
+}
 
 static hu_error_t imessage_get_response_constraints(void *ctx,
                                                     hu_channel_response_constraints_t *out) {
@@ -3270,6 +3736,15 @@ static hu_error_t imessage_stop_typing(void *ctx, const char *recipient, size_t 
 #endif
 }
 
+/* iMessage natively renders Apple Music / Spotify / YouTube Music URLs as
+ * rich playable previews (album art, title, artist, play button) when the URL
+ * is alone in its bubble. The music-share path uses this capability to send
+ * a bare URL instead of downloading + attaching a 30s .m4a preview + JPG. */
+static bool imessage_supports_link_unfurl(void *ctx) {
+    (void)ctx;
+    return true;
+}
+
 static const hu_channel_vtable_t imessage_vtable = {
     .start = imessage_start,
     .stop = imessage_stop,
@@ -3288,6 +3763,7 @@ static const hu_channel_vtable_t imessage_vtable = {
     .build_reaction_context = imessage_vt_build_reaction_context,
     .build_read_receipt_context = imessage_vt_build_read_receipt_context,
     .mark_read = imessage_mark_read,
+    .supports_link_unfurl = imessage_supports_link_unfurl,
 };
 
 hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
@@ -3304,6 +3780,12 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
     c->default_target_len = 0;
     c->allow_from = allow_from;
     c->allow_from_count = allow_from_count;
+    /* US-9.3: courtesy replies default ON. Operators with a non-empty
+     * allowlist will immediately start emitting one-per-handle-per-24h
+     * courtesy replies; the per-handle dedup file + 50/day aggregate cap
+     * (see HU_IMESSAGE_COURTESY_DAILY_CAP) bound spoof-spam exposure. */
+    c->courtesy_replies_enabled = true;
+    c->chatdb_busy_log_emitted = false;
     if (default_target && default_target_len > 0) {
         c->default_target = (char *)alloc->alloc(alloc->ctx, default_target_len + 1);
         if (!c->default_target) {
@@ -3392,6 +3874,13 @@ bool hu_imessage_watch_active(hu_channel_t *ch) {
 #else
     return false;
 #endif
+}
+
+void hu_imessage_set_persona(hu_channel_t *ch, const struct hu_persona *persona) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    c->persona = persona;
 }
 
 void hu_imessage_destroy(hu_channel_t *ch) {
@@ -3667,6 +4156,19 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     sqlite3 *db = NULL;
     int rc = imessage_open_chatdb(db_path, &db);
     if (rc != SQLITE_OK) {
+        /* AC-9.3.3: BUSY/LOCKED after 3 retries means Messages.app is
+         * holding the file (likely a large sync). Save poll status
+         * immediately so the doctor sees the freshest state, and emit a
+         * one-shot warn line (the gate is reset on the next successful
+         * poll below). */
+        if (rc == SQLITE_BUSY || rc == SQLITE_LOCKED) {
+            imessage_save_poll_status(c);
+            if (!c->chatdb_busy_log_emitted) {
+                c->chatdb_busy_log_emitted = true;
+                hu_log_warn("imessage", NULL,
+                            "chat.db busy after 3 retries — Messages.app may be syncing");
+            }
+        }
         /* Log only when not yet circuit-broken; once tripped the breaker
          * already explained the situation in a single high-priority line. */
         if (!c->circuit_breaker_tripped)
@@ -3675,6 +4177,9 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         imessage_save_poll_status(c);
         return HU_ERR_IO;
     }
+    /* Successful open resets the one-shot BUSY gate so a future episode
+     * can emit one warn line again. */
+    c->chatdb_busy_log_emitted = false;
 
     /* Detect date_retracted column (macOS Ventura+) for unsend detection */
     bool has_date_retracted = false;
@@ -3903,6 +4408,27 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 }
             }
             if (!allowed) {
+                /* US-9.3: non-allowlisted DM — emit operator-side log every
+                 * occurrence and (rate-limited) send a one-time courtesy
+                 * reply explaining the allowlist requirement. */
+                int64_t now_epoch = (int64_t)time(NULL);
+                int64_t bucket = now_epoch / 86400;
+                hu_log_info("imessage", NULL,
+                            "non-allowlisted iMessage from %s; dropping (bucket=%lld)", handle,
+                            (long long)bucket);
+                bool dedup_already_replied = hu_imessage_courtesy_dedup_check(handle, bucket);
+                uint32_t aggregate_today_count = hu_imessage_courtesy_aggregate_count(bucket);
+                if (hu_imessage_should_courtesy_reply(false, dedup_already_replied,
+                                                      c->courtesy_replies_enabled,
+                                                      aggregate_today_count)) {
+                    char reply[1024];
+                    size_t reply_len = hu_imessage_build_courtesy_reply(NULL, c->default_target,
+                                                                        reply, sizeof(reply));
+                    if (reply_len > 0) {
+                        (void)imessage_send(c, handle, handle_len, reply, reply_len, NULL, 0);
+                        hu_imessage_courtesy_dedup_record(handle, bucket);
+                    }
+                }
                 c->last_rowid = rowid;
                 continue;
             }
@@ -4440,5 +4966,90 @@ size_t hu_imessage_test_get_last_media_count(hu_channel_t *ch) {
         return 0;
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     return c->last_media_count;
+}
+
+const char *hu_imessage_test_get_last_courtesy_message(hu_channel_t *ch, size_t *out_len) {
+    if (!ch || !ch->ctx)
+        return NULL;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    if (out_len)
+        *out_len = c->last_courtesy_message_len;
+    return c->last_courtesy_message;
+}
+
+void hu_imessage_test_clear_last_courtesy_message(hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    c->last_courtesy_message[0] = '\0';
+    c->last_courtesy_message_len = 0;
+}
+
+/* Test-only: drive the non-allowlisted-handle pipeline without needing a
+ * real chat.db. Calls the same predicate + dedup + builder used by the
+ * production poll loop (and uses the channel's own .send vtable entry, so
+ * the echo ring is populated as it would be in prod). */
+hu_error_t hu_imessage_test_handle_non_allowlisted(hu_channel_t *ch, const char *handle,
+                                                   int64_t mock_epoch) {
+    if (!ch || !ch->ctx || !handle || !handle[0])
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    int64_t bucket = mock_epoch / 86400;
+    bool dedup_already_replied = hu_imessage_courtesy_dedup_check(handle, bucket);
+    uint32_t aggregate_today_count = hu_imessage_courtesy_aggregate_count(bucket);
+    /* Operator-side visibility: log every non-allowlisted DM (per design),
+     * regardless of whether we send a reply. Uses info-level so it does
+     * not trip log-noise alerts. */
+    hu_log_info("imessage", NULL, "non-allowlisted iMessage from %s; dropping (bucket=%lld)",
+                handle, (long long)bucket);
+    bool should = hu_imessage_should_courtesy_reply(
+        false, dedup_already_replied, c->courtesy_replies_enabled, aggregate_today_count);
+    if (!should)
+        return HU_OK;
+    char reply[1024];
+    size_t reply_len = hu_imessage_build_courtesy_reply(NULL, NULL, reply, sizeof(reply));
+    if (reply_len == 0)
+        return HU_OK; /* defensive */
+    /* Send through the same path the production poll loop uses (static
+     * imessage_send in this TU). This populates the echo ring and, under
+     * HU_IS_TEST, records to c->last_message. */
+    (void)imessage_send(c, handle, strlen(handle), reply, reply_len, NULL, 0);
+    /* Mirror to the test-only courtesy field. */
+    size_t mirror = reply_len < sizeof(c->last_courtesy_message) - 1
+                        ? reply_len
+                        : sizeof(c->last_courtesy_message) - 1;
+    memcpy(c->last_courtesy_message, reply, mirror);
+    c->last_courtesy_message[mirror] = '\0';
+    c->last_courtesy_message_len = mirror;
+    /* Record AFTER successful send (best-effort; we already sent). */
+    hu_imessage_courtesy_dedup_record(handle, bucket);
+    return HU_OK;
+}
+
+void hu_imessage_test_record_chatdb_busy_exhaustion(hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    /* Mirror the production AC-9.3.3 handler exactly: persist poll status
+     * immediately AND emit a one-shot warn line. */
+    imessage_save_poll_status(c);
+    if (!c->chatdb_busy_log_emitted) {
+        c->chatdb_busy_log_emitted = true;
+        hu_log_warn("imessage", NULL, "chat.db busy after 3 retries — Messages.app may be syncing");
+    }
+}
+
+void hu_imessage_test_reset_chatdb_busy_gate(hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    c->chatdb_busy_log_emitted = false;
+}
+
+bool hu_imessage_test_chatdb_busy_log_emitted(hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return false;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    return c->chatdb_busy_log_emitted;
 }
 #endif

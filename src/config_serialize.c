@@ -34,8 +34,8 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
             hu_json_object_set(&a, root, "workspace", ws);
     }
     if (cfg->dpo_export_dir && cfg->dpo_export_dir[0]) {
-        hu_json_value_t *dd = hu_json_string_new(&a, cfg->dpo_export_dir,
-                                                  strlen(cfg->dpo_export_dir));
+        hu_json_value_t *dd =
+            hu_json_string_new(&a, cfg->dpo_export_dir, strlen(cfg->dpo_export_dir));
         if (dd)
             hu_json_object_set(&a, root, "dpo_export_dir", dd);
     }
@@ -344,10 +344,48 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
              * stays terse — readers without the flag continue to see
              * the bridge as enabled-by-config. */
             if (cfg->personalization.m3_adapter_disabled)
-                hu_json_object_set(
-                    &a, pers, "m3_adapter_disabled",
-                    hu_json_bool_new(&a, cfg->personalization.m3_adapter_disabled));
+                hu_json_object_set(&a, pers, "m3_adapter_disabled",
+                                   hu_json_bool_new(&a, cfg->personalization.m3_adapter_disabled));
+            /* US-7.8 — MoLoRA per-channel router. Emit only when the block
+             * is non-default (enabled OR at least one channel mapped) so
+             * the canonical default config stays terse. */
+            if (cfg->personalization.molora.enabled || cfg->personalization.molora.count > 0) {
+                hu_json_value_t *mol = hu_json_object_new(&a);
+                if (mol) {
+                    hu_json_object_set(&a, mol, "enabled",
+                                       hu_json_bool_new(&a, cfg->personalization.molora.enabled));
+                    hu_json_value_t *ca = hu_json_object_new(&a);
+                    if (ca) {
+                        for (size_t mi = 0; mi < cfg->personalization.molora.count; mi++) {
+                            const hu_molora_channel_entry_t *e =
+                                &cfg->personalization.molora.entries[mi];
+                            if (!e->adapter_path || e->channel[0] == '\0')
+                                continue;
+                            hu_json_object_set(
+                                &a, ca, e->channel,
+                                hu_json_string_new(&a, e->adapter_path, strlen(e->adapter_path)));
+                        }
+                        hu_json_object_set(&a, mol, "channel_adapters", ca);
+                    }
+                    hu_json_object_set(&a, pers, "molora", mol);
+                }
+            }
             hu_json_object_set(&a, root, "personalization", pers);
+        }
+    }
+
+    /* US-7.7 — inference (best-of-N). Emit only when non-default to keep the
+     * canonical default config terse. */
+    if (cfg->inference.best_of_n > 1 || cfg->inference.best_of_n_cost_cap_ms > 0) {
+        hu_json_value_t *inf = hu_json_object_new(&a);
+        if (inf) {
+            hu_json_object_set(&a, inf, "best_of_n",
+                               hu_json_number_new(&a, (double)cfg->inference.best_of_n));
+            if (cfg->inference.best_of_n_cost_cap_ms > 0)
+                hu_json_object_set(
+                    &a, inf, "best_of_n_cost_cap_ms",
+                    hu_json_number_new(&a, (double)cfg->inference.best_of_n_cost_cap_ms));
+            hu_json_object_set(&a, root, "inference", inf);
         }
     }
 
@@ -394,9 +432,8 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
 
     /* auto_update */
     if (cfg->auto_update && strcmp(cfg->auto_update, "off") != 0) {
-        hu_json_object_set(
-            &a, root, "auto_update",
-            hu_json_string_new(&a, cfg->auto_update, strlen(cfg->auto_update)));
+        hu_json_object_set(&a, root, "auto_update",
+                           hu_json_string_new(&a, cfg->auto_update, strlen(cfg->auto_update)));
     }
     if (cfg->update_check_interval_hours != 24 && cfg->update_check_interval_hours > 0) {
         hu_json_object_set(&a, root, "update_check_interval_hours",

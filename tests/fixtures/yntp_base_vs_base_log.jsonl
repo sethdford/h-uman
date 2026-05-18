@@ -1,0 +1,5 @@
+{"row_id": 1, "base_logprob_sum": -28.4, "base_n_tokens": 14, "adapter_logprob_sum": -28.4, "adapter_n_tokens": 14, "adapter_generated": "same", "has_pad": false, "note": "honest baseline: base scored against itself"}
+{"row_id": 2, "base_logprob_sum": -32.7, "base_n_tokens": 18, "adapter_logprob_sum": -32.7, "adapter_n_tokens": 18, "adapter_generated": "same", "has_pad": false}
+{"row_id": 3, "base_logprob_sum": -30.1, "base_n_tokens": 16, "adapter_logprob_sum": -30.1, "adapter_n_tokens": 16, "adapter_generated": "same", "has_pad": false}
+{"row_id": 4, "base_logprob_sum": -25.8, "base_n_tokens": 12, "adapter_logprob_sum": -25.8, "adapter_n_tokens": 12, "adapter_generated": "same", "has_pad": false}
+{"row_id": 5, "base_logprob_sum": -34.2, "base_n_tokens": 17, "adapter_logprob_sum": -34.2, "adapter_n_tokens": 17, "adapter_generated": "same", "has_pad": false}

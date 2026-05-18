@@ -26,6 +26,7 @@ features:
     F93,
   ]
 parent: 2026-03-10-human-fidelity-design.md
+last_audit: 2026-05-17
 ---
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

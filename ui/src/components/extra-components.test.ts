@@ -41,6 +41,7 @@ import "./hu-section-header.js";
 import "./hu-metric-row.js";
 import "./hu-fidelity-tile.js";
 import type { HuFidelityTile, FidelityStatus } from "./hu-fidelity-tile.js";
+import "./hu-guard-rejects-tile.js";
 import "./hu-timeline.js";
 import "./hu-sparkline-enhanced.js";
 import "./hu-forecast-chart.js";
@@ -3599,6 +3600,16 @@ describe("hu-message-thread", () => {
 describe("hu-directive-telemetry-tile", () => {
   it("should be defined as a custom element", () => {
     expect(customElements.get("hu-directive-telemetry-tile")).toBeDefined();
+  });
+});
+
+/* hu-guard-rejects-tile is exhaustively tested in its dedicated file
+ * (hu-guard-rejects-tile.test.ts). This smoke block exists so the
+ * catalog-completeness lint can find it in extra-components.test.ts. */
+import "./hu-guard-rejects-tile.js";
+describe("hu-guard-rejects-tile", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("hu-guard-rejects-tile")).toBeDefined();
   });
 });
 

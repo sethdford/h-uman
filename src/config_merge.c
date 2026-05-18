@@ -216,6 +216,7 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->agent.mcts_planner_enabled = false;
     cfg->agent.tree_of_thought = false;
     cfg->agent.constitutional_ai = false;
+    cfg->agent.constitutional_style_rules_enabled = false; /* US-7.9: default off */
     cfg->agent.speculative_cache = false;
     cfg->agent.tool_routing_enabled = false;
     cfg->agent.multi_agent = false;
@@ -398,6 +399,17 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->personalization.lora_adapter_id = NULL;
     cfg->personalization.m3_adapter_probe_path = NULL;
     cfg->personalization.m3_adapter_disabled = false;
+    /* US-7.8 — MoLoRA static per-channel router. Disabled by default;
+     * entries owned (parser-strdup, freed by hu_config_deinit). */
+    cfg->personalization.molora.enabled = false;
+    cfg->personalization.molora.count = 0;
+    for (size_t mi = 0; mi < HU_MOLORA_CONFIG_MAX_CHANNELS; mi++) {
+        cfg->personalization.molora.entries[mi].channel[0] = '\0';
+        cfg->personalization.molora.entries[mi].adapter_path = NULL;
+    }
+    /* US-7.7 — best-of-N at inference. Defaults: disabled (n=1), no cap. */
+    cfg->inference.best_of_n = 1;
+    cfg->inference.best_of_n_cost_cap_ms = 0;
     cfg->behavior.consecutive_limit = 3;
     cfg->behavior.participation_pct = 40;
     cfg->behavior.max_response_chars = 300;

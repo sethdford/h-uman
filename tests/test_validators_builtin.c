@@ -134,7 +134,12 @@ static void default_chain_assembles_and_destroys(void) {
     hu_output_validator_chain_t *chain = NULL;
     HU_ASSERT_EQ(hu_validators_build_default_outbound_chain(&alloc, NULL, 0, &chain), HU_OK);
     HU_ASSERT_NOT_NULL(chain);
-    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 8u);
+    /* 10 = 7 stripper/structural + identity_short_circuit (2026-05-17 r2,
+     * REWRITES on AI-disclosure) + persona_voice (2026-05-17, REJECTs as
+     * backstop) + persona_fidelity (M3 stub). Updating this count is a
+     * checkpoint that the chain composition has changed and downstream
+     * callers may need a second look. */
+    HU_ASSERT_EQ(hu_output_validator_chain_len(chain), 10u);
     hu_output_validator_chain_destroy(chain);
 }
 

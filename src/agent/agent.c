@@ -70,6 +70,7 @@
 #include "human/voice.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/ml/m3_id_map.h"
 #endif
 
 #include <stdint.h>
@@ -235,8 +236,7 @@ void hu_agent_internal_clear_scene_direction(hu_agent_t *agent) {
  *   7. Increment count, saturating at MAX. */
 #define HU_DIRECTOR_PUSH_MIN_LEN 30 /* same as HU_GUARD_DIRECTOR_ECHO_MIN_MATCH */
 
-void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
-                                              size_t text_len) {
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text, size_t text_len) {
     if (!agent || !agent->alloc || !text || text_len < HU_DIRECTOR_PUSH_MIN_LEN)
         return;
 
@@ -249,8 +249,7 @@ void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text
 
     /* Free oldest slot if buffer is full. */
     if (agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1]) {
-        agent->alloc->free(agent->alloc->ctx,
-                           agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1],
+        agent->alloc->free(agent->alloc->ctx, agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1],
                            agent->director_history_lens[HU_DIRECTOR_HISTORY_MAX - 1] + 1);
         agent->director_history[HU_DIRECTOR_HISTORY_MAX - 1] = NULL;
         agent->director_history_lens[HU_DIRECTOR_HISTORY_MAX - 1] = 0;
@@ -460,6 +459,7 @@ hu_error_t hu_agent_from_config(
         out->tool_routing_enabled = ctx_cfg->tool_routing_enabled;
         out->tree_of_thought_enabled = ctx_cfg->tree_of_thought;
         out->constitutional_enabled = ctx_cfg->constitutional_ai;
+        out->style_rules_enabled = ctx_cfg->constitutional_style_rules_enabled;
         out->multi_agent_enabled = ctx_cfg->multi_agent;
         out->hula_enabled = ctx_cfg->hula_enabled;
         out->compaction_use_structured = ctx_cfg->compaction_use_structured;
@@ -1004,19 +1004,120 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
     if (agent->m3_adapter) {
         hu_m3_frontier_adapter_close(agent->alloc, agent->m3_adapter);
         agent->m3_adapter = NULL;
+        /* Clear the global accessor before freeing so the gateway
+         * endpoint doesn't read a freed pointer in the small window
+         * between close() and the next attach. */
+        hu_m3_outcomes_register_global_adapter(NULL);
     }
     if (!path || path[0] == '\0')
         return;
     size_t path_len = strlen(path);
     hu_m3_frontier_adapter_t *opened = NULL;
-    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK && opened)
+    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK && opened) {
         agent->m3_adapter = opened;
+        /* B3 v0 (2026-05-17 r2): publish the freshly-opened adapter to
+         * the global accessor so /v1/m3/outcomes can read it. */
+        hu_m3_outcomes_register_global_adapter(opened);
+
+        /* Phase C2 (2026-05-18): open the id map alongside the adapter.
+         * Lives next to the adapter probe path. Failure to open the map
+         * is non-fatal — outcomes regress to model_id=0/adapter_id=0
+         * (unknown) but the loop still functions. */
+        if (!agent->m3_id_map) {
+            char map_path[2048];
+            int mn = snprintf(map_path, sizeof(map_path), "%s/.human/training-data/m3_id_map.json",
+                              getenv("HOME") ? getenv("HOME") : "/tmp");
+            if (mn > 0 && (size_t)mn < sizeof(map_path)) {
+                (void)hu_m3_id_map_create(agent->alloc, map_path, &agent->m3_id_map);
+            }
+        }
+    }
 }
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
     if (!agent || !agent->m3_adapter)
         return;
     (void)hu_m3_frontier_adapter_noop_infer(agent->m3_adapter);
+}
+
+void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
+                                     const char *response, size_t response_len, uint64_t latency_ms,
+                                     const char *contact_id, size_t contact_id_len,
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind,
+                                     const hu_token_usage_t *usage) {
+    /* Defensive no-op shape mirrors hu_agent_m3_on_provider_success so
+     * callers in agent_stream / agent_turn don't have to gate the call.
+     * The hot path is "agent has no M3 adapter attached" and that path
+     * must be free. */
+    if (!agent || !agent->m3_adapter)
+        return;
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+
+    /* Wall clock at record time, not at request start — gives the
+     * training loop a "last seen" anchor. latency_ms (the caller's
+     * own measurement) holds the actual inference duration so the
+     * loop can derive request start by subtraction if needed. */
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        outcome.timestamp_unix_ms =
+            (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+    }
+    outcome.latency_ms = latency_ms;
+    outcome.prompt_hash = hu_m3_outcome_hash_bytes(prompt, prompt_len);
+    outcome.response_hash = hu_m3_outcome_hash_bytes(response, response_len);
+    outcome.contact_id_hash = hu_m3_outcome_hash_bytes(contact_id, contact_id_len);
+    /* prompt_tokens / completion_tokens — Phase C1 (2026-05-18): prefer
+     * provider-reported counts when the caller passes a usage block.
+     * Fall back to a bytes/4 estimate (~English BPE rule) when usage is
+     * NULL or all-zero. The fallback never reports zero when there's
+     * real content, which is the property the M3 driver's selection
+     * policy relies on. Per-field fallback (rather than all-or-nothing)
+     * handles providers that report only prompt_tokens or only
+     * completion_tokens. */
+    if (usage && usage->prompt_tokens > 0) {
+        outcome.prompt_tokens = usage->prompt_tokens;
+    } else {
+        outcome.prompt_tokens = (uint32_t)(prompt_len / 4);
+    }
+    if (usage && usage->completion_tokens > 0) {
+        outcome.completion_tokens = usage->completion_tokens;
+    } else {
+        outcome.completion_tokens = (uint32_t)(response_len / 4);
+    }
+    outcome.guard_decision = (uint8_t)guard_decision;
+    outcome.turn_kind = turn_kind;
+
+    /* Phase C2 (2026-05-18): resolve active model + adapter to stable
+     * uint16 ids via the persisted id-map. Falls back to 0 (= unknown)
+     * for any of:
+     *   - no id_map attached (cold install before bootstrap)
+     *   - no model_name on the agent (rare; agent without provider)
+     *   - provider has no active_adapter accessor (base model only)
+     * Lookup is O(N) over a small N — fine in this hot path because the
+     * vec_find scan stops on first match and N is bounded at 65535. */
+    if (agent->m3_id_map && agent->model_name && agent->model_name_len > 0) {
+        outcome.model_id = hu_m3_id_map_lookup_or_insert_model(agent->m3_id_map, agent->model_name,
+                                                               agent->model_name_len);
+    }
+    if (agent->m3_id_map) {
+        const char *active = hu_provider_active_adapter(&agent->provider);
+        if (active && active[0]) {
+            outcome.adapter_id =
+                hu_m3_id_map_lookup_or_insert_adapter(agent->m3_id_map, active, strlen(active));
+        }
+    }
+    /* Flush new ids opportunistically. Most calls are no-ops (dirty
+     * bit false). The first 1-2 outcomes per session cause a small
+     * write; the rest are free. Worth-it tradeoff: a daemon crash
+     * before next flush would lose at most one model/adapter id, which
+     * the next session re-assigns deterministically (same string →
+     * same scan position → same id). */
+    if (hu_m3_id_map_is_dirty(agent->m3_id_map))
+        (void)hu_m3_id_map_save(agent->m3_id_map);
+
+    (void)hu_m3_frontier_adapter_record_outcome(agent->m3_adapter, &outcome);
 }
 #else
 void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
@@ -1026,6 +1127,24 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
     (void)agent;
+}
+
+void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
+                                     const char *response, size_t response_len, uint64_t latency_ms,
+                                     const char *contact_id, size_t contact_id_len,
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind,
+                                     const hu_token_usage_t *usage) {
+    (void)agent;
+    (void)prompt;
+    (void)prompt_len;
+    (void)response;
+    (void)response_len;
+    (void)latency_ms;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)guard_decision;
+    (void)turn_kind;
+    (void)usage;
 }
 #endif
 
@@ -1315,6 +1434,16 @@ void hu_agent_deinit(hu_agent_t *agent) {
     if (agent->m3_adapter) {
         hu_m3_frontier_adapter_close(agent->alloc, agent->m3_adapter);
         agent->m3_adapter = NULL;
+    }
+    if (agent->m3_id_map) {
+        /* Flush any unsaved ids one last time on shutdown — defensive.
+         * In normal operation the save-on-dirty path in record_outcome
+         * already flushed; this catches the edge case where an id was
+         * assigned during a turn that crashed before reaching the
+         * record_outcome save. */
+        (void)hu_m3_id_map_save(agent->m3_id_map);
+        hu_m3_id_map_destroy(agent->m3_id_map);
+        agent->m3_id_map = NULL;
     }
 #endif
 #ifdef HU_ENABLE_SQLITE
@@ -1701,6 +1830,60 @@ hu_tool_t *hu_agent_internal_find_tool(hu_agent_t *agent, const char *name, size
     return NULL;
 }
 
+bool hu_agent_internal_pre_hook_check(hu_agent_t *agent, const char *tool_name,
+                                      size_t tool_name_len, const char *args_json,
+                                      size_t args_json_len, hu_tool_result_t *out) {
+    if (!agent || !out)
+        return true;
+    if (!agent->hook_registry)
+        return true;
+
+    const char *hook_args = args_json ? args_json : "";
+    size_t hook_args_len = args_json ? args_json_len : 0;
+
+    hu_hook_result_t pre_res;
+    memset(&pre_res, 0, sizeof(pre_res));
+    hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
+                              hook_args, hook_args_len, &pre_res);
+    if (pre_res.decision == HU_HOOK_DENY) {
+        const char *deny_msg = pre_res.message ? pre_res.message : "denied by hook";
+        size_t deny_len = pre_res.message ? pre_res.message_len : 14;
+        char *deny_copy = hu_strndup(agent->alloc, deny_msg, deny_len);
+        hu_hook_result_free(agent->alloc, &pre_res);
+        *out = hu_tool_result_fail(deny_copy ? deny_copy : "denied by hook",
+                                   deny_copy ? deny_len : 14);
+        out->error_msg_owned = deny_copy != NULL;
+        return false;
+    }
+    hu_hook_result_free(agent->alloc, &pre_res);
+    return true;
+}
+
+void hu_agent_internal_post_hook_fire(hu_agent_t *agent, const char *tool_name,
+                                      size_t tool_name_len, const char *args_json,
+                                      size_t args_json_len, const hu_tool_result_t *result) {
+    if (!agent || !result)
+        return;
+    if (!agent->hook_registry)
+        return;
+
+    const char *hook_args = args_json ? args_json : "";
+    size_t hook_args_len = args_json ? args_json_len : 0;
+
+    /* Mirror scattered-site convention: report error_msg on failure so
+     * post-hooks see the actual reason rather than an empty output. */
+    const char *output = result->success ? (result->output ? result->output : "")
+                                         : (result->error_msg ? result->error_msg : "");
+    size_t output_len = result->success ? (result->output ? result->output_len : 0)
+                                        : (result->error_msg ? result->error_msg_len : 0);
+    hu_hook_result_t post_res;
+    memset(&post_res, 0, sizeof(post_res));
+    hu_hook_pipeline_post_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
+                               hook_args, hook_args_len, output, output_len, result->success,
+                               &post_res);
+    hu_hook_result_free(agent->alloc, &post_res);
+}
+
 hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *tool,
                                                  const char *tool_name, size_t tool_name_len,
                                                  const char *args_json, size_t args_json_len,
@@ -1709,55 +1892,42 @@ hu_error_t hu_agent_internal_dispatch_with_hooks(hu_agent_t *agent, hu_tool_t *t
     if (!agent || !tool || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /* Normalize hook-context args. Pre-hooks receive the JSON text the agent
-     * sent to the tool — NULL means "no args provided," which we represent
-     * to the hook as an empty string for predictable shell escaping. */
-    const char *hook_args = args_json ? args_json : "";
-    size_t hook_args_len = args_json ? args_json_len : 0;
-
     /* Pre-tool hook. A DENY decision short-circuits the dispatch: the tool's
-     * execute() is NOT called and *out is populated with a failure result. */
-    if (agent->hook_registry) {
-        hu_hook_result_t pre_res;
-        memset(&pre_res, 0, sizeof(pre_res));
-        hu_hook_pipeline_pre_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
-                                  hook_args, hook_args_len, &pre_res);
-        if (pre_res.decision == HU_HOOK_DENY) {
-            const char *deny_msg = pre_res.message ? pre_res.message : "denied by hook";
-            size_t deny_len = pre_res.message ? pre_res.message_len : 14;
-            char *deny_copy = hu_strndup(agent->alloc, deny_msg, deny_len);
-            hu_hook_result_free(agent->alloc, &pre_res);
-            *out = hu_tool_result_fail(deny_copy ? deny_copy : "denied by hook",
-                                       deny_copy ? deny_len : 14);
-            out->error_msg_owned = deny_copy != NULL;
-            return HU_OK;
-        }
-        hu_hook_result_free(agent->alloc, &pre_res);
-    }
+     * execute() is NOT called and *out is populated with a failure result.
+     * Per the audit-followup contract, the post-hook STILL fires below so
+     * auditors observe every tool dispatch regardless of outcome. */
+    bool proceed = hu_agent_internal_pre_hook_check(agent, tool_name, tool_name_len, args_json,
+                                                    args_json_len, out);
 
     /* Execute. The tool is responsible for populating *out; we treat a missing
      * execute pointer as an empty-success no-op to match the historical
-     * behavior of the inline dispatch sites being replaced. */
-    if (tool->vtable && tool->vtable->execute) {
-        tool->vtable->execute(tool->ctx, agent->alloc, args_parsed, out);
-    } else {
-        *out = hu_tool_result_fail("tool has no execute method", 26);
+     * behavior of the inline dispatch sites being replaced. Skipped if the
+     * pre-hook denied — that's the security gate the helper exists for. */
+    if (proceed) {
+        if (tool->vtable && tool->vtable->execute) {
+            tool->vtable->execute(tool->ctx, agent->alloc, args_parsed, out);
+        } else {
+            *out = hu_tool_result_fail("tool has no execute method", 26);
+        }
     }
 
-    /* Post-tool hook. Informational only — the result has already been
-     * produced. Post-hooks log / audit / scrub but cannot veto here. */
-    if (agent->hook_registry) {
-        hu_hook_result_t post_res;
-        memset(&post_res, 0, sizeof(post_res));
-        const char *output = out->output ? out->output : "";
-        size_t output_len = out->output ? out->output_len : 0;
-        hu_hook_pipeline_post_tool(agent->hook_registry, agent->alloc, tool_name, tool_name_len,
-                                   hook_args, hook_args_len, output, output_len, out->success,
-                                   &post_res);
-        hu_hook_result_free(agent->alloc, &post_res);
-    }
+    /* Post-tool hook. Fires unconditionally whenever a registry is configured,
+     * including when the pre-hook denied the call: auditors get full visibility. */
+    hu_agent_internal_post_hook_fire(agent, tool_name, tool_name_len, args_json, args_json_len,
+                                     out);
 
     return HU_OK;
+}
+
+/* Public alias — same signature, same behavior, exposed in include/human/agent.h
+ * so callers outside the agent module can dispatch through the canonical
+ * pre/post-hook envelope without including agent_internal.h. The internal name
+ * is retained for back-compat with existing call sites. */
+hu_error_t hu_agent_dispatch_tool(hu_agent_t *agent, hu_tool_t *tool, const char *tool_name,
+                                  size_t tool_name_len, const char *args_json, size_t args_json_len,
+                                  const hu_json_value_t *args_parsed, hu_tool_result_t *out) {
+    return hu_agent_internal_dispatch_with_hooks(agent, tool, tool_name, tool_name_len, args_json,
+                                                 args_json_len, args_parsed, out);
 }
 
 hu_error_t hu_agent_run_single(hu_agent_t *agent, const char *system_prompt,

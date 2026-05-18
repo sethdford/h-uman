@@ -1,7 +1,8 @@
 ---
 title: "Init 13 — DeltaKV / SWAN KV-cache compression"
 created: 2026-05-11
-status: design
+status: abandoned
+abandoned: 2026-05-17
 risk: high
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
@@ -21,6 +22,68 @@ related:
 ---
 
 # Init 13 — DeltaKV / SWAN KV-cache compression
+
+## ABANDONED — 2026-05-17
+
+This initiative is **abandoned**. The foundation code (envelope helpers,
+DeltaKV int8 codec, SWAN stub, 203-LOC test) was removed in commit
+`kv-compression-abandon`. The `HU_ENABLE_KV_COMPRESSION` CMake option is
+gone; `include/human/memory/kv_compressor.h`, `src/memory/kv_*.c`,
+`tests/test_kv_compressor.c` no longer exist.
+
+**Why abandoned (decision recorded by Task #6, init-13 validation):**
+
+1. **SHIPPED_UNWIRED for ~6 days with zero production callers.** A repo-wide
+   `grep -r hu_kv_compressor src/ tests/` returned only the codec
+   implementations and a foundation-tests file — no consumer in
+   `src/providers/`, `src/agent/`, `src/memory/neural_memory.c`, or
+   anywhere else.
+2. **The integration target is structurally unavailable.** The
+   llamacpp provider's KV management (`src/providers/llamacpp_kvcache.c`)
+   is a system-prompt hash + `n_past` index, not raw KV tensors. The
+   llama.cpp APIs we'd need to extract / inject tensors
+   (`llama_state_seq_get_data` / `llama_state_seq_set_data`) are
+   **not used anywhere** in the codebase and the provider treats
+   `llama_context` as opaque. The follow-on slice referenced in §9
+   ("`2026-05-11-rl-loop-phase-1-llamacpp.md`'s actual replay wiring")
+   never landed.
+3. **The 6-mo SOTA roadmap moved past this lever.** Per
+   `docs/plans/2026-05-10-sota-roadmap-6mo.md` §B: "prompt cache + KV
+   quantization + LoRA fuse net to ±2% at chat lengths"; the forward bet
+   is multi-tier routing (B1) and spec decode with an aligned draft
+   (B2/B3), not new CPU-side KV codecs. The only roadmap reference to KV
+   layout work is B4.1 — a **Metal kernel** for long-context windowing,
+   which would not consume DeltaKV/SWAN's CPU codec output.
+4. **Carrying cost > option value.** Keeping ~500 LOC of vtable +
+   codecs + the gated build option, the `option()` line, three CMake
+   conditionals, and a test-registration `#ifdef` in `tests/test_main.c`
+   means every future refactor pays attention to a feature with no
+   caller, no fixture (`tests/fixtures/kv_quality_reference.bin` was
+   never generated), no fuzz harness, no quality gate, and no path to
+   the provider whose cache it would compress.
+
+**What we kept**
+
+- This plan document (now marked ABANDONED) so future contributors find
+  the rationale and don't re-invent the codecs without first answering
+  why the integration path is unavailable.
+- The W10 neural memory path (`src/memory/neural_memory.c`,
+  `HU_ENABLE_NEURAL_MEMORY`) is **unchanged** — `neural_kv_cache.blob`
+  stays an empty string per the original W10 deferral
+  (`adr/2026-05-10-w10-kv-replay-deferred.md`).
+
+**Re-opening condition**
+
+If a future sprint a) lands the llama.cpp state-serialization path
+referenced in `2026-05-11-rl-loop-phase-1-llamacpp.md`, b) demonstrates
+a measured RSS bottleneck that KV compression would relieve, and c) is
+prepared to ship the 870-LOC production slice + fixture + fuzz harness
+in one go (not foundation-only), this design doc is salvageable. Until
+then, do not partially re-implement.
+
+---
+
+## Original design (for reference)
 
 ## One-line
 

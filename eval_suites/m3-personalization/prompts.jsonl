@@ -1,0 +1,5 @@
+{"prompt": "How's your day going?", "expected_markers": ["lol", "yeah", "haha", "hmm"]}
+{"prompt": "What should we have for dinner?", "expected_markers": ["could", "depends", "honestly", "lean"]}
+{"prompt": "Did you see the game last night?", "expected_markers": ["yeah", "good", "fair", "haha"]}
+{"prompt": "Free this weekend?", "expected_markers": ["yeah", "haha", "lol", "could"]}
+{"prompt": "Want to grab coffee?", "expected_markers": ["yeah", "sounds good", "lol", "hmm"]}

@@ -96,8 +96,9 @@ static void print_usage(const char *p) {
     printf("  --agent-only          Only agent tests\n");
     printf("  --pressure-only       Only pressure tests\n");
     printf("  --verbose             Verbose output\n");
+    printf("  --smoke               CI smoke mode: argv parse + init only, exits 0\n");
     printf("  --help                Show help\n");
-    printf("\nEnv: GEMINI_API_KEY (required)\n");
+    printf("\nEnv: GEMINI_API_KEY (required for real runs; --smoke ignores it)\n");
 }
 
 int main(int argc, char **argv) {
@@ -109,11 +110,14 @@ int main(int argc, char **argv) {
     cfg.concurrency = 4;
     cfg.duration_secs = 10;
     cfg.tests_per_category = 20;
+    bool smoke = false;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             print_usage(argv[0]);
             return 0;
+        } else if (!strcmp(argv[i], "--smoke")) {
+            smoke = true;
         } else if (!strcmp(argv[i], "--binary") && i + 1 < argc)
             cfg.binary_path = argv[++i];
         else if (!strcmp(argv[i], "--model") && i + 1 < argc)
@@ -151,11 +155,23 @@ int main(int argc, char **argv) {
 
     cfg.gemini_api_key = getenv("GEMINI_API_KEY");
     hu_allocator_t alloc = hu_system_allocator();
+    (void)alloc; /* may be unused in smoke-only path */
     HU_SYNTH_LOG("=== human Synthetic Pressure Tests ===");
     HU_SYNTH_LOG("binary: %s  model: %s  port: %u", cfg.binary_path, cfg.gemini_model,
                  cfg.gateway_port);
     if (cfg.regression_dir)
         HU_SYNTH_LOG("regression dir: %s", cfg.regression_dir);
+
+    if (smoke) {
+        /* CI smoke mode: confirm the binary starts, parses argv, and exits
+         * cleanly without requiring GEMINI_API_KEY or network. This is the
+         * "stub mode" required by Task #5 (2026-05-17) so the harness can run
+         * in default CI even though full Gemini-driven runs need credentials.
+         */
+        HU_SYNTH_LOG("smoke mode: argv parsed, init OK, skipping network/Gemini path");
+        HU_SYNTH_LOG("Total: 0/0 passed, 0 failed, 0 errors");
+        return 0;
+    }
 
     if (cfg.replay_mode) {
         if (!cfg.replay_dir) {

@@ -1,16 +1,18 @@
-/* test_mlx_provider — coverage for the M3 Bridge B MLX stub.
+/* test_mlx_provider — coverage for the M3 Bridge B MLX provider.
  *
- * Today every chat path returns HU_ERR_NOT_SUPPORTED — these tests pin
- * that contract so a future helpers.c refactor or vtable change can't
- * silently break the dispatcher's fallback assumption.
+ * Two contracts pinned here, both required for the daemon's fallback:
  *
- * Mirrors the pattern in test_provider_all.c::test_llamacpp_*: prove
- * the provider creates cleanly, vtable methods return NOT_SUPPORTED
- * without dereffing the context, and deinit doesn't leak.
+ *   1. Unlinked build (HU_ENABLE_MLX_PROVIDER undefined — the default):
+ *      every chat path returns HU_ERR_NOT_SUPPORTED so the agent's
+ *      provider fallback fires cleanly. The existing tests cover this.
  *
- * When HU_ENABLE_MLX_PROVIDER is defined AND an MLX runtime is wired,
- * a parallel positive-path test file should be added — until then,
- * these stubs ARE the contract.
+ *   2. Linked build (HU_ENABLE_MLX_PROVIDER defined + Apple Silicon):
+ *      chat path INVOKES the subprocess helper (`mlx_run_subprocess`)
+ *      modeled after run_claude_cli in src/providers/claude_cli.c.
+ *      Slice 1 (Phase B1 first slice, 2026-05-17) adds the helper
+ *      but its end-to-end test that spawns python3 -m mlx_lm.generate
+ *      lands in slice 2 with the test-fixture shim. For slice 1, the
+ *      compile-time gates are pinned via the new structural test below.
  */
 
 #include "human/core/allocator.h"
@@ -109,6 +111,46 @@ static void mlx_provider_supports_native_tools_is_false(void) {
     p.vtable->deinit(p.ctx, &alloc);
 }
 
+/* Slice 1 structural pin (B1 — 2026-05-17): the chat path MUST flow
+ * through the subprocess helper when the gates are met. We can't
+ * directly observe "the helper got called" from outside, but we CAN
+ * assert that the helper's compile-time guard logic preserves the
+ * NOT_SUPPORTED contract in the unlinked build — which is what the
+ * existing chat_returns_not_supported test does.
+ *
+ * This test additionally pins that the request->user-message flattening
+ * does NOT touch the out parameter on the NOT_SUPPORTED path (a
+ * regression we'd otherwise only catch by inspecting code). When
+ * mlx_run_subprocess returns NOT_SUPPORTED before any allocation, the
+ * caller's `out` struct must be untouched so the daemon's fallback path
+ * can safely retry with another provider. */
+static void mlx_provider_chat_does_not_mutate_out_on_unsupported(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_mlx_config_t cfg = {0};
+    hu_provider_t p = {0};
+    HU_ASSERT_EQ(hu_mlx_provider_create(&alloc, &cfg, &p), HU_OK);
+
+    hu_chat_message_t msgs[1] = {{
+        .role = HU_ROLE_USER,
+        .content = "hello",
+        .content_len = 5,
+    }};
+    hu_chat_request_t req = {.messages = msgs, .messages_count = 1};
+
+    /* Pre-fill out with sentinel values; require they survive a
+     * NOT_SUPPORTED return — caller still owns the struct. */
+    hu_chat_response_t out = {0};
+    out.content = (const char *)0xdeadbeef;
+    out.content_len = 0x4242;
+    HU_ASSERT_EQ(p.vtable->chat(p.ctx, &alloc, &req, "model", 5, 0.0, &out), HU_ERR_NOT_SUPPORTED);
+    /* Sentinel preserved — helper must not partial-fill on the
+     * NOT_SUPPORTED path. */
+    HU_ASSERT_EQ((unsigned long)(uintptr_t)out.content, (unsigned long)0xdeadbeef);
+    HU_ASSERT_EQ((unsigned long)out.content_len, (unsigned long)0x4242);
+
+    p.vtable->deinit(p.ctx, &alloc);
+}
+
 void run_mlx_provider_tests(void) {
     HU_TEST_SUITE("mlx_provider");
     HU_RUN_TEST(mlx_provider_create_succeeds_with_defaults);
@@ -117,4 +159,5 @@ void run_mlx_provider_tests(void) {
     HU_RUN_TEST(mlx_provider_chat_returns_not_supported);
     HU_RUN_TEST(mlx_provider_load_adapter_returns_not_supported);
     HU_RUN_TEST(mlx_provider_supports_native_tools_is_false);
+    HU_RUN_TEST(mlx_provider_chat_does_not_mutate_out_on_unsupported);
 }

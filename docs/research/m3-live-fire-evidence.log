@@ -1,0 +1,113 @@
+[live-fire] using binary: /Users/sethford/Projects/h-uman/build-release/human
+
+═══════════════════════════════════════════════════════════════════
+  1. Pre-flight: stop existing processes, wipe driver state
+═══════════════════════════════════════════════════════════════════
+[live-fire] cleanup: stopping background processes
+[live-fire] PASS: no stale gateway listening on :3006
+[live-fire] PASS: no stale stub-mlx on :8741
+
+═══════════════════════════════════════════════════════════════════
+  2. Start stub MLX server on :8741
+═══════════════════════════════════════════════════════════════════
+[live-fire] stub-mlx PID=90517
+[live-fire] PASS: stub-mlx /health returns 200
+
+═══════════════════════════════════════════════════════════════════
+  3. Start human service-loop --with-gateway (gateway + full agent)
+═══════════════════════════════════════════════════════════════════
+[live-fire] service-loop+gateway PID=90526
+[live-fire] PASS: gateway /v1/m3/outcomes returns 200
+[live-fire] PASS: log says service loop started (with gateway)
+
+═══════════════════════════════════════════════════════════════════
+  4. Confirm ring is EMPTY at start (no prior outcomes)
+═══════════════════════════════════════════════════════════════════
+[live-fire] /v1/m3/outcomes body length before chat: 0 bytes
+[live-fire] PASS: ring empty before inference (body length == 0)
+
+═══════════════════════════════════════════════════════════════════
+  5. Fire 3 chat completions through /v1/chat/completions
+═══════════════════════════════════════════════════════════════════
+[live-fire] chat #1 HTTP 200
+[live-fire] PASS: chat #1 returned 200
+[live-fire] chat #2 HTTP 200
+[live-fire] PASS: chat #2 returned 200
+[live-fire] chat #3 HTTP 200
+[live-fire] PASS: chat #3 returned 200
+
+═══════════════════════════════════════════════════════════════════
+  6. Inspect what the daemon recorded in its ring
+═══════════════════════════════════════════════════════════════════
+[live-fire] outcomes in ring: 10
+[live-fire] raw NDJSON (first 600 chars):
+{"t":1779067733731,"l":0,"ph":406957332248390338,"rh":12715069653988629645,"ch":0,"pt":17,"ct":8,"m":0,"a":0,"g":1,"k":2}
+{"t":1779067734523,"l":791,"ph":406957332248390338,"rh":12715069653988629645,"ch":0,"pt":17,"ct":8,"m":0,"a":0,"g":1,"k":2}
+{"t":1779067734682,"l":158,"ph":406957332248390338,"rh":12715069653988629645,"ch":0,"pt":17,"ct":8,"m":0,"a":0,"g":1,"k":2}
+{"t":1779067736825,"l":0,"ph":3687608437622950059,"rh":8433929466062626818,"ch":0,"pt":17,"ct":12,"m":0,"a":0,"g":1,"k":2}
+{"t":1779067737609,"l":783,"ph":3687608437622950059,"rh":6384475684323867064,"ch":0,"pt":17,"ct":6,"m":0,"a
+[live-fire] PASS: at least one outcome recorded
+[live-fire] first outcome: guard=1 prompt_tokens=17 completion_tokens=8 latency_ms=0 adapter_id=0
+[live-fire] PASS: guard decision is PASS (1)
+[live-fire] PASS: prompt_tokens > 0 (the bytes/4 estimate fired)
+[live-fire] PASS: completion_tokens > 0
+[live-fire] PASS: adapter_id == 0 (base model — eligible for training)
+
+═══════════════════════════════════════════════════════════════════
+  7. Run the M3 driver against the live gateway + stub MLX
+═══════════════════════════════════════════════════════════════════
+[m3-driver] polling http://127.0.0.1:3006 since_ms=0 turn_kind=0 dry_run=False
+[m3-driver] fetched 10 outcomes in 8ms
+[m3-driver] selected=7 appended=3 dedup_skipped=4 new_watermark=1779067741128
+[m3-driver] state saved → /Users/sethford/.human/m3_driver_state.json
+[m3-driver] outcomes appended → /Users/sethford/.human/training-data/m3-outcomes.jsonl
+[m3-driver] JSONL holds 3 samples (threshold=1)
+[m3-driver] (simulate-train) wrote placeholder adapter (82 bytes) → /Users/sethford/.human/training-data/adapters/m3-driver-1779067742.safetensors
+[m3-driver] adapter swap OK: {"status": "ok", "adapter_path": "/Users/sethford/.human/training-data/adapters/m3-driver-1779067742.safetensors", "tensors_loaded": 43}
+[live-fire] PASS: driver produced at least one adapter artifact
+[live-fire] adapter file: /Users/sethford/.human/training-data/adapters/m3-driver-1779067742.safetensors
+[live-fire] adapter size:       82 bytes
+
+═══════════════════════════════════════════════════════════════════
+  8. Verify stub MLX received the swap call
+═══════════════════════════════════════════════════════════════════
+[live-fire] stub-mlx active adapter (post-swap): /Users/sethford/.human/training-data/adapters/m3-driver-1779067742.safetensors
+[live-fire] PASS: stub MLX active adapter equals the new artifact
+[live-fire] PASS: driver-output log confirms swap OK
+[live-fire] stub-mlx swap log lines: [stub-mlx] swap → /Users/sethford/.human/training-data/adapters/m3-driver-1779067742.safetensors
+
+═══════════════════════════════════════════════════════════════════
+  9. Verify driver's JSONL holds the selected outcomes
+═══════════════════════════════════════════════════════════════════
+[live-fire] outcomes in /Users/sethford/.human/training-data/m3-outcomes.jsonl: 3
+[live-fire] PASS: JSONL has at least one outcome
+[live-fire] PASS: JSONL first prompt_hash matches ring's first
+
+═══════════════════════════════════════════════════════════════════
+  10. End-state snapshot
+═══════════════════════════════════════════════════════════════════
+[live-fire] DRIVER_STATE: {
+    "last_ts_ms": 1779067741128,
+    "seen_prompt_hashes": [
+        406957332248390338,
+        3687608437622950059,
+[live-fire] adapter on disk: /Users/sethford/.human/training-data/adapters/m3-driver-1779067742.safetensors (      82 bytes)
+[live-fire] stub-mlx current adapter (post-swap):
+{
+    "adapter_path": "/Users/sethford/.human/training-data/adapters/m3-driver-1779067742.safetensors",
+    "tensors_loaded": 43
+}
+
+═══════════════════════════════════════════════════════════════════
+  ✅ LIVE LOOP PROVEN END-TO-END
+═══════════════════════════════════════════════════════════════════
+  - 3 chat completions hit gateway, routed to stub MLX, returned 200
+  - daemon's agent recorded 10 outcome(s) with guard=PASS,
+    positive tokens, adapter_id=0
+  - driver fetched, filtered, deduped, appended 3 outcome(s)
+    to /Users/sethford/.human/training-data/m3-outcomes.jsonl
+  - simulate-train produced adapter at /Users/sethford/.human/training-data/adapters/m3-driver-1779067742.safetensors
+  - swap POST landed on stub MLX (now its active adapter)
+═══════════════════════════════════════════════════════════════════
+[live-fire] cleanup: stopping background processes
+[live-fire] hard-killing PID 90526 (holding :3006)

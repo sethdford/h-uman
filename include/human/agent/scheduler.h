@@ -53,6 +53,9 @@ typedef enum hu_job_kind {
     HU_JOB_BELIEF_REVERIFICATION,
     HU_JOB_PERSONA_EVOLVER,
     HU_JOB_TRAINING_DATA_EXTRACT,
+    /* US-7.5: W14 nightly LoRA re-train (MLX-Gemma subprocess path).
+     * Distinct from HU_JOB_LORA_TRAINING (HUML GPT in-process path). */
+    HU_JOB_LORA_RETRAIN_NIGHTLY,
     HU_JOB_KIND_MAX
 } hu_job_kind_t;
 
@@ -63,18 +66,18 @@ typedef struct hu_job_spec {
     hu_job_kind_t kind;
     const char *contact_id;
     size_t contact_id_len;
-    int priority;            /* 0 = normal, 1 = high (run before normal) */
-    int budget_ms;           /* per-job wall budget; 0 = scheduler default (60 s) */
-    int interval_sec;        /* repeat interval; 0 = run once */
-    bool requires_idle;      /* skip if probe_load_pct > HU_SCHED_IDLE_LOAD_MAX */
-    bool requires_ac_power;  /* skip if !on_ac_power */
-    int64_t earliest_at;     /* unix ms; 0 = ASAP */
-    int64_t latest_at;       /* unix ms; 0 = no deadline */
+    int priority;           /* 0 = normal, 1 = high (run before normal) */
+    int budget_ms;          /* per-job wall budget; 0 = scheduler default (60 s) */
+    int interval_sec;       /* repeat interval; 0 = run once */
+    bool requires_idle;     /* skip if probe_load_pct > HU_SCHED_IDLE_LOAD_MAX */
+    bool requires_ac_power; /* skip if !on_ac_power */
+    int64_t earliest_at;    /* unix ms; 0 = ASAP */
+    int64_t latest_at;      /* unix ms; 0 = no deadline */
 } hu_job_spec_t;
 
 typedef struct hu_scheduler_status {
-    int system_load_pct;       /* 0-100 */
-    int battery_pct;           /* 0-100, -1 if unknown */
+    int system_load_pct; /* 0-100 */
+    int battery_pct;     /* 0-100, -1 if unknown */
     bool on_ac_power;
     bool quiet_hours_active;
     size_t jobs_pending;
@@ -96,8 +99,7 @@ typedef hu_error_t (*hu_job_runner_fn)(hu_memory_facade_t *m, const hu_job_spec_
  * registers a no-op runner for every `hu_job_kind_t`.  Tests and the
  * daemon overwrite individual runners with `hu_scheduler_register_runner`
  * before calling `hu_scheduler_tick`. */
-hu_error_t hu_scheduler_open(hu_allocator_t *alloc, hu_memory_facade_t *m,
-                             hu_scheduler_t **out);
+hu_error_t hu_scheduler_open(hu_allocator_t *alloc, hu_memory_facade_t *m, hu_scheduler_t **out);
 void hu_scheduler_close(hu_scheduler_t *s, hu_allocator_t *alloc);
 
 /* Enqueue a job.  The spec is validated (kind in range, budget_ms
@@ -108,8 +110,26 @@ hu_error_t hu_scheduler_enqueue(hu_scheduler_t *s, const hu_job_spec_t *job);
 /* Run one scheduling pass.  Dispatches up to `HU_SCHED_MAX_JOBS_PER_TICK`
  * eligible jobs in priority order, respecting the total per-tick budget
  * (`HU_SCHED_TOTAL_BUDGET_MS`).  `now_ms` is used as the wall-clock
- * reference so tests can pin time. */
+ * reference so tests can pin time.
+ *
+ * Legacy entrypoint: dispatches only contact_id='' (global) jobs.  Per-
+ * contact rows stay pending until a caller passes their contact_id via
+ * `hu_scheduler_tick_for`. */
 hu_error_t hu_scheduler_tick(hu_scheduler_t *s, int64_t now_ms);
+
+/* 2026-05-16 P3-5: like `hu_scheduler_tick`, but only dispatches jobs whose
+ * stored contact_id is either '' (global) or exactly equal to
+ * `target_contact_id`.  Equality is enforced in SQL — no LIKE / prefix match.
+ *
+ * - `target_contact_id == NULL` or `target_contact_id_len == 0`: dispatch
+ *   only contact_id='' rows (conservative; equivalent to the legacy tick).
+ * - `target_contact_id == "X"`: dispatch contact_id='' OR contact_id='X'.
+ *
+ * A job enqueued for "alice" must never run when the scheduler is ticking
+ * for "bob" — pinned by tests/test_w14_scheduler.c::
+ * test_w14_scheduler_dispatch_scoped_to_target_contact. */
+hu_error_t hu_scheduler_tick_for(hu_scheduler_t *s, int64_t now_ms, const char *target_contact_id,
+                                 size_t target_contact_id_len);
 
 /* Snapshot scheduler + system state.  Always populates `out` even on
  * partial probe failure. */
@@ -119,8 +139,8 @@ hu_error_t hu_scheduler_status(hu_scheduler_t *s, hu_scheduler_status_t *out);
  * function pointer per kind — repeated registrations replace the prior
  * binding.  `fn == NULL` resets to the no-op default. `user_data` is
  * forwarded verbatim to the runner. */
-hu_error_t hu_scheduler_register_runner(hu_scheduler_t *s, hu_job_kind_t kind,
-                                        hu_job_runner_fn fn, void *user_data);
+hu_error_t hu_scheduler_register_runner(hu_scheduler_t *s, hu_job_kind_t kind, hu_job_runner_fn fn,
+                                        void *user_data);
 
 /* Set the persona used by the quiet-hours probe. The scheduler does NOT
  * take ownership — the caller must keep `p` alive while the scheduler is
@@ -155,10 +175,8 @@ bool hu_scheduler_probe_quiet_hours(int64_t now_ms, const hu_persona_t *persona)
  * `hu_scheduler_register_runner(s, HU_JOB_COUNTERFACTUAL_REHEARSAL,
  *                                hu_counterfactual_rehearsal_runner,
  *                                NULL)`. */
-hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m,
-                                              const hu_job_spec_t *spec,
-                                              int64_t budget_ms,
-                                              void *user_data);
+hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
+                                              int64_t budget_ms, void *user_data);
 
 /* AutoDream runner: wraps `hu_autodream_run` so the scheduler can drive
  * v1's idle-time consolidation (quarantine review, community summaries,
@@ -177,8 +195,8 @@ hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_facade_t *m,
  * scratch allocations. Register once per kind:
  *   hu_scheduler_register_runner(s, HU_JOB_AUTODREAM_QUARANTINE,
  *                                hu_autodream_runner, NULL); */
-hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
-                               int64_t budget_ms, void *user_data);
+hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec, int64_t budget_ms,
+                               void *user_data);
 
 #ifdef __cplusplus
 }

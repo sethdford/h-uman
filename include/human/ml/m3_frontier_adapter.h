@@ -42,11 +42,35 @@ typedef struct hu_m3_frontier_adapter hu_m3_frontier_adapter_t;
  * Returns HU_ERR_IO when the file is missing or the header does not match.
  * On success, `*out` is owned; free with `hu_m3_frontier_adapter_close`. */
 hu_error_t hu_m3_frontier_adapter_try_open(hu_allocator_t *alloc, const char *path, size_t path_len,
-                                          hu_m3_frontier_adapter_t **out);
+                                           hu_m3_frontier_adapter_t **out);
 
-/* Deterministic no-op “inference” — always HU_OK; exists so call sites can be
- * wired before real tensor work lands. */
+/* Deterministic probe "inference" — always HU_OK; increments an internal
+ * call counter on the adapter (observable via
+ * `hu_m3_frontier_adapter_probe_count`). Replaces the older
+ * `hu_m3_frontier_adapter_noop_infer`, which silently returned HU_OK with
+ * no side effect — meaning a regression that dropped one of the 11
+ * provider-success call sites would be undetectable at the test layer.
+ *
+ * The counter is a *signal*, not a model: no tensors, no learning, no
+ * gradient. It exists so:
+ *   1. A test can pin "the chat path actually reaches the M3 hook"
+ *      (see tests/test_m3_frontier_probe.c) instead of trusting that
+ *      a (void)return; means the wiring works.
+ *   2. The eventual real-tensor implementation has a known-good seam
+ *      to slot under — replace the body of `probe_infer` with the
+ *      tensor call; the counter side effect can stay or go.
+ *
+ * Backwards-compat: `hu_m3_frontier_adapter_noop_infer` is preserved as
+ * a thin wrapper that calls `probe_infer` and discards the count delta,
+ * so the agent-side `hu_agent_m3_on_provider_success` callers do not
+ * need to be re-edited for this slice. See
+ * docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md Phase B-pre. */
+hu_error_t hu_m3_frontier_adapter_probe_infer(hu_m3_frontier_adapter_t *adapter);
 hu_error_t hu_m3_frontier_adapter_noop_infer(hu_m3_frontier_adapter_t *adapter);
+
+/* Read-only: number of times probe_infer (or noop_infer) was called on
+ * this adapter since open. Zero for NULL. Test-observable seam. */
+uint64_t hu_m3_frontier_adapter_probe_count(const hu_m3_frontier_adapter_t *adapter);
 
 void hu_m3_frontier_adapter_close(hu_allocator_t *alloc, hu_m3_frontier_adapter_t *adapter);
 
@@ -76,6 +100,137 @@ const char *hu_ml_lora_persona_caveat_doc_path(void);
  * `\n`-terminated and each is prefixed with `[lora-persona]` so the
  * block aligns visually with the rest of the CLI output. */
 const char *hu_ml_lora_persona_caveat_block(void);
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B1 (redefined 2026-05-17): inference outcome capture
+ *
+ * The probe counter from Phase B-pre proves the chat-path hooks REACH
+ * the adapter. This phase captures WHAT they reach with: a structured
+ * outcome record per inference, accumulated in a ring buffer the
+ * future training loop can pull from.
+ *
+ * Why a ring buffer:
+ *   - O(1) append under lock contention from concurrent turn paths.
+ *   - Fixed memory ceiling (~384 KB at 4096 capacity).
+ *   - Training reads via batched snapshot; no per-record locks.
+ *
+ * Why hashes, not raw content:
+ *   - Privacy: structural — the adapter's RAM never holds raw
+ *     prompt/response text. The conversation DB (under proper memory
+ *     governance) remains the canonical source of content.
+ *   - Dedup: 64-bit hashes let the training loop drop duplicate-prompt
+ *     samples without re-reading the DB.
+ *   - Correlation: contact_id_hash links an outcome to a per-contact
+ *     training partition without leaking contact identity in RAM.
+ * ───────────────────────────────────────────────────────────────── */
+
+#define HU_M3_OUTCOMES_RING_CAPACITY 4096u
+#define HU_M3_OUTCOME_RECORD_BYTES   96u
+
+typedef enum hu_m3_guard_decision {
+    HU_M3_GUARD_UNKNOWN = 0,
+    HU_M3_GUARD_PASS = 1,
+    HU_M3_GUARD_REWRITE = 2,
+    HU_M3_GUARD_REJECT = 3,
+} hu_m3_guard_decision_t;
+
+typedef struct hu_m3_inference_outcome {
+    uint64_t timestamp_unix_ms; /* wall clock at record time */
+    uint64_t latency_ms;        /* inference duration */
+    uint64_t prompt_hash;       /* FNV-1a of the system+user prompt */
+    uint64_t response_hash;     /* FNV-1a of the model's output */
+    uint64_t contact_id_hash;   /* FNV-1a of contact_id; 0 = no contact */
+    uint32_t prompt_tokens;     /* prompt token count if known; 0 = unknown */
+    uint32_t completion_tokens; /* completion token count if known */
+    uint16_t model_id;          /* small id of active model (config-mapped) */
+    uint16_t adapter_id;        /* small id of active LoRA adapter; 0 = none */
+    uint8_t guard_decision;     /* hu_m3_guard_decision_t cast to byte */
+    uint8_t turn_kind;          /* 0 = unknown, 1 = stream, 2 = batch, 3 = proactive */
+    uint8_t reserved[38];       /* keep record exactly 96 bytes (8-aligned) */
+} hu_m3_inference_outcome_t;
+
+/* Record an outcome into the ring. NULL adapter is a no-op (returns
+ * HU_OK) so callers don't need to gate. The record is COPIED. */
+hu_error_t hu_m3_frontier_adapter_record_outcome(hu_m3_frontier_adapter_t *adapter,
+                                                 const hu_m3_inference_outcome_t *outcome);
+
+/* Total outcomes ever recorded (monotonic, NOT capped to ring size).
+ * Useful for "the hook fired N times since boot" assertions. */
+uint64_t hu_m3_frontier_adapter_outcomes_recorded(const hu_m3_frontier_adapter_t *adapter);
+
+/* Snapshot up to `max_count` most-recent outcomes into `out_buf`, oldest
+ * first within the snapshot. Writes count into *out_count. NULL adapter
+ * writes 0 and returns HU_OK. */
+hu_error_t hu_m3_frontier_adapter_snapshot_outcomes(const hu_m3_frontier_adapter_t *adapter,
+                                                    hu_m3_inference_outcome_t *out_buf,
+                                                    size_t max_count, size_t *out_count);
+
+/* Pure helper: deterministic FNV-1a 64-bit hash. Used by the agent
+ * paths to compute prompt_hash / response_hash without depending on
+ * the daemon's hash module. */
+uint64_t hu_m3_outcome_hash_bytes(const void *data, size_t len);
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B3 v0 (2026-05-17 round 2): outcome export for the training loop
+ *
+ * The training loop runs in a separate process (Python typically). It
+ * needs to PULL outcomes from the running daemon. We expose them as
+ * JSONL (one outcome per line) — the natural shape for streaming
+ * ingest by ML pipelines.
+ *
+ * The HTTP endpoint at GET /v1/m3/outcomes wraps these helpers; tests
+ * exercise the serializer directly without needing the gateway.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* Filter passed to `hu_m3_outcomes_to_jsonl`. Each field has a "no
+ * filter" sentinel so callers can leave the field unset. */
+typedef struct hu_m3_outcomes_filter {
+    /* Maximum outcomes to include. 0 = no limit (return everything in
+     * the live ring). Capped at HU_M3_OUTCOMES_RING_CAPACITY. */
+    size_t max_count;
+    /* Only include outcomes with this turn_kind value. 0 = no filter
+     * (turn_kind 0 outcomes don't exist in production — turn_kind is
+     * set to 1/2/3 at record time). */
+    uint8_t turn_kind;
+    /* Only include outcomes with timestamp_unix_ms >= since_ms. 0 =
+     * no filter. */
+    uint64_t since_ms;
+} hu_m3_outcomes_filter_t;
+
+/* Serialize matching outcomes from the adapter's ring into a JSONL
+ * buffer (one JSON object per line, '\n' separator, no trailing
+ * newline). `*out_buf` is allocator-owned; free with
+ * `alloc->free(alloc->ctx, *out_buf, *out_cap)` using the returned
+ * capacity (NOT *out_len + 1 — the allocator contract requires the
+ * exact allocation size).
+ *
+ * Returns:
+ *   HU_OK with *out_len > 0 — one or more outcomes serialized.
+ *   HU_OK with *out_len == 0 — no outcomes matched the filter.
+ *   HU_ERR_INVALID_ARGUMENT on NULL alloc / out_buf / out_len /
+ *     out_cap.
+ *   HU_ERR_OUT_OF_MEMORY if the allocation fails.
+ *
+ * The adapter parameter may be NULL — in that case *out_len = 0,
+ * returns HU_OK. Lets the gateway expose the endpoint cleanly even
+ * when no adapter is attached. */
+hu_error_t hu_m3_outcomes_to_jsonl(hu_allocator_t *alloc, const hu_m3_frontier_adapter_t *adapter,
+                                   const hu_m3_outcomes_filter_t *filter, char **out_buf,
+                                   size_t *out_len, size_t *out_cap);
+
+/* Process-global accessor used by the gateway endpoint.
+ *
+ * The daemon registers its agent's M3 adapter once at boot (after
+ * `hu_agent_m3_adapter_attach` succeeds) so the gateway endpoint can
+ * snapshot outcomes without holding an agent pointer. Single adapter
+ * per process — there's only ever one M3 personalization loop active.
+ *
+ * Pass NULL to clear (e.g. on agent teardown). Reads are
+ * atomic-enough for the gateway's single-writer/many-reader pattern;
+ * a stale pointer at teardown returns no outcomes rather than crashes
+ * because the serializer treats NULL adapter as "no outcomes". */
+void hu_m3_outcomes_register_global_adapter(hu_m3_frontier_adapter_t *adapter);
+hu_m3_frontier_adapter_t *hu_m3_outcomes_global_adapter(void);
 
 #ifdef __cplusplus
 }

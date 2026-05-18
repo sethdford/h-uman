@@ -6,9 +6,33 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Pin the on-wire outcome record size so a future field addition can't
+ * silently bloat the ring buffer beyond the agreed 384 KB ceiling
+ * (4096 × 96 bytes). If this fires, either the struct grew or the
+ * #define drifted — both need explicit attention, not a paper-over. */
+_Static_assert(sizeof(hu_m3_inference_outcome_t) == HU_M3_OUTCOME_RECORD_BYTES,
+               "hu_m3_inference_outcome_t must be exactly HU_M3_OUTCOME_RECORD_BYTES");
+
 struct hu_m3_frontier_adapter {
     hu_allocator_t *alloc;
     uint32_t schema_version;
+    /* M3 first-slice observable signal (2026-05-17). The probe counter
+     * increments on every `probe_infer` / `noop_infer` call so tests
+     * (and operators, eventually) can prove the chat-path call sites
+     * actually reach the adapter at runtime. */
+    uint64_t probe_count;
+
+    /* B1 (redefined 2026-05-17): inference outcome ring buffer. Fixed
+     * capacity so the adapter's memory footprint is bounded at open.
+     * `head` is the index where the NEXT outcome will be written;
+     * writes always succeed and overwrite the oldest slot when full.
+     * `total_recorded` is monotonic — every outcome ever written
+     * counts, even those overwritten. The snapshot reader uses
+     * `total_recorded < CAPACITY` to know whether to start from 0 or
+     * from `head` (the oldest live slot in a full buffer). */
+    hu_m3_inference_outcome_t outcomes[HU_M3_OUTCOMES_RING_CAPACITY];
+    size_t head;
+    uint64_t total_recorded;
 };
 
 bool hu_m3_adapter_should_disable(bool cfg_disabled) {
@@ -33,8 +57,7 @@ bool hu_m3_adapter_should_disable(bool cfg_disabled) {
  * tests pin specific substrings (the "NOT" disclaimer, the model name,
  * the doc-path) so a refactor that softens the language fails CI. */
 
-#define HU_ML_LORA_PERSONA_CAVEAT_DOC_PATH \
-    "docs/plans/2026-05-10-m3-frontier-model-bridge.md"
+#define HU_ML_LORA_PERSONA_CAVEAT_DOC_PATH "docs/plans/2026-05-10-m3-frontier-model-bridge.md"
 
 const char *hu_ml_lora_persona_caveat_doc_path(void) {
     return HU_ML_LORA_PERSONA_CAVEAT_DOC_PATH;
@@ -48,7 +71,7 @@ const char *hu_ml_lora_persona_caveat_block(void) {
 }
 
 hu_error_t hu_m3_frontier_adapter_try_open(hu_allocator_t *alloc, const char *path, size_t path_len,
-                                          hu_m3_frontier_adapter_t **out) {
+                                           hu_m3_frontier_adapter_t **out) {
     if (!alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -75,8 +98,7 @@ hu_error_t hu_m3_frontier_adapter_try_open(hu_allocator_t *alloc, const char *pa
     if (ver == 0)
         ver = 1;
 
-    hu_m3_frontier_adapter_t *a =
-        (hu_m3_frontier_adapter_t *)alloc->alloc(alloc->ctx, sizeof(*a));
+    hu_m3_frontier_adapter_t *a = (hu_m3_frontier_adapter_t *)alloc->alloc(alloc->ctx, sizeof(*a));
     if (!a)
         return HU_ERR_OUT_OF_MEMORY;
     memset(a, 0, sizeof(*a));
@@ -86,9 +108,32 @@ hu_error_t hu_m3_frontier_adapter_try_open(hu_allocator_t *alloc, const char *pa
     return HU_OK;
 }
 
-hu_error_t hu_m3_frontier_adapter_noop_infer(hu_m3_frontier_adapter_t *adapter) {
-    (void)adapter;
+hu_error_t hu_m3_frontier_adapter_probe_infer(hu_m3_frontier_adapter_t *adapter) {
+    /* First-slice (2026-05-17) bridge from the silent (void)return to a
+     * real, observable signal. No tensors yet — see
+     * docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md for the
+     * phased path to actual MLX/llama.cpp inference. The point of the
+     * counter is that a regression which drops a chat-path call site
+     * stops being undetectable: the probe count fails to advance and
+     * `test_m3_frontier_probe.c` goes red. */
+    if (!adapter)
+        return HU_OK;
+    adapter->probe_count++;
     return HU_OK;
+}
+
+hu_error_t hu_m3_frontier_adapter_noop_infer(hu_m3_frontier_adapter_t *adapter) {
+    /* Backwards-compat wrapper. Existing 11 call sites in agent_turn.c
+     * + agent_stream.c (via hu_agent_m3_on_provider_success) and the
+     * daemon's M3 probe-path bootstrap (`src/daemon.c`) still call
+     * `noop_infer` — they all reach `probe_infer` so the counter
+     * advances. Renaming the public symbol is a follow-up
+     * (Phase B-pre.2 in the execution plan). */
+    return hu_m3_frontier_adapter_probe_infer(adapter);
+}
+
+uint64_t hu_m3_frontier_adapter_probe_count(const hu_m3_frontier_adapter_t *adapter) {
+    return adapter ? adapter->probe_count : 0;
 }
 
 void hu_m3_frontier_adapter_close(hu_allocator_t *alloc, hu_m3_frontier_adapter_t *adapter) {
@@ -99,4 +144,234 @@ void hu_m3_frontier_adapter_close(hu_allocator_t *alloc, hu_m3_frontier_adapter_
 
 uint32_t hu_m3_frontier_adapter_schema_version(const hu_m3_frontier_adapter_t *adapter) {
     return adapter ? adapter->schema_version : 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B1 (redefined 2026-05-17): inference outcome capture
+ * ───────────────────────────────────────────────────────────────── */
+
+/* FNV-1a 64-bit. Standard parameters (offset basis + prime from
+ * https://tools.ietf.org/html/draft-eastlake-fnv-21). Pure function;
+ * deterministic across runs. Returns 0 for NULL/empty input — this is
+ * a SENTINEL the outcome struct uses to mean "no value" (e.g. for
+ * contact_id_hash when there's no contact context). */
+uint64_t hu_m3_outcome_hash_bytes(const void *data, size_t len) {
+    if (!data || len == 0)
+        return 0;
+    const unsigned char *p = (const unsigned char *)data;
+    uint64_t hash = 0xcbf29ce484222325ULL; /* FNV offset basis */
+    for (size_t i = 0; i < len; i++) {
+        hash ^= (uint64_t)p[i];
+        hash *= 0x100000001b3ULL; /* FNV prime */
+    }
+    /* Reserve 0 for "no value" — if FNV happens to land on 0, bump
+     * to 1 so callers can distinguish "hash is zero" from "no hash". */
+    return hash ? hash : 1ULL;
+}
+
+hu_error_t hu_m3_frontier_adapter_record_outcome(hu_m3_frontier_adapter_t *adapter,
+                                                 const hu_m3_inference_outcome_t *outcome) {
+    /* NULL adapter is a deliberate no-op — agent paths shouldn't have
+     * to gate the call, and the M3 system is opt-in via configuration.
+     * Returning HU_OK here matches probe_infer's NULL semantics. */
+    if (!adapter)
+        return HU_OK;
+    if (!outcome)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Copy into the slot at head; advance head; wrap on capacity. The
+     * ring is single-writer (the agent serializes turns) so no atomic
+     * is needed today. If concurrent writers ever appear, add a
+     * spinlock or migrate head/total_recorded to atomic — the snapshot
+     * reader is already designed to tolerate a slightly stale view. */
+    adapter->outcomes[adapter->head] = *outcome;
+    adapter->head = (adapter->head + 1u) % HU_M3_OUTCOMES_RING_CAPACITY;
+    adapter->total_recorded++;
+    return HU_OK;
+}
+
+uint64_t hu_m3_frontier_adapter_outcomes_recorded(const hu_m3_frontier_adapter_t *adapter) {
+    return adapter ? adapter->total_recorded : 0ULL;
+}
+
+hu_error_t hu_m3_frontier_adapter_snapshot_outcomes(const hu_m3_frontier_adapter_t *adapter,
+                                                    hu_m3_inference_outcome_t *out_buf,
+                                                    size_t max_count, size_t *out_count) {
+    if (!out_buf || !out_count || max_count == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (!adapter)
+        return HU_OK;
+
+    /* Two layout cases:
+     *   1. total_recorded < CAPACITY: ring not yet wrapped. The live
+     *      outcomes are outcomes[0 .. head-1] in storage order.
+     *   2. total_recorded >= CAPACITY: ring has wrapped. The oldest
+     *      live outcome is at index `head`; the newest is at
+     *      `(head - 1 + CAPACITY) % CAPACITY`. Live count = CAPACITY.
+     *
+     * The output ordering contract is "oldest-of-the-snapshot first".
+     * We compute the start index and how many records to copy, then
+     * copy in two segments if the snapshot wraps. */
+    size_t live_count;
+    size_t start;
+    if (adapter->total_recorded < (uint64_t)HU_M3_OUTCOMES_RING_CAPACITY) {
+        live_count = (size_t)adapter->total_recorded;
+        start = 0;
+    } else {
+        live_count = (size_t)HU_M3_OUTCOMES_RING_CAPACITY;
+        start = adapter->head;
+    }
+
+    size_t to_copy = live_count < max_count ? live_count : max_count;
+    /* When max_count < live_count, return the most-recent `max_count`
+     * outcomes — slide the start forward by (live_count - to_copy).
+     * Otherwise start as computed above. */
+    if (to_copy < live_count) {
+        size_t skip = live_count - to_copy;
+        start = (start + skip) % HU_M3_OUTCOMES_RING_CAPACITY;
+    }
+
+    /* Copy in up to two segments (may wrap around the end of the ring). */
+    size_t first_segment = HU_M3_OUTCOMES_RING_CAPACITY - start;
+    if (first_segment > to_copy)
+        first_segment = to_copy;
+    memcpy(out_buf, &adapter->outcomes[start], first_segment * sizeof(*out_buf));
+    if (to_copy > first_segment) {
+        memcpy(out_buf + first_segment, &adapter->outcomes[0],
+               (to_copy - first_segment) * sizeof(*out_buf));
+    }
+
+    *out_count = to_copy;
+    return HU_OK;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B3 v0 — JSONL serializer
+ *
+ * Each outcome becomes one line:
+ *   {"t":TS,"l":LAT,"ph":PHASH,"rh":RHASH,"ch":CHASH,"pt":PT,"ct":CT,
+ *    "m":MID,"a":AID,"g":GUARD,"k":KIND}
+ *
+ * Field names are abbreviated to keep the JSONL compact — for 4096
+ * outcomes the long-name version is ~1.5 MB, the short-name version
+ * is ~720 KB. The training script knows the schema.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* Global accessor: single pointer set by the daemon at boot, read by
+ * the gateway endpoint. Single-writer / many-reader pattern; a `volatile`
+ * qualifier is enough for x86_64 + arm64 word-sized loads/stores under
+ * the C memory model assumptions we make elsewhere in the codebase. */
+static hu_m3_frontier_adapter_t *volatile s_global_outcomes_adapter = NULL;
+
+void hu_m3_outcomes_register_global_adapter(hu_m3_frontier_adapter_t *adapter) {
+    s_global_outcomes_adapter = adapter;
+}
+
+hu_m3_frontier_adapter_t *hu_m3_outcomes_global_adapter(void) {
+    return s_global_outcomes_adapter;
+}
+
+/* Worst-case bytes per outcome line, used to size the initial buffer.
+ * Each uint64 is at most 20 chars; uint32 at most 10; uint8 at most 3.
+ * 5 × 22 (uint64) + 2 × 12 (uint32) + 4 × 5 (uint16/uint8) + brackets
+ * + commas + field names ≈ 250 bytes/outcome. Round up to 320 for
+ * safety; cheap given the buffer is freed immediately. */
+#define HU_M3_OUTCOMES_JSONL_BYTES_PER_OUTCOME 320u
+
+hu_error_t hu_m3_outcomes_to_jsonl(hu_allocator_t *alloc, const hu_m3_frontier_adapter_t *adapter,
+                                   const hu_m3_outcomes_filter_t *filter, char **out_buf,
+                                   size_t *out_len, size_t *out_cap) {
+    if (!alloc || !out_buf || !out_len || !out_cap)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_buf = NULL;
+    *out_len = 0;
+    *out_cap = 0;
+
+    if (!adapter)
+        return HU_OK; /* No adapter → empty result is OK, not an error. */
+
+    /* Snapshot under the same path the public API uses so we don't
+     * duplicate the wrap-aware copy logic. */
+    size_t max_count =
+        (filter && filter->max_count > 0 && filter->max_count < HU_M3_OUTCOMES_RING_CAPACITY)
+            ? filter->max_count
+            : HU_M3_OUTCOMES_RING_CAPACITY;
+
+    hu_m3_inference_outcome_t *snap =
+        (hu_m3_inference_outcome_t *)alloc->alloc(alloc->ctx, sizeof(*snap) * max_count);
+    if (!snap)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    size_t snap_count = 0;
+    hu_error_t err =
+        hu_m3_frontier_adapter_snapshot_outcomes(adapter, snap, max_count, &snap_count);
+    if (err != HU_OK) {
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+        return err;
+    }
+    if (snap_count == 0) {
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+        return HU_OK; /* Empty result. */
+    }
+
+    /* Pre-size the output buffer for the worst case. We'll truncate the
+     * cap at the end if we want — but for a one-shot serialize-and-free
+     * pattern, slight over-allocation is fine. */
+    size_t cap = HU_M3_OUTCOMES_JSONL_BYTES_PER_OUTCOME * snap_count + 1u;
+    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!buf) {
+        alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+
+    size_t off = 0;
+    size_t emitted = 0;
+    for (size_t i = 0; i < snap_count; i++) {
+        const hu_m3_inference_outcome_t *o = &snap[i];
+        /* Apply filters. */
+        if (filter && filter->turn_kind != 0 && o->turn_kind != filter->turn_kind)
+            continue;
+        if (filter && filter->since_ms != 0 && o->timestamp_unix_ms < filter->since_ms)
+            continue;
+
+        /* Emit one compact JSON object + newline. Field names are
+         * short (1-2 chars) — the training script knows the schema.
+         * Format strings use the most-permissive integer types so a
+         * future struct widening doesn't silently overflow. */
+        int n = snprintf(
+            buf + off, cap - off,
+            "%s{\"t\":%llu,\"l\":%llu,\"ph\":%llu,\"rh\":%llu,\"ch\":%llu,"
+            "\"pt\":%u,\"ct\":%u,\"m\":%u,\"a\":%u,\"g\":%u,\"k\":%u}",
+            emitted == 0 ? "" : "\n", (unsigned long long)o->timestamp_unix_ms,
+            (unsigned long long)o->latency_ms, (unsigned long long)o->prompt_hash,
+            (unsigned long long)o->response_hash, (unsigned long long)o->contact_id_hash,
+            (unsigned)o->prompt_tokens, (unsigned)o->completion_tokens, (unsigned)o->model_id,
+            (unsigned)o->adapter_id, (unsigned)o->guard_decision, (unsigned)o->turn_kind);
+        if (n < 0 || (size_t)n >= cap - off) {
+            /* Either snprintf reported an error or we'd overflow. The
+             * pre-sizing should make this unreachable, but bail safely
+             * if it ever happens (e.g. a future struct field is added
+             * without bumping HU_M3_OUTCOMES_JSONL_BYTES_PER_OUTCOME). */
+            alloc->free(alloc->ctx, buf, cap);
+            alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        off += (size_t)n;
+        emitted++;
+    }
+
+    alloc->free(alloc->ctx, snap, sizeof(*snap) * max_count);
+
+    if (emitted == 0) {
+        /* All snapshotted outcomes were filtered out. */
+        alloc->free(alloc->ctx, buf, cap);
+        return HU_OK;
+    }
+
+    buf[off] = '\0';
+    *out_buf = buf;
+    *out_len = off;
+    *out_cap = cap;
+    return HU_OK;
 }

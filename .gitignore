@@ -82,6 +82,12 @@ ui/node_modules/
 ui/test-results/
 ui/playwright-report/
 ui/blob-report/
+# Root-level Playwright artifact directory — appears when tests are run
+# from repo root (e.g. via `cd ui && npx playwright test` then a tool
+# auto-cds back). Already covered for ui/, but not root. PR #113 round
+# 25 caught a stray test-results/.last-run.json commit (Bugbot 150b4dcb).
+/test-results/
+/playwright-report/
 ui/visual-regression/
 ui/coverage/
 ui/e2e-screenshots/
@@ -142,6 +148,12 @@ lora-persona-seth.bin
 # inside the working tree.
 .human/private/
 **/.human/private/
+
+# Sprint 11 / US-11.6 D1 fixture policy: production-tier YNTP holdout
+# lives only on Seth's machine at ~/.human/private/yntp_holdout_30.jsonl
+# and must NEVER appear in the repo, no matter what directory it's in.
+yntp_holdout_30.jsonl
+**/yntp_holdout_30.jsonl
 
 # Phase 1 (RL SOTA) — Gemma GGUF and other large model files. The
 # fetcher script writes to ~/.human/models/, but contributors who

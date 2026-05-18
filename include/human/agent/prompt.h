@@ -127,6 +127,19 @@ typedef struct hu_prompt_config {
      * hu_personal_model_has_content() in human/memory/personal_model.h. */
     const char *personal_model_context;
     size_t personal_model_context_len;
+    /* Moment-context decision-layer fragment — rendered from hu_moment_t
+     * via hu_moment_render_prompt. ~256 chars max. Tells the model what
+     * time/style/rhythm signals the current turn is operating under.
+     * NULL/empty when compose returned an empty moment (new contact,
+     * no signals). See include/human/moment.h. */
+    const char *moment_context;
+    size_t moment_context_len;
+    /* Self-exemplars — up to N verbatim outbound messages we've sent to
+     * THIS contact, formatted as in-context style anchors. Rendered via
+     * hu_moment_render_self_exemplars. NULL/empty when no outbound
+     * history exists for the contact. */
+    const char *self_exemplars_context;
+    size_t self_exemplars_context_len;
     /* W9 world-model snapshot (FIX 12): goals, negatives, theory-of-mind,
      * recent topics for the active contact. Rendered per-turn via the W7
      * bridge (src/agent/world_model_bridge.c). NULL when the load returns

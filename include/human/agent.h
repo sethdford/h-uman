@@ -28,6 +28,7 @@
 #include "human/agent/worktree.h"
 #include "human/behavior/pressure_history.h"
 #include "human/channel.h"
+#include "human/contact_send_recency.h"
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
 #include "human/core/error.h"
@@ -37,6 +38,7 @@
 #include "human/memory.h"
 #include "human/memory/policy.h"
 #include "human/memory/retrieval.h"
+#include "human/ml/m3_frontier_adapter.h"
 #include "human/security/delegation.h"
 #include "human/security/escalate.h"
 #include "human/tools/validation.h"
@@ -48,6 +50,9 @@
 #include "human/agent/growth_narrative.h"
 #include "human/agent/process_reward.h"
 #include "human/agent/reflection.h"
+#ifdef HU_ENABLE_MOLORA
+#include "human/ml/molora.h"
+#endif
 #include "human/cognition/attachment.h"
 #include "human/cognition/dual_process.h"
 #include "human/cognition/emotional.h"
@@ -184,6 +189,8 @@ typedef struct hu_agent_context_config {
     bool mcts_planner_enabled;
     bool tree_of_thought;
     bool constitutional_ai;
+    /* US-7.9: pure string-pattern style self-critique (post-gen). */
+    bool constitutional_style_rules_enabled;
     bool speculative_cache;
     bool tool_routing_enabled;
     bool multi_agent;
@@ -427,6 +434,13 @@ struct hu_agent {
      * LLM interaction (chat, stream_chat, GVR, constitutional, metacog regen,
      * guard retry, streaming rethink). Owned; closed in `hu_agent_deinit`. */
     struct hu_m3_frontier_adapter *m3_adapter;
+    /* Phase C2 (2026-05-18): string→uint16 id map for outcome clustering.
+     * Resolves agent->model_name and the provider's active adapter into
+     * stable small ids that go into the outcome record's `m` and `a`
+     * fields. Persists to ~/.human/training-data/m3_id_map.json so ids
+     * are stable across daemon restarts. Owned; destroyed in
+     * `hu_agent_deinit`. NULL when not attached → outcomes record 0. */
+    struct hu_m3_id_map *m3_id_map;
 #endif
 
     bool chain_of_thought;    /* inject reasoning instructions into prompt */
@@ -437,6 +451,13 @@ struct hu_agent {
     /* Set by channel before turn; used for per-channel persona overlays. Not owned. */
     const char *active_channel;
     size_t active_channel_len;
+
+#ifdef HU_ENABLE_MOLORA
+    /* US-7.8 — MoLoRA static per-channel router. Initialized from
+     * config.personalization.molora at daemon bootstrap; never reallocated.
+     * Disabled when zero-initialized — the agent-turn hook is a no-op. */
+    hu_molora_router_t molora_router;
+#endif
 
     /* Set by cron dispatch before turn; used for per-automation cost tracking. 0 = interactive. */
     uint64_t active_job_id;
@@ -464,6 +485,10 @@ struct hu_agent {
     bool compaction_use_structured; /* use XML structured summaries in compaction */
 
     bool constitutional_enabled;
+    /* US-7.9: enables the pure-string style self-critique pass after
+     * each LLM generation (separate from the LLM-judge constitutional
+     * pass above).  Default false. */
+    bool style_rules_enabled;
     bool multi_agent_enabled;
     bool lean_prompt; /* strip heavy contexts for fast local-model texting */
 
@@ -519,6 +544,15 @@ struct hu_agent {
      * avoid picking the same filler twice in a row.  In-memory only; loss on
      * restart is acceptable.  Zero-initialised by memset in hu_agent_from_config. */
     hu_filler_recency_t filler_recency;
+
+    /* Per-contact send-path recency (memory-scoping FU-1, plan
+     * docs/plans/2026-05-15-memory-scoping-followups.md).  Tracks the last
+     * outbound path (reactive vs proactive vs scheduled vs photo vs morning)
+     * so proactive paths in the daemon can DEFER when a reactive turn has
+     * fired for the same contact within the recency window.  In-memory only;
+     * loss on restart is acceptable.  Zero-initialised by memset in
+     * hu_agent_from_config. */
+    hu_contact_send_recency_t contact_send_recency;
 };
 
 /* Create agent from minimal config (no full config loader yet).
@@ -591,6 +625,38 @@ void hu_agent_set_learner(hu_agent_t *agent, struct hu_learner *learner);
 void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path);
 void hu_agent_m3_on_provider_success(hu_agent_t *agent);
 
+/* Phase B1 redefined (2026-05-17 round 2): record a structured inference
+ * outcome to the M3 adapter's ring buffer. Safe to call always (no-op when
+ * ML off, no adapter attached, or agent NULL). Computes prompt/response
+ * hashes via hu_m3_outcome_hash_bytes — callers don't have to.
+ *
+ * Args:
+ *   - prompt / prompt_len: the system+user prompt sent to the model
+ *   - response / response_len: the cleaned final response
+ *   - latency_ms: end-to-end inference duration
+ *   - contact_id / contact_id_len: per-contact partition key; pass NULL
+ *     when there's no contact context (e.g. agent --once)
+ *   - guard_decision: the response_guard chain's terminal decision
+ *   - turn_kind: 1 = stream-final, 2 = post-stream batch, 3 = proactive
+ *   - usage: optional pointer to the provider's reported token counts.
+ *     When non-NULL AND any field is nonzero, prompt_tokens /
+ *     completion_tokens land in the outcome record as the provider
+ *     reported them. When NULL or all-zero, falls back to a bytes/4
+ *     estimate (~English BPE rule). The bytes/4 fallback never reports
+ *     zero when there's real content, which is what the M3 driver's
+ *     selection policy depends on. Phase C1 (2026-05-18): prefer real
+ *     counts when available; the estimate is a 20-40% under-counter
+ *     and worse for structured / non-English text. See
+ *     `docs/plans/2026-05-17-m3-phase-c-plan.md` C1.
+ *
+ * Model/adapter ids are looked up from the agent's current configuration
+ * inside this helper (set to 0 when unknown). */
+void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
+                                     const char *response, size_t response_len, uint64_t latency_ms,
+                                     const char *contact_id, size_t contact_id_len,
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind,
+                                     const hu_token_usage_t *usage);
+
 /* Point the agent at a hu_voice_config_t (e.g. from hu_voice_config_from_settings).
  * Borrowed pointers inside that struct must outlive the agent. Pass NULL to disable TTS. */
 void hu_agent_set_voice_config(hu_agent_t *agent, hu_voice_config_t *voice_cfg);
@@ -641,6 +707,28 @@ hu_error_t hu_agent_run_single(hu_agent_t *agent, const char *system_prompt,
                                size_t system_prompt_len, const char *user_message,
                                size_t user_message_len, char **response_out,
                                size_t *response_len_out);
+
+/* Canonical tool-dispatch helper.
+ *
+ * Wraps every tool invocation in the agent's hook pipeline:
+ *   1. Pre-tool hook (if a registry is configured). A DENY decision skips
+ *      execution AND short-circuits *out with a "denied by hook" failure.
+ *   2. Tool execute() (only if the pre-hook did NOT deny).
+ *   3. Post-tool hook (if a registry is configured). Fires UNCONDITIONALLY
+ *      — including on the pre-deny path — so auditors observe every
+ *      dispatch attempt regardless of outcome.
+ *
+ * This is the single canonical entry point for tool dispatch. New call sites
+ * MUST go through this helper; the audit on 2026-05-16 documented multiple
+ * scattered hook-and-execute call sites in src/agent/agent_turn.c and
+ * src/agent/agent_stream.c that are progressively migrating to it.
+ *
+ * Returns HU_OK for normal completion (including hook-denied dispatch).
+ * HU_ERR_INVALID_ARGUMENT if agent/tool/out is NULL. The caller frees *out
+ * via hu_tool_result_free. */
+hu_error_t hu_agent_dispatch_tool(hu_agent_t *agent, hu_tool_t *tool, const char *tool_name,
+                                  size_t tool_name_len, const char *args_json, size_t args_json_len,
+                                  const hu_json_value_t *args_parsed, hu_tool_result_t *out);
 
 void hu_agent_clear_history(hu_agent_t *agent);
 

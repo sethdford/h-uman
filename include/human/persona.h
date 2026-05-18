@@ -84,6 +84,7 @@ typedef struct hu_contact_profile {
     char *attachment_style;
     char *dunbar_layer;
     float affect_mirror_ceiling; /* per-contact ceiling override. 0 = use stage default */
+    uint8_t leave_on_read_pct;   /* per-contact override (0-100). 0 = use overlay/default */
 } hu_contact_profile_t;
 
 /* Motivation — the character's core drive (anti-drift anchor) */
@@ -454,6 +455,17 @@ typedef struct hu_persona {
      * Persona name is treated as immutable post-load — mutating persona->name after
      * load does NOT re-derive the chain. */
     hu_output_validator_chain_t *outbound_chain;
+
+    /* Global proactive-messaging kill switch.  When false, the daemon must NOT
+     * generate or send ANY proactive message (F25 emotional check-ins, F30
+     * curiosity, F31 callbacks, F23 topic absence, F12 bookend, scheduled
+     * good-morning, etc.) regardless of per-contact `proactive_checkin` flags.
+     *
+     * Defaults to false (kill-switch ON) so a freshly loaded persona is safe
+     * until the operator explicitly opts in via "proactive.master_enabled":
+     * true in the persona JSON.  Pinned by the 2026-05-16 incident — see
+     * docs/research/2026-05-16-proactive-audit/findings.md (P1-1). */
+    bool proactive_master_enabled;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).
@@ -482,9 +494,32 @@ hu_error_t hu_persona_examples_bank_from_array(hu_allocator_t *alloc, const char
 
 void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona);
 
+/* Returns true iff proactive messaging is GLOBALLY enabled for this persona.
+ * Safe to call with persona == NULL (returns false).  Wraps the
+ * `proactive_master_enabled` field so the daemon never bypasses the gate.
+ * See 2026-05-16 incident — by default the gate is OFF, so a freshly loaded
+ * persona will not send proactive messages until the operator explicitly
+ * sets "proactive": { "master_enabled": true } in the persona JSON. */
+bool hu_persona_proactive_is_enabled(const hu_persona_t *persona);
+
 hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *persona,
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len);
+
+/* P6-5: shared absolute-rules block. Writes the highest-weight
+ * formatting/identity instructions ("You are HUMAN", lowercase, no
+ * markdown, etc.) into the caller's buffer. Called from BOTH the
+ * reactive path (src/agent/agent_stream.c) and the proactive path
+ * (src/daemon_proactive.c) so the two paths cannot drift.
+ *
+ * `persona` is currently unused but accepted so future per-persona
+ * overrides don't break the call site.
+ *
+ * Returns HU_OK on success with *out_len set; HU_ERR_INVALID_ARGUMENT
+ * on NULL buf or zero cap; HU_ERR_OUT_OF_MEMORY if the static block
+ * would exceed cap. */
+hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
+                                           size_t *out_len);
 
 hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *channel,
                                       size_t channel_len, const char *topic, size_t topic_len,
@@ -584,6 +619,67 @@ void hu_persona_example_banks_free(hu_allocator_t *alloc, hu_persona_example_ban
 const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
                                                     const char *channel, size_t channel_len);
 
+/* Render outbound text for a channel by applying its persona overlay.
+ *
+ * Behavior (in fixed order):
+ *   1. If overlay->emoji_usage is "none" / "no" / "off" / "never", strip emoji.
+ *   2. If overlay->formality contains "formal" or "professional", apply
+ *      casual-to-formal lexical swaps ("hey" -> "hello", "yeah" -> "yes",
+ *      "gonna" -> "going to", etc.) and capitalize the first letter.
+ *      If overlay->formality contains "casual" or "informal", apply the
+ *      reverse swaps and lowercase the first letter.
+ *   3. If overlay->avg_length is "short" or has the form "max_chars=NNN",
+ *      truncate the output to at most NNN bytes (default short = 200).
+ *      For length=="short", truncates at the last sentence boundary
+ *      within 200 bytes when possible.
+ *
+ * When overlay is NULL, the output is a heap-allocated copy of raw_text
+ * (no transforms). When raw_text is NULL or raw_len == 0, returns OK with
+ * an empty string ("").
+ *
+ * Caller owns *out_rendered and *out_rendered_len; free with
+ * alloc->free(alloc->ctx, *out_rendered, *out_rendered_len + 1).
+ *
+ * Returns HU_OK on success. HU_ERR_INVALID_ARGUMENT if alloc or
+ * out_rendered is NULL. HU_ERR_OUT_OF_MEMORY on allocation failure. */
+hu_error_t hu_persona_render_for_channel(const hu_persona_overlay_t *overlay, const char *raw_text,
+                                         size_t raw_len, hu_allocator_t *alloc, char **out_rendered,
+                                         size_t *out_rendered_len);
+
+/* Pure predicate: returns the effective formality string for rendering given
+ * an overlay's configured formality and (optionally) a contact's warmth_level.
+ *
+ * Rules:
+ *   - contact_warmth indicates closeness ("close", "high", "warm") AND the
+ *     overlay's formality is unset OR formal-leaning ("formal" / "professional")
+ *     → return "casual" (the contact relationship overrides a stiff overlay).
+ *   - Any other combination → return overlay_formality unchanged (NULL is OK).
+ *
+ * Returned pointer is either overlay_formality itself or a static "casual"
+ * string. Do NOT free. Pure; safe for tests.
+ *
+ * This is the predicate that wires the persona's "warmth_level" field
+ * (previously parsed-but-never-read in the send path) into deterministic
+ * render-time behavior — extending the compiled-persona-architecture pattern
+ * pioneered by hu_followup_compute_send_time. */
+const char *hu_persona_effective_formality(const char *overlay_formality,
+                                           const char *contact_warmth);
+
+/* Render variant that takes a contact's warmth_level string. The renderer
+ * uses hu_persona_effective_formality(overlay->formality, contact_warmth)
+ * as the effective formality, so a close-relationship contact gets casual
+ * rendering even when the channel overlay is configured formal.
+ *
+ * Callers without contact context should pass NULL for contact_warmth;
+ * behavior then matches the original hu_persona_render_for_channel exactly.
+ *
+ * Pinned by tests/test_persona_render.c (warmth-override cases). */
+hu_error_t hu_persona_render_for_channel_with_warmth(const hu_persona_overlay_t *overlay,
+                                                     const char *contact_warmth,
+                                                     const char *raw_text, size_t raw_len,
+                                                     hu_allocator_t *alloc, char **out_rendered,
+                                                     size_t *out_rendered_len);
+
 const hu_contact_profile_t *hu_persona_find_contact(const hu_persona_t *persona,
                                                     const char *contact_id, size_t contact_id_len);
 
@@ -597,6 +693,14 @@ hu_error_t hu_contact_profile_build_context(hu_allocator_t *alloc,
  * Returns 0.7 if no stage is set. */
 float hu_affect_mirror_ceiling(const hu_contact_profile_t *contact,
                                const hu_persona_overlay_t *overlay);
+
+/* Effective leave-on-read percentage: per-contact > per-channel-overlay > 0.
+ * 0 signals "use classifier default (10%)" — callers pass the return value to
+ * hu_conversation_should_leave_on_read where 0 triggers the default. NULL-safe
+ * for both parameters. Mirrors hu_affect_mirror_ceiling's layered-lookup
+ * shape so the per-contact override behaves the same way across overlay axes. */
+uint8_t hu_leave_on_read_pct_effective(const hu_contact_profile_t *contact,
+                                       const hu_persona_overlay_t *overlay);
 
 /* Apply affect mirror ceiling to emotional intensity.
  * If intensity > ceiling, returns the ceiling value.

@@ -160,25 +160,25 @@ static void test_goal_lifecycle(void) {
     HU_ASSERT_EQ(hu_goal_init_tables(&engine), HU_OK);
 
     int64_t id = 0;
-    HU_ASSERT_EQ(hu_goal_create(&engine, "learn C11", 9, 0.8, 0, 0, 1000, &id), HU_OK);
+    HU_ASSERT_EQ(hu_goal_create(&engine, "u-t", 3, "learn C11", 9, 0.8, 0, 0, 1000, &id), HU_OK);
     HU_ASSERT_TRUE(id > 0);
 
     hu_goal_t goal;
     bool found = false;
-    HU_ASSERT_EQ(hu_goal_get(&engine, id, &goal, &found), HU_OK);
+    HU_ASSERT_EQ(hu_goal_get(&engine, "u-t", 3, id, &goal, &found), HU_OK);
     HU_ASSERT_TRUE(found);
     HU_ASSERT_EQ(goal.status, HU_AUTO_GOAL_PENDING);
 
-    HU_ASSERT_EQ(hu_goal_update_status(&engine, id, HU_AUTO_GOAL_ACTIVE, 1001), HU_OK);
-    HU_ASSERT_EQ(hu_goal_get(&engine, id, &goal, &found), HU_OK);
+    HU_ASSERT_EQ(hu_goal_update_status(&engine, "u-t", 3, id, HU_AUTO_GOAL_ACTIVE, 1001), HU_OK);
+    HU_ASSERT_EQ(hu_goal_get(&engine, "u-t", 3, id, &goal, &found), HU_OK);
     HU_ASSERT_EQ(goal.status, HU_AUTO_GOAL_ACTIVE);
 
-    HU_ASSERT_EQ(hu_goal_update_progress(&engine, id, 1.0, 1002), HU_OK);
-    HU_ASSERT_EQ(hu_goal_get(&engine, id, &goal, &found), HU_OK);
+    HU_ASSERT_EQ(hu_goal_update_progress(&engine, "u-t", 3, id, 1.0, 1002), HU_OK);
+    HU_ASSERT_EQ(hu_goal_get(&engine, "u-t", 3, id, &goal, &found), HU_OK);
     HU_ASSERT_EQ(goal.status, HU_AUTO_GOAL_COMPLETED);
 
     size_t count = 0;
-    HU_ASSERT_EQ(hu_goal_count(&engine, &count), HU_OK);
+    HU_ASSERT_EQ(hu_goal_count(&engine, "u-t", 3, &count), HU_OK);
     HU_ASSERT_EQ(count, 1u);
 
     hu_goal_engine_deinit(&engine);
@@ -193,19 +193,20 @@ static void test_goal_decompose(void) {
     hu_goal_init_tables(&engine);
 
     int64_t parent_id = 0;
-    hu_goal_create(&engine, "build agent", 11, 0.9, 0, 0, 1000, &parent_id);
+    hu_goal_create(&engine, "u-t", 3, "build agent", 11, 0.9, 0, 0, 1000, &parent_id);
 
     const char *subs[] = {"design API", "implement", "test"};
     size_t sub_lens[] = {10, 9, 4};
     int64_t sub_ids[3] = {0};
-    HU_ASSERT_EQ(hu_goal_decompose(&engine, parent_id, subs, sub_lens, 3, 1001, sub_ids), HU_OK);
+    HU_ASSERT_EQ(hu_goal_decompose(&engine, "u-t", 3, parent_id, subs, sub_lens, 3, 1001, sub_ids),
+                 HU_OK);
     HU_ASSERT_TRUE(sub_ids[0] > 0);
     HU_ASSERT_TRUE(sub_ids[1] > 0);
     HU_ASSERT_TRUE(sub_ids[2] > 0);
 
     hu_goal_t g;
     bool found;
-    hu_goal_get(&engine, sub_ids[0], &g, &found);
+    hu_goal_get(&engine, "u-t", 3, sub_ids[0], &g, &found);
     HU_ASSERT_TRUE(found);
     HU_ASSERT_EQ(g.parent_id, parent_id);
 
@@ -221,12 +222,12 @@ static void test_goal_select_next(void) {
     hu_goal_init_tables(&engine);
 
     int64_t id1, id2;
-    hu_goal_create(&engine, "low priority", 12, 0.3, 0, 0, 1000, &id1);
-    hu_goal_create(&engine, "high priority", 13, 0.9, 0, 0, 1001, &id2);
+    hu_goal_create(&engine, "u-t", 3, "low priority", 12, 0.3, 0, 0, 1000, &id1);
+    hu_goal_create(&engine, "u-t", 3, "high priority", 13, 0.9, 0, 0, 1001, &id2);
 
     hu_goal_t next;
     bool found;
-    HU_ASSERT_EQ(hu_goal_select_next(&engine, &next, &found), HU_OK);
+    HU_ASSERT_EQ(hu_goal_select_next(&engine, "u-t", 3, &next, &found), HU_OK);
     HU_ASSERT_TRUE(found);
     HU_ASSERT_EQ(next.id, id2);
 
@@ -242,11 +243,11 @@ static void test_goal_build_context(void) {
     hu_goal_init_tables(&engine);
 
     int64_t id;
-    hu_goal_create(&engine, "test goal", 9, 0.7, 0, 0, 1000, &id);
+    hu_goal_create(&engine, "u-t", 3, "test goal", 9, 0.7, 0, 0, 1000, &id);
 
     char *ctx = NULL;
     size_t ctx_len = 0;
-    HU_ASSERT_EQ(hu_goal_build_context(&engine, &ctx, &ctx_len), HU_OK);
+    HU_ASSERT_EQ(hu_goal_build_context(&engine, "u-t", 3, &ctx, &ctx_len), HU_OK);
     HU_ASSERT_NOT_NULL(ctx);
     HU_ASSERT_TRUE(ctx_len > 0);
     alloc.free(alloc.ctx, ctx, ctx_len + 1);

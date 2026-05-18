@@ -1,0 +1,58 @@
+[human] service loop started (with gateway)
+[bootstrap] w13: learner subsystem not built (HU_ENABLE_LEARNING=OFF); persona deltas persist as usual, on-device training disabled
+[imessage] resuming from persisted rowid=57343 (db max=57416, recovering 73 messages)
+[human] agent ready (provider=mlx_local model=mlx-community/gemma-4-26b-a4b-it-4bit tools=83)
+[human] 2 channel(s) active, cron enabled
+[human] proactive check-in registered for Mindy Ford Gibson (id=1 sched=0 10 * * *)
+[human] proactive check-in registered for Betty Ford (id=2 sched=0 10 * * *)
+[human] proactive check-in registered for Annie Ford (id=3 sched=0 10 * * *)
+[feed] feed_processor_cleanup: deleted 0 rows
+[human] research agent registered with feed digest (id=4 sched=0 6 * * *)
+[human] DPO training registered (weekly, id=5)
+[human] ML experiment loop registered (nightly, id=6)
+[human] gateway listening on 127.0.0.1:3006
+[human] hybrid routing: classify provider ready (gemini flash-lite)
+[gateway] listening on 127.0.0.1:3006 (ws: enabled, ui: /Users/sethford/Documents/h-uman/ui/dist)
+[human] W15: no keystore at /Users/sethford/.human/keys; memory encryption not active (run `human keystore init` to enable)
+[human] M3: adapter probe OK (path=/tmp/hu_m3_demo_fixture.bin schema=1)
+[scheduler] tick: 2 pending job(s) eligible for dispatch (load=-1% ac=1 quiet=0)
+[scheduler] dispatch job id=203 kind=9 budget_ms=10000
+[scheduler] job id=203 kind=9 completed ok elapsed_ms=0
+[scheduler] dispatch job id=204 kind=10 budget_ms=10000
+[scheduler] job id=204 kind=10 completed ok elapsed_ms=0
+[human] intelligence cycle: 0 findings, 3 lessons, 20 events
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==88206==ERROR: AddressSanitizer: BUS on unknown address (pc 0x00018fee111c bp 0x00016dec2d30 sp 0x00016dec2d00 T3)
+==88206==The signal is caused by a WRITE memory access.
+==88206==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.
+    #0 0x00018fee111c in _platform_memset+0x6c (libsystem_platform.dylib:arm64e+0x311c)
+
+==88206==Register values:
+ x[0] = 0x000000016dee8b90   x[1] = 0x0000000000000000   x[2] = 0x00000000000000d0   x[3] = 0x000000016dee8b90  
+ x[4] = 0xffffffffffffffff   x[5] = 0x0000000000000000   x[6] = 0x000000006a0b86ce   x[7] = 0x000000016dee8b90  
+ x[8] = 0x0000000000000000   x[9] = 0x000000702dbfd18c  x[10] = 0x0000000000000000  x[11] = 0x0000000000000000  
+x[12] = 0x000000702dbfd18c  x[13] = 0xffffff8fd2402e87  x[14] = 0x000000702dbfd172  x[15] = 0x0000000000000000  
+x[16] = 0x000000018fee10b0  x[17] = 0x0000000104ab8558  x[18] = 0x0000000000000000  x[19] = 0x000000016dee8b90  
+x[20] = 0x00000000000000d0  x[21] = 0x0000000000000000  x[22] = 0x0000000000000000  x[23] = 0x000000702dbfba14  
+x[24] = 0x000000702dbfba10  x[25] = 0x000000702dbfba0c  x[26] = 0x000000702dbfba08  x[27] = 0x000000702dbfba04  
+x[28] = 0x000000702dbfba00     fp = 0x000000016dec2d30     lr = 0x0000000104a4ad50     sp = 0x000000016dec2d00  
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: BUS (libsystem_platform.dylib:arm64e+0x311c) in _platform_memset+0x6c
+Thread T3 created by T1 here:
+    #0 0x000104a45198 in pthread_create+0x60 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x39198)
+    #1 0x000102176be0 in hu_thread_pool_create thread_pool.c:85
+    #2 0x000102168b74 in hu_gateway_run gateway.c:1692
+    #3 0x00010204fbf0 in svc_gateway_thread main.c:1184
+    #4 0x000104a49d64 in asan_thread_start(void*)+0x4c (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x3dd64)
+    #5 0x00018fed7c04 in _pthread_start+0x84 (libsystem_pthread.dylib:arm64e+0x6c04)
+    #6 0x00018fed2ba4 in thread_start+0x4 (libsystem_pthread.dylib:arm64e+0x1ba4)
+
+Thread T1 created by T0 here:
+    #0 0x000104a45198 in pthread_create+0x60 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x39198)
+    #1 0x00010203b1cc in cmd_service_loop main.c:1506
+    #2 0x0001020359c8 in run_command main.c:2954
+    #3 0x000102034e10 in main main.c:3066
+    #4 0x00018fb0dd50 in start+0x1c0c (dyld:arm64e+0x8d50)
+
+==88206==ABORTING

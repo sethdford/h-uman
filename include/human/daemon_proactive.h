@@ -85,4 +85,10 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, struct hu_ag
                                              struct hu_legacy_memory *memory,
                                              const struct hu_contact_profile *cp, size_t *out_len);
 
+/* P2-5 (2026-05-16): outbound-safety predicate. Returns false when content
+ * is unsafe to inject into an outbound proactive prompt (first-person
+ * pronouns, confession verbs, charged emotion keywords, format-specifier
+ * injection, newlines). See src/daemon_proactive.c for the contract. */
+bool hu_daemon_callback_content_is_safe(const char *content, size_t content_len);
+
 #endif /* HU_DAEMON_PROACTIVE_H */

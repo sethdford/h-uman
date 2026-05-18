@@ -1,0 +1,10 @@
+  plugin_discovery: 7/7 passed
+  context_engine_rag: 10/10 passed
+
+=== Sprint 3 Hybrid Recall ===
+  PASS  test_agent_construction_via_from_config
+  PASS  test_cross_contact_isolation_pr83_regression_guard
+  PASS  test_bm25_only_fallback_returns_lexical_hit
+  PASS  test_semantic_recall_utah_hiking_finds_outdoor_plans_red
+
+--- Results: 4/4 passed, 10208 skipped ---

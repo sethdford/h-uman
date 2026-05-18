@@ -1,0 +1,9 @@
+ CMakeLists.txt               |   2 +
+ include/human/ml/cli.h       |   4 +
+ include/human/ml/dpo_miner.h |  80 +++++
+ src/main.c                   |   4 +
+ src/ml/cli.c                 | 737 ++++++++++++++++++++++++++++---------------
+ src/ml/dpo_miner.c           | 311 ++++++++++++++++++
+ tests/test_dpo_miner.c       | 348 ++++++++++++++++++++
+ tests/test_main.c            |   2 +
+ 8 files changed, 1238 insertions(+), 250 deletions(-)

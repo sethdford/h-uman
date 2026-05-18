@@ -1,10 +1,11 @@
 ---
 title: "W9 — World Model: hu_world_model_t per-contact unified snapshot"
 created: 2026-05-10
-status: proposed
+status: complete
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: medium
 scope: include/human/agent/, src/agent/, src/persona/
+last_audit: 2026-05-17
 ---
 
 # W9 — World Model

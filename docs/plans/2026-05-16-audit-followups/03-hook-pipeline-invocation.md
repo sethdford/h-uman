@@ -109,3 +109,74 @@ via config.
   by default (PERMIT); only existing hook-aware tests change.
 - **Existing tools that bypassed hooks intentionally.** *Mitigation:* audit
   call sites before refactor; document any legitimate bypass.
+
+## Status (2026-05-17)
+
+**Done.** Hook-pipeline invocation centralized behind three helpers:
+
+- `hu_agent_internal_dispatch_with_hooks` (existing, hardened) — full
+  pre/execute/post envelope for synchronous tool invocations. Now fires
+  the **post-hook unconditionally**, including on the pre-deny path, so
+  auditors observe every dispatch attempt regardless of outcome.
+- `hu_agent_internal_pre_hook_check` (new, `src/agent/agent.c`) — pre-hook
+  decision wrapped as a `bool` predicate; on DENY populates the caller's
+  `hu_tool_result_t *` with a "denied by hook" failure.
+- `hu_agent_internal_post_hook_fire` (new) — post-hook firing wrapped as
+  a void helper that reads from `hu_tool_result_t` and uses `error_msg`
+  on failure to mirror the scattered-site convention.
+- `hu_agent_dispatch_tool` (new public alias, `include/human/agent.h`) —
+  delegates to the internal helper so out-of-module callers don't lose
+  the contract by including `agent_internal.h`.
+
+**Migration completed:**
+
+| Site | Was | Now |
+|---|---|---|
+| `src/agent/agent.c:1720-1758` | inline pre/exec/post inside `dispatch_with_hooks` | delegates to `pre_hook_check` + `post_hook_fire` |
+| `src/agent/agent_stream.c:1595-1614` (pre) | manual pipeline + DENY-handling | `hu_agent_internal_pre_hook_check` |
+| `src/agent/agent_stream.c:1724-1737` (post) | manual `hu_hook_pipeline_post_tool` | `hu_agent_internal_post_hook_fire` |
+| `src/agent/agent_turn.c:7943` (parallel dispatcher pre-check) | manual pipeline writing to `dispatch_allowed[]` | `hu_agent_internal_pre_hook_check` with scratch result |
+| `src/agent/agent_turn.c:8058` (post-dispatch pre-check) | manual pipeline overwriting `*result` | `hu_agent_internal_pre_hook_check` with scratch result + move-on-deny |
+| `src/agent/agent_turn.c:8418` (parallel-path post-hook) | manual `hu_hook_pipeline_post_tool` | `hu_agent_internal_post_hook_fire` |
+| `src/agent/agent_turn.c:8559` (sequential pre-check) | manual pipeline + early-`continue` skipping post-hook | `hu_agent_internal_pre_hook_check` + **explicit `post_hook_fire` call before `continue`** (fixes AC-3 gap) |
+| `src/agent/agent_turn.c:8730` (sequential post-hook) | manual `hu_hook_pipeline_post_tool` | `hu_agent_internal_post_hook_fire` |
+
+**Verification:**
+
+- `tests/test_agent_dispatch_hooks.c` extended with three new tests that
+  pin the contract:
+  - `test_dispatch_pre_deny_still_fires_post_hook`
+  - `test_dispatch_tool_failure_still_fires_post_hook`
+  - `test_dispatch_tool_public_alias_delegates_to_internal`
+- `grep -rn 'hu_hook_pipeline_pre_tool\|hu_hook_pipeline_post_tool' src/`
+  now returns only the canonical implementations in
+  `src/hook_pipeline.c` and `src/agent/agent.c` — all previously
+  scattered call sites in `agent_turn.c` and `agent_stream.c` are gone.
+- Full suite: 10,650 / 10,650 passing.
+
+**Acceptance criteria status:**
+
+| AC | Status |
+|---|---|
+| AC-1 (every pre-path centralized) | Done — 4 of 4 scattered pre-call sites migrated |
+| AC-2 (every post-path centralized) | Done — 3 of 3 scattered post-call sites migrated |
+| AC-3 (DENY skips tool execute) | Done — pinned by `test_dispatch_pre_hook_deny_skips_tool` |
+| AC-3-followup (post-hook STILL fires on deny) | Done — pinned by `test_dispatch_pre_deny_still_fires_post_hook` |
+| AC-4 (null-registry policy flag) | **Deferred** — current behavior is `PERMIT`; introducing the `HU_NO_HOOKS_REFUSE` enum + config wiring is a separate change. The helpers already centralize the null-registry check, so flipping the default later is a 1-line change in `pre_hook_check`. |
+| AC-5 (single call site per direction) | Done — only `hu_agent_internal_pre_hook_check` and `hu_agent_internal_post_hook_fire` invoke the pipeline outside `src/hook_pipeline.c` |
+
+**Out of scope (documented for future work):**
+
+The parallel-dispatcher path (`hu_dispatcher_dispatch`) invokes tool
+execute() internally without exposing a per-tool callback hook, so we
+can't route those executions through `hu_agent_dispatch_tool` directly.
+The migration above instead splits the pre-check (before dispatch) and
+post-hook (after results return) so both still fire. Routing dispatcher
+execution through the canonical helper would require changing the
+dispatcher's vtable contract — a separate, larger refactor.
+
+Streaming tools (`tool->vtable->execute_streaming`) likewise can't go
+through `hu_agent_dispatch_tool` because the helper expects a
+synchronous `execute`; the split-helper pattern handles streaming
+correctly because the pre/post hooks bracket execution regardless of
+whether the body streamed or batched.

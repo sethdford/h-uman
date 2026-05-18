@@ -324,8 +324,13 @@ test.describe("Wave 3: Loading & Empty States", () => {
   test("voice: shows empty conversation state when no messages", async ({ page }) => {
     await page.goto("/?demo#voice");
     await waitForViewReady(page, "hu-voice-view");
+    // hu-empty-state lives inside the nested hu-voice-conversation
+    // shadow root, not directly in hu-voice-view (voice-view.ts:1447 +
+    // hu-voice-conversation.ts:65). Use shadowExistsIn to traverse.
     await expect(async () => {
-      const hasEmptyState = await page.evaluate(shadowExists("hu-voice-view", "hu-empty-state"));
+      const hasEmptyState = await page.evaluate(
+        shadowExistsIn("hu-voice-view", "hu-voice-conversation", "hu-empty-state"),
+      );
       expect(hasEmptyState).toBe(true);
     }).toPass({ timeout: POLL });
   });
@@ -354,8 +359,13 @@ test.describe("Wave 4: Reduced Motion", () => {
       };
     });
 
+    // getComputedStyle normalizes "0ms" → "0s" (browser canonicalization).
+    // Both are semantically zero; accept either form to avoid a false
+    // failure on what is genuinely a passing reduced-motion override.
     for (const [name, value] of Object.entries(durations)) {
-      expect(value, `--hu-duration-${name} should be 0ms`).toBe("0ms");
+      expect(value, `--hu-duration-${name} should resolve to zero (0ms or 0s)`).toMatch(
+        /^0(ms|s)$/,
+      );
     }
   });
 

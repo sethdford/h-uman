@@ -1,4 +1,27 @@
 /*
+ * DEPRECATED: XOR obfuscation, not encryption.
+ * See docs/plans/2026-05-17-vault-encryption-migration-plan.md
+ *
+ * This vault uses XOR/base64 obfuscation under the HUMAN_VAULT_KEY env
+ * variable — there is NO authenticated encryption and NO integrity
+ * protection. A reader of the on-disk file with knowledge of the key
+ * can decrypt every value; a writer can substitute any value without
+ * detection.
+ *
+ * The replacement primitive is hu_vault_aead_encrypt /
+ * hu_vault_aead_decrypt in src/security/vault_aead.c (vetted AEAD
+ * construction: libsodium XChaCha20-Poly1305 → OpenSSL AES-256-GCM →
+ * ChaCha20+HMAC-SHA256 EtM fallback). Migration to a wire format
+ * built on that primitive is Phase 2 of the migration plan; this file
+ * remains as the read path for legacy vaults until Phase 4 completes
+ * the migration.
+ *
+ * DO NOT add new callers of this module. New code that needs to
+ * encrypt a value must call hu_vault_aead_encrypt directly (Phase 1)
+ * or — once it ships — the hu_vault_v2_* API (Phase 2).
+ *
+ * Original docstring follows for posterity:
+ *
  * Secure secrets vault — key-value store with XOR/base64 obfuscation.
  * Uses HUMAN_VAULT_KEY env var for XOR key; falls back to base64 (obfuscation only).
  * HU_IS_TEST: in-memory storage only, no file I/O.
@@ -272,9 +295,8 @@ hu_vault_t *hu_vault_create(hu_allocator_t *alloc, const char *vault_path) {
         v->has_key = false;
         v->key_len = 0;
 #ifndef HU_IS_TEST
-        fprintf(
-            stderr,
-            "[vault] HUMAN_VAULT_KEY not set — secrets stored as base64 (obfuscation only)\n");
+        fprintf(stderr,
+                "[vault] HUMAN_VAULT_KEY not set — secrets stored as base64 (obfuscation only)\n");
 #endif
     }
 

@@ -112,16 +112,28 @@ test.describe("Design Tokens — Theme Parity", () => {
     "--hu-text",
   ];
 
+  // Read the token's computed value AFTER setting data-theme — combine
+  // both into a single page.evaluate with an rAF flush so the browser
+  // has actually applied the style invalidation before getComputedStyle
+  // reads. Without the rAF, the read can race the invalidation and
+  // return the previous theme's value (intermittent flake observed on
+  // PR #113 round 7 for --hu-surface-container-high specifically).
+  const readTokenForTheme = (theme: string, token: string) =>
+    `(async () => {
+      document.documentElement.setAttribute("data-theme", "${theme}");
+      // Force two rAFs to flush style + layout — first paints the
+      // attribute change, second guarantees getComputedStyle reads it.
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return getComputedStyle(document.documentElement).getPropertyValue("${token}").trim();
+    })()`;
+
   for (const token of criticalTokens) {
     test(`${token} differs between light and dark themes`, async ({ page }) => {
       await page.goto("/?demo");
       await page.waitForLoadState("domcontentloaded");
 
-      await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
-      const lightVal = await page.evaluate(getComputedToken(token));
-
-      await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
-      const darkVal = await page.evaluate(getComputedToken(token));
+      const lightVal = await page.evaluate(readTokenForTheme("light", token));
+      const darkVal = await page.evaluate(readTokenForTheme("dark", token));
 
       expect(lightVal).toBeTruthy();
       expect(darkVal).toBeTruthy();

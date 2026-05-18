@@ -230,7 +230,7 @@ static void simulation_b1_turn_1_initial_state(void) {
     HU_ASSERT_EQ((unsigned)m.interaction_count, 1U);
     HU_ASSERT_EQ((unsigned)m.style.sample_count, 1U);
     HU_ASSERT_TRUE(m.fact_count >= 1U);
-    const hu_heuristic_fact_t *name = sim_find_fact(&m, "my name is", "alex");
+    const hu_heuristic_fact_t *name = sim_find_fact(&m, "name is", "alex");
     HU_ASSERT_NOT_NULL(name);
     HU_ASSERT_TRUE(name->confidence >= 0.85f); /* 0.9 in pattern table */
 }
@@ -246,11 +246,11 @@ static void simulation_b1_turn_10_accumulating(void) {
     HU_ASSERT_EQ((unsigned)m.style.sample_count,
                  (unsigned)sim_user_turns_through(10));
 
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "my name is", "alex"));
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "i work at", "initech"));
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "i'm working on", NULL));
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "i love", "coffee"));
-    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "i hate", NULL));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "name is", "alex"));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "works at", "initech"));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "is working on", NULL));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "loves", "coffee"));
+    HU_ASSERT_NOT_NULL(sim_find_fact(&m, "hates", NULL));
     HU_ASSERT_TRUE(m.fact_count >= 4U);
 
     /* Topic accumulation kicked in (facts insert bumps topics). */
@@ -284,13 +284,13 @@ static void simulation_b1_turn_25_style_emerges(void) {
     HU_ASSERT_TRUE(m.topic_count >= 5U);
 
     /* Reinforcement: the predicate-key dedup path (fact_key_dup
-     * matches subject+predicate only) means T7's "i love" fact
+     * matches subject+predicate only) means T7's "loves" fact
      * gets visited again at T20 ("i love hiking, always have").
      * The dup path lifts the existing fact's confidence via EWMA;
      * since both observations had confidence 0.8, the lifted value
      * is still ~0.8 (no change). What we CAN check is that the
      * fact's last_seen_at moved forward past T7's wall clock. */
-    const hu_heuristic_fact_t *love = sim_find_fact(&m, "i love", NULL);
+    const hu_heuristic_fact_t *love = sim_find_fact(&m, "loves", NULL);
     HU_ASSERT_NOT_NULL(love);
     HU_ASSERT_TRUE(love->last_seen_at > SIM_T0 + 1LL * 86400LL);
 }
@@ -313,23 +313,23 @@ static void simulation_b1_turn_50_terminal_state(void) {
     HU_ASSERT_TRUE(m.topic_count <= (size_t)HU_PM_MAX_TOPICS);
 
     /* Identity fact survived 50 turns. */
-    const hu_heuristic_fact_t *name = sim_find_fact(&m, "my name is", "alex");
+    const hu_heuristic_fact_t *name = sim_find_fact(&m, "name is", "alex");
     HU_ASSERT_NOT_NULL(name);
 
     /* "i work at initech" fact still present (single observation;
-     * the day-14 turn uses "i'm working on" / different predicate,
+     * the day-14 turn uses "is working on" / different predicate,
      * which is treated as a separate prescriptive fact, not a
-     * refresh of "i work at"). */
-    const hu_heuristic_fact_t *work = sim_find_fact(&m, "i work at", "initech");
+     * refresh of "works at"). */
+    const hu_heuristic_fact_t *work = sim_find_fact(&m, "works at", "initech");
     HU_ASSERT_NOT_NULL(work);
 
-    /* The "i love" predicate, on the other hand, is hit multiple
+    /* The "loves" predicate, on the other hand, is hit multiple
      * times across the fixture (T7, T20, T30, T42). Each subsequent
      * hit dedups via subject+predicate match and refreshes
      * last_seen_at. Verify the refresh ran — last_seen_at on the
-     * single "i love" fact should be from the last love-mention,
+     * single "loves" fact should be from the last love-mention,
      * not the first. */
-    const hu_heuristic_fact_t *love = sim_find_fact(&m, "i love", NULL);
+    const hu_heuristic_fact_t *love = sim_find_fact(&m, "loves", NULL);
     HU_ASSERT_NOT_NULL(love);
     /* T42 is on day 13 ("i love coffee"). last_seen_at should be at
      * or after that timestamp. */
@@ -364,7 +364,7 @@ static void simulation_b2_fact_decay_halves_at_sim_end_plus_one_half_life(void) 
     hu_personal_model_init(&m);
     sim_run_through(&m, k_simulation_50turns_count);
 
-    const hu_heuristic_fact_t *love = sim_find_fact(&m, "i love", NULL);
+    const hu_heuristic_fact_t *love = sim_find_fact(&m, "loves", NULL);
     HU_ASSERT_NOT_NULL(love);
     HU_ASSERT_TRUE(love->last_seen_at > 0);
 

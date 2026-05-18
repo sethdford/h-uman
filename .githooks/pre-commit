@@ -86,11 +86,39 @@ if [ -n "$staged_ui_ts" ] && [ -x "ui/scripts/lint-raw-values.sh" ]; then
     fi
 fi
 
+# Sprint 11 / US-11.6 / D1: refuse to commit real YNTP holdout data into the
+# public repo. The synthetic-5 fixture is fine; the redacted sample-10 is
+# fine; the real 30-row holdout MUST stay in ~/.human/private/ on Seth's
+# machine only. See sprints/sprint-11/decisions.md D1.
+if [ -x "scripts/check_no_yntp_holdout_staged.sh" ]; then
+    bash scripts/check_no_yntp_holdout_staged.sh
+    if [ $? -ne 0 ]; then
+        echo "YNTP holdout guard failed (real chat-derived holdout must not land in repo)."
+        exit 1
+    fi
+fi
+
 # Check that staged test files reference at least one production symbol (Sprint 4 US-10)
 if [ -x "scripts/check-test-references.sh" ]; then
     if ! scripts/check-test-references.sh; then
         echo "Test-references check failed. See output above."
         echo "Add '// @covers-none' to suppress for intentional standalone tests."
+        exit 1
+    fi
+fi
+
+# Test/source gate-symmetry check — added after PR #113 hit the same
+# systemic failure 6+ times across 13 rounds. Fires when a staged change
+# touches CMakeLists.txt OR a tests/test_*.c file, since those are the
+# moments where a gate-mismatch can be introduced. See
+# .claude/rules/test-source-gate-symmetry.md for the failure pattern.
+staged_gate_inputs=$(git diff --cached --name-only --diff-filter=ACM -- \
+    'CMakeLists.txt' 'tests/test_*.c' 'tests/test_main.c')
+if [ -n "$staged_gate_inputs" ] && [ -x "scripts/check-test-source-gate-symmetry.sh" ]; then
+    if ! bash scripts/check-test-source-gate-symmetry.sh; then
+        echo ""
+        echo "Pre-commit blocked: test/source gate-symmetry violations."
+        echo "See .claude/rules/test-source-gate-symmetry.md for the fix pattern."
         exit 1
     fi
 fi

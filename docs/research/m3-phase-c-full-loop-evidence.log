@@ -1,0 +1,41 @@
+═══ Phase C full-loop live-fire ═══
+
+--- Step 1: produce outcomes via existing live-fire ---
+    outcomes JSONL: /Users/sethford/.human/training-data/m3-outcomes.jsonl (3 lines)
+
+--- Step 1c: settle (wait for SQLite WAL locks to clear) ---
+    daemon settled
+
+--- Step 1d: build a FIXTURE memory.db (deterministic, isolates from prod) ---
+  fixture db: /tmp/m3-fixture-memory.db (60 rows)
+
+--- Step 1b: produce BASELINE via training_loop.py --dry-run ---
+    baseline (dry-run): /Users/sethford/.human/training-data/adapters/baseline-empty.safetensors (     331 bytes)
+
+--- Step 2: REAL training via training_loop.py --source-jsonl (C3+C4) ---
+  Token totals: prompt=16394 completion=24
+  Model ids:    [1]
+  Adapter ids:  [0]
+  Guard mix:    {1: 3}
+  Resolved:     0 prompt hashes against m3-fixture-memory.db
+  Skipped:      3 unresolved (conversation rotated out of DB?)
+
+  Invoking real LoRA training (C4):
+    /Users/sethford/Projects/h-uman/build-release/human ml lora-persona --persona seth --from-history /tmp/m3-fixture-memory.db --from-history-max 32 --rank 4 --max-steps 16 --output /Users/sethford/.human/training-data/adapters/candidate-real.bin
+  Real LoRA adapter written: /Users/sethford/.human/training-data/adapters/candidate-real.bin (131116 bytes)
+    candidate (real): /Users/sethford/.human/training-data/adapters/candidate-real.bin (  131116 bytes)
+
+--- Step 3: A/B eval (C5) — should report PASS (real > empty) ---
+
+============================================================
+  M3 ADAPTER A/B EVAL (judge=metadata)
+============================================================
+  Baseline:  /Users/sethford/.human/training-data/adapters/baseline-empty.safetensors (safetensors, 331B)
+  Candidate: /Users/sethford/.human/training-data/adapters/candidate-real.bin (lora-bin, 131116B)
+  Verdict:   PASS
+  Reason:    candidate is real LoRA (131116B), baseline format=safetensors
+============================================================
+  Verdict JSON: /tmp/c-full-verdict.json
+
+═══ ✅ FULL C3+C4+C5 LOOP PROVEN END-TO-END ═══
+    Verdict: PASS  (/tmp/c-full-verdict.json)

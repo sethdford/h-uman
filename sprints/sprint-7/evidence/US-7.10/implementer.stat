@@ -1,0 +1,13 @@
+ CMakeLists.txt                   |   6 +
+ include/human/ml/cli.h           |  14 +
+ include/human/ml/rl_trainer.h    | 106 ++++++
+ src/main.c                       |   3 +
+ src/ml/CLAUDE.md                 |   2 +
+ src/ml/cli.c                     | 723 +++++++++++++++++++++++++--------------
+ src/ml/rl_trainer.c              |  36 ++
+ src/ml/rl_trainer_simpo.c        | 143 ++++++++
+ tests/fixtures/simpo_golden.json |  13 +
+ tests/test_main.c                |   4 +
+ tests/test_ml_cli_rl_train.c     | 135 ++++++++
+ tests/test_rl_trainer_simpo.c    | 193 +++++++++++
+ 12 files changed, 1128 insertions(+), 250 deletions(-)

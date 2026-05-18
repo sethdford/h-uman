@@ -21,7 +21,12 @@ COMP_FAIL=0
 if [ -d "ui/src/components" ]; then
   for f in ui/src/components/hu-*.ts; do
     [ -f "$f" ] || continue
-    if ! bash ui/scripts/check-component.sh "$f" >/dev/null 2>&1; then
+    # check-component.sh cd's into ui/ before opening $1, so the path
+    # must be relative to ui/, not to the repo root. Without stripping
+    # the `ui/` prefix every check silently failed with "File not found"
+    # — which was the root cause of 110/110 components being scored as
+    # failing (gate stuck at 64%).
+    if ! bash ui/scripts/check-component.sh "${f#ui/}" >/dev/null 2>&1; then
       COMP_FAIL=$((COMP_FAIL + 1))
     fi
   done
@@ -55,7 +60,18 @@ fi
 # --- Test Coverage ---
 echo "## Test Coverage"
 if [ -f "build/human_tests" ]; then
-  TEST_LINE=$(./build/human_tests 2>&1 | tail -1)
+  # `tail -1` was unreliable — the test binary emits stderr log lines
+  # AFTER the Results: line (e.g., "[agent_turn] consistency drift...")
+  # which then caused the regex to miss and report "Could not parse
+  # test results" (-10 from the quality score). Pin to the Results
+  # line directly via grep.
+  #
+  # `|| true` is REQUIRED: under `set -euo pipefail` (line 4), a grep
+  # with zero matches exits 1 which propagates and aborts the entire
+  # script — bypassing the graceful "Could not parse" fallback below
+  # (lines 82-83). Both Bugbot and CodeRabbit caught this regression
+  # against the previous `tail -1` which always exited 0.
+  TEST_LINE=$(./build/human_tests 2>&1 | grep -E '^--- Results:' | tail -1 || true)
   PASSED=$(echo "$TEST_LINE" | grep -oE '[0-9]+/[0-9]+ passed' | head -1 || echo "")
   if [ -n "$PASSED" ]; then
     COUNT=$(echo "$PASSED" | cut -d/ -f1)

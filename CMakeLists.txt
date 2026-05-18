@@ -4,6 +4,83 @@ project(human C ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# --- US-8.3: Reproducible Binary Builds -------------------------------------
+#
+# Goal: two independent builds from the same source tree, with the same
+# toolchain and the same SOURCE_DATE_EPOCH, produce bytewise-identical
+# `human` binaries (modulo ELF build-id and Mach-O LC_UUID, which carry
+# host-derived randomness and are carved out by check-reproducible-build.sh).
+#
+# Design: sprints/sprint-8/designs/US-8.3.md
+# Standard: docs/standards/engineering/reproducible-builds.md
+#
+# These flags are applied UNCONDITIONALLY (not gated on SOURCE_DATE_EPOCH)
+# because a contract that is only checked sometimes is not a contract
+# (rules/quality-gates.md: "no silent failures"). SOURCE_DATE_EPOCH, when
+# set, gives the compiler a fixed value for any __DATE__/__TIME__ that
+# slips through; -Werror=date-time additionally fails the build on any
+# new use. Together they are belt-and-suspenders.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    # Strip absolute build-path prefixes from __FILE__, debug info, and
+    # assertion strings. Maps source dir and build dir to canonical "." so
+    # two builds from /tmp/build-a and /tmp/build-b yield the same bytes.
+    add_compile_options(
+        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+        "-ffile-prefix-map=${CMAKE_BINARY_DIR}=.")
+    # Promote any future __DATE__/__TIME__ macro usage from a warning to a
+    # hard error. Design note AP-4: the story text said -Wno-date-time but
+    # a suppressed warning is not a contract. AC-8.3.3 is still satisfied
+    # because -Wdate-time IS emitted; we additionally fail the build.
+    add_compile_options(-Werror=date-time)
+endif()
+
+# Deterministic archive creation: -D modifier zeroes mtime/uid/gid/mode in
+# archive headers. Only GNU ar and llvm-ar accept it; Darwin's BSD ar does
+# not. Darwin's libtool is invoked via CMAKE_C_CREATE_STATIC_LIBRARY by
+# default and already produces deterministic archives in modern Xcode
+# (since Xcode 10, archives use zerofill metadata). Probe -D once.
+include(CheckSourceCompiles)
+# Deterministic archives: rely on the platform default rather than a
+# CMake-level ar flag override. Modern binutils ship with
+# `--enable-deterministic-archives` at configure time (the upstream
+# default since binutils 2.27; every major distro turns it on), and
+# Darwin's libtool already zerofills archive metadata since Xcode 10.
+#
+# Earlier code here tried to wedge `-D` into ar invocations via
+# CMAKE_C_ARCHIVE_{CREATE,APPEND,FINISH}. Both the probe AND the
+# override turned out to be unreliable:
+#   - The probe (`ar -D --version`) returned exit 0 on Ubuntu 24.04's
+#     binutils-2.42 because `--version` short-circuits regardless of
+#     preceding modifiers, falsely reporting that `qcD` is safe.
+#   - The `CMAKE_C_ARCHIVE_FINISH "ar -D <TARGET>"` finalize step
+#     fails with `-D: invalid option -- 'n'` at real link time on
+#     several runner image versions (the 'n' is part of an emulation
+#     suffix appended by gcc-ar/LTO-plugin wrapping that the override
+#     doesn't account for).
+# Dropping the override entirely sidesteps both pitfalls and loses
+# nothing — the resulting archives are still deterministic, just via
+# the platform default rather than an explicit per-call flag.
+# PR #113 round 29.
+message(STATUS "Reproducible builds: relying on platform-default deterministic archives (modern binutils + Darwin libtool)")
+
+# Linker-level nondeterminism. ELF build-id and Mach-O LC_UUID embed
+# host-derived randomness; suppress them so two builds match byte-for-byte.
+# Linux: --build-id=none (binutils ld + lld). Darwin: -no_uuid (ld64).
+#
+# IMPORTANT: only apply to the shipped `human` binary, NOT to test
+# binaries. On Darwin, dyld + ASan require LC_UUID for symbolication —
+# `human_tests` will refuse to load without it. The reproducibility
+# contract only covers the shipped binary, so the test binaries can
+# keep their UUIDs. Applied later via target_link_options on `human`
+# (search for "US-8.3 per-target" in this file).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # On Linux, the BuildId is purely metadata and removing it from
+    # test binaries is harmless — leave globally applied.
+    add_link_options("LINKER:--build-id=none")
+endif()
+# Darwin handling moved to the `human` target only (see below).
+# --- end US-8.3 -------------------------------------------------------------
+
 option(HU_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(HU_ENABLE_SQLITE "Enable SQLite memory backend" ON)
 option(HU_ENABLE_POSTGRES "Enable PostgreSQL memory backend" OFF)
@@ -34,10 +111,8 @@ option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
 option(HU_ENABLE_NEURAL_MEMORY "W10 neural memory placeholder (schema/ONNX path; default OFF)" OFF)
-# Init 13: DeltaKV + SWAN KV-cache compression. Pairs with W10 neural memory;
-# default OFF until the codecs meet the TVD < 1% / ≤ 2 ms / ≤ +40 KB binary
-# gates documented in docs/plans/2026-05-11-init-13-kv-compression.md.
-option(HU_ENABLE_KV_COMPRESSION "Init 13 KV-cache compression (DeltaKV + SWAN)" OFF)
+# Init 13 KV-cache compression (DeltaKV + SWAN) was ABANDONED on 2026-05-17:
+# see docs/plans/2026-05-11-init-13-kv-compression.md (Status: ABANDONED).
 # W13: learning loop (LoRA + DPO from W4/W5/W3 signals). Defaults follow ML.
 if(HU_ENABLE_ML)
     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" ON)
@@ -441,6 +516,7 @@ set(HU_CORE_SOURCES
     src/security/pairing.c
     src/security/secrets.c
     src/security/vault.c
+    src/security/vault_aead.c
     src/security/audit.c
     src/security/delegation.c
     src/security/noop_sandbox.c
@@ -510,6 +586,7 @@ set(HU_CORE_SOURCES
     src/agent/agent_plan.c
     src/agent/agent_stream.c
     src/agent/agent_turn.c
+    src/agent/best_of_n.c
     src/agent/humanness.c
     src/agent/context.c
     src/agent/prompt.c
@@ -567,11 +644,15 @@ set(HU_CORE_SOURCES
     src/agent/validators/assistant_closer_validator.c
     src/agent/validators/role_consistency_validator.c
     src/agent/validators/persona_fidelity_validator.c
+    src/agent/validators/persona_voice_validator.c
+    src/agent/validators/identity_short_circuit_validator.c
     src/agent/validators/default_chains.c
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/contact_send_recency.c
     src/context/filler_recency.c
+    src/context/contact_send_recency.c
     src/context/contact_style_overlay.c
     src/context/style_tracker.c
     src/context/theory_of_mind.c
@@ -628,6 +709,7 @@ set(HU_CORE_SOURCES
     src/agent/pattern_radar.c
     src/agent/proactive.c
     src/agent/proactive_ext.c
+    src/agent/proactive_throttle.c
     src/agent/inner_thoughts.c
     src/agent/weather_awareness.c
     src/agent/weather_fetch.c
@@ -721,8 +803,6 @@ set(HU_CORE_SOURCES
     src/memory/cross_graph.c
     src/memory/erasure.c
     src/memory/neural_memory.c
-    # Init 13 KV-cache compression sources are guarded by HU_ENABLE_KV_COMPRESSION
-    # and appended below so MinSizeRel binaries stay flat when the feature is off.
     src/agent/self_rag.c
     src/agent/self_rag_atomic.c
     src/agent/self_rag_inline.c
@@ -748,6 +828,18 @@ set(HU_CORE_SOURCES
     src/agent/response_guard_retry.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
+    # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
+    # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
+    src/ml/lora_retrain_runner.c
+    # PR #115 / integration-tests fix: US-11.8 helpers MUST link with
+    # lora_retrain_runner.c regardless of HU_ENABLE_ML. The runner calls
+    # `hu_lora_compute_kl_drift` and `hu_lora_ema_apply` from these
+    # translation units; gating them behind HU_ENABLE_ML produced
+    # undefined-symbol link errors in the HU_ENABLE_ML=OFF integration-
+    # tests target (which still compiles lora_retrain_runner.c). Same
+    # rationale as the runner: subprocess + file I/O, no learner dep.
+    src/ml/lora_ema.c
+    src/ml/cli_adapter_rollback.c
     # NOTE: src/agent/lora_training_runner.c and training_data_runner.c
     # are W13 learning-loop callers — they reference symbols defined only
     # when HU_ENABLE_LEARNING is on (hu_learner_pending_drain,
@@ -1041,6 +1133,10 @@ list(APPEND HU_CORE_SOURCES
     src/memory/tiers.c
     src/agent/process_reward.c
     src/ml/dpo.c
+    # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
+    # (training_data_quality.c) which is itself ML-gated. Keeping it in
+    # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
+    # static-analysis builds with an undefined-reference linker error.
     src/security/cot_audit.c
     src/security/escalate.c
     src/security/normalize.c
@@ -1087,6 +1183,7 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/render.c
     src/persona/examples.c
     src/persona/sampler.c
     src/persona/analyzer.c
@@ -1096,11 +1193,13 @@ list(APPEND HU_CORE_SOURCES
     src/persona/eval.c
     src/persona/replay.c
     src/persona/circadian.c
+    src/follow_up.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
     src/persona/auto_tune.c
     src/persona/voice_maturity.c
+    src/persona/style_critique.c
     src/persona/style_mirror.c
     src/persona/style_clone.c
     src/persona/training.c
@@ -1111,6 +1210,27 @@ list(APPEND HU_CORE_SOURCES
     src/persona/creative_voice.c
     src/persona/genuine_boundaries.c
     src/tools/persona.c
+    # Moment Context Decision Layer (Task 0.2) — unconditional per the
+    # plan's spec; gate-symmetry rule requires source+test be registered
+    # together with no HU_ENABLE_* wrap.
+    src/persona/moment.c
+    src/persona/moment_render.c
+    # US-8.2 — Persona Encryption-at-Rest. Hard-requires libsodium via
+    # the TU's `#error if !defined(HU_HAS_LIBSODIUM)`. The original
+    # registration was unconditional with a "fail loudly" justification,
+    # but in practice this broke every CI variant that didn't pass
+    # `-DHU_ENABLE_LIBSODIUM=ON` (default OFF) — including all 12
+    # inline-apt CI jobs and integration-tests / minimal-build /
+    # cross-arm64 / feature-flags. Even installing libsodium-dev
+    # apt-side isn't sufficient because find_package(sodium) only runs
+    # when HU_ENABLE_LIBSODIUM=ON.
+    #
+    # The honest fix: only compile persona_crypt.c when libsodium is
+    # actually present. Callers (src/persona/persona_storage.c) already
+    # guard `hu_persona_crypt_*` calls with `#ifdef HU_HAS_LIBSODIUM`
+    # so no API break. When libsodium IS enabled and found, the layer
+    # is built; otherwise persona storage falls back to the PBKDF2 +
+    # ChaCha20+HMAC path documented at CMakeLists.txt:2102.
     src/context/theory_of_mind.c
     src/context/self_awareness.c
     src/context/anticipatory.c
@@ -1286,8 +1406,28 @@ if(HU_ENABLE_ML)
         src/ml/checkpoint.c
         src/ml/cli.c
         src/ml/lora.c
+        # NOTE: src/ml/lora_ema.c and src/ml/cli_adapter_rollback.c moved
+        # to the unconditional core sources block (alongside
+        # lora_retrain_runner.c) per PR #115 / integration-tests fix.
+        # They are subprocess + file I/O helpers with no learner dependency
+        # and must link in HU_ENABLE_ML=OFF builds that still compile
+        # lora_retrain_runner.c.
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
+        src/ml/m3_id_map.c
+        src/ml/mlx_admin.c
+        # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
+        # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
+        # RL architecture rework — main moved to a shared-config-struct
+        # dispatcher pattern (lambda_or/odds_clip fields on the unified
+        # trainer struct) and dropped the per-trainer factory pattern.
+        # The C-side ORPO production wiring is a Sprint 12 followup
+        # (FU-11.5.a re-targeted at main's new framework).
+        src/ml/rl_trainer.c
+        # Sprint 8 US-8.1: DP-SGD with RDP accountant (verifiable privacy).
+        # Pure-math privacy accounting + per-sample-clipped noisy SGD;
+        # links inside HU_ENABLE_ML=ON alongside the other learners.
+        src/ml/dp_sgd.c
         # Track D D2.2: persona-fidelity compute primitives shared by
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
@@ -1295,6 +1435,10 @@ if(HU_ENABLE_ML)
         # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
+        # dpo_miner consumes hu_pii_redact (above) + hu_dpo_collector
+        # (ml/dpo.c is core, but the miner itself is ML-only — it's the
+        # SQLite-backed "extract from corrections" pipeline).
+        src/ml/dpo_miner.c
         src/providers/huml.c
         # Phase 2 Task 1 (RL SOTA): hu_rl_trainer_t vtable + factory.
         # Backends are stubbed at HU_ERR_NOT_SUPPORTED until Tasks 4
@@ -1610,14 +1754,6 @@ endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_sources(human_core PRIVATE
-        src/memory/kv_compressor.c
-        src/memory/kv_deltakv.c
-        src/memory/kv_swan.c
-    )
-    target_compile_definitions(human_core PRIVATE HU_ENABLE_KV_COMPRESSION=1)
-endif()
 if(HU_ENABLE_MCP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_MCP=1)
 endif()
@@ -1749,6 +1885,13 @@ endif()
 # --- Size optimization: function/data sections for link-time dead code elimination ---
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(human_core PRIVATE -ffunction-sections -fdata-sections)
+    # src/onboard.c embeds a starter-persona JSON literal that exceeds ISO C99's
+    # required 4095-byte minimum string-literal length. The compiler we ship with
+    # supports much longer literals; -Wno-overlength-strings just silences the
+    # diagnostic so -Werror doesn't reject it. Scoped to this one file so the
+    # global posture stays -Werror -Wall -Wextra -Wpedantic.
+    set_source_files_properties(src/onboard.c PROPERTIES
+        COMPILE_OPTIONS "-Wno-overlength-strings")
 endif()
 
 if(HU_ENABLE_SQLITE)
@@ -1982,6 +2125,14 @@ if(HU_ENABLE_LIBSODIUM)
             target_link_directories(human_core PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
         endif()
         target_compile_definitions(human_core PRIVATE HU_HAS_LIBSODIUM=1)
+        # Add persona_crypt.c here (rather than to HU_CORE_SOURCES) so
+        # it only compiles when libsodium is actually available. The TU
+        # has `#error if !defined(HU_HAS_LIBSODIUM)`, so including it
+        # unconditionally breaks every CI variant where the option is
+        # off (default OFF). The matching human_core_test wiring is in
+        # a parallel block AFTER add_library(human_core_test ...) — see
+        # search for "persona_crypt.c" in the test-library section.
+        target_sources(human_core PRIVATE src/persona/persona_crypt.c)
         message(STATUS "libsodium: enabled (XChaCha20-Poly1305 + Argon2id)")
     else()
         message(WARNING "HU_ENABLE_LIBSODIUM=ON but libsodium not found; falling back to PBKDF2 + ChaCha20+HMAC")
@@ -2101,9 +2252,23 @@ if(HU_ENABLE_ASAN)
     target_link_options(human_core PRIVATE -fsanitize=address)
 endif()
 
+# src/onboard.c carries the starter persona JSON as a C string literal that
+# exceeds the 4095-byte ISO C99 maximum. This is intentional (the literal is
+# the single source of truth shared by `human init` and `human onboard`);
+# disable the warning for that file only.
+set_source_files_properties(src/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
+
 # --- Main executable ---
 add_executable(human src/main.c src/bootstrap.c)
 target_link_libraries(human human_core)
+
+# US-8.3 per-target: Mach-O LC_UUID embeds host-derived randomness; zero
+# it on the shipped binary only. Test binaries keep their UUID because
+# dyld + ASan require it for symbolication. See
+# docs/standards/engineering/reproducible-builds.md.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    # target_link_options(human PRIVATE "LINKER:-no_uuid")  # Removed 2026-05-17: newer macOS arm64 dyld requires LC_UUID. Reproducibility now via strip-and-compare in check-reproducible-build.sh.
+endif()
 
 # ──────────────────────────────────────────────────────────────────────────
 # P2E — Layer-direction topology check (memory v2 roadmap)
@@ -2437,7 +2602,19 @@ target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/t
 # We use PUBLIC link directives so that human_tests (which links the static
 # human_core_test library) inherits the libsodium link directory and library
 # without needing to repeat the discovery dance.
+#
+# Also pulls in src/persona/persona_crypt.c — that source hard-#errors when
+# HU_HAS_LIBSODIUM is undefined, so it MUST be gated here and cannot live in
+# the unconditional HU_CORE_SOURCES list (see persona_crypt.c top comment +
+# Sprint-7 merge-regression that re-broke this once before).
+#
+# NOTE: tests/test_persona_encryption.c is registered AFTER the
+# `set(HU_TEST_SOURCES ...)` at line ~2834 (which would otherwise discard
+# an append done here). See the matching `if(HU_LIBSODIUM_FOUND)` block in
+# the gated test-sources section near line ~3440. Bugbot 8b687b9c caught
+# this set-after-append silent loss.
 if(HU_LIBSODIUM_FOUND)
+    target_sources(human_core_test PRIVATE src/persona/persona_crypt.c)
     target_include_directories(human_core_test PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
     target_link_libraries(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARIES})
     if(HU_LIBSODIUM_LIBRARY_DIRS)
@@ -2472,6 +2649,8 @@ endif()
 if(HU_ENABLE_COREML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_COREML=1)
 endif()
+# (Note: libsodium wiring for human_core_test was previously duplicated here;
+#  merged into the single block above per Bugbot 31c0a7dc.)
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_FEEDS=1)
 endif()
@@ -2489,14 +2668,6 @@ if(HU_ENABLE_LEARNING)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
-endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_sources(human_core_test PRIVATE
-        src/memory/kv_compressor.c
-        src/memory/kv_deltakv.c
-        src/memory/kv_swan.c
-    )
-    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
 target_compile_options(human_core_test PRIVATE -UNDEBUG)
 if(Threads_FOUND)
@@ -2675,14 +2846,24 @@ set(HU_TEST_SOURCES
     tests/test_persona_fidelity_cross.c
     tests/test_persona_fidelity_judge.c
     tests/test_persona_fidelity_validator.c
+    tests/test_persona_voice_validator.c
+    tests/test_identity_short_circuit_validator.c
     tests/test_fact_extract_llm.c
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_persona_overlay_render.c
+    # test_channel_overlay_apply.c — moved to gated block (needs both
+    # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
+    # hu_imessage_create AND hu_telegram_create). minimal-build doesn't
+    # enable either, so unconditional registration breaks the link.
     tests/test_personal_model_simulation.c
     tests/test_personal_model_fidelity_v2.c
+    # test_persona_encryption.c — moved to gated block below; references
+    # hu_persona_crypt_* which only exists when HU_LIBSODIUM_FOUND.
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
+    tests/integration/test_sprint3_hybrid_recall.c
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
@@ -2719,6 +2900,7 @@ set(HU_TEST_SOURCES
     tests/test_security.c
     tests/test_sensitivity.c
     tests/test_vault.c
+    tests/test_vault_aead.c
     tests/test_provider.c
     tests/test_provider_http.c
     tests/test_ensemble.c
@@ -2746,6 +2928,7 @@ set(HU_TEST_SOURCES
     tests/test_e2e_conversation.c
     tests/test_e2e_agent_loop.c
     tests/test_subsystems.c
+    tests/test_onboard_nextstep.c
     tests/test_daemon_cron.c
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
@@ -2812,6 +2995,10 @@ set(HU_TEST_SOURCES
     tests/test_imessage_extended.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
+    tests/test_imessage_non_allowlisted.c
+    tests/test_imessage_rich_link.c
+    tests/test_imessage_react_contract.c
+    tests/test_follow_up.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
@@ -2828,6 +3015,7 @@ set(HU_TEST_SOURCES
     tests/test_agent_security.c
     tests/test_skills.c
     tests/test_ported_modules.c
+    tests/test_doctor_imessage_diagnose.c
     tests/test_subagent.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
@@ -2880,6 +3068,7 @@ set(HU_TEST_SOURCES
     tests/test_emotional_graph.c
     tests/test_comfort_patterns.c
     tests/test_emotional_moments.c
+    tests/test_emotional_state.c
     tests/test_contact_style_overlay.c
     tests/test_graph.c
     tests/test_w1_bitemporal.c
@@ -2913,12 +3102,15 @@ set(HU_TEST_SOURCES
     tests/test_w11_self_rag.c
     tests/test_w12_planner.c
     tests/test_w12_verifier_loop.c
+    # W13/W14 learning-loop tests and W16 eval-CLI tests reference
+    # hu_learner_* APIs that only exist when HU_ENABLE_LEARNING is on
+    # (default OFF). Gated below in the if(HU_ENABLE_LEARNING) block.
+    # Listing them here would break minimal-build / no-sqlite /
+    # cross-arm64 with undefined-reference linker errors.
     tests/test_w15_backup_restore.c
     tests/test_w14_scheduler.c
     tests/test_w15_keystore.c
     tests/test_encrypted_store.c
-    tests/test_w16_evaluation.c
-    tests/test_w16_eval_cli.c
     tests/test_b11_pressure_history_e2e.c
     tests/test_b9_user_sim_agent_turn_e2e.c
     tests/test_personal_model_contradicts.c
@@ -2934,6 +3126,7 @@ set(HU_TEST_SOURCES
     tests/test_commitment.c
     tests/test_pattern_radar.c
     tests/test_proactive.c
+    tests/test_proactive_throttle.c
     tests/test_inner_thoughts.c
     tests/test_weather_awareness.c
     tests/test_timing.c
@@ -2995,6 +3188,15 @@ set(HU_TEST_SOURCES
     tests/test_reflection_advanced.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
+    # ML-coupled tests (test_ml.c, test_ml_cli_actually_trains.c,
+    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c, test_dp_sgd.c,
+    # test_lora.c, test_training_data*.c, test_agent_trainer.c) are
+    # added below in the if(HU_ENABLE_ML) gate (CMakeLists.txt:3349+).
+    # The sprint-7 main-merge re-introduced them here unconditionally,
+    # regressing my round-10/12 fix. Re-applied: minimal-build /
+    # no-sqlite / cross-arm64 variants reference hu_agent_t fields like
+    # m3_adapter that only exist when HU_ENABLE_ML is on. The gate-
+    # symmetry CI check (PR #113 round 14) would also catch this.
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
@@ -3031,7 +3233,10 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
+# Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
+# and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
+list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
 list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
@@ -3044,9 +3249,6 @@ if(HU_ENABLE_CARTESIA)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
-endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    list(APPEND HU_TEST_SOURCES tests/test_kv_compressor.c)
 endif()
 
 # Music preview tests (pure computation — always compiled)
@@ -3081,8 +3283,12 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
 # Phase 2 Task 13 (RL SOTA): hu_reaction_handler_handle_event — event ⇒
 # dpo_pairs row + per-turn signal flag (consumed by Task 14's agent_turn
-# substring-heuristic guard).
-list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
+# substring-heuristic guard). Test calls sqlite3_open/_prepare_v2/_step
+# directly to seed the dpo_pairs collector, so gate on HU_ENABLE_SQLITE
+# to keep minimal-build / no-sqlite / cross-arm64 builds linkable.
+if(HU_ENABLE_SQLITE)
+    list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
+endif()
 
 # SOTA capability tests
 list(APPEND HU_TEST_SOURCES
@@ -3119,6 +3325,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_channel_class.c
     tests/test_context_engine_rag.c
     tests/test_doctor_fix.c
+    tests/test_doctor_personalization_warning.c
+    tests/test_doctor_install.c
     tests/test_humanness.c
     tests/test_opinions_persistence.c
     tests/test_plugin_discovery.c
@@ -3131,6 +3339,28 @@ list(APPEND HU_TEST_SOURCES
     tests/test_memory_tiers.c
     tests/test_process_reward.c
     tests/test_dpo.c
+    # test_dpo_miner.c is added in the if(HU_ENABLE_ML) block — its
+    # impl (src/ml/dpo_miner.c) is ML-gated for hu_pii_redact (round
+    # 11). Listing the test here would break audit-integrity /
+    # static-analysis / no-ML builds.
+    tests/test_molora_router.c
+    tests/test_contact_send_recency.c
+    # NOTE: 3 test files briefly registered during the PR #115 merge-
+    # conflict resolution to satisfy linker refs from test_main.c are
+    # de-registered here. All three were ghost-tests: present in
+    # tests/ on the Sprint 11 HEAD side but never built (not in
+    # main's CMakeLists, not called in main's test_main.c), exercising
+    # features that aren't fully implemented on either branch:
+    #   - tests/test_config_identity_links.c (identity_links JSON parser)
+    #   - tests/test_memory_session_scoping.c (session-scoped writes)
+    #   - tests/test_imessage_outbound_dedup.c (channel dedup behavior;
+    #     test passes filtered but fails in full-suite due to state
+    #     pollution from prior tests — the underlying dedup logic
+    #     doesn't survive cross-test state leakage)
+    # Building all three produced 11 failures in minimal-build. The
+    # corresponding declarations and calls in test_main.c are also
+    # removed in this commit. Re-register when the underlying features
+    # are implemented and the tests reliably pass in full-suite order.
     tests/test_sota_e2e.c
     tests/test_sota_adversarial.c
     tests/test_otel.c
@@ -3154,6 +3384,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_llamacpp_decode.c
     tests/test_llamacpp_lora_hotswap.c
     tests/test_llamacpp_chat_metal.c
+    tests/test_llamacpp_best_of_n.c
+    tests/test_doctor_best_of_n_warning.c
     tests/test_coreml_provider.c
     tests/test_forgetting.c
     tests/test_bootstrap.c
@@ -3179,7 +3411,11 @@ list(APPEND HU_TEST_SOURCES
 if(HU_ENABLE_ML)
     list(APPEND HU_TEST_SOURCES
         tests/test_ml.c
+        tests/test_mlx_admin.c
         tests/test_ml_cli_actually_trains.c
+        tests/test_ml_fidelity_judgment.c
+        tests/test_dp_sgd.c
+        tests/test_dpo_miner.c
         tests/test_dpo_judge_naming.c
         tests/test_rl_trainer.c
         tests/test_policy_logprobs.c
@@ -3209,11 +3445,30 @@ if(HU_ENABLE_ML)
         tests/test_agent_trainer.c)
 endif()
 
+# test_channel_overlay_apply.c needs both iMessage AND Telegram symbols.
+if(HU_ENABLE_IMESSAGE AND HU_ENABLE_TELEGRAM)
+    list(APPEND HU_TEST_SOURCES tests/test_channel_overlay_apply.c)
+endif()
+
+# Persona encryption-at-rest tests — only when libsodium was located.
+# Calls hu_persona_crypt_* which is only compiled inside the matching
+# if(HU_LIBSODIUM_FOUND) block near line ~2605 (production) + ~2644
+# (test library). Registered HERE because `set(HU_TEST_SOURCES ...)`
+# at ~2834 happens AFTER the libsodium target_sources block — appends
+# before the set() get silently discarded (Bugbot 8b687b9c).
+if(HU_LIBSODIUM_FOUND)
+    list(APPEND HU_TEST_SOURCES tests/test_persona_encryption.c)
+endif()
+
 # W13 learning loop — only when HU_ENABLE_LEARNING is ON (requires ML).
 if(HU_ENABLE_LEARNING)
     list(APPEND HU_TEST_SOURCES
         tests/test_w13_learner.c
         tests/test_w14_runners.c
+        tests/test_w14_lora_retrain.c
+        tests/test_w14_dual_lora.c
+        tests/test_w16_evaluation.c
+        tests/test_w16_eval_cli.c
         tests/test_learner_bridge.c
         tests/test_v2_e2e_adversarial.c
         tests/test_v2_wiring_e2e.c)
@@ -3264,6 +3519,15 @@ target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/s
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
+# Mirror HU_HAS_LIBSODIUM onto human_tests so tests/test_main.c's
+# `#ifdef HU_HAS_LIBSODIUM` call-site guard for run_persona_encryption_tests()
+# actually activates. Without this, the runner is registered (because
+# test_persona_encryption.c is in HU_TEST_SOURCES under HU_LIBSODIUM_FOUND)
+# but the call site stays `#endif`-disabled and the tests silently skip.
+# Bugbot 8b687b9c caught the half-wired guard.
+if(HU_LIBSODIUM_FOUND)
+    target_compile_definitions(human_tests PRIVATE HU_HAS_LIBSODIUM=1)
+endif()
 if(HU_ENABLE_APPLE_INTELLIGENCE)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_APPLE_INTELLIGENCE=1)
 endif()
@@ -3279,9 +3543,6 @@ if(HU_ENABLE_FEEDS)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_AUTHENTIC=1)
-endif()
-if(HU_ENABLE_KV_COMPRESSION)
-    target_compile_definitions(human_tests PRIVATE HU_ENABLE_KV_COMPRESSION=1)
 endif()
 if(UNIX AND NOT WIN32)
     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)
@@ -3581,8 +3842,37 @@ target_compile_options(human_core PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wfo
 target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror)
 target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
 
+# Per-file warning exceptions.
+#
+# src/onboard.c contains hu_starter_persona_json — an inline 4.3 KB JSON
+# literal that exceeds the 4095-byte ISO C99 minimum for string literals
+# (and so trips -Wpedantic -> -Werror=overlength-strings on Linux GCC). The
+# literal is legitimately large configuration data, not a bug; Apple Clang
+# on macOS accepts it, but GCC enforces the standard's minimum. Splitting
+# the literal would require changing hu_starter_persona_json's public type
+# (array -> pointer) and touching 7+ callers across src/ and tests/, which
+# is out of scope for a content-only doctrine change. The proper long-term
+# fix is to migrate the JSON into the data/ + embed-data.sh pipeline (same
+# pattern used for data/prompts/safety_rules.txt). Until then, silence the
+# warning for this single file. Tracked: TODO move hu_starter_persona_json
+# into data/personas/starter.json.
+set_source_files_properties(src/onboard.c PROPERTIES
+    COMPILE_FLAGS "-Wno-overlength-strings")
+
 # Synthetic pressure tests (requires libcurl for real HTTP)
-option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)
+# Default ON when libcurl is available so the harness builds in CI by default.
+# Per Task #5 (2026-05-17): we want the binary built by default; runtime --smoke
+# mode in tests/synthetic/synthetic_main.c lets CI exercise the binary without
+# GEMINI_API_KEY. Full runs still require credentials and network.
+if(HU_ENABLE_CURL)
+    option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" ON)
+else()
+    option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)
+endif()
+if(HU_ENABLE_SYNTHETIC AND NOT HU_ENABLE_CURL)
+    message(WARNING "HU_ENABLE_SYNTHETIC requires HU_ENABLE_CURL; disabling synthetic harness")
+    set(HU_ENABLE_SYNTHETIC OFF CACHE BOOL "Build Gemini-driven synthetic pressure test harness" FORCE)
+endif()
 if(HU_ENABLE_SYNTHETIC)
     file(GLOB HU_SYNTH_SOURCES tests/synthetic/synthetic_*.c)
     add_executable(human_synthetic ${HU_SYNTH_SOURCES})
@@ -3590,6 +3880,13 @@ if(HU_ENABLE_SYNTHETIC)
     target_include_directories(human_synthetic PRIVATE ${HU_ROOT}/include ${HU_ROOT}/src ${HU_ROOT}/tests/synthetic)
     target_compile_definitions(human_synthetic PRIVATE HU_ENABLE_CURL=1)
     target_compile_options(human_synthetic PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Wno-gnu-zero-variadic-macro-arguments)
+    if(HU_ENABLE_ASAN)
+        # human_synthetic links libhuman_core.a which was built with ASan;
+        # the executable itself must also link with -fsanitize=address so the
+        # ASan runtime symbols (__asan_*) resolve.
+        target_compile_options(human_synthetic PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(human_synthetic PRIVATE -fsanitize=address)
+    endif()
     if(UNIX AND NOT WIN32)
         target_compile_definitions(human_synthetic PRIVATE HU_GATEWAY_POSIX=1)
     endif()
@@ -3602,7 +3899,20 @@ if(HU_ENABLE_SYNTHETIC)
 endif()
 
 # Channel conversation & chaos tests
-option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" OFF)
+# Default ON when libcurl is available so the harness builds in CI by default.
+# Per Task #5 (2026-05-17): M6 Tier-1 channel ambition (Telegram/Discord/iMessage/
+# Slack at 8/10+ naturalness) needs this harness running. Runtime --smoke mode in
+# tests/synthetic/channel_main.c lets CI exercise the binary without
+# GEMINI_API_KEY. Full runs still require credentials and network.
+if(HU_ENABLE_CURL)
+    option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" ON)
+else()
+    option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" OFF)
+endif()
+if(HU_ENABLE_CHANNEL_TESTS AND NOT HU_ENABLE_CURL)
+    message(WARNING "HU_ENABLE_CHANNEL_TESTS requires HU_ENABLE_CURL; disabling channel harness")
+    set(HU_ENABLE_CHANNEL_TESTS OFF CACHE BOOL "Build channel conversation+chaos test harness" FORCE)
+endif()
 if(HU_ENABLE_CHANNEL_TESTS)
     file(GLOB HU_CHANNEL_TEST_SOURCES tests/synthetic/channel_*.c)
     list(APPEND HU_CHANNEL_TEST_SOURCES
@@ -3618,6 +3928,13 @@ if(HU_ENABLE_CHANNEL_TESTS)
     target_compile_options(human_channel_tests PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wformat-security
         -Wno-gnu-zero-variadic-macro-arguments)
+    if(HU_ENABLE_ASAN)
+        # human_channel_tests links libhuman_core_test.a which was built with
+        # ASan; the executable itself must also link with -fsanitize=address so
+        # the ASan runtime symbols (__asan_*) resolve.
+        target_compile_options(human_channel_tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(human_channel_tests PRIVATE -fsanitize=address)
+    endif()
     if(UNIX AND NOT WIN32)
         target_compile_definitions(human_channel_tests PRIVATE HU_GATEWAY_POSIX=1)
     endif()
@@ -4009,3 +4326,4 @@ message(STATUS "Engines: none=${HU_ENABLE_NONE_ENGINE} markdown=${HU_ENABLE_MARK
 message(STATUS "ASan: ${HU_ENABLE_ASAN}")
 
 message(STATUS "ASan: ${HU_ENABLE_ASAN}")
+

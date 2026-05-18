@@ -1,0 +1,5 @@
+ scripts/dpo_early_stop.py              | 387 +++++++++++++++++++++++++++++++++
+ scripts/finetune-gemma.py              |  80 ++++++-
+ tests/fixtures/sprint8_dpo80_log.jsonl |  16 ++
+ tests/test_dpo_early_stop.py           | 367 +++++++++++++++++++++++++++++++
+ 4 files changed, 847 insertions(+), 3 deletions(-)

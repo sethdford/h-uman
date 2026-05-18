@@ -1,0 +1,7 @@
+{
+  "verdict": "FAIL",
+  "delta": -0.023,
+  "baseline_score": 0.612,
+  "candidate_score": 0.589,
+  "reason": "candidate_score_below_baseline"
+}

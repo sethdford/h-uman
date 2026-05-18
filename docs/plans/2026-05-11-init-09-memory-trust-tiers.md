@@ -1,7 +1,7 @@
 ---
 title: "Init-09: Memory Poisoning Defenses — Trust Tiers + Provenance"
 created: 2026-05-11
-status: design
+status: complete
 initiative: "SOTA-2026 #09"
 priority: HIGHEST — precondition for shipping #04 and #05 to users
 related:
@@ -14,6 +14,7 @@ related:
   - ../../src/agent/agent_turn.c
   - ../../src/feeds/processor.c
   - ../../docs/standards/security/threat-model.md
+last_audit: 2026-05-17
 ---
 
 # Init-09: Memory Poisoning Defenses — Trust Tiers + Provenance

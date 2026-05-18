@@ -422,6 +422,27 @@ bool hu_conversation_should_leave_on_read(const char *msg, size_t msg_len,
                                           const hu_channel_history_entry_t *entries, size_t count,
                                           uint32_t seed, uint8_t threshold_pct);
 
+/* Leave-on-read state-machine decision (F46): combines the per-contact active-period
+ * status, group-chat policy, and the heuristic classifier's verdict into a single
+ * decision the daemon can act on.
+ *
+ * - Groups never leave-on-read (we always respond), regardless of other flags.
+ * - An existing active period takes precedence over a new helper-triggered period;
+ *   we do not extend a running silence by re-rolling.
+ *
+ * Pure predicate over three booleans so the policy can be unit-tested without
+ * driving the daemon's ring-buffer state. Per .claude/rules/security-predicate-extraction.md,
+ * inputs are facts (not pointers to mutable state) and output is a small enum. */
+typedef enum {
+    HU_LOR_RESPOND = 0,       /* respond normally; do not skip */
+    HU_LOR_ALREADY_IN_PERIOD, /* skip; an active leave-on-read window is still running */
+    HU_LOR_TRIGGER_NEW,       /* skip and start a new leave-on-read period */
+} hu_leave_on_read_decision_t;
+
+hu_leave_on_read_decision_t hu_leave_on_read_decide(bool is_group_chat,
+                                                    bool already_in_active_period,
+                                                    bool helper_says_should_leave);
+
 /* Natural conversation drop-off: returns skip probability 0-100.
  * Caller rolls (seed % 100) < prob to decide SKIP. Used when action is FULL/BRIEF. */
 int hu_conversation_classify_dropoff(const char *message, size_t message_len,
@@ -834,6 +855,27 @@ hu_error_t hu_conversation_gif_cal_load(const char *path, size_t path_len);
  * Designed for the "double-text" pattern where humans send multiple short messages. */
 size_t hu_conversation_split_into_texts(const char *response, size_t resp_len, size_t max_chunk,
                                         char chunks[][512], size_t max_chunks);
+
+/* Channel-class-aware splitter for "burst" cadence.
+ *
+ * Real human texting on iMessage/SMS bursts short multi-sentence replies into
+ * separate bubbles ("sure that sounds great. what time? might be late.") even
+ * when the total length is well under 120 chars. Other channels (Slack,
+ * Discord) tolerate longer single bubbles, so the conservative >120-char
+ * gate of hu_conversation_split_into_texts is preserved there.
+ *
+ * Returns 0 if the text should NOT be split (caller sends as a single bubble).
+ * Returns 1 if the text is best as a single bubble after consideration.
+ * Returns 2-max_chunks if multi-bubble cadence is appropriate.
+ *
+ * Refuses to split when the text contains explicit newlines — those are
+ * intentional LLM formatting we should not second-guess.
+ *
+ * Pure function; safe to test in isolation.
+ *
+ * Pinned by tests in test_conversation.c (split_for_cadence_*). */
+size_t hu_conversation_split_for_cadence(const char *text, size_t text_len, hu_channel_class_t cls,
+                                         char chunks[][512], size_t max_chunks);
 
 /* Schedule a message for future delivery. deliver_at_ms is absolute epoch millis.
  * Call hu_conversation_flush_scheduled periodically to get due messages.

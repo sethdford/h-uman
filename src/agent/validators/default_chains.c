@@ -39,6 +39,17 @@ hu_error_t hu_validators_build_default_outbound_chain(hu_allocator_t *alloc,
     ADD(hu_validator_assistant_closer_create(alloc, &v));
     ADD(hu_validator_persona_narrator_create(alloc, persona_name, persona_name_len, &v));
     ADD(hu_validator_role_consistency_create(alloc, &v));
+    /* 2026-05-17 round 2: identity_short_circuit runs BEFORE persona_voice so
+     * the rewrite happens first. If a response contains "I am an AI" or
+     * similar disclosure, this validator REWRITES it to a deflection phrase
+     * (no retry needed — the user never sees a twin-break). persona_voice
+     * then receives the clean rewritten text and PASSes. If the disclosure
+     * was off-pattern, persona_voice still REJECTs as a backstop. */
+    ADD(hu_validator_identity_short_circuit_create(alloc, &v));
+    /* persona_voice runs AFTER strippers AND the short-circuit rewriter as
+     * a final safety net. REJECTs on hard AI-identity disclosure that the
+     * short-circuit pattern list didn't match. */
+    ADD(hu_validator_persona_voice_create(alloc, &v));
     ADD(hu_validator_persona_fidelity_create(alloc, &v));
 
 #undef ADD

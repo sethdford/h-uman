@@ -1,6 +1,7 @@
 /* Tests for ML subsystem: BPE tokenizer, dataloader, prepare, experiment. */
 
 #include "human/agent.h"
+#include "human/agent/scheduler_status_json.h"
 #include "human/agent/speculative.h"
 #include "human/context/anticipatory.h"
 #include "human/core/allocator.h"
@@ -12,22 +13,22 @@
 #include "human/ml/experiment.h"
 #include "human/ml/experiment_store.h"
 #include "human/ml/lora.h"
-#include "human/ml/ml.h"
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/ml/m3_id_map.h"
+#include "human/ml/ml.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
 #include "human/ml/prepare.h"
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
 #include "human/providers/huml.h"
-#include "human/agent/scheduler_status_json.h"
 #include "test_framework.h"
 
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1482,9 +1483,8 @@ static void test_ml_cli_status_scheduler_file_e2e(void) {
     mkdir_p(humandir);
     char path[600];
     snprintf(path, sizeof(path), "%s/scheduler.status", humandir);
-    write_text_file(path,
-                     "{\"updated_epoch\":2000,\"jobs_pending\":11,\"on_ac_power\":false,"
-                     "\"battery_pct\":77,\"jobs_completed_today\":4}");
+    write_text_file(path, "{\"updated_epoch\":2000,\"jobs_pending\":11,\"on_ac_power\":false,"
+                          "\"battery_pct\":77,\"jobs_completed_today\":4}");
 
     HU_ASSERT_EQ(setenv("HOME", td, 1), 0);
 
@@ -1498,8 +1498,7 @@ static void test_ml_cli_status_scheduler_file_e2e(void) {
     unsigned long long jp = 0, jc = 0;
     long long bat = 0, ue = 0;
     char ac[16] = {0};
-    HU_ASSERT_EQ(
-        hu_scheduler_status_parse_json(body, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(body, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
     HU_ASSERT_EQ(jp, 11ULL);
     HU_ASSERT_EQ(jc, 4ULL);
     HU_ASSERT_EQ(bat, 77LL);
@@ -3293,8 +3292,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
 
     /* Build a non-trivial adapter (B != 0 so delta is nonzero), persist,
      * destroy in-process, load from disk, attach, verify forward differs. */
-    hu_lora_config_t lora_cfg = {.rank = 2, .alpha = 4.0f, .dropout = 0.0f,
-                                 .targets = HU_LORA_TARGET_QV};
+    hu_lora_config_t lora_cfg = {
+        .rank = 2, .alpha = 4.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_QV};
     hu_lora_adapter_t *src = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &lora_cfg, 8, 8, 1, &src), HU_OK);
     float A_vals[16];
@@ -3325,8 +3324,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
     HU_ASSERT_EQ(n_layers, (size_t)1);
 
     int32_t ids[4] = {0, 1, 2, 3};
-    hu_ml_tensor_t input = {.data = ids, .shape = {1, 4, 0, 0}, .ndim = 2,
-                            .dtype = HU_ML_DTYPE_I32, .size_bytes = 16};
+    hu_ml_tensor_t input = {
+        .data = ids, .shape = {1, 4, 0, 0}, .ndim = 2, .dtype = HU_ML_DTYPE_I32, .size_bytes = 16};
 
     hu_ml_tensor_t out_base = {0};
     HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &out_base), HU_OK);
@@ -3366,8 +3365,8 @@ static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
  * tolerate a NULL adapter without crashing. */
 static void test_lora_get_dims_round_trip(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_lora_config_t cfg = {.rank = 4, .alpha = 8.0f, .dropout = 0.0f,
-                            .targets = HU_LORA_TARGET_QV};
+    hu_lora_config_t cfg = {
+        .rank = 4, .alpha = 8.0f, .dropout = 0.0f, .targets = HU_LORA_TARGET_QV};
     hu_lora_adapter_t *a = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, /*in_dim=*/16, /*out_dim=*/24,
                                 /*n_layers=*/3, &a),
@@ -4606,7 +4605,7 @@ static void test_huml_provider_load_unload_adapter(void) {
     lora_cfg.targets = HU_LORA_TARGET_QV;
     hu_lora_adapter_t *adapter = NULL;
     HU_ASSERT_EQ(hu_lora_create(&alloc, &lora_cfg, /*in_dim=*/8, /*out_dim=*/8,
-                                 /*n_layers=*/1, &adapter),
+                                /*n_layers=*/1, &adapter),
                  HU_OK);
 
     char path[] = "/tmp/hu_w13_apply_adapter_XXXXXX";
@@ -4621,8 +4620,7 @@ static void test_huml_provider_load_unload_adapter(void) {
 
     /* Load it under id "test_persona". */
     HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "test_persona", 12),
-        HU_OK);
+        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "test_persona", 12), HU_OK);
     const char *id = hu_provider_active_adapter(&provider);
     HU_ASSERT_NOT_NULL(id);
     HU_ASSERT_STR_EQ(id, "test_persona");
@@ -4636,10 +4634,10 @@ static void test_huml_provider_load_unload_adapter(void) {
     HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
 
     /* Re-loading should work; replacing an incumbent should also work. */
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "first", 5), HU_OK);
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "second", 6), HU_OK);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "first", 5),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "second", 6),
+                 HU_OK);
     HU_ASSERT_STR_EQ(hu_provider_active_adapter(&provider), "second");
 
     provider.vtable->deinit(provider.ctx, &alloc);
@@ -4652,8 +4650,7 @@ static void test_provider_adapter_helpers_not_supported(void) {
     /* Build a minimal provider with the triple NULL. We can't easily
      * do that without a non-test provider, so exercise the helper
      * NULL-check paths directly. */
-    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, "p", 1, "id", 2),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, "p", 1, "id", 2), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_provider_unload_adapter(NULL, "id", 2), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT(hu_provider_active_adapter(NULL) == NULL);
 
@@ -4662,8 +4659,7 @@ static void test_provider_adapter_helpers_not_supported(void) {
     hu_provider_vtable_t empty_vtable = {0};
     hu_provider_t empty = {.ctx = (void *)1, .vtable = &empty_vtable};
     hu_allocator_t alloc = hu_system_allocator();
-    HU_ASSERT_EQ(
-        hu_provider_load_adapter(&empty, &alloc, "p", 1, "id", 2), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(hu_provider_load_adapter(&empty, &alloc, "p", 1, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_EQ(hu_provider_unload_adapter(&empty, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT(hu_provider_active_adapter(&empty) == NULL);
 }
@@ -4725,11 +4721,13 @@ static void test_m3_frontier_adapter_null_args(void) {
 static void test_m3_frontier_adapter_bad_file(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_m3_frontier_adapter_t *a = NULL;
-    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_nonexistent_xyz_abc.bin", 40, &a),
-                 HU_ERR_IO);
+    HU_ASSERT_EQ(
+        hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_nonexistent_xyz_abc.bin", 40, &a),
+        HU_ERR_IO);
     HU_ASSERT_NULL(a);
     write_text_file("/tmp/hu_m3_bad_magic.txt", "not-a-stub");
-    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_bad_magic.txt", 26, &a), HU_ERR_IO);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_bad_magic.txt", 26, &a),
+                 HU_ERR_IO);
     HU_ASSERT_NULL(a);
 }
 
@@ -4755,6 +4753,14 @@ static void test_m3_frontier_adapter_fixture_roundtrip(void) {
     hu_m3_frontier_adapter_close(&alloc, a);
 }
 
+#ifdef HU_ENABLE_ML
+/* These two tests reach into hu_agent_t.m3_adapter, which is only a struct
+ * member when HU_ENABLE_ML is defined (see include/human/agent.h:389). Build
+ * configurations without ML (e.g. the Linux CI minimal/feature-flag matrix)
+ * compile hu_agent_t without that field, so guarding the tests at compile
+ * time keeps the test binary buildable in those configurations. The
+ * non-struct-field m3 helper tests below stay unconditional because they
+ * only call the no-op stubs declared in include/human/ml/m3_frontier_adapter.h. */
 static void test_agent_m3_adapter_attach_bad_path(void) {
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
@@ -4792,6 +4798,7 @@ static void test_agent_m3_adapter_attach_fixture_replace(void) {
     hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
     agent.m3_adapter = NULL;
 }
+#endif /* HU_ENABLE_ML */
 
 /* ─── Track D D1.3 — rollback flag ──────────────────────────────────── */
 
@@ -4840,12 +4847,16 @@ static void test_m3_adapter_should_disable_env_nonzero_force(void) {
     unsetenv("HUMAN_M3_ADAPTER_DISABLE");
 }
 
+#ifdef HU_ENABLE_ML
 /* When the rollback flag is active, the chat-loop hook should remain
  * a no-op even if a stray `agent->m3_adapter` had somehow been left
  * attached (defensive): the no-op-when-NULL contract on
  * `hu_agent_m3_on_provider_success` is what turns this into a true
  * compile-time-eliminable rollback. This test pins that NULL
- * adapter → no-op contract. */
+ * adapter → no-op contract.
+ *
+ * Guarded on HU_ENABLE_ML alongside the other two m3_adapter-struct-field
+ * tests above — without ML, hu_agent_t.m3_adapter does not exist. */
 static void test_m3_on_provider_success_noop_when_unattached(void) {
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
@@ -4855,6 +4866,808 @@ static void test_m3_on_provider_success_noop_when_unattached(void) {
      * for every provider success. */
     hu_agent_m3_on_provider_success(NULL);
     HU_ASSERT_NULL(agent.m3_adapter);
+}
+#endif /* HU_ENABLE_ML */
+
+/* ── M3 first-slice probe-counter tests (2026-05-17) ─────────────────────
+ *
+ * These tests are the verifier-provable evidence for the first slice of
+ * the M3 frontier-model bridge. Before this slice,
+ * `hu_m3_frontier_adapter_noop_infer` was literally `(void)adapter;
+ * return HU_OK;` — so the 11 chat-path call sites in agent_turn.c +
+ * agent_stream.c (via `hu_agent_m3_on_provider_success`) were
+ * undetectable from the test layer. A regression that dropped one or
+ * all of them would still see green.
+ *
+ * The slice converts the noop into a `probe_infer` that increments an
+ * internal counter on the adapter, and exposes the counter via
+ * `hu_m3_frontier_adapter_probe_count`. Now a test can:
+ *   1. Open a fixture adapter.
+ *   2. Attach it to an agent.
+ *   3. Call `hu_agent_m3_on_provider_success` (the exact entry point
+ *      every chat-path site uses).
+ *   4. Read the probe count back and assert it advanced.
+ *
+ * That proves the seam end-to-end: agent → on_provider_success → noop
+ * compat shim → probe_infer → counter mutates → counter observable.
+ *
+ * Not a model. No tensors. No learning. The MLX/llama.cpp tensor work
+ * is planned in docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md.
+ * What this DOES prove is that when that work lands and slots into
+ * `probe_infer`, the call sites are already firing. */
+
+static void test_m3_probe_count_starts_at_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_probe_zero_start.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_m3_frontier_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &a), HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+    /* A freshly-opened adapter has not been probed. */
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 0);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_probe_infer_increments_counter(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_probe_increments.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_m3_frontier_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &a), HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+
+    /* The direct probe API. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 1);
+
+    /* The backwards-compat shim — `noop_infer` — must route to the
+     * same counter so the existing 11 chat-path call sites become
+     * observable without re-editing them. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 2);
+
+    /* And repeats keep advancing — no saturation, no debounce. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(a), HU_OK);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(a), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(a), 4);
+
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_probe_count_null_safe(void) {
+    /* NULL adapter — the probe APIs are on the hot chat path; they must
+     * be safe to call when nothing is attached. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_probe_infer(NULL), HU_OK);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(NULL), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
+}
+
+static void test_m3_agent_on_provider_success_advances_probe_count(void) {
+    /* This is the headline first-slice assertion. It pins the
+     * end-to-end seam:
+     *
+     *   agent has m3 adapter attached
+     *     -> hu_agent_m3_on_provider_success(agent)
+     *       -> hu_m3_frontier_adapter_noop_infer(adapter)  [legacy name]
+     *         -> hu_m3_frontier_adapter_probe_infer(adapter)
+     *           -> adapter->probe_count++
+     *
+     * Before this slice, the bottom three steps collapsed to a single
+     * `(void)return;` and the test below was not expressible — there
+     * was no observable for it. Now if a refactor drops the call site
+     * the assertion goes red. */
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_agent_provider_success.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_agent_m3_adapter_attach(&agent, path);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 0);
+
+    /* The exact call the 11 chat-path sites use. */
+    hu_agent_m3_on_provider_success(&agent);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 1);
+
+    hu_agent_m3_on_provider_success(&agent);
+    hu_agent_m3_on_provider_success(&agent);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(agent.m3_adapter), 3);
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    /* When ML is disabled, the hook is a no-op and there is no adapter
+     * to read a counter from. The test passes by construction — this
+     * is the documented stub return. */
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_probe_count(NULL), 0);
+#endif
+}
+
+/* Pin the producer-side token-count estimate. The B3 v1 outcome driver's
+ * selection policy requires pt > 0 && ct > 0 to drop degenerate turns; if
+ * the agent path silently stops setting these (regressing to "0 =
+ * unknown"), the live daemon's outcomes stop flowing through to LoRA
+ * training. This test catches that regression by recording a known
+ * prompt+response and confirming the byte-length-over-4 estimate fires. */
+static void test_m3_record_chat_outcome_populates_token_estimates(void) {
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_record_outcome_tokens.bin";
+    /* Inline fixture creation (matches the probe-count test above):
+     * open_fixture_adapter() is defined further down in this file and
+     * isn't forward-visible from here. The blob is 8-byte magic + LE
+     * uint32 schema_version=1. */
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &agent.m3_adapter),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+
+    /* 40-byte prompt → expect 10 token-estimate; 80-byte response → 20. */
+    const char *prompt = "Hello there friend, how are you today??";
+    const char *response =
+        "Doing fine thanks. How is your week going so far? Anything new to share with me?";
+    HU_ASSERT_EQ(strlen(prompt), 39u); /* sanity: writer-side check */
+    HU_ASSERT_EQ(strlen(response), 80u);
+
+    /* Pass NULL usage to verify the bytes/4 fallback path. */
+    hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response),
+                                    250 /*latency_ms*/, "contact-7", strlen("contact-7"),
+                                    HU_M3_GUARD_PASS, 1 /*stream*/, NULL);
+
+    hu_m3_inference_outcome_t buf[8];
+    size_t got = 0;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(agent.m3_adapter, buf, 8, &got), HU_OK);
+    HU_ASSERT_EQ(got, 1u);
+    /* 39/4 = 9, 80/4 = 20 — exact integer division (the estimate is the
+     * point; the value just needs to be positive and proportional). */
+    HU_ASSERT_EQ((int)buf[0].prompt_tokens, 9);
+    HU_ASSERT_EQ((int)buf[0].completion_tokens, 20);
+    /* And confirm the OTHER fields the policy depends on still flow. */
+    HU_ASSERT_EQ((int)buf[0].guard_decision, (int)HU_M3_GUARD_PASS);
+    HU_ASSERT_EQ((int)buf[0].turn_kind, 1);
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    /* ML disabled — the producer hook is a no-op. The contract that
+     * token estimates are positive only holds when ML is compiled in. */
+    hu_agent_m3_record_chat_outcome(NULL, NULL, 0, NULL, 0, 0, NULL, 0, HU_M3_GUARD_UNKNOWN, 0,
+                                    NULL);
+#endif
+}
+
+/* Pin Phase C1: when a usage block is passed with positive values, the
+ * outcome records those values verbatim — not the bytes/4 estimate.
+ * Catches the regression where someone reverts to the unconditional
+ * estimate or accidentally swaps the prefer-real / fallback branches.
+ *
+ * Mixed case (one field zero, one positive) verifies the PER-FIELD
+ * fallback: providers that report only one of the two should still get
+ * the estimate for the missing field, not have both fall back. */
+static void test_m3_record_chat_outcome_prefers_usage_block_when_present(void) {
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_record_outcome_usage.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &agent.m3_adapter),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+
+    const char *prompt = "ten bytes!";              /* 10 bytes → bytes/4 estimate = 2 */
+    const char *response = "twenty byte response!"; /* 21 bytes → estimate = 5 */
+
+    /* Case 1: both fields present → record verbatim, ignore the estimate. */
+    hu_token_usage_t usage_full = {
+        .prompt_tokens = 99, .completion_tokens = 42, .total_tokens = 141};
+    hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response), 100,
+                                    NULL, 0, HU_M3_GUARD_PASS, 1, &usage_full);
+
+    /* Case 2: only completion_tokens reported → completion uses it,
+     * prompt falls back to estimate (10/4 = 2). */
+    hu_token_usage_t usage_partial = {
+        .prompt_tokens = 0, .completion_tokens = 17, .total_tokens = 17};
+    hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response), 100,
+                                    NULL, 0, HU_M3_GUARD_PASS, 1, &usage_partial);
+
+    /* Case 3: all-zero usage struct → both fall back to estimate. */
+    hu_token_usage_t usage_zero = {0};
+    hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response), 100,
+                                    NULL, 0, HU_M3_GUARD_PASS, 1, &usage_zero);
+
+    hu_m3_inference_outcome_t buf[8];
+    size_t got = 0;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(agent.m3_adapter, buf, 8, &got), HU_OK);
+    HU_ASSERT_EQ(got, 3u);
+
+    /* Case 1: real counts win. */
+    HU_ASSERT_EQ((int)buf[0].prompt_tokens, 99);
+    HU_ASSERT_EQ((int)buf[0].completion_tokens, 42);
+    /* Case 2: partial — completion real, prompt fallback. */
+    HU_ASSERT_EQ((int)buf[1].prompt_tokens, 2); /* 10/4 estimate */
+    HU_ASSERT_EQ((int)buf[1].completion_tokens, 17);
+    /* Case 3: all-zero → both estimates. */
+    HU_ASSERT_EQ((int)buf[2].prompt_tokens, 2);     /* 10/4 */
+    HU_ASSERT_EQ((int)buf[2].completion_tokens, 5); /* 21/4 */
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    hu_agent_m3_record_chat_outcome(NULL, NULL, 0, NULL, 0, 0, NULL, 0, HU_M3_GUARD_UNKNOWN, 0,
+                                    NULL);
+#endif
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase C2 (2026-05-18): m3 id map — string→uint16 outcome clustering
+ *
+ * Tests the lookup/insert/persistence contracts directly on the
+ * hu_m3_id_map_t module (separate from the agent wiring, which is
+ * covered by the live-fire script). Lets a regression in the map
+ * itself (e.g. lookup non-idempotency, save not atomic, load
+ * misparses) fail loudly before reaching production.
+ * ───────────────────────────────────────────────────────────────── */
+
+static void test_m3_id_map_lookup_is_idempotent_for_same_name(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, NULL, &map), HU_OK);
+    HU_ASSERT_NOT_NULL(map);
+
+    /* First lookup assigns id 1. */
+    uint16_t id1 = hu_m3_id_map_lookup_or_insert_model(map, "gemma-4-31b", 11);
+    HU_ASSERT_EQ((int)id1, 1);
+    /* Same name → same id, no new assignment. */
+    uint16_t id1_again = hu_m3_id_map_lookup_or_insert_model(map, "gemma-4-31b", 11);
+    HU_ASSERT_EQ((int)id1_again, 1);
+    /* Different name → next id (2). */
+    uint16_t id2 = hu_m3_id_map_lookup_or_insert_model(map, "stub-mlx", 8);
+    HU_ASSERT_EQ((int)id2, 2);
+    /* And confirm only 2 distinct entries. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_model_count(map), 2);
+
+    hu_m3_id_map_destroy(map);
+}
+
+static void test_m3_id_map_model_and_adapter_use_separate_spaces(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, NULL, &map), HU_OK);
+
+    uint16_t mid = hu_m3_id_map_lookup_or_insert_model(map, "gemma-4-31b", 11);
+    uint16_t aid = hu_m3_id_map_lookup_or_insert_adapter(map, "/path/to/lora", 13);
+    /* Both spaces start at 1 — a model_id of 1 and adapter_id of 1 are
+     * unrelated. The separateness is the contract; the equality of the
+     * starting id is fine (and is what we're confirming here). */
+    HU_ASSERT_EQ((int)mid, 1);
+    HU_ASSERT_EQ((int)aid, 1);
+    HU_ASSERT_EQ((int)hu_m3_id_map_model_count(map), 1);
+    HU_ASSERT_EQ((int)hu_m3_id_map_adapter_count(map), 1);
+
+    hu_m3_id_map_destroy(map);
+}
+
+static void test_m3_id_map_null_or_empty_inputs_return_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, NULL, &map), HU_OK);
+
+    /* NULL map → 0. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_model(NULL, "x", 1), 0);
+    /* NULL name → 0. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_model(map, NULL, 5), 0);
+    /* Zero-length → 0. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_model(map, "x", 0), 0);
+    /* And after all that, the map is still empty. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_model_count(map), 0);
+
+    hu_m3_id_map_destroy(map);
+}
+
+static void test_m3_id_map_persists_ids_across_reload(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_id_map_reload_test.json";
+    (void)unlink(path);
+
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, path, &map), HU_OK);
+    uint16_t model_id = hu_m3_id_map_lookup_or_insert_model(map, "gemma-4-31b", 11);
+    uint16_t adapter_id = hu_m3_id_map_lookup_or_insert_adapter(map, "/path/lora-v3", 13);
+    HU_ASSERT_TRUE(hu_m3_id_map_is_dirty(map));
+    HU_ASSERT_EQ(hu_m3_id_map_save(map), HU_OK);
+    HU_ASSERT_FALSE(hu_m3_id_map_is_dirty(map));
+    hu_m3_id_map_destroy(map);
+
+    /* Reopen — same ids must come back. This is the contract that
+     * makes outcome clustering meaningful: training analytics on
+     * model_id=7 today must mean the same model as model_id=7
+     * tomorrow. */
+    hu_m3_id_map_t *map2 = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, path, &map2), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_model(map2, "gemma-4-31b", 11), (int)model_id);
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_adapter(map2, "/path/lora-v3", 13),
+                 (int)adapter_id);
+    /* And a new model gets the NEXT id after the loaded ones — proves
+     * the next_id counter survived round-trip too. */
+    uint16_t new_model_id = hu_m3_id_map_lookup_or_insert_model(map2, "stub-mlx", 8);
+    HU_ASSERT_EQ((int)new_model_id, (int)model_id + 1);
+    hu_m3_id_map_destroy(map2);
+
+    (void)unlink(path);
+}
+
+static void test_m3_id_map_save_is_noop_when_clean(void) {
+    /* Pinning the dirty-flag contract: save() on a never-modified map
+     * doesn't write anything to disk. Important because the agent's
+     * record-outcome path calls save() opportunistically; if save()
+     * wrote on every call, we'd have a write per outcome. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_id_map_clean_save_test.json";
+    (void)unlink(path);
+
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, path, &map), HU_OK);
+    HU_ASSERT_FALSE(hu_m3_id_map_is_dirty(map));
+    HU_ASSERT_EQ(hu_m3_id_map_save(map), HU_OK);
+    /* File should NOT exist — save was a no-op. */
+    FILE *fp = fopen(path, "rb");
+    HU_ASSERT_TRUE(fp == NULL);
+
+    hu_m3_id_map_destroy(map);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B1 redefined (2026-05-17 round 2): inference outcome capture
+ *
+ * Tests for the ring-buffer outcome capture API. Tests are phrased to
+ * pin behavior, not the implementation:
+ *   - hash determinism + null/empty handling
+ *   - record_outcome null-safety
+ *   - ring buffer wrap semantics (oldest dropped, snapshot ordering)
+ *   - struct size pinned by static_assert (compile time), reasserted
+ *     in test (runtime) so a struct grow won't silently slip past CI.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* Tiny helper: open a fixture adapter at /tmp. */
+static hu_m3_frontier_adapter_t *open_fixture_adapter(hu_allocator_t *alloc, const char *path) {
+    FILE *fp = fopen(path, "wb");
+    if (!fp)
+        return NULL;
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    if (fwrite(blob, 1, sizeof(blob), fp) != sizeof(blob)) {
+        fclose(fp);
+        return NULL;
+    }
+    fclose(fp);
+    hu_m3_frontier_adapter_t *a = NULL;
+    if (hu_m3_frontier_adapter_try_open(alloc, path, strlen(path), &a) != HU_OK)
+        return NULL;
+    return a;
+}
+
+static void test_m3_outcome_record_size_is_pinned(void) {
+    /* The static_assert in src/ml/m3_frontier_adapter.c is the compile-
+     * time guard; this test makes the contract explicit and provides a
+     * runtime check that future field additions can't silently bypass
+     * via header-only patches. */
+    HU_ASSERT_EQ((unsigned long)sizeof(hu_m3_inference_outcome_t),
+                 (unsigned long)HU_M3_OUTCOME_RECORD_BYTES);
+}
+
+static void test_m3_outcome_hash_bytes_deterministic(void) {
+    const char *s = "hello, world";
+    uint64_t a = hu_m3_outcome_hash_bytes(s, strlen(s));
+    uint64_t b = hu_m3_outcome_hash_bytes(s, strlen(s));
+    HU_ASSERT_EQ((unsigned long)a, (unsigned long)b);
+    /* Different input → different hash (FNV-1a doesn't collide for
+     * short, distinct ASCII inputs). */
+    const char *t = "hello, world!";
+    uint64_t c = hu_m3_outcome_hash_bytes(t, strlen(t));
+    HU_ASSERT_TRUE(a != c);
+}
+
+static void test_m3_outcome_hash_bytes_null_returns_zero(void) {
+    /* 0 is the "no value" sentinel for the outcome struct (e.g. no
+     * contact context). NULL/empty input MUST map to 0 — without this,
+     * the training loop couldn't distinguish "no contact" from
+     * "contact 0x0000…00". */
+    HU_ASSERT_EQ((unsigned long)hu_m3_outcome_hash_bytes(NULL, 0), 0ULL);
+    HU_ASSERT_EQ((unsigned long)hu_m3_outcome_hash_bytes("", 0), 0ULL);
+    HU_ASSERT_EQ((unsigned long)hu_m3_outcome_hash_bytes("anything", 0), 0ULL);
+}
+
+static void test_m3_outcome_hash_bytes_never_returns_zero_for_real_input(void) {
+    /* Implementation bumps FNV-1a's rare zero result to 1 so callers
+     * can distinguish "hash is zero" from "no hash". This test pins
+     * that contract; if a future hash swap drops the bump, the
+     * sentinel semantics break and this test catches it. */
+    /* We cannot easily find a real input that hashes to zero under
+     * FNV-1a (the space is too large to brute-force in a unit test),
+     * so we settle for the strong invariant: every non-empty input
+     * produces a non-zero hash. */
+    const char *cases[] = {"a", "x", "seth", "an awkward prompt", "0"};
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        uint64_t h = hu_m3_outcome_hash_bytes(cases[i], strlen(cases[i]));
+        HU_ASSERT_TRUE(h != 0ULL);
+    }
+}
+
+static void test_m3_record_outcome_null_adapter_is_noop(void) {
+    /* NULL adapter is the "M3 disabled" path — callers don't gate. */
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(NULL, &outcome), HU_OK);
+    /* No state to verify on NULL adapter — just that we returned OK. */
+}
+
+static void test_m3_record_outcome_null_record_is_invalid(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_rec_null.bin");
+    HU_ASSERT_NOT_NULL(a);
+    /* NULL outcome with a valid adapter is a programming error. */
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), 0ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_recorded_starts_at_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_rec_zero.bin");
+    HU_ASSERT_NOT_NULL(a);
+    HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), 0ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_recorded_advances_per_record(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_rec_advance.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    outcome.timestamp_unix_ms = 1700000000000ULL;
+    outcome.latency_ms = 42;
+    outcome.prompt_hash = 0x1234567890abcdefULL;
+    outcome.guard_decision = HU_M3_GUARD_PASS;
+
+    for (int i = 1; i <= 5; i++) {
+        HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, &outcome), HU_OK);
+        HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), (unsigned long)i);
+    }
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_snapshot_outcomes_empty_returns_zero_count(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_snap_empty.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t buf[8];
+    size_t count = 999;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(a, buf, 8, &count), HU_OK);
+    HU_ASSERT_EQ((unsigned long)count, 0ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_snapshot_outcomes_returns_oldest_first(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_snap_order.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    /* Use timestamp as a per-record marker; latency is the index for
+     * easier debug if the test fails. */
+    for (int i = 0; i < 5; i++) {
+        outcome.timestamp_unix_ms = 1700000000000ULL + (uint64_t)i;
+        outcome.latency_ms = (uint64_t)i;
+        HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, &outcome), HU_OK);
+    }
+
+    hu_m3_inference_outcome_t buf[10];
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(a, buf, 10, &count), HU_OK);
+    HU_ASSERT_EQ((unsigned long)count, 5ULL);
+    /* Oldest-first: buf[0] is the i=0 record, buf[4] is i=4. */
+    for (int i = 0; i < 5; i++) {
+        HU_ASSERT_EQ((unsigned long)buf[i].latency_ms, (unsigned long)i);
+    }
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_snapshot_outcomes_drops_oldest_when_wrapped(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_snap_wrap.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    /* Write CAPACITY + 100 outcomes — the first 100 should be
+     * overwritten (dropped); the snapshot should return the most-recent
+     * CAPACITY records in oldest-first order starting from index 100. */
+    const size_t over = HU_M3_OUTCOMES_RING_CAPACITY + 100u;
+    for (size_t i = 0; i < over; i++) {
+        outcome.latency_ms = (uint64_t)i;
+        HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, &outcome), HU_OK);
+    }
+    HU_ASSERT_EQ((unsigned long)hu_m3_frontier_adapter_outcomes_recorded(a), (unsigned long)over);
+
+    /* Snapshot the full ring. */
+    hu_m3_inference_outcome_t *buf = (hu_m3_inference_outcome_t *)alloc.alloc(
+        alloc.ctx, sizeof(*buf) * HU_M3_OUTCOMES_RING_CAPACITY);
+    HU_ASSERT_NOT_NULL(buf);
+    size_t count = 0;
+    HU_ASSERT_EQ(
+        hu_m3_frontier_adapter_snapshot_outcomes(a, buf, HU_M3_OUTCOMES_RING_CAPACITY, &count),
+        HU_OK);
+    HU_ASSERT_EQ((unsigned long)count, (unsigned long)HU_M3_OUTCOMES_RING_CAPACITY);
+    /* buf[0] is the oldest LIVE record. Since we wrote over+100 and the
+     * ring holds CAPACITY, the oldest live latency value is 100. */
+    HU_ASSERT_EQ((unsigned long)buf[0].latency_ms, 100ULL);
+    HU_ASSERT_EQ((unsigned long)buf[HU_M3_OUTCOMES_RING_CAPACITY - 1].latency_ms,
+                 (unsigned long)(over - 1));
+    alloc.free(alloc.ctx, buf, sizeof(*buf) * HU_M3_OUTCOMES_RING_CAPACITY);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_snapshot_outcomes_max_count_caps_output(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = open_fixture_adapter(&alloc, "/tmp/hu_m3_snap_cap.bin");
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+    for (int i = 0; i < 10; i++) {
+        outcome.latency_ms = (uint64_t)i;
+        HU_ASSERT_EQ(hu_m3_frontier_adapter_record_outcome(a, &outcome), HU_OK);
+    }
+
+    /* Ask for only the 3 most recent — should return i=7,8,9. */
+    hu_m3_inference_outcome_t buf[3];
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(a, buf, 3, &count), HU_OK);
+    HU_ASSERT_EQ((unsigned long)count, 3ULL);
+    HU_ASSERT_EQ((unsigned long)buf[0].latency_ms, 7ULL);
+    HU_ASSERT_EQ((unsigned long)buf[1].latency_ms, 8ULL);
+    HU_ASSERT_EQ((unsigned long)buf[2].latency_ms, 9ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Phase B3 v0 — JSONL serializer tests
+ *
+ * The serializer produces newline-separated JSON objects, one per
+ * outcome. Filters drop outcomes; an empty match returns out_len=0
+ * with HU_OK (not an error). NULL adapter is also "no outcomes" not
+ * an error — the gateway endpoint relies on that to stay clean even
+ * before an agent attaches its adapter at boot.
+ * ───────────────────────────────────────────────────────────────── */
+
+static hu_m3_frontier_adapter_t *open_outcomes_fixture(hu_allocator_t *alloc, const char *path,
+                                                       size_t n_outcomes, uint8_t turn_kind) {
+    FILE *fp = fopen(path, "wb");
+    if (!fp)
+        return NULL;
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    if (fwrite(blob, 1, sizeof(blob), fp) != sizeof(blob)) {
+        fclose(fp);
+        return NULL;
+    }
+    fclose(fp);
+    hu_m3_frontier_adapter_t *a = NULL;
+    if (hu_m3_frontier_adapter_try_open(alloc, path, strlen(path), &a) != HU_OK)
+        return NULL;
+    hu_m3_inference_outcome_t o;
+    memset(&o, 0, sizeof(o));
+    o.turn_kind = turn_kind;
+    for (size_t i = 0; i < n_outcomes; i++) {
+        o.timestamp_unix_ms = 1700000000000ULL + (uint64_t)i;
+        o.latency_ms = (uint64_t)i;
+        hu_m3_frontier_adapter_record_outcome(a, &o);
+    }
+    return a;
+}
+
+static void test_m3_outcomes_to_jsonl_null_alloc_returns_invalid(void) {
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(NULL, NULL, NULL, &buf, &len, &cap),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_m3_outcomes_to_jsonl_null_adapter_returns_empty(void) {
+    /* The gateway endpoint relies on this contract — no adapter at
+     * daemon boot means /v1/m3/outcomes returns an empty body, not
+     * an error. */
+    hu_allocator_t alloc = hu_system_allocator();
+    char *buf = NULL;
+    size_t len = 999, cap = 999;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, NULL, NULL, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_TRUE(buf == NULL);
+    HU_ASSERT_EQ((unsigned long)len, 0ULL);
+}
+
+static void test_m3_outcomes_to_jsonl_emits_one_line_per_outcome(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_3.bin", 3, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, NULL, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_NOT_NULL(buf);
+    HU_ASSERT_TRUE(len > 0);
+    /* 3 outcomes → 2 newlines (no trailing newline). */
+    size_t newlines = 0;
+    for (size_t i = 0; i < len; i++)
+        if (buf[i] == '\n')
+            newlines++;
+    HU_ASSERT_EQ((unsigned long)newlines, 2ULL);
+    /* Each line starts with '{' and ends with '}'. */
+    HU_ASSERT_EQ(buf[0], '{');
+    HU_ASSERT_EQ(buf[len - 1], '}');
+    /* The turn_kind=1 field should appear in every line. */
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"k\":1"));
+    alloc.free(alloc.ctx, buf, cap);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_to_jsonl_filters_by_turn_kind(void) {
+    /* Mix turn_kind 1 and 2 in the same ring; filter on turn_kind=2
+     * should drop the kind=1 lines. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_mix.bin", 2, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+    hu_m3_inference_outcome_t o;
+    memset(&o, 0, sizeof(o));
+    o.turn_kind = 2;
+    o.timestamp_unix_ms = 1700000099000ULL;
+    o.latency_ms = 99;
+    hu_m3_frontier_adapter_record_outcome(a, &o);
+
+    hu_m3_outcomes_filter_t filter = {0};
+    filter.turn_kind = 2;
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, &filter, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_NOT_NULL(buf);
+    /* Exactly one line (the kind=2 record). */
+    HU_ASSERT_NOT_NULL(strstr(buf, "\"k\":2"));
+    HU_ASSERT_TRUE(strstr(buf, "\"k\":1") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"l\":99") != NULL);
+    alloc.free(alloc.ctx, buf, cap);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_to_jsonl_filters_by_since_ms(void) {
+    /* 3 outcomes with timestamps 1700000000000, ...000001, ...000002.
+     * Filter since_ms = 1700000000001 should drop the first. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_since.bin", 3, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_outcomes_filter_t filter = {0};
+    filter.since_ms = 1700000000001ULL;
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, &filter, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_NOT_NULL(buf);
+    /* 2 lines remain → 1 newline. */
+    size_t newlines = 0;
+    for (size_t i = 0; i < len; i++)
+        if (buf[i] == '\n')
+            newlines++;
+    HU_ASSERT_EQ((unsigned long)newlines, 1ULL);
+    /* The dropped outcome had latency=0; the surviving two have 1 and 2. */
+    HU_ASSERT_TRUE(strstr(buf, "\"l\":1") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"l\":2") != NULL);
+    alloc.free(alloc.ctx, buf, cap);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_to_jsonl_max_count_caps_output(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_cap.bin", 10, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_outcomes_filter_t filter = {0};
+    filter.max_count = 3;
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, &filter, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_NOT_NULL(buf);
+    /* 3 lines → 2 newlines. */
+    size_t newlines = 0;
+    for (size_t i = 0; i < len; i++)
+        if (buf[i] == '\n')
+            newlines++;
+    HU_ASSERT_EQ((unsigned long)newlines, 2ULL);
+    alloc.free(alloc.ctx, buf, cap);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
+static void test_m3_outcomes_to_jsonl_no_match_returns_empty(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a =
+        open_outcomes_fixture(&alloc, "/tmp/hu_m3_jsonl_empty.bin", 3, /*turn_kind=*/1);
+    HU_ASSERT_NOT_NULL(a);
+
+    hu_m3_outcomes_filter_t filter = {0};
+    filter.turn_kind = 3; /* nothing in the ring has turn_kind=3 */
+    char *buf = NULL;
+    size_t len = 999, cap = 999;
+    HU_ASSERT_EQ(hu_m3_outcomes_to_jsonl(&alloc, a, &filter, &buf, &len, &cap), HU_OK);
+    HU_ASSERT_TRUE(buf == NULL);
+    HU_ASSERT_EQ((unsigned long)len, 0ULL);
+    hu_m3_frontier_adapter_close(&alloc, a);
 }
 
 /* ── Track D D2.1 — honest-gap caveat snapshot tests ──────────────────
@@ -5037,8 +5850,8 @@ static void test_lora_runner_respects_max_examples(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/responses.json", tmpdir);
 
-    const char *argv[] = {"lora-runner",      "--persona",      "runner_max",
-                          "--output",         output,           "--max-examples", "1"};
+    const char *argv[] = {"lora-runner", "--persona",      "runner_max", "--output",
+                          output,        "--max-examples", "1"};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_lora_runner(&alloc, 7, argv);
     unsetenv("HU_PERSONA_DIR");
@@ -5077,8 +5890,8 @@ static void test_lora_persona_export_jsonl_writes_alpaca_shape(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/train.jsonl", tmpdir);
 
-    const char *argv[] = {"lora-persona", "--persona",       "export_jsonl_test",
-                          "--export-jsonl", output};
+    const char *argv[] = {"lora-persona", "--persona", "export_jsonl_test", "--export-jsonl",
+                          output};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_lora_persona(&alloc, 5, argv);
     unsetenv("HU_PERSONA_DIR");
@@ -5182,9 +5995,8 @@ static void test_fidelity_status_includes_ab_when_files_provided(void) {
     char output[1024];
     snprintf(output, sizeof(output), "%s/status.json", tmpdir);
 
-    const char *argv[] = {"fidelity-status", "--persona", "fidelity_ab",
-                          "--before",        before_path, "--after",
-                          after_path,        "--output",  output};
+    const char *argv[] = {"fidelity-status", "--persona", "fidelity_ab", "--before", before_path,
+                          "--after",         after_path,  "--output",    output};
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_ml_cli_fidelity_status(&alloc, 9, argv);
     unsetenv("HU_PERSONA_DIR");
@@ -5372,8 +6184,11 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_frontier_adapter_null_args);
     HU_RUN_TEST(test_m3_frontier_adapter_bad_file);
     HU_RUN_TEST(test_m3_frontier_adapter_fixture_roundtrip);
+#ifdef HU_ENABLE_ML
+    /* hu_agent_t.m3_adapter only exists when HU_ENABLE_ML is on. */
     HU_RUN_TEST(test_agent_m3_adapter_attach_bad_path);
     HU_RUN_TEST(test_agent_m3_adapter_attach_fixture_replace);
+#endif
     /* Track D D1.3 — rollback flag */
     HU_RUN_TEST(test_m3_adapter_should_disable_default_false);
     HU_RUN_TEST(test_m3_adapter_should_disable_true_when_cfg_set);
@@ -5381,7 +6196,9 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_adapter_should_disable_env_zero_does_not_force);
     HU_RUN_TEST(test_m3_adapter_should_disable_env_empty_does_not_force);
     HU_RUN_TEST(test_m3_adapter_should_disable_env_nonzero_force);
+#ifdef HU_ENABLE_ML
     HU_RUN_TEST(test_m3_on_provider_success_noop_when_unattached);
+#endif
     /* Track D D2.1 — honest-gap caveat snapshot tests */
     HU_RUN_TEST(test_lora_persona_caveat_doc_path_is_stable);
     HU_RUN_TEST(test_lora_runner_writes_response_array_in_test_mode);
@@ -5395,4 +6212,45 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_lora_persona_caveat_block_disclaims_frontier);
     HU_RUN_TEST(test_lora_persona_caveat_block_uses_consistent_prefix);
     HU_RUN_TEST(test_lora_persona_caveat_block_has_bridge_doc_reference);
+
+    /* Phase B-pre (2026-05-17): probe-counter observability seam. These
+     * tests existed but were not registered — silent dead code until
+     * the 2026-05-17 round 2 audit found them. Registering now. */
+    HU_RUN_TEST(test_m3_probe_count_starts_at_zero);
+    HU_RUN_TEST(test_m3_probe_infer_increments_counter);
+    HU_RUN_TEST(test_m3_probe_count_null_safe);
+    HU_RUN_TEST(test_m3_agent_on_provider_success_advances_probe_count);
+    HU_RUN_TEST(test_m3_record_chat_outcome_populates_token_estimates);
+    HU_RUN_TEST(test_m3_record_chat_outcome_prefers_usage_block_when_present);
+    HU_RUN_TEST(test_m3_id_map_lookup_is_idempotent_for_same_name);
+    HU_RUN_TEST(test_m3_id_map_model_and_adapter_use_separate_spaces);
+    HU_RUN_TEST(test_m3_id_map_null_or_empty_inputs_return_zero);
+    HU_RUN_TEST(test_m3_id_map_persists_ids_across_reload);
+    HU_RUN_TEST(test_m3_id_map_save_is_noop_when_clean);
+
+    /* Phase B1 redefined (2026-05-17 round 2): inference outcome capture
+     * — ring buffer + structured per-call records the future training
+     * loop can consume. See docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md
+     * Phase B1 (redefined) for the design. */
+    HU_RUN_TEST(test_m3_outcome_record_size_is_pinned);
+    HU_RUN_TEST(test_m3_outcome_hash_bytes_deterministic);
+    HU_RUN_TEST(test_m3_outcome_hash_bytes_null_returns_zero);
+    HU_RUN_TEST(test_m3_outcome_hash_bytes_never_returns_zero_for_real_input);
+    HU_RUN_TEST(test_m3_record_outcome_null_adapter_is_noop);
+    HU_RUN_TEST(test_m3_record_outcome_null_record_is_invalid);
+    HU_RUN_TEST(test_m3_outcomes_recorded_starts_at_zero);
+    HU_RUN_TEST(test_m3_outcomes_recorded_advances_per_record);
+    HU_RUN_TEST(test_m3_snapshot_outcomes_empty_returns_zero_count);
+    HU_RUN_TEST(test_m3_snapshot_outcomes_returns_oldest_first);
+    HU_RUN_TEST(test_m3_snapshot_outcomes_drops_oldest_when_wrapped);
+    HU_RUN_TEST(test_m3_snapshot_outcomes_max_count_caps_output);
+
+    /* Phase B3 v0 (2026-05-17 r2): JSONL serializer tests. */
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_null_alloc_returns_invalid);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_null_adapter_returns_empty);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_emits_one_line_per_outcome);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_filters_by_turn_kind);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_filters_by_since_ms);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_max_count_caps_output);
+    HU_RUN_TEST(test_m3_outcomes_to_jsonl_no_match_returns_empty);
 }

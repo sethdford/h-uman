@@ -372,8 +372,10 @@ export class ScVoiceView extends GatewayAwareLitElement {
       .provider-option input[type="radio"] {
         appearance: none;
         -webkit-appearance: none;
-        width: 1rem;
-        height: 1rem;
+        /* 1.25rem (20px) meets the WCAG 20px hard floor for touch
+         * targets — Wave 2 design-standards spec. */
+        width: 1.25rem;
+        height: 1.25rem;
         border: 2px solid var(--hu-border);
         border-radius: 50%;
         margin: 0;
@@ -1361,7 +1363,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
             href=${selected.url}
             target="_blank"
             rel="noopener noreferrer"
-            style="font-size:var(--hu-text-xs);color:var(--hu-text-faint);white-space:nowrap;text-decoration:underline;text-underline-offset:2px"
+            style="display:inline-flex;align-items:center;min-height:1.25rem;padding:var(--hu-space-2xs) 0;font-size:var(--hu-text-xs);color:var(--hu-text-faint);white-space:nowrap;text-decoration:underline;text-underline-offset:2px"
             >Get key &rarr;</a
           >
         </div>

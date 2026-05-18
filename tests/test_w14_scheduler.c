@@ -62,9 +62,8 @@ static void close_stack_(hu_graph_t *g, hu_memory_facade_t *m, hu_scheduler_t *s
 static int count_jobs_with_status(struct sqlite3 *db, const char *status) {
     sqlite3_stmt *st = NULL;
     int n = -1;
-    if (sqlite3_prepare_v2(db,
-                            "SELECT COUNT(*) FROM scheduler_jobs WHERE status = ?",
-                            -1, &st, NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM scheduler_jobs WHERE status = ?", -1, &st,
+                           NULL) != SQLITE_OK)
         return -1;
     sqlite3_bind_text(st, 1, status, -1, SQLITE_STATIC);
     if (sqlite3_step(st) == SQLITE_ROW)
@@ -78,7 +77,7 @@ static int dispatch_log[256];
 static size_t dispatch_log_len;
 
 static hu_error_t recording_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
-                                    int64_t budget_ms, void *user_data) {
+                                   int64_t budget_ms, void *user_data) {
     (void)m;
     (void)budget_ms;
     (void)user_data;
@@ -89,7 +88,7 @@ static hu_error_t recording_runner(hu_memory_facade_t *m, const hu_job_spec_t *s
 
 static int g_increment_counter;
 static hu_error_t increment_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
-                                    int64_t budget_ms, void *user_data) {
+                                   int64_t budget_ms, void *user_data) {
     (void)m;
     (void)spec;
     (void)budget_ms;
@@ -99,8 +98,8 @@ static hu_error_t increment_runner(hu_memory_facade_t *m, const hu_job_spec_t *s
     return HU_OK;
 }
 
-static hu_error_t error_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
-                                int64_t budget_ms, void *user_data) {
+static hu_error_t error_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec, int64_t budget_ms,
+                               void *user_data) {
     (void)m;
     (void)spec;
     (void)budget_ms;
@@ -108,8 +107,8 @@ static hu_error_t error_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
     return HU_ERR_INTERNAL;
 }
 
-static hu_error_t slow_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
-                               int64_t budget_ms, void *user_data) {
+static hu_error_t slow_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec, int64_t budget_ms,
+                              void *user_data) {
     (void)m;
     (void)spec;
     (void)budget_ms;
@@ -181,8 +180,7 @@ static void test_w14_scheduler_respects_priority(void) {
     hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
-                                              recording_runner, NULL),
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, recording_runner, NULL),
                  HU_OK);
 
     dispatch_log_len = 0;
@@ -215,9 +213,9 @@ static void test_w14_scheduler_skips_jobs_on_battery_when_required(void) {
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
     int counter = 0;
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_WARMING,
-                                              increment_runner, &counter),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_WARMING, increment_runner, &counter),
+        HU_OK);
 
     hu_job_spec_t job = {0};
     job.kind = HU_JOB_KV_CACHE_WARMING;
@@ -247,11 +245,9 @@ static void test_w14_scheduler_respects_quiet_hours(void) {
     hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_AUTODREAM_DECAY,
-                                              recording_runner, NULL),
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_AUTODREAM_DECAY, recording_runner, NULL),
                  HU_OK);
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
-                                              recording_runner, NULL),
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, recording_runner, NULL),
                  HU_OK);
 
     dispatch_log_len = 0;
@@ -287,8 +283,7 @@ static void test_w14_scheduler_budget_enforced_per_job(void) {
     hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_EVICTION,
-                                              slow_runner, NULL),
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_EVICTION, slow_runner, NULL),
                  HU_OK);
 
     hu_job_spec_t job = {0};
@@ -346,9 +341,9 @@ static void test_w14_register_custom_runner_dispatches_correctly(void) {
     open_stack_(&g, &m, &s);
 
     int counter = 0;
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_BELIEF_REVERIFICATION,
-                                              increment_runner, &counter),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_scheduler_register_runner(s, HU_JOB_BELIEF_REVERIFICATION, increment_runner, &counter),
+        HU_OK);
 
     hu_job_spec_t job = {0};
     job.kind = HU_JOB_BELIEF_REVERIFICATION;
@@ -359,9 +354,7 @@ static void test_w14_register_custom_runner_dispatches_correctly(void) {
     HU_ASSERT_EQ(counter, 1);
 
     /* Re-registering with NULL resets to no-op and won't increment. */
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_BELIEF_REVERIFICATION,
-                                              NULL, NULL),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_BELIEF_REVERIFICATION, NULL, NULL), HU_OK);
     HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690001000LL), HU_OK);
     HU_ASSERT_EQ(counter, 1);
@@ -401,8 +394,8 @@ static void test_w14_adversarial_job_flood_respects_total_budget(void) {
     open_stack_(&g, &m, &s);
 
     g_increment_counter = 0;
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_WARMING,
-                                              increment_runner, &g_increment_counter),
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_WARMING, increment_runner,
+                                              &g_increment_counter),
                  HU_OK);
 
     hu_job_spec_t job = {0};
@@ -433,13 +426,11 @@ static void test_w14_adversarial_runner_returns_error_does_not_crash_scheduler(v
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
 
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
-                                              error_runner, NULL),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, error_runner, NULL), HU_OK);
     int counter = 0;
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_WARMING,
-                                              increment_runner, &counter),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_scheduler_register_runner(s, HU_JOB_KV_CACHE_WARMING, increment_runner, &counter),
+        HU_OK);
 
     hu_job_spec_t bad = {0};
     bad.kind = HU_JOB_LORA_TRAINING;
@@ -471,21 +462,19 @@ static void test_w14_counterfactual_rehearsal_caps_at_five_per_tick(void) {
     /* Set up: contact 'cf', 1 trace recorded at t=1000, 8 relations
      * upserted "now" so each relation's last_seen > trace.recorded_at. */
     int64_t self_id = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "cf", 2, "self", 4, HU_ENTITY_PERSON,
-                                        NULL, &self_id),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "cf", 2, "self", 4, HU_ENTITY_PERSON, NULL, &self_id),
                  HU_OK);
     for (int i = 0; i < 8; i++) {
         char nm[16];
         snprintf(nm, sizeof(nm), "fact%d", i);
         int64_t target_id = 0;
-        HU_ASSERT_EQ(hu_graph_upsert_entity(g, "cf", 2, nm, strlen(nm),
-                                            HU_ENTITY_TOPIC, NULL, &target_id),
-                     HU_OK);
+        HU_ASSERT_EQ(
+            hu_graph_upsert_entity(g, "cf", 2, nm, strlen(nm), HU_ENTITY_TOPIC, NULL, &target_id),
+            HU_OK);
         char ctx[64];
         snprintf(ctx, sizeof(ctx), "context %d", i);
-        HU_ASSERT_EQ(hu_graph_upsert_relation(g, "cf", 2, self_id, target_id,
-                                              HU_REL_KNOWS, 1.0f, ctx,
-                                              strlen(ctx)),
+        HU_ASSERT_EQ(hu_graph_upsert_relation(g, "cf", 2, self_id, target_id, HU_REL_KNOWS, 1.0f,
+                                              ctx, strlen(ctx)),
                      HU_OK);
     }
 
@@ -502,8 +491,7 @@ static void test_w14_counterfactual_rehearsal_caps_at_five_per_tick(void) {
     HU_ASSERT_EQ(hu_reasoning_trace_record(m, "cf", 2, &trace, &trace_id), HU_OK);
 
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_COUNTERFACTUAL_REHEARSAL,
-                                              hu_counterfactual_rehearsal_runner,
-                                              NULL),
+                                              hu_counterfactual_rehearsal_runner, NULL),
                  HU_OK);
     hu_job_spec_t job = {0};
     job.kind = HU_JOB_COUNTERFACTUAL_REHEARSAL;
@@ -514,10 +502,9 @@ static void test_w14_counterfactual_rehearsal_caps_at_five_per_tick(void) {
     struct sqlite3 *db = hu_graph_sqlite_connection(g);
     sqlite3_stmt *st = NULL;
     int n = -1;
-    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
-                                    "SELECT COUNT(*) FROM counterfactual_replays",
-                                    -1, &st, NULL),
-                 SQLITE_OK);
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM counterfactual_replays", -1, &st, NULL),
+        SQLITE_OK);
     if (sqlite3_step(st) == SQLITE_ROW)
         n = sqlite3_column_int(st, 0);
     sqlite3_finalize(st);
@@ -529,10 +516,9 @@ static void test_w14_counterfactual_rehearsal_caps_at_five_per_tick(void) {
     HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690001000LL), HU_OK);
     n = -1;
-    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
-                                    "SELECT COUNT(*) FROM counterfactual_replays",
-                                    -1, &st, NULL),
-                 SQLITE_OK);
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM counterfactual_replays", -1, &st, NULL),
+        SQLITE_OK);
     if (sqlite3_step(st) == SQLITE_ROW)
         n = sqlite3_column_int(st, 0);
     sqlite3_finalize(st);
@@ -549,8 +535,7 @@ static void test_w14_expired_jobs_marked_after_latest_at(void) {
     open_stack_(&g, &m, &s);
 
     int counter = 0;
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
-                                              increment_runner, &counter),
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, increment_runner, &counter),
                  HU_OK);
 
     hu_job_spec_t job = {0};
@@ -574,10 +559,23 @@ static void test_w14_requires_idle_job_defers_under_high_load(void) {
     clear_w14_env();
     setenv("HU_TEST_LOAD_PCT", "80", 1);
 
+/* 2026-05-16 P3-5 regression: scheduler_jobs schema HAS contact_id but the
+ * dispatch SELECT didn't bind it.  A job enqueued for contact A would fire in
+ * any tick (including ticks for contact B), invoking A's runner during B's
+ * turn — same cross-contact bleed as the F25 confession-parrot incident.
+ *
+ * After the fix, `hu_scheduler_tick(s, now, target_contact_id, len)` must
+ * dispatch ONLY jobs where:
+ *   - contact_id = '' (truly global), OR
+ *   - contact_id = target_contact_id (exact match — no prefix risk).
+ * NULL/"" target → only the contact_id='' rows dispatch. */
+static void test_w14_scheduler_dispatch_scoped_to_target_contact(void) {
+    clear_w14_env();
     hu_graph_t *g = NULL;
     hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
+<<<<<<< HEAD
 
     int counter = 0;
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
@@ -601,6 +599,56 @@ static void test_w14_requires_idle_job_defers_under_high_load(void) {
     HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 1);
 
     clear_w14_env();
+=======
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, recording_runner, NULL),
+                 HU_OK);
+
+    /* Three jobs: one for alice, one for bob, one global. */
+    hu_job_spec_t job_a = {0};
+    job_a.kind = HU_JOB_LORA_TRAINING;
+    job_a.budget_ms = 50;
+    job_a.contact_id = "alice";
+    job_a.contact_id_len = 5;
+    HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job_a), HU_OK);
+
+    hu_job_spec_t job_b = {0};
+    job_b.kind = HU_JOB_LORA_TRAINING;
+    job_b.budget_ms = 50;
+    job_b.contact_id = "bob";
+    job_b.contact_id_len = 3;
+    HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job_b), HU_OK);
+
+    hu_job_spec_t job_g = {0};
+    job_g.kind = HU_JOB_LORA_TRAINING;
+    job_g.budget_ms = 50;
+    /* No contact_id → global. */
+    HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job_g), HU_OK);
+
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 3);
+
+    /* Tick on bob's turn — must run bob's job + the global job, NOT alice's. */
+    dispatch_log_len = 0;
+    HU_ASSERT_EQ(hu_scheduler_tick_for(s, 1735690000000LL, "bob", 3), HU_OK);
+    HU_ASSERT_EQ((int)dispatch_log_len, 2);
+    /* alice's job remains pending; bob's + global are done. */
+    HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 1);
+    HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 2);
+
+    /* Tick again with target=NULL → only contact-agnostic jobs eligible, but
+     * the only remaining one is alice's, so nothing runs. */
+    dispatch_log_len = 0;
+    HU_ASSERT_EQ(hu_scheduler_tick_for(s, 1735690001000LL, NULL, 0), HU_OK);
+    HU_ASSERT_EQ((int)dispatch_log_len, 0);
+    HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 1);
+
+    /* Tick on alice's turn — finally alice's job runs. */
+    HU_ASSERT_EQ(hu_scheduler_tick_for(s, 1735690002000LL, "alice", 5), HU_OK);
+    HU_ASSERT_EQ((int)dispatch_log_len, 1);
+    HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 0);
+    HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 3);
+
+>>>>>>> origin/main
     close_stack_(g, m, s);
 }
 
@@ -744,7 +792,8 @@ static void test_w14_probe_battery_returns_in_range_or_unknown(void) {
 }
 
 void run_w14_scheduler_tests(void) {
-    HU_TEST_SUITE("W14 scheduler - sleep-time compute scheduler hu_scheduler_t + counterfactual rehearsal");
+    HU_TEST_SUITE(
+        "W14 scheduler - sleep-time compute scheduler hu_scheduler_t + counterfactual rehearsal");
 
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w14_open_close_round_trip);
@@ -760,7 +809,11 @@ void run_w14_scheduler_tests(void) {
     HU_RUN_TEST(test_w14_adversarial_runner_returns_error_does_not_crash_scheduler);
     HU_RUN_TEST(test_w14_counterfactual_rehearsal_caps_at_five_per_tick);
     HU_RUN_TEST(test_w14_expired_jobs_marked_after_latest_at);
+<<<<<<< HEAD
     HU_RUN_TEST(test_w14_requires_idle_job_defers_under_high_load);
+=======
+    HU_RUN_TEST(test_w14_scheduler_dispatch_scoped_to_target_contact);
+>>>>>>> origin/main
 #endif
 
     /* Probe tests run without SQLite — pure env/OS-state checks. */

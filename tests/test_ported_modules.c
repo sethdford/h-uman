@@ -1,5 +1,6 @@
 /* Tests for newly ported modules (capabilities, channel_catalog, config_mutator, update, etc.) */
 #include "human/agent/commands.h"
+#include "human/agent/scheduler_status_json.h"
 #include "human/capabilities.h"
 #include "human/channel_adapters.h"
 #include "human/channel_catalog.h"
@@ -7,16 +8,16 @@
 #include "human/config_mutator.h"
 #include "human/core/allocator.h"
 #include "human/core/arena.h"
-#include "human/agent/scheduler_status_json.h"
 #include "human/doctor.h"
+#include "human/ml/lora_retrain_runner.h"
 #include "human/security.h"
 #include "human/security/sandbox.h"
 #include "human/service.h"
 #include "human/update.h"
 #include "test_framework.h"
-#include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -115,8 +116,8 @@ static void test_scheduler_status_json_bad_json(void) {
     unsigned long long jp = 0, jc = 0;
     long long bat = 0, ue = 0;
     char ac[16] = {0};
-    HU_ASSERT_NEQ(
-        hu_scheduler_status_parse_json("{ not json", &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_NEQ(hu_scheduler_status_parse_json("{ not json", &jp, &jc, &bat, ac, sizeof(ac), &ue),
+                  HU_OK);
 }
 
 static void test_scheduler_status_json_null_args(void) {
@@ -142,17 +143,54 @@ static void test_doctor_deprecated_scheduler_status_matches_shared(void) {
     char ac_d[16] = {0};
     char ac_n[16] = {0};
     const char *j = "{\"jobs_pending\":5,\"jobs_completed_today\":6,\"battery_pct\":7,"
-                     "\"on_ac_power\":false,\"updated_epoch\":8}";
+                    "\"on_ac_power\":false,\"updated_epoch\":8}";
     HU_ASSERT_EQ(
         hu_doctor_parse_scheduler_status_json(j, &jp_d, &jc_d, &bat_d, ac_d, sizeof(ac_d), &ue_d),
         HU_OK);
-    HU_ASSERT_EQ(
-        hu_scheduler_status_parse_json(j, &jp_n, &jc_n, &bat_n, ac_n, sizeof(ac_n), &ue_n), HU_OK);
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j, &jp_n, &jc_n, &bat_n, ac_n, sizeof(ac_n), &ue_n),
+                 HU_OK);
     HU_ASSERT_EQ(jp_d, jp_n);
     HU_ASSERT_EQ(jc_d, jc_n);
     HU_ASSERT_EQ(bat_d, bat_n);
     HU_ASSERT_STR_EQ(ac_d, ac_n);
     HU_ASSERT_EQ(ue_d, ue_n);
+}
+
+/* US-7.5: AC-7.5.5 — `lora_retrain` block is optional and parses
+ * forward/backward. The shared scheduler_status_json parser uses strstr
+ * for each top-level key, so adding the new block is non-breaking. */
+static void test_scheduler_status_lora_retrain_block_optional(void) {
+    /* (1) Backward compat: old shape (no block) still parses cleanly via
+     *     the shared parser; the lora_retrain parser returns NOT_FOUND. */
+    const char *j_old = "{\"jobs_pending\":0,\"jobs_completed_today\":0,\"battery_pct\":50,"
+                        "\"on_ac_power\":true,\"updated_epoch\":1700000000}";
+    unsigned long long jp = 0, jc = 0;
+    long long bat = 0, ue = 0;
+    char ac[16] = {0};
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j_old, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+
+    long long ts = 0;
+    hu_lora_retrain_outcome_t oc = HU_LORA_RETRAIN_OUTCOME_UNKNOWN;
+    unsigned long long pc = 0;
+    HU_ASSERT_EQ(hu_lora_retrain_status_parse(j_old, &ts, &oc, &pc), HU_ERR_NOT_FOUND);
+
+    /* (2) Forward compat: new shape parses through both functions. The
+     *     legacy parser ignores the extra key, the new parser extracts it. */
+    const char *j_new = "{\"jobs_pending\":1,\"jobs_completed_today\":2,\"battery_pct\":80,"
+                        "\"on_ac_power\":false,\"updated_epoch\":1700001234,"
+                        "\"lora_retrain\":{\"last_run_ts\":1715800000,"
+                        "\"last_outcome\":\"promoted\",\"pairs_consumed\":42}}";
+    jp = jc = 0;
+    bat = ue = 0;
+    memset(ac, 0, sizeof(ac));
+    HU_ASSERT_EQ(hu_scheduler_status_parse_json(j_new, &jp, &jc, &bat, ac, sizeof(ac), &ue), HU_OK);
+    HU_ASSERT_EQ(jp, 1ULL);
+    HU_ASSERT_EQ(ue, 1700001234LL);
+
+    HU_ASSERT_EQ(hu_lora_retrain_status_parse(j_new, &ts, &oc, &pc), HU_OK);
+    HU_ASSERT_EQ(ts, 1715800000LL);
+    HU_ASSERT_EQ(oc, HU_LORA_RETRAIN_OUTCOME_PROMOTED);
+    HU_ASSERT_EQ((long long)pc, 42LL);
 }
 
 static void doctor_sch_write_status(const char *home, const char *body) {
@@ -197,8 +235,7 @@ static void test_doctor_check_scheduler_minified_file(void) {
                             "{\"updated_epoch\":5000,\"jobs_pending\":7,\"on_ac_power\":true,"
                             "\"battery_pct\":88,\"jobs_completed_today\":3}");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     /* status_age = 100s — threshold must exceed age or we take the STALE branch */
@@ -220,8 +257,7 @@ static void test_doctor_check_scheduler_stale_warn(void) {
                             "{\"jobs_pending\":0,\"jobs_completed_today\":0,\"battery_pct\":100,"
                             "\"on_ac_power\":false,\"updated_epoch\":1000}");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_scheduler(&alloc, 6000, 3600, &items, &count, &cap), HU_OK);
@@ -617,8 +653,7 @@ static void test_doctor_check_imessage_no_status_file_warns(void) {
     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_no_status");
 
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
@@ -628,24 +663,30 @@ static void test_doctor_check_imessage_no_status_file_warns(void) {
 }
 
 static void test_doctor_check_imessage_breaker_tripped_reports_error(void) {
+    /* US-9.6: breaker output now uses the shared presentation predicate.
+     * Wording shifted from a generic "TRIPPED ... re-grant FDA" line to a
+     * class-aware explanation that names the underlying class AND
+     * suggests `human doctor --fix`. We still assert "TRIPPED" and "AUTH"
+     * (both still present) and add a substring for the new --fix
+     * suggestion so any future drift is caught. */
     char *old = NULL;
     doctor_imsg_swap_home("/tmp/hu_doctor_imsg_tripped", &old);
-    doctor_imsg_write_status("/tmp/hu_doctor_imsg_tripped",
-                             "{\n"
-                             "  \"last_rowid\": 12345,\n"
-                             "  \"last_successful_poll_epoch\": 0,\n"
-                             "  \"consecutive_open_failures\": 9,\n"
-                             "  \"circuit_breaker_tripped\": true,\n"
-                             "  \"last_error_class\": \"AUTH\"\n"
-                             "}\n");
+    doctor_imsg_write_status("/tmp/hu_doctor_imsg_tripped", "{\n"
+                                                            "  \"last_rowid\": 12345,\n"
+                                                            "  \"last_successful_poll_epoch\": 0,\n"
+                                                            "  \"consecutive_open_failures\": 9,\n"
+                                                            "  \"circuit_breaker_tripped\": true,\n"
+                                                            "  \"last_error_class\": \"AUTH\"\n"
+                                                            "}\n");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "TRIPPED"));
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "AUTH"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "Full Disk Access"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "human doctor --fix"));
     doctor_free_semantics_result(&alloc, items, count);
     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_tripped");
     doctor_imsg_restore_home(old);
@@ -663,13 +704,15 @@ static void test_doctor_check_imessage_fresh_poll_reports_ok(void) {
                              "  \"last_error_class\": \"NONE\"\n"
                              "}\n");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
-    /* now=1010, threshold=600 → age=10s → fresh */
+    /* now=1010, threshold=600 → age=10s → fresh.
+     * US-9.6: when `last_error_class=NONE` the predicate emits a positive
+     * "healthy" line in place of the old "circuit breaker: OK" — the
+     * latter is now reserved for the no-state-recorded path. */
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1010, 600, &items, &count, &cap), HU_OK);
-    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "circuit breaker: OK"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "chat.db: healthy"));
     HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "poll: fresh"));
     doctor_free_semantics_result(&alloc, items, count);
     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_fresh");
@@ -688,8 +731,7 @@ static void test_doctor_check_imessage_stale_poll_reports_warn(void) {
                              "  \"last_error_class\": \"NONE\"\n"
                              "}\n");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     /* now=2000, threshold=600 → age=1000s → stale */
@@ -701,6 +743,13 @@ static void test_doctor_check_imessage_stale_poll_reports_warn(void) {
 }
 
 static void test_doctor_check_imessage_partial_failures_warns(void) {
+    /* US-9.6: when consecutive_open_failures>0 but the breaker has not
+     * tripped, the doctor now routes through the shared presentation
+     * predicate using the underlying `last_error_class`. For AUTH (this
+     * fixture) the output points at Full Disk Access — that's
+     * actionable and per AC-9.6.1. The legacy "circuit breaker: OK (N
+     * recent failures, last=X)" wording was replaced because it didn't
+     * tell the user what to fix. */
     char *old = NULL;
     doctor_imsg_swap_home("/tmp/hu_doctor_imsg_partial", &old);
     doctor_imsg_write_status("/tmp/hu_doctor_imsg_partial",
@@ -712,12 +761,12 @@ static void test_doctor_check_imessage_partial_failures_warns(void) {
                              "  \"last_error_class\": \"AUTH\"\n"
                              "}\n");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
-    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "circuit breaker: OK (3 recent failures"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "Full Disk Access"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "System Settings"));
     doctor_free_semantics_result(&alloc, items, count);
     doctor_imsg_remove_status("/tmp/hu_doctor_imsg_partial");
     doctor_imsg_restore_home(old);
@@ -729,8 +778,7 @@ static void test_doctor_check_imessage_corrupt_status_does_not_crash(void) {
     /* Truncated / garbage JSON. Must not crash, must not falsely report fresh. */
     doctor_imsg_write_status("/tmp/hu_doctor_imsg_corrupt", "{ this is not json");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
@@ -746,8 +794,7 @@ static void test_doctor_check_imessage_no_home_reports_error(void) {
     char *old = h ? strdup(h) : NULL;
     unsetenv("HOME");
     hu_allocator_t alloc = hu_system_allocator();
-    hu_diag_item_t *items =
-        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    hu_diag_item_t *items = (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
     size_t count = 0;
     size_t cap = 8;
     HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 0, 600, &items, &count, &cap), HU_OK);
@@ -775,6 +822,7 @@ void run_ported_modules_tests(void) {
     HU_RUN_TEST(test_scheduler_status_json_bad_json);
     HU_RUN_TEST(test_scheduler_status_json_null_args);
     HU_RUN_TEST(test_doctor_deprecated_scheduler_status_matches_shared);
+    HU_RUN_TEST(test_scheduler_status_lora_retrain_block_optional);
     HU_RUN_TEST(test_doctor_check_scheduler_minified_file);
     HU_RUN_TEST(test_doctor_check_scheduler_stale_warn);
     HU_RUN_TEST(test_doctor_truncate_null_alloc);
