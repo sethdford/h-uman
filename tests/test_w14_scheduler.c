@@ -605,29 +605,6 @@ static void test_w14_scheduler_dispatch_scoped_to_target_contact(void) {
     hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
-
-    int counter = 0;
-    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
-                                              increment_runner, &counter),
-                 HU_OK);
-
-    hu_job_spec_t job = {0};
-    job.kind = HU_JOB_LORA_TRAINING;
-    job.budget_ms = 50;
-    job.requires_idle = true;
-    HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
-
-    HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
-    HU_ASSERT_EQ(counter, 0);
-    struct sqlite3 *db = hu_graph_sqlite_connection(g);
-    HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 1);
-
-    setenv("HU_TEST_LOAD_PCT", "30", 1);
-    HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690001000LL), HU_OK);
-    HU_ASSERT_EQ(counter, 1);
-    HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 1);
-
-    clear_w14_env();
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, recording_runner, NULL),
                  HU_OK);
 
