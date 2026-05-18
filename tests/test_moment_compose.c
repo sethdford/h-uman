@@ -22,8 +22,40 @@ static void compose_from_inputs_zero_inputs_produces_safe_defaults(void) {
     HU_ASSERT_EQ(m.source_flags, 0u);
 }
 
+static void compose_computes_time_since_their_last_when_provided(void) {
+    hu_moment_t m = {0};
+    int64_t now = 1700000000;
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, now - 600, /* their */
+                                  now - 300,                   /* ours  */
+                                  NULL, now, &m);
+    HU_ASSERT_EQ(m.time_since_their_last_msg_s, 600);
+    HU_ASSERT_EQ(m.time_since_our_last_msg_s, 300);
+    HU_ASSERT_TRUE(m.source_flags & HU_MOMENT_SRC_LAST_THEIR_TS);
+    HU_ASSERT_TRUE(m.source_flags & HU_MOMENT_SRC_LAST_OUR_TS);
+}
+
+static void compose_clamps_negative_delta_to_zero_on_clock_skew(void) {
+    hu_moment_t m = {0};
+    int64_t now = 1700000000;
+    hu_moment_compose_from_inputs(NULL, NULL, NULL,
+                                  now + 60, /* their ts is in the future — bad clock */
+                                  -1, NULL, now, &m);
+    HU_ASSERT_EQ(m.time_since_their_last_msg_s, 0);
+}
+
+static void compose_keeps_minus_one_when_timestamp_missing(void) {
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, NULL, 1700000000, &m);
+    HU_ASSERT_EQ(m.time_since_their_last_msg_s, -1);
+    HU_ASSERT_EQ(m.time_since_our_last_msg_s, -1);
+    HU_ASSERT_FALSE(m.source_flags & HU_MOMENT_SRC_LAST_THEIR_TS);
+}
+
 void run_moment_compose_tests(void) {
     HU_TEST_SUITE("moment_compose");
     HU_RUN_TEST(compose_from_inputs_rejects_null_out);
     HU_RUN_TEST(compose_from_inputs_zero_inputs_produces_safe_defaults);
+    HU_RUN_TEST(compose_computes_time_since_their_last_when_provided);
+    HU_RUN_TEST(compose_clamps_negative_delta_to_zero_on_clock_skew);
+    HU_RUN_TEST(compose_keeps_minus_one_when_timestamp_missing);
 }
