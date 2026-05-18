@@ -65,6 +65,7 @@ apps/ios/.build/
 apps/ios/.swiftpm/
 apps/macos/.build/
 apps/macos/.swiftpm/
+apps/macos/Human.xcodeproj/
 apps/shared/.build/
 apps/shared/HumanKit/.build/
 

@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// Text field and send button for chat input.
+@available(macOS 14.0, iOS 17.0, *)
 public struct ChatInputBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Binding public var text: String

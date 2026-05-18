@@ -1,18 +1,27 @@
 import Foundation
 
 /// Minimal HTTP response builder.
+@available(macOS 14.0, iOS 17.0, *)
 public struct HTTPResponse: Sendable {
+    /// Numeric HTTP status code (200, 404, etc.).
     public let statusCode: Int
+    /// Human-readable status phrase paired with `statusCode`.
     public let statusText: String
+    /// `Content-Type` response header.
     public let contentType: String
+    /// Response body bytes. Empty for streaming responses.
     public let body: Data
+    /// Optional chunk stream for `text/event-stream` responses.
     public let streamChunks: AsyncStream<Data>?
     /// When set (e.g. CORS preflight), emitted after `Access-Control-Allow-Origin`.
     public let accessControlAllowMethods: String?
+    /// When set, emitted as `Access-Control-Allow-Headers`.
     public let accessControlAllowHeaders: String?
 
+    /// True when this response uses chunked streaming.
     public var isStreaming: Bool { streamChunks != nil }
 
+    /// Construct a response with full control over each field.
     public init(
         statusCode: Int,
         statusText: String,
@@ -31,6 +40,7 @@ public struct HTTPResponse: Sendable {
         self.accessControlAllowHeaders = accessControlAllowHeaders
     }
 
+    /// Build a JSON response (`application/json`) from a Foundation object.
     public static func json(_ object: Any, status: Int = 200) -> HTTPResponse {
         let body = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data()
         return HTTPResponse(
@@ -44,6 +54,7 @@ public struct HTTPResponse: Sendable {
         )
     }
 
+    /// Build a chunked Server-Sent Events response from a `Data` stream.
     public static func sseStream(status: Int = 200, chunks: AsyncStream<Data>) -> HTTPResponse {
         HTTPResponse(
             statusCode: status,
@@ -56,14 +67,17 @@ public struct HTTPResponse: Sendable {
         )
     }
 
+    /// Build an OpenAI-style error response.
     public static func error(_ message: String, status: Int = 500) -> HTTPResponse {
         json(["error": ["message": message, "type": "server_error"]], status: status)
     }
 
+    /// Convenience for the 404 case.
     public static func notFound() -> HTTPResponse {
         error("Not found", status: 404)
     }
 
+    /// Convenience for the 405 case.
     public static func methodNotAllowed() -> HTTPResponse {
         error("Method not allowed", status: 405)
     }

@@ -139,7 +139,7 @@ Evidence lands in `~/.human/proofs/<YYYY-MM-DD>-<method>-step-<pid>/`.
 | Runner gate MT-Bench / IFEval | ✅ `lora_training_runner.c` + daemon W14 `eval_gate` |
 | iMessage outbound GUID | ✅ `hu_imessage_lookup_latest_sent_guid` + daemon registration |
 | CI linker fix | ✅ `hu_training_data_extract_dpo_from_db` synced from main |
-| Live Gemma scorecard | ⚪ Run `bash scripts/demo-rl-loop.sh` on Apple Silicon; publish numbers here |
+| Live Gemma scorecard | 🔄 MLX run in progress on Apple Silicon (`2026-05-17-dpo-step-28157`); HUML smoke: `2026-05-17-dpo-step-90772` (delta=0, exit 2) |
 
 Local HUML demo (no Gemma download): `human demo rl-closed-loop --backend huml --reaction-count 20 --out /tmp/human-rl-proof` — writes 20-prompt manifest + real `gate_decision.json` from `hu_eval_gate`.
 

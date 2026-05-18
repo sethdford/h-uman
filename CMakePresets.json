@@ -118,6 +118,15 @@
       }
     },
     {
+      "name": "dev-neural",
+      "displayName": "Dev + W10 neural memory flag (memory-v2 gate)",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build-dev-neural",
+      "cacheVariables": {
+        "HU_ENABLE_NEURAL_MEMORY": "ON"
+      }
+    },
+    {
       "name": "rl_sota",
       "displayName": "RL SOTA (Phase 1+: dev + vendored llama.cpp + Metal on Apple)",
       "inherits": "dev",
@@ -171,6 +180,11 @@
     {
       "name": "integration",
       "configurePreset": "integration",
+      "jobs": 0
+    },
+    {
+      "name": "dev-neural",
+      "configurePreset": "dev-neural",
       "jobs": 0
     },
     {

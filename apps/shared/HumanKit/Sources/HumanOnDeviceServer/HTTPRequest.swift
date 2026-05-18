@@ -1,10 +1,15 @@
 import Foundation
 
 /// Minimal HTTP request parser. Handles what we need for OpenAI-compatible endpoints.
+@available(macOS 14.0, iOS 17.0, *)
 public struct HTTPRequest: Sendable {
+    /// HTTP method (GET, POST, OPTIONS, etc.).
     public let method: String
+    /// Request path including any query string.
     public let path: String
+    /// Header field name → value, lowercased keys.
     public let headers: [String: String]
+    /// Request body, or `nil` if no body was sent.
     public let body: Data?
 
     /// Parse an HTTP request from raw data. Returns nil if incomplete.
@@ -44,6 +49,7 @@ public struct HTTPRequest: Sendable {
         return HTTPRequest(method: method, path: path, headers: headers, body: remaining > 0 ? data.subdata(in: bodyStart..<data.endIndex) : nil)
     }
 
+    /// Decode the body as JSON, returning the top-level object or `nil`.
     public var json: [String: Any]? {
         guard let body = body, !body.isEmpty else { return nil }
         return try? JSONSerialization.jsonObject(with: body) as? [String: Any]
