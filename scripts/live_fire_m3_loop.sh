@@ -47,18 +47,36 @@ cleanup() {
     # and we don't want that to terminate the script under `set -e`.
     set +e
     echo "[live-fire] cleanup: stopping background processes"
+    # Tight patterns: match only OUR demo processes, not arbitrary substrings.
+    # The previous pattern "human service" matched "human service-loop" (the
+    # production daemon binary), causing the demo to SIGKILL production MLX
+    # every cycle. See 2026-05-18 audit chain. The patterns below all start
+    # with anchors specific to demo invocations.
     pkill -f "stub_mlx_server.py" >/dev/null 2>&1
-    pkill -f "human gateway" >/dev/null 2>&1
-    pkill -f "human service" >/dev/null 2>&1
-    pkill -f "human-daemon" >/dev/null 2>&1
-    pkill -f "imsg" >/dev/null 2>&1
+    pkill -f "human gateway --with-stub" >/dev/null 2>&1
+    pkill -f "human service-loop --stub-mlx" >/dev/null 2>&1
+    pkill -f "live_fire_m3_helper" >/dev/null 2>&1
     sleep 1
-    # Hard kill if anything still holds :3006 or :8741
+    # Discriminating port reclaim: only kill the port holder if it's one of
+    # OUR demo processes, never a production daemon or launchd-managed MLX.
+    # Without this guard, this script SIGKILLs whatever holds :8741 (which
+    # under launchd is the real gemma-4-31b mlx-server.py) every exit cycle.
     for port in 3006 8741; do
         pid=$(lsof -tiTCP:$port -sTCP:LISTEN -n -P 2>/dev/null | head -1)
         if [ -n "$pid" ]; then
-            echo "[live-fire] hard-killing PID $pid (holding :$port)"
-            kill -9 "$pid" >/dev/null 2>&1
+            cmd=$(ps -p "$pid" -o command= 2>/dev/null)
+            # Only kill if the command line includes a demo marker. The
+            # production MLX runs as "mlx-server.py --model ..." with no
+            # "stub_" / "live_fire_" / "--stub-mlx" tokens; production
+            # gateway runs as "human service-loop --with-gateway".
+            if echo "$cmd" | grep -qE "stub_mlx_server\.py|live_fire_m3|human gateway --with-stub|human service-loop --stub-mlx"; then
+                echo "[live-fire] hard-killing PID $pid (holding :$port, demo process)"
+                kill -9 "$pid" >/dev/null 2>&1
+            else
+                echo "[live-fire] :$port held by NON-demo process PID $pid — leaving alone"
+                echo "  cmd: $cmd"
+                echo "  (likely production launchd-managed daemon; do not kill)"
+            fi
         fi
     done
     sleep 1
