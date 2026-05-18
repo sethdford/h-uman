@@ -175,6 +175,73 @@ static void test_config_validate_strict_memory_sqlite_backend_without_sqlite_bui
 }
 #endif
 
+/* Regression tests for 2026-05-18: reaction_collection and personalization
+ * were missing from hu_config_top_keys in src/config_validate.c. The parser
+ * in src/config_parse.c handles both (parse_reaction_collection at L1302),
+ * but check_unknown_top_keys logged "unknown key: 'reaction_collection'
+ * (ignored)" on every daemon startup AND, in strict mode, would have failed
+ * validation outright. These two tests pin the whitelist additions so a
+ * future contributor can't drop either key without a failing test.
+ * See: .claude/rules/silent-config-gated-subsystems.md +
+ *      docs/plans/2026-05-18-phase5-eval-honest-status.md */
+static void test_config_validate_strict_reaction_collection_is_known_top_key(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = hu_arena_allocator(arena);
+    /* gateway.port is required by the strict base-check (see end of
+     * hu_config_validate_strict in src/config_validate.c). Without it,
+     * strict mode would fail with HU_ERR_CONFIG_INVALID regardless of
+     * the whitelist state and this test would NOT actually exercise the
+     * whitelist behaviour we want to pin. */
+    const char *json = "{\"default_provider\":\"openai\",\"default_model\":\"gpt-4o\","
+                       "\"gateway\":{\"port\":3000},"
+                       "\"reaction_collection\":{\"enabled\":true,\"poll_interval_seconds\":30,"
+                       "\"channels\":[\"imessage\"]}}";
+    hu_error_t err = hu_config_parse_json(&cfg, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+    hu_json_value_t *root = NULL;
+    err = hu_json_parse(&cfg.allocator, json, strlen(json), &root);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(root);
+    /* strict=true MUST accept reaction_collection. If this assertion fires
+     * with HU_ERR_*, someone has removed reaction_collection from
+     * hu_config_top_keys in src/config_validate.c — restore it and re-read
+     * the 2026-05-18 audit. */
+    hu_error_t verr = hu_config_validate_strict(&cfg, root, true);
+    HU_ASSERT_EQ(verr, HU_OK);
+    /* And the parsed config should have the block populated */
+    HU_ASSERT_EQ((int)cfg.reaction_collection.enabled, (int)true);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_validate_strict_personalization_is_known_top_key(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"default_provider\":\"openai\",\"default_model\":\"gpt-4o\","
+                       "\"gateway\":{\"port\":3000},"
+                       "\"personalization\":{\"enabled\":true}}";
+    hu_error_t err = hu_config_parse_json(&cfg, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+    hu_json_value_t *root = NULL;
+    err = hu_json_parse(&cfg.allocator, json, strlen(json), &root);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(root);
+    /* strict=true MUST accept personalization. Same rationale as the
+     * reaction_collection sibling test. */
+    hu_error_t verr = hu_config_validate_strict(&cfg, root, true);
+    HU_ASSERT_EQ(verr, HU_OK);
+    hu_arena_destroy(arena);
+}
+
 static void test_config_validate_strict_unknown_key_fails_with_root(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg;
@@ -212,4 +279,6 @@ void run_config_validation_tests(void) {
     HU_RUN_TEST(test_config_validate_strict_memory_sqlite_backend_without_sqlite_build_fails);
 #endif
     HU_RUN_TEST(test_config_validate_strict_unknown_key_fails_with_root);
+    HU_RUN_TEST(test_config_validate_strict_reaction_collection_is_known_top_key);
+    HU_RUN_TEST(test_config_validate_strict_personalization_is_known_top_key);
 }
