@@ -15,19 +15,27 @@
 
 ## §1 Sequencing
 
-### Wave 0 — Parallel (no inter-story dependencies)
+### Wave 0 — Parallel (implementations run concurrently; US-43.3 merge gated on US-43.5)
 
 | Story | Title | Size | Deps |
 |---|---|---|---|
 | US-43.1 | Homebrew tap + formula | L | none |
 | US-43.2 | Onboard nextstep nudge | M | none |
-| US-43.3 | iMessage courtesy reply | L | none |
+| US-43.3 | iMessage courtesy reply | L | US-43.5 (merge gate only — see note) |
 | US-43.4 | `doctor --install` subcommand | M | none |
 | US-43.5 | `chat.db` diagnostics | S | none |
 
-All five run concurrently. No shared files between them at edit time.
-US-43.3 touches `src/channels/imessage.c` (4444 lines); no other story
-touches that file. US-43.1 creates `Formula/human.rb` (new file).
+All five implementations run concurrently. No shared files between them at
+edit time. US-43.3 touches `src/channels/imessage.c` (4444 lines); no other
+story touches that file. US-43.1 creates `Formula/human.rb` (new file).
+
+**US-43.3 merge gate note:** The PO dependency (stories.md L71) is a
+stability gate, not a code-coupling gate. US-43.3 does not call US-43.5
+APIs (different translation units; the design doc confirms this). The
+implementer for US-43.3 proceeds in parallel with US-43.5; however, the
+Scrum Master will not merge US-43.3 onto the sprint branch until US-43.5's
+`impl/US-43.5` commit is verified PASS. This prevents extending the iMessage
+send path while poll-error classification is still in flux.
 
 ### Wave 1 — Depends on Wave 0 completion of US-43.1
 
@@ -59,11 +67,15 @@ directly from the formula's canonical install command.
 ### US-43.3 — iMessage courtesy reply (L, HIGH risk)
 
 - Implementer: `general-purpose` with `isolation: worktree`, impl branch `impl/US-43.3`
-- Quality gates: verifier PASS + critic CLEAN + **aspect-panel MANDATORY** (PASS or CLEAN required — ESCALATE blocks story closure)
+- Quality gates: verifier PASS + critic CLEAN + **5-perspective specialized verifier review MANDATORY**
 - Rationale: spoofable outbound iMessage surface. Any regression here risks sending
   unsolicited messages from the user's phone number to third parties.
-- Evidence required: test coverage for midnight-crossover spoof guard, rate-limiter
-  assertions, and the opt-in gate. Full suite must pass.
+- Note: the project has no `/aspect-panel` subsystem. The design doc (US-43.3.md DoD)
+  substitutes a 5-perspective review: correctness, edge-case, security, regression, style.
+  All five perspectives must PASS or return only LOW/INFO findings before story closes.
+  Any HIGH/CRITICAL finding from any perspective blocks closure — escalate to user immediately.
+- Evidence required: test coverage for midnight-crossover spoof guard, 51-handle adversary
+  test, rate-limiter assertions, opt-in gate, flock TOCTOU guard. Full suite must pass.
 
 ### US-43.4 — `doctor --install` subcommand (M, LOW risk)
 
