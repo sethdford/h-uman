@@ -152,6 +152,65 @@ static void compose_marks_topic_open_when_last_inbound_recent_and_text_substanti
     hu_moment_history_free(h);
 }
 
+/* ---- Style inference tests (Task 1.5) ---- */
+
+static void compose_avg_length_words_matches_inbound_messages(void) {
+    int64_t now = 1779609600;
+    int64_t ts[] = {now - 600, now - 500, now - 400, now - 300, now - 200};
+    bool ob[] = {false, false, false, false, false};
+    const char *tx[] = {"yeah totally", "yep", "ok cool", "lol same", "for real"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(5, ts, ob, tx);
+    HU_ASSERT_NOT_NULL(h);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 200, -1, "UTC", now, &m);
+    /* word counts: 2 + 1 + 2 + 2 + 2 = 9, avg = 9/5 = 1.8 → rounds to 2 */
+    HU_ASSERT_TRUE(m.their_avg_length_words >= 2 && m.their_avg_length_words <= 3);
+    HU_ASSERT_EQ(m.their_recent_tone, HU_MOMENT_TONE_TERSE);
+    hu_moment_history_free(h);
+}
+
+static void compose_detects_lowercase_when_inbound_is_lowercase(void) {
+    int64_t now = 1779609600;
+    int64_t ts[] = {now - 60};
+    bool ob[] = {false};
+    const char *tx[] = {"yeah totally same"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    HU_ASSERT_NOT_NULL(h);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 60, -1, "UTC", now, &m);
+    HU_ASSERT_TRUE(m.they_use_lowercase);
+    HU_ASSERT_FALSE(m.they_use_emoji);
+    HU_ASSERT_FALSE(m.they_use_punctuation_eol);
+    hu_moment_history_free(h);
+}
+
+static void compose_detects_emoji_when_inbound_contains_emoji(void) {
+    int64_t now = 1779609600;
+    int64_t ts[] = {now - 60};
+    bool ob[] = {false};
+    const char *tx[] = {"lol \xF0\x9F\x98\x82 same"}; /* U+1F602 😂 in UTF-8 */
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    HU_ASSERT_NOT_NULL(h);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 60, -1, "UTC", now, &m);
+    HU_ASSERT_TRUE(m.they_use_emoji);
+    hu_moment_history_free(h);
+}
+
+static void compose_distressed_tone_for_long_vent_with_negative_markers(void) {
+    int64_t now = 1779609600;
+    int64_t ts[] = {now - 60};
+    bool ob[] = {false};
+    const char *tx[] = {"ugh i can't believe this happened again, i'm so tired of it, "
+                        "nothing ever works out and i don't know what to do anymore"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    HU_ASSERT_NOT_NULL(h);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 60, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.their_recent_tone, HU_MOMENT_TONE_DISTRESSED);
+    hu_moment_history_free(h);
+}
+
 void run_moment_compose_tests(void) {
     HU_TEST_SUITE("moment_compose");
     HU_RUN_TEST(compose_from_inputs_rejects_null_out);
@@ -168,4 +227,8 @@ void run_moment_compose_tests(void) {
     HU_RUN_TEST(compose_marks_continuation_when_last_inbound_within_30m);
     HU_RUN_TEST(compose_does_not_mark_continuation_when_gap_exceeds_30m);
     HU_RUN_TEST(compose_marks_topic_open_when_last_inbound_recent_and_text_substantive);
+    HU_RUN_TEST(compose_avg_length_words_matches_inbound_messages);
+    HU_RUN_TEST(compose_detects_lowercase_when_inbound_is_lowercase);
+    HU_RUN_TEST(compose_detects_emoji_when_inbound_contains_emoji);
+    HU_RUN_TEST(compose_distressed_tone_for_long_vent_with_negative_markers);
 }

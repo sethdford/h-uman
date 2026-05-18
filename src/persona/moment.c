@@ -5,6 +5,7 @@
 #include "human/moment.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -163,6 +164,112 @@ static int count_words(const char *text) {
     return n;
 }
 
+/* Returns true if text has no uppercase letters (ignores non-alpha chars). */
+static bool is_all_lowercase(const char *text) {
+    if (!text)
+        return false;
+    for (const char *p = text; *p; p++) {
+        if (isupper((unsigned char)*p))
+            return false;
+    }
+    return true;
+}
+
+/* Decode one UTF-8 codepoint from *p, advancing *p past the sequence.
+ * Returns the codepoint, or 0xFFFD on invalid input. */
+static uint32_t utf8_decode(const char **p) {
+    unsigned char c = (unsigned char)**p;
+    uint32_t cp;
+    int extra;
+    if (c < 0x80) {
+        cp = c;
+        extra = 0;
+    } else if (c < 0xC0) {
+        /* continuation byte without a lead — invalid */
+        cp = 0xFFFD;
+        extra = 0;
+    } else if (c < 0xE0) {
+        cp = c & 0x1F;
+        extra = 1;
+    } else if (c < 0xF0) {
+        cp = c & 0x0F;
+        extra = 2;
+    } else {
+        cp = c & 0x07;
+        extra = 3;
+    }
+    (*p)++;
+    for (int i = 0; i < extra; i++) {
+        unsigned char cont = (unsigned char)**p;
+        if ((cont & 0xC0) != 0x80) {
+            /* not a continuation byte — invalid sequence */
+            return 0xFFFD;
+        }
+        cp = (cp << 6) | (cont & 0x3F);
+        (*p)++;
+    }
+    return cp;
+}
+
+/* Returns true if text contains any codepoint in the emoji ranges:
+ *   U+1F000..U+1FAFF  (pictographs, emoticons, transport, etc.)
+ *   U+2600..U+27BF    (misc symbols + dingbats) */
+static bool contains_emoji_codepoint(const char *text) {
+    if (!text)
+        return false;
+    const char *p = text;
+    while (*p) {
+        uint32_t cp = utf8_decode(&p);
+        if ((cp >= 0x1F000 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF))
+            return true;
+    }
+    return false;
+}
+
+/* Returns true if the last non-whitespace character is sentence-ending punctuation. */
+static bool ends_with_punctuation(const char *text) {
+    if (!text || !*text)
+        return false;
+    const char *last = text + strlen(text) - 1;
+    while (last > text && isspace((unsigned char)*last))
+        last--;
+    char c = *last;
+    return c == '.' || c == '?' || c == '!' || c == ';' || c == ':' || c == ',';
+}
+
+/* Negative-affect keywords for DISTRESSED tone detection.
+ * Checked as case-insensitive substrings. */
+static const char *const k_distressed_markers[] = {
+    "ugh",   "tired", "can't",         "cant",  "don't know", "dont know", "hate",
+    "sucks", "awful", "nothing works", "never", "anymore",    NULL};
+
+/* Infer tone from the last inbound message text. */
+static hu_moment_tone_t infer_tone(const char *text, int word_count) {
+    if (word_count < 4)
+        return HU_MOMENT_TONE_TERSE;
+
+    /* Case-insensitive substring search using a lower-cased copy (stack buffer).
+     * Cap at 511 chars to avoid large stack allocations. */
+    char lower[512];
+    size_t len = strlen(text);
+    if (len >= sizeof lower)
+        len = sizeof lower - 1;
+    for (size_t i = 0; i < len; i++)
+        lower[i] = (char)tolower((unsigned char)text[i]);
+    lower[len] = '\0';
+
+    for (int i = 0; k_distressed_markers[i]; i++) {
+        if (strstr(lower, k_distressed_markers[i]))
+            return HU_MOMENT_TONE_DISTRESSED;
+    }
+
+    /* Excited: contains '!' */
+    if (strchr(text, '!'))
+        return HU_MOMENT_TONE_EXCITED;
+
+    return HU_MOMENT_TONE_WARM;
+}
+
 hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
                                          const struct hu_persona_overlay_t *overlay,
                                          const struct hu_conversation_history_t *history,
@@ -214,11 +321,39 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
             out->thread_is_continuation = (age_s < HU_CONTINUATION_WINDOW_S);
 
             /* topic_still_open: recent inbound AND substantive message text. */
-            int wc = count_words(last_inbound->text);
-            if (out->thread_is_continuation && wc >= HU_TOPIC_MIN_WORDS) {
+            int last_wc = count_words(last_inbound->text);
+            if (out->thread_is_continuation && last_wc >= HU_TOPIC_MIN_WORDS) {
                 out->topic_still_open = true;
                 extract_topic_hint(last_inbound->text, out->topic_hint, sizeof out->topic_hint);
             }
+
+            /* Style inference from the most recent inbound message. */
+            out->they_use_lowercase = is_all_lowercase(last_inbound->text);
+            out->they_use_emoji = contains_emoji_codepoint(last_inbound->text);
+            out->they_use_punctuation_eol = ends_with_punctuation(last_inbound->text);
+            out->their_recent_tone = infer_tone(last_inbound->text, last_wc);
+        }
+
+        /* Length stats across inbound entries (last up to 5). */
+        int inbound_counts[5];
+        size_t inbound_n = 0;
+        for (size_t i = history->count; i-- > 0 && inbound_n < 5;) {
+            if (!history->entries[i].outbound) {
+                inbound_counts[inbound_n++] = count_words(history->entries[i].text);
+            }
+        }
+        if (inbound_n > 0) {
+            int sum = 0;
+            int max = 0;
+            for (size_t i = 0; i < inbound_n; i++) {
+                sum += inbound_counts[i];
+                if (inbound_counts[i] > max)
+                    max = inbound_counts[i];
+            }
+            /* Round-to-nearest average. */
+            out->their_avg_length_words = (int)((sum * 10 / (int)inbound_n + 5) / 10);
+            /* With N<=5, p90 is essentially the max. */
+            out->their_p90_length_words = max;
         }
     }
 
