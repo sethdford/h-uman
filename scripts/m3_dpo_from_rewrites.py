@@ -123,29 +123,45 @@ def export_alpaca_dpo(pairs: list[dict], out_path: Path) -> None:
             f.write(json.dumps(record) + "\n")
 
 
-def maybe_invoke_dpo_trainer(jsonl_path: Path, adapter_out: Path) -> int:
-    """Invoke `human ml dpo-train` if available. Returns rc."""
+def maybe_invoke_dpo_trainer(jsonl_path: Path, adapter_out: Path,
+                              iters: int = 100, beta: float = 0.1,
+                              backend: str = "auto") -> int:
+    """E6 (2026-05-18): invoke `human ml dpo-train` with --pairs.
+
+    The C side already accepts JSONL of Alpaca-DPO shape
+    ({"prompt", "chosen", "rejected"}) — the exact format
+    m3_dpo_from_rewrites.py exports. Wiring is now complete:
+    REWRITE outcomes → JSONL → C DPO trainer.
+
+    Returns rc from the subprocess (0 = success, non-zero = failure
+    OR human binary unavailable; caller treats both as soft fail).
+    """
     human_bin = os.environ.get("HUMAN_BIN") or str(REPO_ROOT / "build-release" / "human")
     if not Path(human_bin).exists():
         human_bin = str(REPO_ROOT / "build" / "human")
     if not Path(human_bin).exists():
         print("  WARN: no human binary found — skipping DPO training")
         return 0
-    cmd = [human_bin, "ml", "dpo-train", "--help"]
-    try:
-        rc = subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if rc != 0:
-            print("  WARN: human ml dpo-train not available (subcommand unknown)")
-            return 0
-    except FileNotFoundError:
+    if not jsonl_path.exists():
+        print(f"  WARN: pairs JSONL not found at {jsonl_path}")
         return 0
-    # Real invocation. Argument shape will need to match dpo-train's actual
-    # signature; this is a placeholder until the C side accepts a JSONL.
-    # For now, we just confirm the trainer exists and skip the actual call
-    # (it would expect a specific persona / data layout we haven't built).
-    print(f"  NOTE: dpo-train subcommand available but JSONL ingestion is a "
-          f"follow-up slice. Exported pairs sit at {jsonl_path}.")
-    return 0
+
+    adapter_out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        human_bin, "ml", "dpo-train",
+        "--backend", backend,
+        "--pairs", str(jsonl_path),
+        "--iters", str(iters),
+        "--beta", f"{beta:g}",
+        "--adapter-out", str(adapter_out),
+    ]
+    print(f"  Invoking real DPO training:")
+    print(f"    {' '.join(cmd)}")
+    try:
+        return subprocess.call(cmd)
+    except FileNotFoundError as e:
+        print(f"  ERROR: {human_bin} not found: {e}")
+        return 1
 
 
 def main():
@@ -158,6 +174,12 @@ def main():
                     help="Attempt to invoke `human ml dpo-train` after export")
     ap.add_argument("--adapter-out", type=Path,
                     help="Where dpo-train should write its adapter (with --train)")
+    ap.add_argument("--iters", type=int, default=100,
+                    help="DPO training iterations (with --train, default 100)")
+    ap.add_argument("--beta", type=float, default=0.1,
+                    help="DPO temperature β (with --train, default 0.1)")
+    ap.add_argument("--backend", default="auto", choices=["auto", "huml", "mlx"],
+                    help="DPO backend (with --train, default auto)")
     args = ap.parse_args()
 
     print(f"\n{'='*60}")
@@ -194,8 +216,15 @@ def main():
 
     if args.train:
         adapter_out = args.adapter_out or (Path.home() / ".human" / "training-data" /
-                                            "adapters" / "dpo-from-rewrites.bin")
-        return maybe_invoke_dpo_trainer(args.export_jsonl or args.input, adapter_out)
+                                            "adapters" / "dpo-from-rewrites")
+        # Prefer the exported Alpaca-DPO file if --export-jsonl was set;
+        # otherwise fall back to the input (which must already be in
+        # alpaca-dpo format — the C-side parser expects {prompt, chosen,
+        # rejected}).
+        pairs_for_train = args.export_jsonl or args.input
+        return maybe_invoke_dpo_trainer(pairs_for_train, adapter_out,
+                                         iters=args.iters, beta=args.beta,
+                                         backend=args.backend)
 
     return 0
 
