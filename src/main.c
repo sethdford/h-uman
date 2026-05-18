@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #endif
@@ -22,6 +23,7 @@
 #include "human/bootstrap.h"
 #include "human/bus.h"
 #include "human/channel.h"
+#include "human/channel_catalog.h"
 #include "human/channels/thread_binding.h"
 #include "human/cli_commands.h"
 #include "human/config.h"
@@ -29,6 +31,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/string.h"
 #include "human/cost.h"
 #include "human/cron.h"
 #include "human/crontab.h"
@@ -75,8 +78,8 @@
 #ifdef HU_ENABLE_ML
 #include "human/ml/cli.h"
 #include "human/ml/cli_dpo.h"
-#include "human/ml/cli_kto.h"
 #include "human/ml/cli_grpo.h"
+#include "human/ml/cli_kto.h"
 #include "human/ml/cli_rm.h"
 #endif
 #ifdef HU_ENABLE_CURL
@@ -226,24 +229,27 @@ static bool svc_agent_on_message_locked(hu_bus_event_type_t type, const hu_bus_e
 #ifdef HU_ENABLE_ML
 static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: human ml <subcommand>\n\n"
-                        "Subcommands:\n"
-                        "  train                   Train a model from config\n"
-                        "  experiment              Run experiment loop\n"
-                        "  prepare                 Tokenize data for training\n"
-                        "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
-                        "  dpo-train               Run DPO preference training step\n"
-                        "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
-                        "  kto-train               Train a KTO trainer on one-sided preference signals\n"
-                        "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
-                        "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
-                        "  lora-persona            Train LoRA adapter from persona examples\n"
-                        "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
-                        "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
-                        "  lora-runner             Generate response set from persona via provider (D2.2)\n"
-                        "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
-                        "  train-feed-predictor    Train topic/trend predictor from feed data\n"
-                        "  status                  Show experiment results\n");
+        fprintf(
+            stderr,
+            "Usage: human ml <subcommand>\n\n"
+            "Subcommands:\n"
+            "  train                   Train a model from config\n"
+            "  experiment              Run experiment loop\n"
+            "  prepare                 Tokenize data for training\n"
+            "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
+            "  dpo-train               Run DPO preference training step\n"
+            "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, "
+            "was dpo-train)\n"
+            "  kto-train               Train a KTO trainer on one-sided preference signals\n"
+            "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
+            "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
+            "  lora-persona            Train LoRA adapter from persona examples\n"
+            "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
+            "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
+            "  lora-runner             Generate response set from persona via provider (D2.2)\n"
+            "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
+            "  train-feed-predictor    Train topic/trend predictor from feed data\n"
+            "  status                  Show experiment results\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
     const char *sub = argv[2];
@@ -293,7 +299,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                "  prepare                 Tokenize data for training\n"
                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                "  dpo-train               Run DPO preference training step\n"
-               "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
+               "  dpo-judge               Score preference pairs with an LLM judge (legacy "
+               "semantics, was dpo-train)\n"
                "  kto-train               Train a KTO trainer on one-sided preference signals\n"
                "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
                "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
@@ -325,8 +332,7 @@ static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "demo: unknown subcommand: %s\n", sub);
         return HU_ERR_INVALID_ARGUMENT;
     }
-    hu_error_t err =
-        hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3), alloc);
+    hu_error_t err = hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3), alloc);
     if (err == HU_OK)
         return HU_OK;
     if (err == HU_ERR_PERMISSION_DENIED)
@@ -724,6 +730,177 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
         alloc->free(alloc->ctx, items, cap * sizeof(hu_diag_item_t));
         if (err != HU_OK)
             return err;
+        return err_n > 0 ? HU_ERR_INTERNAL : HU_OK;
+    }
+
+    /* US-43.4: `human doctor --install` install-readiness gate.
+     *
+     * Precedence (AC-43.4.3): subcommand (handled above) → --install →
+     *   --privacy (sprint-42 reserved slot, commented stub below) → --fix →
+     *   default full-scan. The gatherer is file-static (I/O lives here); the
+     *   decision is `hu_doctor_check_install` (pure, tested directly with
+     *   injected state — see tests/test_doctor_install.c). */
+    bool do_install = false;
+    bool install_json = false;
+    for (int i = 2; i < argc; i++) {
+        if (!argv[i])
+            continue;
+        if (strcmp(argv[i], "--install") == 0)
+            do_install = true;
+        else if (strcmp(argv[i], "--json") == 0)
+            install_json = true;
+        /* else if (strcmp(argv[i], "--privacy") == 0) {
+         *     sprint-42 RESERVED: precedence slot between --install and --fix.
+         * } */
+    }
+
+    if (do_install) {
+        /* Gather state. All I/O is local to this branch; the predicate is
+         * pure and tested with synthesized state structs. */
+        hu_doctor_install_state_t state = {
+            .binary_path = NULL,
+            .config_dir_exists = false,
+            .channel_paired = false,
+            .persona_status = HU_DOCTOR_PERSONA_MISSING,
+        };
+        char *resolved_binary = NULL;
+
+        /* 1. Binary path: argv[0] resolved via realpath (fast, portable) with
+         *    /proc/self/exe (linux) / _NSGetExecutablePath (darwin) fallback
+         *    via the existing pattern in src/update.c. */
+#if defined(__linux__)
+        {
+            char buf[4096];
+            ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+            if (n > 0) {
+                buf[n] = '\0';
+                resolved_binary = hu_strdup(alloc, buf);
+            }
+        }
+#elif defined(__APPLE__)
+        {
+            char buf[4096];
+            uint32_t size = (uint32_t)sizeof(buf);
+            extern int _NSGetExecutablePath(char *, uint32_t *);
+            if (_NSGetExecutablePath(buf, &size) == 0) {
+                resolved_binary = hu_strdup(alloc, buf);
+            }
+        }
+#endif
+        if (!resolved_binary && argc >= 1 && argv[0] && argv[0][0]) {
+            resolved_binary = hu_strdup(alloc, argv[0]);
+        }
+        state.binary_path = resolved_binary;
+
+        /* 2. Config dir: stat ~/.human/ (via hu_persona_base_dir's parent
+         *    semantics — we stat $HOME/.human directly). */
+        {
+            const char *home = getenv("HOME");
+            if (home && home[0]) {
+                char path[1024];
+                int n = snprintf(path, sizeof(path), "%s/.human", home);
+                if (n > 0 && (size_t)n < sizeof(path)) {
+                    struct stat st;
+                    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode))
+                        state.config_dir_exists = true;
+                }
+            }
+        }
+
+        /* 3. Channel paired — load config and ask channel_catalog. */
+        hu_config_t inst_cfg;
+        bool cfg_loaded = (hu_config_load(alloc, &inst_cfg) == HU_OK);
+        if (cfg_loaded) {
+            state.channel_paired = hu_channel_catalog_has_any_configured(&inst_cfg, false);
+
+            /* 4. Persona: resolve agent.persona by name and try to load. */
+            if (inst_cfg.agent.persona && inst_cfg.agent.persona[0]) {
+                hu_persona_t persona = {0};
+                hu_error_t pe = hu_persona_load(alloc, inst_cfg.agent.persona,
+                                                strlen(inst_cfg.agent.persona), &persona);
+                if (pe == HU_OK) {
+                    state.persona_status = HU_DOCTOR_PERSONA_PRESENT_VALID;
+                    hu_persona_deinit(alloc, &persona);
+                } else if (pe == HU_ERR_NOT_FOUND) {
+                    state.persona_status = HU_DOCTOR_PERSONA_MISSING;
+                } else {
+                    state.persona_status = HU_DOCTOR_PERSONA_PRESENT_INVALID;
+                }
+            } else {
+                state.persona_status = HU_DOCTOR_PERSONA_MISSING;
+            }
+        }
+
+        /* Run predicate. */
+        hu_diag_item_t *items = NULL;
+        size_t item_count = 0;
+        size_t cap = 8;
+        items = (hu_diag_item_t *)alloc->alloc(alloc->ctx, sizeof(hu_diag_item_t) * cap);
+        if (!items) {
+            if (resolved_binary)
+                alloc->free(alloc->ctx, resolved_binary, strlen(resolved_binary) + 1);
+            if (cfg_loaded)
+                hu_config_deinit(&inst_cfg);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        hu_error_t pred_err = hu_doctor_check_install(alloc, &state, &items, &item_count, &cap);
+
+        size_t err_n = 0;
+        for (size_t i = 0; i < item_count; i++) {
+            if (items[i].severity == HU_DIAG_ERR)
+                err_n++;
+        }
+
+        if (install_json) {
+            const char *status = (err_n > 0) ? "NOT_READY" : "READY";
+            printf("{");
+            printf("\"status\":\"%s\",", status);
+            printf("\"checks\":[");
+            for (size_t i = 0; i < item_count; i++) {
+                printf("%s{", i == 0 ? "" : ",");
+                printf("\"ok\":%s", items[i].severity == HU_DIAG_OK ? "true" : "false");
+                if (items[i].message) {
+                    printf(",\"message\":\"");
+                    for (const char *p = items[i].message; *p; p++) {
+                        if (*p == '"' || *p == '\\')
+                            putchar('\\');
+                        else if (*p == '\n')
+                            printf("\\n");
+                        else if ((unsigned char)*p < 0x20)
+                            continue;
+                        else
+                            putchar(*p);
+                    }
+                    putchar('"');
+                }
+                putchar('}');
+            }
+            printf("]}\n");
+        } else {
+            printf("\n  human doctor --install — install readiness\n\n");
+            for (size_t i = 0; i < item_count; i++) {
+                const char *sev_str = (items[i].severity == HU_DIAG_ERR) ? "error  " : "ok     ";
+                printf("  %s %s\n", sev_str, items[i].message ? items[i].message : "");
+            }
+            printf("\n  Status: %s (%zu error%s)\n\n", err_n > 0 ? "NOT_READY" : "READY", err_n,
+                   err_n == 1 ? "" : "s");
+        }
+
+        for (size_t i = 0; i < item_count; i++) {
+            if (items[i].category)
+                alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
+            if (items[i].message)
+                alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+        }
+        alloc->free(alloc->ctx, items, cap * sizeof(hu_diag_item_t));
+        if (resolved_binary)
+            alloc->free(alloc->ctx, resolved_binary, strlen(resolved_binary) + 1);
+        if (cfg_loaded)
+            hu_config_deinit(&inst_cfg);
+
+        if (pred_err != HU_OK)
+            return pred_err;
+        /* Aggregate verdict → exit code (matches imessage/verifier pattern). */
         return err_n > 0 ? HU_ERR_INTERNAL : HU_OK;
     }
 
@@ -2931,9 +3108,8 @@ int main(int argc, char *argv[]) {
     if (hu_onboard_check_first_run() && strcmp(cmd_name, "onboard") != 0 &&
         strcmp(cmd_name, "init") != 0 && strcmp(cmd_name, "help") != 0 &&
         strcmp(cmd_name, "version") != 0) {
-        fprintf(stderr,
-                "No config found. Run 'human onboard' for interactive setup,\n"
-                "or 'human init' for a quick local start (Ollama, no API key).\n\n");
+        fprintf(stderr, "No config found. Run 'human onboard' for interactive setup,\n"
+                        "or 'human init' for a quick local start (Ollama, no API key).\n\n");
     }
 #endif
 
