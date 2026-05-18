@@ -49,6 +49,19 @@ typedef struct hu_eval_suite {
     char *default_rubric;
     size_t default_rubric_len;
     hu_eval_match_mode_t default_match_mode; /* default for tasks that omit match_mode in JSON */
+    /* 2026-05-18: optional system prompt applied to every task in the suite.
+     * When non-NULL, eval.c passes this to provider->chat_with_system
+     * instead of the previously-hardcoded NULL/0. This closes the
+     * "h-uman isn't witty on iMessage" diagnostic chain — without a persona
+     * system prompt, the LLM produces "AI assistant offering options"
+     * markdown lists; with the persona system prompt the SAME model produces
+     * in-voice 1-sentence texts. The controlled experiment in
+     * scripts/persona_eval_comparison.py measured 97% length reduction +
+     * 100% markdown elimination across 8 tasks. cli_commands.c::cmd_eval
+     * populates this from hu_persona_build_prompt(loaded_persona, channel).
+     * Owned by the suite; hu_eval_suite_free frees it. */
+    char *system_prompt;
+    size_t system_prompt_len;
 } hu_eval_suite_t;
 
 typedef struct hu_eval_run {

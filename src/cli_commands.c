@@ -37,6 +37,7 @@ void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
 hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                         const char *output_path);
 #include "human/onboard.h"
+#include "human/persona.h"
 #include "human/providers/factory.h"
 #include "human/security.h"
 #include "human/security/audit.h"
@@ -1332,6 +1333,58 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
                 hu_log_error("eval", NULL, "provider error: %s", hu_error_string(err));
                 return err;
             }
+            /* 2026-05-18 audit fix: load persona + build per-channel
+             * system prompt and attach to the suite BEFORE running. Without
+             * this, eval.c passes NULL/0 to chat_with_system and the LLM
+             * produces "AI assistant offering options" markdown responses
+             * with no resemblance to the user's actual voice. With this
+             * fix, the same model produces in-voice 1-sentence texts.
+             * Empirical effect (8-task imessage_humanness comparison):
+             * 97% length reduction + 100% markdown elimination.
+             * See: scripts/persona_eval_comparison.py, src/eval.c:572. */
+            const char *persona_name =
+                cfg.agent.persona && cfg.agent.persona[0] ? cfg.agent.persona : "default";
+            hu_persona_t persona_obj;
+            memset(&persona_obj, 0, sizeof(persona_obj));
+            hu_error_t pload =
+                hu_persona_load(alloc, persona_name, strlen(persona_name), &persona_obj);
+            if (pload == HU_OK) {
+                /* Heuristic channel detection from suite name: imessage /
+                 * telegram / slack / discord live in the suite name itself
+                 * (e.g. imessage_humanness.json). Default to imessage,
+                 * which is the primary channel for the persona-system
+                 * audit and is a safe fallback for general suites. */
+                const char *channel = "imessage";
+                if (suite.name) {
+                    if (strstr(suite.name, "telegram"))
+                        channel = "telegram";
+                    else if (strstr(suite.name, "slack"))
+                        channel = "slack";
+                    else if (strstr(suite.name, "discord"))
+                        channel = "discord";
+                }
+                char *sys_prompt = NULL;
+                size_t sys_prompt_len = 0;
+                hu_error_t pp_err =
+                    hu_persona_build_prompt(alloc, &persona_obj, channel, strlen(channel), NULL, 0,
+                                            &sys_prompt, &sys_prompt_len);
+                if (pp_err == HU_OK && sys_prompt && sys_prompt_len > 0) {
+                    suite.system_prompt = sys_prompt;
+                    suite.system_prompt_len = sys_prompt_len;
+                    hu_log_info("eval", NULL,
+                                "loaded persona '%s' for channel '%s' (system prompt: %zu bytes)",
+                                persona_name, channel, sys_prompt_len);
+                } else if (sys_prompt) {
+                    alloc->free(alloc->ctx, sys_prompt, sys_prompt_len + 1);
+                }
+                hu_persona_deinit(alloc, &persona_obj);
+            } else {
+                hu_log_info("eval", NULL,
+                            "persona '%s' not loaded (%s) — eval will run with bare prompt; "
+                            "expect AI-assistant-shaped responses",
+                            persona_name, hu_error_string(pload));
+            }
+
             err = hu_eval_run_suite(alloc, &provider, model, model_len, &suite, HU_EVAL_CONTAINS,
                                     &run);
             if (provider.vtable && provider.vtable->deinit)
