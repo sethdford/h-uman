@@ -4959,7 +4959,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_agent_m3_record_chat_outcome(agent, msg, msg_len, resp.content, resp.content_len,
                                             llm_duration_ms, agent->memory_session_id,
                                             agent->memory_session_id_len, HU_M3_GUARD_PASS,
-                                            /*turn_kind=batch=*/2);
+                                            /*turn_kind=batch=*/2, &resp.usage);
         }
 
         /* W10: persist prompt-token metadata after successful provider call (see probe
@@ -5118,7 +5118,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_agent_m3_record_chat_outcome(agent, msg, msg_len, gvr_resp, gvr_resp_len,
                                                 gvr_latency_ms, agent->memory_session_id,
                                                 agent->memory_session_id_len, HU_M3_GUARD_PASS,
-                                                /*turn_kind=batch=*/2);
+                                                /*turn_kind=batch=*/2, &resp.usage);
             }
             if (gvr_err == HU_OK && gvr_result.final_content) {
                 if (gvr_result.revisions_performed > 0) {
@@ -5564,11 +5564,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                              critique.revised_response_len > 0)
                                 ? critique.revised_response_len
                                 : final_len;
+                        /* No chat_response in scope — critique works on the
+                         * already-cleaned string. Usage is NULL; the helper
+                         * falls back to a bytes/4 estimate. */
                         hu_agent_m3_record_chat_outcome(agent, msg, msg_len, cn_resp, cn_resp_len,
                                                         const_latency_ms, agent->memory_session_id,
                                                         agent->memory_session_id_len,
                                                         HU_M3_GUARD_PASS,
-                                                        /*turn_kind=batch=*/2);
+                                                        /*turn_kind=batch=*/2, NULL);
                         if (critique.verdict == HU_CRITIQUE_REWRITE && critique.revised_response &&
                             critique.revised_response_len > 0) {
                             if (ab_owned)
@@ -5735,7 +5738,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             agent, msg, msg_len, mc_resp.content, mc_resp.content_len,
                             mc_latency_ms, agent->memory_session_id, agent->memory_session_id_len,
                             HU_M3_GUARD_PASS,
-                            /*turn_kind=batch=*/2);
+                            /*turn_kind=batch=*/2, &mc_resp.usage);
 
                         agent->total_tokens += mc_resp.usage.total_tokens;
                         hu_agent_internal_record_cost(agent, &mc_resp.usage);
@@ -5880,11 +5883,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                      * chain RECOVERED via hu_response_guard_retry_slim
                                      * — the slim retry rewrote a rejected first
                                      * draft. Tag REWRITE. */
+                                    /* Slim retry path doesn't expose a
+                                     * chat_response struct — NULL usage,
+                                     * bytes/4 fallback fires. */
                                     hu_agent_m3_record_chat_outcome(
                                         agent, msg, msg_len, retry_content, retry_len,
                                         vc_retry_latency_ms, agent->memory_session_id,
                                         agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
-                                        /*turn_kind=batch=*/2);
+                                        /*turn_kind=batch=*/2, NULL);
                                     /* Re-validate the retry output through the chain so a
                                      * regenerated CoT or helper-closer cannot escape (Fix 3). */
                                     hu_chain_result_t retry_cr;
@@ -6050,11 +6056,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 hu_agent_m3_on_provider_success(agent);
                                 /* B1 r3 (2026-05-17): record outcome from the post-batch
                                  * response_guard retry path. turn_kind=2 (batch). */
+                                /* Slim retry path doesn't expose a
+                                 * chat_response — NULL usage, bytes/4
+                                 * fallback fires. */
                                 hu_agent_m3_record_chat_outcome(
                                     agent, msg, msg_len, retry_content, retry_len,
                                     ab_retry_latency_ms, agent->memory_session_id,
                                     agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
-                                    /*turn_kind=batch=*/2);
+                                    /*turn_kind=batch=*/2, NULL);
                                 hu_log_warn("agent_turn", agent->observer,
                                             "response_guard RECOVERED: retry passed (len=%zu, "
                                             "stripped=%zu)",

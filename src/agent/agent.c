@@ -1029,7 +1029,8 @@ void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
 void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
                                      const char *response, size_t response_len, uint64_t latency_ms,
                                      const char *contact_id, size_t contact_id_len,
-                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind) {
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind,
+                                     const hu_token_usage_t *usage) {
     /* Defensive no-op shape mirrors hu_agent_m3_on_provider_success so
      * callers in agent_stream / agent_turn don't have to gate the call.
      * The hot path is "agent has no M3 adapter attached" and that path
@@ -1053,18 +1054,24 @@ void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size
     outcome.prompt_hash = hu_m3_outcome_hash_bytes(prompt, prompt_len);
     outcome.response_hash = hu_m3_outcome_hash_bytes(response, response_len);
     outcome.contact_id_hash = hu_m3_outcome_hash_bytes(contact_id, contact_id_len);
-    /* prompt_tokens / completion_tokens — populate with a conservative
-     * bytes/4 estimate. Real tokenizer counts aren't cheaply available
-     * in the agent path, but the training-side selection policy needs
-     * a positive value to distinguish degenerate (zero-content) turns
-     * from real ones. The /4 heuristic comes from the rough English
-     * BPE rule (~4 bytes per token); it under-counts by 20-40% for
-     * structured / non-English text but never reports zero when there
-     * is real content, which is the property the filter relies on.
-     * A future phase replaces this with exact counts from the provider
-     * response's `usage` block when available. */
-    outcome.prompt_tokens = (uint32_t)(prompt_len / 4);
-    outcome.completion_tokens = (uint32_t)(response_len / 4);
+    /* prompt_tokens / completion_tokens — Phase C1 (2026-05-18): prefer
+     * provider-reported counts when the caller passes a usage block.
+     * Fall back to a bytes/4 estimate (~English BPE rule) when usage is
+     * NULL or all-zero. The fallback never reports zero when there's
+     * real content, which is the property the M3 driver's selection
+     * policy relies on. Per-field fallback (rather than all-or-nothing)
+     * handles providers that report only prompt_tokens or only
+     * completion_tokens. */
+    if (usage && usage->prompt_tokens > 0) {
+        outcome.prompt_tokens = usage->prompt_tokens;
+    } else {
+        outcome.prompt_tokens = (uint32_t)(prompt_len / 4);
+    }
+    if (usage && usage->completion_tokens > 0) {
+        outcome.completion_tokens = usage->completion_tokens;
+    } else {
+        outcome.completion_tokens = (uint32_t)(response_len / 4);
+    }
     outcome.guard_decision = (uint8_t)guard_decision;
     outcome.turn_kind = turn_kind;
     /* model_id / adapter_id: 0 = unknown. Mapping is a config-driven
@@ -1087,7 +1094,8 @@ void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
 void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
                                      const char *response, size_t response_len, uint64_t latency_ms,
                                      const char *contact_id, size_t contact_id_len,
-                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind) {
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind,
+                                     const hu_token_usage_t *usage) {
     (void)agent;
     (void)prompt;
     (void)prompt_len;
@@ -1098,6 +1106,7 @@ void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size
     (void)contact_id_len;
     (void)guard_decision;
     (void)turn_kind;
+    (void)usage;
 }
 #endif
 

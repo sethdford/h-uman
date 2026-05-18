@@ -1412,7 +1412,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         hu_agent_m3_record_chat_outcome(agent, msg, msg_len, sresp.content, sresp.content_len,
                                         llm_duration_ms, agent->memory_session_id,
                                         agent->memory_session_id_len, HU_M3_GUARD_PASS,
-                                        /*turn_kind=stream=*/1);
+                                        /*turn_kind=stream=*/1, &sresp.usage);
 
         agent->total_tokens += sresp.usage.total_tokens;
         hu_agent_internal_record_cost(agent, &sresp.usage);
@@ -1516,11 +1516,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                              * just "the hook fired". Latency is the slim-retry's
                              * monotonic elapsed time (r3 threaded it through);
                              * contact_id is the agent's session id when set. */
+                            /* Slim retry path — no chat_response in scope.
+                             * NULL usage → bytes/4 fallback fires. */
                             hu_agent_m3_record_chat_outcome(
                                 agent, msg, msg_len, safe_content, safe_content_len,
                                 recovered_retry_latency_ms, agent->memory_session_id,
                                 agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
-                                /*turn_kind=stream=*/1);
+                                /*turn_kind=stream=*/1, NULL);
                             safe_owned = true;
                             hu_log_warn("agent_stream", agent->observer,
                                         "response_guard RECOVERED: stream retry passed (len=%zu, "
@@ -1843,10 +1845,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     gvr_result.final_content ? gvr_result.final_content : final_content;
                 size_t gvr_resp_len =
                     gvr_result.final_content ? gvr_result.final_content_len : final_content_len;
+                /* GVR runs after the original sresp has been cleaned up in
+                 * the stream path — no chat_response struct in scope here.
+                 * NULL usage → bytes/4 fallback. */
                 hu_agent_m3_record_chat_outcome(agent, msg, msg_len, gvr_resp, gvr_resp_len,
                                                 gvr_latency_ms, agent->memory_session_id,
                                                 agent->memory_session_id_len, HU_M3_GUARD_PASS,
-                                                /*turn_kind=stream=*/1);
+                                                /*turn_kind=stream=*/1, NULL);
             }
             if (gvr_err == HU_OK && gvr_result.final_content &&
                 gvr_result.revisions_performed > 0) {
@@ -1926,10 +1931,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     const char *rt_resp = (revised && revised_len > 0) ? revised : final_content;
                     size_t rt_resp_len =
                         (revised && revised_len > 0) ? revised_len : final_content_len;
+                    /* Persona rethink — separate provider call, but the
+                     * intermediate hu_chat_response is freed before this
+                     * point. NULL usage → bytes/4 fallback. */
                     hu_agent_m3_record_chat_outcome(agent, msg, msg_len, rt_resp, rt_resp_len,
                                                     rethink_latency_ms, agent->memory_session_id,
                                                     agent->memory_session_id_len, HU_M3_GUARD_PASS,
-                                                    /*turn_kind=stream=*/1);
+                                                    /*turn_kind=stream=*/1, NULL);
                 }
                 if (re_err == HU_OK && revised && revised_len > final_content_len) {
                     hu_log_info("human", NULL, "[quality] persona rethink: %zu → %zu chars",
@@ -1971,10 +1979,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                      critique.revised_response_len > 0)
                         ? critique.revised_response_len
                         : final_content_len;
+                /* Critique works on cleaned final_content — no
+                 * chat_response in scope. NULL usage → bytes/4 fallback. */
                 hu_agent_m3_record_chat_outcome(agent, msg, msg_len, cn_resp, cn_resp_len,
                                                 const_latency_ms, agent->memory_session_id,
                                                 agent->memory_session_id_len, HU_M3_GUARD_PASS,
-                                                /*turn_kind=stream=*/1);
+                                                /*turn_kind=stream=*/1, NULL);
                 if (critique.verdict == HU_CRITIQUE_REWRITE && critique.revised_response &&
                     critique.revised_response_len > 0) {
                     if (content_owned)
@@ -2337,11 +2347,13 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 /* B1 redefined (2026-05-17 r3): response_guard
                                  * RECOVERED path — the retry rewrote a
                                  * rejected first draft. Tag REWRITE. */
+                                /* response_guard RECOVERED — retry text from
+                                 * the slim retry path, no chat_response. */
                                 hu_agent_m3_record_chat_outcome(
                                     agent, msg, msg_len, retry_txt, retry_txt_len,
                                     ps_retry_latency_ms, agent->memory_session_id,
                                     agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
-                                    /*turn_kind=stream=*/1);
+                                    /*turn_kind=stream=*/1, NULL);
                                 final_content = retry_txt;
                                 final_content_len = retry_txt_len;
                                 hu_log_warn("agent_stream", agent->observer,

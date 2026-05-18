@@ -5052,9 +5052,10 @@ static void test_m3_record_chat_outcome_populates_token_estimates(void) {
     HU_ASSERT_EQ(strlen(prompt), 39u); /* sanity: writer-side check */
     HU_ASSERT_EQ(strlen(response), 80u);
 
+    /* Pass NULL usage to verify the bytes/4 fallback path. */
     hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response),
                                     250 /*latency_ms*/, "contact-7", strlen("contact-7"),
-                                    HU_M3_GUARD_PASS, 1 /*stream*/);
+                                    HU_M3_GUARD_PASS, 1 /*stream*/, NULL);
 
     hu_m3_inference_outcome_t buf[8];
     size_t got = 0;
@@ -5073,7 +5074,81 @@ static void test_m3_record_chat_outcome_populates_token_estimates(void) {
 #else
     /* ML disabled — the producer hook is a no-op. The contract that
      * token estimates are positive only holds when ML is compiled in. */
-    hu_agent_m3_record_chat_outcome(NULL, NULL, 0, NULL, 0, 0, NULL, 0, HU_M3_GUARD_UNKNOWN, 0);
+    hu_agent_m3_record_chat_outcome(NULL, NULL, 0, NULL, 0, 0, NULL, 0, HU_M3_GUARD_UNKNOWN, 0,
+                                    NULL);
+#endif
+}
+
+/* Pin Phase C1: when a usage block is passed with positive values, the
+ * outcome records those values verbatim — not the bytes/4 estimate.
+ * Catches the regression where someone reverts to the unconditional
+ * estimate or accidentally swaps the prefer-real / fallback branches.
+ *
+ * Mixed case (one field zero, one positive) verifies the PER-FIELD
+ * fallback: providers that report only one of the two should still get
+ * the estimate for the missing field, not have both fall back. */
+static void test_m3_record_chat_outcome_prefers_usage_block_when_present(void) {
+#ifdef HU_ENABLE_ML
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_allocator_t alloc = hu_system_allocator();
+    agent.alloc = &alloc;
+    const char *path = "/tmp/hu_m3_record_outcome_usage.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 1;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &agent.m3_adapter),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(agent.m3_adapter);
+
+    const char *prompt = "ten bytes!";              /* 10 bytes → bytes/4 estimate = 2 */
+    const char *response = "twenty byte response!"; /* 21 bytes → estimate = 5 */
+
+    /* Case 1: both fields present → record verbatim, ignore the estimate. */
+    hu_token_usage_t usage_full = {
+        .prompt_tokens = 99, .completion_tokens = 42, .total_tokens = 141};
+    hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response), 100,
+                                    NULL, 0, HU_M3_GUARD_PASS, 1, &usage_full);
+
+    /* Case 2: only completion_tokens reported → completion uses it,
+     * prompt falls back to estimate (10/4 = 2). */
+    hu_token_usage_t usage_partial = {
+        .prompt_tokens = 0, .completion_tokens = 17, .total_tokens = 17};
+    hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response), 100,
+                                    NULL, 0, HU_M3_GUARD_PASS, 1, &usage_partial);
+
+    /* Case 3: all-zero usage struct → both fall back to estimate. */
+    hu_token_usage_t usage_zero = {0};
+    hu_agent_m3_record_chat_outcome(&agent, prompt, strlen(prompt), response, strlen(response), 100,
+                                    NULL, 0, HU_M3_GUARD_PASS, 1, &usage_zero);
+
+    hu_m3_inference_outcome_t buf[8];
+    size_t got = 0;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_snapshot_outcomes(agent.m3_adapter, buf, 8, &got), HU_OK);
+    HU_ASSERT_EQ(got, 3u);
+
+    /* Case 1: real counts win. */
+    HU_ASSERT_EQ((int)buf[0].prompt_tokens, 99);
+    HU_ASSERT_EQ((int)buf[0].completion_tokens, 42);
+    /* Case 2: partial — completion real, prompt fallback. */
+    HU_ASSERT_EQ((int)buf[1].prompt_tokens, 2); /* 10/4 estimate */
+    HU_ASSERT_EQ((int)buf[1].completion_tokens, 17);
+    /* Case 3: all-zero → both estimates. */
+    HU_ASSERT_EQ((int)buf[2].prompt_tokens, 2);     /* 10/4 */
+    HU_ASSERT_EQ((int)buf[2].completion_tokens, 5); /* 21/4 */
+
+    hu_m3_frontier_adapter_close(&alloc, agent.m3_adapter);
+    agent.m3_adapter = NULL;
+#else
+    hu_agent_m3_record_chat_outcome(NULL, NULL, 0, NULL, 0, 0, NULL, 0, HU_M3_GUARD_UNKNOWN, 0,
+                                    NULL);
 #endif
 }
 
@@ -6027,6 +6102,7 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_probe_count_null_safe);
     HU_RUN_TEST(test_m3_agent_on_provider_success_advances_probe_count);
     HU_RUN_TEST(test_m3_record_chat_outcome_populates_token_estimates);
+    HU_RUN_TEST(test_m3_record_chat_outcome_prefers_usage_block_when_present);
 
     /* Phase B1 redefined (2026-05-17 round 2): inference outcome capture
      * — ring buffer + structured per-call records the future training
