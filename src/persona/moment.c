@@ -64,7 +64,7 @@ static hu_moment_phase_t phase_for_tz(int64_t now_s, const char *tz) {
         char saved_copy[256];
         saved_copy[0] = '\0';
         if (saved)
-            snprintf(saved_copy, sizeof saved_copy, "%s", saved);
+            snprintf(saved_copy, sizeof saved_copy, "%.255s", saved);
 
         setenv("TZ", tz, 1);
         tzset();
@@ -355,7 +355,7 @@ static int64_t next_8am_local_s(int64_t now_s, const char *tz) {
     if (tz != NULL) {
         saved = getenv("TZ");
         if (saved)
-            snprintf(saved_copy, sizeof saved_copy, "%s", saved);
+            snprintf(saved_copy, sizeof saved_copy, "%.255s", saved);
         setenv("TZ", tz, 1);
         tzset();
     }

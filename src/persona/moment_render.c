@@ -132,7 +132,7 @@ hu_error_t hu_moment_render_prompt(const hu_moment_t *moment, char *buf, size_t 
     if (moment->thread_is_continuation) {
         pos += snprintf(scratch + pos, sizeof scratch - (size_t)pos, "Same thread");
         if (moment->topic_still_open && moment->topic_hint[0] != '\0')
-            pos += snprintf(scratch + pos, sizeof scratch - (size_t)pos, "; topic: \"%s\"",
+            pos += snprintf(scratch + pos, sizeof scratch - (size_t)pos, "; topic: \"%.127s\"",
                             moment->topic_hint);
         pos += snprintf(scratch + pos, sizeof scratch - (size_t)pos, ". ");
     }
@@ -169,10 +169,12 @@ static int render_one_exemplar(const hu_conversation_history_entry_t *e, int64_t
     format_relative(age, gap, sizeof gap);
 
     /* Take the first 80 chars of text (deliberately short — exemplars are
-     * style anchors, not full quotes). */
+     * style anchors, not full quotes). Bound the snprintf input width
+     * explicitly so GCC's -Wformat-truncation doesn't flag the
+     * potential 511-byte e->text writing into a 96-byte buffer. */
     char clipped[96];
-    snprintf(clipped, sizeof clipped, "%s", e->text);
-    if (strlen(clipped) > 80) {
+    int clipped_n = snprintf(clipped, sizeof clipped, "%.80s", e->text);
+    if (clipped_n > 80) {
         clipped[80] = '\0';
         /* Trim trailing word break for readability. */
         for (int k = 79; k > 60; k--) {
