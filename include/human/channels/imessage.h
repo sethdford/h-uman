@@ -267,6 +267,25 @@ size_t hu_imessage_test_get_last_media_count(hu_channel_t *ch);
 /** Test hook for Tenor fallback JSON string extraction (`gif_json_extract`). */
 size_t hu_imessage_test_gif_json_extract(const char *json, size_t json_len, const char *key,
                                          char *out, size_t cap);
+
+/** US-43.3 test seam: peek at the latest courtesy reply the agent loop drained
+ * from the pending-courtesy ring. Returns NULL if nothing has been drained. */
+const char *hu_imessage_test_get_last_courtesy_message(hu_channel_t *ch, size_t *out_len);
+const char *hu_imessage_test_get_last_courtesy_target(hu_channel_t *ch, size_t *out_len);
 #endif
+
+/** US-43.3: enable/disable the courtesy reply path on a live channel.
+ * Default is true; the operator opt-out flag in config flows through here. */
+void hu_imessage_set_courtesy_replies_enabled(hu_channel_t *ch, bool enabled);
+
+/** US-43.3: drain at most `max_drain` pending courtesy replies, sending each
+ * via the channel's send vtable. Called by the agent loop tick, NEVER by the
+ * poll thread. Returns the number actually drained (0 if none pending). */
+size_t hu_imessage_drain_pending_courtesy(hu_channel_t *ch, size_t max_drain);
+
+/** US-43.3: count of pending courtesy replies and refused-enqueue counter
+ * (observability for the operator audit surface). */
+size_t hu_imessage_pending_courtesy_count(hu_channel_t *ch);
+uint64_t hu_imessage_pending_courtesy_refused(hu_channel_t *ch);
 
 #endif /* HU_CHANNELS_IMESSAGE_H */

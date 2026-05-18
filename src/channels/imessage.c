@@ -2,6 +2,7 @@
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/validators/builtin.h"
 #include "human/channel_loop.h"
+#include "human/channels/imessage_courtesy.h"
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -236,7 +237,16 @@ typedef struct hu_imessage_ctx {
     size_t mock_guid_count;
     hu_reaction_type_t last_reaction;
     int64_t last_reaction_message_id;
+    /* US-43.3 test seam: latest courtesy reply body the agent loop drained
+     * out of the pending ring. Empty string means none has been sent. */
+    char last_courtesy_message[HU_IMESSAGE_COURTESY_REPLY_MAX];
+    char last_courtesy_target[HU_IMESSAGE_COURTESY_HANDLE_MAX];
 #endif
+    /* US-43.3: operator opt-out flag and pending-courtesy ring. Always
+     * compiled — zero-initialized by memset; the ring is drained by the
+     * agent loop, never the poll thread. */
+    bool courtesy_replies_enabled;
+    hu_imessage_courtesy_ring_t courtesy_ring;
 } hu_imessage_ctx_t;
 
 /* ── Circuit breaker / status: ctx-dependent helpers (always compiled) ── */
@@ -3304,6 +3314,10 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
     c->default_target_len = 0;
     c->allow_from = allow_from;
     c->allow_from_count = allow_from_count;
+    /* US-43.3: courtesy reply path is ON by default. Bootstrap/config may
+     * toggle this via hu_imessage_set_courtesy_replies_enabled. */
+    c->courtesy_replies_enabled = true;
+    hu_imessage_courtesy_ring_init(&c->courtesy_ring);
     if (default_target && default_target_len > 0) {
         c->default_target = (char *)alloc->alloc(alloc->ctx, default_target_len + 1);
         if (!c->default_target) {
@@ -3903,6 +3917,24 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 }
             }
             if (!allowed) {
+                /* US-43.3: non-allowlisted sender. The inbound message is
+                 * STILL dropped from the agent's inbox; we just optionally
+                 * enqueue a single courtesy reply (gated by predicate +
+                 * dedup log) onto the side-channel ring drained by the
+                 * agent loop. The poll thread NEVER sends inline. */
+                if (c->courtesy_replies_enabled) {
+                    bool recorded = false;
+                    hu_imessage_courtesy_state_t state = {0};
+                    (void)hu_imessage_courtesy_eval_and_record(
+                        handle, (int64_t)time(NULL), /*record_after=*/true, &recorded, &state);
+                    if (recorded) {
+                        char safe_name[HU_IMESSAGE_COURTESY_HANDLE_MAX];
+                        hu_imessage_courtesy_sanitize_name(handle, safe_name, sizeof(safe_name));
+                        char body[HU_IMESSAGE_COURTESY_REPLY_MAX];
+                        hu_imessage_courtesy_compose_reply(safe_name, body, sizeof(body));
+                        (void)hu_imessage_courtesy_ring_enqueue(&c->courtesy_ring, handle, body);
+                    }
+                }
                 c->last_rowid = rowid;
                 continue;
             }
@@ -4441,4 +4473,81 @@ size_t hu_imessage_test_get_last_media_count(hu_channel_t *ch) {
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     return c->last_media_count;
 }
+
+const char *hu_imessage_test_get_last_courtesy_message(hu_channel_t *ch, size_t *out_len) {
+    if (!ch || !ch->ctx)
+        return NULL;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    if (out_len)
+        *out_len = strlen(c->last_courtesy_message);
+    return c->last_courtesy_message;
+}
+
+const char *hu_imessage_test_get_last_courtesy_target(hu_channel_t *ch, size_t *out_len) {
+    if (!ch || !ch->ctx)
+        return NULL;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    if (out_len)
+        *out_len = strlen(c->last_courtesy_target);
+    return c->last_courtesy_target;
+}
 #endif
+
+/* US-43.3: courtesy-reply public API (always compiled). */
+
+void hu_imessage_set_courtesy_replies_enabled(hu_channel_t *ch, bool enabled) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    c->courtesy_replies_enabled = enabled;
+}
+
+size_t hu_imessage_drain_pending_courtesy(hu_channel_t *ch, size_t max_drain) {
+    if (!ch || !ch->ctx)
+        return 0;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    size_t drained = 0;
+    hu_imessage_courtesy_pending_t pending;
+    while (drained < max_drain) {
+        if (!hu_imessage_courtesy_ring_drain_one(&c->courtesy_ring, &pending))
+            break;
+        /* Best-effort send via the channel's own send vtable. The agent loop
+         * invokes this from outside the poll thread, so re-entry into chat.db
+         * is not a concern. Failures are absorbed — we never retry a
+         * courtesy reply (the dedup log already recorded the attempt). */
+        if (ch->vtable && ch->vtable->send) {
+            (void)ch->vtable->send(c, pending.handle, strlen(pending.handle), pending.body,
+                                   strlen(pending.body), NULL, 0);
+        }
+#if HU_IS_TEST
+        {
+            size_t bn = strlen(pending.body);
+            if (bn >= sizeof(c->last_courtesy_message))
+                bn = sizeof(c->last_courtesy_message) - 1;
+            memcpy(c->last_courtesy_message, pending.body, bn);
+            c->last_courtesy_message[bn] = '\0';
+            size_t tn = strlen(pending.handle);
+            if (tn >= sizeof(c->last_courtesy_target))
+                tn = sizeof(c->last_courtesy_target) - 1;
+            memcpy(c->last_courtesy_target, pending.handle, tn);
+            c->last_courtesy_target[tn] = '\0';
+        }
+#endif
+        drained++;
+    }
+    return drained;
+}
+
+size_t hu_imessage_pending_courtesy_count(hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return 0;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    return hu_imessage_courtesy_ring_count(&c->courtesy_ring);
+}
+
+uint64_t hu_imessage_pending_courtesy_refused(hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return 0;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    return hu_imessage_courtesy_ring_refused(&c->courtesy_ring);
+}

@@ -16,9 +16,8 @@ static void parse_daemon_object(hu_allocator_t *a, hu_channel_daemon_config_t *d
             a->free(a->ctx, dcfg->response_mode, strlen(dcfg->response_mode) + 1);
         dcfg->response_mode = hu_strdup(a, rm);
     }
-    dcfg->user_response_window_sec =
-        (int)hu_json_get_number(daemon_obj, "user_response_window_sec",
-                                (double)dcfg->user_response_window_sec);
+    dcfg->user_response_window_sec = (int)hu_json_get_number(
+        daemon_obj, "user_response_window_sec", (double)dcfg->user_response_window_sec);
     dcfg->poll_interval_sec =
         (int)hu_json_get_number(daemon_obj, "poll_interval_sec", (double)dcfg->poll_interval_sec);
     dcfg->voice_enabled = hu_json_get_bool(daemon_obj, "voice_enabled", dcfg->voice_enabled);
@@ -165,6 +164,11 @@ static void parse_imessage_channel(hu_allocator_t *a, hu_config_t *cfg,
     }
 
     cfg->channels.imessage.use_imsg_cli = hu_json_get_bool(obj, "use_imsg_cli", false);
+
+    /* US-43.3: default-true courtesy reply path. Operators can disable by
+     * setting "courtesy_replies_enabled": false. */
+    cfg->channels.imessage.courtesy_replies_enabled =
+        hu_json_get_bool(obj, "courtesy_replies_enabled", true);
 
     const char *lb = hu_json_get_string(obj, "loopback_handle");
     if (lb) {
@@ -916,8 +920,8 @@ static void parse_signal_channel(hu_allocator_t *a, hu_config_t *cfg, const hu_j
                 a->free(a->ctx, s->allow_from[i], strlen(s->allow_from[i]) + 1);
         }
         s->allow_from_count = 0;
-        for (size_t i = 0;
-             i < af->data.array.len && s->allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX; i++) {
+        for (size_t i = 0; i < af->data.array.len && s->allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX;
+             i++) {
             hu_json_value_t *item = af->data.array.items[i];
             if (item && item->type == HU_JSON_STRING && item->data.string.ptr)
                 s->allow_from[s->allow_from_count++] = hu_strdup(a, item->data.string.ptr);
@@ -932,8 +936,7 @@ static void parse_signal_channel(hu_allocator_t *a, hu_config_t *cfg, const hu_j
         }
         s->group_allow_from_count = 0;
         for (size_t i = 0;
-             i < gaf->data.array.len && s->group_allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX;
-             i++) {
+             i < gaf->data.array.len && s->group_allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX; i++) {
             hu_json_value_t *item = gaf->data.array.items[i];
             if (item && item->type == HU_JSON_STRING && item->data.string.ptr)
                 s->group_allow_from[s->group_allow_from_count++] =
@@ -1083,8 +1086,7 @@ hu_error_t parse_channels(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
                 a->free(a->ctx, cfg->channels.pwa.apps,
                         cfg->channels.pwa.apps_count * sizeof(char *));
             }
-            parse_string_array(a, &cfg->channels.pwa.apps, &cfg->channels.pwa.apps_count,
-                               apps_arr);
+            parse_string_array(a, &cfg->channels.pwa.apps, &cfg->channels.pwa.apps_count, apps_arr);
         }
         cfg->channels.pwa.poll_interval_sec =
             (int)hu_json_get_number(pwa_obj, "poll_interval_sec", 5.0);

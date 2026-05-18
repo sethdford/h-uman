@@ -278,6 +278,9 @@ if(HU_ENABLE_IMESSAGE)
     # HU_REACTION_CUSTOM_EMOJI redefinition). See the navigation comment
     # in src/channels/imessage.c near hu_imessage_poll for the full story.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
+    # US-43.3: non-allowlisted courtesy reply (pure predicate + flock-gated
+    # dedup log + side-channel ring). Its own TU keeps imessage.c bounded.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_courtesy.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -2812,6 +2815,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_extended.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
+    tests/test_imessage_courtesy.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
