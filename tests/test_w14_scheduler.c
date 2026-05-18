@@ -559,18 +559,6 @@ static void test_w14_requires_idle_job_defers_under_high_load(void) {
     clear_w14_env();
     setenv("HU_TEST_LOAD_PCT", "80", 1);
 
-/* 2026-05-16 P3-5 regression: scheduler_jobs schema HAS contact_id but the
- * dispatch SELECT didn't bind it.  A job enqueued for contact A would fire in
- * any tick (including ticks for contact B), invoking A's runner during B's
- * turn — same cross-contact bleed as the F25 confession-parrot incident.
- *
- * After the fix, `hu_scheduler_tick(s, now, target_contact_id, len)` must
- * dispatch ONLY jobs where:
- *   - contact_id = '' (truly global), OR
- *   - contact_id = target_contact_id (exact match — no prefix risk).
- * NULL/"" target → only the contact_id='' rows dispatch. */
-static void test_w14_scheduler_dispatch_scoped_to_target_contact(void) {
-    clear_w14_env();
     hu_graph_t *g = NULL;
     hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
@@ -598,6 +586,25 @@ static void test_w14_scheduler_dispatch_scoped_to_target_contact(void) {
     HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 1);
 
     clear_w14_env();
+    close_stack_(g, m, s);
+}
+
+/* 2026-05-16 P3-5 regression: scheduler_jobs schema HAS contact_id but the
+ * dispatch SELECT didn't bind it.  A job enqueued for contact A would fire in
+ * any tick (including ticks for contact B), invoking A's runner during B's
+ * turn — same cross-contact bleed as the F25 confession-parrot incident.
+ *
+ * After the fix, `hu_scheduler_tick(s, now, target_contact_id, len)` must
+ * dispatch ONLY jobs where:
+ *   - contact_id = '' (truly global), OR
+ *   - contact_id = target_contact_id (exact match — no prefix risk).
+ * NULL/"" target → only the contact_id='' rows dispatch. */
+static void test_w14_scheduler_dispatch_scoped_to_target_contact(void) {
+    clear_w14_env();
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_scheduler_t *s = NULL;
+    open_stack_(&g, &m, &s);
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, recording_runner, NULL),
                  HU_OK);
 
