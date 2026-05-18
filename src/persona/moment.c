@@ -329,6 +329,96 @@ static hu_moment_open_t decide_open(const hu_moment_t *m, const char *last_inbou
     return HU_MOMENT_OPEN_NONE;
 }
 
+/* Decide a closing-style hint. Mostly NONE; emits GREET_NIGHT only when phase
+ * is NIGHT and the conversation tone is warm/excited (we want to wrap warmly
+ * rather than coldly). Re-uses the OPEN enum per spec (the close vocabulary
+ * is a subset of the open vocabulary). */
+static hu_moment_open_t decide_close(const hu_moment_t *m) {
+    if (m->phase_local == HU_MOMENT_PHASE_NIGHT && (m->their_recent_tone == HU_MOMENT_TONE_WARM ||
+                                                    m->their_recent_tone == HU_MOMENT_TONE_EXCITED))
+        return HU_MOMENT_OPEN_GREET_NIGHT;
+    return HU_MOMENT_OPEN_NONE;
+}
+
+/* Decide the response-length budget. Defaults to MIRROR (match the contact's
+ * recent length). Special cases override:
+ *   - TERSE when the last message was very short AND the rolling average is
+ *     also short (signals casual ping rhythm)
+ *   - MEDIUM when the contact is distressed (they need room to feel heard;
+ *     don't dump bullet lists but don't be one-word either)
+ *   - LONG never set by default — reserved for overlay opt-in (future) */
+static hu_moment_brevity_t decide_brevity(const hu_moment_t *m) {
+    if (m->their_recent_tone == HU_MOMENT_TONE_DISTRESSED)
+        return HU_MOMENT_BREVITY_MEDIUM;
+    if (m->their_recent_tone == HU_MOMENT_TONE_TERSE && m->their_avg_length_words <= 4)
+        return HU_MOMENT_BREVITY_TERSE;
+    if (m->their_avg_length_words > 0 && m->their_avg_length_words <= 12)
+        return HU_MOMENT_BREVITY_SHORT;
+    return HU_MOMENT_BREVITY_MIRROR;
+}
+
+/* Compute "next 8am in the contact's timezone" as a Unix timestamp. Uses the
+ * TZ env-swap pattern (same caveats as phase_for_tz: not thread-safe). Falls
+ * back to local TZ when tz is NULL. */
+static int64_t next_8am_local_s(int64_t now_s, const char *tz) {
+    time_t t = (time_t)now_s;
+    struct tm tm_now;
+    char saved_copy[256] = {0};
+    const char *saved = NULL;
+
+    if (tz != NULL) {
+        saved = getenv("TZ");
+        if (saved)
+            snprintf(saved_copy, sizeof saved_copy, "%s", saved);
+        setenv("TZ", tz, 1);
+        tzset();
+    }
+    localtime_r(&t, &tm_now);
+
+    /* Build a tm for 08:00 the same local day. */
+    struct tm tm_8am = tm_now;
+    tm_8am.tm_hour = 8;
+    tm_8am.tm_min = 0;
+    tm_8am.tm_sec = 0;
+    tm_8am.tm_isdst = -1; /* let mktime resolve DST */
+    time_t target = mktime(&tm_8am);
+
+    /* If we're already past 08:00 local today, target tomorrow. */
+    if (target <= t) {
+        tm_8am.tm_mday += 1;
+        tm_8am.tm_isdst = -1;
+        target = mktime(&tm_8am);
+    }
+
+    if (tz != NULL) {
+        if (saved)
+            setenv("TZ", saved_copy, 1);
+        else
+            unsetenv("TZ");
+        tzset();
+    }
+    return (int64_t)target;
+}
+
+/* Decide whether to defer the outbound. Returns 0 if "send now" is fine,
+ * else a future Unix timestamp (next 08:00 in the contact's tz) when:
+ *   - it's DEEP_NIGHT for them, AND
+ *   - this is NOT a continuation thread, AND
+ *   - the inbound did NOT signal night (e.g. "good night") — replying to a
+ *     night sign-off immediately is fine; spontaneously messaging at 3am is not. */
+static int64_t decide_defer_send(const hu_moment_t *m, const char *last_inbound_text, int64_t now_s,
+                                 const char *contact_tz) {
+    if (m->phase_theirs != HU_MOMENT_PHASE_DEEP_NIGHT)
+        return 0;
+    if (m->thread_is_continuation)
+        return 0;
+    if (last_inbound_text != NULL && (text_contains_phrase_ci(last_inbound_text, "night") ||
+                                      text_contains_phrase_ci(last_inbound_text, "sleep") ||
+                                      text_contains_phrase_ci(last_inbound_text, "tomorrow")))
+        return 0;
+    return next_8am_local_s(now_s, contact_tz);
+}
+
 hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
                                          const struct hu_persona_overlay_t *overlay,
                                          const struct hu_conversation_history_t *history,
@@ -425,6 +515,9 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
      * out the override relationships (continuation overrides everything;
      * unusual-hour overrides phase-based greets). */
     out->suggested_open = decide_open(out, last_inbound_text);
+    out->suggested_close = decide_close(out);
+    out->suggested_brevity = decide_brevity(out);
+    out->defer_send_until_s = decide_defer_send(out, last_inbound_text, now_s, contact_tz);
 
     return HU_OK;
 }

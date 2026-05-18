@@ -344,6 +344,110 @@ static void compose_does_NOT_suggest_morning_greet_at_3am(void) {
     tz_env_restore(&saved);
 }
 
+/* ---- suggested_close / suggested_brevity / defer_send tests (Task 1.7) ---- */
+
+static void compose_close_is_NONE_in_unremarkable_midday(void) {
+    tz_env_save_t saved;
+    tz_env_override(&saved, "UTC");
+    int64_t now = TS_8AM_UTC + 4 * 3600; /* 12:00 MIDDAY */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, now - 7200, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.suggested_close, HU_MOMENT_OPEN_NONE);
+    tz_env_restore(&saved);
+}
+
+static void compose_close_is_GREET_NIGHT_at_night_with_warm_tone(void) {
+    tz_env_save_t saved;
+    tz_env_override(&saved, "UTC");
+    int64_t now = TS_8AM_UTC + 15 * 3600; /* 23:00 NIGHT */
+    int64_t ts[] = {now - 4 * 3600};
+    bool ob[] = {false};
+    const char *tx[] = {"yeah that sounds really good thanks for thinking of me"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 4 * 3600, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.their_recent_tone, HU_MOMENT_TONE_WARM);
+    HU_ASSERT_EQ(m.suggested_close, HU_MOMENT_OPEN_GREET_NIGHT);
+    hu_moment_history_free(h);
+    tz_env_restore(&saved);
+}
+
+static void compose_brevity_is_TERSE_when_terse_tone_and_short_avg(void) {
+    int64_t now = TS_8AM_UTC;
+    int64_t ts[] = {now - 600, now - 500, now - 400, now - 300, now - 200};
+    bool ob[] = {false, false, false, false, false};
+    const char *tx[] = {"k", "yep", "ok", "lol", "sure"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(5, ts, ob, tx);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 200, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.their_recent_tone, HU_MOMENT_TONE_TERSE);
+    HU_ASSERT_EQ(m.suggested_brevity, HU_MOMENT_BREVITY_TERSE);
+    hu_moment_history_free(h);
+}
+
+static void compose_brevity_is_SHORT_when_avg_is_moderate(void) {
+    int64_t now = TS_8AM_UTC;
+    int64_t ts[] = {now - 60};
+    bool ob[] = {false};
+    /* 10 words, warm — not terse, not distressed */
+    const char *tx[] = {"hey want to grab lunch tomorrow if you are free"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 60, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.suggested_brevity, HU_MOMENT_BREVITY_SHORT);
+    hu_moment_history_free(h);
+}
+
+static void compose_brevity_is_MEDIUM_when_distressed(void) {
+    int64_t now = TS_8AM_UTC;
+    int64_t ts[] = {now - 60};
+    bool ob[] = {false};
+    const char *tx[] = {"ugh i can't believe this happened again, i'm so tired of it, "
+                        "nothing ever works out and i don't know what to do anymore"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 60, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.their_recent_tone, HU_MOMENT_TONE_DISTRESSED);
+    HU_ASSERT_EQ(m.suggested_brevity, HU_MOMENT_BREVITY_MEDIUM);
+    hu_moment_history_free(h);
+}
+
+static void compose_brevity_is_MIRROR_when_no_history(void) {
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, "UTC", TS_8AM_UTC, &m);
+    HU_ASSERT_EQ(m.suggested_brevity, HU_MOMENT_BREVITY_MIRROR);
+}
+
+static void compose_defer_send_is_zero_when_their_phase_is_not_deep_night(void) {
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, "UTC", TS_8AM_UTC, &m);
+    HU_ASSERT_EQ(m.defer_send_until_s, 0);
+}
+
+static void compose_defer_send_is_future_8am_when_deep_night_and_no_continuation(void) {
+    /* Their tz LA: 08:00 UTC = 01:00 PDT → DEEP_NIGHT. No history (no continuation). */
+    int64_t now = TS_8AM_UTC;
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, "America/Los_Angeles", now, &m);
+    HU_ASSERT_EQ(m.phase_theirs, HU_MOMENT_PHASE_DEEP_NIGHT);
+    HU_ASSERT_TRUE(m.defer_send_until_s > now);
+    HU_ASSERT_TRUE(m.defer_send_until_s < now + 86400); /* within the next 24h */
+}
+
+static void compose_defer_send_is_zero_when_replying_to_night_signoff(void) {
+    /* Their tz: DEEP_NIGHT, BUT they just said "good night" — we may reply now. */
+    int64_t now = TS_8AM_UTC;
+    int64_t ts[] = {now - 60};
+    bool ob[] = {false};
+    const char *tx[] = {"night talk tomorrow"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 60, -1, "America/Los_Angeles", now, &m);
+    HU_ASSERT_EQ(m.phase_theirs, HU_MOMENT_PHASE_DEEP_NIGHT);
+    HU_ASSERT_EQ(m.defer_send_until_s, 0);
+    hu_moment_history_free(h);
+}
+
 void run_moment_compose_tests(void) {
     HU_TEST_SUITE("moment_compose");
     HU_RUN_TEST(compose_from_inputs_rejects_null_out);
@@ -371,4 +475,13 @@ void run_moment_compose_tests(void) {
     HU_RUN_TEST(compose_open_is_GREET_NIGHT_when_they_say_night_at_11pm);
     HU_RUN_TEST(compose_open_is_NONE_in_unremarkable_midday);
     HU_RUN_TEST(compose_does_NOT_suggest_morning_greet_at_3am);
+    HU_RUN_TEST(compose_close_is_NONE_in_unremarkable_midday);
+    HU_RUN_TEST(compose_close_is_GREET_NIGHT_at_night_with_warm_tone);
+    HU_RUN_TEST(compose_brevity_is_TERSE_when_terse_tone_and_short_avg);
+    HU_RUN_TEST(compose_brevity_is_SHORT_when_avg_is_moderate);
+    HU_RUN_TEST(compose_brevity_is_MEDIUM_when_distressed);
+    HU_RUN_TEST(compose_brevity_is_MIRROR_when_no_history);
+    HU_RUN_TEST(compose_defer_send_is_zero_when_their_phase_is_not_deep_night);
+    HU_RUN_TEST(compose_defer_send_is_future_8am_when_deep_night_and_no_continuation);
+    HU_RUN_TEST(compose_defer_send_is_zero_when_replying_to_night_signoff);
 }
