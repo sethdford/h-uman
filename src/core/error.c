@@ -54,6 +54,10 @@ static const char *error_strings[] = {
     [HU_ERR_FLEET_SPAWN_CAP] = "fleet total spawn limit exceeded",
     [HU_ERR_FLEET_BUDGET_EXCEEDED] = "fleet budget exceeded",
     [HU_ERR_PRIVACY_BUDGET_EXHAUSTED] = "differential-privacy budget exhausted",
+    [HU_ERR_LEGACY_REFUSED] = "legacy plaintext refused post-migration",
+    [HU_ERR_DECRYPT_FAILED] = "decryption failed",
+    [HU_ERR_IO_BUSY] = "I/O resource busy (bounded retry exhausted)",
+    [HU_ERR_INVALID_FORMAT] = "invalid on-disk format",
 };
 
 const char *hu_error_string(hu_error_t err) {

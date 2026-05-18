@@ -111,6 +111,7 @@ void run_process_util_tests(void);
 void run_prompt_tests(void);
 void run_tool_search_tests(void);
 void run_persona_tests(void);
+void run_persona_encryption_tests(void);
 void run_circadian_tests(void);
 void run_relationship_tests(void);
 void run_replay_tests(void);
@@ -799,6 +800,7 @@ int main(int argc, char **argv) {
     run_prompt_tests();
     run_tool_search_tests();
     run_persona_tests();
+    run_persona_encryption_tests();
     run_circadian_tests();
     run_relationship_tests();
     run_replay_tests();

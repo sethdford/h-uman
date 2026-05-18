@@ -76,6 +76,14 @@ typedef enum hu_error {
      * no weight update was applied. */
     HU_ERR_PRIVACY_BUDGET_EXHAUSTED,
 
+    /* Sprint 42 — persona encryption-at-rest (US-42.2).
+     * US-42.1 will also add HU_ERR_PRIVACY_BUDGET_EXHAUSTED in this block;
+     * rebase order: US-42.1 lands first, this branch rebases on top. */
+    HU_ERR_LEGACY_REFUSED, /* plaintext load refused post-migration */
+    HU_ERR_DECRYPT_FAILED, /* AEAD tag mismatch / wrong key / corruption */
+    HU_ERR_IO_BUSY,        /* bounded retry exhausted (e.g. EEXIST race) */
+    HU_ERR_INVALID_FORMAT, /* on-disk bytes do not match expected sentinel/layout */
+
     HU_ERR_COUNT
 } hu_error_t;
 
