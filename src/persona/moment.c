@@ -13,23 +13,9 @@
 
 #include "human/core/error.h"
 
-/* ── hu_conversation_history_t definition ──────────────────────────────────
- * The type is forward-declared in moment.h as an opaque struct. This TU
- * owns the concrete definition. Tests access it via make_history / free_history
- * helpers defined in the test file. */
-
-#define HU_HISTORY_TEXT_CAP 512
-
-typedef struct hu_conversation_history_entry {
-    int64_t ts_s;                   /* Unix timestamp, seconds */
-    bool outbound;                  /* true = sent by us; false = inbound */
-    char text[HU_HISTORY_TEXT_CAP]; /* message text, NUL-terminated */
-} hu_conversation_history_entry_t;
-
-struct hu_conversation_history_t {
-    size_t count;
-    hu_conversation_history_entry_t *entries; /* heap-allocated array[count] */
-};
+/* hu_conversation_history_t lives in the internal header so moment_render.c
+ * can iterate entries without a public accessor explosion. */
+#include "moment_internal.h"
 
 /* Returns seconds elapsed since ts_s, clamped to 0 on clock skew.
    Returns -1 when ts_s is negative (timestamp not available). */
