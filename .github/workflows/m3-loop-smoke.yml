@@ -1,0 +1,103 @@
+name: M3 Closed-Loop Smoke
+
+# Live-fires the dormant LoRA loop end-to-end on every push touching the
+# loop's surface — the producer hook (agent.c), the gateway endpoint
+# (gateway.c), the driver (scripts/m3_outcome_driver.py), and the
+# orchestration script itself. Catches regressions in any of the four
+# code boundaries the loop crosses.
+#
+# Security: this workflow uses ONLY trusted GitHub contexts (runner.os,
+# matrix.os). No issue/PR/commit message values are interpolated into
+# run: blocks, so command injection per
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+# is not reachable here.
+
+on:
+  push:
+    paths:
+      - "src/agent/agent.c"
+      - "src/gateway/gateway.c"
+      - "src/ml/m3_frontier_adapter.c"
+      - "include/human/ml/m3_frontier_adapter.h"
+      - "scripts/m3_outcome_driver.py"
+      - "scripts/stub_mlx_server.py"
+      - "scripts/live_fire_m3_loop.sh"
+      - "scripts/test_m3_outcome_driver.py"
+      - "Makefile"
+      - "CMakePresets.json"
+      - ".github/workflows/m3-loop-smoke.yml"
+  pull_request:
+    paths:
+      - "src/agent/agent.c"
+      - "src/gateway/gateway.c"
+      - "src/ml/m3_frontier_adapter.c"
+      - "include/human/ml/m3_frontier_adapter.h"
+      - "scripts/m3_outcome_driver.py"
+      - "scripts/stub_mlx_server.py"
+      - "scripts/live_fire_m3_loop.sh"
+      - "scripts/test_m3_outcome_driver.py"
+  workflow_dispatch:
+
+jobs:
+  driver-e2e:
+    name: Driver e2e (self-contained, no daemon)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Run driver e2e tests (fake gateway + fake MLX in-process)
+        run: python3 scripts/test_m3_outcome_driver.py
+
+  live-fire:
+    name: Full live-fire (release binary + stub MLX + real daemon)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libcurl4-openssl-dev libsqlite3-dev libsodium-dev
+
+      - name: Install macOS build deps
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake libsodium || true
+
+      - name: Build release binary
+        run: |
+          cmake --preset release
+          cmake --build --preset release --target human -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Sanity-check the binary
+        run: |
+          ls -la build-release/human
+          ./build-release/human --version || true
+
+      - name: Run the live-fire orchestration
+        run: bash scripts/live_fire_m3_loop.sh
+        env:
+          HUMAN_M3_ADAPTER_DISABLE: ""
+
+      - name: Upload evidence log on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: m3-live-fire-logs-${{ matrix.os }}
+          path: |
+            /tmp/live-fire-run.log
+            /tmp/human-gateway-live.log
+            /tmp/stub-mlx.log
+            /tmp/driver-output.log
+            /tmp/chat-resp-*.json
+          retention-days: 7

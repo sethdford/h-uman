@@ -87,6 +87,30 @@ cleanup
 sleep 1
 rm -f "$DRIVER_OUT_JSONL" "$DRIVER_STATE"
 rm -f "$ADAPTER_DIR"/m3-driver-*.safetensors 2>/dev/null || true
+
+# Bootstrap minimal config if none exists (CI cold-start path). The fixture
+# adapter file under /tmp lets the daemon attach an M3 adapter on boot,
+# which is what registers the global pointer the gateway endpoint reads.
+mkdir -p "$HOME/.human" "$ADAPTER_DIR"
+if [ ! -f "$HOME/.human/config.json" ]; then
+    echo "[live-fire] no ~/.human/config.json — writing minimal CI config"
+    # 12-byte fixture: 8 magic bytes + LE uint32 schema_version=1
+    FIXTURE=/tmp/hu_m3_demo_fixture.bin
+    printf 'HU_M3AD\x01\x01\x00\x00\x00' > "$FIXTURE"
+    cat > "$HOME/.human/config.json" <<JSON
+{
+  "default_provider": "mlx_local",
+  "default_model": "stub-mlx",
+  "providers": [
+    {"name": "mlx_local", "base_url": "http://127.0.0.1:8741/v1", "api_key": "local"}
+  ],
+  "memory": {"backend": "sqlite"},
+  "gateway": {"port": 3006, "require_pairing": false},
+  "personalization": {"m3_adapter_probe_path": "$FIXTURE"}
+}
+JSON
+fi
+
 require "no stale gateway listening on :3006" \
         "! lsof -iTCP:3006 -sTCP:LISTEN -n -P 2>/dev/null | grep -q LISTEN"
 require "no stale stub-mlx on :8741" \
