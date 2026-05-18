@@ -1413,6 +1413,7 @@ if(HU_ENABLE_ML)
         # and must link in HU_ENABLE_ML=OFF builds that still compile
         # lora_retrain_runner.c.
         src/ml/agent_trainer.c
+        src/ml/m3_contact_routes.c
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
         src/ml/m3_rewrite_capture.c

@@ -1544,10 +1544,82 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
                             examples_this_step++;
                         }
 
-                        /* Backward pass: compute gradients for LoRA params */
-                        if (model.vtable->backward) {
-                            hu_ml_tensor_t grad_out = output_tensor;
-                            (void)model.vtable->backward(model.ctx, &grad_out);
+                        /* F3 (2026-05-18) — correct gradient of cross-entropy
+                         * loss wrt logits. The pre-F3 code passed the FORWARD
+                         * LOGITS as the gradient — which is NOT a gradient
+                         * and explains nothing about why the optimizer would
+                         * move weights in a useful direction.
+                         *
+                         * d_loss/d_logits[t, v] for next-token prediction:
+                         *   softmax(logits[t])[v] - (v == target[t+1] ? 1 : 0)
+                         *
+                         * We compute it for response tokens only (copy_in
+                         * ≤ t < seq_len - 1) and zero the rest, then average
+                         * by the same resp_tokens denominator used for the
+                         * loss above.
+                         *
+                         * KNOWN DEEPER GAP (separate slice): even with this
+                         * correct gradient, training loss stays at the
+                         * random-init baseline (~log(vocab) ≈ 9.0). Diagnostic
+                         * tracing shows the gradient at the logit layer is
+                         * non-zero (max ~2e-2), the optimizer DOES get called
+                         * with group_count=16 LoRA params registered, BUT the
+                         * gradient reaching hu_lora_backward (at the q/v
+                         * projection layer) is identically zero. Conclusion:
+                         * gpt_backward (src/ml/gpt.c) fails to propagate the
+                         * gradient through the transformer's attention/MLP/
+                         * residual chain down to the projection layers where
+                         * LoRA is attached. That's a 250+ LOC math bug in
+                         * gpt_backward — out of scope for this slice. F3
+                         * lands the CORRECT cross-entropy gradient (and
+                         * removes the obvious-wrong logits-as-gradient bug);
+                         * the optimizer will be able to do real work once
+                         * gpt_backward is fixed. */
+                        if (model.vtable->backward && resp_tokens > 0) {
+                            size_t grad_floats = seq_len * cfg.gpt.vocab_size;
+                            size_t grad_bytes = grad_floats * sizeof(float);
+                            float *grad_data = (float *)alloc->alloc(alloc->ctx, grad_bytes);
+                            if (grad_data) {
+                                /* Zero non-response tokens — they don't
+                                 * contribute to the loss, so their gradient
+                                 * is 0. */
+                                memset(grad_data, 0, grad_bytes);
+                                float inv_resp = 1.0f / (float)resp_tokens;
+                                for (size_t t = copy_in; t < seq_len - 1; t++) {
+                                    int32_t target = seq[t + 1];
+                                    if (target < 0 || (size_t)target >= cfg.gpt.vocab_size)
+                                        continue;
+                                    float *row = logits + t * cfg.gpt.vocab_size;
+                                    float *grow = grad_data + t * cfg.gpt.vocab_size;
+                                    /* Numerically-stable softmax. */
+                                    float max_val = row[0];
+                                    for (size_t v2 = 1; v2 < cfg.gpt.vocab_size; v2++)
+                                        if (row[v2] > max_val)
+                                            max_val = row[v2];
+                                    float sum_exp = 0.0f;
+                                    for (size_t v2 = 0; v2 < cfg.gpt.vocab_size; v2++) {
+                                        grow[v2] = expf(row[v2] - max_val);
+                                        sum_exp += grow[v2];
+                                    }
+                                    float inv_sum = 1.0f / sum_exp;
+                                    /* grow[v] = softmax(logits)[v]; subtract
+                                     * one-hot at target. Then scale by
+                                     * 1/resp_tokens (the per-example
+                                     * normalizer). */
+                                    for (size_t v2 = 0; v2 < cfg.gpt.vocab_size; v2++)
+                                        grow[v2] = (grow[v2] * inv_sum) * inv_resp;
+                                    grow[target] -= inv_resp;
+                                }
+                                hu_ml_tensor_t grad_out = {
+                                    .data = grad_data,
+                                    .shape = {1, (int)seq_len, (int)cfg.gpt.vocab_size, 0},
+                                    .ndim = 3,
+                                    .dtype = HU_ML_DTYPE_F32,
+                                    .size_bytes = grad_bytes,
+                                };
+                                (void)model.vtable->backward(model.ctx, &grad_out);
+                                alloc->free(alloc->ctx, grad_data, grad_bytes);
+                            }
                         }
                     }
 
@@ -1577,7 +1649,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             best_loss = avg_loss;
 
         if (step % 50 == 0 || step == max_steps - 1)
-            printf("  step %d/%d  loss=%.4f  best=%.4f\n", step + 1, max_steps, avg_loss,
+            printf("  step %d/%d  loss=%.6f  best=%.6f\n", step + 1, max_steps, avg_loss,
                    best_loss);
     }
 

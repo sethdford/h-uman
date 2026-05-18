@@ -13,6 +13,7 @@
 #include "human/ml/experiment.h"
 #include "human/ml/experiment_store.h"
 #include "human/ml/lora.h"
+#include "human/ml/m3_contact_routes.h"
 #include "human/ml/m3_frontier_adapter.h"
 #include "human/ml/m3_id_map.h"
 #include "human/ml/m3_rewrite_capture.h"
@@ -5327,6 +5328,129 @@ static void test_m3_rewrite_pair_record_appends_multiple_lines(void) {
     (void)unlink(path);
 }
 
+/* F2 (2026-05-18) — C-side contact-routes lookup. Pins:
+ *   1. Missing/empty routes file → lookup returns NULL for everything
+ *   2. Routes file with one entry → specific contact resolves
+ *   3. default_adapter falls through for unknown contacts
+ *   4. Specific route wins over default_adapter
+ *   5. Reload picks up new routes added to the file
+ *   6. NULL inputs are safe (no crash)
+ */
+static void test_m3_contact_routes_empty_file_lookup_returns_null(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_empty_test.json";
+    (void)unlink(path);
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    HU_ASSERT_NOT_NULL(routes);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 0);
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_lookup(routes, 12345));
+    hu_m3_contact_routes_destroy(routes);
+}
+
+static void test_m3_contact_routes_specific_route_resolves(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_specific_test.json";
+    (void)unlink(path);
+    /* Write a minimal routes JSON matching Python's writer shape. */
+    FILE *fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    const char *json = "{\"routes\":{\"42\":{\"adapter_path\":\"/a/mom-lora.bin\"}},"
+                       "\"default_adapter\":null}";
+    fwrite(json, 1, strlen(json), fp);
+    fclose(fp);
+
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 1);
+    const char *r = hu_m3_contact_routes_lookup(routes, 42);
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT_STR_EQ(r, "/a/mom-lora.bin");
+    /* Unknown contact + no default → NULL */
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_lookup(routes, 99));
+    hu_m3_contact_routes_destroy(routes);
+    (void)unlink(path);
+}
+
+static void test_m3_contact_routes_default_fallback(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_default_test.json";
+    (void)unlink(path);
+    FILE *fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    const char *json = "{\"routes\":{\"42\":{\"adapter_path\":\"/a/specific.bin\"}},"
+                       "\"default_adapter\":\"/a/default.bin\"}";
+    fwrite(json, 1, strlen(json), fp);
+    fclose(fp);
+
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    /* Specific contact → specific adapter (wins over default) */
+    HU_ASSERT_STR_EQ(hu_m3_contact_routes_lookup(routes, 42), "/a/specific.bin");
+    /* Unknown contact → default */
+    HU_ASSERT_STR_EQ(hu_m3_contact_routes_lookup(routes, 99), "/a/default.bin");
+    HU_ASSERT_STR_EQ(hu_m3_contact_routes_default(routes), "/a/default.bin");
+    hu_m3_contact_routes_destroy(routes);
+    (void)unlink(path);
+}
+
+static void test_m3_contact_routes_reload_picks_up_changes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_reload_test.json";
+    (void)unlink(path);
+    FILE *fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    fwrite("{\"routes\":{},\"default_adapter\":null}", 1, 36, fp);
+    fclose(fp);
+
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 0);
+
+    /* Append a route via direct file write, then reload. */
+    fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    const char *new_json = "{\"routes\":{\"7\":{\"adapter_path\":\"/a/new.bin\"}},"
+                           "\"default_adapter\":null}";
+    fwrite(new_json, 1, strlen(new_json), fp);
+    fclose(fp);
+
+    HU_ASSERT_EQ(hu_m3_contact_routes_reload(routes), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 1);
+    HU_ASSERT_STR_EQ(hu_m3_contact_routes_lookup(routes, 7), "/a/new.bin");
+    hu_m3_contact_routes_destroy(routes);
+    (void)unlink(path);
+}
+
+static void test_m3_contact_routes_null_safety(void) {
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_lookup(NULL, 42));
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(NULL), 0);
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_default(NULL));
+    /* destroy(NULL) must not crash */
+    hu_m3_contact_routes_destroy(NULL);
+}
+
+static void test_m3_contact_routes_malformed_json_is_non_fatal(void) {
+    /* The C-side mirror of Python's "corrupt routes MUST NOT block
+     * inference" stance. A malformed file → empty routes, lookup
+     * returns NULL, chat path continues with base model. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_malformed_test.json";
+    (void)unlink(path);
+    FILE *fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    fwrite("not json at all", 1, 15, fp);
+    fclose(fp);
+
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    HU_ASSERT_NOT_NULL(routes);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 0);
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_lookup(routes, 42));
+    hu_m3_contact_routes_destroy(routes);
+    (void)unlink(path);
+}
+
 static void test_m3_id_map_save_is_noop_when_clean(void) {
     /* Pinning the dirty-flag contract: save() on a never-modified map
      * doesn't write anything to disk. Important because the agent's
@@ -6337,6 +6461,12 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_rewrite_pair_record_writes_valid_jsonl);
     HU_RUN_TEST(test_m3_rewrite_pair_record_rejects_null_or_empty);
     HU_RUN_TEST(test_m3_rewrite_pair_record_appends_multiple_lines);
+    HU_RUN_TEST(test_m3_contact_routes_empty_file_lookup_returns_null);
+    HU_RUN_TEST(test_m3_contact_routes_specific_route_resolves);
+    HU_RUN_TEST(test_m3_contact_routes_default_fallback);
+    HU_RUN_TEST(test_m3_contact_routes_reload_picks_up_changes);
+    HU_RUN_TEST(test_m3_contact_routes_null_safety);
+    HU_RUN_TEST(test_m3_contact_routes_malformed_json_is_non_fatal);
 
     /* Phase B1 redefined (2026-05-17 round 2): inference outcome capture
      * — ring buffer + structured per-call records the future training
