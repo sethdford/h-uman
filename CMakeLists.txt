@@ -40,19 +40,28 @@ endif()
 # default and already produces deterministic archives in modern Xcode
 # (since Xcode 10, archives use zerofill metadata). Probe -D once.
 include(CheckSourceCompiles)
-execute_process(
-    COMMAND ${CMAKE_AR} -D --version
-    OUTPUT_VARIABLE _hu_ar_d_probe
-    ERROR_QUIET
-    RESULT_VARIABLE _hu_ar_d_result)
-if(_hu_ar_d_result EQUAL 0)
-    set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcD <TARGET> <OBJECTS>")
-    set(CMAKE_C_ARCHIVE_APPEND "<CMAKE_AR> qD  <TARGET> <OBJECTS>")
-    set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_AR> -D <TARGET>")
-    message(STATUS "Reproducible builds: ar supports -D (deterministic mode)")
-else()
-    message(STATUS "Reproducible builds: ar -D not supported (Darwin BSD ar); relying on platform default determinism")
-endif()
+# Deterministic archives: rely on the platform default rather than a
+# CMake-level ar flag override. Modern binutils ship with
+# `--enable-deterministic-archives` at configure time (the upstream
+# default since binutils 2.27; every major distro turns it on), and
+# Darwin's libtool already zerofills archive metadata since Xcode 10.
+#
+# Earlier code here tried to wedge `-D` into ar invocations via
+# CMAKE_C_ARCHIVE_{CREATE,APPEND,FINISH}. Both the probe AND the
+# override turned out to be unreliable:
+#   - The probe (`ar -D --version`) returned exit 0 on Ubuntu 24.04's
+#     binutils-2.42 because `--version` short-circuits regardless of
+#     preceding modifiers, falsely reporting that `qcD` is safe.
+#   - The `CMAKE_C_ARCHIVE_FINISH "ar -D <TARGET>"` finalize step
+#     fails with `-D: invalid option -- 'n'` at real link time on
+#     several runner image versions (the 'n' is part of an emulation
+#     suffix appended by gcc-ar/LTO-plugin wrapping that the override
+#     doesn't account for).
+# Dropping the override entirely sidesteps both pitfalls and loses
+# nothing — the resulting archives are still deterministic, just via
+# the platform default rather than an explicit per-call flag.
+# PR #113 round 29.
+message(STATUS "Reproducible builds: relying on platform-default deterministic archives (modern binutils + Darwin libtool)")
 
 # Linker-level nondeterminism. ELF build-id and Mach-O LC_UUID embed
 # host-derived randomness; suppress them so two builds match byte-for-byte.
@@ -1184,6 +1193,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/eval.c
     src/persona/replay.c
     src/persona/circadian.c
+    src/follow_up.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
@@ -1205,12 +1215,22 @@ list(APPEND HU_CORE_SOURCES
     # together with no HU_ENABLE_* wrap.
     src/persona/moment.c
     src/persona/moment_render.c
-    # US-8.2 — Persona Encryption-at-Rest.  Hard-requires libsodium; the
-    # TU itself emits #error if HU_HAS_LIBSODIUM is not defined, so this
-    # entry intentionally has no compile-time gate — a misconfigured build
-    # fails loudly at compile time rather than silently dropping the
-    # crypto layer.
-    src/persona/persona_crypt.c
+    # US-8.2 — Persona Encryption-at-Rest. Hard-requires libsodium via
+    # the TU's `#error if !defined(HU_HAS_LIBSODIUM)`. The original
+    # registration was unconditional with a "fail loudly" justification,
+    # but in practice this broke every CI variant that didn't pass
+    # `-DHU_ENABLE_LIBSODIUM=ON` (default OFF) — including all 12
+    # inline-apt CI jobs and integration-tests / minimal-build /
+    # cross-arm64 / feature-flags. Even installing libsodium-dev
+    # apt-side isn't sufficient because find_package(sodium) only runs
+    # when HU_ENABLE_LIBSODIUM=ON.
+    #
+    # The honest fix: only compile persona_crypt.c when libsodium is
+    # actually present. Callers (src/persona/persona_storage.c) already
+    # guard `hu_persona_crypt_*` calls with `#ifdef HU_HAS_LIBSODIUM`
+    # so no API break. When libsodium IS enabled and found, the layer
+    # is built; otherwise persona storage falls back to the PBKDF2 +
+    # ChaCha20+HMAC path documented at CMakeLists.txt:2102.
     src/context/theory_of_mind.c
     src/context/self_awareness.c
     src/context/anticipatory.c
@@ -1394,6 +1414,7 @@ if(HU_ENABLE_ML)
         # lora_retrain_runner.c.
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
+        src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
         # RL architecture rework — main moved to a shared-config-struct
@@ -2103,6 +2124,14 @@ if(HU_ENABLE_LIBSODIUM)
             target_link_directories(human_core PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
         endif()
         target_compile_definitions(human_core PRIVATE HU_HAS_LIBSODIUM=1)
+        # Add persona_crypt.c here (rather than to HU_CORE_SOURCES) so
+        # it only compiles when libsodium is actually available. The TU
+        # has `#error if !defined(HU_HAS_LIBSODIUM)`, so including it
+        # unconditionally breaks every CI variant where the option is
+        # off (default OFF). The matching human_core_test wiring is in
+        # a parallel block AFTER add_library(human_core_test ...) — see
+        # search for "persona_crypt.c" in the test-library section.
+        target_sources(human_core PRIVATE src/persona/persona_crypt.c)
         message(STATUS "libsodium: enabled (XChaCha20-Poly1305 + Argon2id)")
     else()
         message(WARNING "HU_ENABLE_LIBSODIUM=ON but libsodium not found; falling back to PBKDF2 + ChaCha20+HMAC")
@@ -2572,7 +2601,19 @@ target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/t
 # We use PUBLIC link directives so that human_tests (which links the static
 # human_core_test library) inherits the libsodium link directory and library
 # without needing to repeat the discovery dance.
+#
+# Also pulls in src/persona/persona_crypt.c — that source hard-#errors when
+# HU_HAS_LIBSODIUM is undefined, so it MUST be gated here and cannot live in
+# the unconditional HU_CORE_SOURCES list (see persona_crypt.c top comment +
+# Sprint-7 merge-regression that re-broke this once before).
+#
+# NOTE: tests/test_persona_encryption.c is registered AFTER the
+# `set(HU_TEST_SOURCES ...)` at line ~2834 (which would otherwise discard
+# an append done here). See the matching `if(HU_LIBSODIUM_FOUND)` block in
+# the gated test-sources section near line ~3440. Bugbot 8b687b9c caught
+# this set-after-append silent loss.
 if(HU_LIBSODIUM_FOUND)
+    target_sources(human_core_test PRIVATE src/persona/persona_crypt.c)
     target_include_directories(human_core_test PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
     target_link_libraries(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARIES})
     if(HU_LIBSODIUM_LIBRARY_DIRS)
@@ -2607,6 +2648,8 @@ endif()
 if(HU_ENABLE_COREML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_COREML=1)
 endif()
+# (Note: libsodium wiring for human_core_test was previously duplicated here;
+#  merged into the single block above per Bugbot 31c0a7dc.)
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_FEEDS=1)
 endif()
@@ -2809,10 +2852,14 @@ set(HU_TEST_SOURCES
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
     tests/test_persona_overlay_render.c
-    tests/test_channel_overlay_apply.c
+    # test_channel_overlay_apply.c — moved to gated block (needs both
+    # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
+    # hu_imessage_create AND hu_telegram_create). minimal-build doesn't
+    # enable either, so unconditional registration breaks the link.
     tests/test_personal_model_simulation.c
     tests/test_personal_model_fidelity_v2.c
-    tests/test_persona_encryption.c
+    # test_persona_encryption.c — moved to gated block below; references
+    # hu_persona_crypt_* which only exists when HU_LIBSODIUM_FOUND.
     tests/test_persona_directive_channels.c
     tests/test_filler_recency.c
     tests/integration/test_sprint3_hybrid_recall.c
@@ -2948,6 +2995,9 @@ set(HU_TEST_SOURCES
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
+    tests/test_imessage_rich_link.c
+    tests/test_imessage_react_contract.c
+    tests/test_follow_up.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
@@ -3137,16 +3187,15 @@ set(HU_TEST_SOURCES
     tests/test_reflection_advanced.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
-    tests/test_ml.c
-    tests/test_ml_cli_actually_trains.c
-    tests/test_ml_fidelity_judgment.c
-    tests/test_dpo_judge_naming.c
-    tests/test_dp_sgd.c
-    tests/test_lora.c
-    tests/test_training_data.c
-    tests/test_training_data_extractor.c
-    tests/test_training_data_quality.c
-    tests/test_agent_trainer.c
+    # ML-coupled tests (test_ml.c, test_ml_cli_actually_trains.c,
+    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c, test_dp_sgd.c,
+    # test_lora.c, test_training_data*.c, test_agent_trainer.c) are
+    # added below in the if(HU_ENABLE_ML) gate (CMakeLists.txt:3349+).
+    # The sprint-7 main-merge re-introduced them here unconditionally,
+    # regressing my round-10/12 fix. Re-applied: minimal-build /
+    # no-sqlite / cross-arm64 variants reference hu_agent_t fields like
+    # m3_adapter that only exist when HU_ENABLE_ML is on. The gate-
+    # symmetry CI check (PR #113 round 14) would also catch this.
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
@@ -3361,8 +3410,10 @@ list(APPEND HU_TEST_SOURCES
 if(HU_ENABLE_ML)
     list(APPEND HU_TEST_SOURCES
         tests/test_ml.c
+        tests/test_mlx_admin.c
         tests/test_ml_cli_actually_trains.c
         tests/test_ml_fidelity_judgment.c
+        tests/test_dp_sgd.c
         tests/test_dpo_miner.c
         tests/test_dpo_judge_naming.c
         tests/test_rl_trainer.c
@@ -3391,6 +3442,21 @@ if(HU_ENABLE_ML)
         tests/test_training_data_quality.c
         tests/test_dpo_extractor_integration.c
         tests/test_agent_trainer.c)
+endif()
+
+# test_channel_overlay_apply.c needs both iMessage AND Telegram symbols.
+if(HU_ENABLE_IMESSAGE AND HU_ENABLE_TELEGRAM)
+    list(APPEND HU_TEST_SOURCES tests/test_channel_overlay_apply.c)
+endif()
+
+# Persona encryption-at-rest tests — only when libsodium was located.
+# Calls hu_persona_crypt_* which is only compiled inside the matching
+# if(HU_LIBSODIUM_FOUND) block near line ~2605 (production) + ~2644
+# (test library). Registered HERE because `set(HU_TEST_SOURCES ...)`
+# at ~2834 happens AFTER the libsodium target_sources block — appends
+# before the set() get silently discarded (Bugbot 8b687b9c).
+if(HU_LIBSODIUM_FOUND)
+    list(APPEND HU_TEST_SOURCES tests/test_persona_encryption.c)
 endif()
 
 # W13 learning loop — only when HU_ENABLE_LEARNING is ON (requires ML).
@@ -3452,6 +3518,15 @@ target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/s
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
 # HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
+# Mirror HU_HAS_LIBSODIUM onto human_tests so tests/test_main.c's
+# `#ifdef HU_HAS_LIBSODIUM` call-site guard for run_persona_encryption_tests()
+# actually activates. Without this, the runner is registered (because
+# test_persona_encryption.c is in HU_TEST_SOURCES under HU_LIBSODIUM_FOUND)
+# but the call site stays `#endif`-disabled and the tests silently skip.
+# Bugbot 8b687b9c caught the half-wired guard.
+if(HU_LIBSODIUM_FOUND)
+    target_compile_definitions(human_tests PRIVATE HU_HAS_LIBSODIUM=1)
+endif()
 if(HU_ENABLE_APPLE_INTELLIGENCE)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_APPLE_INTELLIGENCE=1)
 endif()

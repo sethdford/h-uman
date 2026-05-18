@@ -177,7 +177,7 @@ jobs:
 
       - name: Open or update tracking issue on failure
         if: failure() && github.event.pull_request.head.repo.fork != true
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:

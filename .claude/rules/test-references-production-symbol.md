@@ -23,8 +23,23 @@ grep-detectable reference to a `hu_*` function or macro exported from the produc
 `.c` file implied by the test file name.
 
 Module-name heuristic: `tests/test_daemon_e2e_validator.c` → tries `daemon_e2e_validator`,
-then `daemon_e2e`, then `daemon` as the candidate production module.  The first match in
-`src/**/<candidate>.c` wins.
+then `daemon_e2e`, then `daemon` as the candidate production module. At each step the
+script searches for ALL matching `src/**/<candidate>.c` files (sorted alphabetically for
+determinism), then disambiguates:
+
+- **0 matches** → strip the next underscore segment and retry
+- **1 match** → use it (fast path)
+- **2+ matches** → pick the candidate whose exported `hu_*` symbols appear most often in
+  the test file. Ties (including all-zero matches) broken alphabetically by full path —
+  so the result is reproducible across filesystems.
+
+Why scoring rather than alphabetical-first: before the 2026-05-17 fix, the script used
+`find ... | head -1`, which was filesystem-order-dependent. Two real basename collisions
+exist today — `src/channels/imessage.c` vs `src/feeds/imessage.c`, and `src/music.c` vs
+`src/feeds/music.c`. A test legitimately covering one module could silently be evaluated
+against the other and fail with a misleading missing-symbol error. The fix is pinned by
+`tests/fixtures/check-test-refs/test_imessage_disambig.c` (smoke-tested by
+`run-smoke-test.sh`).
 
 ## Escape hatch
 

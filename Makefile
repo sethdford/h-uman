@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build
 
 all: build test
 
@@ -95,6 +95,22 @@ hooks:
 
 prove:
 	@bash scripts/prove-intelligence.sh
+
+# M3 closed-loop live-fire demo. Needs the release-preset binary so the
+# daemon's chat path runs without ASan. demo-loop-build is the build
+# step (idempotent — cmake re-uses the build cache); demo-loop runs the
+# orchestration. Together they're the e2e proof for the dormant LoRA
+# loop: stub-MLX + service-loop --with-gateway + driver → swap.
+#
+#   make demo-loop-build   # one-time: cmake --preset release + build human
+#   make demo-loop         # idempotent: cleanup + chat + driver + swap
+demo-loop-build:
+	cmake --preset release >/dev/null
+	cmake --build --preset release --target human -j$(JOBS)
+	@echo "==> Release binary: build-release/human"
+
+demo-loop: demo-loop-build
+	@bash scripts/live_fire_m3_loop.sh
 
 validate: format-check build test
 	@echo "Validation passed."

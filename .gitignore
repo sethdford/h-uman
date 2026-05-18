@@ -81,6 +81,12 @@ ui/node_modules/
 ui/test-results/
 ui/playwright-report/
 ui/blob-report/
+# Root-level Playwright artifact directory — appears when tests are run
+# from repo root (e.g. via `cd ui && npx playwright test` then a tool
+# auto-cds back). Already covered for ui/, but not root. PR #113 round
+# 25 caught a stray test-results/.last-run.json commit (Bugbot 150b4dcb).
+/test-results/
+/playwright-report/
 ui/visual-regression/
 ui/coverage/
 ui/e2e-screenshots/

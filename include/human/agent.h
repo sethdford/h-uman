@@ -38,6 +38,7 @@
 #include "human/memory.h"
 #include "human/memory/policy.h"
 #include "human/memory/retrieval.h"
+#include "human/ml/m3_frontier_adapter.h"
 #include "human/security/delegation.h"
 #include "human/security/escalate.h"
 #include "human/tools/validation.h"
@@ -616,6 +617,38 @@ void hu_agent_set_learner(hu_agent_t *agent, struct hu_learner *learner);
  * streaming rethink). */
 void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path);
 void hu_agent_m3_on_provider_success(hu_agent_t *agent);
+
+/* Phase B1 redefined (2026-05-17 round 2): record a structured inference
+ * outcome to the M3 adapter's ring buffer. Safe to call always (no-op when
+ * ML off, no adapter attached, or agent NULL). Computes prompt/response
+ * hashes via hu_m3_outcome_hash_bytes — callers don't have to.
+ *
+ * Args:
+ *   - prompt / prompt_len: the system+user prompt sent to the model
+ *   - response / response_len: the cleaned final response
+ *   - latency_ms: end-to-end inference duration
+ *   - contact_id / contact_id_len: per-contact partition key; pass NULL
+ *     when there's no contact context (e.g. agent --once)
+ *   - guard_decision: the response_guard chain's terminal decision
+ *   - turn_kind: 1 = stream-final, 2 = post-stream batch, 3 = proactive
+ *   - usage: optional pointer to the provider's reported token counts.
+ *     When non-NULL AND any field is nonzero, prompt_tokens /
+ *     completion_tokens land in the outcome record as the provider
+ *     reported them. When NULL or all-zero, falls back to a bytes/4
+ *     estimate (~English BPE rule). The bytes/4 fallback never reports
+ *     zero when there's real content, which is what the M3 driver's
+ *     selection policy depends on. Phase C1 (2026-05-18): prefer real
+ *     counts when available; the estimate is a 20-40% under-counter
+ *     and worse for structured / non-English text. See
+ *     `docs/plans/2026-05-17-m3-phase-c-plan.md` C1.
+ *
+ * Model/adapter ids are looked up from the agent's current configuration
+ * inside this helper (set to 0 when unknown). */
+void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
+                                     const char *response, size_t response_len, uint64_t latency_ms,
+                                     const char *contact_id, size_t contact_id_len,
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind,
+                                     const hu_token_usage_t *usage);
 
 /* Point the agent at a hu_voice_config_t (e.g. from hu_voice_config_from_settings).
  * Borrowed pointers inside that struct must outlive the agent. Pass NULL to disable TTS. */

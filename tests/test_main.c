@@ -220,6 +220,9 @@ void run_imessage_extended_tests(void);
 void run_imessage_chatdb_fixture_tests(void);
 void run_imessage_adversarial_tests(void);
 void run_imessage_non_allowlisted_tests(void);
+void run_imessage_rich_link_tests(void);
+void run_imessage_react_contract_tests(void);
+void run_follow_up_tests(void);
 void run_intelligence_tests(void);
 void run_protective_tests(void);
 void run_humor_tests(void);
@@ -449,6 +452,7 @@ void run_emotion_map_tests(void);
 #endif
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
+void run_mlx_admin_tests(void);
 void run_ml_cli_actually_trains_tests(void);
 void run_ml_fidelity_judgment_tests(void);
 /* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
@@ -647,10 +651,14 @@ void run_grpo_mlx_tests(void);
 void run_grpo_huml_tests(void);
 void run_grpo_e2e_tests(void);
 #endif
+#ifdef HU_HAS_LIBSODIUM
 void run_persona_encryption_tests(void);
+#endif
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
+#if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
 void run_channel_overlay_apply_tests(void);
+#endif
 void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
 #ifdef HU_ENABLE_ML
@@ -949,6 +957,9 @@ int main(int argc, char **argv) {
     run_imessage_chatdb_fixture_tests();
     run_imessage_adversarial_tests();
     run_imessage_non_allowlisted_tests();
+    run_imessage_rich_link_tests();
+    run_imessage_react_contract_tests();
+    run_follow_up_tests();
     run_intelligence_tests();
     run_protective_tests();
     run_humor_tests();
@@ -1172,6 +1183,7 @@ int main(int argc, char **argv) {
 #endif
 #ifdef HU_ENABLE_ML
     run_ml_tests();
+    run_mlx_admin_tests();
     run_ml_cli_actually_trains_tests();
     run_ml_fidelity_judgment_tests();
     /* PR #115 / merge-with-main: run_ml_cli_rl_train_tests +
@@ -1364,10 +1376,14 @@ int main(int argc, char **argv) {
     run_grpo_mlx_tests();
     run_grpo_e2e_tests();
 #endif
+#ifdef HU_HAS_LIBSODIUM
     run_persona_encryption_tests();
+#endif
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
+#if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
     run_channel_overlay_apply_tests();
+#endif
     run_filler_recency_tests();
     run_contact_send_recency_tests();
 #ifdef HU_ENABLE_ML

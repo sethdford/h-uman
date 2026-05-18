@@ -1003,19 +1003,83 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
     if (agent->m3_adapter) {
         hu_m3_frontier_adapter_close(agent->alloc, agent->m3_adapter);
         agent->m3_adapter = NULL;
+        /* Clear the global accessor before freeing so the gateway
+         * endpoint doesn't read a freed pointer in the small window
+         * between close() and the next attach. */
+        hu_m3_outcomes_register_global_adapter(NULL);
     }
     if (!path || path[0] == '\0')
         return;
     size_t path_len = strlen(path);
     hu_m3_frontier_adapter_t *opened = NULL;
-    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK && opened)
+    if (hu_m3_frontier_adapter_try_open(agent->alloc, path, path_len, &opened) == HU_OK && opened) {
         agent->m3_adapter = opened;
+        /* B3 v0 (2026-05-17 r2): publish the freshly-opened adapter to
+         * the global accessor so /v1/m3/outcomes can read it. */
+        hu_m3_outcomes_register_global_adapter(opened);
+    }
 }
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
     if (!agent || !agent->m3_adapter)
         return;
     (void)hu_m3_frontier_adapter_noop_infer(agent->m3_adapter);
+}
+
+void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
+                                     const char *response, size_t response_len, uint64_t latency_ms,
+                                     const char *contact_id, size_t contact_id_len,
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind,
+                                     const hu_token_usage_t *usage) {
+    /* Defensive no-op shape mirrors hu_agent_m3_on_provider_success so
+     * callers in agent_stream / agent_turn don't have to gate the call.
+     * The hot path is "agent has no M3 adapter attached" and that path
+     * must be free. */
+    if (!agent || !agent->m3_adapter)
+        return;
+
+    hu_m3_inference_outcome_t outcome;
+    memset(&outcome, 0, sizeof(outcome));
+
+    /* Wall clock at record time, not at request start — gives the
+     * training loop a "last seen" anchor. latency_ms (the caller's
+     * own measurement) holds the actual inference duration so the
+     * loop can derive request start by subtraction if needed. */
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        outcome.timestamp_unix_ms =
+            (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+    }
+    outcome.latency_ms = latency_ms;
+    outcome.prompt_hash = hu_m3_outcome_hash_bytes(prompt, prompt_len);
+    outcome.response_hash = hu_m3_outcome_hash_bytes(response, response_len);
+    outcome.contact_id_hash = hu_m3_outcome_hash_bytes(contact_id, contact_id_len);
+    /* prompt_tokens / completion_tokens — Phase C1 (2026-05-18): prefer
+     * provider-reported counts when the caller passes a usage block.
+     * Fall back to a bytes/4 estimate (~English BPE rule) when usage is
+     * NULL or all-zero. The fallback never reports zero when there's
+     * real content, which is the property the M3 driver's selection
+     * policy relies on. Per-field fallback (rather than all-or-nothing)
+     * handles providers that report only prompt_tokens or only
+     * completion_tokens. */
+    if (usage && usage->prompt_tokens > 0) {
+        outcome.prompt_tokens = usage->prompt_tokens;
+    } else {
+        outcome.prompt_tokens = (uint32_t)(prompt_len / 4);
+    }
+    if (usage && usage->completion_tokens > 0) {
+        outcome.completion_tokens = usage->completion_tokens;
+    } else {
+        outcome.completion_tokens = (uint32_t)(response_len / 4);
+    }
+    outcome.guard_decision = (uint8_t)guard_decision;
+    outcome.turn_kind = turn_kind;
+    /* model_id / adapter_id: 0 = unknown. Mapping is a config-driven
+     * follow-up — we'll add a small table in personalization config
+     * (model_name -> uint16, adapter_path -> uint16) so outcomes
+     * cluster cleanly without storing the full path strings. */
+
+    (void)hu_m3_frontier_adapter_record_outcome(agent->m3_adapter, &outcome);
 }
 #else
 void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
@@ -1025,6 +1089,24 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
     (void)agent;
+}
+
+void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size_t prompt_len,
+                                     const char *response, size_t response_len, uint64_t latency_ms,
+                                     const char *contact_id, size_t contact_id_len,
+                                     hu_m3_guard_decision_t guard_decision, uint8_t turn_kind,
+                                     const hu_token_usage_t *usage) {
+    (void)agent;
+    (void)prompt;
+    (void)prompt_len;
+    (void)response;
+    (void)response_len;
+    (void)latency_ms;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)guard_decision;
+    (void)turn_kind;
+    (void)usage;
 }
 #endif
 

@@ -51,7 +51,7 @@ F102-F115.
 
 ## Gaps
 - Per-feature depth (F102 fatigue vs F108 gossip vs F115 recovery) not
-  exhaustively verified, but the integration surface (schema + modules +
+  exhaustively verified, but the wiring surface (schema + modules +
   daemon wiring) is complete.
 
 ## Notes

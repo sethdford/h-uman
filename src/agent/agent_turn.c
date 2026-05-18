@@ -4983,8 +4983,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (llm_span)
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
-        if (err == HU_OK)
+        if (err == HU_OK) {
             hu_agent_m3_on_provider_success(agent);
+            /* B1 redefined (2026-05-17 r3): record outcome at the top of
+             * each batch-chat tool-loop iteration. resp.content may be
+             * empty when there are tool_calls; the helper still records
+             * the prompt hash + latency + turn_kind. Downstream sites
+             * (GVR / constitutional / metacog / retry) record again with
+             * cleaned content. */
+            hu_agent_m3_record_chat_outcome(agent, msg, msg_len, resp.content, resp.content_len,
+                                            llm_duration_ms, agent->memory_session_id,
+                                            agent->memory_session_id_len, HU_M3_GUARD_PASS,
+                                            /*turn_kind=batch=*/2, &resp.usage);
+        }
 
         /* W10: persist prompt-token metadata after successful provider call (see probe
          * comment above: no response replay yet). */
@@ -5126,11 +5137,24 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 user_prompt_len = req.messages[req.messages_count - 1].content_len;
             }
             hu_gvr_pipeline_result_t gvr_result;
+            uint64_t gvr_t0_ms = hu_agent_internal_monotonic_ms();
             hu_error_t gvr_err = hu_gvr_pipeline(
                 agent->alloc, &agent->provider, &agent->sota.gvr_config, turn_model, turn_model_len,
                 user_prompt, user_prompt_len, resp.content, resp.content_len, &gvr_result);
-            if (gvr_err == HU_OK)
+            uint64_t gvr_latency_ms = hu_agent_internal_monotonic_ms() - gvr_t0_ms;
+            if (gvr_err == HU_OK) {
                 hu_agent_m3_on_provider_success(agent);
+                /* B1 redefined (2026-05-17 r3): GVR is a quality-pipeline
+                 * rewrite, not response_guard — tag PASS even when revised. */
+                const char *gvr_resp =
+                    gvr_result.final_content ? gvr_result.final_content : resp.content;
+                size_t gvr_resp_len =
+                    gvr_result.final_content ? gvr_result.final_content_len : resp.content_len;
+                hu_agent_m3_record_chat_outcome(agent, msg, msg_len, gvr_resp, gvr_resp_len,
+                                                gvr_latency_ms, agent->memory_session_id,
+                                                agent->memory_session_id_len, HU_M3_GUARD_PASS,
+                                                /*turn_kind=batch=*/2, &resp.usage);
+            }
             if (gvr_err == HU_OK && gvr_result.final_content) {
                 if (gvr_result.revisions_performed > 0) {
                     hu_chat_response_free(agent->alloc, &resp);
@@ -5555,11 +5579,34 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hu_constitutional_config_t const_cfg = hu_constitutional_config_default();
                     hu_critique_result_t critique;
                     memset(&critique, 0, sizeof(critique));
+                    uint64_t const_t0_ms = hu_agent_internal_monotonic_ms();
                     if (hu_constitutional_critique(agent->alloc, &agent->provider,
                                                    agent->model_name, agent->model_name_len, msg,
                                                    msg_len, final_content, final_len, &const_cfg,
                                                    &critique) == HU_OK) {
+                        uint64_t const_latency_ms = hu_agent_internal_monotonic_ms() - const_t0_ms;
                         hu_agent_m3_on_provider_success(agent);
+                        /* B1 redefined (2026-05-17 r3): Constitutional AI
+                         * is a quality-pipeline critique, not response_guard
+                         * — tag PASS even when it rewrites. */
+                        const char *cn_resp =
+                            (critique.verdict == HU_CRITIQUE_REWRITE && critique.revised_response &&
+                             critique.revised_response_len > 0)
+                                ? critique.revised_response
+                                : final_content;
+                        size_t cn_resp_len =
+                            (critique.verdict == HU_CRITIQUE_REWRITE && critique.revised_response &&
+                             critique.revised_response_len > 0)
+                                ? critique.revised_response_len
+                                : final_len;
+                        /* No chat_response in scope — critique works on the
+                         * already-cleaned string. Usage is NULL; the helper
+                         * falls back to a bytes/4 estimate. */
+                        hu_agent_m3_record_chat_outcome(agent, msg, msg_len, cn_resp, cn_resp_len,
+                                                        const_latency_ms, agent->memory_session_id,
+                                                        agent->memory_session_id_len,
+                                                        HU_M3_GUARD_PASS,
+                                                        /*turn_kind=batch=*/2, NULL);
                         if (critique.verdict == HU_CRITIQUE_REWRITE && critique.revised_response &&
                             critique.revised_response_len > 0) {
                             if (ab_owned)
@@ -5703,9 +5750,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
                         hu_chat_response_t mc_resp;
                         memset(&mc_resp, 0, sizeof(mc_resp));
+                        uint64_t mc_t0_ms = hu_agent_internal_monotonic_ms();
                         hu_error_t mc_err = agent->provider.vtable->chat(
                             agent->provider.ctx, agent->alloc, &mc_req, turn_model, turn_model_len,
                             turn_temp, &mc_resp);
+                        uint64_t mc_latency_ms = hu_agent_internal_monotonic_ms() - mc_t0_ms;
 
                         agent->alloc->free(agent->alloc->ctx, new_sp, new_sl + 1);
                         agent->alloc->free(agent->alloc->ctx, mc_msgs,
@@ -5717,6 +5766,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         }
 
                         hu_agent_m3_on_provider_success(agent);
+                        /* B1 redefined (2026-05-17 r3): metacog regen is a
+                         * fresh provider chat call (same model, augmented
+                         * system prompt). Not response_guard — tag PASS. */
+                        hu_agent_m3_record_chat_outcome(
+                            agent, msg, msg_len, mc_resp.content, mc_resp.content_len,
+                            mc_latency_ms, agent->memory_session_id, agent->memory_session_id_len,
+                            HU_M3_GUARD_PASS,
+                            /*turn_kind=batch=*/2, &mc_resp.usage);
 
                         agent->total_tokens += mc_resp.usage.total_tokens;
                         hu_agent_internal_record_cost(agent, &mc_resp.usage);
@@ -5848,12 +5905,27 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 size_t retry_len = 0;
                                 hu_guard_report_t retry_report;
                                 memset(&retry_report, 0, sizeof(retry_report));
+                                uint64_t vc_retry_t0_ms = hu_agent_internal_monotonic_ms();
                                 hu_error_t retry_err = hu_response_guard_retry_slim(
                                     agent->alloc, agent->observer, agent->config, &agent->provider,
                                     turn_model, turn_model_len, msg, msg_len, &retry_content,
                                     &retry_len, &retry_report);
+                                uint64_t vc_retry_latency_ms =
+                                    hu_agent_internal_monotonic_ms() - vc_retry_t0_ms;
                                 if (retry_err == HU_OK && retry_content && retry_len > 0) {
                                     hu_agent_m3_on_provider_success(agent);
+                                    /* B1 redefined (2026-05-17 r3): validator
+                                     * chain RECOVERED via hu_response_guard_retry_slim
+                                     * — the slim retry rewrote a rejected first
+                                     * draft. Tag REWRITE. */
+                                    /* Slim retry path doesn't expose a
+                                     * chat_response struct — NULL usage,
+                                     * bytes/4 fallback fires. */
+                                    hu_agent_m3_record_chat_outcome(
+                                        agent, msg, msg_len, retry_content, retry_len,
+                                        vc_retry_latency_ms, agent->memory_session_id,
+                                        agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
+                                        /*turn_kind=batch=*/2, NULL);
                                     /* Re-validate the retry output through the chain so a
                                      * regenerated CoT or helper-closer cannot escape (Fix 3). */
                                     hu_chain_result_t retry_cr;
@@ -6008,12 +6080,25 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             size_t retry_len = 0;
                             hu_guard_report_t retry_report;
                             memset(&retry_report, 0, sizeof(retry_report));
+                            uint64_t ab_retry_t0_ms = hu_agent_internal_monotonic_ms();
                             hu_error_t retry_err = hu_response_guard_retry_slim(
                                 agent->alloc, agent->observer, agent->config, &agent->provider,
                                 turn_model, turn_model_len, msg, msg_len, &retry_content,
                                 &retry_len, &retry_report);
+                            uint64_t ab_retry_latency_ms =
+                                hu_agent_internal_monotonic_ms() - ab_retry_t0_ms;
                             if (retry_err == HU_OK && retry_content && retry_len > 0) {
                                 hu_agent_m3_on_provider_success(agent);
+                                /* B1 r3 (2026-05-17): record outcome from the post-batch
+                                 * response_guard retry path. turn_kind=2 (batch). */
+                                /* Slim retry path doesn't expose a
+                                 * chat_response — NULL usage, bytes/4
+                                 * fallback fires. */
+                                hu_agent_m3_record_chat_outcome(
+                                    agent, msg, msg_len, retry_content, retry_len,
+                                    ab_retry_latency_ms, agent->memory_session_id,
+                                    agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
+                                    /*turn_kind=batch=*/2, NULL);
                                 hu_log_warn("agent_turn", agent->observer,
                                             "response_guard RECOVERED: retry passed (len=%zu, "
                                             "stripped=%zu)",

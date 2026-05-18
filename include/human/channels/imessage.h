@@ -51,6 +51,21 @@ hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const c
                                                   size_t contact_id_len, char **out,
                                                   size_t *out_len);
 
+/** Find the most recent outbound message to `contact_id` that was READ
+ * (date_read > 0) but has NO inbound reply since. Sets *out_msg_id to
+ * the chat.db ROWID and *out_read_at_ms to the wall-clock ms of the
+ * read receipt; sets both to 0 when there is no unreplied read.
+ *
+ * Returns HU_OK whether or not a result is found (no result is HU_OK
+ * with *out_msg_id == 0). Returns non-OK only on I/O / SQL failures.
+ *
+ * In test mode (HU_IS_TEST) returns HU_OK with no result — chat.db
+ * fixtures are not yet set up; the daemon glue's call site is reviewed,
+ * not unit-tested here. The follow-up policy predicates that consume
+ * this query's output ARE fully tested in tests/test_follow_up.c. */
+hu_error_t hu_imessage_find_unreplied_read(const char *contact_id, size_t contact_id_len,
+                                           int64_t *out_msg_id, uint64_t *out_read_at_ms);
+
 /** Count positive tapbacks (love/like/laugh/emphasis) on our GIF messages from this
  * contact in the last 24 hours. Uses direct SQL on chat.db associated_message_type.
  * Returns 0 on non-macOS or when SQLite unavailable. */

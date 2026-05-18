@@ -346,7 +346,15 @@ static hu_error_t imap_inject_wrapper(hu_channel_t *ch, const char *session_key,
 }
 #endif
 
+/* Sentinel-first registry. The array MUST be non-empty even when every
+ * channel HU_HAS_* macro is undefined (e.g. the `integration-tests`,
+ * `FIPS Crypto Build`, and `Run eval suites` CI jobs that only enable
+ * a narrow feature slice). C forbids zero-length arrays — gcc rejects
+ * with "error: zero or negative size array 's_registry'" — so we put
+ * an explicit NULL-named sentinel at index 0 and have the public API
+ * skip it. Iterators key on `name != NULL`. */
 static const hu_channel_test_entry_t s_registry[] = {
+    {NULL, NULL, NULL, NULL, NULL, NULL}, /* sentinel: keeps array non-empty */
 #if HU_HAS_IMESSAGE
     {"imessage", imessage_test_create, imessage_test_destroy, hu_imessage_test_inject_mock,
      hu_imessage_poll, hu_imessage_test_get_last_message},
@@ -461,15 +469,22 @@ static const hu_channel_test_entry_t s_registry[] = {
 };
 
 const hu_channel_test_entry_t *hu_channel_test_registry(size_t *count) {
-    *count = sizeof(s_registry) / sizeof(s_registry[0]);
-    return s_registry;
+    /* Subtract one for the leading sentinel; expose `count` real entries
+     * starting at &s_registry[1]. When no channels are compiled in,
+     * `count` is 0 and callers get an empty range — not undefined. */
+    *count = (sizeof(s_registry) / sizeof(s_registry[0])) - 1;
+    return &s_registry[1];
 }
 
 const hu_channel_test_entry_t *hu_channel_test_find(const char *name) {
+    if (!name)
+        return NULL;
     size_t n;
     const hu_channel_test_entry_t *r = hu_channel_test_registry(&n);
-    for (size_t i = 0; i < n; i++)
-        if (strcmp(r[i].name, name) == 0)
+    for (size_t i = 0; i < n; i++) {
+        /* Defensive: skip any NULL-named entries (sentinels). */
+        if (r[i].name && strcmp(r[i].name, name) == 0)
             return &r[i];
+    }
     return NULL;
 }
