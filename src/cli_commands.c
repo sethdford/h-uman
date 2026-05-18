@@ -1,15 +1,15 @@
 #include "human/cli_commands.h"
-#include "human/cli_eval_w16_internal.h"
 #include "human/agent/hula.h"
 #include "human/agent/hula_analytics.h"
 #include "human/agent/hula_compiler.h"
-#include "human/agent/tom_scenario.h"
 #include "human/agent/hula_emergence.h"
 #include "human/agent/hula_lite.h"
 #include "human/agent/spawn.h"
+#include "human/agent/tom_scenario.h"
 #include "human/bootstrap.h"
 #include "human/calibration.h"
 #include "human/calibration/clone.h"
+#include "human/cli_eval_w16_internal.h"
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
@@ -31,7 +31,8 @@
 /* W7 facade: do not include human/memory/memory.h here — it collides with
  * legacy human/memory.h (hu_memory_t). Only three entrypoints are needed. */
 typedef struct hu_memory_facade hu_memory_facade_t;
-hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_memory_facade_t **out);
+hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph,
+                                 hu_memory_facade_t **out);
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
 hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                         const char *output_path);
@@ -70,22 +71,21 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
 #define HU_INIT_MAX_PATH    1024
 
 #ifndef HU_IS_TEST
-static const char HU_INIT_DEFAULT_JSON[] =
-    "{\n"
-    "  \"default_provider\": \"ollama\",\n"
-    "  \"default_model\": \"llama3.2\",\n"
-    "  \"max_tokens\": 4096,\n"
-    "  \"agent\": {\n"
-    "    \"persona\": \"default\"\n"
-    "  },\n"
-    "  \"memory\": {\n"
-    "    \"backend\": \"sqlite\"\n"
-    "  },\n"
-    "  \"gateway\": {\n"
-    "    \"enabled\": false,\n"
-    "    \"port\": 3000\n"
-    "  }\n"
-    "}\n";
+static const char HU_INIT_DEFAULT_JSON[] = "{\n"
+                                           "  \"default_provider\": \"ollama\",\n"
+                                           "  \"default_model\": \"llama3.2\",\n"
+                                           "  \"max_tokens\": 4096,\n"
+                                           "  \"agent\": {\n"
+                                           "    \"persona\": \"default\"\n"
+                                           "  },\n"
+                                           "  \"memory\": {\n"
+                                           "    \"backend\": \"sqlite\"\n"
+                                           "  },\n"
+                                           "  \"gateway\": {\n"
+                                           "    \"enabled\": false,\n"
+                                           "    \"port\": 3000\n"
+                                           "  }\n"
+                                           "}\n";
 
 /* Starter persona literal centralized in src/onboard.c as
  * `hu_starter_persona_json` (declared in include/human/onboard.h).
@@ -248,14 +248,34 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     printf("Created ~/.human/config.json\n");
     printf("Created ~/.human/personas/default.json (starter persona)\n");
     printf("\n");
-    printf("Default provider is Ollama (local, no API key). Start the server:\n");
-    printf("  ollama serve && ollama pull llama3.2\n");
-    printf("\n");
-    printf("For cloud providers or Apple Intelligence, run:\n");
-    printf("  human onboard\n");
-    printf("\n");
-    printf("Start chatting: human agent\n");
-    printf("Customize your persona: human persona update default\n");
+
+    /* US-43.2: post-fclose, verify the config we just wrote parses, then
+     * derive the 4 booleans for the next-step formatter. Any non-OK
+     * return from hu_config_load (HU_ERR_IO, HU_ERR_PARSE,
+     * HU_ERR_CONFIG_INVALID) means we cannot trust the persona/channel
+     * state — fall through to fallback_bare. */
+    bool persona_set = false;
+    bool imessage_paired = false;
+    {
+        hu_config_t cfg;
+        hu_error_t verify_err = hu_config_load(alloc, &cfg);
+        if (verify_err == HU_OK) {
+            persona_set = true;
+            imessage_paired = (cfg.channels.imessage.allow_from_count > 0);
+            hu_config_deinit(&cfg);
+        }
+    }
+    bool ollama_ok = hu_ollama_api_tags_reachable();
+    bool brew_installed = hu_exe_on_path("brew");
+
+    char nbuf[512];
+    hu_error_t fmt_rc = hu_onboard_nextstep_format(imessage_paired, persona_set, ollama_ok,
+                                                   brew_installed, nbuf, sizeof(nbuf));
+    if (fmt_rc != HU_OK) {
+        fprintf(stderr, "warning: nextstep formatter returned %d; user prompt may be truncated\n",
+                (int)fmt_rc);
+    }
+    fputs(nbuf, stdout);
     return HU_OK;
 #endif /* !HU_IS_TEST */
 }
@@ -501,15 +521,14 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         if (cfg.security.audit.enabled) {
             hu_audit_config_t acfg = HU_AUDIT_CONFIG_DEFAULT;
             acfg.enabled = true;
-            acfg.log_path = cfg.security.audit.log_path
-                ? cfg.security.audit.log_path : "audit.log";
+            acfg.log_path = cfg.security.audit.log_path ? cfg.security.audit.log_path : "audit.log";
             hu_audit_logger_t *logger = hu_audit_logger_create(alloc, &acfg, ws);
             if (logger) {
                 hu_audit_event_t ev;
                 hu_audit_event_init(&ev, HU_AUDIT_FILE_ACCESS);
                 hu_audit_event_with_actor(&ev, "cli", NULL, "user");
-                hu_audit_event_with_action(&ev, "memory.forget",
-                                            deleted ? "low" : "low", true, true);
+                hu_audit_event_with_action(&ev, "memory.forget", deleted ? "low" : "low", true,
+                                           true);
                 hu_audit_event_with_result(&ev, deleted, deleted ? 0 : 1, 0,
                                            deleted ? NULL : "key not found");
                 (void)hu_audit_logger_log(logger, &ev);
@@ -534,8 +553,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         const char *home = getenv("HOME");
         if (home) {
             char graph_path[1024];
-            int np = snprintf(graph_path, sizeof(graph_path),
-                              "%s/.human/graph.db", home);
+            int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
             if (np > 0 && (size_t)np < sizeof(graph_path)) {
                 hu_graph_t *g = NULL;
                 hu_error_t ge = hu_graph_open(alloc, graph_path, (size_t)np, &g);
@@ -554,8 +572,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         if (!used_facade)
             err = hu_memory_export_json(&mem, alloc, path);
         if (err == HU_ERR_IO) {
-            fprintf(stderr, "Failed to open '%s' for export: %s\n",
-                    path, strerror(errno));
+            fprintf(stderr, "Failed to open '%s' for export: %s\n", path, strerror(errno));
             goto done;
         }
         if (err != HU_OK) {
@@ -565,15 +582,13 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         size_t exported = 0;
         if (mem.vtable->count)
             mem.vtable->count(mem.ctx, &exported);
-        printf("Exported %s to %s\n",
-               used_facade ? "all memory records (v2 facade)" : "entries",
+        printf("Exported %s to %s\n", used_facade ? "all memory records (v2 facade)" : "entries",
                path);
 
         if (cfg.security.audit.enabled) {
             hu_audit_config_t acfg = HU_AUDIT_CONFIG_DEFAULT;
             acfg.enabled = true;
-            acfg.log_path = cfg.security.audit.log_path
-                ? cfg.security.audit.log_path : "audit.log";
+            acfg.log_path = cfg.security.audit.log_path ? cfg.security.audit.log_path : "audit.log";
             hu_audit_logger_t *logger = hu_audit_logger_create(alloc, &acfg, ws);
             if (logger) {
                 hu_audit_event_t ev;
@@ -589,9 +604,9 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         /* W15 — query recent audit entries from the SQLite-backed
          * audit log, then verify the HMAC chain on the text log. */
         static const char *const op_names[] = {
-            [HU_AUDIT_OP_READ]   = "read",
-            [HU_AUDIT_OP_WRITE]  = "write",
-            [HU_AUDIT_OP_ERASE]  = "erase",
+            [HU_AUDIT_OP_READ] = "read",
+            [HU_AUDIT_OP_WRITE] = "write",
+            [HU_AUDIT_OP_ERASE] = "erase",
             [HU_AUDIT_OP_EXPORT] = "export",
         };
 
@@ -612,8 +627,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
                     const hu_audit_log_event_t *ev = &events[i];
                     const char *op_str = "unknown";
                     if ((int)ev->operation >= 0 &&
-                        (size_t)ev->operation < sizeof(op_names) / sizeof(op_names[0])
-                        && op_names[ev->operation])
+                        (size_t)ev->operation < sizeof(op_names) / sizeof(op_names[0]) &&
+                        op_names[ev->operation])
                         op_str = op_names[ev->operation];
 
                     time_t ts = (time_t)(ev->occurred_at / 1000);
@@ -625,19 +640,15 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
                     else
                         snprintf(tbuf, sizeof(tbuf), "%lld", (long long)ev->occurred_at);
 
-                    printf("  [%s] %-6s actor=%-10s key=%s%s%s\n",
-                           tbuf, op_str,
-                           ev->actor ? ev->actor : "-",
-                           ev->contact_id ? ev->contact_id : "-",
-                           ev->summary ? "  " : "",
-                           ev->summary ? ev->summary : "");
+                    printf("  [%s] %-6s actor=%-10s key=%s%s%s\n", tbuf, op_str,
+                           ev->actor ? ev->actor : "-", ev->contact_id ? ev->contact_id : "-",
+                           ev->summary ? "  " : "", ev->summary ? ev->summary : "");
                 }
                 hu_audit_log_events_free(alloc, events, event_count);
             } else if (event_count == 0) {
                 printf("audit: no entries recorded yet\n");
             } else {
-                fprintf(stderr, "audit: query failed: %s\n",
-                        hu_error_string(alog_err));
+                fprintf(stderr, "audit: query failed: %s\n", hu_error_string(alog_err));
             }
             hu_audit_log_close(alog, alloc);
         } else {
@@ -645,8 +656,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         }
 
         /* Also verify the HMAC text-based chain if it exists. */
-        const char *audit_path = cfg.security.audit.log_path
-            ? cfg.security.audit.log_path : "audit.log";
+        const char *audit_path =
+            cfg.security.audit.log_path ? cfg.security.audit.log_path : "audit.log";
         char full[1024];
         if (audit_path[0] != '/') {
             snprintf(full, sizeof(full), "%s/%s", ws, audit_path);
@@ -660,8 +671,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             if (err == HU_OK) {
                 printf("audit: chain ok (%lld bytes)\n", (long long)st.st_size);
             } else {
-                fprintf(stderr, "audit: chain verification failed: %s\n",
-                        hu_error_string(err));
+                fprintf(stderr, "audit: chain verification failed: %s\n", hu_error_string(err));
             }
         }
     } else {
@@ -1117,18 +1127,16 @@ static const hu_w16_factory_entry_t *hu_w16_find_factory(const char *id) {
 }
 
 static void hu_w16_cli_print_usage(FILE *out) {
-    fprintf(out,
-            "Usage: human eval --w16 <suite> [--offline]\n"
-            "  Run one of the W16 continuous-evaluation backends through the\n"
-            "  `hu_evaluation_t` vtable and print the report JSON on stdout.\n\n"
-            "  Suites:\n");
+    fprintf(out, "Usage: human eval --w16 <suite> [--offline]\n"
+                 "  Run one of the W16 continuous-evaluation backends through the\n"
+                 "  `hu_evaluation_t` vtable and print the report JSON on stdout.\n\n"
+                 "  Suites:\n");
     for (size_t i = 0; i < HU_W16_CLI_FACTORIES_N; i++)
         fprintf(out, "    %s\n", HU_W16_CLI_FACTORIES[i].id);
-    fprintf(out,
-            "\n  --offline   Force synthetic-dataset paths (no network, no real\n"
-            "              corpus). Backends are already offline-by-default;\n"
-            "              this flag pins HU_EVAL_DATA_DIR to a guaranteed-empty\n"
-            "              path so a host-installed corpus cannot bleed in.\n");
+    fprintf(out, "\n  --offline   Force synthetic-dataset paths (no network, no real\n"
+                 "              corpus). Backends are already offline-by-default;\n"
+                 "              this flag pins HU_EVAL_DATA_DIR to a guaranteed-empty\n"
+                 "              path so a host-installed corpus cannot bleed in.\n");
 }
 
 /* Parse `--w16 <suite> [--offline]` from argv starting at index 2 and run
@@ -1166,9 +1174,7 @@ static hu_error_t hu_w16_cli_dispatch(hu_allocator_t *alloc, int argc, char **ar
 
     const hu_w16_factory_entry_t *entry = hu_w16_find_factory(suite_id);
     if (!entry) {
-        fprintf(stderr,
-                "Unknown W16 suite '%s' (try `human eval --w16 --help`)\n",
-                suite_id);
+        fprintf(stderr, "Unknown W16 suite '%s' (try `human eval --w16 --help`)\n", suite_id);
         status->suite_name = hu_strdup(alloc, suite_id);
         status->suite_name_owned = (status->suite_name != NULL);
         status->status = HU_ERR_NOT_FOUND;
@@ -1191,8 +1197,7 @@ static hu_error_t hu_w16_cli_dispatch(hu_allocator_t *alloc, int argc, char **ar
     memset(&backend, 0, sizeof(backend));
     hu_error_t err = entry->factory(alloc, &backend);
     if (err != HU_OK) {
-        fprintf(stderr, "W16 factory failed for '%s': %s\n", entry->id,
-                hu_error_string(err));
+        fprintf(stderr, "W16 factory failed for '%s': %s\n", entry->id, hu_error_string(err));
         status->status = err;
         return err;
     }
@@ -1203,8 +1208,7 @@ static hu_error_t hu_w16_cli_dispatch(hu_allocator_t *alloc, int argc, char **ar
     err = hu_evaluation_run_suite(&backend, &report);
     hu_evaluation_close(&backend);
     if (err != HU_OK) {
-        fprintf(stderr, "W16 run failed for '%s': %s\n", entry->id,
-                hu_error_string(err));
+        fprintf(stderr, "W16 run failed for '%s': %s\n", entry->id, hu_error_string(err));
         hu_evaluation_report_free(alloc, &report);
         status->status = err;
         return err;
@@ -2252,9 +2256,7 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
         else if (strcmp(bench_name, "proagentbench") == 0)
             bench_type = HU_BENCHMARK_PROAGENTBENCH;
         else {
-            hu_log_error("eval", NULL,
-                         "Unknown benchmark: %s",
-                         bench_name);
+            hu_log_error("eval", NULL, "Unknown benchmark: %s", bench_name);
             return HU_ERR_INVALID_ARGUMENT;
         }
 
@@ -2388,10 +2390,10 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
                 return HU_ERR_INVALID_ARGUMENT;
             }
             unsigned pass = 0, total = 0;
-            hu_error_t err = strcmp(tom_sub, "smoke") == 0
-                                  ? hu_tom_b8_synthetic_pack_run_smoke(alloc, argv[4], &pass, &total)
-                                  : hu_tom_b8_synthetic_pack_score_gold(alloc, argv[4], &pass,
-                                                                         &total);
+            hu_error_t err =
+                strcmp(tom_sub, "smoke") == 0
+                    ? hu_tom_b8_synthetic_pack_run_smoke(alloc, argv[4], &pass, &total)
+                    : hu_tom_b8_synthetic_pack_score_gold(alloc, argv[4], &pass, &total);
             if (err != HU_OK) {
                 hu_log_error("eval", NULL, "tom %s: %s", tom_sub, hu_error_string(err));
                 return err;
@@ -2483,15 +2485,14 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
                 if (i != rd && buf[i] != '\n')
                     continue;
                 size_t line_len = i - line_start;
-                while (line_len > 0 &&
-                       (buf[line_start] == ' ' || buf[line_start] == '\t' ||
-                        buf[line_start] == '\r')) {
+                while (line_len > 0 && (buf[line_start] == ' ' || buf[line_start] == '\t' ||
+                                        buf[line_start] == '\r')) {
                     line_start++;
                     line_len--;
                 }
                 while (line_len > 0 && (buf[line_start + line_len - 1] == ' ' ||
-                                         buf[line_start + line_len - 1] == '\t' ||
-                                         buf[line_start + line_len - 1] == '\r')) {
+                                        buf[line_start + line_len - 1] == '\t' ||
+                                        buf[line_start + line_len - 1] == '\r')) {
                     line_len--;
                 }
                 if (line_len > 0 && r_count < cap) {

@@ -1,6 +1,8 @@
 #include "human/onboard.h"
 #include "human/config.h"
+#include "human/core/allocator.h"
 #include "human/core/io_secure.h"
+#include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/interactions.h"
 #include <stdio.h>
@@ -27,6 +29,62 @@ static char *get_config_path(char *buf, size_t buf_size) {
     if (n <= 0 || (size_t)n >= buf_size)
         return NULL;
     return buf;
+}
+
+/* US-43.2: Pure formatter for post-onboard next-step message.
+ *
+ * Truth table contract — see include/human/onboard.h for the full
+ * precedence ladder. Outputs are guaranteed strcmp-distinct.
+ *
+ * The 5 output strings (one fallback + four positive variants) are
+ * deliberately short and stable; tests pin both their content (required
+ * substrings) and the adversarial absence of the legacy generic text
+ * (see tests/test_onboard.c for the exact forbidden-substring pins).
+ */
+static const char k_nextstep_fallback_bare[] =
+    "Setup incomplete. Run 'human onboard' to finish configuring.\n";
+static const char k_nextstep_pair_imessage[] = "Persona ready. Pair iMessage to start chatting:\n"
+                                               "  human channel pair imessage\n";
+static const char k_nextstep_chat_cloud[] = "Cloud provider configured. Start chatting:\n"
+                                            "  human chat\n";
+static const char k_nextstep_chat_no_brew[] = "Local Ollama is reachable. Start chatting:\n"
+                                              "  human chat\n";
+static const char k_nextstep_all_ready[] = "Ready to go. Start chatting:\n"
+                                           "  human chat\n";
+
+hu_error_t hu_onboard_nextstep_format(bool imessage_paired, bool persona_set, bool ollama_ok,
+                                      bool brew_installed, char *buf, size_t buflen) {
+    if (!buf || buflen == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Always make the buffer safe to read first, even on short-buffer
+     * failure — keeps the contract from depending on caller pre-init. */
+    buf[0] = '\0';
+
+    const char *src;
+    if (!persona_set) {
+        src = k_nextstep_fallback_bare;
+    } else if (!imessage_paired) {
+        src = k_nextstep_pair_imessage;
+    } else if (!ollama_ok) {
+        src = k_nextstep_chat_cloud;
+    } else if (!brew_installed) {
+        src = k_nextstep_chat_no_brew;
+    } else {
+        src = k_nextstep_all_ready;
+    }
+
+    size_t need = strlen(src) + 1; /* include NUL */
+    if (buflen < need) {
+        /* Short-buffer: buf[0] already NUL above; surface a distinct
+         * non-OK return code. See sprints/sprint-43/designs/US-43.2.md
+         * "Design Decision" for why this reuses HU_ERR_IO rather than
+         * introducing HU_ERR_BUFFER_TOO_SMALL. */
+        return HU_ERR_IO;
+    }
+
+    memcpy(buf, src, need);
+    return HU_OK;
 }
 
 bool hu_onboard_check_first_run(void) {
@@ -517,10 +575,36 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
     alloc->free(alloc->ctx, ws_dir, strlen(ws_dir) + 1);
 
     printf("\nConfig written to %s\n", config_path);
-    if (is_apple_provider(provider))
-        printf("Run 'human agent' to start chatting with Apple Intelligence.\n");
-    else
-        printf("Run 'human agent' to start chatting.\n");
+
+    /* US-43.2: post-fclose, verify the config we just wrote actually
+     * parses, then derive the 4 booleans for the next-step formatter.
+     * `hu_config_load` reads `~/.human/config.json` — the same file the
+     * preceding write targeted. Any non-OK return (HU_ERR_IO,
+     * HU_ERR_PARSE, HU_ERR_CONFIG_INVALID) means we cannot trust the
+     * persona / channel state, so we fall through to fallback_bare. */
+    bool persona_set = false;
+    bool imessage_paired = false;
+    {
+        hu_config_t cfg;
+        hu_error_t verify_err = hu_config_load(alloc, &cfg);
+        if (verify_err == HU_OK) {
+            persona_set = true;
+            imessage_paired = (cfg.channels.imessage.allow_from_count > 0);
+            hu_config_deinit(&cfg);
+        }
+    }
+    bool ollama_ok = !is_apple_provider(provider) && (strcmp(provider, "ollama") == 0) &&
+                     hu_ollama_api_tags_reachable();
+    bool brew_installed = hu_exe_on_path("brew");
+
+    char nbuf[512];
+    hu_error_t fmt_rc = hu_onboard_nextstep_format(imessage_paired, persona_set, ollama_ok,
+                                                   brew_installed, nbuf, sizeof(nbuf));
+    if (fmt_rc != HU_OK) {
+        fprintf(stderr, "warning: nextstep formatter returned %d; user prompt may be truncated\n",
+                (int)fmt_rc);
+    }
+    fputs(nbuf, stdout);
     return HU_OK;
 }
 #endif

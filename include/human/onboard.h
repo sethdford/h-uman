@@ -50,4 +50,51 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
  */
 bool hu_onboard_check_first_run(void);
 
+/**
+ * Format the post-onboard "next step" CLI message.
+ *
+ * Pure function: no I/O, no globals, no syscalls. The 4 boolean inputs
+ * map deterministically to exactly 5 distinct output strings; the
+ * truth table below is the contract.
+ *
+ * Precedence ladder (earlier rows short-circuit later ones):
+ *
+ *   imessage_paired | persona_set | ollama_ok | brew_installed | output id
+ *   ----------------|-------------|-----------|----------------|------------------
+ *   —               | false       | —         | —              | fallback_bare
+ *   false           | true        | —         | —              | pair_imessage
+ *   true            | true        | false     | —              | chat_cloud
+ *   true            | true        | true      | false          | chat_no_brew
+ *   true            | true        | true      | true           | all_ready
+ *
+ * The 5 outputs are guaranteed `strcmp`-distinct and none contains the
+ * legacy generic string "You're all set". The `all_ready` output is
+ * additionally guaranteed to contain "human chat" and to NOT contain
+ * either "setup" or "configure".
+ *
+ * The prototype is annotated `warn_unused_result` so callers that
+ * silently drop the return code fail with `-Werror`.
+ *
+ * @param imessage_paired  true if at least one iMessage chat is allow-listed
+ * @param persona_set      true if `~/.human/personas/default.json` parses cleanly
+ * @param ollama_ok        true if `GET http://127.0.0.1:11434/api/tags` returned 200
+ * @param brew_installed   true if Homebrew is detected on the system
+ * @param buf              output buffer; MUST be non-NULL and `buflen >= 1`
+ * @param buflen           size of `buf` in bytes
+ * @return
+ *   - `HU_OK` on success; `buf` contains a NUL-terminated next-step string.
+ *   - `HU_ERR_INVALID_ARGUMENT` if `buf == NULL` or `buflen == 0`.
+ *   - `HU_ERR_IO` if `buflen` is strictly less than the formatted message's
+ *     terminating NUL. See `sprints/sprint-43/designs/US-43.2.md`
+ *     "Design Decision" for why this reuses `HU_ERR_IO` rather than
+ *     introducing a new `HU_ERR_BUFFER_TOO_SMALL` enum value.
+ *     On short-buffer the function writes a NUL terminator at `buf[0]`
+ *     (so the buffer is always safe to read) before returning.
+ */
+__attribute__((warn_unused_result)) hu_error_t hu_onboard_nextstep_format(bool imessage_paired,
+                                                                          bool persona_set,
+                                                                          bool ollama_ok,
+                                                                          bool brew_installed,
+                                                                          char *buf, size_t buflen);
+
 #endif /* HU_ONBOARD_H */
