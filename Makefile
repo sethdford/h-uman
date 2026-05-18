@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo
 
 all: build test
 
@@ -117,6 +117,16 @@ demo-loop: demo-loop-build
 # `demo-loop` which uses --simulate-train.
 demo-loop-full: demo-loop-build
 	@bash scripts/live_fire_m3_full_loop.sh
+
+# D1 (2026-05-18) — single-screen status of the M3 personalization loop.
+# Pure file-inspection; safe to run while the daemon is live.
+m3-status:
+	@python3 scripts/m3_status.py
+
+# D7 (2026-05-18) — summarize REWRITE preference pairs captured by the
+# guard chain; optionally export Alpaca-DPO format for downstream training.
+m3-dpo:
+	@python3 scripts/m3_dpo_from_rewrites.py
 
 validate: format-check build test
 	@echo "Validation passed."

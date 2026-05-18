@@ -68,6 +68,7 @@
 #include "human/memory.h"
 #include <sqlite3.h>
 #endif
+#include "human/ml/m3_rewrite_capture.h"
 #include "human/provider.h"
 #include "human/voice.h"
 #include <math.h>
@@ -1523,6 +1524,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 recovered_retry_latency_ms, agent->memory_session_id,
                                 agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
                                 /*turn_kind=stream=*/1, NULL);
+                            /* D7 (2026-05-18): perfect DPO preference pair —
+                             * (sresp.content = rejected, safe_content = accepted).
+                             * Captured into ~/.human/training-data/
+                             * m3-rewrite-pairs.jsonl for the DPO trainer to
+                             * consume. Best-effort; failure here MUST NOT
+                             * break the chat path. */
+                            (void)hu_m3_rewrite_pair_record(agent->alloc, NULL, msg, msg_len,
+                                                            sresp.content, sresp.content_len,
+                                                            safe_content, safe_content_len,
+                                                            /*turn_kind=stream=*/1);
                             safe_owned = true;
                             hu_log_warn("agent_stream", agent->observer,
                                         "response_guard RECOVERED: stream retry passed (len=%zu, "

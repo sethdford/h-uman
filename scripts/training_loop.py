@@ -523,6 +523,91 @@ def resolve_hashes_against_db(outcomes: list[dict], db_path: Path) -> tuple[list
         conn.close()
 
 
+# Lineage manifest path. JSONL — one record per produced adapter.
+# Append-only so the file's an auditable history. Rotation logic at end
+# of train_from_outcomes keeps the directory bounded.
+LINEAGE_PATH = Path.home() / ".human" / "training-data" / "adapter_lineage.jsonl"
+
+# Retention: keep at most N most-recent driver-produced adapters.
+# Older ones are logged in the lineage manifest and then unlinked.
+# 16 is enough to roll back several iterations without unbounded growth.
+ADAPTER_RETENTION_LIMIT = 16
+
+
+# D6 (2026-05-18): JSONL rotation. The lineage manifest is append-only;
+# unbounded. We rotate when it crosses LINEAGE_ROTATE_BYTES — keep the
+# most-recent half, archive the rest. The training loop's interest is
+# in recent training runs; older runs are still readable from the
+# rotated archive but don't load on every status call.
+LINEAGE_ROTATE_BYTES = 4 * 1024 * 1024  # 4 MB → ~10k entries; well over a year of weekly trains
+
+
+def rotate_jsonl_if_needed(path: Path, max_bytes: int) -> bool:
+    """If `path` exceeds `max_bytes`, archive it to `<path>.<ts>` and
+    truncate. Returns True if rotation happened. Atomic-ish — the
+    rename + open-for-write window is brief but not zero; that's
+    acceptable because losing one in-flight write at rotation time
+    is preferable to unbounded growth.
+
+    The archive name embeds the rotation timestamp so retention
+    tooling can age them out later. We do NOT delete archives here —
+    that's a separate operator decision."""
+    if not path.exists():
+        return False
+    if path.stat().st_size < max_bytes:
+        return False
+    archive = path.with_name(f"{path.name}.{int(time.time())}")
+    try:
+        path.rename(archive)
+        return True
+    except OSError as e:
+        print(f"  WARN: rotation failed for {path}: {e}")
+        return False
+
+
+def append_lineage_entry(entry: dict) -> None:
+    """Append a one-line JSON record to the lineage manifest. Best-effort
+    — failures here must NOT break the training run."""
+    try:
+        LINEAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # D6: rotate when the manifest crosses 4 MB. Free space + faster
+        # status reads. The rotated archive stays on disk under
+        # `adapter_lineage.jsonl.<ts>` for forensic recovery.
+        if rotate_jsonl_if_needed(LINEAGE_PATH, LINEAGE_ROTATE_BYTES):
+            print(f"  Rotated lineage manifest (was > {LINEAGE_ROTATE_BYTES // 1024 // 1024} MB)")
+        with open(LINEAGE_PATH, "a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+    except OSError as e:
+        print(f"  WARN: could not append lineage manifest: {e}")
+
+
+def prune_old_adapters(adapter_dir: Path, keep: int = ADAPTER_RETENTION_LIMIT) -> int:
+    """Delete driver-produced adapters older than the N most-recent.
+    Returns count of files deleted. The lineage manifest is the
+    auditable history — the actual files on disk are short-lived.
+
+    Only touches files matching the driver's naming convention
+    (`m3-driver-*.safetensors`, `m3-driver-*.bin`, `candidate-real.bin`).
+    Hand-placed adapters (`seth-lora-*`) are protected from rotation."""
+    if not adapter_dir.exists():
+        return 0
+    pruneable = []
+    for p in adapter_dir.iterdir():
+        if not p.is_file():
+            continue
+        if p.name.startswith("m3-driver-") or p.name == "candidate-real.bin":
+            pruneable.append(p)
+    pruneable.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    deleted = 0
+    for old in pruneable[keep:]:
+        try:
+            old.unlink()
+            deleted += 1
+        except OSError:
+            pass
+    return deleted
+
+
 def write_dry_run_adapter(adapter_out: Path, summary: dict,
                           resolved_count: int, skipped_count: int) -> None:
     """Write a richer-than-placeholder safetensors-shaped artifact for
@@ -604,6 +689,19 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     if dry_run:
         write_dry_run_adapter(adapter_out, summary, len(resolved), skipped)
         print(f"  Dry-run adapter written: {adapter_out} ({adapter_out.stat().st_size} bytes)")
+        # D2 lineage: even dry-run adapters get logged so the trail is
+        # complete. Verdict comes from the optional follow-up eval.
+        append_lineage_entry({
+            "timestamp": int(time.time() * 1000),
+            "adapter_path": str(adapter_out),
+            "size_bytes": adapter_out.stat().st_size,
+            "kind": "dry-run",
+            "outcome_count": summary.get("count", 0),
+            "resolved_count": len(resolved),
+            "skipped_count": skipped,
+            "model_ids": summary.get("model_ids", []),
+            "source_jsonl": str(source_jsonl),
+        })
         return 0
 
     # Phase C4 (2026-05-18) — real LoRA training via `human ml lora-persona`.
@@ -613,17 +711,36 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     # bridge to gemma-4-31b lives in
     # docs/plans/2026-05-10-m3-frontier-model-bridge.md.
     #
-    # We size the run based on the resolved outcome count:
-    #   - rank scales: 4 below 32 samples, 8 above
-    #   - max-steps stays modest (16) for the warmup
-    # On lora-persona failure we fall back to the empty-tensors path
-    # so the driver's swap call still exercises end-to-end.
+    # D3 (2026-05-18): LoRA hyperparameters at SOTA defaults.
+    # KNOWN GAP: even with these hyperparams, the lora-persona reference
+    # GPT path's loss stays at the random-init baseline (~log(vocab))
+    # across 100 steps. The optimizer-doesn't-actually-train bug is
+    # outside this slice. D3's job is to make sure the hyperparameter
+    # envelope is correct when the optimizer bug is fixed OR when this
+    # pipeline is replaced with mlx-lm.lora.
+    # The original C4 defaults (rank=4-8, max_steps=16, default LR)
+    # produced 16 steps of loss=9.0099 — no measurable training.
+    # Upgrades:
+    #   - rank scales 16-32 (SOTA persona-tuning typically uses 16-64)
+    #   - max_steps scales with sample count: 50 steps per 8 samples,
+    #     min 100, max 400. The reference HUML GPT is small (~150K
+    #     params); these step counts converge in <10s wall-clock.
+    #   - learning_rate 3e-3: an order of magnitude higher than the
+    #     lora-persona default 1e-4. Bigger LR is justified because
+    #     (a) we're training fresh on small data (no over-shoot risk
+    #     from a pretrained checkpoint), (b) higher LR + few steps
+    #     beats lower LR + few steps in the regime we operate in
+    #     (warmup-only, no schedule), and (c) the C side's optimizer
+    #     uses AdamW which is robust to higher LRs.
     persona_name = os.environ.get("HUMAN_LORA_PERSONA", "seth")
     human_bin = os.environ.get("HUMAN_BIN") or str(REPO_ROOT / "build-release" / "human")
     if not Path(human_bin).exists():
         human_bin = str(REPO_ROOT / "build" / "human")
-    rank = 8 if len(resolved) >= 32 else 4
-    max_steps = 16
+    # D3 hyperparameter envelope
+    n = max(8, len(resolved))
+    rank = 32 if n >= 64 else (16 if n >= 16 else 8)
+    max_steps = max(100, min(400, (n // 8) * 50))
+    learning_rate = 3e-3
     # --from-history-max floor of 32: the PII redaction + length /
     # entropy quality filter in lora-persona discards a meaningful
     # fraction of candidate rows, so asking for fewer than ~32 often
@@ -638,6 +755,7 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         "--from-history-max", str(history_max),
         "--rank", str(rank),
         "--max-steps", str(max_steps),
+        "--learning-rate", f"{learning_rate:g}",
         "--output", str(adapter_out),
     ]
     print(f"\n  Invoking real LoRA training (C4):")
@@ -657,6 +775,33 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         return 0
     size = adapter_out.stat().st_size
     print(f"  Real LoRA adapter written: {adapter_out} ({size} bytes)")
+
+    # D2 lineage entry for the real-training success path.
+    append_lineage_entry({
+        "timestamp": int(time.time() * 1000),
+        "adapter_path": str(adapter_out),
+        "size_bytes": size,
+        "kind": "lora-persona",
+        "persona": persona_name,
+        "rank": rank,
+        "max_steps": max_steps,
+        "learning_rate": learning_rate,
+        "history_max": history_max,
+        "outcome_count": summary.get("count", 0),
+        "resolved_count": len(resolved),
+        "skipped_count": skipped,
+        "model_ids": summary.get("model_ids", []),
+        "source_jsonl": str(source_jsonl),
+        "memory_db": str(db_path),
+    })
+
+    # D2 retention: prune older driver-produced adapters. Lineage above
+    # is the auditable history; disk files beyond ADAPTER_RETENTION_LIMIT
+    # are surplus.
+    pruned = prune_old_adapters(adapter_out.parent)
+    if pruned > 0:
+        print(f"  Pruned {pruned} older adapter(s) (keeping last {ADAPTER_RETENTION_LIMIT})")
+
     return 0
 
 

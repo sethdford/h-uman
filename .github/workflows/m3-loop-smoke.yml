@@ -25,6 +25,13 @@ on:
       - "scripts/test_m3_outcome_driver.py"
       - "scripts/training_loop.py"
       - "scripts/test_m3_train_from_outcomes.py"
+      - "scripts/m3_status.py"
+      - "scripts/m3_dpo_from_rewrites.py"
+      - "scripts/test_m3_dpo_from_rewrites.py"
+      - "scripts/m3_eval_adapter.py"
+      - "scripts/test_m3_eval_adapter.py"
+      - "include/human/ml/m3_rewrite_capture.h"
+      - "src/ml/m3_rewrite_capture.c"
       - "Makefile"
       - "CMakePresets.json"
       - ".github/workflows/m3-loop-smoke.yml"
@@ -40,6 +47,13 @@ on:
       - "scripts/test_m3_outcome_driver.py"
       - "scripts/training_loop.py"
       - "scripts/test_m3_train_from_outcomes.py"
+      - "scripts/m3_status.py"
+      - "scripts/m3_dpo_from_rewrites.py"
+      - "scripts/test_m3_dpo_from_rewrites.py"
+      - "scripts/m3_eval_adapter.py"
+      - "scripts/test_m3_eval_adapter.py"
+      - "include/human/ml/m3_rewrite_capture.h"
+      - "src/ml/m3_rewrite_capture.c"
   workflow_dispatch:
 
 jobs:
@@ -65,6 +79,13 @@ jobs:
         # MetadataJudge (pass / no-change / fail / regress) plus
         # format-inspection contracts for lora-bin and safetensors.
         run: python3 scripts/test_m3_eval_adapter.py
+
+      - name: Run DPO-from-rewrites (D7) consumer verifier
+        # 13 assertions covering parse filtering, summary aggregates,
+        # Alpaca-DPO export schema (accepted→chosen mapping), and empty-
+        # input handling. Cross-checks that the C-side rewrite-capture
+        # output is consumable.
+        run: python3 scripts/test_m3_dpo_from_rewrites.py
 
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)
