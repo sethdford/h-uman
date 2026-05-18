@@ -424,8 +424,8 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
                                          const struct hu_conversation_history_t *history,
                                          int64_t last_their_ts_s, int64_t last_our_ts_s,
                                          const char *contact_tz, int64_t now_s, hu_moment_t *out) {
-    (void)persona;
-    (void)overlay;
+    /* persona/overlay are reserved for future per-contact / per-channel
+     * decision inputs; for now we only record their presence as provenance. */
     if (out == NULL)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof *out);
@@ -437,6 +437,10 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
         out->source_flags |= HU_MOMENT_SRC_LAST_THEIR_TS;
     if (last_our_ts_s >= 0)
         out->source_flags |= HU_MOMENT_SRC_LAST_OUR_TS;
+    if (persona != NULL)
+        out->source_flags |= HU_MOMENT_SRC_PERSONA;
+    if (overlay != NULL)
+        out->source_flags |= HU_MOMENT_SRC_OVERLAY;
 
     /* Phase fields: local and contact's timezone. */
     out->phase_local = phase_for_tz(now_s, NULL);

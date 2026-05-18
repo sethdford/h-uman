@@ -448,6 +448,38 @@ static void compose_defer_send_is_zero_when_replying_to_night_signoff(void) {
     hu_moment_history_free(h);
 }
 
+/* ---- source_flag bookkeeping tests (Task 1.8) ---- */
+
+/* The compose predicate never dereferences persona/overlay (yet), so tests can
+ * pass any non-NULL pointer to assert the provenance flag is set. */
+static void compose_records_persona_source_flag_when_persona_provided(void) {
+    hu_moment_t m = {0};
+    struct hu_persona_t *fake_persona = (struct hu_persona_t *)(uintptr_t)1;
+    hu_moment_compose_from_inputs(fake_persona, NULL, NULL, -1, -1, NULL, TS_8AM_UTC, &m);
+    HU_ASSERT_TRUE(m.source_flags & HU_MOMENT_SRC_PERSONA);
+    HU_ASSERT_FALSE(m.source_flags & HU_MOMENT_SRC_OVERLAY);
+}
+
+static void compose_records_overlay_source_flag_when_overlay_provided(void) {
+    hu_moment_t m = {0};
+    struct hu_persona_overlay_t *fake_overlay = (struct hu_persona_overlay_t *)(uintptr_t)1;
+    hu_moment_compose_from_inputs(NULL, fake_overlay, NULL, -1, -1, NULL, TS_8AM_UTC, &m);
+    HU_ASSERT_TRUE(m.source_flags & HU_MOMENT_SRC_OVERLAY);
+    HU_ASSERT_FALSE(m.source_flags & HU_MOMENT_SRC_PERSONA);
+}
+
+static void compose_records_history_source_flag_when_history_nonempty(void) {
+    int64_t now = TS_8AM_UTC;
+    int64_t ts[] = {now - 60};
+    bool ob[] = {false};
+    const char *tx[] = {"hey"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, -1, -1, NULL, now, &m);
+    HU_ASSERT_TRUE(m.source_flags & HU_MOMENT_SRC_HISTORY);
+    hu_moment_history_free(h);
+}
+
 void run_moment_compose_tests(void) {
     HU_TEST_SUITE("moment_compose");
     HU_RUN_TEST(compose_from_inputs_rejects_null_out);
@@ -484,4 +516,7 @@ void run_moment_compose_tests(void) {
     HU_RUN_TEST(compose_defer_send_is_zero_when_their_phase_is_not_deep_night);
     HU_RUN_TEST(compose_defer_send_is_future_8am_when_deep_night_and_no_continuation);
     HU_RUN_TEST(compose_defer_send_is_zero_when_replying_to_night_signoff);
+    HU_RUN_TEST(compose_records_persona_source_flag_when_persona_provided);
+    HU_RUN_TEST(compose_records_overlay_source_flag_when_overlay_provided);
+    HU_RUN_TEST(compose_records_history_source_flag_when_history_nonempty);
 }
