@@ -75,8 +75,8 @@
 #ifdef HU_ENABLE_ML
 #include "human/ml/cli.h"
 #include "human/ml/cli_dpo.h"
-#include "human/ml/cli_kto.h"
 #include "human/ml/cli_grpo.h"
+#include "human/ml/cli_kto.h"
 #include "human/ml/cli_rm.h"
 #endif
 #ifdef HU_ENABLE_CURL
@@ -226,24 +226,27 @@ static bool svc_agent_on_message_locked(hu_bus_event_type_t type, const hu_bus_e
 #ifdef HU_ENABLE_ML
 static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: human ml <subcommand>\n\n"
-                        "Subcommands:\n"
-                        "  train                   Train a model from config\n"
-                        "  experiment              Run experiment loop\n"
-                        "  prepare                 Tokenize data for training\n"
-                        "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
-                        "  dpo-train               Run DPO preference training step\n"
-                        "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
-                        "  kto-train               Train a KTO trainer on one-sided preference signals\n"
-                        "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
-                        "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
-                        "  lora-persona            Train LoRA adapter from persona examples\n"
-                        "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
-                        "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
-                        "  lora-runner             Generate response set from persona via provider (D2.2)\n"
-                        "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
-                        "  train-feed-predictor    Train topic/trend predictor from feed data\n"
-                        "  status                  Show experiment results\n");
+        fprintf(
+            stderr,
+            "Usage: human ml <subcommand>\n\n"
+            "Subcommands:\n"
+            "  train                   Train a model from config\n"
+            "  experiment              Run experiment loop\n"
+            "  prepare                 Tokenize data for training\n"
+            "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
+            "  dpo-train               Run DPO preference training step\n"
+            "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, "
+            "was dpo-train)\n"
+            "  kto-train               Train a KTO trainer on one-sided preference signals\n"
+            "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
+            "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
+            "  lora-persona            Train LoRA adapter from persona examples\n"
+            "  lora-baseline           Score persona example bank fidelity (D2.2)\n"
+            "  lora-ab                 Compare pre-/post-LoRA response sets (D2.2)\n"
+            "  lora-runner             Generate response set from persona via provider (D2.2)\n"
+            "  fidelity-status         Emit JSON status of persona-fidelity health (D2.2)\n"
+            "  train-feed-predictor    Train topic/trend predictor from feed data\n"
+            "  status                  Show experiment results\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
     const char *sub = argv[2];
@@ -293,7 +296,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                "  prepare                 Tokenize data for training\n"
                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                "  dpo-train               Run DPO preference training step\n"
-               "  dpo-judge               Score preference pairs with an LLM judge (legacy semantics, was dpo-train)\n"
+               "  dpo-judge               Score preference pairs with an LLM judge (legacy "
+               "semantics, was dpo-train)\n"
                "  kto-train               Train a KTO trainer on one-sided preference signals\n"
                "  grpo-train              Group Relative Policy Optimization training (real RL)\n"
                "  rm-train                Train a reward model (Bradley-Terry on two-sided pairs)\n"
@@ -325,8 +329,7 @@ static hu_error_t cmd_demo(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "demo: unknown subcommand: %s\n", sub);
         return HU_ERR_INVALID_ARGUMENT;
     }
-    hu_error_t err =
-        hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3), alloc);
+    hu_error_t err = hu_ml_cli_demo_rl_closed_loop(argc - 3, (const char **)(argv + 3), alloc);
     if (err == HU_OK)
         return HU_OK;
     if (err == HU_ERR_PERMISSION_DENIED)
@@ -701,6 +704,15 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
                     }
                     putchar('"');
                 }
+                if (items[i].error_class) {
+                    printf(",\"error_class\":\"");
+                    for (const char *p = items[i].error_class; *p; p++) {
+                        if (*p == '"' || *p == '\\')
+                            putchar('\\');
+                        putchar(*p);
+                    }
+                    putchar('"');
+                }
                 putchar('}');
             }
             printf("]}\n");
@@ -720,6 +732,9 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
                 alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
             if (items[i].message)
                 alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+            if (items[i].error_class)
+                alloc->free(alloc->ctx, (void *)items[i].error_class,
+                            strlen(items[i].error_class) + 1);
         }
         alloc->free(alloc->ctx, items, cap * sizeof(hu_diag_item_t));
         if (err != HU_OK)
@@ -826,6 +841,9 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
                 alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
             if (items[i].message)
                 alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+            if (items[i].error_class)
+                alloc->free(alloc->ctx, (void *)items[i].error_class,
+                            strlen(items[i].error_class) + 1);
         }
         alloc->free(alloc->ctx, items, item_count * sizeof(hu_diag_item_t));
     }
@@ -2931,9 +2949,8 @@ int main(int argc, char *argv[]) {
     if (hu_onboard_check_first_run() && strcmp(cmd_name, "onboard") != 0 &&
         strcmp(cmd_name, "init") != 0 && strcmp(cmd_name, "help") != 0 &&
         strcmp(cmd_name, "version") != 0) {
-        fprintf(stderr,
-                "No config found. Run 'human onboard' for interactive setup,\n"
-                "or 'human init' for a quick local start (Ollama, no API key).\n\n");
+        fprintf(stderr, "No config found. Run 'human onboard' for interactive setup,\n"
+                        "or 'human init' for a quick local start (Ollama, no API key).\n\n");
     }
 #endif
 

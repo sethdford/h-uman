@@ -2812,6 +2812,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_extended.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
+    tests/test_imessage_diag.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c
@@ -3580,6 +3581,12 @@ endif()
 target_compile_options(human_core PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror)
 target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror)
 target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
+
+# src/onboard.c embeds a multi-kilobyte starter-persona JSON literal that
+# exceeds the ISO C99 4095-byte minimum. The string is a single coherent
+# JSON document; splitting it would obfuscate the persona schema. Suppress
+# -Woverlength-strings just for this TU.
+set_source_files_properties(src/onboard.c PROPERTIES COMPILE_FLAGS "-Wno-overlength-strings")
 
 # Synthetic pressure tests (requires libcurl for real HTTP)
 option(HU_ENABLE_SYNTHETIC "Build Gemini-driven synthetic pressure test harness" OFF)

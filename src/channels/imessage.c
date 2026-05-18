@@ -155,6 +155,20 @@ const char *hu_imessage_error_class_name(hu_imessage_error_class_t cls) {
     return "OTHER";
 }
 
+hu_imessage_error_class_t hu_imessage_error_class_from_name(const char *name) {
+    if (!name || !name[0])
+        return HU_IMESSAGE_ERR_OTHER;
+    if (strcmp(name, "NONE") == 0)
+        return HU_IMESSAGE_ERR_NONE;
+    if (strcmp(name, "AUTH") == 0)
+        return HU_IMESSAGE_ERR_AUTH;
+    if (strcmp(name, "CANTOPEN") == 0)
+        return HU_IMESSAGE_ERR_CANTOPEN;
+    if (strcmp(name, "BUSY") == 0)
+        return HU_IMESSAGE_ERR_BUSY;
+    return HU_IMESSAGE_ERR_OTHER;
+}
+
 bool hu_imessage_status_path(char *buf, size_t cap) {
     if (!buf || cap < 16)
         return false;
