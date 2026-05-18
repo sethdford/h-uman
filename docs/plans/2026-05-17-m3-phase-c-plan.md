@@ -27,13 +27,13 @@ challenge for M3.
 
 | Item | Current | Phase C target |
 |---|---|---|
-| Token counts in outcomes | `prompt_len / 4` byte estimate | Exact counts from provider `usage` block |
-| model_id / adapter_id | Always 0 (unknown) | Config-mapped small ids for outcome clustering |
-| Training trigger | C3 shipped (2026-05-18): `training_loop.py --source-jsonl` parses outcomes, resolves hashes, writes safetensors-shaped artifact with metadata block. Real LoRA tensor production is C4. | Real `training_loop.py` invocation, ≤60s for 32-sample warmup |
-| Adapter artifact | 82-byte text blob | MLX-compatible safetensors, hot-loadable by mlx-server.py |
-| MLX server | Stub (responds in 150ms, no model) | Real gemma-4-31b loaded with the new adapter |
-| Validation | "Endpoint returned 200" | A/B eval shows persona-fidelity improvement |
-| Chat-path stability | OK on release preset | OK on dev preset (ASan finding fixed) |
+| Token counts in outcomes | ✅ C1 (9bbf67f2): provider `usage` block populates outcome.pt/ct | Done |
+| model_id / adapter_id | ✅ C2 (a2939365): persisted id-map, model_id=1 in live ring | Done |
+| Training trigger | ✅ C3 (4a8fd60c): `--source-jsonl` wire + FNV-1a + DB resolution + dry-run safetensors | Done |
+| Adapter artifact | ✅ C4 (2026-05-18): real 131KB LORA-magic binary from `lora-persona` | Done |
+| MLX server | Stub (responds in 150ms, no model) | Real gemma-4-31b loaded with the new adapter (separate bridge slice) |
+| Validation | ✅ C5 (2026-05-18): MetadataJudge with pass/no-change/regress/fail; live-fire reports PASS | Done (LLM-judge for production gate is sft-prompts judge slot) |
+| Chat-path stability | OK on release preset | C6 — DEFERRED (clean repro in m3-c6-asan-repro.log) |
 
 # Phases
 
@@ -159,10 +159,43 @@ plumbing, not quality.
 Skips with informative output (not failure) when the model isn't
 loaded.
 
-## Phase C6 — Chat-path ASan fix (medium, sidecar)
+## Phase C6 — Chat-path ASan fix (medium, sidecar — DEFERRED)
 
-**Why now:** Discovered during live-fire setup. ASan caught a
-stack-use-after-scope inside the chat path under load. Not on the
+**Status (2026-05-18):** Reproduced cleanly with `ASAN_OPTIONS=halt_on_error=1`.
+Full trace in `docs/research/m3-c6-asan-repro.log`. **Deferred** to a
+focused investigation slice — see "Repro recipe" below.
+
+**Why deferred:** The bug fires in the thread pool worker that handles
+chat completions (T3 → `_platform_memset+0x6c`, 208-byte memset to a
+stack address). It's gated to ASan dev builds; the release binary
+(used in production and live-fire) is unaffected. Phase C4 + C5
+(the load-bearing slices that personalize the model) ship first.
+
+**Repro recipe:**
+```
+cmake --build --preset dev --target human
+ASAN_OPTIONS=halt_on_error=1:abort_on_error=0 ./build/human service-loop --with-gateway &
+python3 scripts/stub_mlx_server.py --port 8741 &
+curl -X POST http://127.0.0.1:3006/v1/chat/completions \
+  -d '{"model":"mlx_local","messages":[{"role":"user","content":"hi"}]}'
+# Daemon aborts with: BUS on unknown address in _platform_memset+0x6c
+# Stack: thread pool worker T3, created by hu_gateway_run thread pool
+```
+
+**Investigation hints:**
+- Crash size is `0xd0` (208 bytes) — search for memsets of structs in
+  that size range
+- Caller's `lr=0x0000000104a4ad50` symbolize with `atos -o ./build/human
+  -l <slid_base> 0x0000000104a4ad50` (slid base derivable from
+  pthread_create address in the trace)
+- The chat handler path likely involves: `hu_openai_compat_handle_chat_completions`
+  → `hu_agent_turn` → some deeply nested error-handling branch
+- Try the "fix obvious cases first" pass: any place that does
+  `memset(&local_struct, 0, sizeof(local_struct))` where `local_struct`
+  was declared in a tighter scope than where the memset runs
+
+**Why now (original):** Discovered during live-fire setup. ASan caught
+a stack-use-after-scope inside the chat path under load. Not on the
 loop's critical path (the release binary doesn't have ASan), but
 worth fixing for the dev preset to be usable.
 

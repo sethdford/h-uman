@@ -112,6 +112,12 @@ demo-loop-build:
 demo-loop: demo-loop-build
 	@bash scripts/live_fire_m3_loop.sh
 
+# Phase C full loop — produces outcomes, runs REAL lora-persona training,
+# A/B-evaluates the candidate vs an empty-tensors baseline. Different from
+# `demo-loop` which uses --simulate-train.
+demo-loop-full: demo-loop-build
+	@bash scripts/live_fire_m3_full_loop.sh
+
 validate: format-check build test
 	@echo "Validation passed."
 

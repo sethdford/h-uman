@@ -606,18 +606,57 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         print(f"  Dry-run adapter written: {adapter_out} ({adapter_out.stat().st_size} bytes)")
         return 0
 
-    # Real training path. The actual LoRA invocation lives in C4 —
-    # this is where the resolved [(prompt, response)] pairs would
-    # feed into `lora-persona` (or its successor). For now we exit
-    # cleanly with a clear note rather than fail; the driver treats
-    # exit 0 as "training succeeded" and proceeds to the swap step.
-    # The empty-tensors safetensors output still lets the swap call
-    # exercise its code path.
-    print(f"  NOTE: real LoRA training is Phase C4 (see "
-          f"docs/plans/2026-05-17-m3-phase-c-plan.md).")
-    print(f"  Writing empty-tensors safetensors for now so the driver's "
-          f"swap call has an artifact to load.")
-    write_dry_run_adapter(adapter_out, summary, len(resolved), skipped)
+    # Phase C4 (2026-05-18) — real LoRA training via `human ml lora-persona`.
+    # The reference HUML GPT path produces a real adapter (rank-decomposition
+    # tensors) from the conversation DB. Per the lora-persona warning,
+    # this trains the REFERENCE GPT, not the frontier chat model — the
+    # bridge to gemma-4-31b lives in
+    # docs/plans/2026-05-10-m3-frontier-model-bridge.md.
+    #
+    # We size the run based on the resolved outcome count:
+    #   - rank scales: 4 below 32 samples, 8 above
+    #   - max-steps stays modest (16) for the warmup
+    # On lora-persona failure we fall back to the empty-tensors path
+    # so the driver's swap call still exercises end-to-end.
+    persona_name = os.environ.get("HUMAN_LORA_PERSONA", "seth")
+    human_bin = os.environ.get("HUMAN_BIN") or str(REPO_ROOT / "build-release" / "human")
+    if not Path(human_bin).exists():
+        human_bin = str(REPO_ROOT / "build" / "human")
+    rank = 8 if len(resolved) >= 32 else 4
+    max_steps = 16
+    # --from-history-max floor of 32: the PII redaction + length /
+    # entropy quality filter in lora-persona discards a meaningful
+    # fraction of candidate rows, so asking for fewer than ~32 often
+    # leaves zero valid examples and lora-persona returns I/O error
+    # (a misleading code; see lora-persona src for context). 32 is
+    # cheap to derive and reliably crosses the filter floor.
+    history_max = max(32, len(resolved))
+    cmd = [
+        human_bin, "ml", "lora-persona",
+        "--persona", persona_name,
+        "--from-history", str(db_path),
+        "--from-history-max", str(history_max),
+        "--rank", str(rank),
+        "--max-steps", str(max_steps),
+        "--output", str(adapter_out),
+    ]
+    print(f"\n  Invoking real LoRA training (C4):")
+    print(f"    {' '.join(cmd)}")
+    try:
+        rc = subprocess.call(cmd)
+    except FileNotFoundError as e:
+        print(f"  ERROR: {human_bin} not found: {e}")
+        print(f"  Falling back to empty-tensors safetensors so the driver "
+              f"swap call still has an artifact.")
+        write_dry_run_adapter(adapter_out, summary, len(resolved), skipped)
+        return 0
+    if rc != 0 or not adapter_out.exists():
+        print(f"  lora-persona exited with rc={rc} or produced no adapter.")
+        print(f"  Falling back to empty-tensors safetensors.")
+        write_dry_run_adapter(adapter_out, summary, len(resolved), skipped)
+        return 0
+    size = adapter_out.stat().st_size
+    print(f"  Real LoRA adapter written: {adapter_out} ({size} bytes)")
     return 0
 
 

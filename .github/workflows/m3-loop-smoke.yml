@@ -60,6 +60,12 @@ jobs:
         # and the dry-run safetensors artifact format.
         run: python3 scripts/test_m3_train_from_outcomes.py
 
+      - name: Run adapter A/B eval (C5) verifier
+        # 14 assertions covering all four verdict paths through
+        # MetadataJudge (pass / no-change / fail / regress) plus
+        # format-inspection contracts for lora-bin and safetensors.
+        run: python3 scripts/test_m3_eval_adapter.py
+
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)
     runs-on: ${{ matrix.os }}
