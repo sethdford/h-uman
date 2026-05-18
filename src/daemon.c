@@ -1295,8 +1295,20 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 
                 int64_t fmsg_id = 0;
                 uint64_t fread_at_ms = 0;
+#ifdef HU_HAS_IMESSAGE
                 hu_error_t qerr = hu_imessage_find_unreplied_read(
                     cp->contact_id, strlen(cp->contact_id), &fmsg_id, &fread_at_ms);
+#else
+                /* Builds without HU_ENABLE_IMESSAGE can't query chat.db. The
+                 * loop's outer guard at line 1284 already filters to imessage
+                 * channels; we only reach this point when imessage support is
+                 * compiled in. Stub-out as NOT_SUPPORTED for the unreachable
+                 * branch so the symbol isn't required at link time. */
+                hu_error_t qerr = HU_ERR_NOT_SUPPORTED;
+                (void)cp;
+                (void)fmsg_id;
+                (void)fread_at_ms;
+#endif
                 if (qerr != HU_OK || fmsg_id == 0)
                     continue;
 
