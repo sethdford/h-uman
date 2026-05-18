@@ -45,6 +45,7 @@
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "HU_ENABLE_LTO": "ON",
         "HU_ENABLE_ALL_CHANNELS": "ON",
         "HU_ENABLE_SQLITE": "ON",

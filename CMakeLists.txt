@@ -1766,7 +1766,15 @@ if(HU_ENABLE_SQLITE)
         endif()
     endif()
     target_compile_definitions(human_core PRIVATE HU_ENABLE_SQLITE=1)
-    target_compile_definitions(human_core PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
+    # AC-42.3.5: on Release/MinSizeRel, the eval-suites dir is baked in as a
+    # relative path so `strings build/human | grep "$PWD"` is empty. Dev
+    # builds keep the absolute path for convenience (the dev workflow
+    # involves running from the build dir against in-tree fixtures).
+    if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+        target_compile_definitions(human_core PRIVATE "HU_EVAL_SUITES_DIR=\"./eval_suites\"")
+    else()
+        target_compile_definitions(human_core PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/eval_suites\"")
+    endif()
 endif()
 
 # Phase D Task D-1 (CF-7 RL SOTA): inject HU_ML_SCRIPTS_DIR compile-time
@@ -1774,7 +1782,15 @@ endif()
 # requiring HU_ML_SCRIPTS_DIR env in dev/test builds. Env override (set
 # at runtime) still wins. Installed builds should override this at
 # install time to point at <prefix>/share/human/scripts.
-target_compile_definitions(human_core PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
+#
+# AC-42.3.5: on Release/MinSizeRel, bake in a relative path so the binary
+# doesn't embed the build-tree source path (would break reproducibility
+# across build environments AND leak operator paths in shipped binaries).
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    target_compile_definitions(human_core PRIVATE "HU_ML_SCRIPTS_DIR=\"./scripts\"")
+else()
+    target_compile_definitions(human_core PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
+endif()
 
 if(HU_ENABLE_POSTGRES)
     find_package(PostgreSQL QUIET)
@@ -2263,6 +2279,66 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel"
         set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
     elseif(UNIX)
         set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
+    endif()
+
+    # --- US-42.3 Reproducible build flags ---
+    # Goal: bit-for-bit reproducible `human` binary under a frozen
+    # SOURCE_DATE_EPOCH. CI gates this via scripts/check-reproducible-build.sh
+    # (two-build sha256 diff). See sprints/sprint-42/designs/US-42.3.md.
+    #
+    # AC-42.3.1: -Werror=date-time is the stronger sister of the story's
+    # suggested -Wno-date-time. The codebase already runs -Werror, and the
+    # AC demands future __DATE__/__TIME__ usage "fails the build immediately"
+    # — exactly what -Werror=date-time does. The weaker -Wno- form would
+    # silently allow regressions.
+    #
+    # AC-42.3.5: -ffile-prefix-map=<srcdir>=. canonicalizes embedded source
+    # paths in debug info / __FILE__, eliminating $PWD as a source of
+    # non-reproducibility.
+    #
+    # DO NOT ADD -frandom-seed=<const>: -ffile-prefix-map already
+    # canonicalizes the per-TU seed input (clang derives it from the
+    # rewritten source path). A constant -frandom-seed would force the same
+    # seed across TUs and cause static-local symbol collisions. Documented
+    # in sprints/sprint-42/designs/US-42.3.md "Risks" section.
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(human PRIVATE
+            -Werror=date-time
+            -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
+        target_compile_options(human_core PRIVATE
+            -Werror=date-time
+            -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
+    endif()
+
+    # AC-42.3.4: strip build-id (linux) / LC_UUID (darwin) from the `human`
+    # target ONLY. These are the canonical sources of binary nondeterminism
+    # on each platform. Scoped via target_link_options so `human_tests`
+    # keeps LC_UUID for ASan + atos symbolication (matches the convention
+    # at CMakeLists.txt:2174 / :2237 where _tests target keeps its own
+    # link flags).
+    if(UNIX AND NOT APPLE)
+        target_link_options(human PRIVATE -Wl,--build-id=none)
+    elseif(APPLE)
+        target_link_options(human PRIVATE -Wl,-no_uuid)
+    endif()
+
+    # AC-42.3.2: configure-time probe for `ar -D` (deterministic mode,
+    # strips timestamps and UIDs/GIDs from static archives). GNU binutils
+    # ar supports this; BSD ar on macOS rejects -D, so darwin uses libtool
+    # (deterministic by default — no action needed). AC-42.3.3.
+    if(UNIX AND NOT APPLE)
+        execute_process(
+            COMMAND ${CMAKE_AR} -D --version
+            RESULT_VARIABLE _hu_ar_d_rc
+            OUTPUT_QUIET ERROR_QUIET)
+        if(_hu_ar_d_rc EQUAL 0)
+            set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> Dqc <TARGET> <LINK_FLAGS> <OBJECTS>")
+            set(CMAKE_C_ARCHIVE_APPEND "<CMAKE_AR> Dq <TARGET> <LINK_FLAGS> <OBJECTS>")
+            set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_AR> -D <TARGET>")
+            message(STATUS "Reproducible builds: ar -D supported, archives will be deterministic")
+        else()
+            message(STATUS "Reproducible builds: ar -D NOT supported by ${CMAKE_AR}; archives may carry timestamps")
+        endif()
     endif()
 endif()
 

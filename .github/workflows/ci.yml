@@ -179,6 +179,35 @@ jobs:
             exit 1
           fi
 
+  # US-42.3: bit-for-bit reproducibility of the `human` release binary.
+  # Two builds under SOURCE_DATE_EPOCH=1700000000 must produce identical
+  # sha256 hashes. Fast gate (no banned date/time macros) runs first; slow
+  # gate (two-build diff) only runs if the fast gate passes.
+  # No continue-on-error: branch protection should make this required.
+  reproducible-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies (linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential jq binutils libsqlite3-dev libcurl4-openssl-dev
+      - name: Install dependencies (darwin)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install jq cmake || true
+      - name: Configure release preset
+        run: cmake --preset release
+      - name: Fast gate - no date/time macros in TUs
+        run: bash scripts/check-no-date-time-macros.sh --build build-release
+      - name: Slow gate - two-build sha256 diff
+        run: bash scripts/check-reproducible-build.sh --two-build-diff
+
   build-ios:
     runs-on: macos-latest
     steps:
