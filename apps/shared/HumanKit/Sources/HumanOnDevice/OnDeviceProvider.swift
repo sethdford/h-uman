@@ -85,6 +85,7 @@ public final class OnDeviceProvider: Sendable {
 #else
 
 /// Stub when FoundationModels is not available (pre-macOS 26, non-Apple platforms).
+@available(macOS 14.0, iOS 17.0, *)
 public final class OnDeviceProvider: Sendable {
     public static let modelName = "apple-foundationmodel"
     public static let contextWindow = 4096

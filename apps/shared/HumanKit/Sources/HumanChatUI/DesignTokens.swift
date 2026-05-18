@@ -1,7 +1,11 @@
 // Auto-generated from design-tokens/ — do not edit manually
 import SwiftUI
 
+/// Design-token namespace for the Human chat UI. Values are sourced
+/// from `design-tokens/` and regenerated mechanically; do not hand-edit.
+@available(macOS 14.0, iOS 17.0, *)
 public enum HUTokens {
+    /// Dark-mode color palette.
     // MARK: - Colors (Dark)
     public enum Dark {
         public static let accent = Color(hex: 0x7AB648)
@@ -60,6 +64,7 @@ public enum HUTokens {
         public static let warningDim = Color(red: 0.9176, green: 0.702, blue: 0.0314, opacity: 0.15)
     }
 
+    /// Light-mode color palette.
     // MARK: - Colors (Light)
     public enum Light {
         public static let accent = Color(hex: 0x7AB648)
@@ -256,10 +261,25 @@ public enum HUTokens {
     public static let springDramatic = Animation.spring(response: 0.702, dampingFraction: 0.559)
     public static let springInteractive = Animation.spring(response: 0.35, dampingFraction: 0.864)
 
+    /// Haptic feedback styles wrapping `UIImpactFeedbackGenerator` /
+    /// `UINotificationFeedbackGenerator` / `UISelectionFeedbackGenerator`.
     // MARK: - Haptic Feedback
     public enum Haptic {
-        case light, medium, heavy, success, warning, selection
+        /// Light impact (`UIImpactFeedbackGenerator(.light)`).
+        case light
+        /// Medium impact (`UIImpactFeedbackGenerator(.medium)`).
+        case medium
+        /// Heavy impact (`UIImpactFeedbackGenerator(.heavy)`).
+        case heavy
+        /// Success notification.
+        case success
+        /// Warning notification.
+        case warning
+        /// Selection change.
+        case selection
 
+        /// Fire the haptic feedback corresponding to `self`. No-op on
+        /// platforms without `UIKit` (e.g. macOS).
         public func trigger() {
             #if canImport(UIKit)
             switch self {
