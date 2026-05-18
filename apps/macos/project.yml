@@ -1,0 +1,47 @@
+name: Human
+options:
+  bundleIdPrefix: ai.human
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+packages:
+  HumanKit:
+    path: ../shared/HumanKit
+
+targets:
+  Human:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/HumanApp
+    dependencies:
+      # Mirror apps/macos/Package.swift exactly so the archive build
+      # uses the same module graph as `swift build`.
+      - package: HumanKit
+        product: HumanClient
+      - package: HumanKit
+        product: HumanChatUI
+      - package: HumanKit
+        product: HumanOnDevice
+      - package: HumanKit
+        product: HumanOnDeviceServer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.human.macos
+        # Identity by NAME (not SHA-1) per AC-45.1.3.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: ""  # supplied by CI env or US-45.6 lane
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_CFBundleDisplayName: Human
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        INFOPLIST_KEY_NSHumanReadableCopyright: "© 2026 Human"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
