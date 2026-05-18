@@ -575,7 +575,6 @@ static void test_w14_scheduler_dispatch_scoped_to_target_contact(void) {
     hu_memory_facade_t *m = NULL;
     hu_scheduler_t *s = NULL;
     open_stack_(&g, &m, &s);
-<<<<<<< HEAD
 
     int counter = 0;
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
@@ -599,7 +598,6 @@ static void test_w14_scheduler_dispatch_scoped_to_target_contact(void) {
     HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 1);
 
     clear_w14_env();
-=======
     HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING, recording_runner, NULL),
                  HU_OK);
 
@@ -648,7 +646,6 @@ static void test_w14_scheduler_dispatch_scoped_to_target_contact(void) {
     HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 0);
     HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 3);
 
->>>>>>> origin/main
     close_stack_(g, m, s);
 }
 
@@ -809,11 +806,8 @@ void run_w14_scheduler_tests(void) {
     HU_RUN_TEST(test_w14_adversarial_runner_returns_error_does_not_crash_scheduler);
     HU_RUN_TEST(test_w14_counterfactual_rehearsal_caps_at_five_per_tick);
     HU_RUN_TEST(test_w14_expired_jobs_marked_after_latest_at);
-<<<<<<< HEAD
     HU_RUN_TEST(test_w14_requires_idle_job_defers_under_high_load);
-=======
     HU_RUN_TEST(test_w14_scheduler_dispatch_scoped_to_target_contact);
->>>>>>> origin/main
 #endif
 
     /* Probe tests run without SQLite — pure env/OS-state checks. */
