@@ -181,6 +181,28 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             if (err != HU_OK)
                 goto fail;
         }
+        if (config->moment_context && config->moment_context_len > 0) {
+            err =
+                append(alloc, &buf, &len, &cap, config->moment_context, config->moment_context_len);
+            if (err != HU_OK)
+                goto fail;
+            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
+            if (err != HU_OK)
+                goto fail;
+        }
+        if (config->self_exemplars_context && config->self_exemplars_context_len > 0) {
+            err = append(alloc, &buf, &len, &cap,
+                         "HOW YOU SOUND TO THIS PERSON (verbatim recent messages):\n", 58);
+            if (err != HU_OK)
+                goto fail;
+            err = append(alloc, &buf, &len, &cap, config->self_exemplars_context,
+                         config->self_exemplars_context_len);
+            if (err != HU_OK)
+                goto fail;
+            err = append(alloc, &buf, &len, &cap, "\n", 1);
+            if (err != HU_OK)
+                goto fail;
+        }
         if (config->world_model_context && config->world_model_context_len > 0) {
             err = append(alloc, &buf, &len, &cap, config->world_model_context,
                          config->world_model_context_len);
@@ -631,6 +653,36 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
         if (err != HU_OK)
             goto fail;
         err = append(alloc, &buf, &len, &cap, "\n\n", 2);
+        if (err != HU_OK)
+            goto fail;
+    }
+
+    /* Moment-context decision layer — "what is happening RIGHT NOW" for
+     * this turn (time of day, silence gap, their recent style, suggested
+     * opener / brevity / defer). Distinct from personal_model_context
+     * which is "who they are over time". Sits adjacent. */
+    if (config->moment_context && config->moment_context_len > 0) {
+        err = append(alloc, &buf, &len, &cap, config->moment_context, config->moment_context_len);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, "\n\n", 2);
+        if (err != HU_OK)
+            goto fail;
+    }
+
+    /* Self-exemplars block — recent verbatim outbound messages we've sent
+     * to this contact, as in-context style anchors. Highest-leverage prompt
+     * addition for personal-feeling responses; see spec §4c. */
+    if (config->self_exemplars_context && config->self_exemplars_context_len > 0) {
+        err = append(alloc, &buf, &len, &cap,
+                     "HOW YOU SOUND TO THIS PERSON (verbatim recent messages):\n", 58);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, config->self_exemplars_context,
+                     config->self_exemplars_context_len);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, "\n", 1);
         if (err != HU_OK)
             goto fail;
     }
