@@ -309,8 +309,12 @@ def main() -> int:
                     help="Gateway base URL (default %(default)s)")
     ap.add_argument("--since", type=int, default=None,
                     help="Override watermark (ms since epoch). 0 = full backfill.")
-    ap.add_argument("--turn-kind", type=int, default=1,
-                    help="Filter outcomes by turn_kind (default 1=stream)")
+    ap.add_argument("--turn-kind", type=int, default=0,
+                    help="Filter outcomes by turn_kind (0=any, 1=stream, "
+                         "2=batch, 3=proactive). Default 0 — both stream "
+                         "(channel messages) and batch (gateway /v1/chat/"
+                         "completions) are legitimate training signal; "
+                         "filtering to one kind excludes a major workload.")
     ap.add_argument("--limit", type=int, default=4096,
                     help="Max outcomes per poll (server caps at ring size)")
     ap.add_argument("--dry-run", action="store_true",

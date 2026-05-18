@@ -886,9 +886,9 @@ static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *meth
                                  "# TYPE human_component_healthy gauge\n");
             hu_readiness_result_t r = hu_health_check_readiness(&a);
             for (size_t i = 0; i < r.check_count; i++) {
-                off = hu_buf_appendf(buf, cap, off,
-                                     "human_component_healthy{component=\"%s\"} %d\n",
-                                     r.checks[i].name, r.checks[i].healthy ? 1 : 0);
+                off =
+                    hu_buf_appendf(buf, cap, off, "human_component_healthy{component=\"%s\"} %d\n",
+                                   r.checks[i].name, r.checks[i].healthy ? 1 : 0);
             }
             if (r.checks)
                 a.free(a.ctx, (void *)r.checks, r.check_count * sizeof(hu_component_check_t));
@@ -963,6 +963,13 @@ static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *meth
             (void)send_json(fd, 401, "{\"error\":\"unauthorized\"}");
             return;
         }
+#ifndef HU_ENABLE_ML
+        /* ML disabled at build time — endpoint is a no-op. Return empty
+         * 200 so consumers (the M3 driver) get a uniform response shape
+         * across ML-on / ML-off builds. */
+        (void)send_response(fd, 200, "application/x-ndjson", "", 0, 0);
+        return;
+#else
         hu_allocator_t a = hu_system_allocator();
         hu_m3_outcomes_filter_t filter = {0};
         /* Parse query params if present. The path here is the raw path
@@ -1006,6 +1013,7 @@ static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *meth
         (void)send_response(fd, 200, "application/x-ndjson", body_buf, body_len_out, 0);
         a.free(a.ctx, body_buf, body_cap);
         return;
+#endif /* HU_ENABLE_ML */
     }
 
     /* OpenAI-compatible API — require auth when auth_token is configured */
@@ -1856,7 +1864,8 @@ hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port
                         rejected = true;
                         break;
                     }
-                    /* Reject multiple differing Content-Length headers (request smuggling) */
+                    /* Reject multiple differing Content-Length headers (request smuggling)
+                     */
                     if (have_content_length && body_len != (size_t)v) {
                         (void)send_json(client, 400, "{\"error\":\"conflicting content-length\"}");
                         close(client);
