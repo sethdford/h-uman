@@ -569,8 +569,24 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
         }
 #else
         {
+            /* 2026-05-18 audit fix: pass suite-level system_prompt instead
+             * of hardcoded NULL/0. Without this, the LLM receives only the
+             * raw task prompt with no persona / channel-overlay /
+             * humor-framework / anti-patterns context, producing default
+             * "AI assistant offering options" markdown responses that look
+             * nothing like Seth's actual iMessage style. With the persona
+             * system prompt populated (by cli_commands.c::cmd_eval before
+             * the run), the same model produces in-voice 1-sentence texts.
+             * Empirical effect: 97% length reduction + 100% markdown
+             * elimination across 8 iMessage tasks. See:
+             *   scripts/persona_eval_comparison.py
+             *   .claude/rules/silent-config-gated-subsystems.md (the
+             *   meta-rule: silent NULL defaults are the same failure
+             *   class as silent config-gated subsystems). */
+            const char *sys = suite->system_prompt ? suite->system_prompt : NULL;
+            size_t sys_len = suite->system_prompt ? suite->system_prompt_len : 0;
             hu_error_t err = provider->vtable->chat_with_system(
-                provider->ctx, alloc, NULL, 0, task->prompt ? task->prompt : "",
+                provider->ctx, alloc, sys, sys_len, task->prompt ? task->prompt : "",
                 task->prompt ? task->prompt_len : 0, model ? model : "", model_len, 0.0, &response,
                 &response_len);
             int64_t task_end_ms = (int64_t)time(NULL) * 1000;
@@ -1306,6 +1322,13 @@ void hu_eval_suite_free(hu_allocator_t *alloc, hu_eval_suite_t *suite) {
         alloc->free(alloc->ctx, suite->default_rubric, suite->default_rubric_len + 1);
         suite->default_rubric = NULL;
         suite->default_rubric_len = 0;
+    }
+    /* 2026-05-18: free the persona system prompt set by cli_commands.c
+     * before hu_eval_run_suite. Owned by the suite struct. */
+    if (suite->system_prompt) {
+        alloc->free(alloc->ctx, suite->system_prompt, suite->system_prompt_len + 1);
+        suite->system_prompt = NULL;
+        suite->system_prompt_len = 0;
     }
 }
 
