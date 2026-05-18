@@ -559,6 +559,36 @@ static void test_w14_requires_idle_job_defers_under_high_load(void) {
     clear_w14_env();
     setenv("HU_TEST_LOAD_PCT", "80", 1);
 
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    hu_scheduler_t *s = NULL;
+    open_stack_(&g, &m, &s);
+
+    int counter = 0;
+    HU_ASSERT_EQ(hu_scheduler_register_runner(s, HU_JOB_LORA_TRAINING,
+                                              increment_runner, &counter),
+                 HU_OK);
+
+    hu_job_spec_t job = {0};
+    job.kind = HU_JOB_LORA_TRAINING;
+    job.budget_ms = 50;
+    job.requires_idle = true;
+    HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
+
+    HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
+    HU_ASSERT_EQ(counter, 0);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 1);
+
+    setenv("HU_TEST_LOAD_PCT", "30", 1);
+    HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690001000LL), HU_OK);
+    HU_ASSERT_EQ(counter, 1);
+    HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 1);
+
+    clear_w14_env();
+    close_stack_(g, m, s);
+}
+
 /* 2026-05-16 P3-5 regression: scheduler_jobs schema HAS contact_id but the
  * dispatch SELECT didn't bind it.  A job enqueued for contact A would fire in
  * any tick (including ticks for contact B), invoking A's runner during B's
