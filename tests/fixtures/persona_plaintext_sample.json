@@ -1,0 +1,11 @@
+{
+  "name": "sprint42-fixture",
+  "identity": "test persona for US-42.2 encryption-at-rest",
+  "communication_rules": [
+    "be honest",
+    "be concise"
+  ],
+  "values": [
+    "privacy"
+  ]
+}
