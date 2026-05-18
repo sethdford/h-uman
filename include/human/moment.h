@@ -96,6 +96,20 @@ typedef struct {
 #define HU_MOMENT_SRC_LAST_OUR_TS   (1u << 4)
 #define HU_MOMENT_SRC_CONTACT_TZ    (1u << 5)
 
+/* ── hu_conversation_history_t constructor/destructor ─────────────────────
+ * The struct is opaque; callers allocate via hu_moment_history_create and
+ * release via hu_moment_history_free. Tests use these to build fixtures. */
+
+/* Allocate a history with `count` entries.  Each entry is initialised from
+ * the parallel arrays ts_s[], outbound[], and text[].  Returns NULL on
+ * allocation failure.  Caller must free with hu_moment_history_free(). */
+struct hu_conversation_history_t *hu_moment_history_create(size_t count, const int64_t *ts_s,
+                                                           const bool *outbound,
+                                                           const char *const *text);
+
+/* Release a history created by hu_moment_history_create(). No-op on NULL. */
+void hu_moment_history_free(struct hu_conversation_history_t *h);
+
 /* Public composer — loads inputs from the agent, then calls the pure inner. */
 hu_error_t hu_moment_compose(const struct hu_agent_t *agent, const struct hu_contact_t *contact,
                              const char *channel_id, int64_t now_s, hu_moment_t *out);

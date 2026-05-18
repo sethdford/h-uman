@@ -110,6 +110,48 @@ static void compose_does_not_flag_unusual_hour_when_their_phase_is_morning(void)
     HU_ASSERT_FALSE(m.it_is_unusual_hour_for_them);
 }
 
+/* ---- Thread continuation + topic state tests (Task 1.4) ---- */
+
+static void compose_marks_continuation_when_last_inbound_within_30m(void) {
+    int64_t now = 1779609600;
+    int64_t ts[] = {now - 60}; /* 1 minute ago — well within 30-minute window */
+    bool ob[] = {false};
+    const char *tx[] = {"hey"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    HU_ASSERT_NOT_NULL(h);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 60, -1, "UTC", now, &m);
+    HU_ASSERT_TRUE(m.thread_is_continuation);
+    hu_moment_history_free(h);
+}
+
+static void compose_does_not_mark_continuation_when_gap_exceeds_30m(void) {
+    int64_t now = 1779609600;
+    int64_t ts[] = {now - 7200}; /* 2 hours ago — outside window */
+    bool ob[] = {false};
+    const char *tx[] = {"hey"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    HU_ASSERT_NOT_NULL(h);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 7200, -1, "UTC", now, &m);
+    HU_ASSERT_FALSE(m.thread_is_continuation);
+    hu_moment_history_free(h);
+}
+
+static void compose_marks_topic_open_when_last_inbound_recent_and_text_substantive(void) {
+    int64_t now = 1779609600;
+    int64_t ts[] = {now - 120}; /* 2 minutes ago */
+    bool ob[] = {false};
+    const char *tx[] = {"monday standup got pushed to wednesday"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    HU_ASSERT_NOT_NULL(h);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 120, -1, "UTC", now, &m);
+    HU_ASSERT_TRUE(m.topic_still_open);
+    HU_ASSERT_TRUE(m.topic_hint[0] != '\0');
+    hu_moment_history_free(h);
+}
+
 void run_moment_compose_tests(void) {
     HU_TEST_SUITE("moment_compose");
     HU_RUN_TEST(compose_from_inputs_rejects_null_out);
@@ -123,4 +165,7 @@ void run_moment_compose_tests(void) {
     HU_RUN_TEST(compose_phase_theirs_falls_back_to_local_when_tz_unknown);
     HU_RUN_TEST(compose_flags_unusual_hour_when_their_phase_is_deep_night);
     HU_RUN_TEST(compose_does_not_flag_unusual_hour_when_their_phase_is_morning);
+    HU_RUN_TEST(compose_marks_continuation_when_last_inbound_within_30m);
+    HU_RUN_TEST(compose_does_not_mark_continuation_when_gap_exceeds_30m);
+    HU_RUN_TEST(compose_marks_topic_open_when_last_inbound_recent_and_text_substantive);
 }
