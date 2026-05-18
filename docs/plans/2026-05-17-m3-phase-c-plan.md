@@ -29,7 +29,7 @@ challenge for M3.
 |---|---|---|
 | Token counts in outcomes | `prompt_len / 4` byte estimate | Exact counts from provider `usage` block |
 | model_id / adapter_id | Always 0 (unknown) | Config-mapped small ids for outcome clustering |
-| Training trigger | `--simulate-train` (placeholder file) | Real `training_loop.py` invocation, ≤60s for 32-sample warmup |
+| Training trigger | C3 shipped (2026-05-18): `training_loop.py --source-jsonl` parses outcomes, resolves hashes, writes safetensors-shaped artifact with metadata block. Real LoRA tensor production is C4. | Real `training_loop.py` invocation, ≤60s for 32-sample warmup |
 | Adapter artifact | 82-byte text blob | MLX-compatible safetensors, hot-loadable by mlx-server.py |
 | MLX server | Stub (responds in 150ms, no model) | Real gemma-4-31b loaded with the new adapter |
 | Validation | "Endpoint returned 200" | A/B eval shows persona-fidelity improvement |

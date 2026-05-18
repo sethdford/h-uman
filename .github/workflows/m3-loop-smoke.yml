@@ -23,6 +23,8 @@ on:
       - "scripts/stub_mlx_server.py"
       - "scripts/live_fire_m3_loop.sh"
       - "scripts/test_m3_outcome_driver.py"
+      - "scripts/training_loop.py"
+      - "scripts/test_m3_train_from_outcomes.py"
       - "Makefile"
       - "CMakePresets.json"
       - ".github/workflows/m3-loop-smoke.yml"
@@ -36,6 +38,8 @@ on:
       - "scripts/stub_mlx_server.py"
       - "scripts/live_fire_m3_loop.sh"
       - "scripts/test_m3_outcome_driver.py"
+      - "scripts/training_loop.py"
+      - "scripts/test_m3_train_from_outcomes.py"
   workflow_dispatch:
 
 jobs:
@@ -49,6 +53,12 @@ jobs:
           python-version: "3.12"
       - name: Run driver e2e tests (fake gateway + fake MLX in-process)
         run: python3 scripts/test_m3_outcome_driver.py
+
+      - name: Run train-from-outcomes (C3) verifier
+        # 25 assertions covering FNV-1a cross-language agreement,
+        # JSONL parse tolerance, summary aggregates, DB hash resolution,
+        # and the dry-run safetensors artifact format.
+        run: python3 scripts/test_m3_train_from_outcomes.py
 
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)
