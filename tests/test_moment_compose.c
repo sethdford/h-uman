@@ -1,6 +1,10 @@
 #include "human/moment.h"
 #include "test_framework.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
 static void compose_from_inputs_rejects_null_out(void) {
     hu_error_t err =
         hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, NULL, 1700000000, NULL);
@@ -211,6 +215,135 @@ static void compose_distressed_tone_for_long_vent_with_negative_markers(void) {
     hu_moment_history_free(h);
 }
 
+/* ---- suggested_open decision tree tests (Task 1.6) ---- */
+
+/* Saves the current TZ env so a test can override it deterministically and
+ * restore it after. Used to control phase_local (which reads the machine TZ
+ * via phase_for_tz(now_s, NULL)). */
+typedef struct {
+    char saved[64];
+    bool was_set;
+} tz_env_save_t;
+
+static void tz_env_override(tz_env_save_t *s, const char *tz) {
+    const char *cur = getenv("TZ");
+    s->was_set = (cur != NULL);
+    if (s->was_set)
+        snprintf(s->saved, sizeof s->saved, "%s", cur);
+    setenv("TZ", tz, 1);
+    tzset();
+}
+
+static void tz_env_restore(tz_env_save_t *s) {
+    if (s->was_set)
+        setenv("TZ", s->saved, 1);
+    else
+        unsetenv("TZ");
+    tzset();
+}
+
+static void compose_open_is_NONE_on_continuation(void) {
+    int64_t now = TS_8AM_UTC;
+    int64_t ts[] = {now - 60}; /* 1 min ago — continuation */
+    bool ob[] = {false};
+    const char *tx[] = {"hey"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, now - 60, -1, "UTC", now, &m);
+    HU_ASSERT_TRUE(m.thread_is_continuation);
+    HU_ASSERT_EQ(m.suggested_open, HU_MOMENT_OPEN_NONE);
+    hu_moment_history_free(h);
+}
+
+static void compose_open_is_RECONNECT_after_4_days(void) {
+    int64_t now = TS_8AM_UTC;
+    int64_t four_days_ago = now - 4 * 86400;
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, four_days_ago, four_days_ago, "UTC", now, &m);
+    HU_ASSERT_EQ(m.suggested_open, HU_MOMENT_OPEN_RECONNECT);
+}
+
+static void compose_open_is_ACKNOWLEDGE_GAP_at_their_3am(void) {
+    /* 08:00 UTC = 01:00 PDT → DEEP_NIGHT for the contact → unusual_hour. */
+    int64_t now = TS_8AM_UTC;
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, now - 7200, -1, "America/Los_Angeles", now, &m);
+    HU_ASSERT_TRUE(m.it_is_unusual_hour_for_them);
+    HU_ASSERT_EQ(m.suggested_open, HU_MOMENT_OPEN_ACKNOWLEDGE_GAP);
+}
+
+static void compose_open_is_GREET_MORNING_at_7am_fresh_day(void) {
+    /* phase_local depends on machine TZ. Force TZ=UTC so 08:00 UTC = MORNING. */
+    tz_env_save_t saved;
+    tz_env_override(&saved, "UTC");
+
+    int64_t now = TS_8AM_UTC;
+    int64_t last_their = now - 14 * 3600; /* 14h ago — fresh-day gap (>8h) */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, last_their, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.phase_local, HU_MOMENT_PHASE_MORNING);
+    HU_ASSERT_EQ(m.suggested_open, HU_MOMENT_OPEN_GREET_MORNING);
+
+    tz_env_restore(&saved);
+}
+
+static void compose_open_is_GREET_NIGHT_when_they_say_night_at_11pm(void) {
+    /* 23:00 UTC = NIGHT in UTC. Force TZ=UTC. Inbound is 2h old, outside the
+     * 30-min continuation window, so rule 1 (continuation→NONE) doesn't fire
+     * and the tree reaches rule 5 (phase=NIGHT + "night"/"tomorrow" → GREET_NIGHT). */
+    tz_env_save_t saved;
+    tz_env_override(&saved, "UTC");
+
+    int64_t now = TS_8AM_UTC + 15 * 3600; /* 08:00 UTC + 15h = 23:00 UTC */
+    int64_t two_hours_ago = now - 2 * 3600;
+    int64_t ts[] = {two_hours_ago};
+    bool ob[] = {false};
+    const char *tx[] = {"night talk tomorrow"};
+    struct hu_conversation_history_t *h = hu_moment_history_create(1, ts, ob, tx);
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, h, two_hours_ago, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.phase_local, HU_MOMENT_PHASE_NIGHT);
+    HU_ASSERT_FALSE(m.thread_is_continuation);
+    HU_ASSERT_EQ(m.suggested_open, HU_MOMENT_OPEN_GREET_NIGHT);
+    hu_moment_history_free(h);
+
+    tz_env_restore(&saved);
+}
+
+static void compose_open_is_NONE_in_unremarkable_midday(void) {
+    /* Midday, recent-but-not-continuation contact, no special markers. */
+    tz_env_save_t saved;
+    tz_env_override(&saved, "UTC");
+
+    int64_t now = TS_8AM_UTC + 4 * 3600; /* 12:00 UTC = MIDDAY */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, now - 7200, -1, "UTC", now, &m);
+    HU_ASSERT_EQ(m.phase_local, HU_MOMENT_PHASE_MIDDAY);
+    HU_ASSERT_EQ(m.suggested_open, HU_MOMENT_OPEN_NONE);
+
+    tz_env_restore(&saved);
+}
+
+/* Regression guard: even at fresh-day morning conditions, if the contact's
+ * timezone resolves to DEEP_NIGHT, we MUST NOT greet them with "good morning".
+ * Per spec §Success Criteria #5 — zero "good morning at 3am" regressions. */
+static void compose_does_NOT_suggest_morning_greet_at_3am(void) {
+    tz_env_save_t saved;
+    tz_env_override(&saved, "UTC"); /* phase_local = MORNING */
+
+    int64_t now = TS_8AM_UTC;
+    int64_t fresh_day = now - 14 * 3600;
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, fresh_day, -1, "America/Los_Angeles", now, &m);
+    /* phase_local=MORNING WOULD say GREET_MORNING — but unusual-hour overrides. */
+    HU_ASSERT_EQ(m.phase_local, HU_MOMENT_PHASE_MORNING);
+    HU_ASSERT_TRUE(m.it_is_unusual_hour_for_them);
+    HU_ASSERT_EQ(m.suggested_open, HU_MOMENT_OPEN_ACKNOWLEDGE_GAP);
+    HU_ASSERT_TRUE(m.suggested_open != HU_MOMENT_OPEN_GREET_MORNING);
+
+    tz_env_restore(&saved);
+}
+
 void run_moment_compose_tests(void) {
     HU_TEST_SUITE("moment_compose");
     HU_RUN_TEST(compose_from_inputs_rejects_null_out);
@@ -231,4 +364,11 @@ void run_moment_compose_tests(void) {
     HU_RUN_TEST(compose_detects_lowercase_when_inbound_is_lowercase);
     HU_RUN_TEST(compose_detects_emoji_when_inbound_contains_emoji);
     HU_RUN_TEST(compose_distressed_tone_for_long_vent_with_negative_markers);
+    HU_RUN_TEST(compose_open_is_NONE_on_continuation);
+    HU_RUN_TEST(compose_open_is_RECONNECT_after_4_days);
+    HU_RUN_TEST(compose_open_is_ACKNOWLEDGE_GAP_at_their_3am);
+    HU_RUN_TEST(compose_open_is_GREET_MORNING_at_7am_fresh_day);
+    HU_RUN_TEST(compose_open_is_GREET_NIGHT_when_they_say_night_at_11pm);
+    HU_RUN_TEST(compose_open_is_NONE_in_unremarkable_midday);
+    HU_RUN_TEST(compose_does_NOT_suggest_morning_greet_at_3am);
 }

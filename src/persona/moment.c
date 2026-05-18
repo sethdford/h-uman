@@ -270,6 +270,65 @@ static hu_moment_tone_t infer_tone(const char *text, int word_count) {
     return HU_MOMENT_TONE_WARM;
 }
 
+/* Lowercase substring search: returns true iff needle (already lowercase) is
+ * found inside text after lower-casing text. Cap at 511 chars for the
+ * lowercased buffer; messages beyond that are searched only over their first
+ * 511 chars (good enough for opener detection, which scans short phrases). */
+static bool text_contains_phrase_ci(const char *text, const char *needle_lower) {
+    if (!text || !needle_lower)
+        return false;
+    char lower[512];
+    size_t len = strlen(text);
+    if (len >= sizeof lower)
+        len = sizeof lower - 1;
+    for (size_t i = 0; i < len; i++)
+        lower[i] = (char)tolower((unsigned char)text[i]);
+    lower[len] = '\0';
+    return strstr(lower, needle_lower) != NULL;
+}
+
+/* Decide the suggested opener for the response based on the current moment.
+ * Top-down: first matching rule wins. The order encodes overrides:
+ *   continuation > long silence > unusual hour > phase-based greets > none. */
+static hu_moment_open_t decide_open(const hu_moment_t *m, const char *last_inbound_text) {
+    /* 1. Mid-thread continuation: no greeting under any circumstance. */
+    if (m->thread_is_continuation)
+        return HU_MOMENT_OPEN_NONE;
+
+    /* 2. Long silence (> 3 days on either side): reconnect rather than greet. */
+    const int64_t three_days_s = (int64_t)3 * 86400;
+    if (m->time_since_their_last_msg_s > three_days_s ||
+        m->time_since_our_last_msg_s > three_days_s)
+        return HU_MOMENT_OPEN_RECONNECT;
+
+    /* 3. It's an unusual hour for the contact (typically DEEP_NIGHT in their tz).
+     * Acknowledge the gap — never apply a morning greet under this branch. This
+     * is the "no good morning at 3am" regression guard. */
+    if (m->it_is_unusual_hour_for_them)
+        return HU_MOMENT_OPEN_ACKNOWLEDGE_GAP;
+
+    /* 4. Fresh-day morning: greet only if we haven't talked recently. */
+    const int64_t fresh_day_silence_s = (int64_t)8 * 3600;
+    if ((m->phase_local == HU_MOMENT_PHASE_EARLY_MORNING ||
+         m->phase_local == HU_MOMENT_PHASE_MORNING) &&
+        (m->time_since_their_last_msg_s < 0 ||
+         m->time_since_their_last_msg_s > fresh_day_silence_s))
+        return HU_MOMENT_OPEN_GREET_MORNING;
+
+    /* 5. Night, and the inbound mentions sleeping or tomorrow: match the
+     * "good night" register. */
+    if (m->phase_local == HU_MOMENT_PHASE_NIGHT && last_inbound_text != NULL) {
+        if (text_contains_phrase_ci(last_inbound_text, "night") ||
+            text_contains_phrase_ci(last_inbound_text, "sleep") ||
+            text_contains_phrase_ci(last_inbound_text, "tomorrow") ||
+            text_contains_phrase_ci(last_inbound_text, "talk later"))
+            return HU_MOMENT_OPEN_GREET_NIGHT;
+    }
+
+    /* 6. Default: no greeting. */
+    return HU_MOMENT_OPEN_NONE;
+}
+
 hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
                                          const struct hu_persona_overlay_t *overlay,
                                          const struct hu_conversation_history_t *history,
@@ -299,6 +358,9 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
     }
     out->it_is_unusual_hour_for_them = (out->phase_theirs == HU_MOMENT_PHASE_DEEP_NIGHT);
 
+    /* Hoisted so the decision tree (below) can read the last inbound's text. */
+    const char *last_inbound_text = NULL;
+
     /* Thread continuation + topic state from history. */
     if (history != NULL && history->count > 0) {
         out->source_flags |= HU_MOMENT_SRC_HISTORY;
@@ -313,6 +375,7 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
         }
 
         if (last_inbound != NULL) {
+            last_inbound_text = last_inbound->text;
             int64_t age_s = now_s - last_inbound->ts_s;
             if (age_s < 0)
                 age_s = 0;
@@ -356,6 +419,12 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
             out->their_p90_length_words = max;
         }
     }
+
+    /* ── suggested_open decision tree ──
+     * Top-down — first matching rule wins. Order matters; comments call
+     * out the override relationships (continuation overrides everything;
+     * unusual-hour overrides phase-based greets). */
+    out->suggested_open = decide_open(out, last_inbound_text);
 
     return HU_OK;
 }
