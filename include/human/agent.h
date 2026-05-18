@@ -434,6 +434,13 @@ struct hu_agent {
      * LLM interaction (chat, stream_chat, GVR, constitutional, metacog regen,
      * guard retry, streaming rethink). Owned; closed in `hu_agent_deinit`. */
     struct hu_m3_frontier_adapter *m3_adapter;
+    /* Phase C2 (2026-05-18): string→uint16 id map for outcome clustering.
+     * Resolves agent->model_name and the provider's active adapter into
+     * stable small ids that go into the outcome record's `m` and `a`
+     * fields. Persists to ~/.human/training-data/m3_id_map.json so ids
+     * are stable across daemon restarts. Owned; destroyed in
+     * `hu_agent_deinit`. NULL when not attached → outcomes record 0. */
+    struct hu_m3_id_map *m3_id_map;
 #endif
 
     bool chain_of_thought;    /* inject reasoning instructions into prompt */

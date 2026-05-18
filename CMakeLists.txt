@@ -1414,6 +1414,7 @@ if(HU_ENABLE_ML)
         # lora_retrain_runner.c.
         src/ml/agent_trainer.c
         src/ml/m3_frontier_adapter.c
+        src/ml/m3_id_map.c
         src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's

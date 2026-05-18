@@ -70,6 +70,7 @@
 #include "human/voice.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/ml/m3_id_map.h"
 #endif
 
 #include <stdint.h>
@@ -1017,6 +1018,19 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
         /* B3 v0 (2026-05-17 r2): publish the freshly-opened adapter to
          * the global accessor so /v1/m3/outcomes can read it. */
         hu_m3_outcomes_register_global_adapter(opened);
+
+        /* Phase C2 (2026-05-18): open the id map alongside the adapter.
+         * Lives next to the adapter probe path. Failure to open the map
+         * is non-fatal — outcomes regress to model_id=0/adapter_id=0
+         * (unknown) but the loop still functions. */
+        if (!agent->m3_id_map) {
+            char map_path[2048];
+            int mn = snprintf(map_path, sizeof(map_path), "%s/.human/training-data/m3_id_map.json",
+                              getenv("HOME") ? getenv("HOME") : "/tmp");
+            if (mn > 0 && (size_t)mn < sizeof(map_path)) {
+                (void)hu_m3_id_map_create(agent->alloc, map_path, &agent->m3_id_map);
+            }
+        }
     }
 }
 
@@ -1074,10 +1088,34 @@ void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size
     }
     outcome.guard_decision = (uint8_t)guard_decision;
     outcome.turn_kind = turn_kind;
-    /* model_id / adapter_id: 0 = unknown. Mapping is a config-driven
-     * follow-up — we'll add a small table in personalization config
-     * (model_name -> uint16, adapter_path -> uint16) so outcomes
-     * cluster cleanly without storing the full path strings. */
+
+    /* Phase C2 (2026-05-18): resolve active model + adapter to stable
+     * uint16 ids via the persisted id-map. Falls back to 0 (= unknown)
+     * for any of:
+     *   - no id_map attached (cold install before bootstrap)
+     *   - no model_name on the agent (rare; agent without provider)
+     *   - provider has no active_adapter accessor (base model only)
+     * Lookup is O(N) over a small N — fine in this hot path because the
+     * vec_find scan stops on first match and N is bounded at 65535. */
+    if (agent->m3_id_map && agent->model_name && agent->model_name_len > 0) {
+        outcome.model_id = hu_m3_id_map_lookup_or_insert_model(agent->m3_id_map, agent->model_name,
+                                                               agent->model_name_len);
+    }
+    if (agent->m3_id_map) {
+        const char *active = hu_provider_active_adapter(&agent->provider);
+        if (active && active[0]) {
+            outcome.adapter_id =
+                hu_m3_id_map_lookup_or_insert_adapter(agent->m3_id_map, active, strlen(active));
+        }
+    }
+    /* Flush new ids opportunistically. Most calls are no-ops (dirty
+     * bit false). The first 1-2 outcomes per session cause a small
+     * write; the rest are free. Worth-it tradeoff: a daemon crash
+     * before next flush would lose at most one model/adapter id, which
+     * the next session re-assigns deterministically (same string →
+     * same scan position → same id). */
+    if (hu_m3_id_map_is_dirty(agent->m3_id_map))
+        (void)hu_m3_id_map_save(agent->m3_id_map);
 
     (void)hu_m3_frontier_adapter_record_outcome(agent->m3_adapter, &outcome);
 }
@@ -1396,6 +1434,16 @@ void hu_agent_deinit(hu_agent_t *agent) {
     if (agent->m3_adapter) {
         hu_m3_frontier_adapter_close(agent->alloc, agent->m3_adapter);
         agent->m3_adapter = NULL;
+    }
+    if (agent->m3_id_map) {
+        /* Flush any unsaved ids one last time on shutdown — defensive.
+         * In normal operation the save-on-dirty path in record_outcome
+         * already flushed; this catches the edge case where an id was
+         * assigned during a turn that crashed before reaching the
+         * record_outcome save. */
+        (void)hu_m3_id_map_save(agent->m3_id_map);
+        hu_m3_id_map_destroy(agent->m3_id_map);
+        agent->m3_id_map = NULL;
     }
 #endif
 #ifdef HU_ENABLE_SQLITE

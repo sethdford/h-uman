@@ -14,6 +14,7 @@
 #include "human/ml/experiment_store.h"
 #include "human/ml/lora.h"
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/ml/m3_id_map.h"
 #include "human/ml/ml.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
@@ -5153,6 +5154,124 @@ static void test_m3_record_chat_outcome_prefers_usage_block_when_present(void) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────
+ * Phase C2 (2026-05-18): m3 id map — string→uint16 outcome clustering
+ *
+ * Tests the lookup/insert/persistence contracts directly on the
+ * hu_m3_id_map_t module (separate from the agent wiring, which is
+ * covered by the live-fire script). Lets a regression in the map
+ * itself (e.g. lookup non-idempotency, save not atomic, load
+ * misparses) fail loudly before reaching production.
+ * ───────────────────────────────────────────────────────────────── */
+
+static void test_m3_id_map_lookup_is_idempotent_for_same_name(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, NULL, &map), HU_OK);
+    HU_ASSERT_NOT_NULL(map);
+
+    /* First lookup assigns id 1. */
+    uint16_t id1 = hu_m3_id_map_lookup_or_insert_model(map, "gemma-4-31b", 11);
+    HU_ASSERT_EQ((int)id1, 1);
+    /* Same name → same id, no new assignment. */
+    uint16_t id1_again = hu_m3_id_map_lookup_or_insert_model(map, "gemma-4-31b", 11);
+    HU_ASSERT_EQ((int)id1_again, 1);
+    /* Different name → next id (2). */
+    uint16_t id2 = hu_m3_id_map_lookup_or_insert_model(map, "stub-mlx", 8);
+    HU_ASSERT_EQ((int)id2, 2);
+    /* And confirm only 2 distinct entries. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_model_count(map), 2);
+
+    hu_m3_id_map_destroy(map);
+}
+
+static void test_m3_id_map_model_and_adapter_use_separate_spaces(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, NULL, &map), HU_OK);
+
+    uint16_t mid = hu_m3_id_map_lookup_or_insert_model(map, "gemma-4-31b", 11);
+    uint16_t aid = hu_m3_id_map_lookup_or_insert_adapter(map, "/path/to/lora", 13);
+    /* Both spaces start at 1 — a model_id of 1 and adapter_id of 1 are
+     * unrelated. The separateness is the contract; the equality of the
+     * starting id is fine (and is what we're confirming here). */
+    HU_ASSERT_EQ((int)mid, 1);
+    HU_ASSERT_EQ((int)aid, 1);
+    HU_ASSERT_EQ((int)hu_m3_id_map_model_count(map), 1);
+    HU_ASSERT_EQ((int)hu_m3_id_map_adapter_count(map), 1);
+
+    hu_m3_id_map_destroy(map);
+}
+
+static void test_m3_id_map_null_or_empty_inputs_return_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, NULL, &map), HU_OK);
+
+    /* NULL map → 0. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_model(NULL, "x", 1), 0);
+    /* NULL name → 0. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_model(map, NULL, 5), 0);
+    /* Zero-length → 0. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_model(map, "x", 0), 0);
+    /* And after all that, the map is still empty. */
+    HU_ASSERT_EQ((int)hu_m3_id_map_model_count(map), 0);
+
+    hu_m3_id_map_destroy(map);
+}
+
+static void test_m3_id_map_persists_ids_across_reload(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_id_map_reload_test.json";
+    (void)unlink(path);
+
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, path, &map), HU_OK);
+    uint16_t model_id = hu_m3_id_map_lookup_or_insert_model(map, "gemma-4-31b", 11);
+    uint16_t adapter_id = hu_m3_id_map_lookup_or_insert_adapter(map, "/path/lora-v3", 13);
+    HU_ASSERT_TRUE(hu_m3_id_map_is_dirty(map));
+    HU_ASSERT_EQ(hu_m3_id_map_save(map), HU_OK);
+    HU_ASSERT_FALSE(hu_m3_id_map_is_dirty(map));
+    hu_m3_id_map_destroy(map);
+
+    /* Reopen — same ids must come back. This is the contract that
+     * makes outcome clustering meaningful: training analytics on
+     * model_id=7 today must mean the same model as model_id=7
+     * tomorrow. */
+    hu_m3_id_map_t *map2 = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, path, &map2), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_model(map2, "gemma-4-31b", 11), (int)model_id);
+    HU_ASSERT_EQ((int)hu_m3_id_map_lookup_or_insert_adapter(map2, "/path/lora-v3", 13),
+                 (int)adapter_id);
+    /* And a new model gets the NEXT id after the loaded ones — proves
+     * the next_id counter survived round-trip too. */
+    uint16_t new_model_id = hu_m3_id_map_lookup_or_insert_model(map2, "stub-mlx", 8);
+    HU_ASSERT_EQ((int)new_model_id, (int)model_id + 1);
+    hu_m3_id_map_destroy(map2);
+
+    (void)unlink(path);
+}
+
+static void test_m3_id_map_save_is_noop_when_clean(void) {
+    /* Pinning the dirty-flag contract: save() on a never-modified map
+     * doesn't write anything to disk. Important because the agent's
+     * record-outcome path calls save() opportunistically; if save()
+     * wrote on every call, we'd have a write per outcome. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_id_map_clean_save_test.json";
+    (void)unlink(path);
+
+    hu_m3_id_map_t *map = NULL;
+    HU_ASSERT_EQ(hu_m3_id_map_create(&alloc, path, &map), HU_OK);
+    HU_ASSERT_FALSE(hu_m3_id_map_is_dirty(map));
+    HU_ASSERT_EQ(hu_m3_id_map_save(map), HU_OK);
+    /* File should NOT exist — save was a no-op. */
+    FILE *fp = fopen(path, "rb");
+    HU_ASSERT_TRUE(fp == NULL);
+
+    hu_m3_id_map_destroy(map);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
  * Phase B1 redefined (2026-05-17 round 2): inference outcome capture
  *
  * Tests for the ring-buffer outcome capture API. Tests are phrased to
@@ -6103,6 +6222,11 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_agent_on_provider_success_advances_probe_count);
     HU_RUN_TEST(test_m3_record_chat_outcome_populates_token_estimates);
     HU_RUN_TEST(test_m3_record_chat_outcome_prefers_usage_block_when_present);
+    HU_RUN_TEST(test_m3_id_map_lookup_is_idempotent_for_same_name);
+    HU_RUN_TEST(test_m3_id_map_model_and_adapter_use_separate_spaces);
+    HU_RUN_TEST(test_m3_id_map_null_or_empty_inputs_return_zero);
+    HU_RUN_TEST(test_m3_id_map_persists_ids_across_reload);
+    HU_RUN_TEST(test_m3_id_map_save_is_noop_when_clean);
 
     /* Phase B1 redefined (2026-05-17 round 2): inference outcome capture
      * — ring buffer + structured per-call records the future training
