@@ -9,15 +9,27 @@
 /* ── Internal: relative-time formatter ──────────────────────────────────────
  * "30s", "8m", "3h", "2d" — fits in 8 chars.  Returns chars written. */
 static int format_relative(int64_t seconds, char *buf, size_t cap) {
+    /* Values are clamped (seconds<60, minutes<60, hours<24, days<10000)
+     * and stored in `int` before printing so GCC's -Wformat-truncation can
+     * reason about the maximum digit count without flagging the buffer. */
     if (seconds < 0)
         return snprintf(buf, cap, "?");
-    if (seconds < 60)
-        return snprintf(buf, cap, "%llds", (long long)seconds);
-    if (seconds < 3600)
-        return snprintf(buf, cap, "%lldm", (long long)(seconds / 60));
-    if (seconds < 86400)
-        return snprintf(buf, cap, "%lldh", (long long)(seconds / 3600));
-    return snprintf(buf, cap, "%lldd", (long long)(seconds / 86400));
+    if (seconds < 60) {
+        int s = (int)seconds; /* <60 — 2 digits max */
+        return snprintf(buf, cap, "%ds", s);
+    }
+    if (seconds < 3600) {
+        int m = (int)(seconds / 60); /* <60 */
+        return snprintf(buf, cap, "%dm", m);
+    }
+    if (seconds < 86400) {
+        int h = (int)(seconds / 3600); /* <24 */
+        return snprintf(buf, cap, "%dh", h);
+    }
+    int d = (int)(seconds / 86400);
+    if (d > 9999)
+        d = 9999; /* "9999d" worst case → 5 chars + NUL */
+    return snprintf(buf, cap, "%dd", d);
 }
 
 static const char *phase_label(hu_moment_phase_t p) {
