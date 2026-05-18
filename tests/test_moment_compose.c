@@ -41,6 +41,8 @@ static void compose_clamps_negative_delta_to_zero_on_clock_skew(void) {
                                   now + 60, /* their ts is in the future — bad clock */
                                   -1, NULL, now, &m);
     HU_ASSERT_EQ(m.time_since_their_last_msg_s, 0);
+    HU_ASSERT_TRUE(m.source_flags &
+                   HU_MOMENT_SRC_LAST_THEIR_TS); /* future ts is >= 0; bit must still set */
 }
 
 static void compose_keeps_minus_one_when_timestamp_missing(void) {
@@ -51,6 +53,63 @@ static void compose_keeps_minus_one_when_timestamp_missing(void) {
     HU_ASSERT_FALSE(m.source_flags & HU_MOMENT_SRC_LAST_THEIR_TS);
 }
 
+/* ---- Phase field tests (Task 1.3) ---- */
+
+/* 1779609600 = 2026-05-24T08:00:00Z (verified via Python datetime) */
+#define TS_8AM_UTC ((int64_t)1779609600)
+/* 1779591600 = 2026-05-24T03:00:00Z */
+#define TS_3AM_UTC ((int64_t)1779591600)
+
+/* phase_local always uses the machine's local TZ (NULL passed to phase_for_tz),
+   so we cannot assert specific phase values on phase_local without controlling
+   the test machine's timezone. Instead we exercise the hour→phase boundary
+   table deterministically via phase_theirs, which honors contact_tz when set. */
+
+static void compose_phase_theirs_is_morning_for_8am_in_contact_utc(void) {
+    /* 08:00 UTC falls in MORNING window (07:30–11:00) */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, "UTC", TS_8AM_UTC, &m);
+    HU_ASSERT_EQ(m.phase_theirs, HU_MOMENT_PHASE_MORNING);
+}
+
+static void compose_phase_theirs_is_deep_night_for_3am_in_contact_utc(void) {
+    /* 03:00 UTC falls in DEEP_NIGHT window (00:00–05:30) */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, "UTC", TS_3AM_UTC, &m);
+    HU_ASSERT_EQ(m.phase_theirs, HU_MOMENT_PHASE_DEEP_NIGHT);
+}
+
+static void compose_phase_theirs_uses_contact_tz_when_provided(void) {
+    /* 08:00 UTC = 01:00 PDT (America/Los_Angeles, UTC-7 in May).
+       Their phase should be DEEP_NIGHT; local (UTC) should be MORNING. */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, "America/Los_Angeles", TS_8AM_UTC, &m);
+    HU_ASSERT_EQ(m.phase_theirs, HU_MOMENT_PHASE_DEEP_NIGHT);
+    HU_ASSERT_TRUE(m.source_flags & HU_MOMENT_SRC_CONTACT_TZ);
+}
+
+static void compose_phase_theirs_falls_back_to_local_when_tz_unknown(void) {
+    /* No contact_tz → phase_theirs mirrors phase_local; flag not set. */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, NULL, TS_8AM_UTC, &m);
+    HU_ASSERT_EQ(m.phase_theirs, m.phase_local);
+    HU_ASSERT_FALSE(m.source_flags & HU_MOMENT_SRC_CONTACT_TZ);
+}
+
+static void compose_flags_unusual_hour_when_their_phase_is_deep_night(void) {
+    /* Their tz resolves to 01:00 → DEEP_NIGHT → unusual_hour = true */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, "America/Los_Angeles", TS_8AM_UTC, &m);
+    HU_ASSERT_TRUE(m.it_is_unusual_hour_for_them);
+}
+
+static void compose_does_not_flag_unusual_hour_when_their_phase_is_morning(void) {
+    /* Their tz = UTC → 08:00 → MORNING → unusual_hour = false */
+    hu_moment_t m = {0};
+    hu_moment_compose_from_inputs(NULL, NULL, NULL, -1, -1, "UTC", TS_8AM_UTC, &m);
+    HU_ASSERT_FALSE(m.it_is_unusual_hour_for_them);
+}
+
 void run_moment_compose_tests(void) {
     HU_TEST_SUITE("moment_compose");
     HU_RUN_TEST(compose_from_inputs_rejects_null_out);
@@ -58,4 +117,10 @@ void run_moment_compose_tests(void) {
     HU_RUN_TEST(compose_computes_time_since_their_last_when_provided);
     HU_RUN_TEST(compose_clamps_negative_delta_to_zero_on_clock_skew);
     HU_RUN_TEST(compose_keeps_minus_one_when_timestamp_missing);
+    HU_RUN_TEST(compose_phase_theirs_is_morning_for_8am_in_contact_utc);
+    HU_RUN_TEST(compose_phase_theirs_is_deep_night_for_3am_in_contact_utc);
+    HU_RUN_TEST(compose_phase_theirs_uses_contact_tz_when_provided);
+    HU_RUN_TEST(compose_phase_theirs_falls_back_to_local_when_tz_unknown);
+    HU_RUN_TEST(compose_flags_unusual_hour_when_their_phase_is_deep_night);
+    HU_RUN_TEST(compose_does_not_flag_unusual_hour_when_their_phase_is_morning);
 }
