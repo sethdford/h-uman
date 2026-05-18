@@ -70,6 +70,12 @@ typedef enum hu_error {
     HU_ERR_FLEET_SPAWN_CAP,
     HU_ERR_FLEET_BUDGET_EXCEEDED,
 
+    /* Sprint 42 / US-42.1: differential-privacy budget exhausted. The RDP
+     * accountant computed that the next training step would push cumulative
+     * (epsilon, delta) past the configured budget; the step was refused and
+     * no weight update was applied. */
+    HU_ERR_PRIVACY_BUDGET_EXHAUSTED,
+
     HU_ERR_COUNT
 } hu_error_t;
 

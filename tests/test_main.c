@@ -273,6 +273,7 @@ void run_w11_self_rag_tests(void);
 void run_w12_planner_tests(void);
 void run_w12_verifier_loop_tests(void);
 #ifdef HU_ENABLE_LEARNING
+void run_dp_sgd_tests(void);
 void run_w13_learner_tests(void);
 void run_w14_runners_tests(void);
 void run_learner_bridge_tests(void);
@@ -956,6 +957,7 @@ int main(int argc, char **argv) {
     run_w12_planner_tests();
     run_w12_verifier_loop_tests();
 #ifdef HU_ENABLE_LEARNING
+    run_dp_sgd_tests();
     run_w13_learner_tests();
     run_w14_runners_tests();
     run_learner_bridge_tests();

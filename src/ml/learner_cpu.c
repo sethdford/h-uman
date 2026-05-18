@@ -18,6 +18,7 @@
  * deterministic reference implementation). Until that wiring lands, the
  * CPU backend is the only available trainer. */
 
+#include "human/ml/dp_sgd.h"
 #include "human/ml/learner.h"
 
 #include <math.h>
@@ -52,19 +53,10 @@ static float prng_uniform(uint64_t *state) {
     return (float)v / (float)(1 << 23);
 }
 
-/* Box-Muller normal sample. Two uniforms → one normal; we waste the second
- * so the same call sequence is byte-identical across runs regardless of
- * how the caller batches. */
-static float prng_normal(uint64_t *state) {
-    /* Avoid log(0): clamp u1 away from zero. */
-    float u1 = (prng_uniform(state) + 1.0f) * 0.5f; /* (0, 1] */
-    if (u1 < 1e-7f)
-        u1 = 1e-7f;
-    float u2 = (prng_uniform(state) + 1.0f) * 0.5f;
-    float r = sqrtf(-2.0f * logf(u1));
-    float theta = 6.28318530717958647692f * u2;
-    return r * cosf(theta);
-}
+/* (Gaussian sampling formerly lived here as `prng_normal`. The DP-SGD path
+ * now delegates all Gaussian noise to hu_dp_sgd_step / hu_dp_rng_normal in
+ * src/ml/dp_sgd.c — the canonical translation unit. Pre-Sprint-42 inline
+ * noise has been removed; see US-42.1 design (R-CURRENT-IS-PER-BATCH).) */
 
 /* FNV-1a 64-bit. Used to project arbitrary text into a deterministic
  * floating-point target. */
@@ -87,8 +79,8 @@ static float hash_to_unit(uint64_t h) {
 /* Build a per-weight target vector from the signals. Each signal contributes
  * to every weight slot via FNV(signal_content, weight_index). The mean target
  * is what SGD pulls the weights toward. */
-static void compute_targets(const hu_training_signal_t *signals, size_t n,
-                            float *targets, size_t n_weights) {
+static void compute_targets(const hu_training_signal_t *signals, size_t n, float *targets,
+                            size_t n_weights) {
     if (n == 0) {
         for (size_t i = 0; i < n_weights; i++)
             targets[i] = 0.0f;
@@ -100,9 +92,9 @@ static void compute_targets(const hu_training_signal_t *signals, size_t n,
             uint64_t base;
             switch (signals[i].kind) {
             case HU_TRAIN_DPO_PAIR: {
-                uint64_t hp = fnv1a64(signals[i].as.dpo.preferred,
-                                      strnlen(signals[i].as.dpo.preferred,
-                                              sizeof(signals[i].as.dpo.preferred)));
+                uint64_t hp = fnv1a64(
+                    signals[i].as.dpo.preferred,
+                    strnlen(signals[i].as.dpo.preferred, sizeof(signals[i].as.dpo.preferred)));
                 uint64_t hd = fnv1a64(signals[i].as.dpo.dispreferred,
                                       strnlen(signals[i].as.dpo.dispreferred,
                                               sizeof(signals[i].as.dpo.dispreferred)));
@@ -119,17 +111,14 @@ static void compute_targets(const hu_training_signal_t *signals, size_t n,
                 base = fnv1a64(signals[i].as.persona.delta.value,
                                strnlen(signals[i].as.persona.delta.value,
                                        sizeof(signals[i].as.persona.delta.value)));
-                acc += (double)hash_to_unit(base ^
-                                            ((uint64_t)w * 0x9E3779B97F4A7C15ULL));
+                acc += (double)hash_to_unit(base ^ ((uint64_t)w * 0x9E3779B97F4A7C15ULL));
                 continue;
             case HU_TRAIN_CASE_OUTCOME: {
                 uint64_t cid = (uint64_t)signals[i].as.case_outcome.case_id;
                 base = fnv1a64(&cid, sizeof(cid));
                 /* Reward in [0,1] → contribution scaled to [-1, 1]. */
                 float r = signals[i].as.case_outcome.reward * 2.0f - 1.0f;
-                acc += (double)(hash_to_unit(base ^
-                                             ((uint64_t)w * 0x9E3779B97F4A7C15ULL)) *
-                                r);
+                acc += (double)(hash_to_unit(base ^ ((uint64_t)w * 0x9E3779B97F4A7C15ULL)) * r);
                 continue;
             }
             default:
@@ -140,6 +129,49 @@ static void compute_targets(const hu_training_signal_t *signals, size_t n,
     }
 }
 
+/* Per-signal target: the contribution of ONE signal to the per-weight target.
+ * This is required for the DP-SGD per-sample gradient path — true DP-SGD
+ * needs each sample's gradient to be clipped independently to clip_norm
+ * BEFORE summing. The previous implementation clipped one summed gradient
+ * across all signals, which is per-BATCH clipping, not per-sample. */
+static void compute_single_target(const hu_training_signal_t *s, float *targets, size_t n_weights) {
+    for (size_t w = 0; w < n_weights; w++) {
+        uint64_t base;
+        double val = 0.0;
+        switch (s->kind) {
+        case HU_TRAIN_DPO_PAIR: {
+            uint64_t hp = fnv1a64(s->as.dpo.preferred,
+                                  strnlen(s->as.dpo.preferred, sizeof(s->as.dpo.preferred)));
+            uint64_t hd = fnv1a64(s->as.dpo.dispreferred,
+                                  strnlen(s->as.dpo.dispreferred, sizeof(s->as.dpo.dispreferred)));
+            float fp = hash_to_unit(hp ^ ((uint64_t)w * 0x9E3779B97F4A7C15ULL));
+            float fd = hash_to_unit(hd ^ ((uint64_t)w * 0x9E3779B97F4A7C15ULL));
+            float weight = s->as.dpo.weight;
+            if (weight <= 0.0f)
+                weight = 1.0f;
+            val = (double)((fp - fd) * weight);
+            break;
+        }
+        case HU_TRAIN_PERSONA_DELTA:
+            base = fnv1a64(s->as.persona.delta.value,
+                           strnlen(s->as.persona.delta.value, sizeof(s->as.persona.delta.value)));
+            val = (double)hash_to_unit(base ^ ((uint64_t)w * 0x9E3779B97F4A7C15ULL));
+            break;
+        case HU_TRAIN_CASE_OUTCOME: {
+            uint64_t cid = (uint64_t)s->as.case_outcome.case_id;
+            base = fnv1a64(&cid, sizeof(cid));
+            float r = s->as.case_outcome.reward * 2.0f - 1.0f;
+            val = (double)(hash_to_unit(base ^ ((uint64_t)w * 0x9E3779B97F4A7C15ULL)) * r);
+            break;
+        }
+        default:
+            val = 0.0;
+            break;
+        }
+        targets[w] = (float)val;
+    }
+}
+
 static int64_t now_ms_monotonic(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
@@ -147,9 +179,8 @@ static int64_t now_ms_monotonic(void) {
     return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
 }
 
-static hu_error_t write_adapter_file(const char *path, const char *model_version,
-                                     uint32_t rank, const float *weights, size_t n_weights,
-                                     int64_t *out_bytes) {
+static hu_error_t write_adapter_file(const char *path, const char *model_version, uint32_t rank,
+                                     const float *weights, size_t n_weights, int64_t *out_bytes) {
     FILE *f = fopen(path, "wb");
     if (!f)
         return HU_ERR_IO;
@@ -227,7 +258,9 @@ io_err:
     return HU_ERR_IO;
 }
 
-static bool cpu_available(void) { return true; }
+static bool cpu_available(void) {
+    return true;
+}
 
 static void cpu_deinit(void *ctx) {
     hu_learner_cpu_ctx_t *c = (hu_learner_cpu_ctx_t *)ctx;
@@ -294,8 +327,8 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
     uint64_t prng = cfg->seed ? cfg->seed : 0xD1B54A32D192ED03ULL;
     /* Salt the seed with model_version so two adapters with different
      * model_version are not interchangeable. */
-    uint64_t mv_hash = fnv1a64(cfg->model_version,
-                               strnlen(cfg->model_version, sizeof(cfg->model_version)));
+    uint64_t mv_hash =
+        fnv1a64(cfg->model_version, strnlen(cfg->model_version, sizeof(cfg->model_version)));
     prng ^= mv_hash;
 
     for (size_t i = 0; i < n_weights; i++)
@@ -304,46 +337,99 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
     compute_targets(signals, signals_count, targets, n_weights);
 
     /* SGD loop. Each step: w_i -= lr * 2 * (w_i - target_i).
-     * With DP-SGD: (1) clip per-sample gradient to max norm, then
-     * (2) add calibrated Gaussian noise scaled by (clip_norm / epsilon). */
+     *
+     * DP-SGD path: per-sample gradients (one row per signal) are clipped
+     * INDEPENDENTLY to clip_norm BEFORE summation — the only way to bound
+     * any one sample's contribution to the released sum. The canonical
+     * implementation lives in src/ml/dp_sgd.c (hu_dp_sgd_step). This
+     * backend MUST delegate; it MUST NOT compute its own grad_norm or
+     * noise locally. Pinned by AC-42.1.4 call-counter and by grep at
+     * review time. */
     int max_steps = cfg->max_steps > 0 ? cfg->max_steps : 1;
     float lr = cfg->learning_rate;
-    float clip_norm = cfg->dp_clip_norm > 0.0f ? cfg->dp_clip_norm : 1.0f;
+    double clip_norm = cfg->dp_clip_norm > 0.0f ? (double)cfg->dp_clip_norm : 1.0;
     int64_t deadline = -1;
     if (cfg->budget_ms > 0)
         deadline = now_ms_monotonic() + cfg->budget_ms;
+
+    /* For the DP path we need a row-per-sample buffer. We treat each
+     * signal as one "sample"; if there are no signals we synthesize one
+     * dummy sample so the per-sample-clip contract is still satisfied. */
+    size_t n_samples = signals_count > 0 ? signals_count : 1;
+    float *per_sample_targets = NULL;
+    float *per_sample_grads = NULL;
+    float *avg_grad = NULL;
+    hu_dp_rng_t dp_rng;
+    double noise_multiplier = 0.0;
+    if (cfg->dp_enabled) {
+        per_sample_targets =
+            (float *)c->alloc->alloc(c->alloc->ctx, n_samples * n_weights * sizeof(float));
+        per_sample_grads =
+            (float *)c->alloc->alloc(c->alloc->ctx, n_samples * n_weights * sizeof(float));
+        avg_grad = (float *)c->alloc->alloc(c->alloc->ctx, n_weights * sizeof(float));
+        if (!per_sample_targets || !per_sample_grads || !avg_grad) {
+            if (per_sample_targets)
+                c->alloc->free(c->alloc->ctx, per_sample_targets,
+                               n_samples * n_weights * sizeof(float));
+            if (per_sample_grads)
+                c->alloc->free(c->alloc->ctx, per_sample_grads,
+                               n_samples * n_weights * sizeof(float));
+            if (avg_grad)
+                c->alloc->free(c->alloc->ctx, avg_grad, n_weights * sizeof(float));
+            c->alloc->free(c->alloc->ctx, weights, n_weights * sizeof(float));
+            c->alloc->free(c->alloc->ctx, targets, n_weights * sizeof(float));
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        for (size_t s = 0; s < n_samples; s++) {
+            float *row = per_sample_targets + s * n_weights;
+            if (signals_count > 0) {
+                compute_single_target(&signals[s], row, n_weights);
+            } else {
+                for (size_t w = 0; w < n_weights; w++)
+                    row[w] = 0.0f;
+            }
+        }
+        hu_dp_rng_seed(&dp_rng, prng);
+        /* Translate the legacy (epsilon-per-step) config into a noise
+         * multiplier. The legacy formula was sigma = clip / epsilon; the
+         * canonical formula is sigma = noise_multiplier * clip. Therefore
+         * noise_multiplier = 1 / epsilon. */
+        noise_multiplier = 1.0 / (double)cfg->dp_epsilon;
+    }
 
     int steps = 0;
     double loss = 0.0;
     for (steps = 0; steps < max_steps; steps++) {
         loss = 0.0;
         if (cfg->dp_enabled) {
-            /* DP-SGD step: compute gradient, clip, then add noise. */
-            double grad_norm_sq = 0.0;
-            for (size_t i = 0; i < n_weights; i++) {
-                float diff = weights[i] - targets[i];
-                loss += (double)(diff * diff);
-                float grad = 2.0f * diff;
-                targets[i] = grad; /* temporarily stash gradient in targets */
-                grad_norm_sq += (double)(grad * grad);
+            /* Per-sample gradients: each row is 2*(weights - target_s). */
+            for (size_t s = 0; s < n_samples; s++) {
+                const float *t_row = per_sample_targets + s * n_weights;
+                float *g_row = per_sample_grads + s * n_weights;
+                for (size_t i = 0; i < n_weights; i++) {
+                    float diff = weights[i] - t_row[i];
+                    g_row[i] = 2.0f * diff;
+                    loss += (double)(diff * diff);
+                }
             }
-            loss /= (double)n_weights;
+            loss /= (double)(n_samples * n_weights);
 
-            /* Per-sample gradient clipping. */
-            float grad_norm = (float)sqrt(grad_norm_sq);
-            float scale = 1.0f;
-            if (grad_norm > clip_norm)
-                scale = clip_norm / grad_norm;
-
-            float noise_sigma = clip_norm / cfg->dp_epsilon;
-            for (size_t i = 0; i < n_weights; i++) {
-                float clipped = targets[i] * scale;
-                float noise = prng_normal(&prng) * noise_sigma;
-                weights[i] -= lr * (clipped + noise);
+            /* Delegate clip+noise+average to the canonical implementation. */
+            hu_error_t cse = hu_dp_sgd_step(per_sample_grads, n_samples, n_weights, clip_norm,
+                                            noise_multiplier, &dp_rng, avg_grad);
+            if (cse != HU_OK) {
+                c->alloc->free(c->alloc->ctx, per_sample_targets,
+                               n_samples * n_weights * sizeof(float));
+                c->alloc->free(c->alloc->ctx, per_sample_grads,
+                               n_samples * n_weights * sizeof(float));
+                c->alloc->free(c->alloc->ctx, avg_grad, n_weights * sizeof(float));
+                c->alloc->free(c->alloc->ctx, weights, n_weights * sizeof(float));
+                c->alloc->free(c->alloc->ctx, targets, n_weights * sizeof(float));
+                return cse;
             }
-
-            /* Restore targets for next step. */
-            compute_targets(signals, signals_count, targets, n_weights);
+            for (size_t i = 0; i < n_weights; i++) {
+                weights[i] -= lr * avg_grad[i];
+            }
         } else {
             for (size_t i = 0; i < n_weights; i++) {
                 float diff = weights[i] - targets[i];
@@ -356,6 +442,12 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
         if (deadline > 0 && now_ms_monotonic() >= deadline)
             break;
     }
+
+    if (cfg->dp_enabled) {
+        c->alloc->free(c->alloc->ctx, per_sample_targets, n_samples * n_weights * sizeof(float));
+        c->alloc->free(c->alloc->ctx, per_sample_grads, n_samples * n_weights * sizeof(float));
+        c->alloc->free(c->alloc->ctx, avg_grad, n_weights * sizeof(float));
+    }
     /* Loop variable `steps` may have been incremented past completion;
      * cap at max_steps for the report. */
     if (steps > max_steps)
@@ -365,7 +457,7 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
 
     int64_t bytes = 0;
     hu_error_t e = write_adapter_file(cfg->adapter_output_path, cfg->model_version,
-                                       (uint32_t)cfg->rank, weights, n_weights, &bytes);
+                                      (uint32_t)cfg->rank, weights, n_weights, &bytes);
     if (e != HU_OK) {
         /* adapter_output_path is up to 256 bytes; last_error is 128. */
         snprintf(out_report->last_error, sizeof(out_report->last_error),
@@ -389,8 +481,7 @@ const hu_learner_vtable_t hu_learner_cpu_vtable = {
 hu_error_t hu_learner_cpu_open(hu_allocator_t *alloc, void **out_ctx) {
     if (!alloc || !out_ctx)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_learner_cpu_ctx_t *c =
-        (hu_learner_cpu_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+    hu_learner_cpu_ctx_t *c = (hu_learner_cpu_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
         return HU_ERR_OUT_OF_MEMORY;
     c->alloc = alloc;

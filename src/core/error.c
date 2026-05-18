@@ -53,6 +53,7 @@ static const char *error_strings[] = {
     [HU_ERR_FLEET_DEPTH_EXCEEDED] = "fleet spawn depth limit exceeded",
     [HU_ERR_FLEET_SPAWN_CAP] = "fleet total spawn limit exceeded",
     [HU_ERR_FLEET_BUDGET_EXCEEDED] = "fleet budget exceeded",
+    [HU_ERR_PRIVACY_BUDGET_EXHAUSTED] = "differential-privacy budget exhausted",
 };
 
 const char *hu_error_string(hu_error_t err) {
