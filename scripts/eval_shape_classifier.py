@@ -63,19 +63,61 @@ MARKDOWN_PATTERNS = [
     (re.compile(r"```"), "code-fence"),
 ]
 
-# Length thresholds for iMessage. Real human texts on iMessage are
-# almost always under 250 chars (per persona overlay: "Default 5-15
-# words. When deep: 20-60 words across 1-2 sentences").
-TOO_LONG_CHARS = 250
-WAY_TOO_LONG_CHARS = 500
+# Per-channel length and markdown thresholds. Real human texts on
+# iMessage are almost always under 250 chars; Slack tolerates markdown
+# and longer threads; email needs greetings and paragraphs.
+# 2026-05-18 audit (M5): added per-channel mode so the classifier
+# applies the right shape rules for each medium.
+CHANNEL_RULES = {
+    "imessage": {
+        "too_long": 250,
+        "way_too_long": 500,
+        "markdown_allowed": False,
+        "ai_openers_allowed": False,
+    },
+    "telegram": {
+        "too_long": 350,
+        "way_too_long": 700,
+        "markdown_allowed": False,
+        "ai_openers_allowed": False,
+    },
+    "discord": {
+        "too_long": 500,
+        "way_too_long": 1200,
+        "markdown_allowed": True,   # Discord supports markdown natively
+        "ai_openers_allowed": False,
+    },
+    "slack": {
+        "too_long": 800,
+        "way_too_long": 2000,
+        "markdown_allowed": True,   # Slack workflows use markdown
+        "ai_openers_allowed": False,  # still no "Depending on" garbage
+    },
+    "email": {
+        "too_long": 2000,
+        "way_too_long": 5000,
+        "markdown_allowed": True,
+        "ai_openers_allowed": True,  # emails sometimes do open formally
+    },
+}
+# Default = strictest (iMessage). Most eval suites are iMessage-style.
+DEFAULT_RULES = CHANNEL_RULES["imessage"]
+TOO_LONG_CHARS = DEFAULT_RULES["too_long"]
+WAY_TOO_LONG_CHARS = DEFAULT_RULES["way_too_long"]
 
 
-def classify(response: str) -> dict:
-    """Return {pass, score, fails} for a response under iMessage shape rules.
+def classify(response: str, channel: str = "imessage") -> dict:
+    """Return {pass, score, fails} for a response under channel-specific shape rules.
 
     score is in [0, 1] where 1 = perfect in-voice, 0 = canonical AI-assistant.
     fails is a list of named violations for explainability.
+    channel: one of CHANNEL_RULES keys (imessage, telegram, discord, slack, email).
     """
+    rules = CHANNEL_RULES.get(channel, DEFAULT_RULES)
+    too_long = rules["too_long"]
+    way_too_long = rules["way_too_long"]
+    markdown_allowed = rules["markdown_allowed"]
+    ai_openers_allowed = rules["ai_openers_allowed"]
     if response is None:
         return {"pass": False, "score": 0.0, "fails": ["null-response"], "len": 0}
     response = response.strip()
@@ -84,22 +126,24 @@ def classify(response: str) -> dict:
 
     fails = []
 
-    # Length checks
+    # Length checks (channel-specific)
     n = len(response)
-    if n > WAY_TOO_LONG_CHARS:
-        fails.append(f"way-too-long ({n} chars)")
-    elif n > TOO_LONG_CHARS:
-        fails.append(f"too-long ({n} chars)")
+    if n > way_too_long:
+        fails.append(f"way-too-long ({n} chars, channel={channel})")
+    elif n > too_long:
+        fails.append(f"too-long ({n} chars, channel={channel})")
 
-    # AI-assistant tells
-    for pat, name in AI_ASSISTANT_PATTERNS:
-        if pat.search(response):
-            fails.append(name)
+    # AI-assistant tells (skip for email which sometimes legitimately opens formally)
+    if not ai_openers_allowed:
+        for pat, name in AI_ASSISTANT_PATTERNS:
+            if pat.search(response):
+                fails.append(name)
 
-    # Markdown tells
-    for pat, name in MARKDOWN_PATTERNS:
-        if pat.search(response):
-            fails.append(name)
+    # Markdown tells (skip for channels that natively support markdown)
+    if not markdown_allowed:
+        for pat, name in MARKDOWN_PATTERNS:
+            if pat.search(response):
+                fails.append(name)
 
     # Score: start at 1.0, subtract per-fail penalty, clamp to [0, 1]
     # Heavy violations (way-too-long, markdown lists) get 0.3 each.
