@@ -278,9 +278,12 @@ static hu_error_t build_get_updates_body(hu_allocator_t *alloc, int64_t offset,
     if (err)
         return err;
     char num[128];
+    /* allowed_updates MUST include "message_reaction" or the Bot API
+     * silently drops these updates. See telegram_reactions.c for the
+     * downstream handler. */
     int n = snprintf(num, sizeof(num),
                      "{\"offset\":%lld,\"timeout\":%u,"
-                     "\"allowed_updates\":[\"message\"]}",
+                     "\"allowed_updates\":[\"message\",\"message_reaction\"]}",
                      (long long)offset, timeout_secs);
     if (n < 0 || (size_t)n >= sizeof(num)) {
         err = HU_ERR_INTERNAL;
@@ -1354,6 +1357,22 @@ hu_error_t hu_telegram_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         hu_json_value_t *uid = hu_json_object_get(up, "update_id");
         if (uid && uid->type == HU_JSON_NUMBER) {
             c->last_update_id = (int64_t)uid->data.number + 1;
+        }
+
+        /* message_reaction branch — must run BEFORE the message field
+         * check below, otherwise this update is silently dropped. The
+         * dispatch lives in src/channels/telegram_reactions.c to avoid
+         * an enum-name collision between human/channels/reaction_event.h
+         * and human/channel.h. See breadcrumb in that file. */
+        {
+            char bot_id_str[32];
+            snprintf(bot_id_str, sizeof(bot_id_str), "%lld", (long long)c->bot_user_id);
+            extern int hu_telegram_dispatch_reaction_from_update(const hu_json_value_t *up,
+                                                                 const char *bot_user_id);
+            if (hu_telegram_dispatch_reaction_from_update(up,
+                                                          c->bot_user_id > 0 ? bot_id_str : NULL)) {
+                continue;
+            }
         }
 
         hu_json_value_t *msg_obj = hu_json_object_get(up, "message");

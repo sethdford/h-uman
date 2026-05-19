@@ -293,9 +293,17 @@ if(HU_ENABLE_CLI)
 endif()
 if(HU_ENABLE_TELEGRAM)
     list(APPEND CHANNEL_SOURCES src/channels/telegram.c)
+    # Phase 2 of docs/plans/2026-05-18-imessage-sota.md: message_reaction
+    # dispatch lives in its own TU to avoid the hu_reaction_type_t (channel.h)
+    # ↔ hu_reaction_kind_t (reaction_event.h) enumerator collision — same
+    # pattern as slack_reactions.c and imessage_reactions.c.
+    list(APPEND CHANNEL_SOURCES src/channels/telegram_reactions.c)
 endif()
 if(HU_ENABLE_DISCORD)
     list(APPEND CHANNEL_SOURCES src/channels/discord.c)
+    # Phase 2: MESSAGE_REACTION_ADD/REMOVE dispatch. Same enum-collision
+    # constraint as telegram_reactions / slack_reactions / imessage_reactions.
+    list(APPEND CHANNEL_SOURCES src/channels/discord_reactions.c)
 endif()
 if(HU_ENABLE_SLACK)
     list(APPEND CHANNEL_SOURCES src/channels/slack.c)
@@ -457,6 +465,10 @@ set(HU_CORE_SOURCES
     src/core/string.c
     src/core/io_secure.c
     src/core/json.c
+    # Phase 3 of docs/plans/2026-05-18-imessage-sota.md: pure-C bplist00
+    # parser. Used by imessage_ingest.c extractors for audio transcripts
+    # and edit-chain history. No external deps.
+    src/util/bplist.c
     src/core/http.c
     src/core/vertex_auth.c
     src/core/process_util.c
@@ -3291,6 +3303,13 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_ingest.c)
 # asserts personal_model state mutates. Internally guarded by
 # HU_HAS_IMESSAGE + HU_ENABLE_SQLITE; stub runner on other build variants.
 list(APPEND HU_TEST_SOURCES tests/test_imessage_personal_model_e2e.c)
+# Phase 3: bplist00 parser tests. Pure-C, no gates needed.
+list(APPEND HU_TEST_SOURCES tests/test_bplist.c)
+# Phase 2 of docs/plans/2026-05-18-imessage-sota.md: cross-channel reaction
+# emit paths for Discord + Telegram. Internal #ifdef HU_HAS_* guards with
+# stub runners per .claude/rules/test-source-gate-symmetry.md.
+list(APPEND HU_TEST_SOURCES tests/test_discord_reactions.c)
+list(APPEND HU_TEST_SOURCES tests/test_telegram_reactions.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
 # (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)

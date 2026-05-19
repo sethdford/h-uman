@@ -134,6 +134,36 @@ hu_error_t hu_imessage_ingest_balloon(struct hu_personal_model *model, const cha
                                       const char *detail, int64_t timestamp_unix,
                                       bool in_group_chat);
 
+/* ── Phase 3: bplist payload extractors ───────────────────────────────
+ *
+ * These read raw bplist00 blobs from chat.db columns (payload_data for
+ * voice messages, message_summary_info for edits). They use the
+ * dependency-free hu_bplist parser in src/util/bplist.c. */
+
+/* Extract the auto-transcribed text from a voice-message payload_data
+ * plist. Voice messages carry their Speech-recognizer transcript under
+ * either "transcribed_text" (older iOS) or "transcription" (newer iOS).
+ * Returns bytes written to `out` (excluding NUL), or 0 if neither key
+ * is present, the blob is malformed, or any argument is invalid. */
+size_t hu_imessage_extract_audio_transcript(const unsigned char *payload_blob, size_t payload_len,
+                                            char *out, size_t cap);
+
+/* Extract the edit chain from a message_summary_info plist. Apple
+ * stores per-part edit histories under the "ec" key as a dict keyed by
+ * part-index strings ("0", "1", ...). Each part value is an array of
+ * edit-event dicts whose "t" key holds the historical text (either a
+ * raw string or a typedstream blob extractable via
+ * hu_imessage_extract_attributed_body).
+ *
+ * This function flattens ALL parts' histories into one ordered list
+ * (part 0 first, oldest-edit first). Writes each entry into
+ * out_buf[i * entry_cap], NUL-terminated and truncated to entry_cap-1
+ * bytes. Returns the number of entries written, capped at
+ * out_count_max. Returns 0 if no edits are present or the blob fails
+ * to parse. */
+size_t hu_imessage_extract_edit_chain(const unsigned char *summary_blob, size_t summary_len,
+                                      char *out_buf, size_t out_count_max, size_t entry_cap);
+
 #ifdef __cplusplus
 }
 #endif
