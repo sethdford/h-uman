@@ -694,6 +694,19 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
     out->pass_rate =
         (out->results_count > 0) ? (double)out->passed / (double)out->results_count : 1.0;
 
+    /* 2026-05-18 (B2 fix): aggregate per-task elapsed_ms into
+     * total_elapsed_ms. Previously this field was always 0 in reports
+     * because no one summed it — the field existed in the struct, was
+     * serialized to JSON, persisted to SQLite, and parsed back, but
+     * never CALCULATED. Made every eval report read "elapsed_ms: 0"
+     * which masked the throughput bottleneck during the persona-eval
+     * audit chain. */
+    out->total_elapsed_ms = 0;
+    for (size_t i = 0; i < out->results_count; i++) {
+        if (out->results[i].elapsed_ms > 0)
+            out->total_elapsed_ms += out->results[i].elapsed_ms;
+    }
+
     out->suite_name = suite->name ? hu_strdup(alloc, suite->name) : hu_strndup(alloc, "eval", 4);
     if (!out->suite_name) {
         hu_eval_run_free(alloc, out);
