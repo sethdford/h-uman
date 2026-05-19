@@ -145,6 +145,24 @@ def classify(response: str, channel: str = "imessage") -> dict:
             if pat.search(response):
                 fails.append(name)
 
+    # M5: excessive emoji — count F0 9F xx xx UTF-8 sequences (most
+    # emoji code points). Threshold mirrors src/eval/shape.c: flag when
+    # emoji count * 30 > response length.
+    try:
+        utf8 = response.encode("utf-8")
+        emoji_count = 0
+        i = 0
+        while i + 3 < len(utf8):
+            if utf8[i] == 0xF0 and utf8[i + 1] == 0x9F:
+                emoji_count += 1
+                i += 4
+            else:
+                i += 1
+        if len(response) > 0 and emoji_count * 30 > len(response):
+            fails.append("excessive-emoji")
+    except Exception:
+        pass
+
     # Score: start at 1.0, subtract per-fail penalty, clamp to [0, 1]
     # Heavy violations (way-too-long, markdown lists) get 0.3 each.
     # Light violations (mild openers) get 0.15 each.

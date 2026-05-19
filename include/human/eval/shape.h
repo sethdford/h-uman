@@ -44,21 +44,28 @@ typedef struct hu_shape_result {
 
 /* Per-fail bit flags. Use these to attribute which rules a response
  * violated when displaying results to humans. */
-#define HU_SHAPE_FAIL_NULL_RESPONSE  0x0001
-#define HU_SHAPE_FAIL_EMPTY_RESPONSE 0x0002
-#define HU_SHAPE_FAIL_TOO_LONG       0x0004
-#define HU_SHAPE_FAIL_WAY_TOO_LONG   0x0008
-#define HU_SHAPE_FAIL_BULLET_LIST    0x0010
-#define HU_SHAPE_FAIL_NUMBERED_LIST  0x0020
-#define HU_SHAPE_FAIL_HEADER         0x0040
-#define HU_SHAPE_FAIL_BOLD_MARKDOWN  0x0080
-#define HU_SHAPE_FAIL_CODE_FENCE     0x0100
-#define HU_SHAPE_FAIL_DEPENDING_ON   0x0200
-#define HU_SHAPE_FAIL_HERE_ARE       0x0400
-#define HU_SHAPE_FAIL_CERTAINLY      0x0800
-#define HU_SHAPE_FAIL_ABSOLUTELY     0x1000
-#define HU_SHAPE_FAIL_GREAT_QUESTION 0x2000
-#define HU_SHAPE_FAIL_I_UNDERSTAND   0x4000
+#define HU_SHAPE_FAIL_NULL_RESPONSE   0x0001
+#define HU_SHAPE_FAIL_EMPTY_RESPONSE  0x0002
+#define HU_SHAPE_FAIL_TOO_LONG        0x0004
+#define HU_SHAPE_FAIL_WAY_TOO_LONG    0x0008
+#define HU_SHAPE_FAIL_BULLET_LIST     0x0010
+#define HU_SHAPE_FAIL_NUMBERED_LIST   0x0020
+#define HU_SHAPE_FAIL_HEADER          0x0040
+#define HU_SHAPE_FAIL_BOLD_MARKDOWN   0x0080
+#define HU_SHAPE_FAIL_CODE_FENCE      0x0100
+#define HU_SHAPE_FAIL_DEPENDING_ON    0x0200
+#define HU_SHAPE_FAIL_HERE_ARE        0x0400
+#define HU_SHAPE_FAIL_CERTAINLY       0x0800
+#define HU_SHAPE_FAIL_ABSOLUTELY      0x1000
+#define HU_SHAPE_FAIL_GREAT_QUESTION  0x2000
+#define HU_SHAPE_FAIL_I_UNDERSTAND    0x4000
+#define HU_SHAPE_FAIL_EXCESSIVE_EMOJI 0x8000 /* M5: seth.json says ZERO emoji on most msgs */
+
+/* M9: compile-time guard against bit-flag exhaustion. If the highest
+ * fail flag exceeds 31 bits we'd silently corrupt masking in shape.c.
+ * Update this bound when adding a flag. */
+_Static_assert(HU_SHAPE_FAIL_EXCESSIVE_EMOJI < (1u << 31),
+               "HU_SHAPE_FAIL_* exhausted 31-bit range — widen shape_fails or split");
 
 /* Map a channel name string (case-insensitive) to the enum. Falls
  * back to HU_SHAPE_CHANNEL_IMESSAGE (strictest) for unknown channels. */
