@@ -26,6 +26,7 @@ void run_log_once_tests(void);
 void run_io_secure_tests(void);
 void run_slice_tests(void);
 void run_memory_tests(void);
+void run_w7_render_null_safety_tests(void);
 void run_sql_transaction_tests(void);
 void run_memory_util_tests(void);
 void run_tunnel_tests(void);
@@ -60,6 +61,14 @@ void run_imessage_ingest_tests(void);
 void run_imessage_personal_model_e2e_tests(void);
 /* Phase 3: bplist00 parser tests (pure-C, no platform gates). */
 void run_bplist_tests(void);
+/* Phase 3 completion: daemon iMessage observer tick. */
+void run_imessage_observer_tests(void);
+/* Phase 6: schema-version probe + drift canary. */
+void run_imessage_schema_tests(void);
+/* Phase 4: typedstream attribute-run parser tests. */
+void run_typedstream_tests(void);
+/* Phase 5: per-balloon payload decoder tests + privacy contracts. */
+void run_imessage_balloon_decode_tests(void);
 /* Phase 2 cross-channel reaction emit: Discord MESSAGE_REACTION_ADD/REMOVE. */
 void run_discord_reactions_tests(void);
 /* Phase 2 cross-channel reaction emit: Telegram message_reaction diff. */
@@ -785,6 +794,7 @@ int main(int argc, char **argv) {
     run_io_secure_tests();
     run_slice_tests();
     run_memory_tests();
+    run_w7_render_null_safety_tests();
     run_sql_transaction_tests();
     run_memory_util_tests();
     run_tunnel_tests();
@@ -813,6 +823,10 @@ int main(int argc, char **argv) {
     run_imessage_ingest_tests();
     run_imessage_personal_model_e2e_tests();
     run_bplist_tests();
+    run_imessage_observer_tests();
+    run_imessage_schema_tests();
+    run_typedstream_tests();
+    run_imessage_balloon_decode_tests();
     run_discord_reactions_tests();
     run_telegram_reactions_tests();
     run_slack_reactions_tests();
