@@ -543,6 +543,7 @@ static const hu_command_t commands[] = {
 #endif
     {"research", "Run research agent", cmd_research},
     {"calibrate", "Analyze messaging patterns and calibrate persona", cmd_calibrate},
+    {"drafts", "Generate predictive draft suggestions for a contact", cmd_drafts},
     {"workspace", "Workspace management", cmd_workspace},
     {"config", "Configuration reference (schema)", cmd_config},
     {"schedule", "Manage scheduled messages (list, add, cancel)", cmd_schedule},

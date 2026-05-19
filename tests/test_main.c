@@ -84,6 +84,8 @@ void run_persona_social_insights_tests(void);
 void run_personal_model_topics_from_reactions_tests(void);
 /* Calibrate-with-reactions (Tier 1 #2). */
 void run_calibration_reactions_tests(void);
+/* Predictive draft suggestions (Sprint 1 Story 1). */
+void run_predictive_drafts_tests(void);
 /* Phase 2 cross-channel reaction emit: Discord MESSAGE_REACTION_ADD/REMOVE. */
 void run_discord_reactions_tests(void);
 /* Phase 2 cross-channel reaction emit: Telegram message_reaction diff. */
@@ -363,6 +365,7 @@ void run_weather_awareness_tests(void);
 void run_timing_tests(void);
 void run_calibration_tests(void);
 void run_calibration_reactions_tests(void);
+void run_predictive_drafts_tests(void);
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
 void run_activation_steering_tests(void);
@@ -850,6 +853,7 @@ int main(int argc, char **argv) {
     run_persona_social_insights_tests();
     run_personal_model_topics_from_reactions_tests();
     run_calibration_reactions_tests();
+    run_predictive_drafts_tests();
     run_discord_reactions_tests();
     run_telegram_reactions_tests();
     run_slack_reactions_tests();
@@ -1120,6 +1124,7 @@ int main(int argc, char **argv) {
     run_timing_tests();
     run_calibration_tests();
     run_calibration_reactions_tests();
+    run_predictive_drafts_tests();
     run_behavioral_clone_tests();
     run_governor_tests();
     run_activation_steering_tests();

@@ -746,6 +746,7 @@ set(HU_CORE_SOURCES
     src/calibration/calibrate.c
     src/calibration/clone.c
     src/calibration/ab_compare.c
+    src/predictive/drafts.c
     src/context/context_ext.c
     src/agent/episodic.c
     src/agent/reflection.c
@@ -3196,6 +3197,7 @@ set(HU_TEST_SOURCES
     tests/test_timing.c
     tests/test_calibration.c
     tests/test_calibration_reactions.c
+    tests/test_predictive_drafts.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
     tests/test_activation_steering.c
