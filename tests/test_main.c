@@ -72,6 +72,8 @@ void run_whatsapp_reactions_tests(void);
 void run_matrix_reactions_tests(void);
 /* SQLite-backed reaction_handler lookup store. */
 void run_reaction_handler_lookup_store_tests(void);
+/* Conversation-gap classifier (Tier 1 #3 of better-than-human plan). */
+void run_imessage_gaps_tests(void);
 /* Phase 2 cross-channel reaction emit: Discord MESSAGE_REACTION_ADD/REMOVE. */
 void run_discord_reactions_tests(void);
 /* Phase 2 cross-channel reaction emit: Telegram message_reaction diff. */
@@ -830,6 +832,7 @@ int main(int argc, char **argv) {
     run_whatsapp_reactions_tests();
     run_matrix_reactions_tests();
     run_reaction_handler_lookup_store_tests();
+    run_imessage_gaps_tests();
     run_discord_reactions_tests();
     run_telegram_reactions_tests();
     run_slack_reactions_tests();

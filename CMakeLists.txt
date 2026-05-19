@@ -386,6 +386,11 @@ if(HU_ENABLE_IMESSAGE)
     # Privacy contracts pinned in tests: never reads amount/currency or
     # latitude/longitude keys.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_balloon_decode.c)
+    # Tier 1 #3 from docs/plans/2026-05-19-better-than-human.md:
+    # conversation-gap detection — surfaces previously-active contacts
+    # who have gone silent, for proactive-outreach prompting. Pure
+    # classifier + SQL scanner (gated under HU_IS_TEST).
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_gaps.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -3355,6 +3360,8 @@ list(APPEND HU_TEST_SOURCES tests/test_matrix_reactions.c)
 # SQLite-backed lookup store for reaction_handler (closes the 256-entry
 # in-memory ring gap; under HU_IS_TEST stays in-memory for determinism).
 list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_lookup_store.c)
+# Conversation-gap classifier tests.
+list(APPEND HU_TEST_SOURCES tests/test_imessage_gaps.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
 # (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
