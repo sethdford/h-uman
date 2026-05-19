@@ -115,11 +115,14 @@
 #define HU_WEB_FETCH_MAX_CHARS 100000
 
 /* Honest tool-registry counters (see include/human/tools/factory.h).
- * Process-lifetime; test seam resets via hu_tools_factory_reset_honesty_counters. */
+ * Process-lifetime; test seam resets via hu_tools_factory_reset_honesty_counters.
+ * atomic_bool guards (not plain int) so concurrent factory creation across
+ * threads only emits one warn per process; matches the hu_log_info_once
+ * contract from include/human/core/log.h. */
 static unsigned g_factory_twitter_skipped_count = 0;
 static unsigned g_factory_lsp_skipped_count = 0;
-static int g_factory_twitter_warned_once = 0;
-static int g_factory_lsp_warned_once = 0;
+static atomic_bool g_factory_twitter_warned_once = false;
+static atomic_bool g_factory_lsp_warned_once = false;
 
 unsigned hu_tools_factory_twitter_skipped_count(void) {
     return g_factory_twitter_skipped_count;
@@ -132,8 +135,8 @@ unsigned hu_tools_factory_lsp_skipped_count(void) {
 void hu_tools_factory_reset_honesty_counters(void) {
     g_factory_twitter_skipped_count = 0;
     g_factory_lsp_skipped_count = 0;
-    g_factory_twitter_warned_once = 0;
-    g_factory_lsp_warned_once = 0;
+    atomic_store(&g_factory_twitter_warned_once, false);
+    atomic_store(&g_factory_lsp_warned_once, false);
 }
 
 /* Predicate: are twitter API credentials configured?
@@ -172,10 +175,12 @@ static bool hu_twitter_credentials_available(const hu_config_t *config) {
 #endif
 #define HU_TOOLS_WEBHOOK_COUNT       3 /* webhook_register, webhook_poll, webhook_list */
 #define HU_TOOLS_DB_INTROSPECT_COUNT 1 /* db_introspect */
-/* Base: 59 (core tools incl. lsp + tool_search + 3 media gen) + 5 (ask_user + 4 task tools) + 1
- * (db_introspect) + cron - 1 (skill_run conditional) + persona + cartesia + webhook */
+/* Base: 58 (core tools + tool_search + 3 media gen, lsp deregistered 2026-05-19) +
+ * 5 (ask_user + 4 task tools) + 1 (db_introspect) + cron - 1 (skill_run conditional) +
+ * persona + cartesia + webhook. Twitter may also be skipped at runtime via the
+ * hu_twitter_credentials_available() predicate; the allocation tolerates over-count. */
 #define HU_TOOLS_COUNT_BASE                                                                     \
-    (59 + 5 + HU_TOOLS_DB_INTROSPECT_COUNT + HU_TOOLS_CRON_COUNT - 1 + HU_TOOLS_PERSONA_COUNT + \
+    (58 + 5 + HU_TOOLS_DB_INTROSPECT_COUNT + HU_TOOLS_CRON_COUNT - 1 + HU_TOOLS_PERSONA_COUNT + \
      HU_TOOLS_CARTESIA_COUNT + HU_TOOLS_WEBHOOK_COUNT)
 #ifdef HU_HAS_TOOLS_BROWSER
 #define HU_TOOLS_BROWSER_COUNT 3
@@ -621,13 +626,10 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
         idx++;
     } else {
         g_factory_twitter_skipped_count++;
-        if (!g_factory_twitter_warned_once) {
-            g_factory_twitter_warned_once = 1;
-            hu_log_info("tools/factory", NULL,
-                        "twitter tool not registered: twitter API credentials "
-                        "missing from config.twitter (set bearer_token, api_key, "
-                        "or access_token to activate)");
-        }
+        hu_log_info_once(&g_factory_twitter_warned_once, "tools/factory", NULL,
+                         "twitter tool not registered: twitter API credentials "
+                         "missing from config.twitter (set bearer_token, api_key, "
+                         "or access_token to activate)");
     }
 
     err = hu_gcloud_create(alloc, policy, &tools[idx]);
@@ -678,12 +680,9 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
      * source file remains on disk for a future chip to flesh out, but it must
      * not be exposed to agents as if it worked. */
     g_factory_lsp_skipped_count++;
-    if (!g_factory_lsp_warned_once) {
-        g_factory_lsp_warned_once = 1;
-        hu_log_info("tools/factory", NULL,
-                    "lsp tool removed pending real implementation "
-                    "(src/tools/lsp.c is a canned stub)");
-    }
+    hu_log_info_once(&g_factory_lsp_warned_once, "tools/factory", NULL,
+                     "lsp tool removed pending real implementation "
+                     "(src/tools/lsp.c is a canned stub)");
 
     /* tool_search: searches available tools by name/keyword.
      * Note: pass tools array and current idx (doesn't include itself yet) */

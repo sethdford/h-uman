@@ -116,8 +116,13 @@ hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg, int64_t since_un
                                         size_t *out_ingested) {
     if (out_ingested)
         *out_ingested = 0;
-    if (!cfg)
+    if (!cfg) {
+        hu_log_warn_once(&g_warned_reaction_poll_disabled_cfg, "daemon", NULL,
+                         "reaction_collection poll skipped: cfg is NULL — caller "
+                         "did not pass a daemon config. This is a programmer error, "
+                         "not an operator misconfiguration.");
         return HU_OK;
+    }
     if (!reaction_collection_wants_imessage_cfg(cfg)) {
         hu_log_info_once(&g_warned_reaction_poll_disabled_cfg, "daemon", NULL,
                          "reaction_collection (imessage) disabled by config "
