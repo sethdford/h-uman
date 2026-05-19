@@ -22,7 +22,9 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HUMAN_HOME="$HOME/.human"
+# HUMAN_HOME defaults to ~/.human in production; smoke tests override
+# this to point at an isolated path (scripts/test_m3_loop_cycle_smoke.sh).
+HUMAN_HOME="${HUMAN_HOME:-$HOME/.human}"
 LOG_DIR="$HUMAN_HOME/logs"
 LOG="$LOG_DIR/m3-loop-$(date +%Y-%m-%d).log"
 mkdir -p "$LOG_DIR"
@@ -51,10 +53,15 @@ PROBE_SIMULATED_REPLY="${M3_PROBE_SIMULATED_REPLY:-}"
 #   non-zero but the loop continues.
 if [ "$H_TIER_ENABLE" = "1" ]; then
     log "--- step 0a: H1 corpus extract ---"
+    # Optional DB overrides for isolated smoke testing
+    H1_EXTRA=()
+    [ -n "${M3_IMSG_DB:-}" ] && H1_EXTRA+=(--imessage-db "$M3_IMSG_DB")
+    [ -n "${M3_MEMORY_DB:-}" ] && H1_EXTRA+=(--memory-db "$M3_MEMORY_DB")
     python3 "$REPO_ROOT/scripts/m3_extract_corpus.py" \
         --out "$HUMAN_HOME/training-data/m3-corpus.jsonl" \
         --sources imessage,memory_db \
-        --max-per-source 5000 2>&1 | tee -a "$LOG" || \
+        --max-per-source 5000 \
+        "${H1_EXTRA[@]}" 2>&1 | tee -a "$LOG" || \
         log "  WARN: H1 extract returned non-zero (corpus may be stale)"
 
     # Step 0b: H2 — regenerate counterfactual preference pairs from the

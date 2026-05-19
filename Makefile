@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe m3-collect m3-h-demo
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe m3-collect m3-h-demo m3-cycle-smoke
 
 all: build test
 
@@ -213,6 +213,13 @@ m3-collect:
 # Alpaca-DPO training file. Set FIX=1 to use fixture DBs (CI mode).
 m3-h-demo:
 	@bash scripts/m3_h_tier_demo.sh $${FIX:+--fixture}
+
+# Cycle smoke (2026-05-19) — m3_loop_cycle.sh end-to-end in HUMAN_HOME
+# isolation. Builds fixture DBs, runs the full autonomous cycle script
+# against them, verifies every artifact landed. Closes the integration
+# gap that the H-tier verifiers alone don't reach.
+m3-cycle-smoke:
+	@bash scripts/test_m3_loop_cycle_smoke.sh
 
 validate: format-check build test
 	@echo "Validation passed."

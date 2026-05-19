@@ -15,18 +15,21 @@ The collector handles three modes, picked by --mode:
     convert to Alpaca-DPO pairs, append to pairs-out, mark done.
     No iMessage send, no chat.db poll. Useful in tests and CI.
 
-  dispatch — production sender.
-    For each pending entry: send the question via `human channel
-    send imessage <handle> <question>`. Mark entry as "sent" with
-    the sent timestamp. Does NOT block waiting for the reply.
-    (Currently a STUB — wires required to call the human binary.)
+  dispatch — production sender (macOS).
+    For each pending entry: send the question via Messages.app
+    (osascript wire) to --operator-handle. Mark entry as "sent"
+    with sent_ts_ms + operator_handle. Does NOT block waiting for
+    the reply.
+    Safety: --confirm-real-send is REQUIRED to actually invoke
+    osascript. Without it, dry-run prints what would be sent.
 
-  poll — production reply collector.
-    For each "sent" entry: scan ~/Library/Messages/chat.db for
-    INBOUND messages from <handle> AFTER the sent timestamp.
-    First such message is treated as Seth's reply. Convert to
-    pairs, append, mark "done".
-    (Currently a STUB — wires required to read chat.db with FDA.)
+  poll — production reply collector (macOS).
+    For each "sent" entry: scan --chat-db (default ~/Library/
+    Messages/chat.db) for messages on the operator's iMessage thread
+    AFTER sent_ts_ms, skipping probe echoes (PROBE_HEADER prefix).
+    First non-probe message becomes the reply; convert to pairs,
+    append, mark "done".
+    Requires Full Disk Access for the running shell on macOS.
 
 For local end-to-end testing, simulate-tick is enough: H3 writes a
 queue entry, the collector picks it up, converts the simulated
@@ -40,18 +43,37 @@ Usage:
         --mode simulate-tick \\
         --simulate-response=B
 
+    # Production dispatch (dry-run by default — see what would send)
+    python3 scripts/m3_probe_collector.py --mode dispatch \\
+        --operator-handle +15555550123
+
+    # Production dispatch (LIVE — actually sends via Messages.app)
+    python3 scripts/m3_probe_collector.py --mode dispatch \\
+        --operator-handle +15555550123 --confirm-real-send
+
+    # Production poll (reads chat.db for replies)
+    python3 scripts/m3_probe_collector.py --mode poll \\
+        --operator-handle +15555550123
+
 Exit codes:
     0 — pair(s) written OR no pending entries (idempotent no-op)
+    1 — partial failure (some sends failed)
     2 — queue file missing / malformed
-    3 — production mode requested but underlying wire missing
+    3 — production mode requested but required arg/file missing
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import sqlite3
+import subprocess
 import sys
 import time
 from pathlib import Path
+
+# Mac/Apple epoch offset used by chat.db (matches m3_extract_corpus.py)
+APPLE_EPOCH_OFFSET_SEC = 978307200
 
 # Re-use the parser from H3 so the response→pairs contract stays
 # pinned in one place. If H3 changes, the collector follows.
@@ -174,46 +196,191 @@ def simulate_tick(queue_path: Path, pairs_out: Path,
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Dispatch / poll — production stubs documenting the wire surface
+# Dispatch wire — Messages.app via osascript (macOS)
 # ─────────────────────────────────────────────────────────────────────
 
-def dispatch_mode(queue_path: Path) -> int:
-    """Send every pending probe via the human binary's iMessage channel.
-    STUB: the actual `human channel send` invocation is not yet wired —
-    deliberately, because shipping accidental iMessages to real contacts
-    while testing would be terrible. The contract is documented here so
-    the wire can land as a separate, deliberate slice."""
+def send_via_messages_app(handle: str, body: str,
+                           dry_run: bool = True) -> tuple[bool, str]:
+    """Send `body` via Messages.app to iMessage handle `handle`.
+
+    dry_run=True (default) prints what WOULD be sent and returns
+    (True, "dry-run") without invoking osascript. Safety net for any
+    accidental run; flipping to live requires --confirm-real-send.
+
+    Returns (ok, detail). detail is "dry-run", "sent", or the error
+    string when ok=False.
+    """
+    if not handle:
+        return False, "no operator handle"
+    if dry_run:
+        print(f"  [DRY-RUN] osascript send → {handle} ({len(body)} chars)")
+        return True, "dry-run"
+    # Escape for AppleScript string literals. AppleScript strings use
+    # backslash escapes for "  \  newline  tab — same convention as C.
+    safe_handle = handle.replace("\\", "\\\\").replace('"', '\\"')
+    safe_body = (body.replace("\\", "\\\\")
+                      .replace('"', '\\"')
+                      .replace("\n", "\\n")
+                      .replace("\t", "\\t"))
+    script = (
+        'tell application "Messages"\n'
+        '    set targetService to 1st service whose service type = iMessage\n'
+        f'    set targetBuddy to buddy "{safe_handle}" of targetService\n'
+        f'    send "{safe_body}" to targetBuddy\n'
+        'end tell\n')
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=20)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return False, f"osascript invocation failed: {e}"
+    if result.returncode != 0:
+        return False, f"osascript exit {result.returncode}: {result.stderr.strip()}"
+    return True, "sent"
+
+
+def dispatch_mode(queue_path: Path, operator_handle: str,
+                   confirm_real_send: bool) -> int:
+    """Send every pending probe to `operator_handle` via Messages.app.
+    Default dry_run=True is overridden only by confirm_real_send=True."""
     entries = load_queue(queue_path)
     pending = [(i, e) for i, e in enumerate(entries)
                 if e.get("status") == "pending"]
     if not pending:
         print(f"  No pending entries in {queue_path}")
         return 0
-    print(f"  --mode=dispatch: would send {len(pending)} probe(s) via iMessage")
-    print(f"  STUB: this mode requires the human-binary iMessage wire.")
-    print(f"        See deliver_probe('imessage') in m3_active_probe.py")
-    print(f"        Pending entries (idx → handle):")
+    if not operator_handle:
+        print(f"  --mode=dispatch requires --operator-handle (or M3_OPERATOR_HANDLE env)")
+        print(f"  Pending entries (idx → handle hash → preview):")
+        for i, e in pending:
+            print(f"    [{i}] {e.get('handle','?'):>10} "
+                  f"msg={e.get('user_message','')[:40]!r}")
+        return 3
+    sent = 0
+    failed = 0
+    dry_run = not confirm_real_send
+    if dry_run:
+        print(f"  DRY-RUN mode (pass --confirm-real-send to actually send)")
     for i, e in pending:
-        print(f"          [{i}] handle={e.get('handle','?')} "
-              f"msg={e.get('user_message','')[:40]!r}")
-    return 3
+        ok, detail = send_via_messages_app(
+            operator_handle, e.get("question", ""), dry_run=dry_run)
+        if ok:
+            e["status"] = "sent" if not dry_run else "pending"
+            if not dry_run:
+                e["sent_ts_ms"] = int(time.time() * 1000)
+                e["operator_handle"] = operator_handle
+            sent += 1
+            print(f"    [{i}] OK ({detail})")
+        else:
+            failed += 1
+            print(f"    [{i}] FAILED: {detail}", file=sys.stderr)
+    if not dry_run:
+        save_queue(queue_path, entries)
+    tag = "(DRY-RUN — queue unchanged)" if dry_run else "(LIVE — queue updated)"
+    print(f"  Dispatched {sent}/{len(pending)} {tag}; {failed} failed")
+    return 0 if failed == 0 else 1
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Poll wire — read chat.db for replies (macOS, needs FDA)
+# ─────────────────────────────────────────────────────────────────────
+
+def poll_chat_db_for_replies(chat_db: Path, operator_handle: str,
+                              since_ms: int,
+                              probe_header: str = PROBE_HEADER
+                              ) -> list[tuple[int, str, bool]]:
+    """Return messages on the operator's iMessage thread sent AFTER
+    since_ms, EXCLUDING the probe echoes (those start with probe_header).
+    Each tuple: (ts_ms, text, is_from_me).
+
+    Soft-fails: returns [] on any sqlite error (FDA missing, corrupt db,
+    schema drift). The caller sees the empty list and skips that entry.
+    """
+    if not chat_db.exists() or not operator_handle:
+        return []
+    # Convert since_ms back into Apple's nanoseconds-since-2001-01-01.
+    # since_ms == 0 means "no filter" — emit everything in the thread.
+    if since_ms > 0:
+        since_apple_ns = int((since_ms / 1000.0 - APPLE_EPOCH_OFFSET_SEC)
+                               * 1_000_000_000)
+    else:
+        since_apple_ns = 0
+    out: list[tuple[int, str, bool]] = []
+    try:
+        conn = sqlite3.connect(str(chat_db))
+        conn.text_factory = bytes
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT m.text, m.date, m.is_from_me "
+            "FROM message m LEFT JOIN handle h ON m.handle_id = h.ROWID "
+            "WHERE h.id = ? AND m.date > ? AND m.text IS NOT NULL "
+            "  AND length(m.text) > 0 "
+            "ORDER BY m.date ASC",
+            (operator_handle, since_apple_ns))
+        for text_b, apple_ns, ifm in cur.fetchall():
+            text = (text_b.decode("utf-8", "replace")
+                    if isinstance(text_b, bytes) else (text_b or ""))
+            text = text.strip()
+            if not text:
+                continue
+            # Skip the probe message itself (which has the sentinel header)
+            if text.startswith(probe_header):
+                continue
+            ts_ms = int((apple_ns / 1e9 + APPLE_EPOCH_OFFSET_SEC) * 1000)
+            out.append((ts_ms, text, bool(ifm)))
+        conn.close()
+    except sqlite3.Error as e:
+        print(f"  WARN: chat.db poll failed ({e}). FDA missing?",
+              file=sys.stderr)
+        return []
+    return out
 
 
 def poll_mode(queue_path: Path, pairs_out: Path,
-               chat_db: Path | None = None) -> int:
-    """Scan chat.db for replies to sent probes. STUB: requires Full
-    Disk Access on macOS and the same SQLite read pattern that H1
-    uses. Contract documented; wire is a separate slice."""
+               chat_db: Path | None, operator_handle: str) -> int:
+    """For each 'sent' entry, find the first reply in chat.db on the
+    operator's thread, convert to pairs, mark done."""
     entries = load_queue(queue_path)
-    sent = [(i, e) for i, e in enumerate(entries)
-             if e.get("status") == "sent"]
-    if not sent:
+    sent_entries = [(i, e) for i, e in enumerate(entries)
+                     if e.get("status") == "sent"]
+    if not sent_entries:
         print(f"  No 'sent' entries waiting for replies")
         return 0
-    print(f"  --mode=poll: {len(sent)} entry/entries awaiting reply")
-    print(f"  STUB: requires chat.db poll with FDA.")
-    print(f"        See extract_imessage() in m3_extract_corpus.py for the read pattern.")
-    return 3
+    if not operator_handle or chat_db is None:
+        print(f"  --mode=poll requires --operator-handle and --chat-db "
+              f"(or M3_OPERATOR_HANDLE + default ~/Library/Messages/chat.db)")
+        return 3
+    if not chat_db.exists():
+        print(f"  --mode=poll: {chat_db} does not exist (FDA missing on macOS?)")
+        return 3
+    total_pairs = 0
+    matched = 0
+    for i, e in sent_entries:
+        replies = poll_chat_db_for_replies(
+            chat_db, operator_handle, e.get("sent_ts_ms", 0))
+        if not replies:
+            continue
+        # Take the FIRST reply (oldest after sent_ts_ms)
+        ts_ms, text, _ = replies[0]
+        pairs = response_to_pairs(e.get("user_message", ""),
+                                    e.get("candidates", []), text)
+        if not pairs:
+            e["status"] = "no_pairs"
+            e["operator_reply"] = text
+            matched += 1
+            continue
+        append_pairs(pairs_out, pairs)
+        e["status"] = "done"
+        e["done_ts_ms"] = int(time.time() * 1000)
+        e["operator_reply"] = text
+        e["operator_reply_ts_ms"] = ts_ms
+        e["pairs_written"] = len(pairs)
+        total_pairs += len(pairs)
+        matched += 1
+    save_queue(queue_path, entries)
+    print(f"  Polled {len(sent_entries)} sent entries → {matched} matched, "
+          f"{total_pairs} pairs written")
+    return 0
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -230,6 +397,17 @@ def main():
                     help="In simulate-tick mode, the canned reply (letter or freetext)")
     ap.add_argument("--max-ticks", type=int, default=1,
                     help="In simulate-tick mode, process up to N entries")
+    ap.add_argument("--operator-handle",
+                    default=os.environ.get("M3_OPERATOR_HANDLE", ""),
+                    help="iMessage handle to send probes to (your own number/email). "
+                         "Required for --mode=dispatch and --mode=poll. "
+                         "Env: M3_OPERATOR_HANDLE")
+    ap.add_argument("--confirm-real-send", action="store_true",
+                    help="In --mode=dispatch, actually invoke osascript. "
+                         "Without this flag, dispatch is a dry-run.")
+    ap.add_argument("--chat-db", type=Path,
+                    default=Path.home() / "Library" / "Messages" / "chat.db",
+                    help="Path to chat.db for --mode=poll (default: macOS standard)")
     args = ap.parse_args()
 
     print(f"\n{'='*60}")
@@ -238,6 +416,8 @@ def main():
     print(f"  Queue:     {args.queue}")
     print(f"  Pairs out: {args.pairs_out}")
     print(f"  Mode:      {args.mode}")
+    if args.mode in ("dispatch", "poll"):
+        print(f"  Operator:  {args.operator_handle or '(not set)'}")
 
     if args.mode == "simulate-tick":
         total_pairs = 0
@@ -250,9 +430,11 @@ def main():
         print(f"\n  TOTAL pairs written this run: {total_pairs}")
         return 0
     elif args.mode == "dispatch":
-        return dispatch_mode(args.queue)
+        return dispatch_mode(args.queue, args.operator_handle,
+                              args.confirm_real_send)
     elif args.mode == "poll":
-        return poll_mode(args.queue, args.pairs_out)
+        return poll_mode(args.queue, args.pairs_out,
+                          args.chat_db, args.operator_handle)
     return 0
 
 

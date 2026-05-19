@@ -253,39 +253,266 @@ def test_end_to_end_h3_writes_collector_reads():
             updated and updated[0]["status"] == "done")
 
 
-def test_dispatch_mode_stub_returns_3():
-    print("\n--- test_dispatch_mode_stub_returns_3 ---")
+def test_dispatch_mode_without_operator_returns_3():
+    """Without --operator-handle (and without M3_OPERATOR_HANDLE env),
+    dispatch is informational + exits 3 — never accidentally sends."""
+    print("\n--- test_dispatch_mode_without_operator_returns_3 ---")
     with tempfile.TemporaryDirectory() as d:
         q = Path(d) / "q.jsonl"
         m.save_queue(q, [_queue_entry("hi", ["a", "b"])])
+        # Strip M3_OPERATOR_HANDLE from env so the arg default is ""
+        env = {k: v for k, v in os.environ.items() if k != "M3_OPERATOR_HANDLE"}
         result = subprocess.run(
             [sys.executable, str(COLLECTOR),
              "--queue", str(q),
              "--pairs-out", str(Path(d) / "p.jsonl"),
              "--mode", "dispatch"],
-            capture_output=True, text=True, timeout=10)
-        _ok(f"dispatch stub exits 3 (got {result.returncode})",
+            capture_output=True, text=True, timeout=10, env=env)
+        _ok(f"no operator → exit 3 (got {result.returncode})",
             result.returncode == 3)
-        _ok("dispatch output mentions STUB",
-            "STUB" in result.stdout)
+        _ok("output asks for --operator-handle",
+            "--operator-handle" in result.stdout,
+            f"stdout: {result.stdout[:200]}")
 
 
-def test_poll_mode_stub_returns_3():
-    print("\n--- test_poll_mode_stub_returns_3 ---")
+def test_poll_mode_without_chat_db_returns_3():
+    """Without a real chat.db on the operator path, poll exits 3."""
+    print("\n--- test_poll_mode_without_chat_db_returns_3 ---")
     with tempfile.TemporaryDirectory() as d:
         q = Path(d) / "q.jsonl"
-        # Mark one entry as 'sent' so poll has work to "do"
         e = _queue_entry("hi", ["a", "b"])
         e["status"] = "sent"
+        e["sent_ts_ms"] = 1000
         m.save_queue(q, [e])
+        env = {k: v for k, v in os.environ.items() if k != "M3_OPERATOR_HANDLE"}
         result = subprocess.run(
             [sys.executable, str(COLLECTOR),
              "--queue", str(q),
              "--pairs-out", str(Path(d) / "p.jsonl"),
+             "--chat-db", str(Path(d) / "nonexistent-chat.db"),
              "--mode", "poll"],
-            capture_output=True, text=True, timeout=10)
-        _ok(f"poll stub exits 3 (got {result.returncode})",
+            capture_output=True, text=True, timeout=10, env=env)
+        _ok(f"no operator → exit 3 (got {result.returncode})",
             result.returncode == 3)
+
+
+def test_send_via_messages_app_dry_run():
+    """Dry-run mode never invokes osascript — returns True deterministically.
+    Safety net for any default-mode dispatch invocation."""
+    print("\n--- test_send_via_messages_app_dry_run ---")
+    ok, detail = m.send_via_messages_app("+15555550123", "hello world",
+                                           dry_run=True)
+    _ok("dry-run returns ok=True", ok is True)
+    _ok("dry-run detail is 'dry-run'", detail == "dry-run")
+
+
+def test_send_via_messages_app_live_calls_osascript():
+    """Live mode invokes subprocess.run(['osascript', ...]). Mocked."""
+    print("\n--- test_send_via_messages_app_live_calls_osascript ---")
+    from unittest import mock
+    fake = mock.Mock(returncode=0, stderr="", stdout="")
+    with mock.patch.object(m.subprocess, "run", return_value=fake) as run_mock:
+        ok, detail = m.send_via_messages_app("+15555550123",
+                                               'say "hi"\nand things',
+                                               dry_run=False)
+    _ok("live returns ok=True on rc=0", ok is True)
+    _ok("live detail is 'sent'", detail == "sent")
+    _ok("subprocess.run was called once", run_mock.call_count == 1)
+    call = run_mock.call_args
+    _ok("called osascript", call.args[0][0] == "osascript")
+    script = call.args[0][2]
+    _ok("script targets Messages app", 'tell application "Messages"' in script)
+    _ok("script contains escaped handle",
+        "+15555550123" in script)
+    # Quotes in the body should be backslash-escaped
+    _ok("script escapes embedded quotes",
+        '\\"hi\\"' in script,
+        f"script:\n{script}")
+    # Newlines should be turned into \\n (AppleScript string escape)
+    _ok("script escapes newline as backslash-n",
+        "\\n" in script.replace("\\n", "")[-50:] or "\\n" in script)
+
+
+def test_send_via_messages_app_handles_osascript_failure():
+    """When osascript exits non-zero (e.g. Messages.app not authorized),
+    the function returns (False, error_detail)."""
+    print("\n--- test_send_via_messages_app_handles_osascript_failure ---")
+    from unittest import mock
+    fake = mock.Mock(returncode=1, stderr="not authorized to send messages",
+                     stdout="")
+    with mock.patch.object(m.subprocess, "run", return_value=fake):
+        ok, detail = m.send_via_messages_app("+15555550123", "x",
+                                               dry_run=False)
+    _ok("rc=1 → ok=False", ok is False)
+    _ok("error detail propagated",
+        "not authorized" in detail, f"detail: {detail!r}")
+
+
+def test_dispatch_mode_dry_run_marks_nothing():
+    """In default dry-run mode (no --confirm-real-send), queue must
+    be unchanged. Critical safety contract."""
+    print("\n--- test_dispatch_mode_dry_run_marks_nothing ---")
+    with tempfile.TemporaryDirectory() as d:
+        q = Path(d) / "q.jsonl"
+        entries = [_queue_entry("hi", ["a", "b"])]
+        m.save_queue(q, entries)
+        rc = m.dispatch_mode(q, operator_handle="+15555550123",
+                              confirm_real_send=False)
+        _ok("dry-run returns 0", rc == 0)
+        updated = m.load_queue(q)
+        _ok("queue entry status STILL 'pending' (dry-run)",
+            updated[0]["status"] == "pending")
+        _ok("no sent_ts_ms recorded in dry-run",
+            "sent_ts_ms" not in updated[0])
+
+
+def test_dispatch_mode_live_marks_sent():
+    """With --confirm-real-send (mocked osascript), entries flip to
+    'sent' with sent_ts_ms + operator_handle recorded."""
+    print("\n--- test_dispatch_mode_live_marks_sent ---")
+    from unittest import mock
+    with tempfile.TemporaryDirectory() as d:
+        q = Path(d) / "q.jsonl"
+        m.save_queue(q, [_queue_entry("hi", ["a", "b"]),
+                          _queue_entry("yo", ["c", "d"], ts_ms=2000)])
+        fake = mock.Mock(returncode=0, stderr="", stdout="")
+        with mock.patch.object(m.subprocess, "run", return_value=fake):
+            rc = m.dispatch_mode(q, operator_handle="+15555550123",
+                                  confirm_real_send=True)
+        _ok("live dispatch returns 0", rc == 0)
+        updated = m.load_queue(q)
+        _ok("all entries flipped to sent",
+            all(e["status"] == "sent" for e in updated))
+        _ok("all entries recorded operator_handle",
+            all(e.get("operator_handle") == "+15555550123" for e in updated))
+        _ok("all entries recorded sent_ts_ms",
+            all("sent_ts_ms" in e for e in updated))
+
+
+def test_dispatch_mode_live_handles_partial_failure():
+    """If some sends fail, return code is 1 (partial)."""
+    print("\n--- test_dispatch_mode_live_handles_partial_failure ---")
+    from unittest import mock
+    with tempfile.TemporaryDirectory() as d:
+        q = Path(d) / "q.jsonl"
+        m.save_queue(q, [_queue_entry("hi", ["a", "b"]),
+                          _queue_entry("yo", ["c", "d"], ts_ms=2000)])
+        # First call OK, second call fails
+        results = [mock.Mock(returncode=0, stderr="", stdout=""),
+                    mock.Mock(returncode=1, stderr="permission denied",
+                              stdout="")]
+        with mock.patch.object(m.subprocess, "run", side_effect=results):
+            rc = m.dispatch_mode(q, operator_handle="+15555550123",
+                                  confirm_real_send=True)
+        _ok("partial failure → exit 1", rc == 1)
+
+
+def test_poll_chat_db_returns_replies_after_since():
+    """Poll filters chat.db by handle + date > since_ms, EXCLUDES probe
+    echoes (PROBE_HEADER prefix), returns in ts_ms ASC order."""
+    print("\n--- test_poll_chat_db_returns_replies_after_since ---")
+    import sqlite3 as _sql
+    with tempfile.TemporaryDirectory() as d:
+        cdb = Path(d) / "chat.db"
+        c = _sql.connect(str(cdb))
+        c.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, "
+                  "is_from_me INTEGER, date INTEGER, handle_id INTEGER)")
+        c.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
+        c.execute("INSERT INTO handle(ROWID,id) VALUES (1,'+15555550999')")
+        # Mac-epoch ns. epoch=2001-01-01 → unix 978307200 sec.
+        # 1 sec  = 1e9 ns  → unix ms = (1e9/1e9 + 978307200) * 1000 = 978307201000
+        # 100 ns = 0 sec   → unix ms = 978307200000
+        # Insert 4 messages:
+        #  - The probe itself (PROBE_HEADER prefix) — must be FILTERED OUT
+        #  - The actual reply (after probe) — must be RETURNED
+        #  - An earlier message (before sent_ts) — must be FILTERED
+        #  - A message from a different handle — must be FILTERED
+        # Apple ns = (unix_sec - 978307200) * 1e9
+        def to_ns(unix_sec): return (unix_sec - 978307200) * 1_000_000_000
+        # since_ms in test = unix 978307210000ms = unix_sec 978307210
+        rows = [
+            ("🧠 [m3 probe]\nWhich would you send?",
+              1, to_ns(978307215), 1),               # the probe itself
+            ("yeah, B sounds good",
+              1, to_ns(978307220), 1),               # the reply
+            ("earlier message that's irrelevant",
+              0, to_ns(978307200), 1),               # before since
+        ]
+        c.execute("CREATE TABLE handle2 (ROWID INTEGER PRIMARY KEY, id TEXT)")
+        # Add a second handle to confirm cross-handle filter
+        c.execute("INSERT INTO handle(ROWID,id) VALUES (2,'other@example.com')")
+        rows.append(("from a different person",
+                      0, to_ns(978307225), 2))
+        for r in rows:
+            c.execute("INSERT INTO message(text,is_from_me,date,handle_id) "
+                      "VALUES (?,?,?,?)", r)
+        c.commit(); c.close()
+
+        replies = m.poll_chat_db_for_replies(
+            cdb, "+15555550999", since_ms=978307210_000)
+        _ok(f"exactly 1 reply (got {len(replies)})", len(replies) == 1,
+            f"replies={replies}")
+        if replies:
+            ts, text, _ = replies[0]
+            _ok("reply text is the non-probe message",
+                text == "yeah, B sounds good", f"got {text!r}")
+
+
+def test_poll_mode_end_to_end_with_fixture():
+    """Full flow: sent entry → poll → reply → pairs → done."""
+    print("\n--- test_poll_mode_end_to_end_with_fixture ---")
+    import sqlite3 as _sql
+    with tempfile.TemporaryDirectory() as d:
+        cdb = Path(d) / "chat.db"
+        c = _sql.connect(str(cdb))
+        c.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, "
+                  "is_from_me INTEGER, date INTEGER, handle_id INTEGER)")
+        c.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
+        c.execute("INSERT INTO handle(ROWID,id) VALUES (1,'+15555550777')")
+        # Reply: "B" at unix_sec=978307220
+        c.execute("INSERT INTO message(text,is_from_me,date,handle_id) "
+                  "VALUES (?,?,?,?)",
+                  ("B", 1, (978307220 - 978307200) * 1_000_000_000, 1))
+        c.commit(); c.close()
+
+        q = Path(d) / "q.jsonl"
+        p = Path(d) / "p.jsonl"
+        sent_entry = _queue_entry("how was today?",
+                                    ["yeah", "fine", "Yes, lovely."],
+                                    ts_ms=978307210_000)
+        sent_entry["status"] = "sent"
+        sent_entry["sent_ts_ms"] = 978307210_000
+        sent_entry["operator_handle"] = "+15555550777"
+        m.save_queue(q, [sent_entry])
+        rc = m.poll_mode(q, p, cdb, "+15555550777")
+        _ok(f"poll_mode returns 0 (got {rc})", rc == 0)
+        # Pair file should have 2 entries (3 candidates, letter B → 2 pairs)
+        if p.exists():
+            lines = [l for l in p.read_text().splitlines() if l.strip()]
+            _ok(f"2 pairs written (got {len(lines)})", len(lines) == 2)
+        else:
+            _ok("pair file exists", False, "missing")
+        updated = m.load_queue(q)
+        _ok("queue entry status=done", updated[0]["status"] == "done")
+        _ok("operator_reply recorded",
+            updated[0].get("operator_reply") == "B")
+
+
+def test_poll_chat_db_corrupt_soft_fails():
+    """Same FDA-revoked / corrupt failure mode as H1's iMessage extractor."""
+    print("\n--- test_poll_chat_db_corrupt_soft_fails ---")
+    with tempfile.TemporaryDirectory() as d:
+        bad = Path(d) / "chat.db"
+        bad.write_bytes(b"not a sqlite file\n" * 100)
+        out = m.poll_chat_db_for_replies(bad, "+15555550123", since_ms=1)
+        _ok("corrupt db → []", out == [])
+
+    out = m.poll_chat_db_for_replies(Path("/tmp/missing-chat.db"),
+                                       "+15555550123", since_ms=1)
+    _ok("missing db → []", out == [])
+    # Empty handle short-circuits before opening
+    out = m.poll_chat_db_for_replies(Path("/dev/null"), "", since_ms=1)
+    _ok("empty handle → []", out == [])
 
 
 def main():
@@ -301,8 +528,17 @@ def main():
     test_simulate_tick_no_pending_is_noop()
     test_simulate_tick_malformed_entry()
     test_end_to_end_h3_writes_collector_reads()
-    test_dispatch_mode_stub_returns_3()
-    test_poll_mode_stub_returns_3()
+    test_dispatch_mode_without_operator_returns_3()
+    test_poll_mode_without_chat_db_returns_3()
+    test_send_via_messages_app_dry_run()
+    test_send_via_messages_app_live_calls_osascript()
+    test_send_via_messages_app_handles_osascript_failure()
+    test_dispatch_mode_dry_run_marks_nothing()
+    test_dispatch_mode_live_marks_sent()
+    test_dispatch_mode_live_handles_partial_failure()
+    test_poll_chat_db_returns_replies_after_since()
+    test_poll_mode_end_to_end_with_fixture()
+    test_poll_chat_db_corrupt_soft_fails()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")
     return 0 if _FAIL == 0 else 1
 

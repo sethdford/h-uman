@@ -54,6 +54,7 @@ on:
       - "scripts/m3_probe_collector.py"
       - "scripts/test_m3_probe_collector.py"
       - "scripts/m3_h_tier_demo.sh"
+      - "scripts/test_m3_loop_cycle_smoke.sh"
       - "Makefile"
       - "CMakePresets.json"
       - ".github/workflows/m3-loop-smoke.yml"
@@ -98,6 +99,7 @@ on:
       - "scripts/m3_probe_collector.py"
       - "scripts/test_m3_probe_collector.py"
       - "scripts/m3_h_tier_demo.sh"
+      - "scripts/test_m3_loop_cycle_smoke.sh"
   workflow_dispatch:
 
 jobs:
@@ -178,10 +180,11 @@ jobs:
         run: python3 scripts/test_m3_active_probe.py
 
       - name: Run probe collector (H3b) verifier
-        # 40 assertions covering queue load/save atomicity, malformed-line
-        # tolerance, find_next_pending, simulate-tick all paths (letter,
-        # freetext, no-response, no-pending, malformed), dispatch + poll
-        # stub contracts, and the H3 → collector → pairs end-to-end flow.
+        # 69 assertions: queue load/save atomicity, malformed tolerance,
+        # find_next_pending, every simulate-tick branch, mocked osascript
+        # dispatch (dry-run + live + partial failure), chat.db poll
+        # against fixture DBs (filter by handle + ts + probe-echo skip),
+        # corrupt-db soft-fail, AND the H3 → collector → pairs e2e flow.
         run: python3 scripts/test_m3_probe_collector.py
 
       - name: Run H-tier full end-to-end demo (fixture mode)
@@ -190,6 +193,15 @@ jobs:
         # file ready for dpo-train. This is the integration test that
         # the unit verifiers alone cannot prove.
         run: bash scripts/m3_h_tier_demo.sh --fixture
+
+      - name: Run m3_loop_cycle.sh end-to-end smoke
+        # Closes the last integration gap: the autonomous loop script
+        # itself, in HUMAN_HOME isolation. Seeds fixture DBs, runs
+        # m3_loop_cycle.sh end-to-end, verifies every artifact landed
+        # (corpus, counterfactuals, probe queue + pairs, alpaca-DPO
+        # export with H-tier merge). G-tier steps soft-fail (no
+        # gateway, no MLX) — that's correct and not part of the assertion.
+        run: bash scripts/test_m3_loop_cycle_smoke.sh
 
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)
