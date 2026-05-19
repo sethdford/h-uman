@@ -81,6 +81,10 @@ void run_matrix_reactions_tests(void);
 void run_reaction_handler_lookup_store_tests(void);
 /* Conversation-gap classifier (Tier 1 #3 of better-than-human plan). */
 void run_imessage_gaps_tests(void);
+/* Pattern-drift compute layer (Tier-3 future-facing). */
+void run_pattern_drift_tests(void);
+/* Per-contact relationship signatures (Tier 2 Sprint A). */
+void run_contact_signature_tests(void);
 /* Reaction-driven topic salience (Tier 1 #1). */
 void run_personal_model_topics_from_reactions_tests(void);
 /* Calibrate-with-reactions (Tier 1 #2). */
@@ -395,6 +399,7 @@ void run_memory_degradation_tests(void);
 void run_self_awareness_tests(void);
 void run_superhuman_tests(void);
 void run_contact_graph_tests(void);
+void run_identity_resolver_tests(void);
 void run_tool_call_parser_tests(void);
 void run_tool_router_tests(void);
 void run_dag_tests(void);
@@ -853,6 +858,8 @@ int main(int argc, char **argv) {
     run_matrix_reactions_tests();
     run_reaction_handler_lookup_store_tests();
     run_imessage_gaps_tests();
+    run_pattern_drift_tests();
+    run_contact_signature_tests();
     run_personal_model_topics_from_reactions_tests();
     run_calibration_reactions_tests();
     run_discord_reactions_tests();
@@ -1158,6 +1165,7 @@ int main(int argc, char **argv) {
     run_self_awareness_tests();
     run_superhuman_tests();
     run_contact_graph_tests();
+    run_identity_resolver_tests();
     run_tool_call_parser_tests();
     run_tool_router_tests();
     run_dag_tests();
