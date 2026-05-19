@@ -11,12 +11,32 @@
 #include "human/agent/reaction_handler.h"
 #include "human/channels/imessage_reactions.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/ml/dpo.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Per ~/.claude/rules/silent-config-gated-subsystems.md: emit ONE
+ * operator-visible log line per process when reaction polling is
+ * disabled or enabled, so the operator can tell "we silently skipped"
+ * apart from "we ran". Guards are process-scoped via atomic_bool. */
+static atomic_bool g_warned_reaction_poll_disabled_cfg = false;
+static atomic_bool g_warned_reaction_poll_enabled_cfg = false;
+static atomic_bool g_warned_reaction_poll_disabled_sub = false;
+static atomic_bool g_warned_reaction_poll_enabled_sub = false;
+
+#if HU_IS_TEST
+void hu_daemon_reaction_poll_reset_warn_guards_for_test(void) {
+    atomic_store(&g_warned_reaction_poll_disabled_cfg, false);
+    atomic_store(&g_warned_reaction_poll_enabled_cfg, false);
+    atomic_store(&g_warned_reaction_poll_disabled_sub, false);
+    atomic_store(&g_warned_reaction_poll_enabled_sub, false);
+}
+#endif
 
 void hu_daemon_reaction_wire_collector(struct hu_dpo_collector *collector) {
     hu_reaction_handler_set_collector((hu_dpo_collector_t *)collector);
@@ -98,8 +118,16 @@ hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg, int64_t since_un
         *out_ingested = 0;
     if (!cfg)
         return HU_OK;
-    if (!reaction_collection_wants_imessage_cfg(cfg))
+    if (!reaction_collection_wants_imessage_cfg(cfg)) {
+        hu_log_info_once(&g_warned_reaction_poll_disabled_cfg, "daemon", NULL,
+                         "reaction_collection (imessage) disabled by config "
+                         "(cfg->reaction_collection.enabled=false or no 'imessage' "
+                         "in reaction_collection.channels) — set "
+                         "reaction_collection.enabled=true in config.json to activate");
         return HU_OK;
+    }
+    hu_log_info_once(&g_warned_reaction_poll_enabled_cfg, "daemon", NULL,
+                     "reaction_collection (imessage) enabled — polling chat.db for tapbacks");
 
     const char *db = getenv("HU_CHATDB");
     if (!db || !db[0])
@@ -139,8 +167,16 @@ hu_error_t hu_daemon_tick_reaction_poll(const hu_reaction_collection_config_t *c
                                         int64_t *watermark_inout) {
     if (!cfg || !last_poll_unix_inout || !watermark_inout)
         return HU_ERR_INVALID_ARGUMENT;
-    if (!reaction_collection_wants_imessage_sub(cfg))
+    if (!reaction_collection_wants_imessage_sub(cfg)) {
+        hu_log_info_once(&g_warned_reaction_poll_disabled_sub, "daemon", NULL,
+                         "reaction_collection (imessage) disabled by config "
+                         "(reaction_collection.enabled=false or 'imessage' not in "
+                         "reaction_collection.channels) — set "
+                         "reaction_collection.enabled=true in config.json to activate");
         return HU_OK;
+    }
+    hu_log_info_once(&g_warned_reaction_poll_enabled_sub, "daemon", NULL,
+                     "reaction_collection (imessage) enabled — polling chat.db for tapbacks");
 
     int interval = cfg->poll_interval_seconds > 0 ? cfg->poll_interval_seconds : 30;
     if (*last_poll_unix_inout > 0 && now_unix - *last_poll_unix_inout < interval)

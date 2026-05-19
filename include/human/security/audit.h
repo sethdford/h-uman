@@ -181,6 +181,8 @@ void hu_audit_set_rotation_interval(hu_audit_logger_t *logger, uint32_t hours);
 #if defined(HU_IS_TEST) && HU_IS_TEST
 /** Test-only: set last_rotation_time to force scheduled rotation on next log. */
 void hu_audit_test_set_last_rotation_epoch(hu_audit_logger_t *logger, time_t epoch);
+/** Test-only: re-arm the one-shot disable/enable warning guards. */
+void hu_audit_logger_reset_warn_guards_for_test(void);
 #endif
 
 /** Filter: should this severity be logged? */

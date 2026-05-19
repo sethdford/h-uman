@@ -18,6 +18,8 @@
 #include "human/core/string.h"
 #include "human/humanness.h"
 
+#include <stdatomic.h>
+
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
 #include "human/agent/kv_cache.h"
@@ -12971,14 +12973,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
 #if defined(HU_ENABLE_RL_FULL) && defined(HU_HAS_IMESSAGE) && defined(__APPLE__) && \
     defined(HU_ENABLE_SQLITE)
-        if (config && config->reaction_collection.enabled) {
-            static int64_t reaction_watermark = 0;
-            static int64_t reaction_last_poll_unix = 0;
-            int64_t now_unix = (int64_t)time(NULL);
-            if (reaction_watermark == 0)
-                reaction_watermark = now_unix;
-            (void)hu_daemon_tick_reaction_poll(&config->reaction_collection, now_unix,
-                                               &reaction_last_poll_unix, &reaction_watermark);
+        /* Per ~/.claude/rules/silent-config-gated-subsystems.md: emit one
+         * operator-visible log line per process when the daemon-loop
+         * reaction-collection block is disabled or enabled, so the
+         * operator can tell "the loop is silently skipping this every
+         * tick" apart from "the loop is actually polling chat.db". The
+         * guards here are independent of the ones in
+         * daemon_reaction_poll.c so we can confirm BOTH the daemon-loop
+         * gate AND the inner tick gate are aligned. */
+        {
+            static atomic_bool daemon_loop_reaction_disabled_warned = false;
+            static atomic_bool daemon_loop_reaction_enabled_warned = false;
+            if (config && config->reaction_collection.enabled) {
+                hu_log_info_once(&daemon_loop_reaction_enabled_warned, "daemon",
+                                 agent ? agent->observer : NULL,
+                                 "reaction_collection enabled in daemon loop — "
+                                 "ticking reaction-poll subsystem");
+                static int64_t reaction_watermark = 0;
+                static int64_t reaction_last_poll_unix = 0;
+                int64_t now_unix = (int64_t)time(NULL);
+                if (reaction_watermark == 0)
+                    reaction_watermark = now_unix;
+                (void)hu_daemon_tick_reaction_poll(&config->reaction_collection, now_unix,
+                                                   &reaction_last_poll_unix, &reaction_watermark);
+            } else {
+                hu_log_info_once(&daemon_loop_reaction_disabled_warned, "daemon",
+                                 agent ? agent->observer : NULL,
+                                 "reaction_collection disabled in daemon loop "
+                                 "(config->reaction_collection.enabled=false) — set "
+                                 "reaction_collection.enabled=true in config.json to "
+                                 "activate iMessage tapback collection");
+            }
         }
 #endif
 
