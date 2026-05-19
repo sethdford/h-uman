@@ -40,6 +40,15 @@ typedef struct hu_eval_result {
     int tool_calls_made;
     int tokens_used;
     char *error_msg;
+    /* 2026-05-18 (M4): deterministic shape classification.
+     * Populated by hu_shape_classify in hu_eval_run_suite. Persists to
+     * eval_results SQLite columns shape_score / shape_pass / shape_fails.
+     * Use these as a deterministic alternative to the noisy LLM-judge
+     * (judge has false positives AND false negatives — see
+     * docs/plans/2026-05-18-persona-eval-sota-closeout.md). */
+    double shape_score; /* in [0.0, 1.0] */
+    bool shape_pass;
+    uint32_t shape_fails; /* HU_SHAPE_FAIL_* bit flags from eval/shape.h */
 } hu_eval_result_t;
 
 typedef struct hu_eval_suite {
