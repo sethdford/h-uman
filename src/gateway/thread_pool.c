@@ -81,44 +81,20 @@ hu_thread_pool_t *hu_thread_pool_create(size_t n) {
         free(pool);
         return NULL;
     }
-    /* F1 (2026-05-18) — C6 ASan fix.
-     *
-     * Worker threads handle HTTP requests including the chat-completion
-     * path, which calls into hu_agent_turn. agent_turn has a HUGE stack
-     * frame — variable scope tracking puts locals at offsets 500KB+ from
-     * the frame base (deeply nested error-handler scopes in the validator
-     * chain + response_guard retry paths). Default pthread stack on macOS
-     * is 512KB, which is JUST barely enough; under ASan red zones it
-     * overflows and the memset of a topmost local hits the stack guard
-     * page → BUS on unknown address.
-     *
-     * Set 4 MB explicitly. That's the same order of magnitude as the
-     * main thread's default stack (8 MB on macOS / Linux glibc) and
-     * gives headroom for:
-     *   - agent_turn's ~507 KB of locals
-     *   - ASan red zones (≈2x overhead)
-     *   - Recursive guard retry chains
-     *   - The DPO/eval helpers that may inline-call into agent_turn
-     *
-     * On Linux glibc the default is 8 MB so this is a no-op there in
-     * practice, but the explicit setting documents the intent and
-     * keeps macOS + Linux behavior aligned.
-     *
-     * Reproduces with: ASAN_OPTIONS=halt_on_error=1 ./build/human
-     *   service-loop --with-gateway, then curl /v1/chat/completions.
-     * Pinned by tests/test_thread_pool_worker_stack_size.c. */
-    pthread_attr_t attr;
-    pthread_attr_t *attr_ptr = NULL;
-    if (pthread_attr_init(&attr) == 0) {
-        size_t want = (size_t)4 * 1024 * 1024; /* 4 MB per worker */
-        /* setstacksize is best-effort; if it fails (e.g. system policy
-         * caps the value) we fall back to the default rather than
-         * refuse to create the pool. */
-        (void)pthread_attr_setstacksize(&attr, want);
-        attr_ptr = &attr;
-    }
+    /* 2026-05-19 (M4 audit): set 8 MB stack on worker threads. macOS pthread
+     * default is 512 KB which is insufficient for hu_agent_turn — the
+     * function has 15+ stack arrays totaling ~20 KB plus deep call stacks
+     * through validators, persona renderers, world-model bridges, humor
+     * framework directives. Stack overflow manifested as BUS errors in
+     * seemingly-unrelated callees (micro_expression.c:9, agent_turn.c:3550)
+     * — the M4 production A/B harness reproduces it on first request to
+     * /v1/chat/completions. */
+    pthread_attr_t worker_attr;
+    int attr_ok = (pthread_attr_init(&worker_attr) == 0);
+    if (attr_ok)
+        pthread_attr_setstacksize(&worker_attr, 8u * 1024u * 1024u);
     for (size_t i = 0; i < n; i++) {
-        if (pthread_create(&pool->threads[i], attr_ptr, worker, pool) != 0) {
+        if (pthread_create(&pool->threads[i], attr_ok ? &worker_attr : NULL, worker, pool) != 0) {
             pool->shutdown = true;
             pthread_cond_broadcast(&pool->not_empty);
             for (size_t j = 0; j < i; j++)
@@ -126,15 +102,15 @@ hu_thread_pool_t *hu_thread_pool_create(size_t n) {
             pthread_cond_destroy(&pool->not_full);
             pthread_cond_destroy(&pool->not_empty);
             pthread_mutex_destroy(&pool->mutex);
+            if (attr_ok)
+                pthread_attr_destroy(&worker_attr);
             free(pool->threads);
             free(pool);
-            if (attr_ptr)
-                pthread_attr_destroy(attr_ptr);
             return NULL;
         }
     }
-    if (attr_ptr)
-        pthread_attr_destroy(attr_ptr);
+    if (attr_ok)
+        pthread_attr_destroy(&worker_attr);
     return pool;
 }
 
