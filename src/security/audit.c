@@ -1,6 +1,7 @@
 #include "human/security/audit.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/crypto.h"
 #include "human/security.h"
@@ -665,11 +666,33 @@ void hu_audit_logger_destroy(hu_audit_logger_t *logger, hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, logger, sizeof(hu_audit_logger_t));
 }
 
+/* Per ~/.claude/rules/silent-config-gated-subsystems.md: when the audit
+ * logger is disabled, the first attempt to log an event must emit one
+ * operator-visible line naming the config key, so operators can tell
+ * "we silently dropped this audit event" apart from "we recorded it".
+ * Guards are process-scoped via atomic_bool. */
+static atomic_bool g_warned_audit_logger_disabled = false;
+static atomic_bool g_warned_audit_logger_enabled = false;
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+void hu_audit_logger_reset_warn_guards_for_test(void) {
+    atomic_store(&g_warned_audit_logger_disabled, false);
+    atomic_store(&g_warned_audit_logger_enabled, false);
+}
+#endif
+
 hu_error_t hu_audit_logger_log(hu_audit_logger_t *logger, const hu_audit_event_t *event) {
     if (!logger || !event)
         return HU_ERR_INVALID_ARGUMENT;
-    if (!logger->config.enabled)
+    if (!logger->config.enabled) {
+        hu_log_info_once(&g_warned_audit_logger_disabled, "audit", NULL,
+                         "audit logger disabled by config "
+                         "(audit.enabled=false) — set audit.enabled=true in "
+                         "config.json to record security audit events");
         return HU_OK;
+    }
+    hu_log_info_once(&g_warned_audit_logger_enabled, "audit", NULL,
+                     "audit logger enabled — recording security audit events");
 
     /* Check scheduled rotation */
     if (logger->rotation_interval_hours > 0) {

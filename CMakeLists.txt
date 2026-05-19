@@ -2929,6 +2929,7 @@ set(HU_TEST_SOURCES
     tests/test_json.c
     tests/test_string.c
     tests/test_log_once.c
+    tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
     tests/test_slice.c
     tests/test_memory.c
