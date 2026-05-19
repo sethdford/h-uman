@@ -3808,8 +3808,21 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (persona_prompt)
             agent->alloc->free(agent->alloc->ctx, persona_prompt, persona_prompt_len + 1);
         persona_prompt = NULL;
-        if (memory_ctx)
+        if (memory_ctx) {
             agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+            /* 2026-05-19 (M4 audit): null + zero-length the freed memory_ctx.
+             * Previously the pointer was freed but NOT nulled, leading to a
+             * heap-use-after-free ~3000 lines later at agent_turn.c:6673
+             * where `if (memory_ctx && memory_ctx_len > 20)` saw a non-NULL
+             * dangling pointer and passed it to hu_tier_manager_promote →
+             * sqlite3_bind_text(stmt, 2, key, ..., SQLITE_STATIC) →
+             * sqlite3_step → vdbeRecordCompareString → memcmp on freed memory.
+             * The surrounding stm_ctx / awareness_ctx / outcome_ctx free
+             * blocks DO null themselves; memory_ctx was the lone miss.
+             * Surfaced by the M4 production A/B harness on 2026-05-19. */
+            memory_ctx = NULL;
+            memory_ctx_len = 0;
+        }
         if (stm_ctx) {
             agent->alloc->free(agent->alloc->ctx, stm_ctx, stm_ctx_len + 1);
             stm_ctx = NULL;
