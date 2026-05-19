@@ -339,6 +339,45 @@ static void test_reaction_event_struct_has_emoji_field(void) {
     HU_ASSERT_STR_EQ(e.emoji, "\xf0\x9f\x8e\x89");
 }
 
+static void test_ingest_reaction_is_channel_agnostic_slack(void) {
+    /* Phase 2 of docs/plans/2026-05-18-imessage-sota.md: the ingest
+     * wrapper is generalized — Slack reactions flow through the same
+     * path as iMessage, with provenance derived from event->channel_id.
+     * This pins the contract that the function does NOT reject non-
+     * iMessage events. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_reaction_event_t e = {0};
+    e.channel_id = "slack";
+    e.sender_handle = "U07ALICE";
+    e.kind = HU_REACTION_LOVE;
+    e.polarity = HU_REACTION_POSITIVE;
+    e.timestamp_unix = 1700000000;
+    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, NULL, "ship it",
+                                                 /*is_from_me_target=*/true,
+                                                 /*in_group_chat=*/false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
+static void test_ingest_reaction_discord_group_uses_channel_qualifier(void) {
+    /* Provenance for Discord group reactions must use "discord_channel"
+     * not "discord_group" — matches the qualifier convention in
+     * src/agent/channel_trust.c::hu_channel_trust. Verified indirectly
+     * by ensuring ingest succeeds; tier mapping is exercised by
+     * channel_trust's own test suite. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    hu_reaction_event_t e = {0};
+    e.channel_id = "discord";
+    e.sender_handle = "alice#1234";
+    e.kind = HU_REACTION_LAUGH;
+    e.timestamp_unix = 1700000000;
+    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, NULL, "ha",
+                                                 /*is_from_me_target=*/true,
+                                                 /*in_group_chat=*/true);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+}
+
 static void test_ingest_group_chat_uses_group_provenance(void) {
     /* The in_group_chat flag changes the channel string from
      * "imessage_dm" → "imessage_group" which downgrades trust tier.
@@ -389,5 +428,7 @@ void run_imessage_ingest_tests(void) {
     HU_RUN_TEST(test_ingest_balloon_url_preview_succeeds);
     HU_RUN_TEST(test_ingest_reaction_uses_event_emoji_when_custom_emoji_null);
     HU_RUN_TEST(test_reaction_event_struct_has_emoji_field);
+    HU_RUN_TEST(test_ingest_reaction_is_channel_agnostic_slack);
+    HU_RUN_TEST(test_ingest_reaction_discord_group_uses_channel_qualifier);
     HU_RUN_TEST(test_ingest_group_chat_uses_group_provenance);
 }

@@ -3289,6 +3289,10 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 # for src/channels/imessage_ingest.c. No chat.db / Apple deps; tests run
 # unconditionally and stay green on every build variant.
 list(APPEND HU_TEST_SOURCES tests/test_imessage_ingest.c)
+# Phase 1c end-to-end smoke: builds an in-memory chat.db, polls reactions,
+# asserts personal_model state mutates. Internally guarded by
+# HU_HAS_IMESSAGE + HU_ENABLE_SQLITE; stub runner on other build variants.
+list(APPEND HU_TEST_SOURCES tests/test_imessage_personal_model_e2e.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
 # (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)

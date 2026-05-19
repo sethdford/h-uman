@@ -81,8 +81,15 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
      * on registered assistant messages also feed the personal model. This
      * happens BEFORE the DPO record so that a missing DPO collector (e.g.
      * RL build flag off) does not block personal-model learning. */
-    if (s_personal_model && strcmp(e->channel_id, "imessage") == 0) {
-        /* L->response is the text the reactor reacted to (our assistant
+    if (s_personal_model) {
+        /* Phase 2 of docs/plans/2026-05-18-imessage-sota.md: channel-
+         * agnostic ingest. The synthesis renders "<actor> reacted with
+         * <glyph> to <target>" regardless of channel; provenance is
+         * built from event->channel_id by event_provenance. Slack +
+         * any future reaction-bearing channel reaches this point via
+         * hu_reaction_handler_handle_event without further wiring.
+         *
+         * L->response is the text the reactor reacted to (our assistant
          * message). is_from_me_target=true because the lookup only holds
          * our own outbound messages by construction. e->emoji carries
          * the iOS 17+ custom-emoji glyph when present (NULL otherwise —
