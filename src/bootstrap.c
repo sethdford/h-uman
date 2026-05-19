@@ -59,6 +59,7 @@
 #endif
 #if HU_HAS_IMESSAGE
 #include "human/channels/imessage.h"
+#include "human/channels/imessage_schema.h"
 #endif
 #if HU_HAS_PWA
 #include "human/channels/pwa.h"
@@ -1200,6 +1201,27 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 bi->channels[ch_count].last_poll_ms = 0;
                 bi->channel_destroys[ch_count] = destroy_imessage_wrap;
                 ch_count++;
+
+                /* Phase 6 of docs/plans/2026-05-18-imessage-sota.md: probe
+                 * chat.db schema once at startup so operators see the
+                 * fingerprint + any Apple-added columns in the service log.
+                 * Suppressed under HU_IS_TEST to keep test runs deterministic
+                 * (no real ~/Library/Messages access). */
+#if !HU_IS_TEST
+                {
+                    hu_imessage_schema_caps_t caps;
+                    /* NULL path = default ~/Library/Messages/chat.db */
+                    hu_error_t schema_err = hu_imessage_schema_probe(NULL, &caps);
+                    if (schema_err == HU_OK) {
+                        hu_imessage_schema_log_fingerprint(&caps);
+                    } else {
+                        hu_log_warn("imessage", NULL,
+                                    "schema probe failed (err=%d); chat.db readers "
+                                    "will fall back to blind queries",
+                                    (int)schema_err);
+                    }
+                }
+#endif
             }
         }
 #else

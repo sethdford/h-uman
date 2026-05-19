@@ -164,6 +164,19 @@ size_t hu_imessage_extract_audio_transcript(const unsigned char *payload_blob, s
 size_t hu_imessage_extract_edit_chain(const unsigned char *summary_blob, size_t summary_len,
                                       char *out_buf, size_t out_count_max, size_t entry_cap);
 
+/* ── Phase 4: typedstream attribute-run synthesis ─────────────────────
+ *
+ * Render a single attributedBody blob into a personal-model-ingestable
+ * sentence, INCLUDING attribute-run signal. OTP-containing blobs return
+ * 0 (caller should skip — these are 2FA codes, NOT persona signal).
+ * Mentions get "(@<handle>)" inline. `sender_handle` and `is_from_me`
+ * select the perspective ("I said: ..." vs "<handle> said: ...").
+ *
+ * Returns bytes written (excluding NUL), 0 on OTP/malformed/empty. */
+size_t hu_imessage_synth_attributed_message(const unsigned char *blob, size_t blob_len,
+                                            const char *sender_handle, bool is_from_me, char *out,
+                                            size_t out_cap);
+
 #ifdef __cplusplus
 }
 #endif
