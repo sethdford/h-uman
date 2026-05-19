@@ -37,6 +37,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 from eval_shape_classifier import classify  # noqa: E402
 
 GATEWAY_DEFAULT = "http://127.0.0.1:3006/v1/chat/completions"
+SPEAKER_ID_CLF_DEFAULT = "/tmp/seth_speaker_id.json"
+
+
+def _maybe_load_speaker_id_clf(path: str):
+    """Best-effort load of the trained speaker-ID classifier.
+
+    Returns None silently if the classifier file isn't present so callers
+    fall back to shape-only argmax. Without this fallback, fresh
+    checkouts would need to train the classifier before any verifier
+    run, which we don't want to require.
+    """
+    try:
+        from personaeval_speaker_id import load_classifier
+        return load_classifier(path)
+    except (ImportError, FileNotFoundError, json.JSONDecodeError):
+        return None
 
 
 def generate(prompt: str, gateway: str, temperature: float = 0.9,
@@ -68,13 +84,24 @@ def generate(prompt: str, gateway: str, temperature: float = 0.9,
 
 
 def ttt_one_prompt(prompt: str, n: int, gateway: str, channel: str = "imessage",
-                   temperatures: list = None) -> dict:
+                   temperatures: list = None,
+                   speaker_id_clf: dict = None) -> dict:
     """Generate n candidates for a prompt, score, pick best.
 
+    The choice function:
+      - If `speaker_id_clf` is available AND all candidates pass shape:
+        argmax on P(Seth), shape-len tiebreak. This is the "shape is
+        saturated, the speaker-ID classifier is the binding constraint"
+        path. Discovered on 2026-05-19: when N=5 candidates all hit
+        shape=1.0, the original shape+length tiebreaker silently picked
+        AGAINST P(Seth) (mean Δ = -0.212).
+      - Else fall back to argmax(shape, -len).
+
     Returns:
-      {"prompt", "candidates": [{text, shape, elapsed_s, temperature}],
-       "chosen_idx", "chosen_text", "chosen_score", "rejected": [text,...],
-       "total_elapsed_s"}
+      {"prompt", "candidates": [{text, shape, p_seth, elapsed_s,
+                                  temperature}],
+       "chosen_idx", "chosen_text", "chosen_score", "chosen_p_seth",
+       "choice_mode", "rejected_texts", "total_elapsed_s"}
     """
     if temperatures is None:
         # Spread temperatures to encourage candidate diversity
@@ -89,14 +116,29 @@ def ttt_one_prompt(prompt: str, n: int, gateway: str, channel: str = "imessage",
         text, elapsed, err = generate(prompt, gateway, temperature=temp)
         shape = classify(text, channel=channel) if not err else {
             "pass": False, "score": 0.0, "len": 0, "fails": [f"gen-error: {err}"]}
+        c_p_seth = None
+        if speaker_id_clf is not None and text:
+            from personaeval_speaker_id import p_seth as _p
+            c_p_seth = _p(speaker_id_clf, text)
         candidates.append({
-            "idx": i, "text": text, "shape": shape, "elapsed_s": elapsed,
-            "temperature": temp, "error": err or None,
+            "idx": i, "text": text, "shape": shape, "p_seth": c_p_seth,
+            "elapsed_s": elapsed, "temperature": temp, "error": err or None,
         })
 
-    # argmax over shape score; tiebreak by shortest response (Seth-voice
-    # is short)
-    scored = [(c["shape"]["score"], -c["shape"]["len"], c["idx"]) for c in candidates]
+    # Choice function — see docstring for the rationale.
+    all_shape_pass = (speaker_id_clf is not None and
+                      all(c["shape"].get("score", 0) >= 1.0 and c["p_seth"] is not None
+                          for c in candidates))
+    if all_shape_pass:
+        # Speaker-ID classifier is now the binding signal.
+        scored = [(c["p_seth"], -c["shape"]["len"], c["idx"])
+                  for c in candidates]
+        choice_mode = "p_seth_argmax"
+    else:
+        # Fallback: shape primary, length tiebreak.
+        scored = [(c["shape"]["score"], -c["shape"]["len"], c["idx"])
+                  for c in candidates]
+        choice_mode = "shape_argmax"
     scored.sort(reverse=True)
     chosen_idx = scored[0][2]
     chosen = candidates[chosen_idx]
@@ -108,6 +150,8 @@ def ttt_one_prompt(prompt: str, n: int, gateway: str, channel: str = "imessage",
         "chosen_idx": chosen_idx,
         "chosen_text": chosen["text"],
         "chosen_score": chosen["shape"]["score"],
+        "chosen_p_seth": chosen.get("p_seth"),
+        "choice_mode": choice_mode,
         "rejected_texts": [r["text"] for r in rejected],
         "total_elapsed_s": time.time() - t_start,
     }
@@ -149,7 +193,18 @@ def main():
     p.add_argument("--channel", default="imessage")
     p.add_argument("--log-to-sqlite", help="Path to memory.db; logs DPO triples")
     p.add_argument("--out", help="Output JSON path", default="/tmp/ttt_results.json")
+    p.add_argument("--speaker-id-clf", default=SPEAKER_ID_CLF_DEFAULT,
+                   help="Path to trained speaker-ID classifier JSON. "
+                        "When loaded AND all candidates pass shape, "
+                        "choose by argmax P(Seth).")
     args = p.parse_args()
+    speaker_id_clf = _maybe_load_speaker_id_clf(args.speaker_id_clf)
+    if speaker_id_clf:
+        print(f"speaker-ID classifier loaded from {args.speaker_id_clf} "
+              f"(features={len(speaker_id_clf.get('feature_names', []))})")
+    else:
+        print(f"speaker-ID classifier NOT loaded (path={args.speaker_id_clf}); "
+              f"using shape-only argmax")
 
     prompts = []
     if args.prompt:
@@ -167,9 +222,14 @@ def main():
     all_results = []
     for i, prompt in enumerate(prompts, 1):
         print(f"--- prompt {i}/{len(prompts)}: {prompt[:80]!r}")
-        result = ttt_one_prompt(prompt, args.n, args.gateway, args.channel)
+        result = ttt_one_prompt(prompt, args.n, args.gateway, args.channel,
+                                speaker_id_clf=speaker_id_clf)
         all_results.append(result)
-        print(f"    chosen (idx={result['chosen_idx']}, score={result['chosen_score']:.2f}):")
+        p_seth_disp = (f", P(Seth)={result['chosen_p_seth']:.3f}"
+                       if result.get("chosen_p_seth") is not None else "")
+        print(f"    chosen (idx={result['chosen_idx']}, "
+              f"score={result['chosen_score']:.2f}{p_seth_disp}, "
+              f"mode={result.get('choice_mode', '?')}):")
         print(f"      {result['chosen_text']!r}")
         print(f"    rejected ({len(result['rejected_texts'])}):")
         for j, rej in enumerate(result["rejected_texts"][:3]):
