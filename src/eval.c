@@ -17,6 +17,18 @@
 #include <sqlite3.h>
 #endif
 
+/* 2026-05-19 (M7): proper millisecond precision for per-task elapsed_ms.
+ * Previously time(NULL)*1000 gave only second-precision rounded UP to ms,
+ * so any task finishing in <1s registered 0 ms (false zero — same shape as
+ * the original B2 bug). Use CLOCK_MONOTONIC so neither wall-clock jumps
+ * nor leap-seconds shift the delta. */
+static int64_t eval_monotonic_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return eval_monotonic_ms();
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+}
+
 #define EVAL_MAX_TASKS               256
 #define HU_EVAL_SUITE_JSON_MAX_BYTES (1024u * 1024u)
 
@@ -550,7 +562,7 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
         hu_eval_result_t *res = &out->results[i];
         char *response = NULL;
         size_t response_len = 0;
-        int64_t task_start_ms = (int64_t)time(NULL) * 1000;
+        int64_t task_start_ms = eval_monotonic_ms();
 
 #if defined(HU_IS_TEST) && HU_IS_TEST
         {
@@ -590,7 +602,7 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
                 provider->ctx, alloc, sys, sys_len, task->prompt ? task->prompt : "",
                 task->prompt ? task->prompt_len : 0, model ? model : "", model_len, 0.0, &response,
                 &response_len);
-            int64_t task_end_ms = (int64_t)time(NULL) * 1000;
+            int64_t task_end_ms = eval_monotonic_ms();
             int64_t task_elapsed = task_end_ms - task_start_ms;
 
             /* Timeout enforcement: if task exceeded timeout_ms, treat as failure */
@@ -681,7 +693,7 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
         res->score = score_val;
         res->actual_output = response;
         res->actual_output_len = response_len;
-        res->elapsed_ms = (int64_t)time(NULL) * 1000 - task_start_ms;
+        res->elapsed_ms = eval_monotonic_ms() - task_start_ms;
         res->tool_calls_made = 0;
         res->tokens_used = 0;
         res->error_msg = NULL;
