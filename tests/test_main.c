@@ -57,6 +57,12 @@ void run_imessage_reactions_tests(void);
 void run_imessage_ingest_tests(void);
 /* Phase 1c end-to-end smoke: chat.db → poll → reaction_handler → personal_model. */
 void run_imessage_personal_model_e2e_tests(void);
+/* Phase 3: bplist00 parser tests (pure-C, no platform gates). */
+void run_bplist_tests(void);
+/* Phase 2 cross-channel reaction emit: Discord MESSAGE_REACTION_ADD/REMOVE. */
+void run_discord_reactions_tests(void);
+/* Phase 2 cross-channel reaction emit: Telegram message_reaction diff. */
+void run_telegram_reactions_tests(void);
 /* Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch. */
 void run_slack_reactions_tests(void);
 /* Phase 2 Task 13 (RL SOTA): reaction_handler event → dpo_pairs row E2E.
@@ -803,6 +809,9 @@ int main(int argc, char **argv) {
     run_imessage_reactions_tests();
     run_imessage_ingest_tests();
     run_imessage_personal_model_e2e_tests();
+    run_bplist_tests();
+    run_discord_reactions_tests();
+    run_telegram_reactions_tests();
     run_slack_reactions_tests();
 #ifdef HU_ENABLE_SQLITE
     run_reaction_handler_e2e_tests();

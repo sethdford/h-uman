@@ -14,7 +14,9 @@
 #include "human/channels/imessage_ingest.h"
 
 #include "human/agent/channel_trust.h"
+#include "human/channels/imessage.h"
 #include "human/memory/personal_model.h"
+#include "human/util/bplist.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -421,4 +423,110 @@ hu_error_t hu_imessage_ingest_balloon(struct hu_personal_model *model, const cha
 
     hu_provenance_t prov = imessage_provenance(sender_handle, timestamp_unix, in_group_chat);
     return ingest_synthesized(model, buf, n, /*from_user=*/true, timestamp_unix, &prov);
+}
+
+/* ── Phase 3: bplist payload extractors ───────────────────────────── */
+
+size_t hu_imessage_extract_audio_transcript(const unsigned char *payload_blob, size_t payload_len,
+                                            char *out, size_t cap) {
+    if (!payload_blob || payload_len == 0 || !out || cap == 0)
+        return 0;
+    out[0] = '\0';
+
+    hu_bplist_t *p = NULL;
+    if (hu_bplist_parse(payload_blob, payload_len, &p) != HU_OK)
+        return 0;
+
+    /* Try both schema versions: older "transcribed_text", newer
+     * "transcription". The root is typically a dict; some iOS versions
+     * wrap the dict in an NSKeyedArchiver $objects array. We try the
+     * direct path first and let the caller handle archiver-wrapped
+     * blobs if needed. */
+    size_t root = hu_bplist_root(p);
+    size_t n = 0;
+
+    if (hu_bplist_kind(p, root) == HU_BPLIST_DICT) {
+        size_t v = hu_bplist_dict_lookup(p, root, "transcribed_text");
+        if (v == SIZE_MAX)
+            v = hu_bplist_dict_lookup(p, root, "transcription");
+        if (v != SIZE_MAX && hu_bplist_kind(p, v) == HU_BPLIST_STRING)
+            n = hu_bplist_get_string(p, v, out, cap);
+    }
+
+    hu_bplist_free(p);
+    return n;
+}
+
+/* Resolve a single edit-event's text. The "t" key may either be:
+ *   - a plain string  → copy directly
+ *   - a typedstream data blob → run hu_imessage_extract_attributed_body
+ * Anything else yields zero bytes written. */
+static size_t edit_event_extract_text(const hu_bplist_t *p, size_t event_idx, char *out,
+                                      size_t cap) {
+    if (cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (hu_bplist_kind(p, event_idx) != HU_BPLIST_DICT)
+        return 0;
+    size_t t = hu_bplist_dict_lookup(p, event_idx, "t");
+    if (t == SIZE_MAX)
+        return 0;
+    hu_bplist_kind_t k = hu_bplist_kind(p, t);
+    if (k == HU_BPLIST_STRING)
+        return hu_bplist_get_string(p, t, out, cap);
+    if (k == HU_BPLIST_DATA) {
+        size_t blen = 0;
+        const unsigned char *b = hu_bplist_get_data(p, t, &blen);
+        if (b && blen > 0)
+            return hu_imessage_extract_attributed_body(b, blen, out, cap);
+    }
+    return 0;
+}
+
+size_t hu_imessage_extract_edit_chain(const unsigned char *summary_blob, size_t summary_len,
+                                      char *out_buf, size_t out_count_max, size_t entry_cap) {
+    if (!summary_blob || summary_len == 0 || !out_buf || out_count_max == 0 || entry_cap == 0)
+        return 0;
+
+    hu_bplist_t *p = NULL;
+    if (hu_bplist_parse(summary_blob, summary_len, &p) != HU_OK)
+        return 0;
+
+    size_t written = 0;
+    size_t root = hu_bplist_root(p);
+    if (hu_bplist_kind(p, root) != HU_BPLIST_DICT) {
+        hu_bplist_free(p);
+        return 0;
+    }
+    size_t ec = hu_bplist_dict_lookup(p, root, "ec");
+    if (ec == SIZE_MAX || hu_bplist_kind(p, ec) != HU_BPLIST_DICT) {
+        hu_bplist_free(p);
+        return 0;
+    }
+
+    /* Iterate parts in numeric ascending order ("0", "1", ...) up to
+     * 16. Apple keeps at most ~5 edits per part, so 16 is a generous
+     * upper bound that avoids unbounded loops. */
+    for (size_t part = 0; part < 16 && written < out_count_max; part++) {
+        char key[8];
+        snprintf(key, sizeof(key), "%zu", part);
+        size_t arr = hu_bplist_dict_lookup(p, ec, key);
+        if (arr == SIZE_MAX)
+            continue;
+        if (hu_bplist_kind(p, arr) != HU_BPLIST_ARRAY)
+            continue;
+        size_t count = hu_bplist_array_count(p, arr);
+        for (size_t i = 0; i < count && written < out_count_max; i++) {
+            size_t event = hu_bplist_array_at(p, arr, i);
+            if (event == SIZE_MAX)
+                continue;
+            char *slot = out_buf + written * entry_cap;
+            size_t n = edit_event_extract_text(p, event, slot, entry_cap);
+            if (n > 0)
+                written++;
+        }
+    }
+
+    hu_bplist_free(p);
+    return written;
 }

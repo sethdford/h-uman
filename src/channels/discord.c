@@ -797,6 +797,20 @@ hu_error_t hu_discord_on_webhook(void *channel_ctx, hu_allocator_t *alloc, const
     if (err != HU_OK || !parsed)
         return HU_OK;
 
+    /* RL SOTA — Discord reaction gateway branch. Lives in
+     * discord_reactions.c to avoid the hu_reaction_type_t (channel.h) ↔
+     * hu_reaction_kind_t (reaction_event.h) enumerator-name collision.
+     * Must run BEFORE the MESSAGE_CREATE / content-extraction path
+     * below — that path early-returns HU_OK for any payload without a
+     * non-empty `content` and would otherwise silently drop
+     * MESSAGE_REACTION_ADD / MESSAGE_REACTION_REMOVE events. */
+    extern int hu_discord_handle_reaction_gateway(const char *body, size_t body_len,
+                                                  hu_allocator_t *alloc, const char *bot_user_id);
+    if (hu_discord_handle_reaction_gateway(body, body_len, alloc, c->bot_id)) {
+        hu_json_free(alloc, parsed);
+        return HU_OK;
+    }
+
     /*
      * Discord Interactions webhook payload:
      *   { "type": 0, "d": { "channel_id": "...", "author": { "id": "...", "bot": false },
