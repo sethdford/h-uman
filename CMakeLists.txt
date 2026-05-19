@@ -1109,6 +1109,7 @@ list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
 list(APPEND HU_CORE_SOURCES
     src/a2a.c
     src/eval.c
+    src/eval/shape.c
     src/eval/consistency.c
     src/eval/persona_fidelity.c
     src/memory/fact_extract_llm.c

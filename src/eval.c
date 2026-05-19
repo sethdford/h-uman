@@ -1,6 +1,7 @@
 #include "human/eval.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include "human/eval/shape.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <math.h>
@@ -685,6 +686,34 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
         res->tokens_used = 0;
         res->error_msg = NULL;
 
+        /* 2026-05-18 (M4): also compute deterministic shape score
+         * alongside the LLM-judge result. Shape classifier is
+         * regex-based on the canonical "AI assistant offering options"
+         * failure mode — robust to judge noise. Channel derived from
+         * the suite name (heuristic): "imessage" / "telegram" / "slack"
+         * / "discord" / "email" substring match; falls back to iMessage
+         * (strictest) for unknown suites. Persists to eval_results
+         * SQLite columns. */
+        {
+            hu_shape_channel_t shape_ch = HU_SHAPE_CHANNEL_IMESSAGE;
+            if (suite->name) {
+                if (strstr(suite->name, "telegram"))
+                    shape_ch = HU_SHAPE_CHANNEL_TELEGRAM;
+                else if (strstr(suite->name, "slack"))
+                    shape_ch = HU_SHAPE_CHANNEL_SLACK;
+                else if (strstr(suite->name, "discord"))
+                    shape_ch = HU_SHAPE_CHANNEL_DISCORD;
+                else if (strstr(suite->name, "email"))
+                    shape_ch = HU_SHAPE_CHANNEL_EMAIL;
+            }
+            hu_shape_result_t shape;
+            memset(&shape, 0, sizeof(shape));
+            (void)hu_shape_classify(response, response_len, shape_ch, &shape);
+            res->shape_score = shape.score;
+            res->shape_pass = shape.passed;
+            res->shape_fails = shape.fail_flags;
+        }
+
         if (passed)
             out->passed++;
         else
@@ -1021,6 +1050,11 @@ hu_error_t hu_eval_init_tables(sqlite3 *db) {
     /* Migration: add provider/model columns to existing tables */
     sqlite3_exec(db, "ALTER TABLE eval_runs ADD COLUMN provider TEXT", NULL, NULL, NULL);
     sqlite3_exec(db, "ALTER TABLE eval_runs ADD COLUMN model TEXT", NULL, NULL, NULL);
+    /* 2026-05-18 (M4) migration: shape columns. ALTER returns error
+     * silently when column already exists; that's the idempotent path. */
+    sqlite3_exec(db, "ALTER TABLE eval_results ADD COLUMN shape_score REAL", NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE eval_results ADD COLUMN shape_pass INTEGER", NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE eval_results ADD COLUMN shape_fails INTEGER", NULL, NULL, NULL);
     const char *results_sql = "CREATE TABLE IF NOT EXISTS eval_results ("
                               "id INTEGER PRIMARY KEY AUTOINCREMENT,"
                               "run_id INTEGER NOT NULL REFERENCES eval_runs(id),"
@@ -1028,7 +1062,10 @@ hu_error_t hu_eval_init_tables(sqlite3 *db) {
                               "passed INTEGER NOT NULL,"
                               "actual_output TEXT,"
                               "score REAL,"
-                              "elapsed_ms INTEGER)";
+                              "elapsed_ms INTEGER,"
+                              "shape_score REAL,"     /* 2026-05-18 (M4) */
+                              "shape_pass INTEGER,"   /* 2026-05-18 (M4) */
+                              "shape_fails INTEGER)"; /* 2026-05-18 (M4) */
     if (sqlite3_exec(db, results_sql, NULL, NULL, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
     const char *baselines_sql = "CREATE TABLE IF NOT EXISTS eval_baselines ("
@@ -1182,8 +1219,9 @@ hu_error_t hu_eval_store_run(hu_allocator_t *alloc, sqlite3 *db, const hu_eval_r
     if (run->results_count > 0 && run->results) {
         sqlite3_stmt *ins_res = NULL;
         const char *res_sql =
-            "INSERT INTO eval_results(run_id,task_id,passed,actual_output,score,elapsed_ms) "
-            "VALUES(?,?,?,?,?,?)";
+            "INSERT INTO eval_results(run_id,task_id,passed,actual_output,score,elapsed_ms,"
+            "shape_score,shape_pass,shape_fails) "
+            "VALUES(?,?,?,?,?,?,?,?,?)";
         if (sqlite3_prepare_v2(db, res_sql, -1, &ins_res, NULL) != SQLITE_OK)
             return HU_ERR_MEMORY_BACKEND;
         for (size_t i = 0; i < run->results_count; i++) {
@@ -1199,6 +1237,10 @@ hu_error_t hu_eval_store_run(hu_allocator_t *alloc, sqlite3 *db, const hu_eval_r
             }
             sqlite3_bind_double(ins_res, 5, r->score);
             sqlite3_bind_int64(ins_res, 6, r->elapsed_ms);
+            /* 2026-05-18 (M4): deterministic shape classification fields */
+            sqlite3_bind_double(ins_res, 7, r->shape_score);
+            sqlite3_bind_int(ins_res, 8, r->shape_pass ? 1 : 0);
+            sqlite3_bind_int(ins_res, 9, (int)r->shape_fails);
             if (sqlite3_step(ins_res) != SQLITE_DONE) {
                 sqlite3_finalize(ins_res);
                 return HU_ERR_MEMORY_BACKEND;

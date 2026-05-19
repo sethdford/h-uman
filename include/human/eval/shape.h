@@ -1,0 +1,75 @@
+#ifndef HU_EVAL_SHAPE_H
+#define HU_EVAL_SHAPE_H
+
+/* 2026-05-18 (M4): C-side deterministic shape classifier for eval responses.
+ *
+ * Mirrors scripts/eval_shape_classifier.py but in C, so every
+ * hu_eval_run_suite call automatically scores each response on shape
+ * (length + markdown + AI-assistant openers) without needing the
+ * Python tool. Results persist alongside score/passed in the
+ * eval_results SQLite table.
+ *
+ * Rationale: the LLM-judge has false positives AND false negatives
+ * (proven in the persona-eval audit chain). The shape classifier is
+ * a deterministic regex/string-matching gate that detects the
+ * canonical "AI assistant offering options" failure mode. It
+ * correlates with the LLM-judge on unambiguous responses and provides
+ * signal where the judge gives noise.
+ *
+ * For iMessage / Telegram (strict): no markdown, no AI openers, <=250 char.
+ * For Discord / Slack (relaxed): markdown OK, no AI openers, <=500-800 char.
+ * For Email (formal): markdown + openers OK, <=2000 char.
+ */
+
+#include "human/core/error.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+typedef enum hu_shape_channel {
+    HU_SHAPE_CHANNEL_IMESSAGE = 0, /* default — strictest */
+    HU_SHAPE_CHANNEL_TELEGRAM,
+    HU_SHAPE_CHANNEL_DISCORD, /* markdown allowed */
+    HU_SHAPE_CHANNEL_SLACK,   /* markdown allowed */
+    HU_SHAPE_CHANNEL_EMAIL,   /* markdown + openers allowed */
+} hu_shape_channel_t;
+
+typedef struct hu_shape_result {
+    double score; /* in [0.0, 1.0], 1.0 = perfect in-voice */
+    bool passed;  /* score >= 0.7 AND no fatal violation */
+    size_t response_len;
+    /* Bit flags for per-fail attribution (debug / explainability) */
+    uint32_t fail_flags;
+} hu_shape_result_t;
+
+/* Per-fail bit flags. Use these to attribute which rules a response
+ * violated when displaying results to humans. */
+#define HU_SHAPE_FAIL_NULL_RESPONSE  0x0001
+#define HU_SHAPE_FAIL_EMPTY_RESPONSE 0x0002
+#define HU_SHAPE_FAIL_TOO_LONG       0x0004
+#define HU_SHAPE_FAIL_WAY_TOO_LONG   0x0008
+#define HU_SHAPE_FAIL_BULLET_LIST    0x0010
+#define HU_SHAPE_FAIL_NUMBERED_LIST  0x0020
+#define HU_SHAPE_FAIL_HEADER         0x0040
+#define HU_SHAPE_FAIL_BOLD_MARKDOWN  0x0080
+#define HU_SHAPE_FAIL_CODE_FENCE     0x0100
+#define HU_SHAPE_FAIL_DEPENDING_ON   0x0200
+#define HU_SHAPE_FAIL_HERE_ARE       0x0400
+#define HU_SHAPE_FAIL_CERTAINLY      0x0800
+#define HU_SHAPE_FAIL_ABSOLUTELY     0x1000
+#define HU_SHAPE_FAIL_GREAT_QUESTION 0x2000
+#define HU_SHAPE_FAIL_I_UNDERSTAND   0x4000
+
+/* Map a channel name string (case-insensitive) to the enum. Falls
+ * back to HU_SHAPE_CHANNEL_IMESSAGE (strictest) for unknown channels. */
+hu_shape_channel_t hu_shape_channel_from_string(const char *channel, size_t channel_len);
+
+/* Classify a response under the channel's shape rules. response may
+ * be NULL (recorded as NULL_RESPONSE fail with score 0.0).
+ * Never returns an error — populates result and returns HU_OK.
+ *
+ * Safe to call from any context; no allocation, no I/O. */
+hu_error_t hu_shape_classify(const char *response, size_t response_len, hu_shape_channel_t channel,
+                             hu_shape_result_t *out);
+
+#endif /* HU_EVAL_SHAPE_H */
