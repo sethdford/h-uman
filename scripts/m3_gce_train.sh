@@ -60,7 +60,7 @@ ITERS=50
 RANK=8
 LEARNING_RATE=5e-5
 BATCH_SIZE=1
-BASE_MODEL="google/gemma-3-4b-it"
+BASE_MODEL=""        # default chosen below based on HF_TOKEN availability
 PAIRS=""
 ADAPTER_OUT="$HOME/.human/training-data/adapters/gce-$(date +%Y%m%d-%H%M%S)"
 
@@ -97,6 +97,24 @@ banner "Pre-flight"
 command -v gcloud >/dev/null 2>&1 || die "gcloud CLI not installed" 2
 [ -n "$PAIRS" ] || die "--pairs required" 2
 [ -f "$PAIRS" ] || die "pairs file not found: $PAIRS" 2
+
+# HF auth detection: if HF_TOKEN env or ~/.cache/huggingface/token is
+# present locally, we can use gated models (e.g. google/gemma-*).
+# Otherwise default to an open model so the VM can actually download
+# the weights without a 401.
+HF_TOKEN_LOCAL=""
+if [ -n "${HF_TOKEN:-}" ]; then
+    HF_TOKEN_LOCAL="$HF_TOKEN"
+elif [ -f "$HOME/.cache/huggingface/token" ]; then
+    HF_TOKEN_LOCAL=$(cat "$HOME/.cache/huggingface/token")
+fi
+if [ -z "$BASE_MODEL" ]; then
+    if [ -n "$HF_TOKEN_LOCAL" ]; then
+        BASE_MODEL="google/gemma-3-4b-it"   # gated; needs the token
+    else
+        BASE_MODEL="Qwen/Qwen2.5-3B-Instruct"   # open-access default
+    fi
+fi
 
 # Map GPU type to machine type + accelerator
 case "$GPU" in
@@ -167,31 +185,82 @@ trap cleanup EXIT INT TERM
 
 banner "Step 1 — provision GPU VM ($GPU)"
 
-# Use the Debian-based deep learning VM image with PyTorch + CUDA.
-# Image family follows GCP's published cadence:
-#   pytorch-2-9-cu130-ubuntu-2204-nvidia-580
-# (Use the most recent family for the chosen GPU's compute capability.)
-IMAGE_FAMILY="pytorch-latest-gpu"
+# GCP's deep-learning image families drift quarterly (the old
+# `pytorch-latest-gpu` alias was retired in early 2026). Discover the
+# current family at provision time so this script doesn't bit-rot.
+# Picks the most-recent `pytorch-*-cu*-nvidia-*` family on Ubuntu 22.04.
 IMAGE_PROJECT="deeplearning-platform-release"
-
-if ! gcloud compute instances create "$VM_NAME" \
-    --project="$PROJECT" --zone="$ZONE" \
-    --machine-type="$MACHINE_TYPE" \
-    --accelerator="$ACCELERATOR" \
-    --maintenance-policy=TERMINATE \
-    --image-family="$IMAGE_FAMILY" \
-    --image-project="$IMAGE_PROJECT" \
-    --boot-disk-size=100GB \
-    --boot-disk-type=pd-ssd \
-    --metadata="install-nvidia-driver=True,m3-vm-purpose=training" \
-    --labels="purpose=m3-train,owner=seth" \
-    --scopes=https://www.googleapis.com/auth/cloud-platform \
-    --no-restart-on-failure \
-    2>&1 | tail -3; then
-    die "Provisioning failed" 3
+IMAGE_FAMILY="${M3_GCE_IMAGE_FAMILY:-}"
+if [ -z "$IMAGE_FAMILY" ]; then
+    IMAGE_FAMILY=$(gcloud compute images list \
+        --project="$IMAGE_PROJECT" \
+        --filter="family~^pytorch-[0-9]+-[0-9]+-cu1[0-9]+-ubuntu-2204-nvidia-" \
+        --format="value(family)" 2>/dev/null | sort -u | tail -1)
+    [ -z "$IMAGE_FAMILY" ] && \
+        die "Could not discover a PyTorch CUDA Ubuntu 22.04 image family. Set M3_GCE_IMAGE_FAMILY manually." 2
+    log "Discovered image family: $IMAGE_FAMILY"
 fi
-VM_CREATED=1
-log "VM provisioned: $VM_NAME"
+
+# Zone fallback: L4 (and other accelerators) frequently stock out in
+# any one zone. Try a list of zones in the same region in sequence
+# until one accepts the request. The `--zone` flag set above is the
+# preferred zone; subsequent fallbacks are appended.
+case "$GPU" in
+    l4)        FALLBACK_ZONES="us-central1-a us-central1-b us-central1-c us-east1-c us-east4-c us-west1-b us-west4-a" ;;
+    a100)      FALLBACK_ZONES="us-central1-a us-central1-b us-central1-c us-central1-f us-east1-b us-west1-b" ;;
+    a100-80gb) FALLBACK_ZONES="us-central1-a us-central1-b us-central1-c us-east5-b" ;;
+    *)         FALLBACK_ZONES="$ZONE" ;;
+esac
+# Put the requested zone first, then any others not duplicated
+ZONES_TO_TRY="$ZONE"
+for z in $FALLBACK_ZONES; do
+    [ "$z" = "$ZONE" ] && continue
+    ZONES_TO_TRY="$ZONES_TO_TRY $z"
+done
+
+PROVISION_OK=0
+for try_zone in $ZONES_TO_TRY; do
+    log "Trying zone: $try_zone"
+    if gcloud compute instances create "$VM_NAME" \
+        --project="$PROJECT" --zone="$try_zone" \
+        --machine-type="$MACHINE_TYPE" \
+        --accelerator="$ACCELERATOR" \
+        --maintenance-policy=TERMINATE \
+        --image-family="$IMAGE_FAMILY" \
+        --image-project="$IMAGE_PROJECT" \
+        --boot-disk-size=100GB \
+        --boot-disk-type=pd-ssd \
+        --metadata="install-nvidia-driver=True,m3-vm-purpose=training" \
+        --labels="purpose=m3-train,owner=seth" \
+        --scopes=https://www.googleapis.com/auth/cloud-platform \
+        --no-restart-on-failure \
+        2>&1 | tail -3 | grep -v "does not have enough resources"; then
+        # Check the instance actually exists (the previous command may
+        # exit 0 even on stockout if the partial-create succeeded but
+        # was auto-terminated)
+        sleep 3
+        status=$(gcloud compute instances describe "$VM_NAME" \
+            --zone="$try_zone" --project="$PROJECT" \
+            --format="value(status)" 2>/dev/null)
+        if [ "$status" = "PROVISIONING" ] || [ "$status" = "STAGING" ] || \
+           [ "$status" = "RUNNING" ]; then
+            ZONE="$try_zone"   # commit to this zone for downstream SCP/SSH
+            PROVISION_OK=1
+            VM_CREATED=1
+            log "VM provisioned in $try_zone (status=$status)"
+            break
+        else
+            log "  $try_zone created VM but it's in $status — likely stockout; cleaning up"
+            gcloud compute instances delete "$VM_NAME" \
+                --zone="$try_zone" --project="$PROJECT" --quiet 2>&1 \
+                | head -2 || true
+        fi
+    else
+        log "  $try_zone refused (stockout or other error)"
+    fi
+done
+[ "$PROVISION_OK" = "1" ] || \
+    die "All zones in fallback list refused; cloud is constrained right now" 3
 
 # Wait for SSH ready (deep learning AMIs need ~60-90s for first-boot
 # CUDA driver install)
@@ -220,17 +289,39 @@ gcloud compute scp "$PAIRS" "${VM_NAME}:/tmp/pairs.jsonl" \
 gcloud compute scp "$REPO_ROOT/scripts/m3_gce_train_remote.py" \
     "${VM_NAME}:/tmp/train.py" \
     --zone="$ZONE" --project="$PROJECT" --quiet 2>&1 | tail -2
+# Upload HF token so gated models (gemma) can be downloaded.
+# Token file is private (mode 600) on disk; we use the gcloud SSH
+# pipe and write it directly with chmod 600 on the VM side — never
+# echoed to a log.
+if [ -n "$HF_TOKEN_LOCAL" ]; then
+    log "Uploading HF token (for gated model access)"
+    gcloud compute ssh "$VM_NAME" --zone="$ZONE" --project="$PROJECT" \
+        --command="mkdir -p ~/.cache/huggingface && \
+                   umask 077 && \
+                   printf '%s' '$HF_TOKEN_LOCAL' > ~/.cache/huggingface/token && \
+                   chmod 600 ~/.cache/huggingface/token" \
+        --quiet 2>&1 | tail -1
+fi
 
 banner "Step 4 — train on GPU (this is the work)"
-# The remote script handles model download, LoRA setup, training,
-# and adapter save. We redirect stderr so progress is visible.
-TRAIN_CMD="python3 /tmp/train.py \
-    --pairs /tmp/pairs.jsonl \
-    --adapter-out /tmp/adapter \
-    --base-model '$BASE_MODEL' \
-    --iters $ITERS --rank $RANK \
-    --batch-size $BATCH_SIZE \
-    --learning-rate $LEARNING_RATE 2>&1 | tee /tmp/train.log"
+# The DL AMI's `/usr/bin/python3` is the SYSTEM python with no ML libs.
+# All the pre-installed PyTorch / transformers / etc. lives in conda
+# at /opt/conda/bin/python3 (which the AMI's default bashrc activates,
+# but `ssh --command` doesn't source bashrc). Use the conda python
+# explicitly so we don't pay for re-installing 5 GB of deps every run.
+# Fallback to /usr/bin/python3 if conda env isn't found (different AMI).
+TRAIN_CMD='PY=/opt/conda/bin/python3; \
+    [ -x "$PY" ] || PY=/usr/bin/python3; \
+    echo "Using Python: $PY"; \
+    $PY -c "import torch, transformers, peft; print(f\"torch={torch.__version__} transformers={transformers.__version__}\")" || \
+        $PY -m pip install --quiet torch transformers peft accelerate bitsandbytes datasets safetensors; \
+    $PY /tmp/train.py \
+        --pairs /tmp/pairs.jsonl \
+        --adapter-out /tmp/adapter \
+        --base-model "'"$BASE_MODEL"'" \
+        --iters '"$ITERS"' --rank '"$RANK"' \
+        --batch-size '"$BATCH_SIZE"' \
+        --learning-rate '"$LEARNING_RATE"' 2>&1 | tee /tmp/train.log'
 
 if ! gcloud compute ssh "$VM_NAME" --zone="$ZONE" --project="$PROJECT" \
         --command="$TRAIN_CMD" --quiet; then
