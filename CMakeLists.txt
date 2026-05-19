@@ -2930,6 +2930,7 @@ set(HU_TEST_SOURCES
     tests/test_string.c
     tests/test_log_once.c
     tests/test_io_secure.c
+    tests/test_config_banner_runtime_failfast.c
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
     tests/test_memory.c

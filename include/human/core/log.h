@@ -57,12 +57,13 @@ static inline void hu_log_impl_(const char *component, hu_observer_t *obs, const
  *                    "reaction_collection.enabled=true in config.json to activate");
  *
  * Intended for config-gated background subsystems whose normal disabled
- * path silently returns HU_OK. See
+ * path silently returns HU_OK, AND for stub backends in factories that
+ * silently return NOT_SUPPORTED. See
  * ~/.claude/rules/silent-config-gated-subsystems.md — the message MUST
- * name the config key the operator needs to flip.
+ * name the config key/value the operator needs to fix.
  *
  * The guard is process-scoped; in tests, reset it to false between
- * invocations if you need to re-arm the warning.
+ * invocations via atomic_store if you need to re-arm the warning.
  */
 static inline bool hu_log_once_check_(atomic_bool *guard) {
     bool expected = false;

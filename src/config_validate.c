@@ -143,19 +143,70 @@ static bool is_provider_valid(const char *name) {
     return hu_compatible_provider_url(name) != NULL;
 }
 
+/* Cap on collected unknown keys for the consolidated startup banner. Bounds
+ * memory in pathological/adversarial configs; extra keys still get the
+ * per-key info log, just not the banner mention. */
+#define HU_CONFIG_UNKNOWN_KEY_BANNER_CAP 16
+
 static void check_unknown_top_keys(const hu_json_value_t *root, bool strict, bool *has_error) {
     if (!root || root->type != HU_JSON_OBJECT || !root->data.object.pairs)
         return;
+
+    /* Collect unknown keys so we can also emit one consolidated banner line.
+     * Per ~/.claude/rules/silent-config-gated-subsystems.md, operators easily
+     * miss per-key info lines in multi-thousand-line service logs; the banner
+     * surfaces "your binary doesn't understand these keys" as one warn line. */
+    const char *unknown_keys[HU_CONFIG_UNKNOWN_KEY_BANNER_CAP];
+    size_t unknown_count = 0;
+    size_t unknown_total = 0;
+
     for (size_t i = 0; i < root->data.object.len; i++) {
         hu_json_pair_t *p = &root->data.object.pairs[i];
         if (!p->key)
             continue;
         if (!key_in_list(p->key, hu_config_top_keys, hu_config_top_keys_len)) {
-            hu_log_error("config", NULL, "unknown key: '%s' (ignored)", p->key);
+            /* Per-key info-level line (existing contract — keep so operators
+             * can still grep each key individually). */
+            hu_log_info("config", NULL, "unknown key: '%s' (ignored)", p->key);
+            unknown_total++;
+            if (unknown_count < HU_CONFIG_UNKNOWN_KEY_BANNER_CAP)
+                unknown_keys[unknown_count++] = p->key;
             if (strict)
                 *has_error = true;
         }
     }
+
+    if (unknown_total == 0)
+        return;
+
+    /* Build the consolidated banner. Cap each key length defensively so an
+     * adversarial JSON with a giant key can't blow the message buffer. */
+    char buf[512];
+    size_t off = 0;
+    int n = snprintf(buf + off, sizeof(buf) - off,
+                     "WARNING: %zu unknown config %s ignored: ", unknown_total,
+                     unknown_total == 1 ? "key" : "keys");
+    if (n < 0 || (size_t)n >= sizeof(buf) - off)
+        return;
+    off += (size_t)n;
+    for (size_t i = 0; i < unknown_count && off < sizeof(buf) - 1; i++) {
+        const char *sep = (i + 1 < unknown_count) ? ", " : "";
+        n = snprintf(buf + off, sizeof(buf) - off, "%s%s", unknown_keys[i], sep);
+        if (n < 0 || (size_t)n >= sizeof(buf) - off)
+            break;
+        off += (size_t)n;
+    }
+    if (unknown_total > unknown_count && off < sizeof(buf) - 1) {
+        n = snprintf(buf + off, sizeof(buf) - off, " (+%zu more)", unknown_total - unknown_count);
+        if (n > 0 && (size_t)n < sizeof(buf) - off)
+            off += (size_t)n;
+    }
+    if (off < sizeof(buf) - 1) {
+        (void)snprintf(buf + off, sizeof(buf) - off,
+                       " - these are either deprecated or your binary "
+                       "predates the schema. Rebuild from source or remove them.");
+    }
+    hu_log_warn("config", NULL, "%s", buf);
 }
 
 static void check_unknown_nested_keys(const hu_json_value_t *obj, const char *section,
