@@ -4186,6 +4186,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     hu_chat_message_t *msgs = NULL;
     size_t msgs_count = 0;
 
+    /* G1 (2026-05-18) — per-turn contact routing. Lookup the contact's
+     * adapter (if any) and swap on the MLX server BEFORE the chat
+     * request fires. No-op when no routes are configured or the
+     * target adapter is already loaded. Soft-fail on swap errors. */
+    hu_agent_m3_route_per_turn(agent);
+
     hu_chat_request_t req;
     memset(&req, 0, sizeof(req));
     req.model = agent->model_name;

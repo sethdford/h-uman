@@ -38,6 +38,13 @@ on:
       - "scripts/test_m3_drift_detector.py"
       - "scripts/m3_contact_routing.py"
       - "scripts/test_m3_contact_routing.py"
+      - "scripts/m3_promote.py"
+      - "scripts/test_m3_promote.py"
+      - "scripts/live_fire_m3_canary.sh"
+      - "scripts/test_m3_canary.py"
+      - "scripts/m3_loop_cycle.sh"
+      - "include/human/ml/m3_contact_routes.h"
+      - "src/ml/m3_contact_routes.c"
       - "Makefile"
       - "CMakePresets.json"
       - ".github/workflows/m3-loop-smoke.yml"
@@ -66,6 +73,13 @@ on:
       - "scripts/test_m3_drift_detector.py"
       - "scripts/m3_contact_routing.py"
       - "scripts/test_m3_contact_routing.py"
+      - "scripts/m3_promote.py"
+      - "scripts/test_m3_promote.py"
+      - "scripts/live_fire_m3_canary.sh"
+      - "scripts/test_m3_canary.py"
+      - "scripts/m3_loop_cycle.sh"
+      - "include/human/ml/m3_contact_routes.h"
+      - "src/ml/m3_contact_routes.c"
   workflow_dispatch:
 
 jobs:
@@ -114,6 +128,16 @@ jobs:
         # 12 assertions covering load/save atomicity, lookup precedence,
         # and the promote/demote roundtrip.
         run: python3 scripts/test_m3_contact_routing.py
+
+      - name: Run promote CLI (G2) verifier
+        # 17 assertions covering swap + rollback against a fake MLX,
+        # lineage manifest writes, and production-path guard.
+        run: python3 scripts/test_m3_promote.py
+
+      - name: Run canary live-fire (G3) verifier
+        # 9 assertions covering the canary's full lifecycle including
+        # automatic rollback via shell trap on EXIT.
+        run: python3 scripts/test_m3_canary.py
 
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)

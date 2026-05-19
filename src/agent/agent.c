@@ -69,8 +69,10 @@
 #include "human/security/arg_inspector.h"
 #include "human/voice.h"
 #ifdef HU_ENABLE_ML
+#include "human/ml/m3_contact_routes.h"
 #include "human/ml/m3_frontier_adapter.h"
 #include "human/ml/m3_id_map.h"
+#include "human/ml/mlx_admin.h"
 #endif
 
 #include <stdint.h>
@@ -1031,6 +1033,70 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
                 (void)hu_m3_id_map_create(agent->alloc, map_path, &agent->m3_id_map);
             }
         }
+
+        /* Phase G1 (2026-05-18): open the contact routes file alongside
+         * the id map. Same resilience as id_map — failure is non-fatal,
+         * routes file missing/corrupt → empty routes (lookup returns NULL
+         * for everything, chat path uses base model). */
+        if (!agent->m3_contact_routes) {
+            (void)hu_m3_contact_routes_create(agent->alloc, /*path=NULL→default*/ NULL,
+                                              &agent->m3_contact_routes);
+        }
+    }
+}
+
+/* G1: per-turn contact routing. Called from agent_turn before the
+ * provider chat. Reads memory_session_id → hash → routes lookup; if
+ * the target adapter differs from what's loaded, POSTs swap to MLX.
+ * Tracks the loaded adapter on the agent so repeated turns with the
+ * same contact don't pay the swap round-trip. */
+void hu_agent_m3_route_per_turn(hu_agent_t *agent) {
+    if (!agent || !agent->m3_contact_routes)
+        return;
+    if (!agent->memory_session_id || agent->memory_session_id_len == 0)
+        return;
+
+    uint64_t contact_hash =
+        hu_m3_outcome_hash_bytes(agent->memory_session_id, agent->memory_session_id_len);
+    const char *target = hu_m3_contact_routes_lookup(agent->m3_contact_routes, contact_hash);
+    if (!target || !target[0])
+        return; /* No route for this contact; leave current adapter alone. */
+
+    /* Already loaded? Skip the HTTP round-trip. */
+    if (agent->m3_active_adapter_path && strcmp(agent->m3_active_adapter_path, target) == 0)
+        return;
+
+    /* Resolve MLX URL (env var or default). mlx_admin_swap_adapter
+     * takes the v1 root, so include "/v1" suffix. */
+    const char *mlx_url = getenv("HUMAN_MLX_URL");
+    if (!mlx_url || !mlx_url[0])
+        mlx_url = "http://127.0.0.1:8741/v1";
+
+    hu_mlx_admin_swap_result_t swap_result = {0};
+    hu_error_t serr = hu_mlx_admin_swap_adapter(agent->alloc, mlx_url, strlen(mlx_url), target,
+                                                strlen(target), &swap_result);
+    /* Always free the result fields, even on error paths. */
+    bool swap_ok = (serr == HU_OK && swap_result.status_code == 200);
+    hu_mlx_admin_swap_result_free(agent->alloc, &swap_result);
+
+    if (!swap_ok) {
+        /* Soft fail: log + continue with current adapter. The chat path's
+         * correctness MUST NOT depend on routing succeeding. */
+        hu_log_warn("agent", agent->observer,
+                    "m3 contact-routing swap failed: contact_hash=%llu target=%s err=%d",
+                    (unsigned long long)contact_hash, target, (int)serr);
+        return;
+    }
+
+    /* Swap succeeded — update the cached active adapter path. */
+    if (agent->m3_active_adapter_path) {
+        agent->alloc->free(agent->alloc->ctx, agent->m3_active_adapter_path,
+                           strlen(agent->m3_active_adapter_path) + 1);
+    }
+    size_t tlen = strlen(target);
+    agent->m3_active_adapter_path = (char *)agent->alloc->alloc(agent->alloc->ctx, tlen + 1);
+    if (agent->m3_active_adapter_path) {
+        memcpy(agent->m3_active_adapter_path, target, tlen + 1);
     }
 }
 
@@ -1126,6 +1192,10 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
 }
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
+    (void)agent;
+}
+
+void hu_agent_m3_route_per_turn(hu_agent_t *agent) {
     (void)agent;
 }
 
@@ -1444,6 +1514,16 @@ void hu_agent_deinit(hu_agent_t *agent) {
         (void)hu_m3_id_map_save(agent->m3_id_map);
         hu_m3_id_map_destroy(agent->m3_id_map);
         agent->m3_id_map = NULL;
+    }
+    /* G1 (2026-05-18): release contact routes + active adapter cache. */
+    if (agent->m3_contact_routes) {
+        hu_m3_contact_routes_destroy(agent->m3_contact_routes);
+        agent->m3_contact_routes = NULL;
+    }
+    if (agent->m3_active_adapter_path) {
+        agent->alloc->free(agent->alloc->ctx, agent->m3_active_adapter_path,
+                           strlen(agent->m3_active_adapter_path) + 1);
+        agent->m3_active_adapter_path = NULL;
     }
 #endif
 #ifdef HU_ENABLE_SQLITE

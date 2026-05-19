@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now
 
 all: build test
 
@@ -145,6 +145,21 @@ m3-drift:
 # E5 (2026-05-18) — per-contact adapter routing CLI.
 m3-routes:
 	@python3 scripts/m3_contact_routing.py list
+
+# G2 (2026-05-18) — promote/rollback CLI for the live MLX server.
+# Pass ADAPTER=<path> to promote that adapter; otherwise shows current.
+m3-promote:
+	@if [ -n "$$ADAPTER" ]; then \
+		python3 scripts/m3_promote.py promote --adapter "$$ADAPTER" --yes ; \
+	else \
+		python3 scripts/m3_promote.py current ; \
+	fi
+
+# G4 (2026-05-18) — manually trigger the autonomous loop cycle once.
+# The launchd plist (scripts/ai.human.m3-loop.plist) runs this weekly;
+# `make m3-loop-now` lets you exercise it ad hoc.
+m3-loop-now:
+	@bash scripts/m3_loop_cycle.sh
 
 validate: format-check build test
 	@echo "Validation passed."

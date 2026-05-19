@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Phase G4 (2026-05-18) — autonomous M3 personalization loop.
+
+  Runs scripts/m3_loop_cycle.sh on a weekly schedule. The script
+  itself is the orchestrator (poll → export → train → eval → drift);
+  this plist just owns the schedule + logs.
+
+  Install:
+    cp scripts/ai.human.m3-loop.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/ai.human.m3-loop.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/ai.human.m3-loop.plist
+    rm ~/Library/LaunchAgents/ai.human.m3-loop.plist
+
+  Adjust schedule (default: Sundays 4:00 AM local) by editing
+  StartCalendarInterval below.
+
+  M3_AUTO_PROMOTE=0 means the cycle never auto-promotes adapters,
+  even on PASS. Set to 1 only after verifying the eval gate matches
+  your risk tolerance. Manual promote: scripts/m3_promote.py promote.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.human.m3-loop</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/sethford/Projects/h-uman/scripts/m3_loop_cycle.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/sethford</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/sethford/.local/bin</string>
+        <key>HUMAN_MLX_URL</key>
+        <string>http://127.0.0.1:8741</string>
+        <key>M3_DPO_THRESHOLD</key>
+        <string>32</string>
+        <!-- 0 = require manual promote (safe default). Flip to 1 only
+             after the eval gate is tuned. -->
+        <key>M3_AUTO_PROMOTE</key>
+        <string>0</string>
+    </dict>
+
+    <!-- Weekly: Sundays at 04:00 local time. Off-hours so a slow
+         training run doesn't interfere with user-facing inference. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/sethford/.human/logs/m3-loop-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sethford/.human/logs/m3-loop-stderr.log</string>
+</dict>
+</plist>
