@@ -67,6 +67,11 @@ void run_imessage_schema_tests(void);
 void run_typedstream_tests(void);
 /* Phase 5: per-balloon payload decoder tests + privacy contracts. */
 void run_imessage_balloon_decode_tests(void);
+/* Cross-channel reaction emit: WhatsApp + Matrix. */
+void run_whatsapp_reactions_tests(void);
+void run_matrix_reactions_tests(void);
+/* SQLite-backed reaction_handler lookup store. */
+void run_reaction_handler_lookup_store_tests(void);
 /* Phase 2 cross-channel reaction emit: Discord MESSAGE_REACTION_ADD/REMOVE. */
 void run_discord_reactions_tests(void);
 /* Phase 2 cross-channel reaction emit: Telegram message_reaction diff. */
@@ -822,6 +827,9 @@ int main(int argc, char **argv) {
     run_imessage_schema_tests();
     run_typedstream_tests();
     run_imessage_balloon_decode_tests();
+    run_whatsapp_reactions_tests();
+    run_matrix_reactions_tests();
+    run_reaction_handler_lookup_store_tests();
     run_discord_reactions_tests();
     run_telegram_reactions_tests();
     run_slack_reactions_tests();

@@ -15,6 +15,7 @@
 
 #include "human/agent/channel_trust.h"
 #include "human/channels/imessage.h"
+#include "human/memory/fact_extract.h"
 #include "human/memory/personal_model.h"
 #include "human/util/bplist.h"
 #include "human/util/typedstream.h"
@@ -328,7 +329,92 @@ static hu_error_t ingest_synthesized(hu_personal_model_t *model, const char *tex
     return hu_personal_model_ingest(model, text, text_len, from_user, ts, prov);
 }
 
-hu_error_t hu_imessage_ingest_reaction(struct hu_personal_model *model,
+/* Phase 2 gap-closer (the "option b" from the prior gap analysis):
+ * construct a hu_heuristic_fact_t DIRECTLY from a reaction event and
+ * merge it into the personal model, bypassing the text→extract round-
+ * trip that was producing zero facts because the extractor only matches
+ * first-person user patterns ("i like X").
+ *
+ * The fact we record:
+ *   subject   = sender_handle ("Alice")
+ *   predicate = kind-derived verb ("reacted_with_love_to", "laughed_at")
+ *   object    = target_text_preview (truncated to fit HU_FACT_MAX_FIELD)
+ *
+ * After this lands, the prior documented-gap test must flip: instead of
+ * asserting fact_count == 0 on the synthesis text, the new contract is
+ * "after ingest_reaction, model->fact_count >= 1 with the contact as
+ * subject." */
+static const char *reaction_predicate(hu_reaction_kind_t kind) {
+    switch (kind) {
+    case HU_REACTION_LOVE:
+        return "reacted_with_love_to";
+    case HU_REACTION_LIKE:
+        return "reacted_with_like_to";
+    case HU_REACTION_DISLIKE:
+        return "reacted_with_dislike_to";
+    case HU_REACTION_LAUGH:
+        return "laughed_at";
+    case HU_REACTION_EMPHASIZE:
+        return "emphasized";
+    case HU_REACTION_KIND_QUESTION:
+        return "questioned";
+    case HU_REACTION_KIND_CUSTOM_EMOJI:
+        return "reacted_with_emoji_to";
+    case HU_REACTION_UNKNOWN:
+    default:
+        return "reacted_to";
+    }
+}
+
+static hu_error_t construct_and_merge_reaction_fact(hu_personal_model_t *model,
+                                                    const hu_reaction_event_t *event,
+                                                    const char *target_text_preview,
+                                                    const hu_provenance_t *prov) {
+    if (!model || !event)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Skip if we don't know who reacted — a NULL subject is useless. */
+    if (!event->sender_handle || !event->sender_handle[0])
+        return HU_OK;
+    /* Skip removals: a retraction is a negative-signal event, harder to
+     * model as a positive (subject, predicate, object) triple. The
+     * existing synthesis path already feeds the model a removal narration
+     * for style metrics; we don't add a fact. */
+    if (event->is_removal)
+        return HU_OK;
+
+    hu_fact_extract_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    hu_heuristic_fact_t *fact = &result.facts[0];
+    fact->type = HU_KNOWLEDGE_PROPOSITIONAL;
+    /* strncpy + explicit NUL: defensive against handles longer than
+     * HU_FACT_MAX_FIELD (256). */
+    strncpy(fact->subject, event->sender_handle, sizeof(fact->subject) - 1);
+    fact->subject[sizeof(fact->subject) - 1] = '\0';
+    const char *pred = reaction_predicate(event->kind);
+    strncpy(fact->predicate, pred, sizeof(fact->predicate) - 1);
+    fact->predicate[sizeof(fact->predicate) - 1] = '\0';
+    const char *object_str = (target_text_preview && target_text_preview[0]) ? target_text_preview
+                                                                             : "an unknown message";
+    strncpy(fact->object, object_str, sizeof(fact->object) - 1);
+    fact->object[sizeof(fact->object) - 1] = '\0';
+    fact->confidence = 0.75f; /* heuristic-but-directly-observed */
+    strncpy(fact->source_hint, "reaction_ingest", sizeof(fact->source_hint) - 1);
+    fact->source_hint[sizeof(fact->source_hint) - 1] = '\0';
+    fact->last_seen_at = event->timestamp_unix;
+    if (prov)
+        fact->provenance = *prov;
+    result.fact_count = 1;
+    result.propositional_count = 1;
+
+    /* merge_facts_checked respects trust-tier overwrite rules and routes
+     * THIRD_PARTY facts into the pending-quarantine queue rather than
+     * stable facts[]. Group-chat reactions therefore don't pollute the
+     * main fact set without a corroborating user-direct signal. */
+    return hu_personal_model_merge_facts_checked(model, &result, prov);
+}
+
+hu_error_t hu_reaction_ingest_personal_model(struct hu_personal_model *model,
                                        const hu_reaction_event_t *event, const char *custom_emoji,
                                        const char *target_text_preview, bool is_from_me_target,
                                        bool in_group_chat) {
@@ -350,15 +436,26 @@ hu_error_t hu_imessage_ingest_reaction(struct hu_personal_model *model,
     hu_provenance_t prov = event_provenance(event->channel_id, event->sender_handle,
                                             event->timestamp_unix, in_group_chat);
 
-    /* from_user = true: the synthesized text is the AGENT's narration of an
-     * observed event ("Alice reacted with ❤️ to my message: '...'"), not
-     * raw third-party content. hu_personal_model_ingest gates fact
-     * extraction + style update on from_user=true; passing false would
-     * short-circuit the pipeline at personal_model.c:942. The provenance
-     * tier (FIRST_PARTY for DM, THIRD_PARTY for group) still drives the
-     * MINJA gate at personal_model.c:966 — group-chat reactions get
-     * routed through the quarantine path if they look like injection. */
-    return ingest_synthesized(model, buf, n, /*from_user=*/true, event->timestamp_unix, &prov);
+    /* Two-track ingest (post gap-fix):
+     *
+     * 1. Text path — keeps style metrics + interaction_count updating.
+     *    from_user=true is documented at personal_model.c:942; the
+     *    provenance tier still drives the MINJA gate on group-chat
+     *    content.
+     *
+     * 2. Direct-fact path (the gap-closer) — constructs a structured
+     *    (subject, predicate, object) triple and merges via
+     *    hu_personal_model_merge_facts_checked. Bypasses the text-
+     *    extraction round-trip that produced zero facts for third-
+     *    person narration. THIS is what makes the personal model
+     *    actually learn about contacts from reactions.
+     *
+     * Both are best-effort; track 2's failure doesn't propagate (we
+     * still want style metrics to land even if fact merge fails). */
+    hu_error_t text_err =
+        ingest_synthesized(model, buf, n, /*from_user=*/true, event->timestamp_unix, &prov);
+    (void)construct_and_merge_reaction_fact(model, event, target_text_preview, &prov);
+    return text_err;
 }
 
 hu_error_t hu_imessage_ingest_edit(struct hu_personal_model *model, const char *sender_handle,

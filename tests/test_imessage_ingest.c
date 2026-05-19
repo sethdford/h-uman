@@ -236,14 +236,14 @@ static void test_ingest_reaction_rejects_null_model(void) {
     e.sender_handle = "Alice";
     e.kind = HU_REACTION_LOVE;
     e.timestamp_unix = 1700000000;
-    hu_error_t err = hu_imessage_ingest_reaction(NULL, &e, NULL, NULL, true, false);
+    hu_error_t err = hu_reaction_ingest_personal_model(NULL, &e, NULL, NULL, true, false);
     HU_ASSERT_EQ((int)err, (int)HU_ERR_INVALID_ARGUMENT);
 }
 
 static void test_ingest_reaction_rejects_null_event(void) {
     hu_personal_model_t model;
     hu_personal_model_init(&model);
-    hu_error_t err = hu_imessage_ingest_reaction(&model, NULL, NULL, NULL, true, false);
+    hu_error_t err = hu_reaction_ingest_personal_model(&model, NULL, NULL, NULL, true, false);
     HU_ASSERT_EQ((int)err, (int)HU_ERR_INVALID_ARGUMENT);
 }
 
@@ -259,7 +259,7 @@ static void test_ingest_reaction_succeeds_and_marks_content(void) {
     e.timestamp_unix = 1700000000;
 
     hu_error_t err =
-        hu_imessage_ingest_reaction(&model, &e, NULL, "let's hike Mount Tam Saturday", true, false);
+        hu_reaction_ingest_personal_model(&model, &e, NULL, "let's hike Mount Tam Saturday", true, false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 
     /* Ingestion should at minimum NOT regress the has_content signal.
@@ -324,7 +324,7 @@ static void test_ingest_reaction_uses_event_emoji_when_custom_emoji_null(void) {
     e.kind = HU_REACTION_KIND_CUSTOM_EMOJI;
     e.emoji = "\xf0\x9f\x94\xa5"; /* 🔥 */
     e.timestamp_unix = 1700000000;
-    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, e.emoji, "great idea",
+    hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, e.emoji, "great idea",
                                                  /*is_from_me_target=*/true, false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 }
@@ -354,7 +354,7 @@ static void test_ingest_reaction_is_channel_agnostic_slack(void) {
     e.kind = HU_REACTION_LOVE;
     e.polarity = HU_REACTION_POSITIVE;
     e.timestamp_unix = 1700000000;
-    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, NULL, "ship it",
+    hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "ship it",
                                                  /*is_from_me_target=*/true,
                                                  /*in_group_chat=*/false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
@@ -373,7 +373,7 @@ static void test_ingest_reaction_discord_group_uses_channel_qualifier(void) {
     e.sender_handle = "alice#1234";
     e.kind = HU_REACTION_LAUGH;
     e.timestamp_unix = 1700000000;
-    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, NULL, "ha",
+    hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "ha",
                                                  /*is_from_me_target=*/true,
                                                  /*in_group_chat=*/true);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
@@ -390,7 +390,7 @@ static void test_ingest_group_chat_uses_group_provenance(void) {
     e.sender_handle = "Alice";
     e.kind = HU_REACTION_LIKE;
     e.timestamp_unix = 1700000000;
-    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, NULL, "some message", false,
+    hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "some message", false,
                                                  /*in_group_chat=*/true);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 }
@@ -407,32 +407,29 @@ static void test_ingest_group_chat_uses_group_provenance(void) {
  * adjusted to be more extractor-friendly — without this contract, the
  * "personal-model learning" claim is unfalsifiable. */
 
-/* DOCUMENTED GAP (2026-05-19): the heuristic fact extractor at
- * src/memory/fact_extract.c only matches FIRST-PERSON USER patterns
- * ("i like", "i love", "i prefer", "i don't like", etc). Our synthesis
- * output is THIRD-PERSON AGENT NARRATION ("Alice reacted with ❤️ to my
- * message: '...'"), so NO extractor pattern matches. As a result,
- * ingest advances style.sample_count + interaction_count but produces
- * ZERO heuristic_facts about contacts.
+/* GAP CLOSED (2026-05-19): the prior commit documented that
+ * fact_extract returns 0 facts for our third-person synthesis text.
+ * Option (b) — direct hu_heuristic_fact_t construction in
+ * hu_reaction_ingest_personal_model — has now landed. The tests below pin
+ * the new contract:
  *
- * The follow-up to close this gap is either:
- *   a) Extend fact_extract patterns to include third-person observations
- *      ("X reacted with Y", "X shared Z", "X edited W") with the
- *      contact as subject. ~50 LoC of new patterns.
- *   b) Have hu_imessage_ingest_reaction construct hu_heuristic_fact_t
- *      directly and call hu_personal_model_merge_facts_checked,
- *      bypassing the text→extract round-trip. Cleaner — the synthesis
- *      layer already has the structured info; rendering text just to
- *      re-parse it is lossy. ~80 LoC.
- *
- * Option (b) is the architectural fix. Tests below DOCUMENT the
- * current gap (asserting zero facts) so we see when it closes. */
+ *   1. The heuristic text extractor still produces 0 facts from
+ *      synthesis output (kept for regression visibility — if this
+ *      flips to nonzero, the extractor changed and we want to know).
+ *   2. After hu_reaction_ingest_personal_model runs, model->fact_count
+ *      reflects the directly-constructed fact (subject = sender,
+ *      predicate = kind-derived verb, object = target preview).
+ *      This is the actual M2 win — the personal model now learns
+ *      about contacts from reaction patterns. */
 
-static void test_documented_gap_synth_reaction_does_not_yield_facts(void) {
+static void test_text_extractor_still_misses_synthesis_text(void) {
+    /* Regression guard — kept from the documented-gap era. If the
+     * extractor gains third-person patterns this will flip, and the
+     * direct-fact construction path becomes redundant (could be
+     * removed). Worth keeping the signal. */
     hu_reaction_event_t e = {0};
     e.sender_handle = "Alice";
     e.kind = HU_REACTION_LOVE;
-    e.polarity = HU_REACTION_POSITIVE;
 
     char buf[512];
     size_t n = hu_imessage_synth_reaction(&e, NULL, "let's hike Mount Tam Saturday",
@@ -443,11 +440,61 @@ static void test_documented_gap_synth_reaction_does_not_yield_facts(void) {
     memset(&result, 0, sizeof(result));
     hu_error_t err = hu_fact_extract(buf, n, &result);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
-    /* THIS IS THE GAP. When we close it (per option a/b above), this
-     * assertion should FLIP to fact_count >= 1. Until then, pinning
-     * zero ensures the regression-vs-improvement distinction is
-     * unambiguous. */
     HU_ASSERT_EQ((int)result.fact_count, 0);
+}
+
+static void test_ingest_reaction_produces_fact_about_contact(void) {
+    /* The gap-closer contract: after one tapback ingest, the personal
+     * model has at least one fact with the reactor as subject. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    HU_ASSERT_EQ((int)model.fact_count, 0);
+
+    hu_reaction_event_t e = {0};
+    e.channel_id = "imessage";
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LOVE;
+    e.polarity = HU_REACTION_POSITIVE;
+    e.timestamp_unix = 1700000000;
+
+    hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "let's hike Mount Tam Saturday",
+                                                 /*is_from_me_target=*/true,
+                                                 /*in_group_chat=*/false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+
+    /* DM-tier ingest goes into facts[]; group chat would route to
+     * pending_facts[] via the trust-tier gate. This test is DM, so we
+     * expect facts[] to have grown. */
+    HU_ASSERT_TRUE(model.fact_count >= 1);
+
+    /* Find the fact about Alice and verify it has the expected shape. */
+    bool found = false;
+    for (size_t i = 0; i < model.fact_count; i++) {
+        if (strstr(model.facts[i].subject, "Alice") != NULL) {
+            HU_ASSERT_TRUE(strstr(model.facts[i].predicate, "love") != NULL);
+            HU_ASSERT_TRUE(strstr(model.facts[i].object, "hike") != NULL);
+            found = true;
+            break;
+        }
+    }
+    HU_ASSERT_TRUE(found);
+}
+
+static void test_ingest_reaction_removal_does_not_produce_fact(void) {
+    /* Removals are negative signal — we don't construct a fact for them.
+     * The synthesis path still feeds style metrics. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+
+    hu_reaction_event_t e = {0};
+    e.channel_id = "imessage";
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LOVE;
+    e.is_removal = 1;
+    e.timestamp_unix = 1700000000;
+
+    (void)hu_reaction_ingest_personal_model(&model, &e, NULL, "let's hike", true, false);
+    HU_ASSERT_EQ((int)model.fact_count, 0);
 }
 
 static void test_first_person_text_does_yield_facts(void) {
@@ -477,7 +524,7 @@ static void test_synth_ingest_advances_style_sample_count(void) {
     e.sender_handle = "Alice";
     e.kind = HU_REACTION_LOVE;
     e.timestamp_unix = 1700000000;
-    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, NULL, "hiking Saturday",
+    hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "hiking Saturday",
                                                  /*is_from_me_target=*/true, false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
     HU_ASSERT_TRUE(model.style.sample_count >= 1);
@@ -520,7 +567,9 @@ void run_imessage_ingest_tests(void) {
     HU_RUN_TEST(test_ingest_reaction_is_channel_agnostic_slack);
     HU_RUN_TEST(test_ingest_reaction_discord_group_uses_channel_qualifier);
     HU_RUN_TEST(test_ingest_group_chat_uses_group_provenance);
-    HU_RUN_TEST(test_documented_gap_synth_reaction_does_not_yield_facts);
+    HU_RUN_TEST(test_text_extractor_still_misses_synthesis_text);
+    HU_RUN_TEST(test_ingest_reaction_produces_fact_about_contact);
+    HU_RUN_TEST(test_ingest_reaction_removal_does_not_produce_fact);
     HU_RUN_TEST(test_first_person_text_does_yield_facts);
     HU_RUN_TEST(test_synth_ingest_advances_style_sample_count);
 }
