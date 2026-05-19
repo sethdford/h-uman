@@ -3527,16 +3527,20 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         size_t cognition_mode_str_len = strlen(cognition_mode_str);
 
         /* Render personal-model prompt block from accumulated user signal.
-         * Stack buffer (~8 KB) bounded by HU_PM_MAX_FACTS / TOPICS / GOALS.
-         * Skipped entirely when the model has no real content yet so we
-         * don't burn tokens on the "(No detailed personal data yet.)"
-         * placeholder on a fresh install. */
-        char personal_model_buf[8192];
+         * 2026-05-19 (M4 audit): heap-allocate instead of stack to eliminate
+         * stack-use-after-scope risk. ASan was reporting use-after-scope
+         * BUS errors when this buffer was declared on stack and a pointer
+         * to it was used later in cfg.personal_model_context (~200 lines
+         * later in the same nested scope). Whether the original was truly
+         * out-of-scope or ASan was being aggressive about a deeply-nested
+         * { ... } scope, heap-allocation makes the lifetime explicit and
+         * survives the entire turn until we free it. */
+        char *personal_model_buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 8192);
         const char *personal_model_ctx = NULL;
         size_t personal_model_ctx_len = 0;
-        if (hu_personal_model_has_content(&agent->personal_model)) {
-            size_t pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
-                                                         sizeof(personal_model_buf));
+        if (personal_model_buf && hu_personal_model_has_content(&agent->personal_model)) {
+            size_t pm_n =
+                hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf, 8192);
             if (pm_n > 0) {
                 personal_model_ctx = personal_model_buf;
                 personal_model_ctx_len = pm_n;
@@ -3743,6 +3747,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
             world_model_ctx = NULL;
             world_model_ctx_len = 0;
+        }
+        /* 2026-05-19 (M4 audit): free the heap-allocated personal_model_buf
+         * (was stack-allocated before; see comment at allocation site). */
+        if (personal_model_buf) {
+            agent->alloc->free(agent->alloc->ctx, personal_model_buf, 8192);
+            personal_model_buf = NULL;
+            personal_model_ctx = NULL;
+            personal_model_ctx_len = 0;
         }
         if (enriched_contact) {
             agent->alloc->free(agent->alloc->ctx, enriched_contact, enriched_contact_len + 1);

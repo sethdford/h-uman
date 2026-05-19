@@ -81,8 +81,20 @@ hu_thread_pool_t *hu_thread_pool_create(size_t n) {
         free(pool);
         return NULL;
     }
+    /* 2026-05-19 (M4 audit): set 8 MB stack on worker threads. macOS pthread
+     * default is 512 KB which is insufficient for hu_agent_turn — the
+     * function has 15+ stack arrays totaling ~20 KB plus deep call stacks
+     * through validators, persona renderers, world-model bridges, humor
+     * framework directives. Stack overflow manifested as BUS errors in
+     * seemingly-unrelated callees (micro_expression.c:9, agent_turn.c:3550)
+     * — the M4 production A/B harness reproduces it on first request to
+     * /v1/chat/completions. */
+    pthread_attr_t worker_attr;
+    int attr_ok = (pthread_attr_init(&worker_attr) == 0);
+    if (attr_ok)
+        pthread_attr_setstacksize(&worker_attr, 8u * 1024u * 1024u);
     for (size_t i = 0; i < n; i++) {
-        if (pthread_create(&pool->threads[i], NULL, worker, pool) != 0) {
+        if (pthread_create(&pool->threads[i], attr_ok ? &worker_attr : NULL, worker, pool) != 0) {
             pool->shutdown = true;
             pthread_cond_broadcast(&pool->not_empty);
             for (size_t j = 0; j < i; j++)
@@ -90,11 +102,15 @@ hu_thread_pool_t *hu_thread_pool_create(size_t n) {
             pthread_cond_destroy(&pool->not_full);
             pthread_cond_destroy(&pool->not_empty);
             pthread_mutex_destroy(&pool->mutex);
+            if (attr_ok)
+                pthread_attr_destroy(&worker_attr);
             free(pool->threads);
             free(pool);
             return NULL;
         }
     }
+    if (attr_ok)
+        pthread_attr_destroy(&worker_attr);
     return pool;
 }
 
