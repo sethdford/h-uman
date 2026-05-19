@@ -202,6 +202,59 @@ class MetadataJudge:
                 "baseline": baseline, "candidate": candidate,
             }
 
+        # Real safetensors candidate (tensor_count > 0) against an empty-
+        # stub baseline — this is the mlx_lm.lora bridge path. The
+        # candidate is a freshly trained LoRA; baseline is the empty
+        # placeholder from the dry-run stub. Treat as PASS.
+        if (candidate["format"] == "safetensors"
+                and candidate.get("tensor_count", 0) > 0
+                and (baseline["format"] != "safetensors"
+                     or baseline.get("tensor_count", 0) == 0
+                     or baseline.get("size_bytes", 0) < 1024)):
+            return {
+                "judge": "metadata",
+                "verdict": "pass",
+                "reason": (f"candidate is real safetensors LoRA "
+                           f"({candidate['tensor_count']} tensors, "
+                           f"{candidate['size_bytes']}B); baseline is "
+                           f"empty-stub ({baseline.get('size_bytes', 0)}B)"),
+                "baseline": baseline, "candidate": candidate,
+            }
+
+        # Both safetensors with real tensor counts — compare sizes /
+        # tensor counts. If candidate has MORE LoRA tensors, that's
+        # generally a higher-capacity adapter → tentative pass; if
+        # FEWER, regress; if equal AND same byte size, no-change.
+        if (baseline["format"] == "safetensors"
+                and candidate["format"] == "safetensors"
+                and baseline.get("tensor_count", 0) > 0
+                and candidate.get("tensor_count", 0) > 0):
+            if candidate["tensor_count"] < baseline["tensor_count"]:
+                return {
+                    "judge": "metadata",
+                    "verdict": "regress",
+                    "reason": (f"tensor_count dropped "
+                               f"{baseline['tensor_count']} → "
+                               f"{candidate['tensor_count']}"),
+                    "baseline": baseline, "candidate": candidate,
+                }
+            if (candidate["tensor_count"] == baseline["tensor_count"]
+                    and candidate["size_bytes"] == baseline["size_bytes"]):
+                return {
+                    "judge": "metadata",
+                    "verdict": "no-change",
+                    "reason": "identical tensor count + byte size",
+                    "baseline": baseline, "candidate": candidate,
+                }
+            return {
+                "judge": "metadata",
+                "verdict": "pass",
+                "reason": (f"candidate tensors="
+                           f"{candidate['tensor_count']} ≥ baseline="
+                           f"{baseline['tensor_count']}"),
+                "baseline": baseline, "candidate": candidate,
+            }
+
         return {
             "judge": "metadata",
             "verdict": "no-change",

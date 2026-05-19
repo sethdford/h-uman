@@ -108,6 +108,15 @@ def apple_ns_to_unix_ms(apple_ns: int) -> int:
     return int((apple_ns / 1_000_000_000.0 + APPLE_EPOCH_OFFSET_SEC) * 1000)
 
 
+# Sentinel header used by the H3 active-probe — any message starting
+# with this string is one of OUR probes (sent via osascript to the
+# operator's own iMessage thread for active-learning feedback). These
+# must NOT enter the training corpus as Seth-authored turns: doing so
+# trains Seth's model on Seth's automated probes, a circular feedback
+# loop that pollutes the persona signal with synthetic noise.
+PROBE_HEADER = "🧠 [m3 probe]"
+
+
 def decode_attributed_body(raw: bytes) -> str:
     """Extract visible UTF-8 text from Apple's NSAttributedString
     typedstream blob (the `attributedBody` column in chat.db).
@@ -186,6 +195,11 @@ def extract_imessage(db_path: Path, max_records: int, redact_handles: bool) -> l
             if (not text or len(text) < 2) and ab_b:
                 text = decode_attributed_body(ab_b).strip()
             if not text or len(text) < 2:
+                continue
+            # Skip our own active-probe messages — they're synthetic,
+            # not authentic Seth style, and would create a circular
+            # training loop if included.
+            if text.startswith(PROBE_HEADER):
                 continue
             out.append({
                 "channel": "imessage",

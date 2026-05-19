@@ -115,7 +115,23 @@ def convert_to_mlx_lm_jsonl(src: Path, dst: Path, src_format: str) -> int:
             except json.JSONDecodeError:
                 continue
             if src_format == "alpaca-dpo":
-                fout.write(json.dumps(rec) + "\n")
+                # mlx_lm 0.21+ dropped the dedicated DPO trainer; the
+                # `lora` subcommand now only does SFT against `{"text":}`
+                # records. We adapt by SFT-ing on the CHOSEN completions
+                # (the real Seth-authored response) — the same data the
+                # DPO trainer would have used as the positive signal.
+                # The REJECTED side becomes implicit signal: by training
+                # only on `chosen`, we're saying "this is what to emit"
+                # without explicit negative examples. Equivalent to
+                # rejection-sampling SFT, slightly weaker than DPO but
+                # the closest fit to the current mlx_lm CLI surface.
+                prompt = rec.get("prompt") or ""
+                chosen = rec.get("chosen") or ""
+                if not prompt or not chosen:
+                    continue
+                text = (f"<start_of_turn>user\n{prompt}<end_of_turn>\n"
+                        f"<start_of_turn>model\n{chosen}<end_of_turn>")
+                fout.write(json.dumps({"text": text}) + "\n")
                 n += 1
             elif src_format == "chat-completion-log":
                 prompt = rec.get("prompt") or ""
@@ -179,8 +195,14 @@ def invoke_mlx_lm_lora(model: str, train_jsonl: Path, adapter_out: Path,
         (data_dir / "valid.jsonl").write_text("\n".join(all_lines[cut:]) + "\n")
 
         adapter_out.parent.mkdir(parents=True, exist_ok=True)
+        # CLI surface changed between mlx_lm versions:
+        #   old: `python -m mlx_lm.lora --lora-layers N --dpo ...`
+        #   new: `python -m mlx_lm lora --num-layers N ...` (no --dpo)
+        # The new entry point is what mlx_lm 0.20+ ships; we always
+        # use it because the deprecation warning got promoted to an
+        # error in 0.21.
         cmd = [
-            sys.executable, "-m", "mlx_lm.lora",
+            sys.executable, "-m", "mlx_lm", "lora",
             "--model", model,
             "--train",
             "--data", str(data_dir),
@@ -188,12 +210,12 @@ def invoke_mlx_lm_lora(model: str, train_jsonl: Path, adapter_out: Path,
             "--batch-size", str(batch_size),
             "--iters", str(iters),
             "--learning-rate", f"{learning_rate:g}",
-            "--lora-layers", str(rank),
+            "--num-layers", str(rank),
         ]
-        if mode == "dpo":
-            # mlx-lm 0.21+ added a --dpo flag; older versions ignore it
-            # and train SFT. Either way we get a real adapter.
-            cmd.append("--dpo")
+        # NOTE: mlx_lm.lora no longer accepts --dpo. The convert step
+        # above already SFT-flattens DPO pairs to chosen-only text, so
+        # the resulting training is rejection-sampling SFT — close
+        # enough to DPO's positive signal for persona fidelity work.
         print(f"  Invoking: {' '.join(cmd)}")
         return subprocess.call(cmd)
 

@@ -252,6 +252,48 @@ def test_decode_attributed_body_malformed_returns_empty():
         m.decode_attributed_body(truncated) == "")
 
 
+def test_extract_imessage_skips_probe_messages():
+    """Pins gap: our own H3 probe messages must NOT enter the training
+    corpus. They start with PROBE_HEADER ('🧠 [m3 probe]'); the
+    extractor filters them out via prefix match on the (possibly
+    attributedBody-decoded) text."""
+    print("\n--- test_extract_imessage_skips_probe_messages ---")
+    with tempfile.TemporaryDirectory() as d:
+        db_path = Path(d) / "chat.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, "
+                     "text TEXT, is_from_me INTEGER, date INTEGER, "
+                     "handle_id INTEGER, attributedBody BLOB)")
+        conn.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
+        conn.execute("INSERT INTO handle(ROWID, id) VALUES (1, 'me@example.com')")
+        # A probe with text in the text column
+        conn.execute("INSERT INTO message(text, is_from_me, date, handle_id) "
+                     "VALUES ('🧠 [m3 probe]\nWhich would you send?', 1, "
+                     "1_000_000_000, 1)")
+        # An authentic Seth message
+        conn.execute("INSERT INTO message(text, is_from_me, date, handle_id) "
+                     "VALUES ('yeah sounds good', 1, 2_000_000_000, 1)")
+        # A probe with body in attributedBody (text=NULL — common case)
+        probe_body = b"\xf0\x9f\xa7\xa0 [m3 probe]\nWhich would you send?"
+        ab = (b"NSString\x00\x01\x94\x84\x01\x2b" + bytes([len(probe_body)]) +
+              probe_body + b"NSDictionary\x00")
+        conn.execute("INSERT INTO message(text, is_from_me, date, "
+                     "handle_id, attributedBody) VALUES "
+                     "(NULL, 1, 3_000_000_000, 1, ?)", (ab,))
+        conn.commit()
+        conn.close()
+        records = m.extract_imessage(db_path, max_records=100,
+                                       redact_handles=True)
+        contents = [r["content"] for r in records]
+        _ok(f"only authentic msg extracted (got {len(records)})",
+            len(records) == 1, f"got: {contents}")
+        if records:
+            _ok("the authentic message is preserved",
+                records[0]["content"] == "yeah sounds good")
+        _ok("no probe-header message slipped through",
+            not any("[m3 probe]" in c for c in contents))
+
+
 def test_extract_imessage_reads_attributedbody_fallback():
     """Pins the H1-side fallback: when text is NULL but attributedBody
     has content, the extractor must surface it."""
@@ -362,6 +404,7 @@ def main():
     test_decode_attributed_body_short_message()
     test_decode_attributed_body_long_message_2byte_length()
     test_decode_attributed_body_malformed_returns_empty()
+    test_extract_imessage_skips_probe_messages()
     test_extract_imessage_reads_attributedbody_fallback()
     test_gmail_slack_stubs_return_empty()
     test_end_to_end_jsonl_output()
