@@ -3553,9 +3553,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             const char *tom_p = agent->tom_scenario_premise;
             const char *tom_q = agent->tom_scenario_question;
             const char *tom_c = agent->tom_scenario_category;
-            size_t tom_p_len = tom_p[0] ? strlen(tom_p) : 0;
-            size_t tom_q_len = tom_q[0] ? strlen(tom_q) : 0;
-            size_t tom_c_len = tom_c[0] ? strlen(tom_c) : 0;
+            /* 2026-05-19 (M4 audit): null-check before dereference. Previously
+             * `tom_p[0]` would BUS error when the ToM scenario isn't set —
+             * which is the default state for any chat-completion request
+             * routed through the gateway (no ToM scenario context attached).
+             * Discovered when the M4 production A/B sent the first prompt
+             * through `human gateway --with-agent` and crashed agent_turn. */
+            size_t tom_p_len = (tom_p && tom_p[0]) ? strlen(tom_p) : 0;
+            size_t tom_q_len = (tom_q && tom_q[0]) ? strlen(tom_q) : 0;
+            size_t tom_c_len = (tom_c && tom_c[0]) ? strlen(tom_c) : 0;
             /* Story B (sprint-4 follow-up): thread persona context so the
              * bridge's persona-merge runs and interaction_style reaches the
              * rendered prompt. Previously this passed NULL → merge skipped. */
