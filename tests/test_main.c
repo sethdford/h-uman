@@ -24,6 +24,7 @@ void run_wasm_tests(void); /* from test_wasm.c when built */
 void run_string_tests(void);
 void run_io_secure_tests(void);
 void run_slice_tests(void);
+void run_tool_registry_honesty_tests(void);
 void run_memory_tests(void);
 void run_sql_transaction_tests(void);
 void run_memory_util_tests(void);
@@ -790,6 +791,7 @@ int main(int argc, char **argv) {
     run_string_tests();
     run_io_secure_tests();
     run_slice_tests();
+    run_tool_registry_honesty_tests();
     run_memory_tests();
     run_sql_transaction_tests();
     run_memory_util_tests();
