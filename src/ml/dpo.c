@@ -58,6 +58,19 @@ hu_error_t hu_dpo_record_pair(hu_dpo_collector_t *collector, const hu_preference
     if (!collector || !pair)
         return HU_ERR_INVALID_ARGUMENT;
 
+    /* NOTE on single-sided writes: this entry point INTENTIONALLY allows
+     * rows where one side is empty. The reaction_handler path (positive
+     * tapback / negative tapback) writes single-sided rows; refusing them
+     * here would silently drop legitimate user-feedback signal. Defense
+     * against those reaching ORPO training lives at the READ side in
+     * hu_dpo_iterate_pairs, which skips rows where either side is < 4
+     * bytes — see docs/plans/2026-05-19-dpo-corpus-inverted.md.
+     *
+     * A future refactor should route single-sided reactions to a separate
+     * `negative_signals` / `positive_signals` table so dpo_pairs holds
+     * only true preference pairs; until then this asymmetric design
+     * (permissive write + filtering read) is the conservative fix. */
+
 #ifdef HU_ENABLE_SQLITE
     if (collector->db) {
         sqlite3_stmt *stmt = NULL;
@@ -164,6 +177,41 @@ hu_error_t hu_dpo_record_from_retry(hu_dpo_collector_t *collector, const char *p
                                     const char *chosen, size_t chosen_len) {
     if (!collector || !prompt || !rejected || !chosen)
         return HU_ERR_INVALID_ARGUMENT;
+
+    /* Content invariants for a preference pair. Each was a corpus-poison
+     * pattern surfaced by the 2026-05-19 audit
+     * (docs/plans/2026-05-19-dpo-corpus-inverted.md):
+     *
+     *   (a) Trivially-short sides: a 0-3 byte response is a label
+     *       (e.g. "GOOD"/"k"), not a real response. Symmetric with the
+     *       4-byte minimum in hu_dpo_record_from_feedback.
+     *
+     *   (b) Identical chosen == rejected: no learning signal. The
+     *       previously bug-pinning test
+     *       `dpo_retry_with_identical_chosen_rejected` is updated.
+     *
+     *   (c) Critique-as-chosen: when the reflection retry loop's
+     *       LLM-side step echoes the critique back as its retry attempt,
+     *       the chosen column ends up holding meta-critique text like
+     *       "NEEDS_RETRY. The response 'GOOD' is irrelevant...". 9 of
+     *       10 reflection_retry rows in the audited 369-row corpus had
+     *       this exact shape. Block any chosen that begins with one of
+     *       the evaluator's verdict tokens — those are critique
+     *       fragments, not corrected responses.
+     */
+    if (chosen_len < 4 || rejected_len < 4)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (chosen_len == rejected_len && memcmp(chosen, rejected, chosen_len) == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    static const char critique_prefixes[][16] = {
+        "NEEDS_RETRY",
+        "needs_retry",
+    };
+    for (size_t i = 0; i < sizeof(critique_prefixes) / sizeof(critique_prefixes[0]); i++) {
+        size_t plen2 = strlen(critique_prefixes[i]);
+        if (chosen_len >= plen2 && memcmp(chosen, critique_prefixes[i], plen2) == 0)
+            return HU_ERR_INVALID_ARGUMENT;
+    }
 
     hu_preference_pair_t pair;
     memset(&pair, 0, sizeof(pair));

@@ -337,12 +337,47 @@ static void dpo_feedback_max_length_truncation(void) {
 }
 
 static void dpo_retry_with_identical_chosen_rejected(void) {
+    /* Asserts the corrected contract: identical chosen == rejected has
+     * NO learning signal and must be refused. Prior to 2026-05-19 this
+     * test asserted HU_OK — codifying the bug. Audit row id=28 had this
+     * exact shape ("I apologize for the mistake" in both columns).
+     * Per ~/.claude/rules/tests-that-pin-bugs.md, test name claims a
+     * security/correctness property; assertion must match. */
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     hu_dpo_collector_create(&alloc, NULL, 100, &col);
     hu_error_t err =
         hu_dpo_record_from_retry(&col, "prompt", 6, "same response", 13, "same response", 13);
-    HU_ASSERT(err == HU_OK);
+    HU_ASSERT(err == HU_ERR_INVALID_ARGUMENT);
+    size_t count = 999;
+    hu_dpo_pair_count(&col, &count);
+    HU_ASSERT(count == 0);
+    hu_dpo_collector_deinit(&col);
+}
+
+static void dpo_retry_refuses_critique_as_chosen(void) {
+    /* Positive contract: the LLM's retry attempt occasionally echoes
+     * the reflection critique back as its response, leading to
+     * chosen="NEEDS_RETRY. The response 'GOOD' is irrelevant..." +
+     * rejected="GOOD". 9/10 reflection_retry rows in the audited
+     * corpus had this shape. Refuse the write. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_dpo_collector_t col;
+    hu_dpo_collector_create(&alloc, NULL, 100, &col);
+    const char *critique = "NEEDS_RETRY. The response 'GOOD' is irrelevant to the prompt.";
+    /* Case-sensitive prefix */
+    HU_ASSERT(hu_dpo_record_from_retry(&col, "prompt", 6, "GOOD", 4, critique, strlen(critique)) ==
+              HU_ERR_INVALID_ARGUMENT);
+    /* Lower-case also caught */
+    HU_ASSERT(hu_dpo_record_from_retry(&col, "prompt", 6, "GOOD", 4, "needs_retry: too short",
+                                       22) == HU_ERR_INVALID_ARGUMENT);
+    /* A legitimate corrected response that happens to MENTION needs_retry
+     * elsewhere in its body is fine — only PREFIX blocks the row. */
+    const char *ok = "well, the answer is 42. The retry pass evaluated the prior NEEDS_RETRY case.";
+    HU_ASSERT(hu_dpo_record_from_retry(&col, "prompt", 6, "GOOD", 4, ok, strlen(ok)) == HU_OK);
+    size_t count = 0;
+    hu_dpo_pair_count(&col, &count);
+    HU_ASSERT(count == 1);
     hu_dpo_collector_deinit(&col);
 }
 
@@ -460,6 +495,7 @@ void run_sota_adversarial_tests(void) {
     HU_RUN_TEST(dpo_feedback_trivially_short_response_rejected);
     HU_RUN_TEST(dpo_feedback_max_length_truncation);
     HU_RUN_TEST(dpo_retry_with_identical_chosen_rejected);
+    HU_RUN_TEST(dpo_retry_refuses_critique_as_chosen);
     HU_RUN_TEST(dpo_rapid_fire_many_records);
     HU_RUN_TEST(dpo_create_with_zero_max_pairs);
     HU_RUN_TEST(dpo_clear_then_count);
