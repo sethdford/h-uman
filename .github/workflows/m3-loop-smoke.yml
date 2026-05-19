@@ -244,7 +244,7 @@ jobs:
 
       - name: Upload evidence log on failure
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: m3-live-fire-logs-${{ matrix.os }}
           path: |
