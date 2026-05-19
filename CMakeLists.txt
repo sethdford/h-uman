@@ -832,6 +832,7 @@ set(HU_CORE_SOURCES
     src/memory/emotional_moments.c
     src/memory/superhuman.c
     src/memory/contact_graph.c
+    src/memory/identity_resolver.c
     src/memory/fast_capture.c
     src/memory/promotion.c
     src/memory/consolidation.c
@@ -3207,6 +3208,7 @@ set(HU_TEST_SOURCES
     tests/test_self_awareness.c
     tests/test_superhuman.c
     tests/test_contact_graph.c
+    tests/test_identity_resolver.c
     tests/test_tool_call_parser.c
     tests/test_tool_router.c
     tests/test_dag.c
