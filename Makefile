@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe m3-collect m3-h-demo m3-cycle-smoke
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe m3-collect m3-h-demo m3-cycle-smoke m3-holdout m3-behavioral m3-dashboard m3-install-cron m3-uninstall-cron
 
 all: build test
 
@@ -220,6 +220,44 @@ m3-h-demo:
 # gap that the H-tier verifiers alone don't reach.
 m3-cycle-smoke:
 	@bash scripts/test_m3_loop_cycle_smoke.sh
+
+# Holdout split (2026-05-19) — split corpus into 90% train + 10%
+# held-out for behavioral eval. Deterministic, seeded, per-contact.
+m3-holdout:
+	@python3 scripts/m3_holdout_split.py \
+		--corpus $${IN:-$$HOME/.human/training-data/m3-corpus.jsonl} \
+		--train-out $${TRAIN:-$$HOME/.human/training-data/m3-corpus-train.jsonl} \
+		--holdout-out $${HOLD:-$$HOME/.human/training-data/m3-holdout-prompts.jsonl} \
+		--holdout-frac $${FRAC:-0.10}
+
+# Behavioral eval (2026-05-19) — generate base + base+adapter responses
+# on held-out prompts; score via Seth-style heuristics + diversity check.
+# The "did it actually learn?" gate.
+m3-behavioral:
+	@python3 scripts/m3_behavioral_eval.py \
+		--model $${MODEL:-mlx-community/gemma-3-4b-it-bf16} \
+		--candidate-adapter $${ADAPTER:?usage: ADAPTER=/path/to/adapter make m3-behavioral} \
+		--prompts-jsonl $${PROMPTS:-$$HOME/.human/training-data/m3-holdout-prompts.jsonl} \
+		--max-prompts $${N:-8} \
+		--json-out $${OUT:-/tmp/m3-behavioral-$$(date +%Y%m%d-%H%M%S).json}
+
+# Status dashboard (2026-05-19) — one-screen view of the autonomous loop.
+m3-dashboard:
+	@python3 scripts/m3_status_dashboard.py $${JSON:+--json}
+
+# Install / uninstall the launchd plist for weekly autonomous cycle
+m3-install-cron:
+	@cp scripts/ai.human.m3-loop.plist ~/Library/LaunchAgents/
+	@launchctl unload ~/Library/LaunchAgents/ai.human.m3-loop.plist 2>/dev/null || true
+	@launchctl load ~/Library/LaunchAgents/ai.human.m3-loop.plist
+	@launchctl list ai.human.m3-loop > /dev/null && \
+		echo "  Installed: ai.human.m3-loop (Sun 04:00 local)" || \
+		echo "  WARN: installed but launchctl can't find the label"
+
+m3-uninstall-cron:
+	@launchctl unload ~/Library/LaunchAgents/ai.human.m3-loop.plist 2>/dev/null || true
+	@rm -f ~/Library/LaunchAgents/ai.human.m3-loop.plist
+	@echo "  Uninstalled"
 
 validate: format-check build test
 	@echo "Validation passed."
