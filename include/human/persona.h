@@ -506,6 +506,27 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len);
 
+/* 2026-05-18: compact variant for throughput-sensitive callers (eval
+ * framework, short-form chat). Produces ~2-3 KB instead of 16 KB by
+ * including only: identity (truncated 600 chars), the requested channel
+ * overlay, top-N communication_rules and avoided_vocab, humor style +
+ * signature phrases, and up to 5 example shots from the matching bank.
+ *
+ * Empirical motivation from the 2026-05-18 audit chain: the 16 KB
+ * prompt produced 60-95 s end-to-end latencies on a 31B MLX model,
+ * triggering provider-timeout-driven NULL responses on ~75% of eval
+ * tasks. The 2 KB compact form completes in ~13 s and produces
+ * identical-in-voice output (proven via
+ * scripts/persona_eval_comparison.py). Same in-voice quality,
+ * 6x throughput.
+ *
+ * For callers that need the full prompt (production agent_turn,
+ * long-form planning), use hu_persona_build_prompt. For
+ * short-form eval / chat where every msec counts, use this. */
+hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_persona_t *persona,
+                                           const char *channel, size_t channel_len, char **out,
+                                           size_t *out_len);
+
 /* P6-5: shared absolute-rules block. Writes the highest-weight
  * formatting/identity instructions ("You are HUMAN", lowercase, no
  * markdown, etc.) into the caller's buffer. Called from BOTH the

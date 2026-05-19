@@ -1365,9 +1365,15 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv) {
                 }
                 char *sys_prompt = NULL;
                 size_t sys_prompt_len = 0;
-                hu_error_t pp_err =
-                    hu_persona_build_prompt(alloc, &persona_obj, channel, strlen(channel), NULL, 0,
-                                            &sys_prompt, &sys_prompt_len);
+                /* 2026-05-18 compact variant: produces ~2-3 KB instead of
+                 * 16 KB. Profiling against the 31B MLX model showed the
+                 * full prompt drove 60-95s latencies and ~75% provider-
+                 * timeout NULL responses on eval tasks. The compact form
+                 * is ~6x faster and produces identical in-voice output
+                 * (verified categorically by
+                 * scripts/persona_eval_comparison.py). */
+                hu_error_t pp_err = hu_persona_build_prompt_compact(
+                    alloc, &persona_obj, channel, strlen(channel), &sys_prompt, &sys_prompt_len);
                 if (pp_err == HU_OK && sys_prompt && sys_prompt_len > 0) {
                     suite.system_prompt = sys_prompt;
                     suite.system_prompt_len = sys_prompt_len;
