@@ -90,7 +90,7 @@ def build_compact_persona_prompt() -> str:
     return "\n\n".join(parts)
 
 
-def post_chat(url: str, body: dict, timeout: int = 120) -> tuple[str, float, str]:
+def post_chat(url: str, body: dict, timeout: int = 180) -> tuple[str, float, str]:
     data = json.dumps(body).encode("utf-8")
     req = request.Request(url, data=data, method="POST",
                           headers={"Content-Type": "application/json"})
@@ -102,7 +102,8 @@ def post_chat(url: str, body: dict, timeout: int = 120) -> tuple[str, float, str
             return resp["choices"][0]["message"]["content"].strip(), time.time() - t0, ""
         except (KeyError, IndexError):
             return "", time.time() - t0, str(resp)[:120]
-    except (error.URLError, error.HTTPError, json.JSONDecodeError, ConnectionError) as e:
+    except (error.URLError, error.HTTPError, json.JSONDecodeError,
+            ConnectionError, TimeoutError, OSError) as e:
         return "", time.time() - t0, str(e)[:200]
 
 

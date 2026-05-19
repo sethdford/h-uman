@@ -57,8 +57,11 @@ from typing import Optional
 LAUGH_RE = re.compile(r"\b(lol|lmao|rofl|lmfao|haha+|hehe+|😂|🤣|💀)\b", re.IGNORECASE)
 LOVE_RE = re.compile(r"(\blove\b|❤️|💕|🥰|\bproud of (you|u)\b|\bappreciate (you|u|that|this)\b)",
                      re.IGNORECASE)
-ACK_TOKENS = (r"(?:k|kk|ok|okay|cool|got it|sounds good|sg|gotcha|thx|thanks|"
-              r"ty|yep|yup|yes|no|nope|same|word|bet|fr)")
+# Note: thanks/thx/ty intentionally NOT in ack bucket — those are
+# appreciation, which gets a love-tapback, not a like-tapback. The
+# APPRECIATION_RE check handles them.
+ACK_TOKENS = (r"(?:k|kk|ok|okay|cool|got it|sounds good|sg|gotcha|"
+              r"yep|yup|yes|no|nope|same|word|bet|fr)")
 # Accepts a single ack token OR two ack tokens separated by space
 # ("cool got it", "ok cool", "thx bet"). All trailing punctuation tolerated.
 ACK_RE = re.compile(rf"^{ACK_TOKENS}(?:\s+{ACK_TOKENS})?[\.\!]?$",
@@ -69,6 +72,20 @@ EMPHASIS_RE = re.compile(r"\b(huge|massive|incredible|wild|insane|crazy|"
 EMOTIONAL_HEAVY = re.compile(r"\b(sorry|grief|loss|miss(ing)?|love you|"
                              r"missing you|hurt|pain|sad|crying|tears)\b",
                              re.IGNORECASE)
+# Venting / bad-day signal — distinct from grief but still emotional;
+# tapback emphasize beats text default; voice is over-the-top.
+VENT_RE = re.compile(r"\b(ugh|fml|worst day|awful day|terrible day|"
+                     r"hate this|so done|done with this|hate my (job|life|boss))\b",
+                     re.IGNORECASE)
+# Appreciation — thanks/grateful/that helped → tapback love
+APPRECIATION_RE = re.compile(r"\b(thanks?|thank you|thx|ty|tysm|"
+                             r"that helped|appreciate (it|that|this)|"
+                             r"you're (a )?(life ?saver|the best))\b",
+                             re.IGNORECASE)
+# Logistics arrival — omw / on my way / be there in N / arriving → tapback like
+LOGISTICS_RE = re.compile(r"\b(omw|on my way|be there in|here in \d+|"
+                          r"running late|arriving|outside|here)\b",
+                          re.IGNORECASE)
 HYPED_RE = re.compile(r"\b(let'?s go|lfg|yesss+|fire|goat|🔥|🚀|💪|🙌)\b",
                       re.IGNORECASE)
 
@@ -103,20 +120,41 @@ def decide(incoming: str, history: Optional[list] = None) -> dict:
                 "confidence": 0.85,
                 "reason": "incoming-is-ack-tapback-suffices"}
 
+    # 1b. Appreciation — short thanks → tapback ❤️
+    if APPRECIATION_RE.search(inc) and len(inc) < 40:
+        return {"modality": "tapback", "tapback_kind": "love",
+                "confidence": 0.85,
+                "reason": "incoming-appreciation-tapback-suffices"}
+
+    # 1c. Logistics arrival — omw / be there → tapback 👍
+    if LOGISTICS_RE.search(inc) and len(inc) < 30:
+        return {"modality": "tapback", "tapback_kind": "like",
+                "confidence": 0.80,
+                "reason": "logistics-arrival-tapback-suffices"}
+
     # 2. Loaded question — text only. Never tapback ?.
     if QUESTION_TRAIL_RE.search(inc):
         # Was it short? Then short text response.
         return {"modality": "text", "tapback_kind": None,
                 "confidence": 0.95, "reason": "explicit-question"}
 
-    # 3. Laugh-trigger — tapback 😂 fits the moment IF the response
-    #    would otherwise be one of "lol", "hahaha", "💀". When the
-    #    incoming itself is funny content (not a "you're funny" reaction),
-    #    sending a haha-tapback is the move.
+    # 2b. Venting / bad-day — tapback emphasize (signals "I hear you"
+    # without overstepping); falls back to text for follow-up if needed.
+    if VENT_RE.search(inc):
+        return {"modality": "tapback", "tapback_kind": "emphasize",
+                "confidence": 0.7,
+                "reason": "venting-signal-tapback-then-text-followup"}
+
+    # 3. Laugh-as-ack — if the WHOLE incoming is just a laugh
+    #    (lol / lmao / haha / 💀), respond with tapback laugh, not text.
+    #    Echoing "lol" back is robotic.
+    if LAUGH_RE.fullmatch(inc.strip().rstrip(".!?")):
+        return {"modality": "tapback", "tapback_kind": "laugh",
+                "confidence": 0.85,
+                "reason": "incoming-is-bare-laughter-tapback-not-echo"}
+    # 3b. Laughter embedded — incoming has a laugh AND substantive content;
+    #     respond text (build on the joke).
     if LAUGH_RE.search(inc):
-        # If the LAUGH appears in the incoming, that's a setup line —
-        # we should respond with text (build on the joke) not tapback.
-        # Only tapback if WE are the one being told something funny.
         return {"modality": "text", "tapback_kind": None,
                 "confidence": 0.6,
                 "reason": "incoming-contains-laughter-build-don-t-react"}
@@ -170,6 +208,18 @@ GOLDEN = [
     ("that's insane", "tapback", "emphasize"),
     ("hey what's up", "text", None),
     ("", "text", None),
+    # Added after eval-suite run showed under-firing on real shapes
+    ("thanks mate, that helped", "tapback", "love"),
+    ("ty", "tapback", "love"),
+    ("omw, 8 min", "tapback", "like"),
+    ("be there in 5", "tapback", "like"),
+    ("ugh worst day ever", "tapback", "emphasize"),
+    ("fml", "tapback", "emphasize"),
+    # Bare laughter → tapback laugh (echoing is robotic)
+    ("lol", "tapback", "laugh"),
+    ("lmao", "tapback", "laugh"),
+    ("haha", "tapback", "laugh"),
+    ("haha that's wild", "text", None),  # embedded — already in golden, re-affirm
 ]
 
 
@@ -205,11 +255,27 @@ def main():
         return
     if args.eval:
         suite = json.loads(Path(args.eval).read_text())
+        # Extract Them: "..." payload from eval-suite scaffolding. The
+        # suites wrap real messages in `[iMessage, close friend] Them:
+        # "..."\nYou (one line reply):` — we want the actual incoming.
+        # Suites use 'Them: "..."' (DM) and 'Someone: "..."' (group chat)
+        them_re = re.compile(r'(?:Them|Someone|They|He|She|[A-Z]\w+):\s*"([^"]+)"')
+        from collections import Counter
+        bucket = Counter()
         for t in suite.get("tasks", []):
-            inc = t.get("prompt", "")
+            raw = t.get("prompt", "")
+            m = them_re.search(raw)
+            inc = m.group(1) if m else raw
             d = decide(inc)
+            bucket[d["modality"]] += 1
             print(f"[{t.get('id')}] {inc[:60]!r:64} → {d['modality']:<8} "
-                  f"({d['tapback_kind'] or '-':<10}) conf={d['confidence']:.2f}")
+                  f"({d['tapback_kind'] or '-':<10}) conf={d['confidence']:.2f}  "
+                  f"// {d['reason']}")
+        print()
+        print(f"Modality distribution across {sum(bucket.values())} prompts:")
+        for mod, n in bucket.most_common():
+            pct = 100 * n / sum(bucket.values())
+            print(f"  {mod:<10} {n:>3}  ({pct:.1f}%)")
         return
     p.print_help()
 
