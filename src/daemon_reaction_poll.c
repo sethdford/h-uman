@@ -22,6 +22,10 @@ void hu_daemon_reaction_wire_collector(struct hu_dpo_collector *collector) {
     hu_reaction_handler_set_collector((hu_dpo_collector_t *)collector);
 }
 
+void hu_daemon_reaction_wire_personal_model(struct hu_personal_model *model) {
+    hu_reaction_handler_set_personal_model(model);
+}
+
 #if HU_IS_TEST
 static int *g_imessage_poll_call_counter = NULL;
 static int g_poll_count_for_test = 0;
@@ -30,9 +34,13 @@ void hu_daemon_set_poll_call_counter_for_test(int *counter) {
     g_imessage_poll_call_counter = counter;
 }
 
-int hu_daemon_reaction_poll_get_count_for_test(void) { return g_poll_count_for_test; }
+int hu_daemon_reaction_poll_get_count_for_test(void) {
+    return g_poll_count_for_test;
+}
 
-void hu_daemon_reaction_poll_reset_count_for_test(void) { g_poll_count_for_test = 0; }
+void hu_daemon_reaction_poll_reset_count_for_test(void) {
+    g_poll_count_for_test = 0;
+}
 #endif
 
 static bool reaction_collection_wants_imessage_cfg(const hu_config_t *cfg) {
@@ -63,9 +71,11 @@ static void free_event_strings(hu_reaction_event_t *ev) {
     free((void *)ev->target_thread_id);
     free((void *)ev->target_message_ref);
     free((void *)ev->sender_handle);
+    free((void *)ev->emoji);
     ev->target_thread_id = NULL;
     ev->target_message_ref = NULL;
     ev->sender_handle = NULL;
+    ev->emoji = NULL;
 }
 
 static const char *resolve_chatdb_path(const hu_reaction_collection_config_t *cfg) {
@@ -82,8 +92,7 @@ static const char *resolve_chatdb_path(const hu_reaction_collection_config_t *cf
     return home_path;
 }
 
-hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg,
-                                        int64_t since_unix,
+hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg, int64_t since_unix,
                                         size_t *out_ingested) {
     if (out_ingested)
         *out_ingested = 0;

@@ -13,6 +13,7 @@
  * HU_REACTION_QUESTION / HU_REACTION_CUSTOM_EMOJI tokens). Callers
  * that need to install the collector should use the wrapper below. */
 struct hu_dpo_collector;
+struct hu_personal_model;
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,9 +21,14 @@ extern "C" {
 
 void hu_daemon_reaction_wire_collector(struct hu_dpo_collector *collector);
 
+/* Phase 1c of docs/plans/2026-05-18-imessage-sota.md: wire the personal
+ * model into the reaction handler so iMessage tapbacks on our outbound
+ * messages also feed the persona-learning pipeline. Pass NULL at shutdown
+ * to detach. */
+void hu_daemon_reaction_wire_personal_model(struct hu_personal_model *model);
+
 /* Poll since_unix; feeds events into the reaction handler. */
-hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg,
-                                        int64_t since_unix,
+hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg, int64_t since_unix,
                                         size_t *out_ingested);
 
 /* Interval-gated tick used by the daemon main loop (CF-3). */
