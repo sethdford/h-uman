@@ -1,6 +1,7 @@
 #ifndef HU_MEMORY_PERSONAL_MODEL_H
 #define HU_MEMORY_PERSONAL_MODEL_H
 
+#include "human/channels/reaction_event.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory/fact_extract.h"
@@ -297,6 +298,34 @@ hu_error_t hu_personal_model_merge_facts_checked(hu_personal_model_t *model,
 size_t hu_personal_model_promote_pending_facts(hu_personal_model_t *model,
                                                const hu_fact_extract_result_t *user_direct_facts,
                                                int64_t now);
+
+/* Extract topic keywords from a reaction's target-message text and bump
+ * the corresponding entries in `model->topics[]`. Reactions are a strong
+ * salience signal: a topic the user POSITIVELY reacts to (love / like /
+ * laugh / emphasize / custom-emoji) is by definition something they care
+ * about — even if they never typed about it themselves. A negatively-
+ * reacted topic (dislike / question) is demoted so it doesn't dominate.
+ *
+ * Tokenization is intentionally simple (no LLM): walk `target_text`
+ * word-by-word, lowercase each token, strip leading/trailing punctuation,
+ * drop tokens < 4 chars and the standard topic-stopword set. The
+ * surviving tokens each get a `bump_topic` (positive polarity) or
+ * `decay_topic` (negative polarity) hit. The polarity is derived from
+ * `event->polarity` (HU_REACTION_POSITIVE / NEGATIVE / NEUTRAL) — neutral
+ * reactions (e.g. QUESTION) are no-ops on topic salience.
+ *
+ * Returns the number of distinct topic slots touched (added, bumped, or
+ * demoted). NULL-safe on every argument. Removal events (is_removal=1)
+ * are no-ops because retracting a reaction shouldn't retroactively
+ * change topic salience — the original bump already happened and would
+ * have been observed by everyone who saw the chat.
+ *
+ * Wired into `hu_reaction_ingest_personal_model` so every reaction
+ * routed through the reaction handler bubbles up topics in addition
+ * to the (subject, predicate, object) fact triple. */
+size_t hu_personal_model_bump_topics_from_reaction(hu_personal_model_t *model,
+                                                   const hu_reaction_event_t *event,
+                                                   const char *target_text, int64_t now_unix);
 
 /* SOTA-2026 init-09: expire pending facts older than TTL or whose decay
  * has dropped below floor. Returns the count expired. Called from the

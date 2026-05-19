@@ -3183,6 +3183,7 @@ set(HU_TEST_SOURCES
     tests/test_weather_awareness.c
     tests/test_timing.c
     tests/test_calibration.c
+    tests/test_calibration_reactions.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
     tests/test_activation_steering.c
@@ -3362,6 +3363,8 @@ list(APPEND HU_TEST_SOURCES tests/test_matrix_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_lookup_store.c)
 # Conversation-gap classifier tests.
 list(APPEND HU_TEST_SOURCES tests/test_imessage_gaps.c)
+# Reaction-driven topic salience (Tier 1 #1 of better-than-human plan).
+list(APPEND HU_TEST_SOURCES tests/test_personal_model_topics_from_reactions.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
 # (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
