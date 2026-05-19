@@ -266,7 +266,11 @@ def main():
     print(f"{'='*60}\n")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    rng = random.Random(args.seed)
+    # --seed > 0 → reproducible random variant pick (gives training data
+    # diversity across regeneration cycles). --seed == 0 (default) →
+    # deterministic "most-different by length" pick (preserves the
+    # original behavior; same input → same rejected, run after run).
+    rng = random.Random(args.seed) if args.seed else None
     n_written = 0
 
     with open(args.out, "w") as fout:
@@ -282,10 +286,13 @@ def main():
                 variants = synthetic_variants(real, args.variations)
             if not variants:
                 continue
-            # Pick the most-different variant (largest len delta) as the
-            # `rejected`. Could also use a real judge here; the heuristic
-            # works for the synthetic case.
-            rejected = max(variants, key=lambda v: abs(len(v) - len(real)))
+            # Pick the rejected variant:
+            #   seed=0  → deterministic max-length-delta (default)
+            #   seed>0  → seeded random pick (reproducible diversity)
+            if rng is not None:
+                rejected = rng.choice(variants)
+            else:
+                rejected = max(variants, key=lambda v: abs(len(v) - len(real)))
             record = {
                 "prompt": prev,
                 "chosen": real,

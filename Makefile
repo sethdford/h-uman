@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe m3-collect m3-h-demo
 
 all: build test
 
@@ -195,6 +195,24 @@ m3-probe:
 		--queue $${QUEUE:-$$HOME/.human/training-data/m3-active-probe-queue.jsonl} \
 		$${SIM:+--simulate-delivery} \
 		$${RESP:+--simulate-response=$$RESP}
+
+# H3b (2026-05-19) — probe queue collector.
+# Drains the active-probe queue into Alpaca-DPO preference pairs.
+# Default mode is simulate-tick (single-pass, optional --simulate-response).
+# Set MODE=dispatch / MODE=poll for production wires (currently stubs).
+# Example: RESP=A make m3-collect
+m3-collect:
+	@python3 scripts/m3_probe_collector.py \
+		--queue $${QUEUE:-$$HOME/.human/training-data/m3-active-probe-queue.jsonl} \
+		--pairs-out $${OUT:-$$HOME/.human/training-data/m3-active-probe-pairs.jsonl} \
+		--mode $${MODE:-simulate-tick} \
+		$${RESP:+--simulate-response=$$RESP}
+
+# H demo (2026-05-19) — full data-acquisition tier end-to-end.
+# Runs H1 → H2 → H3 → H3b in isolated paths and produces a combined
+# Alpaca-DPO training file. Set FIX=1 to use fixture DBs (CI mode).
+m3-h-demo:
+	@bash scripts/m3_h_tier_demo.sh $${FIX:+--fixture}
 
 validate: format-check build test
 	@echo "Validation passed."

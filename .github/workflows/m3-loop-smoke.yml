@@ -51,6 +51,9 @@ on:
       - "scripts/test_m3_generate_counterfactuals.py"
       - "scripts/m3_active_probe.py"
       - "scripts/test_m3_active_probe.py"
+      - "scripts/m3_probe_collector.py"
+      - "scripts/test_m3_probe_collector.py"
+      - "scripts/m3_h_tier_demo.sh"
       - "Makefile"
       - "CMakePresets.json"
       - ".github/workflows/m3-loop-smoke.yml"
@@ -92,6 +95,9 @@ on:
       - "scripts/test_m3_generate_counterfactuals.py"
       - "scripts/m3_active_probe.py"
       - "scripts/test_m3_active_probe.py"
+      - "scripts/m3_probe_collector.py"
+      - "scripts/test_m3_probe_collector.py"
+      - "scripts/m3_h_tier_demo.sh"
   workflow_dispatch:
 
 jobs:
@@ -164,11 +170,26 @@ jobs:
         run: python3 scripts/test_m3_generate_counterfactuals.py
 
       - name: Run active probe (H3) verifier
-        # 51 assertions covering response→pairs parsing (letter, freetext,
+        # 60 assertions covering response→pairs parsing (letter, freetext,
         # empty), probe formatting + sentinel header, deliver_probe modes
-        # (simulate/queue), eligible-message picking, and end-to-end
-        # --simulate-delivery --simulate-response flow.
+        # (simulate/queue), eligible-message picking, message-aware
+        # synthetic candidates, gateway parse + TimeoutError/URLError/
+        # OSError soft-fail, and end-to-end --simulate flows.
         run: python3 scripts/test_m3_active_probe.py
+
+      - name: Run probe collector (H3b) verifier
+        # 40 assertions covering queue load/save atomicity, malformed-line
+        # tolerance, find_next_pending, simulate-tick all paths (letter,
+        # freetext, no-response, no-pending, malformed), dispatch + poll
+        # stub contracts, and the H3 → collector → pairs end-to-end flow.
+        run: python3 scripts/test_m3_probe_collector.py
+
+      - name: Run H-tier full end-to-end demo (fixture mode)
+        # Runs H1 → H2 → H3 → H3b → merge with fixture DBs (no FDA
+        # needed). Verifies the chain produces a combined Alpaca-DPO
+        # file ready for dpo-train. This is the integration test that
+        # the unit verifiers alone cannot prove.
+        run: bash scripts/m3_h_tier_demo.sh --fixture
 
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)

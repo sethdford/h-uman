@@ -203,6 +203,94 @@ def test_synthetic_candidates_shape():
         f"lengths: {[len(c) for c in cs]}")
 
 
+def test_synthetic_candidates_are_message_aware():
+    """Pins gap #3: candidates must echo the user's actual message,
+    not return a hardcoded list. Question shape vs statement shape
+    pick different response templates."""
+    print("\n--- test_synthetic_candidates_are_message_aware ---")
+    # Question shape → answer-style candidates
+    q = m.synthetic_candidates("you free for coffee tomorrow at 3?", 3)
+    joined_q = " ".join(q)
+    _ok("question-shape: verbose candidate echoes the user's message",
+        "coffee" in joined_q,
+        f"verbose: {q[2]!r}")
+
+    # Statement shape → ack-style candidates (NOT "Yes definitely")
+    s = m.synthetic_candidates("just got home, what a day", 3)
+    joined_s = " ".join(s)
+    _ok("statement-shape: verbose candidate echoes the user's message",
+        "home" in joined_s or "what a day" in joined_s,
+        f"verbose: {s[2]!r}")
+
+    # Two DIFFERENT messages produce DIFFERENT candidate sets
+    a = m.synthetic_candidates("are you free Saturday for hiking?", 3)
+    b = m.synthetic_candidates("are you free Tuesday for dinner?", 3)
+    _ok("two different messages produce different candidates",
+        a != b, f"a={a}\nb={b}")
+
+    # Empty message must not crash
+    e = m.synthetic_candidates("", 3)
+    _ok("empty message → 3 candidates (no crash)", len(e) == 3)
+
+
+def test_generate_candidates_via_gateway_parses_response():
+    """Mocks urlopen to feed generate_candidates_via_gateway a canned
+    chat-completion response. Exercises the gateway path."""
+    print("\n--- test_generate_candidates_via_gateway_parses_response ---")
+    import io
+    from unittest import mock
+
+    def make_resp(text):
+        body = json.dumps({"choices": [{"message": {"content": text}}]}).encode()
+        class FakeResp(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): self.close()
+        return FakeResp(body)
+
+    # 3 sequential urlopen calls (one per temperature)
+    responses = [make_resp("first answer"),
+                  make_resp("second answer"),
+                  make_resp("third answer")]
+    with mock.patch("urllib.request.urlopen", side_effect=responses):
+        out = m.generate_candidates_via_gateway(
+            "http://fake-gateway", "user msg", k=3,
+            temperatures=[0.3, 0.7, 1.1])
+    _ok(f"3 candidates returned (got {len(out)})", len(out) == 3)
+    _ok("candidates parsed in order",
+        out == ["first answer", "second answer", "third answer"])
+
+
+def test_generate_candidates_via_gateway_soft_fails_on_timeout():
+    """TimeoutError (Python 3.10+ socket.timeout) must be caught so
+    the caller falls back to synthetic candidates instead of crashing.
+    This is the regression test for the bug found during live H3
+    against a slow gateway."""
+    print("\n--- test_generate_candidates_via_gateway_soft_fails_on_timeout ---")
+    from unittest import mock
+
+    with mock.patch("urllib.request.urlopen",
+                     side_effect=TimeoutError("timed out")):
+        out = m.generate_candidates_via_gateway(
+            "http://fake-gateway", "user msg", k=3,
+            temperatures=[0.3, 0.7, 1.1])
+    _ok("TimeoutError → [] (soft-fail)", out == [])
+
+    import urllib.error
+    with mock.patch("urllib.request.urlopen",
+                     side_effect=urllib.error.URLError("connection refused")):
+        out = m.generate_candidates_via_gateway(
+            "http://fake-gateway", "user msg", k=3,
+            temperatures=[0.3, 0.7, 1.1])
+    _ok("URLError → [] (soft-fail)", out == [])
+
+    with mock.patch("urllib.request.urlopen",
+                     side_effect=OSError("network unreachable")):
+        out = m.generate_candidates_via_gateway(
+            "http://fake-gateway", "user msg", k=3,
+            temperatures=[0.3, 0.7, 1.1])
+    _ok("OSError → [] (soft-fail)", out == [])
+
+
 def test_end_to_end_simulate_writes_pair():
     print("\n--- test_end_to_end_simulate_writes_pair ---")
     with tempfile.TemporaryDirectory() as d:
@@ -306,6 +394,9 @@ def main():
     test_pick_eligible_prefers_unanswered()
     test_pick_eligible_empty_corpus_returns_none()
     test_synthetic_candidates_shape()
+    test_synthetic_candidates_are_message_aware()
+    test_generate_candidates_via_gateway_parses_response()
+    test_generate_candidates_via_gateway_soft_fails_on_timeout()
     test_end_to_end_simulate_writes_pair()
     test_end_to_end_simulate_freetext()
     test_empty_corpus_exits_2()

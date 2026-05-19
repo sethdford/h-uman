@@ -181,6 +181,40 @@ def test_missing_db_returns_empty():
     _ok("missing memory.db → []", out == [])
 
 
+def test_corrupt_db_soft_fails():
+    """Pins gap #12: when chat.db exists but is unreadable (the FDA-
+    revoked failure mode on macOS, or just a corrupt file), the
+    extractor must return [] gracefully instead of crashing. The
+    operator sees a WARN on stderr but the loop continues."""
+    print("\n--- test_corrupt_db_soft_fails ---")
+    with tempfile.TemporaryDirectory() as d:
+        # Write garbage that's NOT a valid SQLite file
+        bad = Path(d) / "chat.db"
+        bad.write_bytes(b"this is not a sqlite database, sorry\n" * 100)
+        out = m.extract_imessage(bad, 10, True)
+        _ok("corrupt chat.db → []", out == [],
+            f"got {len(out)} records from a corrupt db")
+
+        bad2 = Path(d) / "memory.db"
+        bad2.write_bytes(b"\x00\x01\x02 garbage \xff\xff" * 50)
+        out2 = m.extract_memory_db(bad2, 10, True)
+        _ok("corrupt memory.db → []", out2 == [],
+            f"got {len(out2)} records from a corrupt db")
+
+
+def test_gmail_slack_stubs_return_empty():
+    """Pins gap #11: gmail / slack are stubs. Until the real network
+    slices land, they MUST return [] (not crash, not None) so the
+    --sources gmail,slack path works as a documented no-op."""
+    print("\n--- test_gmail_slack_stubs_return_empty ---")
+    _ok("extract_gmail → []", m.extract_gmail(100, True) == [])
+    _ok("extract_slack → []", m.extract_slack(100, True) == [])
+    # Also verify they're wired in the dispatch table so --sources
+    # gmail / --sources slack doesn't error out
+    _ok("gmail in SOURCE_DISPATCH", "gmail" in m.SOURCE_DISPATCH)
+    _ok("slack in SOURCE_DISPATCH", "slack" in m.SOURCE_DISPATCH)
+
+
 def test_end_to_end_jsonl_output():
     print("\n--- test_end_to_end_jsonl_output ---")
     with tempfile.TemporaryDirectory() as d:
@@ -237,6 +271,8 @@ def main():
     test_imessage_extractor_handles_apple_schema()
     test_memory_db_extractor()
     test_missing_db_returns_empty()
+    test_corrupt_db_soft_fails()
+    test_gmail_slack_stubs_return_empty()
     test_end_to_end_jsonl_output()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")
     return 0 if _FAIL == 0 else 1

@@ -167,15 +167,38 @@ def generate_candidates_via_gateway(gateway_url: str, user_message: str,
 
 
 def synthetic_candidates(user_message: str, k: int) -> list[str]:
-    """Deterministic candidates for the simulate path. Three obvious
-    styles: terse, neutral, verbose. The point isn't quality — it's
-    that the probe shape works end-to-end."""
-    base = user_message.strip()
-    return [
-        "yeah",                                          # terse
-        "yeah, sounds good — let me think about it",     # medium
-        "Yes, that works for me. Let me know when you'd like to proceed.",  # verbose
-    ][:k]
+    """Deterministic, MESSAGE-AWARE candidates for the simulate path.
+
+    Three distinct styles (terse, casual-engaged, formal-elaborate)
+    that ECHO a snippet of the user's actual message so the probe
+    feels like real responses to that specific question instead of
+    generic noise.
+
+    Question vs. statement detection picks the response shape; the
+    snippet is the first ~40 chars of the user message with trailing
+    punctuation stripped.
+    """
+    msg = (user_message or "").strip()
+    # Question if it ends with "?" OR starts with a question word/AUX
+    QWORDS = ("what", "where", "when", "why", "how", "who",
+              "is ", "are ", "do ", "did ", "can ", "could ",
+              "would ", "should ", "will ", "have ", "has ")
+    is_question = msg.endswith("?") or any(
+        msg.lower().startswith(w) for w in QWORDS)
+    snippet = msg[:40].rstrip(",.!?— \t\n").strip() or "that"
+    if is_question:
+        candidates = [
+            "yeah",
+            "yeah — let me think on it",
+            f"Yes, definitely. Regarding {snippet!r} — happy to dig in more.",
+        ]
+    else:
+        candidates = [
+            "ok",
+            "yeah, makes sense — thanks for the heads up",
+            f"Thanks for sharing. Noted about {snippet!r}; got it.",
+        ]
+    return candidates[:k]
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -198,7 +221,9 @@ def format_probe_question(user_message: str, candidates: list[str], handle: str)
     return "\n".join(lines)
 
 
-def deliver_probe(question: str, mode: str, queue_path: Path) -> str:
+def deliver_probe(question: str, mode: str, queue_path: Path,
+                   user_message: str = "", candidates: list[str] | None = None,
+                   handle: str = "") -> str:
     """Push the question to Seth via the chosen delivery mode.
 
     Modes:
@@ -208,6 +233,10 @@ def deliver_probe(question: str, mode: str, queue_path: Path) -> str:
       - imessage: directly invoke `human channel send imessage ...`
         — only available when the daemon is running with the
         imessage channel and the operator has confirmed delivery
+
+    The queue entry carries ENRICHED context so the downstream collector
+    (scripts/m3_probe_collector.py) can convert Seth's reply into
+    Alpaca-DPO pairs without re-parsing the question text.
     """
     if mode == "simulate":
         print("\n  [SIMULATE-DELIVERY] would send to Seth:")
@@ -217,7 +246,11 @@ def deliver_probe(question: str, mode: str, queue_path: Path) -> str:
     if mode == "queue":
         queue_path.parent.mkdir(parents=True, exist_ok=True)
         entry = {"ts_ms": int(time.time() * 1000),
-                 "question": question, "status": "pending"}
+                 "question": question,
+                 "user_message": user_message,
+                 "candidates": candidates or [],
+                 "handle": handle,
+                 "status": "pending"}
         with open(queue_path, "a") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         print(f"\n  Queued probe → {queue_path}")
@@ -321,7 +354,9 @@ def main():
         print(f"    {chr(65+i)}) {c[:80]}")
 
     question = format_probe_question(user_message, candidates, handle)
-    status = deliver_probe(question, delivery_mode, args.queue)
+    status = deliver_probe(question, delivery_mode, args.queue,
+                            user_message=user_message,
+                            candidates=candidates, handle=handle)
 
     if args.simulate_response is None:
         print(f"\n  Probe {status}. Pair generation waits for response.")

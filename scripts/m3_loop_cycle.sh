@@ -38,6 +38,62 @@ log() { echo "[$(ts)] $*" | tee -a "$LOG"; }
 log "═══ m3-loop-cycle start ═══"
 log "  threshold=$DPO_THRESHOLD auto_promote=$AUTO_PROMOTE mlx=$MLX_URL"
 
+# Toggle: set M3_H_TIER_ENABLE=0 to skip the data-acquisition tier
+# (useful when the corpus is already fresh or the loop is being
+# debugged on the G-tier steps).
+H_TIER_ENABLE="${M3_H_TIER_ENABLE:-1}"
+PROBE_RESPONSE_MODE="${M3_PROBE_RESPONSE_MODE:-simulate-tick}"
+PROBE_SIMULATED_REPLY="${M3_PROBE_SIMULATED_REPLY:-}"
+
+# Step 0a: H1 — refresh the multi-channel corpus from local stores.
+#   PII-redacted JSONL at $HUMAN_HOME/training-data/m3-corpus.jsonl.
+#   Soft-fails: if chat.db can't be read (no FDA), the script returns
+#   non-zero but the loop continues.
+if [ "$H_TIER_ENABLE" = "1" ]; then
+    log "--- step 0a: H1 corpus extract ---"
+    python3 "$REPO_ROOT/scripts/m3_extract_corpus.py" \
+        --out "$HUMAN_HOME/training-data/m3-corpus.jsonl" \
+        --sources imessage,memory_db \
+        --max-per-source 5000 2>&1 | tee -a "$LOG" || \
+        log "  WARN: H1 extract returned non-zero (corpus may be stale)"
+
+    # Step 0b: H2 — regenerate counterfactual preference pairs from the
+    #   refreshed corpus. Uses synthetic variants unless OPENAI_API_KEY
+    #   is set in the environment.
+    log "--- step 0b: H2 counterfactual pairs ---"
+    H2_FLAGS=""
+    [ -z "${OPENAI_API_KEY:-}" ] && H2_FLAGS="--no-llm"
+    python3 "$REPO_ROOT/scripts/m3_generate_counterfactuals.py" \
+        --corpus "$HUMAN_HOME/training-data/m3-corpus.jsonl" \
+        --out "$HUMAN_HOME/training-data/m3-counterfactuals.jsonl" \
+        --max-records 200 $H2_FLAGS 2>&1 | tee -a "$LOG" || \
+        log "  WARN: H2 counterfactual generation skipped (no corpus?)"
+
+    # Step 0c: H3 — queue one active-learning probe.
+    #   Soft-fail: if no eligible unanswered message exists, exits 2.
+    log "--- step 0c: H3 active probe (queue) ---"
+    python3 "$REPO_ROOT/scripts/m3_active_probe.py" \
+        --corpus "$HUMAN_HOME/training-data/m3-corpus.jsonl" \
+        --queue "$HUMAN_HOME/training-data/m3-active-probe-queue.jsonl" \
+        --pairs-out "$HUMAN_HOME/training-data/m3-active-probe-pairs.jsonl" \
+        --delivery queue 2>&1 | tee -a "$LOG" || \
+        log "  WARN: H3 probe skipped (no eligible messages?)"
+
+    # Step 0d: H3b — consume queued probes (simulate by default).
+    #   Production mode (--mode=dispatch / --mode=poll) requires the
+    #   iMessage send wire; set M3_PROBE_RESPONSE_MODE to switch.
+    log "--- step 0d: H3b probe collector ($PROBE_RESPONSE_MODE) ---"
+    COLLECTOR_ARGS=(--queue "$HUMAN_HOME/training-data/m3-active-probe-queue.jsonl"
+                     --pairs-out "$HUMAN_HOME/training-data/m3-active-probe-pairs.jsonl"
+                     --mode "$PROBE_RESPONSE_MODE")
+    if [ -n "$PROBE_SIMULATED_REPLY" ]; then
+        COLLECTOR_ARGS+=(--simulate-response "$PROBE_SIMULATED_REPLY")
+    fi
+    python3 "$REPO_ROOT/scripts/m3_probe_collector.py" \
+        "${COLLECTOR_ARGS[@]}" 2>&1 | tee -a "$LOG" || \
+        log "  WARN: probe collector returned non-zero"
+fi
+
 # Step 1: poll outcomes (drives JSONL append + adapter swap if --run-loop)
 log "--- step 1: poll outcomes ---"
 python3 "$REPO_ROOT/scripts/m3_outcome_driver.py" 2>&1 | tee -a "$LOG"
@@ -49,9 +105,23 @@ log "--- step 2: export DPO pairs ---"
 python3 "$REPO_ROOT/scripts/m3_dpo_from_rewrites.py" \
     --input "$REWRITE_PAIRS" --export-jsonl "$ALPACA_OUT" 2>&1 | tee -a "$LOG"
 
-# Count pairs (each line is one pair).
+# Merge H-tier preference pairs (counterfactuals + active probe) into the
+# training set. These are Alpaca-DPO shape already; just concatenate.
+CF_PAIRS="$HUMAN_HOME/training-data/m3-counterfactuals.jsonl"
+PROBE_PAIRS="$HUMAN_HOME/training-data/m3-active-probe-pairs.jsonl"
+for src in "$CF_PAIRS" "$PROBE_PAIRS"; do
+    if [ -f "$src" ]; then
+        added=$(wc -l < "$src" 2>/dev/null | tr -d ' ' || echo 0)
+        if [ "$added" -gt 0 ]; then
+            cat "$src" >> "$ALPACA_OUT"
+            log "  merged $added pairs from $(basename "$src")"
+        fi
+    fi
+done
+
+# Count pairs (each line is one pair, all sources combined).
 PAIRS_COUNT=$(wc -l < "$ALPACA_OUT" 2>/dev/null | tr -d ' ' || echo 0)
-log "  accumulated $PAIRS_COUNT DPO pairs"
+log "  accumulated $PAIRS_COUNT DPO pairs (rewrites + counterfactuals + probes)"
 
 # Step 3: train if threshold met
 if [ "$PAIRS_COUNT" -ge "$DPO_THRESHOLD" ]; then
