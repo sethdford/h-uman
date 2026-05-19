@@ -86,7 +86,16 @@ static void mlx_provider_chat_returns_not_supported(void) {
     p.vtable->deinit(p.ctx, &alloc);
 }
 
-static void mlx_provider_load_adapter_returns_not_supported(void) {
+/* M3 Phase B5 (2026-05-19): load_adapter is now wired. The contract is:
+ *   - NULL/invalid args → HU_ERR_INVALID_ARGUMENT
+ *   - missing adapters.safetensors → HU_ERR_NOT_FOUND
+ * Previously this test asserted HU_ERR_NOT_SUPPORTED — that pinned the
+ * stub behavior and would have blocked the wiring. Updated per
+ * .claude/rules/tests-that-pin-bugs.md. The "stub fallback" contract is
+ * still pinned on chat (HU_ERR_NOT_SUPPORTED in non-MLX builds) by
+ * `mlx_provider_chat_returns_not_supported` above. unload_adapter and
+ * active_adapter remain stubs — those are tracked separately. */
+static void mlx_provider_load_adapter_validates_inputs(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_mlx_config_t cfg = {0};
     hu_provider_t p = {0};
@@ -95,8 +104,12 @@ static void mlx_provider_load_adapter_returns_not_supported(void) {
     HU_ASSERT_NOT_NULL(p.vtable->unload_adapter); /* CodeRabbit 2026-05-17 — pin
                                                      the third member of the
                                                      adapter triple too. */
+    /* Missing safetensors file in the directory → NOT_FOUND. /tmp exists
+     * on every CI runner but /tmp/adapters.safetensors does not. */
     HU_ASSERT_EQ(p.vtable->load_adapter(p.ctx, &alloc, "/tmp/x.safetensors", 18, "id", 2),
-                 HU_ERR_NOT_SUPPORTED);
+                 HU_ERR_NOT_FOUND);
+    /* unload + active remain NOT_SUPPORTED stubs for now (unload requires
+     * a way to revert the persisted ctx state; tracked in next slice). */
     HU_ASSERT_EQ(p.vtable->unload_adapter(p.ctx, "id", 2), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_NULL(p.vtable->active_adapter(p.ctx));
     p.vtable->deinit(p.ctx, &alloc);
@@ -157,7 +170,7 @@ void run_mlx_provider_tests(void) {
     HU_RUN_TEST(mlx_provider_create_copies_config_strings);
     HU_RUN_TEST(mlx_provider_create_rejects_null_args);
     HU_RUN_TEST(mlx_provider_chat_returns_not_supported);
-    HU_RUN_TEST(mlx_provider_load_adapter_returns_not_supported);
+    HU_RUN_TEST(mlx_provider_load_adapter_validates_inputs);
     HU_RUN_TEST(mlx_provider_supports_native_tools_is_false);
     HU_RUN_TEST(mlx_provider_chat_does_not_mutate_out_on_unsupported);
 }

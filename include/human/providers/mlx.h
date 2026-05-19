@@ -64,4 +64,11 @@ typedef struct hu_mlx_config {
 hu_error_t hu_mlx_provider_create(hu_allocator_t *alloc, const hu_mlx_config_t *config,
                                   hu_provider_t *out);
 
+/* Test/debug accessor: returns the currently-persisted adapter path on
+ * the MLX provider's ctx (set via vtable->load_adapter or the initial
+ * config), or NULL if no adapter is loaded. `*out_len` (if non-NULL) is
+ * set to the path length without scanning. Returns a pointer owned by
+ * the provider — valid until the next load_adapter call or deinit. */
+const char *hu_mlx_provider_active_adapter_path(const hu_provider_t *p, size_t *out_len);
+
 #endif /* HU_MLX_PROVIDER_H */

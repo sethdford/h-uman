@@ -2938,9 +2938,15 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_log_once.c
+    tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
+    tests/test_config_banner_runtime_failfast.c
     tests/test_slice.c
+    tests/test_tool_registry_honesty.c
     tests/test_memory.c
+    tests/test_mlx_load_adapter.c
+    tests/test_m3_route_per_turn.c
     tests/test_sql_transaction.c
     tests/test_normalize.c
     tests/test_memory_util.c
@@ -3128,6 +3134,7 @@ set(HU_TEST_SOURCES
     tests/test_w5_persona_deltas.c
     tests/test_persona_delta_observer.c
     tests/test_world_model_bridge.c
+    tests/test_w7_render_null_safety.c
     tests/test_signal_channel_wire.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c

@@ -41,6 +41,8 @@ hu_error_t hu_daemon_tick_for_test(const hu_config_t *cfg);
 void hu_daemon_set_poll_call_counter_for_test(int *counter);
 int hu_daemon_reaction_poll_get_count_for_test(void);
 void hu_daemon_reaction_poll_reset_count_for_test(void);
+/* Re-arm the one-shot disable/enable warning guards between test cases. */
+void hu_daemon_reaction_poll_reset_warn_guards_for_test(void);
 #endif
 
 #ifdef __cplusplus

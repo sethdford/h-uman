@@ -23,13 +23,16 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/provider.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #if defined(HU_ENABLE_MLX_PROVIDER) && defined(__APPLE__) && defined(__arm64__) && \
     defined(HU_GATEWAY_POSIX) && !HU_IS_TEST
@@ -391,20 +394,92 @@ static void mlx_deinit(void *ctx, hu_allocator_t *alloc) {
 
 /* ── vtable: load_adapter ─────────────────────────────────────────────── */
 
+/* Phase B5 (2026-05-19): wire adapter delivery via the subprocess argv.
+ *
+ * Contract:
+ *   - Validate inputs (ctx, alloc, adapter_path).
+ *   - Verify the directory contains `adapters.safetensors` (mlx-lm CLI
+ *     loads weights from this filename when given --adapter-path <dir>).
+ *   - Persist the path on the ctx so subsequent `mlx_run_subprocess`
+ *     invocations include `--adapter-path <path>` in argv.
+ *   - On failure, log a warning and return a precise error code.
+ *
+ * Delivery mechanism:
+ *   - Subprocess path: mlx_run_subprocess already passes
+ *     `--adapter-path <ctx->adapter_path_owned>` when the field is
+ *     non-NULL (see argv builder above). After this call the next
+ *     chat will use the new adapter.
+ *   - HTTP admin path (server-mode MLX): the daemon's per-turn router
+ *     `hu_agent_m3_route_per_turn` POSTs to /v1/adapters/swap directly
+ *     via `hu_mlx_admin_swap_adapter` (see src/agent/agent.c:1053). The
+ *     provider vtable layer remains subprocess-only; the admin path is
+ *     a parallel mechanism the agent invokes by URL.
+ *
+ * NOTE on dispatcher safety: when HU_MLX_SUBPROCESS_ACTIVE is 0 (the
+ * default CI / test build), the chat path returns NOT_SUPPORTED anyway,
+ * so persisting an adapter on ctx has no observable effect there. The
+ * load itself still validates and persists — this keeps the load path
+ * uniformly testable and avoids a confusing "succeeds-on-mac,
+ * fails-on-linux" surface for callers.
+ */
 static hu_error_t mlx_load_adapter(void *ctx, hu_allocator_t *alloc, const char *adapter_path,
                                    size_t adapter_path_len, const char *adapter_id,
                                    size_t adapter_id_len) {
-    (void)ctx;
-    (void)alloc;
-    (void)adapter_path;
-    (void)adapter_path_len;
     (void)adapter_id;
     (void)adapter_id_len;
-    /* Phase B5 will wire this: validate safetensors, persist path on
-     * ctx, pass to next subprocess invocation via --adapter-path. Until
-     * then NOT_SUPPORTED matches the dispatcher safety contract the
-     * daemon expects (see test_provider_all.c). */
-    return HU_ERR_NOT_SUPPORTED;
+
+    if (!ctx || !alloc || !adapter_path || adapter_path_len == 0) {
+        hu_log_warn("mlx_provider", NULL,
+                    "load_adapter: NULL or empty argument (ctx=%p alloc=%p path=%p len=%zu)", ctx,
+                    (void *)alloc, (const void *)adapter_path, adapter_path_len);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Validate the adapter directory contains adapters.safetensors.
+     * Use access(F_OK) — minimal syscall, just an existence check.
+     * The mlx-lm CLI will re-validate when it actually loads the file. */
+    char check[1024];
+    int n = snprintf(check, sizeof(check), "%.*s/adapters.safetensors", (int)adapter_path_len,
+                     adapter_path);
+    if (n <= 0 || (size_t)n >= sizeof(check)) {
+        hu_log_warn("mlx_provider", NULL, "load_adapter: adapter path too long (len=%zu cap=%zu)",
+                    adapter_path_len, sizeof(check));
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    if (access(check, F_OK) != 0) {
+        hu_log_warn("mlx_provider", NULL, "load_adapter: adapters.safetensors not found in %.*s",
+                    (int)adapter_path_len, adapter_path);
+        return HU_ERR_NOT_FOUND;
+    }
+
+    mlx_ctx_t *c = (mlx_ctx_t *)ctx;
+    char *new_path = dup_with_len(alloc, adapter_path, adapter_path_len);
+    if (!new_path)
+        return HU_ERR_OUT_OF_MEMORY;
+
+    /* Swap atomically from the caller's POV: free the prior path AFTER
+     * the new one is fully allocated, so a failed alloc leaves the
+     * previously-active adapter intact (consistent with personal-model
+     * save's tmp+rename pattern). */
+    if (c->adapter_path_owned) {
+        alloc->free(alloc->ctx, c->adapter_path_owned, c->adapter_path_owned_len + 1);
+    }
+    c->adapter_path_owned = new_path;
+    c->adapter_path_owned_len = adapter_path_len;
+    return HU_OK;
+}
+
+/* Test-mode introspection: returns the persisted adapter path, or NULL
+ * if none. Used by tests/test_mlx_load_adapter.c to verify the
+ * subprocess argv builder would receive the new value without spawning
+ * python3. Defined in the linked build too — the read is O(1). */
+const char *hu_mlx_provider_active_adapter_path(const hu_provider_t *p, size_t *out_len) {
+    if (!p || !p->ctx)
+        return NULL;
+    const mlx_ctx_t *c = (const mlx_ctx_t *)p->ctx;
+    if (out_len)
+        *out_len = c->adapter_path_owned_len;
+    return c->adapter_path_owned;
 }
 
 static hu_error_t mlx_unload_adapter(void *ctx, const char *adapter_id, size_t adapter_id_len) {
