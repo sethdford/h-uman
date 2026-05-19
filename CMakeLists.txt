@@ -2931,6 +2931,7 @@ set(HU_TEST_SOURCES
     tests/test_log_once.c
     tests/test_io_secure.c
     tests/test_slice.c
+    tests/test_tool_registry_honesty.c
     tests/test_memory.c
     tests/test_sql_transaction.c
     tests/test_normalize.c

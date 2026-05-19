@@ -2,6 +2,7 @@
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #ifdef HU_HAS_CRON
 #include "human/cron.h"
 #endif
@@ -112,6 +113,51 @@
 #include <string.h>
 
 #define HU_WEB_FETCH_MAX_CHARS 100000
+
+/* Honest tool-registry counters (see include/human/tools/factory.h).
+ * Process-lifetime; test seam resets via hu_tools_factory_reset_honesty_counters. */
+static unsigned g_factory_twitter_skipped_count = 0;
+static unsigned g_factory_lsp_skipped_count = 0;
+static int g_factory_twitter_warned_once = 0;
+static int g_factory_lsp_warned_once = 0;
+
+unsigned hu_tools_factory_twitter_skipped_count(void) {
+    return g_factory_twitter_skipped_count;
+}
+
+unsigned hu_tools_factory_lsp_skipped_count(void) {
+    return g_factory_lsp_skipped_count;
+}
+
+void hu_tools_factory_reset_honesty_counters(void) {
+    g_factory_twitter_skipped_count = 0;
+    g_factory_lsp_skipped_count = 0;
+    g_factory_twitter_warned_once = 0;
+    g_factory_lsp_warned_once = 0;
+}
+
+/* Predicate: are twitter API credentials configured?
+ * Mirrors the conditions src/tools/twitter.c:46 short-circuits on
+ * (canned "Twitter API not configured" failure). Until that file gains a real
+ * HTTP path, this predicate is the operator-honest gate at registration time:
+ * if no credentials are present, the tool would always return that canned
+ * failure, so do not register it. */
+static bool hu_twitter_credentials_available(const hu_config_t *config) {
+    if (!config)
+        return false;
+    const hu_twitter_channel_config_t *t = &config->channels.twitter;
+    if (t->bearer_token && t->bearer_token[0])
+        return true;
+    if (t->api_key && t->api_key[0])
+        return true;
+    if (t->access_token && t->access_token[0])
+        return true;
+    /* Read-only feed bearer also qualifies — twitter tool's search action only
+     * needs the bearer token. */
+    if (config->feeds.twitter_bearer_token && config->feeds.twitter_bearer_token[0])
+        return true;
+    return false;
+}
 
 #ifdef HU_HAS_CRON
 #define HU_TOOLS_CRON_COUNT 7
@@ -562,10 +608,27 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
         goto fail;
     idx++;
 
-    err = hu_twitter_tool_create(alloc, &tools[idx]);
-    if (err != HU_OK)
-        goto fail;
-    idx++;
+    /* Twitter tool registers ONLY when credentials are configured. Without
+     * credentials, twitter_execute() in src/tools/twitter.c falls through to a
+     * canned "Twitter API not configured" failure regardless of input; that
+     * silent stub misleads operators who see the tool in the registry. The
+     * honest behaviour is to NOT register, and to log once at startup naming
+     * the missing config so operators can find the fix. */
+    if (hu_twitter_credentials_available(config)) {
+        err = hu_twitter_tool_create(alloc, &tools[idx]);
+        if (err != HU_OK)
+            goto fail;
+        idx++;
+    } else {
+        g_factory_twitter_skipped_count++;
+        if (!g_factory_twitter_warned_once) {
+            g_factory_twitter_warned_once = 1;
+            hu_log_info("tools/factory", NULL,
+                        "twitter tool not registered: twitter API credentials "
+                        "missing from config.twitter (set bearer_token, api_key, "
+                        "or access_token to activate)");
+        }
+    }
 
     err = hu_gcloud_create(alloc, policy, &tools[idx]);
     if (err != HU_OK)
@@ -609,8 +672,18 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
         goto fail;
     idx++;
 
-    tools[idx] = hu_lsp_tool_create(alloc);
-    idx++;
+    /* lsp tool removed from default registry pending a real implementation.
+     * src/tools/lsp.c currently returns canned empty diagnostics in test and
+     * "LSP not supported" in production with no LSP client behind it. The
+     * source file remains on disk for a future chip to flesh out, but it must
+     * not be exposed to agents as if it worked. */
+    g_factory_lsp_skipped_count++;
+    if (!g_factory_lsp_warned_once) {
+        g_factory_lsp_warned_once = 1;
+        hu_log_info("tools/factory", NULL,
+                    "lsp tool removed pending real implementation "
+                    "(src/tools/lsp.c is a canned stub)");
+    }
 
     /* tool_search: searches available tools by name/keyword.
      * Note: pass tools array and current idx (doesn't include itself yet) */
