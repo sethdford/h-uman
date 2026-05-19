@@ -278,6 +278,31 @@ hu_error_t hu_shape_classify(const char *response, size_t response_len, hu_shape
         }
     }
 
+    /* 2026-05-18 (M5): excessive-emoji check.
+     * Per seth.json::anti_patterns: "NEVER use emoji in more than 20%
+     * of messages. Most texts should have ZERO emoji." Heuristic:
+     * count UTF-8 emoji bytes (4-byte sequences in plane 1F***) and
+     * flag if they exceed 1 per 50 chars of response. Conservative —
+     * won't catch every emoji but catches the obvious "😂🔥💯" pattern. */
+    {
+        size_t emoji_bytes = 0;
+        for (size_t i = 0; i + 3 < trimmed_len; i++) {
+            unsigned char c0 = (unsigned char)r[i];
+            unsigned char c1 = (unsigned char)r[i + 1];
+            /* F0 9F xx xx = UTF-8 for U+1F***, which covers most emoji
+             * code points (emoticons, symbols, transport, food, etc.) */
+            if (c0 == 0xF0 && c1 == 0x9F) {
+                emoji_bytes += 4;
+                i += 3; /* skip rest of UTF-8 sequence */
+            }
+        }
+        size_t emoji_count = emoji_bytes / 4;
+        /* Flag if >= 1 emoji per 30 chars (roughly the seth.json "20% of messages"
+         * threshold scaled to character density). */
+        if (trimmed_len > 0 && emoji_count * 30 > trimmed_len)
+            out->fail_flags |= HU_SHAPE_FAIL_EXCESSIVE_EMOJI;
+    }
+
     /* Score: start at 1.0, subtract per-fail penalty, clamp to [0, 1]
      * Mirrors the Python classifier — heavy violations -0.3, light -0.15. */
     double score = 1.0;
@@ -307,6 +332,8 @@ hu_error_t hu_shape_classify(const char *response, size_t response_len, hu_shape
     if (f & HU_SHAPE_FAIL_GREAT_QUESTION)
         score -= 0.15;
     if (f & HU_SHAPE_FAIL_I_UNDERSTAND)
+        score -= 0.15;
+    if (f & HU_SHAPE_FAIL_EXCESSIVE_EMOJI)
         score -= 0.15;
     if (score < 0.0)
         score = 0.0;

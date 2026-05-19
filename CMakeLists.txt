@@ -3368,6 +3368,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_skill_scaffold.c
     tests/test_eval_runner.c
     tests/test_eval_history.c
+    tests/test_eval_shape.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c
     tests/test_self_rag.c

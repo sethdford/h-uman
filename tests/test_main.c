@@ -557,6 +557,7 @@ void run_eval_judge_tests(void);
 void run_eval_benchmarks_tests(void);
 void run_eval_runner_tests(void);
 void run_eval_history_tests(void);
+void run_eval_shape_tests(void);
 void run_corrective_rag_tests(void);
 void run_adaptive_rag_tests(void);
 void run_self_rag_tests(void);
@@ -1286,6 +1287,7 @@ int main(int argc, char **argv) {
     run_eval_benchmarks_tests();
     run_eval_runner_tests();
     run_eval_history_tests();
+    run_eval_shape_tests();
     run_corrective_rag_tests();
     run_adaptive_rag_tests();
     run_self_rag_tests();
