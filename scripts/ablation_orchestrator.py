@@ -63,7 +63,7 @@ ENDPOINTS = {
 }
 
 
-def post_chat(url: str, body: dict, timeout: int = 120) -> tuple[str, float, str]:
+def post_chat(url: str, body: dict, timeout: int = 180) -> tuple[str, float, str]:
     data = json.dumps(body).encode("utf-8")
     req = request.Request(url, data=data, method="POST",
                           headers={"Content-Type": "application/json"})
@@ -77,7 +77,7 @@ def post_chat(url: str, body: dict, timeout: int = 120) -> tuple[str, float, str
         except (KeyError, IndexError):
             return "", time.time() - t0, str(resp)[:120]
     except (error.URLError, error.HTTPError, json.JSONDecodeError,
-            ConnectionError) as e:
+            ConnectionError, TimeoutError, OSError) as e:
         return "", time.time() - t0, str(e)[:200]
 
 

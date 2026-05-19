@@ -40,7 +40,7 @@ GATEWAY_DEFAULT = "http://127.0.0.1:3006/v1/chat/completions"
 
 
 def generate(prompt: str, gateway: str, temperature: float = 0.9,
-             max_tokens: int = 80, timeout: int = 90) -> tuple[str, float, str]:
+             max_tokens: int = 80, timeout: int = 180) -> tuple[str, float, str]:
     body = {
         "model": "gemma-4-26b",
         "messages": [{"role": "user", "content": prompt}],
@@ -58,7 +58,12 @@ def generate(prompt: str, gateway: str, temperature: float = 0.9,
             return resp["choices"][0]["message"]["content"].strip(), time.time() - t0, ""
         except (KeyError, IndexError):
             return "", time.time() - t0, f"malformed: {str(resp)[:120]}"
-    except (error.URLError, error.HTTPError, json.JSONDecodeError, ConnectionError) as e:
+    except (error.URLError, error.HTTPError, json.JSONDecodeError,
+            ConnectionError, TimeoutError, OSError) as e:
+        # OSError covers http.client.RemoteDisconnected + socket.timeout.
+        # We swallow, return an empty text + error string, so the outer
+        # loop can record the failure and continue with the next candidate
+        # rather than abandoning the whole run.
         return "", time.time() - t0, str(e)[:200]
 
 
