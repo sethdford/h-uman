@@ -85,7 +85,7 @@ static void dpo_pair_count_accurate(void) {
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
     hu_dpo_record_from_feedback(&col, "p1", 2, "resp1", 5, true);
     hu_dpo_record_from_feedback(&col, "p2", 2, "resp2", 5, false);
-    hu_dpo_record_from_retry(&col, "p3", 2, "rej", 3, "cho", 3);
+    hu_dpo_record_from_retry(&col, "p3", 2, "rejected", 8, "chosen", 6);
     size_t count = 0;
     hu_dpo_pair_count(&col, &count);
     HU_ASSERT_EQ((int)count, 3);

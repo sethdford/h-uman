@@ -131,6 +131,63 @@ training corpora is more valuable for catching dataset bugs than for
 ranking responses.** This is now wired in as `dpo_pair_persona_miner.py`
 and intended to run before every ORPO training round.
 
+## Update — 2026-05-19 second pass
+
+After the initial fix landed (refuse trivially-short writes in
+`hu_dpo_record_from_feedback` + iterator filter on read), a deeper trace
+of the `reflection_retry` rows surfaced a separate logger bug:
+
+The 9/10 inverted reflection_retry rows have:
+  chosen   = "NEEDS_RETRY. The response 'GOOD' is irrelevant..."  (critique)
+  rejected = "GOOD"                                                (bad original)
+
+The chosen column holds the CRITIQUE TEXT, not the corrected response.
+This happens when the LLM, having seen the reflection critique in its
+history, echoes the critique structure back as its retry attempt.
+`agent_turn.c:5402` correctly passes (rejected=bad, chosen=resp.content),
+but `resp.content` IS the echoed-critique text on those failure modes.
+
+**Second-layer fix in `hu_dpo_record_from_retry`:**
+
+  if (chosen_len < 4 || rejected_len < 4) return INVALID_ARGUMENT;
+  if (chosen == rejected) return INVALID_ARGUMENT;
+  if (chosen starts with "NEEDS_RETRY" or "needs_retry") return INVALID;
+
+The third clause catches the echoed-critique pattern. Tests:
+- `dpo_retry_with_identical_chosen_rejected` flipped from bug-pinning
+  (HU_OK) to corrected (HU_ERR_INVALID_ARGUMENT)
+- `dpo_retry_refuses_critique_as_chosen` is a NEW positive contract:
+  exact-prefix critiques refused, embedded mentions allowed.
+
+**On the universal write-side invariant:** I attempted to refuse
+single-sided writes in `hu_dpo_record_pair` itself (covering the
+`reaction_handler.c` path that writes positive-only / negative-only
+tapback signal as poison). That broke 12 pre-existing tests whose
+contract WAS "single-sided writes accumulate and are counted." The
+trade-off — symmetric defense at write site vs. read-side filter only —
+favors the read-side filter because:
+  (a) `hu_dpo_iterate_pairs` already skips bad rows before training
+  (b) the reaction signal IS valuable; the right home is a separate
+      `negative_signals` / `positive_signals` table, not "block the
+      write entirely"
+
+That separate-table refactor is the follow-up; until then dpo_pairs
+collects the rows (for completeness/audit) and the iterator skips them.
+
+**Final defense graph (post-second-pass):**
+
+  Write site (rejects with HU_ERR_INVALID_ARGUMENT):
+    hu_dpo_record_from_feedback — response_len ≥ 4
+    hu_dpo_record_from_retry    — both sides ≥ 4
+                                — chosen != rejected
+                                — chosen NOT starting with NEEDS_RETRY
+    hu_dpo_record_pair          — permissive (legacy reaction_handler)
+
+  Read site (silently skips):
+    hu_dpo_iterate_pairs        — both sides ≥ 4 bytes
+
+Full suite: 11110/11110 pass.
+
 ## Artifacts
 
   /tmp/dpo_persona_audit.json   full per-row audit
