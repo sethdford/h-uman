@@ -45,6 +45,12 @@ on:
       - "scripts/m3_loop_cycle.sh"
       - "include/human/ml/m3_contact_routes.h"
       - "src/ml/m3_contact_routes.c"
+      - "scripts/m3_extract_corpus.py"
+      - "scripts/test_m3_extract_corpus.py"
+      - "scripts/m3_generate_counterfactuals.py"
+      - "scripts/test_m3_generate_counterfactuals.py"
+      - "scripts/m3_active_probe.py"
+      - "scripts/test_m3_active_probe.py"
       - "Makefile"
       - "CMakePresets.json"
       - ".github/workflows/m3-loop-smoke.yml"
@@ -80,6 +86,12 @@ on:
       - "scripts/m3_loop_cycle.sh"
       - "include/human/ml/m3_contact_routes.h"
       - "src/ml/m3_contact_routes.c"
+      - "scripts/m3_extract_corpus.py"
+      - "scripts/test_m3_extract_corpus.py"
+      - "scripts/m3_generate_counterfactuals.py"
+      - "scripts/test_m3_generate_counterfactuals.py"
+      - "scripts/m3_active_probe.py"
+      - "scripts/test_m3_active_probe.py"
   workflow_dispatch:
 
 jobs:
@@ -138,6 +150,25 @@ jobs:
         # 9 assertions covering the canary's full lifecycle including
         # automatic rollback via shell trap on EXIT.
         run: python3 scripts/test_m3_canary.py
+
+      - name: Run corpus extractor (H1) verifier
+        # 29 assertions covering PII redaction, hash determinism, Apple
+        # epoch conversion, iMessage + memory.db schema reads, and the
+        # end-to-end JSONL output shape with fixture DBs.
+        run: python3 scripts/test_m3_extract_corpus.py
+
+      - name: Run counterfactual generator (H2) verifier
+        # 18 assertions covering synthetic variant count/distinctness,
+        # style-violation injection, same-contact pairing (no cross-
+        # conversation bleed), and end-to-end --no-llm output.
+        run: python3 scripts/test_m3_generate_counterfactuals.py
+
+      - name: Run active probe (H3) verifier
+        # 51 assertions covering response→pairs parsing (letter, freetext,
+        # empty), probe formatting + sentinel header, deliver_probe modes
+        # (simulate/queue), eligible-message picking, and end-to-end
+        # --simulate-delivery --simulate-response flow.
+        run: python3 scripts/test_m3_active_probe.py
 
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)

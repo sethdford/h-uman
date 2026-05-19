@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe
 
 all: build test
 
@@ -160,6 +160,41 @@ m3-promote:
 # `make m3-loop-now` lets you exercise it ad hoc.
 m3-loop-now:
 	@bash scripts/m3_loop_cycle.sh
+
+# H1 (2026-05-18) — multi-channel corpus extractor.
+# Pulls Seth-authored turns from iMessage chat.db + memory.db (gmail/
+# slack stubbed). PII redaction is mandatory by default. Writes the
+# unified JSONL to ~/.human/training-data/m3-corpus.jsonl.
+m3-extract:
+	@python3 scripts/m3_extract_corpus.py \
+		--out $${OUT:-$$HOME/.human/training-data/m3-corpus.jsonl} \
+		--sources $${SRC:-imessage,memory_db} \
+		--max-per-source $${MAX:-10000}
+
+# H2 (2026-05-18) — counterfactual preference generator.
+# Reads H1 corpus, pairs each Seth turn with its preceding user
+# context (same-contact), generates style-violation variants, emits
+# Alpaca-DPO pairs. LLM-as-judge when OPENAI_API_KEY set; synthetic
+# deterministic fallback otherwise.
+m3-counterfactuals:
+	@python3 scripts/m3_generate_counterfactuals.py \
+		--corpus $${IN:-$$HOME/.human/training-data/m3-corpus.jsonl} \
+		--out $${OUT:-$$HOME/.human/training-data/m3-counterfactuals.jsonl} \
+		--max-records $${MAX:-200} \
+		$${NO_LLM:+--no-llm}
+
+# H3 (2026-05-18) — active-learning probe.
+# Picks an unanswered incoming message from H1 corpus, generates K
+# candidate responses via the gateway (or synthetic fallback), and
+# queues an A/B/C question for Seth. Set SIM=1 for local simulate
+# mode (prints to stdout, no real iMessage send).
+m3-probe:
+	@python3 scripts/m3_active_probe.py \
+		--corpus $${IN:-$$HOME/.human/training-data/m3-corpus.jsonl} \
+		--pairs-out $${OUT:-$$HOME/.human/training-data/m3-active-probe-pairs.jsonl} \
+		--queue $${QUEUE:-$$HOME/.human/training-data/m3-active-probe-queue.jsonl} \
+		$${SIM:+--simulate-delivery} \
+		$${RESP:+--simulate-response=$$RESP}
 
 validate: format-check build test
 	@echo "Validation passed."
