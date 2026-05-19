@@ -415,9 +415,10 @@ static hu_error_t construct_and_merge_reaction_fact(hu_personal_model_t *model,
 }
 
 hu_error_t hu_reaction_ingest_personal_model(struct hu_personal_model *model,
-                                       const hu_reaction_event_t *event, const char *custom_emoji,
-                                       const char *target_text_preview, bool is_from_me_target,
-                                       bool in_group_chat) {
+                                             const hu_reaction_event_t *event,
+                                             const char *custom_emoji,
+                                             const char *target_text_preview,
+                                             bool is_from_me_target, bool in_group_chat) {
     if (!model || !event)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -455,6 +456,12 @@ hu_error_t hu_reaction_ingest_personal_model(struct hu_personal_model *model,
     hu_error_t text_err =
         ingest_synthesized(model, buf, n, /*from_user=*/true, event->timestamp_unix, &prov);
     (void)construct_and_merge_reaction_fact(model, event, target_text_preview, &prov);
+    /* Track 3: bubble the reaction's target-text topics up into the
+     * personal_model.topics[] salience system. A LOVE reaction on
+     * "let's hike Saturday" makes "hike" / "Saturday" salient even
+     * though the user never typed those words themselves. */
+    (void)hu_personal_model_bump_topics_from_reaction(model, event, target_text_preview,
+                                                      event->timestamp_unix);
     return text_err;
 }
 

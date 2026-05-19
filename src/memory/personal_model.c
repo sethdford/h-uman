@@ -793,6 +793,179 @@ static void bump_topic(hu_personal_model_t *model, const char *name, int64_t ts)
     t->last_mentioned = ts;
 }
 
+/* Decrease topic salience after a NEGATIVE reaction. Symmetric to
+ * `bump_topic`: if the topic is present, decrement its mention_count
+ * (saturating at 1 — never zero, since the topic was clearly mentioned)
+ * and pull `interest_score` down by 0.05. If the topic is NOT present
+ * we DO NOT add a new slot at low salience — a dislike on a topic the
+ * model has never heard of shouldn't materialize a new low-interest
+ * topic entry. Returns true iff a slot was actually touched. */
+static bool decay_topic_for_negative_reaction(hu_personal_model_t *model, const char *name,
+                                              int64_t ts) {
+    if (!name || name[0] == '\0')
+        return false;
+    for (size_t i = 0; i < model->topic_count; i++) {
+        if (strcasecmp(model->topics[i].name, name) == 0) {
+            if (model->topics[i].mention_count > 1U)
+                model->topics[i].mention_count--;
+            if (model->topics[i].interest_score > 0.05f)
+                model->topics[i].interest_score -= 0.05f;
+            else
+                model->topics[i].interest_score = 0.0f;
+            model->topics[i].last_mentioned = ts;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Topic-extraction stopwords for reaction-target text.
+ *
+ * Per ~/.claude/rules/audit-verify-before-allege.md: there ARE existing
+ * stopword filters in the codebase (src/context/conversation.c::is_stopword,
+ * src/context/style_tracker.c::is_stopword, src/agent/retrieval_planner.c::
+ * is_stopword), but each is `static` inside its TU with a different set
+ * tailored to its use case (e.g. conversation.c adds emotion keywords
+ * because that module already surfaces emotion through a sibling channel).
+ * The reaction-topic case wants the standard "function-word" filter plus a
+ * couple of imperatives ("let's", "lets") common in iMessage reactions.
+ * Rather than promote one of the three to a header and refactor all four
+ * call sites, we inline a fourth local copy. This is the cheapest correct
+ * fix; a follow-up could unify them into a shared core/text/stopwords.h. */
+static bool reaction_topic_is_stopword(const char *w, size_t len) {
+    /* All entries lowercase. Length comparison short-circuits, so we
+     * pay strncasecmp only on length match. */
+    static const char *const kStop[] = {
+        "the",   "and",    "but",   "for",   "with",   "this",  "that",  "what", "when", "where",
+        "were",  "will",   "would", "could", "should", "have",  "has",   "had",  "your", "you",
+        "are",   "was",    "get",   "got",   "let",    "lets",  "let's", "just", "from", "about",
+        "into",  "onto",   "than",  "then",  "them",   "they",  "there", "here", "been", "being",
+        "going", "didn't", "wasn",  "won't", "isn't",  "doesn", NULL,
+    };
+    for (const char *const *sw = kStop; *sw != NULL; sw++) {
+        size_t swlen = strlen(*sw);
+        if (swlen == len && strncasecmp(w, *sw, len) == 0)
+            return true;
+    }
+    return false;
+}
+
+/* Minimum candidate-token length (in BYTES). Tokens shorter than this
+ * are dropped before stopword check — keeps "to", "in", "of" etc. out
+ * even if the stopword table later evolves. Matches the spec
+ * ("each word ≥ 4 chars"). */
+#define HU_PM_REACTION_TOPIC_MIN_LEN 4U
+
+/* Has this normalized name already been touched in this call? Bounded
+ * dedup array sized to HU_PM_MAX_TOPICS so the function does at most
+ * one bump per unique token, even if "hike" appears twice in the
+ * preview. */
+static bool name_already_touched(const char names[][HU_PM_MAX_FIELD], size_t n,
+                                 const char *candidate) {
+    for (size_t i = 0; i < n; i++) {
+        if (strcasecmp(names[i], candidate) == 0)
+            return true;
+    }
+    return false;
+}
+
+size_t hu_personal_model_bump_topics_from_reaction(hu_personal_model_t *model,
+                                                   const hu_reaction_event_t *event,
+                                                   const char *target_text, int64_t now_unix) {
+    if (!model || !event)
+        return 0;
+    /* Removals don't roll back topic salience — see header. */
+    if (event->is_removal)
+        return 0;
+    /* Neutral reactions (QUESTION, UNKNOWN) don't affect topic salience.
+     * Custom-emoji is treated by the producer as POSITIVE (see the
+     * imessage.c normalizer); we trust event->polarity here rather than
+     * re-deriving from event->kind. */
+    if (event->polarity == HU_REACTION_NEUTRAL)
+        return 0;
+    if (!target_text || target_text[0] == '\0')
+        return 0;
+
+    const bool positive = (event->polarity == HU_REACTION_POSITIVE);
+    size_t touched = 0;
+    /* Track which token names have already been processed this call so
+     * repeats in the same preview ("hike, hike, hike") only bump once. */
+    char seen[HU_PM_MAX_TOPICS][HU_PM_MAX_FIELD];
+    size_t seen_n = 0;
+
+    size_t len = strlen(target_text);
+    size_t i = 0;
+    while (i < len) {
+        /* Skip leading non-alnum (spaces, punctuation, opening quotes). */
+        while (i < len && !isalnum((unsigned char)target_text[i]))
+            i++;
+        if (i >= len)
+            break;
+        size_t start = i;
+        /* Word body: keep letters, digits, and intra-word apostrophes
+         * ("don't") — but cut at any other punctuation. We then strip
+         * any trailing apostrophe in the normalization step. */
+        while (i < len && (isalnum((unsigned char)target_text[i]) || target_text[i] == '\'')) {
+            i++;
+        }
+        size_t end = i;
+        if (end <= start)
+            continue;
+
+        /* Trim leading/trailing apostrophes from the token. */
+        while (start < end && target_text[start] == '\'')
+            start++;
+        while (end > start && target_text[end - 1] == '\'')
+            end--;
+        if (end <= start)
+            continue;
+
+        size_t tok_len = end - start;
+        if (tok_len < HU_PM_REACTION_TOPIC_MIN_LEN)
+            continue;
+        if (tok_len >= HU_PM_MAX_FIELD)
+            tok_len = HU_PM_MAX_FIELD - 1;
+
+        /* Lowercase normalize into a stack buffer. */
+        char norm[HU_PM_MAX_FIELD];
+        for (size_t k = 0; k < tok_len; k++)
+            norm[k] = (char)tolower((unsigned char)target_text[start + k]);
+        norm[tok_len] = '\0';
+
+        if (reaction_topic_is_stopword(norm, tok_len))
+            continue;
+
+        /* Dedup within this call. */
+        if (name_already_touched(seen, seen_n, norm))
+            continue;
+        if (seen_n < HU_PM_MAX_TOPICS) {
+            strncpy(seen[seen_n], norm, sizeof(seen[seen_n]) - 1);
+            seen[seen_n][sizeof(seen[seen_n]) - 1] = '\0';
+            seen_n++;
+        }
+
+        if (positive) {
+            size_t before = model->topic_count;
+            bump_topic(model, norm, now_unix);
+            /* bump_topic always touches a slot when it returns (either
+             * existing entry bumped, LRU evicted then new entry added,
+             * or new entry appended) — so unconditionally count one.
+             * The `before` comparison above is unused but kept as a
+             * paper-trail hook for any future "did we hit the cap?"
+             * observability. */
+            (void)before;
+            touched++;
+        } else {
+            /* Negative polarity. Only count when an existing slot was
+             * actually decremented — never materialize a new low-
+             * salience slot for a dislike on an unseen topic. */
+            if (decay_topic_for_negative_reaction(model, norm, now_unix))
+                touched++;
+        }
+    }
+    return touched;
+}
+
 static bool fact_key_dup(const hu_heuristic_fact_t *a, const hu_heuristic_fact_t *b) {
     return strcmp(a->subject, b->subject) == 0 && strcmp(a->predicate, b->predicate) == 0;
 }
@@ -1679,11 +1852,10 @@ typedef struct hu_pm_v2_vocab_entry {
  * "try" is hard to disambiguate without a parser, so it stays out of both
  * vocabularies and we lean on the dedicated word lists below. */
 static const hu_pm_v2_vocab_entry_t HU_PM_FIDELITY_HEDGES_V2[] = {
-    {"maybe", 5},   {"perhaps", 7},  {"possibly", 8}, {"possible", 8},
-    {"might", 5},   {"could", 5},    {"would", 5},    {"probably", 8},
-    {"somewhat", 8},{"kinda", 5},    {"sorta", 5},    {"likely", 6},
-    {"unlikely", 8},{"consider", 8}, {"seem", 4},     {"seems", 5},
-    {"seemed", 6},  {"appears", 7},  {"appear", 6},   {"suppose", 7},
+    {"maybe", 5}, {"perhaps", 7}, {"possibly", 8}, {"possible", 8}, {"might", 5},
+    {"could", 5}, {"would", 5},   {"probably", 8}, {"somewhat", 8}, {"kinda", 5},
+    {"sorta", 5}, {"likely", 6},  {"unlikely", 8}, {"consider", 8}, {"seem", 4},
+    {"seems", 5}, {"seemed", 6},  {"appears", 7},  {"appear", 6},   {"suppose", 7},
 };
 #define HU_PM_FIDELITY_HEDGE_V2_COUNT \
     (sizeof(HU_PM_FIDELITY_HEDGES_V2) / sizeof(HU_PM_FIDELITY_HEDGES_V2[0]))
@@ -1693,23 +1865,19 @@ static const hu_pm_v2_vocab_entry_t HU_PM_FIDELITY_HEDGES_V2[] = {
  * only (not bag-of-words) so "I will fix it" doesn't get counted as
  * imperative even though "fix" is in the table. */
 static const hu_pm_v2_vocab_entry_t HU_PM_FIDELITY_IMPERATIVES_V2[] = {
-    {"do", 2},      {"check", 5},   {"fix", 3},     {"stop", 4},
-    {"run", 3},     {"use", 3},     {"make", 4},    {"go", 2},
-    {"see", 3},     {"tell", 4},    {"call", 4},    {"send", 4},
-    {"ship", 4},    {"build", 5},   {"open", 4},    {"close", 5},
-    {"add", 3},     {"remove", 6},  {"set", 3},     {"get", 3},
-    {"pick", 4},    {"start", 5},   {"finish", 6},  {"save", 4},
-    {"load", 4},    {"read", 4},    {"write", 5},   {"print", 5},
-    {"log", 3},     {"pause", 5},   {"skip", 4},    {"merge", 5},
-    {"commit", 6},  {"push", 4},    {"pull", 4},    {"deploy", 6},
-    {"keep", 4},    {"drop", 4},    {"kill", 4},    {"ask", 3},
-    {"answer", 6},  {"reply", 5},   {"reach", 5},   {"focus", 5},
+    {"do", 2},    {"check", 5}, {"fix", 3},    {"stop", 4},  {"run", 3},    {"use", 3},
+    {"make", 4},  {"go", 2},    {"see", 3},    {"tell", 4},  {"call", 4},   {"send", 4},
+    {"ship", 4},  {"build", 5}, {"open", 4},   {"close", 5}, {"add", 3},    {"remove", 6},
+    {"set", 3},   {"get", 3},   {"pick", 4},   {"start", 5}, {"finish", 6}, {"save", 4},
+    {"load", 4},  {"read", 4},  {"write", 5},  {"print", 5}, {"log", 3},    {"pause", 5},
+    {"skip", 4},  {"merge", 5}, {"commit", 6}, {"push", 4},  {"pull", 4},   {"deploy", 6},
+    {"keep", 4},  {"drop", 4},  {"kill", 4},   {"ask", 3},   {"answer", 6}, {"reply", 5},
+    {"reach", 5}, {"focus", 5},
 };
 #define HU_PM_FIDELITY_IMPERATIVE_V2_COUNT \
     (sizeof(HU_PM_FIDELITY_IMPERATIVES_V2) / sizeof(HU_PM_FIDELITY_IMPERATIVES_V2[0]))
 
-static bool pm_v2_word_in_vocab(const char *w, size_t wl,
-                                const hu_pm_v2_vocab_entry_t *vocab,
+static bool pm_v2_word_in_vocab(const char *w, size_t wl, const hu_pm_v2_vocab_entry_t *vocab,
                                 size_t vocab_n) {
     for (size_t i = 0; i < vocab_n; i++) {
         if (vocab[i].len != wl)
@@ -1718,9 +1886,12 @@ static bool pm_v2_word_in_vocab(const char *w, size_t wl,
         while (k < wl) {
             unsigned char x = (unsigned char)w[k];
             unsigned char y = (unsigned char)vocab[i].word[k];
-            if (x >= 'A' && x <= 'Z') x = (unsigned char)(x + 32);
-            if (y >= 'A' && y <= 'Z') y = (unsigned char)(y + 32);
-            if (x != y) break;
+            if (x >= 'A' && x <= 'Z')
+                x = (unsigned char)(x + 32);
+            if (y >= 'A' && y <= 'Z')
+                y = (unsigned char)(y + 32);
+            if (x != y)
+                break;
             k++;
         }
         if (k == wl)
@@ -1735,10 +1906,10 @@ typedef struct hu_pm_v2_response_features {
     float abbreviation_ratio;
     size_t byte_len;
     /* v2 decision-style axes: */
-    float hedging_ratio;     /* hedge words / total words */
-    float question_ratio;    /* sentences ending in '?' / total sentences */
-    float imperative_ratio;  /* sentences whose first word is an imperative verb /
-                              * total sentences */
+    float hedging_ratio;    /* hedge words / total words */
+    float question_ratio;   /* sentences ending in '?' / total sentences */
+    float imperative_ratio; /* sentences whose first word is an imperative verb /
+                             * total sentences */
 } hu_pm_v2_response_features_t;
 
 /* Single-pass walker: extracts both v1 and v2 features. The v1 fields
@@ -1773,7 +1944,8 @@ static void hu_pm_extract_response_features_v2(const char *response, size_t resp
                 if (!((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z')))
                     break;
                 total_letters++;
-                if (d >= 'a' && d <= 'z') lower_letters++;
+                if (d >= 'a' && d <= 'z')
+                    lower_letters++;
                 i++;
             }
             size_t wl = i - start;
@@ -1781,16 +1953,14 @@ static void hu_pm_extract_response_features_v2(const char *response, size_t resp
             sentence_has_content = true;
             if (fidelity_word_is_abbrev(response + start, wl))
                 abbrev_words++;
-            if (pm_v2_word_in_vocab(response + start, wl,
-                                    HU_PM_FIDELITY_HEDGES_V2,
+            if (pm_v2_word_in_vocab(response + start, wl, HU_PM_FIDELITY_HEDGES_V2,
                                     HU_PM_FIDELITY_HEDGE_V2_COUNT))
                 hedge_words++;
             if (!sentence_first_word_seen) {
                 sentence_first_word_seen = true;
-                sentence_first_word_is_imperative = pm_v2_word_in_vocab(
-                    response + start, wl,
-                    HU_PM_FIDELITY_IMPERATIVES_V2,
-                    HU_PM_FIDELITY_IMPERATIVE_V2_COUNT);
+                sentence_first_word_is_imperative =
+                    pm_v2_word_in_vocab(response + start, wl, HU_PM_FIDELITY_IMPERATIVES_V2,
+                                        HU_PM_FIDELITY_IMPERATIVE_V2_COUNT);
             }
             continue;
         }
@@ -1798,8 +1968,10 @@ static void hu_pm_extract_response_features_v2(const char *response, size_t resp
             if (sentence_has_content) {
                 total_sentences++;
                 sentence_terminated_by_question = (c == '?');
-                if (sentence_terminated_by_question) question_sentences++;
-                if (sentence_first_word_is_imperative) imperative_sentences++;
+                if (sentence_terminated_by_question)
+                    question_sentences++;
+                if (sentence_first_word_is_imperative)
+                    imperative_sentences++;
             }
             sentence_has_content = false;
             sentence_first_word_seen = false;
@@ -1813,7 +1985,8 @@ static void hu_pm_extract_response_features_v2(const char *response, size_t resp
      * sentence cannot be a question (no '?' terminator). */
     if (sentence_has_content) {
         total_sentences++;
-        if (sentence_first_word_is_imperative) imperative_sentences++;
+        if (sentence_first_word_is_imperative)
+            imperative_sentences++;
     }
 
     if (total_letters > 0)
@@ -1838,8 +2011,7 @@ static void hu_pm_extract_response_features_v2(const char *response, size_t resp
 static float hu_pm_decision_style_match(const hu_pm_v2_response_features_t *f,
                                         const hu_communication_style_t *target) {
     const float eps = 1e-6f;
-    if (fabsf(target->hedging_ratio) < eps &&
-        fabsf(target->question_ratio) < eps &&
+    if (fabsf(target->hedging_ratio) < eps && fabsf(target->question_ratio) < eps &&
         fabsf(target->imperative_ratio) < eps) {
         return 0.5f;
     }
@@ -1859,7 +2031,7 @@ float hu_communication_style_fidelity_score_v2(const hu_communication_style_t *t
     hu_pm_v2_response_features_t f;
     hu_pm_extract_response_features_v2(response, response_len, &f);
 
-    float lower_match  = hu_pm_axis_match(f.lowercase_ratio, target->lowercase_ratio);
+    float lower_match = hu_pm_axis_match(f.lowercase_ratio, target->lowercase_ratio);
     float abbrev_match = hu_pm_axis_match(f.abbreviation_ratio, target->abbreviation_ratio);
     float length_match = hu_pm_length_match(f.byte_len, target->avg_message_length);
     float decision_match = hu_pm_decision_style_match(&f, target);
@@ -1888,8 +2060,10 @@ static void hu_pm_score_response_set_v2(const hu_communication_style_t *target,
             continue;
         }
         sum += s;
-        if (s < out->min_score) out->min_score = s;
-        if (s > out->max_score) out->max_score = s;
+        if (s < out->min_score)
+            out->min_score = s;
+        if (s > out->max_score)
+            out->max_score = s;
         out->scored++;
     }
     if (out->scored == 0) {
@@ -1902,8 +2076,8 @@ static void hu_pm_score_response_set_v2(const hu_communication_style_t *target,
 hu_error_t hu_communication_style_compare_response_sets_v2(
     const hu_communication_style_t *target, const char *const *set_a, const size_t *lens_a,
     size_t n_a, const char *const *set_b, const size_t *lens_b, size_t n_b,
-    hu_communication_style_set_summary_t *out_a,
-    hu_communication_style_set_summary_t *out_b, float *out_delta) {
+    hu_communication_style_set_summary_t *out_a, hu_communication_style_set_summary_t *out_b,
+    float *out_delta) {
     if (!target || !out_a || !out_b || !out_delta)
         return HU_ERR_INVALID_ARGUMENT;
     if (target->sample_count == 0U)
