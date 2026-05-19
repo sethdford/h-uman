@@ -629,6 +629,10 @@ set(HU_CORE_SOURCES
     src/persona/markdown_loader.c
     src/persona/somatic.c
     src/persona/narrative_self.c
+    # Sprint A.5 wiring: renders the personal model's reaction signature
+    # (from calibrate) into a prompt-ready paragraph, ready to splice
+    # into the agent's persona context.
+    src/persona/social_insights.c
     src/gateway/event_bridge.c
     src/gateway/tenant.c
     src/runtime/native.c
@@ -742,6 +746,7 @@ set(HU_CORE_SOURCES
     src/calibration/calibrate.c
     src/calibration/clone.c
     src/calibration/ab_compare.c
+    src/predictive/drafts.c
     src/context/context_ext.c
     src/agent/episodic.c
     src/agent/reflection.c
@@ -3202,6 +3207,7 @@ set(HU_TEST_SOURCES
     tests/test_timing.c
     tests/test_calibration.c
     tests/test_calibration_reactions.c
+    tests/test_predictive_drafts.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
     tests/test_activation_steering.c
@@ -3386,6 +3392,8 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_gaps.c)
 list(APPEND HU_TEST_SOURCES tests/test_pattern_drift.c)
 # Per-contact relationship signatures (Tier 2 Sprint A).
 list(APPEND HU_TEST_SOURCES tests/test_contact_signature.c)
+# Sprint A.5 wiring: render reaction signature → prompt paragraph.
+list(APPEND HU_TEST_SOURCES tests/test_persona_social_insights.c)
 # Reaction-driven topic salience (Tier 1 #1 of better-than-human plan).
 list(APPEND HU_TEST_SOURCES tests/test_personal_model_topics_from_reactions.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
