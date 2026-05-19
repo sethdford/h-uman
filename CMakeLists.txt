@@ -469,6 +469,11 @@ set(HU_CORE_SOURCES
     # parser. Used by imessage_ingest.c extractors for audio transcripts
     # and edit-chain history. No external deps.
     src/util/bplist.c
+    # Phase 3 completion: daemon tick that polls chat.db for the
+    # enriched-event columns (payload_data, message_summary_info,
+    # group_action_type, balloon_bundle_id) and ingests into personal_model.
+    # Test mode + non-Apple builds get a stub implementation.
+    src/daemon_imessage_observer.c
     src/core/http.c
     src/core/vertex_auth.c
     src/core/process_util.c
@@ -3305,6 +3310,8 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_ingest.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_personal_model_e2e.c)
 # Phase 3: bplist00 parser tests. Pure-C, no gates needed.
 list(APPEND HU_TEST_SOURCES tests/test_bplist.c)
+# Phase 3 completion: daemon iMessage observer tick (audio + edits + group).
+list(APPEND HU_TEST_SOURCES tests/test_imessage_observer.c)
 # Phase 2 of docs/plans/2026-05-18-imessage-sota.md: cross-channel reaction
 # emit paths for Discord + Telegram. Internal #ifdef HU_HAS_* guards with
 # stub runners per .claude/rules/test-source-gate-symmetry.md.

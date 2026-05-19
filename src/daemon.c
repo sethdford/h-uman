@@ -82,6 +82,10 @@
  * The other three headers below remain gated because their call sites are
  * gated. */
 #include "human/agent/reaction_handler.h"
+/* Phase 3 completion: observer tick runs whenever HU_HAS_IMESSAGE + SQLite
+ * are present, independent of RL_FULL — the personal-model sink doesn't
+ * need the DPO collector. */
+#include "human/daemon_imessage_observer.h"
 #if defined(HU_ENABLE_RL_FULL)
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_reactions.h"
@@ -2635,6 +2639,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * sink works regardless of whether the DPO collector is wired. */
     if (agent) {
         hu_reaction_handler_set_personal_model(&agent->personal_model);
+        /* Phase 3 completion: route audio transcripts, edit history,
+         * group events, and balloon-plugin payloads through the same
+         * personal-model sink. */
+        hu_daemon_imessage_observer_wire_personal_model(&agent->personal_model);
     }
 
     /* Hybrid routing: create a lightweight cloud provider for classification/scoring
@@ -12974,6 +12982,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         }
 #endif
 
+        /* Phase 3 of docs/plans/2026-05-18-imessage-sota.md completion:
+         * observer tick for enriched-event columns (audio transcripts,
+         * edit history, group events, balloon payloads). Independent of
+         * RL_FULL because the personal-model sink works regardless of
+         * whether the DPO collector is wired. Stubs to no-op in test +
+         * non-Apple builds; see src/daemon_imessage_observer.c. */
+#if defined(HU_HAS_IMESSAGE) && defined(__APPLE__) && defined(HU_ENABLE_SQLITE)
+        if (config) {
+            static int64_t observer_watermark = 0;
+            static int64_t observer_last_poll_unix = 0;
+            int64_t now_unix_obs = (int64_t)time(NULL);
+            if (observer_watermark == 0)
+                observer_watermark = now_unix_obs;
+            (void)hu_daemon_tick_imessage_observer(config, now_unix_obs, &observer_last_poll_unix,
+                                                   &observer_watermark);
+        }
+#endif
+
         struct timespec sleep_ts = {.tv_sec = tick_interval_ms / 1000,
                                     .tv_nsec = (long)(tick_interval_ms % 1000) * 1000000L};
         nanosleep(&sleep_ts, NULL);
@@ -13000,8 +13026,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #if defined(HU_ENABLE_RL_FULL)
     hu_reaction_handler_set_collector(NULL);
 #endif
-    /* Phase 1c teardown: detach the personal-model sink. */
+    /* Phase 1c teardown: detach the personal-model sinks. */
     hu_reaction_handler_set_personal_model(NULL);
+    hu_daemon_imessage_observer_wire_personal_model(NULL);
     if (agent && agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, alloc);
         agent->w14_scheduler = NULL;

@@ -11,6 +11,7 @@
 
 #include "human/channels/imessage_ingest.h"
 #include "human/channels/reaction_event.h"
+#include "human/memory/fact_extract.h"
 #include "human/memory/personal_model.h"
 #include "test_framework.h"
 
@@ -394,6 +395,94 @@ static void test_ingest_group_chat_uses_group_provenance(void) {
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 }
 
+/* ── fact-emergence verification (Tier 1 #5 from gap analysis) ────────
+ *
+ * These tests answer the question the prior e2e tests didn't: does the
+ * synthesized text we feed to hu_personal_model_ingest actually produce
+ * facts via hu_fact_extract, or are we just incrementing
+ * style.sample_count? Run fact_extract directly on canonical synthesis
+ * outputs and assert at least one heuristic_fact emerges.
+ *
+ * If these break in the future, the synthesis wording needs to be
+ * adjusted to be more extractor-friendly — without this contract, the
+ * "personal-model learning" claim is unfalsifiable. */
+
+/* DOCUMENTED GAP (2026-05-19): the heuristic fact extractor at
+ * src/memory/fact_extract.c only matches FIRST-PERSON USER patterns
+ * ("i like", "i love", "i prefer", "i don't like", etc). Our synthesis
+ * output is THIRD-PERSON AGENT NARRATION ("Alice reacted with ❤️ to my
+ * message: '...'"), so NO extractor pattern matches. As a result,
+ * ingest advances style.sample_count + interaction_count but produces
+ * ZERO heuristic_facts about contacts.
+ *
+ * The follow-up to close this gap is either:
+ *   a) Extend fact_extract patterns to include third-person observations
+ *      ("X reacted with Y", "X shared Z", "X edited W") with the
+ *      contact as subject. ~50 LoC of new patterns.
+ *   b) Have hu_imessage_ingest_reaction construct hu_heuristic_fact_t
+ *      directly and call hu_personal_model_merge_facts_checked,
+ *      bypassing the text→extract round-trip. Cleaner — the synthesis
+ *      layer already has the structured info; rendering text just to
+ *      re-parse it is lossy. ~80 LoC.
+ *
+ * Option (b) is the architectural fix. Tests below DOCUMENT the
+ * current gap (asserting zero facts) so we see when it closes. */
+
+static void test_documented_gap_synth_reaction_does_not_yield_facts(void) {
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LOVE;
+    e.polarity = HU_REACTION_POSITIVE;
+
+    char buf[512];
+    size_t n = hu_imessage_synth_reaction(&e, NULL, "let's hike Mount Tam Saturday",
+                                          /*is_from_me_target=*/true, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+
+    hu_fact_extract_result_t result;
+    memset(&result, 0, sizeof(result));
+    hu_error_t err = hu_fact_extract(buf, n, &result);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    /* THIS IS THE GAP. When we close it (per option a/b above), this
+     * assertion should FLIP to fact_count >= 1. Until then, pinning
+     * zero ensures the regression-vs-improvement distinction is
+     * unambiguous. */
+    HU_ASSERT_EQ((int)result.fact_count, 0);
+}
+
+static void test_first_person_text_does_yield_facts(void) {
+    /* Sanity check: extractor itself isn't broken — first-person user
+     * text DOES produce facts. This pins the extractor's contract so we
+     * can tell "extractor regressed" apart from "our synthesis voice
+     * isn't extractable." */
+    const char *first_person = "i love hiking on saturdays.";
+    hu_fact_extract_result_t result;
+    memset(&result, 0, sizeof(result));
+    hu_error_t err = hu_fact_extract(first_person, strlen(first_person), &result);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(result.fact_count >= 1);
+}
+
+static void test_synth_ingest_advances_style_sample_count(void) {
+    /* The WEAKER property the ingest currently achieves: style.sample_count
+     * goes from 0 → ≥1 on a successful ingest. This is what makes
+     * has_content() return true; the e2e tests rely on it. When the
+     * fact-emergence gap closes, this test should be STRENGTHENED to
+     * assert specific (subject, predicate, object) triples emerged. */
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+    HU_ASSERT_EQ((int)model.style.sample_count, 0);
+
+    hu_reaction_event_t e = {0};
+    e.sender_handle = "Alice";
+    e.kind = HU_REACTION_LOVE;
+    e.timestamp_unix = 1700000000;
+    hu_error_t err = hu_imessage_ingest_reaction(&model, &e, NULL, "hiking Saturday",
+                                                 /*is_from_me_target=*/true, false);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(model.style.sample_count >= 1);
+}
+
 /* ── runner ───────────────────────────────────────────────────────── */
 
 void run_imessage_ingest_tests(void) {
@@ -431,4 +520,7 @@ void run_imessage_ingest_tests(void) {
     HU_RUN_TEST(test_ingest_reaction_is_channel_agnostic_slack);
     HU_RUN_TEST(test_ingest_reaction_discord_group_uses_channel_qualifier);
     HU_RUN_TEST(test_ingest_group_chat_uses_group_provenance);
+    HU_RUN_TEST(test_documented_gap_synth_reaction_does_not_yield_facts);
+    HU_RUN_TEST(test_first_person_text_does_yield_facts);
+    HU_RUN_TEST(test_synth_ingest_advances_style_sample_count);
 }
