@@ -1,6 +1,36 @@
 #include "human/config.h"
+#include "human/core/log.h"
 #include "human/runtime.h"
+#include <stdbool.h>
 #include <string.h>
+
+/* One-shot operator warnings for stub-tier runtimes. Per
+ * ~/.claude/rules/silent-config-gated-subsystems.md, runtimes that are
+ * incomplete (vtable methods return HU_ERR_NOT_SUPPORTED) or that require
+ * out-of-band setup (gce — no usable behavior without an instance configured)
+ * should announce themselves once per process so the operator can see in the
+ * service log that the configured runtime is not the production-ready path. */
+static void warn_stub_runtime_once(const char *kind) {
+    static bool warned_gce = false;
+    static bool warned_wasm = false;
+    static bool warned_cloudflare = false;
+    bool *flag = NULL;
+    if (strcmp(kind, "gce") == 0)
+        flag = &warned_gce;
+    else if (strcmp(kind, "wasm") == 0)
+        flag = &warned_wasm;
+    else if (strcmp(kind, "cloudflare") == 0)
+        flag = &warned_cloudflare;
+    if (!flag || *flag)
+        return;
+    *flag = true;
+    hu_log_warn("runtime", NULL,
+                "runtime.kind='%s' selected — this runtime is a stub/incomplete "
+                "tier and most vtable methods return HU_ERR_NOT_SUPPORTED. "
+                "Supported runtimes: native, docker. Update runtime.kind in "
+                "config.json to use the production path.",
+                kind);
+}
 
 hu_error_t hu_runtime_from_config(const struct hu_config *cfg, hu_runtime_t *out) {
     if (!cfg || !out)
@@ -23,6 +53,7 @@ hu_error_t hu_runtime_from_config(const struct hu_config *cfg, hu_runtime_t *out
     }
 
     if (strcmp(kind, "gce") == 0) {
+        warn_stub_runtime_once("gce");
         uint64_t mem_mb = 0;
         if (cfg->security.resource_limits.max_memory_mb > 0)
             mem_mb = (uint64_t)cfg->security.resource_limits.max_memory_mb;
@@ -35,11 +66,13 @@ hu_error_t hu_runtime_from_config(const struct hu_config *cfg, hu_runtime_t *out
 
 #ifdef HU_HAS_RUNTIME_EXOTIC
     if (strcmp(kind, "wasm") == 0) {
+        warn_stub_runtime_once("wasm");
         *out = hu_runtime_wasm(0);
         return HU_OK;
     }
 
     if (strcmp(kind, "cloudflare") == 0) {
+        warn_stub_runtime_once("cloudflare");
         *out = hu_runtime_cloudflare();
         return HU_OK;
     }
