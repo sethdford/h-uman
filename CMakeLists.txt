@@ -371,6 +371,11 @@ if(HU_ENABLE_IMESSAGE)
     # logs unknown columns at startup so operators see Apple-added fields
     # before features silently break.
     list(APPEND CHANNEL_SOURCES src/channels/imessage_schema.c)
+    # Phase 5 of docs/plans/2026-05-18-imessage-sota.md: per-balloon
+    # payload decoders (URL preview, Apple Pay, Placemark, Music, Poll).
+    # Privacy contracts pinned in tests: never reads amount/currency or
+    # latitude/longitude keys.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_balloon_decode.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -3326,6 +3331,9 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_observer.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_schema.c)
 # Phase 4: typedstream attribute-run extractor tests. Pure-C, no gates.
 list(APPEND HU_TEST_SOURCES tests/test_typedstream.c)
+# Phase 5: per-balloon payload decoder tests. Pinned privacy contracts
+# (no money / no coordinates).
+list(APPEND HU_TEST_SOURCES tests/test_imessage_balloon_decode.c)
 # Phase 2 of docs/plans/2026-05-18-imessage-sota.md: cross-channel reaction
 # emit paths for Discord + Telegram. Internal #ifdef HU_HAS_* guards with
 # stub runners per .claude/rules/test-source-gate-symmetry.md.

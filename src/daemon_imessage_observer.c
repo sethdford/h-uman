@@ -12,6 +12,7 @@
 
 #include "human/daemon_imessage_observer.h"
 
+#include "human/channels/imessage_balloon_decode.h"
 #include "human/channels/imessage_ingest.h"
 #include "human/memory/personal_model.h"
 
@@ -211,25 +212,25 @@ static int process_row(sqlite3_stmt *st, hu_personal_model_t *pm) {
         }
     }
 
-    /* 3. Balloon (app-message) payloads — audio transcripts get the
-     *    highest priority because their detail string is real linguistic
-     *    signal, not metadata. Other balloon kinds get a stub detail
-     *    pending Phase 5 per-balloon decoders. */
-    if (balloon && balloon[0]) {
+    /* 3. Balloon (app-message) payloads — Phase 5 per-balloon decoders
+     *    now plug in real detail strings (URL title, Apple Pay recipient
+     *    handle, placemark name, music track, poll question). Audio
+     *    transcripts flow through the same row-ingest path; the
+     *    dispatcher routes to hu_imessage_extract_audio_transcript
+     *    internally. Privacy contracts (no money/coordinates) enforced
+     *    structurally inside the decoders. */
+    if (balloon && balloon[0] && payload && payload_len > 0) {
+        hu_error_t be =
+            hu_imessage_ingest_balloon_row(pm, (const char *)balloon, payload, (size_t)payload_len,
+                                           sender, is_from_me != 0, ts_unix, in_group);
+        if (be == HU_OK)
+            signaled = 1;
+    } else if (balloon && balloon[0]) {
+        /* No payload available but the bundle ID still classifies into
+         * a recognized kind — emit generic narration. */
         hu_imessage_balloon_kind_t kind =
             hu_imessage_balloon_kind_from_bundle_id((const char *)balloon);
-        if (kind == HU_IMESSAGE_BALLOON_AUDIO_TRANSCRIPT && payload && payload_len > 0) {
-            char transcript[1024];
-            size_t tlen = hu_imessage_extract_audio_transcript(payload, (size_t)payload_len,
-                                                               transcript, sizeof(transcript));
-            if (tlen > 0) {
-                (void)hu_imessage_ingest_balloon(pm, sender, is_from_me != 0, kind, transcript,
-                                                 ts_unix, in_group);
-                signaled = 1;
-            }
-        } else if (kind != HU_IMESSAGE_BALLOON_UNKNOWN) {
-            /* Non-audio balloon: emit a generic narration. Phase 5
-             * decoders will plug in detail strings. */
+        if (kind != HU_IMESSAGE_BALLOON_UNKNOWN) {
             (void)hu_imessage_ingest_balloon(pm, sender, is_from_me != 0, kind, NULL, ts_unix,
                                              in_group);
             signaled = 1;
