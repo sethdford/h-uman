@@ -208,6 +208,21 @@ def train_classifier():
             "n_positives": len(positives), "n_negatives": len(negatives)}
 
 
+# --- Compatibility wrappers for sota_summarize.py and ad-hoc callers ---
+def load_classifier(path: str = "/tmp/seth_speaker_id.json") -> dict:
+    """Load a trained classifier from JSON. Mirrors `json.loads(read_text)`
+    but gives callers a stable function name."""
+    return json.loads(Path(path).read_text())
+
+
+def p_seth(model: dict, text: str) -> float:
+    """Return the P(Seth) probability for `text` under `model`. Thin
+    wrapper around classify_text for callers that only need the scalar."""
+    if not text:
+        return 0.0
+    return classify_text(model, text)["p_seth"]
+
+
 def classify_text(model: dict, text: str) -> dict:
     feats = featurize(text)
     x_raw = [feats[k] for k in model["feature_names"]]
