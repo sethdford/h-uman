@@ -2935,6 +2935,8 @@ set(HU_TEST_SOURCES
     tests/test_slice.c
     tests/test_tool_registry_honesty.c
     tests/test_memory.c
+    tests/test_mlx_load_adapter.c
+    tests/test_m3_route_per_turn.c
     tests/test_sql_transaction.c
     tests/test_normalize.c
     tests/test_memory_util.c
