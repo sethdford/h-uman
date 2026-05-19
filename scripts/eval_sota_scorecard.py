@@ -44,7 +44,7 @@ RELEVANT_SUITES = (
     "imessage-humanness",
     "tier1-naturalness",
     "humor-engine",
-    "human-likeness",
+    "human-likeness-quality",  # actual suite_name in eval_runs (not "human-likeness")
 )
 
 
