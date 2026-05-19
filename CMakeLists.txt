@@ -3118,6 +3118,7 @@ set(HU_TEST_SOURCES
     tests/test_w5_persona_deltas.c
     tests/test_persona_delta_observer.c
     tests/test_world_model_bridge.c
+    tests/test_w7_render_null_safety.c
     tests/test_signal_channel_wire.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
