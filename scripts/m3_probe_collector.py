@@ -285,6 +285,38 @@ def dispatch_mode(queue_path: Path, operator_handle: str,
 # Poll wire — read chat.db for replies (macOS, needs FDA)
 # ─────────────────────────────────────────────────────────────────────
 
+def _decode_attributed_body(raw: bytes) -> str:
+    """Local copy of the typedstream decoder. Kept in sync with
+    m3_extract_corpus.py::decode_attributed_body — see that docstring
+    for the format. Pinned by tests in both modules' verifiers."""
+    if not raw or len(raw) < 30:
+        return ""
+    ns_idx = raw.find(b'NSString')
+    if ns_idx < 0:
+        return ""
+    plus = raw.find(b'\x2b', ns_idx, ns_idx + 50)
+    if plus < 0 or plus + 1 >= len(raw):
+        return ""
+    marker = raw[plus + 1]
+    if marker == 0x81:
+        if plus + 4 > len(raw):
+            return ""
+        body_len = int.from_bytes(raw[plus+2:plus+4], 'little')
+        body_start = plus + 4
+    elif marker == 0x84:
+        if plus + 6 > len(raw):
+            return ""
+        body_len = int.from_bytes(raw[plus+2:plus+6], 'little')
+        body_start = plus + 6
+    else:
+        body_len = marker
+        body_start = plus + 2
+    body_end = body_start + body_len
+    if body_len <= 0 or body_len > 1_000_000 or body_end > len(raw):
+        return ""
+    return raw[body_start:body_end].decode('utf-8', 'replace')
+
+
 def poll_chat_db_for_replies(chat_db: Path, operator_handle: str,
                               since_ms: int,
                               probe_header: str = PROBE_HEADER
@@ -293,13 +325,16 @@ def poll_chat_db_for_replies(chat_db: Path, operator_handle: str,
     since_ms, EXCLUDING the probe echoes (those start with probe_header).
     Each tuple: (ts_ms, text, is_from_me).
 
+    Reads BOTH `text` and `attributedBody` columns: modern macOS stores
+    formatted / multi-line / emoji bodies in attributedBody with
+    text=NULL. Without that fallback, long freetext replies would be
+    invisible to the poll.
+
     Soft-fails: returns [] on any sqlite error (FDA missing, corrupt db,
     schema drift). The caller sees the empty list and skips that entry.
     """
     if not chat_db.exists() or not operator_handle:
         return []
-    # Convert since_ms back into Apple's nanoseconds-since-2001-01-01.
-    # since_ms == 0 means "no filter" — emit everything in the thread.
     if since_ms > 0:
         since_apple_ns = int((since_ms / 1000.0 - APPLE_EPOCH_OFFSET_SEC)
                                * 1_000_000_000)
@@ -308,22 +343,25 @@ def poll_chat_db_for_replies(chat_db: Path, operator_handle: str,
     out: list[tuple[int, str, bool]] = []
     try:
         conn = sqlite3.connect(str(chat_db))
-        conn.text_factory = bytes
+        # Don't override text_factory here; we want str for `text` and
+        # bytes for `attributedBody`. Use detect_types where needed.
         cur = conn.cursor()
         cur.execute(
-            "SELECT m.text, m.date, m.is_from_me "
+            "SELECT m.text, m.date, m.is_from_me, m.attributedBody "
             "FROM message m LEFT JOIN handle h ON m.handle_id = h.ROWID "
-            "WHERE h.id = ? AND m.date > ? AND m.text IS NOT NULL "
-            "  AND length(m.text) > 0 "
+            "WHERE h.id = ? AND m.date > ? "
+            "  AND ((m.text IS NOT NULL AND length(m.text) > 0) "
+            "       OR (m.attributedBody IS NOT NULL "
+            "           AND length(m.attributedBody) > 0)) "
             "ORDER BY m.date ASC",
             (operator_handle, since_apple_ns))
-        for text_b, apple_ns, ifm in cur.fetchall():
-            text = (text_b.decode("utf-8", "replace")
-                    if isinstance(text_b, bytes) else (text_b or ""))
-            text = text.strip()
+        for text, apple_ns, ifm, ab in cur.fetchall():
+            text = (text or "").strip()
+            # Fall back to attributedBody when text is missing/empty
+            if (not text or len(text) < 1) and ab:
+                text = _decode_attributed_body(ab).strip()
             if not text:
                 continue
-            # Skip the probe message itself (which has the sentinel header)
             if text.startswith(probe_header):
                 continue
             ts_ms = int((apple_ns / 1e9 + APPLE_EPOCH_OFFSET_SEC) * 1000)

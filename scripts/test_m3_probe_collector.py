@@ -416,7 +416,8 @@ def test_poll_chat_db_returns_replies_after_since():
         cdb = Path(d) / "chat.db"
         c = _sql.connect(str(cdb))
         c.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, "
-                  "is_from_me INTEGER, date INTEGER, handle_id INTEGER)")
+                  "is_from_me INTEGER, date INTEGER, handle_id INTEGER, "
+                  "attributedBody BLOB)")
         c.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
         c.execute("INSERT INTO handle(ROWID,id) VALUES (1,'+15555550999')")
         # Mac-epoch ns. epoch=2001-01-01 → unix 978307200 sec.
@@ -466,7 +467,8 @@ def test_poll_mode_end_to_end_with_fixture():
         cdb = Path(d) / "chat.db"
         c = _sql.connect(str(cdb))
         c.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, "
-                  "is_from_me INTEGER, date INTEGER, handle_id INTEGER)")
+                  "is_from_me INTEGER, date INTEGER, handle_id INTEGER, "
+                  "attributedBody BLOB)")
         c.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
         c.execute("INSERT INTO handle(ROWID,id) VALUES (1,'+15555550777')")
         # Reply: "B" at unix_sec=978307220

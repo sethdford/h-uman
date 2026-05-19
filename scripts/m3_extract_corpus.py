@@ -108,6 +108,49 @@ def apple_ns_to_unix_ms(apple_ns: int) -> int:
     return int((apple_ns / 1_000_000_000.0 + APPLE_EPOCH_OFFSET_SEC) * 1000)
 
 
+def decode_attributed_body(raw: bytes) -> str:
+    """Extract visible UTF-8 text from Apple's NSAttributedString
+    typedstream blob (the `attributedBody` column in chat.db).
+
+    Modern macOS (Ventura+) stores message bodies here when `text` is
+    NULL — especially for messages with formatting, emoji, or sent via
+    osascript. Without this decoder we'd miss most outgoing messages.
+
+    Format after the NSString class-registry marker:
+        ... 0x2b 0x81 LL LL <body>          (2-byte LE length, typical)
+        ... 0x2b 0x84 LL LL LL LL <body>    (4-byte LE length, long msgs)
+        ... 0x2b LL <body>                  (1-byte length, len<128)
+    The 0x2b is the typedstream "next object" marker; the next byte
+    controls how the length is encoded.
+    """
+    if not raw or len(raw) < 30:
+        return ""
+    ns_idx = raw.find(b'NSString')
+    if ns_idx < 0:
+        return ""
+    plus = raw.find(b'\x2b', ns_idx, ns_idx + 50)
+    if plus < 0 or plus + 1 >= len(raw):
+        return ""
+    marker = raw[plus + 1]
+    if marker == 0x81:
+        if plus + 4 > len(raw):
+            return ""
+        body_len = int.from_bytes(raw[plus+2:plus+4], 'little')
+        body_start = plus + 4
+    elif marker == 0x84:
+        if plus + 6 > len(raw):
+            return ""
+        body_len = int.from_bytes(raw[plus+2:plus+6], 'little')
+        body_start = plus + 6
+    else:
+        body_len = marker
+        body_start = plus + 2
+    body_end = body_start + body_len
+    if body_len <= 0 or body_len > 1_000_000 or body_end > len(raw):
+        return ""
+    return raw[body_start:body_end].decode('utf-8', 'replace')
+
+
 def extract_imessage(db_path: Path, max_records: int, redact_handles: bool) -> list[dict]:
     """Read from Apple's chat.db. JOINs message → handle for the
     contact identifier. Skips rows with no text content (attachments,
@@ -119,20 +162,29 @@ def extract_imessage(db_path: Path, max_records: int, redact_handles: bool) -> l
         conn = sqlite3.connect(str(db_path))
         conn.text_factory = bytes  # tolerate mojibake
         cur = conn.cursor()
+        # Include attributedBody so we can recover messages that Apple
+        # stored with text=NULL (modern macOS for formatted / multi-line
+        # / emoji content). This is the same fallback every well-behaved
+        # chat.db reader does (imessage-exporter, iMessage Reader, etc).
         cur.execute(
-            "SELECT m.text, m.is_from_me, m.date, h.id "
+            "SELECT m.text, m.is_from_me, m.date, h.id, m.attributedBody "
             "FROM message m "
             "LEFT JOIN handle h ON m.handle_id = h.ROWID "
-            "WHERE m.text IS NOT NULL AND length(m.text) > 0 "
+            "WHERE (m.text IS NOT NULL AND length(m.text) > 0) "
+            "   OR (m.attributedBody IS NOT NULL "
+            "       AND length(m.attributedBody) > 0) "
             "ORDER BY m.date DESC "
             "LIMIT ?",
             (max_records,))
-        for text_b, is_from_me, apple_ns, handle_b in cur.fetchall():
+        for text_b, is_from_me, apple_ns, handle_b, ab_b in cur.fetchall():
             text = (text_b.decode("utf-8", "replace")
                     if isinstance(text_b, bytes) else (text_b or ""))
             handle = (handle_b.decode("utf-8", "replace")
                       if isinstance(handle_b, bytes) else (handle_b or ""))
             text = text.strip()
+            # Fall back to attributedBody when text is empty/missing
+            if (not text or len(text) < 2) and ab_b:
+                text = decode_attributed_body(ab_b).strip()
             if not text or len(text) < 2:
                 continue
             out.append({

@@ -75,7 +75,7 @@ d = Path(sys.argv[1])
 imsg = d / "fixture-chat.db"
 mem  = d / "fixture-memory.db"
 c = sqlite3.connect(str(imsg))
-c.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, is_from_me INTEGER, date INTEGER, handle_id INTEGER)")
+c.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, is_from_me INTEGER, date INTEGER, handle_id INTEGER, attributedBody BLOB)")
 c.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
 c.execute("INSERT INTO handle(ROWID,id) VALUES (1,'+15555550001'),(2,'friend@example.com')")
 rows = [

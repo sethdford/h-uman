@@ -111,7 +111,8 @@ def test_imessage_extractor_handles_apple_schema():
         conn.execute("""
             CREATE TABLE message (
                 ROWID INTEGER PRIMARY KEY,
-                text TEXT, is_from_me INTEGER, date INTEGER, handle_id INTEGER
+                text TEXT, is_from_me INTEGER, date INTEGER, handle_id INTEGER,
+                attributedBody BLOB
             )
         """)
         conn.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
@@ -202,6 +203,90 @@ def test_corrupt_db_soft_fails():
             f"got {len(out2)} records from a corrupt db")
 
 
+def test_decode_attributed_body_short_message():
+    """Pins the typedstream decoder for short messages (1-byte length).
+    Discovered during 2026-05-19 operator live-fire: modern macOS stores
+    most bodies in attributedBody, not text."""
+    print("\n--- test_decode_attributed_body_short_message ---")
+    # Construct a minimal typedstream with: NSString + 2b + 1-byte length
+    # + body "hello". 1-byte length encoding when len < 128.
+    body = b"hello world"
+    blob = (b"streamtyped\x00" * 2 +                # filler header
+            b"NSAttributedString\x00" +
+            b"NSObject\x00" +
+            b"NSString\x00\x01\x94\x84\x01" +
+            b"\x2b" + bytes([len(body)]) + body +
+            b"NSDictionary\x00")
+    decoded = m.decode_attributed_body(blob)
+    _ok(f"short body decoded (got {decoded!r})", decoded == "hello world")
+
+
+def test_decode_attributed_body_long_message_2byte_length():
+    """0x81 marker → 2-byte little-endian length. This is the encoding
+    Apple used for our 271-byte live probe message."""
+    print("\n--- test_decode_attributed_body_long_message_2byte_length ---")
+    body = ("🧠 [m3 probe]\n" + "X" * 250).encode("utf-8")
+    blob = (b"streamtyped\x00\x00" +
+            b"NSAttributedString\x00" +
+            b"NSObject\x00" +
+            b"NSString\x00\x01\x94\x84\x01" +
+            b"\x2b\x81" + len(body).to_bytes(2, "little") + body +
+            b"NSDictionary\x00")
+    decoded = m.decode_attributed_body(blob)
+    _ok(f"2-byte-len body decoded ({len(decoded)} chars vs {len(body.decode())} expected)",
+        decoded == body.decode("utf-8"))
+
+
+def test_decode_attributed_body_malformed_returns_empty():
+    """Decoder must soft-fail on malformed/truncated blobs — never raise."""
+    print("\n--- test_decode_attributed_body_malformed_returns_empty ---")
+    _ok("empty bytes → ''", m.decode_attributed_body(b"") == "")
+    _ok("None → ''", m.decode_attributed_body(None) == "")
+    _ok("too short → ''", m.decode_attributed_body(b"x" * 10) == "")
+    # NSString marker but no '+' after it
+    _ok("no '+' marker → ''",
+        m.decode_attributed_body(b"NSString" + b"\x00" * 30) == "")
+    # 0x81 marker but truncated length bytes
+    truncated = b"NSString\x00\x2b\x81\x0f"  # missing 1 length byte
+    _ok("truncated length → ''",
+        m.decode_attributed_body(truncated) == "")
+
+
+def test_extract_imessage_reads_attributedbody_fallback():
+    """Pins the H1-side fallback: when text is NULL but attributedBody
+    has content, the extractor must surface it."""
+    print("\n--- test_extract_imessage_reads_attributedbody_fallback ---")
+    with tempfile.TemporaryDirectory() as d:
+        db_path = Path(d) / "chat.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, "
+                     "text TEXT, is_from_me INTEGER, date INTEGER, "
+                     "handle_id INTEGER, attributedBody BLOB)")
+        conn.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
+        conn.execute("INSERT INTO handle(ROWID, id) VALUES (1, '+15555550001')")
+        # Build an attributedBody blob with body "hi from ab"
+        body = b"hi from ab"
+        ab = (b"NSString\x00\x01\x94\x84\x01\x2b" + bytes([len(body)]) +
+              body + b"NSDictionary\x00")
+        conn.execute("INSERT INTO message(text, is_from_me, date, "
+                     "handle_id, attributedBody) VALUES (NULL, 1, 1000000000, 1, ?)",
+                     (ab,))
+        # Also insert one with text column populated (normal path)
+        conn.execute("INSERT INTO message(text, is_from_me, date, "
+                     "handle_id, attributedBody) VALUES "
+                     "('plain text msg', 0, 2000000000, 1, NULL)")
+        conn.commit()
+        conn.close()
+
+        records = m.extract_imessage(db_path, max_records=100,
+                                       redact_handles=True)
+        _ok(f"both records extracted (got {len(records)})", len(records) == 2)
+        contents = {r["content"] for r in records}
+        _ok("text-column record preserved", "plain text msg" in contents)
+        _ok("attributedBody fallback record recovered",
+            "hi from ab" in contents, f"got: {contents}")
+
+
 def test_gmail_slack_stubs_return_empty():
     """Pins gap #11: gmail / slack are stubs. Until the real network
     slices land, they MUST return [] (not crash, not None) so the
@@ -222,10 +307,12 @@ def test_end_to_end_jsonl_output():
         imsg = Path(d) / "chat.db"
         c = sqlite3.connect(str(imsg))
         c.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, "
-                  "is_from_me INTEGER, date INTEGER, handle_id INTEGER)")
+                  "is_from_me INTEGER, date INTEGER, handle_id INTEGER, "
+                  "attributedBody BLOB)")
         c.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
         c.execute("INSERT INTO handle(ROWID, id) VALUES (1, '+15555551234')")
-        c.execute("INSERT INTO message VALUES (NULL, 'hi 415-555-9999 there', 1, 1000000000, 1)")
+        c.execute("INSERT INTO message(text, is_from_me, date, handle_id) "
+                  "VALUES ('hi 415-555-9999 there', 1, 1000000000, 1)")
         c.commit(); c.close()
 
         mem = Path(d) / "memory.db"
@@ -272,6 +359,10 @@ def main():
     test_memory_db_extractor()
     test_missing_db_returns_empty()
     test_corrupt_db_soft_fails()
+    test_decode_attributed_body_short_message()
+    test_decode_attributed_body_long_message_2byte_length()
+    test_decode_attributed_body_malformed_returns_empty()
+    test_extract_imessage_reads_attributedbody_fallback()
     test_gmail_slack_stubs_return_empty()
     test_end_to_end_jsonl_output()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")
