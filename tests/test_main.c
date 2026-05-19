@@ -55,6 +55,8 @@ void run_imessage_reactions_tests(void);
 /* Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis primitives
  * that render iMessage events into canonical English for personal-model ingest. */
 void run_imessage_ingest_tests(void);
+/* Phase 1c end-to-end smoke: chat.db → poll → reaction_handler → personal_model. */
+void run_imessage_personal_model_e2e_tests(void);
 /* Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch. */
 void run_slack_reactions_tests(void);
 /* Phase 2 Task 13 (RL SOTA): reaction_handler event → dpo_pairs row E2E.
@@ -800,6 +802,7 @@ int main(int argc, char **argv) {
     run_reaction_event_tests();
     run_imessage_reactions_tests();
     run_imessage_ingest_tests();
+    run_imessage_personal_model_e2e_tests();
     run_slack_reactions_tests();
 #ifdef HU_ENABLE_SQLITE
     run_reaction_handler_e2e_tests();

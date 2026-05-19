@@ -274,16 +274,45 @@ size_t hu_imessage_synth_balloon(const char *sender_handle, bool is_from_me,
 
 /* ── Phase 1b: ingest wrappers ────────────────────────────────────── */
 
-/* Build a provenance stamp for an iMessage event. Channel string follows
- * the "channel_qualifier" convention from src/agent/channel_trust.c:
- * "imessage_dm" for 1:1, "imessage_group" for group chats — matters
- * because group-chat content lands at THIRD_PARTY tier while 1:1 lands
- * at FIRST_PARTY. */
+/* Build a provenance stamp for any reaction-bearing channel. Channel
+ * string follows the "channel_qualifier" convention from
+ * src/agent/channel_trust.c — qualified strings let the classifier
+ * distinguish 1:1 from group/channel (FIRST_PARTY vs THIRD_PARTY tier).
+ *
+ * Mapping (matches the equals_ci / starts_with_ci entries in
+ * src/agent/channel_trust.c):
+ *   imessage  → imessage_dm     / imessage_group
+ *   slack     → slack_dm        / slack_channel
+ *   discord   → discord_dm      / discord_channel
+ *   telegram  → telegram_dm     / telegram_group
+ *   <other>   → <channel>_dm    / <channel>_group  (THIRD_PARTY fallback —
+ *               unrecognized channels are conservatively low-trust). */
+static const char *qualifier_suffix(const char *channel_id, bool in_group_chat) {
+    if (!in_group_chat)
+        return "_dm";
+    if (!channel_id)
+        return "_group";
+    if (strcmp(channel_id, "slack") == 0 || strcmp(channel_id, "discord") == 0)
+        return "_channel";
+    return "_group";
+}
+
+static hu_provenance_t event_provenance(const char *channel_id, const char *sender_handle,
+                                        int64_t ts, bool in_group_chat) {
+    char buf[64];
+    const char *base = (channel_id && channel_id[0]) ? channel_id : "imessage";
+    const char *suffix = qualifier_suffix(base, in_group_chat);
+    snprintf(buf, sizeof(buf), "%s%s", base, suffix);
+    return hu_channel_trust_stamp(buf, strlen(buf), sender_handle,
+                                  sender_handle ? strlen(sender_handle) : 0, ts);
+}
+
+/* iMessage-specific compatibility shim — preserves the Phase 1a/1b API
+ * surface. The generalized provenance helper now derives the channel
+ * string from the event itself. */
 static hu_provenance_t imessage_provenance(const char *sender_handle, int64_t ts,
                                            bool in_group_chat) {
-    const char *channel = in_group_chat ? "imessage_group" : "imessage_dm";
-    return hu_channel_trust_stamp(channel, strlen(channel), sender_handle,
-                                  sender_handle ? strlen(sender_handle) : 0, ts);
+    return event_provenance("imessage", sender_handle, ts, in_group_chat);
 }
 
 /* Shared helper: synthesize → ingest. Returns HU_OK on success even when
@@ -309,12 +338,24 @@ hu_error_t hu_imessage_ingest_reaction(struct hu_personal_model *model,
     if (n == 0)
         return HU_OK; /* no content to ingest */
 
-    hu_provenance_t prov =
-        imessage_provenance(event->sender_handle, event->timestamp_unix, in_group_chat);
+    /* Phase 2 generalization: the synthesis output is channel-agnostic
+     * ("<sender> reacted with <glyph> to <target>"), so the same wrapper
+     * works for Slack, Discord, etc. The provenance channel string is
+     * derived from event->channel_id so reaction_handler can fire this
+     * for any reaction-bearing channel — see also the lifted gate at
+     * src/agent/reaction_handler.c. */
+    hu_provenance_t prov = event_provenance(event->channel_id, event->sender_handle,
+                                            event->timestamp_unix, in_group_chat);
 
-    /* from_user = false: the reactor is the contact, not the device owner.
-     * Even when reacting to OUR message, the reactor is the third party. */
-    return ingest_synthesized(model, buf, n, /*from_user=*/false, event->timestamp_unix, &prov);
+    /* from_user = true: the synthesized text is the AGENT's narration of an
+     * observed event ("Alice reacted with ❤️ to my message: '...'"), not
+     * raw third-party content. hu_personal_model_ingest gates fact
+     * extraction + style update on from_user=true; passing false would
+     * short-circuit the pipeline at personal_model.c:942. The provenance
+     * tier (FIRST_PARTY for DM, THIRD_PARTY for group) still drives the
+     * MINJA gate at personal_model.c:966 — group-chat reactions get
+     * routed through the quarantine path if they look like injection. */
+    return ingest_synthesized(model, buf, n, /*from_user=*/true, event->timestamp_unix, &prov);
 }
 
 hu_error_t hu_imessage_ingest_edit(struct hu_personal_model *model, const char *sender_handle,
@@ -330,7 +371,7 @@ hu_error_t hu_imessage_ingest_edit(struct hu_personal_model *model, const char *
         return HU_OK;
 
     hu_provenance_t prov = imessage_provenance(sender_handle, timestamp_unix, in_group_chat);
-    return ingest_synthesized(model, buf, n, is_from_me, timestamp_unix, &prov);
+    return ingest_synthesized(model, buf, n, /*from_user=*/true, timestamp_unix, &prov);
 }
 
 hu_error_t hu_imessage_ingest_unsend(struct hu_personal_model *model, const char *sender_handle,
@@ -346,7 +387,7 @@ hu_error_t hu_imessage_ingest_unsend(struct hu_personal_model *model, const char
         return HU_OK;
 
     hu_provenance_t prov = imessage_provenance(sender_handle, timestamp_unix, in_group_chat);
-    return ingest_synthesized(model, buf, n, is_from_me, timestamp_unix, &prov);
+    return ingest_synthesized(model, buf, n, /*from_user=*/true, timestamp_unix, &prov);
 }
 
 hu_error_t hu_imessage_ingest_reply(struct hu_personal_model *model, const char *sender_handle,
@@ -363,7 +404,7 @@ hu_error_t hu_imessage_ingest_reply(struct hu_personal_model *model, const char 
         return HU_OK;
 
     hu_provenance_t prov = imessage_provenance(sender_handle, timestamp_unix, in_group_chat);
-    return ingest_synthesized(model, buf, n, is_from_me, timestamp_unix, &prov);
+    return ingest_synthesized(model, buf, n, /*from_user=*/true, timestamp_unix, &prov);
 }
 
 hu_error_t hu_imessage_ingest_balloon(struct hu_personal_model *model, const char *sender_handle,
@@ -379,5 +420,5 @@ hu_error_t hu_imessage_ingest_balloon(struct hu_personal_model *model, const cha
         return HU_OK;
 
     hu_provenance_t prov = imessage_provenance(sender_handle, timestamp_unix, in_group_chat);
-    return ingest_synthesized(model, buf, n, is_from_me, timestamp_unix, &prov);
+    return ingest_synthesized(model, buf, n, /*from_user=*/true, timestamp_unix, &prov);
 }
