@@ -417,6 +417,14 @@ BASELINE_ALLOWLIST = {
     "tests/test_imessage_react_contract.c",
     "tests/test_imessage_reactions.c",
     "tests/test_imessage_rich_link.c",
+    # Phase 6 of docs/plans/2026-05-18-imessage-sota.md: chat.db schema
+    # probe + drift canary tests. Body is fully wrapped in
+    # `#if HU_HAS_IMESSAGE && defined(HU_ENABLE_SQLITE)` with a stub
+    # runner in the #else branch. The script's heuristic looks for
+    # `HU_ENABLE_IMESSAGE` literally and doesn't recognize the
+    # `HU_HAS_IMESSAGE` CMake-defined macro that all the existing
+    # iMessage tests use (matches the peer convention here).
+    "tests/test_imessage_schema.c",
     "tests/test_media_gen.c",
     "tests/test_pwa.c",
     "tests/test_sota_humanness.c",

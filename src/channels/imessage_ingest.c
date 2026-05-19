@@ -17,6 +17,7 @@
 #include "human/channels/imessage.h"
 #include "human/memory/personal_model.h"
 #include "human/util/bplist.h"
+#include "human/util/typedstream.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -529,4 +530,48 @@ size_t hu_imessage_extract_edit_chain(const unsigned char *summary_blob, size_t 
 
     hu_bplist_free(p);
     return written;
+}
+
+/* ── Phase 4: typedstream attribute-run synthesis ───────────────────── */
+
+size_t hu_imessage_synth_attributed_message(const unsigned char *blob, size_t blob_len,
+                                            const char *sender_handle, bool is_from_me, char *out,
+                                            size_t out_cap) {
+    if (!blob || blob_len == 0 || !out || out_cap < 2)
+        return 0;
+    out[0] = '\0';
+
+    char text[1024];
+    hu_attribute_run_t runs[16];
+    size_t runs_n = 0;
+    hu_error_t err = hu_imessage_extract_attribute_runs(blob, blob_len, text, sizeof(text), runs,
+                                                        sizeof(runs) / sizeof(runs[0]), &runs_n);
+    if (err != HU_OK)
+        return 0;
+    if (text[0] == '\0')
+        return 0;
+
+    /* OTP / 2FA messages: refuse to ingest. The presence of a one-time-
+     * code attribute run is Apple's marker that this text is a credential
+     * the user copy-pastes — not persona signal. */
+    if (hu_imessage_runs_contain_otp(runs, runs_n))
+        return 0;
+
+    /* Find first mention (if any) for inline rendering. */
+    const hu_attribute_run_t *m = hu_imessage_runs_first_mention(runs, runs_n);
+
+    const char *who = (is_from_me || !sender_handle || !sender_handle[0]) ? "I" : sender_handle;
+    const char *verb = (is_from_me) ? "said" : "said";
+
+    int n;
+    if (m && m->detail[0]) {
+        n = snprintf(out, out_cap, "%s %s: \"%s\" (@%s)", who, verb, text, m->detail);
+    } else {
+        n = snprintf(out, out_cap, "%s %s: \"%s\"", who, verb, text);
+    }
+    if (n < 0)
+        return 0;
+    if ((size_t)n >= out_cap)
+        return out_cap - 1;
+    return (size_t)n;
 }

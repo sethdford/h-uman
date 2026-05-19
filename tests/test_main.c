@@ -61,6 +61,10 @@ void run_imessage_personal_model_e2e_tests(void);
 void run_bplist_tests(void);
 /* Phase 3 completion: daemon iMessage observer tick. */
 void run_imessage_observer_tests(void);
+/* Phase 6: schema-version probe + drift canary. */
+void run_imessage_schema_tests(void);
+/* Phase 4: typedstream attribute-run parser tests. */
+void run_typedstream_tests(void);
 /* Phase 2 cross-channel reaction emit: Discord MESSAGE_REACTION_ADD/REMOVE. */
 void run_discord_reactions_tests(void);
 /* Phase 2 cross-channel reaction emit: Telegram message_reaction diff. */
@@ -813,6 +817,8 @@ int main(int argc, char **argv) {
     run_imessage_personal_model_e2e_tests();
     run_bplist_tests();
     run_imessage_observer_tests();
+    run_imessage_schema_tests();
+    run_typedstream_tests();
     run_discord_reactions_tests();
     run_telegram_reactions_tests();
     run_slack_reactions_tests();
