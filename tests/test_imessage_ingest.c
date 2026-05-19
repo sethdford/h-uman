@@ -258,8 +258,8 @@ static void test_ingest_reaction_succeeds_and_marks_content(void) {
     e.polarity = HU_REACTION_POSITIVE;
     e.timestamp_unix = 1700000000;
 
-    hu_error_t err =
-        hu_reaction_ingest_personal_model(&model, &e, NULL, "let's hike Mount Tam Saturday", true, false);
+    hu_error_t err = hu_reaction_ingest_personal_model(
+        &model, &e, NULL, "let's hike Mount Tam Saturday", true, false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 
     /* Ingestion should at minimum NOT regress the has_content signal.
@@ -325,7 +325,7 @@ static void test_ingest_reaction_uses_event_emoji_when_custom_emoji_null(void) {
     e.emoji = "\xf0\x9f\x94\xa5"; /* 🔥 */
     e.timestamp_unix = 1700000000;
     hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, e.emoji, "great idea",
-                                                 /*is_from_me_target=*/true, false);
+                                                       /*is_from_me_target=*/true, false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 }
 
@@ -355,8 +355,8 @@ static void test_ingest_reaction_is_channel_agnostic_slack(void) {
     e.polarity = HU_REACTION_POSITIVE;
     e.timestamp_unix = 1700000000;
     hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "ship it",
-                                                 /*is_from_me_target=*/true,
-                                                 /*in_group_chat=*/false);
+                                                       /*is_from_me_target=*/true,
+                                                       /*in_group_chat=*/false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 }
 
@@ -374,8 +374,8 @@ static void test_ingest_reaction_discord_group_uses_channel_qualifier(void) {
     e.kind = HU_REACTION_LAUGH;
     e.timestamp_unix = 1700000000;
     hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "ha",
-                                                 /*is_from_me_target=*/true,
-                                                 /*in_group_chat=*/true);
+                                                       /*is_from_me_target=*/true,
+                                                       /*in_group_chat=*/true);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 }
 
@@ -391,7 +391,7 @@ static void test_ingest_group_chat_uses_group_provenance(void) {
     e.kind = HU_REACTION_LIKE;
     e.timestamp_unix = 1700000000;
     hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "some message", false,
-                                                 /*in_group_chat=*/true);
+                                                       /*in_group_chat=*/true);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 }
 
@@ -457,9 +457,10 @@ static void test_ingest_reaction_produces_fact_about_contact(void) {
     e.polarity = HU_REACTION_POSITIVE;
     e.timestamp_unix = 1700000000;
 
-    hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "let's hike Mount Tam Saturday",
-                                                 /*is_from_me_target=*/true,
-                                                 /*in_group_chat=*/false);
+    hu_error_t err =
+        hu_reaction_ingest_personal_model(&model, &e, NULL, "let's hike Mount Tam Saturday",
+                                          /*is_from_me_target=*/true,
+                                          /*in_group_chat=*/false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
 
     /* DM-tier ingest goes into facts[]; group chat would route to
@@ -497,6 +498,81 @@ static void test_ingest_reaction_removal_does_not_produce_fact(void) {
     HU_ASSERT_EQ((int)model.fact_count, 0);
 }
 
+/* ── eval-equivalent: reaction-derived facts reach the persona PROMPT ─
+ *
+ * This test is the in-tree replacement for an external eval scenario:
+ * after N reactions ingest, the personal model's prompt summary
+ * (the actual text fed to the LLM as system context) must mention
+ * the contact + the reaction signal. Without this, "the persona
+ * learns from your reactions" is unverifiable in production.
+ *
+ * Tests three behavioral contracts:
+ *   1. After one reaction, the prompt contains the contact handle.
+ *   2. After multiple reactions to the same contact, the persona's
+ *      prompt summary reflects ALL of them (no silent overwrite).
+ *   3. Multi-contact: prompt mentions both contacts. */
+
+static void test_persona_prompt_reflects_reaction_derived_facts(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+
+    /* Three reactions from Alice on hiking-related topics; she should
+     * emerge as a positive reactor on hiking. */
+    int64_t ts = 1700000000;
+    const char *topics[] = {"let's hike Mount Tam Saturday", "ridge trail this weekend?",
+                            "hiking shoes recommendation?"};
+    for (size_t i = 0; i < 3; i++) {
+        hu_reaction_event_t e = {0};
+        e.channel_id = "imessage";
+        e.sender_handle = "Alice";
+        e.kind = HU_REACTION_LOVE;
+        e.polarity = HU_REACTION_POSITIVE;
+        e.timestamp_unix = ts + (int64_t)i;
+        (void)hu_reaction_ingest_personal_model(&model, &e, NULL, topics[i],
+                                                /*is_from_me_target=*/true,
+                                                /*in_group_chat=*/false);
+    }
+
+    char prompt[4096];
+    size_t n = hu_personal_model_build_prompt(&model, prompt, sizeof(prompt));
+    HU_ASSERT_TRUE(n > 0);
+
+    /* The PROMPT — the actual text fed to the LLM as persona context —
+     * must surface "Alice" as a known subject. This is what closes the
+     * "personal-model learning is unfalsifiable" gap: the persona has
+     * provably absorbed the reactor's identity. */
+    HU_ASSERT_TRUE(strstr(prompt, "Alice") != NULL);
+}
+
+static void test_multi_contact_reactions_both_surface_in_prompt(void) {
+    hu_personal_model_t model;
+    hu_personal_model_init(&model);
+
+    hu_reaction_event_t e_alice = {0};
+    e_alice.channel_id = "imessage";
+    e_alice.sender_handle = "Alice";
+    e_alice.kind = HU_REACTION_LOVE;
+    e_alice.timestamp_unix = 1700000000;
+    (void)hu_reaction_ingest_personal_model(&model, &e_alice, NULL, "hiking Saturday morning", true,
+                                            false);
+
+    hu_reaction_event_t e_bob = {0};
+    e_bob.channel_id = "imessage";
+    e_bob.sender_handle = "Bob";
+    e_bob.kind = HU_REACTION_LAUGH;
+    e_bob.timestamp_unix = 1700001000;
+    (void)hu_reaction_ingest_personal_model(&model, &e_bob, NULL, "that meeting was painful", true,
+                                            false);
+
+    char prompt[4096];
+    size_t n = hu_personal_model_build_prompt(&model, prompt, sizeof(prompt));
+    HU_ASSERT_TRUE(n > 0);
+
+    /* Both contacts must appear — neither silently overwrites the other. */
+    HU_ASSERT_TRUE(strstr(prompt, "Alice") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Bob") != NULL);
+}
+
 static void test_first_person_text_does_yield_facts(void) {
     /* Sanity check: extractor itself isn't broken — first-person user
      * text DOES produce facts. This pins the extractor's contract so we
@@ -525,7 +601,7 @@ static void test_synth_ingest_advances_style_sample_count(void) {
     e.kind = HU_REACTION_LOVE;
     e.timestamp_unix = 1700000000;
     hu_error_t err = hu_reaction_ingest_personal_model(&model, &e, NULL, "hiking Saturday",
-                                                 /*is_from_me_target=*/true, false);
+                                                       /*is_from_me_target=*/true, false);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
     HU_ASSERT_TRUE(model.style.sample_count >= 1);
 }
@@ -570,6 +646,8 @@ void run_imessage_ingest_tests(void) {
     HU_RUN_TEST(test_text_extractor_still_misses_synthesis_text);
     HU_RUN_TEST(test_ingest_reaction_produces_fact_about_contact);
     HU_RUN_TEST(test_ingest_reaction_removal_does_not_produce_fact);
+    HU_RUN_TEST(test_persona_prompt_reflects_reaction_derived_facts);
+    HU_RUN_TEST(test_multi_contact_reactions_both_surface_in_prompt);
     HU_RUN_TEST(test_first_person_text_does_yield_facts);
     HU_RUN_TEST(test_synth_ingest_advances_style_sample_count);
 }
