@@ -1,9 +1,9 @@
-#include "test_framework.h"
+#include "human/agent/process_reward.h"
 #include "human/memory/adaptive_rag.h"
 #include "human/memory/self_rag.h"
 #include "human/memory/tiers.h"
-#include "human/agent/process_reward.h"
 #include "human/ml/dpo.h"
+#include "test_framework.h"
 #include <string.h>
 
 /* ── Adaptive RAG adversarial ────────────────────────────────── */
@@ -63,9 +63,12 @@ static void rag_record_outcome_boundary_strategy(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_adaptive_rag_t rag;
     hu_adaptive_rag_create(&alloc, NULL, &rag);
-    HU_ASSERT(hu_adaptive_rag_record_outcome(&rag, (hu_rag_strategy_t)-1, 0.5) == HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT(hu_adaptive_rag_record_outcome(&rag, (hu_rag_strategy_t)HU_RAG_STRATEGY_COUNT, 0.5) == HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT(hu_adaptive_rag_record_outcome(&rag, (hu_rag_strategy_t)99, 0.5) == HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT(hu_adaptive_rag_record_outcome(&rag, (hu_rag_strategy_t)-1, 0.5) ==
+              HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT(hu_adaptive_rag_record_outcome(&rag, (hu_rag_strategy_t)HU_RAG_STRATEGY_COUNT, 0.5) ==
+              HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT(hu_adaptive_rag_record_outcome(&rag, (hu_rag_strategy_t)99, 0.5) ==
+              HU_ERR_INVALID_ARGUMENT);
     hu_adaptive_rag_deinit(&rag);
 }
 
@@ -93,8 +96,8 @@ static void srag_max_length_relevance(void) {
         big_content[i] = ' ';
     double rel = 0.0;
     bool use = false;
-    hu_error_t err = hu_srag_verify_relevance(&alloc, &cfg,
-        big_query, sizeof(big_query), big_content, sizeof(big_content), &rel, &use);
+    hu_error_t err = hu_srag_verify_relevance(&alloc, &cfg, big_query, sizeof(big_query),
+                                              big_content, sizeof(big_content), &rel, &use);
     HU_ASSERT(err == HU_OK);
     HU_ASSERT(rel >= 0.0 && rel <= 1.0);
 }
@@ -105,8 +108,8 @@ static void srag_identical_query_and_content(void) {
     const char *text = "the quick brown fox jumps over the lazy dog";
     double rel = 0.0;
     bool use = false;
-    hu_error_t err = hu_srag_verify_relevance(&alloc, &cfg,
-        text, strlen(text), text, strlen(text), &rel, &use);
+    hu_error_t err =
+        hu_srag_verify_relevance(&alloc, &cfg, text, strlen(text), text, strlen(text), &rel, &use);
     HU_ASSERT(err == HU_OK);
     HU_ASSERT(rel > 0.5);
     HU_ASSERT(use == true);
@@ -115,8 +118,8 @@ static void srag_identical_query_and_content(void) {
 static void srag_all_greeting_variants(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_srag_config_t cfg = hu_srag_config_default();
-    const char *greetings[] = {"hi", "hello", "hey", "thanks", "bye", "ok", "thank you",
-                                "HI", "HELLO", "Hey!", "Thanks.", "OK"};
+    const char *greetings[] = {"hi",        "hello", "hey",   "thanks", "bye",     "ok",
+                               "thank you", "HI",    "HELLO", "Hey!",   "Thanks.", "OK"};
     for (size_t i = 0; i < sizeof(greetings) / sizeof(greetings[0]); i++) {
         hu_srag_assessment_t out;
         hu_srag_should_retrieve(&alloc, &cfg, greetings[i], strlen(greetings[i]), NULL, 0, &out);
@@ -221,8 +224,7 @@ static void prm_only_newlines(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_prm_config_t cfg = hu_prm_config_default();
     hu_prm_result_t result;
-    hu_error_t err = hu_prm_score_chain(&alloc, &cfg,
-        "\n\n\n\n\n\n\n\n\n\n", 10, &result);
+    hu_error_t err = hu_prm_score_chain(&alloc, &cfg, "\n\n\n\n\n\n\n\n\n\n", 10, &result);
     HU_ASSERT(err == HU_OK);
     hu_prm_result_free(&alloc, &result);
 }
@@ -234,7 +236,8 @@ static void prm_65_steps_capped_at_64(void) {
     size_t pos = 0;
     for (int i = 0; i < 70 && pos + 20 < sizeof(big); i++) {
         int n = snprintf(big + pos, sizeof(big) - pos, "Step %d reasoning\n\n", i);
-        if (n > 0) pos += (size_t)n;
+        if (n > 0)
+            pos += (size_t)n;
     }
     hu_prm_result_t result;
     hu_error_t err = hu_prm_score_chain(&alloc, &cfg, big, pos, &result);
@@ -280,11 +283,41 @@ static void prm_threshold_zero_all_valid(void) {
 /* ── DPO adversarial ─────────────────────────────────────────── */
 
 static void dpo_feedback_with_zero_length_response(void) {
+    /* Asserts the corrected contract: empty or trivially-short responses
+     * are REJECTED with HU_ERR_INVALID_ARGUMENT, not silently written as
+     * single-sided rows.
+     *
+     * Prior to 2026-05-19 this test asserted err == HU_OK — codifying the
+     * exact bug that caused 41.5% of dpo_pairs to be inverted (empty
+     * chosen + "SKIP"/"GOOD" in rejected). Per
+     * ~/.claude/rules/tests-that-pin-bugs.md the test name claims a
+     * security/correctness behavior ("zero length response"); the
+     * assertion must MATCH that intent. See
+     * docs/plans/2026-05-19-dpo-corpus-inverted.md. */
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     hu_dpo_collector_create(&alloc, NULL, 100, &col);
     hu_error_t err = hu_dpo_record_from_feedback(&col, "prompt", 6, "", 0, true);
-    HU_ASSERT(err == HU_OK);
+    HU_ASSERT(err == HU_ERR_INVALID_ARGUMENT);
+    size_t count = 999;
+    hu_dpo_pair_count(&col, &count);
+    HU_ASSERT(count == 0);
+    hu_dpo_collector_deinit(&col);
+}
+
+static void dpo_feedback_trivially_short_response_rejected(void) {
+    /* Positive contract: explicitly verify the 4-byte minimum. A 3-char
+     * response like "GO" or "k" is the exact length of the labels that
+     * poisoned the corpus on 2026-05-19. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_dpo_collector_t col;
+    hu_dpo_collector_create(&alloc, NULL, 100, &col);
+    HU_ASSERT(hu_dpo_record_from_feedback(&col, "p", 1, "k", 1, true) == HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT(hu_dpo_record_from_feedback(&col, "p", 1, "GO", 2, true) == HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT(hu_dpo_record_from_feedback(&col, "p", 1, "SKIP", 4, true) == HU_OK);
+    size_t count = 0;
+    hu_dpo_pair_count(&col, &count);
+    HU_ASSERT(count == 1);
     hu_dpo_collector_deinit(&col);
 }
 
@@ -294,7 +327,8 @@ static void dpo_feedback_max_length_truncation(void) {
     hu_dpo_collector_create(&alloc, NULL, 100, &col);
     char huge[8192];
     memset(huge, 'A', sizeof(huge));
-    hu_error_t err = hu_dpo_record_from_feedback(&col, huge, sizeof(huge), huge, sizeof(huge), true);
+    hu_error_t err =
+        hu_dpo_record_from_feedback(&col, huge, sizeof(huge), huge, sizeof(huge), true);
     HU_ASSERT(err == HU_OK);
     size_t count = 0;
     hu_dpo_pair_count(&col, &count);
@@ -306,8 +340,8 @@ static void dpo_retry_with_identical_chosen_rejected(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     hu_dpo_collector_create(&alloc, NULL, 100, &col);
-    hu_error_t err = hu_dpo_record_from_retry(&col,
-        "prompt", 6, "same response", 13, "same response", 13);
+    hu_error_t err =
+        hu_dpo_record_from_retry(&col, "prompt", 6, "same response", 13, "same response", 13);
     HU_ASSERT(err == HU_OK);
     hu_dpo_collector_deinit(&col);
 }
@@ -317,7 +351,7 @@ static void dpo_rapid_fire_many_records(void) {
     hu_dpo_collector_t col;
     hu_dpo_collector_create(&alloc, NULL, 50, &col);
     for (int i = 0; i < 200; i++) {
-        hu_dpo_record_from_feedback(&col, "p", 1, "r", 1, i % 2 == 0);
+        hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, i % 2 == 0);
     }
     size_t count = 0;
     hu_dpo_pair_count(&col, &count);
@@ -338,8 +372,8 @@ static void dpo_clear_then_count(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     hu_dpo_collector_create(&alloc, NULL, 100, &col);
-    hu_dpo_record_from_feedback(&col, "p", 1, "r", 1, true);
-    hu_dpo_record_from_feedback(&col, "p", 1, "r", 1, false);
+    hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true);
+    hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, false);
     hu_dpo_clear(&col);
     size_t count = 99;
     hu_dpo_pair_count(&col, &count);
@@ -378,8 +412,7 @@ static void cross_prm_feeds_dpo_correctly(void) {
 
     HU_ASSERT(good_res.aggregate_score > bad_res.aggregate_score);
 
-    hu_dpo_record_from_retry(&col, "What is the answer?", 19,
-                             bad, strlen(bad), good, strlen(good));
+    hu_dpo_record_from_retry(&col, "What is the answer?", 19, bad, strlen(bad), good, strlen(good));
     size_t count = 0;
     hu_dpo_pair_count(&col, &count);
     HU_ASSERT(count == 1);
@@ -424,6 +457,7 @@ void run_sota_adversarial_tests(void) {
 
     /* DPO */
     HU_RUN_TEST(dpo_feedback_with_zero_length_response);
+    HU_RUN_TEST(dpo_feedback_trivially_short_response_rejected);
     HU_RUN_TEST(dpo_feedback_max_length_truncation);
     HU_RUN_TEST(dpo_retry_with_identical_chosen_rejected);
     HU_RUN_TEST(dpo_rapid_fire_many_records);

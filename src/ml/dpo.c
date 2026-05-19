@@ -1,13 +1,14 @@
 #include "human/ml/dpo.h"
 #include "human/core/io_secure.h"
+#include "human/core/log.h"
 #include "human/provider.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/core/json.h"
 #include "human/core/string.h"
 #endif
 #include <math.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 hu_error_t hu_dpo_collector_create(hu_allocator_t *alloc,
@@ -38,11 +39,10 @@ hu_error_t hu_dpo_init_tables(hu_dpo_collector_t *collector) {
 #ifdef HU_ENABLE_SQLITE
     if (!collector->db)
         return HU_OK;
-    const char *sql =
-        "CREATE TABLE IF NOT EXISTS dpo_pairs("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-        "prompt TEXT, chosen TEXT, rejected TEXT, "
-        "margin REAL, timestamp INTEGER, source TEXT);";
+    const char *sql = "CREATE TABLE IF NOT EXISTS dpo_pairs("
+                      "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                      "prompt TEXT, chosen TEXT, rejected TEXT, "
+                      "margin REAL, timestamp INTEGER, source TEXT);";
     char *err_msg = NULL;
     int rc = sqlite3_exec(collector->db, sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
@@ -54,15 +54,15 @@ hu_error_t hu_dpo_init_tables(hu_dpo_collector_t *collector) {
     return HU_OK;
 }
 
-hu_error_t hu_dpo_record_pair(hu_dpo_collector_t *collector,
-                              const hu_preference_pair_t *pair) {
+hu_error_t hu_dpo_record_pair(hu_dpo_collector_t *collector, const hu_preference_pair_t *pair) {
     if (!collector || !pair)
         return HU_ERR_INVALID_ARGUMENT;
 
 #ifdef HU_ENABLE_SQLITE
     if (collector->db) {
         sqlite3_stmt *stmt = NULL;
-        int rc = sqlite3_prepare_v2(collector->db,
+        int rc = sqlite3_prepare_v2(
+            collector->db,
             "INSERT INTO dpo_pairs(prompt, chosen, rejected, margin, timestamp, source) "
             "VALUES(?, ?, ?, ?, ?, ?)",
             -1, &stmt, NULL);
@@ -82,7 +82,8 @@ hu_error_t hu_dpo_record_pair(hu_dpo_collector_t *collector,
         /* Ring buffer eviction */
         if (collector->max_pairs > 0) {
             sqlite3_stmt *cnt_stmt = NULL;
-            rc = sqlite3_prepare_v2(collector->db, "SELECT COUNT(*) FROM dpo_pairs", -1, &cnt_stmt, NULL);
+            rc = sqlite3_prepare_v2(collector->db, "SELECT COUNT(*) FROM dpo_pairs", -1, &cnt_stmt,
+                                    NULL);
             if (rc == SQLITE_OK && sqlite3_step(cnt_stmt) == SQLITE_ROW) {
                 int64_t total = sqlite3_column_int64(cnt_stmt, 0);
                 sqlite3_finalize(cnt_stmt);
@@ -91,7 +92,8 @@ hu_error_t hu_dpo_record_pair(hu_dpo_collector_t *collector,
                     char del_sql[128];
                     snprintf(del_sql, sizeof(del_sql),
                              "DELETE FROM dpo_pairs WHERE id IN "
-                             "(SELECT id FROM dpo_pairs ORDER BY id LIMIT %zu)", excess);
+                             "(SELECT id FROM dpo_pairs ORDER BY id LIMIT %zu)",
+                             excess);
                     sqlite3_exec(collector->db, del_sql, NULL, NULL, NULL);
                 }
             } else if (cnt_stmt) {
@@ -104,11 +106,28 @@ hu_error_t hu_dpo_record_pair(hu_dpo_collector_t *collector,
     return HU_OK;
 }
 
-hu_error_t hu_dpo_record_from_feedback(hu_dpo_collector_t *collector,
-                                       const char *prompt, size_t prompt_len,
-                                       const char *response, size_t response_len,
+hu_error_t hu_dpo_record_from_feedback(hu_dpo_collector_t *collector, const char *prompt,
+                                       size_t prompt_len, const char *response, size_t response_len,
                                        bool positive) {
     if (!collector || !prompt || !response)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Refuse single-sided writes. Previously this function would write a
+     * row with empty chosen (when positive=false) or empty rejected (when
+     * positive=true). Those rows are NOT preference pairs — they're
+     * single-sided labels — and they actively poison ORPO training.
+     *
+     * Audit on 2026-05-19 (docs/plans/2026-05-19-dpo-corpus-inverted.md)
+     * found 41.5% of dpo_pairs were inverted; the dominant pattern was
+     * empty chosen + "SKIP"/"GOOD" in rejected, all from this path. The
+     * fix: refuse to write at all when the response side is empty or
+     * trivially-short (≤3 bytes, e.g. "k", "GO"). Callers that want to
+     * record a feedback signal without a paired counterpart should use
+     * a separate table (e.g. negative_signals), NOT dpo_pairs.
+     *
+     * This is a behavior change. The previously bug-pinning test
+     * `dpo_feedback_with_zero_length_response` is updated to assert the
+     * new contract per ~/.claude/rules/tests-that-pin-bugs.md. */
+    if (response_len < 4)
         return HU_ERR_INVALID_ARGUMENT;
 
     hu_preference_pair_t pair;
@@ -119,12 +138,14 @@ hu_error_t hu_dpo_record_from_feedback(hu_dpo_collector_t *collector,
     pair.prompt_len = plen;
 
     if (positive) {
-        size_t rlen = response_len < sizeof(pair.chosen) - 1 ? response_len : sizeof(pair.chosen) - 1;
+        size_t rlen =
+            response_len < sizeof(pair.chosen) - 1 ? response_len : sizeof(pair.chosen) - 1;
         memcpy(pair.chosen, response, rlen);
         pair.chosen_len = rlen;
         pair.rejected_len = 0;
     } else {
-        size_t rlen = response_len < sizeof(pair.rejected) - 1 ? response_len : sizeof(pair.rejected) - 1;
+        size_t rlen =
+            response_len < sizeof(pair.rejected) - 1 ? response_len : sizeof(pair.rejected) - 1;
         memcpy(pair.rejected, response, rlen);
         pair.rejected_len = rlen;
         pair.chosen_len = 0;
@@ -138,9 +159,8 @@ hu_error_t hu_dpo_record_from_feedback(hu_dpo_collector_t *collector,
     return hu_dpo_record_pair(collector, &pair);
 }
 
-hu_error_t hu_dpo_record_from_retry(hu_dpo_collector_t *collector,
-                                    const char *prompt, size_t prompt_len,
-                                    const char *rejected, size_t rejected_len,
+hu_error_t hu_dpo_record_from_retry(hu_dpo_collector_t *collector, const char *prompt,
+                                    size_t prompt_len, const char *rejected, size_t rejected_len,
                                     const char *chosen, size_t chosen_len) {
     if (!collector || !prompt || !rejected || !chosen)
         return HU_ERR_INVALID_ARGUMENT;
@@ -156,7 +176,8 @@ hu_error_t hu_dpo_record_from_retry(hu_dpo_collector_t *collector,
     memcpy(pair.chosen, chosen, clen);
     pair.chosen_len = clen;
 
-    size_t rlen = rejected_len < sizeof(pair.rejected) - 1 ? rejected_len : sizeof(pair.rejected) - 1;
+    size_t rlen =
+        rejected_len < sizeof(pair.rejected) - 1 ? rejected_len : sizeof(pair.rejected) - 1;
     memcpy(pair.rejected, rejected, rlen);
     pair.rejected_len = rlen;
 
@@ -168,8 +189,7 @@ hu_error_t hu_dpo_record_from_retry(hu_dpo_collector_t *collector,
     return hu_dpo_record_pair(collector, &pair);
 }
 
-hu_error_t hu_dpo_export_jsonl(hu_dpo_collector_t *collector,
-                               const char *path, size_t path_len,
+hu_error_t hu_dpo_export_jsonl(hu_dpo_collector_t *collector, const char *path, size_t path_len,
                                size_t *exported_count) {
     if (!collector || !exported_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -198,8 +218,8 @@ hu_error_t hu_dpo_export_jsonl(hu_dpo_collector_t *collector,
         return HU_ERR_IO;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(collector->db,
-        "SELECT prompt, chosen, rejected, margin, source FROM dpo_pairs ORDER BY id",
+    int rc = sqlite3_prepare_v2(
+        collector->db, "SELECT prompt, chosen, rejected, margin, source FROM dpo_pairs ORDER BY id",
         -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         fclose(f);
@@ -225,12 +245,24 @@ hu_error_t hu_dpo_export_jsonl(hu_dpo_collector_t *collector,
                 fprintf(f, "\"%s\":\"", keys[fi]);
                 for (const char *c = val; *c; c++) {
                     switch (*c) {
-                    case '"':  fputs("\\\"", f); break;
-                    case '\\': fputs("\\\\", f); break;
-                    case '\n': fputs("\\n", f);  break;
-                    case '\r': fputs("\\r", f);  break;
-                    case '\t': fputs("\\t", f);  break;
-                    default:   fputc(*c, f);     break;
+                    case '"':
+                        fputs("\\\"", f);
+                        break;
+                    case '\\':
+                        fputs("\\\\", f);
+                        break;
+                    case '\n':
+                        fputs("\\n", f);
+                        break;
+                    case '\r':
+                        fputs("\\r", f);
+                        break;
+                    case '\t':
+                        fputs("\\t", f);
+                        break;
+                    default:
+                        fputc(*c, f);
+                        break;
                     }
                 }
                 fputc('"', f);
@@ -266,15 +298,14 @@ hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(collector->db,
-        "SELECT prompt, chosen, rejected, margin, source, timestamp "
-        "FROM dpo_pairs ORDER BY id",
-        -1, &stmt, NULL);
+                                "SELECT prompt, chosen, rejected, margin, source, timestamp "
+                                "FROM dpo_pairs ORDER BY id",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
 
     size_t cap = collector->pair_count > 0 ? collector->pair_count : 8;
-    hu_preference_pair_t *pairs =
-        alloc->alloc(alloc->ctx, cap * sizeof(hu_preference_pair_t));
+    hu_preference_pair_t *pairs = alloc->alloc(alloc->ctx, cap * sizeof(hu_preference_pair_t));
     if (!pairs) {
         sqlite3_finalize(stmt);
         return HU_ERR_OUT_OF_MEMORY;
@@ -282,7 +313,25 @@ hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
     memset(pairs, 0, cap * sizeof(hu_preference_pair_t));
 
     size_t n = 0;
+    size_t skipped_unpaired = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
+        /* Defense in depth: skip legacy single-sided rows. The write path
+         * was patched on 2026-05-19 to refuse single-sided writes, but
+         * the table already contains historical rows from before the fix
+         * (41.5% of 369 audited rows). Skipping them here ensures ORPO
+         * training never sees a preference pair where one side is empty
+         * or trivially short. See docs/plans/2026-05-19-dpo-corpus-inverted.md
+         */
+        {
+            const char *peek_chosen = (const char *)sqlite3_column_text(stmt, 1);
+            const char *peek_rejected = (const char *)sqlite3_column_text(stmt, 2);
+            size_t peek_chosen_len = peek_chosen ? strlen(peek_chosen) : 0;
+            size_t peek_rejected_len = peek_rejected ? strlen(peek_rejected) : 0;
+            if (peek_chosen_len < 4 || peek_rejected_len < 4) {
+                skipped_unpaired++;
+                continue;
+            }
+        }
         if (n == cap) {
             size_t old_cap = cap;
             cap *= 2;
@@ -328,6 +377,15 @@ hu_error_t hu_dpo_export(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
         n++;
     }
     sqlite3_finalize(stmt);
+    if (skipped_unpaired > 0) {
+        /* Log once per call so operators can see the legacy bad-row count.
+         * High counts indicate the corpus needs cleaning (or the write
+         * path regressed). See docs/plans/2026-05-19-dpo-corpus-inverted.md. */
+        hu_log_info("dpo", NULL,
+                    "iterate_pairs: skipped %zu legacy unpaired rows "
+                    "(empty/short side); kept %zu",
+                    skipped_unpaired, n);
+    }
     out->pairs = pairs;
     out->count = n;
     return HU_OK;
@@ -389,16 +447,17 @@ hu_error_t hu_dpo_get_best_examples(hu_dpo_collector_t *collector, hu_allocator_
         char entry[1024];
         int n;
         if (rejected && rejected[0]) {
-            n = snprintf(entry, sizeof(entry),
+            n = snprintf(
+                entry, sizeof(entry),
                 "When asked: \"%.*s\"\n  GOOD response: \"%.*s\"\n  BAD response: \"%.*s\"\n\n",
                 (int)(strlen(prompt) < 200 ? strlen(prompt) : 200), prompt,
                 (int)(strlen(chosen) < 300 ? strlen(chosen) : 300), chosen,
                 (int)(strlen(rejected) < 200 ? strlen(rejected) : 200), rejected);
         } else {
             n = snprintf(entry, sizeof(entry),
-                "When asked: \"%.*s\"\n  GOOD response: \"%.*s\"\n\n",
-                (int)(strlen(prompt) < 200 ? strlen(prompt) : 200), prompt,
-                (int)(strlen(chosen) < 300 ? strlen(chosen) : 300), chosen);
+                         "When asked: \"%.*s\"\n  GOOD response: \"%.*s\"\n\n",
+                         (int)(strlen(prompt) < 200 ? strlen(prompt) : 200), prompt,
+                         (int)(strlen(chosen) < 300 ? strlen(chosen) : 300), chosen);
         }
         if (n > 0) {
             size_t append_len = (size_t)n >= sizeof(entry) ? sizeof(entry) - 1 : (size_t)n;
@@ -469,8 +528,7 @@ void hu_dpo_export_free(hu_allocator_t *alloc, hu_dpo_export_t *export_data) {
  * identical-return contract. */
 hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *alloc,
                              hu_provider_t *provider, const char *model, size_t model_len,
-                             double beta, size_t batch_size,
-                             hu_dpo_judge_result_t *out) {
+                             double beta, size_t batch_size, hu_dpo_judge_result_t *out) {
     if (!collector || !alloc || !provider || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -524,10 +582,10 @@ hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *allo
             "Output ONLY a number.";
 
         char chosen_prompt[4096];
-        int cn = snprintf(chosen_prompt, sizeof(chosen_prompt),
-                          "Prompt: \"%.*s\"\nResponse: \"%.*s\"",
-                          (int)(strlen(prompt) < 500 ? strlen(prompt) : 500), prompt,
-                          (int)(strlen(chosen) < 1500 ? strlen(chosen) : 1500), chosen);
+        int cn =
+            snprintf(chosen_prompt, sizeof(chosen_prompt), "Prompt: \"%.*s\"\nResponse: \"%.*s\"",
+                     (int)(strlen(prompt) < 500 ? strlen(prompt) : 500), prompt,
+                     (int)(strlen(chosen) < 1500 ? strlen(chosen) : 1500), chosen);
 
         char rejected_prompt[4096];
         int rn = snprintf(rejected_prompt, sizeof(rejected_prompt),
@@ -541,16 +599,14 @@ hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *allo
         size_t rejected_out_len = 0;
 
         hu_error_t e1 = provider->vtable->chat_with_system(
-            provider->ctx, alloc, score_sys, sizeof(score_sys) - 1u,
-            chosen_prompt, cn > 0 ? (size_t)cn : 0u,
-            model ? model : "", model_len, 0.0,
-            &chosen_out, &chosen_out_len);
+            provider->ctx, alloc, score_sys, sizeof(score_sys) - 1u, chosen_prompt,
+            cn > 0 ? (size_t)cn : 0u, model ? model : "", model_len, 0.0, &chosen_out,
+            &chosen_out_len);
 
         hu_error_t e2 = provider->vtable->chat_with_system(
-            provider->ctx, alloc, score_sys, sizeof(score_sys) - 1u,
-            rejected_prompt, rn > 0 ? (size_t)rn : 0u,
-            model ? model : "", model_len, 0.0,
-            &rejected_out, &rejected_out_len);
+            provider->ctx, alloc, score_sys, sizeof(score_sys) - 1u, rejected_prompt,
+            rn > 0 ? (size_t)rn : 0u, model ? model : "", model_len, 0.0, &rejected_out,
+            &rejected_out_len);
 
         double chosen_score = 50.0;
         double rejected_score = 50.0;
@@ -572,7 +628,8 @@ hu_error_t hu_dpo_judge_step(hu_dpo_collector_t *collector, hu_allocator_t *allo
             for (size_t ci = 0; ci < rejected_out_len; ci++) {
                 if (rejected_out[ci] >= '0' && rejected_out[ci] <= '9') {
                     rejected_score = 0;
-                    while (ci < rejected_out_len && rejected_out[ci] >= '0' && rejected_out[ci] <= '9') {
+                    while (ci < rejected_out_len && rejected_out[ci] >= '0' &&
+                           rejected_out[ci] <= '9') {
                         rejected_score = rejected_score * 10.0 + (double)(rejected_out[ci] - '0');
                         ci++;
                     }
