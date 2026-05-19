@@ -18,10 +18,13 @@
   Adjust schedule (default: Sundays 4:00 AM local) by editing
   StartCalendarInterval below.
 
-  M3_AUTO_PROMOTE=0 means the cycle never auto-promotes adapters,
-  even on PASS. Set to 1 only after verifying the eval gate matches
-  your risk tolerance. Manual promote: scripts/m3_promote.py promote.
+  M3_AUTO_PROMOTE: 2026-05-19 flipped from 0 → 1 after the dual-gate
+  (metadata + behavioral with diversity check) shipped and was proven
+  to block mode-collapsed adapters. Auto-promote fires ONLY when BOTH
+  gates pass; the behavioral eval's diversity guard blocks structurally
+  Seth-like but contextually-broken adapters automatically.
 -->
+
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -43,10 +46,17 @@
         <string>http://127.0.0.1:8741</string>
         <key>M3_DPO_THRESHOLD</key>
         <string>32</string>
-        <!-- 0 = require manual promote (safe default). Flip to 1 only
-             after the eval gate is tuned. -->
+        <!-- 1 = auto-promote on (PASS metadata + non-regress behavioral).
+             Safe because the diversity guard blocks mode-collapse;
+             see docs/research/2026-05-19-m3-autonomous-loop.md. -->
         <key>M3_AUTO_PROMOTE</key>
-        <string>0</string>
+        <string>1</string>
+        <!-- Training backend: local (default, Apple Silicon mlx_lm) or
+             gce (provisions a GPU VM via scripts/m3_gce_train.sh).
+             gce backend ALSO requires M3_GCE_CONFIRM_SPEND=1 — the
+             plist won't accidentally spin up a billable VM. -->
+        <key>M3_TRAINING_BACKEND</key>
+        <string>local</string>
     </dict>
 
     <!-- Weekly: Sundays at 04:00 local time. Off-hours so a slow

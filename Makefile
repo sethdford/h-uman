@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe m3-collect m3-h-demo m3-cycle-smoke m3-holdout m3-behavioral m3-dashboard m3-install-cron m3-uninstall-cron
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe m3-collect m3-h-demo m3-cycle-smoke m3-holdout m3-behavioral m3-dashboard m3-install-cron m3-uninstall-cron m3-gce-dryrun m3-gce-train
 
 all: build test
 
@@ -258,6 +258,32 @@ m3-uninstall-cron:
 	@launchctl unload ~/Library/LaunchAgents/ai.human.m3-loop.plist 2>/dev/null || true
 	@rm -f ~/Library/LaunchAgents/ai.human.m3-loop.plist
 	@echo "  Uninstalled"
+
+# GCE training (2026-05-19) — train LoRA on a Google Cloud GPU VM.
+# Two targets: m3-gce-dryrun prints the plan + cost ceiling without
+# provisioning anything; m3-gce-train actually spins up a billable VM.
+# Defaults: gemma-3-4b on L4 (24GB VRAM, ~$0.71/hr), 50 iters rank 8.
+# Override via env: GPU=a100 BASE_MODEL=google/gemma-3-12b-it ...
+m3-gce-dryrun:
+	@PAIRS=$${PAIRS:-$$HOME/.human/training-data/m3-combined-dpo-$$(date +%Y%m%d).jsonl}; \
+	bash scripts/m3_gce_train.sh \
+		--pairs $$PAIRS \
+		--base-model $${BASE_MODEL:-google/gemma-3-4b-it} \
+		--gpu $${GPU:-l4} \
+		--iters $${ITERS:-50} \
+		--rank $${RANK:-8} \
+		--max-hours $${MAX_HOURS:-1}
+
+m3-gce-train:
+	@PAIRS=$${PAIRS:-$$HOME/.human/training-data/m3-combined-dpo-$$(date +%Y%m%d).jsonl}; \
+	bash scripts/m3_gce_train.sh \
+		--pairs $$PAIRS \
+		--base-model $${BASE_MODEL:-google/gemma-3-4b-it} \
+		--gpu $${GPU:-l4} \
+		--iters $${ITERS:-50} \
+		--rank $${RANK:-8} \
+		--max-hours $${MAX_HOURS:-1} \
+		--confirm-spend
 
 validate: format-check build test
 	@echo "Validation passed."

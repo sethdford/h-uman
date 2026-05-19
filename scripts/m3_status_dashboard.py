@@ -242,6 +242,64 @@ def schedule_status() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Section: GCE training state (any live training VMs? backend setting?)
+# ─────────────────────────────────────────────────────────────────────
+
+def gce_status() -> dict:
+    """Inspect the autonomous loop's training-backend config + look for
+    any live m3-train-* VMs that might be billing. Read-only via gcloud
+    if available; falls back to a "not configured" report otherwise."""
+    out = {
+        "backend":           os.environ.get("M3_TRAINING_BACKEND", "local"),
+        "gcloud_available":  False,
+        "active_project":    None,
+        "live_train_vms":    [],
+    }
+    # Read backend from the plist if installed
+    plist = Path.home() / "Library/LaunchAgents/ai.human.m3-loop.plist"
+    if plist.exists():
+        try:
+            import plistlib
+            with open(plist, "rb") as f:
+                p = plistlib.load(f)
+            env = p.get("EnvironmentVariables", {})
+            if "M3_TRAINING_BACKEND" in env:
+                out["backend"] = env["M3_TRAINING_BACKEND"]
+        except (OSError, ValueError):
+            pass
+    # gcloud probe — only if installed AND configured
+    try:
+        result = subprocess.run(
+            ["gcloud", "config", "get-value", "project"],
+            capture_output=True, text=True, timeout=3)
+        if result.returncode == 0 and result.stdout.strip():
+            out["gcloud_available"] = True
+            out["active_project"] = result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return out
+    # Look for live m3-train-* VMs (these would be billing)
+    try:
+        result = subprocess.run(
+            ["gcloud", "compute", "instances", "list",
+             "--filter=name~^m3-train-",
+             "--format=value(name,zone,status,machineType.basename())"],
+            capture_output=True, text=True, timeout=8)
+        if result.returncode == 0 and result.stdout.strip():
+            for line in result.stdout.strip().split("\n"):
+                fields = line.split("\t")
+                if len(fields) >= 3:
+                    out["live_train_vms"].append({
+                        "name":    fields[0],
+                        "zone":    fields[1],
+                        "status":  fields[2],
+                        "machine": fields[3] if len(fields) > 3 else "?",
+                    })
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Renderer
 # ─────────────────────────────────────────────────────────────────────
 
@@ -290,6 +348,20 @@ def render_human(h: dict, t: dict, e: dict, p: dict, s: dict) -> None:
     print()
 
 
+def render_gce(g: dict) -> None:
+    section("Training backend (GCE)")
+    print(f"  Backend:          {g['backend']}")
+    print(f"  gcloud available: {g['gcloud_available']}")
+    if g.get("active_project"):
+        print(f"  Active project:   {g['active_project']}")
+    if g["live_train_vms"]:
+        print(f"  ⚠  Live m3-train-* VMs (BILLING):")
+        for vm in g["live_train_vms"]:
+            print(f"      {vm['name']:<40}  {vm['machine']:<20}  {vm['status']}  ({vm['zone']})")
+    else:
+        print(f"  Live training VMs: 0  (no active billing)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--json", action="store_true",
@@ -301,13 +373,17 @@ def main():
     e = eval_status()
     p = promotion_status()
     s = schedule_status()
+    g = gce_status()
 
     if args.json:
         print(json.dumps({"h_tier": h, "training": t, "eval": e,
-                          "promotion": p, "schedule": s}, indent=2))
+                          "promotion": p, "schedule": s, "gce": g},
+                          indent=2))
     else:
         print(f"\n  M3 STATUS DASHBOARD — {datetime.datetime.now().isoformat(' ', 'seconds')}")
         render_human(h, t, e, p, s)
+        render_gce(g)
+        print()
     return 0
 
 

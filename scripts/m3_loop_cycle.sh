@@ -134,11 +134,36 @@ log "  accumulated $PAIRS_COUNT DPO pairs (rewrites + counterfactuals + probes)"
 if [ "$PAIRS_COUNT" -ge "$DPO_THRESHOLD" ]; then
     ADAPTER_OUT="$HUMAN_HOME/training-data/adapters/dpo-$(date +%Y%m%d-%H%M%S)"
     log "--- step 3: real DPO training (threshold $DPO_THRESHOLD met) ---"
-    python3 "$REPO_ROOT/scripts/m3_dpo_from_rewrites.py" \
-        --input "$REWRITE_PAIRS" \
-        --export-jsonl "$ALPACA_OUT" \
-        --train --adapter-out "$ADAPTER_OUT" \
-        --iters 100 --beta 0.1 2>&1 | tee -a "$LOG"
+
+    # Training backend selector — defaults to local mlx_lm; flip to gce
+    # to offload training to a GPU VM. The gce path REQUIRES
+    # M3_GCE_CONFIRM_SPEND=1 to actually provision a billable VM;
+    # otherwise it dry-runs and falls back to local.
+    M3_TRAINING_BACKEND="${M3_TRAINING_BACKEND:-local}"
+    if [ "$M3_TRAINING_BACKEND" = "gce" ] && [ "${M3_GCE_CONFIRM_SPEND:-0}" = "1" ]; then
+        log "  backend=gce (will provision GPU VM via m3_gce_train.sh)"
+        bash "$REPO_ROOT/scripts/m3_gce_train.sh" \
+            --pairs "$ALPACA_OUT" \
+            --adapter-out "$ADAPTER_OUT" \
+            --base-model "${M3_BASE_MODEL:-google/gemma-3-4b-it}" \
+            --iters "${M3_ITERS:-50}" \
+            --rank "${M3_RANK:-8}" \
+            --gpu "${M3_GPU:-l4}" \
+            --max-hours "${M3_MAX_HOURS:-1}" \
+            --confirm-spend 2>&1 | tee -a "$LOG" || \
+            log "  WARN: gce training failed; falling back to local"
+        # If gce produced an adapter, we use that; otherwise fall through
+        # to the legacy local path below.
+    fi
+    if [ ! -f "$ADAPTER_OUT/adapters.safetensors" ] && \
+       [ ! -f "$ADAPTER_OUT/adapter_model.safetensors" ]; then
+        log "  backend=local (mlx_lm.lora)"
+        python3 "$REPO_ROOT/scripts/m3_dpo_from_rewrites.py" \
+            --input "$REWRITE_PAIRS" \
+            --export-jsonl "$ALPACA_OUT" \
+            --train --adapter-out "$ADAPTER_OUT" \
+            --iters 100 --beta 0.1 2>&1 | tee -a "$LOG"
+    fi
 
     # Step 4: A/B eval against the prior adapter (find via lineage)
     PRIOR_ADAPTER=$(python3 -c "
