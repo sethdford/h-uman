@@ -208,6 +208,18 @@ hu_error_t hu_whatsapp_on_webhook(void *channel_ctx, hu_allocator_t *alloc, cons
     whatsapp_queue_push(c, "test-sender", 11, body, body_len);
     return HU_OK;
 #else
+    /* Phase 2 of docs/plans/2026-05-18-imessage-sota.md: reaction
+     * webhook branch lives in whatsapp_reactions.c to avoid the
+     * hu_reaction_type_t (channel.h) ↔ hu_reaction_kind_t
+     * (reaction_event.h) enumerator-name collision. Must run BEFORE
+     * the type=="text" filter below — that filter silently drops any
+     * non-text message, including reactions. */
+    extern int hu_whatsapp_handle_reaction_webhook(const char *body, size_t body_len,
+                                                   hu_allocator_t *alloc, const char *bot_user_id);
+    if (hu_whatsapp_handle_reaction_webhook(body, body_len, alloc, c->phone_number_id)) {
+        return HU_OK;
+    }
+
     hu_json_value_t *parsed = NULL;
     hu_error_t err = hu_json_parse(alloc, body, body_len, &parsed);
     if (err != HU_OK || !parsed)
@@ -255,7 +267,8 @@ hu_error_t hu_whatsapp_on_webhook(void *channel_ctx, hu_allocator_t *alloc, cons
                 if (wamid) {
                     size_t wl = strlen(wamid);
                     size_t fl = strlen(from);
-                    if (wl > 0 && wl < sizeof(c->last_inbound_wamid) && fl < sizeof(c->last_inbound_from)) {
+                    if (wl > 0 && wl < sizeof(c->last_inbound_wamid) &&
+                        fl < sizeof(c->last_inbound_from)) {
                         memcpy(c->last_inbound_wamid, wamid, wl);
                         c->last_inbound_wamid[wl] = '\0';
                         c->last_inbound_wamid_len = wl;
@@ -322,8 +335,8 @@ static hu_error_t whatsapp_get_response_constraints(void *ctx,
     return HU_OK;
 }
 
-static hu_error_t whatsapp_react(void *ctx, const char *target, size_t target_len, int64_t message_id,
-                                 hu_reaction_type_t reaction) {
+static hu_error_t whatsapp_react(void *ctx, const char *target, size_t target_len,
+                                 int64_t message_id, hu_reaction_type_t reaction) {
     (void)ctx;
     (void)target;
     (void)target_len;
@@ -340,13 +353,26 @@ static hu_error_t whatsapp_react(void *ctx, const char *target, size_t target_le
 
     const char *emoji = NULL;
     switch (reaction) {
-    case HU_REACTION_HEART:      emoji = "\xe2\x9d\xa4\xef\xb8\x8f"; break;
-    case HU_REACTION_THUMBS_UP:  emoji = "\xf0\x9f\x91\x8d"; break;
-    case HU_REACTION_THUMBS_DOWN:emoji = "\xf0\x9f\x91\x8e"; break;
-    case HU_REACTION_HAHA:       emoji = "\xf0\x9f\x98\x82"; break;
-    case HU_REACTION_EMPHASIS:   emoji = "\xe2\x9d\x97"; break;
-    case HU_REACTION_QUESTION:   emoji = "\xe2\x9d\x93"; break;
-    default: return HU_ERR_INVALID_ARGUMENT;
+    case HU_REACTION_HEART:
+        emoji = "\xe2\x9d\xa4\xef\xb8\x8f";
+        break;
+    case HU_REACTION_THUMBS_UP:
+        emoji = "\xf0\x9f\x91\x8d";
+        break;
+    case HU_REACTION_THUMBS_DOWN:
+        emoji = "\xf0\x9f\x91\x8e";
+        break;
+    case HU_REACTION_HAHA:
+        emoji = "\xf0\x9f\x98\x82";
+        break;
+    case HU_REACTION_EMPHASIS:
+        emoji = "\xe2\x9d\x97";
+        break;
+    case HU_REACTION_QUESTION:
+        emoji = "\xe2\x9d\x93";
+        break;
+    default:
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     char url_buf[512];
@@ -369,10 +395,10 @@ static hu_error_t whatsapp_react(void *ctx, const char *target, size_t target_le
 
     char body[1024];
     n = snprintf(body, sizeof(body),
-        "{\"messaging_product\":\"whatsapp\",\"recipient_type\":\"individual\","
-        "\"to\":\"%.*s\",\"type\":\"reaction\","
-        "\"reaction\":{\"message_id\":\"%s\",\"emoji\":\"%s\"}}",
-        (int)target_len, target, wamid, emoji);
+                 "{\"messaging_product\":\"whatsapp\",\"recipient_type\":\"individual\","
+                 "\"to\":\"%.*s\",\"type\":\"reaction\","
+                 "\"reaction\":{\"message_id\":\"%s\",\"emoji\":\"%s\"}}",
+                 (int)target_len, target, wamid, emoji);
     if (n < 0 || (size_t)n >= sizeof(body))
         return HU_ERR_INTERNAL;
 
@@ -529,7 +555,7 @@ static char *whatsapp_get_attachment_path(void *ctx, hu_allocator_t *alloc, int6
 }
 
 static bool whatsapp_human_active_recently(void *ctx, const char *contact, size_t contact_len,
-                                             int window_sec) {
+                                           int window_sec) {
 #if HU_IS_TEST
     (void)ctx;
     (void)contact;

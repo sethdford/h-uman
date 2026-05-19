@@ -2,7 +2,18 @@
  *
  * Phase 2 Task 13 (RL SOTA): hu_reaction_event_t → hu_preference_pair_t
  * row in the daemon-owned hu_dpo_collector_t. See the header for the
- * full wiring diagram and the lookup-cap caveat. */
+ * full wiring diagram.
+ *
+ * Phase 5 R4: the lookup store. Two implementations live in this TU
+ * behind a feature flag:
+ *
+ *   HU_IS_TEST              → in-memory array (deterministic, no disk I/O)
+ *   HU_ENABLE_SQLITE        → SQLite-backed persistent store at
+ *                             ~/.human/reaction_lookup.db (production)
+ *
+ * The SQLite path replaces the previous 256-entry in-memory ring, which
+ * silently dropped registrations once full AND lost ALL state on daemon
+ * restart (R4 in the Phase-5 risk register). */
 #include "human/agent/reaction_handler.h"
 #include "human/channels/imessage_ingest.h"
 #include "human/memory/personal_model.h"
@@ -11,11 +22,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* CAVEAT: in-memory lookup, 256-entry cap, NOT persisted. This is the test
- * seam + interim production path until the daemon-side assistant-message
- * resolver lands in Phase 5. Reactions on messages older than the most
- * recent 256 sends silently drop (R4 in the risk register). */
-#define LOOKUP_CAP 256
+#if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
+#define HU_RXN_LOOKUP_USES_SQLITE 1
+#include <sqlite3.h>
+#include <sys/stat.h>
+#else
+#define HU_RXN_LOOKUP_USES_SQLITE 0
+#endif
+
+/* ----- in-memory backing store (kept for the HU_IS_TEST path) -----
+ *
+ * Under HU_IS_TEST we keep the original array-based lookup so unit tests
+ * remain deterministic and never touch real disk. The cap is intentionally
+ * loose (1024) so larger test scenarios don't hit the previous 256-entry
+ * silent-drop. */
+#if HU_RXN_LOOKUP_USES_SQLITE == 0
+#define LOOKUP_CAP 1024
 
 typedef struct {
     char channel[32];
@@ -27,6 +49,7 @@ typedef struct {
 
 static lookup_entry_t s_lookup[LOOKUP_CAP];
 static size_t s_lookup_n = 0;
+#endif
 
 /* Daemon-owned collector handle. NULL until set_collector is called. */
 static hu_dpo_collector_t *s_collector = NULL;
@@ -58,14 +81,183 @@ int hu_reaction_handler_was_called_this_turn(void) {
     return s_called_this_turn;
 }
 
-static const lookup_entry_t *find_lookup(const hu_reaction_event_t *e) {
+/* ===== SQLite-backed persistent lookup store =====
+ *
+ * Schema (created lazily on first open):
+ *   reaction_lookup(channel TEXT, thread TEXT, msg_ref TEXT,
+ *                   prompt TEXT, response TEXT, inserted_at INTEGER,
+ *                   PRIMARY KEY (channel, thread, msg_ref))
+ *
+ * Writes go through INSERT OR REPLACE for upsert semantics — if a
+ * (channel, thread, msg_ref) triple is re-registered, the latest
+ * prompt/response wins. SQLite's WAL journal mode gives us atomic
+ * commits without needing the tmp+fsync+rename dance used elsewhere
+ * (see src/memory/personal_model.c for the file-based equivalent).
+ *
+ * Retention: every register call probes a counter and runs a 60-day
+ * cleanup DELETE every 1000th invocation. Keeps the DB bounded without
+ * a daemon-side scheduler tick. */
+#if HU_RXN_LOOKUP_USES_SQLITE
+
+static sqlite3 *s_db = NULL;
+static unsigned long s_register_count = 0;
+static const unsigned long RXN_CLEANUP_EVERY_N = 1000;
+static const long RXN_RETENTION_SECONDS = 60L * 86400L; /* 60 days */
+
+/* Ensure parent directory exists for ~/.human/reaction_lookup.db. mkdir(0700)
+ * matches the rest of the ~/.human/ tree posture. Best-effort; failures get
+ * surfaced when sqlite3_open is unable to create the DB file. */
+static void rxn_ensure_parent_dir(const char *path) {
+    if (!path)
+        return;
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "%s", path);
+    char *slash = strrchr(buf, '/');
+    if (!slash)
+        return;
+    *slash = '\0';
+    (void)mkdir(buf, 0700);
+}
+
+static int rxn_db_open(void) {
+    if (s_db)
+        return 1;
+
+    static char path_buf[1024];
+    const char *home = getenv("HOME");
+    if (!home || !*home)
+        home = "/tmp";
+    snprintf(path_buf, sizeof(path_buf), "%s/.human/reaction_lookup.db", home);
+    rxn_ensure_parent_dir(path_buf);
+
+    if (sqlite3_open(path_buf, &s_db) != SQLITE_OK) {
+        if (s_db)
+            sqlite3_close(s_db);
+        s_db = NULL;
+        return 0;
+    }
+    sqlite3_exec(s_db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL);
+    sqlite3_exec(s_db, "PRAGMA synchronous=NORMAL", NULL, NULL, NULL);
+
+    static const char *ddl[] = {
+        "CREATE TABLE IF NOT EXISTS reaction_lookup ("
+        "channel TEXT NOT NULL,"
+        "thread TEXT NOT NULL,"
+        "msg_ref TEXT NOT NULL,"
+        "prompt TEXT NOT NULL,"
+        "response TEXT NOT NULL,"
+        "inserted_at INTEGER NOT NULL,"
+        "PRIMARY KEY (channel, thread, msg_ref))",
+        "CREATE INDEX IF NOT EXISTS idx_reaction_lookup_inserted "
+        "ON reaction_lookup(inserted_at DESC)",
+        NULL,
+    };
+    for (size_t i = 0; ddl[i]; i++) {
+        if (sqlite3_exec(s_db, ddl[i], NULL, NULL, NULL) != SQLITE_OK) {
+            sqlite3_close(s_db);
+            s_db = NULL;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* 60-day retention sweep. Idempotent; safe to call repeatedly. */
+static void rxn_db_cleanup_old(void) {
+    if (!s_db)
+        return;
+    sqlite3_stmt *st = NULL;
+    static const char sql[] =
+        "DELETE FROM reaction_lookup WHERE inserted_at < (strftime('%s','now') - ?)";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK)
+        return;
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)RXN_RETENTION_SECONDS);
+    (void)sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
+static void rxn_db_register(const char *channel, const char *thread, const char *msg_ref,
+                            const char *prompt, const char *response) {
+    if (!rxn_db_open())
+        return;
+
+    sqlite3_stmt *st = NULL;
+    static const char sql[] = "INSERT OR REPLACE INTO reaction_lookup "
+                              "(channel, thread, msg_ref, prompt, response, inserted_at) "
+                              "VALUES (?, ?, ?, ?, ?, strftime('%s','now'))";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK)
+        return;
+
+    sqlite3_bind_text(st, 1, channel, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, thread, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, msg_ref, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 4, prompt, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 5, response, -1, SQLITE_STATIC);
+    (void)sqlite3_step(st);
+    sqlite3_finalize(st);
+
+    /* Periodic retention sweep. Bounded by RXN_CLEANUP_EVERY_N to keep
+     * the per-register hot path cheap. */
+    if (++s_register_count % RXN_CLEANUP_EVERY_N == 0)
+        rxn_db_cleanup_old();
+}
+
+/* Lookup returns 1 on hit, 0 on miss. On hit, prompt_out/response_out are
+ * filled (truncated via snprintf if needed). */
+static int rxn_db_lookup(const char *channel, const char *thread, const char *msg_ref,
+                         char *prompt_out, size_t prompt_cap, char *response_out,
+                         size_t response_cap) {
+    if (!rxn_db_open())
+        return 0;
+
+    sqlite3_stmt *st = NULL;
+    static const char sql[] = "SELECT prompt, response FROM reaction_lookup "
+                              "WHERE channel = ? AND thread = ? AND msg_ref = ? LIMIT 1";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK)
+        return 0;
+
+    sqlite3_bind_text(st, 1, channel, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, thread, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, msg_ref, -1, SQLITE_STATIC);
+
+    int found = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *p = sqlite3_column_text(st, 0);
+        const unsigned char *r = sqlite3_column_text(st, 1);
+        snprintf(prompt_out, prompt_cap, "%s", p ? (const char *)p : "");
+        snprintf(response_out, response_cap, "%s", r ? (const char *)r : "");
+        found = 1;
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
+#endif /* HU_RXN_LOOKUP_USES_SQLITE */
+
+/* ===== Unified lookup adapter =====
+ *
+ * Returns 1 on hit (prompt_out / response_out filled), 0 on miss.
+ * Buffers must be sized at least 2048 (prompt) and 4096 (response) to
+ * match hu_preference_pair_t's fixed-size columns. */
+static int reaction_lookup_find(const hu_reaction_event_t *e, char *prompt_out, size_t prompt_cap,
+                                char *response_out, size_t response_cap) {
+    const char *thread = e->target_thread_id ? e->target_thread_id : "";
+    const char *msg_ref = e->target_message_ref ? e->target_message_ref : "";
+
+#if HU_RXN_LOOKUP_USES_SQLITE
+    return rxn_db_lookup(e->channel_id, thread, msg_ref, prompt_out, prompt_cap, response_out,
+                         response_cap);
+#else
     for (size_t i = 0; i < s_lookup_n; i++) {
         if (strcmp(s_lookup[i].channel, e->channel_id) == 0 &&
-            strcmp(s_lookup[i].thread, e->target_thread_id ? e->target_thread_id : "") == 0 &&
-            strcmp(s_lookup[i].msg_ref, e->target_message_ref ? e->target_message_ref : "") == 0)
-            return &s_lookup[i];
+            strcmp(s_lookup[i].thread, thread) == 0 && strcmp(s_lookup[i].msg_ref, msg_ref) == 0) {
+            snprintf(prompt_out, prompt_cap, "%s", s_lookup[i].prompt);
+            snprintf(response_out, response_cap, "%s", s_lookup[i].response);
+            return 1;
+        }
     }
-    return NULL;
+    return 0;
+#endif
 }
 
 hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
@@ -73,33 +265,29 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
         return HU_ERR_INVALID_ARGUMENT;
     if (e->is_removal)
         return HU_OK; /* drop removals; we only record adds */
-    const lookup_entry_t *L = find_lookup(e);
-    if (!L)
-        return HU_ERR_NOT_FOUND;
 
-    /* Phase 1c of docs/plans/2026-05-18-imessage-sota.md: iMessage reactions
-     * on registered assistant messages also feed the personal model. This
-     * happens BEFORE the DPO record so that a missing DPO collector (e.g.
-     * RL build flag off) does not block personal-model learning. */
+    char prompt_buf[2048];
+    char response_buf[4096];
+    prompt_buf[0] = '\0';
+    response_buf[0] = '\0';
+    int lookup_hit =
+        reaction_lookup_find(e, prompt_buf, sizeof(prompt_buf), response_buf, sizeof(response_buf));
+
+    /* Personal-model ingest fires REGARDLESS of lookup hit. DPO below
+     * still requires the lookup (DPO only learns from reactions on OUR
+     * outbound messages), but the persona-learning sink wants any
+     * observed reaction — contact's reaction on inbound messages is
+     * social-graph signal worth recording even without target context. */
     if (s_personal_model) {
-        /* Phase 2 of docs/plans/2026-05-18-imessage-sota.md: channel-
-         * agnostic ingest. The synthesis renders "<actor> reacted with
-         * <glyph> to <target>" regardless of channel; provenance is
-         * built from event->channel_id by event_provenance. Slack +
-         * any future reaction-bearing channel reaches this point via
-         * hu_reaction_handler_handle_event without further wiring.
-         *
-         * L->response is the text the reactor reacted to (our assistant
-         * message). is_from_me_target=true because the lookup only holds
-         * our own outbound messages by construction. e->emoji carries
-         * the iOS 17+ custom-emoji glyph when present (NULL otherwise —
-         * synth_reaction falls back to "a sticker"). */
-        (void)hu_imessage_ingest_reaction(s_personal_model, e,
-                                          /*custom_emoji=*/e->emoji, L->response,
-                                          /*is_from_me_target=*/true,
-                                          /*in_group_chat=*/false);
+        const char *preview = lookup_hit ? response_buf : NULL;
+        (void)hu_reaction_ingest_personal_model(s_personal_model, e,
+                                                /*custom_emoji=*/e->emoji, preview,
+                                                /*is_from_me_target=*/(lookup_hit != 0),
+                                                /*in_group_chat=*/false);
     }
 
+    if (!lookup_hit)
+        return HU_ERR_NOT_FOUND;
     if (!s_collector)
         return HU_ERR_NOT_SUPPORTED; /* daemon hasn't wired it yet */
 
@@ -119,17 +307,17 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
 
     /* Copy strings into fixed-size buffers (NOT pointer assignment — fields
      * are char[2048] / char[4096] / char[64] per include/human/ml/dpo.h:15-26). */
-    strncpy(pair.prompt, L->prompt, sizeof(pair.prompt) - 1);
+    strncpy(pair.prompt, prompt_buf, sizeof(pair.prompt) - 1);
     pair.prompt_len = strlen(pair.prompt);
 
     if (e->polarity > 0) {
         /* Positive reaction → record this response as `chosen` */
-        strncpy(pair.chosen, L->response, sizeof(pair.chosen) - 1);
+        strncpy(pair.chosen, response_buf, sizeof(pair.chosen) - 1);
         pair.chosen_len = strlen(pair.chosen);
         /* `rejected` left as zeroed-out empty string */
     } else if (e->polarity < 0) {
         /* Negative reaction → record this response as `rejected` */
-        strncpy(pair.rejected, L->response, sizeof(pair.rejected) - 1);
+        strncpy(pair.rejected, response_buf, sizeof(pair.rejected) - 1);
         pair.rejected_len = strlen(pair.rejected);
     } else {
         return HU_OK; /* neutral reactions don't yield training signal */
@@ -153,6 +341,19 @@ static void register_assistant_message(const char *channel, const char *thread, 
                                        const char *prompt, const char *response) {
     if (!channel || !thread || !msg_ref || !prompt || !response)
         return;
+#if HU_RXN_LOOKUP_USES_SQLITE
+    rxn_db_register(channel, thread, msg_ref, prompt, response);
+#else
+    /* In-memory path: overwrite existing entry on key match (upsert
+     * semantics so tests can re-register and see the latest values). */
+    for (size_t i = 0; i < s_lookup_n; i++) {
+        if (strcmp(s_lookup[i].channel, channel) == 0 && strcmp(s_lookup[i].thread, thread) == 0 &&
+            strcmp(s_lookup[i].msg_ref, msg_ref) == 0) {
+            snprintf(s_lookup[i].prompt, sizeof(s_lookup[i].prompt), "%s", prompt);
+            snprintf(s_lookup[i].response, sizeof(s_lookup[i].response), "%s", response);
+            return;
+        }
+    }
     if (s_lookup_n >= LOOKUP_CAP)
         return;
     snprintf(s_lookup[s_lookup_n].channel, sizeof(s_lookup[0].channel), "%s", channel);
@@ -161,6 +362,7 @@ static void register_assistant_message(const char *channel, const char *thread, 
     snprintf(s_lookup[s_lookup_n].prompt, sizeof(s_lookup[0].prompt), "%s", prompt);
     snprintf(s_lookup[s_lookup_n].response, sizeof(s_lookup[0].response), "%s", response);
     s_lookup_n++;
+#endif
 }
 
 void hu_reaction_handler_register_assistant_message_for_production(const char *channel,
@@ -180,7 +382,9 @@ void hu_reaction_handler_register_assistant_message_for_test(const char *channel
     register_assistant_message(channel, thread, msg_ref, prompt, response);
 }
 void hu_reaction_handler_reset_for_test(void) {
+#if HU_RXN_LOOKUP_USES_SQLITE == 0
     s_lookup_n = 0;
+#endif
     s_called_this_turn = 0;
     s_collector = NULL;
     s_personal_model = NULL;

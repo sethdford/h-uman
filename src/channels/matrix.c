@@ -260,8 +260,8 @@ static hu_error_t matrix_require_user_id(hu_matrix_ctx_t *c) {
     if (nu < 0 || (size_t)nu >= sizeof(url_buf))
         return HU_ERR_INTERNAL;
     char auth_buf[512];
-    int na = snprintf(auth_buf, sizeof(auth_buf), "Bearer %.*s",
-                      (int)c->access_token_len, c->access_token);
+    int na = snprintf(auth_buf, sizeof(auth_buf), "Bearer %.*s", (int)c->access_token_len,
+                      c->access_token);
     if (na <= 0 || (size_t)na >= sizeof(auth_buf))
         return HU_ERR_INTERNAL;
     hu_http_response_t resp = {0};
@@ -419,9 +419,8 @@ static hu_error_t matrix_react(void *ctx, const char *target, size_t target_len,
         hu_error_t err = hu_json_buf_init(&jbuf, c->alloc);
         if (err)
             return err;
-        err = hu_json_buf_append_raw(&jbuf,
-                                     "{\"m.relates_to\":{\"rel_type\":\"m.annotation\",\"event_id\":",
-                                     58);
+        err = hu_json_buf_append_raw(
+            &jbuf, "{\"m.relates_to\":{\"rel_type\":\"m.annotation\",\"event_id\":", 58);
         if (err)
             goto mreact_fail;
         err = hu_json_append_string(&jbuf, event_id, event_len);
@@ -504,16 +503,15 @@ static hu_error_t matrix_load_conversation_history(void *ctx, hu_allocator_t *al
         limit = 50;
 
     char url_buf[1024];
-    int nu = snprintf(url_buf, sizeof(url_buf),
-                      "%.*s/_matrix/client/v3/rooms/%.*s/messages?dir=b&limit=%zu",
-                      (int)c->homeserver_len, c->homeserver, (int)contact_id_len, contact_id,
-                      limit);
+    int nu = snprintf(
+        url_buf, sizeof(url_buf), "%.*s/_matrix/client/v3/rooms/%.*s/messages?dir=b&limit=%zu",
+        (int)c->homeserver_len, c->homeserver, (int)contact_id_len, contact_id, limit);
     if (nu < 0 || (size_t)nu >= sizeof(url_buf))
         return HU_ERR_INTERNAL;
 
     char auth_buf[512];
-    int na = snprintf(auth_buf, sizeof(auth_buf), "Bearer %.*s",
-                      (int)c->access_token_len, c->access_token);
+    int na = snprintf(auth_buf, sizeof(auth_buf), "Bearer %.*s", (int)c->access_token_len,
+                      c->access_token);
     if (na <= 0 || (size_t)na >= sizeof(auth_buf))
         return HU_ERR_INTERNAL;
 
@@ -566,8 +564,7 @@ static hu_error_t matrix_load_conversation_history(void *ctx, hu_allocator_t *al
         if (!body || strlen(body) == 0)
             continue;
 
-        entries[count].from_me =
-            (sender && c->user_id && strcmp(sender, c->user_id) == 0);
+        entries[count].from_me = (sender && c->user_id && strcmp(sender, c->user_id) == 0);
 
         size_t text_len = strlen(body);
         if (text_len > 511)
@@ -638,10 +635,10 @@ static char *matrix_get_attachment_path(void *ctx, hu_allocator_t *alloc, int64_
         matrix_pct_encode_seg(c->mxc_media, enc_med, sizeof(enc_med)) != 0)
         return NULL;
     char url_buf[2048];
-    int nu = snprintf(url_buf, sizeof(url_buf),
-                       "%.*s/_matrix/media/v3/download/%s/%s?access_token=%.*s",
-                       (int)c->homeserver_len, c->homeserver, enc_srv, enc_med,
-                       (int)c->access_token_len, c->access_token);
+    int nu =
+        snprintf(url_buf, sizeof(url_buf), "%.*s/_matrix/media/v3/download/%s/%s?access_token=%.*s",
+                 (int)c->homeserver_len, c->homeserver, enc_srv, enc_med, (int)c->access_token_len,
+                 c->access_token);
     if (nu < 0 || (size_t)nu >= sizeof(url_buf))
         return NULL;
     char *copy = (char *)alloc->alloc(alloc->ctx, (size_t)nu + 1);
@@ -763,6 +760,17 @@ hu_error_t hu_matrix_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_l
                     if (!ev || ev->type != HU_JSON_OBJECT)
                         continue;
                     const char *ev_type = hu_json_get_string(ev, "type");
+                    /* Phase 2 of docs/plans/2026-05-18-imessage-sota.md:
+                     * m.reaction events live in matrix_reactions.c to
+                     * avoid the hu_reaction_type_t (channel.h) ↔
+                     * hu_reaction_kind_t (reaction_event.h) enum
+                     * collision. Dispatch before the m.room.message
+                     * filter below, which would otherwise silently
+                     * drop the reaction. */
+                    extern int hu_matrix_handle_reaction_sync_event(
+                        const hu_json_value_t *event, const char *room_id, const char *bot_user_id);
+                    if (hu_matrix_handle_reaction_sync_event(ev, room_id, ctx->user_id))
+                        continue;
                     if (!ev_type || strcmp(ev_type, "m.room.message") != 0)
                         continue;
                     const char *sender = hu_json_get_string(ev, "sender");

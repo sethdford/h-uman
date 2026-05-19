@@ -109,7 +109,7 @@ static void write_db_to_disk(const char *path) {
  * keep unit tests deterministic), so this e2e test SIMULATES the poll
  * output and then exercises the integration boundary that the unit
  * tests miss: hu_reaction_handler_handle_event with personal_model
- * wired, all the way through hu_imessage_ingest_reaction into
+ * wired, all the way through hu_reaction_ingest_personal_model into
  * hu_personal_model_ingest.
  *
  * The chat.db fixture above is still written + cleaned up because we
@@ -172,10 +172,18 @@ static void test_e2e_imessage_tapback_reaches_personal_model(void) {
     unlink(tmp_path);
 }
 
-static void test_e2e_imessage_tapback_without_assistant_lookup_does_not_crash(void) {
-    /* Edge case: tapback arrives but the assistant-message lookup is
-     * empty (e.g. daemon restarted, lookup ring evicted). Handler must
-     * return HU_ERR_NOT_FOUND and NOT touch the personal model. */
+static void test_e2e_imessage_tapback_without_assistant_lookup_still_ingests(void) {
+    /* Contract change (2026-05-19, inbound-reaction fix): when the
+     * assistant-message lookup misses (daemon restart, lookup ring
+     * evicted, or — the new case — reaction on a CONTACT-authored
+     * message), the handler still ingests the reaction into
+     * personal_model with a NULL target preview. The DPO path still
+     * returns HU_ERR_NOT_FOUND (that's correct — DPO only learns from
+     * our outbound), but persona learning gets the signal.
+     *
+     * The reactor-as-subject fact still merges because
+     * construct_and_merge_reaction_fact doesn't require a preview —
+     * it falls back to object = "an unknown message". */
     hu_reaction_handler_reset_for_test();
     hu_personal_model_t model;
     hu_personal_model_init(&model);
@@ -184,8 +192,11 @@ static void test_e2e_imessage_tapback_without_assistant_lookup_does_not_crash(vo
     hu_reaction_event_t event;
     synthetic_love_tapback(&event);
     hu_error_t he = hu_reaction_handler_handle_event(&event);
+    /* DPO path: HU_ERR_NOT_FOUND (no lookup hit). Personal-model path:
+     * still ran, so the model has content. */
     HU_ASSERT_EQ((int)he, (int)HU_ERR_NOT_FOUND);
-    HU_ASSERT_TRUE(!hu_personal_model_has_content(&model));
+    HU_ASSERT_TRUE(hu_personal_model_has_content(&model));
+    HU_ASSERT_TRUE(model.fact_count >= 1);
 
     hu_reaction_handler_set_personal_model(NULL);
     hu_reaction_handler_reset_for_test();
@@ -224,7 +235,7 @@ static void test_e2e_slack_reaction_reaches_personal_model(void) {
 void run_imessage_personal_model_e2e_tests(void) {
     HU_TEST_SUITE("imessage_personal_model_e2e");
     HU_RUN_TEST(test_e2e_imessage_tapback_reaches_personal_model);
-    HU_RUN_TEST(test_e2e_imessage_tapback_without_assistant_lookup_does_not_crash);
+    HU_RUN_TEST(test_e2e_imessage_tapback_without_assistant_lookup_still_ingests);
     HU_RUN_TEST(test_e2e_slack_reaction_reaches_personal_model);
 }
 

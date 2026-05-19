@@ -299,6 +299,16 @@ if(HU_ENABLE_TELEGRAM)
     # pattern as slack_reactions.c and imessage_reactions.c.
     list(APPEND CHANNEL_SOURCES src/channels/telegram_reactions.c)
 endif()
+if(HU_ENABLE_WHATSAPP)
+    # WhatsApp + Matrix reaction emit paths. Same TU-split rationale as
+    # slack_reactions.c (enum-name collision). WhatsApp Cloud API webhook
+    # has a "messages.type=reaction" branch; Matrix uses m.reaction events
+    # via /sync. Both gated by their respective HU_ENABLE_* flags.
+    list(APPEND CHANNEL_SOURCES src/channels/whatsapp_reactions.c)
+endif()
+if(HU_ENABLE_MATRIX)
+    list(APPEND CHANNEL_SOURCES src/channels/matrix_reactions.c)
+endif()
 if(HU_ENABLE_DISCORD)
     list(APPEND CHANNEL_SOURCES src/channels/discord.c)
     # Phase 2: MESSAGE_REACTION_ADD/REMOVE dispatch. Same enum-collision
@@ -3342,6 +3352,12 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_balloon_decode.c)
 # stub runners per .claude/rules/test-source-gate-symmetry.md.
 list(APPEND HU_TEST_SOURCES tests/test_discord_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_telegram_reactions.c)
+# Phase 2 cross-channel: WhatsApp + Matrix reaction emit tests.
+list(APPEND HU_TEST_SOURCES tests/test_whatsapp_reactions.c)
+list(APPEND HU_TEST_SOURCES tests/test_matrix_reactions.c)
+# SQLite-backed lookup store for reaction_handler (closes the 256-entry
+# in-memory ring gap; under HU_IS_TEST stays in-memory for determinism).
+list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_lookup_store.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch
 # (parse + filter + normalize via hu_slack_handle_reaction_event_for_test).
 list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)

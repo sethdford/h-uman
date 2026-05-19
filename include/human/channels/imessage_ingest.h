@@ -111,7 +111,7 @@ struct hu_personal_model;
 
 #include "human/core/error.h"
 
-hu_error_t hu_imessage_ingest_reaction(struct hu_personal_model *model,
+hu_error_t hu_reaction_ingest_personal_model(struct hu_personal_model *model,
                                        const hu_reaction_event_t *event, const char *custom_emoji,
                                        const char *target_text_preview, bool is_from_me_target,
                                        bool in_group_chat);
