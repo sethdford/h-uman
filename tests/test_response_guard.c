@@ -14,7 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-static hu_allocator_t A(void) { return hu_system_allocator(); }
+static hu_allocator_t A(void) {
+    return hu_system_allocator();
+}
 
 /* Forward declaration — helper lives in src/agent/agent_internal.h, which
  * is not exported. We exercise it directly here to prove the production
@@ -26,8 +28,7 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
  * trick: agent_internal.h is not exported, but the symbols are linked
  * into the test binary because the test target builds against the
  * same agent.c TU. */
-void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
-                                              size_t text_len);
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text, size_t text_len);
 void hu_agent_internal_free_director_history(hu_agent_t *agent);
 void hu_agent_internal_reset_contact_boundary_state(hu_agent_t *agent);
 
@@ -35,20 +36,19 @@ void hu_agent_internal_reset_contact_boundary_state(hu_agent_t *agent);
 
 static void guard_rejects_or_sanitizes_production_harmony_leak(void) {
     /* Reproduces the exact wire-format leak. */
-    const char *raw =
-        "Like <|channel>thoughtThe user said said \"Here! \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-        "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \"";
+    const char *raw = "Like <|channel>thoughtThe user said said \"Here! \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+                      "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \"";
 
     hu_allocator_t alloc = A();
     char *out = NULL;
@@ -175,10 +175,10 @@ static void guard_strips_capital_thought_block(void) {
 }
 
 static void guard_strips_all_known_harmony_markers(void) {
-    static const char *markers[] = {"<|start|>",       "<|end|>",       "<|return|>",
-                                    "<|channel|>",     "<|message|>",   "<|thought|>",
-                                    "<|user|>",        "<|assistant|>", "<|system|>",
-                                    "<|tool_call|>",   "<|tool_response|>"};
+    static const char *markers[] = {"<|start|>",     "<|end|>",          "<|return|>",
+                                    "<|channel|>",   "<|message|>",      "<|thought|>",
+                                    "<|user|>",      "<|assistant|>",    "<|system|>",
+                                    "<|tool_call|>", "<|tool_response|>"};
 
     hu_allocator_t alloc = A();
     for (size_t i = 0; i < sizeof(markers) / sizeof(markers[0]); i++) {
@@ -190,9 +190,9 @@ static void guard_strips_all_known_harmony_markers(void) {
         hu_guard_report_t report;
         memset(&report, 0, sizeof(report));
 
-        HU_ASSERT_EQ(hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome,
-                                             &report),
-                     HU_OK);
+        HU_ASSERT_EQ(
+            hu_response_guard_check(&alloc, raw, strlen(raw), &out, &out_len, &outcome, &report),
+            HU_OK);
         HU_ASSERT_EQ(outcome, HU_GUARD_REWROTE);
         HU_ASSERT(strstr(out, markers[i]) == NULL);
         HU_ASSERT(report.stripped_harmony_tokens);
@@ -369,12 +369,11 @@ static void helper_longest_token_run_counts(void) {
 }
 
 static void guard_strips_gemma4_untagged_reasoning(void) {
-    const char *raw =
-        "\n*   User: \"Hey you!\"\n"
-        "    *   Persona: Seth Douglas Ford (51, Chief Architect)\n"
-        "    *   Context: Annie is teasing Seth.\n"
-        "\n"
-        "hey! what's up";
+    const char *raw = "\n*   User: \"Hey you!\"\n"
+                      "    *   Persona: Seth Douglas Ford (51, Chief Architect)\n"
+                      "    *   Context: Annie is teasing Seth.\n"
+                      "\n"
+                      "hey! what's up";
     hu_allocator_t alloc = A();
     char *out = NULL;
     size_t out_len = 0;
@@ -392,10 +391,9 @@ static void guard_strips_gemma4_untagged_reasoning(void) {
 }
 
 static void guard_rejects_gemma4_reasoning_only(void) {
-    const char *raw =
-        "\n*   User (Annie Ford, Seth's sister) is asking about Doug\n"
-        "    *   Persona: Seth Douglas Ford\n"
-        "    *   Options: 1) Ask more 2) Redirect\n";
+    const char *raw = "\n*   User (Annie Ford, Seth's sister) is asking about Doug\n"
+                      "    *   Persona: Seth Douglas Ford\n"
+                      "    *   Options: 1) Ask more 2) Redirect\n";
     hu_allocator_t alloc = A();
     char *out = NULL;
     size_t out_len = 0;
@@ -484,10 +482,9 @@ static void guard_rejects_msg_56354_brea_primary_recipient_leak_verbatim(void) {
 
 /* G1 — numbered analytical-list dump.  3+ long items, no reply tail. */
 static void guard_rejects_numbered_analysis_dump(void) {
-    const char *raw =
-        "1.  Project Apollo (NASA's lunar landing program from 1961-1972).\n"
-        "2.  Project Gemini (preceded Apollo, ran 1961-1966 with two-person crews).\n"
-        "3.  Project Mercury (the first US human spaceflight program 1958-1963).\n";
+    const char *raw = "1.  Project Apollo (NASA's lunar landing program from 1961-1972).\n"
+                      "2.  Project Gemini (preceded Apollo, ran 1961-1966 with two-person crews).\n"
+                      "3.  Project Mercury (the first US human spaceflight program 1958-1963).\n";
     hu_allocator_t alloc = A();
     char *out = NULL;
     size_t out_len = 0;
@@ -503,10 +500,9 @@ static void guard_rejects_numbered_analysis_dump(void) {
 
 /* G1 — handles `1)` paren form too (defensive — model could emit either). */
 static void guard_rejects_numbered_analysis_paren_form(void) {
-    const char *raw =
-        "1) The first analytical observation is fairly long and detailed here.\n"
-        "2) The second analytical observation also runs well over thirty chars.\n"
-        "3) The third analytical observation continues the structured analysis.\n";
+    const char *raw = "1) The first analytical observation is fairly long and detailed here.\n"
+                      "2) The second analytical observation also runs well over thirty chars.\n"
+                      "3) The third analytical observation continues the structured analysis.\n";
     hu_allocator_t alloc = A();
     char *out = NULL;
     size_t out_len = 0;
@@ -769,24 +765,23 @@ static void guard_rejects_msg_56049_user_constraints_scene_direction_leak_verbat
  * Shorter persona-block leak: User/Context/Persona/Goal labels followed
  * by candidate-list dump with the actual reply ("talk soon") appended. */
 static void guard_rejects_msg_56063_persona_block_short_leak_verbatim(void) {
-    const char *raw =
-        "User: \"Awesome\"\n"
-        " Context: Annie is responding to Seth's (implied) agreement to look at "
-        "the technical presentation.\n"
-        " Persona: Seth (Chief Architect, 51, relaxed professional, sisterly "
-        "relationship).\n"
-        " Goal: Acknowledge the \"Awesome\" and keep things moving or just end "
-        "the interaction naturally.\n"
-        " Low energy (\"Awesome\" is a simple closer).\n"
-        " Match the energy: short reply.\n"
-        " All lowercase.\n"
-        " No markdown.\n"
-        " Natural, casual you know.\n"
-        " \"cool\"\n"
-        " \"yeah\"\n"
-        " \"talk soon\"\n"
-        " \"got it\"\n"
-        " \"alright\"talk soon";
+    const char *raw = "User: \"Awesome\"\n"
+                      " Context: Annie is responding to Seth's (implied) agreement to look at "
+                      "the technical presentation.\n"
+                      " Persona: Seth (Chief Architect, 51, relaxed professional, sisterly "
+                      "relationship).\n"
+                      " Goal: Acknowledge the \"Awesome\" and keep things moving or just end "
+                      "the interaction naturally.\n"
+                      " Low energy (\"Awesome\" is a simple closer).\n"
+                      " Match the energy: short reply.\n"
+                      " All lowercase.\n"
+                      " No markdown.\n"
+                      " Natural, casual you know.\n"
+                      " \"cool\"\n"
+                      " \"yeah\"\n"
+                      " \"talk soon\"\n"
+                      " \"got it\"\n"
+                      " \"alright\"talk soon";
     hu_allocator_t alloc = A();
     char *out = NULL;
     size_t out_len = 0;
@@ -840,9 +835,8 @@ static void guard_rejects_template_label_substrings(void) {
  * gracefully (the loop's tokens are >8 chars). Returns NUL-terminated
  * length. */
 static size_t guard_test_make_benign_long(char *out, size_t out_cap, size_t target_len) {
-    static const char *phrase =
-        "Sure thing, that all sounds reasonable to me right now. "
-        "Maybe we can grab coffee tomorrow if you have free time then. ";
+    static const char *phrase = "Sure thing, that all sounds reasonable to me right now. "
+                                "Maybe we can grab coffee tomorrow if you have free time then. ";
     size_t phrase_len = strlen(phrase);
     size_t i = 0;
     while (i + phrase_len < target_len && i + phrase_len + 1 < out_cap) {
@@ -891,12 +885,11 @@ static void guard_g5_imessage_channel_uses_stricter_mult(void) {
 
     hu_guard_context_t ctx = {0};
     ctx.recent_avg_len = 10;
-    ctx.length_anomaly_mult =
-        hu_guard_length_anomaly_mult_for_channel("imessage", 8);
+    ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel("imessage", 8);
 
-    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome,
-                                            &report),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome, &report),
+        HU_OK);
     HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
     HU_ASSERT(report.detected_length_anomaly);
 
@@ -904,12 +897,11 @@ static void guard_g5_imessage_channel_uses_stricter_mult(void) {
     out_len = 0;
     outcome = HU_GUARD_OK;
     memset(&report, 0, sizeof(report));
-    ctx.length_anomaly_mult =
-        hu_guard_length_anomaly_mult_for_channel("discord", 7);
+    ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel("discord", 7);
 
-    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome,
-                                            &report),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome, &report),
+        HU_OK);
     HU_ASSERT_EQ(outcome, HU_GUARD_OK);
     HU_ASSERT(!report.detected_length_anomaly);
 }
@@ -949,9 +941,9 @@ static void guard_ex_rejects_length_anomaly(void) {
     hu_guard_context_t ctx = {0};
     ctx.recent_avg_len = 44;
 
-    HU_ASSERT_EQ(hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome,
-                                            &report),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_response_guard_check_ex(&alloc, raw, raw_len, &ctx, &out, &out_len, &outcome, &report),
+        HU_OK);
     HU_ASSERT_EQ(outcome, HU_GUARD_REJECT);
     HU_ASSERT(report.detected_length_anomaly);
     HU_ASSERT(!report.detected_director_echo);
@@ -961,12 +953,10 @@ static void guard_ex_rejects_length_anomaly(void) {
 /* G6 — director-string echo. Response quotes 50+ chars of director
  * text → REJECT. */
 static void guard_ex_rejects_director_echo(void) {
-    const char *director =
-        "Professional, slightly skeptical, ask for clarification on why "
-        "they are sending it again.";
+    const char *director = "Professional, slightly skeptical, ask for clarification on why "
+                           "they are sending it again.";
     /* Reply that quotes a substantial fragment of the director string. */
-    const char *reply =
-        "ok will do — Professional, slightly skeptical, ask for clarification";
+    const char *reply = "ok will do — Professional, slightly skeptical, ask for clarification";
 
     hu_allocator_t alloc = A();
     char *out = NULL;
@@ -1405,8 +1395,7 @@ static void guard_g6_history_walks_all_slots(void) {
     ctx.director_history_lens = history_lens;
     ctx.director_history_count = 4;
 
-    const char *raw =
-        "ok ask one clarifying question; minimum two sentences sounds fair";
+    const char *raw = "ok ask one clarifying question; minimum two sentences sounds fair";
     hu_allocator_t alloc = A();
     char *out = NULL;
     size_t out_len = 0;
@@ -1440,8 +1429,7 @@ static void agent_director_history_push_basic(void) {
     hu_allocator_t alloc = A();
     hu_agent_t a = g37_make_test_agent(&alloc);
 
-    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST,
-                                             sizeof(G37_DIRECTOR_PAST) - 1);
+    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST, sizeof(G37_DIRECTOR_PAST) - 1);
     HU_ASSERT_EQ(a.director_history_count, (size_t)1);
     HU_ASSERT_NOT_NULL(a.director_history[0]);
     HU_ASSERT_EQ(a.director_history_lens[0], sizeof(G37_DIRECTOR_PAST) - 1);
@@ -1520,10 +1508,8 @@ static void agent_director_history_free_zeroes_count(void) {
     hu_allocator_t alloc = A();
     hu_agent_t a = g37_make_test_agent(&alloc);
 
-    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST,
-                                             sizeof(G37_DIRECTOR_PAST) - 1);
-    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST2,
-                                             sizeof(G37_DIRECTOR_PAST2) - 1);
+    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST, sizeof(G37_DIRECTOR_PAST) - 1);
+    hu_agent_internal_push_director_history(&a, G37_DIRECTOR_PAST2, sizeof(G37_DIRECTOR_PAST2) - 1);
     HU_ASSERT_EQ(a.director_history_count, (size_t)2);
 
     hu_agent_internal_free_director_history(&a);
@@ -1550,10 +1536,9 @@ static void agent_contact_boundary_clears_director_history(void) {
 }
 
 static void guard_audit_detects_numbered_analysis_fixture(void) {
-    const char *raw =
-        "1. First long numbered analysis item that exceeds thirty chars.\n"
-        "2. Second long numbered analysis item that exceeds thirty chars.\n"
-        "3. Third long numbered analysis item that exceeds thirty chars.\n";
+    const char *raw = "1. First long numbered analysis item that exceeds thirty chars.\n"
+                      "2. Second long numbered analysis item that exceeds thirty chars.\n"
+                      "3. Third long numbered analysis item that exceeds thirty chars.\n";
     HU_ASSERT(hu_guard_audit_numbered_analysis_dump(raw, strlen(raw)));
     HU_ASSERT(!hu_guard_audit_self_talk_leak("hey what's up", 13));
 }
@@ -1561,11 +1546,9 @@ static void guard_audit_detects_numbered_analysis_fixture(void) {
 /* ── Sprint 38 — G8 biography + reject telemetry ─────────────────────── */
 
 static void guard_g8_rejects_biography_only_echo(void) {
-    static const char bio[] =
-        "grew up in Utah, studied computer science at BYU, then moved to "
-        "Silicon Valley to build distributed systems for a decade";
-    const char *raw =
-        "yeah grew up in Utah, studied computer science at BYU, then moved";
+    static const char bio[] = "grew up in Utah, studied computer science at BYU, then moved to "
+                              "Silicon Valley to build distributed systems for a decade";
+    const char *raw = "yeah grew up in Utah, studied computer science at BYU, then moved";
     hu_guard_context_t ctx = {0};
     /* No identity — biography alone must trip G8. */
     ctx.persona_biography = bio;
@@ -1585,11 +1568,9 @@ static void guard_g8_rejects_biography_only_echo(void) {
 
 static void guard_g8_orthogonal_biography_vs_identity(void) {
     static const char identity[] = "Chief Architect at Pure Health Solutions";
-    static const char bio[] =
-        "spent fifteen years building healthcare data platforms across "
-        "three continents before joining the current team";
-    const char *raw =
-        "spent fifteen years building healthcare data platforms across";
+    static const char bio[] = "spent fifteen years building healthcare data platforms across "
+                              "three continents before joining the current team";
+    const char *raw = "spent fifteen years building healthcare data platforms across";
     hu_guard_context_t ctx = {0};
     ctx.persona_identity = identity;
     ctx.persona_identity_len = sizeof(identity) - 1;
@@ -1670,10 +1651,8 @@ static void guard_reject_stats_reset_clears_counters(void) {
 
 static void guard_g8_rejects_verbatim_identity_quote(void) {
     /* identity is 58 bytes; response quotes 35 bytes contiguously. */
-    static const char identity[] =
-        "51-year-old technical professional, lives alone with a cat";
-    const char *raw =
-        "yeah, i'm a technical professional, lives alone too lol";
+    static const char identity[] = "51-year-old technical professional, lives alone with a cat";
+    const char *raw = "yeah, i'm a technical professional, lives alone too lol";
     hu_guard_context_t ctx = {0};
     ctx.persona_identity = identity;
     ctx.persona_identity_len = sizeof(identity) - 1;
@@ -1692,8 +1671,7 @@ static void guard_g8_rejects_verbatim_identity_quote(void) {
 
 static void guard_g8_rejects_chief_architect_phrase(void) {
     static const char identity[] = "Chief Architect at Pure Health Solutions";
-    const char *raw =
-        "yeah i'm a Chief Architect at Pure Health Solutions, busy day";
+    const char *raw = "yeah i'm a Chief Architect at Pure Health Solutions, busy day";
     hu_guard_context_t ctx = {0};
     ctx.persona_identity = identity;
     ctx.persona_identity_len = sizeof(identity) - 1;
@@ -1788,11 +1766,9 @@ static void guard_g8_orthogonal_to_g6(void) {
     /* Both director_text and persona_identity are set. The response
      * quotes 30+ bytes of identity but does NOT quote the director.
      * Only G8 (not G6) should fire. */
-    static const char director[] =
-        "casual short, dry; respond briefly and slightly skeptical";
+    static const char director[] = "casual short, dry; respond briefly and slightly skeptical";
     static const char identity[] = "Chief Architect at Pure Health Solutions";
-    const char *raw =
-        "i'm a Chief Architect at Pure Health Solutions, what's up";
+    const char *raw = "i'm a Chief Architect at Pure Health Solutions, what's up";
     hu_guard_context_t ctx = {0};
     ctx.director_text = director;
     ctx.director_len = sizeof(director) - 1;
@@ -1866,9 +1842,9 @@ static void agent_recent_assistant_avg_len_empty_history_returns_zero(void) {
 static void agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant(void) {
     char a1[] = "twelve bytes";       /* len=12 */
     char a2[] = "ten bytes!";         /* len=10 */
-    char user[] = "user message big";  /* len=16, must be ignored */
-    char tool[] = "tool result data";  /* len=16, must be ignored */
-    char system[] = "system prompt";   /* len=13, must be ignored */
+    char user[] = "user message big"; /* len=16, must be ignored */
+    char tool[] = "tool result data"; /* len=16, must be ignored */
+    char system[] = "system prompt";  /* len=13, must be ignored */
 
     hu_owned_message_t msgs[5];
     memset(msgs, 0, sizeof(msgs));
@@ -1956,6 +1932,53 @@ static void agent_recent_assistant_avg_len_uses_most_recent_n(void) {
     msgs[1].content_len = 100;
     HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 480u);
     HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 100), 375u);
+}
+
+/* ── Critique-echo predicate (D1, 2026-05-19) ─────────────────────────── */
+/* Tests the predicate that catches when the LLM echoes the reflection
+ * critique back as its retry response — covering both the dpo write-side
+ * guard (src/ml/dpo.c) and the agent_turn user-facing scrub
+ * (src/agent/agent_turn.c). The predicate IS the contract: testing it
+ * in isolation per ~/.claude/rules/security-predicate-extraction.md is
+ * worth more than spawning a full agent with a mock provider. */
+
+static void critique_echo_predicate_detects_NEEDS_RETRY_prefix(void) {
+    /* The exact shape seen in 9/10 reflection_retry audit rows. */
+    const char *echo = "NEEDS_RETRY. The response 'GOOD' is irrelevant to the prompt.";
+    HU_ASSERT_TRUE(hu_response_is_critique_echo(echo, strlen(echo)));
+}
+
+static void critique_echo_predicate_detects_needs_retry_lowercase_prefix(void) {
+    /* Some quality evaluators emit lowercase. Catch that too. */
+    const char *echo = "needs_retry: too short and missing context";
+    HU_ASSERT_TRUE(hu_response_is_critique_echo(echo, strlen(echo)));
+}
+
+static void critique_echo_predicate_allows_embedded_mention(void) {
+    /* A legitimate response that mentions NEEDS_RETRY in its body
+     * (not as prefix) is fine — only the prefix is the bug shape. */
+    const char *ok = "I evaluated the prior NEEDS_RETRY case earlier and moved on.";
+    HU_ASSERT_FALSE(hu_response_is_critique_echo(ok, strlen(ok)));
+}
+
+static void critique_echo_predicate_allows_legitimate_response(void) {
+    /* Normal Seth-shape iMessage reply — must not be misclassified. */
+    const char *ok = "yeah let me look at it";
+    HU_ASSERT_FALSE(hu_response_is_critique_echo(ok, strlen(ok)));
+}
+
+static void critique_echo_predicate_handles_short_input(void) {
+    /* Shorter than the prefix length — must not memcmp-overrun. */
+    HU_ASSERT_FALSE(hu_response_is_critique_echo("NEEDS", 5));
+    HU_ASSERT_FALSE(hu_response_is_critique_echo("", 0));
+    /* Boundary: exactly 11 bytes equal to "NEEDS_RETRY" — counts as echo. */
+    HU_ASSERT_TRUE(hu_response_is_critique_echo("NEEDS_RETRY", 11));
+}
+
+static void critique_echo_predicate_handles_null_safe(void) {
+    /* Null s must not crash. */
+    HU_ASSERT_FALSE(hu_response_is_critique_echo(NULL, 0));
+    HU_ASSERT_FALSE(hu_response_is_critique_echo(NULL, 100));
 }
 
 /* ── Registration ─────────────────────────────────────────────────────── */
@@ -2074,4 +2097,10 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_g8_orthogonal_biography_vs_identity);
     HU_RUN_TEST(guard_reject_stats_g8_increments_on_identity_echo);
     HU_RUN_TEST(guard_reject_stats_reset_clears_counters);
+    HU_RUN_TEST(critique_echo_predicate_detects_NEEDS_RETRY_prefix);
+    HU_RUN_TEST(critique_echo_predicate_detects_needs_retry_lowercase_prefix);
+    HU_RUN_TEST(critique_echo_predicate_allows_embedded_mention);
+    HU_RUN_TEST(critique_echo_predicate_allows_legitimate_response);
+    HU_RUN_TEST(critique_echo_predicate_handles_short_input);
+    HU_RUN_TEST(critique_echo_predicate_handles_null_safe);
 }

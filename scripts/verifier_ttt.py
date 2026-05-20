@@ -56,10 +56,24 @@ def _maybe_load_speaker_id_clf(path: str):
 
 
 def generate(prompt: str, gateway: str, temperature: float = 0.9,
-             max_tokens: int = 80, timeout: int = 180) -> tuple[str, float, str]:
+             max_tokens: int = 80, timeout: int = 180,
+             persona_prompt: str = None) -> tuple[str, float, str]:
+    """Generate one candidate response.
+
+    When `persona_prompt` is provided, it's injected as the system
+    message. This matters when `gateway` points at MLX direct (port 8741)
+    rather than the human gateway (port 3006); the gateway's agent_turn
+    pipeline injects persona automatically, but MLX direct does not.
+    Without this, MLX-direct TTT produces bare-LLM output, defeating the
+    purpose of the verifier.
+    """
+    messages = []
+    if persona_prompt:
+        messages.append({"role": "system", "content": persona_prompt})
+    messages.append({"role": "user", "content": prompt})
     body = {
         "model": "gemma-4-26b",
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
@@ -85,7 +99,8 @@ def generate(prompt: str, gateway: str, temperature: float = 0.9,
 
 def ttt_one_prompt(prompt: str, n: int, gateway: str, channel: str = "imessage",
                    temperatures: list = None,
-                   speaker_id_clf: dict = None) -> dict:
+                   speaker_id_clf: dict = None,
+                   persona_prompt: str = None) -> dict:
     """Generate n candidates for a prompt, score, pick best.
 
     The choice function:
@@ -113,7 +128,8 @@ def ttt_one_prompt(prompt: str, n: int, gateway: str, channel: str = "imessage",
     t_start = time.time()
     for i in range(n):
         temp = temperatures[i]
-        text, elapsed, err = generate(prompt, gateway, temperature=temp)
+        text, elapsed, err = generate(prompt, gateway, temperature=temp,
+                                       persona_prompt=persona_prompt)
         shape = classify(text, channel=channel) if not err else {
             "pass": False, "score": 0.0, "len": 0, "fails": [f"gen-error: {err}"]}
         c_p_seth = None
@@ -197,6 +213,11 @@ def main():
                    help="Path to trained speaker-ID classifier JSON. "
                         "When loaded AND all candidates pass shape, "
                         "choose by argmax P(Seth).")
+    p.add_argument("--persona", action="store_true",
+                   help="Inject the compact persona prompt as system "
+                        "message. Required when --gateway points at MLX "
+                        "direct (port 8741); the gateway path injects "
+                        "persona automatically.")
     args = p.parse_args()
     speaker_id_clf = _maybe_load_speaker_id_clf(args.speaker_id_clf)
     if speaker_id_clf:
@@ -205,6 +226,15 @@ def main():
     else:
         print(f"speaker-ID classifier NOT loaded (path={args.speaker_id_clf}); "
               f"using shape-only argmax")
+
+    persona_prompt = None
+    if args.persona:
+        try:
+            from memory_ablation import build_compact_persona_prompt
+            persona_prompt = build_compact_persona_prompt()
+            print(f"persona prompt loaded ({len(persona_prompt)} chars)")
+        except (ImportError, FileNotFoundError) as e:
+            print(f"WARNING: --persona requested but could not build prompt: {e}")
 
     prompts = []
     if args.prompt:
@@ -223,7 +253,8 @@ def main():
     for i, prompt in enumerate(prompts, 1):
         print(f"--- prompt {i}/{len(prompts)}: {prompt[:80]!r}")
         result = ttt_one_prompt(prompt, args.n, args.gateway, args.channel,
-                                speaker_id_clf=speaker_id_clf)
+                                speaker_id_clf=speaker_id_clf,
+                                persona_prompt=persona_prompt)
         all_results.append(result)
         p_seth_disp = (f", P(Seth)={result['chosen_p_seth']:.3f}"
                        if result.get("chosen_p_seth") is not None else "")
