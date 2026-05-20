@@ -807,7 +807,26 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 error_response(alloc, 502, "Agent error", out_status, out_body, out_body_len);
                 return;
             }
+            /* UAF-fix 2026-05-19: if the agent returned HU_OK but with a
+             * NULL/empty response (the AI-tell retry path at L692-714 can
+             * produce this), control would previously fall through to the
+             * fallback provider path at L813+ which uses `msgs` — but
+             * `msgs` was freed at L760. Crash trace: heap-use-after-free
+             * at compatible.c:121 via compatible_chat. Return with a
+             * synthetic empty-response error so msgs is not reused.
+             *
+             * agent_err == HU_OK at this point, response is NULL/empty;
+             * report a 502 so the client retries or surfaces it rather
+             * than silently getting nothing.
+             */
+            error_response(alloc, 502, "Agent returned empty response", out_status, out_body,
+                           out_body_len);
+            return;
         }
+        /* No user message in the request — also can't reach the fallback
+         * provider path because msgs+root are still live, but `last_user_msg`
+         * being NULL means we have no prompt to send. Fall through to the
+         * fallback provider so it can return its own error. */
     }
 
     hu_provider_t provider = {0};

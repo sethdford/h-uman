@@ -163,15 +163,22 @@ def run_one_prompt(prompt: str, spec: dict, persona_prompt: str,
         candidates.append({"text": text, "shape": shape, "p_seth": c_p_seth,
                            "elapsed_s": elapsed, "error": err})
 
-    # L5 v2 choice rule: when shape saturates, P(Seth) is the binding signal.
-    all_shape_pass_and_scored = (
-        speaker_id_clf is not None and
-        all(c["shape"].get("score", 0) >= 1.0 and c["p_seth"] is not None
-            for c in candidates)
-    )
-    if all_shape_pass_and_scored:
-        best = max(candidates, key=lambda c: (c["p_seth"], -c["shape"]["len"]))
-        choice_mode = "p_seth_argmax"
+    # L5 v3 choice rule (2026-05-19, A3 insight): instead of requiring
+    # ALL candidates to pass shape (which rarely happens with the
+    # 0.7-1.15 temperature spread — at least one off-voice candidate
+    # always fails), FILTER to candidates that pass and argmax P(Seth)
+    # within that filtered set. Falls back to shape_argmax only when
+    # no candidate passes.
+    if speaker_id_clf is not None:
+        shape_pass = [c for c in candidates
+                       if c["shape"].get("score", 0) >= 1.0 and c["p_seth"] is not None]
+        if shape_pass:
+            best = max(shape_pass, key=lambda c: (c["p_seth"], -c["shape"]["len"]))
+            choice_mode = "p_seth_argmax_filtered"
+        else:
+            best = max(candidates, key=lambda c: (c["shape"]["score"],
+                                                  -c["shape"]["len"]))
+            choice_mode = "shape_argmax_no_passes"
     else:
         best = max(candidates, key=lambda c: (c["shape"]["score"],
                                               -c["shape"]["len"]))

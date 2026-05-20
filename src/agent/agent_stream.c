@@ -1110,6 +1110,24 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .world_model_context_len = world_model_ctx_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
+        /* Prompt-size budget guard — see agent_turn.c equivalent block.
+         * Caps system prompt at 16 KB to avoid MLX backend empty-response
+         * failures observed at body_len > ~28 KB on 2026-05-19. */
+        if (err == HU_OK && system_prompt && system_prompt_len > 16384) {
+            size_t budget = 16384;
+            size_t cut = budget;
+            while (cut > 0 && system_prompt[cut - 1] != '\n')
+                cut--;
+            if (cut < budget / 2)
+                cut = budget;
+            static atomic_bool warned_stream_prompt_budget = false;
+            hu_log_warn_once(&warned_stream_prompt_budget, "agent_stream", NULL,
+                             "system prompt truncated from %zu to %zu bytes "
+                             "(MLX backend cap)",
+                             system_prompt_len, cut);
+            system_prompt[cut] = '\0';
+            system_prompt_len = cut;
+        }
         if (world_model_ctx) {
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
             world_model_ctx = NULL;

@@ -151,8 +151,7 @@ hu_error_t hu_ml_cli_dpo_judge(hu_allocator_t *alloc, int argc, const char **arg
 
     size_t model_len = model ? strlen(model) : 0;
     hu_dpo_judge_result_t result = {0};
-    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name,
-           batch_size);
+    printf("[dpo] Running DPO judge step (provider=%s, batch=%d)...\n", provider_name, batch_size);
 
     err = hu_dpo_judge_step(&collector, alloc, &provider, model, model_len, 0.1, (size_t)batch_size,
                             &result);
@@ -185,7 +184,8 @@ hu_error_t hu_ml_cli_dpo_judge(hu_allocator_t *alloc, int argc, const char **arg
 }
 
 hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv) {
-    if (!alloc) return HU_ERR_INVALID_ARGUMENT;
+    if (!alloc)
+        return HU_ERR_INVALID_ARGUMENT;
     const char *backend_str = "auto";
     const char *pairs_path = NULL;
     int max_iters = 100;
@@ -202,28 +202,40 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
                    "  --beta <float>             DPO temperature (default: 0.1)\n"
                    "  --model <hf-id>            MLX backend model id\n"
                    "  --adapter-out <dir>        MLX backend output directory\n"
-                   "  --legacy-judge             dispatch to old dpo-judge (deprecated, removed Phase 3)\n");
+                   "  --legacy-judge             dispatch to old dpo-judge (deprecated, removed "
+                   "Phase 3)\n");
             return HU_OK;
         }
         const char *v;
-        if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--backend")))     backend_str = v;
-        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--pairs")))  pairs_path = v;
-        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--iters")))  max_iters = atoi(v);
-        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--beta")))   beta = atof(v);
-        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--model")))  model_id = v;
-        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--adapter-out"))) adapter_out = v;
+        if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--backend")))
+            backend_str = v;
+        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--pairs")))
+            pairs_path = v;
+        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--iters")))
+            max_iters = atoi(v);
+        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--beta")))
+            beta = atof(v);
+        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--model")))
+            model_id = v;
+        else if ((v = cli_dpo_get_opt_p(argv, argc, &i, "--adapter-out")))
+            adapter_out = v;
         else if (strcmp(argv[i], "--legacy-judge") == 0) {
             return hu_ml_cli_dpo_judge(alloc, argc - i - 1, argv + i + 1);
         }
     }
 
     hu_dpo_backend_t backend = HU_DPO_BACKEND_AUTO;
-    if (strcmp(backend_str, "huml") == 0) backend = HU_DPO_BACKEND_HUML;
-    else if (strcmp(backend_str, "mlx") == 0) backend = HU_DPO_BACKEND_MLX;
+    if (strcmp(backend_str, "huml") == 0)
+        backend = HU_DPO_BACKEND_HUML;
+    else if (strcmp(backend_str, "mlx") == 0)
+        backend = HU_DPO_BACKEND_MLX;
 
     hu_rl_trainer_config_t cfg = {
-        .backend = backend, .beta = beta, .max_iters = (size_t)max_iters,
-        .model_id = model_id, .adapter_out_dir = adapter_out,
+        .backend = backend,
+        .beta = beta,
+        .max_iters = (size_t)max_iters,
+        .model_id = model_id,
+        .adapter_out_dir = adapter_out,
     };
     hu_rl_trainer_t trainer = {0};
     hu_error_t err = hu_rl_trainer_create_dpo(alloc, &cfg, &trainer);
@@ -265,7 +277,8 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
             char *p = strstr(line, "\"prompt\": \"");
             char *c = strstr(line, "\"chosen\": \"");
             char *r = strstr(line, "\"rejected\": \"");
-            if (!p || !c || !r) continue;
+            if (!p || !c || !r)
+                continue;
             char prompt[512] = {0}, chosen[512] = {0}, rejected[512] = {0};
             sscanf(p + 11, "%511[^\"]", prompt);
             sscanf(c + 11, "%511[^\"]", chosen);
@@ -287,16 +300,65 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
         }
         fclose(f);
     } else {
-        /* NOTE: Task 13 (the reaction-handler write path that populates the
-         * SQLite dpo_pairs table) shipped in commits a45ee11f + b3059e9a.
-         * The CLI *read-from-SQLite* path here is a separate, intentional
-         * Phase 5 daemon-integration deferral — once the daemon owns a
-         * single hu_dpo_collector_t lifecycle (see plan §"NOT in scope"),
-         * this branch will reuse hu_dpo_collector_open + a SELECT over
-         * dpo_pairs. Until then `--pairs <jsonl>` is the only entry point. */
-        fprintf(stderr, "[dpo-train] no --pairs and SQLite path not yet wired (Phase 5 daemon integration)\n");
-        trainer.vtable->deinit(trainer.ctx, alloc);
-        return HU_ERR_NOT_SUPPORTED;
+        /* SQLite path: open ~/.human/memory.db, run hu_dpo_export
+         * (which embeds the iterator filter that skips short-side
+         * legacy rows — see src/ml/dpo.c::hu_dpo_export and
+         * docs/plans/2026-05-19-dpo-corpus-inverted.md). Copy up to
+         * 256 rows into the stack array used by the training loop. */
+        const char *home = getenv("HOME");
+        if (!home || !*home) {
+            fprintf(stderr, "[dpo-train] HOME not set; cannot find memory.db\n");
+            trainer.vtable->deinit(trainer.ctx, alloc);
+            return HU_ERR_IO;
+        }
+        char db_path[1024];
+        snprintf(db_path, sizeof(db_path), "%s/.human/memory.db", home);
+        sqlite3 *db = NULL;
+        if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+            fprintf(stderr, "[dpo-train] failed to open %s: %s\n", db_path,
+                    db ? sqlite3_errmsg(db) : "(null)");
+            if (db)
+                sqlite3_close(db);
+            trainer.vtable->deinit(trainer.ctx, alloc);
+            return HU_ERR_IO;
+        }
+        hu_dpo_collector_t col;
+        hu_error_t cerr = hu_dpo_collector_create(alloc, db, 0, &col);
+        if (cerr != HU_OK) {
+            fprintf(stderr, "[dpo-train] collector_create failed: error %d\n", (int)cerr);
+            sqlite3_close(db);
+            trainer.vtable->deinit(trainer.ctx, alloc);
+            return cerr;
+        }
+        hu_dpo_export_t exp = {0};
+        cerr = hu_dpo_export(&col, alloc, &exp);
+        if (cerr != HU_OK) {
+            fprintf(stderr, "[dpo-train] export from SQLite failed: error %d\n", (int)cerr);
+            hu_dpo_export_free(alloc, &exp);
+            hu_dpo_collector_deinit(&col);
+            sqlite3_close(db);
+            trainer.vtable->deinit(trainer.ctx, alloc);
+            return cerr;
+        }
+        fprintf(stderr,
+                "[dpo-train] loaded %zu pairs from %s "
+                "(after iterator filter)\n",
+                exp.count, db_path);
+        size_t to_copy = exp.count < 256 ? exp.count : 256;
+        for (size_t i = 0; i < to_copy; i++) {
+            pairs[n_pairs++] = exp.pairs[i];
+        }
+        if (exp.count > 256)
+            fprintf(stderr, "[dpo-train] truncated %zu pairs to 256 (stack cap)\n", exp.count);
+        hu_dpo_export_free(alloc, &exp);
+        hu_dpo_collector_deinit(&col);
+        sqlite3_close(db);
+        if (n_pairs == 0) {
+            fprintf(stderr, "[dpo-train] no usable pairs in DB after filter; "
+                            "nothing to train on\n");
+            trainer.vtable->deinit(trainer.ctx, alloc);
+            return HU_ERR_NOT_SUPPORTED;
+        }
     }
 
     for (int iter = 0; iter < max_iters; iter++) {
@@ -307,10 +369,9 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
             break;
         }
         if ((iter + 1) % 10 == 0 || iter == max_iters - 1)
-            fprintf(stderr,
-                    "[dpo-train] iter %d/%d loss=%.4f Δlogp_w=%.4f Δlogp_l=%.4f\n",
-                    iter + 1, max_iters, m.final_loss,
-                    m.chosen_logprob_delta, m.rejected_logprob_delta);
+            fprintf(stderr, "[dpo-train] iter %d/%d loss=%.4f Δlogp_w=%.4f Δlogp_l=%.4f\n",
+                    iter + 1, max_iters, m.final_loss, m.chosen_logprob_delta,
+                    m.rejected_logprob_delta);
         if (m.adapter_path[0])
             fprintf(stderr, "[dpo-train] adapter written to %s\n", m.adapter_path);
     }

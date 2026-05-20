@@ -87,8 +87,8 @@
  * we catch it) and longer than incidental phrase matches like
  * "I think we should" that happen to appear in both director and
  * reply for normal reasons. */
-#define HU_GUARD_LENGTH_ANOMALY_MULT          HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT
-#define HU_GUARD_DIRECTOR_ECHO_MIN_MATCH      30
+#define HU_GUARD_LENGTH_ANOMALY_MULT     HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT
+#define HU_GUARD_DIRECTOR_ECHO_MIN_MATCH 30
 
 /* Persona identity echo minimum match length. Persona identity strings
  * are typically 30-60 chars ("Chief Architect at Pure Health Solutions"
@@ -97,7 +97,7 @@
  * quotes) and above common-phrase floor ("thanks for the message" = 22)
  * to avoid incidental overlap. Calibrated against the 2026-05-12 audit:
  * every identity-class leak quoted ≥ 30 contiguous chars. */
-#define HU_GUARD_PERSONA_IDENTITY_MIN_MATCH    25
+#define HU_GUARD_PERSONA_IDENTITY_MIN_MATCH 25
 
 /* Documented surface (handled by the catch-all <|...|> stripper, listed
  * here so future maintainers know what model formats we cover):
@@ -133,22 +133,19 @@ bool hu_response_guard_has_special_token(const char *s, size_t len) {
     if (len >= 7) {
         for (size_t i = 0; i + 6 < len; i++) {
             if (s[i] == '<' && (s[i + 1] == 't' || s[i + 1] == 'T') &&
-                (s[i + 2] == 'h' || s[i + 2] == 'H') &&
-                (s[i + 3] == 'i' || s[i + 3] == 'I') &&
-                (s[i + 4] == 'n' || s[i + 4] == 'N') &&
-                (s[i + 5] == 'k' || s[i + 5] == 'K') && s[i + 6] == '>')
+                (s[i + 2] == 'h' || s[i + 2] == 'H') && (s[i + 3] == 'i' || s[i + 3] == 'I') &&
+                (s[i + 4] == 'n' || s[i + 4] == 'N') && (s[i + 5] == 'k' || s[i + 5] == 'K') &&
+                s[i + 6] == '>')
                 return true;
         }
     }
     if (len >= 9) {
         for (size_t i = 0; i + 8 < len; i++) {
             if (s[i] == '<' && (s[i + 1] == 't' || s[i + 1] == 'T') &&
-                (s[i + 2] == 'h' || s[i + 2] == 'H') &&
-                (s[i + 3] == 'o' || s[i + 3] == 'O') &&
-                (s[i + 4] == 'u' || s[i + 4] == 'U') &&
-                (s[i + 5] == 'g' || s[i + 5] == 'G') &&
-                (s[i + 6] == 'h' || s[i + 6] == 'H') &&
-                (s[i + 7] == 't' || s[i + 7] == 'T') && s[i + 8] == '>')
+                (s[i + 2] == 'h' || s[i + 2] == 'H') && (s[i + 3] == 'o' || s[i + 3] == 'O') &&
+                (s[i + 4] == 'u' || s[i + 4] == 'U') && (s[i + 5] == 'g' || s[i + 5] == 'G') &&
+                (s[i + 6] == 'h' || s[i + 6] == 'H') && (s[i + 7] == 't' || s[i + 7] == 'T') &&
+                s[i + 8] == '>')
                 return true;
         }
     }
@@ -516,7 +513,7 @@ static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t re
  * true if any window appears verbatim (case-insensitively) in
  * `s[0..len)`. Skips when src is NULL/short or response is short. */
 static bool hu_guard_director_window_matches(const char *src, size_t src_len, const char *s,
-                                              size_t len) {
+                                             size_t len) {
     if (!src || src_len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
         return false;
     if (len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
@@ -550,7 +547,7 @@ static bool hu_guard_has_director_echo(const hu_guard_context_t *ctx, const char
     if (ctx->director_history && ctx->director_history_lens && ctx->director_history_count > 0) {
         for (size_t i = 0; i < ctx->director_history_count; i++) {
             if (hu_guard_director_window_matches(ctx->director_history[i],
-                                                  ctx->director_history_lens[i], s, len))
+                                                 ctx->director_history_lens[i], s, len))
                 return true;
         }
     }
@@ -590,12 +587,10 @@ static bool hu_guard_persona_pii_construct_at(const char *s, size_t len, size_t 
 
     /* Sliding window for verbs. Patterns include the leading space. */
     static const char *constructs[] = {
-        " is a ",  " is an ", " is the ", " is currently",
-        " was a ", " was an ", " was the ",
-        " has a ", " has an ", " has been ",
-        " lives ", " lives in ", " lives alone",
-        " works ", " works at ", " works as ",
-        " said ", " would ", " prefers ", " enjoys ", " likes ",
+        " is a ",       " is an ",  " is the ",   " is currently", " was a ", " was an ",
+        " was the ",    " has a ",  " has an ",   " has been ",    " lives ", " lives in ",
+        " lives alone", " works ",  " works at ", " works as ",    " said ",  " would ",
+        " prefers ",    " enjoys ", " likes ",
     };
     static const size_t n_constructs = sizeof(constructs) / sizeof(constructs[0]);
 
@@ -627,8 +622,7 @@ static bool hu_guard_persona_pii_construct_at(const char *s, size_t len, size_t 
 
 static bool hu_guard_has_persona_pii_echo(const hu_guard_context_t *ctx, const char *s,
                                           size_t len) {
-    if (!ctx || !ctx->persona_name || ctx->persona_name_len < 2 ||
-        ctx->persona_name_len > 64)
+    if (!ctx || !ctx->persona_name || ctx->persona_name_len < 2 || ctx->persona_name_len > 64)
         return false;
     if (!s || len < ctx->persona_name_len + 4) /* need name + " is " minimum */
         return false;
@@ -663,8 +657,7 @@ static bool hu_guard_has_persona_pii_echo(const hu_guard_context_t *ctx, const c
         /* Right boundary: end-of-string or non-letter. */
         if (i + nlen < len) {
             char next = s[i + nlen];
-            bool next_letter =
-                (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z');
+            bool next_letter = (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z');
             if (next_letter)
                 continue;
         }
@@ -730,12 +723,10 @@ static void hu_guard_record_reject_stats(const hu_guard_report_t *report) {
 void hu_guard_reject_stats_snapshot(hu_guard_reject_stats_t *out) {
     if (!out)
         return;
-    out->semantic_leak =
-        atomic_load_explicit(&s_guard_stat_semantic, memory_order_relaxed);
+    out->semantic_leak = atomic_load_explicit(&s_guard_stat_semantic, memory_order_relaxed);
     out->length_anomaly = atomic_load_explicit(&s_guard_stat_length, memory_order_relaxed);
     out->director_echo = atomic_load_explicit(&s_guard_stat_director, memory_order_relaxed);
-    out->persona_pii_echo =
-        atomic_load_explicit(&s_guard_stat_persona_pii, memory_order_relaxed);
+    out->persona_pii_echo = atomic_load_explicit(&s_guard_stat_persona_pii, memory_order_relaxed);
     out->persona_identity_echo =
         atomic_load_explicit(&s_guard_stat_persona_identity, memory_order_relaxed);
 }
@@ -756,10 +747,28 @@ bool hu_guard_audit_self_talk_leak(const char *s, size_t len) {
     return hu_guard_has_self_talk_pattern(s, len);
 }
 
+bool hu_response_is_critique_echo(const char *s, size_t len) {
+    /* The reflection-retry critique always begins with a verdict token
+     * from reflection.c's prompt template ("NEEDS_RETRY" or lowercase).
+     * When the LLM echoes the critique structure as its response, the
+     * resulting string begins with one of those tokens. Test the prefix
+     * only — embedded mentions in the middle of a legitimate response
+     * are NOT echoes (e.g. "I evaluated the NEEDS_RETRY case earlier"
+     * is fine). Matches the dpo write-side guard in
+     * src/ml/dpo.c::hu_dpo_record_from_retry. */
+    if (!s || len < 11)
+        return false;
+    if (memcmp(s, "NEEDS_RETRY", 11) == 0)
+        return true;
+    if (memcmp(s, "needs_retry", 11) == 0)
+        return true;
+    return false;
+}
+
 void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
-                                  size_t contact_key_len, size_t candidate_count,
-                                  size_t best_idx, int best_quality, size_t response_len,
-                                  const char *response, size_t response_text_len) {
+                                  size_t contact_key_len, size_t candidate_count, size_t best_idx,
+                                  int best_quality, size_t response_len, const char *response,
+                                  size_t response_text_len) {
     hu_observer_t *obs = (hu_observer_t *)observer;
     int preview_n = (int)(response_text_len < 48 ? response_text_len : 48);
     hu_log_info("response_guard", obs,
@@ -942,9 +951,8 @@ static void strip_special_into(const char *in, size_t in_len, char *out, size_t 
     *out_len = w;
 
     /* Trim trailing whitespace introduced by stripping. */
-    while (*out_len > 0 &&
-           (out[*out_len - 1] == ' ' || out[*out_len - 1] == '\t' ||
-            out[*out_len - 1] == '\n' || out[*out_len - 1] == '\r')) {
+    while (*out_len > 0 && (out[*out_len - 1] == ' ' || out[*out_len - 1] == '\t' ||
+                            out[*out_len - 1] == '\n' || out[*out_len - 1] == '\r')) {
         out[--(*out_len)] = '\0';
     }
     /* Trim leading whitespace too. */
@@ -976,8 +984,7 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, 
 hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *response,
                                       size_t response_len, const hu_guard_context_t *ctx,
                                       char **out_response, size_t *out_len,
-                                      hu_guard_outcome_t *out_outcome,
-                                      hu_guard_report_t *report) {
+                                      hu_guard_outcome_t *out_outcome, hu_guard_report_t *report) {
     if (!alloc || !response || !out_response || !out_len || !out_outcome)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -1016,15 +1023,14 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
 
     /* Skip leading whitespace. */
     size_t skip_ws = 0;
-    while (skip_ws < response_len &&
-           (response[skip_ws] == ' ' || response[skip_ws] == '\t' ||
-            response[skip_ws] == '\n' || response[skip_ws] == '\r'))
+    while (skip_ws < response_len && (response[skip_ws] == ' ' || response[skip_ws] == '\t' ||
+                                      response[skip_ws] == '\n' || response[skip_ws] == '\r'))
         skip_ws++;
 
     bool stripped_reasoning_prefix = false;
 
-    if (skip_ws < response_len && response[skip_ws] == '*' &&
-        skip_ws + 1 < response_len && response[skip_ws + 1] == ' ') {
+    if (skip_ws < response_len && response[skip_ws] == '*' && skip_ws + 1 < response_len &&
+        response[skip_ws + 1] == ' ') {
         /* Looks like untagged reasoning.  Walk line-by-line to find where
          * the actual reply begins. A "reasoning line" either starts with
          * `*` or is indented (leading spaces/tabs).  The first
@@ -1107,8 +1113,7 @@ hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *respons
         report->detected_degenerate_repetition = degenerate;
         report->max_repetition_run = char_run > tok_run ? char_run : tok_run;
         size_t prefix_bytes = stripped_reasoning_prefix ? (response_len - effective_len) : 0;
-        report->bytes_stripped =
-            prefix_bytes + (needs_strip ? (effective_len - cleaned_len) : 0);
+        report->bytes_stripped = prefix_bytes + (needs_strip ? (effective_len - cleaned_len) : 0);
     }
 
     if (degenerate) {

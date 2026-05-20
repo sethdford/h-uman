@@ -189,10 +189,23 @@ unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t ch
  * G1/G2 so post-mortems can trace *why* a numbered candidate list leaked. */
 bool hu_guard_audit_numbered_analysis_dump(const char *s, size_t len);
 bool hu_guard_audit_self_talk_leak(const char *s, size_t len);
+
+/* 2026-05-19 — critique-as-response echo detector.
+ *
+ * The reflection-retry loop appends an LLM-generated critique to the
+ * conversation history before re-running chat completion. The LLM
+ * occasionally echoes the critique structure back as its retry attempt,
+ * producing a response that starts with one of the evaluator's verdict
+ * tokens (NEEDS_RETRY / needs_retry). Those responses would otherwise
+ * reach the user as the assistant reply.
+ *
+ * Pure predicate — easy to unit-test (see tests/test_response_guard.c).
+ * Returns true iff the response is a critique echo. */
+bool hu_response_is_critique_echo(const char *s, size_t len);
 void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
-                                  size_t contact_key_len, size_t candidate_count,
-                                  size_t best_idx, int best_quality, size_t response_len,
-                                  const char *response, size_t response_text_len);
+                                  size_t contact_key_len, size_t candidate_count, size_t best_idx,
+                                  int best_quality, size_t response_len, const char *response,
+                                  size_t response_text_len);
 
 /* Run the guard over a response.
  *
@@ -217,11 +230,9 @@ void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
  *
  * Returns HU_OK unless arguments are invalid or allocation failed. The
  * outcome enum (not the error code) tells the caller what to do. */
-hu_error_t hu_response_guard_check(hu_allocator_t *alloc,
-                                   const char *response, size_t response_len,
+hu_error_t hu_response_guard_check(hu_allocator_t *alloc, const char *response, size_t response_len,
                                    char **out_response, size_t *out_len,
-                                   hu_guard_outcome_t *out_outcome,
-                                   hu_guard_report_t *report);
+                                   hu_guard_outcome_t *out_outcome, hu_guard_report_t *report);
 
 /* Context-aware variant. Same as `hu_response_guard_check` but accepts
  * an optional `ctx` with rolling-average reply length and the director's
@@ -236,12 +247,10 @@ hu_error_t hu_response_guard_check(hu_allocator_t *alloc,
  *
  * `ctx == NULL` is identical to `hu_response_guard_check` — no
  * context-aware detections run. */
-hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc,
-                                      const char *response, size_t response_len,
-                                      const hu_guard_context_t *ctx,
+hu_error_t hu_response_guard_check_ex(hu_allocator_t *alloc, const char *response,
+                                      size_t response_len, const hu_guard_context_t *ctx,
                                       char **out_response, size_t *out_len,
-                                      hu_guard_outcome_t *out_outcome,
-                                      hu_guard_report_t *report);
+                                      hu_guard_outcome_t *out_outcome, hu_guard_report_t *report);
 
 /* Lower-level helpers, exposed for testing. ────────────────────────────── */
 
