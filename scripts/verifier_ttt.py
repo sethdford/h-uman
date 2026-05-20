@@ -141,17 +141,23 @@ def ttt_one_prompt(prompt: str, n: int, gateway: str, channel: str = "imessage",
             "elapsed_s": elapsed, "temperature": temp, "error": err or None,
         })
 
-    # Choice function — see docstring for the rationale.
-    all_shape_pass = (speaker_id_clf is not None and
-                      all(c["shape"].get("score", 0) >= 1.0 and c["p_seth"] is not None
-                          for c in candidates))
-    if all_shape_pass:
-        # Speaker-ID classifier is now the binding signal.
-        scored = [(c["p_seth"], -c["shape"]["len"], c["idx"])
-                  for c in candidates]
-        choice_mode = "p_seth_argmax"
+    # L5 v3 choice rule (2026-05-19, A3 insight): filter to candidates
+    # that pass shape, then argmax P(Seth) within that set. The previous
+    # "all candidates pass" predicate almost never fired with the 0.7-1.15
+    # temperature spread — at least one off-voice candidate always failed
+    # shape, defeating the P(Seth) tiebreaker.
+    if speaker_id_clf is not None:
+        shape_pass = [c for c in candidates
+                      if c["shape"].get("score", 0) >= 1.0 and c["p_seth"] is not None]
+        if shape_pass:
+            scored = [(c["p_seth"], -c["shape"]["len"], c["idx"]) for c in shape_pass]
+            choice_mode = "p_seth_argmax_filtered"
+        else:
+            scored = [(c["shape"]["score"], -c["shape"]["len"], c["idx"])
+                      for c in candidates]
+            choice_mode = "shape_argmax_no_passes"
     else:
-        # Fallback: shape primary, length tiebreak.
+        # No classifier — fall back to pure shape ranking.
         scored = [(c["shape"]["score"], -c["shape"]["len"], c["idx"])
                   for c in candidates]
         choice_mode = "shape_argmax"
