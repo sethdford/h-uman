@@ -5022,6 +5022,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
         if (err == HU_OK) {
+            /* Spec 2026-05-19 self-model-scaffold Phase B: stash per-turn
+             * metrics before the canonical write site. Defaults: tool_count
+             * / tool_sequence_hash / persona_delta_kind / emotional_register
+             * left zero — not computed at this batch-chat site. */
+            hu_agent_m3_stash_behavior_metrics(
+                agent, &(hu_agent_behavior_stash_t){
+                           .response_length_chars = (uint32_t)resp.content_len,
+                           .response_length_tokens_est = (uint32_t)(resp.content_len / 4),
+                           .response_latency_ms = (uint32_t)llm_duration_ms,
+                       });
             hu_agent_m3_on_provider_success(agent);
             /* B1 redefined (2026-05-17 r3): record outcome at the top of
              * each batch-chat tool-loop iteration. resp.content may be
@@ -5181,6 +5191,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 user_prompt, user_prompt_len, resp.content, resp.content_len, &gvr_result);
             uint64_t gvr_latency_ms = hu_agent_internal_monotonic_ms() - gvr_t0_ms;
             if (gvr_err == HU_OK) {
+                /* Spec 2026-05-19 self-model-scaffold Phase B: stash GVR's
+                 * post-rewrite length (falls back to original resp when GVR
+                 * did not revise). Other metric fields not available here. */
+                size_t gvr_stash_len =
+                    gvr_result.final_content ? gvr_result.final_content_len : resp.content_len;
+                hu_agent_m3_stash_behavior_metrics(
+                    agent, &(hu_agent_behavior_stash_t){
+                               .response_length_chars = (uint32_t)gvr_stash_len,
+                               .response_length_tokens_est = (uint32_t)(gvr_stash_len / 4),
+                               .response_latency_ms = (uint32_t)gvr_latency_ms,
+                           });
                 hu_agent_m3_on_provider_success(agent);
                 /* B1 redefined (2026-05-17 r3): GVR is a quality-pipeline
                  * rewrite, not response_guard — tag PASS even when revised. */
@@ -5623,6 +5644,22 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                    msg_len, final_content, final_len, &const_cfg,
                                                    &critique) == HU_OK) {
                         uint64_t const_latency_ms = hu_agent_internal_monotonic_ms() - const_t0_ms;
+                        /* Spec 2026-05-19 self-model-scaffold Phase B: stash
+                         * the constitutional pass's output length + latency.
+                         * Uses the post-critique length (revised if rewrite,
+                         * else original draft). Other metric fields not
+                         * available at this critique site. */
+                        size_t cn_stash_len =
+                            (critique.verdict == HU_CRITIQUE_REWRITE && critique.revised_response &&
+                             critique.revised_response_len > 0)
+                                ? critique.revised_response_len
+                                : final_len;
+                        hu_agent_m3_stash_behavior_metrics(
+                            agent, &(hu_agent_behavior_stash_t){
+                                       .response_length_chars = (uint32_t)cn_stash_len,
+                                       .response_length_tokens_est = (uint32_t)(cn_stash_len / 4),
+                                       .response_latency_ms = (uint32_t)const_latency_ms,
+                                   });
                         hu_agent_m3_on_provider_success(agent);
                         /* B1 redefined (2026-05-17 r3): Constitutional AI
                          * is a quality-pipeline critique, not response_guard
@@ -5803,6 +5840,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             break;
                         }
 
+                        /* Spec 2026-05-19 self-model-scaffold Phase B: stash
+                         * metacog regen length + latency. Other metric
+                         * fields not computed here. */
+                        hu_agent_m3_stash_behavior_metrics(
+                            agent,
+                            &(hu_agent_behavior_stash_t){
+                                .response_length_chars = (uint32_t)mc_resp.content_len,
+                                .response_length_tokens_est = (uint32_t)(mc_resp.content_len / 4),
+                                .response_latency_ms = (uint32_t)mc_latency_ms,
+                            });
                         hu_agent_m3_on_provider_success(agent);
                         /* B1 redefined (2026-05-17 r3): metacog regen is a
                          * fresh provider chat call (same model, augmented
@@ -5951,6 +5998,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 uint64_t vc_retry_latency_ms =
                                     hu_agent_internal_monotonic_ms() - vc_retry_t0_ms;
                                 if (retry_err == HU_OK && retry_content && retry_len > 0) {
+                                    /* Spec 2026-05-19 self-model-scaffold Phase
+                                     * B: stash validator-retry length + latency.
+                                     * Other metric fields not computed here. */
+                                    hu_agent_m3_stash_behavior_metrics(
+                                        agent,
+                                        &(hu_agent_behavior_stash_t){
+                                            .response_length_chars = (uint32_t)retry_len,
+                                            .response_length_tokens_est = (uint32_t)(retry_len / 4),
+                                            .response_latency_ms = (uint32_t)vc_retry_latency_ms,
+                                        });
                                     hu_agent_m3_on_provider_success(agent);
                                     /* B1 redefined (2026-05-17 r3): validator
                                      * chain RECOVERED via hu_response_guard_retry_slim
@@ -6134,6 +6191,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             uint64_t ab_retry_latency_ms =
                                 hu_agent_internal_monotonic_ms() - ab_retry_t0_ms;
                             if (retry_err == HU_OK && retry_content && retry_len > 0) {
+                                /* Spec 2026-05-19 self-model-scaffold Phase B:
+                                 * stash response_guard-retry length + latency.
+                                 * Other metric fields not computed here. */
+                                hu_agent_m3_stash_behavior_metrics(
+                                    agent,
+                                    &(hu_agent_behavior_stash_t){
+                                        .response_length_chars = (uint32_t)retry_len,
+                                        .response_length_tokens_est = (uint32_t)(retry_len / 4),
+                                        .response_latency_ms = (uint32_t)ab_retry_latency_ms,
+                                    });
                                 hu_agent_m3_on_provider_success(agent);
                                 /* B1 r3 (2026-05-17): record outcome from the post-batch
                                  * response_guard retry path. turn_kind=2 (batch). */

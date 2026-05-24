@@ -1417,6 +1417,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * hu_agent_m3_route_per_turn(). Mirrors agent_turn.c:4224. */
         hu_agent_m3_route_per_turn(agent);
 
+        /* Spec 2026-05-19 self-model-scaffold Phase B: stash per-turn
+         * metrics before the canonical write site. tool_count + the rest
+         * left zero — not computed at this stream-chat site. */
+        hu_agent_m3_stash_behavior_metrics(
+            agent, &(hu_agent_behavior_stash_t){
+                       .response_length_chars = (uint32_t)sresp.content_len,
+                       .response_length_tokens_est = (uint32_t)(sresp.content_len / 4),
+                       .response_latency_ms = (uint32_t)llm_duration_ms,
+                   });
         hu_agent_m3_on_provider_success(agent);
         /* B1 redefined (2026-05-17 r3): record outcome at the top of each
          * tool-loop iteration. sresp.content may be empty when there are
@@ -1525,6 +1534,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                             safe_content_len = 0;
                             safe_owned = false;
                         } else {
+                            /* Spec 2026-05-19 self-model-scaffold Phase B:
+                             * stash post-retry length + latency. Other metric
+                             * fields not computed here. */
+                            hu_agent_m3_stash_behavior_metrics(
+                                agent,
+                                &(hu_agent_behavior_stash_t){
+                                    .response_length_chars = (uint32_t)safe_content_len,
+                                    .response_length_tokens_est = (uint32_t)(safe_content_len / 4),
+                                    .response_latency_ms = (uint32_t)recovered_retry_latency_ms,
+                                });
                             hu_agent_m3_on_provider_success(agent);
                             /* B1 redefined (2026-05-17 r3): also record a structured
                              * outcome so the future training loop has signal beyond
@@ -1861,6 +1880,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 agent->model_name_len, msg, msg_len, final_content, final_content_len, &gvr_result);
             uint64_t gvr_latency_ms = hu_agent_internal_monotonic_ms() - gvr_t0_ms;
             if (gvr_err == HU_OK) {
+                /* Spec 2026-05-19 self-model-scaffold Phase B:
+                 * stash pre-revise length + GVR latency. The actual gvr_resp_len
+                 * is computed below; final_content_len is the closest approximation
+                 * in scope at this point. */
+                hu_agent_m3_stash_behavior_metrics(
+                    agent, &(hu_agent_behavior_stash_t){
+                               .response_length_chars = (uint32_t)final_content_len,
+                               .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                               .response_latency_ms = (uint32_t)gvr_latency_ms,
+                           });
                 hu_agent_m3_on_provider_success(agent);
                 /* B1 redefined (2026-05-17 r3): GVR is not response_guard
                  * — even when it revises, the decision tag is PASS so the
@@ -1948,6 +1977,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     &revised, &revised_len);
                 uint64_t rethink_latency_ms = hu_agent_internal_monotonic_ms() - rethink_t0_ms;
                 if (re_err == HU_OK) {
+                    /* Spec 2026-05-19 self-model-scaffold Phase B:
+                     * stash final-content length + rethink latency. */
+                    hu_agent_m3_stash_behavior_metrics(
+                        agent, &(hu_agent_behavior_stash_t){
+                                   .response_length_chars = (uint32_t)final_content_len,
+                                   .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                                   .response_latency_ms = (uint32_t)rethink_latency_ms,
+                               });
                     hu_agent_m3_on_provider_success(agent);
                     /* B1 redefined (2026-05-17 r3): persona rethink is a
                      * quality-pipeline rewrite, not response_guard — tag
@@ -1990,6 +2027,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                            agent->model_name_len, msg, msg_len, final_content,
                                            final_content_len, &const_cfg, &critique) == HU_OK) {
                 uint64_t const_latency_ms = hu_agent_internal_monotonic_ms() - const_t0_ms;
+                /* Spec 2026-05-19 self-model-scaffold Phase B:
+                 * stash final-content length + constitutional-critique latency. */
+                hu_agent_m3_stash_behavior_metrics(
+                    agent, &(hu_agent_behavior_stash_t){
+                               .response_length_chars = (uint32_t)final_content_len,
+                               .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                               .response_latency_ms = (uint32_t)const_latency_ms,
+                           });
                 hu_agent_m3_on_provider_success(agent);
                 /* B1 redefined (2026-05-17 r3): Constitutional AI is a
                  * quality-pipeline critique, not response_guard — tag
@@ -2383,6 +2428,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                              retry_txt_len);
                                 agent->alloc->free(agent->alloc->ctx, retry_txt, retry_txt_len + 1);
                             } else {
+                                /* Spec 2026-05-19 self-model-scaffold Phase B:
+                                 * stash retry-text length. No latency in scope
+                                 * at this slim-retry RECOVERED branch. */
+                                hu_agent_m3_stash_behavior_metrics(
+                                    agent,
+                                    &(hu_agent_behavior_stash_t){
+                                        .response_length_chars = (uint32_t)retry_txt_len,
+                                        .response_length_tokens_est = (uint32_t)(retry_txt_len / 4),
+                                    });
                                 hu_agent_m3_on_provider_success(agent);
                                 /* B1 redefined (2026-05-17 r3): response_guard
                                  * RECOVERED path — the retry rewrote a
