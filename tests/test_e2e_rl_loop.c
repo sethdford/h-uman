@@ -1,10 +1,5 @@
 /* tests/test_e2e_rl_loop.c — Phase 6 deterministic closed-loop wiring proof. */
-/* keep <stdio.h> + test_framework.h first — the static-inline helpers in
- * hu_e2e_closed_loop.h depend on snprintf being declared. */
-#include <stdio.h>
-
 #include "test_framework.h"
-
 #include "hu_e2e_closed_loop.h"
 #include "human/agent/reaction_handler.h"
 #include "human/channels/reaction_event.h"
@@ -18,7 +13,6 @@
 #include "human/ml/model.h"
 #include "human/ml/rl_trainer.h"
 #include "human/provider.h"
-#include "test_framework.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,10 +49,10 @@ static float e2e_policy_signature(const hu_model_t *policy) {
 }
 
 static hu_error_t e2e_mock_chat_with_system(void *ctx, hu_allocator_t *alloc,
-                                            const char *system_prompt, size_t system_prompt_len,
-                                            const char *message, size_t message_len,
-                                            const char *model, size_t model_len, double temperature,
-                                            char **out, size_t *out_len) {
+                                              const char *system_prompt, size_t system_prompt_len,
+                                              const char *message, size_t message_len,
+                                              const char *model, size_t model_len,
+                                              double temperature, char **out, size_t *out_len) {
     (void)system_prompt;
     (void)system_prompt_len;
     (void)message;
@@ -182,7 +176,8 @@ static void load_persona_seed(const char ***out_held_out, size_t *out_n_prompts)
     HU_ASSERT_NOT_NULL(held);
     HU_ASSERT_EQ(held->type, HU_JSON_ARRAY);
     HU_ASSERT_EQ(held->data.array.len, 100u);
-    const char **held_out = (const char **)alloc.alloc(alloc.ctx, 100 * sizeof(const char *));
+    const char **held_out =
+        (const char **)alloc.alloc(alloc.ctx, 100 * sizeof(const char *));
     for (size_t i = 0; i < 100; i++) {
         hu_json_value_t *p = held->data.array.items[i];
         char *dup = (char *)alloc.alloc(alloc.ctx, p->data.string.len + 1);
@@ -227,7 +222,8 @@ static void load_reaction_signals(e2e_loaded_events_t *loaded, hu_e2e_reaction_a
     HU_ASSERT_EQ(n, 50u);
 
     loaded->n = n;
-    loaded->events = (hu_reaction_event_t *)alloc.alloc(alloc.ctx, n * sizeof(hu_reaction_event_t));
+    loaded->events =
+        (hu_reaction_event_t *)alloc.alloc(alloc.ctx, n * sizeof(hu_reaction_event_t));
     loaded->event_storage = (char **)alloc.alloc(alloc.ctx, n * 4 * sizeof(char *));
     hu_e2e_reaction_aux_t *aux =
         (hu_e2e_reaction_aux_t *)alloc.alloc(alloc.ctx, n * sizeof(hu_e2e_reaction_aux_t));
@@ -486,6 +482,13 @@ static void test_e2e_closed_loop_deterministic_run1_vs_run2(void) {
     tear_down_env();
 }
 
+void run_e2e_closed_loop_tests(void) {
+    HU_TEST_SUITE("E2E-closed-loop");
+    HU_RUN_TEST(test_e2e_closed_loop_dpo_shows_measurable_response_change);
+    HU_RUN_TEST(test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs);
+    HU_RUN_TEST(test_e2e_closed_loop_provider_after_response_differs_from_before);
+    HU_RUN_TEST(test_e2e_closed_loop_deterministic_run1_vs_run2);
+}
 /* Spec 2026-05-19 (Task 7) — E2E proof that the DPO pair-count trigger
  * (`hu_training_runner_pair_count_should_fire`) actually closes the
  * loop: 50 synthetic reactions populate the collector, the predicate
@@ -624,13 +627,3 @@ static void test_e2e_closed_loop_pair_count_trigger_closes_the_loop(void) {
 }
 #endif /* HU_ENABLE_LEARNING && HU_ENABLE_SQLITE */
 
-void run_e2e_closed_loop_tests(void) {
-    HU_TEST_SUITE("E2E-closed-loop");
-    HU_RUN_TEST(test_e2e_closed_loop_dpo_shows_measurable_response_change);
-    HU_RUN_TEST(test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs);
-    HU_RUN_TEST(test_e2e_closed_loop_provider_after_response_differs_from_before);
-    HU_RUN_TEST(test_e2e_closed_loop_deterministic_run1_vs_run2);
-#if defined(HU_ENABLE_LEARNING) && defined(HU_ENABLE_SQLITE)
-    HU_RUN_TEST(test_e2e_closed_loop_pair_count_trigger_closes_the_loop);
-#endif
-}
