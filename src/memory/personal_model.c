@@ -754,6 +754,21 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
         }
     }
 
+    /* Sprint A.7 wire — splice the social_state.json snapshot (written
+     * every 6h by hu_daemon_social_tick) into the prompt. This brings
+     * stale-contact + drift signals to the LLM's attention without
+     * waiting for the user to ask "any updates?" The reader is
+     * tolerant of missing files; we silently skip when the snapshot
+     * isn't there yet (first daemon run, or non-Apple build). */
+    {
+        char snap_buf[1024];
+        size_t snap_n = hu_persona_render_social_state_snapshot(NULL, snap_buf, sizeof(snap_buf));
+        if (snap_n > 0) {
+            append_fmt(buf, cap, &n, "%s\n", snap_buf);
+            detail = true;
+        }
+    }
+
     if (!detail)
         append_fmt(buf, cap, &n, "(No detailed personal data yet.)\n");
 

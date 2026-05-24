@@ -52,6 +52,20 @@ void hu_reaction_handler_set_collector(hu_dpo_collector_t *collector);
  * hu_daemon_reaction_wire_personal_model. Pass NULL at shutdown to clear. */
 void hu_reaction_handler_set_personal_model(struct hu_personal_model *model);
 
+/* Sprint A.7: optional identity-resolver wire. When non-NULL, reaction
+ * sender_handle is canonicalized via hu_identity_lookup BEFORE the
+ * personal-model ingest call. Effect: "Alice@imessage" + "Alice@slack"
+ * reactions cluster under one canonical name in the persona, instead
+ * of as two separate contacts.
+ *
+ * Conservative: only HIGH-confidence merges (canonical-phone or
+ * canonical-email match) actually rewrite the handle. LOW/MEDIUM
+ * confidence merges leave the raw handle untouched — the resolver's
+ * own conservatism (don't merge strangers with the same first name)
+ * already pinned at that level. */
+#include "human/memory/identity_resolver.h"
+void hu_reaction_handler_set_identity_graph(const hu_identity_graph_t *graph);
+
 hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *event);
 
 /* Per-turn signal flag — daemon's per-turn-cleanup block calls clear() at
