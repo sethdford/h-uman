@@ -209,6 +209,70 @@ def _swap_adapter_inline(adapter_path: str) -> tuple[int, dict]:
     }
 
 
+def _chat_completion_inline(body):
+    """Serve an OpenAI-compatible /v1/chat/completions request from the
+    in-process MLX model.
+
+    Per spec AC-M3-1 (live-fire): the inline server must serve chat through
+    whichever adapter is currently loaded, so the M3 personalization loop
+    has a real served-turn proof end-to-end (training → swap → served turn).
+
+    Request: {"messages": [{"role": ..., "content": ...}, ...], "max_tokens": N?,
+              "model": "..."?, "temperature": ...?}
+    Response: OpenAI-compatible {"choices": [{"message": {"role": "assistant",
+              "content": "..."}, "finish_reason": "stop", "index": 0}], ...}
+
+    If mlx_lm isn't available (e.g. fake-mlx host), returns a deterministic
+    stub response that's structurally valid but content-free — sufficient for
+    transport-contract testing.
+    """
+    messages = body.get("messages", [])
+    if not isinstance(messages, list) or not messages:
+        return 400, {"error": "missing or empty messages"}
+    max_tokens = int(body.get("max_tokens", 256))
+
+    # Apply the model's chat template if the tokenizer supports it; else
+    # fall back to a simple concatenation. Either way produces a prompt
+    # string suitable for generate().
+    if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
+        try:
+            from mlx_lm import generate
+            tok = _MLX_TOKENIZER
+            if hasattr(tok, "apply_chat_template"):
+                prompt = tok.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+            else:
+                prompt = "\n".join(
+                    f"{m.get('role', 'user')}: {m.get('content', '')}"
+                    for m in messages
+                )
+            text = generate(
+                _MLX_MODEL, _MLX_TOKENIZER,
+                prompt=prompt, max_tokens=max_tokens,
+            )
+        except Exception as exc:
+            print(f"[mlx-server] chat generate failed: {exc}", flush=True)
+            return 500, {"error": f"generate failed: {exc}"}
+    else:
+        # No real model loaded — return a deterministic stub so the
+        # transport contract is still testable.
+        last = messages[-1].get("content", "") if messages else ""
+        text = f"[stub] echoing {len(last)} chars from last user message"
+
+    return 200, {
+        "id": "chatcmpl-mlx-inline",
+        "object": "chat.completion",
+        "model": body.get("model", "mlx-inline"),
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": text},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
 def _count_safetensors(path: str) -> int:
     """Parse the safetensors header to count non-metadata tensors.
     Returns 0 on parse failure or empty-tensors stub.
@@ -288,6 +352,14 @@ class SwapHandler(BaseHTTPRequestHandler):
                 flush=True,
             )
             status, resp = _swap_adapter_inline(ap)
+            return self._send_json(status, resp)
+
+        if self.path == "/v1/chat/completions":
+            # AC-M3-1 (live-fire): the inline server must serve chat
+            # completions through the swapped adapter, otherwise the
+            # M3 personalization loop has no served-turn proof.
+            # OpenAI-compatible request shape: messages=[{role, content}].
+            status, resp = _chat_completion_inline(body)
             return self._send_json(status, resp)
 
         return self._send_json(404, {"error": f"no route: {self.path}"})
