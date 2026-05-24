@@ -359,6 +359,7 @@ void run_training_runner_shared_entry_tests(void);
  * internal-#ifdef-wrap-with-stub-runner pattern so the runner symbol
  * resolves in both HU_ENABLE_SELF_MODEL=ON and =OFF builds. */
 void run_self_model_behavior_log_tests(void);
+void run_action_directives_tests(void);
 /* Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same gate
  * pattern as Phase A (stub runner under HU_ENABLE_SELF_MODEL=OFF). */
 void run_self_model_phase_bcde_tests(void);
@@ -1157,6 +1158,7 @@ int main(int argc, char **argv) {
     run_training_runner_shared_entry_tests();
     /* Spec 2026-05-19 self-model-scaffold — runs in both flag variants. */
     run_self_model_behavior_log_tests();
+    run_action_directives_tests();
     run_self_model_phase_bcde_tests();
 #ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
