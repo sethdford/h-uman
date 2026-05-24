@@ -90,10 +90,15 @@ static void error_response(hu_allocator_t *alloc, int status, const char *messag
         *out_body_len = 0;
         return;
     }
-    const char *epfx = "{\"error\":{\"message\":\"";
+    /* hu_json_append_string emits a fully-quoted JSON string (opens with `"`,
+     * escapes contents, closes with `"`). The prefix and suffix must NOT
+     * include those quotes — earlier code added them, producing the
+     * malformed body `{"error":{"message":""Agent error""}}` (verifier
+     * 2026-05-24, M4 production iMessage A/B). */
+    const char *epfx = "{\"error\":{\"message\":";
     if (hu_json_buf_append_raw(&buf, epfx, strlen(epfx)) != HU_OK ||
         hu_json_append_string(&buf, message, strlen(message)) != HU_OK ||
-        hu_json_buf_append_raw(&buf, "\"}}", 3) != HU_OK) {
+        hu_json_buf_append_raw(&buf, "}}", 2) != HU_OK) {
         hu_json_buf_free(&buf);
         *out_body = NULL;
         *out_body_len = 0;
