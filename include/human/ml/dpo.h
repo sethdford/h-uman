@@ -102,6 +102,25 @@ hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *chan
                                  const char *message_ref, size_t message_ref_len,
                                  int tapback_polarity, int reply_latency_s, int reply_length);
 
+/* Sprint 46 R5.1 — latency ingest helper.
+ *
+ * Convenience wrapper called from the iMessage (or any channel's)
+ * inbound dispatch path. Internally:
+ *   1. Looks up the most-recent unresolved production_outcomes row
+ *      for (channel, target).
+ *   2. Computes latency = now - send_timestamp.
+ *   3. Calls hu_dpo_record_outcome with reply_latency_s set.
+ *
+ * If no matching unresolved row exists (e.g. contact texted us without
+ * a prior outbound), this is a no-op returning HU_OK.
+ *
+ * `inbound_length` is the byte length of the incoming text; passed to
+ * record_outcome's reply_length column. Pass -1 if unknown.
+ */
+hu_error_t hu_dpo_record_inbound_arrival(hu_dpo_collector_t *collector, const char *channel,
+                                         size_t channel_len, const char *target, size_t target_len,
+                                         int inbound_length);
+
 typedef struct hu_dpo_export {
     hu_preference_pair_t *pairs;
     size_t count;

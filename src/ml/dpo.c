@@ -408,6 +408,61 @@ hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *chan
     return HU_OK;
 }
 
+hu_error_t hu_dpo_record_inbound_arrival(hu_dpo_collector_t *collector, const char *channel,
+                                         size_t channel_len, const char *target, size_t target_len,
+                                         int inbound_length) {
+    if (!collector || !channel || !target)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (channel_len == 0 || target_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#ifdef HU_ENABLE_SQLITE
+    if (!collector->db)
+        return HU_OK;
+
+    /* Look up most-recent unresolved outbound's send_timestamp. */
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(collector->db,
+                                "SELECT send_timestamp FROM production_outcomes "
+                                "WHERE channel=? AND target=? AND outcome_resolved_at IS NULL "
+                                "ORDER BY send_timestamp DESC LIMIT 1",
+                                -1, &st, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(st, 1, channel, (int)channel_len, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, target, (int)target_len, SQLITE_STATIC);
+    int64_t send_ts = 0;
+    int step_rc = sqlite3_step(st);
+    if (step_rc == SQLITE_ROW)
+        send_ts = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+
+    if (send_ts == 0) {
+        /* No unresolved outbound for this contact — common case: the
+         * contact texted us without us having texted them first. Not
+         * an error; just nothing to attribute the inbound to. */
+        return HU_OK;
+    }
+
+    int64_t now_ts = (int64_t)time(NULL);
+    int64_t latency = now_ts - send_ts;
+    if (latency < 0)
+        latency = 0; /* clock skew safety */
+    if (latency > 2147483647)
+        latency = 2147483647; /* cap to int range */
+
+    return hu_dpo_record_outcome(collector, channel, channel_len, target, target_len, NULL,
+                                 0, /* no message_ref — match by channel+target */
+                                 /*tapback_polarity=*/-2, /* sentinel: leave column */
+                                 (int)latency, inbound_length);
+#else
+    (void)channel_len;
+    (void)target_len;
+    (void)inbound_length;
+    return HU_OK;
+#endif
+}
+
 hu_error_t hu_dpo_export_jsonl(hu_dpo_collector_t *collector, const char *path, size_t path_len,
                                size_t *exported_count) {
     if (!collector || !exported_count)

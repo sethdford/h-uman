@@ -9980,6 +9980,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
 
+                        /* Sprint 46 R5.1 — inbound arrival latency ingest.
+                         *
+                         * Before running agent_turn for this inbound, attribute
+                         * its arrival to any prior unresolved outbound to the
+                         * same contact. record_inbound_arrival is a no-op when
+                         * there's no prior outbound (contact texted us first).
+                         * Best-effort: errors are logged, not fatal.
+                         *
+                         * Note: we use `combined_len` as a proxy for inbound
+                         * length here. It's actually the assembled prompt
+                         * length, not the raw inbound. The reply_length
+                         * column is a coarse engagement proxy; this is
+                         * accurate enough for the L4 outcome-DPO pipeline. */
+                        if (agent && agent->sota.sota_initialized && ch && ch->channel &&
+                            ch->channel->vtable && ch->channel->vtable->name) {
+                            const char *ch_name_in = ch->channel->vtable->name(ch->channel->ctx);
+                            if (ch_name_in && batch_key && key_len > 0) {
+                                int incoming_len = combined_len > 0 && combined_len < 2147483647
+                                                       ? (int)combined_len
+                                                       : -1;
+                                hu_error_t lat_err = hu_dpo_record_inbound_arrival(
+                                    &agent->sota.dpo_collector, ch_name_in, strlen(ch_name_in),
+                                    batch_key, key_len, incoming_len);
+                                if (lat_err != HU_OK && lat_err != HU_ERR_INVALID_ARGUMENT) {
+                                    hu_log_warn("human", agent->observer,
+                                                "inbound_arrival ingest failed: %s",
+                                                hu_error_string(lat_err));
+                                }
+                            }
+                        }
+
                         size_t saved_tools = 0;
                         size_t saved_specs = 0;
                         if (llm_decides) {
