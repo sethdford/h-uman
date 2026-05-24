@@ -155,6 +155,18 @@ static const char *g_classify_model = "gemini-3.1-flash-lite-preview";
 static size_t g_classify_model_len = 29;
 #endif
 
+/* Sprint A.7 daemon-side identity-graph loader storage.
+ *
+ * The reaction handler's identity setter BORROWS the graph pointer, so the
+ * daemon must keep the graph alive for the full process lifetime. The graph
+ * is ~314 KB (256-contact array) — too big for stack but fine as a file-scope
+ * static. Production loads from ~/.human/identity_graph.json at startup;
+ * the file is absent on first-run users, in which case the graph stays
+ * zeroed and the reaction handler is never wired (preserving the current
+ * "no canonicalization" behavior for unconfigured deployments). */
+static hu_identity_graph_t g_identity_graph;
+static bool g_identity_graph_loaded = false;
+
 /* Emotion detection: test builds use heuristic-only (no LLM), production uses hybrid
  * routing via g_classify_provider when available. May appear unreferenced in test builds
  * because some call sites are behind #ifndef HU_IS_TEST. */
@@ -2647,6 +2659,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
          * group events, and balloon-plugin payloads through the same
          * personal-model sink. */
         hu_daemon_imessage_observer_wire_personal_model(&agent->personal_model);
+    }
+
+    /* Sprint A.7 — daemon-side identity-graph loader.
+     *
+     * Activates cross-channel canonicalization: "Alice@imessage" +
+     * "Alice@slack" reactions cluster under one persona contact instead
+     * of two strangers. The setter borrows g_identity_graph for the full
+     * process lifetime (cleared in teardown at the end of this function).
+     *
+     * Conservative on absence: a missing file is the first-run default,
+     * NOT an error — we log at info level and leave the reaction handler
+     * un-wired, which preserves the prior "no canonicalization" behavior.
+     * Only actual parse failures escalate to a warning. */
+    {
+        const char *home = getenv("HOME");
+        char ident_path[1024];
+        if (home && home[0] &&
+            snprintf(ident_path, sizeof(ident_path), "%s/.human/identity_graph.json", home) > 0) {
+            hu_error_t ie = hu_identity_load(&g_identity_graph, ident_path);
+            if (ie == HU_OK) {
+                hu_reaction_handler_set_identity_graph(&g_identity_graph);
+                g_identity_graph_loaded = true;
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "identity graph loaded: %zu contacts from %s",
+                            g_identity_graph.contact_count, ident_path);
+            } else if (ie == HU_ERR_NOT_FOUND) {
+                /* First-run default: no identity_graph.json yet. Silent at
+                 * info level — operators who want cross-channel merging
+                 * will know to create the file. */
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "identity graph: no file at %s — cross-channel "
+                            "reactor canonicalization disabled (create the "
+                            "file via hu_identity_save to enable)",
+                            ident_path);
+            } else {
+                hu_log_error("human", agent ? agent->observer : NULL,
+                             "identity graph: load failed (err=%d) for %s — "
+                             "cross-channel canonicalization disabled",
+                             (int)ie, ident_path);
+            }
+        }
     }
 
     /* Hybrid routing: create a lightweight cloud provider for classification/scoring
@@ -13133,6 +13186,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     /* Phase 1c teardown: detach the personal-model sinks. */
     hu_reaction_handler_set_personal_model(NULL);
     hu_daemon_imessage_observer_wire_personal_model(NULL);
+    /* Sprint A.7 teardown: detach the identity graph borrow. The static
+     * storage itself is process-lifetime; this just ensures the reaction
+     * handler doesn't hold a stale pointer if the process ever live-reloads. */
+    if (g_identity_graph_loaded) {
+        hu_reaction_handler_set_identity_graph(NULL);
+        g_identity_graph_loaded = false;
+    }
     if (agent && agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, alloc);
         agent->w14_scheduler = NULL;
