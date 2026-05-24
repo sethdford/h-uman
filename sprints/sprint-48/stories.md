@@ -149,3 +149,16 @@ This is a **7-story sprint** sized for a **2–3 person team** working in parall
 3. **Wave 3**: US-48-6 (once all others pass /verify)
 
 RESULT_product-owner=READY
+
+---
+
+## Stakeholder decisions (recorded 2026-05-24)
+
+Resolves the 4 open questions:
+
+1. **Eval baseline (US-48-1)**: **Raw frontier model, no persona.** Same model with vs without persona overlay. Cleanest signal that persona is doing work.
+2. **Per-contact fact storage (US-48-2)**: **Single `personal_model.db` with contact-scoped rows.** `contact_handle` indexed column. Easier ops, atomic across contacts, matches existing `hu_personal_model_t` shape. Overrides PO's original per-handle-DB plan in AC-2.3 — update implementation accordingly.
+3. **Proactive throttle scope (US-48-3)**: **Per-contact, max 1/day default, configurable per relationship.** AC-3.4 stands; add config knob `proactive_throttle.per_contact_daily_max` defaulting to 1.
+4. **Onboarding allowlist UX (US-48-5)**: **Auto-detect seth's own handle, add self-chat by default, then prompt for additional contacts.** AC-5.2 refined: wizard pre-populates with auto-detected handle.
+
+These decisions are binding for tech-leads and implementers. Any deviation must be flagged to the scrum-master as a scope-change request.
