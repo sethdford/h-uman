@@ -16,8 +16,12 @@
  * compare-and-exchange so two threads racing on the same kind still emit at
  * most one line. */
 static atomic_bool warned_runtime_gce = false;
+#ifdef HU_HAS_RUNTIME_EXOTIC
+/* Only declared when the exotic runtime branch below is compiled in;
+ * otherwise -Werror=unused-variable trips. */
 static atomic_bool warned_runtime_wasm = false;
 static atomic_bool warned_runtime_cloudflare = false;
+#endif
 
 #define HU_STUB_RUNTIME_MSG_FMT                                                        \
     "runtime.kind='%s' selected — this runtime is a stub/incomplete tier and most "    \

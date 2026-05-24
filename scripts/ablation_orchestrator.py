@@ -130,8 +130,16 @@ RUN_SPECS = {
 }
 
 
-def run_one_prompt(prompt: str, spec: dict, persona_prompt: str) -> dict:
-    """Drive one prompt through one run config. Returns aggregated metrics."""
+def run_one_prompt(prompt: str, spec: dict, persona_prompt: str,
+                   speaker_id_clf: dict = None) -> dict:
+    """Drive one prompt through one run config. Returns aggregated metrics.
+
+    Choice rule for N > 1 (TTT path):
+      - If speaker_id_clf is available AND all candidates pass shape:
+        argmax on P(Seth). Shape was the binding constraint until it
+        saturated at 1.0; now P(Seth) is.
+      - Else fall back to argmax(shape_score, -len).
+    """
     endpoint = ENDPOINTS.get(spec["endpoint_key"])
     if not endpoint:
         return {"text": "", "shape": {"score": 0.0, "pass": False, "len": 0},
@@ -139,7 +147,6 @@ def run_one_prompt(prompt: str, spec: dict, persona_prompt: str) -> dict:
     n = spec["ttt_n"]
     candidates = []
     for i in range(n):
-        # Spread temperature when n > 1
         temp = 0.9 if n == 1 else (0.70 + 0.10 * i)
         messages = []
         if spec.get("with_persona"):
@@ -149,13 +156,29 @@ def run_one_prompt(prompt: str, spec: dict, persona_prompt: str) -> dict:
                 "max_tokens": 80, "temperature": temp}
         text, elapsed, err = post_chat(endpoint, body)
         shape = classify(text, channel="imessage")
-        candidates.append({"text": text, "shape": shape,
+        c_p_seth = None
+        if speaker_id_clf is not None and text:
+            from personaeval_speaker_id import p_seth as _p
+            c_p_seth = _p(speaker_id_clf, text)
+        candidates.append({"text": text, "shape": shape, "p_seth": c_p_seth,
                            "elapsed_s": elapsed, "error": err})
-    # argmax shape_score (TTT step)
-    best = max(candidates, key=lambda c: (c["shape"]["score"],
-                                          -c["shape"]["len"]))
+
+    # L5 v2 choice rule: when shape saturates, P(Seth) is the binding signal.
+    all_shape_pass_and_scored = (
+        speaker_id_clf is not None and
+        all(c["shape"].get("score", 0) >= 1.0 and c["p_seth"] is not None
+            for c in candidates)
+    )
+    if all_shape_pass_and_scored:
+        best = max(candidates, key=lambda c: (c["p_seth"], -c["shape"]["len"]))
+        choice_mode = "p_seth_argmax"
+    else:
+        best = max(candidates, key=lambda c: (c["shape"]["score"],
+                                              -c["shape"]["len"]))
+        choice_mode = "shape_argmax"
     best["total_elapsed_s"] = sum(c["elapsed_s"] for c in candidates)
     best["n_candidates"] = n
+    best["choice_mode"] = choice_mode
     return best
 
 
@@ -187,6 +210,15 @@ def main():
     suite = json.loads(Path(args.suite).read_text())
     tasks = suite["tasks"][: args.n]
     persona_prompt = build_persona_prompt()
+    # Best-effort load of the speaker-ID classifier. When loaded, run_one_prompt
+    # switches to P(Seth) argmax once shape saturates.
+    try:
+        from personaeval_speaker_id import load_classifier
+        speaker_id_clf = load_classifier("/tmp/seth_speaker_id.json")
+        print(f"speaker-ID classifier loaded (P(Seth) tiebreak active)")
+    except (ImportError, FileNotFoundError):
+        speaker_id_clf = None
+        print(f"speaker-ID classifier NOT loaded; shape-only TTT argmax")
     run_ids = [r.strip() for r in args.runs.split(",") if r.strip()]
 
     print("=" * 78)
@@ -204,7 +236,8 @@ def main():
         run_results = []
         for t in tasks:
             prompt = t["prompt"]
-            res = run_one_prompt(prompt, spec, persona_prompt)
+            res = run_one_prompt(prompt, spec, persona_prompt,
+                                 speaker_id_clf=speaker_id_clf)
             score = res["shape"]["score"]
             print(f"  [{t.get('id'):25}] score={score:.2f} "
                   f"len={res['shape']['len']:>3} "

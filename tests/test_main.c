@@ -86,10 +86,18 @@ void run_matrix_reactions_tests(void);
 void run_reaction_handler_lookup_store_tests(void);
 /* Conversation-gap classifier (Tier 1 #3 of better-than-human plan). */
 void run_imessage_gaps_tests(void);
+/* Pattern-drift compute layer (Tier-3 future-facing). */
+void run_pattern_drift_tests(void);
+/* Per-contact relationship signatures (Tier 2 Sprint A). */
+void run_contact_signature_tests(void);
+/* Sprint A.5 — render reaction signature to prompt paragraph. */
+void run_persona_social_insights_tests(void);
 /* Reaction-driven topic salience (Tier 1 #1). */
 void run_personal_model_topics_from_reactions_tests(void);
 /* Calibrate-with-reactions (Tier 1 #2). */
 void run_calibration_reactions_tests(void);
+/* Predictive draft suggestions (Sprint 1 Story 1). */
+void run_predictive_drafts_tests(void);
 /* Phase 2 cross-channel reaction emit: Discord MESSAGE_REACTION_ADD/REMOVE. */
 void run_discord_reactions_tests(void);
 /* Phase 2 cross-channel reaction emit: Telegram message_reaction diff. */
@@ -379,6 +387,7 @@ void run_weather_awareness_tests(void);
 void run_timing_tests(void);
 void run_calibration_tests(void);
 void run_calibration_reactions_tests(void);
+void run_predictive_drafts_tests(void);
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
 void run_activation_steering_tests(void);
@@ -410,6 +419,7 @@ void run_memory_degradation_tests(void);
 void run_self_awareness_tests(void);
 void run_superhuman_tests(void);
 void run_contact_graph_tests(void);
+void run_identity_resolver_tests(void);
 void run_tool_call_parser_tests(void);
 void run_tool_router_tests(void);
 void run_dag_tests(void);
@@ -874,8 +884,12 @@ int main(int argc, char **argv) {
     run_matrix_reactions_tests();
     run_reaction_handler_lookup_store_tests();
     run_imessage_gaps_tests();
+    run_pattern_drift_tests();
+    run_contact_signature_tests();
+    run_persona_social_insights_tests();
     run_personal_model_topics_from_reactions_tests();
     run_calibration_reactions_tests();
+    run_predictive_drafts_tests();
     run_discord_reactions_tests();
     run_telegram_reactions_tests();
     run_slack_reactions_tests();
@@ -1152,6 +1166,7 @@ int main(int argc, char **argv) {
     run_timing_tests();
     run_calibration_tests();
     run_calibration_reactions_tests();
+    run_predictive_drafts_tests();
     run_behavioral_clone_tests();
     run_governor_tests();
     run_activation_steering_tests();
@@ -1185,6 +1200,7 @@ int main(int argc, char **argv) {
     run_self_awareness_tests();
     run_superhuman_tests();
     run_contact_graph_tests();
+    run_identity_resolver_tests();
     run_tool_call_parser_tests();
     run_tool_router_tests();
     run_dag_tests();

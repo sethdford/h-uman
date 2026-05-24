@@ -396,6 +396,10 @@ if(HU_ENABLE_IMESSAGE)
     # who have gone silent, for proactive-outreach prompting. Pure
     # classifier + SQL scanner (gated under HU_IS_TEST).
     list(APPEND CHANNEL_SOURCES src/channels/imessage_gaps.c)
+    # Tier 2 Sprint A — per-contact relationship signatures: TOD
+    # distribution, response latency, initiation ratio, frequency
+    # aggregates per contact. Pure helpers + SQL scanner (HU_IS_TEST stub).
+    list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -630,6 +634,10 @@ set(HU_CORE_SOURCES
     src/persona/markdown_loader.c
     src/persona/somatic.c
     src/persona/narrative_self.c
+    # Sprint A.5 wiring: renders the personal model's reaction signature
+    # (from calibrate) into a prompt-ready paragraph, ready to splice
+    # into the agent's persona context.
+    src/persona/social_insights.c
     src/gateway/event_bridge.c
     src/gateway/tenant.c
     src/runtime/native.c
@@ -743,6 +751,7 @@ set(HU_CORE_SOURCES
     src/calibration/calibrate.c
     src/calibration/clone.c
     src/calibration/ab_compare.c
+    src/predictive/drafts.c
     src/context/context_ext.c
     src/agent/episodic.c
     src/agent/reflection.c
@@ -837,6 +846,7 @@ set(HU_CORE_SOURCES
     src/memory/emotional_moments.c
     src/memory/superhuman.c
     src/memory/contact_graph.c
+    src/memory/identity_resolver.c
     src/memory/fast_capture.c
     src/memory/promotion.c
     src/memory/consolidation.c
@@ -847,6 +857,9 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
+    # Tier-3 future-facing: pattern-drift compute. Pure helpers + SQL
+    # scanner gated under HU_IS_TEST (same pattern as imessage_gaps).
+    src/memory/pattern_drift.c
     src/memory/minja_guard.c
     src/memory/hallucination_guard.c
     # W7: graph.h is the internal graph API. Direct includes from outside
@@ -3241,6 +3254,7 @@ set(HU_TEST_SOURCES
     tests/test_timing.c
     tests/test_calibration.c
     tests/test_calibration_reactions.c
+    tests/test_predictive_drafts.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
     tests/test_activation_steering.c
@@ -3264,6 +3278,7 @@ set(HU_TEST_SOURCES
     tests/test_self_awareness.c
     tests/test_superhuman.c
     tests/test_contact_graph.c
+    tests/test_identity_resolver.c
     tests/test_tool_call_parser.c
     tests/test_tool_router.c
     tests/test_dag.c
@@ -3421,6 +3436,12 @@ list(APPEND HU_TEST_SOURCES tests/test_matrix_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_lookup_store.c)
 # Conversation-gap classifier tests.
 list(APPEND HU_TEST_SOURCES tests/test_imessage_gaps.c)
+# Pattern-drift compute-layer tests (pure helpers + SQL stub contract).
+list(APPEND HU_TEST_SOURCES tests/test_pattern_drift.c)
+# Per-contact relationship signatures (Tier 2 Sprint A).
+list(APPEND HU_TEST_SOURCES tests/test_contact_signature.c)
+# Sprint A.5 wiring: render reaction signature → prompt paragraph.
+list(APPEND HU_TEST_SOURCES tests/test_persona_social_insights.c)
 # Reaction-driven topic salience (Tier 1 #1 of better-than-human plan).
 list(APPEND HU_TEST_SOURCES tests/test_personal_model_topics_from_reactions.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch

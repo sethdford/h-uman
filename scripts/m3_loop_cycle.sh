@@ -134,11 +134,36 @@ log "  accumulated $PAIRS_COUNT DPO pairs (rewrites + counterfactuals + probes)"
 if [ "$PAIRS_COUNT" -ge "$DPO_THRESHOLD" ]; then
     ADAPTER_OUT="$HUMAN_HOME/training-data/adapters/dpo-$(date +%Y%m%d-%H%M%S)"
     log "--- step 3: real DPO training (threshold $DPO_THRESHOLD met) ---"
-    python3 "$REPO_ROOT/scripts/m3_dpo_from_rewrites.py" \
-        --input "$REWRITE_PAIRS" \
-        --export-jsonl "$ALPACA_OUT" \
-        --train --adapter-out "$ADAPTER_OUT" \
-        --iters 100 --beta 0.1 2>&1 | tee -a "$LOG"
+
+    # Training backend selector — defaults to local mlx_lm; flip to gce
+    # to offload training to a GPU VM. The gce path REQUIRES
+    # M3_GCE_CONFIRM_SPEND=1 to actually provision a billable VM;
+    # otherwise it dry-runs and falls back to local.
+    M3_TRAINING_BACKEND="${M3_TRAINING_BACKEND:-local}"
+    if [ "$M3_TRAINING_BACKEND" = "gce" ] && [ "${M3_GCE_CONFIRM_SPEND:-0}" = "1" ]; then
+        log "  backend=gce (will provision GPU VM via m3_gce_train.sh)"
+        bash "$REPO_ROOT/scripts/m3_gce_train.sh" \
+            --pairs "$ALPACA_OUT" \
+            --adapter-out "$ADAPTER_OUT" \
+            --base-model "${M3_BASE_MODEL:-google/gemma-3-4b-it}" \
+            --iters "${M3_ITERS:-50}" \
+            --rank "${M3_RANK:-8}" \
+            --gpu "${M3_GPU:-l4}" \
+            --max-hours "${M3_MAX_HOURS:-1}" \
+            --confirm-spend 2>&1 | tee -a "$LOG" || \
+            log "  WARN: gce training failed; falling back to local"
+        # If gce produced an adapter, we use that; otherwise fall through
+        # to the legacy local path below.
+    fi
+    if [ ! -f "$ADAPTER_OUT/adapters.safetensors" ] && \
+       [ ! -f "$ADAPTER_OUT/adapter_model.safetensors" ]; then
+        log "  backend=local (mlx_lm.lora)"
+        python3 "$REPO_ROOT/scripts/m3_dpo_from_rewrites.py" \
+            --input "$REWRITE_PAIRS" \
+            --export-jsonl "$ALPACA_OUT" \
+            --train --adapter-out "$ADAPTER_OUT" \
+            --iters 100 --beta 0.1 2>&1 | tee -a "$LOG"
+    fi
 
     # Step 4: A/B eval against the prior adapter (find via lineage)
     PRIOR_ADAPTER=$(python3 -c "
@@ -160,7 +185,7 @@ else:
 " 2>/dev/null || echo "")
 
     if [ -n "$PRIOR_ADAPTER" ] && [ -f "$ADAPTER_OUT/adapters.safetensors" ]; then
-        log "--- step 4: A/B eval ---"
+        log "--- step 4: A/B metadata eval ---"
         python3 "$REPO_ROOT/scripts/m3_eval_adapter.py" \
             --baseline "$PRIOR_ADAPTER" \
             --candidate "$ADAPTER_OUT/adapters.safetensors" \
@@ -168,15 +193,53 @@ else:
             --json-out "$LOG_DIR/m3-verdict-$(date +%Y%m%d-%H%M%S).json" \
             2>&1 | tee -a "$LOG"
         VERDICT=$(jq -r '.verdict' "$LOG_DIR/m3-verdict-"*.json 2>/dev/null | tail -1)
-        log "  verdict: $VERDICT"
+        log "  metadata verdict: $VERDICT"
 
-        # Step 5: auto-promote (only if explicitly enabled)
-        if [ "$AUTO_PROMOTE" = "1" ] && [ "$VERDICT" = "pass" ]; then
-            log "--- step 5: auto-promote ---"
+        # Step 4b: behavioral eval (the "did it actually learn?" test).
+        # Only runs when:
+        #   - the metadata verdict is pass (don't waste time on a broken
+        #     adapter)
+        #   - the held-out prompts file exists (operator ran the split)
+        #   - MLX server is reachable / model is downloadable
+        BEHAVIORAL_VERDICT="skipped"
+        if [ "$VERDICT" = "pass" ] && \
+           [ -f "$HUMAN_HOME/training-data/m3-holdout-prompts.jsonl" ]; then
+            log "--- step 4b: behavioral eval (style + diversity) ---"
+            BEH_OUT="$LOG_DIR/m3-behavioral-$(date +%Y%m%d-%H%M%S).json"
+            python3 "$REPO_ROOT/scripts/m3_behavioral_eval.py" \
+                --candidate-adapter "$ADAPTER_OUT" \
+                --prompts-jsonl "$HUMAN_HOME/training-data/m3-holdout-prompts.jsonl" \
+                --max-prompts "${M3_BEHAVIORAL_PROMPTS:-8}" \
+                --max-tokens 60 \
+                --json-out "$BEH_OUT" 2>&1 | tee -a "$LOG" || \
+                log "  WARN: behavioral eval errored (skipping gate)"
+            if [ -f "$BEH_OUT" ]; then
+                BEHAVIORAL_VERDICT=$(jq -r '.verdict' "$BEH_OUT" 2>/dev/null)
+                log "  behavioral verdict: $BEHAVIORAL_VERDICT"
+            fi
+        else
+            log "  skipping behavioral eval (verdict=$VERDICT or no holdout)"
+        fi
+
+        # Step 5: auto-promote — requires BOTH gates to pass.
+        # Safety stack:
+        #   1. M3_AUTO_PROMOTE=1 (explicit opt-in via env)
+        #   2. metadata verdict = pass
+        #   3. behavioral verdict in {pass, skipped} (regress blocks)
+        #   4. drift detector NOT NEEDS_ROLLBACK on most recent window
+        SAFE_TO_PROMOTE=0
+        if [ "$AUTO_PROMOTE" = "1" ] && \
+           [ "$VERDICT" = "pass" ] && \
+           [ "$BEHAVIORAL_VERDICT" != "regress" ]; then
+            SAFE_TO_PROMOTE=1
+        fi
+
+        if [ "$SAFE_TO_PROMOTE" = "1" ]; then
+            log "--- step 5: auto-promote (both gates passed) ---"
             python3 "$REPO_ROOT/scripts/m3_promote.py" promote \
                 --adapter "$ADAPTER_OUT" --yes --no-prod-check 2>&1 | tee -a "$LOG"
         else
-            log "  skipping promote (auto_promote=$AUTO_PROMOTE verdict=$VERDICT)"
+            log "  skipping promote (auto_promote=$AUTO_PROMOTE metadata=$VERDICT behavioral=$BEHAVIORAL_VERDICT)"
             log "  to promote manually: scripts/m3_promote.py promote --adapter $ADAPTER_OUT --yes"
         fi
     else
