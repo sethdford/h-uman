@@ -10051,6 +10051,40 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 "silent to users");
                     } else if (err == HU_OK && response_len > 0) {
                         g_empty_agent_response_streak = 0;
+                        /* AGI-C1b — record outbound to production_outcomes
+                         * for the self-improvement loop. Outcome columns
+                         * fill in later when reactions arrive (handled
+                         * in reaction_handler.c). The pair (channel,
+                         * target, message_ref) is the join key; until
+                         * iMessage send returns the actual message
+                         * ref, we use batch_key as a best-effort
+                         * proxy (batch_key encodes channel+chat).
+                         *
+                         * Best-effort: SQLite-disabled builds get
+                         * HU_OK (no-op); transient IO errors are logged
+                         * but don't fail the turn. See
+                         * docs/plans/2026-05-19-agi-path.md. */
+                        if (agent && agent->sota.sota_initialized && ch && ch->channel &&
+                            ch->channel->vtable && ch->channel->vtable->name) {
+                            const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
+                            if (ch_name) {
+                                hu_error_t out_err = hu_dpo_record_outbound(
+                                    &agent->sota.dpo_collector, ch_name, strlen(ch_name), batch_key,
+                                    key_len, NULL, 0, /* message_ref unknown here */
+                                    combined, combined_len, response, response_len,
+                                    /* p_seth_at_send — not yet computed in C; -1.0 means
+                                     * "classifier unavailable, leave column NULL". The
+                                     * outcomes_to_dpo Python job can backfill later by
+                                     * scoring chosen with the v2 classifier offline. */
+                                    -1.0);
+                                if (out_err != HU_OK) {
+                                    hu_log_warn("human", agent->observer,
+                                                "production_outcomes record_outbound "
+                                                "failed: %s",
+                                                hu_error_string(out_err));
+                                }
+                            }
+                        }
                     }
                     /* Hex dump first 80 bytes of response for encoding diagnostics */
                     if (err == HU_OK && response && response_len > 0) {
