@@ -49,6 +49,11 @@ typedef struct hu_lora_nightly_config {
     char adapters_dir[HU_LORA_NIGHTLY_PATH_MAX];     /* default ~/.human/adapters */
     char current_symlink[HU_LORA_NIGHTLY_PATH_MAX];  /* default ~/.human/adapter-current */
     char mlx_base_url[HU_LORA_NIGHTLY_PATH_MAX];     /* default http://127.0.0.1:8741/v1 */
+    /* Base model identifier passed to mlx_lm.lora --model. Empty →
+     * subprocess training is skipped (rotation + swap still execute
+     * against an empty adapter dir, useful for smoke-testing). Set
+     * via hu_lora_nightly_config_init_defaults to a built-in default. */
+    char base_model[256];
     /* When true, skip the actual mlx_lm subprocess call. Useful for
      * smoke-testing the export+rotation+swap path without an MLX
      * runtime on PATH. */
