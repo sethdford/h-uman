@@ -126,6 +126,38 @@ static void test_half_life_decay_applies_to_contact_facts(void) {
     HU_ASSERT_EQ(effective, fact.confidence);
 }
 
+static void test_30_day_old_fact_decays_to_expected_confidence(void) {
+    /* AC-2.5: Half-life decay test at a non-trivial point (30 days).
+     * Half-life = 90 days = 7,776,000 seconds.
+     * Formula: effective = confidence * 0.5^(age_seconds / half_life_seconds)
+     * For confidence=0.8, age=30 days: 0.8 * 0.5^(30/90) = 0.8 * 0.5^(1/3)
+     * ≈ 0.8 * 0.7937 ≈ 0.635
+     */
+
+    hu_heuristic_fact_t fact;
+    memset(&fact, 0, sizeof(fact));
+
+    fact.type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(fact.subject, sizeof(fact.subject), "contact");
+    snprintf(fact.predicate, sizeof(fact.predicate), "enjoys");
+    snprintf(fact.object, sizeof(fact.object), "coffee");
+    snprintf(fact.source_hint, sizeof(fact.source_hint), "conversation");
+    fact.confidence = 0.8f;
+    fact.provenance.tier = HU_TRUST_USER_DIRECT;
+    snprintf(fact.contact_handle, sizeof(fact.contact_handle), "alice");
+
+    int64_t now = time(NULL);
+    int64_t thirty_days_ago = now - (30LL * 24 * 60 * 60);
+    fact.last_seen_at = thirty_days_ago;
+
+    float effective = hu_heuristic_fact_effective_confidence(&fact, now);
+
+    /* Expected: 0.8 * 0.5^(30/90) ≈ 0.635
+     * Allow tolerance of ±0.05 */
+    HU_ASSERT_TRUE(effective > 0.585f);
+    HU_ASSERT_TRUE(effective < 0.685f);
+}
+
 static void test_atomic_save_preserves_contact_handle_rows(void) {
     setup_test_db();
 
@@ -225,6 +257,7 @@ void run_personal_model_per_contact_tests(void) {
     HU_RUN_TEST(test_load_for_contact_returns_empty_when_not_found);
     HU_RUN_TEST(test_ingest_for_contact_stores_facts_by_handle);
     HU_RUN_TEST(test_half_life_decay_applies_to_contact_facts);
+    HU_RUN_TEST(test_30_day_old_fact_decays_to_expected_confidence);
     HU_RUN_TEST(test_atomic_save_preserves_contact_handle_rows);
     HU_RUN_TEST(test_contact_facts_injected_into_autoresponder_prompt);
 }

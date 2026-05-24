@@ -198,7 +198,7 @@ static void test_prompt_includes_assistant_framing(void) {
     init_cfg(&cfg);
     char buf[2048] = {0};
     size_t n = hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hey are you free?",
-                                             "Tone: warm, casual.", buf, sizeof(buf));
+                                             "Tone: warm, casual.", NULL, buf, sizeof(buf));
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_TRUE(strstr(buf, "assistant") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "Seth") != NULL);
@@ -208,7 +208,7 @@ static void test_prompt_forbids_claiming_to_be_user(void) {
     hu_autoresponder_config_t cfg;
     init_cfg(&cfg);
     char buf[2048] = {0};
-    hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hi", NULL, buf, sizeof(buf));
+    hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hi", NULL, NULL, buf, sizeof(buf));
     /* Must contain explicit prohibition. */
     HU_ASSERT_TRUE(strstr(buf, "NEVER claim to be the user") != NULL);
 }
@@ -217,7 +217,7 @@ static void test_prompt_null_incoming_falls_back_to_empty(void) {
     hu_autoresponder_config_t cfg;
     init_cfg(&cfg);
     char buf[1024] = {0};
-    hu_autoresponder_build_prompt(&cfg, "alice", "imessage", NULL, NULL, buf, sizeof(buf));
+    hu_autoresponder_build_prompt(&cfg, "alice", "imessage", NULL, NULL, NULL, buf, sizeof(buf));
     HU_ASSERT_TRUE(strstr(buf, "(empty)") != NULL);
 }
 
