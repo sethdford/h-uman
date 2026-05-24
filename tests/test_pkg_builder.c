@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static void test_pkg_builder_flag_parsing_output_flag(void) {
@@ -311,6 +312,22 @@ static void test_pkg_builder_non_macos_exits_79(void) {
     HU_ASSERT_TRUE(found_exit_79);
 }
 
+static void test_pkg_builder_dry_run_succeeds_e2e(void) {
+    // E2E test: actually invoke the script in dry-run mode and verify it succeeds.
+    // Validates command-line parsing, dry-run logic, and script stability.
+    HU_SKIP_IF(access("scripts/release/build-pkg.sh", X_OK) != 0, "build-pkg.sh not executable");
+    HU_SKIP_IF(access("build/Human.app/Contents/MacOS/human", X_OK) != 0,
+               "Human.app binary not found (build with cmake first)");
+
+    int exit_code = system("bash scripts/release/build-pkg.sh --dry-run --app-path build/Human.app "
+                           "--output /tmp/sprint49-test.pkg");
+
+    // system() returns exit status in upper 8 bits (shift right by 8)
+    int actual_exit = WEXITSTATUS(exit_code);
+
+    HU_ASSERT_EQ(actual_exit, 0);
+}
+
 void run_pkg_builder_tests(void) {
     HU_TEST_SUITE("pkg_builder");
 
@@ -329,4 +346,5 @@ void run_pkg_builder_tests(void) {
     HU_RUN_TEST(test_pkg_builder_launchd_plist_exists);
     HU_RUN_TEST(test_pkg_builder_dry_run_mode);
     HU_RUN_TEST(test_pkg_builder_non_macos_exits_79);
+    HU_RUN_TEST(test_pkg_builder_dry_run_succeeds_e2e);
 }

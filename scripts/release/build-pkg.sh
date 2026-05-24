@@ -138,7 +138,11 @@ fi
 DIST_XML=$(mktemp)
 trap "rm -rf '$STAGE' '$COMPONENT_PLIST' '$(dirname "$COMPONENT_PKG")' '$DIST_XML'" EXIT
 
-sed "s/@VERSION@/$VERSION/g" \
+# Escape ampersands and forward slashes in VERSION for sed substitution
+VERSION_ESC="${VERSION//&/\\&}"
+VERSION_ESC="${VERSION_ESC//\//\\/}"
+
+sed "s|@VERSION@|${VERSION_ESC}|g" \
     "$PROJECT_DIR/tests/fixtures/distribution.xml.template" > "$DIST_XML"
 
 # Validate distribution.xml syntax
