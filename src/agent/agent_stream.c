@@ -205,6 +205,9 @@ hu_error_t hu_agent_turn_stream(hu_agent_t *agent, const char *msg, size_t msg_l
 
     hu_agent_set_current_for_tools(agent);
 
+    /* Reset per-turn state so behavior-log stash sees a clean slate. */
+    hu_agent_turn_state_reset(agent);
+
     hu_agent_internal_process_mailbox_messages(agent);
 
     char *slash_resp = hu_agent_handle_slash_command(agent, msg, msg_len);
@@ -292,6 +295,10 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         *response_len_out = 0;
 
     hu_agent_set_current_for_tools(agent);
+
+    /* Reset per-turn state so behavior-log stash sees a clean slate. */
+    hu_agent_turn_state_reset(agent);
+
     hu_agent_internal_process_mailbox_messages(agent);
 
     /* Free any previously-built humanness context, then build fresh for this turn */
@@ -1721,9 +1728,11 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                             .tool_call_id = call->id,
                             .tool_call_id_len = call->id_len,
                         };
+                        hu_agent_turn_state_track_tool(agent, call->name, call->name_len);
                         tool->vtable->execute_streaming(tool->ctx, agent->alloc, args,
                                                         tool_chunk_to_event, &bridge, &result);
                     } else if (tool->vtable->execute) {
+                        hu_agent_turn_state_track_tool(agent, call->name, call->name_len);
                         tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
                     }
                     hu_json_free(agent->alloc, args);
