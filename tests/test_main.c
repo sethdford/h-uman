@@ -87,6 +87,8 @@ void run_pattern_drift_tests(void);
 void run_contact_signature_tests(void);
 /* Sprint A.5 — render reaction signature to prompt paragraph. */
 void run_persona_social_insights_tests(void);
+/* Sprint A.6 — daemon social tick (gap + drift + signatures → JSON). */
+void run_daemon_social_tick_tests(void);
 /* Reaction-driven topic salience (Tier 1 #1). */
 void run_personal_model_topics_from_reactions_tests(void);
 /* Calibrate-with-reactions (Tier 1 #2). */
@@ -868,6 +870,7 @@ int main(int argc, char **argv) {
     run_pattern_drift_tests();
     run_contact_signature_tests();
     run_persona_social_insights_tests();
+    run_daemon_social_tick_tests();
     run_personal_model_topics_from_reactions_tests();
     run_calibration_reactions_tests();
     run_predictive_drafts_tests();
