@@ -25,6 +25,7 @@
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/multimodal_policy.h"
+#include "human/agent/persona_eval.h"
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
@@ -10100,16 +10101,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             ch->channel->vtable && ch->channel->vtable->name) {
                             const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
                             if (ch_name) {
+                                /* Sprint 46 R5.3 — score the response with the
+                                 * in-process PersonaEval classifier. When the
+                                 * agent has no model loaded (file missing at
+                                 * init), score returns 0.5 — record_outbound
+                                 * stores that as-is. */
+                                double p_seth = hu_persona_eval_score(agent->persona_eval, response,
+                                                                      response_len);
                                 hu_error_t out_err = hu_dpo_record_outbound(
                                     &agent->sota.dpo_collector, ch_name, strlen(ch_name), batch_key,
                                     key_len, NULL, 0, /* message_ref unknown here */
-                                    combined, combined_len, response, response_len,
-                                    /* p_seth_at_send — not yet computed in C; -1.0 means
-                                     * "classifier unavailable, leave column NULL". The
-                                     * outcomes_to_dpo Python job can backfill later by
-                                     * scoring chosen with the v2 classifier offline.
-                                     * R5.3 will replace -1.0 with the real value. */
-                                    -1.0,
+                                    combined, combined_len, response, response_len, p_seth,
                                     /* alternatives_json — Sprint 46 R5.2. NULL today since
                                      * production doesn't run L5 best-of-N yet. Sprint 47
                                      * will populate this when the L5 path lands. */

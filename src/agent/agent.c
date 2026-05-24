@@ -6,6 +6,7 @@
 #include "human/agent/humanness.h"
 #include "human/agent/idempotency.h"
 #include "human/agent/pattern_radar.h"
+#include "human/agent/persona_eval.h"
 #include "human/agent/response_verifier.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/superhuman_commitment.h"
@@ -817,6 +818,30 @@ hu_error_t hu_agent_from_config(
     }
     out->sota.sota_initialized = true;
 
+    /* Sprint 46 R5.3 — lazy-load the C-side PersonaEval classifier.
+     * Failure is non-fatal — the field stays NULL and downstream calls
+     * (hu_persona_eval_score on a NULL model) return neutral 0.5. This
+     * keeps fresh checkouts that haven't trained a classifier yet from
+     * blowing up at agent init. */
+    {
+        hu_persona_eval_model_t *m = NULL;
+        hu_error_t pe_err = hu_persona_eval_load(out->alloc, NULL /*use default path*/, &m);
+        if (pe_err == HU_OK && m) {
+            out->persona_eval = m;
+        } else {
+            out->persona_eval = NULL;
+            if (pe_err != HU_ERR_IO) {
+                /* IO is the "file missing" case — common, not worth a warn.
+                 * Other errors might indicate model corruption or format
+                 * drift; surface those. */
+                hu_log_warn("agent", NULL,
+                            "persona_eval load failed: %s (P(Seth) scoring "
+                            "will return neutral 0.5)",
+                            hu_error_string(pe_err));
+            }
+        }
+    }
+
     hu_emotional_cognition_init(&out->infra.emotional_cognition);
     hu_metacognition_init(&out->infra.metacognition);
     out->infra.current_cognition_mode = HU_COGNITION_FAST;
@@ -1316,6 +1341,13 @@ void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64
 void hu_agent_deinit(hu_agent_t *agent) {
     if (!agent)
         return;
+    /* Sprint 46 R5.3 — free the PersonaEval classifier. Safe on NULL
+     * (load failure path) — hu_persona_eval_free handles NULL. */
+    if (agent->persona_eval) {
+        hu_persona_eval_free(agent->alloc, agent->persona_eval);
+        agent->persona_eval = NULL;
+    }
+
     /* Sprint 37 — free director history ring buffer first (heap-owned
      * copies, leaks otherwise). Idempotent on agents with no history. */
     hu_agent_internal_free_director_history(agent);
