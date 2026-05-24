@@ -408,6 +408,14 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 hu_json_buf_free(&buf);
                 if (err == HU_ERR_OUT_OF_MEMORY)
                     error_response(alloc, 500, "Out of memory", out_status, out_body, out_body_len);
+                else if (err == HU_ERR_PROVIDER_UNAVAILABLE)
+                    /* M4 follow-up 2026-05-24: agent_turn's transport-error fast-fail
+                     * surfaces here. 503 (not 502) is the correct code for
+                     * "downstream temporarily unavailable, retry later" — tells
+                     * clients to back off rather than treating it as a permanent
+                     * gateway failure. */
+                    error_response(alloc, 503, "Provider unavailable", out_status, out_body,
+                                   out_body_len);
                 else
                     error_response(alloc, 502, "Agent error", out_status, out_body, out_body_len);
                 return;
@@ -809,7 +817,15 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 return;
             }
             if (agent_err != HU_OK) {
-                error_response(alloc, 502, "Agent error", out_status, out_body, out_body_len);
+                /* M4 follow-up 2026-05-24: transport-failure fast-fail (PROVIDER_UNAVAILABLE)
+                 * maps to HTTP 503 ("downstream temporarily unavailable") so clients
+                 * back off instead of treating it as a permanent gateway failure.
+                 * Other agent errors still surface as 502 ("Agent error"). */
+                if (agent_err == HU_ERR_PROVIDER_UNAVAILABLE)
+                    error_response(alloc, 503, "Provider unavailable", out_status, out_body,
+                                   out_body_len);
+                else
+                    error_response(alloc, 502, "Agent error", out_status, out_body, out_body_len);
                 return;
             }
             /* UAF-fix 2026-05-19: if the agent returned HU_OK but with a

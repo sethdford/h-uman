@@ -1223,6 +1223,43 @@ static void test_openai_compat_models_returns_list(void) {
         alloc.free(alloc.ctx, resp, resp_len + 1);
 }
 
+/* M4 follow-up 2026-05-24: when agent_turn's transport-error fast-fail
+ * bails with HU_ERR_PROVIDER_UNAVAILABLE, the gateway maps to HTTP 503
+ * (not 502). 503 = "downstream temporarily unavailable, retry later" so
+ * clients back off; 502 = "permanent gateway failure." See the
+ * src/gateway/openai_compat.c if-blocks at the agent_err call sites and
+ * the agent_turn fast-fail in src/agent/agent_turn.c.
+ *
+ * This test pins the 503-body-shape contract: a well-formed
+ * single-quoted JSON error body (the same fix as commit 220db26d). The
+ * easiest 503 trigger from a unit test is config=NULL on the
+ * chat-completions handler (openai_compat.c line 203 "Service
+ * unavailable: no config"). The PROVIDER_UNAVAILABLE → 503 mapping
+ * itself is a 4-line code change reviewable inline; what regresses
+ * silently is the JSON body shape, hence this assertion. */
+static void test_openai_compat_chat_503_body_is_well_formed_json(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_context_t app = {.config = NULL};
+
+    const char *body =
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    int status = 200;
+    char *resp = NULL;
+    size_t resp_len = 0;
+    hu_openai_compat_handle_chat_completions(body, strlen(body), &alloc, &app, &status, &resp,
+                                             &resp_len, NULL);
+    HU_ASSERT_EQ(status, 503);
+    HU_ASSERT_NOT_NULL(resp);
+    /* Same shape contract as the 400 error_response test — single-quoted,
+     * no consecutive `""` (the bug fingerprint from commit 220db26d). */
+    const char *want = "{\"error\":{\"message\":\"Service unavailable: no config\"}}";
+    HU_ASSERT_EQ(resp_len, strlen(want));
+    HU_ASSERT_TRUE(memcmp(resp, want, resp_len) == 0);
+    HU_ASSERT_TRUE(strstr(resp, "\"\"") == NULL);
+    if (resp)
+        alloc.free(alloc.ctx, resp, resp_len + 1);
+}
+
 static void test_openai_compat_models_null_config_503(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_app_context_t app = {.config = NULL};
@@ -1686,4 +1723,5 @@ void run_gateway_extended_tests(void) {
     HU_RUN_TEST(test_gateway_missing_content_type);
     HU_RUN_TEST(test_openai_compat_models_returns_list);
     HU_RUN_TEST(test_openai_compat_models_null_config_503);
+    HU_RUN_TEST(test_openai_compat_chat_503_body_is_well_formed_json);
 }

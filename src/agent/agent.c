@@ -100,6 +100,52 @@ hu_error_t hu_agent_internal_load_persona_eval(hu_agent_t *agent, const char *mo
     return err == HU_OK ? HU_ERR_IO : err;
 }
 
+bool hu_agent_internal_is_transport_error(hu_error_t err) {
+    /* See agent_internal.h for contract. Three codes count as transport:
+     *   HU_ERR_IO        — curl returned anything that isn't a timeout
+     *                      (src/core/http.c:372); typically CURLE_COULDNT_CONNECT
+     *                      or similar dial-failure mode.
+     *   HU_ERR_TIMEOUT   — curl returned CURLE_OPERATION_TIMEDOUT
+     *                      (src/core/http.c:371); the request was sent but
+     *                      no response within the budget.
+     *   HU_ERR_PROVIDER_UNAVAILABLE — the degradation layer
+     *                      (src/agent/degradation.c) translates ALL-transport
+     *                      failure into this code so the semantic survives
+     *                      the abstraction; also emitted when the circuit
+     *                      breaker is open. Without this third case, the
+     *                      fast-fail wouldn't fire in production because
+     *                      hu_agent_from_config enables degradation by
+     *                      default (agent.c:820).
+     *
+     * Application errors (HU_ERR_PROVIDER_RESPONSE, HU_ERR_PROVIDER_AUTH,
+     * content-filter rejection, malformed JSON) are NOT transport — the
+     * round-trip completed, the response just wasn't usable; those still
+     * deserve the normal retry path. */
+    return err == HU_ERR_IO || err == HU_ERR_TIMEOUT || err == HU_ERR_PROVIDER_UNAVAILABLE;
+}
+
+hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, char **out,
+                                                        size_t *out_len) {
+    if (!alloc || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+    /* Short, lowercase, in-voice. Matches the persona register the rest
+     * of the response pipeline is tuned for; channels can show it or
+     * suppress it. The exact wording is a contract — tests pin it via
+     * the fallback_returns_canonical_text case. */
+    static const char canonical[] = "having trouble connecting, try again in a moment";
+    size_t n = sizeof(canonical) - 1;
+    char *buf = (char *)alloc->alloc(alloc->ctx, n + 1);
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(buf, canonical, n);
+    buf[n] = '\0';
+    *out = buf;
+    *out_len = n;
+    return HU_OK;
+}
+
 void hu_agent_internal_generate_trace_id(char *buf) {
     static uint32_t counter = 0;
     uint64_t t = (uint64_t)clock();
