@@ -68,6 +68,7 @@
 #include "human/memory.h"
 #include <sqlite3.h>
 #endif
+#include "human/ml/m3_rewrite_capture.h"
 #include "human/provider.h"
 #include "human/voice.h"
 #include <math.h>
@@ -1523,6 +1524,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 recovered_retry_latency_ms, agent->memory_session_id,
                                 agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
                                 /*turn_kind=stream=*/1, NULL);
+                            /* D7 (2026-05-18): perfect DPO preference pair —
+                             * (sresp.content = rejected, safe_content = accepted).
+                             * Captured into ~/.human/training-data/
+                             * m3-rewrite-pairs.jsonl for the DPO trainer to
+                             * consume. Best-effort; failure here MUST NOT
+                             * break the chat path. */
+                            (void)hu_m3_rewrite_pair_record(agent->alloc, NULL, msg, msg_len,
+                                                            sresp.content, sresp.content_len,
+                                                            safe_content, safe_content_len,
+                                                            /*turn_kind=stream=*/1);
                             safe_owned = true;
                             hu_log_warn("agent_stream", agent->observer,
                                         "response_guard RECOVERED: stream retry passed (len=%zu, "
@@ -2305,6 +2316,21 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         guard_report.detected_persona_pii_echo ? 1 : 0,
                         guard_report.detected_persona_identity_echo ? 1 : 0,
                         guard_report.max_repetition_run);
+                    /* E1 (2026-05-18): snapshot the REJECTED text before we
+                     * free it — we need it for the DPO preference pair if the
+                     * retry below succeeds. Small alloc; freed at the end of
+                     * this block whether or not the retry succeeds. */
+                    char *rejected_snap = NULL;
+                    size_t rejected_snap_len = 0;
+                    if (final_content && final_content_len > 0) {
+                        rejected_snap =
+                            (char *)agent->alloc->alloc(agent->alloc->ctx, final_content_len + 1);
+                        if (rejected_snap) {
+                            memcpy(rejected_snap, final_content, final_content_len);
+                            rejected_snap[final_content_len] = '\0';
+                            rejected_snap_len = final_content_len;
+                        }
+                    }
                     agent->alloc->free(agent->alloc->ctx, (void *)final_content,
                                        final_content_len + 1);
                     final_content = NULL;
@@ -2354,6 +2380,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                     ps_retry_latency_ms, agent->memory_session_id,
                                     agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
                                     /*turn_kind=stream=*/1, NULL);
+                                /* E1 (2026-05-18): DPO preference pair —
+                                 * rejected_snap (snapshotted above before free)
+                                 * vs retry_txt (accepted). Best-effort. */
+                                if (rejected_snap && rejected_snap_len > 0) {
+                                    (void)hu_m3_rewrite_pair_record(
+                                        agent->alloc, NULL, msg, msg_len, rejected_snap,
+                                        rejected_snap_len, retry_txt, retry_txt_len,
+                                        /*turn_kind=stream=*/1);
+                                }
                                 final_content = retry_txt;
                                 final_content_len = retry_txt_len;
                                 hu_log_warn("agent_stream", agent->observer,
@@ -2361,6 +2396,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                             "(len=%zu)",
                                             retry_txt_len);
                             }
+                        }
+                        /* E1 (2026-05-18): release the rejected snapshot
+                         * whether or not the retry succeeded. Owned by the
+                         * agent->alloc, allocated above. */
+                        if (rejected_snap) {
+                            agent->alloc->free(agent->alloc->ctx, rejected_snap,
+                                               rejected_snap_len + 1);
+                            rejected_snap = NULL;
                         }
                     }
                 } else if (guard_outcome == HU_GUARD_REWROTE) {

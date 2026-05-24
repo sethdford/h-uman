@@ -84,6 +84,18 @@ def test_fnv1a_64_matches_known_vectors():
     _ok("'foobar' → 0x85944171f73967e8",
         tl.fnv1a_64(b"foobar") == 0x85944171f73967e8,
         f"got {hex(tl.fnv1a_64(b'foobar'))}")
+    # D4 (2026-05-18): cross-language pinning. These hex literals must
+    # MATCH the C-side assertions in tests/test_ml.c::
+    # test_m3_outcome_hash_bytes_pins_cross_language_vectors EXACTLY.
+    # Includes UTF-8 multi-byte sequences (real memory.db has them).
+    _ok("'hello, world' → 0x17a1a4f267be633d",
+        tl.fnv1a_64(b"hello, world") == 0x17a1a4f267be633d)
+    _ok("'café' (UTF-8) → 0x48e8823acfa40d89",
+        tl.fnv1a_64("café".encode("utf-8")) == 0x48e8823acfa40d89)
+    _ok("'👋' (4-byte UTF-8) → 0xfee7423874edd4e8",
+        tl.fnv1a_64("👋".encode("utf-8")) == 0xfee7423874edd4e8)
+    _ok("mixed Latin+emoji+Chinese → 0xa69f9f3d3251b8ea",
+        tl.fnv1a_64("I said hi 👋 in 中文.".encode("utf-8")) == 0xa69f9f3d3251b8ea)
     # Determinism — same input twice MUST be the same output
     h1 = tl.fnv1a_64(b"some prompt that an agent might see")
     h2 = tl.fnv1a_64(b"some prompt that an agent might see")

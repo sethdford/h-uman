@@ -80,6 +80,7 @@ int hu_reaction_handler_was_called_this_turn(void);
 #include "human/security/sycophancy_guard.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
+#include "human/ml/m3_rewrite_capture.h"
 #endif
 
 /* Default fallback arrays (NULL-terminated) */
@@ -3528,16 +3529,20 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         size_t cognition_mode_str_len = strlen(cognition_mode_str);
 
         /* Render personal-model prompt block from accumulated user signal.
-         * Stack buffer (~8 KB) bounded by HU_PM_MAX_FACTS / TOPICS / GOALS.
-         * Skipped entirely when the model has no real content yet so we
-         * don't burn tokens on the "(No detailed personal data yet.)"
-         * placeholder on a fresh install. */
-        char personal_model_buf[8192];
+         * 2026-05-19 (M4 audit): heap-allocate instead of stack to eliminate
+         * stack-use-after-scope risk. ASan was reporting use-after-scope
+         * BUS errors when this buffer was declared on stack and a pointer
+         * to it was used later in cfg.personal_model_context (~200 lines
+         * later in the same nested scope). Whether the original was truly
+         * out-of-scope or ASan was being aggressive about a deeply-nested
+         * { ... } scope, heap-allocation makes the lifetime explicit and
+         * survives the entire turn until we free it. */
+        char *personal_model_buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 8192);
         const char *personal_model_ctx = NULL;
         size_t personal_model_ctx_len = 0;
-        if (hu_personal_model_has_content(&agent->personal_model)) {
-            size_t pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
-                                                         sizeof(personal_model_buf));
+        if (personal_model_buf && hu_personal_model_has_content(&agent->personal_model)) {
+            size_t pm_n =
+                hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf, 8192);
             if (pm_n > 0) {
                 personal_model_ctx = personal_model_buf;
                 personal_model_ctx_len = pm_n;
@@ -3586,9 +3591,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             const char *tom_p = agent->tom_scenario_premise;
             const char *tom_q = agent->tom_scenario_question;
             const char *tom_c = agent->tom_scenario_category;
-            size_t tom_p_len = tom_p[0] ? strlen(tom_p) : 0;
-            size_t tom_q_len = tom_q[0] ? strlen(tom_q) : 0;
-            size_t tom_c_len = tom_c[0] ? strlen(tom_c) : 0;
+            /* 2026-05-19 (M4 audit): null-check before dereference. Previously
+             * `tom_p[0]` would BUS error when the ToM scenario isn't set —
+             * which is the default state for any chat-completion request
+             * routed through the gateway (no ToM scenario context attached).
+             * Discovered when the M4 production A/B sent the first prompt
+             * through `human gateway --with-agent` and crashed agent_turn. */
+            size_t tom_p_len = (tom_p && tom_p[0]) ? strlen(tom_p) : 0;
+            size_t tom_q_len = (tom_q && tom_q[0]) ? strlen(tom_q) : 0;
+            size_t tom_c_len = (tom_c && tom_c[0]) ? strlen(tom_c) : 0;
             /* Story B (sprint-4 follow-up): thread persona context so the
              * bridge's persona-merge runs and interaction_style reaches the
              * rendered prompt. Previously this passed NULL → merge skipped. */
@@ -3773,6 +3784,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             world_model_ctx = NULL;
             world_model_ctx_len = 0;
         }
+        /* 2026-05-19 (M4 audit): free the heap-allocated personal_model_buf
+         * (was stack-allocated before; see comment at allocation site). */
+        if (personal_model_buf) {
+            agent->alloc->free(agent->alloc->ctx, personal_model_buf, 8192);
+            personal_model_buf = NULL;
+            personal_model_ctx = NULL;
+            personal_model_ctx_len = 0;
+        }
         if (enriched_contact) {
             agent->alloc->free(agent->alloc->ctx, enriched_contact, enriched_contact_len + 1);
             enriched_contact = NULL;
@@ -3789,8 +3808,21 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (persona_prompt)
             agent->alloc->free(agent->alloc->ctx, persona_prompt, persona_prompt_len + 1);
         persona_prompt = NULL;
-        if (memory_ctx)
+        if (memory_ctx) {
             agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+            /* 2026-05-19 (M4 audit): null + zero-length the freed memory_ctx.
+             * Previously the pointer was freed but NOT nulled, leading to a
+             * heap-use-after-free ~3000 lines later at agent_turn.c:6673
+             * where `if (memory_ctx && memory_ctx_len > 20)` saw a non-NULL
+             * dangling pointer and passed it to hu_tier_manager_promote →
+             * sqlite3_bind_text(stmt, 2, key, ..., SQLITE_STATIC) →
+             * sqlite3_step → vdbeRecordCompareString → memcmp on freed memory.
+             * The surrounding stm_ctx / awareness_ctx / outcome_ctx free
+             * blocks DO null themselves; memory_ctx was the lone miss.
+             * Surfaced by the M4 production A/B harness on 2026-05-19. */
+            memory_ctx = NULL;
+            memory_ctx_len = 0;
+        }
         if (stm_ctx) {
             agent->alloc->free(agent->alloc->ctx, stm_ctx, stm_ctx_len + 1);
             stm_ctx = NULL;
@@ -4184,6 +4216,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
     hu_chat_message_t *msgs = NULL;
     size_t msgs_count = 0;
+
+    /* G1 (2026-05-18) — per-turn contact routing. Lookup the contact's
+     * adapter (if any) and swap on the MLX server BEFORE the chat
+     * request fires. No-op when no routes are configured or the
+     * target adapter is already loaded. Soft-fail on swap errors. */
+    hu_agent_m3_route_per_turn(agent);
 
     hu_chat_request_t req;
     memset(&req, 0, sizeof(req));
@@ -5926,6 +5964,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         vc_retry_latency_ms, agent->memory_session_id,
                                         agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
                                         /*turn_kind=batch=*/2, NULL);
+                                    /* E1 (2026-05-18): perfect DPO preference
+                                     * pair — final_content (rejected by the
+                                     * validator chain) vs retry_content
+                                     * (accepted after the slim retry). */
+                                    (void)hu_m3_rewrite_pair_record(
+                                        agent->alloc, NULL, msg, msg_len, final_content, final_len,
+                                        retry_content, retry_len,
+                                        /*turn_kind=batch=*/2);
                                     /* Re-validate the retry output through the chain so a
                                      * regenerated CoT or helper-closer cannot escape (Fix 3). */
                                     hu_chain_result_t retry_cr;
@@ -6099,6 +6145,14 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                     ab_retry_latency_ms, agent->memory_session_id,
                                     agent->memory_session_id_len, HU_M3_GUARD_REWRITE,
                                     /*turn_kind=batch=*/2, NULL);
+                                /* E1 (2026-05-18): perfect DPO preference pair —
+                                 * final_content (response_guard rejected) vs
+                                 * retry_content (accepted after slim retry).
+                                 * Captured BEFORE the ab_owned free below so
+                                 * the rejected text is still valid. */
+                                (void)hu_m3_rewrite_pair_record(
+                                    agent->alloc, NULL, msg, msg_len, final_content, final_len,
+                                    retry_content, retry_len, /*turn_kind=batch=*/2);
                                 hu_log_warn("agent_turn", agent->observer,
                                             "response_guard RECOVERED: retry passed (len=%zu, "
                                             "stripped=%zu)",

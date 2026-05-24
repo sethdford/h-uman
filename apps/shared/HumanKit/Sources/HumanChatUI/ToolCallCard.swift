@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// Card displaying tool call status (running, completed, failed).
+@available(macOS 14.0, iOS 17.0, *)
 public struct ToolCallCard: View {
     @Environment(\.colorScheme) private var colorScheme
 

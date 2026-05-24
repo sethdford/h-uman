@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup install hooks lint tidy coverage validate ci prove demo-loop demo-loop-build demo-loop-full m3-status m3-dpo m3-train-mlx m3-drift m3-routes m3-promote m3-loop-now m3-extract m3-counterfactuals m3-probe m3-collect m3-h-demo m3-cycle-smoke m3-holdout m3-behavioral m3-dashboard m3-install-cron m3-uninstall-cron m3-gce-dryrun m3-gce-train
 
 all: build test
 
@@ -117,6 +117,173 @@ demo-loop: demo-loop-build
 # `demo-loop` which uses --simulate-train.
 demo-loop-full: demo-loop-build
 	@bash scripts/live_fire_m3_full_loop.sh
+
+# D1 (2026-05-18) — single-screen status of the M3 personalization loop.
+# Pure file-inspection; safe to run while the daemon is live.
+m3-status:
+	@python3 scripts/m3_status.py
+
+# D7 (2026-05-18) — summarize REWRITE preference pairs captured by the
+# guard chain; optionally export Alpaca-DPO format for downstream training.
+m3-dpo:
+	@python3 scripts/m3_dpo_from_rewrites.py
+
+# E2 (2026-05-18) — MLX-lm.lora bridge. Trains a real LoRA against the
+# served model when mlx_lm is installed; otherwise produces a stub
+# safetensors with a clear "install mlx-lm" hint.
+m3-train-mlx:
+	@python3 scripts/m3_mlx_lora_bridge.py --check-only \
+		--pairs $${PAIRS:-~/.human/training-data/m3-rewrite-pairs.jsonl} \
+		--adapter-out $${OUT:-/tmp/m3-mlx-test.safetensors}
+
+# E4 (2026-05-18) — drift detection over outcome windows. Compares the
+# most-recent adapter's metrics against the prior one; flags
+# DEGRADING or NEEDS_ROLLBACK.
+m3-drift:
+	@python3 scripts/m3_drift_detector.py
+
+# E5 (2026-05-18) — per-contact adapter routing CLI.
+m3-routes:
+	@python3 scripts/m3_contact_routing.py list
+
+# G2 (2026-05-18) — promote/rollback CLI for the live MLX server.
+# Pass ADAPTER=<path> to promote that adapter; otherwise shows current.
+m3-promote:
+	@if [ -n "$$ADAPTER" ]; then \
+		python3 scripts/m3_promote.py promote --adapter "$$ADAPTER" --yes ; \
+	else \
+		python3 scripts/m3_promote.py current ; \
+	fi
+
+# G4 (2026-05-18) — manually trigger the autonomous loop cycle once.
+# The launchd plist (scripts/ai.human.m3-loop.plist) runs this weekly;
+# `make m3-loop-now` lets you exercise it ad hoc.
+m3-loop-now:
+	@bash scripts/m3_loop_cycle.sh
+
+# H1 (2026-05-18) — multi-channel corpus extractor.
+# Pulls Seth-authored turns from iMessage chat.db + memory.db (gmail/
+# slack stubbed). PII redaction is mandatory by default. Writes the
+# unified JSONL to ~/.human/training-data/m3-corpus.jsonl.
+m3-extract:
+	@python3 scripts/m3_extract_corpus.py \
+		--out $${OUT:-$$HOME/.human/training-data/m3-corpus.jsonl} \
+		--sources $${SRC:-imessage,memory_db} \
+		--max-per-source $${MAX:-10000}
+
+# H2 (2026-05-18) — counterfactual preference generator.
+# Reads H1 corpus, pairs each Seth turn with its preceding user
+# context (same-contact), generates style-violation variants, emits
+# Alpaca-DPO pairs. LLM-as-judge when OPENAI_API_KEY set; synthetic
+# deterministic fallback otherwise.
+m3-counterfactuals:
+	@python3 scripts/m3_generate_counterfactuals.py \
+		--corpus $${IN:-$$HOME/.human/training-data/m3-corpus.jsonl} \
+		--out $${OUT:-$$HOME/.human/training-data/m3-counterfactuals.jsonl} \
+		--max-records $${MAX:-200} \
+		$${NO_LLM:+--no-llm}
+
+# H3 (2026-05-18) — active-learning probe.
+# Picks an unanswered incoming message from H1 corpus, generates K
+# candidate responses via the gateway (or synthetic fallback), and
+# queues an A/B/C question for Seth. Set SIM=1 for local simulate
+# mode (prints to stdout, no real iMessage send).
+m3-probe:
+	@python3 scripts/m3_active_probe.py \
+		--corpus $${IN:-$$HOME/.human/training-data/m3-corpus.jsonl} \
+		--pairs-out $${OUT:-$$HOME/.human/training-data/m3-active-probe-pairs.jsonl} \
+		--queue $${QUEUE:-$$HOME/.human/training-data/m3-active-probe-queue.jsonl} \
+		$${SIM:+--simulate-delivery} \
+		$${RESP:+--simulate-response=$$RESP}
+
+# H3b (2026-05-19) — probe queue collector.
+# Drains the active-probe queue into Alpaca-DPO preference pairs.
+# Default mode is simulate-tick (single-pass, optional --simulate-response).
+# Set MODE=dispatch / MODE=poll for production wires (currently stubs).
+# Example: RESP=A make m3-collect
+m3-collect:
+	@python3 scripts/m3_probe_collector.py \
+		--queue $${QUEUE:-$$HOME/.human/training-data/m3-active-probe-queue.jsonl} \
+		--pairs-out $${OUT:-$$HOME/.human/training-data/m3-active-probe-pairs.jsonl} \
+		--mode $${MODE:-simulate-tick} \
+		$${RESP:+--simulate-response=$$RESP}
+
+# H demo (2026-05-19) — full data-acquisition tier end-to-end.
+# Runs H1 → H2 → H3 → H3b in isolated paths and produces a combined
+# Alpaca-DPO training file. Set FIX=1 to use fixture DBs (CI mode).
+m3-h-demo:
+	@bash scripts/m3_h_tier_demo.sh $${FIX:+--fixture}
+
+# Cycle smoke (2026-05-19) — m3_loop_cycle.sh end-to-end in HUMAN_HOME
+# isolation. Builds fixture DBs, runs the full autonomous cycle script
+# against them, verifies every artifact landed. Closes the integration
+# gap that the H-tier verifiers alone don't reach.
+m3-cycle-smoke:
+	@bash scripts/test_m3_loop_cycle_smoke.sh
+
+# Holdout split (2026-05-19) — split corpus into 90% train + 10%
+# held-out for behavioral eval. Deterministic, seeded, per-contact.
+m3-holdout:
+	@python3 scripts/m3_holdout_split.py \
+		--corpus $${IN:-$$HOME/.human/training-data/m3-corpus.jsonl} \
+		--train-out $${TRAIN:-$$HOME/.human/training-data/m3-corpus-train.jsonl} \
+		--holdout-out $${HOLD:-$$HOME/.human/training-data/m3-holdout-prompts.jsonl} \
+		--holdout-frac $${FRAC:-0.10}
+
+# Behavioral eval (2026-05-19) — generate base + base+adapter responses
+# on held-out prompts; score via Seth-style heuristics + diversity check.
+# The "did it actually learn?" gate.
+m3-behavioral:
+	@python3 scripts/m3_behavioral_eval.py \
+		--model $${MODEL:-mlx-community/gemma-3-4b-it-bf16} \
+		--candidate-adapter $${ADAPTER:?usage: ADAPTER=/path/to/adapter make m3-behavioral} \
+		--prompts-jsonl $${PROMPTS:-$$HOME/.human/training-data/m3-holdout-prompts.jsonl} \
+		--max-prompts $${N:-8} \
+		--json-out $${OUT:-/tmp/m3-behavioral-$$(date +%Y%m%d-%H%M%S).json}
+
+# Status dashboard (2026-05-19) — one-screen view of the autonomous loop.
+m3-dashboard:
+	@python3 scripts/m3_status_dashboard.py $${JSON:+--json}
+
+# Install / uninstall the launchd plist for weekly autonomous cycle
+m3-install-cron:
+	@cp scripts/ai.human.m3-loop.plist ~/Library/LaunchAgents/
+	@launchctl unload ~/Library/LaunchAgents/ai.human.m3-loop.plist 2>/dev/null || true
+	@launchctl load ~/Library/LaunchAgents/ai.human.m3-loop.plist
+	@launchctl list ai.human.m3-loop > /dev/null && \
+		echo "  Installed: ai.human.m3-loop (Sun 04:00 local)" || \
+		echo "  WARN: installed but launchctl can't find the label"
+
+m3-uninstall-cron:
+	@launchctl unload ~/Library/LaunchAgents/ai.human.m3-loop.plist 2>/dev/null || true
+	@rm -f ~/Library/LaunchAgents/ai.human.m3-loop.plist
+	@echo "  Uninstalled"
+
+# GCE training (2026-05-19) — train LoRA on a Google Cloud GPU VM.
+# Two targets: m3-gce-dryrun prints the plan + cost ceiling without
+# provisioning anything; m3-gce-train actually spins up a billable VM.
+# Defaults: gemma-3-4b on L4 (24GB VRAM, ~$0.71/hr), 50 iters rank 8.
+# Override via env: GPU=a100 BASE_MODEL=google/gemma-3-12b-it ...
+m3-gce-dryrun:
+	@PAIRS=$${PAIRS:-$$HOME/.human/training-data/m3-combined-dpo-$$(date +%Y%m%d).jsonl}; \
+	bash scripts/m3_gce_train.sh \
+		--pairs $$PAIRS \
+		--base-model $${BASE_MODEL:-google/gemma-3-4b-it} \
+		--gpu $${GPU:-l4} \
+		--iters $${ITERS:-50} \
+		--rank $${RANK:-8} \
+		--max-hours $${MAX_HOURS:-1}
+
+m3-gce-train:
+	@PAIRS=$${PAIRS:-$$HOME/.human/training-data/m3-combined-dpo-$$(date +%Y%m%d).jsonl}; \
+	bash scripts/m3_gce_train.sh \
+		--pairs $$PAIRS \
+		--base-model $${BASE_MODEL:-google/gemma-3-4b-it} \
+		--gpu $${GPU:-l4} \
+		--iters $${ITERS:-50} \
+		--rank $${RANK:-8} \
+		--max-hours $${MAX_HOURS:-1} \
+		--confirm-spend
 
 validate: format-check build test
 	@echo "Validation passed."

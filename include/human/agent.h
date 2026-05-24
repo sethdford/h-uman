@@ -441,6 +441,17 @@ struct hu_agent {
      * are stable across daemon restarts. Owned; destroyed in
      * `hu_agent_deinit`. NULL when not attached → outcomes record 0. */
     struct hu_m3_id_map *m3_id_map;
+    /* Phase G1 (2026-05-18): per-contact adapter routes — loaded
+     * alongside the id_map from ~/.human/training-data/m3_contact_routes.json.
+     * Read by `hu_agent_m3_route_per_turn` at the start of each turn.
+     * NULL = no routes file present; turn proceeds with current adapter. */
+    struct hu_m3_contact_routes *m3_contact_routes;
+    /* G1: tracks the currently-loaded MLX adapter (path) so per-turn
+     * routing only fires the HTTP swap call when the target adapter
+     * differs from what's already loaded. Owned; freed in
+     * `hu_agent_deinit`. NULL = no swap has been performed in this
+     * session (next route lookup with a non-NULL adapter will swap). */
+    char *m3_active_adapter_path;
 #endif
 
     bool chain_of_thought;    /* inject reasoning instructions into prompt */
@@ -624,6 +635,29 @@ void hu_agent_set_learner(hu_agent_t *agent, struct hu_learner *learner);
  * streaming rethink). */
 void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path);
 void hu_agent_m3_on_provider_success(hu_agent_t *agent);
+
+/* Phase G1 (2026-05-18) — per-turn contact-routing hook.
+ *
+ * Called at the start of each chat turn. Hashes the agent's
+ * memory_session_id, looks up the target adapter in
+ * `agent->m3_contact_routes`, and (if different from the currently
+ * loaded adapter) POSTs /v1/adapters/swap on the MLX server.
+ *
+ * No-op when:
+ *   - agent or its m3_contact_routes is NULL (cold install or
+ *     missing routes file)
+ *   - lookup returns NULL (no specific route + no default_adapter)
+ *   - lookup returns the same path as agent->m3_active_adapter_path
+ *     (already loaded — no swap needed)
+ *
+ * On swap failure (MLX server unreachable, swap returns non-200):
+ * log a warning and continue with the currently-loaded adapter.
+ * Inference correctness MUST NOT depend on this hook succeeding;
+ * routing is an optimization, not a correctness contract.
+ *
+ * The MLX URL is read from the HUMAN_MLX_URL env var or defaults
+ * to http://127.0.0.1:8741 (matching scripts/mlx-server.py). */
+void hu_agent_m3_route_per_turn(hu_agent_t *agent);
 
 /* Phase B1 redefined (2026-05-17 round 2): record a structured inference
  * outcome to the M3 adapter's ring buffer. Safe to call always (no-op when

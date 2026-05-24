@@ -183,6 +183,34 @@ def select_training_outcomes(outcomes: list[dict]) -> list[dict]:
 # Dedup + append
 # ─────────────────────────────────────────────────────────────────────
 
+# D6 (2026-05-18): rotation threshold for the outcomes JSONL. The
+# selection policy already aggressively filters incoming outcomes
+# (PASS only, base adapter only, latency window, token threshold,
+# per-contact cap) so growth is slow — but unbounded over months. 8 MB
+# = ~25k outcomes at 320 B/line, which is well past the threshold
+# where training_loop.py wants to consume a "recent window" rather
+# than the full corpus.
+OUTCOMES_ROTATE_BYTES = 8 * 1024 * 1024
+
+
+def rotate_outcomes_if_needed() -> bool:
+    """If the outcomes JSONL exceeds OUTCOMES_ROTATE_BYTES, archive it.
+    Returns True if rotation happened. Errors are non-fatal — the
+    driver MUST continue functioning even if rotation fails."""
+    if not OUTCOMES_JSONL.exists():
+        return False
+    if OUTCOMES_JSONL.stat().st_size < OUTCOMES_ROTATE_BYTES:
+        return False
+    archive = OUTCOMES_JSONL.with_name(
+        f"{OUTCOMES_JSONL.name}.{int(time.time())}"
+    )
+    try:
+        OUTCOMES_JSONL.rename(archive)
+        return True
+    except OSError:
+        return False
+
+
 def dedup_and_append(selected: list[dict], seen_hashes: set[int],
                      dry_run: bool) -> tuple[int, int]:
     """Skip outcomes whose prompt_hash we've already trained on. Append the
@@ -196,6 +224,12 @@ def dedup_and_append(selected: list[dict], seen_hashes: set[int],
     skipped = 0
     if not dry_run:
         OUTCOMES_JSONL.parent.mkdir(parents=True, exist_ok=True)
+        # D6: rotate BEFORE appending so the next write starts fresh.
+        # Doesn't fire on the hot path — only when the JSONL has grown
+        # past the rotation threshold.
+        if rotate_outcomes_if_needed():
+            print(f"[m3-driver] rotated outcomes JSONL "
+                  f"(was > {OUTCOMES_ROTATE_BYTES // 1024 // 1024} MB)")
     with open(OUTCOMES_JSONL, "a") if not dry_run else _devnull() as f:
         for outcome in selected:
             ph = outcome.get("ph", 0)

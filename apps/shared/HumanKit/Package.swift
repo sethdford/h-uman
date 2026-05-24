@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
@@ -17,26 +17,31 @@ let package = Package(
     targets: [
         .target(
             name: "HumanProtocol",
-            path: "Sources/HumanProtocol"
+            path: "Sources/HumanProtocol",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "HumanClient",
             dependencies: ["HumanProtocol"],
-            path: "Sources/HumanClient"
+            path: "Sources/HumanClient",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "HumanChatUI",
             dependencies: ["HumanProtocol"],
-            path: "Sources/HumanChatUI"
+            path: "Sources/HumanChatUI",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "HumanOnDevice",
-            path: "Sources/HumanOnDevice"
+            path: "Sources/HumanOnDevice",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "HumanOnDeviceServer",
             dependencies: ["HumanOnDevice"],
-            path: "Sources/HumanOnDeviceServer"
+            path: "Sources/HumanOnDeviceServer",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "HumanProtocolTests",

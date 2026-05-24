@@ -1,6 +1,20 @@
 import XCTest
+import os
 @testable import HumanClient
 import HumanProtocol
+
+/// Lock-guarded box for capturing observed states in a `@Sendable` handler.
+/// Built on `OSAllocatedUnfairLock`, which is itself `Sendable`, so the
+/// box conforms via the lock's own Sendable conformance — no escape hatch.
+final class StatesBox: Sendable {
+    private let storage = OSAllocatedUnfairLock<[HumanConnection.ConnectionState]>(initialState: [])
+    func append(_ s: HumanConnection.ConnectionState) {
+        storage.withLock { $0.append(s) }
+    }
+    func snapshot() -> [HumanConnection.ConnectionState] {
+        storage.withLock { $0 }
+    }
+}
 
 final class ConnectionTests: XCTestCase {
 
@@ -27,11 +41,12 @@ final class ConnectionTests: XCTestCase {
 
     func testStateHandlerCalled() {
         let conn = HumanConnection(url: URL(string: "wss://localhost:3000/ws")!)
-        var states: [HumanConnection.ConnectionState] = []
-        conn.stateHandler = { states.append($0) }
+        let states = StatesBox()
+        conn.stateHandler = { state in states.append(state) }
         conn.disconnect()
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        XCTAssertTrue(states.isEmpty || states.allSatisfy { $0 == .disconnected })
+        let snapshot = states.snapshot()
+        XCTAssertTrue(snapshot.isEmpty || snapshot.allSatisfy { $0 == .disconnected })
     }
 
     func testConnectionStateEquatable() {

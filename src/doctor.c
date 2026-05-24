@@ -842,7 +842,9 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
 
     if (!cfg->default_provider || !cfg->default_provider[0]) {
         it = (hu_diag_item_t){HU_DIAG_ERR, hu_strdup(alloc, "config"),
-                              hu_strdup(alloc, "no default_provider configured")};
+                              hu_strdup(alloc,
+                                        "no default_provider configured "
+                                        "(run 'human onboard' or set mlx_local/apple for no API key)")};
         buf[n++] = it;
     } else {
         char *msg = hu_sprintf(alloc, "provider: %s", cfg->default_provider);

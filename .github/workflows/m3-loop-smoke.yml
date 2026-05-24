@@ -25,6 +25,36 @@ on:
       - "scripts/test_m3_outcome_driver.py"
       - "scripts/training_loop.py"
       - "scripts/test_m3_train_from_outcomes.py"
+      - "scripts/m3_status.py"
+      - "scripts/m3_dpo_from_rewrites.py"
+      - "scripts/test_m3_dpo_from_rewrites.py"
+      - "scripts/m3_eval_adapter.py"
+      - "scripts/test_m3_eval_adapter.py"
+      - "include/human/ml/m3_rewrite_capture.h"
+      - "src/ml/m3_rewrite_capture.c"
+      - "scripts/m3_mlx_lora_bridge.py"
+      - "scripts/test_m3_mlx_lora_bridge.py"
+      - "scripts/m3_drift_detector.py"
+      - "scripts/test_m3_drift_detector.py"
+      - "scripts/m3_contact_routing.py"
+      - "scripts/test_m3_contact_routing.py"
+      - "scripts/m3_promote.py"
+      - "scripts/test_m3_promote.py"
+      - "scripts/live_fire_m3_canary.sh"
+      - "scripts/test_m3_canary.py"
+      - "scripts/m3_loop_cycle.sh"
+      - "include/human/ml/m3_contact_routes.h"
+      - "src/ml/m3_contact_routes.c"
+      - "scripts/m3_extract_corpus.py"
+      - "scripts/test_m3_extract_corpus.py"
+      - "scripts/m3_generate_counterfactuals.py"
+      - "scripts/test_m3_generate_counterfactuals.py"
+      - "scripts/m3_active_probe.py"
+      - "scripts/test_m3_active_probe.py"
+      - "scripts/m3_probe_collector.py"
+      - "scripts/test_m3_probe_collector.py"
+      - "scripts/m3_h_tier_demo.sh"
+      - "scripts/test_m3_loop_cycle_smoke.sh"
       - "Makefile"
       - "CMakePresets.json"
       - ".github/workflows/m3-loop-smoke.yml"
@@ -40,6 +70,36 @@ on:
       - "scripts/test_m3_outcome_driver.py"
       - "scripts/training_loop.py"
       - "scripts/test_m3_train_from_outcomes.py"
+      - "scripts/m3_status.py"
+      - "scripts/m3_dpo_from_rewrites.py"
+      - "scripts/test_m3_dpo_from_rewrites.py"
+      - "scripts/m3_eval_adapter.py"
+      - "scripts/test_m3_eval_adapter.py"
+      - "include/human/ml/m3_rewrite_capture.h"
+      - "src/ml/m3_rewrite_capture.c"
+      - "scripts/m3_mlx_lora_bridge.py"
+      - "scripts/test_m3_mlx_lora_bridge.py"
+      - "scripts/m3_drift_detector.py"
+      - "scripts/test_m3_drift_detector.py"
+      - "scripts/m3_contact_routing.py"
+      - "scripts/test_m3_contact_routing.py"
+      - "scripts/m3_promote.py"
+      - "scripts/test_m3_promote.py"
+      - "scripts/live_fire_m3_canary.sh"
+      - "scripts/test_m3_canary.py"
+      - "scripts/m3_loop_cycle.sh"
+      - "include/human/ml/m3_contact_routes.h"
+      - "src/ml/m3_contact_routes.c"
+      - "scripts/m3_extract_corpus.py"
+      - "scripts/test_m3_extract_corpus.py"
+      - "scripts/m3_generate_counterfactuals.py"
+      - "scripts/test_m3_generate_counterfactuals.py"
+      - "scripts/m3_active_probe.py"
+      - "scripts/test_m3_active_probe.py"
+      - "scripts/m3_probe_collector.py"
+      - "scripts/test_m3_probe_collector.py"
+      - "scripts/m3_h_tier_demo.sh"
+      - "scripts/test_m3_loop_cycle_smoke.sh"
   workflow_dispatch:
 
 jobs:
@@ -65,6 +125,83 @@ jobs:
         # MetadataJudge (pass / no-change / fail / regress) plus
         # format-inspection contracts for lora-bin and safetensors.
         run: python3 scripts/test_m3_eval_adapter.py
+
+      - name: Run DPO-from-rewrites (D7) consumer verifier
+        # 13 assertions covering parse filtering, summary aggregates,
+        # Alpaca-DPO export schema (accepted→chosen mapping), and empty-
+        # input handling. Cross-checks that the C-side rewrite-capture
+        # output is consumable.
+        run: python3 scripts/test_m3_dpo_from_rewrites.py
+
+      - name: Run MLX-lm.lora bridge (E2) verifier
+        # 16 assertions covering format detection, mlx-lm format
+        # conversion, stub-adapter when mlx_lm unavailable, gemma
+        # chat-template wrapping.
+        run: python3 scripts/test_m3_mlx_lora_bridge.py
+
+      - name: Run drift detector (E4) verifier
+        # 16 assertions covering all status verdicts (OK / DEGRADING /
+        # NEEDS_ROLLBACK), threshold tuning, and window bucketing.
+        run: python3 scripts/test_m3_drift_detector.py
+
+      - name: Run contact-routing (E5) verifier
+        # 12 assertions covering load/save atomicity, lookup precedence,
+        # and the promote/demote roundtrip.
+        run: python3 scripts/test_m3_contact_routing.py
+
+      - name: Run promote CLI (G2) verifier
+        # 17 assertions covering swap + rollback against a fake MLX,
+        # lineage manifest writes, and production-path guard.
+        run: python3 scripts/test_m3_promote.py
+
+      - name: Run canary live-fire (G3) verifier
+        # 9 assertions covering the canary's full lifecycle including
+        # automatic rollback via shell trap on EXIT.
+        run: python3 scripts/test_m3_canary.py
+
+      - name: Run corpus extractor (H1) verifier
+        # 29 assertions covering PII redaction, hash determinism, Apple
+        # epoch conversion, iMessage + memory.db schema reads, and the
+        # end-to-end JSONL output shape with fixture DBs.
+        run: python3 scripts/test_m3_extract_corpus.py
+
+      - name: Run counterfactual generator (H2) verifier
+        # 18 assertions covering synthetic variant count/distinctness,
+        # style-violation injection, same-contact pairing (no cross-
+        # conversation bleed), and end-to-end --no-llm output.
+        run: python3 scripts/test_m3_generate_counterfactuals.py
+
+      - name: Run active probe (H3) verifier
+        # 60 assertions covering response→pairs parsing (letter, freetext,
+        # empty), probe formatting + sentinel header, deliver_probe modes
+        # (simulate/queue), eligible-message picking, message-aware
+        # synthetic candidates, gateway parse + TimeoutError/URLError/
+        # OSError soft-fail, and end-to-end --simulate flows.
+        run: python3 scripts/test_m3_active_probe.py
+
+      - name: Run probe collector (H3b) verifier
+        # 69 assertions: queue load/save atomicity, malformed tolerance,
+        # find_next_pending, every simulate-tick branch, mocked osascript
+        # dispatch (dry-run + live + partial failure), chat.db poll
+        # against fixture DBs (filter by handle + ts + probe-echo skip),
+        # corrupt-db soft-fail, AND the H3 → collector → pairs e2e flow.
+        run: python3 scripts/test_m3_probe_collector.py
+
+      - name: Run H-tier full end-to-end demo (fixture mode)
+        # Runs H1 → H2 → H3 → H3b → merge with fixture DBs (no FDA
+        # needed). Verifies the chain produces a combined Alpaca-DPO
+        # file ready for dpo-train. This is the integration test that
+        # the unit verifiers alone cannot prove.
+        run: bash scripts/m3_h_tier_demo.sh --fixture
+
+      - name: Run m3_loop_cycle.sh end-to-end smoke
+        # Closes the last integration gap: the autonomous loop script
+        # itself, in HUMAN_HOME isolation. Seeds fixture DBs, runs
+        # m3_loop_cycle.sh end-to-end, verifies every artifact landed
+        # (corpus, counterfactuals, probe queue + pairs, alpaca-DPO
+        # export with H-tier merge). G-tier steps soft-fail (no
+        # gateway, no MLX) — that's correct and not part of the assertion.
+        run: bash scripts/test_m3_loop_cycle_smoke.sh
 
   live-fire:
     name: Full live-fire (release binary + stub MLX + real daemon)

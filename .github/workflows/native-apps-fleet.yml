@@ -151,6 +151,82 @@ jobs:
       - name: "Debug + release build (award-tier: ships clean on both configs)"
         run: cd apps/macos && swift build && swift build -c release
 
+  macos-app-archive:
+    name: macOS app · Archive + codesign
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache Homebrew downloads (XcodeGen)
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: ${{ runner.os }}-brew-macos-archive-${{ hashFiles('.github/workflows/native-apps-fleet.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-brew-macos-archive-
+
+      - name: Install XcodeGen
+        # Unpinned; the runner image's homebrew-core revision is the floor.
+        # Pin via `xcodegen@<version>` in a follow-up if drift bites.
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: cd apps/macos && xcodegen generate
+
+      - name: Verify generated .xcodeproj is git-ignored (AC-45.1.1)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          if [ -n "$(git status --porcelain apps/macos/Human.xcodeproj)" ]; then
+            echo "::error::apps/macos/Human.xcodeproj is not git-ignored — fix .gitignore"
+            git status --porcelain apps/macos/Human.xcodeproj
+            exit 1
+          fi
+
+      # --- Signed path (AC-45.1.2 / AC-45.1.3): only when secrets are present.
+      # Gate is EXPLICIT on `secrets.MACOS_CERT_P12 == ''` vs `!= ''`; we do
+      # NOT key off the prior step's `outcome`, which would silently mask a
+      # real cert-import infra failure (prior critic catch).
+      - name: Import signing certificate
+        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: bash scripts/ci/import-macos-cert.sh
+
+      - name: Archive (signed)
+        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        # Identity by NAME ("Apple Development"), NOT SHA-1 (AC-45.1.3).
+        # `--deep` is intentionally NOT passed here — it would re-sign every
+        # nested framework with our identity, which is wrong for vendored
+        # signed binaries.
+        run: |
+          cd apps/macos
+          xcodebuild archive \
+              -project Human.xcodeproj \
+              -scheme Human \
+              -configuration Release \
+              -archivePath build/Human.xcarchive \
+              CODE_SIGN_IDENTITY="Apple Development" \
+              CODE_SIGN_STYLE=Manual
+
+      - name: Verify codesign
+        if: ${{ secrets.MACOS_CERT_P12 != '' }}
+        # `--deep` here walks the bundle tree to verify every nested
+        # signature is intact — distinct from the archive step above.
+        run: |
+          cd apps/macos
+          codesign --verify --deep --strict \
+              build/Human.xcarchive/Products/Applications/Human.app
+
+      # --- Unsigned fallback (AC-45.1.4): only when secrets are absent
+      # (fork PRs, scheduled runs without secrets configured, etc.). We
+      # use `swift build -c release` here, NOT `xcodebuild build` — the
+      # acceptance criterion is explicit.
+      - name: Unsigned fallback (no secrets)
+        if: ${{ secrets.MACOS_CERT_P12 == '' }}
+        run: cd apps/macos && swift build -c release
+
   fleet-sota-gate:
     name: Fleet SOTA gate (award-tier)
     runs-on: ubuntu-latest
@@ -159,6 +235,7 @@ jobs:
       - ios-simulator-fleet
       - android-emulator-fleet
       - macos-app-build
+      - macos-app-archive
     if: always()
     steps:
       - name: Summarize + enforce all-green
@@ -167,6 +244,7 @@ jobs:
           IOS: ${{ needs.ios-simulator-fleet.result }}
           AND: ${{ needs.android-emulator-fleet.result }}
           MAC: ${{ needs.macos-app-build.result }}
+          MAC_ARCHIVE: ${{ needs.macos-app-archive.result }}
         run: |
           {
             echo "## Native fleet — SOTA / award-tier gate"
@@ -179,14 +257,16 @@ jobs:
             echo "| iOS simulator matrix (XCUITest) | \`$IOS\` |"
             echo "| Android emulator matrix (Compose) | \`$AND\` |"
             echo "| macOS app (debug + release) | \`$MAC\` |"
+            echo "| macOS app · Archive + codesign | \`$MAC_ARCHIVE\` |"
             echo ""
             echo "### What this fleet proves"
             echo "- **Inclusivity**: Tab journeys + labeled controls exercised under automation (VoiceOver/TalkBack-oriented labels)."
             echo "- **Cross-device**: Multiple iPhone / iPad + API 29–34 emulators."
             echo "- **Reliability**: Xcode test retries + disabled emulator animations + Gradle caches."
+            echo "- **Distribution-ready**: macOS archive built + codesigned (or unsigned-fallback on fork PRs)."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ]; then
+          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$AND" != success ] || [ "$MAC" != success ] || [ "$MAC_ARCHIVE" != success ]; then
             echo "::error::Fleet SOTA gate failed — every matrix job must be success."
             exit 1
           fi

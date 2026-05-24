@@ -43,8 +43,7 @@ typedef struct hu_muon_adamw {
 /* ─── LR schedule ───────────────────────────────────────────────────────── */
 
 float hu_ml_lr_schedule(float progress, float warmup_ratio, float warmdown_ratio,
-                        float final_lr_frac)
-{
+                        float final_lr_frac) {
     if (progress <= 0.0f)
         return 0.0f;
     if (progress >= 1.0f)
@@ -62,9 +61,7 @@ float hu_ml_lr_schedule(float progress, float warmup_ratio, float warmdown_ratio
 
 /* ─── AdamW step (embedding, unembedding, scalar) ─────────────────────────── */
 
-static void step_adamw(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
-                       float lr, float wd)
-{
+static void step_adamw(hu_param_group_t *g, const hu_optimizer_config_t *cfg, float lr, float wd) {
     const float beta1 = cfg->adam_beta1;
     const float beta2 = cfg->adam_beta2;
     const float eps = ADAM_EPS;
@@ -95,25 +92,25 @@ static void step_adamw(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
 /* ─── Newton-Schulz orthogonalization (Muon reference implementation) ──────── */
 
 #define NS_STEPS 10
-#define NS_A  3.4445f
-#define NS_B -4.7750f
-#define NS_C  2.0315f
+#define NS_A     3.4445f
+#define NS_B     -4.7750f
+#define NS_C     2.0315f
 
 /* Frobenius norm of rows x cols matrix */
-static float mat_frob_norm(const float *m, size_t n)
-{
+static float mat_frob_norm(const float *m, size_t n) {
     float s = 0.0f;
-    for (size_t i = 0; i < n; i++) s += m[i] * m[i];
+    for (size_t i = 0; i < n; i++)
+        s += m[i] * m[i];
     return sqrtf(s) + 1e-12f;
 }
 
 /* Y[m×m] = X[m×n] @ X[m×n]^T  (or X^T @ X for tall matrices, handled by caller) */
-static void matmul_xxt(float *y, const float *x, size_t m, size_t n)
-{
+static void matmul_xxt(float *y, const float *x, size_t m, size_t n) {
     for (size_t i = 0; i < m; i++)
         for (size_t j = 0; j <= i; j++) {
             float s = 0.0f;
-            for (size_t k = 0; k < n; k++) s += x[i * n + k] * x[j * n + k];
+            for (size_t k = 0; k < n; k++)
+                s += x[i * n + k] * x[j * n + k];
             y[i * m + j] = s;
             y[j * m + i] = s;
         }
@@ -123,8 +120,7 @@ static void matmul_xxt(float *y, const float *x, size_t m, size_t n)
  * For tall matrices (rows > cols), transposes to wide form, orthogonalizes,
  * then transposes back so the caller always sees rows×cols output. */
 static hu_error_t newton_schulz_orthogonalize(float *x, size_t rows, size_t cols,
-                                               hu_allocator_t *alloc)
-{
+                                              hu_allocator_t *alloc) {
     int transposed = 0;
     size_t m = rows, n = cols;
     float *work = NULL;
@@ -132,28 +128,36 @@ static hu_error_t newton_schulz_orthogonalize(float *x, size_t rows, size_t cols
     if (m > n) {
         transposed = 1;
         work = (float *)alloc->alloc(alloc->ctx, m * n * sizeof(float));
-        if (!work) return HU_ERR_OUT_OF_MEMORY;
+        if (!work)
+            return HU_ERR_OUT_OF_MEMORY;
         for (size_t i = 0; i < m; i++)
             for (size_t j = 0; j < n; j++)
                 work[j * m + i] = x[i * n + j];
-        size_t tmp = m; m = n; n = tmp;
+        size_t tmp = m;
+        m = n;
+        n = tmp;
     } else {
         work = (float *)alloc->alloc(alloc->ctx, m * n * sizeof(float));
-        if (!work) return HU_ERR_OUT_OF_MEMORY;
+        if (!work)
+            return HU_ERR_OUT_OF_MEMORY;
         memcpy(work, x, m * n * sizeof(float));
     }
 
     /* Frobenius normalize */
     float fnorm = mat_frob_norm(work, m * n);
-    for (size_t i = 0; i < m * n; i++) work[i] /= fnorm;
+    for (size_t i = 0; i < m * n; i++)
+        work[i] /= fnorm;
 
     float *a = (float *)alloc->alloc(alloc->ctx, m * m * sizeof(float));
     float *a2 = (float *)alloc->alloc(alloc->ctx, m * m * sizeof(float));
     float *xnew = (float *)alloc->alloc(alloc->ctx, m * n * sizeof(float));
     if (!a || !a2 || !xnew) {
-        if (a) alloc->free(alloc->ctx, a, m * m * sizeof(float));
-        if (a2) alloc->free(alloc->ctx, a2, m * m * sizeof(float));
-        if (xnew) alloc->free(alloc->ctx, xnew, m * n * sizeof(float));
+        if (a)
+            alloc->free(alloc->ctx, a, m * m * sizeof(float));
+        if (a2)
+            alloc->free(alloc->ctx, a2, m * m * sizeof(float));
+        if (xnew)
+            alloc->free(alloc->ctx, xnew, m * n * sizeof(float));
         alloc->free(alloc->ctx, work, rows * cols * sizeof(float));
         return HU_ERR_OUT_OF_MEMORY;
     }
@@ -166,17 +170,20 @@ static hu_error_t newton_schulz_orthogonalize(float *x, size_t rows, size_t cols
         for (size_t i = 0; i < m; i++)
             for (size_t j = 0; j < m; j++) {
                 float s = 0.0f;
-                for (size_t k = 0; k < m; k++) s += a[i * m + k] * a[k * m + j];
+                for (size_t k = 0; k < m; k++)
+                    s += a[i * m + k] * a[k * m + j];
                 a2[i * m + j] = s;
             }
 
         /* combined = b*A + c*A2, then X_new = a*X + combined @ X */
-        for (size_t i = 0; i < m * m; i++) a[i] = NS_B * a[i] + NS_C * a2[i];
+        for (size_t i = 0; i < m * m; i++)
+            a[i] = NS_B * a[i] + NS_C * a2[i];
 
         for (size_t i = 0; i < m; i++)
             for (size_t j = 0; j < n; j++) {
                 float s = 0.0f;
-                for (size_t k = 0; k < m; k++) s += a[i * m + k] * work[k * n + j];
+                for (size_t k = 0; k < m; k++)
+                    s += a[i * m + k] * work[k * n + j];
                 xnew[i * n + j] = NS_A * work[i * n + j] + s;
             }
 
@@ -201,9 +208,8 @@ static hu_error_t newton_schulz_orthogonalize(float *x, size_t rows, size_t cols
 
 /* ─── Muon step (2D matrices) ──────────────────────────────────────────────── */
 
-static hu_error_t step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
-                            float lr, float wd, float beta, hu_allocator_t *alloc)
-{
+static hu_error_t step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cfg, float lr,
+                            float wd, float beta, hu_allocator_t *alloc) {
     const size_t rows = g->rows;
     const size_t cols = g->cols;
     const size_t n = g->numel;
@@ -251,9 +257,8 @@ static hu_error_t step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cf
 
 /* ─── Vtable implementations ─────────────────────────────────────────────── */
 
-static hu_error_t muon_adamw_step(void *ctx, hu_ml_tensor_t *params,
-                                  const hu_ml_tensor_t *grads, size_t count)
-{
+static hu_error_t muon_adamw_step(void *ctx, hu_ml_tensor_t *params, const hu_ml_tensor_t *grads,
+                                  size_t count) {
     (void)params;
     (void)grads;
     (void)count;
@@ -286,8 +291,7 @@ static hu_error_t muon_adamw_step(void *ctx, hu_ml_tensor_t *params,
     float beta_start = cfg->muon_beta_start > 0.0f ? cfg->muon_beta_start : 0.85f;
     float beta_end = cfg->muon_beta_end > 0.0f ? cfg->muon_beta_end : 0.95f;
     int ramp_steps = cfg->muon_beta_ramp_steps > 0 ? cfg->muon_beta_ramp_steps : 300;
-    float t = (m->global_step < ramp_steps)
-        ? (float)m->global_step / (float)ramp_steps : 1.0f;
+    float t = (m->global_step < ramp_steps) ? (float)m->global_step / (float)ramp_steps : 1.0f;
     float muon_beta = beta_start + t * (beta_end - beta_start);
 
     /* Weight decay schedule: wd * (1 - progress) — full wd at start, zero at end */
@@ -317,7 +321,8 @@ static hu_error_t muon_adamw_step(void *ctx, hu_ml_tensor_t *params,
             lr = cfg->matrix_lr * mult;
             {
                 hu_error_t err = step_muon(g, cfg, lr, wd, muon_beta, m->alloc);
-                if (err != HU_OK) return err;
+                if (err != HU_OK)
+                    return err;
             }
             break;
         case HU_PARAM_SCALAR:
@@ -329,8 +334,7 @@ static hu_error_t muon_adamw_step(void *ctx, hu_ml_tensor_t *params,
     return HU_OK;
 }
 
-static void muon_adamw_zero_grad(void *ctx)
-{
+static void muon_adamw_zero_grad(void *ctx) {
     hu_muon_adamw_t *m = (hu_muon_adamw_t *)ctx;
     for (size_t i = 0; i < m->group_count; i++) {
         hu_param_group_t *g = &m->groups[i];
@@ -338,18 +342,15 @@ static void muon_adamw_zero_grad(void *ctx)
     }
 }
 
-static void muon_adamw_set_lr_multiplier(void *ctx, float multiplier)
-{
+static void muon_adamw_set_lr_multiplier(void *ctx, float multiplier) {
     ((hu_muon_adamw_t *)ctx)->lr_multiplier = multiplier;
 }
 
-static void muon_adamw_set_training_progress(void *ctx, float progress)
-{
+static void muon_adamw_set_training_progress(void *ctx, float progress) {
     ((hu_muon_adamw_t *)ctx)->training_progress = progress;
 }
 
-static void muon_adamw_deinit(void *ctx, hu_allocator_t *alloc)
-{
+static void muon_adamw_deinit(void *ctx, hu_allocator_t *alloc) {
     hu_muon_adamw_t *m = (hu_muon_adamw_t *)ctx;
     if (!m)
         return;
@@ -378,10 +379,8 @@ static const hu_ml_optimizer_vtable_t muon_adamw_vtable = {
 
 /* ─── Public API ─────────────────────────────────────────────────────────── */
 
-hu_error_t hu_muon_adamw_create(hu_allocator_t *alloc,
-                                const hu_optimizer_config_t *config,
-                                hu_ml_optimizer_t *out)
-{
+hu_error_t hu_muon_adamw_create(hu_allocator_t *alloc, const hu_optimizer_config_t *config,
+                                hu_ml_optimizer_t *out) {
     if (!alloc || !config || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -403,10 +402,8 @@ hu_error_t hu_muon_adamw_create(hu_allocator_t *alloc,
     return HU_OK;
 }
 
-hu_error_t hu_muon_adamw_add_param(hu_ml_optimizer_t *opt, float *param,
-                                   float *grad, size_t rows, size_t cols,
-                                   hu_param_kind_t kind)
-{
+hu_error_t hu_muon_adamw_add_param(hu_ml_optimizer_t *opt, float *param, float *grad, size_t rows,
+                                   size_t cols, hu_param_kind_t kind) {
     if (!opt || !opt->ctx || !opt->vtable || !param || !grad)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -422,8 +419,7 @@ hu_error_t hu_muon_adamw_add_param(hu_ml_optimizer_t *opt, float *param,
     if (m->group_count >= m->group_capacity) {
         size_t new_cap = (m->group_capacity == 0) ? 8 : m->group_capacity * 2;
         hu_param_group_t *new_groups = (hu_param_group_t *)m->alloc->realloc(
-            m->alloc->ctx, m->groups,
-            m->group_capacity * sizeof(hu_param_group_t),
+            m->alloc->ctx, m->groups, m->group_capacity * sizeof(hu_param_group_t),
             new_cap * sizeof(hu_param_group_t));
         if (!new_groups)
             return HU_ERR_OUT_OF_MEMORY;
@@ -491,10 +487,8 @@ hu_error_t hu_muon_adamw_save_state(hu_ml_optimizer_t *opt, void *file) {
         uint32_t numel = (uint32_t)g->numel;
         int32_t sc = g->step_count;
         uint32_t has_mom = g->momentum_buf ? 1 : 0;
-        if (fwrite(&kind, 4, 1, f) != 1 ||
-            fwrite(&numel, 4, 1, f) != 1 ||
-            fwrite(&sc, 4, 1, f) != 1 ||
-            fwrite(&has_mom, 4, 1, f) != 1)
+        if (fwrite(&kind, 4, 1, f) != 1 || fwrite(&numel, 4, 1, f) != 1 ||
+            fwrite(&sc, 4, 1, f) != 1 || fwrite(&has_mom, 4, 1, f) != 1)
             return HU_ERR_IO;
         size_t sz = g->numel * sizeof(float);
         if (fwrite(g->exp_avg, 1, sz, f) != sz)
@@ -528,9 +522,7 @@ hu_error_t hu_muon_adamw_load_state(hu_ml_optimizer_t *opt, void *file) {
         hu_param_group_t *g = &m->groups[i];
         uint32_t kind, numel, has_mom;
         int32_t sc;
-        if (fread(&kind, 4, 1, f) != 1 ||
-            fread(&numel, 4, 1, f) != 1 ||
-            fread(&sc, 4, 1, f) != 1 ||
+        if (fread(&kind, 4, 1, f) != 1 || fread(&numel, 4, 1, f) != 1 || fread(&sc, 4, 1, f) != 1 ||
             fread(&has_mom, 4, 1, f) != 1)
             return HU_ERR_IO;
         if ((size_t)numel != g->numel || (uint32_t)g->kind != kind)

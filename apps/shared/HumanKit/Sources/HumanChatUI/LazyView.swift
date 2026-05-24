@@ -13,6 +13,7 @@ import SwiftUI
 /// the layout shape stable and the accessibility tree well-formed. See
 /// `apps/ios/UITests/HumaniOSFleetUITests.swift::launchAndSettle` and the prior
 /// CI breakage in run 25736654202 (45s `app.tabBars.firstMatch` timeout).
+@available(macOS 14.0, iOS 17.0, *)
 public struct LazyView<Content: View>: View {
     let build: () -> Content
     @State private var hasAppeared = false

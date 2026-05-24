@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Chat message bubble with user vs assistant styling and basic Markdown rendering.
 /// Supports: **bold**, *italic*, `inline code`, ```code blocks```, [links](url).
+@available(macOS 14.0, iOS 17.0, *)
 public struct ChatBubble: View {
     @Environment(\.colorScheme) private var colorScheme
 

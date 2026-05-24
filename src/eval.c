@@ -1,6 +1,7 @@
 #include "human/eval.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include "human/eval/shape.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <math.h>
@@ -15,6 +16,18 @@
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 #endif
+
+/* 2026-05-19 (M7): proper millisecond precision for per-task elapsed_ms.
+ * Previously time(NULL)*1000 gave only second-precision rounded UP to ms,
+ * so any task finishing in <1s registered 0 ms (false zero — same shape as
+ * the original B2 bug). Use CLOCK_MONOTONIC so neither wall-clock jumps
+ * nor leap-seconds shift the delta. */
+static int64_t eval_monotonic_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return eval_monotonic_ms();
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+}
 
 #define EVAL_MAX_TASKS               256
 #define HU_EVAL_SUITE_JSON_MAX_BYTES (1024u * 1024u)
@@ -549,7 +562,7 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
         hu_eval_result_t *res = &out->results[i];
         char *response = NULL;
         size_t response_len = 0;
-        int64_t task_start_ms = (int64_t)time(NULL) * 1000;
+        int64_t task_start_ms = eval_monotonic_ms();
 
 #if defined(HU_IS_TEST) && HU_IS_TEST
         {
@@ -569,11 +582,27 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
         }
 #else
         {
+            /* 2026-05-18 audit fix: pass suite-level system_prompt instead
+             * of hardcoded NULL/0. Without this, the LLM receives only the
+             * raw task prompt with no persona / channel-overlay /
+             * humor-framework / anti-patterns context, producing default
+             * "AI assistant offering options" markdown responses that look
+             * nothing like Seth's actual iMessage style. With the persona
+             * system prompt populated (by cli_commands.c::cmd_eval before
+             * the run), the same model produces in-voice 1-sentence texts.
+             * Empirical effect: 97% length reduction + 100% markdown
+             * elimination across 8 iMessage tasks. See:
+             *   scripts/persona_eval_comparison.py
+             *   .claude/rules/silent-config-gated-subsystems.md (the
+             *   meta-rule: silent NULL defaults are the same failure
+             *   class as silent config-gated subsystems). */
+            const char *sys = suite->system_prompt ? suite->system_prompt : NULL;
+            size_t sys_len = suite->system_prompt ? suite->system_prompt_len : 0;
             hu_error_t err = provider->vtable->chat_with_system(
-                provider->ctx, alloc, NULL, 0, task->prompt ? task->prompt : "",
+                provider->ctx, alloc, sys, sys_len, task->prompt ? task->prompt : "",
                 task->prompt ? task->prompt_len : 0, model ? model : "", model_len, 0.0, &response,
                 &response_len);
-            int64_t task_end_ms = (int64_t)time(NULL) * 1000;
+            int64_t task_end_ms = eval_monotonic_ms();
             int64_t task_elapsed = task_end_ms - task_start_ms;
 
             /* Timeout enforcement: if task exceeded timeout_ms, treat as failure */
@@ -664,10 +693,38 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
         res->score = score_val;
         res->actual_output = response;
         res->actual_output_len = response_len;
-        res->elapsed_ms = (int64_t)time(NULL) * 1000 - task_start_ms;
+        res->elapsed_ms = eval_monotonic_ms() - task_start_ms;
         res->tool_calls_made = 0;
         res->tokens_used = 0;
         res->error_msg = NULL;
+
+        /* 2026-05-18 (M4): also compute deterministic shape score
+         * alongside the LLM-judge result. Shape classifier is
+         * regex-based on the canonical "AI assistant offering options"
+         * failure mode — robust to judge noise. Channel derived from
+         * the suite name (heuristic): "imessage" / "telegram" / "slack"
+         * / "discord" / "email" substring match; falls back to iMessage
+         * (strictest) for unknown suites. Persists to eval_results
+         * SQLite columns. */
+        {
+            hu_shape_channel_t shape_ch = HU_SHAPE_CHANNEL_IMESSAGE;
+            if (suite->name) {
+                if (strstr(suite->name, "telegram"))
+                    shape_ch = HU_SHAPE_CHANNEL_TELEGRAM;
+                else if (strstr(suite->name, "slack"))
+                    shape_ch = HU_SHAPE_CHANNEL_SLACK;
+                else if (strstr(suite->name, "discord"))
+                    shape_ch = HU_SHAPE_CHANNEL_DISCORD;
+                else if (strstr(suite->name, "email"))
+                    shape_ch = HU_SHAPE_CHANNEL_EMAIL;
+            }
+            hu_shape_result_t shape;
+            memset(&shape, 0, sizeof(shape));
+            (void)hu_shape_classify(response, response_len, shape_ch, &shape);
+            res->shape_score = shape.score;
+            res->shape_pass = shape.passed;
+            res->shape_fails = shape.fail_flags;
+        }
 
         if (passed)
             out->passed++;
@@ -677,6 +734,19 @@ hu_error_t hu_eval_run_suite(hu_allocator_t *alloc, hu_provider_t *provider, con
 
     out->pass_rate =
         (out->results_count > 0) ? (double)out->passed / (double)out->results_count : 1.0;
+
+    /* 2026-05-18 (B2 fix): aggregate per-task elapsed_ms into
+     * total_elapsed_ms. Previously this field was always 0 in reports
+     * because no one summed it — the field existed in the struct, was
+     * serialized to JSON, persisted to SQLite, and parsed back, but
+     * never CALCULATED. Made every eval report read "elapsed_ms: 0"
+     * which masked the throughput bottleneck during the persona-eval
+     * audit chain. */
+    out->total_elapsed_ms = 0;
+    for (size_t i = 0; i < out->results_count; i++) {
+        if (out->results[i].elapsed_ms > 0)
+            out->total_elapsed_ms += out->results[i].elapsed_ms;
+    }
 
     out->suite_name = suite->name ? hu_strdup(alloc, suite->name) : hu_strndup(alloc, "eval", 4);
     if (!out->suite_name) {
@@ -992,6 +1062,11 @@ hu_error_t hu_eval_init_tables(sqlite3 *db) {
     /* Migration: add provider/model columns to existing tables */
     sqlite3_exec(db, "ALTER TABLE eval_runs ADD COLUMN provider TEXT", NULL, NULL, NULL);
     sqlite3_exec(db, "ALTER TABLE eval_runs ADD COLUMN model TEXT", NULL, NULL, NULL);
+    /* 2026-05-18 (M4) migration: shape columns. ALTER returns error
+     * silently when column already exists; that's the idempotent path. */
+    sqlite3_exec(db, "ALTER TABLE eval_results ADD COLUMN shape_score REAL", NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE eval_results ADD COLUMN shape_pass INTEGER", NULL, NULL, NULL);
+    sqlite3_exec(db, "ALTER TABLE eval_results ADD COLUMN shape_fails INTEGER", NULL, NULL, NULL);
     const char *results_sql = "CREATE TABLE IF NOT EXISTS eval_results ("
                               "id INTEGER PRIMARY KEY AUTOINCREMENT,"
                               "run_id INTEGER NOT NULL REFERENCES eval_runs(id),"
@@ -999,7 +1074,10 @@ hu_error_t hu_eval_init_tables(sqlite3 *db) {
                               "passed INTEGER NOT NULL,"
                               "actual_output TEXT,"
                               "score REAL,"
-                              "elapsed_ms INTEGER)";
+                              "elapsed_ms INTEGER,"
+                              "shape_score REAL,"     /* 2026-05-18 (M4) */
+                              "shape_pass INTEGER,"   /* 2026-05-18 (M4) */
+                              "shape_fails INTEGER)"; /* 2026-05-18 (M4) */
     if (sqlite3_exec(db, results_sql, NULL, NULL, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
     const char *baselines_sql = "CREATE TABLE IF NOT EXISTS eval_baselines ("
@@ -1153,8 +1231,9 @@ hu_error_t hu_eval_store_run(hu_allocator_t *alloc, sqlite3 *db, const hu_eval_r
     if (run->results_count > 0 && run->results) {
         sqlite3_stmt *ins_res = NULL;
         const char *res_sql =
-            "INSERT INTO eval_results(run_id,task_id,passed,actual_output,score,elapsed_ms) "
-            "VALUES(?,?,?,?,?,?)";
+            "INSERT INTO eval_results(run_id,task_id,passed,actual_output,score,elapsed_ms,"
+            "shape_score,shape_pass,shape_fails) "
+            "VALUES(?,?,?,?,?,?,?,?,?)";
         if (sqlite3_prepare_v2(db, res_sql, -1, &ins_res, NULL) != SQLITE_OK)
             return HU_ERR_MEMORY_BACKEND;
         for (size_t i = 0; i < run->results_count; i++) {
@@ -1170,6 +1249,10 @@ hu_error_t hu_eval_store_run(hu_allocator_t *alloc, sqlite3 *db, const hu_eval_r
             }
             sqlite3_bind_double(ins_res, 5, r->score);
             sqlite3_bind_int64(ins_res, 6, r->elapsed_ms);
+            /* 2026-05-18 (M4): deterministic shape classification fields */
+            sqlite3_bind_double(ins_res, 7, r->shape_score);
+            sqlite3_bind_int(ins_res, 8, r->shape_pass ? 1 : 0);
+            sqlite3_bind_int(ins_res, 9, (int)r->shape_fails);
             if (sqlite3_step(ins_res) != SQLITE_DONE) {
                 sqlite3_finalize(ins_res);
                 return HU_ERR_MEMORY_BACKEND;
@@ -1306,6 +1389,13 @@ void hu_eval_suite_free(hu_allocator_t *alloc, hu_eval_suite_t *suite) {
         alloc->free(alloc->ctx, suite->default_rubric, suite->default_rubric_len + 1);
         suite->default_rubric = NULL;
         suite->default_rubric_len = 0;
+    }
+    /* 2026-05-18: free the persona system prompt set by cli_commands.c
+     * before hu_eval_run_suite. Owned by the suite struct. */
+    if (suite->system_prompt) {
+        alloc->free(alloc->ctx, suite->system_prompt, suite->system_prompt_len + 1);
+        suite->system_prompt = NULL;
+        suite->system_prompt_len = 0;
     }
 }
 

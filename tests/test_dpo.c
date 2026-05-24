@@ -1,5 +1,5 @@
-#include "test_framework.h"
 #include "human/ml/dpo.h"
+#include "test_framework.h"
 #include <string.h>
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -72,7 +72,7 @@ static void dpo_export_jsonl_format(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
-    hu_dpo_record_from_feedback(&col, "p", 1, "r", 1, true);
+    hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true);
     size_t exported = 0;
     HU_ASSERT_EQ(hu_dpo_export_jsonl(&col, "test.jsonl", 10, &exported), HU_OK);
     HU_ASSERT_EQ((int)exported, 1);
@@ -83,9 +83,9 @@ static void dpo_pair_count_accurate(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
-    hu_dpo_record_from_feedback(&col, "p1", 2, "r1", 2, true);
-    hu_dpo_record_from_feedback(&col, "p2", 2, "r2", 2, false);
-    hu_dpo_record_from_retry(&col, "p3", 2, "rej", 3, "cho", 3);
+    hu_dpo_record_from_feedback(&col, "p1", 2, "resp1", 5, true);
+    hu_dpo_record_from_feedback(&col, "p2", 2, "resp2", 5, false);
+    hu_dpo_record_from_retry(&col, "p3", 2, "rejected", 8, "chosen", 6);
     size_t count = 0;
     hu_dpo_pair_count(&col, &count);
     HU_ASSERT_EQ((int)count, 3);
@@ -96,7 +96,7 @@ static void dpo_clear_removes_all(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
-    hu_dpo_record_from_feedback(&col, "p", 1, "r", 1, true);
+    hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true);
     HU_ASSERT_EQ(hu_dpo_clear(&col), HU_OK);
     size_t count = 999;
     hu_dpo_pair_count(&col, &count);
@@ -184,7 +184,7 @@ static void dpo_max_pairs_ring_buffer(void) {
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 3, &col), HU_OK);
     HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
     for (int i = 0; i < 5; i++)
-        hu_dpo_record_from_feedback(&col, "p", 1, "r", 1, true);
+        hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true);
     /* DB should have at most 3 rows due to ring buffer eviction */
     sqlite3_stmt *stmt = NULL;
     sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM dpo_pairs", -1, &stmt, NULL);
@@ -266,8 +266,8 @@ static void dpo_margin_reflects_confidence(void) {
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
     /* record_from_feedback uses margin=0.7, record_from_retry uses margin=0.8 */
-    HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "p", 1, "r", 1, true), HU_OK);
-    HU_ASSERT_EQ(hu_dpo_record_from_retry(&col, "p", 1, "rej", 3, "cho", 3), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "p", 1, "resp", 4, true), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_from_retry(&col, "p", 1, "rejected", 8, "chosen", 6), HU_OK);
     size_t count = 0;
     hu_dpo_pair_count(&col, &count);
     HU_ASSERT_EQ((int)count, 2);

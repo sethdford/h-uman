@@ -1,7 +1,20 @@
 import SwiftUI
 
+/// View modifier that applies a SwiftUI "glass" material treatment
+/// (`.glassEffect` on macOS 26+/iOS 26+, falling back to standard
+/// `Material` on older OSes) with an opaque fallback when the user has
+/// `accessibilityReduceTransparency` enabled.
+@available(macOS 14.0, iOS 17.0, *)
 public struct SCGlassModifier: ViewModifier {
-    public enum Tier { case subtle, standard, prominent }
+    /// Visual intensity of the glass treatment.
+    public enum Tier {
+        /// Subtle glass (corner radius `radiusMd`, ultra-thin material).
+        case subtle
+        /// Standard glass (corner radius `radiusLg`, thin material).
+        case standard
+        /// Prominent glass (corner radius `radiusXl`, regular material).
+        case prominent
+    }
     let tier: Tier
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -60,7 +73,10 @@ public struct SCGlassModifier: ViewModifier {
     }
 }
 
+/// `View` convenience for applying `SCGlassModifier`.
+@available(macOS 14.0, iOS 17.0, *)
 public extension View {
+    /// Apply the SCGlass treatment at the given `tier`.
     func scGlass(_ tier: SCGlassModifier.Tier = .standard) -> some View {
         modifier(SCGlassModifier(tier: tier))
     }

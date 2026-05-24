@@ -13,8 +13,10 @@
 #include "human/ml/experiment.h"
 #include "human/ml/experiment_store.h"
 #include "human/ml/lora.h"
+#include "human/ml/m3_contact_routes.h"
 #include "human/ml/m3_frontier_adapter.h"
 #include "human/ml/m3_id_map.h"
+#include "human/ml/m3_rewrite_capture.h"
 #include "human/ml/ml.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
@@ -5251,6 +5253,204 @@ static void test_m3_id_map_persists_ids_across_reload(void) {
     (void)unlink(path);
 }
 
+/* D7 (2026-05-18): REWRITE pair capture for DPO training. Pins the
+ * three contracts:
+ *   1. Successful capture writes one JSONL line with prompt/rejected/
+ *      accepted text + ph + k fields
+ *   2. NULL/empty inputs return HU_ERR_INVALID_ARGUMENT and write nothing
+ *   3. Per-field truncation kicks in at HU_M3_REWRITE_PAIR_MAX_FIELD_BYTES
+ *      so a giant prompt doesn't blow past the PIPE_BUF atomicity
+ *      guarantee. */
+static void test_m3_rewrite_pair_record_writes_valid_jsonl(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_rewrite_pair_test.jsonl";
+    (void)unlink(path);
+
+    hu_error_t err = hu_m3_rewrite_pair_record(&alloc, path, "what's the time?", 16,
+                                               "I'm sorry, I can't tell time as an AI", 38,
+                                               "no clue, my watch died", 22,
+                                               /*turn_kind=*/2);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    FILE *fp = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(fp);
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    buf[n] = '\0';
+    /* Must contain the four key fields and one of each input string. */
+    HU_ASSERT_TRUE(strstr(buf, "\"prompt\":\"what's the time?\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"rejected\":") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"accepted\":\"no clue, my watch died\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"k\":2") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"ph\":") != NULL);
+    /* Line terminated by \n */
+    HU_ASSERT_TRUE(buf[n - 1] == '\n');
+
+    (void)unlink(path);
+}
+
+static void test_m3_rewrite_pair_record_rejects_null_or_empty(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    /* NULL prompt */
+    HU_ASSERT_EQ(hu_m3_rewrite_pair_record(&alloc, "/tmp/_nope.jsonl", NULL, 10, "x", 1, "y", 1, 1),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* Zero-length rejected */
+    HU_ASSERT_EQ(hu_m3_rewrite_pair_record(&alloc, "/tmp/_nope.jsonl", "p", 1, "x", 0, "y", 1, 1),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* NULL alloc */
+    HU_ASSERT_EQ(hu_m3_rewrite_pair_record(NULL, "/tmp/_nope.jsonl", "p", 1, "x", 1, "y", 1, 1),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_m3_rewrite_pair_record_appends_multiple_lines(void) {
+    /* Two pairs from the same prompt → two JSONL lines, both readable. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_rewrite_pair_append.jsonl";
+    (void)unlink(path);
+
+    for (int i = 0; i < 3; i++) {
+        hu_error_t err = hu_m3_rewrite_pair_record(&alloc, path, "p", 1, "r", 1, "a", 1,
+                                                   /*turn_kind=*/1);
+        HU_ASSERT_EQ(err, HU_OK);
+    }
+
+    FILE *fp = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(fp);
+    int lines = 0;
+    int ch;
+    while ((ch = fgetc(fp)) != EOF)
+        if (ch == '\n')
+            lines++;
+    fclose(fp);
+    HU_ASSERT_EQ(lines, 3);
+
+    (void)unlink(path);
+}
+
+/* F2 (2026-05-18) — C-side contact-routes lookup. Pins:
+ *   1. Missing/empty routes file → lookup returns NULL for everything
+ *   2. Routes file with one entry → specific contact resolves
+ *   3. default_adapter falls through for unknown contacts
+ *   4. Specific route wins over default_adapter
+ *   5. Reload picks up new routes added to the file
+ *   6. NULL inputs are safe (no crash)
+ */
+static void test_m3_contact_routes_empty_file_lookup_returns_null(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_empty_test.json";
+    (void)unlink(path);
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    HU_ASSERT_NOT_NULL(routes);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 0);
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_lookup(routes, 12345));
+    hu_m3_contact_routes_destroy(routes);
+}
+
+static void test_m3_contact_routes_specific_route_resolves(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_specific_test.json";
+    (void)unlink(path);
+    /* Write a minimal routes JSON matching Python's writer shape. */
+    FILE *fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    const char *json = "{\"routes\":{\"42\":{\"adapter_path\":\"/a/mom-lora.bin\"}},"
+                       "\"default_adapter\":null}";
+    fwrite(json, 1, strlen(json), fp);
+    fclose(fp);
+
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 1);
+    const char *r = hu_m3_contact_routes_lookup(routes, 42);
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT_STR_EQ(r, "/a/mom-lora.bin");
+    /* Unknown contact + no default → NULL */
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_lookup(routes, 99));
+    hu_m3_contact_routes_destroy(routes);
+    (void)unlink(path);
+}
+
+static void test_m3_contact_routes_default_fallback(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_default_test.json";
+    (void)unlink(path);
+    FILE *fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    const char *json = "{\"routes\":{\"42\":{\"adapter_path\":\"/a/specific.bin\"}},"
+                       "\"default_adapter\":\"/a/default.bin\"}";
+    fwrite(json, 1, strlen(json), fp);
+    fclose(fp);
+
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    /* Specific contact → specific adapter (wins over default) */
+    HU_ASSERT_STR_EQ(hu_m3_contact_routes_lookup(routes, 42), "/a/specific.bin");
+    /* Unknown contact → default */
+    HU_ASSERT_STR_EQ(hu_m3_contact_routes_lookup(routes, 99), "/a/default.bin");
+    HU_ASSERT_STR_EQ(hu_m3_contact_routes_default(routes), "/a/default.bin");
+    hu_m3_contact_routes_destroy(routes);
+    (void)unlink(path);
+}
+
+static void test_m3_contact_routes_reload_picks_up_changes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_reload_test.json";
+    (void)unlink(path);
+    FILE *fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    fwrite("{\"routes\":{},\"default_adapter\":null}", 1, 36, fp);
+    fclose(fp);
+
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 0);
+
+    /* Append a route via direct file write, then reload. */
+    fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    const char *new_json = "{\"routes\":{\"7\":{\"adapter_path\":\"/a/new.bin\"}},"
+                           "\"default_adapter\":null}";
+    fwrite(new_json, 1, strlen(new_json), fp);
+    fclose(fp);
+
+    HU_ASSERT_EQ(hu_m3_contact_routes_reload(routes), HU_OK);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 1);
+    HU_ASSERT_STR_EQ(hu_m3_contact_routes_lookup(routes, 7), "/a/new.bin");
+    hu_m3_contact_routes_destroy(routes);
+    (void)unlink(path);
+}
+
+static void test_m3_contact_routes_null_safety(void) {
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_lookup(NULL, 42));
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(NULL), 0);
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_default(NULL));
+    /* destroy(NULL) must not crash */
+    hu_m3_contact_routes_destroy(NULL);
+}
+
+static void test_m3_contact_routes_malformed_json_is_non_fatal(void) {
+    /* The C-side mirror of Python's "corrupt routes MUST NOT block
+     * inference" stance. A malformed file → empty routes, lookup
+     * returns NULL, chat path continues with base model. */
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_routes_malformed_test.json";
+    (void)unlink(path);
+    FILE *fp = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(fp);
+    fwrite("not json at all", 1, 15, fp);
+    fclose(fp);
+
+    hu_m3_contact_routes_t *routes = NULL;
+    HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &routes), HU_OK);
+    HU_ASSERT_NOT_NULL(routes);
+    HU_ASSERT_EQ((int)hu_m3_contact_routes_count(routes), 0);
+    HU_ASSERT_NULL((void *)hu_m3_contact_routes_lookup(routes, 42));
+    hu_m3_contact_routes_destroy(routes);
+    (void)unlink(path);
+}
+
 static void test_m3_id_map_save_is_noop_when_clean(void) {
     /* Pinning the dirty-flag contract: save() on a never-modified map
      * doesn't write anything to disk. Important because the agent's
@@ -5324,6 +5524,37 @@ static void test_m3_outcome_hash_bytes_deterministic(void) {
     const char *t = "hello, world!";
     uint64_t c = hu_m3_outcome_hash_bytes(t, strlen(t));
     HU_ASSERT_TRUE(a != c);
+}
+
+/* D4 (2026-05-18): cross-language pinning. The Python side
+ * (scripts/training_loop.py::fnv1a_64) must produce IDENTICAL hashes
+ * for these byte sequences, or hash resolution silently breaks
+ * across the C↔Python boundary. The Python verifier
+ * scripts/test_m3_train_from_outcomes.py has the matching assertions
+ * with the same hex literals — change both sides together if you
+ * change the algorithm.
+ *
+ * Vectors include UTF-8 byte sequences (café, 👋, mixed Chinese)
+ * because real `memory.db` content contains them; ASCII-only tests
+ * miss decoder / byte-order regressions in the multi-byte path. */
+static void test_m3_outcome_hash_bytes_pins_cross_language_vectors(void) {
+    /* "a" — single byte, FNV-1a 64-bit standard reference */
+    HU_ASSERT_EQ((unsigned long long)hu_m3_outcome_hash_bytes("a", 1), 0xaf63dc4c8601ec8cULL);
+    /* "foobar" — another FNV-1a 64-bit standard reference */
+    HU_ASSERT_EQ((unsigned long long)hu_m3_outcome_hash_bytes("foobar", 6), 0x85944171f73967e8ULL);
+    /* "hello, world" — 12 bytes ASCII */
+    HU_ASSERT_EQ((unsigned long long)hu_m3_outcome_hash_bytes("hello, world", 12),
+                 0x17a1a4f267be633dULL);
+    /* "café" — 5 UTF-8 bytes (c, a, f, é=0xc3 0xa9) */
+    HU_ASSERT_EQ((unsigned long long)hu_m3_outcome_hash_bytes("caf\xc3\xa9", 5),
+                 0x48e8823acfa40d89ULL);
+    /* "👋" — 4 UTF-8 bytes (0xf0 0x9f 0x91 0x8b) */
+    HU_ASSERT_EQ((unsigned long long)hu_m3_outcome_hash_bytes("\xf0\x9f\x91\x8b", 4),
+                 0xfee7423874edd4e8ULL);
+    /* Mixed Latin + emoji + Chinese — 25 bytes total */
+    const char mixed[] = "I said hi \xf0\x9f\x91\x8b in \xe4\xb8\xad\xe6\x96\x87.";
+    HU_ASSERT_EQ((unsigned long long)hu_m3_outcome_hash_bytes(mixed, sizeof(mixed) - 1),
+                 0xa69f9f3d3251b8eaULL);
 }
 
 static void test_m3_outcome_hash_bytes_null_returns_zero(void) {
@@ -6227,6 +6458,15 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_m3_id_map_null_or_empty_inputs_return_zero);
     HU_RUN_TEST(test_m3_id_map_persists_ids_across_reload);
     HU_RUN_TEST(test_m3_id_map_save_is_noop_when_clean);
+    HU_RUN_TEST(test_m3_rewrite_pair_record_writes_valid_jsonl);
+    HU_RUN_TEST(test_m3_rewrite_pair_record_rejects_null_or_empty);
+    HU_RUN_TEST(test_m3_rewrite_pair_record_appends_multiple_lines);
+    HU_RUN_TEST(test_m3_contact_routes_empty_file_lookup_returns_null);
+    HU_RUN_TEST(test_m3_contact_routes_specific_route_resolves);
+    HU_RUN_TEST(test_m3_contact_routes_default_fallback);
+    HU_RUN_TEST(test_m3_contact_routes_reload_picks_up_changes);
+    HU_RUN_TEST(test_m3_contact_routes_null_safety);
+    HU_RUN_TEST(test_m3_contact_routes_malformed_json_is_non_fatal);
 
     /* Phase B1 redefined (2026-05-17 round 2): inference outcome capture
      * — ring buffer + structured per-call records the future training
@@ -6234,6 +6474,7 @@ void run_ml_tests(void) {
      * Phase B1 (redefined) for the design. */
     HU_RUN_TEST(test_m3_outcome_record_size_is_pinned);
     HU_RUN_TEST(test_m3_outcome_hash_bytes_deterministic);
+    HU_RUN_TEST(test_m3_outcome_hash_bytes_pins_cross_language_vectors);
     HU_RUN_TEST(test_m3_outcome_hash_bytes_null_returns_zero);
     HU_RUN_TEST(test_m3_outcome_hash_bytes_never_returns_zero_for_real_input);
     HU_RUN_TEST(test_m3_record_outcome_null_adapter_is_noop);

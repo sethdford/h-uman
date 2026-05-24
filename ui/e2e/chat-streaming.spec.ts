@@ -22,7 +22,9 @@ async function getAssistantBubbleVisibleLength(page: Page): Promise<number> {
 
 async function sendChatMessage(page: Page, text: string): Promise<void> {
   const chatView = page.locator("hu-app >> hu-chat-view");
-  await expect(chatView.locator(".status-bar")).toContainText("Connected", { timeout: 25000 });
+  await expect(page.locator("hu-app >> hu-chat-view >> .status-bar")).toContainText("Connected", {
+    timeout: 25000,
+  });
   const input = chatView.locator("#composer-textarea").or(chatView.locator("textarea")).first();
   await expect(input).toBeVisible({ timeout: 8000 });
   await expect(input).toBeEnabled({ timeout: 8000 });

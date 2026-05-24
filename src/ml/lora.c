@@ -1,8 +1,8 @@
 /* LoRA (Low-Rank Adaptation) adapter for fine-tuning. */
 
+#include "human/ml/lora.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/ml/lora.h"
 #include "human/ml/optimizer.h"
 #include <math.h>
 #include <stdint.h>
@@ -24,16 +24,14 @@ static float prng_next(uint64_t *seed) {
     return ((float)(*seed >> 33) / (float)(1ULL << 31)) - 0.5f;
 }
 
-hu_error_t hu_lora_create(hu_allocator_t *alloc, const hu_lora_config_t *config,
-                           size_t in_dim, size_t out_dim, size_t n_layers,
-                           hu_lora_adapter_t **out) {
+hu_error_t hu_lora_create(hu_allocator_t *alloc, const hu_lora_config_t *config, size_t in_dim,
+                          size_t out_dim, size_t n_layers, hu_lora_adapter_t **out) {
     if (!alloc || !config || !out || n_layers == 0)
         return HU_ERR_INVALID_ARGUMENT;
     if (config->rank == 0 || in_dim == 0 || out_dim == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
-    hu_lora_adapter_t *a =
-        (hu_lora_adapter_t *)alloc->alloc(alloc->ctx, sizeof(hu_lora_adapter_t));
+    hu_lora_adapter_t *a = (hu_lora_adapter_t *)alloc->alloc(alloc->ctx, sizeof(hu_lora_adapter_t));
     if (!a)
         return HU_ERR_OUT_OF_MEMORY;
 
@@ -43,8 +41,7 @@ hu_error_t hu_lora_create(hu_allocator_t *alloc, const hu_lora_config_t *config,
     a->in_dim = in_dim;
     a->out_dim = out_dim;
 
-    a->layers =
-        (hu_lora_layer_t *)alloc->alloc(alloc->ctx, n_layers * sizeof(hu_lora_layer_t));
+    a->layers = (hu_lora_layer_t *)alloc->alloc(alloc->ctx, n_layers * sizeof(hu_lora_layer_t));
     if (!a->layers) {
         alloc->free(alloc->ctx, a, sizeof(hu_lora_adapter_t));
         return HU_ERR_OUT_OF_MEMORY;
@@ -52,9 +49,8 @@ hu_error_t hu_lora_create(hu_allocator_t *alloc, const hu_lora_config_t *config,
     memset(a->layers, 0, n_layers * sizeof(hu_lora_layer_t));
 
     uint64_t seed = 12345;
-    float scale = (config->alpha > 0.0f && config->rank > 0)
-                      ? (config->alpha / (float)config->rank)
-                      : 1.0f;
+    float scale =
+        (config->alpha > 0.0f && config->rank > 0) ? (config->alpha / (float)config->rank) : 1.0f;
 
     for (size_t i = 0; i < n_layers; i++) {
         hu_lora_layer_t *layer = &a->layers[i];
@@ -117,13 +113,12 @@ void hu_lora_destroy(hu_allocator_t *alloc, hu_lora_adapter_t *adapter) {
         if (l->grad_B)
             alloc->free(alloc->ctx, l->grad_B, l->out_dim * l->rank * sizeof(float));
     }
-    alloc->free(alloc->ctx, adapter->layers,
-                adapter->n_layers * sizeof(hu_lora_layer_t));
+    alloc->free(alloc->ctx, adapter->layers, adapter->n_layers * sizeof(hu_lora_layer_t));
     alloc->free(alloc->ctx, adapter, sizeof(hu_lora_adapter_t));
 }
 
-hu_error_t hu_lora_apply(const hu_lora_adapter_t *adapter, size_t layer_idx,
-                          const float *input, size_t batch_tokens, float *output) {
+hu_error_t hu_lora_apply(const hu_lora_adapter_t *adapter, size_t layer_idx, const float *input,
+                         size_t batch_tokens, float *output) {
     if (!adapter || !input || !output)
         return HU_ERR_INVALID_ARGUMENT;
     if (layer_idx >= adapter->n_layers)
@@ -136,8 +131,7 @@ hu_error_t hu_lora_apply(const hu_lora_adapter_t *adapter, size_t layer_idx,
     float scale = layer->scale;
 
     float *temp =
-        (float *)adapter->alloc->alloc(adapter->alloc->ctx,
-                                       batch_tokens * rank * sizeof(float));
+        (float *)adapter->alloc->alloc(adapter->alloc->ctx, batch_tokens * rank * sizeof(float));
     if (!temp)
         return HU_ERR_OUT_OF_MEMORY;
 
@@ -159,14 +153,12 @@ hu_error_t hu_lora_apply(const hu_lora_adapter_t *adapter, size_t layer_idx,
             output[i * out_dim + j] += sum * scale;
         }
 
-    adapter->alloc->free(adapter->alloc->ctx, temp,
-                         batch_tokens * rank * sizeof(float));
+    adapter->alloc->free(adapter->alloc->ctx, temp, batch_tokens * rank * sizeof(float));
     return HU_OK;
 }
 
-hu_error_t hu_lora_backward(hu_lora_adapter_t *adapter, size_t layer_idx,
-                             const float *input, const float *grad_output,
-                             size_t batch_tokens, float *grad_input) {
+hu_error_t hu_lora_backward(hu_lora_adapter_t *adapter, size_t layer_idx, const float *input,
+                            const float *grad_output, size_t batch_tokens, float *grad_input) {
     if (!adapter || !input || !grad_output)
         return HU_ERR_INVALID_ARGUMENT;
     if (layer_idx >= adapter->n_layers)
@@ -180,8 +172,7 @@ hu_error_t hu_lora_backward(hu_lora_adapter_t *adapter, size_t layer_idx,
     size_t bt_rank = batch_tokens * rank;
 
     /* temp = input @ A^T  [BT × rank] */
-    float *temp =
-        (float *)adapter->alloc->alloc(adapter->alloc->ctx, bt_rank * sizeof(float));
+    float *temp = (float *)adapter->alloc->alloc(adapter->alloc->ctx, bt_rank * sizeof(float));
     if (!temp)
         return HU_ERR_OUT_OF_MEMORY;
 
@@ -203,8 +194,7 @@ hu_error_t hu_lora_backward(hu_lora_adapter_t *adapter, size_t layer_idx,
         }
 
     /* gob = grad_output @ B  [BT × rank] — reuse temp buffer */
-    float *gob =
-        (float *)adapter->alloc->alloc(adapter->alloc->ctx, bt_rank * sizeof(float));
+    float *gob = (float *)adapter->alloc->alloc(adapter->alloc->ctx, bt_rank * sizeof(float));
     if (!gob) {
         adapter->alloc->free(adapter->alloc->ctx, temp, bt_rank * sizeof(float));
         return HU_ERR_OUT_OF_MEMORY;
@@ -248,21 +238,20 @@ hu_error_t hu_lora_register_params(hu_lora_adapter_t *adapter, hu_ml_optimizer_t
 
     for (size_t i = 0; i < adapter->n_layers; i++) {
         hu_lora_layer_t *layer = &adapter->layers[i];
-        hu_error_t err =
-            hu_muon_adamw_add_param(opt, layer->A, layer->grad_A, layer->rank,
-                                    layer->in_dim, HU_PARAM_MATRIX);
+        hu_error_t err = hu_muon_adamw_add_param(opt, layer->A, layer->grad_A, layer->rank,
+                                                 layer->in_dim, HU_PARAM_MATRIX);
         if (err != HU_OK)
             return err;
-        err = hu_muon_adamw_add_param(opt, layer->B, layer->grad_B, layer->out_dim,
-                                       layer->rank, HU_PARAM_MATRIX);
+        err = hu_muon_adamw_add_param(opt, layer->B, layer->grad_B, layer->out_dim, layer->rank,
+                                      HU_PARAM_MATRIX);
         if (err != HU_OK)
             return err;
     }
     return HU_OK;
 }
 
-void hu_lora_get_dims(const hu_lora_adapter_t *adapter, size_t *out_in_dim,
-                      size_t *out_out_dim, size_t *out_n_layers) {
+void hu_lora_get_dims(const hu_lora_adapter_t *adapter, size_t *out_in_dim, size_t *out_out_dim,
+                      size_t *out_n_layers) {
     if (out_in_dim)
         *out_in_dim = adapter ? adapter->in_dim : 0;
     if (out_out_dim)
@@ -325,8 +314,8 @@ fail:
     return HU_ERR_IO;
 }
 
-hu_error_t hu_lora_set_layer_weights(hu_lora_adapter_t *adapter, size_t layer_idx,
-                                     const float *A, const float *B) {
+hu_error_t hu_lora_set_layer_weights(hu_lora_adapter_t *adapter, size_t layer_idx, const float *A,
+                                     const float *B) {
     if (!adapter || layer_idx >= adapter->n_layers)
         return HU_ERR_INVALID_ARGUMENT;
     hu_lora_layer_t *layer = &adapter->layers[layer_idx];
@@ -337,8 +326,7 @@ hu_error_t hu_lora_set_layer_weights(hu_lora_adapter_t *adapter, size_t layer_id
     return HU_OK;
 }
 
-hu_error_t hu_lora_load(hu_allocator_t *alloc, const char *path,
-                        hu_lora_adapter_t **out) {
+hu_error_t hu_lora_load(hu_allocator_t *alloc, const char *path, hu_lora_adapter_t **out) {
     if (!alloc || !path || !out)
         return HU_ERR_INVALID_ARGUMENT;
 

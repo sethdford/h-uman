@@ -1169,6 +1169,7 @@ list(APPEND HU_CORE_SOURCES src/daemon_reaction_poll.c)
 list(APPEND HU_CORE_SOURCES
     src/a2a.c
     src/eval.c
+    src/eval/shape.c
     src/eval/consistency.c
     src/eval/persona_fidelity.c
     src/memory/fact_extract_llm.c
@@ -1478,8 +1479,10 @@ if(HU_ENABLE_ML)
         # and must link in HU_ENABLE_ML=OFF builds that still compile
         # lora_retrain_runner.c.
         src/ml/agent_trainer.c
+        src/ml/m3_contact_routes.c
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
+        src/ml/m3_rewrite_capture.c
         src/ml/mlx_admin.c
         # US-7.10 (Init #06 phase 1): RL trainer vtable + SimPO loss head.
         # NOTE: Sprint 11 US-11.5's rl_trainer_orpo.c is orphaned by main's
@@ -2953,9 +2956,15 @@ set(HU_TEST_SOURCES
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
+    tests/test_log_once.c
+    tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
+    tests/test_config_banner_runtime_failfast.c
     tests/test_slice.c
+    tests/test_tool_registry_honesty.c
     tests/test_memory.c
+    tests/test_mlx_load_adapter.c
+    tests/test_m3_route_per_turn.c
     tests/test_sql_transaction.c
     tests/test_normalize.c
     tests/test_memory_util.c
@@ -3143,6 +3152,7 @@ set(HU_TEST_SOURCES
     tests/test_w5_persona_deltas.c
     tests/test_persona_delta_observer.c
     tests/test_world_model_bridge.c
+    tests/test_w7_render_null_safety.c
     tests/test_signal_channel_wire.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
@@ -3441,6 +3451,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_skill_scaffold.c
     tests/test_eval_runner.c
     tests/test_eval_history.c
+    tests/test_eval_shape.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c
     tests/test_self_rag.c
