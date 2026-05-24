@@ -4697,6 +4697,57 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 all[i + 1] = hist_msgs[i];
             msgs = all;
             msgs_count = total;
+
+            /* A1b — message-history budget cap (2026-05-19).
+             *
+             * A1 capped the system_prompt at 16 KB, but the messages
+             * array's total bytes grow with conversation length. Multi-turn
+             * test A4 (2026-05-19) saw turn-5 onwards fail with
+             *   body_len=22595 → "Server returned nothing"
+             * because system_prompt (~16 KB) + accumulated history (~6 KB)
+             * crossed the MLX backend's effective request cap.
+             *
+             * Algorithm: keep all[0] (system) and the LAST message (the
+             * most recent user message — required for the turn to make
+             * sense). Drop oldest history (all[1], all[2], ...) until
+             * total content bytes < HISTORY_BUDGET. Then compact the
+             * array by sliding survivors forward.
+             *
+             * Budget chosen at 20 KB total. With system_prompt capped at
+             * 16 KB, this leaves ~4 KB for history — about 8-10 turns of
+             * short iMessage replies. Long-conversation drift will need
+             * summarization (a separate future fix). */
+            if (msgs_count > 2) {
+                const size_t HISTORY_BUDGET = 20 * 1024;
+                size_t total_bytes = 0;
+                for (size_t i = 0; i < msgs_count; i++)
+                    total_bytes += msgs[i].content_len;
+                if (total_bytes > HISTORY_BUDGET) {
+                    /* Drop oldest non-system, non-last messages first. */
+                    size_t dropped = 0;
+                    size_t drop_idx = 1; /* start after system */
+                    while (total_bytes > HISTORY_BUDGET && drop_idx < msgs_count - 1) {
+                        total_bytes -= msgs[drop_idx].content_len;
+                        drop_idx++;
+                        dropped++;
+                    }
+                    if (dropped > 0) {
+                        /* Slide survivors forward: [0] system stays,
+                         * [drop_idx .. msgs_count) shifts to [1 ..]. */
+                        size_t kept_tail = msgs_count - drop_idx;
+                        for (size_t i = 0; i < kept_tail; i++)
+                            msgs[1 + i] = msgs[drop_idx + i];
+                        msgs_count = 1 + kept_tail;
+                        static atomic_bool warned_history_budget = false;
+                        hu_log_warn_once(&warned_history_budget, "agent_turn", NULL,
+                                         "history truncated: dropped %zu "
+                                         "oldest messages to fit %zu-byte "
+                                         "budget (now %zu msgs, %zu bytes)",
+                                         dropped, HISTORY_BUDGET, msgs_count, total_bytes);
+                    }
+                }
+            }
+
             req.messages = msgs;
             req.messages_count = msgs_count;
         }
