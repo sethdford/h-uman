@@ -1403,6 +1403,20 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             return err;
         }
 
+        /* Spec 2026-05-19 M3 closure / AC-M3-2 / D-M3-2 — per-turn
+         * contact routing on the streaming path. We fire route_per_turn
+         * AFTER the first successful stream_chat returns (i.e., once we
+         * know the model is serving healthily) rather than before the
+         * stream starts. This trades one turn of personalization on
+         * adapter rotation against ~50-200ms of synchronous swap latency
+         * on every healthy turn — the contact-route table already
+         * records intended adapter so missing one turn is recoverable.
+         *
+         * Pinned by tests/test_m3_route_per_turn_call_sites.c which
+         * grep-checks that both agent_turn.c AND this file invoke
+         * hu_agent_m3_route_per_turn(). Mirrors agent_turn.c:4224. */
+        hu_agent_m3_route_per_turn(agent);
+
         hu_agent_m3_on_provider_success(agent);
         /* B1 redefined (2026-05-17 r3): record outcome at the top of each
          * tool-loop iteration. sresp.content may be empty when there are

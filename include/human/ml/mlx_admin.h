@@ -93,6 +93,71 @@ void hu_mlx_admin_current_adapter_free(hu_allocator_t *alloc,
 hu_error_t hu_mlx_admin_current_adapter(hu_allocator_t *alloc, const char *base_url,
                                         size_t base_url_len, hu_mlx_admin_current_adapter_t *out);
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Spec 1 Task 5 (AC-M3-3): swap-failure observability.
+ *
+ * Every time hu_mlx_admin_swap_adapter() fails (transport, HTTP non-2xx,
+ * server-side reject), it:
+ *   (a) emits a structured log line at error level via hu_log_error
+ *       (adapter_path + status_code + reason label),
+ *   (b) increments the appropriate per-reason counter below,
+ *   (c) on the FIRST failure post-startup, emits hu_log_info_once with
+ *       the "m3 adapter swap path is failing" landmark per
+ *       silent-config-gated-subsystems.md.
+ *
+ * The codebase has no formal metrics-counter library yet; counters are
+ * process-global atomic uint64 with public read APIs. Tests read the
+ * counters directly; future metrics-export gateway endpoints can do
+ * the same.
+ * ───────────────────────────────────────────────────────────────── */
+
+typedef enum hu_mlx_swap_failure_reason {
+    /* Successful swap (200 OK) — never counted, present so callers can
+     * map any classifier to a single enum. */
+    HU_MLX_SWAP_FAILURE_NONE = 0,
+    /* Could not reach the server (DNS, connection refused, timeout). */
+    HU_MLX_SWAP_FAILURE_TRANSPORT = 1,
+    /* Server returned a 4xx (other than 404). */
+    HU_MLX_SWAP_FAILURE_HTTP_4XX = 2,
+    /* Server returned a 5xx. */
+    HU_MLX_SWAP_FAILURE_HTTP_5XX = 3,
+    /* 404 — the server is alive but the swap endpoint is absent or the
+     * adapter path is unknown to the server. Distinguished from generic
+     * 4xx because it carries an explicit "operator hasn't deployed the
+     * endpoint" signal. */
+    HU_MLX_SWAP_FAILURE_MISSING_ENDPOINT = 4,
+    /* Other — HU_OK with an unexpected status (e.g. 3xx redirect that
+     * curl followed past, 2xx that isn't 200, etc.). */
+    HU_MLX_SWAP_FAILURE_OTHER = 5,
+    /* Sentinel — keep last. */
+    HU_MLX_SWAP_FAILURE__COUNT = 6,
+} hu_mlx_swap_failure_reason_t;
+
+/* Per-reason failure counter. NONE/COUNT return 0 (defensive). */
+uint64_t hu_mlx_admin_swap_failure_counter(hu_mlx_swap_failure_reason_t reason);
+
+/* Sum across every non-NONE reason. */
+uint64_t hu_mlx_admin_swap_failure_total(void);
+
+/* Pure classifier: given the return value of hu_mlx_admin_swap_adapter
+ * and the resulting status_code, decide which failure reason applies.
+ * Returns HU_MLX_SWAP_FAILURE_NONE when status_code == 200 and err == HU_OK.
+ *
+ * Extracted as a public predicate (per security-predicate-extraction.md)
+ * so tests can pin every branch of the truth table without spinning up
+ * a fake HTTP server. */
+hu_mlx_swap_failure_reason_t hu_mlx_admin_classify_swap_failure(hu_error_t err, long status_code);
+
+/* Stable string label for a reason — used in log lines and counter
+ * label names. Never NULL; returns "none"/"unknown" sentinels for
+ * NONE/COUNT. */
+const char *hu_mlx_admin_swap_failure_label(hu_mlx_swap_failure_reason_t reason);
+
+/* Test-only: reset all observability counters AND the once-guard so a
+ * test can re-arm the first-failure landmark. Production code MUST NOT
+ * call this; it exists to make the once-guard testable. */
+void hu_mlx_admin_reset_observability_for_test(void);
+
 #ifdef __cplusplus
 }
 #endif

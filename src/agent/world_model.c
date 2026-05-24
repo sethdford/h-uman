@@ -1713,6 +1713,59 @@ void hu_world_model_merge_self_recent_tools(hu_world_model_t *wm, const char *co
     }
 }
 
+void hu_world_model_merge_self_observations(hu_world_model_t *wm, struct sqlite3 *db) {
+    if (!wm)
+        return;
+    /* Always clear first so the field reflects current table state, not
+     * a stale cached row from a previous build. */
+    memset(wm->self_model.recent_self_observations, 0,
+           sizeof(wm->self_model.recent_self_observations));
+    wm->self_model.recent_self_observations_count = 0;
+#ifdef HU_ENABLE_SQLITE
+    if (!db)
+        return;
+    /* Read top N rows ordered newest-first. The Phase D contract is
+     * "most recent" — we use `window_end_ts_ms DESC, id DESC` as the
+     * tiebreaker so newer rows that landed in the same millisecond do
+     * not flicker their ordering across calls. */
+    sqlite3_stmt *st = NULL;
+    const char *sql = "SELECT id, window_start_ts_ms, window_end_ts_ms, n_turns, "
+                      "response_length_mean, response_length_stddev, "
+                      "tool_selection_entropy, latency_p50_ms, latency_p95_ms "
+                      "FROM agent_self_observations "
+                      "ORDER BY window_end_ts_ms DESC, id DESC LIMIT ?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &st, NULL);
+    if (rc != SQLITE_OK) {
+        /* Missing table or other prepare error — treat as empty. The
+         * AC-SM-4 design says "empty table or missing → empty merge,
+         * never an error". */
+        if (st)
+            sqlite3_finalize(st);
+        return;
+    }
+    sqlite3_bind_int(st, 1, HU_SELF_RECENT_OBSERVATIONS);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (wm->self_model.recent_self_observations_count >= HU_SELF_RECENT_OBSERVATIONS)
+            break;
+        hu_self_observation_summary_t *slot =
+            &wm->self_model.recent_self_observations[wm->self_model.recent_self_observations_count];
+        slot->observation_id = sqlite3_column_int64(st, 0);
+        slot->window_start_ts_ms = sqlite3_column_int64(st, 1);
+        slot->window_end_ts_ms = sqlite3_column_int64(st, 2);
+        slot->n_turns = (uint32_t)sqlite3_column_int64(st, 3);
+        slot->response_length_mean = sqlite3_column_double(st, 4);
+        slot->response_length_stddev = sqlite3_column_double(st, 5);
+        slot->tool_selection_entropy = sqlite3_column_double(st, 6);
+        slot->latency_p50_ms = (uint32_t)sqlite3_column_int64(st, 7);
+        slot->latency_p95_ms = (uint32_t)sqlite3_column_int64(st, 8);
+        wm->self_model.recent_self_observations_count++;
+    }
+    sqlite3_finalize(st);
+#else
+    (void)db;
+#endif
+}
+
 void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm) {
     if (!alloc || !wm)
         return;

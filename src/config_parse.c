@@ -317,6 +317,31 @@ static hu_error_t parse_inference(hu_allocator_t *a, hu_config_t *cfg, const hu_
     return HU_OK;
 }
 
+/* Spec 2026-05-19 — `learning` block:
+ *   { "dpo_pair_training_threshold": 100 }
+ *
+ * `dpo_pair_training_threshold` clamped to [0, INT_MAX]. Negative
+ * values are coerced to 0 (operator-disabled state). 0 explicitly
+ * disables the trigger; the daemon emits a `hu_log_info_once` line on
+ * first tick per ~/.claude/rules/silent-config-gated-subsystems.md. */
+static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    double th = hu_json_get_number(obj, "dpo_pair_training_threshold",
+                                   (double)cfg->learning.dpo_pair_training_threshold);
+    if (th < 0.0)
+        th = 0.0;
+    if (th > 2147483647.0)
+        th = 2147483647.0;
+    cfg->learning.dpo_pair_training_threshold = (int)th;
+    /* Spec 2026-05-19 M3 closure / AC-M3-7 — frontier auto-training
+     * opt-in. Off by default; daemon emits a hu_log_info_once on the
+     * first tick whether enabled or disabled. */
+    cfg->learning.m3_frontier_auto_training =
+        hu_json_get_bool(obj, "m3_frontier_auto_training", cfg->learning.m3_frontier_auto_training);
+    return HU_OK;
+}
+
 static hu_error_t parse_reaction_collection(hu_config_t *cfg, const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
@@ -1151,6 +1176,14 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
 
     cfg->config_version = (int)hu_json_get_number(root, "config_version", 1.0);
 
+    /* Spec 2026-05-19 — initialize the learning trigger threshold to the
+     * compile-time default (100) BEFORE parsing the `learning` block.
+     * Callers memset the config to zero, which would otherwise look like
+     * "operator explicitly disabled". The `parse_learning` step below
+     * overrides this when the key is present, including 0. */
+    if (cfg->learning.dpo_pair_training_threshold == 0)
+        cfg->learning.dpo_pair_training_threshold = HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT;
+
     const char *workspace = hu_json_get_string(root, "workspace");
     if (workspace && strstr(workspace, "..")) {
         workspace = NULL; /* Reject path traversal */
@@ -1296,6 +1329,11 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     hu_json_value_t *inference_obj = hu_json_object_get(root, "inference");
     if (inference_obj)
         parse_inference(a, cfg, inference_obj);
+
+    /* Spec 2026-05-19 — `learning` block (DPO pair-count trigger). */
+    hu_json_value_t *learning_obj = hu_json_object_get(root, "learning");
+    if (learning_obj)
+        parse_learning(cfg, learning_obj);
 
     hu_json_value_t *reaction_obj = hu_json_object_get(root, "reaction_collection");
     if (reaction_obj) {

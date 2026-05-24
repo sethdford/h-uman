@@ -515,21 +515,17 @@ static void test_daemon_active_config_known_channels_match_structs(void) {
     memset(&cfg, 0, sizeof(cfg));
     HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "discord") ==
               &cfg.channels.discord.daemon);
-    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "email") ==
-              &cfg.channels.email.daemon);
-    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "gmail") ==
-              &cfg.channels.gmail.daemon);
+    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "email") == &cfg.channels.email.daemon);
+    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "gmail") == &cfg.channels.gmail.daemon);
     HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "imessage") ==
               &cfg.channels.imessage.daemon);
     HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "irc") == &cfg.channels.irc.daemon);
     HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "matrix") ==
               &cfg.channels.matrix.daemon);
-    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "nostr") ==
-              &cfg.channels.nostr.daemon);
+    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "nostr") == &cfg.channels.nostr.daemon);
     HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "signal") ==
               &cfg.channels.signal.daemon);
-    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "slack") ==
-              &cfg.channels.slack.daemon);
+    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "slack") == &cfg.channels.slack.daemon);
     HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "telegram") ==
               &cfg.channels.telegram.daemon);
     HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, "whatsapp") ==
@@ -546,8 +542,7 @@ static void test_daemon_active_config_unknown_channel_returns_default_daemon(voi
 static void test_daemon_active_config_null_channel_name_returns_default_daemon(void) {
     hu_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, NULL) ==
-              &cfg.channels.default_daemon);
+    HU_ASSERT(hu_daemon_test_get_active_daemon_config(&cfg, NULL) == &cfg.channels.default_daemon);
 }
 
 static void test_config_parse_mcp_servers(void) {
@@ -816,16 +811,15 @@ static void test_config_parse_behavior_thresholds(void) {
     cfg_local.arena = arena;
     cfg_local.allocator = hu_arena_allocator(arena);
 
-    const char *json =
-        "{\"behavior\":{"
-        "\"consecutive_limit\":2,"
-        "\"participation_pct\":35,"
-        "\"max_response_chars\":250,"
-        "\"min_response_chars\":20,"
-        "\"decay_days\":14,"
-        "\"dedup_threshold\":65,"
-        "\"missed_msg_threshold_sec\":3600"
-        "}}";
+    const char *json = "{\"behavior\":{"
+                       "\"consecutive_limit\":2,"
+                       "\"participation_pct\":35,"
+                       "\"max_response_chars\":250,"
+                       "\"min_response_chars\":20,"
+                       "\"decay_days\":14,"
+                       "\"dedup_threshold\":65,"
+                       "\"missed_msg_threshold_sec\":3600"
+                       "}}";
 
     hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
@@ -948,10 +942,15 @@ static void test_config_parse_voice_stt_tts_providers(void) {
 
 static void test_config_parse_feeds_section(void) {
     hu_allocator_t backing = hu_system_allocator();
-    hu_config_t cfg_local; memset(&cfg_local, 0, sizeof(cfg_local));
-    hu_arena_t *arena = hu_arena_create(backing); HU_ASSERT_NOT_NULL(arena);
-    cfg_local.arena = arena; cfg_local.allocator = hu_arena_allocator(arena);
-    const char *json = "{ \"feeds\": { \"enabled\": true, \"interests\": \"AI LLM GPT\", \"relevance_threshold\": 0.3, \"poll_interval_rss\": 120, \"max_items_per_poll\": 50 } }";
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json =
+        "{ \"feeds\": { \"enabled\": true, \"interests\": \"AI LLM GPT\", \"relevance_threshold\": "
+        "0.3, \"poll_interval_rss\": 120, \"max_items_per_poll\": 50 } }";
     hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(cfg_local.feeds.enabled, true);
@@ -972,17 +971,15 @@ static void test_config_parses_personalization_block(void) {
     HU_ASSERT_NOT_NULL(arena);
     cfg_local.arena = arena;
     cfg_local.allocator = hu_arena_allocator(arena);
-    const char *json =
-        "{\"personalization\":{\"enabled\":true,"
-        "\"lora_adapter_path\":\"/tmp/persona-default.lora\","
-        "\"lora_adapter_id\":\"persona-default\","
-        "\"m3_adapter_probe_path\":\"/tmp/hu_m3_probe.bin\"}}";
+    const char *json = "{\"personalization\":{\"enabled\":true,"
+                       "\"lora_adapter_path\":\"/tmp/persona-default.lora\","
+                       "\"lora_adapter_id\":\"persona-default\","
+                       "\"m3_adapter_probe_path\":\"/tmp/hu_m3_probe.bin\"}}";
     hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(cfg_local.personalization.enabled);
     HU_ASSERT_NOT_NULL(cfg_local.personalization.lora_adapter_path);
-    HU_ASSERT_STR_EQ(cfg_local.personalization.lora_adapter_path,
-                     "/tmp/persona-default.lora");
+    HU_ASSERT_STR_EQ(cfg_local.personalization.lora_adapter_path, "/tmp/persona-default.lora");
     HU_ASSERT_STR_EQ(cfg_local.personalization.lora_adapter_id, "persona-default");
     HU_ASSERT_NOT_NULL(cfg_local.personalization.m3_adapter_probe_path);
     HU_ASSERT_STR_EQ(cfg_local.personalization.m3_adapter_probe_path, "/tmp/hu_m3_probe.bin");
@@ -1096,9 +1093,8 @@ static void test_config_personalization_m3_disabled_true(void) {
     HU_ASSERT_NOT_NULL(arena);
     cfg_local.arena = arena;
     cfg_local.allocator = hu_arena_allocator(arena);
-    const char *json =
-        "{\"personalization\":{\"m3_adapter_probe_path\":\"/x.bin\","
-        "\"m3_adapter_disabled\":true}}";
+    const char *json = "{\"personalization\":{\"m3_adapter_probe_path\":\"/x.bin\","
+                       "\"m3_adapter_disabled\":true}}";
     hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(cfg_local.personalization.m3_adapter_disabled);
@@ -1150,6 +1146,152 @@ static void test_config_save_roundtrip_m3_disabled(void) {
 
     hu_arena_destroy(arena);
     hu_arena_destroy(arena2);
+}
+
+/* Spec 2026-05-19 (Task 1) — `learning.dpo_pair_training_threshold`
+ * config key. Verifies parse default + override + round-trip semantics. */
+static void test_config_parse_learning_default_threshold_is_100(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    /* Empty JSON — no learning block. Default must be 100. */
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, "{}", 2), HU_OK);
+    HU_ASSERT_EQ(cfg_local.learning.dpo_pair_training_threshold,
+                 HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT);
+    HU_ASSERT_EQ(cfg_local.learning.dpo_pair_training_threshold, 100);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_learning_threshold_override(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"learning\":{\"dpo_pair_training_threshold\":250}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_EQ(cfg_local.learning.dpo_pair_training_threshold, 250);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_learning_threshold_zero_disables(void) {
+    /* Operator-disabled state: explicit 0 in JSON must round-trip as 0
+     * even though that's the memset-zero value the default fixup
+     * normally rewrites to 100. The parse step runs AFTER the default
+     * fixup so the explicit JSON value wins. */
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"learning\":{\"dpo_pair_training_threshold\":0}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_EQ(cfg_local.learning.dpo_pair_training_threshold, 0);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_learning_threshold_negative_clamped_to_zero(void) {
+    /* Defensive parse: negatives clamped to 0 (operator-disabled).
+     * Pinned so a future parser refactor that drops the clamp can't
+     * silently let negative values through. */
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"learning\":{\"dpo_pair_training_threshold\":-5}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_EQ(cfg_local.learning.dpo_pair_training_threshold, 0);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_learning_threshold_roundtrip(void) {
+    /* Parse → save → re-parse round-trip preserves a non-default
+     * threshold. Default-valued configs should NOT emit the block (so
+     * the canonical config stays terse), but explicit overrides must
+     * survive a save/load cycle. */
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"learning\":{\"dpo_pair_training_threshold\":42}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
+
+    char tmp_path[] = "/tmp/human_test_learning_threshold_XXXXXX";
+    int fd = mkstemp(tmp_path);
+    HU_ASSERT_GT(fd, -1);
+    close(fd);
+    cfg.config_path = tmp_path;
+    HU_ASSERT_EQ(hu_config_save(&cfg), HU_OK);
+
+    FILE *f = fopen(tmp_path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    unlink(tmp_path);
+    /* Non-default threshold MUST appear in the serialized output. */
+    HU_ASSERT_NOT_NULL(strstr(buf, "dpo_pair_training_threshold"));
+
+    hu_config_t cfg2;
+    memset(&cfg2, 0, sizeof(cfg2));
+    hu_arena_t *arena2 = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena2);
+    cfg2.arena = arena2;
+    cfg2.allocator = hu_arena_allocator(arena2);
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg2, buf, n), HU_OK);
+    HU_ASSERT_EQ(cfg2.learning.dpo_pair_training_threshold, 42);
+
+    hu_arena_destroy(arena);
+    hu_arena_destroy(arena2);
+}
+
+static void test_config_parse_learning_default_does_not_serialize(void) {
+    /* Default threshold (100) should NOT emit the `learning` block —
+     * keep the canonical default config terse, same pattern as
+     * `personalization.m3_adapter_disabled`. */
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = hu_arena_allocator(arena);
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, "{}", 2), HU_OK);
+    HU_ASSERT_EQ(cfg.learning.dpo_pair_training_threshold, 100);
+
+    char tmp_path[] = "/tmp/human_test_learning_default_XXXXXX";
+    int fd = mkstemp(tmp_path);
+    HU_ASSERT_GT(fd, -1);
+    close(fd);
+    cfg.config_path = tmp_path;
+    HU_ASSERT_EQ(hu_config_save(&cfg), HU_OK);
+
+    FILE *f = fopen(tmp_path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    unlink(tmp_path);
+    /* Default threshold MUST NOT appear. */
+    HU_ASSERT(strstr(buf, "dpo_pair_training_threshold") == NULL);
+
+    hu_arena_destroy(arena);
 }
 
 static void test_config_parse_reaction_collection_rejects_relative_chatdb_path(void) {
@@ -1241,4 +1383,12 @@ void run_config_parse_tests(void) {
 
     HU_TEST_SUITE("Reaction collection");
     HU_RUN_TEST(test_config_parse_reaction_collection_rejects_relative_chatdb_path);
+
+    HU_TEST_SUITE("Learning config (DPO pair-count trigger)");
+    HU_RUN_TEST(test_config_parse_learning_default_threshold_is_100);
+    HU_RUN_TEST(test_config_parse_learning_threshold_override);
+    HU_RUN_TEST(test_config_parse_learning_threshold_zero_disables);
+    HU_RUN_TEST(test_config_parse_learning_threshold_negative_clamped_to_zero);
+    HU_RUN_TEST(test_config_parse_learning_threshold_roundtrip);
+    HU_RUN_TEST(test_config_parse_learning_default_does_not_serialize);
 }

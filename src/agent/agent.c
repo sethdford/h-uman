@@ -12,6 +12,7 @@
 #include "human/agent/superhuman_emotional.h"
 #include "human/agent/superhuman_predictive.h"
 #include "human/agent/superhuman_silence.h"
+#include "human/agent/theory_of_mind.h"
 #include "human/agent/workflow_event.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/config.h"
@@ -93,6 +94,92 @@ void hu_agent_internal_generate_trace_id(char *buf) {
 
 uint64_t hu_agent_internal_clock_diff_ms(clock_t start, clock_t end) {
     return (uint64_t)((end - start) * 1000 / CLOCKS_PER_SEC);
+}
+
+/* Spec 2026-05-19 self-model-scaffold — Phase B.
+ *
+ * FNV-1a 64-bit hash for opaque contact-id / channel-name hashing.
+ * Lives in this TU so we don't depend on hu_m3_outcome_hash_bytes
+ * (which is only built when HU_ENABLE_ML is ON). The behavior log
+ * records hashes regardless of ML configuration, so this helper has
+ * to be available on every variant. */
+static uint64_t hu_agent_self_model_fnv1a64(const void *data, size_t len) {
+    const uint8_t *p = (const uint8_t *)data;
+    uint64_t h = 1469598103934665603ULL; /* FNV-1a offset basis (64-bit) */
+    for (size_t i = 0; i < len; i++) {
+        h ^= (uint64_t)p[i];
+        h *= 1099511628211ULL; /* FNV prime (64-bit) */
+    }
+    return h;
+}
+
+void hu_agent_internal_emit_behavior_record(hu_agent_t *agent) {
+    if (!agent)
+        return;
+
+    /* Build the per-turn record. Field policy (per AC-SM-7):
+     *   - sizes, hashes, enums, timestamps only
+     *   - NEVER content strings: response body, user message, tool args
+     *
+     * Sources:
+     *   - response_length / tokens_est / tool_seq_hash / tool_count /
+     *     emotional_register / persona_delta_kind / response_latency_ms
+     *       -> agent->behavior_log_pending (staged by callers; zero
+     *          when un-staged, which is fine — un-plumbed callers
+     *          contribute a real-timestamped record with sentinel
+     *          fields for sample counting, until they migrate to
+     *          hu_agent_m3_stash_behavior_metrics).
+     *   - contact_hash  -> FNV-1a(memory_session_id)
+     *   - channel_id    -> FNV-1a(active_channel) truncated to 32 bits
+     *   - timestamp_utc_ms -> CLOCK_REALTIME wall time
+     */
+    hu_agent_behavior_record_t rec;
+    memset(&rec, 0, sizeof(rec));
+
+    rec.response_length_chars = agent->behavior_log_pending.response_length_chars;
+    rec.response_length_tokens_est = agent->behavior_log_pending.response_length_tokens_est;
+    rec.tool_sequence_hash = agent->behavior_log_pending.tool_sequence_hash;
+    rec.tool_count = agent->behavior_log_pending.tool_count;
+    rec.emotional_register = agent->behavior_log_pending.emotional_register;
+    rec.persona_delta_kind = agent->behavior_log_pending.persona_delta_kind;
+    rec.response_latency_ms = agent->behavior_log_pending.response_latency_ms;
+
+    if (agent->memory_session_id && agent->memory_session_id_len > 0) {
+        rec.contact_hash =
+            hu_agent_self_model_fnv1a64(agent->memory_session_id, agent->memory_session_id_len);
+    }
+    if (agent->active_channel && agent->active_channel_len > 0) {
+        uint64_t ch64 =
+            hu_agent_self_model_fnv1a64(agent->active_channel, agent->active_channel_len);
+        rec.channel_id = (uint32_t)(ch64 & 0xFFFFFFFFULL);
+    }
+
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        rec.timestamp_utc_ms = (int64_t)ts.tv_sec * 1000LL + (int64_t)(ts.tv_nsec / 1000000L);
+    }
+
+    (void)hu_agent_behavior_log_record(&agent->behavior_log, &rec);
+
+    /* Clear the pending stash so the next turn does not inherit stale
+     * fields. A turn that does not re-stash will produce a record with
+     * zero metric fields and a real contact/channel/timestamp — which
+     * is honest signal (we recorded the turn but had no per-turn
+     * metrics for it yet). */
+    memset(&agent->behavior_log_pending, 0, sizeof(agent->behavior_log_pending));
+}
+
+void hu_agent_m3_stash_behavior_metrics(hu_agent_t *agent, const hu_agent_behavior_stash_t *stash) {
+    if (!agent || !stash)
+        return;
+    agent->behavior_log_pending.response_length_chars = stash->response_length_chars;
+    agent->behavior_log_pending.response_length_tokens_est = stash->response_length_tokens_est;
+    agent->behavior_log_pending.tool_sequence_hash = stash->tool_sequence_hash;
+    agent->behavior_log_pending.tool_count = stash->tool_count;
+    agent->behavior_log_pending.emotional_register = stash->emotional_register;
+    agent->behavior_log_pending.persona_delta_kind = stash->persona_delta_kind;
+    agent->behavior_log_pending.response_latency_ms = stash->response_latency_ms;
+    agent->behavior_log_pending.has_data = true;
 }
 
 static _Thread_local hu_agent_t *hu__current_agent_for_tools;
@@ -628,6 +715,26 @@ hu_error_t hu_agent_from_config(
     memset(&out->relationship, 0, sizeof(out->relationship));
     hu_relationship_new_session(&out->relationship);
 
+    /* Spec 2026-05-19 self-model-scaffold — Phase B (AC-SM-1).
+     * Initialize the per-turn behavioral observation ring at default
+     * capacity (HU_AGENT_BEHAVIOR_LOG_DEFAULT_CAPACITY = 256). When
+     * HU_ENABLE_SELF_MODEL is OFF, this is a zero-cost no-op that
+     * leaves the embedded struct safely zeroed (the stub variant of
+     * `hu_agent_behavior_log_init`). The destroy in `hu_agent_deinit`
+     * mirrors. */
+    {
+        memset(&out->behavior_log, 0, sizeof(out->behavior_log));
+        hu_error_t blerr = hu_agent_behavior_log_init(&out->behavior_log, alloc, 0);
+        /* Non-fatal: a behavior-log init failure (e.g. OOM on the slab)
+         * MUST NOT take down agent creation. The ring is observability,
+         * not correctness; the worst-case downgrade is "no behavior
+         * records collected this session" — every record() call then
+         * silently returns HU_OK because the log is uninitialized. */
+        if (blerr != HU_OK) {
+            memset(&out->behavior_log, 0, sizeof(out->behavior_log));
+        }
+    }
+
     if (memory && memory->vtable) {
         hu_error_t cerr = hu_commitment_store_create(alloc, memory, &out->commitment_store);
         if (cerr != HU_OK)
@@ -1098,10 +1205,38 @@ void hu_agent_m3_route_per_turn(hu_agent_t *agent) {
     if (agent->m3_active_adapter_path) {
         memcpy(agent->m3_active_adapter_path, target, tlen + 1);
     }
+
+    /* Spec 4 Phase C / AC-TOM-5: record this adapter swap as a self-change
+     * event against the active contact. The memory_session_id is the
+     * stable per-contact key the daemon uses elsewhere. Magnitude is 1.0
+     * for a binary swap event (D-TOM-5 / design.md). Swap failures are
+     * already logged + counted by mlx_admin.c's record_swap_outcome path,
+     * so we only fire here on the success branch. */
+#ifdef HU_ENABLE_SQLITE
+    if (agent->memory) {
+        sqlite3 *tom_db = hu_sqlite_memory_get_db(agent->memory);
+        if (tom_db) {
+            (void)hu_tom_self_change_events_init_table(tom_db);
+            (void)hu_tom_record_self_change_event(tom_db, agent->memory_session_id,
+                                                  HU_TOM_SELF_CHANGE_ADAPTER_SWAP,
+                                                  /* session_key */ NULL, /* session_key_len */ 0,
+                                                  /* turn_number */ 0, /* magnitude */ 1.0,
+                                                  /* now_ts_ms */ (int64_t)time(NULL) * 1000);
+        }
+    }
+#endif
 }
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
-    if (!agent || !agent->m3_adapter)
+    if (!agent)
+        return;
+    /* Spec 2026-05-19 self-model-scaffold — Phase B canonical write site.
+     * Runs BEFORE the m3-adapter noop_infer so the behavior log is
+     * populated even when no M3 adapter is attached. Single-write-site
+     * invariant: `hu_agent_behavior_log_record(` appears exactly once in
+     * src/ (pinned by tests/test_self_model_single_write_site.c). */
+    hu_agent_internal_emit_behavior_record(agent);
+    if (!agent->m3_adapter)
         return;
     (void)hu_m3_frontier_adapter_noop_infer(agent->m3_adapter);
 }
@@ -1192,7 +1327,13 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
 }
 
 void hu_agent_m3_on_provider_success(hu_agent_t *agent) {
-    (void)agent;
+    if (!agent)
+        return;
+    /* Spec 2026-05-19 self-model-scaffold — same canonical write site as
+     * the HU_ENABLE_ML branch above. Both branches call the same
+     * unconditional helper so the behavior log fires on every successful
+     * provider turn regardless of ML configuration. */
+    hu_agent_internal_emit_behavior_record(agent);
 }
 
 void hu_agent_m3_route_per_turn(hu_agent_t *agent) {
@@ -1500,6 +1641,11 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_webhook_manager_destroy(agent->alloc, agent->infra.webhook_manager);
         agent->infra.webhook_manager = NULL;
     }
+    /* Spec 2026-05-19 self-model-scaffold — Phase B teardown. Safe to
+     * call on an uninitialized (zeroed) log; the destroy stub handles
+     * that path. */
+    hu_agent_behavior_log_destroy(&agent->behavior_log);
+
 #ifdef HU_ENABLE_ML
     if (agent->m3_adapter) {
         hu_m3_frontier_adapter_close(agent->alloc, agent->m3_adapter);

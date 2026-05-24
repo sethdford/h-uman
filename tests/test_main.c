@@ -32,6 +32,11 @@ void run_memory_tests(void);
 void run_w7_render_null_safety_tests(void);
 void run_mlx_load_adapter_tests(void);
 void run_m3_route_per_turn_tests(void);
+void run_m3_route_per_turn_call_sites_tests(void);
+void run_m3_swap_failure_observability_tests(void);
+void run_m3_outcome_ring_population_tests(void);
+void run_m3_ab_fidelity_gate_tests(void);
+void run_m3_frontier_auto_invocation_tests(void);
 void run_sql_transaction_tests(void);
 void run_memory_util_tests(void);
 void run_tunnel_tests(void);
@@ -333,6 +338,16 @@ void run_learner_bridge_tests(void);
 #endif
 void run_w15_backup_restore_tests(void);
 void run_w14_scheduler_tests(void);
+/* Spec 2026-05-19 — DPO pair-count auto-training trigger. */
+void run_dpo_pair_count_trigger_tests(void);
+void run_training_runner_shared_entry_tests(void);
+/* Spec 2026-05-19 self-model-scaffold — Phase A. Test file uses the
+ * internal-#ifdef-wrap-with-stub-runner pattern so the runner symbol
+ * resolves in both HU_ENABLE_SELF_MODEL=ON and =OFF builds. */
+void run_self_model_behavior_log_tests(void);
+/* Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same gate
+ * pattern as Phase A (stub runner under HU_ENABLE_SELF_MODEL=OFF). */
+void run_self_model_phase_bcde_tests(void);
 #ifdef HU_ENABLE_LEARNING
 void run_w16_evaluation_tests(void);
 void run_w16_eval_cli_tests(void);
@@ -405,6 +420,7 @@ void run_sota_features_tests(void);
 void run_mood_tests(void);
 void run_style_tracker_tests(void);
 void run_theory_of_mind_tests(void);
+void run_tom_activation_tests(void);
 void run_anticipatory_tests(void);
 void run_context_engine_tests(void);
 void run_exec_env_tests(void);
@@ -817,6 +833,11 @@ int main(int argc, char **argv) {
     run_w7_render_null_safety_tests();
     run_mlx_load_adapter_tests();
     run_m3_route_per_turn_tests();
+    run_m3_route_per_turn_call_sites_tests();
+    run_m3_swap_failure_observability_tests();
+    run_m3_outcome_ring_population_tests();
+    run_m3_ab_fidelity_gate_tests();
+    run_m3_frontier_auto_invocation_tests();
     run_sql_transaction_tests();
     run_memory_util_tests();
     run_tunnel_tests();
@@ -1094,6 +1115,12 @@ int main(int argc, char **argv) {
 #endif
     run_w15_backup_restore_tests();
     run_w14_scheduler_tests();
+    /* Spec 2026-05-19 — DPO pair-count auto-training trigger. */
+    run_dpo_pair_count_trigger_tests();
+    run_training_runner_shared_entry_tests();
+    /* Spec 2026-05-19 self-model-scaffold — runs in both flag variants. */
+    run_self_model_behavior_log_tests();
+    run_self_model_phase_bcde_tests();
 #ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
     run_w16_eval_cli_tests();
@@ -1168,6 +1195,7 @@ int main(int argc, char **argv) {
     run_mood_tests();
     run_style_tracker_tests();
     run_theory_of_mind_tests();
+    run_tom_activation_tests();
     run_anticipatory_tests();
     run_context_engine_tests();
     run_exec_env_tests();

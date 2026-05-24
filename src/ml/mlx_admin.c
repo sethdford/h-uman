@@ -23,11 +23,129 @@
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Spec 1 Task 5 (AC-M3-3): swap-failure observability — counters,
+ * classifier, labels, once-guard. Implemented even when curl is OFF so
+ * that NOT_SUPPORTED still surfaces as a transport-style failure to any
+ * caller scraping the counters.
+ * ───────────────────────────────────────────────────────────────── */
+
+/* One counter per reason. Indexed by `hu_mlx_swap_failure_reason_t`. */
+static atomic_uint_least64_t g_swap_failure_counters[HU_MLX_SWAP_FAILURE__COUNT];
+
+/* hu_log_info_once landmark — fires on first failure of any kind after
+ * process start (or after reset_observability_for_test). */
+static atomic_bool g_warned_swap_failure_first_seen = false;
+
+const char *hu_mlx_admin_swap_failure_label(hu_mlx_swap_failure_reason_t reason) {
+    switch (reason) {
+    case HU_MLX_SWAP_FAILURE_NONE:
+        return "none";
+    case HU_MLX_SWAP_FAILURE_TRANSPORT:
+        return "transport";
+    case HU_MLX_SWAP_FAILURE_HTTP_4XX:
+        return "http_4xx";
+    case HU_MLX_SWAP_FAILURE_HTTP_5XX:
+        return "http_5xx";
+    case HU_MLX_SWAP_FAILURE_MISSING_ENDPOINT:
+        return "missing_endpoint";
+    case HU_MLX_SWAP_FAILURE_OTHER:
+        return "other";
+    default:
+        return "unknown";
+    }
+}
+
+hu_mlx_swap_failure_reason_t hu_mlx_admin_classify_swap_failure(hu_error_t err, long status_code) {
+    if (err == HU_OK && status_code == 200)
+        return HU_MLX_SWAP_FAILURE_NONE;
+    if (err == HU_ERR_NOT_SUPPORTED || err == HU_ERR_IO)
+        return HU_MLX_SWAP_FAILURE_TRANSPORT;
+    /* err is HU_OK here — server replied. Classify by status code. */
+    if (status_code == 404)
+        return HU_MLX_SWAP_FAILURE_MISSING_ENDPOINT;
+    if (status_code >= 400 && status_code < 500)
+        return HU_MLX_SWAP_FAILURE_HTTP_4XX;
+    if (status_code >= 500 && status_code < 600)
+        return HU_MLX_SWAP_FAILURE_HTTP_5XX;
+    return HU_MLX_SWAP_FAILURE_OTHER;
+}
+
+uint64_t hu_mlx_admin_swap_failure_counter(hu_mlx_swap_failure_reason_t reason) {
+    if ((unsigned)reason >= (unsigned)HU_MLX_SWAP_FAILURE__COUNT)
+        return 0;
+    if (reason == HU_MLX_SWAP_FAILURE_NONE)
+        return 0;
+    return (uint64_t)atomic_load(&g_swap_failure_counters[(unsigned)reason]);
+}
+
+uint64_t hu_mlx_admin_swap_failure_total(void) {
+    uint64_t sum = 0;
+    for (unsigned i = (unsigned)HU_MLX_SWAP_FAILURE_TRANSPORT;
+         i < (unsigned)HU_MLX_SWAP_FAILURE__COUNT; i++) {
+        sum += (uint64_t)atomic_load(&g_swap_failure_counters[i]);
+    }
+    return sum;
+}
+
+void hu_mlx_admin_reset_observability_for_test(void) {
+    for (unsigned i = 0; i < (unsigned)HU_MLX_SWAP_FAILURE__COUNT; i++)
+        atomic_store(&g_swap_failure_counters[i], 0);
+    atomic_store(&g_warned_swap_failure_first_seen, false);
+}
+
+/* Record one swap-attempt outcome. Increments the per-reason counter
+ * + emits the structured log line + fires the once-guard landmark.
+ *
+ * adapter_path is logged but no other request bytes — privacy contract
+ * is "paths + hashes only, never prompt/response content". The contact
+ * hash is passed through as a uint64 (computed by the caller from
+ * memory_session_id via FNV-1a, matching the outcome ring conventions).
+ *
+ * Called from inside hu_mlx_admin_swap_adapter on every return path
+ * other than INVALID_ARGUMENT. */
+static void record_swap_outcome(const char *adapter_path, size_t adapter_path_len, hu_error_t err,
+                                long status_code, uint64_t contact_hash) {
+    hu_mlx_swap_failure_reason_t reason = hu_mlx_admin_classify_swap_failure(err, status_code);
+    if (reason == HU_MLX_SWAP_FAILURE_NONE)
+        return;
+
+    atomic_fetch_add(&g_swap_failure_counters[(unsigned)reason], 1);
+
+    /* Log unconditionally at error level so the failure is operator-
+     * visible whether or not metrics are being scraped. Truncate the
+     * adapter path to something reasonable for log lines. */
+    const char *label = hu_mlx_admin_swap_failure_label(reason);
+    int p_len = (int)adapter_path_len;
+    if (p_len < 0)
+        p_len = 0;
+    if (p_len > 256)
+        p_len = 256;
+    hu_log_error("mlx_admin", NULL,
+                 "m3 adapter swap failed: reason=%s status=%ld err=%d "
+                 "contact_hash=%llu adapter_path=%.*s",
+                 label, status_code, (int)err, (unsigned long long)contact_hash, p_len,
+                 adapter_path ? adapter_path : "");
+
+    /* Once-guard landmark — "the personalization loop is silently not
+     * personalizing" was the 2026-05-18 incident shape. The first-
+     * failure log is the operator's loudest signal that the swap path
+     * is broken; subsequent failures still increment counters but don't
+     * spam the log at info level. */
+    hu_log_info_once(&g_warned_swap_failure_first_seen, "mlx_admin", NULL,
+                     "m3 adapter swap path is failing — first failure reason=%s. Subsequent "
+                     "failures will increment counters silently; inspect "
+                     "hu_mlx_admin_swap_failure_total() to monitor.",
+                     label);
+}
 
 #ifndef HU_ENABLE_CURL
 /* When curl is disabled (release minimal builds, fuzz-only configs)
@@ -41,10 +159,12 @@ hu_error_t hu_mlx_admin_swap_adapter(hu_allocator_t *alloc, const char *base_url
     (void)alloc;
     (void)base_url;
     (void)base_url_len;
-    (void)adapter_path;
-    (void)adapter_path_len;
     if (result)
         memset(result, 0, sizeof(*result));
+    /* NOT_SUPPORTED counts as a transport-class failure — operator
+     * still needs to know the personalization loop is silently
+     * inactive. Per silent-config-gated-subsystems.md. */
+    record_swap_outcome(adapter_path, adapter_path_len, HU_ERR_NOT_SUPPORTED, 0, 0);
     return HU_ERR_NOT_SUPPORTED;
 }
 
@@ -162,6 +282,7 @@ hu_error_t hu_mlx_admin_swap_adapter(hu_allocator_t *alloc, const char *base_url
          * status_code stays 0 to distinguish from a server-side reject. */
         if (resp.owned && resp.body)
             hu_http_response_free(alloc, &resp);
+        record_swap_outcome(adapter_path, adapter_path_len, HU_ERR_IO, 0, 0);
         return HU_ERR_IO;
     }
 
@@ -169,6 +290,9 @@ hu_error_t hu_mlx_admin_swap_adapter(hu_allocator_t *alloc, const char *base_url
     if (resp.status_code == 200 && resp.body && resp.body_len > 0)
         parse_swap_response(alloc, resp.body, resp.body_len, result);
     hu_http_response_free(alloc, &resp);
+    /* Server replied — observability runs on every non-200 path. The
+     * classifier distinguishes 4xx/5xx/missing-endpoint. */
+    record_swap_outcome(adapter_path, adapter_path_len, HU_OK, result->status_code, 0);
     return HU_OK;
 }
 
