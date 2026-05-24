@@ -181,6 +181,16 @@ else
     }
 fi
 
+# mlx_lm.lora's natural output layout is a directory named with .safetensors
+# suffix containing the actual weight file inside. Walk into it so the rest
+# of the script sees a real parseable file.
+if [[ -d "$CANDIDATE_ADAPTER" ]]; then
+    INNER="$(find "$CANDIDATE_ADAPTER" -name '*.safetensors' -type f 2>/dev/null | head -1 || true)"
+    if [[ -n "$INNER" && -f "$INNER" ]]; then
+        CANDIDATE_ADAPTER="$INNER"
+    fi
+fi
+
 if [[ ! -s "$CANDIDATE_ADAPTER" ]]; then
     echo "ERROR: candidate adapter not produced at $CANDIDATE_ADAPTER" >&2
     exit 4
