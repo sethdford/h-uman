@@ -169,13 +169,13 @@ static void test_reaction_poll_enabled_emits_one_positive_confirmation(void) {
     (void)slurp_file(tmp_path, &buf);
     HU_ASSERT_NOT_NULL(buf);
 
-    /* Positive confirmation must say "enabled — polling". */
+    /* Positive confirmation must say "activated by config". */
     HU_ASSERT_STR_CONTAINS(buf, "reaction_collection");
+    HU_ASSERT_STR_CONTAINS(buf, "activated");
     HU_ASSERT_STR_CONTAINS(buf, "enabled");
-    HU_ASSERT_STR_CONTAINS(buf, "polling");
 
     /* Exactly one positive-confirmation line across 5 ticks. */
-    int n = count_substr(buf, "polling chat.db");
+    int n = count_substr(buf, "activated by config");
     HU_ASSERT_EQ(n, 1);
 
     free(buf);

@@ -125,14 +125,14 @@ hu_error_t hu_daemon_reaction_poll_tick(const hu_config_t *cfg, int64_t since_un
     }
     if (!reaction_collection_wants_imessage_cfg(cfg)) {
         hu_log_info_once(&g_warned_reaction_poll_disabled_cfg, "daemon", NULL,
-                         "reaction_collection (imessage) disabled by config "
-                         "(cfg->reaction_collection.enabled=false or no 'imessage' "
-                         "in reaction_collection.channels) — set "
+                         "reaction_collection subsystem disabled by config "
+                         "(cfg->reaction_collection.enabled=false); set "
                          "reaction_collection.enabled=true in config.json to activate");
         return HU_OK;
     }
     hu_log_info_once(&g_warned_reaction_poll_enabled_cfg, "daemon", NULL,
-                     "reaction_collection (imessage) enabled — polling chat.db for tapbacks");
+                     "reaction_collection subsystem activated by config "
+                     "(cfg->reaction_collection.enabled=true)");
 
     const char *db = getenv("HU_CHATDB");
     if (!db || !db[0])
@@ -174,14 +174,14 @@ hu_error_t hu_daemon_tick_reaction_poll(const hu_reaction_collection_config_t *c
         return HU_ERR_INVALID_ARGUMENT;
     if (!reaction_collection_wants_imessage_sub(cfg)) {
         hu_log_info_once(&g_warned_reaction_poll_disabled_sub, "daemon", NULL,
-                         "reaction_collection (imessage) disabled by config "
-                         "(reaction_collection.enabled=false or 'imessage' not in "
-                         "reaction_collection.channels) — set "
+                         "reaction_collection subsystem disabled by config "
+                         "(cfg->reaction_collection.enabled=false); set "
                          "reaction_collection.enabled=true in config.json to activate");
         return HU_OK;
     }
     hu_log_info_once(&g_warned_reaction_poll_enabled_sub, "daemon", NULL,
-                     "reaction_collection (imessage) enabled — polling chat.db for tapbacks");
+                     "reaction_collection subsystem activated by config "
+                     "(cfg->reaction_collection.enabled=true)");
 
     int interval = cfg->poll_interval_seconds > 0 ? cfg->poll_interval_seconds : 30;
     if (*last_poll_unix_inout > 0 && now_unix - *last_poll_unix_inout < interval)
