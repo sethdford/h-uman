@@ -224,7 +224,22 @@ def p_seth(model: dict, text: str) -> float:
 
 
 def classify_text(model: dict, text: str) -> dict:
-    feats = featurize(text)
+    """Version-aware scorer. v1 models use the 15-feature featurize();
+    v2+ models have additional length-normalized features and require
+    featurize_v2 from personaeval_speaker_id_v2. Dispatch on the model's
+    version tag (or absence of it). Added 2026-05-19 after the verifier
+    caught DPO miner crashing on v2 model with v1 featurize: KeyError
+    'capital_word_ratio' — the v2 feature the v1 extractor didn't
+    produce. This keeps every existing caller of classify_text/p_seth
+    working without changes."""
+    if model.get("version") == "v2":
+        try:
+            from personaeval_speaker_id_v2 import featurize_v2
+            feats = featurize_v2(text)
+        except ImportError:
+            feats = featurize(text)
+    else:
+        feats = featurize(text)
     x_raw = [feats[k] for k in model["feature_names"]]
     x_norm = [(x_raw[i] - model["means"][i]) / model["stds"][i]
               for i in range(len(x_raw))]
