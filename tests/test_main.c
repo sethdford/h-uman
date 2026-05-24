@@ -696,6 +696,7 @@ void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_emotional_context_tests(void);
 void run_autoresponder_tests(void);
+void run_contact_narrative_tests(void);
 void run_style_critique_patterns_tests(void);
 void run_style_self_critique_tests(void);
 void run_personal_model_simulation_tests(void);
@@ -1456,6 +1457,7 @@ int main(int argc, char **argv) {
     run_personal_model_atomic_save_tests();
     run_emotional_context_tests();
     run_autoresponder_tests();
+    run_contact_narrative_tests();
     run_style_critique_patterns_tests();
     run_style_self_critique_tests();
     run_personal_model_simulation_tests();

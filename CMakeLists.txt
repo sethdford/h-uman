@@ -753,6 +753,7 @@ set(HU_CORE_SOURCES
     src/calibration/ab_compare.c
     src/predictive/drafts.c
     src/agent/autoresponder.c
+    src/research/contact_narrative.c
     src/context/context_ext.c
     src/agent/episodic.c
     src/agent/reflection.c
@@ -2931,6 +2932,7 @@ set(HU_TEST_SOURCES
     tests/test_personal_model_atomic_save.c
     tests/test_emotional_context.c
     tests/test_autoresponder.c
+    tests/test_contact_narrative.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
