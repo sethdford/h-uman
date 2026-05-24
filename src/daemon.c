@@ -10107,8 +10107,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     /* p_seth_at_send — not yet computed in C; -1.0 means
                                      * "classifier unavailable, leave column NULL". The
                                      * outcomes_to_dpo Python job can backfill later by
-                                     * scoring chosen with the v2 classifier offline. */
-                                    -1.0);
+                                     * scoring chosen with the v2 classifier offline.
+                                     * R5.3 will replace -1.0 with the real value. */
+                                    -1.0,
+                                    /* alternatives_json — Sprint 46 R5.2. NULL today since
+                                     * production doesn't run L5 best-of-N yet. Sprint 47
+                                     * will populate this when the L5 path lands. */
+                                    NULL, 0);
                                 if (out_err != HU_OK) {
                                     hu_log_warn("human", agent->observer,
                                                 "production_outcomes record_outbound "

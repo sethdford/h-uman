@@ -283,7 +283,7 @@ static void dpo_record_outbound_inserts_row(void) {
     HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
 
     HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15555550100", 12, "msg_abc", 7,
-                                        "you around?", 11, "yeah just got back", 18, 0.85),
+                                        "you around?", 11, "yeah just got back", 18, 0.85, NULL, 0),
                  HU_OK);
 
     sqlite3_stmt *st = NULL;
@@ -311,7 +311,7 @@ static void dpo_record_outcome_updates_resolution(void) {
 
     /* Outbound first */
     HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15555550100", 12, "msg_xyz", 7,
-                                        "thanks!", 7, "no worries man", 14, 0.91),
+                                        "thanks!", 7, "no worries man", 14, 0.91, NULL, 0),
                  HU_OK);
 
     /* Outcome arrives: positive tapback */
@@ -341,12 +341,76 @@ static void dpo_record_outbound_null_returns_invalid(void) {
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
     /* NULL channel */
-    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, NULL, 0, "t", 1, NULL, 0, "p", 1, "c", 1, 0.5),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_dpo_record_outbound(&col, NULL, 0, "t", 1, NULL, 0, "p", 1, "c", 1, 0.5, NULL, 0),
+        HU_ERR_INVALID_ARGUMENT);
     /* Empty target */
-    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imsg", 4, "", 0, NULL, 0, "p", 1, "c", 1, 0.5),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_dpo_record_outbound(&col, "imsg", 4, "", 0, NULL, 0, "p", 1, "c", 1, 0.5, NULL, 0),
+        HU_ERR_INVALID_ARGUMENT);
     hu_dpo_collector_deinit(&col);
+}
+
+/* Sprint 46 R5.2 — alternatives column persistence */
+
+static void dpo_record_outbound_with_alternatives_persists_json(void) {
+    /* L5 best-of-N writes the LOSING candidates as a JSON array into
+     * the alternatives column. outcomes_to_dpo.py reads them later to
+     * materialize DPO pairs once the outcome resolves. */
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    const char *alts = "[\"yeah\",\"sure thing\",\"absolutely\"]";
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15551112222", 12, "msg_alt", 7,
+                                        "you free?", 9, "yeah whats up", 13, 0.91, alts,
+                                        strlen(alts)),
+                 HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT alternatives FROM production_outcomes "
+                       "WHERE message_ref='msg_alt'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    const char *stored = (const char *)sqlite3_column_text(st, 0);
+    HU_ASSERT_NOT_NULL(stored);
+    /* Exact round-trip: stored bytes equal the input. */
+    HU_ASSERT_STR_EQ(stored, alts);
+    sqlite3_finalize(st);
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
+static void dpo_record_outbound_null_alternatives_stores_null(void) {
+    /* When L5 didn't fire (or only one candidate), pass NULL/0 and the
+     * column stays SQL NULL — not the JSON string "null". */
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15553334444", 12, "msg_no_alt", 10,
+                                        "hey", 3, "hey whats good", 14, 0.78, NULL, 0),
+                 HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT alternatives FROM production_outcomes "
+                       "WHERE message_ref='msg_no_alt'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_type(st, 0), SQLITE_NULL);
+    sqlite3_finalize(st);
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
 }
 
 /* Sprint 46 R5.1 — latency ingest test cluster */
@@ -363,7 +427,7 @@ static void dpo_record_outcome_with_latency_sets_column(void) {
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
     HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
     HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15551234567", 12, "msg_r5_1", 8,
-                                        "you up?", 7, "yeah whats up", 13, 0.84),
+                                        "you up?", 7, "yeah whats up", 13, 0.84, NULL, 0),
                  HU_OK);
     HU_ASSERT_EQ(hu_dpo_record_outcome(&col, "imessage", 8, "+15551234567", 12, "msg_r5_1", 8,
                                        /*tapback_polarity=*/-2, /* sentinel: leave column */
@@ -502,6 +566,9 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_record_outbound_inserts_row);
     HU_RUN_TEST(dpo_record_outcome_updates_resolution);
     HU_RUN_TEST(dpo_record_outbound_null_returns_invalid);
+    /* Sprint 46 R5.2 — alternatives column */
+    HU_RUN_TEST(dpo_record_outbound_with_alternatives_persists_json);
+    HU_RUN_TEST(dpo_record_outbound_null_alternatives_stores_null);
     /* Sprint 46 R5.1 — latency ingest */
     HU_RUN_TEST(dpo_record_outcome_with_latency_sets_column);
     HU_RUN_TEST(dpo_record_inbound_arrival_computes_latency);

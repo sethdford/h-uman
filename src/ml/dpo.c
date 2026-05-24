@@ -276,7 +276,8 @@ hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *cha
                                   size_t channel_len, const char *target, size_t target_len,
                                   const char *message_ref, size_t message_ref_len,
                                   const char *prompt, size_t prompt_len, const char *chosen,
-                                  size_t chosen_len, double p_seth_at_send) {
+                                  size_t chosen_len, double p_seth_at_send,
+                                  const char *alternatives_json, size_t alternatives_json_len) {
     if (!collector || !channel || !target || !prompt || !chosen)
         return HU_ERR_INVALID_ARGUMENT;
     if (channel_len == 0 || target_len == 0 || prompt_len == 0 || chosen_len == 0)
@@ -289,8 +290,8 @@ hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *cha
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(collector->db,
                                 "INSERT INTO production_outcomes("
-                                "channel, target, message_ref, prompt, chosen, "
-                                "p_seth_at_send, send_timestamp) VALUES(?,?,?,?,?,?,?)",
+                                "channel, target, message_ref, prompt, chosen, alternatives, "
+                                "p_seth_at_send, send_timestamp) VALUES(?,?,?,?,?,?,?,?)",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
@@ -302,11 +303,16 @@ hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *cha
         sqlite3_bind_null(stmt, 3);
     sqlite3_bind_text(stmt, 4, prompt, (int)prompt_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 5, chosen, (int)chosen_len, SQLITE_STATIC);
-    if (p_seth_at_send >= 0.0)
-        sqlite3_bind_double(stmt, 6, p_seth_at_send);
+    /* Sprint 46 R5.2 — alternatives column: NULL when L5 didn't fire. */
+    if (alternatives_json && alternatives_json_len > 0)
+        sqlite3_bind_text(stmt, 6, alternatives_json, (int)alternatives_json_len, SQLITE_STATIC);
     else
         sqlite3_bind_null(stmt, 6);
-    sqlite3_bind_int64(stmt, 7, (sqlite3_int64)time(NULL));
+    if (p_seth_at_send >= 0.0)
+        sqlite3_bind_double(stmt, 7, p_seth_at_send);
+    else
+        sqlite3_bind_null(stmt, 7);
+    sqlite3_bind_int64(stmt, 8, (sqlite3_int64)time(NULL));
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     if (rc != SQLITE_DONE)
@@ -319,6 +325,8 @@ hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *cha
     (void)prompt_len;
     (void)chosen_len;
     (void)p_seth_at_send;
+    (void)alternatives_json;
+    (void)alternatives_json_len;
 #endif
     return HU_OK;
 }

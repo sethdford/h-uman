@@ -78,6 +78,13 @@ hu_error_t hu_dpo_clear(hu_dpo_collector_t *collector);
  *   chosen        — the response we sent
  *   p_seth_at_send — PersonaEval P(Seth) on `chosen` at send time
  *                    (set to -1.0 if classifier unavailable)
+ *   alternatives_json — Sprint 46 R5.2 — when L5 best-of-N fires, this
+ *                       is the JSON array of LOSING candidates (the ones
+ *                       not chosen). Pass NULL/0 when L5 didn't fire or
+ *                       only one candidate was generated. Read by
+ *                       scripts/outcomes_to_dpo.py to materialize DPO
+ *                       pairs (chosen > rejected) once the outcome
+ *                       resolves.
  *
  * Returns HU_OK on success, HU_ERR_INVALID_ARGUMENT for null args,
  * HU_ERR_IO on SQLite failure. Skips silently when SQLITE is disabled. */
@@ -85,7 +92,8 @@ hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *cha
                                   size_t channel_len, const char *target, size_t target_len,
                                   const char *message_ref, size_t message_ref_len,
                                   const char *prompt, size_t prompt_len, const char *chosen,
-                                  size_t chosen_len, double p_seth_at_send);
+                                  size_t chosen_len, double p_seth_at_send,
+                                  const char *alternatives_json, size_t alternatives_json_len);
 
 /* AGI Capability-1b: outcome update — fill outcome columns on the
  * production_outcomes row that matches (channel, target, message_ref).
