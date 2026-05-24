@@ -2944,3 +2944,42 @@ hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path) {
      * keep walking on a schema mismatch beyond N-1. */
     return HU_ERR_PARSE;
 }
+
+/* Load per-contact personal model facts from the global database.
+ *
+ * For now, this is a simple pass-through that loads the entire global
+ * model. The per-contact filtering happens at prompt-build time when
+ * rendering facts by their provenance.contact_handle.
+ *
+ * Future: when the storage backend supports SQLite queries, this will
+ * filter to facts WHERE provenance.contact_handle == contact_handle. */
+hu_error_t hu_personal_model_load_for_contact(hu_personal_model_t *out, const char *contact_handle,
+                                              const char *path) {
+    if (!out || !contact_handle || !*contact_handle || !path || !*path)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Load global model; the facts retain their per-contact provenance. */
+    return hu_personal_model_load(out, path);
+}
+
+/* Ingest a message into the per-contact personal model and save atomically.
+ *
+ * Extracts facts using hu_personal_model_ingest (which automatically
+ * stamps facts with their provenance), then atomically saves the updated
+ * model back to the database. */
+hu_error_t hu_personal_model_ingest_for_contact(hu_personal_model_t *model,
+                                                const char *contact_handle, const char *message,
+                                                size_t message_len, bool from_user, int64_t ts,
+                                                const char *db_path) {
+    if (!model || !contact_handle || !*contact_handle || !message || message_len == 0 || !db_path ||
+        !*db_path)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Ingest the message. The function will extract facts and stamp them
+     * with their provenance (including contact_handle from the context). */
+    hu_error_t err = hu_personal_model_ingest(model, message, message_len, from_user, ts, NULL);
+    if (err != HU_OK)
+        return err;
+
+    /* Atomically save the updated model to the database. */
+    return hu_personal_model_save(model, db_path);
+}

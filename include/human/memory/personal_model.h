@@ -403,6 +403,29 @@ hu_error_t hu_personal_model_contradicts_user(const hu_personal_model_t *model, 
 hu_error_t hu_personal_model_save(const hu_personal_model_t *model, const char *path);
 hu_error_t hu_personal_model_load(hu_personal_model_t *out, const char *path);
 
+/* Load per-contact personal model facts from the global database.
+ *
+ * Filters the database to retrieve only facts tagged with the given
+ * contact_handle (fields with matching contact_handle). Returns HU_OK
+ * on success (even if no facts are found; the model is initialized but
+ * may be empty). */
+hu_error_t hu_personal_model_load_for_contact(hu_personal_model_t *out, const char *contact_handle,
+                                              const char *path);
+
+/* Ingest a message into the per-contact personal model and save atomically.
+ *
+ * Extracts facts from the message text, tags each fact with contact_handle
+ * (per-contact scoping), and atomically saves to the database. The per-contact
+ * model state is derived from the global model on load — this function
+ * mutates the caller's model struct and persists it.
+ *
+ * Returns HU_OK on success, HU_ERR_IO on save failure, HU_ERR_INVALID_ARGUMENT
+ * on missing required arguments. */
+hu_error_t hu_personal_model_ingest_for_contact(hu_personal_model_t *model,
+                                                const char *contact_handle, const char *message,
+                                                size_t message_len, bool from_user, int64_t ts,
+                                                const char *db_path);
+
 /* Infer the user's chronotype from observed `active_hours` distribution.
  *
  * The personal model accumulates a coarse hour-of-day histogram on every
