@@ -3048,6 +3048,7 @@ set(HU_TEST_SOURCES
     tests/test_sensitivity.c
     tests/test_vault.c
     tests/test_vault_aead.c
+    tests/test_app_bundle_structure.c
     tests/test_provider.c
     tests/test_provider_http.c
     tests/test_ensemble.c
@@ -4536,6 +4537,37 @@ add_custom_target(benchmark
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running benchmarks..."
 )
+
+# macOS App Bundle target (US-C1.1)
+if(APPLE)
+    set(APP_BUNDLE_PATH ${CMAKE_BINARY_DIR}/Human.app)
+    set(APP_BUNDLE_CONTENTS ${APP_BUNDLE_PATH}/Contents)
+    set(APP_BUNDLE_MACOS ${APP_BUNDLE_CONTENTS}/MacOS)
+    set(APP_BUNDLE_RESOURCES ${APP_BUNDLE_CONTENTS}/Resources)
+    set(APP_PLIST_SOURCE ${CMAKE_SOURCE_DIR}/apps/macOS/Human.app/Contents/Info.plist)
+
+    add_custom_target(build_app_bundle ALL
+        DEPENDS human
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${APP_BUNDLE_CONTENTS} ${APP_BUNDLE_MACOS} ${APP_BUNDLE_RESOURCES}
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/human ${APP_BUNDLE_MACOS}/human
+        COMMAND ${CMAKE_COMMAND} -E copy ${APP_PLIST_SOURCE} ${APP_BUNDLE_CONTENTS}/Info.plist
+        COMMAND chmod 755 ${APP_BUNDLE_MACOS}/human
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Building macOS app bundle: ${APP_BUNDLE_PATH}"
+        VERBATIM
+    )
+
+    # Verify bundle dependencies (no rpath leakage)
+    add_custom_target(verify_bundle_dependencies
+        DEPENDS build_app_bundle
+        COMMAND ${CMAKE_COMMAND} -E echo "Verifying bundle dependencies..."
+        COMMAND otool -L ${APP_BUNDLE_MACOS}/human | grep -q "@rpath" &&
+            (echo "ERROR: Bundle binary has @rpath entries" && exit 1) ||
+            echo "OK: No @rpath entries detected"
+        COMMENT "Verifying macOS app bundle has system-only dependencies..."
+        VERBATIM
+    )
+endif()
 
 # Print build info
 message(STATUS "Human v0.5.0")
