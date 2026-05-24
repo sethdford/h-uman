@@ -124,6 +124,7 @@ endif()
 # latency) into a ring buffer for later aggregation. Defaults OFF so it ships
 # behind a flag while we tune what's useful (per AC-SM-6 zero-cost-off).
 option(HU_ENABLE_SELF_MODEL "Build agent behavioral self-model (per-turn observation ring buffer)" OFF)
+option(HU_ENABLE_ACTION_LAYERS "Inject drift + TOM-clarification directives into per-turn prompts (Spec 2026-05-24)" OFF)
 option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
@@ -923,6 +924,7 @@ set(HU_CORE_SOURCES
     # so the public symbols resolve at link time in both build variants.
     # Per AC-SM-6 (zero-cost when OFF) the stub bodies are bare returns.
     src/agent/self_model.c
+    src/agent/action_directives.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
     src/ml/lora_retrain_runner.c
@@ -1867,6 +1869,9 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_ACTION_LAYERS=1)
+endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
@@ -2470,6 +2475,9 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human PRIVATE HU_ENABLE_ACTION_LAYERS=1)
+endif()
 if(HU_ENABLE_CRON)
     target_compile_definitions(human PRIVATE HU_HAS_CRON=1)
 endif()
@@ -2793,6 +2801,9 @@ if(HU_ENABLE_LEARNING)
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
@@ -3233,6 +3244,7 @@ set(HU_TEST_SOURCES
     # so it links cleanly in both build variants per
     # `.claude/rules/test-source-gate-symmetry.md`.
     tests/test_self_model_behavior_log.c
+    tests/test_action_directives.c
     # Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same
     # internal-#ifdef-wrap-with-stub-runner pattern as Phase A above.
     tests/test_self_model_phase_bcde.c
@@ -3896,6 +3908,9 @@ if(HU_ENABLE_LEARNING)
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
+if(HU_ENABLE_ACTION_LAYERS)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 # Phase 1 (RL SOTA) — propagate HU_ENABLE_LLAMACPP into the test build so
 # .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).
