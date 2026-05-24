@@ -439,13 +439,37 @@ hu_chronotype_t hu_personal_model_infer_chronotype(const hu_personal_model_t *mo
  * Resolution order:
  *   1. `HUMAN_PERSONAL_MODEL_PATH` environment variable (full path, overrides
  *      everything; intended for tests and explicit operator overrides).
- *   2. `$HOME/.human/personal_model.bin`.
+ *   2. `$HOME/.human/models/personal_model.db` (SQLite, per stakeholder decision).
  *
  * Writes the resolved path into `buf` and returns it (NUL-terminated). Returns
  * NULL when neither override nor `HOME` is available, or when the resolved
  * path would overflow `cap`. The caller owns `buf`. Pure path resolution —
  * no I/O, no allocation. */
 const char *hu_personal_model_resolve_default_path(char *buf, size_t cap);
+
+/* ── Per-contact M2 slice (Sprint 48 US-48-2) ──────────────────────────
+ *
+ * Load per-contact facts from personal_model.db into a model struct.
+ * contact_handle is the iMessage handle (e.g. "+1234567890" or
+ * "user@example.com"); an empty string "" loads global (contact-agnostic)
+ * facts. Returns HU_OK and populates *out with the contact-scoped slice,
+ * or HU_ERR_NOT_FOUND when no file exists or no facts match the handle.
+ * Other errors (parse, I/O) return HU_ERR_PARSE or HU_ERR_IO.
+ *
+ * Backwards compatible: if .db doesn't exist, tries .bin (legacy binary
+ * blob) and migrates on first successful read. */
+hu_error_t hu_personal_model_load_for_contact(hu_personal_model_t *out, const char *contact_handle,
+                                              const char *db_path);
+
+/* Ingest a message for a specific contact. Tags facts with contact_handle
+ * during extraction. Same provenance contract as hu_personal_model_ingest:
+ * prov must be non-NULL outside tests. Atomically saves to db_path after
+ * ingest (same tmp+fsync+rename pattern as global model). */
+hu_error_t hu_personal_model_ingest_for_contact(hu_personal_model_t *model,
+                                                const char *contact_handle, const char *message,
+                                                size_t message_len, bool from_user,
+                                                int64_t timestamp, const hu_provenance_t *prov,
+                                                const char *db_path);
 
 /* ── Symmetric signal aging — topics, goals, style ─────────────────────
  *

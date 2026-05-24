@@ -18,12 +18,12 @@
  * density and better retrieval via the knowledge graph.
  */
 
-#define HU_FACT_MAX_FIELD 256
+#define HU_FACT_MAX_FIELD   256
 #define HU_FACT_EXTRACT_MAX 32
 
 typedef enum hu_knowledge_type {
-    HU_KNOWLEDGE_PROPOSITIONAL = 0,  /* factual: "User likes hiking" */
-    HU_KNOWLEDGE_PRESCRIPTIVE,       /* procedural: "When stressed, suggest walk" */
+    HU_KNOWLEDGE_PROPOSITIONAL = 0, /* factual: "User likes hiking" */
+    HU_KNOWLEDGE_PRESCRIPTIVE,      /* procedural: "When stressed, suggest walk" */
 } hu_knowledge_type_t;
 
 typedef struct hu_heuristic_fact {
@@ -31,7 +31,7 @@ typedef struct hu_heuristic_fact {
     char subject[HU_FACT_MAX_FIELD];
     char predicate[HU_FACT_MAX_FIELD];
     char object[HU_FACT_MAX_FIELD];
-    float confidence;                 /* 0.0–1.0 extraction confidence */
+    float confidence;                    /* 0.0–1.0 extraction confidence */
     char source_hint[HU_FACT_MAX_FIELD]; /* conversation context hint */
     /* Unix timestamp (seconds) of the most recent observation that
      * supports this fact. 0 means the fact has never been refreshed
@@ -43,6 +43,10 @@ typedef struct hu_heuristic_fact {
      * insert by `hu_personal_model_ingest`. Defaults to USER_DIRECT
      * when callers pass NULL (only inside #ifdef _HU_PM_SELF_TEST). */
     hu_provenance_t provenance;
+    /* Sprint 48 US-48-2: contact handle (iMessage handle or similar).
+     * Empty string ("") = global/contact-agnostic fact.
+     * Stamped during extraction or ingest by hu_personal_model_ingest_for_contact. */
+    char contact_handle[HU_FACT_MAX_FIELD];
 } hu_heuristic_fact_t;
 
 /* Default exponential half-life for fact-confidence decay. After
@@ -64,8 +68,7 @@ typedef struct hu_heuristic_fact {
  * For age = 2x         → 0.25 * confidence
  * For age = 4x         → 0.0625 * confidence
  * Beyond ~10 half-lives we floor at 0. */
-float hu_heuristic_fact_effective_confidence(const hu_heuristic_fact_t *fact,
-                                             int64_t now);
+float hu_heuristic_fact_effective_confidence(const hu_heuristic_fact_t *fact, int64_t now);
 
 typedef struct hu_fact_extract_result {
     hu_heuristic_fact_t facts[HU_FACT_EXTRACT_MAX];
@@ -79,8 +82,7 @@ typedef struct hu_fact_extract_result {
  * Uses heuristic NLP patterns to identify subject-predicate-object triples.
  * High-confidence facts (>= 0.6) should be stored in the knowledge graph.
  */
-hu_error_t hu_fact_extract(const char *text, size_t text_len,
-                           hu_fact_extract_result_t *result);
+hu_error_t hu_fact_extract(const char *text, size_t text_len, hu_fact_extract_result_t *result);
 
 /*
  * Deduplicate facts against existing entries.
@@ -88,8 +90,8 @@ hu_error_t hu_fact_extract(const char *text, size_t text_len,
  * compacting the array in place and updating result->fact_count.
  * Returns the number of novel (retained) facts.
  */
-size_t hu_fact_dedup(hu_fact_extract_result_t *result,
-                     const hu_heuristic_fact_t *existing, size_t existing_count);
+size_t hu_fact_dedup(hu_fact_extract_result_t *result, const hu_heuristic_fact_t *existing,
+                     size_t existing_count);
 
 /*
  * Format extracted facts as memory store keys and values.
@@ -97,9 +99,7 @@ size_t hu_fact_dedup(hu_fact_extract_result_t *result,
  * Prescriptive: key = "skill:{subject}:{predicate}"
  * Caller frees each key/value string via alloc.
  */
-hu_error_t hu_fact_format_for_store(hu_allocator_t *alloc,
-                                    const hu_heuristic_fact_t *fact,
-                                    char **key, size_t *key_len,
-                                    char **value, size_t *value_len);
+hu_error_t hu_fact_format_for_store(hu_allocator_t *alloc, const hu_heuristic_fact_t *fact,
+                                    char **key, size_t *key_len, char **value, size_t *value_len);
 
 #endif
