@@ -334,7 +334,22 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
      * heuristic should still defer. The return code is the caller's
      * diagnostic; the flag is the side-effect signal. */
     s_called_this_turn = 1;
-    return hu_dpo_record_pair(s_collector, &pair);
+    hu_error_t rec_err = hu_dpo_record_pair(s_collector, &pair);
+
+    /* AGI-C1b — also update the production_outcomes row for this
+     * (channel, target, message_ref) with the tapback polarity. This
+     * is the "reaction came in" signal that resolves an outbound's
+     * outcome columns. Best-effort: failures here don't fail the
+     * caller's signal — the per-turn flag is already set. */
+    if (e->channel_id && e->target_thread_id && e->target_message_ref) {
+        int polarity_int = (e->polarity > 0) ? 1 : (e->polarity < 0 ? -1 : 0);
+        (void)hu_dpo_record_outcome(s_collector, e->channel_id, strlen(e->channel_id),
+                                    e->target_thread_id, strlen(e->target_thread_id),
+                                    e->target_message_ref, strlen(e->target_message_ref),
+                                    polarity_int,
+                                    /*reply_latency_s=*/-1, /*reply_length=*/-1);
+    }
+    return rec_err;
 }
 
 static void register_assistant_message(const char *channel, const char *thread, const char *msg_ref,

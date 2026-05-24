@@ -39,10 +39,37 @@ hu_error_t hu_dpo_init_tables(hu_dpo_collector_t *collector) {
 #ifdef HU_ENABLE_SQLITE
     if (!collector->db)
         return HU_OK;
-    const char *sql = "CREATE TABLE IF NOT EXISTS dpo_pairs("
-                      "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                      "prompt TEXT, chosen TEXT, rejected TEXT, "
-                      "margin REAL, timestamp INTEGER, source TEXT);";
+    const char *sql =
+        "CREATE TABLE IF NOT EXISTS dpo_pairs("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "prompt TEXT, chosen TEXT, rejected TEXT, "
+        "margin REAL, timestamp INTEGER, source TEXT);"
+        /* production_outcomes — AGI Capability-1 foundation
+         * (docs/plans/2026-05-19-agi-path.md). Every outbound message
+         * generates a row here. Outcome columns fill later when a
+         * reaction or reply arrives. A nightly job reads resolved rows
+         * and generates dpo_pairs from them — this is how the
+         * production learning loop closes. */
+        "CREATE TABLE IF NOT EXISTS production_outcomes("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "channel TEXT NOT NULL,"
+        "target TEXT NOT NULL,"
+        "message_ref TEXT,"
+        "prompt TEXT NOT NULL,"
+        "chosen TEXT NOT NULL,"
+        "alternatives TEXT,"
+        "p_seth_at_send REAL,"
+        "send_timestamp INTEGER NOT NULL,"
+        "tapback_polarity INTEGER,"
+        "reply_latency_s INTEGER,"
+        "reply_length INTEGER,"
+        "reply_sentiment REAL,"
+        "user_edited INTEGER,"
+        "outcome_resolved_at INTEGER,"
+        "processed_into_dpo INTEGER DEFAULT 0);"
+        "CREATE INDEX IF NOT EXISTS idx_po_msg_ref ON production_outcomes(channel, target, "
+        "message_ref);"
+        "CREATE INDEX IF NOT EXISTS idx_po_unprocessed ON production_outcomes(processed_into_dpo);";
     char *err_msg = NULL;
     int rc = sqlite3_exec(collector->db, sql, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
@@ -235,6 +262,150 @@ hu_error_t hu_dpo_record_from_retry(hu_dpo_collector_t *collector, const char *p
     pair.source_len = 16;
 
     return hu_dpo_record_pair(collector, &pair);
+}
+
+/* ── AGI Capability-1: production outcomes ─────────────────────────────
+ *
+ * Every outbound message generates one row in `production_outcomes`.
+ * Outcome columns (tapback, reply, etc.) fill in later as reactions
+ * arrive. A nightly job reads resolved rows and materializes dpo_pairs
+ * with source='outcome_tapback'. See docs/plans/2026-05-19-agi-path.md.
+ */
+
+hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *channel,
+                                  size_t channel_len, const char *target, size_t target_len,
+                                  const char *message_ref, size_t message_ref_len,
+                                  const char *prompt, size_t prompt_len, const char *chosen,
+                                  size_t chosen_len, double p_seth_at_send) {
+    if (!collector || !channel || !target || !prompt || !chosen)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (channel_len == 0 || target_len == 0 || prompt_len == 0 || chosen_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#ifdef HU_ENABLE_SQLITE
+    if (!collector->db)
+        return HU_OK; /* no-op without SQLite */
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(collector->db,
+                                "INSERT INTO production_outcomes("
+                                "channel, target, message_ref, prompt, chosen, "
+                                "p_seth_at_send, send_timestamp) VALUES(?,?,?,?,?,?,?)",
+                                -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(stmt, 1, channel, (int)channel_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, target, (int)target_len, SQLITE_STATIC);
+    if (message_ref && message_ref_len > 0)
+        sqlite3_bind_text(stmt, 3, message_ref, (int)message_ref_len, SQLITE_STATIC);
+    else
+        sqlite3_bind_null(stmt, 3);
+    sqlite3_bind_text(stmt, 4, prompt, (int)prompt_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 5, chosen, (int)chosen_len, SQLITE_STATIC);
+    if (p_seth_at_send >= 0.0)
+        sqlite3_bind_double(stmt, 6, p_seth_at_send);
+    else
+        sqlite3_bind_null(stmt, 6);
+    sqlite3_bind_int64(stmt, 7, (sqlite3_int64)time(NULL));
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+#else
+    (void)channel_len;
+    (void)target_len;
+    (void)message_ref;
+    (void)message_ref_len;
+    (void)prompt_len;
+    (void)chosen_len;
+    (void)p_seth_at_send;
+#endif
+    return HU_OK;
+}
+
+hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *channel,
+                                 size_t channel_len, const char *target, size_t target_len,
+                                 const char *message_ref, size_t message_ref_len,
+                                 int tapback_polarity, int reply_latency_s, int reply_length) {
+    if (!collector || !channel || !target)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (channel_len == 0 || target_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#ifdef HU_ENABLE_SQLITE
+    if (!collector->db)
+        return HU_OK;
+
+    /* Match the most-recent unresolved outbound row for this
+     * (channel, target, message_ref). When message_ref is null, fall
+     * back to the most-recent unresolved row for the (channel, target)
+     * pair — this lets us record outcomes even when channels don't
+     * surface a stable per-message identifier. */
+    sqlite3_stmt *stmt = NULL;
+    int rc;
+    if (message_ref && message_ref_len > 0) {
+        rc = sqlite3_prepare_v2(collector->db,
+                                "UPDATE production_outcomes SET "
+                                "tapback_polarity=COALESCE(?, tapback_polarity),"
+                                "reply_latency_s=COALESCE(?, reply_latency_s),"
+                                "reply_length=COALESCE(?, reply_length),"
+                                "outcome_resolved_at=?"
+                                " WHERE id=(SELECT id FROM production_outcomes "
+                                "WHERE channel=? AND target=? AND message_ref=? "
+                                "AND outcome_resolved_at IS NULL "
+                                "ORDER BY send_timestamp DESC LIMIT 1)",
+                                -1, &stmt, NULL);
+    } else {
+        rc = sqlite3_prepare_v2(collector->db,
+                                "UPDATE production_outcomes SET "
+                                "tapback_polarity=COALESCE(?, tapback_polarity),"
+                                "reply_latency_s=COALESCE(?, reply_latency_s),"
+                                "reply_length=COALESCE(?, reply_length),"
+                                "outcome_resolved_at=?"
+                                " WHERE id=(SELECT id FROM production_outcomes "
+                                "WHERE channel=? AND target=? "
+                                "AND outcome_resolved_at IS NULL "
+                                "ORDER BY send_timestamp DESC LIMIT 1)",
+                                -1, &stmt, NULL);
+    }
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+
+    /* Sentinel: tapback_polarity passes through if -2 means "leave
+     * existing"; otherwise bind the value. Same for reply_latency_s/
+     * reply_length where -1 means "no signal." */
+    if (tapback_polarity >= -1 && tapback_polarity <= 1)
+        sqlite3_bind_int(stmt, 1, tapback_polarity);
+    else
+        sqlite3_bind_null(stmt, 1);
+    if (reply_latency_s >= 0)
+        sqlite3_bind_int(stmt, 2, reply_latency_s);
+    else
+        sqlite3_bind_null(stmt, 2);
+    if (reply_length >= 0)
+        sqlite3_bind_int(stmt, 3, reply_length);
+    else
+        sqlite3_bind_null(stmt, 3);
+    sqlite3_bind_int64(stmt, 4, (sqlite3_int64)time(NULL));
+    sqlite3_bind_text(stmt, 5, channel, (int)channel_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 6, target, (int)target_len, SQLITE_STATIC);
+    if (message_ref && message_ref_len > 0)
+        sqlite3_bind_text(stmt, 7, message_ref, (int)message_ref_len, SQLITE_STATIC);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+#else
+    (void)channel_len;
+    (void)target_len;
+    (void)message_ref;
+    (void)message_ref_len;
+    (void)tapback_polarity;
+    (void)reply_latency_s;
+    (void)reply_length;
+#endif
+    return HU_OK;
 }
 
 hu_error_t hu_dpo_export_jsonl(hu_dpo_collector_t *collector, const char *path, size_t path_len,
