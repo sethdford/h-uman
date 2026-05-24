@@ -68,6 +68,18 @@ const char *hu_audio_tone_label(hu_audio_tone_t tone);
 size_t hu_audio_tone_render(const char *contact_handle, hu_audio_tone_t tone, char *out,
                             size_t cap);
 
+/* B5 production wire helper: format the (contact, tone) pair as a
+ * canonical English fact suitable for hu_personal_model_ingest. Returns
+ * bytes written. Output shape:
+ *   "<handle>'s voice message sounded <label>."
+ *
+ * Caller is expected to feed the result into the personal-model
+ * ingest pipeline (which will then fact-extract subject/predicate/
+ * object and stamp provenance). For UNKNOWN tone returns 0 (no
+ * meaningful signal to surface). */
+size_t hu_audio_tone_format_fact(const char *contact_handle, hu_audio_tone_t tone, char *out,
+                                 size_t cap);
+
 #ifdef __cplusplus
 }
 #endif
