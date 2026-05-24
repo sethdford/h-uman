@@ -58,6 +58,24 @@ static inline uint64_t hu_agent_internal_monotonic_ms(void) {
 
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
 
+/* Sprint 46 R5.3 (refactored for testability per audit FAIL):
+ * Lazy-load the PersonaEval v2 classifier into agent->persona_eval.
+ *
+ * Loader contract:
+ *   - On success: agent->persona_eval is non-NULL, HU_OK is returned.
+ *   - On missing file: agent->persona_eval is NULL, HU_ERR_IO returned.
+ *     The CALLER decides whether HU_ERR_IO is fatal —
+ *     hu_agent_from_config treats it as non-fatal (downstream calls
+ *     to score on a NULL model gracefully return 0.5).
+ *   - On other error: agent->persona_eval is NULL, original error
+ *     returned. hu_agent_from_config logs a warn and proceeds.
+ *
+ * `model_path` may be NULL to use the default /tmp/seth_speaker_id.json.
+ *
+ * Split from hu_agent_from_config so tests can verify the load contract
+ * directly without spawning a full agent. */
+hu_error_t hu_agent_internal_load_persona_eval(hu_agent_t *agent, const char *model_path);
+
 /* Set / clear the active scene-direction text for the next turn. The
  * daemon owns the buffer (typically `hu_director_result_t.direction[512]`);
  * the agent only borrows a const pointer + length. Setter is a plain

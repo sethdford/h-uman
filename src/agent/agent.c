@@ -82,6 +82,24 @@
 #include <string.h>
 #include <time.h>
 
+hu_error_t hu_agent_internal_load_persona_eval(hu_agent_t *agent, const char *model_path) {
+    /* Sprint 46 R5.3 (refactored for testability per audit FAIL).
+     * See agent_internal.h for contract. */
+    if (!agent || !agent->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    agent->persona_eval = NULL;
+    hu_persona_eval_model_t *m = NULL;
+    hu_error_t err = hu_persona_eval_load(agent->alloc, model_path, &m);
+    if (err == HU_OK && m) {
+        agent->persona_eval = m;
+        return HU_OK;
+    }
+    /* Either err != HU_OK (missing file or parse error) OR m == NULL
+     * (defensive — shouldn't happen on HU_OK). Field stays NULL; caller
+     * decides severity. */
+    return err == HU_OK ? HU_ERR_IO : err;
+}
+
 void hu_agent_internal_generate_trace_id(char *buf) {
     static uint32_t counter = 0;
     uint64_t t = (uint64_t)clock();
@@ -818,28 +836,16 @@ hu_error_t hu_agent_from_config(
     }
     out->sota.sota_initialized = true;
 
-    /* Sprint 46 R5.3 — lazy-load the C-side PersonaEval classifier.
-     * Failure is non-fatal — the field stays NULL and downstream calls
-     * (hu_persona_eval_score on a NULL model) return neutral 0.5. This
-     * keeps fresh checkouts that haven't trained a classifier yet from
-     * blowing up at agent init. */
+    /* Sprint 46 R5.3 — load classifier via helper (refactored for
+     * testability per audit FAIL). Failure non-fatal — field stays NULL,
+     * downstream gracefully degrades to 0.5. */
     {
-        hu_persona_eval_model_t *m = NULL;
-        hu_error_t pe_err = hu_persona_eval_load(out->alloc, NULL /*use default path*/, &m);
-        if (pe_err == HU_OK && m) {
-            out->persona_eval = m;
-        } else {
-            out->persona_eval = NULL;
-            if (pe_err != HU_ERR_IO) {
-                /* IO is the "file missing" case — common, not worth a warn.
-                 * Other errors might indicate model corruption or format
-                 * drift; surface those. */
-                hu_log_warn("agent", NULL,
-                            "persona_eval load failed: %s (P(Seth) scoring "
-                            "will return neutral 0.5)",
-                            hu_error_string(pe_err));
-            }
-        }
+        hu_error_t pe_err = hu_agent_internal_load_persona_eval(out, NULL);
+        if (pe_err != HU_OK && pe_err != HU_ERR_IO)
+            hu_log_warn("agent", NULL,
+                        "speaker classifier load failed: %s "
+                        "(scoring will return neutral 0.5)",
+                        hu_error_string(pe_err));
     }
 
     hu_emotional_cognition_init(&out->infra.emotional_cognition);
