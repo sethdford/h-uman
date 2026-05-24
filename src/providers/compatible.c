@@ -6,6 +6,7 @@
 #include "human/provider.h"
 #include "human/providers/helpers.h"
 #include "human/providers/provider_http.h"
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,27 @@
 #include "human/core/http.h"
 #include "human/providers/sse.h"
 #endif
+
+/* Serialize chat / stream_chat HTTP calls to a single-threaded MLX-style
+ * upstream (gemma-realtime, our inline mlx-server.py, mlx_lm.server).
+ *
+ * Problem: those servers use plain HTTPServer (not ThreadingHTTPServer)
+ * because MLX requires per-thread GPU stream init. When the daemon
+ * receives multiple iMessages concurrently and dispatches several agent
+ * turns in parallel, the second-to-Nth curl calls race the first and
+ * hit CURLE_COULDNT_CONNECT (code=7) — observed in production as
+ * "curl stream POST failed: Couldn't connect to server".
+ *
+ * This mutex makes every chat / stream_chat call wait for the previous
+ * one to finish before reaching curl. Inference still runs at the same
+ * speed; the daemon just queues turns naturally instead of racing them.
+ * iMessages that would otherwise get NO REPLY get a (delayed) reply.
+ *
+ * Per ~/.claude/rules/silent-config-gated-subsystems.md the lock is
+ * always-on; no config knob (the only reason to disable would be if
+ * the upstream is actually multi-threaded, which we'd discover via a
+ * different bug than silent-no-reply). */
+static pthread_mutex_t g_compatible_chat_lock = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct hu_compatible_ctx {
     char *api_key;
@@ -397,7 +419,12 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     }
 
     hu_json_value_t *parsed = NULL;
+    /* Serialize against concurrent stream_chat and other compatible_chat
+     * calls to avoid CURLE_COULDNT_CONNECT against single-threaded MLX
+     * upstreams. See g_compatible_chat_lock declaration. */
+    pthread_mutex_lock(&g_compatible_chat_lock);
     err = hu_provider_http_post_json(alloc, url_buf, auth, NULL, body, body_len, &parsed);
+    pthread_mutex_unlock(&g_compatible_chat_lock);
     alloc->free(alloc->ctx, body, body_len);
     if (err != HU_OK)
         return err;
@@ -879,8 +906,14 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
     }
     hu_log_info("compatible", NULL, "stream_chat: provider=compatible model=%.*s body_len=%zu",
                 (int)model_len, model, body_len);
+    /* Serialize against concurrent chat/stream_chat to a single-threaded
+     * MLX upstream. See g_compatible_chat_lock declaration. The lock is
+     * held for the duration of the stream (covers SSE keep-alive); other
+     * iMessages dispatched in parallel will wait their turn. */
+    pthread_mutex_lock(&g_compatible_chat_lock);
     err = hu_http_post_json_stream(alloc, url_buf, auth, NULL, body, body_len,
                                    compatible_stream_write_cb, &sctx);
+    pthread_mutex_unlock(&g_compatible_chat_lock);
     hu_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
 
