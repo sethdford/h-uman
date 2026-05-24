@@ -6393,16 +6393,42 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 final_len = retry_len;
                                 ab_owned = true;
                             } else {
+                                /* 2026-05-24 fix: response_guard REJECT + slim-retry both
+                                 * failed. Previously this nulled final_content and let the
+                                 * function return HU_OK with empty response_out, which the
+                                 * gateway misclassified as a transient "Agent returned empty
+                                 * response" 502 (telling clients to retry — but retrying won't
+                                 * help if the model keeps producing rejected content). Worse,
+                                 * iMessage saw HU_OK + NULL and silently skipped the send,
+                                 * leaving the user with no reply at all.
+                                 *
+                                 * Mirror the critique-echo guard's pattern (~line 5136): install
+                                 * a canonical short safe fallback so the function's contract
+                                 * holds ("HU_OK ⇒ non-NULL content"). The fallback matches the
+                                 * persona register (lowercase, no AI-tells) so it's plausibly
+                                 * something Seth would say while he gathers his thoughts. */
                                 hu_log_error(
                                     "agent_turn", agent->observer,
-                                    "response_guard retry failed (err=%s) — suppressing send",
+                                    "response_guard retry failed (err=%s) — installing fallback",
                                     hu_error_string(retry_err));
                                 if (ab_owned)
                                     agent->alloc->free(agent->alloc->ctx, (void *)final_content,
                                                        final_len + 1);
-                                final_content = NULL;
-                                final_len = 0;
-                                ab_owned = false;
+                                static const char fallback[] = "hold on, let me think on that";
+                                size_t fallback_len = sizeof(fallback) - 1;
+                                char *fb_copy = hu_strndup(agent->alloc, fallback, fallback_len);
+                                if (fb_copy) {
+                                    final_content = fb_copy;
+                                    final_len = fallback_len;
+                                    ab_owned = true;
+                                } else {
+                                    /* OOM on the fallback alloc — last resort: NULL content,
+                                     * but log loudly. Gateway will still 502 in this case, but
+                                     * OOM is its own real failure so 502 is appropriate. */
+                                    final_content = NULL;
+                                    final_len = 0;
+                                    ab_owned = false;
+                                }
                             }
                         } else if (guard_outcome == HU_GUARD_REWROTE) {
                             hu_log_warn(
