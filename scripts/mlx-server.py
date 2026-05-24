@@ -159,13 +159,7 @@ def _swap_adapter_inline(adapter_path: str) -> tuple[int, dict]:
     # for the test/stub path — same contract surface, no real weights.
     if _MLX_MODEL is not None and have_mlx_lm():
         try:
-            # mlx_lm's preferred adapter format is a directory with
-            # adapters.safetensors; resolve to that if a directory was given.
-            weight_path = expanded
-            if os.path.isdir(expanded):
-                cand = os.path.join(expanded, "adapters.safetensors")
-                if os.path.isfile(cand):
-                    weight_path = cand
+            weight_path = _resolve_adapter_weight_file(expanded)
             # load_weights mutates the model in place. On exception we
             # try to restore the prior adapter.
             _MLX_MODEL.load_weights(weight_path, strict=False)
@@ -178,22 +172,14 @@ def _swap_adapter_inline(adapter_path: str) -> tuple[int, dict]:
             err_msg = f"load_weights failed: {exc}"
             if prior_adapter and prior_adapter != expanded:
                 try:
-                    revert_path = prior_adapter
-                    if os.path.isdir(prior_adapter):
-                        cand = os.path.join(prior_adapter, "adapters.safetensors")
-                        if os.path.isfile(cand):
-                            revert_path = cand
+                    revert_path = _resolve_adapter_weight_file(prior_adapter)
                     _MLX_MODEL.load_weights(revert_path, strict=False)
                 except Exception as revert_exc:  # noqa: BLE001
                     err_msg += f"; revert to prior adapter also failed: {revert_exc}"
             return 500, {"status": "error", "error": err_msg}
     else:
         # Stub path: just count tensors in the safetensors file.
-        weight_path = expanded
-        if os.path.isdir(expanded):
-            cand = os.path.join(expanded, "adapters.safetensors")
-            if os.path.isfile(cand):
-                weight_path = cand
+        weight_path = _resolve_adapter_weight_file(expanded)
         tensors_loaded = _count_safetensors(weight_path)
 
     _CURRENT_ADAPTER = os.path.realpath(expanded)
@@ -207,6 +193,35 @@ def _swap_adapter_inline(adapter_path: str) -> tuple[int, dict]:
         "prior_adapter": prior_adapter,
         "prior_tensors": prior_tensors,
     }
+
+
+def _resolve_adapter_weight_file(path: str) -> str:
+    """Resolve a swap path to the actual .safetensors weight FILE.
+
+    mlx_lm.lora's natural output layout is:
+        <given-path>/                          ← what callers typically pass
+            adapters.safetensors/              ← directory created by mlx_lm.lora
+                adapters.safetensors           ← the actual weight file
+                adapter_config.json
+
+    So we walk down: if `path` is a directory, look for adapters.safetensors
+    inside. If THAT is also a directory, look one level deeper. If it's a
+    file with .safetensors extension, return it. Returns the original path
+    if no safetensors file is found (caller's load_weights will surface a
+    clean error).
+    """
+    cur = path
+    # Walk down up to 3 levels — covers the typical mlx_lm.lora nesting.
+    for _ in range(3):
+        if os.path.isfile(cur) and cur.endswith(".safetensors"):
+            return cur
+        if os.path.isdir(cur):
+            cand = os.path.join(cur, "adapters.safetensors")
+            if os.path.exists(cand):
+                cur = cand
+                continue
+        break
+    return cur
 
 
 def _chat_completion_inline(body):
