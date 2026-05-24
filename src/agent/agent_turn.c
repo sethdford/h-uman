@@ -78,9 +78,12 @@ int hu_reaction_handler_was_called_this_turn(void);
 #include "human/persona/humor.h"
 #include "human/provider/structured_output.h"
 #include "human/security/sycophancy_guard.h"
+/* m3_rewrite_capture.h is unconditional — the header provides an inline
+ * no-op stub for HU_ENABLE_ML=OFF so call sites in this TU link cleanly
+ * in both modes (per ~/.claude/rules/test-source-gate-symmetry.md). */
+#include "human/ml/m3_rewrite_capture.h"
 #ifdef HU_ENABLE_ML
 #include "human/ml/m3_frontier_adapter.h"
-#include "human/ml/m3_rewrite_capture.h"
 #endif
 
 /* Default fallback arrays (NULL-terminated) */

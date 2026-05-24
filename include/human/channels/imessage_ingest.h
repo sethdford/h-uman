@@ -111,10 +111,32 @@ struct hu_personal_model;
 
 #include "human/core/error.h"
 
+#ifdef HU_ENABLE_IMESSAGE
 hu_error_t hu_reaction_ingest_personal_model(struct hu_personal_model *model,
-                                       const hu_reaction_event_t *event, const char *custom_emoji,
-                                       const char *target_text_preview, bool is_from_me_target,
-                                       bool in_group_chat);
+                                             const hu_reaction_event_t *event,
+                                             const char *custom_emoji,
+                                             const char *target_text_preview,
+                                             bool is_from_me_target, bool in_group_chat);
+#else
+/* HU_ENABLE_IMESSAGE=OFF stub. Without the iMessage channel compiled in,
+ * imessage_ingest.c isn't built — so callers in reaction_handler.c need an
+ * inline no-op to satisfy the link contract (per
+ * ~/.claude/rules/test-source-gate-symmetry.md). The reaction-handler path
+ * still works for non-iMessage channels; this stub silently skips the
+ * personal-model bump that only iMessage tapbacks provide. */
+static inline hu_error_t
+hu_reaction_ingest_personal_model(struct hu_personal_model *model, const hu_reaction_event_t *event,
+                                  const char *custom_emoji, const char *target_text_preview,
+                                  bool is_from_me_target, bool in_group_chat) {
+    (void)model;
+    (void)event;
+    (void)custom_emoji;
+    (void)target_text_preview;
+    (void)is_from_me_target;
+    (void)in_group_chat;
+    return HU_OK;
+}
+#endif
 
 hu_error_t hu_imessage_ingest_edit(struct hu_personal_model *model, const char *sender_handle,
                                    bool is_from_me, const char *old_text, const char *new_text,
