@@ -3178,6 +3178,7 @@ set(HU_TEST_SOURCES
     tests/test_response_guard_retry.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
+    tests/test_agent.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
     tests/test_w8_belief_layer.c

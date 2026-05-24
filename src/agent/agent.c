@@ -6,6 +6,7 @@
 #include "human/agent/humanness.h"
 #include "human/agent/idempotency.h"
 #include "human/agent/pattern_radar.h"
+#include "human/agent/persona_eval.h"
 #include "human/agent/response_verifier.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/superhuman_commitment.h"
@@ -80,6 +81,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+hu_error_t hu_agent_internal_load_persona_eval(hu_agent_t *agent, const char *model_path) {
+    /* Sprint 46 R5.3 (refactored for testability per audit FAIL).
+     * See agent_internal.h for contract. */
+    if (!agent || !agent->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    agent->persona_eval = NULL;
+    hu_persona_eval_model_t *m = NULL;
+    hu_error_t err = hu_persona_eval_load(agent->alloc, model_path, &m);
+    if (err == HU_OK && m) {
+        agent->persona_eval = m;
+        return HU_OK;
+    }
+    /* Either err != HU_OK (missing file or parse error) OR m == NULL
+     * (defensive — shouldn't happen on HU_OK). Field stays NULL; caller
+     * decides severity. */
+    return err == HU_OK ? HU_ERR_IO : err;
+}
 
 void hu_agent_internal_generate_trace_id(char *buf) {
     static uint32_t counter = 0;
@@ -817,6 +836,18 @@ hu_error_t hu_agent_from_config(
     }
     out->sota.sota_initialized = true;
 
+    /* Sprint 46 R5.3 — load classifier via helper (refactored for
+     * testability per audit FAIL). Failure non-fatal — field stays NULL,
+     * downstream gracefully degrades to 0.5. */
+    {
+        hu_error_t pe_err = hu_agent_internal_load_persona_eval(out, NULL);
+        if (pe_err != HU_OK && pe_err != HU_ERR_IO)
+            hu_log_warn("agent", NULL,
+                        "speaker classifier load failed: %s "
+                        "(scoring will return neutral 0.5)",
+                        hu_error_string(pe_err));
+    }
+
     hu_emotional_cognition_init(&out->infra.emotional_cognition);
     hu_metacognition_init(&out->infra.metacognition);
     out->infra.current_cognition_mode = HU_COGNITION_FAST;
@@ -1316,6 +1347,13 @@ void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64
 void hu_agent_deinit(hu_agent_t *agent) {
     if (!agent)
         return;
+    /* Sprint 46 R5.3 — free the PersonaEval classifier. Safe on NULL
+     * (load failure path) — hu_persona_eval_free handles NULL. */
+    if (agent->persona_eval) {
+        hu_persona_eval_free(agent->alloc, agent->persona_eval);
+        agent->persona_eval = NULL;
+    }
+
     /* Sprint 37 — free director history ring buffer first (heap-owned
      * copies, leaks otherwise). Idempotent on agents with no history. */
     hu_agent_internal_free_director_history(agent);

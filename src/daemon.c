@@ -25,6 +25,7 @@
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/multimodal_policy.h"
+#include "human/agent/persona_eval.h"
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
@@ -9980,6 +9981,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
 
+                        /* Sprint 46 R5.1 — inbound arrival latency ingest.
+                         *
+                         * Before running agent_turn for this inbound, attribute
+                         * its arrival to any prior unresolved outbound to the
+                         * same contact. record_inbound_arrival is a no-op when
+                         * there's no prior outbound (contact texted us first).
+                         * Best-effort: errors are logged, not fatal.
+                         *
+                         * Note: we use `combined_len` as a proxy for inbound
+                         * length here. It's actually the assembled prompt
+                         * length, not the raw inbound. The reply_length
+                         * column is a coarse engagement proxy; this is
+                         * accurate enough for the L4 outcome-DPO pipeline. */
+                        if (agent && agent->sota.sota_initialized && ch && ch->channel &&
+                            ch->channel->vtable && ch->channel->vtable->name) {
+                            const char *ch_name_in = ch->channel->vtable->name(ch->channel->ctx);
+                            if (ch_name_in && batch_key && key_len > 0) {
+                                int incoming_len = combined_len > 0 && combined_len < 2147483647
+                                                       ? (int)combined_len
+                                                       : -1;
+                                hu_error_t lat_err = hu_dpo_record_inbound_arrival(
+                                    &agent->sota.dpo_collector, ch_name_in, strlen(ch_name_in),
+                                    batch_key, key_len, incoming_len);
+                                if (lat_err != HU_OK && lat_err != HU_ERR_INVALID_ARGUMENT) {
+                                    hu_log_warn("human", agent->observer,
+                                                "inbound_arrival ingest failed: %s",
+                                                hu_error_string(lat_err));
+                                }
+                            }
+                        }
+
                         size_t saved_tools = 0;
                         size_t saved_specs = 0;
                         if (llm_decides) {
@@ -10069,15 +10101,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             ch->channel->vtable && ch->channel->vtable->name) {
                             const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
                             if (ch_name) {
+                                /* Sprint 46 R5.3 — score the response with the
+                                 * in-process PersonaEval classifier. When the
+                                 * agent has no model loaded (file missing at
+                                 * init), score returns 0.5 — record_outbound
+                                 * stores that as-is. */
+                                double p_seth = hu_persona_eval_score(agent->persona_eval, response,
+                                                                      response_len);
                                 hu_error_t out_err = hu_dpo_record_outbound(
                                     &agent->sota.dpo_collector, ch_name, strlen(ch_name), batch_key,
                                     key_len, NULL, 0, /* message_ref unknown here */
-                                    combined, combined_len, response, response_len,
-                                    /* p_seth_at_send — not yet computed in C; -1.0 means
-                                     * "classifier unavailable, leave column NULL". The
-                                     * outcomes_to_dpo Python job can backfill later by
-                                     * scoring chosen with the v2 classifier offline. */
-                                    -1.0);
+                                    combined, combined_len, response, response_len, p_seth,
+                                    /* alternatives_json — Sprint 46 R5.2. NULL today since
+                                     * production doesn't run L5 best-of-N yet. Sprint 47
+                                     * will populate this when the L5 path lands. */
+                                    NULL, 0);
                                 if (out_err != HU_OK) {
                                     hu_log_warn("human", agent->observer,
                                                 "production_outcomes record_outbound "

@@ -1,6 +1,7 @@
 #include "human/ml/dpo.h"
 #include "test_framework.h"
 #include <string.h>
+#include <time.h>
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 #endif
@@ -282,7 +283,7 @@ static void dpo_record_outbound_inserts_row(void) {
     HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
 
     HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15555550100", 12, "msg_abc", 7,
-                                        "you around?", 11, "yeah just got back", 18, 0.85),
+                                        "you around?", 11, "yeah just got back", 18, 0.85, NULL, 0),
                  HU_OK);
 
     sqlite3_stmt *st = NULL;
@@ -310,7 +311,7 @@ static void dpo_record_outcome_updates_resolution(void) {
 
     /* Outbound first */
     HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15555550100", 12, "msg_xyz", 7,
-                                        "thanks!", 7, "no worries man", 14, 0.91),
+                                        "thanks!", 7, "no worries man", 14, 0.91, NULL, 0),
                  HU_OK);
 
     /* Outcome arrives: positive tapback */
@@ -340,11 +341,194 @@ static void dpo_record_outbound_null_returns_invalid(void) {
     hu_dpo_collector_t col;
     HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
     /* NULL channel */
-    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, NULL, 0, "t", 1, NULL, 0, "p", 1, "c", 1, 0.5),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_dpo_record_outbound(&col, NULL, 0, "t", 1, NULL, 0, "p", 1, "c", 1, 0.5, NULL, 0),
+        HU_ERR_INVALID_ARGUMENT);
     /* Empty target */
-    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imsg", 4, "", 0, NULL, 0, "p", 1, "c", 1, 0.5),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_dpo_record_outbound(&col, "imsg", 4, "", 0, NULL, 0, "p", 1, "c", 1, 0.5, NULL, 0),
+        HU_ERR_INVALID_ARGUMENT);
+    hu_dpo_collector_deinit(&col);
+}
+
+/* Sprint 46 R5.2 — alternatives column persistence */
+
+static void dpo_record_outbound_with_alternatives_persists_json(void) {
+    /* L5 best-of-N writes the LOSING candidates as a JSON array into
+     * the alternatives column. outcomes_to_dpo.py reads them later to
+     * materialize DPO pairs once the outcome resolves. */
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    const char *alts = "[\"yeah\",\"sure thing\",\"absolutely\"]";
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15551112222", 12, "msg_alt", 7,
+                                        "you free?", 9, "yeah whats up", 13, 0.91, alts,
+                                        strlen(alts)),
+                 HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT alternatives FROM production_outcomes "
+                       "WHERE message_ref='msg_alt'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    const char *stored = (const char *)sqlite3_column_text(st, 0);
+    HU_ASSERT_NOT_NULL(stored);
+    /* Exact round-trip: stored bytes equal the input. */
+    HU_ASSERT_STR_EQ(stored, alts);
+    sqlite3_finalize(st);
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
+static void dpo_record_outbound_null_alternatives_stores_null(void) {
+    /* When L5 didn't fire (or only one candidate), pass NULL/0 and the
+     * column stays SQL NULL — not the JSON string "null". */
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15553334444", 12, "msg_no_alt", 10,
+                                        "hey", 3, "hey whats good", 14, 0.78, NULL, 0),
+                 HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT alternatives FROM production_outcomes "
+                       "WHERE message_ref='msg_no_alt'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_type(st, 0), SQLITE_NULL);
+    sqlite3_finalize(st);
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
+/* Sprint 46 R5.1 — latency ingest test cluster */
+
+static void dpo_record_outcome_with_latency_sets_column(void) {
+    /* Unit test for the existing API: write outbound, then call
+     * record_outcome with latency=42; assert column persists.
+     * Already pinned in part by dpo_record_outcome_updates_resolution;
+     * this is the latency-only variant. */
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15551234567", 12, "msg_r5_1", 8,
+                                        "you up?", 7, "yeah whats up", 13, 0.84, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_outcome(&col, "imessage", 8, "+15551234567", 12, "msg_r5_1", 8,
+                                       /*tapback_polarity=*/-2, /* sentinel: leave column */
+                                       /*reply_latency_s=*/42, /*reply_length=*/13),
+                 HU_OK);
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT reply_latency_s, reply_length FROM production_outcomes "
+                       "WHERE message_ref='msg_r5_1'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(st, 0), 42);
+    HU_ASSERT_EQ(sqlite3_column_int(st, 1), 13);
+    sqlite3_finalize(st);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
+static void dpo_record_inbound_arrival_computes_latency(void) {
+    /* The Sprint 46 R5.1 acceptance test: drive the high-level wrapper
+     * that the daemon will call when an inbound iMessage arrives.
+     * Pre-conditions:
+     *   - One outbound row exists for (channel='imessage', target='+15559876543')
+     *     with send_timestamp set to a known past time.
+     * Action:
+     *   - hu_dpo_record_inbound_arrival is called with the same
+     *     (channel, target).
+     * Post-conditions:
+     *   - The row's reply_latency_s is now > 0 (the actual value
+     *     depends on time elapsed; we just assert it's plausible).
+     *   - The row's outcome_resolved_at is now non-NULL.
+     */
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    /* Inject an outbound row with a known-past send_timestamp.
+     * Bypass hu_dpo_record_outbound (which uses time(NULL)) and INSERT
+     * directly so we can control the timestamp for a deterministic
+     * latency. */
+    int64_t past = (int64_t)time(NULL) - 60; /* 60s ago */
+    sqlite3_stmt *ins = NULL;
+    sqlite3_prepare_v2(db,
+                       "INSERT INTO production_outcomes(channel, target, message_ref, "
+                       "prompt, chosen, send_timestamp) VALUES (?,?,?,?,?,?)",
+                       -1, &ins, NULL);
+    sqlite3_bind_text(ins, 1, "imessage", 8, SQLITE_STATIC);
+    sqlite3_bind_text(ins, 2, "+15559876543", 12, SQLITE_STATIC);
+    sqlite3_bind_text(ins, 3, "msg_r5_1_lat", 12, SQLITE_STATIC);
+    sqlite3_bind_text(ins, 4, "hey there", 9, SQLITE_STATIC);
+    sqlite3_bind_text(ins, 5, "yeah whats up", 13, SQLITE_STATIC);
+    sqlite3_bind_int64(ins, 6, past);
+    HU_ASSERT_EQ(sqlite3_step(ins), SQLITE_DONE);
+    sqlite3_finalize(ins);
+
+    /* Call the wrapper — should look up the row above and fill latency. */
+    HU_ASSERT_EQ(hu_dpo_record_inbound_arrival(&col, "imessage", 8, "+15559876543", 12,
+                                               /*inbound_length=*/24),
+                 HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT reply_latency_s, reply_length, outcome_resolved_at "
+                       "FROM production_outcomes WHERE message_ref='msg_r5_1_lat'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    /* Latency should be approximately 60s (we set send_timestamp 60s
+     * ago). Allow ±5s for test execution time. */
+    int latency = sqlite3_column_int(st, 0);
+    HU_ASSERT(latency >= 55 && latency <= 70);
+    HU_ASSERT_EQ(sqlite3_column_int(st, 1), 24);
+    HU_ASSERT(sqlite3_column_int64(st, 2) > 0);
+    sqlite3_finalize(st);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
+static void dpo_record_inbound_arrival_no_outbound_is_noop(void) {
+    /* When the contact texts us WITHOUT a prior outbound, the wrapper
+     * is a no-op — not an error. (Mirror the production "contact
+     * messaged us first" case.) */
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_inbound_arrival(&col, "imessage", 8, "+15550000000", 12, 10), HU_OK);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
+static void dpo_record_inbound_arrival_null_returns_invalid(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_inbound_arrival(&col, NULL, 0, "t", 1, 0), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_dpo_record_inbound_arrival(&col, "imsg", 4, "", 0, 0), HU_ERR_INVALID_ARGUMENT);
     hu_dpo_collector_deinit(&col);
 }
 
@@ -382,6 +566,14 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_record_outbound_inserts_row);
     HU_RUN_TEST(dpo_record_outcome_updates_resolution);
     HU_RUN_TEST(dpo_record_outbound_null_returns_invalid);
+    /* Sprint 46 R5.2 — alternatives column */
+    HU_RUN_TEST(dpo_record_outbound_with_alternatives_persists_json);
+    HU_RUN_TEST(dpo_record_outbound_null_alternatives_stores_null);
+    /* Sprint 46 R5.1 — latency ingest */
+    HU_RUN_TEST(dpo_record_outcome_with_latency_sets_column);
+    HU_RUN_TEST(dpo_record_inbound_arrival_computes_latency);
+    HU_RUN_TEST(dpo_record_inbound_arrival_no_outbound_is_noop);
+    HU_RUN_TEST(dpo_record_inbound_arrival_null_returns_invalid);
 #endif
     HU_RUN_TEST(dpo_null_collector_returns_error);
     HU_RUN_TEST(dpo_empty_export_succeeds);
