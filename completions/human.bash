@@ -9,7 +9,7 @@ _human() {
 
     # Global flags (before or as first argument)
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W '--version -v --help -h --mcp agent agents auth calibrate capabilities channel config cron demo doctor eval evaluation feed gateway hardware help hula init mcp memory migrate ml models onboard paperclip persona plugins pwa research sandbox schedule service service-loop setup skills status update version voice workspace' -- "$cur"))
+        COMPREPLY=($(compgen -W '--version -v --help -h --mcp agent agents auth calibrate capabilities channel config cron demo doctor drafts eval evaluation feed gateway hardware help hula init mcp memory migrate ml models onboard paperclip persona plugins pwa research sandbox schedule service service-loop setup skills status update version voice workspace' -- "$cur"))
         return
     fi
 

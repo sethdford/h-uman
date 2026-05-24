@@ -1,3 +1,11 @@
+---
+title: "M3 Consumer-Side Live-Fire — 2026-05-19"
+created: 2026-05-19
+status: active
+scope: M3 frontier-bridge live-fire evidence
+slug: 2026-05-19-m3-consumer-side-live-fire
+---
+
 # M3 Consumer-Side Live-Fire — 2026-05-19
 
 After H-tier (data acquisition) landed earlier today, this is the first

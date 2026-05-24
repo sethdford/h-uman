@@ -238,7 +238,7 @@ After all 6 phases:
 | Risk | Mitigation |
 |---|---|
 | Schema differences across macOS 12-26 | Phase 6 explicitly tests fixtures per version |
-| `payload_data` plist parser pulls in CoreFoundation | Use minimal plist parser; reference [src/io/plist.c](../../src/io/plist.c) if exists, else write ~200 LoC bplist00 parser |
+| `payload_data` plist parser pulls in CoreFoundation | Use minimal plist parser ([src/util/bplist.c](../../src/util/bplist.c)) — ~200 LoC bplist00 parser already exists |
 | Privacy concern: ingesting financial events (Apple Pay amounts) | Phase 5 explicitly excludes amounts from facts; only fact-of-payment |
 | LLM cost spike from Phase 1 Path A | Phase 1 already gates ingest at daemon-tick cadence (not per-message); Path B exists as escape hatch |
 | Cross-channel custom-emoji ripple breaks Discord/Slack/Telegram | Phase 2 explicitly tests each channel; new field defaults to NULL |

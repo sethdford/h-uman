@@ -1,3 +1,11 @@
+---
+title: "M3 Autonomous Cycle — First Real Local Live-Fire (2026-05-19)"
+created: 2026-05-19
+status: active
+scope: M3 frontier-bridge live-fire evidence
+slug: 2026-05-19-m3-local-cycle-live
+---
+
 # M3 Autonomous Cycle — First Real Local Live-Fire (2026-05-19)
 
 User instruction after the GCE work landed: "Merge to main and get it
