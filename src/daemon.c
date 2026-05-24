@@ -10033,6 +10033,74 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Sprint B A-loop A1+A2: autoresponder gate.
+                 *
+                 * When the loaded autoresponder config matches AND we're
+                 * in a DND window AND the human hasn't been active
+                 * recently on this channel (A2 dedup), generate a
+                 * persona-faithful auto-reply in the user's voice and
+                 * skip agent_turn for this batch.
+                 *
+                 * Conservative on every check: any failure (NULL config,
+                 * no allowlist match, outside DND, human active, provider
+                 * down, generate error) silently falls through to the
+                 * normal agent_turn path — no behavior regression.
+                 *
+                 * TZ: computed at runtime from localtime / gmtime gap to
+                 * honor user's local schedule. */
+                {
+                    const hu_autoresponder_config_t *ar_cfg = daemon_autoresponder_config();
+                    if (ar_cfg && ch && ch->channel && ch->channel->vtable &&
+                        ch->channel->vtable->send && batch_key && key_len > 0 && combined_len > 0) {
+                        /* A2 dedup: skip when the human is replying themselves. */
+                        bool human_recently_active =
+                            (ch->channel->vtable->human_active_recently &&
+                             ch->channel->vtable->human_active_recently(ch->channel->ctx, batch_key,
+                                                                        key_len, 120));
+                        if (!human_recently_active) {
+                            int64_t now_unix_ar = (int64_t)time(NULL);
+                            /* Local tz offset (seconds east of UTC). */
+                            time_t tnow = (time_t)now_unix_ar;
+                            struct tm lt, gt;
+                            int32_t tz_off = 0;
+                            if (localtime_r(&tnow, &lt) && gmtime_r(&tnow, &gt)) {
+                                tz_off = (int32_t)(((lt.tm_hour - gt.tm_hour) * 3600) +
+                                                   ((lt.tm_min - gt.tm_min) * 60));
+                                if (tz_off > 12 * 3600)
+                                    tz_off -= 24 * 3600;
+                                if (tz_off < -12 * 3600)
+                                    tz_off += 24 * 3600;
+                            }
+                            if (hu_autoresponder_should_respond(ar_cfg, batch_key, now_unix_ar,
+                                                                tz_off)) {
+                                char ar_reply[HU_AUTORESPONDER_REPLY_MAX];
+                                hu_error_t are = hu_autoresponder_generate_reply(
+                                    alloc, ar_cfg,
+                                    agent ? (const struct hu_personal_model *)&agent->personal_model
+                                          : NULL,
+                                    batch_key,
+                                    ch->channel->vtable->name
+                                        ? ch->channel->vtable->name(ch->channel->ctx)
+                                        : "?",
+                                    combined, now_unix_ar, tz_off, ar_reply, sizeof(ar_reply));
+                                if (are == HU_OK && ar_reply[0]) {
+                                    size_t ar_reply_len = strlen(ar_reply);
+                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                              send_target_len, ar_reply,
+                                                              ar_reply_len, NULL, 0);
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "autoresponder fired for %.*s (DND + allowlisted, "
+                                                "human inactive %ds+); skipped agent_turn",
+                                                (int)(key_len > 20 ? 20 : key_len), batch_key, 120);
+                                    goto skip_llm_this_batch;
+                                }
+                                /* Generate failed (provider down etc.) — fall through to
+                                 * the normal agent_turn path. */
+                            }
+                        }
+                    }
+                }
+
                 bool retried = false;
                 char *turing_rejected_resp = NULL;
                 size_t turing_rejected_len = 0;

@@ -545,6 +545,7 @@ static const hu_command_t commands[] = {
     {"calibrate", "Analyze messaging patterns and calibrate persona", cmd_calibrate},
     {"drafts", "Generate predictive draft suggestions for a contact", cmd_drafts},
     {"narrate", "Generate a long-horizon narrative for a contact from chat.db", cmd_narrate},
+    {"autoresponder", "Manage the DND autoresponder (digest of recent replies)", cmd_autoresponder},
     {"workspace", "Workspace management", cmd_workspace},
     {"config", "Configuration reference (schema)", cmd_config},
     {"schedule", "Manage scheduled messages (list, add, cancel)", cmd_schedule},

@@ -142,6 +142,13 @@ hu_error_t hu_predictive_drafts_parse_response(const char *response, size_t resp
  * single-threaded event loop but should not be invoked concurrently. */
 void hu_predictive_drafts_set_provider_override(const char *provider_name);
 
+/* Paired model-id override. When the CLI swaps providers, cfg.default_model
+ * may still be the previous provider's model id (e.g. an MLX-named id
+ * passed to a cloud provider, which rejects it). This setter lets a
+ * matching model be supplied for the override-provider. Pass NULL or ""
+ * to revert to cfg.default_model. */
+void hu_predictive_drafts_set_model_override(const char *model_name);
+
 /* CLI entry: `human drafts --contact <handle> [--channel <name>] [--n N]
  * [--provider <name>]`. Reads the user's config + personal_model file,
  * runs the generator, prints each draft to stdout. */

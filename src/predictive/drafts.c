@@ -24,7 +24,9 @@
  * single-threaded event loop and CLI invocations are short-lived
  * single-threaded processes, so a plain static is sufficient. */
 #define HU_DRAFTS_PROVIDER_OVERRIDE_CAP 64
+#define HU_DRAFTS_MODEL_OVERRIDE_CAP    128 /* model ids can be longer than provider names */
 static char s_drafts_provider_override[HU_DRAFTS_PROVIDER_OVERRIDE_CAP] = {0};
+static char s_drafts_model_override[HU_DRAFTS_MODEL_OVERRIDE_CAP] = {0};
 
 void hu_predictive_drafts_set_provider_override(const char *provider_name) {
     if (!provider_name || !*provider_name) {
@@ -34,6 +36,18 @@ void hu_predictive_drafts_set_provider_override(const char *provider_name) {
     /* snprintf truncates safely; the cap is generous for real provider
      * names ("gemini", "openai", "mlx_local", "ollama", "anthropic", …). */
     snprintf(s_drafts_provider_override, sizeof(s_drafts_provider_override), "%s", provider_name);
+}
+
+/* Paired companion to set_provider_override — when the user swaps providers
+ * via the CLI, cfg.default_model may still be the previous provider's
+ * model id (e.g. an MLX-named model passed to Gemini). This lets the CLI
+ * supply a matching model for the override-provider in one invocation. */
+void hu_predictive_drafts_set_model_override(const char *model_name) {
+    if (!model_name || !*model_name) {
+        s_drafts_model_override[0] = '\0';
+        return;
+    }
+    snprintf(s_drafts_model_override, sizeof(s_drafts_model_override), "%s", model_name);
 }
 
 /* ── safe-string helpers ─────────────────────────────────────────────── */
@@ -504,7 +518,12 @@ hu_error_t hu_predictive_drafts_generate(hu_allocator_t *alloc,
     size_t resp_len = 0;
     const char *model_id = NULL;
     size_t model_id_len = 0;
-    if (cfg.default_model) {
+    if (s_drafts_model_override[0]) {
+        /* CLI --model wins over cfg.default_model. Useful when --provider
+         * swaps to cloud and the configured model id is MLX-named. */
+        model_id = s_drafts_model_override;
+        model_id_len = strlen(s_drafts_model_override);
+    } else if (cfg.default_model) {
         model_id = cfg.default_model;
         model_id_len = strlen(cfg.default_model);
     }
@@ -534,12 +553,15 @@ hu_error_t hu_predictive_drafts_generate(hu_allocator_t *alloc,
 /* ── CLI subcommand ──────────────────────────────────────────────────── */
 
 static const char *kDraftsUsage =
-    "Usage: human drafts --contact <handle> [--channel <name>] [--n N] [--provider <name>]\n"
+    "Usage: human drafts --contact <handle> [--channel <name>] [--n N] [--provider <name>] "
+    "[--model <id>]\n"
     "  --contact <handle>   Recipient handle (required)\n"
     "  --channel <name>     Channel name (optional; default \"imessage\")\n"
     "  --n N                Number of drafts (1..8; default 3)\n"
     "  --provider <name>    Override configured default_provider for this run\n"
-    "                       (e.g. \"gemini\" when local MLX is down)\n";
+    "                       (e.g. \"gemini\" when local MLX is down)\n"
+    "  --model <id>         Override configured default_model (pair with --provider when\n"
+    "                       swapping providers — cloud rejects MLX-named model ids)\n";
 
 hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv) {
     if (!alloc)
@@ -548,6 +570,7 @@ hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv) {
     const char *contact = NULL;
     const char *channel = NULL;
     const char *provider_override = NULL;
+    const char *model_override = NULL;
     size_t n = HU_PREDICTIVE_DRAFT_DEFAULT_N;
     bool want_help = false;
 
@@ -563,6 +586,8 @@ hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv) {
             channel = argv[++i];
         } else if (strcmp(a, "--provider") == 0 && i + 1 < argc) {
             provider_override = argv[++i];
+        } else if (strcmp(a, "--model") == 0 && i + 1 < argc) {
+            model_override = argv[++i];
         } else if (strcmp(a, "--n") == 0 && i + 1 < argc) {
             long v = strtol(argv[++i], NULL, 10);
             if (v < 1)
@@ -591,15 +616,17 @@ hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv) {
             hu_log_warn("drafts", NULL, "personal model load: %s", hu_error_string(lerr));
     }
 
-    /* Apply CLI provider override (no-op when --provider was not passed). */
+    /* Apply CLI overrides (no-op when not passed). */
     hu_predictive_drafts_set_provider_override(provider_override);
+    hu_predictive_drafts_set_model_override(model_override);
 
     hu_predictive_draft_set_t set;
     hu_error_t err = hu_predictive_drafts_generate(alloc, &model, contact, channel, NULL, n, &set);
 
-    /* Clear the override so subsequent generate calls (e.g. in long-running
-     * daemon paths sharing this TU) revert to the configured default. */
+    /* Clear overrides so subsequent generate calls (e.g. in long-running
+     * daemon paths sharing this TU) revert to the configured defaults. */
     hu_predictive_drafts_set_provider_override(NULL);
+    hu_predictive_drafts_set_model_override(NULL);
     if (err == HU_ERR_NOT_SUPPORTED) {
         hu_log_error("drafts", NULL, "no LLM provider configured — see ~/.human/config.json");
         return err;
