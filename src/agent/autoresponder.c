@@ -697,3 +697,174 @@ hu_error_t hu_autoresponder_config_load_from_file(const char *path,
     free(body);
     return HU_OK;
 }
+
+/* ── digest aggregation (A4) ─────────────────────────────────────────── */
+
+/* Increment or insert a per-contact counter. Bounded by allowlist cap
+ * to keep the digest output readable. */
+static void digest_bump_contact(hu_autoresponder_digest_t *d, const char *handle) {
+    if (!d || !handle || !*handle)
+        return;
+    for (size_t i = 0; i < d->per_contact_count; i++) {
+        if (strncasecmp(d->per_contact[i].handle, handle, HU_AUTORESPONDER_HANDLE_MAX) == 0) {
+            d->per_contact[i].count++;
+            return;
+        }
+    }
+    if (d->per_contact_count >= HU_AUTORESPONDER_MAX_ALLOWLIST)
+        return;
+    snprintf(d->per_contact[d->per_contact_count].handle, HU_AUTORESPONDER_HANDLE_MAX, "%s",
+             handle);
+    d->per_contact[d->per_contact_count].count = 1;
+    d->per_contact_count++;
+}
+
+/* Extract an int64 numeric value from `{"ts":<num>,...}` after a key
+ * lookup. Returns -1 on parse failure (timestamp won't pass window
+ * gate). */
+static int64_t parse_int64_field(const char *obj, const char *key) {
+    const char *p = ar_find_key(obj, key);
+    if (!p)
+        return -1;
+    /* Skip whitespace; expect digits. */
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (!*p || (!isdigit((unsigned char)*p) && *p != '-'))
+        return -1;
+    char *endp = NULL;
+    long long v = strtoll(p, &endp, 10);
+    if (endp == p)
+        return -1;
+    return (int64_t)v;
+}
+
+void hu_autoresponder_digest_aggregate(const char *body, int64_t now_unix, int64_t since_seconds,
+                                       hu_autoresponder_digest_t *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    if (!body || !*body)
+        return;
+    if (since_seconds <= 0)
+        since_seconds = 86400; /* 24h default for safety */
+    int64_t window_start = now_unix - since_seconds;
+
+    /* Walk line-by-line. Each line should be a JSON object with "ts"
+     * and "contact" fields. Robust to malformed lines. */
+    const char *line_start = body;
+    while (*line_start) {
+        const char *line_end = strchr(line_start, '\n');
+        size_t line_len = line_end ? (size_t)(line_end - line_start) : strlen(line_start);
+        if (line_len < 8) {
+            /* Too short to be meaningful — skip. */
+            line_start = line_end ? line_end + 1 : line_start + line_len;
+            continue;
+        }
+        /* Copy the line into a bounded buffer so the helpers can
+         * NUL-terminate. */
+        char line_buf[HU_AUTORESPONDER_LOG_LINE_MAX];
+        size_t copy = line_len >= sizeof(line_buf) ? sizeof(line_buf) - 1 : line_len;
+        memcpy(line_buf, line_start, copy);
+        line_buf[copy] = '\0';
+
+        int64_t ts = parse_int64_field(line_buf, "ts");
+        if (ts >= window_start && ts <= now_unix + 60 /* tolerate small clock skew */) {
+            char handle[HU_AUTORESPONDER_HANDLE_MAX] = {0};
+            if (ar_extract_str_field(line_buf, "contact", handle, sizeof(handle)) > 0) {
+                out->total_replies++;
+                digest_bump_contact(out, handle);
+            }
+        }
+        if (!line_end)
+            break;
+        line_start = line_end + 1;
+    }
+}
+
+/* ── CLI: human autoresponder digest ─────────────────────────────────── */
+
+static const char *kAutoresponderUsage =
+    "Usage: human autoresponder digest [--since-hours N] [--log <path>]\n"
+    "  Aggregates ~/.human/autoresponder.log (or --log) into a per-contact\n"
+    "  reply count for the last N hours (default 24).\n";
+
+hu_error_t cmd_autoresponder(hu_allocator_t *alloc, int argc, char **argv) {
+    (void)alloc;
+    if (argc < 3 || strcmp(argv[2], "digest") != 0) {
+        printf("%s", kAutoresponderUsage);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    int since_hours = 24;
+    const char *log_path_override = NULL;
+    for (int i = 3; i < argc; i++) {
+        const char *a = argv[i];
+        if (!a)
+            continue;
+        if (strcmp(a, "--since-hours") == 0 && i + 1 < argc) {
+            since_hours = atoi(argv[++i]);
+            if (since_hours <= 0)
+                since_hours = 24;
+        } else if (strcmp(a, "--log") == 0 && i + 1 < argc) {
+            log_path_override = argv[++i];
+        } else if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
+            printf("%s", kAutoresponderUsage);
+            return HU_OK;
+        }
+    }
+
+    char path_buf[512];
+    const char *path = log_path_override;
+    if (!path) {
+        const char *home = getenv("HOME");
+        if (home && home[0] &&
+            snprintf(path_buf, sizeof(path_buf), "%s/.human/autoresponder.log", home) > 0) {
+            path = path_buf;
+        }
+    }
+    if (!path) {
+        fprintf(stderr, "could not resolve log path\n");
+        return HU_ERR_IO;
+    }
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        /* No file → 0 replies; still a successful digest. */
+        printf("0 autoresponder replies in the last %d hours (no log at %s)\n", since_hours, path);
+        return HU_OK;
+    }
+    /* Bounded read — autoresponder.log shouldn't grow unbounded but
+     * cap at 4 MB to keep digest cheap. */
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return HU_ERR_IO;
+    }
+    long fsz = ftell(fp);
+    if (fsz < 0)
+        fsz = 0;
+    if (fsz > 4 * 1024 * 1024)
+        fsz = 4 * 1024 * 1024; /* cap */
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return HU_ERR_IO;
+    }
+    char *body = (char *)malloc((size_t)fsz + 1);
+    if (!body) {
+        fclose(fp);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    size_t rd = fread(body, 1, (size_t)fsz, fp);
+    fclose(fp);
+    body[rd] = '\0';
+
+    hu_autoresponder_digest_t d;
+    hu_autoresponder_digest_aggregate(body, (int64_t)time(NULL), (int64_t)since_hours * 3600, &d);
+    free(body);
+
+    printf("%d autoresponder replies in the last %d hours:\n", (int)d.total_replies, since_hours);
+    for (size_t i = 0; i < d.per_contact_count; i++) {
+        printf("  %4d  %s\n", (int)d.per_contact[i].count, d.per_contact[i].handle);
+    }
+    if (d.per_contact_count == 0)
+        printf("  (no replies in window)\n");
+    return HU_OK;
+}

@@ -190,6 +190,37 @@ hu_error_t hu_autoresponder_log_reply(const hu_autoresponder_config_t *cfg,
  *   HU_ERR_IO          — file exists but read failed */
 hu_error_t hu_autoresponder_config_load_from_file(const char *path, hu_autoresponder_config_t *out);
 
+/* CLI entry: `human autoresponder digest [--since-hours N] [--log <path>]`.
+ * Reads the rolling JSON log (default ~/.human/autoresponder.log) and
+ * prints a summary of replies sent in the last N hours (default 24).
+ *
+ * Returns HU_OK on success (even when the log file doesn't exist —
+ * "0 replies in the last N hours" is a valid result). */
+hu_error_t cmd_autoresponder(hu_allocator_t *alloc, int argc, char **argv);
+
+/* Pure helpers exposed for unit testing:
+ *
+ * Aggregate one JSON-line log into counts. `now_unix` and `since_seconds`
+ * gate which lines are counted. Returns total_lines_in_window; populates
+ * out_contact_count via the optional `out_contact_counts` array (caller
+ * supplies a small bounded array of {handle, count} pairs). */
+typedef struct hu_autoresponder_digest_contact {
+    char handle[HU_AUTORESPONDER_HANDLE_MAX];
+    int32_t count;
+} hu_autoresponder_digest_contact_t;
+
+typedef struct hu_autoresponder_digest {
+    int32_t total_replies;
+    hu_autoresponder_digest_contact_t per_contact[HU_AUTORESPONDER_MAX_ALLOWLIST];
+    size_t per_contact_count;
+} hu_autoresponder_digest_t;
+
+/* Pure: aggregate log content from `body` (NUL-terminated) into `out`.
+ * Lines that don't parse as the expected JSON shape are silently
+ * skipped — robust to log-format drift. */
+void hu_autoresponder_digest_aggregate(const char *body, int64_t now_unix, int64_t since_seconds,
+                                       hu_autoresponder_digest_t *out);
+
 #ifdef __cplusplus
 }
 #endif

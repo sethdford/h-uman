@@ -416,6 +416,82 @@ static void test_loader_null_args_return_invalid(void) {
                  (int)HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ── digest aggregator (A4) ──────────────────────────────────────────── */
+
+static void test_digest_empty_body_returns_zero(void) {
+    hu_autoresponder_digest_t d;
+    hu_autoresponder_digest_aggregate("", 1700000000, 86400, &d);
+    HU_ASSERT_EQ((int)d.total_replies, 0);
+    HU_ASSERT_EQ((int)d.per_contact_count, 0);
+}
+
+static void test_digest_in_window_lines_counted(void) {
+    /* now = 1700000000; window = 24h. ts=1699920000 is 80000s (~22h)
+     * back → inside window. */
+    const char *body =
+        "{\"ts\":1699920000,\"contact\":\"alice\",\"channel\":\"imessage\",\"reply\":\"hi\"}\n"
+        "{\"ts\":1699930000,\"contact\":\"bob\",\"channel\":\"imessage\",\"reply\":\"yo\"}\n"
+        "{\"ts\":1699940000,\"contact\":\"alice\",\"channel\":\"slack\",\"reply\":\"ack\"}\n";
+    hu_autoresponder_digest_t d;
+    hu_autoresponder_digest_aggregate(body, 1700000000, 86400, &d);
+    HU_ASSERT_EQ((int)d.total_replies, 3);
+    HU_ASSERT_EQ((int)d.per_contact_count, 2);
+}
+
+static void test_digest_old_lines_dropped(void) {
+    /* ts = 1500000000 is years before now=1700000000 → outside any
+     * reasonable window. */
+    const char *body =
+        "{\"ts\":1500000000,\"contact\":\"alice\",\"channel\":\"imessage\",\"reply\":\"old\"}\n";
+    hu_autoresponder_digest_t d;
+    hu_autoresponder_digest_aggregate(body, 1700000000, 86400, &d);
+    HU_ASSERT_EQ((int)d.total_replies, 0);
+}
+
+static void test_digest_per_contact_counts_correct(void) {
+    const char *body =
+        "{\"ts\":1699999000,\"contact\":\"alice\",\"channel\":\"imessage\",\"reply\":\"a\"}\n"
+        "{\"ts\":1699999100,\"contact\":\"alice\",\"channel\":\"imessage\",\"reply\":\"b\"}\n"
+        "{\"ts\":1699999200,\"contact\":\"alice\",\"channel\":\"imessage\",\"reply\":\"c\"}\n"
+        "{\"ts\":1699999300,\"contact\":\"bob\",\"channel\":\"slack\",\"reply\":\"d\"}\n";
+    hu_autoresponder_digest_t d;
+    hu_autoresponder_digest_aggregate(body, 1700000000, 86400, &d);
+    HU_ASSERT_EQ((int)d.total_replies, 4);
+    /* Find Alice. */
+    int alice_count = 0, bob_count = 0;
+    for (size_t i = 0; i < d.per_contact_count; i++) {
+        if (strcmp(d.per_contact[i].handle, "alice") == 0)
+            alice_count = d.per_contact[i].count;
+        else if (strcmp(d.per_contact[i].handle, "bob") == 0)
+            bob_count = d.per_contact[i].count;
+    }
+    HU_ASSERT_EQ(alice_count, 3);
+    HU_ASSERT_EQ(bob_count, 1);
+}
+
+static void test_digest_malformed_lines_skipped(void) {
+    /* Lines with no "ts" or no "contact" → silently skipped. */
+    const char *body =
+        "garbage line\n"
+        "{\"no_ts\":true,\"contact\":\"alice\"}\n"
+        "{\"ts\":1699999000,\"contact\":\"valid\",\"channel\":\"x\",\"reply\":\"y\"}\n"
+        "{partial\n";
+    hu_autoresponder_digest_t d;
+    hu_autoresponder_digest_aggregate(body, 1700000000, 86400, &d);
+    HU_ASSERT_EQ((int)d.total_replies, 1);
+    HU_ASSERT_STR_EQ(d.per_contact[0].handle, "valid");
+}
+
+static void test_digest_default_window_when_since_seconds_nonpositive(void) {
+    /* since_seconds <= 0 → default to 24h. ts = 1699999000 is within 24h
+     * of now=1700000000 → counted. */
+    const char *body =
+        "{\"ts\":1699999000,\"contact\":\"alice\",\"channel\":\"x\",\"reply\":\"y\"}\n";
+    hu_autoresponder_digest_t d;
+    hu_autoresponder_digest_aggregate(body, 1700000000, 0, &d);
+    HU_ASSERT_EQ((int)d.total_replies, 1);
+}
+
 void run_autoresponder_tests(void) {
     HU_TEST_SUITE("autoresponder");
     /* allowlist */
@@ -453,4 +529,11 @@ void run_autoresponder_tests(void) {
     HU_RUN_TEST(test_loader_named_days_csv_parsed);
     HU_RUN_TEST(test_loader_malformed_returns_parse_error);
     HU_RUN_TEST(test_loader_null_args_return_invalid);
+    /* digest (A4) */
+    HU_RUN_TEST(test_digest_empty_body_returns_zero);
+    HU_RUN_TEST(test_digest_in_window_lines_counted);
+    HU_RUN_TEST(test_digest_old_lines_dropped);
+    HU_RUN_TEST(test_digest_per_contact_counts_correct);
+    HU_RUN_TEST(test_digest_malformed_lines_skipped);
+    HU_RUN_TEST(test_digest_default_window_when_since_seconds_nonpositive);
 }
