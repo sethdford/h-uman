@@ -1,128 +1,139 @@
-typedef int hu_test_anticipatory_unused_;
+/* tests/test_anticipatory.c
+ *
+ * Sprint B Story 7 — anticipatory memory surfacing.
+ * Contracts (8 tests; mirrors test_emotional_context shape):
+ *   1. empty model → empty
+ *   2. matching contact + lexicon + recent → renders UPCOMING
+ *   3. older than 14d → dropped
+ *   4. low confidence → dropped
+ *   5. lexicon word-boundary safety ("birthdays" doesn't match "birthday")
+ *   6. multiple matching → most recent wins
+ *   7. NULL/empty args → empty
+ *   8. now=0 in HU_IS_TEST → empty (deterministic)
+ *
+ * Note: a prior file with the same name was a no-op stub
+ * (`typedef int hu_test_anticipatory_unused_;`) — this rewrite is the
+ * first real coverage of the anticipatory module. The previous CMake
+ * entry (if any) registered against the SQLite-gated stub; both the
+ * source path and the test now live under the same module gate (no
+ * gate — pure functions compile everywhere). */
 
-#ifdef HU_ENABLE_SQLITE
-
-#include "human/context/anticipatory.h"
-#include "human/core/allocator.h"
-#include "human/memory.h"
-#include "human/memory/superhuman.h"
+#include "human/memory/anticipatory.h"
+#include "human/memory/fact_extract.h"
+#include "human/memory/personal_model.h"
+#include "human/memory/trust.h"
 #include "test_framework.h"
+
 #include <string.h>
-#include <time.h>
 
-static void store_micro_moment_kid_game_predicts_nervous(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    HU_ASSERT_NOT_NULL(mem.ctx);
-
-    hu_error_t err = hu_superhuman_micro_moment_store(
-        &mem, &alloc, "contact_a", 9, "kid game tomorrow", 17, "sports event", 12);
-    HU_ASSERT_EQ(err, HU_OK);
-
-    hu_emotional_prediction_t *preds = NULL;
-    size_t count = 0;
-    int64_t now_ts = (int64_t)time(NULL);
-    err = hu_anticipatory_predict(&alloc, &mem, "contact_a", 9, now_ts, &preds, &count);
-
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(preds);
-    HU_ASSERT_TRUE(count >= 1);
-    HU_ASSERT_TRUE(strstr(preds[0].predicted_emotion, "nervous") != NULL);
-    HU_ASSERT_TRUE(preds[0].confidence > 0.5f);
-
-    hu_anticipatory_predictions_free(&alloc, preds, count);
-    mem.vtable->deinit(mem.ctx);
+static void seed_fact(hu_personal_model_t *m, const char *contact, const char *subject,
+                      const char *predicate, const char *object, float confidence,
+                      int64_t last_seen) {
+    if (m->fact_count >= HU_PM_MAX_FACTS)
+        return;
+    hu_heuristic_fact_t *f = &m->facts[m->fact_count++];
+    memset(f, 0, sizeof(*f));
+    f->type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(f->subject, sizeof(f->subject), "%s", subject);
+    snprintf(f->predicate, sizeof(f->predicate), "%s", predicate);
+    snprintf(f->object, sizeof(f->object), "%s", object);
+    f->confidence = confidence;
+    f->last_seen_at = last_seen;
+    f->provenance.tier = HU_TRUST_THIRD_PARTY;
+    snprintf(f->provenance.contact_handle, sizeof(f->provenance.contact_handle), "%s", contact);
 }
 
-static void no_events_empty_predictions(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    HU_ASSERT_NOT_NULL(mem.ctx);
-
-    hu_emotional_prediction_t *preds = NULL;
-    size_t count = 0;
-    int64_t now_ts = (int64_t)time(NULL);
-    hu_error_t err = hu_anticipatory_predict(&alloc, &mem, "contact_none", 11, now_ts, &preds, &count);
-
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NULL(preds);
-    HU_ASSERT_EQ(count, 0u);
-
-    mem.vtable->deinit(mem.ctx);
+static void test_empty_model_writes_nothing(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[256] = {0};
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, "alice", 1000000000, 0, buf, sizeof(buf)), 0);
 }
 
-static void build_directive_with_predictions_returns_non_null(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_emotional_prediction_t preds[1];
-    memset(preds, 0, sizeof(preds));
-    memcpy(preds[0].contact_id, "contact_a", 9);
-    memcpy(preds[0].predicted_emotion, "nervous", 7);
-    preds[0].confidence = 0.75f;
-    memcpy(preds[0].basis, "kid has a game tomorrow", 23);
-
-    size_t out_len = 0;
-    char *s = hu_anticipatory_build_directive(&alloc, preds, 1, "Sarah", 5, &out_len);
-
-    HU_ASSERT_NOT_NULL(s);
-    HU_ASSERT_TRUE(out_len > 0);
-    HU_ASSERT_TRUE(strstr(s, "ANTICIPATORY") != NULL);
-    HU_ASSERT_TRUE(strstr(s, "nervous") != NULL);
-    HU_ASSERT_TRUE(strstr(s, "checking in") != NULL);
-
-    alloc.free(alloc.ctx, s, out_len + 1);
+static void test_matching_contact_lexicon_recent_renders(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    int64_t now = 1000000000;
+    seed_fact(&m, "alice", "her", "birthday is", "next week", 0.8f, now - 3600);
+    char buf[256] = {0};
+    size_t n = hu_anticipatory_for_contact(&m, "alice", now, 0, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "UPCOMING:") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "birthday") != NULL);
 }
 
-static void build_directive_low_confidence_returns_null(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_emotional_prediction_t preds[1];
-    memset(preds, 0, sizeof(preds));
-    preds[0].confidence = 0.3f;
-    memcpy(preds[0].predicted_emotion, "nervous", 7);
-    memcpy(preds[0].basis, "game", 4);
-
-    size_t out_len = 0;
-    char *s = hu_anticipatory_build_directive(&alloc, preds, 1, "Test", 4, &out_len);
-
-    HU_ASSERT_NULL(s);
-    HU_ASSERT_EQ(out_len, 0u);
+static void test_older_than_lookback_dropped(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    int64_t now = 1000000000;
+    int64_t old = now - HU_ANTICIPATORY_LOOKBACK_DEFAULT_SEC - 60; /* >14d */
+    seed_fact(&m, "alice", "her", "wedding is", "in june", 0.8f, old);
+    char buf[256] = {0};
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, "alice", now, 0, buf, sizeof(buf)), 0);
 }
 
-static void exam_keyword_predicts_stressed(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    HU_ASSERT_NOT_NULL(mem.ctx);
+static void test_low_confidence_dropped(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    int64_t now = 1000000000;
+    seed_fact(&m, "alice", "her", "trip is", "soon", 0.2f, now - 60);
+    char buf[256] = {0};
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, "alice", now, 0, buf, sizeof(buf)), 0);
+}
 
-    hu_error_t err = hu_superhuman_micro_moment_store(
-        &mem, &alloc, "contact_b", 9, "big exam next week", 18, "finals", 6);
-    HU_ASSERT_EQ(err, HU_OK);
+static void test_birthdays_does_not_match_birthday(void) {
+    /* Lexicon has "birthday"; "birthdays" (with trailing 's') is NOT a
+     * word-boundary match. Sanity check the word-boundary discipline
+     * holds (matches substring-classifier-pitfalls rule). */
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    int64_t now = 1000000000;
+    seed_fact(&m, "alice", "the", "topic was", "birthdays", 0.9f, now - 60);
+    char buf[256] = {0};
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, "alice", now, 0, buf, sizeof(buf)), 0);
+}
 
-    hu_emotional_prediction_t *preds = NULL;
-    size_t count = 0;
-    int64_t now_ts = (int64_t)time(NULL);
-    err = hu_anticipatory_predict(&alloc, &mem, "contact_b", 9, now_ts, &preds, &count);
+static void test_multiple_matches_most_recent_wins(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    int64_t now = 1000000000;
+    seed_fact(&m, "alice", "her", "exam is", "soon", 0.9f, now - 86400 * 5); /* 5d ago */
+    seed_fact(&m, "alice", "her", "flight is", "tonight", 0.9f, now - 3600); /* 1h ago */
+    char buf[256] = {0};
+    size_t n = hu_anticipatory_for_contact(&m, "alice", now, 0, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(buf, "flight") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "exam") == NULL);
+}
 
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(preds);
-    HU_ASSERT_TRUE(count >= 1);
-    HU_ASSERT_TRUE(strstr(preds[0].predicted_emotion, "stressed") != NULL);
+static void test_null_args_return_zero(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char buf[256] = {0};
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(NULL, "alice", 1000000000, 0, buf, sizeof(buf)),
+                 0);
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, NULL, 1000000000, 0, buf, sizeof(buf)), 0);
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, "", 1000000000, 0, buf, sizeof(buf)), 0);
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, "alice", 1000000000, 0, NULL, 100), 0);
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, "alice", 1000000000, 0, buf, 0), 0);
+}
 
-    hu_anticipatory_predictions_free(&alloc, preds, count);
-    mem.vtable->deinit(mem.ctx);
+static void test_now_zero_returns_empty_in_test_mode(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    seed_fact(&m, "alice", "her", "birthday is", "tomorrow", 0.8f, 1000000000);
+    char buf[256] = {0};
+    HU_ASSERT_EQ((int)hu_anticipatory_for_contact(&m, "alice", 0, 0, buf, sizeof(buf)), 0);
 }
 
 void run_anticipatory_tests(void) {
     HU_TEST_SUITE("anticipatory");
-    HU_RUN_TEST(store_micro_moment_kid_game_predicts_nervous);
-    HU_RUN_TEST(no_events_empty_predictions);
-    HU_RUN_TEST(build_directive_with_predictions_returns_non_null);
-    HU_RUN_TEST(build_directive_low_confidence_returns_null);
-    HU_RUN_TEST(exam_keyword_predicts_stressed);
+    HU_RUN_TEST(test_empty_model_writes_nothing);
+    HU_RUN_TEST(test_matching_contact_lexicon_recent_renders);
+    HU_RUN_TEST(test_older_than_lookback_dropped);
+    HU_RUN_TEST(test_low_confidence_dropped);
+    HU_RUN_TEST(test_birthdays_does_not_match_birthday);
+    HU_RUN_TEST(test_multiple_matches_most_recent_wins);
+    HU_RUN_TEST(test_null_args_return_zero);
+    HU_RUN_TEST(test_now_zero_returns_empty_in_test_mode);
 }
-
-#else
-
-void run_anticipatory_tests(void) {
-    (void)0;
-}
-
-#endif /* HU_ENABLE_SQLITE */

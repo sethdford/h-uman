@@ -18,6 +18,7 @@
 #include <string.h>
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+#include "human/channels/imessage.h" /* hu_imessage_extract_attributed_body — modern macOS NULL text fallback */
 #include <sqlite3.h>
 #endif
 
@@ -164,7 +165,21 @@ typedef struct {
 
 static hu_error_t load_contact_stream(sqlite3 *db, const char *contact_handle,
                                       hu_sig_stream_t *out) {
-    const char *sql = "SELECT m.date, m.is_from_me, COALESCE(LENGTH(m.text), 0) "
+    /* Modern macOS (15+) stores message bodies in `attributedBody` (Apple
+     * typedstream / NSKeyedArchiver), leaving `text` NULL. Fetching only
+     * LENGTH(text) returned 0 for every modern message, which made
+     * avg_msg_length always 0 and silently broke every downstream
+     * consumer (predictive drafts, drift detection, signature reports).
+     *
+     * Strategy: fetch both columns. If text is non-empty, use its length.
+     * Otherwise decode attributedBody to its plain-text form and use THAT
+     * length — not the blob length, which includes typedstream framing
+     * overhead and would dramatically inflate avg_msg_length.
+     *
+     * Decoded text is bounded by attr_text_buf (1024 bytes); messages
+     * longer than that are clamped — acceptable because we only need
+     * length statistics, not the content itself. */
+    const char *sql = "SELECT m.date, m.is_from_me, m.text, m.attributedBody "
                       "FROM message m "
                       "JOIN handle h ON h.ROWID = m.handle_id "
                       "WHERE h.id = ? "
@@ -214,7 +229,24 @@ static hu_error_t load_contact_stream(sqlite3 *db, const char *contact_handle,
         }
         int64_t mac_ns = sqlite3_column_int64(st, 0);
         int from_me = sqlite3_column_int(st, 1);
-        int len = sqlite3_column_int(st, 2);
+        const unsigned char *text = sqlite3_column_text(st, 2);
+        int text_bytes = sqlite3_column_bytes(st, 2);
+        int len = (text && text_bytes > 0) ? text_bytes : 0;
+        if (len == 0) {
+            /* Modern macOS: text is NULL, decode attributedBody. We only
+             * need the LENGTH of the decoded text, not the text itself,
+             * but the decoder writes both — extract into a small bounded
+             * buffer and read its strlen. */
+            const unsigned char *ab = sqlite3_column_blob(st, 3);
+            int ab_len = sqlite3_column_bytes(st, 3);
+            if (ab && ab_len > 0) {
+                char attr_text_buf[1024];
+                size_t extracted = hu_imessage_extract_attributed_body(
+                    ab, (size_t)ab_len, attr_text_buf, sizeof(attr_text_buf));
+                if (extracted > 0)
+                    len = (int)extracted;
+            }
+        }
         out->timestamps[out->count] = (mac_ns / 1000000000LL) + HU_MAC_EPOCH_OFFSET;
         out->is_from_me[out->count] = (from_me != 0);
         out->text_lens[out->count] = len;

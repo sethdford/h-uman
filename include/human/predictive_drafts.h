@@ -133,9 +133,18 @@ hu_error_t hu_predictive_drafts_generate(hu_allocator_t *alloc,
 hu_error_t hu_predictive_drafts_parse_response(const char *response, size_t response_len,
                                                hu_predictive_draft_set_t *out);
 
-/* CLI entry: `human drafts --contact <handle> [--channel <name>] [--n N]`.
- * Reads the user's config + personal_model file, runs the generator,
- * prints each draft to stdout. */
+/* Optional provider-name override for `hu_predictive_drafts_generate`.
+ * When set to a non-empty string, generate ignores the configured
+ * default_provider and uses this one instead — useful when the user's
+ * local MLX server is down and they want to fall back to a cloud
+ * provider for one CLI invocation. Pass NULL or "" to clear. Stored
+ * in a file-scope static, NOT thread-local; safe in the daemon's
+ * single-threaded event loop but should not be invoked concurrently. */
+void hu_predictive_drafts_set_provider_override(const char *provider_name);
+
+/* CLI entry: `human drafts --contact <handle> [--channel <name>] [--n N]
+ * [--provider <name>]`. Reads the user's config + personal_model file,
+ * runs the generator, prints each draft to stdout. */
 hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv);
 
 #ifdef __cplusplus

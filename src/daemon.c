@@ -156,6 +156,43 @@ static const char *g_classify_model = "gemini-3.1-flash-lite-preview";
 static size_t g_classify_model_len = 29;
 #endif
 
+/* Sprint A.7 daemon-side identity-graph loader storage.
+ *
+ * The reaction handler's identity setter BORROWS the graph pointer, so the
+ * daemon must keep the graph alive for the full process lifetime. The graph
+ * is ~314 KB (256-contact array) — too big for stack but fine as a file-scope
+ * static. Production loads from ~/.human/identity_graph.json at startup;
+ * the file is absent on first-run users, in which case the graph stays
+ * zeroed and the reaction handler is never wired (preserving the current
+ * "no canonicalization" behavior for unconfigured deployments). */
+static hu_identity_graph_t g_identity_graph;
+static bool g_identity_graph_loaded = false;
+
+/* Sprint B.3 D1 — daemon-loaded autoresponder config.
+ *
+ * Per-channel autoresponder wire-up is deferred (each channel's inbound
+ * dispatch needs its own design decisions: dedup vs human_active_recently,
+ * channel-specific reply paths, etc.). The loader is wired NOW so the
+ * config surface is live and per-channel integration becomes one-line
+ * gating calls in follow-up commits.
+ *
+ * Loaded from ~/.human/autoresponder.json at startup. Missing file is the
+ * first-run default (info-level log per silent-config-gated-subsystems
+ * rule). */
+#include "human/autoresponder.h"
+static hu_autoresponder_config_t g_autoresponder_cfg;
+static bool g_autoresponder_loaded = false;
+
+/* Borrowed accessor for future per-channel integration. Returns NULL when
+ * the config wasn't loaded, autoresponder is disabled, or allowlist is
+ * empty (in which case there's nothing for callers to do). */
+__attribute__((unused)) static const hu_autoresponder_config_t *daemon_autoresponder_config(void) {
+    if (!g_autoresponder_loaded || !g_autoresponder_cfg.enabled ||
+        g_autoresponder_cfg.allowlist_count == 0)
+        return NULL;
+    return &g_autoresponder_cfg;
+}
+
 /* Emotion detection: test builds use heuristic-only (no LLM), production uses hybrid
  * routing via g_classify_provider when available. May appear unreferenced in test builds
  * because some call sites are behind #ifndef HU_IS_TEST. */
@@ -2648,6 +2685,84 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
          * group events, and balloon-plugin payloads through the same
          * personal-model sink. */
         hu_daemon_imessage_observer_wire_personal_model(&agent->personal_model);
+    }
+
+    /* Sprint A.7 — daemon-side identity-graph loader.
+     *
+     * Activates cross-channel canonicalization: "Alice@imessage" +
+     * "Alice@slack" reactions cluster under one persona contact instead
+     * of two strangers. The setter borrows g_identity_graph for the full
+     * process lifetime (cleared in teardown at the end of this function).
+     *
+     * Conservative on absence: a missing file is the first-run default,
+     * NOT an error — we log at info level and leave the reaction handler
+     * un-wired, which preserves the prior "no canonicalization" behavior.
+     * Only actual parse failures escalate to a warning. */
+    {
+        const char *home = getenv("HOME");
+        char ident_path[1024];
+        if (home && home[0] &&
+            snprintf(ident_path, sizeof(ident_path), "%s/.human/identity_graph.json", home) > 0) {
+            hu_error_t ie = hu_identity_load(&g_identity_graph, ident_path);
+            if (ie == HU_OK) {
+                hu_reaction_handler_set_identity_graph(&g_identity_graph);
+                g_identity_graph_loaded = true;
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "identity graph loaded: %zu contacts from %s",
+                            g_identity_graph.contact_count, ident_path);
+            } else if (ie == HU_ERR_NOT_FOUND) {
+                /* First-run default: no identity_graph.json yet. Silent at
+                 * info level — operators who want cross-channel merging
+                 * will know to create the file. */
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "identity graph: no file at %s — cross-channel "
+                            "reactor canonicalization disabled (create the "
+                            "file via hu_identity_save to enable)",
+                            ident_path);
+            } else {
+                hu_log_error("human", agent ? agent->observer : NULL,
+                             "identity graph: load failed (err=%d) for %s — "
+                             "cross-channel canonicalization disabled",
+                             (int)ie, ident_path);
+            }
+        }
+    }
+
+    /* Sprint B.3 D1 — load the autoresponder config from
+     * ~/.human/autoresponder.json. Per silent-config-gated-subsystems
+     * rule: log once at info level whether config was loaded, and on
+     * disable explain how to enable. */
+    {
+        const char *home_ar = getenv("HOME");
+        char ar_path[1024];
+        if (home_ar && home_ar[0] &&
+            snprintf(ar_path, sizeof(ar_path), "%s/.human/autoresponder.json", home_ar) > 0) {
+            hu_error_t are = hu_autoresponder_config_load_from_file(ar_path, &g_autoresponder_cfg);
+            if (are == HU_OK && g_autoresponder_cfg.enabled) {
+                g_autoresponder_loaded = true;
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: loaded — %zu allowlist entries, %zu schedules, "
+                            "user=\"%s\"",
+                            g_autoresponder_cfg.allowlist_count, g_autoresponder_cfg.schedule_count,
+                            g_autoresponder_cfg.user_display_name[0]
+                                ? g_autoresponder_cfg.user_display_name
+                                : "(unset)");
+            } else if (are == HU_OK && !g_autoresponder_cfg.enabled) {
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: config present but enabled=false (set "
+                            "\"enabled\":true in %s to activate)",
+                            ar_path);
+            } else if (are == HU_ERR_NOT_FOUND) {
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: no file at %s — DND auto-reply disabled "
+                            "(create the file to enable)",
+                            ar_path);
+            } else {
+                hu_log_error("human", agent ? agent->observer : NULL,
+                             "autoresponder: load failed (err=%d) for %s — disabled", (int)are,
+                             ar_path);
+            }
+        }
     }
 
     /* Hybrid routing: create a lightweight cloud provider for classification/scoring
@@ -13171,6 +13286,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     /* Phase 1c teardown: detach the personal-model sinks. */
     hu_reaction_handler_set_personal_model(NULL);
     hu_daemon_imessage_observer_wire_personal_model(NULL);
+    /* Sprint A.7 teardown: detach the identity graph borrow. The static
+     * storage itself is process-lifetime; this just ensures the reaction
+     * handler doesn't hold a stale pointer if the process ever live-reloads. */
+    if (g_identity_graph_loaded) {
+        hu_reaction_handler_set_identity_graph(NULL);
+        g_identity_graph_loaded = false;
+    }
     if (agent && agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, alloc);
         agent->w14_scheduler = NULL;

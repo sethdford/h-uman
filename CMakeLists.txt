@@ -752,6 +752,8 @@ set(HU_CORE_SOURCES
     src/calibration/clone.c
     src/calibration/ab_compare.c
     src/predictive/drafts.c
+    src/agent/autoresponder.c
+    src/research/contact_narrative.c
     src/context/context_ext.c
     src/agent/episodic.c
     src/agent/reflection.c
@@ -857,6 +859,11 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
+    src/memory/emotional_context.c
+    src/memory/anticipatory.c
+    src/memory/causal_attribution.c
+    src/memory/identity_continuity.c
+    src/memory/audio_emotion.c
     # Tier-3 future-facing: pattern-drift compute. Pure helpers + SQL
     # scanner gated under HU_IS_TEST (same pattern as imessage_gaps).
     src/memory/pattern_drift.c
@@ -2927,6 +2934,12 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_emotional_context.c
+    tests/test_autoresponder.c
+    tests/test_contact_narrative.c
+    tests/test_causal_attribution.c
+    tests/test_identity_continuity.c
+    tests/test_audio_emotion.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls

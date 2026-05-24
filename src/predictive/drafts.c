@@ -19,6 +19,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* ── provider override (CLI --provider <name>) ───────────────────────── */
+/* See header. File-scope static, NOT thread-local — the daemon runs as a
+ * single-threaded event loop and CLI invocations are short-lived
+ * single-threaded processes, so a plain static is sufficient. */
+#define HU_DRAFTS_PROVIDER_OVERRIDE_CAP 64
+static char s_drafts_provider_override[HU_DRAFTS_PROVIDER_OVERRIDE_CAP] = {0};
+
+void hu_predictive_drafts_set_provider_override(const char *provider_name) {
+    if (!provider_name || !*provider_name) {
+        s_drafts_provider_override[0] = '\0';
+        return;
+    }
+    /* snprintf truncates safely; the cap is generous for real provider
+     * names ("gemini", "openai", "mlx_local", "ollama", "anthropic", …). */
+    snprintf(s_drafts_provider_override, sizeof(s_drafts_provider_override), "%s", provider_name);
+}
+
 /* ── safe-string helpers ─────────────────────────────────────────────── */
 
 /* Append `s` (up to s_len, or strlen(s) when s_len == SIZE_MAX) to the
@@ -450,16 +467,33 @@ hu_error_t hu_predictive_drafts_generate(hu_allocator_t *alloc,
     if (cerr != HU_OK)
         return HU_ERR_NOT_SUPPORTED;
 
+    /* Apply CLI provider override if set. The override BORROWS the cfg's
+     * default_provider slot for this one invocation — we don't allocate,
+     * just point at our static buffer. hu_config_deinit will see a
+     * non-allocated default_provider via the swap-and-restore guard, so
+     * we save the original pointer and restore before deinit. */
+    char *saved_default_provider = NULL;
+    bool override_applied = false;
+    if (s_drafts_provider_override[0]) {
+        saved_default_provider = cfg.default_provider;
+        cfg.default_provider = s_drafts_provider_override;
+        override_applied = true;
+    }
+
     hu_provider_t provider;
     memset(&provider, 0, sizeof(provider));
     hu_error_t perr = hu_provider_create_default(alloc, &cfg, &provider);
     if (perr != HU_OK || !provider.vtable) {
+        if (override_applied)
+            cfg.default_provider = saved_default_provider;
         hu_config_deinit(&cfg);
         return HU_ERR_NOT_SUPPORTED;
     }
     if (!provider.vtable->chat_with_system) {
         if (provider.vtable->deinit)
             provider.vtable->deinit(provider.ctx, alloc);
+        if (override_applied)
+            cfg.default_provider = saved_default_provider;
         hu_config_deinit(&cfg);
         return HU_ERR_NOT_SUPPORTED;
     }
@@ -489,6 +523,10 @@ hu_error_t hu_predictive_drafts_generate(hu_allocator_t *alloc,
         alloc->free(alloc->ctx, resp, resp_len + 1);
     if (provider.vtable->deinit)
         provider.vtable->deinit(provider.ctx, alloc);
+    /* Restore the cfg's owned pointer before deinit so the override slot
+     * (file-scope static, NOT heap) doesn't get passed to free(). */
+    if (override_applied)
+        cfg.default_provider = saved_default_provider;
     hu_config_deinit(&cfg);
     return parse_err;
 }
@@ -496,10 +534,12 @@ hu_error_t hu_predictive_drafts_generate(hu_allocator_t *alloc,
 /* ── CLI subcommand ──────────────────────────────────────────────────── */
 
 static const char *kDraftsUsage =
-    "Usage: human drafts --contact <handle> [--channel <name>] [--n N]\n"
+    "Usage: human drafts --contact <handle> [--channel <name>] [--n N] [--provider <name>]\n"
     "  --contact <handle>   Recipient handle (required)\n"
     "  --channel <name>     Channel name (optional; default \"imessage\")\n"
-    "  --n N                Number of drafts (1..8; default 3)\n";
+    "  --n N                Number of drafts (1..8; default 3)\n"
+    "  --provider <name>    Override configured default_provider for this run\n"
+    "                       (e.g. \"gemini\" when local MLX is down)\n";
 
 hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv) {
     if (!alloc)
@@ -507,6 +547,7 @@ hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv) {
 
     const char *contact = NULL;
     const char *channel = NULL;
+    const char *provider_override = NULL;
     size_t n = HU_PREDICTIVE_DRAFT_DEFAULT_N;
     bool want_help = false;
 
@@ -520,6 +561,8 @@ hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv) {
             contact = argv[++i];
         } else if (strcmp(a, "--channel") == 0 && i + 1 < argc) {
             channel = argv[++i];
+        } else if (strcmp(a, "--provider") == 0 && i + 1 < argc) {
+            provider_override = argv[++i];
         } else if (strcmp(a, "--n") == 0 && i + 1 < argc) {
             long v = strtol(argv[++i], NULL, 10);
             if (v < 1)
@@ -548,8 +591,15 @@ hu_error_t cmd_drafts(hu_allocator_t *alloc, int argc, char **argv) {
             hu_log_warn("drafts", NULL, "personal model load: %s", hu_error_string(lerr));
     }
 
+    /* Apply CLI provider override (no-op when --provider was not passed). */
+    hu_predictive_drafts_set_provider_override(provider_override);
+
     hu_predictive_draft_set_t set;
     hu_error_t err = hu_predictive_drafts_generate(alloc, &model, contact, channel, NULL, n, &set);
+
+    /* Clear the override so subsequent generate calls (e.g. in long-running
+     * daemon paths sharing this TU) revert to the configured default. */
+    hu_predictive_drafts_set_provider_override(NULL);
     if (err == HU_ERR_NOT_SUPPORTED) {
         hu_log_error("drafts", NULL, "no LLM provider configured — see ~/.human/config.json");
         return err;
