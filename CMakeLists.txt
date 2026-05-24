@@ -3049,6 +3049,7 @@ set(HU_TEST_SOURCES
     tests/test_vault.c
     tests/test_vault_aead.c
     tests/test_app_bundle_structure.c
+    tests/test_pkg_builder.c
     tests/test_provider.c
     tests/test_provider_http.c
     tests/test_ensemble.c
