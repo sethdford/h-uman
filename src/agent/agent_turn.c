@@ -4266,6 +4266,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 
     uint32_t iter = 0;
+    /* M4 follow-up 2026-05-24: track consecutive transport-error iterations
+     * so the tool-loop bails fast when the provider is structurally unreachable
+     * (MLX backend down, network partition) instead of iterating
+     * max_tool_iterations times. Resets to 0 on any successful chat call.
+     * See hu_agent_internal_is_transport_error in agent.c for the
+     * classification rule. */
+    int transport_err_streak = 0;
     size_t turn_tool_results_count = 0;
     int reflection_retries_left = agent->reflection.max_retries;
     char *dpo_rejected_resp = NULL;
@@ -5096,6 +5103,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
         if (err == HU_OK) {
+            /* M4 follow-up: a successful chat resets the transport-error
+             * streak, so transient blips (single HU_ERR_IO followed by
+             * recovery) don't accumulate toward the bail threshold. */
+            transport_err_streak = 0;
             hu_agent_m3_on_provider_success(agent);
             /* Critique-echo guard. When the LLM sees the reflection
              * critique in its retry-attempt history, it occasionally
@@ -5217,10 +5228,56 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
 
         if (err != HU_OK) {
+            /* M4 follow-up 2026-05-24: transport-error fast-fail. Pre-fix,
+             * the gateway burned ~90s per request when MLX was unreachable
+             * — multiple retry paths layered on top of each other (degrade
+             * loop + on-device-fallback + tool-loop iterations + verifier
+             * retry) all consumed connection-refused round-trips before
+             * eventually returning. Now: classify the err, allow ONE retry
+             * on transport failure (in case it was a transient blip), bail
+             * fast with HU_ERR_PROVIDER_UNAVAILABLE on the second
+             * consecutive transport error. Non-transport errors (provider
+             * responded with garbage, content-filter rejection, etc.) keep
+             * the existing fail-immediately path. */
+            bool is_transport = hu_agent_internal_is_transport_error(err);
+            if (is_transport) {
+                transport_err_streak++;
+                if (transport_err_streak < 2) {
+                    /* First transport error — give it one retry. Clear
+                     * per-iteration state and continue the loop. */
+                    hu_log_info("agent_turn", agent->observer,
+                                "transport err on chat (streak=1, err=%s); retrying once",
+                                hu_error_string(err));
+                    hu_chat_response_free(agent->alloc, &resp);
+                    memset(&resp, 0, sizeof(resp));
+                    if (agent->turn_arena)
+                        hu_arena_reset(agent->turn_arena);
+                    continue;
+                }
+                /* Second consecutive transport error — bail with the
+                 * canonical PROVIDER_UNAVAILABLE so the gateway can map
+                 * to HTTP 503 and the caller can decide to retry later
+                 * (vs HU_ERR_PROVIDER_RESPONSE which implies the
+                 * provider responded with something we couldn't use). */
+                hu_log_warn("agent_turn", agent->observer,
+                            "transport err streak=2; bailing as PROVIDER_UNAVAILABLE "
+                            "(err=%s) after %u tool-loop iterations",
+                            hu_error_string(err), iter);
+                char *fb = NULL;
+                size_t fb_len = 0;
+                if (hu_agent_internal_build_unavailable_fallback(agent->alloc, &fb, &fb_len) ==
+                    HU_OK) {
+                    *response_out = fb;
+                    if (response_len_out)
+                        *response_len_out = fb_len;
+                }
+                err = HU_ERR_PROVIDER_UNAVAILABLE;
+            }
             {
                 hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_ERR, .data = {{0}}};
                 ev.data.err.component = "agent";
-                ev.data.err.message = "provider chat failed";
+                ev.data.err.message =
+                    is_transport ? "provider transport unavailable" : "provider chat failed";
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             hu_chat_response_free(agent->alloc, &resp);
