@@ -41,6 +41,21 @@ struct hu_personal_model;
 size_t hu_persona_render_social_insights(const struct hu_personal_model *model, char *out,
                                          size_t cap);
 
+/* Sprint A.7 consumer: read ~/.human/social_state.json (written every
+ * 6h by hu_daemon_social_tick) and render the most actionable bits
+ * into a prompt-ready paragraph. Highlights:
+ *   - Stale contacts (top 3 by gap-days) — "you haven't heard from
+ *     Alice in 21 days"
+ *   - Pattern drift alerts (PRONOUNCED severity only) — "Bob's reply
+ *     style has shifted recently"
+ *
+ * Returns bytes written, 0 if the file doesn't exist or is empty (no
+ * paragraph to emit). NULL path → use the default ~/.human/social_state.json.
+ *
+ * Tolerant of missing fields and malformed JSON (returns 0 silently
+ * rather than crashing — degradation should be invisible to the user). */
+size_t hu_persona_render_social_state_snapshot(const char *path, char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

@@ -73,6 +73,58 @@ static inline uint64_t hu_agent_internal_monotonic_ms(void) {
 
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
 
+/* Sprint 46 R5.3 (refactored for testability per audit FAIL):
+ * Lazy-load the PersonaEval v2 classifier into agent->persona_eval.
+ *
+ * Loader contract:
+ *   - On success: agent->persona_eval is non-NULL, HU_OK is returned.
+ *   - On missing file: agent->persona_eval is NULL, HU_ERR_IO returned.
+ *     The CALLER decides whether HU_ERR_IO is fatal —
+ *     hu_agent_from_config treats it as non-fatal (downstream calls
+ *     to score on a NULL model gracefully return 0.5).
+ *   - On other error: agent->persona_eval is NULL, original error
+ *     returned. hu_agent_from_config logs a warn and proceeds.
+ *
+ * `model_path` may be NULL to use the default /tmp/seth_speaker_id.json.
+ *
+ * Split from hu_agent_from_config so tests can verify the load contract
+ * directly without spawning a full agent. */
+hu_error_t hu_agent_internal_load_persona_eval(hu_agent_t *agent, const char *model_path);
+
+/* Transport-error classifier for the agent's tool-loop fast-fail logic.
+ *
+ * Returns true for errors that indicate the underlying provider transport is
+ * unreachable: connection refused, hostname unresolvable, IO failure, request
+ * timeout. These are categorically different from application-level errors
+ * (HU_ERR_PROVIDER_RESPONSE, content-filter rejection, malformed JSON): no
+ * amount of regenerating the prompt will help, the provider is structurally
+ * down. The tool-loop uses this to bail after a single retry instead of
+ * iterating max_tool_iterations times, each iteration burning ~30s on a
+ * connect-refused round-trip.
+ *
+ * Currently matches HU_ERR_IO (curl returned anything that isn't a timeout,
+ * see src/core/http.c:372) and HU_ERR_TIMEOUT (curl returned
+ * CURLE_OPERATION_TIMEDOUT, http.c:371). Extend here, not at call sites,
+ * if future error codes describe a transport failure.
+ *
+ * Pure predicate, testable in isolation via the
+ * `is_transport_error_*` tests in tests/test_agent_turn_transport.c. */
+bool hu_agent_internal_is_transport_error(hu_error_t err);
+
+/* Build the fallback response text for a provider-unavailable bail-out.
+ *
+ * Caller-owned string written to *out / *out_len; free with alloc->free
+ * once consumed. Returns HU_ERR_OUT_OF_MEMORY if allocation fails; the
+ * agent_turn fast-fail then returns HU_ERR_PROVIDER_UNAVAILABLE with
+ * *out left NULL so the gateway maps to HTTP 503 + the canonical
+ * error_response body.
+ *
+ * The text is intentionally short, lowercase, in-voice ("having trouble
+ * connecting, try again in a moment"). Channels can choose to send it or
+ * suppress; the audit point is that the agent didn't hang for 90s. */
+hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, char **out,
+                                                        size_t *out_len);
+
 /* Set / clear the active scene-direction text for the next turn. The
  * daemon owns the buffer (typically `hu_director_result_t.direction[512]`);
  * the agent only borrows a const pointer + length. Setter is a plain

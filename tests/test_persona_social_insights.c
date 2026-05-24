@@ -97,6 +97,154 @@ static void test_render_null_inputs_return_zero(void) {
     HU_ASSERT_EQ((int)hu_persona_render_social_insights(&model, tiny, sizeof(tiny)), 0);
 }
 
+/* ── Sprint A.7 — social_state.json consumer tests ──────────────────
+ *
+ * Write a synthetic snapshot to a tmp file, render it, assert the
+ * paragraph carries the expected handles + verbs. Pinned defensively
+ * against missing files / malformed JSON / empty arrays. */
+
+#include <stdio.h>
+#include <unistd.h>
+
+static const char *write_tmp_snapshot(const char *content, char *path_buf, size_t cap) {
+    snprintf(path_buf, cap, "/tmp/hu_social_state_test_%d.json", (int)getpid());
+    unlink(path_buf);
+    FILE *f = fopen(path_buf, "w");
+    if (!f)
+        return NULL;
+    fwrite(content, 1, strlen(content), f);
+    fclose(f);
+    return path_buf;
+}
+
+static void test_snapshot_render_missing_file_returns_zero(void) {
+    char out[1024] = {0};
+    size_t n = hu_persona_render_social_state_snapshot("/tmp/hu_does_not_exist_xyz.json", out,
+                                                       sizeof(out));
+    HU_ASSERT_EQ((int)n, 0);
+}
+
+static void test_snapshot_render_empty_arrays_returns_zero(void) {
+    const char *empty_json = "{\n"
+                             "  \"generated_at_unix\": 1779642882,\n"
+                             "  \"stale_contacts\": [],\n"
+                             "  \"signatures\": [],\n"
+                             "  \"drift_alerts\": []\n"
+                             "}\n";
+    char path_buf[128];
+    const char *path = write_tmp_snapshot(empty_json, path_buf, sizeof(path_buf));
+    HU_ASSERT_NOT_NULL(path);
+
+    char out[1024] = {0};
+    size_t n = hu_persona_render_social_state_snapshot(path, out, sizeof(out));
+    HU_ASSERT_EQ((int)n, 0);
+    unlink(path);
+}
+
+static void test_snapshot_render_stale_contacts_surfaces_handles(void) {
+    const char *json = "{\n"
+                       "  \"generated_at_unix\": 1779642882,\n"
+                       "  \"stale_contacts\": [\n"
+                       "    {\"contact\":\"+15551234567\",\"last_message_unix\":1777915021,"
+                       "\"days_since_last\":21,\"historical_count\":42},\n"
+                       "    {\"contact\":\"+15559876543\",\"last_message_unix\":1778000000,"
+                       "\"days_since_last\":15,\"historical_count\":20}\n"
+                       "  ],\n"
+                       "  \"signatures\": [],\n"
+                       "  \"drift_alerts\": []\n"
+                       "}\n";
+    char path_buf[128];
+    const char *path = write_tmp_snapshot(json, path_buf, sizeof(path_buf));
+    HU_ASSERT_NOT_NULL(path);
+
+    char out[2048] = {0};
+    size_t n = hu_persona_render_social_state_snapshot(path, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    /* Paragraph header + both handles + quiet-for-N-days framing must
+     * appear so the LLM consumer can act on the signal. */
+    HU_ASSERT_TRUE(strstr(out, "Recent social signals:") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "+15551234567") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "+15559876543") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "quiet for 21 days") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "42 historical messages") != NULL);
+    unlink(path);
+}
+
+static void test_snapshot_render_drift_surfaces_dimension_name(void) {
+    /* dimension 1 = response latency */
+    const char *json = "{\n"
+                       "  \"generated_at_unix\": 1779642882,\n"
+                       "  \"stale_contacts\": [],\n"
+                       "  \"signatures\": [],\n"
+                       "  \"drift_alerts\": [\n"
+                       "    {\"contact\":\"+15551234567\",\"dimension\":1,\"severity\":3,"
+                       "\"sigma\":2.5,\"recent\":300.0,\"baseline\":120.0}\n"
+                       "  ]\n"
+                       "}\n";
+    char path_buf[128];
+    const char *path = write_tmp_snapshot(json, path_buf, sizeof(path_buf));
+    HU_ASSERT_NOT_NULL(path);
+
+    char out[1024] = {0};
+    size_t n = hu_persona_render_social_state_snapshot(path, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "+15551234567") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "response latency") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "drifted") != NULL);
+    unlink(path);
+}
+
+static void test_snapshot_render_caps_at_three_stale_contacts(void) {
+    /* Five stale contacts in input; only top 3 should render to avoid
+     * prompt bloat. */
+    const char *json = "{\n"
+                       "  \"generated_at_unix\": 1779642882,\n"
+                       "  \"stale_contacts\": [\n"
+                       "    "
+                       "{\"contact\":\"+1111\",\"last_message_unix\":1,\"days_since_last\":30,"
+                       "\"historical_count\":100},\n"
+                       "    "
+                       "{\"contact\":\"+2222\",\"last_message_unix\":2,\"days_since_last\":25,"
+                       "\"historical_count\":90},\n"
+                       "    "
+                       "{\"contact\":\"+3333\",\"last_message_unix\":3,\"days_since_last\":20,"
+                       "\"historical_count\":80},\n"
+                       "    "
+                       "{\"contact\":\"+4444\",\"last_message_unix\":4,\"days_since_last\":15,"
+                       "\"historical_count\":70},\n"
+                       "    "
+                       "{\"contact\":\"+5555\",\"last_message_unix\":5,\"days_since_last\":14,"
+                       "\"historical_count\":60}\n"
+                       "  ],\n"
+                       "  \"signatures\": [],\n"
+                       "  \"drift_alerts\": []\n"
+                       "}\n";
+    char path_buf[128];
+    const char *path = write_tmp_snapshot(json, path_buf, sizeof(path_buf));
+
+    char out[2048] = {0};
+    size_t n = hu_persona_render_social_state_snapshot(path, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_TRUE(strstr(out, "+1111") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "+2222") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "+3333") != NULL);
+    /* 4th and 5th should NOT appear */
+    HU_ASSERT_TRUE(strstr(out, "+4444") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "+5555") == NULL);
+    unlink(path);
+}
+
+static void test_snapshot_render_handles_malformed_json_safely(void) {
+    const char *garbage = "{ this is not valid json at all }}}{{{";
+    char path_buf[128];
+    const char *path = write_tmp_snapshot(garbage, path_buf, sizeof(path_buf));
+    char out[1024] = {0};
+    /* Don't crash; return 0 silently. */
+    size_t n = hu_persona_render_social_state_snapshot(path, out, sizeof(out));
+    HU_ASSERT_EQ((int)n, 0);
+    unlink(path);
+}
+
 void run_persona_social_insights_tests(void) {
     HU_TEST_SUITE("persona_social_insights");
     HU_RUN_TEST(test_render_empty_model_returns_zero);
@@ -104,4 +252,10 @@ void run_persona_social_insights_tests(void) {
     HU_RUN_TEST(test_render_multi_contact_lists_each);
     HU_RUN_TEST(test_render_truncation_safe_when_buffer_small);
     HU_RUN_TEST(test_render_null_inputs_return_zero);
+    HU_RUN_TEST(test_snapshot_render_missing_file_returns_zero);
+    HU_RUN_TEST(test_snapshot_render_empty_arrays_returns_zero);
+    HU_RUN_TEST(test_snapshot_render_stale_contacts_surfaces_handles);
+    HU_RUN_TEST(test_snapshot_render_drift_surfaces_dimension_name);
+    HU_RUN_TEST(test_snapshot_render_caps_at_three_stale_contacts);
+    HU_RUN_TEST(test_snapshot_render_handles_malformed_json_safely);
 }

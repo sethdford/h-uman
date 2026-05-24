@@ -508,6 +508,11 @@ set(HU_CORE_SOURCES
     # group_action_type, balloon_bundle_id) and ingests into personal_model.
     # Test mode + non-Apple builds get a stub implementation.
     src/daemon_imessage_observer.c
+    # Sprint A.6 wire: the missing production caller for the three
+    # Tier-2 library-only scanners (gap / drift / signatures). Runs
+    # every 6 hours from the daemon main loop, writes a JSON snapshot
+    # to ~/.human/social_state.json.
+    src/daemon_social_tick.c
     # Phase 4 of docs/plans/2026-05-18-imessage-sota.md: typedstream
     # attribute-run extractor — pulls mentions, OTP/2FA detection, link
     # spans, iOS 18 text effects, and formatting runs out of
@@ -752,6 +757,8 @@ set(HU_CORE_SOURCES
     src/calibration/clone.c
     src/calibration/ab_compare.c
     src/predictive/drafts.c
+    src/agent/autoresponder.c
+    src/research/contact_narrative.c
     src/context/context_ext.c
     src/agent/episodic.c
     src/agent/reflection.c
@@ -857,6 +864,12 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
+    src/memory/emotional_context.c
+    src/memory/anticipatory.c
+    src/memory/causal_attribution.c
+    src/memory/identity_continuity.c
+    src/memory/audio_emotion.c
+    src/persona/style_adapter.c
     # Tier-3 future-facing: pattern-drift compute. Pure helpers + SQL
     # scanner gated under HU_IS_TEST (same pattern as imessage_gaps).
     src/memory/pattern_drift.c
@@ -896,6 +909,8 @@ set(HU_CORE_SOURCES
     src/agent/response_verifier.c
     src/agent/response_guard.c
     src/agent/response_guard_retry.c
+    src/agent/multimodal_policy.c
+    src/agent/persona_eval.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
     # Spec 2026-05-19 — shared training-runner entry. Always compiled; the
@@ -1214,6 +1229,8 @@ list(APPEND HU_CORE_SOURCES
     src/memory/tiers.c
     src/agent/process_reward.c
     src/ml/dpo.c
+    src/ml/lora_export.c
+    src/ml/lora_nightly.c
     # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
     # (training_data_quality.c) which is itself ML-gated. Keeping it in
     # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
@@ -2962,6 +2979,15 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_emotional_context.c
+    tests/test_autoresponder.c
+    tests/test_contact_narrative.c
+    tests/test_causal_attribution.c
+    tests/test_identity_continuity.c
+    tests/test_audio_emotion.c
+    tests/test_style_adapter.c
+    tests/test_lora_export.c
+    tests/test_lora_nightly.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
@@ -3225,6 +3251,10 @@ set(HU_TEST_SOURCES
     tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
+    tests/test_multimodal_policy.c
+    tests/test_persona_eval.c
+    tests/test_agent.c
+    tests/test_agent_turn_transport.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
     tests/test_w8_belief_layer.c
@@ -3456,6 +3486,8 @@ list(APPEND HU_TEST_SOURCES tests/test_pattern_drift.c)
 list(APPEND HU_TEST_SOURCES tests/test_contact_signature.c)
 # Sprint A.5 wiring: render reaction signature → prompt paragraph.
 list(APPEND HU_TEST_SOURCES tests/test_persona_social_insights.c)
+# Sprint A.6 wiring: daemon social tick (gap + drift + signatures → JSON).
+list(APPEND HU_TEST_SOURCES tests/test_daemon_social_tick.c)
 # Reaction-driven topic salience (Tier 1 #1 of better-than-human plan).
 list(APPEND HU_TEST_SOURCES tests/test_personal_model_topics_from_reactions.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch

@@ -90,10 +90,15 @@ static void error_response(hu_allocator_t *alloc, int status, const char *messag
         *out_body_len = 0;
         return;
     }
-    const char *epfx = "{\"error\":{\"message\":\"";
+    /* hu_json_append_string emits a fully-quoted JSON string (opens with `"`,
+     * escapes contents, closes with `"`). The prefix and suffix must NOT
+     * include those quotes — earlier code added them, producing the
+     * malformed body `{"error":{"message":""Agent error""}}` (verifier
+     * 2026-05-24, M4 production iMessage A/B). */
+    const char *epfx = "{\"error\":{\"message\":";
     if (hu_json_buf_append_raw(&buf, epfx, strlen(epfx)) != HU_OK ||
         hu_json_append_string(&buf, message, strlen(message)) != HU_OK ||
-        hu_json_buf_append_raw(&buf, "\"}}", 3) != HU_OK) {
+        hu_json_buf_append_raw(&buf, "}}", 2) != HU_OK) {
         hu_json_buf_free(&buf);
         *out_body = NULL;
         *out_body_len = 0;
@@ -403,6 +408,14 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 hu_json_buf_free(&buf);
                 if (err == HU_ERR_OUT_OF_MEMORY)
                     error_response(alloc, 500, "Out of memory", out_status, out_body, out_body_len);
+                else if (err == HU_ERR_PROVIDER_UNAVAILABLE)
+                    /* M4 follow-up 2026-05-24: agent_turn's transport-error fast-fail
+                     * surfaces here. 503 (not 502) is the correct code for
+                     * "downstream temporarily unavailable, retry later" — tells
+                     * clients to back off rather than treating it as a permanent
+                     * gateway failure. */
+                    error_response(alloc, 503, "Provider unavailable", out_status, out_body,
+                                   out_body_len);
                 else
                     error_response(alloc, 502, "Agent error", out_status, out_body, out_body_len);
                 return;
@@ -804,10 +817,37 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 return;
             }
             if (agent_err != HU_OK) {
-                error_response(alloc, 502, "Agent error", out_status, out_body, out_body_len);
+                /* M4 follow-up 2026-05-24: transport-failure fast-fail (PROVIDER_UNAVAILABLE)
+                 * maps to HTTP 503 ("downstream temporarily unavailable") so clients
+                 * back off instead of treating it as a permanent gateway failure.
+                 * Other agent errors still surface as 502 ("Agent error"). */
+                if (agent_err == HU_ERR_PROVIDER_UNAVAILABLE)
+                    error_response(alloc, 503, "Provider unavailable", out_status, out_body,
+                                   out_body_len);
+                else
+                    error_response(alloc, 502, "Agent error", out_status, out_body, out_body_len);
                 return;
             }
+            /* UAF-fix 2026-05-19: if the agent returned HU_OK but with a
+             * NULL/empty response (the AI-tell retry path at L692-714 can
+             * produce this), control would previously fall through to the
+             * fallback provider path at L813+ which uses `msgs` — but
+             * `msgs` was freed at L760. Crash trace: heap-use-after-free
+             * at compatible.c:121 via compatible_chat. Return with a
+             * synthetic empty-response error so msgs is not reused.
+             *
+             * agent_err == HU_OK at this point, response is NULL/empty;
+             * report a 502 so the client retries or surfaces it rather
+             * than silently getting nothing.
+             */
+            error_response(alloc, 502, "Agent returned empty response", out_status, out_body,
+                           out_body_len);
+            return;
         }
+        /* No user message in the request — also can't reach the fallback
+         * provider path because msgs+root are still live, but `last_user_msg`
+         * being NULL means we have no prompt to send. Fall through to the
+         * fallback provider so it can return its own error. */
     }
 
     hu_provider_t provider = {0};

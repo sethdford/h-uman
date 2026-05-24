@@ -218,9 +218,13 @@ struct hu_agent {
     hu_session_store_t *session_store;       /* optional, may be NULL */
     hu_observer_t *observer;                 /* optional, may be NULL */
     hu_bth_metrics_t *bth_metrics;           /* optional; set by daemon for BTH observability */
-    hu_security_policy_t *policy;            /* optional, may be NULL */
-    hu_cost_tracker_t *cost_tracker;         /* optional, may be NULL */
-    hu_usage_tracker_t *usage_tracker;       /* optional, per-provider token tracking */
+    /* Sprint 46 R5.3 — in-process PersonaEval classifier. Loaded lazily at
+     * init time; NULL when model file absent (downstream calls degrade
+     * gracefully to neutral 0.5). Owned by the agent; freed in hu_agent_deinit. */
+    struct hu_persona_eval_model *persona_eval;
+    hu_security_policy_t *policy;      /* optional, may be NULL */
+    hu_cost_tracker_t *cost_tracker;   /* optional, may be NULL */
+    hu_usage_tracker_t *usage_tracker; /* optional, per-provider token tracking */
 
     char *model_name; /* owned */
     size_t model_name_len;

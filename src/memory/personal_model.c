@@ -1,6 +1,13 @@
 #include "human/memory/personal_model.h"
+#include "human/memory/anticipatory.h"
+#include "human/memory/causal_attribution.h"
+#include "human/memory/emotional_context.h"
+#include "human/memory/identity_continuity.h"
+#include "human/memory/identity_resolver.h" /* hu_identity_graph_t for the setter borrow */
 #include "human/memory/minja_guard.h"
 #include "human/persona.h"
+#include "human/persona/social_insights.h"
+#include "human/persona/style_adapter.h"
 #include "human/platform.h"
 #include <ctype.h>
 #include <errno.h>
@@ -22,6 +29,17 @@
  * quarantine queue. On-disk struct size grew; the existing version-mismatch
  * path in the loader resets the model rather than partial-reads. */
 #define HU_PM_VERSION 5u
+
+/* Sprint B.8 wire — borrowed identity graph pointer. Set by daemon at
+ * startup via hu_personal_model_set_identity_graph(&g_identity_graph).
+ * Single-threaded daemon → no lock needed. NULL means "no graph yet"
+ * (first-run path) and the prompt builder silently skips the
+ * IDENTITY block. */
+static const hu_identity_graph_t *s_identity_graph_for_prompt = NULL;
+
+void hu_personal_model_set_identity_graph(const void *graph) {
+    s_identity_graph_for_prompt = (const hu_identity_graph_t *)graph;
+}
 
 void hu_personal_model_init(hu_personal_model_t *model) {
     if (!model)
@@ -736,6 +754,132 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
                 append_fmt(buf, cap, &n, "Chronotype: %s\n", label);
                 detail = true;
             }
+        }
+    }
+
+    /* Sprint A.5 wire — splice reaction-derived social insights into
+     * the persona prompt. Pulls top reactors + salient topics from the
+     * model's reaction-derived facts (filtered by
+     * source_hint=="reaction_ingest"). Returns 0 when there are no
+     * reactions; in that case we don't emit an empty paragraph. */
+    {
+        char social_buf[1024];
+        size_t social_n = hu_persona_render_social_insights(model, social_buf, sizeof(social_buf));
+        if (social_n > 0) {
+            append_fmt(buf, cap, &n, "%s\n", social_buf);
+            detail = true;
+        }
+    }
+
+    /* Sprint A.7 wire — splice the social_state.json snapshot (written
+     * every 6h by hu_daemon_social_tick) into the prompt. This brings
+     * stale-contact + drift signals to the LLM's attention without
+     * waiting for the user to ask "any updates?" The reader is
+     * tolerant of missing files; we silently skip when the snapshot
+     * isn't there yet (first daemon run, or non-Apple build). */
+    {
+        char snap_buf[1024];
+        size_t snap_n = hu_persona_render_social_state_snapshot(NULL, snap_buf, sizeof(snap_buf));
+        if (snap_n > 0) {
+            append_fmt(buf, cap, &n, "%s\n", snap_buf);
+            detail = true;
+        }
+    }
+
+    /* Sprint B.2 wire — surface tender emotional context for each
+     * distinct contact in the model. The agent_turn site doesn't have
+     * the recipient handle plumbed into this function, so instead of
+     * making this contact-specific we walk every distinct provenance
+     * contact_handle. The LLM then knows "Alice recently mentioned: her
+     * mother is sick" regardless of who it's currently messaging, and
+     * uses that contextually.
+     *
+     * Dedup is done by linear scan against a small bounded array of
+     * seen handles — N contacts in a personal model is small, and we
+     * cap emissions at the lookup limit anyway. */
+    {
+#define HU_EMOCTX_MAX_DISTINCT_CONTACTS 8
+        const char *seen[HU_EMOCTX_MAX_DISTINCT_CONTACTS] = {0};
+        size_t seen_count = 0;
+        for (size_t fi = 0; fi < model->fact_count && seen_count < HU_EMOCTX_MAX_DISTINCT_CONTACTS;
+             fi++) {
+            const char *h = model->facts[fi].provenance.contact_handle;
+            if (!h || !h[0])
+                continue;
+            bool dup = false;
+            for (size_t s = 0; s < seen_count; s++) {
+                if (seen[s] && strcasecmp(seen[s], h) == 0) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup)
+                continue;
+            seen[seen_count++] = h;
+
+            char emo_buf[256];
+            /* now=0 → wall clock in production; tests don't reach this
+             * file's contact-walk path (they call emotional_context
+             * directly with explicit `now`). */
+            size_t emo_n =
+                hu_emotional_context_for_contact(model, h, 0, 0, emo_buf, sizeof(emo_buf));
+            if (emo_n > 0) {
+                append_fmt(buf, cap, &n, "%s\n", emo_buf);
+                detail = true;
+            }
+
+            /* Sprint B.7 wire — surface upcoming events for the same
+             * set of contacts. Same now=0 → wall-clock semantics. The
+             * two contexts coexist: a contact may have BOTH a tender
+             * recent event AND an upcoming one (e.g. her mother is
+             * sick AND her birthday is next week — both useful for
+             * the agent). */
+            char ant_buf[256];
+            size_t ant_n = hu_anticipatory_for_contact(model, h, 0, 0, ant_buf, sizeof(ant_buf));
+            if (ant_n > 0) {
+                append_fmt(buf, cap, &n, "%s\n", ant_buf);
+                detail = true;
+            }
+
+            /* Sprint B.6 wire — surface causal attribution ("what
+             * works with this contact?"). Cheap aggregate; renders
+             * only when total_reactions > 0. Same now=0 semantics. */
+            hu_causal_attribution_summary_t cas;
+            size_t cas_count = hu_causal_attribution_summarize(model, h, &cas);
+            if (cas_count > 0) {
+                char cas_buf[256];
+                size_t cas_n = hu_causal_attribution_render(h, &cas, 0, cas_buf, sizeof(cas_buf));
+                if (cas_n > 0) {
+                    append_fmt(buf, cap, &n, "%s\n", cas_buf);
+                    detail = true;
+                }
+            }
+
+            /* Sprint B B-loop — derive a "STYLE HINT:" line from the
+             * same causal_attribution counts. This is the act-on side
+             * of WHAT WORKS: not just "5 positive / 1 negative" but
+             * "keep current tone" / "try shorter, warmer." Renders
+             * silently to 0 below the MIN_REACTIONS=3 floor. */
+            char style_buf[256];
+            size_t style_n = hu_style_adapter_render_hint(model, h, style_buf, sizeof(style_buf));
+            if (style_n > 0) {
+                append_fmt(buf, cap, &n, "%s\n", style_buf);
+                detail = true;
+            }
+        }
+#undef HU_EMOCTX_MAX_DISTINCT_CONTACTS
+    }
+
+    /* Sprint B.8 wire — one-shot identity-merge suggestion. Surfaces
+     * at most one candidate per prompt build. Skips silently when no
+     * graph is wired (first-run path). */
+    if (s_identity_graph_for_prompt) {
+        char ident_buf[256];
+        size_t ident_n = hu_identity_continuity_suggest(model, s_identity_graph_for_prompt,
+                                                        ident_buf, sizeof(ident_buf));
+        if (ident_n > 0) {
+            append_fmt(buf, cap, &n, "%s\n", ident_buf);
+            detail = true;
         }
     }
 

@@ -24,6 +24,8 @@
 #include "human/agent/autodream.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
+#include "human/agent/multimodal_policy.h"
+#include "human/agent/persona_eval.h"
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
@@ -89,6 +91,7 @@
  * are present, independent of RL_FULL — the personal-model sink doesn't
  * need the DPO collector. */
 #include "human/daemon_imessage_observer.h"
+#include "human/daemon_social_tick.h"
 #if defined(HU_ENABLE_RL_FULL)
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_reactions.h"
@@ -153,6 +156,43 @@ static bool g_classify_provider_ok = false;
 static const char *g_classify_model = "gemini-3.1-flash-lite-preview";
 static size_t g_classify_model_len = 29;
 #endif
+
+/* Sprint A.7 daemon-side identity-graph loader storage.
+ *
+ * The reaction handler's identity setter BORROWS the graph pointer, so the
+ * daemon must keep the graph alive for the full process lifetime. The graph
+ * is ~314 KB (256-contact array) — too big for stack but fine as a file-scope
+ * static. Production loads from ~/.human/identity_graph.json at startup;
+ * the file is absent on first-run users, in which case the graph stays
+ * zeroed and the reaction handler is never wired (preserving the current
+ * "no canonicalization" behavior for unconfigured deployments). */
+static hu_identity_graph_t g_identity_graph;
+static bool g_identity_graph_loaded = false;
+
+/* Sprint B.3 D1 — daemon-loaded autoresponder config.
+ *
+ * Per-channel autoresponder wire-up is deferred (each channel's inbound
+ * dispatch needs its own design decisions: dedup vs human_active_recently,
+ * channel-specific reply paths, etc.). The loader is wired NOW so the
+ * config surface is live and per-channel integration becomes one-line
+ * gating calls in follow-up commits.
+ *
+ * Loaded from ~/.human/autoresponder.json at startup. Missing file is the
+ * first-run default (info-level log per silent-config-gated-subsystems
+ * rule). */
+#include "human/autoresponder.h"
+static hu_autoresponder_config_t g_autoresponder_cfg;
+static bool g_autoresponder_loaded = false;
+
+/* Borrowed accessor for future per-channel integration. Returns NULL when
+ * the config wasn't loaded, autoresponder is disabled, or allowlist is
+ * empty (in which case there's nothing for callers to do). */
+__attribute__((unused)) static const hu_autoresponder_config_t *daemon_autoresponder_config(void) {
+    if (!g_autoresponder_loaded || !g_autoresponder_cfg.enabled ||
+        g_autoresponder_cfg.allowlist_count == 0)
+        return NULL;
+    return &g_autoresponder_cfg;
+}
 
 /* Emotion detection: test builds use heuristic-only (no LLM), production uses hybrid
  * routing via g_classify_provider when available. May appear unreferenced in test builds
@@ -2646,6 +2686,87 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
          * group events, and balloon-plugin payloads through the same
          * personal-model sink. */
         hu_daemon_imessage_observer_wire_personal_model(&agent->personal_model);
+    }
+
+    /* Sprint A.7 — daemon-side identity-graph loader.
+     *
+     * Activates cross-channel canonicalization: "Alice@imessage" +
+     * "Alice@slack" reactions cluster under one persona contact instead
+     * of two strangers. The setter borrows g_identity_graph for the full
+     * process lifetime (cleared in teardown at the end of this function).
+     *
+     * Conservative on absence: a missing file is the first-run default,
+     * NOT an error — we log at info level and leave the reaction handler
+     * un-wired, which preserves the prior "no canonicalization" behavior.
+     * Only actual parse failures escalate to a warning. */
+    {
+        const char *home = getenv("HOME");
+        char ident_path[1024];
+        if (home && home[0] &&
+            snprintf(ident_path, sizeof(ident_path), "%s/.human/identity_graph.json", home) > 0) {
+            hu_error_t ie = hu_identity_load(&g_identity_graph, ident_path);
+            if (ie == HU_OK) {
+                hu_reaction_handler_set_identity_graph(&g_identity_graph);
+                /* Sprint B.8 wire — share the same graph borrow with the
+                 * prompt builder so the IDENTITY suggestion block fires. */
+                hu_personal_model_set_identity_graph(&g_identity_graph);
+                g_identity_graph_loaded = true;
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "identity graph loaded: %zu contacts from %s",
+                            g_identity_graph.contact_count, ident_path);
+            } else if (ie == HU_ERR_NOT_FOUND) {
+                /* First-run default: no identity_graph.json yet. Silent at
+                 * info level — operators who want cross-channel merging
+                 * will know to create the file. */
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "identity graph: no file at %s — cross-channel "
+                            "reactor canonicalization disabled (create the "
+                            "file via hu_identity_save to enable)",
+                            ident_path);
+            } else {
+                hu_log_error("human", agent ? agent->observer : NULL,
+                             "identity graph: load failed (err=%d) for %s — "
+                             "cross-channel canonicalization disabled",
+                             (int)ie, ident_path);
+            }
+        }
+    }
+
+    /* Sprint B.3 D1 — load the autoresponder config from
+     * ~/.human/autoresponder.json. Per silent-config-gated-subsystems
+     * rule: log once at info level whether config was loaded, and on
+     * disable explain how to enable. */
+    {
+        const char *home_ar = getenv("HOME");
+        char ar_path[1024];
+        if (home_ar && home_ar[0] &&
+            snprintf(ar_path, sizeof(ar_path), "%s/.human/autoresponder.json", home_ar) > 0) {
+            hu_error_t are = hu_autoresponder_config_load_from_file(ar_path, &g_autoresponder_cfg);
+            if (are == HU_OK && g_autoresponder_cfg.enabled) {
+                g_autoresponder_loaded = true;
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: loaded — %zu allowlist entries, %zu schedules, "
+                            "user=\"%s\"",
+                            g_autoresponder_cfg.allowlist_count, g_autoresponder_cfg.schedule_count,
+                            g_autoresponder_cfg.user_display_name[0]
+                                ? g_autoresponder_cfg.user_display_name
+                                : "(unset)");
+            } else if (are == HU_OK && !g_autoresponder_cfg.enabled) {
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: config present but enabled=false (set "
+                            "\"enabled\":true in %s to activate)",
+                            ar_path);
+            } else if (are == HU_ERR_NOT_FOUND) {
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: no file at %s — DND auto-reply disabled "
+                            "(create the file to enable)",
+                            ar_path);
+            } else {
+                hu_log_error("human", agent ? agent->observer : NULL,
+                             "autoresponder: load failed (err=%d) for %s — disabled", (int)are,
+                             ar_path);
+            }
+        }
     }
 
     /* Hybrid routing: create a lightweight cloud provider for classification/scoring
@@ -10040,6 +10161,74 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Sprint B A-loop A1+A2: autoresponder gate.
+                 *
+                 * When the loaded autoresponder config matches AND we're
+                 * in a DND window AND the human hasn't been active
+                 * recently on this channel (A2 dedup), generate a
+                 * persona-faithful auto-reply in the user's voice and
+                 * skip agent_turn for this batch.
+                 *
+                 * Conservative on every check: any failure (NULL config,
+                 * no allowlist match, outside DND, human active, provider
+                 * down, generate error) silently falls through to the
+                 * normal agent_turn path — no behavior regression.
+                 *
+                 * TZ: computed at runtime from localtime / gmtime gap to
+                 * honor user's local schedule. */
+                {
+                    const hu_autoresponder_config_t *ar_cfg = daemon_autoresponder_config();
+                    if (ar_cfg && ch && ch->channel && ch->channel->vtable &&
+                        ch->channel->vtable->send && batch_key && key_len > 0 && combined_len > 0) {
+                        /* A2 dedup: skip when the human is replying themselves. */
+                        bool human_recently_active =
+                            (ch->channel->vtable->human_active_recently &&
+                             ch->channel->vtable->human_active_recently(ch->channel->ctx, batch_key,
+                                                                        key_len, 120));
+                        if (!human_recently_active) {
+                            int64_t now_unix_ar = (int64_t)time(NULL);
+                            /* Local tz offset (seconds east of UTC). */
+                            time_t tnow = (time_t)now_unix_ar;
+                            struct tm lt, gt;
+                            int32_t tz_off = 0;
+                            if (localtime_r(&tnow, &lt) && gmtime_r(&tnow, &gt)) {
+                                tz_off = (int32_t)(((lt.tm_hour - gt.tm_hour) * 3600) +
+                                                   ((lt.tm_min - gt.tm_min) * 60));
+                                if (tz_off > 12 * 3600)
+                                    tz_off -= 24 * 3600;
+                                if (tz_off < -12 * 3600)
+                                    tz_off += 24 * 3600;
+                            }
+                            if (hu_autoresponder_should_respond(ar_cfg, batch_key, now_unix_ar,
+                                                                tz_off)) {
+                                char ar_reply[HU_AUTORESPONDER_REPLY_MAX];
+                                hu_error_t are = hu_autoresponder_generate_reply(
+                                    alloc, ar_cfg,
+                                    agent ? (const struct hu_personal_model *)&agent->personal_model
+                                          : NULL,
+                                    batch_key,
+                                    ch->channel->vtable->name
+                                        ? ch->channel->vtable->name(ch->channel->ctx)
+                                        : "?",
+                                    combined, now_unix_ar, tz_off, ar_reply, sizeof(ar_reply));
+                                if (are == HU_OK && ar_reply[0]) {
+                                    size_t ar_reply_len = strlen(ar_reply);
+                                    ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                              send_target_len, ar_reply,
+                                                              ar_reply_len, NULL, 0);
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "autoresponder fired for %.*s (DND + allowlisted, "
+                                                "human inactive %ds+); skipped agent_turn",
+                                                (int)(key_len > 20 ? 20 : key_len), batch_key, 120);
+                                    goto skip_llm_this_batch;
+                                }
+                                /* Generate failed (provider down etc.) — fall through to
+                                 * the normal agent_turn path. */
+                            }
+                        }
+                    }
+                }
+
                 bool retried = false;
                 char *turing_rejected_resp = NULL;
                 size_t turing_rejected_len = 0;
@@ -10106,6 +10295,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
 
+                        /* Sprint 46 R5.1 — inbound arrival latency ingest.
+                         *
+                         * Before running agent_turn for this inbound, attribute
+                         * its arrival to any prior unresolved outbound to the
+                         * same contact. record_inbound_arrival is a no-op when
+                         * there's no prior outbound (contact texted us first).
+                         * Best-effort: errors are logged, not fatal.
+                         *
+                         * Note: we use `combined_len` as a proxy for inbound
+                         * length here. It's actually the assembled prompt
+                         * length, not the raw inbound. The reply_length
+                         * column is a coarse engagement proxy; this is
+                         * accurate enough for the L4 outcome-DPO pipeline. */
+                        if (agent && agent->sota.sota_initialized && ch && ch->channel &&
+                            ch->channel->vtable && ch->channel->vtable->name) {
+                            const char *ch_name_in = ch->channel->vtable->name(ch->channel->ctx);
+                            if (ch_name_in && batch_key && key_len > 0) {
+                                int incoming_len = combined_len > 0 && combined_len < 2147483647
+                                                       ? (int)combined_len
+                                                       : -1;
+                                hu_error_t lat_err = hu_dpo_record_inbound_arrival(
+                                    &agent->sota.dpo_collector, ch_name_in, strlen(ch_name_in),
+                                    batch_key, key_len, incoming_len);
+                                if (lat_err != HU_OK && lat_err != HU_ERR_INVALID_ARGUMENT) {
+                                    hu_log_warn("human", agent->observer,
+                                                "inbound_arrival ingest failed: %s",
+                                                hu_error_string(lat_err));
+                                }
+                            }
+                        }
+
                         size_t saved_tools = 0;
                         size_t saved_specs = 0;
                         if (llm_decides) {
@@ -10132,6 +10352,38 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 "agent turn result: err=%s response_len=%zu for %.*s",
                                 hu_error_string(err), response_len,
                                 (int)(key_len > 20 ? 20 : key_len), batch_key);
+                    /* L4 multimodal shadow-logging (2026-05-19).
+                     *
+                     * Run the predicate against the inbound message; log
+                     * the decision but DO NOT change routing. This collects
+                     * production data on tapback-vs-text-vs-voice routing
+                     * so we can calibrate confidence thresholds before
+                     * flipping live. Next round (per
+                     * docs/plans/2026-05-19-sota-round-3-findings.md):
+                     * route on the decision when conf >= 0.85 and channel
+                     * has react vtable.
+                     *
+                     * Scoped to iMessage channel only — other channels
+                     * have different tapback semantics. */
+                    if (err == HU_OK && response && response_len > 0 && ch && ch->channel &&
+                        ch->channel->vtable && ch->channel->vtable->name) {
+                        const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
+                        if (ch_name && strcmp(ch_name, "imessage") == 0 && combined_len > 0) {
+                            hu_mm_decision_t mm = {0};
+                            (void)hu_multimodal_decide(combined, combined_len, &mm);
+                            const char *mod_names[] = {"text", "tapback", "voice", "gif"};
+                            const char *tb_names[] = {"none",  "like",      "love",
+                                                      "laugh", "emphasize", "question"};
+                            if (mm.modality != HU_MM_MODALITY_TEXT) {
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "L4-shadow: would route to %s (kind=%s conf=%.2f "
+                                            "reason=%s) for incoming '%.*s' — sending text anyway",
+                                            mod_names[mm.modality], tb_names[mm.tapback_kind],
+                                            (double)mm.confidence, mm.reason ? mm.reason : "?",
+                                            (int)(combined_len > 60 ? 60 : combined_len), combined);
+                            }
+                        }
+                    }
                     if (err == HU_OK && (!response || response_len == 0)) {
                         g_empty_agent_response_streak++;
                         hu_log_error(
@@ -10146,6 +10398,46 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 "silent to users");
                     } else if (err == HU_OK && response_len > 0) {
                         g_empty_agent_response_streak = 0;
+                        /* AGI-C1b — record outbound to production_outcomes
+                         * for the self-improvement loop. Outcome columns
+                         * fill in later when reactions arrive (handled
+                         * in reaction_handler.c). The pair (channel,
+                         * target, message_ref) is the join key; until
+                         * iMessage send returns the actual message
+                         * ref, we use batch_key as a best-effort
+                         * proxy (batch_key encodes channel+chat).
+                         *
+                         * Best-effort: SQLite-disabled builds get
+                         * HU_OK (no-op); transient IO errors are logged
+                         * but don't fail the turn. See
+                         * docs/plans/2026-05-19-agi-path.md. */
+                        if (agent && agent->sota.sota_initialized && ch && ch->channel &&
+                            ch->channel->vtable && ch->channel->vtable->name) {
+                            const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
+                            if (ch_name) {
+                                /* Sprint 46 R5.3 — score the response with the
+                                 * in-process PersonaEval classifier. When the
+                                 * agent has no model loaded (file missing at
+                                 * init), score returns 0.5 — record_outbound
+                                 * stores that as-is. */
+                                double p_seth = hu_persona_eval_score(agent->persona_eval, response,
+                                                                      response_len);
+                                hu_error_t out_err = hu_dpo_record_outbound(
+                                    &agent->sota.dpo_collector, ch_name, strlen(ch_name), batch_key,
+                                    key_len, NULL, 0, /* message_ref unknown here */
+                                    combined, combined_len, response, response_len, p_seth,
+                                    /* alternatives_json — Sprint 46 R5.2. NULL today since
+                                     * production doesn't run L5 best-of-N yet. Sprint 47
+                                     * will populate this when the L5 path lands. */
+                                    NULL, 0);
+                                if (out_err != HU_OK) {
+                                    hu_log_warn("human", agent->observer,
+                                                "production_outcomes record_outbound "
+                                                "failed: %s",
+                                                hu_error_string(out_err));
+                                }
+                            }
+                        }
                     }
                     /* Hex dump first 80 bytes of response for encoding diagnostics */
                     if (err == HU_OK && response && response_len > 0) {
@@ -13182,6 +13474,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             (void)hu_daemon_tick_imessage_observer(config, now_unix_obs, &observer_last_poll_unix,
                                                    &observer_watermark);
         }
+
+        /* Sprint A.6 wire — periodic social tick: exercises the three
+         * Tier-2 library-only scanners (gap / drift / signatures) and
+         * snapshots their output to ~/.human/social_state.json. Default
+         * cadence 6 hours; the interval-gate inside the function makes
+         * this safe to call every daemon-loop iteration. */
+        if (config) {
+            static int64_t social_tick_last_run = 0;
+            int64_t now_unix_st = (int64_t)time(NULL);
+            (void)hu_daemon_social_tick(config, now_unix_st, &social_tick_last_run);
+        }
 #endif
 
         struct timespec sleep_ts = {.tv_sec = tick_interval_ms / 1000,
@@ -13213,6 +13516,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     /* Phase 1c teardown: detach the personal-model sinks. */
     hu_reaction_handler_set_personal_model(NULL);
     hu_daemon_imessage_observer_wire_personal_model(NULL);
+    /* Sprint A.7 teardown: detach the identity graph borrow. The static
+     * storage itself is process-lifetime; this just ensures the reaction
+     * handler doesn't hold a stale pointer if the process ever live-reloads. */
+    if (g_identity_graph_loaded) {
+        hu_reaction_handler_set_identity_graph(NULL);
+        hu_personal_model_set_identity_graph(NULL); /* B.8 teardown */
+        g_identity_graph_loaded = false;
+    }
     if (agent && agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, alloc);
         agent->w14_scheduler = NULL;

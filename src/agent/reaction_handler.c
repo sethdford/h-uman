@@ -16,6 +16,7 @@
  * restart (R4 in the Phase-5 risk register). */
 #include "human/agent/reaction_handler.h"
 #include "human/channels/imessage_ingest.h"
+#include "human/memory/identity_resolver.h"
 #include "human/memory/personal_model.h"
 #include "human/ml/dpo.h"
 #include <stdio.h>
@@ -60,6 +61,11 @@ static hu_dpo_collector_t *s_collector = NULL;
  * which exists for training-data collection). Mirrors the set_collector
  * pattern: daemon sets at init via hu_daemon_reaction_wire_personal_model. */
 static hu_personal_model_t *s_personal_model = NULL;
+/* Sprint A.7: optional identity-graph wire. NULL == no canonicalization;
+ * non-NULL == reactions are looked up via hu_identity_lookup before
+ * ingest, and HIGH-confidence merges rewrite sender_handle to the
+ * canonical name. */
+static const hu_identity_graph_t *s_identity_graph = NULL;
 
 /* Per-turn signal flag (NOT thread-safe; daemon is single-threaded event loop —
  * see header comment on hu_reaction_handler_clear_turn for the full safety
@@ -73,6 +79,10 @@ void hu_reaction_handler_set_collector(hu_dpo_collector_t *c) {
 
 void hu_reaction_handler_set_personal_model(hu_personal_model_t *m) {
     s_personal_model = m;
+}
+
+void hu_reaction_handler_set_identity_graph(const hu_identity_graph_t *graph) {
+    s_identity_graph = graph;
 }
 void hu_reaction_handler_clear_turn(void) {
     s_called_this_turn = 0;
@@ -277,11 +287,30 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
      * still requires the lookup (DPO only learns from reactions on OUR
      * outbound messages), but the persona-learning sink wants any
      * observed reaction — contact's reaction on inbound messages is
-     * social-graph signal worth recording even without target context. */
+     * social-graph signal worth recording even without target context.
+     *
+     * Sprint A.7: if an identity graph is wired, canonicalize the
+     * sender_handle BEFORE ingest. HIGH-confidence merges only — the
+     * resolver's own conservatism (no display-name-only merges) is what
+     * makes this safe to apply automatically. */
     if (s_personal_model) {
         const char *preview = lookup_hit ? response_buf : NULL;
-        (void)hu_reaction_ingest_personal_model(s_personal_model, e,
-                                                /*custom_emoji=*/e->emoji, preview,
+
+        hu_reaction_event_t effective = *e;
+        if (s_identity_graph && e->sender_handle && e->sender_handle[0]) {
+            const hu_identity_contact_t *resolved =
+                hu_identity_lookup(s_identity_graph, e->sender_handle);
+            if (resolved && resolved->merge_confidence >= HU_IDENTITY_CONFIDENCE_HIGH &&
+                resolved->canonical_name[0]) {
+                /* Rewrite the const pointer to point at the graph's own
+                 * canonical_name buffer. The graph outlives this call by
+                 * contract (daemon owns it across the loop). */
+                effective.sender_handle = resolved->canonical_name;
+            }
+        }
+
+        (void)hu_reaction_ingest_personal_model(s_personal_model, &effective,
+                                                /*custom_emoji=*/effective.emoji, preview,
                                                 /*is_from_me_target=*/(lookup_hit != 0),
                                                 /*in_group_chat=*/false);
     }
@@ -403,5 +432,6 @@ void hu_reaction_handler_reset_for_test(void) {
     s_called_this_turn = 0;
     s_collector = NULL;
     s_personal_model = NULL;
+    s_identity_graph = NULL;
 }
 #endif

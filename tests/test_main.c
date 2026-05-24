@@ -92,6 +92,8 @@ void run_pattern_drift_tests(void);
 void run_contact_signature_tests(void);
 /* Sprint A.5 — render reaction signature to prompt paragraph. */
 void run_persona_social_insights_tests(void);
+/* Sprint A.6 — daemon social tick (gap + drift + signatures → JSON). */
+void run_daemon_social_tick_tests(void);
 /* Reaction-driven topic salience (Tier 1 #1). */
 void run_personal_model_topics_from_reactions_tests(void);
 /* Calibrate-with-reactions (Tier 1 #2). */
@@ -329,6 +331,10 @@ void run_validator_chain_cache_tests(void);
 void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
+void run_multimodal_policy_tests(void);
+void run_persona_eval_tests(void);
+void run_agent_tests(void);                /* Sprint 46 R5.3 carryover */
+void run_agent_turn_transport_tests(void); /* M4 follow-up: transport-error fast-fail */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
 void run_w8_belief_layer_tests(void);
@@ -386,8 +392,9 @@ void run_inner_thoughts_tests(void);
 void run_weather_awareness_tests(void);
 void run_timing_tests(void);
 void run_calibration_tests(void);
-void run_calibration_reactions_tests(void);
-void run_predictive_drafts_tests(void);
+/* run_calibration_reactions_tests + run_predictive_drafts_tests
+ * forward-declared earlier (line ~95). Duplicates removed
+ * 2026-05-24 — they caused both suites to run twice. */
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
 void run_activation_steering_tests(void);
@@ -706,6 +713,15 @@ void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_atomic_save_tests(void);
+void run_emotional_context_tests(void);
+void run_autoresponder_tests(void);
+void run_contact_narrative_tests(void);
+void run_causal_attribution_tests(void);
+void run_identity_continuity_tests(void);
+void run_audio_emotion_tests(void);
+void run_style_adapter_tests(void);
+void run_lora_export_tests(void);
+void run_lora_nightly_tests(void);
 void run_style_critique_patterns_tests(void);
 void run_style_self_critique_tests(void);
 void run_personal_model_simulation_tests(void);
@@ -887,6 +903,7 @@ int main(int argc, char **argv) {
     run_pattern_drift_tests();
     run_contact_signature_tests();
     run_persona_social_insights_tests();
+    run_daemon_social_tick_tests();
     run_personal_model_topics_from_reactions_tests();
     run_calibration_reactions_tests();
     run_predictive_drafts_tests();
@@ -1112,6 +1129,12 @@ int main(int argc, char **argv) {
     run_daemon_e2e_validator_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
+    run_multimodal_policy_tests();
+    run_persona_eval_tests();
+    /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */
+    run_agent_tests();
+    /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
+    run_agent_turn_transport_tests();
     run_w6_e2e_adversarial_tests();
     run_w7_memory_facade_tests();
     run_w8_belief_layer_tests();
@@ -1165,8 +1188,8 @@ int main(int argc, char **argv) {
     run_weather_awareness_tests();
     run_timing_tests();
     run_calibration_tests();
-    run_calibration_reactions_tests();
-    run_predictive_drafts_tests();
+    /* run_calibration_reactions_tests + run_predictive_drafts_tests
+     * called earlier (line ~881). Duplicates removed 2026-05-24. */
     run_behavioral_clone_tests();
     run_governor_tests();
     run_activation_steering_tests();
@@ -1473,6 +1496,15 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_atomic_save_tests();
+    run_emotional_context_tests();
+    run_autoresponder_tests();
+    run_contact_narrative_tests();
+    run_causal_attribution_tests();
+    run_identity_continuity_tests();
+    run_audio_emotion_tests();
+    run_style_adapter_tests();
+    run_lora_export_tests();
+    run_lora_nightly_tests();
     run_style_critique_patterns_tests();
     run_style_self_critique_tests();
     run_personal_model_simulation_tests();

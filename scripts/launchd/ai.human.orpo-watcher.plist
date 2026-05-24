@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.human.orpo-watcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/sethford/Projects/h-uman/scripts/orpo_readiness_watcher.sh</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/sethford</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/sethford/.local/bin</string>
+    </dict>
+    <!-- Run nightly at 03:17 local — off the rush-hour 03:00 mark per
+         ~/.claude/rules on avoiding round-minute scheduling -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>17</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/sethford/.human/logs/orpo-watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sethford/.human/logs/orpo-watcher.err.log</string>
+</dict>
+</plist>

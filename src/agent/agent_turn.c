@@ -3782,6 +3782,29 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .world_model_context_len = world_model_ctx_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
+        /* Prompt-size budget guard. MLX backends return empty responses
+         * when the assembled prompt exceeds ~28 KB (observed 2026-05-19:
+         * body_len=28291 → "Server returned nothing"). Cap at 16 KB so
+         * we land well inside the safe zone. Truncate at the last newline
+         * within the budget for a clean cut. See
+         * docs/plans/2026-05-19-sota-first-data.md finding 1. */
+        if (err == HU_OK && system_prompt && system_prompt_len > 16384) {
+            size_t budget = 16384;
+            /* Find the last newline within [0, budget) so we cut at a
+             * logical boundary rather than mid-token. */
+            size_t cut = budget;
+            while (cut > 0 && system_prompt[cut - 1] != '\n')
+                cut--;
+            if (cut < budget / 2)
+                cut = budget; /* no clean cut — accept the hard cap */
+            static atomic_bool warned_prompt_budget = false;
+            hu_log_warn_once(&warned_prompt_budget, "agent_turn", NULL,
+                             "system prompt truncated from %zu to %zu bytes "
+                             "(MLX backend cap); some context dropped",
+                             system_prompt_len, cut);
+            system_prompt[cut] = '\0';
+            system_prompt_len = cut;
+        }
         if (world_model_ctx) {
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
             world_model_ctx = NULL;
@@ -4246,6 +4269,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 
     uint32_t iter = 0;
+    /* M4 follow-up 2026-05-24: track consecutive transport-error iterations
+     * so the tool-loop bails fast when the provider is structurally unreachable
+     * (MLX backend down, network partition) instead of iterating
+     * max_tool_iterations times. Resets to 0 on any successful chat call.
+     * See hu_agent_internal_is_transport_error in agent.c for the
+     * classification rule. */
+    int transport_err_streak = 0;
     size_t turn_tool_results_count = 0;
     int reflection_retries_left = agent->reflection.max_retries;
     char *dpo_rejected_resp = NULL;
@@ -4677,6 +4707,57 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 all[i + 1] = hist_msgs[i];
             msgs = all;
             msgs_count = total;
+
+            /* A1b — message-history budget cap (2026-05-19).
+             *
+             * A1 capped the system_prompt at 16 KB, but the messages
+             * array's total bytes grow with conversation length. Multi-turn
+             * test A4 (2026-05-19) saw turn-5 onwards fail with
+             *   body_len=22595 → "Server returned nothing"
+             * because system_prompt (~16 KB) + accumulated history (~6 KB)
+             * crossed the MLX backend's effective request cap.
+             *
+             * Algorithm: keep all[0] (system) and the LAST message (the
+             * most recent user message — required for the turn to make
+             * sense). Drop oldest history (all[1], all[2], ...) until
+             * total content bytes < HISTORY_BUDGET. Then compact the
+             * array by sliding survivors forward.
+             *
+             * Budget chosen at 20 KB total. With system_prompt capped at
+             * 16 KB, this leaves ~4 KB for history — about 8-10 turns of
+             * short iMessage replies. Long-conversation drift will need
+             * summarization (a separate future fix). */
+            if (msgs_count > 2) {
+                const size_t HISTORY_BUDGET = 20 * 1024;
+                size_t total_bytes = 0;
+                for (size_t i = 0; i < msgs_count; i++)
+                    total_bytes += msgs[i].content_len;
+                if (total_bytes > HISTORY_BUDGET) {
+                    /* Drop oldest non-system, non-last messages first. */
+                    size_t dropped = 0;
+                    size_t drop_idx = 1; /* start after system */
+                    while (total_bytes > HISTORY_BUDGET && drop_idx < msgs_count - 1) {
+                        total_bytes -= msgs[drop_idx].content_len;
+                        drop_idx++;
+                        dropped++;
+                    }
+                    if (dropped > 0) {
+                        /* Slide survivors forward: [0] system stays,
+                         * [drop_idx .. msgs_count) shifts to [1 ..]. */
+                        size_t kept_tail = msgs_count - drop_idx;
+                        for (size_t i = 0; i < kept_tail; i++)
+                            msgs[1 + i] = msgs[drop_idx + i];
+                        msgs_count = 1 + kept_tail;
+                        static atomic_bool warned_history_budget = false;
+                        hu_log_warn_once(&warned_history_budget, "agent_turn", NULL,
+                                         "history truncated: dropped %zu "
+                                         "oldest messages to fit %zu-byte "
+                                         "budget (now %zu msgs, %zu bytes)",
+                                         dropped, HISTORY_BUDGET, msgs_count, total_bytes);
+                    }
+                }
+            }
+
             req.messages = msgs;
             req.messages_count = msgs_count;
         }
@@ -5025,6 +5106,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
         if (err == HU_OK) {
+            /* M4 follow-up: a successful chat resets the transport-error
+             * streak, so transient blips (single HU_ERR_IO followed by
+             * recovery) don't accumulate toward the bail threshold. */
+            transport_err_streak = 0;
             /* Spec 2026-05-19 self-model-scaffold Phase B: stash per-turn
              * metrics before the canonical write site. Defaults: tool_count
              * / tool_sequence_hash / persona_delta_kind / emotional_register
@@ -5036,6 +5121,34 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                            .response_latency_ms = (uint32_t)llm_duration_ms,
                        });
             hu_agent_m3_on_provider_success(agent);
+            /* Critique-echo guard. When the LLM sees the reflection
+             * critique in its retry-attempt history, it occasionally
+             * echoes the critique structure back as its response (e.g.
+             * "NEEDS_RETRY. The response 'GOOD' is irrelevant..."). The
+             * audit at docs/plans/2026-05-19-dpo-corpus-inverted.md
+             * found 9/10 reflection_retry rows had this exact shape.
+             *
+             * The dpo write-side now refuses these for training, but the
+             * USER would still receive that critique text as the
+             * assistant reply. Scrub here: discard the body, fall back to
+             * a generic short reply, and log so the retry loop knows
+             * downstream. */
+            if (hu_response_is_critique_echo(resp.content, resp.content_len)) {
+                static atomic_bool warned_critique_echo = false;
+                hu_log_warn_once(&warned_critique_echo, "agent_turn", NULL,
+                                 "LLM echoed reflection critique as response; "
+                                 "scrubbing to fallback. First 60 chars: %.*s",
+                                 (int)(resp.content_len > 60 ? 60 : resp.content_len),
+                                 resp.content);
+                hu_chat_response_free(agent->alloc, &resp);
+                /* Best-effort short fallback. Lowercase + casual to
+                 * match Seth-voice; the next iteration is the real fix
+                 * if one is available. */
+                const char *fallback = "let me think on that";
+                size_t fallback_len = strlen(fallback);
+                resp.content = hu_strndup(agent->alloc, fallback, fallback_len);
+                resp.content_len = resp.content ? fallback_len : 0;
+            }
             /* B1 redefined (2026-05-17 r3): record outcome at the top of
              * each batch-chat tool-loop iteration. resp.content may be
              * empty when there are tool_calls; the helper still records
@@ -5128,10 +5241,56 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
 
         if (err != HU_OK) {
+            /* M4 follow-up 2026-05-24: transport-error fast-fail. Pre-fix,
+             * the gateway burned ~90s per request when MLX was unreachable
+             * — multiple retry paths layered on top of each other (degrade
+             * loop + on-device-fallback + tool-loop iterations + verifier
+             * retry) all consumed connection-refused round-trips before
+             * eventually returning. Now: classify the err, allow ONE retry
+             * on transport failure (in case it was a transient blip), bail
+             * fast with HU_ERR_PROVIDER_UNAVAILABLE on the second
+             * consecutive transport error. Non-transport errors (provider
+             * responded with garbage, content-filter rejection, etc.) keep
+             * the existing fail-immediately path. */
+            bool is_transport = hu_agent_internal_is_transport_error(err);
+            if (is_transport) {
+                transport_err_streak++;
+                if (transport_err_streak < 2) {
+                    /* First transport error — give it one retry. Clear
+                     * per-iteration state and continue the loop. */
+                    hu_log_info("agent_turn", agent->observer,
+                                "transport err on chat (streak=1, err=%s); retrying once",
+                                hu_error_string(err));
+                    hu_chat_response_free(agent->alloc, &resp);
+                    memset(&resp, 0, sizeof(resp));
+                    if (agent->turn_arena)
+                        hu_arena_reset(agent->turn_arena);
+                    continue;
+                }
+                /* Second consecutive transport error — bail with the
+                 * canonical PROVIDER_UNAVAILABLE so the gateway can map
+                 * to HTTP 503 and the caller can decide to retry later
+                 * (vs HU_ERR_PROVIDER_RESPONSE which implies the
+                 * provider responded with something we couldn't use). */
+                hu_log_warn("agent_turn", agent->observer,
+                            "transport err streak=2; bailing as PROVIDER_UNAVAILABLE "
+                            "(err=%s) after %u tool-loop iterations",
+                            hu_error_string(err), iter);
+                char *fb = NULL;
+                size_t fb_len = 0;
+                if (hu_agent_internal_build_unavailable_fallback(agent->alloc, &fb, &fb_len) ==
+                    HU_OK) {
+                    *response_out = fb;
+                    if (response_len_out)
+                        *response_len_out = fb_len;
+                }
+                err = HU_ERR_PROVIDER_UNAVAILABLE;
+            }
             {
                 hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_ERR, .data = {{0}}};
                 ev.data.err.component = "agent";
-                ev.data.err.message = "provider chat failed";
+                ev.data.err.message =
+                    is_transport ? "provider transport unavailable" : "provider chat failed";
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             hu_chat_response_free(agent->alloc, &resp);

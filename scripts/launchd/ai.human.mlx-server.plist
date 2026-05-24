@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ai.human.mlx-server.plist — canonical launchd plist for the local MLX model
+  backend used by the h-uman gateway agent path.
+
+  Deployed location: ~/Library/LaunchAgents/ai.human.mlx-server.plist
+
+  Background — why this plist looks the way it does (2026-05-24 fix):
+
+  The previous version of this plist invoked `human-serve.sh ensure` with
+  `KeepAlive=false` + `StartInterval=30`. `ensure` calls `do_start` which
+  spawns the python child via `nohup $cmd > $LOGFILE 2>&1 &` and then
+  returns success. The python child was reaped within ~5s of each cycle
+  because nohup only protects against SIGHUP from the controlling
+  terminal — it does NOT survive launchd's process-group cleanup when
+  the launchd-tracked program (the bash wrapper) exits.
+
+  The fix: invoke `human-serve.sh foreground` instead. `foreground` does
+  the same config-load + arg-build as `do_start` but ends with `exec`
+  rather than `nohup ... &`. The python child REPLACES the bash shell
+  in the same PID, so launchd directly tracks the daemon and no parent
+  process exists to be cleaned up.
+
+  KeepAlive then takes over restart-on-exit duty (it's the canonical
+  launchd idiom — `KeepAlive=true` + `exec` is the textbook pattern).
+  ThrottleInterval=10 prevents a restart storm if the python child
+  crashes immediately at startup (e.g. model file missing, OOM).
+
+  Empirical proof: pre-fix MLX died within seconds of every launchd
+  cycle (last exit code = 0 because the wrapper script returned clean).
+  Post-fix MLX stays bound at least 5+ minutes through real gateway
+  traffic, `last exit code = (never exited)` in `launchctl print`.
+
+  See also: scripts/human-serve.sh::do_foreground for the wrapper side.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.human.mlx-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/sethford/.human/bin/human-serve.sh</string>
+        <string>foreground</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- KeepAlive: launchd restarts the daemon if it crashes or exits non-zero.
+         Paired with ProgramArguments→`foreground`, which exec's the python so
+         the python child IS the launchd-managed process. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <!-- Throttle: cap restart frequency at 1 per 10s if the python child
+         crashes immediately at startup (default is 10s; being explicit). -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/sethford/.human/logs/mlx-server-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sethford/.human/logs/mlx-server-launchd.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/sethford</string>
+    </dict>
+</dict>
+</plist>
