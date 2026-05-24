@@ -88,6 +88,7 @@
  * are present, independent of RL_FULL — the personal-model sink doesn't
  * need the DPO collector. */
 #include "human/daemon_imessage_observer.h"
+#include "human/daemon_social_tick.h"
 #if defined(HU_ENABLE_RL_FULL)
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_reactions.h"
@@ -13022,6 +13023,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 observer_watermark = now_unix_obs;
             (void)hu_daemon_tick_imessage_observer(config, now_unix_obs, &observer_last_poll_unix,
                                                    &observer_watermark);
+        }
+
+        /* Sprint A.6 wire — periodic social tick: exercises the three
+         * Tier-2 library-only scanners (gap / drift / signatures) and
+         * snapshots their output to ~/.human/social_state.json. Default
+         * cadence 6 hours; the interval-gate inside the function makes
+         * this safe to call every daemon-loop iteration. */
+        if (config) {
+            static int64_t social_tick_last_run = 0;
+            int64_t now_unix_st = (int64_t)time(NULL);
+            (void)hu_daemon_social_tick(config, now_unix_st, &social_tick_last_run);
         }
 #endif
 

@@ -503,6 +503,11 @@ set(HU_CORE_SOURCES
     # group_action_type, balloon_bundle_id) and ingests into personal_model.
     # Test mode + non-Apple builds get a stub implementation.
     src/daemon_imessage_observer.c
+    # Sprint A.6 wire: the missing production caller for the three
+    # Tier-2 library-only scanners (gap / drift / signatures). Runs
+    # every 6 hours from the daemon main loop, writes a JSON snapshot
+    # to ~/.human/social_state.json.
+    src/daemon_social_tick.c
     # Phase 4 of docs/plans/2026-05-18-imessage-sota.md: typedstream
     # attribute-run extractor — pulls mentions, OTP/2FA detection, link
     # spans, iOS 18 text effects, and formatting runs out of
@@ -3394,6 +3399,8 @@ list(APPEND HU_TEST_SOURCES tests/test_pattern_drift.c)
 list(APPEND HU_TEST_SOURCES tests/test_contact_signature.c)
 # Sprint A.5 wiring: render reaction signature → prompt paragraph.
 list(APPEND HU_TEST_SOURCES tests/test_persona_social_insights.c)
+# Sprint A.6 wiring: daemon social tick (gap + drift + signatures → JSON).
+list(APPEND HU_TEST_SOURCES tests/test_daemon_social_tick.c)
 # Reaction-driven topic salience (Tier 1 #1 of better-than-human plan).
 list(APPEND HU_TEST_SOURCES tests/test_personal_model_topics_from_reactions.c)
 # Phase 2 Task 12 (RL SOTA): Slack reaction_added/removed webhook branch

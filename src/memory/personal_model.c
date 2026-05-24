@@ -1,6 +1,7 @@
 #include "human/memory/personal_model.h"
 #include "human/memory/minja_guard.h"
 #include "human/persona.h"
+#include "human/persona/social_insights.h"
 #include "human/platform.h"
 #include <ctype.h>
 #include <errno.h>
@@ -736,6 +737,20 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
                 append_fmt(buf, cap, &n, "Chronotype: %s\n", label);
                 detail = true;
             }
+        }
+    }
+
+    /* Sprint A.5 wire — splice reaction-derived social insights into
+     * the persona prompt. Pulls top reactors + salient topics from the
+     * model's reaction-derived facts (filtered by
+     * source_hint=="reaction_ingest"). Returns 0 when there are no
+     * reactions; in that case we don't emit an empty paragraph. */
+    {
+        char social_buf[1024];
+        size_t social_n = hu_persona_render_social_insights(model, social_buf, sizeof(social_buf));
+        if (social_n > 0) {
+            append_fmt(buf, cap, &n, "%s\n", social_buf);
+            detail = true;
         }
     }
 
