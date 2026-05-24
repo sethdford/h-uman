@@ -261,6 +261,95 @@ static void test_dpo_export_in_memory_roundtrip(void) {
 #endif
 }
 
+/* ── AGI Capability-1: production_outcomes write + outcome update ── */
+
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+
+/* Helper: opens an in-memory SQLite DB, returns it via *db_out. The
+ * caller is responsible for sqlite3_close. Used by outcome tests to
+ * exercise the SQLite path without writing to ~/.human/memory.db. */
+static int open_inmem_db(sqlite3 **db_out) {
+    return sqlite3_open(":memory:", db_out);
+}
+
+static void dpo_record_outbound_inserts_row(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15555550100", 12, "msg_abc", 7,
+                                        "you around?", 11, "yeah just got back", 18, 0.85),
+                 HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT channel, chosen, p_seth_at_send "
+                       "FROM production_outcomes WHERE message_ref='msg_abc'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 0), "imessage");
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 1), "yeah just got back");
+    HU_ASSERT_TRUE(sqlite3_column_double(st, 2) > 0.84 && sqlite3_column_double(st, 2) < 0.86);
+    sqlite3_finalize(st);
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
+static void dpo_record_outcome_updates_resolution(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(open_inmem_db(&db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    /* Outbound first */
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15555550100", 12, "msg_xyz", 7,
+                                        "thanks!", 7, "no worries man", 14, 0.91),
+                 HU_OK);
+
+    /* Outcome arrives: positive tapback */
+    HU_ASSERT_EQ(hu_dpo_record_outcome(&col, "imessage", 8, "+15555550100", 12, "msg_xyz", 7,
+                                       /*polarity=*/+1, /*latency=*/45,
+                                       /*reply_len=*/-1),
+                 HU_OK);
+
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT tapback_polarity, reply_latency_s, "
+                       "outcome_resolved_at FROM production_outcomes "
+                       "WHERE message_ref='msg_xyz'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(st, 0), 1);
+    HU_ASSERT_EQ(sqlite3_column_int(st, 1), 45);
+    HU_ASSERT_TRUE(sqlite3_column_int64(st, 2) > 0);
+    sqlite3_finalize(st);
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
+static void dpo_record_outbound_null_returns_invalid(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, NULL, 0, &col), HU_OK);
+    /* NULL channel */
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, NULL, 0, "t", 1, NULL, 0, "p", 1, "c", 1, 0.5),
+                 HU_ERR_INVALID_ARGUMENT);
+    /* Empty target */
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imsg", 4, "", 0, NULL, 0, "p", 1, "c", 1, 0.5),
+                 HU_ERR_INVALID_ARGUMENT);
+    hu_dpo_collector_deinit(&col);
+}
+
+#endif /* HU_ENABLE_SQLITE */
+
 static void dpo_margin_reflects_confidence(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_dpo_collector_t col;
@@ -289,6 +378,10 @@ void run_dpo_tests(void) {
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(dpo_get_best_examples_sqlite_orders_by_margin);
     HU_RUN_TEST(dpo_max_pairs_ring_buffer);
+    /* AGI Capability-1 production_outcomes tests */
+    HU_RUN_TEST(dpo_record_outbound_inserts_row);
+    HU_RUN_TEST(dpo_record_outcome_updates_resolution);
+    HU_RUN_TEST(dpo_record_outbound_null_returns_invalid);
 #endif
     HU_RUN_TEST(dpo_null_collector_returns_error);
     HU_RUN_TEST(dpo_empty_export_succeeds);
