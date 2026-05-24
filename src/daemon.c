@@ -13602,6 +13602,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                    &observer_watermark);
         }
 
+        /* Spec 2026-05-19 — TOM expectation GC tick. Periodically deletes
+         * resolved expectations older than 30d (default) so the table
+         * doesn't grow unbounded. Interval-gated internally; safe to call
+         * every loop iteration. Gated on SQLite (no-op without it). */
+#ifdef HU_ENABLE_SQLITE
+        if (agent && agent->memory) {
+            static int64_t tom_gc_last_run_ms = 0;
+            struct timespec gc_ts;
+            clock_gettime(CLOCK_REALTIME, &gc_ts);
+            int64_t gc_now_ms = (int64_t)gc_ts.tv_sec * 1000 + (int64_t)gc_ts.tv_nsec / 1000000;
+            struct sqlite3 *gc_db = hu_sqlite_memory_get_db(agent->memory);
+            (void)hu_daemon_tick_tom_expectation_gc(gc_db, gc_now_ms, &tom_gc_last_run_ms,
+                                                    /*interval_seconds=*/86400,
+                                                    /*ttl_ms=*/(int64_t)30 * 86400 * 1000);
+        }
+#endif
+
+        /* Spec 2026-05-19 self-model-scaffold — periodic aggregation tick.
+         * Computes self-observations from the recent behavior log every
+         * 100 turns OR 60 min, then writes drift signals into
+         * agent_self_concerns. Interval-gated internally. Gated on the
+         * SELF_MODEL flag so it's a true no-op when the subsystem is off. */
+#if defined(HU_ENABLE_SELF_MODEL) && defined(HU_ENABLE_SQLITE)
+        if (agent && agent->memory) {
+            static int64_t sm_last_run_ms = 0;
+            static size_t sm_last_total_records = 0;
+            struct timespec sm_ts;
+            clock_gettime(CLOCK_REALTIME, &sm_ts);
+            int64_t sm_now_ms = (int64_t)sm_ts.tv_sec * 1000 + (int64_t)sm_ts.tv_nsec / 1000000;
+            struct sqlite3 *sm_db = hu_sqlite_memory_get_db(agent->memory);
+            /* Baseline values from spec defaults — calibration integration
+             * is a separate follow-up. Reasonable defaults for early
+             * deployment; drift signal only fires past min_baseline_n. */
+            (void)hu_daemon_tick_self_observation_aggregate(
+                sm_db, &agent->behavior_log, sm_now_ms, &sm_last_run_ms, &sm_last_total_records,
+                /*every_n_turns=*/100, /*every_sec=*/3600,
+                /*baseline_mean=*/80.0, /*baseline_stddev=*/40.0, /*baseline_n=*/50,
+                /*drift_threshold_sigma=*/2.0, /*min_baseline_n=*/50);
+        }
+#endif
+
         /* Sprint A.6 wire — periodic social tick: exercises the three
          * Tier-2 library-only scanners (gap / drift / signatures) and
          * snapshots their output to ~/.human/social_state.json. Default
