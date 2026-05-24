@@ -4826,6 +4826,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 while (m < count && strcmp(msgs[m].session_key, batch_key) == 0) {
                     const char *content_to_add = msgs[m].content;
                     size_t mlen = strlen(content_to_add);
+                    /* 2026-05-24 ASan fix: hoist the attachment-augmentation
+                     * buffer to the same scope as content_to_add. Previously
+                     * each augmentation branch (has_audio/has_video via
+                     * vision, has_image via vision, has_video fallback)
+                     * declared its own char[4096] INSIDE the nested if-block;
+                     * those buffers went out of scope before the memcpy at
+                     * line ~4965 read from content_to_add, causing
+                     * stack-use-after-scope (the ASan abort that took down
+                     * service-loop PID 59064 on 2026-05-24). Hoisting to one
+                     * buffer at this scope matches content_to_add's
+                     * lifetime exactly. */
+                    char augmented[4096];
 #ifndef HU_IS_TEST
                     /* Per-message attachment: images via vision; local audio/video via multimodal
                      * route. Injects description or transcription into batch text. */
@@ -4860,38 +4872,39 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         alloc, path, plen, &agent->provider, model, model_len,
                                         &media_desc, &media_desc_len) == HU_OK &&
                                     media_desc && media_desc_len > 0) {
-                                    char attachment_augmented[4096];
+                                    /* ASan fix 2026-05-24: use the outer-scope `augmented`
+                                     * buffer (declared at the content_to_add scope) instead of
+                                     * a nested char[4096]. Nested declaration went out of scope
+                                     * before the memcpy at line ~4965 read content_to_add. */
                                     size_t desc_copy =
                                         media_desc_len > 3800 ? 3800 : media_desc_len;
                                     int n;
                                     if (is_audio) {
                                         if (mlen > 0 && strcmp(content_to_add, "[Audio]") != 0) {
-                                            n = snprintf(
-                                                attachment_augmented, sizeof(attachment_augmented),
-                                                "%.*s\n[Audio transcription: %.*s]", (int)mlen,
-                                                content_to_add, (int)desc_copy, media_desc);
+                                            n = snprintf(augmented, sizeof(augmented),
+                                                         "%.*s\n[Audio transcription: %.*s]",
+                                                         (int)mlen, content_to_add, (int)desc_copy,
+                                                         media_desc);
                                         } else {
-                                            n = snprintf(attachment_augmented,
-                                                         sizeof(attachment_augmented),
+                                            n = snprintf(augmented, sizeof(augmented),
                                                          "[Audio transcription: %.*s]",
                                                          (int)desc_copy, media_desc);
                                         }
                                     } else {
                                         if (mlen > 0 && strcmp(content_to_add, "[Video]") != 0) {
-                                            n = snprintf(
-                                                attachment_augmented, sizeof(attachment_augmented),
-                                                "%.*s\n[Video transcription: %.*s]", (int)mlen,
-                                                content_to_add, (int)desc_copy, media_desc);
+                                            n = snprintf(augmented, sizeof(augmented),
+                                                         "%.*s\n[Video transcription: %.*s]",
+                                                         (int)mlen, content_to_add, (int)desc_copy,
+                                                         media_desc);
                                         } else {
-                                            n = snprintf(attachment_augmented,
-                                                         sizeof(attachment_augmented),
+                                            n = snprintf(augmented, sizeof(augmented),
                                                          "[Video transcription: %.*s]",
                                                          (int)desc_copy, media_desc);
                                         }
                                     }
                                     alloc->free(alloc->ctx, media_desc, media_desc_len + 1);
-                                    if (n > 0 && (size_t)n < sizeof(attachment_augmented)) {
-                                        content_to_add = attachment_augmented;
+                                    if (n > 0 && (size_t)n < sizeof(augmented)) {
+                                        content_to_add = augmented;
                                         mlen = (size_t)n;
                                     }
                                 } else if (media_desc) {
@@ -4911,22 +4924,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             "vision: result=%s desc_len=%zu", hu_error_string(verr),
                                             desc_len);
                                 if (verr == HU_OK && desc && desc_len > 0) {
-                                    char attachment_augmented[4096];
+                                    /* ASan fix 2026-05-24: use outer-scope `augmented`. */
                                     size_t desc_copy = desc_len > 3800 ? 3800 : desc_len;
                                     int n;
                                     if (mlen > 0 && strcmp(content_to_add, "[Photo]") != 0) {
-                                        n = snprintf(attachment_augmented,
-                                                     sizeof(attachment_augmented),
+                                        n = snprintf(augmented, sizeof(augmented),
                                                      "%.*s\n[They sent a photo: %.*s]", (int)mlen,
                                                      content_to_add, (int)desc_copy, desc);
                                     } else {
-                                        n = snprintf(
-                                            attachment_augmented, sizeof(attachment_augmented),
-                                            "[They sent a photo: %.*s]", (int)desc_copy, desc);
+                                        n = snprintf(augmented, sizeof(augmented),
+                                                     "[They sent a photo: %.*s]", (int)desc_copy,
+                                                     desc);
                                     }
                                     alloc->free(alloc->ctx, desc, desc_len + 1);
-                                    if (n > 0 && (size_t)n < sizeof(attachment_augmented)) {
-                                        content_to_add = attachment_augmented;
+                                    if (n > 0 && (size_t)n < sizeof(augmented)) {
+                                        content_to_add = augmented;
                                         mlen = (size_t)n;
                                         if (agent->bth_metrics)
                                             agent->bth_metrics->vision_descriptions++;
@@ -4938,18 +4950,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             alloc->free(alloc->ctx, path, plen + 1);
                         }
                     } else if (msgs[m].has_video) {
-                        /* F7: Video context — no vision in Phase 1; inject "[They sent a video]" */
-                        char video_augmented[4096];
+                        /* F7: Video context — no vision in Phase 1; inject "[They sent a video]".
+                         * ASan fix 2026-05-24: use outer-scope `augmented`. */
                         int n;
                         if (mlen > 0 && strcmp(content_to_add, "[Video]") != 0) {
-                            n = snprintf(video_augmented, sizeof(video_augmented),
-                                         "%.*s\n[They sent a video]", (int)mlen, content_to_add);
+                            n = snprintf(augmented, sizeof(augmented), "%.*s\n[They sent a video]",
+                                         (int)mlen, content_to_add);
                         } else {
-                            n = snprintf(video_augmented, sizeof(video_augmented),
-                                         "[They sent a video]");
+                            n = snprintf(augmented, sizeof(augmented), "[They sent a video]");
                         }
-                        if (n > 0 && (size_t)n < sizeof(video_augmented)) {
-                            content_to_add = video_augmented;
+                        if (n > 0 && (size_t)n < sizeof(augmented)) {
+                            content_to_add = augmented;
                             mlen = (size_t)n;
                         }
                     }
