@@ -181,6 +181,7 @@ static bool g_identity_graph_loaded = false;
  * first-run default (info-level log per silent-config-gated-subsystems
  * rule). */
 #include "human/autoresponder.h"
+#include "human/ml/lora_nightly.h" /* N2: nightly LoRA export→train→swap tick */
 static hu_autoresponder_config_t g_autoresponder_cfg;
 static bool g_autoresponder_loaded = false;
 
@@ -3939,6 +3940,71 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             autodream_done_today = false;
                             evolver_done_today = false;
                         }
+                    }
+                }
+
+                /* Sprint B N2 — LoRA nightly tick.
+                 *
+                 * Fires at 04:00 local time once per day, AFTER the 03:00
+                 * autodream + 03:05 persona evolver have finished their
+                 * SQLite work. Calls hu_lora_nightly_run, which:
+                 *   1. checks should_run (≥24h since last run + ≥20 new pairs)
+                 *   2. exports dpo_pairs → JSONL
+                 *   3. (when enabled) invokes mlx_lm.lora via subprocess
+                 *      with a 30-min hard timeout
+                 *   4. atomically rotates ~/.human/adapter-current
+                 *   5. POSTs /v1/adapters/swap to the live MLX server
+                 *
+                 * BLOCKING CAVEAT: subprocess training holds this loop
+                 * for up to 30 min. The 4 AM slot is chosen to minimize
+                 * user impact. Opt-in via env var HU_NIGHTLY_LORA_ENABLED=1
+                 * until the daemon-config plumbing lands as a follow-up.
+                 *
+                 * Last-run tracking is in-memory only for this slice —
+                 * after a daemon restart we'll re-run the next 4 AM
+                 * regardless of when the previous run was. Persisting to
+                 * ~/.human/lora-nightly.state is a clean follow-up. */
+                {
+                    static bool lora_nightly_done_today = false;
+                    static int64_t lora_last_run_unix = 0;
+                    struct tm tm_nightly;
+#if defined(_WIN32) && !defined(__CYGWIN__)
+                    struct tm *lt_nightly =
+                        (localtime_s(&tm_nightly, &t) == 0) ? &tm_nightly : NULL;
+#else
+                    struct tm *lt_nightly = localtime_r(&t, &tm_nightly);
+#endif
+                    const char *nightly_enabled = getenv("HU_NIGHTLY_LORA_ENABLED");
+                    bool gate_on = nightly_enabled && nightly_enabled[0] == '1';
+                    if (lt_nightly && gate_on) {
+                        if (lt_nightly->tm_hour == 4 && lt_nightly->tm_min == 0 &&
+                            !lora_nightly_done_today) {
+                            hu_lora_nightly_config_t lcfg;
+                            if (hu_lora_nightly_config_init_defaults(&lcfg)) {
+                                size_t pair_count = 0;
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "lora-nightly: starting at 04:00 (may block up to "
+                                            "30m)");
+                                hu_error_t lr =
+                                    hu_lora_nightly_run(alloc, &lcfg, (int64_t)t, &pair_count);
+                                if (lr == HU_OK) {
+                                    lora_last_run_unix = (int64_t)t;
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: ok (%zu pairs exported)",
+                                                pair_count);
+                                } else if (lr == HU_ERR_NOT_FOUND) {
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: skipped (no new pairs)");
+                                } else {
+                                    hu_log_warn("human", agent ? agent->observer : NULL,
+                                                "lora-nightly: failed (err=%d)", (int)lr);
+                                }
+                            }
+                            lora_nightly_done_today = true;
+                            (void)lora_last_run_unix; /* reserved for next-tier persistence */
+                        }
+                        if (lt_nightly->tm_hour == 6)
+                            lora_nightly_done_today = false;
                     }
                 }
                 /* P7: Feed processor poll — every 5 minutes (per-type intervals apply) */

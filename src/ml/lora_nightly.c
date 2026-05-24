@@ -7,6 +7,7 @@
 
 #include "human/core/log.h"
 #include "human/ml/lora_export.h"
+#include "human/ml/lora_subprocess.h"
 #include "human/ml/mlx_admin.h"
 
 #include <errno.h>
@@ -32,6 +33,10 @@ bool hu_lora_nightly_config_init_defaults(hu_lora_nightly_config_t *cfg) {
     snprintf(cfg->adapters_dir, sizeof(cfg->adapters_dir), "%s/.human/adapters", home);
     snprintf(cfg->current_symlink, sizeof(cfg->current_symlink), "%s/.human/adapter-current", home);
     snprintf(cfg->mlx_base_url, sizeof(cfg->mlx_base_url), "http://127.0.0.1:8741/v1");
+    /* Default base model — same as the M3 runbook example. Users on
+     * different hardware (more/less VRAM) should override via the
+     * struct or via the future daemon config block. */
+    snprintf(cfg->base_model, sizeof(cfg->base_model), "mlx-community/gemma-2-2b-it-4bit");
     cfg->dry_run = false;
     return true;
 }
@@ -135,34 +140,44 @@ hu_error_t hu_lora_nightly_run(hu_allocator_t *alloc, const hu_lora_nightly_conf
 
     /* Step 3 — train.
      *
-     * Subprocess plumbing for `mlx_lm.lora` is intentionally deferred:
-     *   - It depends on mlx-lm installed at a known PATH
-     *   - It depends on a base model identifier the user has
-     *     downloaded
-     *   - It can take 5-30 minutes — needs progress monitoring,
-     *     timeout policy, and crash recovery
+     * Either delegate to hu_lora_subprocess_train (N1, wired
+     * 2026-05-25) OR skip in dry-run mode for smoke-testing the
+     * rotation+swap layers without invoking mlx_lm.
      *
-     * For this slice, dry_run mode is the default. The orchestrator
-     * STILL creates the version directory and tries the symlink
-     * rotation + swap — proving the rotation+swap layers work
-     * end-to-end. The directory will be empty (no adapters.safetensors
-     * inside), and the live swap will fail at the MLX server side
-     * with a missing-file error; we log that and continue gracefully.
-     *
-     * To enable real training, set cfg->dry_run=false and link
-     * against a future src/ml/lora_subprocess.c (TODO). */
-    if (!cfg->dry_run) {
-        hu_log_warn("lora-nightly", NULL,
-                    "real subprocess training not yet wired (see header TODO); proceeding in "
-                    "dry-run-equivalent mode");
-    } else {
-        hu_log_info("lora-nightly", NULL, "dry-run mode: skipping mlx_lm.lora subprocess");
-    }
-    /* Create the empty version dir so rotation has something real to
-     * point at — easier to diagnose "swap failed" than "missing dir." */
+     * Create the version directory FIRST in both branches so the
+     * subprocess has somewhere to write, and so dry-run mode produces
+     * a valid empty dir that rotation can point at. */
     if (mkdir(next_dir, 0700) != 0 && errno != EEXIST) {
         hu_log_error("lora-nightly", NULL, "mkdir %s failed: %s", next_dir, strerror(errno));
         return HU_ERR_IO;
+    }
+
+    if (cfg->dry_run) {
+        hu_log_info("lora-nightly", NULL, "dry-run mode: skipping mlx_lm.lora subprocess");
+    } else if (!cfg->base_model[0]) {
+        hu_log_warn("lora-nightly", NULL,
+                    "base_model not configured; skipping subprocess (rotation + swap continue "
+                    "against empty dir)");
+    } else {
+        hu_lora_subprocess_config_t sp;
+        memset(&sp, 0, sizeof(sp));
+        snprintf(sp.base_model, sizeof(sp.base_model), "%s", cfg->base_model);
+        snprintf(sp.data_jsonl_path, sizeof(sp.data_jsonl_path), "%s", cfg->pairs_jsonl_path);
+        snprintf(sp.adapter_output_dir, sizeof(sp.adapter_output_dir), "%s", next_dir);
+        /* batch_size/iters/lora_layers/timeout/retries = 0 → use
+         * lora_subprocess.c's USER-CONFIRMED defaults (30min, 1 retry,
+         * 30s backoff, M3-runbook hyperparameters). */
+        hu_error_t te = hu_lora_subprocess_train(alloc, &sp);
+        if (te == HU_ERR_NOT_SUPPORTED) {
+            hu_log_warn("lora-nightly", NULL,
+                        "subprocess preflight failed (mlx-lm not installed?); skipping training "
+                        "but continuing rotation+swap for diagnostic visibility");
+        } else if (te != HU_OK) {
+            hu_log_error("lora-nightly", NULL,
+                         "subprocess training failed (%d); skipping rotation+swap this run",
+                         (int)te);
+            return te;
+        }
     }
 
     /* Step 4 — atomic rotation of the symlink. */

@@ -1231,6 +1231,7 @@ list(APPEND HU_CORE_SOURCES
     src/ml/dpo.c
     src/ml/lora_export.c
     src/ml/lora_nightly.c
+    src/ml/lora_subprocess.c
     # dpo_miner moved to if(HU_ENABLE_ML) block — references hu_pii_redact
     # (training_data_quality.c) which is itself ML-gated. Keeping it in
     # HU_CORE_SOURCES broke audit-integrity / Verify Audit Log Integrity /
@@ -2988,6 +2989,7 @@ set(HU_TEST_SOURCES
     tests/test_style_adapter.c
     tests/test_lora_export.c
     tests/test_lora_nightly.c
+    tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
