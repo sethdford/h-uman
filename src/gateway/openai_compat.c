@@ -408,12 +408,19 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 hu_json_buf_free(&buf);
                 if (err == HU_ERR_OUT_OF_MEMORY)
                     error_response(alloc, 500, "Out of memory", out_status, out_body, out_body_len);
-                else if (err == HU_ERR_PROVIDER_UNAVAILABLE)
-                    /* M4 follow-up 2026-05-24: agent_turn's transport-error fast-fail
-                     * surfaces here. 503 (not 502) is the correct code for
-                     * "downstream temporarily unavailable, retry later" — tells
-                     * clients to back off rather than treating it as a permanent
-                     * gateway failure. */
+                else if (err == HU_ERR_PROVIDER_UNAVAILABLE || err == HU_ERR_IO ||
+                         err == HU_ERR_TIMEOUT)
+                    /* M4 follow-up 2026-05-24 (gap-A): map ALL transport-failure
+                     * codes to 503 ("downstream temporarily unavailable, retry
+                     * later") so batch + streaming paths return uniformly. The
+                     * streaming path (hu_agent_turn_stream_v2) does NOT route
+                     * through the degradation layer, so HU_ERR_IO / _TIMEOUT
+                     * surface raw here — without the agent_turn fast-fail
+                     * translating them to HU_ERR_PROVIDER_UNAVAILABLE first.
+                     * Without this branch the streaming path returned 502 on
+                     * transport failure while the batch path returned 503.
+                     * iMessage daemon uses the streaming path, so this also
+                     * lines up internal-vs-external client behavior. */
                     error_response(alloc, 503, "Provider unavailable", out_status, out_body,
                                    out_body_len);
                 else
@@ -817,11 +824,15 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                 return;
             }
             if (agent_err != HU_OK) {
-                /* M4 follow-up 2026-05-24: transport-failure fast-fail (PROVIDER_UNAVAILABLE)
-                 * maps to HTTP 503 ("downstream temporarily unavailable") so clients
-                 * back off instead of treating it as a permanent gateway failure.
-                 * Other agent errors still surface as 502 ("Agent error"). */
-                if (agent_err == HU_ERR_PROVIDER_UNAVAILABLE)
+                /* M4 follow-up 2026-05-24: transport-failure codes (PROVIDER_UNAVAILABLE,
+                 * IO, TIMEOUT) all map to HTTP 503 ("downstream temporarily unavailable")
+                 * so clients back off instead of treating it as a permanent gateway
+                 * failure. PROVIDER_UNAVAILABLE comes from agent_turn's fast-fail (the
+                 * degradation-translated code path). IO/TIMEOUT surface raw on paths
+                 * that don't go through degradation (gap-A 2026-05-24). Other agent
+                 * errors still surface as 502 ("Agent error"). */
+                if (agent_err == HU_ERR_PROVIDER_UNAVAILABLE || agent_err == HU_ERR_IO ||
+                    agent_err == HU_ERR_TIMEOUT)
                     error_response(alloc, 503, "Provider unavailable", out_status, out_body,
                                    out_body_len);
                 else
