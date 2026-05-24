@@ -1,4 +1,5 @@
 #include "human/memory/personal_model.h"
+#include "human/memory/emotional_context.h"
 #include "human/memory/minja_guard.h"
 #include "human/persona.h"
 #include "human/persona/social_insights.h"
@@ -767,6 +768,51 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
             append_fmt(buf, cap, &n, "%s\n", snap_buf);
             detail = true;
         }
+    }
+
+    /* Sprint B.2 wire — surface tender emotional context for each
+     * distinct contact in the model. The agent_turn site doesn't have
+     * the recipient handle plumbed into this function, so instead of
+     * making this contact-specific we walk every distinct provenance
+     * contact_handle. The LLM then knows "Alice recently mentioned: her
+     * mother is sick" regardless of who it's currently messaging, and
+     * uses that contextually.
+     *
+     * Dedup is done by linear scan against a small bounded array of
+     * seen handles — N contacts in a personal model is small, and we
+     * cap emissions at the lookup limit anyway. */
+    {
+#define HU_EMOCTX_MAX_DISTINCT_CONTACTS 8
+        const char *seen[HU_EMOCTX_MAX_DISTINCT_CONTACTS] = {0};
+        size_t seen_count = 0;
+        for (size_t fi = 0; fi < model->fact_count && seen_count < HU_EMOCTX_MAX_DISTINCT_CONTACTS;
+             fi++) {
+            const char *h = model->facts[fi].provenance.contact_handle;
+            if (!h || !h[0])
+                continue;
+            bool dup = false;
+            for (size_t s = 0; s < seen_count; s++) {
+                if (seen[s] && strcasecmp(seen[s], h) == 0) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup)
+                continue;
+            seen[seen_count++] = h;
+
+            char emo_buf[256];
+            /* now=0 → wall clock in production; tests don't reach this
+             * file's contact-walk path (they call emotional_context
+             * directly with explicit `now`). */
+            size_t emo_n =
+                hu_emotional_context_for_contact(model, h, 0, 0, emo_buf, sizeof(emo_buf));
+            if (emo_n > 0) {
+                append_fmt(buf, cap, &n, "%s\n", emo_buf);
+                detail = true;
+            }
+        }
+#undef HU_EMOCTX_MAX_DISTINCT_CONTACTS
     }
 
     if (!detail)

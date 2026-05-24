@@ -857,6 +857,7 @@ set(HU_CORE_SOURCES
     src/memory/fact_extract.c
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
+    src/memory/emotional_context.c
     # Tier-3 future-facing: pattern-drift compute. Pure helpers + SQL
     # scanner gated under HU_IS_TEST (same pattern as imessage_gaps).
     src/memory/pattern_drift.c
@@ -2927,6 +2928,7 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_atomic_save.c
+    tests/test_emotional_context.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
