@@ -510,7 +510,16 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
             provider.vtable->deinit(provider.ctx, alloc);
         if (err != HU_OK) {
             hu_json_buf_free(&buf);
-            error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
+            /* M4 follow-up 2026-05-24 (gap-A critic finding): non-agent
+             * fallback streaming path. Same transport-failure → 503 mapping
+             * as the agent path (line ~411) so clients get consistent
+             * back-off semantics regardless of whether their request landed
+             * on the agent or the fallback provider. */
+            if (err == HU_ERR_IO || err == HU_ERR_TIMEOUT || err == HU_ERR_PROVIDER_UNAVAILABLE)
+                error_response(alloc, 503, "Provider unavailable", out_status, out_body,
+                               out_body_len);
+            else
+                error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
             if (resp.content)
                 hu_chat_response_free(alloc, &resp);
             return;
@@ -901,7 +910,14 @@ void hu_openai_compat_handle_chat_completions(const char *body, size_t body_len,
         provider.vtable->deinit(provider.ctx, alloc);
 
     if (err != HU_OK) {
-        error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
+        /* M4 follow-up 2026-05-24 (gap-A critic finding): non-agent
+         * fallback batch path. Mirror of the streaming-side fix at
+         * line ~511 so transport-failure responses are consistently 503
+         * across batch + streaming, agent + fallback. */
+        if (err == HU_ERR_IO || err == HU_ERR_TIMEOUT || err == HU_ERR_PROVIDER_UNAVAILABLE)
+            error_response(alloc, 503, "Provider unavailable", out_status, out_body, out_body_len);
+        else
+            error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
         if (resp.content)
             hu_chat_response_free(alloc, &resp);
         return;
