@@ -119,6 +119,11 @@ if(HU_ENABLE_ML)
 else()
     option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" OFF)
 endif()
+# Spec 2026-05-19 self-model-scaffold — observe-only behavioral self-model.
+# Records per-turn metrics (length, tool-sequence hash, emotional register,
+# latency) into a ring buffer for later aggregation. Defaults OFF so it ships
+# behind a flag while we tune what's useful (per AC-SM-6 zero-cost-off).
+option(HU_ENABLE_SELF_MODEL "Build agent behavioral self-model (per-turn observation ring buffer)" OFF)
 option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
@@ -908,6 +913,16 @@ set(HU_CORE_SOURCES
     src/agent/persona_eval.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
+    # Spec 2026-05-19 — shared training-runner entry. Always compiled; the
+    # body is stubbed when HU_ENABLE_LEARNING is OFF so callers don't need
+    # conditional compilation. See header for the contract.
+    src/agent/training_runner_shared.c
+    # Spec 2026-05-19 self-model-scaffold — agent behavioral self-model.
+    # Always compiled; body wrapped in `#ifdef HU_ENABLE_SELF_MODEL` with an
+    # `#else` stub-runner branch per `.claude/rules/test-source-gate-symmetry.md`
+    # so the public symbols resolve at link time in both build variants.
+    # Per AC-SM-6 (zero-cost when OFF) the stub bodies are bare returns.
+    src/agent/self_model.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
     src/ml/lora_retrain_runner.c
@@ -1517,6 +1532,10 @@ if(HU_ENABLE_ML)
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
         src/ml/fidelity.c
+        # Spec 2026-05-19 M3 closure / AC-M3-5: fidelity-based A/B gate
+        # comparing candidate vs baseline adapter outputs on a held-out
+        # prompt set. Pure judging math; no inference, no HTTP.
+        src/ml/m3_ab_fidelity_gate.c
         # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
@@ -1835,6 +1854,17 @@ if(HU_ENABLE_ML)
 endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_LEARNING=1)
+endif()
+if(HU_ENABLE_IMESSAGE)
+    # Propagated so header guards in include/human/channels/imessage_ingest.h
+    # pick the real declaration vs. the inline stub when imessage_ingest.c
+    # is in CHANNEL_SOURCES. Per ~/.claude/rules/test-source-gate-symmetry.md.
+    # Other targets (human, human_core_test, human_tests) get this near
+    # their own ML_DEFINITIONS lines after their add_library/add_executable.
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_IMESSAGE=1)
+endif()
+if(HU_ENABLE_SELF_MODEL)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
@@ -2433,6 +2463,12 @@ endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human PRIVATE HU_ENABLE_ML=1)
 endif()
+if(HU_ENABLE_IMESSAGE)
+    target_compile_definitions(human PRIVATE HU_ENABLE_IMESSAGE=1)
+endif()
+if(HU_ENABLE_SELF_MODEL)
+    target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
+endif()
 if(HU_ENABLE_CRON)
     target_compile_definitions(human PRIVATE HU_HAS_CRON=1)
 endif()
@@ -2748,8 +2784,14 @@ target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_T
 if(HU_ENABLE_ML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ML=1)
 endif()
+if(HU_ENABLE_IMESSAGE)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_IMESSAGE=1)
+endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_LEARNING=1)
+endif()
+if(HU_ENABLE_SELF_MODEL)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
@@ -2991,6 +3033,11 @@ set(HU_TEST_SOURCES
     tests/test_memory.c
     tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
+    tests/test_m3_route_per_turn_call_sites.c
+    tests/test_m3_swap_failure_observability.c
+    tests/test_m3_outcome_ring_population.c
+    tests/test_m3_ab_fidelity_gate.c
+    tests/test_m3_frontier_auto_invocation.c
     tests/test_sql_transaction.c
     tests/test_normalize.c
     tests/test_memory_util.c
@@ -3178,6 +3225,15 @@ set(HU_TEST_SOURCES
     tests/test_w5_persona_deltas.c
     tests/test_persona_delta_observer.c
     tests/test_world_model_bridge.c
+    # Spec 2026-05-19 self-model-scaffold — ring-buffer correctness +
+    # OFF-flag no-op behavior. Test file body is internally gated with
+    # `#ifdef HU_ENABLE_SELF_MODEL` and provides an `#else` stub-runner
+    # so it links cleanly in both build variants per
+    # `.claude/rules/test-source-gate-symmetry.md`.
+    tests/test_self_model_behavior_log.c
+    # Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same
+    # internal-#ifdef-wrap-with-stub-runner pattern as Phase A above.
+    tests/test_self_model_phase_bcde.c
     tests/test_w7_render_null_safety.c
     tests/test_signal_channel_wire.c
     tests/test_daemon_housekeeping.c
@@ -3214,6 +3270,11 @@ set(HU_TEST_SOURCES
     # cross-arm64 with undefined-reference linker errors.
     tests/test_w15_backup_restore.c
     tests/test_w14_scheduler.c
+    # Spec 2026-05-19 — DPO pair-count auto-training trigger. Both test
+    # files use internal-#ifdef-wrap-with-stub-runner so they stay in the
+    # unconditional list per ~/.claude/rules/test-source-gate-symmetry.md.
+    tests/test_dpo_pair_count_trigger.c
+    tests/test_training_runner_shared_entry.c
     tests/test_w15_keystore.c
     tests/test_encrypted_store.c
     tests/test_b11_pressure_history_e2e.c
@@ -3319,6 +3380,7 @@ set(HU_TEST_SOURCES
     tests/test_weakness.c
     tests/test_anti_sycophancy.c
     tests/test_mutual_tom.c
+    tests/test_tom_activation.c
     tests/test_opinion_history.c
     tests/test_trust.c
     tests/test_sota_humanness.c
@@ -3824,8 +3886,14 @@ endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1)
 endif()
+if(HU_ENABLE_IMESSAGE)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_IMESSAGE=1)
+endif()
 if(HU_ENABLE_LEARNING)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_LEARNING=1)
+endif()
+if(HU_ENABLE_SELF_MODEL)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
 # Phase 1 (RL SOTA) — propagate HU_ENABLE_LLAMACPP into the test build so
 # .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).

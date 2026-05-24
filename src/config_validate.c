@@ -67,6 +67,14 @@ static const char *const hu_config_top_keys[] = {
      * the bigger issue (whole subsystem disabled by missing config block). */
     "reaction_collection",
     "personalization",
+    /* 2026-05-19: Spec 2 (reaction-loop pair-count trigger) added the
+     * `learning` block with `dpo_pair_training_threshold` and
+     * `m3_frontier_auto_training`. Spec 1 added `inference` for the
+     * best-of-N at inference (US-7.7). Without these in the whitelist,
+     * the validator emits "unknown key" even though config_parse.c
+     * picks them up correctly. */
+    "learning",
+    "inference",
 };
 static const size_t hu_config_top_keys_len =
     sizeof(hu_config_top_keys) / sizeof(hu_config_top_keys[0]);

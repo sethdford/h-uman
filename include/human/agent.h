@@ -14,6 +14,7 @@
 #include "human/agent/mar.h"
 #include "human/agent/pattern_radar.h"
 #include "human/agent/scratchpad.h"
+#include "human/agent/self_model.h"
 #include "human/agent/spawn.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/superhuman_commitment.h"
@@ -458,6 +459,42 @@ struct hu_agent {
     char *m3_active_adapter_path;
 #endif
 
+    /* Spec 2026-05-19 self-model-scaffold — Phase B (AC-SM-1, AC-SM-2).
+     *
+     * Per-turn behavioral observation ring. Initialized in
+     * `hu_agent_from_config` and freed in `hu_agent_deinit`. The write
+     * site is `hu_agent_m3_record_chat_outcome` (single-canonical-write-
+     * site invariant — see AC-SM-2 grep test). Records hashes / sizes /
+     * enums only; NEVER content (AC-SM-7).
+     *
+     * The struct is embedded by value: it owns a small heap slab for the
+     * record slots but the outer struct lives inline on the agent. Zero-
+     * cost when HU_ENABLE_SELF_MODEL is OFF — the stub init returns HU_OK
+     * without allocating and record() is a no-op. */
+    hu_agent_behavior_log_t behavior_log;
+
+    /* Spec 2026-05-19 self-model-scaffold — Phase B.
+     *
+     * Per-turn metrics staged by callers BEFORE invoking the canonical
+     * write site `hu_agent_m3_on_provider_success`. The fields are
+     * additive: callers that have not been migrated leave them zero;
+     * `on_provider_success` records whatever is present. This shape lets
+     * the canonical write site live inside one function without touching
+     * every one of the 11 call paths to `on_provider_success`.
+     *
+     * Cleared by `on_provider_success` after every recorded turn so a
+     * stale stash never bleeds into the next turn's record. */
+    struct {
+        uint32_t response_length_chars;
+        uint32_t response_length_tokens_est;
+        uint32_t tool_sequence_hash;
+        uint16_t tool_count;
+        uint8_t emotional_register;
+        uint8_t persona_delta_kind;
+        uint32_t response_latency_ms;
+        bool has_data; /* true once any field has been stashed for this turn */
+    } behavior_log_pending;
+
     bool chain_of_thought;    /* inject reasoning instructions into prompt */
     bool on_device_available; /* true if on-device inference server was detected at startup */
     char *persona_prompt;     /* custom identity override; owned */
@@ -639,6 +676,30 @@ void hu_agent_set_learner(hu_agent_t *agent, struct hu_learner *learner);
  * streaming rethink). */
 void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path);
 void hu_agent_m3_on_provider_success(hu_agent_t *agent);
+
+/* Spec 2026-05-19 self-model-scaffold — Phase B helper.
+ *
+ * Stash per-turn behavioral metrics that `hu_agent_m3_on_provider_success`
+ * will fold into the behavior log on the next call. Idempotent within a
+ * single turn (subsequent stashes overwrite — last writer wins). Safe to
+ * call with NULL agent (silently no-ops). All scalar fields; never any
+ * content strings.
+ *
+ * Callers populate the fields they have available; un-stashed fields
+ * remain zero. The function is intentionally a one-shot batched stash
+ * rather than a per-field setter so callers can drop in a single line
+ * before invoking `hu_agent_m3_on_provider_success`. */
+typedef struct hu_agent_behavior_stash {
+    uint32_t response_length_chars;
+    uint32_t response_length_tokens_est;
+    uint32_t tool_sequence_hash;
+    uint16_t tool_count;
+    uint8_t emotional_register; /* hu_agent_emotional_register_t */
+    uint8_t persona_delta_kind; /* hu_agent_persona_delta_kind_t */
+    uint32_t response_latency_ms;
+} hu_agent_behavior_stash_t;
+
+void hu_agent_m3_stash_behavior_metrics(hu_agent_t *agent, const hu_agent_behavior_stash_t *stash);
 
 /* Phase G1 (2026-05-18) — per-turn contact-routing hook.
  *

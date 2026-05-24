@@ -667,6 +667,7 @@ typedef struct hu_config {
     hu_cron_config_t cron;
     hu_scheduler_config_t scheduler;
     hu_personalization_config_t personalization;
+    hu_learning_config_t learning;   /* Spec 2026-05-19 — DPO pair-count training trigger */
     hu_inference_config_t inference; /* US-7.7 — best-of-N at inference (default off) */
     hu_behavior_config_t behavior;
     hu_node_entry_t nodes[HU_NODES_MAX];

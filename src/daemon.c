@@ -31,6 +31,7 @@
 #include "human/eval/leaderboard.h"
 #endif
 #include "human/agent/training_data_runner.h"
+#include "human/agent/training_runner_shared.h"
 #include "human/agent/verifier_metrics.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/ml/learner.h"
@@ -3623,12 +3624,82 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                         /* W13/W14 — auto-enqueue LoRA training when enough
                          * signals have accumulated. The runner is already
-                         * registered; we just need a job in the queue. */
+                         * registered; we just need a job in the queue.
+                         *
+                         * Spec 2026-05-19 (Task 2): routes through the
+                         * shared training-runner entry alongside the new
+                         * pair-count trigger so both triggers produce
+                         * structurally identical scheduler records. */
                         if (agent->learner) {
                             size_t pending = hu_learner_pending_count(agent->learner);
                             if (pending >= 10) {
-                                (void)hu_w14_scheduler_enqueue_lora(agent->w14_scheduler, now_ms,
-                                                                    300000);
+                                (void)hu_training_runner_enqueue_lora_persona(
+                                    agent->w14_scheduler, now_ms, 300000,
+                                    HU_TRAINING_TRIGGER_LEARNER_PENDING, agent->observer);
+                            }
+                        }
+                        /* Spec 2026-05-19 (Task 3) — DPO pair-count trigger.
+                         * When uncommitted reaction-derived DPO pairs cross
+                         * `learning.dpo_pair_training_threshold`, enqueue a
+                         * training run via the same shared entry. Per
+                         * ~/.claude/rules/silent-config-gated-subsystems.md,
+                         * emit one info-level line on first tick for both
+                         * the disabled (threshold==0) and enabled paths. */
+                        if (agent && agent->sota.dpo_collector.alloc) {
+                            int threshold = config
+                                                ? config->learning.dpo_pair_training_threshold
+                                                : HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT;
+                            static atomic_bool warned_pair_count_disabled = false;
+                            static atomic_bool warned_pair_count_enabled = false;
+                            if (threshold <= 0) {
+                                hu_log_info_once(
+                                    &warned_pair_count_disabled, "daemon", agent->observer,
+                                    "DPO pair-count training trigger disabled by config "
+                                    "(learning.dpo_pair_training_threshold=0); set "
+                                    "learning.dpo_pair_training_threshold to a positive integer "
+                                    "in config.json to activate");
+                            } else {
+                                hu_log_info_once(&warned_pair_count_enabled, "daemon",
+                                                 agent->observer,
+                                                 "DPO pair-count training trigger active "
+                                                 "(learning.dpo_pair_training_threshold=%d)",
+                                                 threshold);
+                                /* Spec 2026-05-19 M3 closure / AC-M3-7 —
+                                 * frontier-MLX auto-training gate. Emit one
+                                 * info-line on first tick whether the gate
+                                 * is on or off, per
+                                 * ~/.claude/rules/silent-config-gated-subsystems.md. */
+                                bool frontier_auto =
+                                    config ? config->learning.m3_frontier_auto_training : false;
+                                static atomic_bool warned_frontier_disabled = false;
+                                static atomic_bool warned_frontier_enabled = false;
+                                if (frontier_auto) {
+                                    hu_log_info_once(
+                                        &warned_frontier_enabled, "daemon", agent->observer,
+                                        "M3 frontier-MLX auto-training ENABLED "
+                                        "(learning.m3_frontier_auto_training=true) — pair-count "
+                                        "trigger will dispatch with target=frontier_mlx");
+                                } else {
+                                    hu_log_info_once(
+                                        &warned_frontier_disabled, "daemon", agent->observer,
+                                        "M3 frontier-MLX auto-training disabled by config "
+                                        "(learning.m3_frontier_auto_training=false); pair-count "
+                                        "trigger will dispatch with target=huml_reference. Set "
+                                        "learning.m3_frontier_auto_training=true in config.json to "
+                                        "activate the M3 closure path");
+                                }
+                                size_t pair_count = 0;
+                                if (hu_dpo_pair_count(&agent->sota.dpo_collector, &pair_count) ==
+                                        HU_OK &&
+                                    hu_training_runner_pair_count_should_fire(pair_count,
+                                                                              threshold)) {
+                                    hu_training_target_model_t target =
+                                        frontier_auto ? HU_TRAINING_TARGET_FRONTIER_MLX
+                                                      : HU_TRAINING_TARGET_HUML_REFERENCE;
+                                    (void)hu_training_runner_enqueue_lora_persona_target(
+                                        agent->w14_scheduler, now_ms, 300000,
+                                        HU_TRAINING_TRIGGER_PAIR_COUNT, target, agent->observer);
+                                }
                             }
                         }
 #endif /* HU_ENABLE_LEARNING — outcome drain + LoRA auto-enqueue */
@@ -9028,6 +9099,37 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* ── Spec 4 Phase A (TOM activation): user-expectation detection.
+                 *
+                 * Wires the previously dead hu_tom_detect_user_expectation() into
+                 * the pre-turn assembly path (AC-TOM-1, dead-code activation per
+                 * recon: ZERO production callers before this site). Detection
+                 * fires on every inbound user message; persisted writes are
+                 * idempotent on (contact_id, topic, session_key) via the table's
+                 * UNIQUE constraint, so re-running on the same batch is safe.
+                 *
+                 * Runs BEFORE the existing TOM context block so the freshly
+                 * recorded expectations can be surfaced as "Unmet User
+                 * Expectations" in the same turn if no belief matches. */
+#ifdef HU_ENABLE_SQLITE
+                if (!llm_decides && agent && agent->memory && combined_len > 0) {
+                    sqlite3 *tom_db = hu_sqlite_memory_get_db(agent->memory);
+                    if (tom_db) {
+                        const char *topic_ptr = NULL;
+                        size_t topic_len = 0;
+                        hu_tom_expected_knowledge_t ktype = HU_TOM_EXPECT_REMEMBERS;
+                        if (hu_tom_detect_user_expectation(combined, combined_len, &topic_ptr,
+                                                           &topic_len, &ktype) &&
+                            topic_ptr && topic_len > 0) {
+                            (void)hu_tom_user_expectations_init_table(tom_db);
+                            (void)hu_tom_persist_user_expectation(
+                                tom_db, batch_key, topic_ptr, topic_len, ktype, batch_key, key_len,
+                                /* turn_number */ 0, (int64_t)time(NULL) * 1000);
+                        }
+                    }
+                }
+#endif
+
                 /* ── BTH Tier 1: Theory of Mind context (t1b-pre) ──────────── */
                 if (!llm_decides) {
                     size_t tom_idx = (size_t)-1;
@@ -9047,11 +9149,31 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         tom_contact_keys[tom_idx][key_len] = '\0';
                         tom_contact_count++;
                     }
-                    if (tom_idx != (size_t)-1 && tom_states[tom_idx].belief_count > 0) {
+                    /* Spec 4 Phase A Task 5: also surface persisted unresolved
+                     * user-expectations. Load happens even when belief_count == 0
+                     * because a turn-1 inbound saying "as you know I prefer X"
+                     * has no prior beliefs yet but DOES have an unmet expectation
+                     * worth flagging. */
+                    hu_tom_persisted_expectation_t *unmet_exps = NULL;
+                    size_t unmet_count = 0;
+#ifdef HU_ENABLE_SQLITE
+                    if (tom_idx != (size_t)-1 && agent && agent->memory) {
+                        sqlite3 *tom_db = hu_sqlite_memory_get_db(agent->memory);
+                        if (tom_db) {
+                            (void)hu_tom_user_expectations_load_unresolved(
+                                tom_db, alloc, batch_key, 8, &unmet_exps, &unmet_count);
+                        }
+                    }
+#endif
+                    bool tom_has_content =
+                        (tom_idx != (size_t)-1) &&
+                        (tom_states[tom_idx].belief_count > 0 || unmet_count > 0);
+                    if (tom_has_content) {
                         char *tom_ctx = NULL;
                         size_t tom_ctx_len = 0;
-                        if (hu_tom_build_context(&tom_states[tom_idx], alloc, &tom_ctx,
-                                                 &tom_ctx_len) == HU_OK &&
+                        if (hu_tom_build_context_with_expectations(&tom_states[tom_idx], unmet_exps,
+                                                                   unmet_count, alloc, &tom_ctx,
+                                                                   &tom_ctx_len) == HU_OK &&
                             tom_ctx && tom_ctx_len > 0) {
                             if (convo_ctx) {
                                 size_t total = convo_ctx_len + tom_ctx_len + 2;
@@ -9073,6 +9195,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (tom_ctx)
                                 alloc->free(alloc->ctx, tom_ctx, tom_ctx_len + 1);
                         }
+                    }
+#ifdef HU_ENABLE_SQLITE
+                    if (unmet_exps)
+                        hu_tom_persisted_expectations_free(alloc, unmet_exps, unmet_count);
+#endif
+                    if (tom_idx != (size_t)-1 && tom_states[tom_idx].belief_count > 0) {
 
                         /* ── Phase 4: MToM gap detection ─────────── */
                         hu_tom_gap_t *tom_gaps = NULL;
@@ -10915,16 +11043,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_fc_result_t fc_tom;
                         memset(&fc_tom, 0, sizeof(fc_tom));
                         (void)hu_fast_capture(alloc, combined, combined_len, &fc_tom);
+                        /* Spec 4 Phase B / AC-TOM-4: also write through to the
+                         * persisted tom_user_beliefs table tagged with the
+                         * current session_key + turn_number, so beliefs gain
+                         * conversation-local temporality. The in-memory belief
+                         * state stays the hot-path cache; the persisted row
+                         * is the durable, temporal layer used by Phase D
+                         * staleness detection. */
+#ifdef HU_ENABLE_SQLITE
+                        sqlite3 *belief_db =
+                            agent && agent->memory ? hu_sqlite_memory_get_db(agent->memory) : NULL;
+                        if (belief_db) {
+                            (void)hu_tom_user_beliefs_init_table(belief_db);
+                        }
+                        int64_t belief_now_ms = (int64_t)time(NULL) * 1000;
+#endif
                         if (fc_tom.primary_topic && fc_tom.primary_topic[0]) {
                             (void)hu_tom_record_belief(
                                 &tom_states[tom_idx], alloc, fc_tom.primary_topic,
                                 strlen(fc_tom.primary_topic), HU_BELIEF_KNOWS, 0.8f);
+#ifdef HU_ENABLE_SQLITE
+                            if (belief_db) {
+                                (void)hu_tom_persist_belief(
+                                    belief_db, batch_key, fc_tom.primary_topic,
+                                    strlen(fc_tom.primary_topic), HU_BELIEF_KNOWS, 0.8f, batch_key,
+                                    key_len, /* turn_number */ 0, belief_now_ms);
+                            }
+#endif
                         }
                         for (size_t ei = 0; ei < fc_tom.entity_count && ei < 3; ei++) {
                             if (fc_tom.entities[ei].name[0]) {
                                 (void)hu_tom_record_belief(
                                     &tom_states[tom_idx], alloc, fc_tom.entities[ei].name,
                                     strlen(fc_tom.entities[ei].name), HU_BELIEF_KNOWS, 0.6f);
+#ifdef HU_ENABLE_SQLITE
+                                if (belief_db) {
+                                    (void)hu_tom_persist_belief(
+                                        belief_db, batch_key, fc_tom.entities[ei].name,
+                                        strlen(fc_tom.entities[ei].name), HU_BELIEF_KNOWS, 0.6f,
+                                        batch_key, key_len, /* turn_number */ 0, belief_now_ms);
+                                }
+#endif
                             }
                         }
                         hu_fc_result_deinit(&fc_tom, alloc);

@@ -374,6 +374,19 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
         }
     }
 
+    /* Spec 2026-05-19 — `learning` block (DPO pair-count training trigger).
+     * Emit only when non-default to keep the canonical config terse. */
+    if (cfg->learning.dpo_pair_training_threshold !=
+        HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT) {
+        hu_json_value_t *learn = hu_json_object_new(&a);
+        if (learn) {
+            hu_json_object_set(
+                &a, learn, "dpo_pair_training_threshold",
+                hu_json_number_new(&a, (double)cfg->learning.dpo_pair_training_threshold));
+            hu_json_object_set(&a, root, "learning", learn);
+        }
+    }
+
     /* US-7.7 — inference (best-of-N). Emit only when non-default to keep the
      * canonical default config terse. */
     if (cfg->inference.best_of_n > 1 || cfg->inference.best_of_n_cost_cap_ms > 0) {

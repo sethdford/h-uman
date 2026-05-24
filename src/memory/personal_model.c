@@ -1079,8 +1079,9 @@ size_t hu_personal_model_bump_topics_from_reaction(hu_personal_model_t *model,
         if (reaction_topic_is_stopword(norm, tok_len))
             continue;
 
-        /* Dedup within this call. */
-        if (name_already_touched(seen, seen_n, norm))
+        /* Dedup within this call. Explicit cast because C-pre-C2X is strict
+         * about adding `const` to a pointer-to-array's element type. */
+        if (name_already_touched((const char (*)[HU_PM_MAX_FIELD])seen, seen_n, norm))
             continue;
         if (seen_n < HU_PM_MAX_TOPICS) {
             strncpy(seen[seen_n], norm, sizeof(seen[seen_n]) - 1);

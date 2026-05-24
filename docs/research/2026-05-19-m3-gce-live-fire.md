@@ -1,3 +1,11 @@
+---
+title: "M3 GCE Live-Fire — First Real Cloud Training (2026-05-19)"
+created: 2026-05-19
+status: active
+scope: M3 frontier-bridge live-fire evidence
+slug: 2026-05-19-m3-gce-live-fire
+---
+
 # M3 GCE Live-Fire — First Real Cloud Training (2026-05-19)
 
 After the GCE infrastructure shipped earlier today, this was the

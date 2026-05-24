@@ -12,6 +12,7 @@
 #include "human/agent/retrieval_planner.h"
 #include "human/agent/scheduler.h"
 #include "human/agent/self_rag.h"
+#include "human/agent/theory_of_mind.h"
 #include "human/agent/tom_scenario.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/world_model.h"
@@ -213,17 +214,52 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
      * tools → merge skipped (back-compat with all pre-F.1 callers
      * which leave the new pctx fields zero-initialized). */
     if (persona_ctx && persona_ctx->tools && persona_ctx->tools_count > 0) {
-        hu_world_model_merge_self_capabilities(wm, persona_ctx->tools,
-                                               persona_ctx->tools_count);
+        hu_world_model_merge_self_capabilities(wm, persona_ctx->tools, persona_ctx->tools_count);
     }
 
     /* Story F.2 — emotional register + recently-used tools. */
+    /* Spec 4 Phase C / AC-TOM-5: snapshot the prior register BEFORE the
+     * merge so we can detect a transition. Crossing from one non-neutral
+     * register to a different non-neutral register counts as a shift;
+     * neutral → X or X → neutral does not (those are the trivial
+     * boundaries and would create event-storms on every quiescent turn).
+     */
+    char prior_register[sizeof(wm->self_model.recent_emotional_register)];
+    memcpy(prior_register, wm->self_model.recent_emotional_register, sizeof(prior_register));
     hu_world_model_merge_self_emotion(wm);
-    if (persona_ctx && persona_ctx->recent_tools_used &&
-        persona_ctx->recent_tools_used_count > 0) {
+#ifdef HU_ENABLE_SQLITE
+    if (facade && facade->m && prior_register[0] && wm->self_model.recent_emotional_register[0] &&
+        strcmp(prior_register, wm->self_model.recent_emotional_register) != 0) {
+        sqlite3 *tom_db = hu_memory_facade_sqlite_db(facade->m);
+        if (tom_db) {
+            (void)hu_tom_self_change_events_init_table(tom_db);
+            (void)hu_tom_record_self_change_event(tom_db, contact_id,
+                                                  HU_TOM_SELF_CHANGE_REGISTER_SHIFT,
+                                                  /* session_key */ NULL, /* session_key_len */ 0,
+                                                  /* turn_number */ 0,
+                                                  /* magnitude */ 1.0,
+                                                  /* now_ts_ms */ (int64_t)time(NULL) * 1000);
+        }
+    }
+#endif
+    if (persona_ctx && persona_ctx->recent_tools_used && persona_ctx->recent_tools_used_count > 0) {
         hu_world_model_merge_self_recent_tools(wm, persona_ctx->recent_tools_used,
                                                persona_ctx->recent_tools_used_count);
     }
+
+    /* Spec 2026-05-19 self-model-scaffold — Phase D (AC-SM-4).
+     * Fold the most recent rows of agent_self_observations into the
+     * self_model cell. Idempotent; no-op when the table is missing or
+     * empty. The bridge already holds a sqlite3 handle via the memory
+     * facade, so this merge sits alongside merge_self_emotion / tools. */
+#ifdef HU_ENABLE_SQLITE
+    if (facade && facade->m) {
+        sqlite3 *self_obs_db = hu_memory_facade_sqlite_db(facade->m);
+        if (self_obs_db) {
+            hu_world_model_merge_self_observations(wm, self_obs_db);
+        }
+    }
+#endif
 
     /* If everything is empty, return NULL/0 -- callers skip injection.
      *
@@ -358,8 +394,8 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         size_t rc_cap = wm->recent_changes_count > 5 ? 5 : wm->recent_changes_count;
         for (size_t i = 0; i < rc_cap; i++) {
             const hu_world_recent_change_t *ch = &wm->recent_changes[i];
-            const char *kind_str = (ch->kind == HU_WORLD_CHANGE_SUPERSEDED)
-                                       ? "updated" : "no longer holds";
+            const char *kind_str =
+                (ch->kind == HU_WORLD_CHANGE_SUPERSEDED) ? "updated" : "no longer holds";
             const hu_graph_relation_t *rel = NULL;
             for (size_t r = 0; r < wm->relations_count; r++) {
                 if (wm->relations[r].id == ch->relation_id) {
@@ -370,11 +406,10 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
             if (rel && rel->source_name && rel->target_name) {
                 const char *t = hu_relation_type_to_string(rel->type);
                 ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s %s %s (%s)\n",
-                                       rel->source_name, t ? t : "->",
-                                       rel->target_name, kind_str);
+                                       rel->source_name, t ? t : "->", rel->target_name, kind_str);
             } else if (ch->summary[0]) {
-                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s (%s)\n",
-                                       ch->summary, kind_str);
+                ok = ok &&
+                     buf_appendf(alloc, &buf, &blen, &bcap, "- %s (%s)\n", ch->summary, kind_str);
             }
         }
     }
@@ -392,19 +427,21 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         size_t he_cap = wm->hyperedges_count > 5 ? 5 : wm->hyperedges_count;
         for (size_t i = 0; i < he_cap; i++) {
             const hu_hyperedge_t *he = &wm->hyperedges[i];
-            if (!he->relation_label[0]) continue;
+            if (!he->relation_label[0])
+                continue;
             ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- %s: ", he->relation_label);
             size_t mem_cap = he->members_count > 6 ? 6 : he->members_count;
             for (size_t j = 0; j < mem_cap; j++) {
-                if (j > 0) ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
+                if (j > 0)
+                    ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
                 const char *name = wm_entity_name_by_id(wm, he->members[j].entity_id);
                 if (name) {
-                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s[%s]",
-                                           name, he->members[j].role);
-                } else {
-                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "ent#%lld[%s]",
-                                           (long long)he->members[j].entity_id,
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "%s[%s]", name,
                                            he->members[j].role);
+                } else {
+                    ok =
+                        ok && buf_appendf(alloc, &buf, &blen, &bcap, "ent#%lld[%s]",
+                                          (long long)he->members[j].entity_id, he->members[j].role);
                 }
             }
             ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
@@ -431,37 +468,33 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
      * a "- Capabilities I have: a, b, c" line — exactly as planned in
      * docs/plans/2026-05-12-self-model-cell.md, "Story E + F.1 integration". */
     {
-        bool self_signal = wm->self_model.name[0]
-            || wm->self_model.focused_topics[0]
-            || wm->self_model.recent_drift_kind[0]
-            || wm->self_model.confidence_in_self >= 0.1f
-            || wm->self_model.capabilities_count > 0
-            || wm->self_model.recent_drift_history_count > 1
-            || wm->self_model.recent_emotional_register[0]
-            || wm->self_model.recent_tools_used_count > 0;
+        bool self_signal = wm->self_model.name[0] || wm->self_model.focused_topics[0] ||
+                           wm->self_model.recent_drift_kind[0] ||
+                           wm->self_model.confidence_in_self >= 0.1f ||
+                           wm->self_model.capabilities_count > 0 ||
+                           wm->self_model.recent_drift_history_count > 1 ||
+                           wm->self_model.recent_emotional_register[0] ||
+                           wm->self_model.recent_tools_used_count > 0;
         if (self_signal) {
             ok = ok && buf_append(alloc, &buf, &blen, &bcap, "Self model:\n", 12);
             if (wm->self_model.name[0])
-                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
-                                       "- I am: %s\n", wm->self_model.name);
+                ok = ok &&
+                     buf_appendf(alloc, &buf, &blen, &bcap, "- I am: %s\n", wm->self_model.name);
             if (wm->self_model.focused_topics[0])
-                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
-                                       "- Tracking: %s\n",
+                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- Tracking: %s\n",
                                        wm->self_model.focused_topics);
             if (wm->self_model.recent_drift_kind[0]) {
                 if (wm->self_model.recent_drift_value[0])
-                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
-                                           "- Most recent shift: %s — %s\n",
-                                           wm->self_model.recent_drift_kind,
-                                           wm->self_model.recent_drift_value);
+                    ok = ok &&
+                         buf_appendf(alloc, &buf, &blen, &bcap, "- Most recent shift: %s — %s\n",
+                                     wm->self_model.recent_drift_kind,
+                                     wm->self_model.recent_drift_value);
                 else
-                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
-                                           "- Most recent shift: %s\n",
+                    ok = ok && buf_appendf(alloc, &buf, &blen, &bcap, "- Most recent shift: %s\n",
                                            wm->self_model.recent_drift_kind);
             }
             if (wm->self_model.recent_drift_history_count > 1) {
-                ok = ok && buf_append(alloc, &buf, &blen, &bcap,
-                                      "- Shift history: ", 17);
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap, "- Shift history: ", 17);
                 for (size_t i = 0; i < wm->self_model.recent_drift_history_count; i++) {
                     if (i > 0)
                         ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
@@ -471,12 +504,12 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                 ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
             }
             if (wm->self_model.recent_emotional_register[0])
-                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
-                                       "- How I've been showing up: %s\n",
-                                       wm->self_model.recent_emotional_register);
+                ok =
+                    ok && buf_appendf(alloc, &buf, &blen, &bcap, "- How I've been showing up: %s\n",
+                                      wm->self_model.recent_emotional_register);
             if (wm->self_model.recent_tools_used_count > 0) {
-                ok = ok && buf_append(alloc, &buf, &blen, &bcap,
-                                      "- Tools I've used recently: ", 28);
+                ok =
+                    ok && buf_append(alloc, &buf, &blen, &bcap, "- Tools I've used recently: ", 28);
                 for (size_t i = 0; i < wm->self_model.recent_tools_used_count; i++) {
                     if (i > 0)
                         ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);
@@ -486,15 +519,17 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
                 ok = ok && buf_append(alloc, &buf, &blen, &bcap, "\n", 1);
             }
             const char *bucket = NULL;
-            if (wm->self_model.confidence_in_self >= 0.7f) bucket = "high";
-            else if (wm->self_model.confidence_in_self >= 0.4f) bucket = "medium";
-            else if (wm->self_model.confidence_in_self >= 0.1f) bucket = "low";
+            if (wm->self_model.confidence_in_self >= 0.7f)
+                bucket = "high";
+            else if (wm->self_model.confidence_in_self >= 0.4f)
+                bucket = "medium";
+            else if (wm->self_model.confidence_in_self >= 0.1f)
+                bucket = "low";
             if (bucket)
-                ok = ok && buf_appendf(alloc, &buf, &blen, &bcap,
-                                       "- Self-confidence: %s\n", bucket);
+                ok =
+                    ok && buf_appendf(alloc, &buf, &blen, &bcap, "- Self-confidence: %s\n", bucket);
             if (wm->self_model.capabilities_count > 0) {
-                ok = ok && buf_append(alloc, &buf, &blen, &bcap,
-                                      "- Capabilities I have: ", 23);
+                ok = ok && buf_append(alloc, &buf, &blen, &bcap, "- Capabilities I have: ", 23);
                 for (size_t i = 0; i < wm->self_model.capabilities_count; i++) {
                     if (i > 0)
                         ok = ok && buf_append(alloc, &buf, &blen, &bcap, ", ", 2);

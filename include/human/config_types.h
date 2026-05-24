@@ -118,6 +118,36 @@ typedef struct hu_personalization_config {
     hu_molora_config_t molora;
 } hu_personalization_config_t;
 
+/* Spec 2026-05-19 — reaction-loop pair-count auto-training trigger.
+ *
+ * `dpo_pair_training_threshold`: when the uncommitted DPO-pair count
+ * (per `hu_dpo_pair_count`) reaches this value, the daemon enqueues a
+ * LoRA training run through the shared training-runner entry. This is
+ * additive to the existing learner-pending trigger (~10 W13 signals).
+ *
+ * Default 100 — see `docs/standards/ai/` and the spec's D-RL-1 decision:
+ * roughly a busy day's worth of reactions for a heavy user, a week for a
+ * light user; configurable for operators on slower hardware.
+ *
+ * Set to 0 to disable the pair-count trigger entirely; the daemon emits
+ * one info-level log line on first tick per
+ * `~/.claude/rules/silent-config-gated-subsystems.md`. */
+typedef struct hu_learning_config {
+    int dpo_pair_training_threshold;
+    /* Spec 2026-05-19 M3 closure / AC-M3-7 — when true, the pair-count
+     * trigger enqueues training with target=frontier_mlx (subprocess
+     * to scripts/m3_mlx_lora_bridge.py against the served frontier
+     * model) rather than target=huml_reference (in-process toy GPT).
+     *
+     * Default false — operators must opt in. The daemon emits one
+     * info-level log line on first tick for both the disabled and
+     * first-enabled paths per
+     * ~/.claude/rules/silent-config-gated-subsystems.md. */
+    bool m3_frontier_auto_training;
+} hu_learning_config_t;
+
+#define HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT 100
+
 /* US-7.7 (Sprint 7, P1) — Test-time persona scoring (best-of-N at inference).
  *
  * When `best_of_n >= 2` AND the active provider is `llamacpp`, the agent's
