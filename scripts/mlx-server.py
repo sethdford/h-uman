@@ -159,11 +159,24 @@ def _swap_adapter_inline(adapter_path: str) -> tuple[int, dict]:
     # for the test/stub path — same contract surface, no real weights.
     if _MLX_MODEL is not None and have_mlx_lm():
         try:
-            weight_path = _resolve_adapter_weight_file(expanded)
-            # load_weights mutates the model in place. On exception we
-            # try to restore the prior adapter.
-            _MLX_MODEL.load_weights(weight_path, strict=False)
-            tensors_loaded = _count_safetensors(weight_path)
+            # LoRA adapters require linear_to_lora_layers() injection — plain
+            # load_weights() silently drops tensors with names like
+            # `lora_A.weight` that don't match the base model's parameters.
+            # Detect: if the path is a directory containing adapter_config.json,
+            # use load_adapters(). Otherwise fall back to load_weights() on the
+            # resolved file (full-checkpoint replacement).
+            adapter_dir = _resolve_adapter_dir(expanded)
+            if adapter_dir is not None:
+                from mlx_lm.tuner.utils import load_adapters, remove_lora_layers
+                # Remove prior LoRA layers (idempotent — no-op if none).
+                remove_lora_layers(_MLX_MODEL)
+                _MLX_MODEL = load_adapters(_MLX_MODEL, adapter_dir)
+                weight_path = os.path.join(adapter_dir, "adapters.safetensors")
+                tensors_loaded = _count_safetensors(weight_path)
+            else:
+                weight_path = _resolve_adapter_weight_file(expanded)
+                _MLX_MODEL.load_weights(weight_path, strict=False)
+                tensors_loaded = _count_safetensors(weight_path)
         except Exception as exc:  # noqa: BLE001
             # Revert on exception. Best-effort — if revert itself fails
             # we surface that too. State stays "whatever load_weights
@@ -193,6 +206,27 @@ def _swap_adapter_inline(adapter_path: str) -> tuple[int, dict]:
         "prior_adapter": prior_adapter,
         "prior_tensors": prior_tensors,
     }
+
+
+def _resolve_adapter_dir(path: str):
+    """Resolve a swap path to a LoRA adapter DIRECTORY (one containing
+    `adapter_config.json` next to `adapters.safetensors`), or None if the
+    path doesn't look like a LoRA adapter layout.
+
+    Layouts handled:
+        <path>/adapter_config.json + adapters.safetensors  → return <path>
+        <path>/adapters.safetensors/adapter_config.json    → return inner dir
+    """
+    candidates = [path]
+    inner = os.path.join(path, "adapters.safetensors")
+    if os.path.isdir(inner):
+        candidates.append(inner)
+    for cand in candidates:
+        if os.path.isdir(cand) and os.path.isfile(
+            os.path.join(cand, "adapter_config.json")
+        ) and os.path.isfile(os.path.join(cand, "adapters.safetensors")):
+            return cand
+    return None
 
 
 def _resolve_adapter_weight_file(path: str) -> str:
