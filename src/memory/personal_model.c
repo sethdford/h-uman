@@ -1,4 +1,5 @@
 #include "human/memory/personal_model.h"
+#include "human/memory/anticipatory.h"
 #include "human/memory/emotional_context.h"
 #include "human/memory/minja_guard.h"
 #include "human/persona.h"
@@ -809,6 +810,19 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
                 hu_emotional_context_for_contact(model, h, 0, 0, emo_buf, sizeof(emo_buf));
             if (emo_n > 0) {
                 append_fmt(buf, cap, &n, "%s\n", emo_buf);
+                detail = true;
+            }
+
+            /* Sprint B.7 wire — surface upcoming events for the same
+             * set of contacts. Same now=0 → wall-clock semantics. The
+             * two contexts coexist: a contact may have BOTH a tender
+             * recent event AND an upcoming one (e.g. her mother is
+             * sick AND her birthday is next week — both useful for
+             * the agent). */
+            char ant_buf[256];
+            size_t ant_n = hu_anticipatory_for_contact(model, h, 0, 0, ant_buf, sizeof(ant_buf));
+            if (ant_n > 0) {
+                append_fmt(buf, cap, &n, "%s\n", ant_buf);
                 detail = true;
             }
         }

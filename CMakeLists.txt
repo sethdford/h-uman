@@ -860,6 +860,7 @@ set(HU_CORE_SOURCES
     src/memory/personal_model.c
     src/memory/personal_model_contradicts.c
     src/memory/emotional_context.c
+    src/memory/anticipatory.c
     # Tier-3 future-facing: pattern-drift compute. Pure helpers + SQL
     # scanner gated under HU_IS_TEST (same pattern as imessage_gaps).
     src/memory/pattern_drift.c
