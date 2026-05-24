@@ -1,4 +1,5 @@
 /* Gateway edge cases + control protocol + event bridge tests. */
+#include "cp_internal.h"
 #include "human/agent/model_router.h"
 #include "human/agent/response_guard.h"
 #include "human/bus.h"
@@ -15,7 +16,6 @@
 #include "human/memory/personal_model.h"
 #include "human/persona.h"
 #include "test_framework.h"
-#include "cp_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1078,6 +1078,37 @@ static void test_openai_compat_chat_invalid_json_400(void) {
         alloc.free(alloc.ctx, resp, resp_len + 1);
 }
 
+/* Regression: 2026-05-24 M4 verifier observed body `{"error":{"message":""Invalid JSON""}}`
+ * (double-quoted message). The fix in src/gateway/openai_compat.c::error_response stripped
+ * the redundant `"` from prefix/suffix since hu_json_append_string already emits a
+ * fully-quoted JSON string. This test pins the SHAPE of the body so the bug can't
+ * regress — assert the body matches exactly `{"error":{"message":"Invalid JSON"}}`
+ * and contains no `""` (consecutive quote pair, which is the bug fingerprint). */
+static void test_openai_compat_error_response_single_quoted_message(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_config_t cfg = {0};
+    cfg.default_provider = "openai";
+    cfg.default_model = "gpt-4o";
+    hu_app_context_t app = {.config = &cfg};
+
+    const char *body = "{invalid json";
+    int status = 200;
+    char *resp = NULL;
+    size_t resp_len = 0;
+    hu_openai_compat_handle_chat_completions(body, strlen(body), &alloc, &app, &status, &resp,
+                                             &resp_len, NULL);
+    HU_ASSERT_EQ(status, 400);
+    HU_ASSERT_NOT_NULL(resp);
+    /* Exact match — properly-formed JSON, no double-escape. */
+    const char *want = "{\"error\":{\"message\":\"Invalid JSON\"}}";
+    HU_ASSERT_EQ(resp_len, strlen(want));
+    HU_ASSERT_TRUE(memcmp(resp, want, resp_len) == 0);
+    /* Bug fingerprint: never two consecutive quotes in a well-formed error body. */
+    HU_ASSERT_TRUE(strstr(resp, "\"\"") == NULL);
+    if (resp)
+        alloc.free(alloc.ctx, resp, resp_len + 1);
+}
+
 static void test_openai_compat_chat_stream_returns_sse(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_config_t cfg = {0};
@@ -1430,8 +1461,7 @@ static void test_cp_admin_metrics_directive_telemetry_returns_counts(void) {
     hu_personal_model_init(&m);
     /* Recently-completed goal — required to get the directive
      * to fire at all. */
-    snprintf(m.goals[0].description, sizeof(m.goals[0].description),
-             "ship gateway telemetry");
+    snprintf(m.goals[0].description, sizeof(m.goals[0].description), "ship gateway telemetry");
     m.goals[0].active = false;
     m.goals[0].last_referenced = 1000;
     m.goal_count = 1;
@@ -1452,8 +1482,8 @@ static void test_cp_admin_metrics_directive_telemetry_returns_counts(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = cp_admin_metrics_directive_telemetry(&alloc, &app, NULL, NULL, NULL, &out,
-                                                          &out_len);
+    hu_error_t err =
+        cp_admin_metrics_directive_telemetry(&alloc, &app, NULL, NULL, NULL, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(strstr(out, "\"total\":1") != NULL);
@@ -1649,6 +1679,7 @@ void run_gateway_extended_tests(void) {
     HU_TEST_SUITE("OpenAI Compat");
     HU_RUN_TEST(test_openai_compat_chat_valid_returns_mock);
     HU_RUN_TEST(test_openai_compat_chat_invalid_json_400);
+    HU_RUN_TEST(test_openai_compat_error_response_single_quoted_message);
     HU_RUN_TEST(test_openai_compat_chat_stream_returns_sse);
     HU_RUN_TEST(test_openai_compat_chat_stream_has_delta_content);
     HU_RUN_TEST(test_openai_compat_chat_empty_messages_400);

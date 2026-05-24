@@ -257,14 +257,89 @@ do_ensure() {
     do_start
 }
 
+# do_foreground — exec the python child IN-PLACE so it becomes the
+# launchd-managed process. This is the canonical launchd idiom: the
+# daemon IS the launched program, and KeepAlive=true in the plist
+# handles restart-on-exit.
+#
+# Why this exists: `do_start` uses `nohup $cmd &` to background the
+# python child and returns. When launchd runs `do_start` (via the
+# `ensure` subcommand), the wrapper script exits success → launchd's
+# session cleanup reaps the entire process group, killing the
+# nohup'd child within seconds. Empirically validated 2026-05-24:
+# direct manual `start` keeps MLX alive >50s; launchd-invoked
+# `ensure` killed it in ~5s every cycle.
+#
+# `exec` (no `&`, no nohup, no PIDFILE write) makes the python
+# child REPLACE this shell in the same PID, so launchd tracks the
+# real daemon and there is no parent to clean up.
+#
+# Companion change in ~/Library/LaunchAgents/ai.human.mlx-server.plist:
+#   - ProgramArguments points at this subcommand (`foreground`)
+#   - KeepAlive: { Crashed=true, SuccessfulExit=false }
+#   - StartInterval removed (KeepAlive replaces it)
+#   - ThrottleInterval=10 (prevent restart storm on immediate crash)
+do_foreground() {
+    read_config
+    echo "Starting MLX model server (foreground / exec mode)..."
+    echo "  Model:   $MODEL"
+    echo "  Adapter: $ADAPTER"
+    echo "  Port:    $PORT"
+    echo "  Log:     stdout/stderr inherited (launchd captures)"
+
+    local cmd_array=()
+    local server_script
+    if server_script=$(find_server_script); then
+        cmd_array=("$PYTHON" "$server_script" --model "$MODEL" --port "$PORT")
+        echo "  Engine:  gemma-realtime mlx-server.py"
+        if [[ "$REALTIME" == "true" ]]; then
+            cmd_array+=(--realtime)
+            echo "  Mode:    real-time voice (TurboQuant+ KV compression)"
+        fi
+        if [[ -n "$KV_BITS" ]]; then
+            cmd_array+=(--kv-bits "$KV_BITS")
+            echo "  KV bits: $KV_BITS"
+        fi
+        if [[ "$KV_ASYMMETRIC" == "true" ]]; then
+            cmd_array+=(--kv-asymmetric)
+        fi
+        if [[ -n "$SPECULATIVE_DRAFT" ]]; then
+            cmd_array+=(--speculative-draft "$SPECULATIVE_DRAFT")
+        fi
+        if [[ -n "$SPECULATIVE_DRAFT_ADAPTER" ]] && [[ -d "$SPECULATIVE_DRAFT_ADAPTER" ]]; then
+            cmd_array+=(--speculative-draft-adapter "$SPECULATIVE_DRAFT_ADAPTER")
+        fi
+    else
+        cmd_array=("$PYTHON" -m mlx_lm.server --model "$MODEL" --port "$PORT")
+        echo "  Engine:  mlx_lm.server (fallback)"
+    fi
+
+    if [[ -d "$ADAPTER" ]] && [[ -f "$ADAPTER/adapters.safetensors" ]]; then
+        cmd_array+=(--adapter-path "$ADAPTER")
+        echo "  LoRA:    persona adapter loaded"
+    fi
+
+    # Belt-and-suspenders: if a stale instance is still listening (e.g.
+    # from a manual `start`), refuse rather than fight for the port.
+    if lsof -ti:"$PORT" &>/dev/null; then
+        echo "ERROR: port $PORT already in use; refusing to exec"
+        exit 1
+    fi
+
+    # exec replaces this shell with the python process — same PID.
+    # No backgrounding, no PIDFILE write, no parent to be reaped.
+    exec "${cmd_array[@]}"
+}
+
 case "${1:-status}" in
-    start)   do_start ;;
-    stop)    do_stop ;;
-    status)  do_status ;;
-    restart) do_stop; sleep 2; do_start ;;
-    ensure)  do_ensure ;;
+    start)       do_start ;;
+    stop)        do_stop ;;
+    status)      do_status ;;
+    restart)     do_stop; sleep 2; do_start ;;
+    ensure)      do_ensure ;;
+    foreground)  do_foreground ;;
     *)
-        echo "Usage: $0 {start|stop|status|restart|ensure}"
+        echo "Usage: $0 {start|stop|status|restart|ensure|foreground}"
         exit 1
         ;;
 esac
