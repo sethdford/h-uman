@@ -131,6 +131,110 @@ static void record_outbound_with_p_seth_persists_column(void) {
 }
 #endif
 
+/* R5.3 wire regression — 2026-05-24 follow-up.
+ *
+ * Background: production_outcomes contained a row with p_seth_at_send=NULL
+ * despite R5.3 (commit c3881151) shipping the wire that computes the score
+ * and threads it into hu_dpo_record_outbound. Investigation found the row
+ * was written by a daemon process running an older binary that had the
+ * AGI-C1b record_outbound call (commit 8220d3812) but NOT yet R5.3 — passed
+ * a sentinel value that dpo.c:311's `if (p_seth >= 0.0)` correctly bound as
+ * NULL. The wire is correct in current code; the row was a one-time
+ * historical artifact of the rebuild-restart sequence on 2026-05-24.
+ *
+ * The actual invariant that prevents p_seth_at_send=NULL going forward is
+ * THIS: hu_persona_eval_score is contractually required to return a value
+ * in [0, 1]. The daemon's wire at daemon.c:10423 captures that return value
+ * directly and passes it to hu_dpo_record_outbound. The dpo binding at
+ * dpo.c:311 (`if (p_seth >= 0.0) bind_double else bind_null`) only writes
+ * NULL when the score is NEGATIVE — which the contract forbids.
+ *
+ * If hu_persona_eval_score ever starts returning negative values (e.g. -1
+ * as a "not loaded" sentinel), every outbound after that change writes NULL
+ * to p_seth_at_send, and Sprint 47's R6 uncertainty router has no signal.
+ *
+ * The two tests below pin both halves of the contract:
+ *   1. score never returns negative — including the model-NULL fallback path
+ *   2. the daemon's record path persists a real value for the 0.5 fallback
+ *      (not NULL via the dpo-binding shortcut)
+ *
+ * The existing `record_outbound_with_p_seth_persists_column` test covers
+ * the loaded-model case end-to-end. These add the explicit
+ * model-NULL-fallback-doesn't-become-database-NULL coverage that was
+ * implicit before but never asserted. */
+/* CONTRACT 1: hu_persona_eval_score never returns a negative value.
+ * Daemon code at daemon.c:10423 captures the return value directly:
+ *   double p_seth = hu_persona_eval_score(agent->persona_eval, ...);
+ * If this is ever < 0, dpo.c:311 binds NULL and every Sprint-47 R6.1
+ * routing decision loses its signal. Test both branches of the score
+ * function: model loaded (sigmoid path) AND model NULL (fallback to 0.5). */
+static void persona_eval_score_never_returns_negative(void) {
+    /* Model NULL → 0.5 fallback per persona_eval.c:475-476. Without this
+     * fallback, daemon writes NULL p_seth_at_send for every outbound on
+     * first-run installs where the model file is absent. */
+    double null_score = hu_persona_eval_score(NULL, "any text", 8);
+    HU_ASSERT(null_score >= 0.0);
+    HU_ASSERT(null_score <= 1.0);
+
+    /* Loaded model → sigmoid in (0, 1). Sigmoid output is mathematically
+     * bounded; this just ensures the implementation matches the math. */
+    if (model_file_exists()) {
+        hu_allocator_t alloc = hu_system_allocator();
+        hu_persona_eval_model_t *m = NULL;
+        HU_ASSERT_EQ(hu_persona_eval_load(&alloc, NULL, &m), HU_OK);
+        HU_ASSERT_NOT_NULL(m);
+        double loaded_score = hu_persona_eval_score(m, "hey just got back", 17);
+        HU_ASSERT(loaded_score >= 0.0);
+        HU_ASSERT(loaded_score <= 1.0);
+        hu_persona_eval_free(&alloc, m);
+    }
+}
+
+/* CONTRACT 2: when score returns 0.5 (model-NULL fallback), the dpo
+ * binding writes 0.5 to the column, NOT NULL.
+ *
+ * dpo.c:311 has `if (p_seth_at_send >= 0.0) bind_double else bind_null`.
+ * 0.5 satisfies >= 0.0, so the value persists. If a future refactor changes
+ * the model-NULL fallback to return -1 ("not loaded" sentinel), this test
+ * fails — and that failure is the signal that the fallback contract
+ * changed AND the database column will now be NULL for every fallback row.
+ * That's a Sprint-47-blocking regression. */
+#ifdef HU_ENABLE_SQLITE
+static void dpo_record_with_score_0_5_persists_real_value_not_null(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+
+    /* Pass exactly the model-NULL fallback value the daemon would observe. */
+    double p_seth = hu_persona_eval_score(NULL, "anything", 8);
+    HU_ASSERT(p_seth >= 0.0); /* the contract from test 1 */
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+15553334444", 12, NULL, 0, "prompt",
+                                        6, "chosen", 6, p_seth, NULL, 0),
+                 HU_OK);
+
+    /* Bug fingerprint: SQLITE_NULL column type means dpo.c:311's
+     * negative-value branch fired (= the score contract broke). We want
+     * SQLITE_FLOAT (real value persisted). Don't relax this — fix the
+     * contract in persona_eval.c if it ever drifts. */
+    sqlite3_stmt *st = NULL;
+    sqlite3_prepare_v2(db,
+                       "SELECT p_seth_at_send FROM production_outcomes "
+                       "WHERE target='+15553334444'",
+                       -1, &st, NULL);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_type(st, 0), SQLITE_FLOAT);
+    double stored = sqlite3_column_double(st, 0);
+    HU_ASSERT(stored > p_seth - 1e-6 && stored < p_seth + 1e-6);
+    sqlite3_finalize(st);
+
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+#endif /* HU_ENABLE_SQLITE */
+
 /* R5.1 spec name alias — the auditor flagged that the original
  * spec name `inbound_after_outbound_records_latency` wasn't shipped
  * (the test is in test_dpo.c under a different name). Add an alias
@@ -187,8 +291,10 @@ void run_agent_tests(void) {
     HU_TEST_SUITE("agent");
     HU_RUN_TEST(agent_init_with_persona_eval_model_present_loads_it);
     HU_RUN_TEST(agent_init_with_missing_model_proceeds_without_failure);
+    HU_RUN_TEST(persona_eval_score_never_returns_negative);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(record_outbound_with_p_seth_persists_column);
+    HU_RUN_TEST(dpo_record_with_score_0_5_persists_real_value_not_null);
     HU_RUN_TEST(inbound_after_outbound_records_latency);
 #endif
 }
