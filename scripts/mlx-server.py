@@ -59,7 +59,7 @@ import json
 import os
 import sys
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Paths to look for gemma-realtime, in priority order.
 GEMMA_RT_PATHS = [
@@ -237,6 +237,7 @@ def _chat_completion_inline(body):
     if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
         try:
             from mlx_lm import generate
+            import mlx.core as mx
             tok = _MLX_TOKENIZER
             if hasattr(tok, "apply_chat_template"):
                 prompt = tok.apply_chat_template(
@@ -247,6 +248,8 @@ def _chat_completion_inline(body):
                     f"{m.get('role', 'user')}: {m.get('content', '')}"
                     for m in messages
                 )
+            # Single-threaded HTTPServer means we're on the main thread
+            # where load() initialized the GPU stream. Direct generate works.
             text = generate(
                 _MLX_MODEL, _MLX_TOKENIZER,
                 prompt=prompt, max_tokens=max_tokens,
@@ -409,7 +412,11 @@ def _run_inline_server(port: int, initial_adapter: str, model_id: str):
                 flush=True,
             )
 
-    srv = ThreadingHTTPServer(("127.0.0.1", port), SwapHandler)
+    # Plain HTTPServer (not Threading) — MLX uses thread-local GPU streams.
+    # ThreadingHTTPServer spawns a thread per request which won't have a
+    # stream initialized; serializing chat + swap requests on one thread is
+    # also the right behavior (you don't want to swap adapters mid-generation).
+    srv = HTTPServer(("127.0.0.1", port), SwapHandler)
     print(
         f"[mlx-server] listening on http://127.0.0.1:{port} "
         f"(adapter swap endpoint: /v1/adapters/swap)",
