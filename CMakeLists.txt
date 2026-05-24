@@ -4558,13 +4558,13 @@ if(APPLE)
     )
 
     # Verify bundle dependencies (no rpath leakage)
+    # Uses scripts/release/verify-bundle.sh as single source of truth
     add_custom_target(verify_bundle_dependencies
         DEPENDS build_app_bundle
         COMMAND ${CMAKE_COMMAND} -E echo "Verifying bundle dependencies..."
-        COMMAND otool -L ${APP_BUNDLE_MACOS}/human | grep -q "@rpath" &&
-            (echo "ERROR: Bundle binary has @rpath entries" && exit 1) ||
-            echo "OK: No @rpath entries detected"
+        COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/release/verify-bundle.sh ${APP_BUNDLE_PATH}
         COMMENT "Verifying macOS app bundle has system-only dependencies..."
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         VERBATIM
     )
 endif()

@@ -170,10 +170,25 @@ static void test_info_plist_has_required_keys(void) {
 }
 
 /**
- * Test that the daemon binary exists in MacOS/ and is executable.
+ * Test that the daemon binary path can be resolved.
+ * This test always passes and validates the path computation logic.
+ */
+static void test_daemon_binary_path_resolves(void) {
+#ifdef __APPLE__
+    char binary_path[512];
+
+    const char *bundle_base = resolve_bundle_path();
+    HU_ASSERT(bundle_base != NULL);
+
+    snprintf(binary_path, sizeof(binary_path), "%s/MacOS/human", bundle_base);
+    HU_ASSERT(strlen(binary_path) > 0);
+#endif
+}
+
+/**
+ * Test that the daemon binary exists and is executable.
  * NOTE: The binary is only present after running the build_app_bundle target.
- * If the binary is missing, the test passes (skipped) as the source bundle
- * skeleton is sufficient for bundle structure validation.
+ * If the binary is missing, this test is skipped (not silently passed).
  */
 static void test_daemon_binary_present_and_executable(void) {
 #ifdef __APPLE__
@@ -185,10 +200,10 @@ static void test_daemon_binary_present_and_executable(void) {
     snprintf(binary_path, sizeof(binary_path), "%s/MacOS/human", bundle_base);
 
     /* Binary is only present after build_app_bundle target runs.
-     * If it doesn't exist yet, silently pass as the test is optional. */
-    if (file_exists(binary_path)) {
-        HU_ASSERT(file_is_executable(binary_path));
-    }
+     * We skip (not silently pass) if the binary hasn't been built. */
+    HU_SKIP_IF(!file_exists(binary_path),
+               "Daemon binary not built; requires build_app_bundle target");
+    HU_ASSERT(file_is_executable(binary_path));
 #endif
 }
 
@@ -206,5 +221,6 @@ void run_app_bundle_structure_tests(void) {
     HU_RUN_TEST(test_info_plist_has_required_keys);
 
     /* Daemon binary */
+    HU_RUN_TEST(test_daemon_binary_path_resolves);
     HU_RUN_TEST(test_daemon_binary_present_and_executable);
 }
