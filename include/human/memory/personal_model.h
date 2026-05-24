@@ -199,6 +199,18 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
                                                    const struct hu_persona_overlay *overlay,
                                                    char *buf, size_t cap);
 
+/* Sprint B.8 wire — set the identity graph used by the prompt builder
+ * to surface cross-handle merge candidates ("IDENTITY: \"alice@new\"
+ * may be same person as Alice"). Caller retains ownership; passing
+ * NULL clears.
+ *
+ * Like hu_reaction_handler_set_identity_graph, this is a process-
+ * lifetime borrow stored in a file-scope static. Single-threaded
+ * daemon → no lock needed. The graph type is treated as opaque here
+ * via void* to keep identity_resolver.h out of personal_model.h's
+ * dep tree; callers MUST pass a (hu_identity_graph_t *). */
+void hu_personal_model_set_identity_graph(const void *graph);
+
 /* Track D D2.2 — acknowledgment-directive variant telemetry.
  *
  * Every time the prompt builder fires the recently-completed

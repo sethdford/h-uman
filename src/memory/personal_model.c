@@ -1,6 +1,9 @@
 #include "human/memory/personal_model.h"
 #include "human/memory/anticipatory.h"
+#include "human/memory/causal_attribution.h"
 #include "human/memory/emotional_context.h"
+#include "human/memory/identity_continuity.h"
+#include "human/memory/identity_resolver.h" /* hu_identity_graph_t for the setter borrow */
 #include "human/memory/minja_guard.h"
 #include "human/persona.h"
 #include "human/persona/social_insights.h"
@@ -25,6 +28,17 @@
  * quarantine queue. On-disk struct size grew; the existing version-mismatch
  * path in the loader resets the model rather than partial-reads. */
 #define HU_PM_VERSION 5u
+
+/* Sprint B.8 wire — borrowed identity graph pointer. Set by daemon at
+ * startup via hu_personal_model_set_identity_graph(&g_identity_graph).
+ * Single-threaded daemon → no lock needed. NULL means "no graph yet"
+ * (first-run path) and the prompt builder silently skips the
+ * IDENTITY block. */
+static const hu_identity_graph_t *s_identity_graph_for_prompt = NULL;
+
+void hu_personal_model_set_identity_graph(const void *graph) {
+    s_identity_graph_for_prompt = (const hu_identity_graph_t *)graph;
+}
 
 void hu_personal_model_init(hu_personal_model_t *model) {
     if (!model)
@@ -825,8 +839,35 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
                 append_fmt(buf, cap, &n, "%s\n", ant_buf);
                 detail = true;
             }
+
+            /* Sprint B.6 wire — surface causal attribution ("what
+             * works with this contact?"). Cheap aggregate; renders
+             * only when total_reactions > 0. Same now=0 semantics. */
+            hu_causal_attribution_summary_t cas;
+            size_t cas_count = hu_causal_attribution_summarize(model, h, &cas);
+            if (cas_count > 0) {
+                char cas_buf[256];
+                size_t cas_n = hu_causal_attribution_render(h, &cas, 0, cas_buf, sizeof(cas_buf));
+                if (cas_n > 0) {
+                    append_fmt(buf, cap, &n, "%s\n", cas_buf);
+                    detail = true;
+                }
+            }
         }
 #undef HU_EMOCTX_MAX_DISTINCT_CONTACTS
+    }
+
+    /* Sprint B.8 wire — one-shot identity-merge suggestion. Surfaces
+     * at most one candidate per prompt build. Skips silently when no
+     * graph is wired (first-run path). */
+    if (s_identity_graph_for_prompt) {
+        char ident_buf[256];
+        size_t ident_n = hu_identity_continuity_suggest(model, s_identity_graph_for_prompt,
+                                                        ident_buf, sizeof(ident_buf));
+        if (ident_n > 0) {
+            append_fmt(buf, cap, &n, "%s\n", ident_buf);
+            detail = true;
+        }
     }
 
     if (!detail)

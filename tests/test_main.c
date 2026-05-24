@@ -376,8 +376,9 @@ void run_inner_thoughts_tests(void);
 void run_weather_awareness_tests(void);
 void run_timing_tests(void);
 void run_calibration_tests(void);
-void run_calibration_reactions_tests(void);
-void run_predictive_drafts_tests(void);
+/* run_calibration_reactions_tests + run_predictive_drafts_tests
+ * forward-declared earlier (line ~95). Duplicates removed
+ * 2026-05-24 — they caused both suites to run twice. */
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
 void run_activation_steering_tests(void);
@@ -1154,8 +1155,8 @@ int main(int argc, char **argv) {
     run_weather_awareness_tests();
     run_timing_tests();
     run_calibration_tests();
-    run_calibration_reactions_tests();
-    run_predictive_drafts_tests();
+    /* run_calibration_reactions_tests + run_predictive_drafts_tests
+     * called earlier (line ~881). Duplicates removed 2026-05-24. */
     run_behavioral_clone_tests();
     run_governor_tests();
     run_activation_steering_tests();

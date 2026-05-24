@@ -2706,6 +2706,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_error_t ie = hu_identity_load(&g_identity_graph, ident_path);
             if (ie == HU_OK) {
                 hu_reaction_handler_set_identity_graph(&g_identity_graph);
+                /* Sprint B.8 wire — share the same graph borrow with the
+                 * prompt builder so the IDENTITY suggestion block fires. */
+                hu_personal_model_set_identity_graph(&g_identity_graph);
                 g_identity_graph_loaded = true;
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "identity graph loaded: %zu contacts from %s",
@@ -13291,6 +13294,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * handler doesn't hold a stale pointer if the process ever live-reloads. */
     if (g_identity_graph_loaded) {
         hu_reaction_handler_set_identity_graph(NULL);
+        hu_personal_model_set_identity_graph(NULL); /* B.8 teardown */
         g_identity_graph_loaded = false;
     }
     if (agent && agent->w14_scheduler) {
