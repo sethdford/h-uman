@@ -276,6 +276,23 @@ static void test_generate_null_args_return_invalid(void) {
                  (int)HU_ERR_INVALID_ARGUMENT);
 }
 
+/* B1 provider-override mechanism: setter accepts NULL, empty, and a real
+ * name without crashing; subsequent calls revert when cleared. There's
+ * no public getter for the override slot, so the contract here is
+ * "calling the setter in these patterns must not crash, must not leak,
+ * and must remain safe across repeated invocations." A failing
+ * implementation (e.g. unbounded strcpy) would crash under ASan. */
+static void test_set_provider_override_accepts_null_empty_and_name(void) {
+    /* Pattern users hit on the CLI: --provider gemini → run → reset. */
+    hu_predictive_drafts_set_provider_override("gemini");
+    hu_predictive_drafts_set_provider_override(NULL); /* CLI restore on exit */
+    hu_predictive_drafts_set_provider_override("");   /* CLI restore on no override */
+    /* Repeated set with a much longer name should truncate, not overflow. */
+    hu_predictive_drafts_set_provider_override("a_very_long_provider_name_designed_to_overflow_the_"
+                                               "64_byte_static_buffer_used_for_storage");
+    hu_predictive_drafts_set_provider_override(NULL);
+}
+
 void run_predictive_drafts_tests(void) {
     HU_TEST_SUITE("predictive_drafts");
 
@@ -304,4 +321,5 @@ void run_predictive_drafts_tests(void) {
 
     HU_RUN_TEST(test_generate_no_grounding_returns_not_found);
     HU_RUN_TEST(test_generate_null_args_return_invalid);
+    HU_RUN_TEST(test_set_provider_override_accepts_null_empty_and_name);
 }
