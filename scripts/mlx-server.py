@@ -283,6 +283,8 @@ def _chat_completion_inline(body):
     # Apply the model's chat template if the tokenizer supports it; else
     # fall back to a simple concatenation. Either way produces a prompt
     # string suitable for generate().
+    prompt_tokens = 0
+    completion_tokens = 0
     if _MLX_MODEL is not None and _MLX_TOKENIZER is not None:
         try:
             from mlx_lm import generate
@@ -303,12 +305,28 @@ def _chat_completion_inline(body):
                 _MLX_MODEL, _MLX_TOKENIZER,
                 prompt=prompt, max_tokens=max_tokens,
             )
+            # Phase 0.1 — honest token accounting. Without this, every
+            # bench-gemma-perf.py run against the inline path reports
+            # tps=0 because completion_tokens=0. The tokenizer's
+            # encode() is the same one apply_chat_template used, so the
+            # counts are the actual decoded tokens (not an estimate).
+            try:
+                prompt_tokens = len(tok.encode(prompt))
+            except Exception:
+                prompt_tokens = 0
+            try:
+                # text is the assistant reply only — generate() returns
+                # the continuation, not prompt + continuation.
+                completion_tokens = len(tok.encode(text))
+            except Exception:
+                completion_tokens = 0
         except Exception as exc:
             print(f"[mlx-server] chat generate failed: {exc}", flush=True)
             return 500, {"error": f"generate failed: {exc}"}
     else:
         # No real model loaded — return a deterministic stub so the
-        # transport contract is still testable.
+        # transport contract is still testable. Token counts stay 0 in
+        # this branch; bench callers can detect stub mode by health probe.
         last = messages[-1].get("content", "") if messages else ""
         text = f"[stub] echoing {len(last)} chars from last user message"
 
@@ -321,7 +339,11 @@ def _chat_completion_inline(body):
             "message": {"role": "assistant", "content": text},
             "finish_reason": "stop",
         }],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
     }
 
 

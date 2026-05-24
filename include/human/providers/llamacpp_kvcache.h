@@ -29,12 +29,21 @@
 
 #include "human/core/error.h"
 
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 
 typedef struct hu_llamacpp_kvcache {
     uint64_t system_prompt_hash; /* 0 -> empty slot */
-    int32_t  n_past_system;      /* token count consumed by the prefix */
+    int32_t n_past_system;       /* token count consumed by the prefix */
+    /* Phase 0.3 — hit-rate telemetry. Incremented inside lookup_system.
+     * Atomic so a future /health endpoint or metrics scraper on a
+     * different thread can read without tearing. The chat path itself
+     * is already serialized per provider context (see compatible.c
+     * g_compatible_chat_lock for the analogous discipline), so these
+     * are write-mostly from one thread + read-rarely from another. */
+    _Atomic uint64_t hits;
+    _Atomic uint64_t misses;
 } hu_llamacpp_kvcache_t;
 
 hu_error_t hu_llamacpp_kvcache_init(hu_llamacpp_kvcache_t *cache);
@@ -42,20 +51,26 @@ hu_error_t hu_llamacpp_kvcache_init(hu_llamacpp_kvcache_t *cache);
 /* Record that `system_prompt` was decoded into the llama_context and the
  * cursor is now at `n_past_system`. Overwrites any prior slot. */
 hu_error_t hu_llamacpp_kvcache_record_system(hu_llamacpp_kvcache_t *cache,
-                                             const char *system_prompt,
-                                             size_t system_prompt_len,
+                                             const char *system_prompt, size_t system_prompt_len,
                                              int32_t n_past_system);
 
 /* Look up `system_prompt`. On hit: HU_OK + *out_n_past_system set.
  * On miss: HU_ERR_NOT_FOUND, *out_n_past_system left untouched. */
 hu_error_t hu_llamacpp_kvcache_lookup_system(hu_llamacpp_kvcache_t *cache,
-                                             const char *system_prompt,
-                                             size_t system_prompt_len,
+                                             const char *system_prompt, size_t system_prompt_len,
                                              int32_t *out_n_past_system);
 
 void hu_llamacpp_kvcache_reset(hu_llamacpp_kvcache_t *cache);
 void hu_llamacpp_kvcache_free(hu_llamacpp_kvcache_t *cache);
 
 uint64_t hu_llamacpp_kvcache_fnv1a(const char *data, size_t len);
+
+/* Phase 0.3 — telemetry getters. Return 0 if `cache` is NULL so a future
+ * metrics aggregator can iterate over providers without null-checking.
+ * Reads are relaxed-ordered atomics: counters are monotonically
+ * incrementing, so a torn read would only ever produce a stale-low
+ * value — never a value larger than the true count. */
+uint64_t hu_llamacpp_kvcache_hits(const hu_llamacpp_kvcache_t *cache);
+uint64_t hu_llamacpp_kvcache_misses(const hu_llamacpp_kvcache_t *cache);
 
 #endif /* HU_LLAMACPP_KVCACHE_H */
