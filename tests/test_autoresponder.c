@@ -323,6 +323,99 @@ static void test_log_escapes_quotes_and_backslashes(void) {
     HU_ASSERT_TRUE(strstr(line, "\\\\there") != NULL);
 }
 
+/* ── config-file loader (D1) ─────────────────────────────────────────── */
+
+static void write_tmp(const char *path, const char *content) {
+    FILE *fp = fopen(path, "wb");
+    if (!fp)
+        return;
+    fwrite(content, 1, strlen(content), fp);
+    fclose(fp);
+}
+
+static void test_loader_missing_file_returns_not_found(void) {
+    hu_autoresponder_config_t cfg;
+    hu_error_t err =
+        hu_autoresponder_config_load_from_file("/tmp/hu_does_not_exist_definitely_xyz.json", &cfg);
+    HU_ASSERT_EQ((int)err, (int)HU_ERR_NOT_FOUND);
+    /* Output left disabled (safe default). */
+    HU_ASSERT_TRUE(!cfg.enabled);
+    HU_ASSERT_EQ((int)cfg.allowlist_count, 0);
+    HU_ASSERT_EQ((int)cfg.schedule_count, 0);
+}
+
+static void test_loader_valid_json_populates_struct(void) {
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_ar_loader_test_%d.json", (int)getpid());
+    write_tmp(path, "{\n"
+                    "  \"enabled\": true,\n"
+                    "  \"user_display_name\": \"Seth\",\n"
+                    "  \"allowlist\": [\"+15551234567\", \"alice@example.com\"],\n"
+                    "  \"schedules\": [\n"
+                    "    { \"start\": \"22:00\", \"end\": \"07:00\", \"days\": \"daily\" }\n"
+                    "  ]\n"
+                    "}\n");
+    hu_autoresponder_config_t cfg;
+    hu_error_t err = hu_autoresponder_config_load_from_file(path, &cfg);
+    unlink(path);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(cfg.enabled);
+    HU_ASSERT_STR_EQ(cfg.user_display_name, "Seth");
+    HU_ASSERT_EQ((int)cfg.allowlist_count, 2);
+    HU_ASSERT_STR_EQ(cfg.allowlist[0], "+15551234567");
+    HU_ASSERT_STR_EQ(cfg.allowlist[1], "alice@example.com");
+    HU_ASSERT_EQ((int)cfg.schedule_count, 1);
+    HU_ASSERT_EQ((int)cfg.dnd_schedule[0].start_minute_of_day, 22 * 60);
+    HU_ASSERT_EQ((int)cfg.dnd_schedule[0].end_minute_of_day, 7 * 60);
+    HU_ASSERT_EQ((int)cfg.dnd_schedule[0].days_of_week_mask, HU_DOW_MASK_DAILY);
+}
+
+static void test_loader_weekdays_mask_parsed(void) {
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_ar_loader_dow_test_%d.json", (int)getpid());
+    write_tmp(path,
+              "{ \"enabled\": true, \"user_display_name\": \"X\","
+              " \"allowlist\": [\"a\"],"
+              " \"schedules\": [{\"start\":\"09:00\",\"end\":\"17:00\",\"days\":\"weekdays\"}] }");
+    hu_autoresponder_config_t cfg;
+    HU_ASSERT_EQ((int)hu_autoresponder_config_load_from_file(path, &cfg), (int)HU_OK);
+    unlink(path);
+    HU_ASSERT_EQ((int)cfg.dnd_schedule[0].days_of_week_mask, HU_DOW_MASK_WEEKDAYS);
+}
+
+static void test_loader_named_days_csv_parsed(void) {
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_ar_loader_csv_test_%d.json", (int)getpid());
+    write_tmp(
+        path,
+        "{ \"enabled\": true, \"user_display_name\": \"X\","
+        " \"allowlist\": [\"a\"],"
+        " \"schedules\": [{\"start\":\"09:00\",\"end\":\"17:00\",\"days\":\"mon,wed,fri\"}] }");
+    hu_autoresponder_config_t cfg;
+    HU_ASSERT_EQ((int)hu_autoresponder_config_load_from_file(path, &cfg), (int)HU_OK);
+    unlink(path);
+    /* Mon=2, Wed=8, Fri=32 → 42 (0x2A). */
+    HU_ASSERT_EQ((int)cfg.dnd_schedule[0].days_of_week_mask, 0x2A);
+}
+
+static void test_loader_malformed_returns_parse_error(void) {
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/hu_ar_loader_bad_test_%d.json", (int)getpid());
+    write_tmp(path, "not-json-at-all just bytes");
+    hu_autoresponder_config_t cfg;
+    hu_error_t err = hu_autoresponder_config_load_from_file(path, &cfg);
+    unlink(path);
+    HU_ASSERT_EQ((int)err, (int)HU_ERR_PARSE);
+}
+
+static void test_loader_null_args_return_invalid(void) {
+    hu_autoresponder_config_t cfg;
+    HU_ASSERT_EQ((int)hu_autoresponder_config_load_from_file(NULL, &cfg),
+                 (int)HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ((int)hu_autoresponder_config_load_from_file("/tmp/x", NULL),
+                 (int)HU_ERR_INVALID_ARGUMENT);
+}
+
 void run_autoresponder_tests(void) {
     HU_TEST_SUITE("autoresponder");
     /* allowlist */
@@ -353,4 +446,11 @@ void run_autoresponder_tests(void) {
     /* log */
     HU_RUN_TEST(test_log_writes_parseable_json_line);
     HU_RUN_TEST(test_log_escapes_quotes_and_backslashes);
+    /* loader (D1) */
+    HU_RUN_TEST(test_loader_missing_file_returns_not_found);
+    HU_RUN_TEST(test_loader_valid_json_populates_struct);
+    HU_RUN_TEST(test_loader_weekdays_mask_parsed);
+    HU_RUN_TEST(test_loader_named_days_csv_parsed);
+    HU_RUN_TEST(test_loader_malformed_returns_parse_error);
+    HU_RUN_TEST(test_loader_null_args_return_invalid);
 }

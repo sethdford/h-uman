@@ -167,6 +167,31 @@ static size_t g_classify_model_len = 29;
 static hu_identity_graph_t g_identity_graph;
 static bool g_identity_graph_loaded = false;
 
+/* Sprint B.3 D1 — daemon-loaded autoresponder config.
+ *
+ * Per-channel autoresponder wire-up is deferred (each channel's inbound
+ * dispatch needs its own design decisions: dedup vs human_active_recently,
+ * channel-specific reply paths, etc.). The loader is wired NOW so the
+ * config surface is live and per-channel integration becomes one-line
+ * gating calls in follow-up commits.
+ *
+ * Loaded from ~/.human/autoresponder.json at startup. Missing file is the
+ * first-run default (info-level log per silent-config-gated-subsystems
+ * rule). */
+#include "human/autoresponder.h"
+static hu_autoresponder_config_t g_autoresponder_cfg;
+static bool g_autoresponder_loaded = false;
+
+/* Borrowed accessor for future per-channel integration. Returns NULL when
+ * the config wasn't loaded, autoresponder is disabled, or allowlist is
+ * empty (in which case there's nothing for callers to do). */
+__attribute__((unused)) static const hu_autoresponder_config_t *daemon_autoresponder_config(void) {
+    if (!g_autoresponder_loaded || !g_autoresponder_cfg.enabled ||
+        g_autoresponder_cfg.allowlist_count == 0)
+        return NULL;
+    return &g_autoresponder_cfg;
+}
+
 /* Emotion detection: test builds use heuristic-only (no LLM), production uses hybrid
  * routing via g_classify_provider when available. May appear unreferenced in test builds
  * because some call sites are behind #ifndef HU_IS_TEST. */
@@ -2698,6 +2723,43 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                              "identity graph: load failed (err=%d) for %s — "
                              "cross-channel canonicalization disabled",
                              (int)ie, ident_path);
+            }
+        }
+    }
+
+    /* Sprint B.3 D1 — load the autoresponder config from
+     * ~/.human/autoresponder.json. Per silent-config-gated-subsystems
+     * rule: log once at info level whether config was loaded, and on
+     * disable explain how to enable. */
+    {
+        const char *home_ar = getenv("HOME");
+        char ar_path[1024];
+        if (home_ar && home_ar[0] &&
+            snprintf(ar_path, sizeof(ar_path), "%s/.human/autoresponder.json", home_ar) > 0) {
+            hu_error_t are = hu_autoresponder_config_load_from_file(ar_path, &g_autoresponder_cfg);
+            if (are == HU_OK && g_autoresponder_cfg.enabled) {
+                g_autoresponder_loaded = true;
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: loaded — %zu allowlist entries, %zu schedules, "
+                            "user=\"%s\"",
+                            g_autoresponder_cfg.allowlist_count, g_autoresponder_cfg.schedule_count,
+                            g_autoresponder_cfg.user_display_name[0]
+                                ? g_autoresponder_cfg.user_display_name
+                                : "(unset)");
+            } else if (are == HU_OK && !g_autoresponder_cfg.enabled) {
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: config present but enabled=false (set "
+                            "\"enabled\":true in %s to activate)",
+                            ar_path);
+            } else if (are == HU_ERR_NOT_FOUND) {
+                hu_log_info("human", agent ? agent->observer : NULL,
+                            "autoresponder: no file at %s — DND auto-reply disabled "
+                            "(create the file to enable)",
+                            ar_path);
+            } else {
+                hu_log_error("human", agent ? agent->observer : NULL,
+                             "autoresponder: load failed (err=%d) for %s — disabled", (int)are,
+                             ar_path);
             }
         }
     }

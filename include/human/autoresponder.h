@@ -167,6 +167,29 @@ hu_error_t hu_autoresponder_log_reply(const hu_autoresponder_config_t *cfg,
                                       const char *contact_handle, const char *channel,
                                       const char *reply_text, int64_t now_unix);
 
+/* Load an autoresponder config from a JSON file (typically
+ * ~/.human/autoresponder.json). The file format mirrors the struct:
+ *
+ *   {
+ *     "enabled": true,
+ *     "user_display_name": "Seth",
+ *     "allowlist": ["+15551234567", "alice@example.com"],
+ *     "schedules": [
+ *       { "start": "22:00", "end": "07:00", "days": "daily" }
+ *     ],
+ *     "log_path": "/Users/seth/.human/autoresponder.log"
+ *   }
+ *
+ * Time strings are "HH:MM" (24h, local). "days" accepts: "daily",
+ * "weekdays", "weekends", or a comma-separated list like "mon,wed,fri".
+ *
+ * Returns:
+ *   HU_OK              — config populated
+ *   HU_ERR_NOT_FOUND   — file does not exist (out is zeroed, enabled=false)
+ *   HU_ERR_PARSE       — file exists but isn't valid JSON / shape
+ *   HU_ERR_IO          — file exists but read failed */
+hu_error_t hu_autoresponder_config_load_from_file(const char *path, hu_autoresponder_config_t *out);
+
 #ifdef __cplusplus
 }
 #endif

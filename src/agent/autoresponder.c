@@ -446,3 +446,254 @@ hu_error_t hu_autoresponder_generate_reply(hu_allocator_t *alloc,
     hu_config_deinit(&loaded_cfg);
     return result;
 }
+
+/* ── tiny JSON probe (substring-based, no parser dep) ────────────────
+ *
+ * Mirrors src/persona/social_insights.c::find_key — these helpers are
+ * inlined rather than shared because each TU has slightly different
+ * shape expectations and the helpers are tiny. Replace with a real
+ * parser when 3rd consumer appears. */
+
+static const char *ar_find_key(const char *body, const char *key) {
+    if (!body || !key)
+        return NULL;
+    char needle[64];
+    int n = snprintf(needle, sizeof(needle), "\"%s\":", key);
+    if (n < 0 || (size_t)n >= sizeof(needle))
+        return NULL;
+    const char *p = strstr(body, needle);
+    if (!p)
+        return NULL;
+    p += (size_t)n;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    return p;
+}
+
+static size_t ar_extract_str_field(const char *obj, const char *key, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    const char *p = ar_find_key(obj, key);
+    if (!p || *p != '"')
+        return 0;
+    p++;
+    size_t i = 0;
+    while (*p && *p != '"' && i + 1 < cap) {
+        if (*p == '\\' && p[1]) {
+            /* simple escape: copy the next char as-is (handles \" \\ \/ \n) */
+            char c = p[1];
+            if (c == 'n')
+                out[i++] = '\n';
+            else if (c == 't')
+                out[i++] = '\t';
+            else
+                out[i++] = c;
+            p += 2;
+        } else {
+            out[i++] = *p++;
+        }
+    }
+    out[i] = '\0';
+    return i;
+}
+
+static bool ar_extract_bool_field(const char *obj, const char *key, bool default_val) {
+    const char *p = ar_find_key(obj, key);
+    if (!p)
+        return default_val;
+    if (strncmp(p, "true", 4) == 0)
+        return true;
+    if (strncmp(p, "false", 5) == 0)
+        return false;
+    return default_val;
+}
+
+/* Parse "HH:MM" → minute-of-day. Returns -1 on parse failure. */
+static int parse_hhmm(const char *s) {
+    if (!s)
+        return -1;
+    int h = 0, m = 0;
+    if (sscanf(s, "%d:%d", &h, &m) != 2)
+        return -1;
+    if (h < 0 || h > 23 || m < 0 || m > 59)
+        return -1;
+    return h * 60 + m;
+}
+
+/* Parse "daily" / "weekdays" / "weekends" / "mon,wed,fri" / "0,1,5"
+ * → days_of_week_mask. Returns 0 (no days) on failure. */
+static uint8_t parse_days_mask(const char *s) {
+    if (!s || !*s)
+        return 0;
+    if (strcasecmp(s, "daily") == 0)
+        return HU_DOW_MASK_DAILY;
+    if (strcasecmp(s, "weekdays") == 0)
+        return HU_DOW_MASK_WEEKDAYS;
+    if (strcasecmp(s, "weekends") == 0)
+        return HU_DOW_MASK_WEEKENDS;
+    uint8_t mask = 0;
+    /* Token-by-token, comma-separated. */
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%s", s);
+    char *save = NULL;
+    for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        while (*tok == ' ')
+            tok++;
+        if (!*tok)
+            continue;
+        int dow = -1;
+        if (strncasecmp(tok, "sun", 3) == 0)
+            dow = 0;
+        else if (strncasecmp(tok, "mon", 3) == 0)
+            dow = 1;
+        else if (strncasecmp(tok, "tue", 3) == 0)
+            dow = 2;
+        else if (strncasecmp(tok, "wed", 3) == 0)
+            dow = 3;
+        else if (strncasecmp(tok, "thu", 3) == 0)
+            dow = 4;
+        else if (strncasecmp(tok, "fri", 3) == 0)
+            dow = 5;
+        else if (strncasecmp(tok, "sat", 3) == 0)
+            dow = 6;
+        else if (isdigit((unsigned char)*tok))
+            dow = atoi(tok);
+        if (dow >= 0 && dow <= 6)
+            mask |= (uint8_t)(1u << dow);
+    }
+    return mask;
+}
+
+/* Walk the "allowlist": [...] array and fill cfg->allowlist. Lenient:
+ * tolerates whitespace and trailing commas; stops at the matching ']'. */
+static void parse_allowlist_array(const char *array_start, hu_autoresponder_config_t *cfg) {
+    if (!array_start || *array_start != '[')
+        return;
+    const char *p = array_start + 1;
+    while (*p && *p != ']' && cfg->allowlist_count < HU_AUTORESPONDER_MAX_ALLOWLIST) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
+            p++;
+        if (*p == ']')
+            break;
+        if (*p != '"')
+            break;
+        p++;
+        size_t i = 0;
+        while (*p && *p != '"' && i + 1 < HU_AUTORESPONDER_HANDLE_MAX) {
+            cfg->allowlist[cfg->allowlist_count][i++] = *p++;
+        }
+        cfg->allowlist[cfg->allowlist_count][i] = '\0';
+        cfg->allowlist_count++;
+        if (*p == '"')
+            p++;
+    }
+}
+
+/* Walk the "schedules": [{...},{...}] array. Each object should carry
+ * "start", "end", and "days" keys. */
+static void parse_schedules_array(const char *array_start, hu_autoresponder_config_t *cfg) {
+    if (!array_start || *array_start != '[')
+        return;
+    const char *p = array_start + 1;
+    while (*p && *p != ']' && cfg->schedule_count < HU_AUTORESPONDER_MAX_SCHEDULES) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
+            p++;
+        if (*p == ']')
+            break;
+        if (*p != '{')
+            break;
+        /* Find the matching '}' — naive depth-1 scan (we don't expect
+         * nested objects inside a schedule entry). */
+        const char *obj_start = p;
+        int depth = 1;
+        p++;
+        while (*p && depth > 0) {
+            if (*p == '{')
+                depth++;
+            else if (*p == '}')
+                depth--;
+            p++;
+        }
+        size_t obj_len = (size_t)(p - obj_start);
+        char obj_buf[256];
+        if (obj_len >= sizeof(obj_buf))
+            continue;
+        memcpy(obj_buf, obj_start, obj_len);
+        obj_buf[obj_len] = '\0';
+
+        char start_str[16] = {0};
+        char end_str[16] = {0};
+        char days_str[64] = {0};
+        ar_extract_str_field(obj_buf, "start", start_str, sizeof(start_str));
+        ar_extract_str_field(obj_buf, "end", end_str, sizeof(end_str));
+        ar_extract_str_field(obj_buf, "days", days_str, sizeof(days_str));
+
+        int start_mod = parse_hhmm(start_str);
+        int end_mod = parse_hhmm(end_str);
+        uint8_t days = parse_days_mask(days_str[0] ? days_str : "daily");
+        if (start_mod < 0 || end_mod < 0 || days == 0)
+            continue;
+
+        cfg->dnd_schedule[cfg->schedule_count].start_minute_of_day = (int16_t)start_mod;
+        cfg->dnd_schedule[cfg->schedule_count].end_minute_of_day = (int16_t)end_mod;
+        cfg->dnd_schedule[cfg->schedule_count].days_of_week_mask = days;
+        cfg->schedule_count++;
+    }
+}
+
+hu_error_t hu_autoresponder_config_load_from_file(const char *path,
+                                                  hu_autoresponder_config_t *out) {
+    if (!path || !*path || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return HU_ERR_NOT_FOUND;
+
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return HU_ERR_IO;
+    }
+    long fsz = ftell(fp);
+    if (fsz < 2 || fsz > 1024 * 1024) {
+        fclose(fp);
+        return HU_ERR_PARSE;
+    }
+    rewind(fp);
+    char *body = (char *)malloc((size_t)fsz + 1);
+    if (!body) {
+        fclose(fp);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    size_t rd = fread(body, 1, (size_t)fsz, fp);
+    fclose(fp);
+    if (rd != (size_t)fsz) {
+        free(body);
+        return HU_ERR_IO;
+    }
+    body[fsz] = '\0';
+
+    /* Cheap shape check: must contain at least one '{' AND one '}'. */
+    if (!strchr(body, '{') || !strchr(body, '}')) {
+        free(body);
+        return HU_ERR_PARSE;
+    }
+
+    out->enabled = ar_extract_bool_field(body, "enabled", false);
+    ar_extract_str_field(body, "user_display_name", out->user_display_name,
+                         sizeof(out->user_display_name));
+    ar_extract_str_field(body, "log_path", out->log_path, sizeof(out->log_path));
+
+    const char *allow = ar_find_key(body, "allowlist");
+    if (allow)
+        parse_allowlist_array(allow, out);
+
+    const char *scheds = ar_find_key(body, "schedules");
+    if (scheds)
+        parse_schedules_array(scheds, out);
+
+    free(body);
+    return HU_OK;
+}
