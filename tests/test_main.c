@@ -702,6 +702,7 @@ void run_contact_narrative_tests(void);
 void run_causal_attribution_tests(void);
 void run_identity_continuity_tests(void);
 void run_audio_emotion_tests(void);
+void run_style_adapter_tests(void);
 void run_style_critique_patterns_tests(void);
 void run_style_self_critique_tests(void);
 void run_personal_model_simulation_tests(void);
@@ -1468,6 +1469,7 @@ int main(int argc, char **argv) {
     run_causal_attribution_tests();
     run_identity_continuity_tests();
     run_audio_emotion_tests();
+    run_style_adapter_tests();
     run_style_critique_patterns_tests();
     run_style_self_critique_tests();
     run_personal_model_simulation_tests();

@@ -7,6 +7,7 @@
 #include "human/memory/minja_guard.h"
 #include "human/persona.h"
 #include "human/persona/social_insights.h"
+#include "human/persona/style_adapter.h"
 #include "human/platform.h"
 #include <ctype.h>
 #include <errno.h>
@@ -852,6 +853,18 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
                     append_fmt(buf, cap, &n, "%s\n", cas_buf);
                     detail = true;
                 }
+            }
+
+            /* Sprint B B-loop — derive a "STYLE HINT:" line from the
+             * same causal_attribution counts. This is the act-on side
+             * of WHAT WORKS: not just "5 positive / 1 negative" but
+             * "keep current tone" / "try shorter, warmer." Renders
+             * silently to 0 below the MIN_REACTIONS=3 floor. */
+            char style_buf[256];
+            size_t style_n = hu_style_adapter_render_hint(model, h, style_buf, sizeof(style_buf));
+            if (style_n > 0) {
+                append_fmt(buf, cap, &n, "%s\n", style_buf);
+                detail = true;
             }
         }
 #undef HU_EMOCTX_MAX_DISTINCT_CONTACTS
