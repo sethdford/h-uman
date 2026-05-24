@@ -340,7 +340,11 @@ GATE_REPORT="$LOG_DIR/gate_report.json"
 # for the metadata judge; we pass cosmetic paths since the fidelity
 # judge ignores them.
 DUMMY_BASE="$LOG_DIR/dummy_baseline.safetensors"
-cp "$CANDIDATE_ADAPTER" "$DUMMY_BASE"
+# mlx_lm.lora outputs CANDIDATE_ADAPTER as a directory (with the
+# .safetensors suffix on the dir name), so use -r for the dummy copy.
+# The fidelity judge ignores the adapter paths — only the JSONL
+# response sets matter — so even a structurally-different dummy works.
+cp -r "$CANDIDATE_ADAPTER" "$DUMMY_BASE" 2>/dev/null || cp "$CANDIDATE_ADAPTER" "$DUMMY_BASE" 2>/dev/null || touch "$DUMMY_BASE"
 
 python3 "$REPO_ROOT/scripts/m3_eval_adapter.py" \
     --baseline "$DUMMY_BASE" \
