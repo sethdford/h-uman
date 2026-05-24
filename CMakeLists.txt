@@ -891,6 +891,7 @@ set(HU_CORE_SOURCES
     src/agent/response_verifier.c
     src/agent/response_guard.c
     src/agent/response_guard_retry.c
+    src/agent/multimodal_policy.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
@@ -3169,6 +3170,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
+    tests/test_multimodal_policy.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
     tests/test_w8_belief_layer.c

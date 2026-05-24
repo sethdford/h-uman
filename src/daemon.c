@@ -24,6 +24,7 @@
 #include "human/agent/autodream.h"
 #include "human/agent/kv_cache.h"
 #include "human/agent/lora_runner.h"
+#include "human/agent/multimodal_policy.h"
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
@@ -10004,6 +10005,38 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 "agent turn result: err=%s response_len=%zu for %.*s",
                                 hu_error_string(err), response_len,
                                 (int)(key_len > 20 ? 20 : key_len), batch_key);
+                    /* L4 multimodal shadow-logging (2026-05-19).
+                     *
+                     * Run the predicate against the inbound message; log
+                     * the decision but DO NOT change routing. This collects
+                     * production data on tapback-vs-text-vs-voice routing
+                     * so we can calibrate confidence thresholds before
+                     * flipping live. Next round (per
+                     * docs/plans/2026-05-19-sota-round-3-findings.md):
+                     * route on the decision when conf >= 0.85 and channel
+                     * has react vtable.
+                     *
+                     * Scoped to iMessage channel only — other channels
+                     * have different tapback semantics. */
+                    if (err == HU_OK && response && response_len > 0 && ch && ch->channel &&
+                        ch->channel->vtable && ch->channel->vtable->name) {
+                        const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
+                        if (ch_name && strcmp(ch_name, "imessage") == 0 && combined_len > 0) {
+                            hu_mm_decision_t mm = {0};
+                            (void)hu_multimodal_decide(combined, combined_len, &mm);
+                            const char *mod_names[] = {"text", "tapback", "voice", "gif"};
+                            const char *tb_names[] = {"none",  "like",      "love",
+                                                      "laugh", "emphasize", "question"};
+                            if (mm.modality != HU_MM_MODALITY_TEXT) {
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "L4-shadow: would route to %s (kind=%s conf=%.2f "
+                                            "reason=%s) for incoming '%.*s' — sending text anyway",
+                                            mod_names[mm.modality], tb_names[mm.tapback_kind],
+                                            (double)mm.confidence, mm.reason ? mm.reason : "?",
+                                            (int)(combined_len > 60 ? 60 : combined_len), combined);
+                            }
+                        }
+                    }
                     if (err == HU_OK && (!response || response_len == 0)) {
                         g_empty_agent_response_streak++;
                         hu_log_error(

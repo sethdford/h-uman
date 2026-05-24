@@ -324,6 +324,7 @@ void run_validator_chain_cache_tests(void);
 void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
+void run_multimodal_policy_tests(void);
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
 void run_w8_belief_layer_tests(void);
@@ -1091,6 +1092,7 @@ int main(int argc, char **argv) {
     run_daemon_e2e_validator_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
+    run_multimodal_policy_tests();
     run_w6_e2e_adversarial_tests();
     run_w7_memory_facade_tests();
     run_w8_belief_layer_tests();
