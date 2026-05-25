@@ -1309,6 +1309,108 @@ static void test_config_parse_reaction_collection_rejects_relative_chatdb_path(v
     hu_arena_destroy(arena);
 }
 
+/* Phase 1c — `inference` block extension: kv_quant, flash_attn, draft_model
+ * JSON fields bridge to the factory env-var consumers via setenv(...,
+ * overwrite=0). Operator-set env ALWAYS wins; config provides the default.
+ * Tests must unset the env vars first so the "fresh process" precedence
+ * actually exercises. */
+
+static void test_config_inference_kv_quant_bridges_to_env(void) {
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"inference\":{\"kv_quant\":\"q8_0\"}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    const char *got = getenv("HU_LLAMACPP_KV_QUANT");
+    HU_ASSERT_NOT_NULL(got);
+    HU_ASSERT_STR_EQ(got, "q8_0");
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+    hu_arena_destroy(arena);
+}
+
+static void test_config_inference_draft_model_bridges_to_env(void) {
+    unsetenv("HU_LLAMACPP_DRAFT_MODEL");
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"inference\":{\"draft_model\":\"/tmp/draft.gguf\"}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    const char *got = getenv("HU_LLAMACPP_DRAFT_MODEL");
+    HU_ASSERT_NOT_NULL(got);
+    HU_ASSERT_STR_EQ(got, "/tmp/draft.gguf");
+    unsetenv("HU_LLAMACPP_DRAFT_MODEL");
+    hu_arena_destroy(arena);
+}
+
+static void test_config_inference_flash_attn_false_bridges_to_env_off(void) {
+    /* flash_attn defaults to TRUE; only explicit false emits the env
+     * setting (true + unset env = factory default behavior = on). */
+    unsetenv("HU_LLAMACPP_FLASH_ATTN");
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"inference\":{\"flash_attn\":false}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    const char *got = getenv("HU_LLAMACPP_FLASH_ATTN");
+    HU_ASSERT_NOT_NULL(got);
+    HU_ASSERT_STR_EQ(got, "off");
+    unsetenv("HU_LLAMACPP_FLASH_ATTN");
+    hu_arena_destroy(arena);
+}
+
+static void test_config_inference_operator_env_wins_over_config(void) {
+    /* The bridge uses setenv with overwrite=0, so the operator-set env
+     * survives. Pinned because a typo (overwrite=1) would silently
+     * have config override env — backwards from operator expectation. */
+    setenv("HU_LLAMACPP_KV_QUANT", "q4_0", 1);
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"inference\":{\"kv_quant\":\"q8_0\"}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    const char *got = getenv("HU_LLAMACPP_KV_QUANT");
+    HU_ASSERT_NOT_NULL(got);
+    HU_ASSERT_STR_EQ(got, "q4_0"); /* operator wins */
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+    hu_arena_destroy(arena);
+}
+
+static void test_config_inference_absent_block_leaves_env_untouched(void) {
+    unsetenv("HU_LLAMACPP_KV_QUANT");
+    unsetenv("HU_LLAMACPP_FLASH_ATTN");
+    unsetenv("HU_LLAMACPP_DRAFT_MODEL");
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    /* No inference block at all — env vars must stay unset. */
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, "{}", 2), HU_OK);
+    HU_ASSERT_TRUE(getenv("HU_LLAMACPP_KV_QUANT") == NULL);
+    HU_ASSERT_TRUE(getenv("HU_LLAMACPP_FLASH_ATTN") == NULL);
+    HU_ASSERT_TRUE(getenv("HU_LLAMACPP_DRAFT_MODEL") == NULL);
+    hu_arena_destroy(arena);
+}
+
 void run_config_parse_tests(void) {
     HU_TEST_SUITE("Config parse");
     HU_RUN_TEST(test_config_parse_empty_json);
@@ -1332,6 +1434,11 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_string_array_basic);
     HU_RUN_TEST(test_config_parse_string_array_empty);
     HU_RUN_TEST(test_config_parse_string_array_skips_non_strings);
+    HU_RUN_TEST(test_config_inference_kv_quant_bridges_to_env);
+    HU_RUN_TEST(test_config_inference_draft_model_bridges_to_env);
+    HU_RUN_TEST(test_config_inference_flash_attn_false_bridges_to_env_off);
+    HU_RUN_TEST(test_config_inference_operator_env_wins_over_config);
+    HU_RUN_TEST(test_config_inference_absent_block_leaves_env_untouched);
     HU_RUN_TEST(test_config_parse_email_channel);
     HU_RUN_TEST(test_config_parse_imap_channel_smtp);
     HU_RUN_TEST(test_config_parse_imessage_channel);

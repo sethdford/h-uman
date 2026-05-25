@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "config_internal.h"
@@ -289,14 +290,23 @@ static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
     return HU_OK;
 }
 
-/* US-7.7 — `inference` block:
+/* US-7.7 + Phase 1c (Gemma throughput program) — `inference` block:
  *   {
  *     "best_of_n": 4,                  // default 1 (disabled); clamped 0..8
- *     "best_of_n_cost_cap_ms": 1500    // default 0 (no cap); soft wall-clock cap
+ *     "best_of_n_cost_cap_ms": 1500,   // default 0 (no cap); soft wall-clock cap
+ *
+ *     // Phase 1c — Gemma throughput knobs. These mirror the operator
+ *     // env vars consumed by src/providers/factory.c. The parser bridges
+ *     // config → env via setenv(..., overwrite=0) so operator-set env
+ *     // ALWAYS wins. Config supplies the default when env is unset.
+ *     "kv_quant":      "q8_0",   // "fp16" (default) | "q8_0" | "q4_0"
+ *     "flash_attn":    true,     // default true (Mac Metal table-stakes)
+ *     "draft_model":   "/path/to/draft.gguf"  // empty = spec decode off
  *   }
- * The decorator (src/agent/best_of_n.c) only fires when best_of_n >= 2 AND
- * the active provider is "llamacpp". Cloud-provider misconfiguration is
- * surfaced by the doctor warning in src/doctor.c (AC-7.7.3). */
+ *
+ * The decorator (src/agent/best_of_n.c) only fires when best_of_n >= 2
+ * AND the active provider is "llamacpp". Cloud-provider misconfiguration
+ * is surfaced by the doctor warning in src/doctor.c (AC-7.7.3). */
 static hu_error_t parse_inference(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {
     (void)a;
     if (!obj || obj->type != HU_JSON_OBJECT)
@@ -314,6 +324,35 @@ static hu_error_t parse_inference(hu_allocator_t *a, hu_config_t *cfg, const hu_
     if (cap > (double)UINT32_MAX)
         cap = (double)UINT32_MAX;
     cfg->inference.best_of_n_cost_cap_ms = (uint32_t)cap;
+
+    /* Phase 1c — bridge config → env so the existing factory env-var
+     * consumers pick up the values. overwrite=0 means an operator-set
+     * env var ALWAYS wins over the config. Config provides the
+     * persistent default when env is unset.
+     *
+     * Why setenv-and-discard rather than struct fields + getter:
+     *   1. Factory already reads getenv — zero new plumbing
+     *   2. Operators have one source of truth at runtime (the env)
+     *   3. Doctor / CLI status commands read the same env, so the
+     *      reported value matches what the factory actually used
+     *   4. No allocator-owned strings to free at config_deinit
+     */
+    const char *kvq = hu_json_get_string(obj, "kv_quant");
+    if (kvq && *kvq)
+        setenv("HU_LLAMACPP_KV_QUANT", kvq, /*overwrite=*/0);
+    /* flash_attn defaults to TRUE; we only emit FALSE to the env when
+     * the config explicitly disables it. Operator unset + config absent
+     * = factory's true default. Config-true with operator unset = same
+     * (no env emitted = factory default). Config-false + operator unset
+     * = env="off" via this branch. */
+    if (hu_json_object_get(obj, "flash_attn")) {
+        bool fa = hu_json_get_bool(obj, "flash_attn", true);
+        if (!fa)
+            setenv("HU_LLAMACPP_FLASH_ATTN", "off", /*overwrite=*/0);
+    }
+    const char *dm = hu_json_get_string(obj, "draft_model");
+    if (dm && *dm)
+        setenv("HU_LLAMACPP_DRAFT_MODEL", dm, /*overwrite=*/0);
     return HU_OK;
 }
 
