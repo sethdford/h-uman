@@ -1,0 +1,25 @@
+{"prompt": "hey whatup", "channel": "imessage", "context": "greeting"}
+{"prompt": "did u see that article about machine learning", "channel": "imessage", "context": "work-context"}
+{"prompt": "lol that's hilarious", "channel": "imessage", "context": "emoji-reaction"}
+{"prompt": "wanna grab coffee next week", "channel": "imessage", "context": "planning"}
+{"prompt": "im on my way over", "channel": "imessage", "context": "coordination"}
+{"prompt": "that's wild", "channel": "imessage", "context": "emotion"}
+{"prompt": "pretty good, just been working a lot lately", "channel": "imessage", "context": "status"}
+{"prompt": "totally get it, been there myself", "channel": "imessage", "context": "empathy"}
+{"prompt": "can you send me that link", "channel": "imessage", "context": "request"}
+{"prompt": "sounds good to me", "channel": "imessage", "context": "agreement"}
+{"prompt": "yeah i think we should do that", "channel": "imessage", "context": "decision"}
+{"prompt": "honestly i have no idea what's going on", "channel": "imessage", "context": "confusion"}
+{"prompt": "that was so annoying", "channel": "imessage", "context": "complaint"}
+{"prompt": "cool cool i'll let you know", "channel": "imessage", "context": "acknowledgment"}
+{"prompt": "just finished that thing we talked about", "channel": "imessage", "context": "update"}
+{"prompt": "how's that project going", "channel": "imessage", "context": "question"}
+{"prompt": "not sure yet but ill figure it out", "channel": "imessage", "context": "uncertainty"}
+{"prompt": "oh man that reminds me", "channel": "imessage", "context": "association"}
+{"prompt": "absolutely 🙌", "channel": "imessage", "context": "enthusiasm"}
+{"prompt": "same honestly", "channel": "imessage", "context": "agreement-casual"}
+{"prompt": "im gonna head out soon", "channel": "imessage", "context": "departure"}
+{"prompt": "what do you think about that", "channel": "imessage", "context": "opinion"}
+{"prompt": "yeah thats fair", "channel": "imessage", "context": "concession"}
+{"prompt": "just saw your message sorry was busy", "channel": "imessage", "context": "delayed-response"}
+{"prompt": "remind me again what we decided", "channel": "imessage", "context": "memory"}

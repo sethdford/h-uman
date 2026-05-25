@@ -5545,11 +5545,38 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* Seen behavior: model realistic "read then wait" patterns */
 #ifndef HU_IS_TEST
                 if (llm_decides) {
+                    /* US-12 director context-bleed runtime trace (env-gated).
+                     * HU_DIRECTOR_TRACE=1 captures INPUT + OUTPUT per contact.
+                     * One-shot disabled-warn per process when off. See
+                     * docs/plans/2026-05-26-sprint-56-gemma-as-seth/stories.md
+                     * US-12 for the diagnostic rationale (Mindy bleed). */
+                    static bool s_director_trace_warned = false;
+                    const char *trace_env = getenv("HU_DIRECTOR_TRACE");
+                    bool trace_on = (trace_env && *trace_env == '1');
+                    if (!trace_on && !s_director_trace_warned) {
+                        s_director_trace_warned = true;
+                        hu_log_info("director_trace", NULL,
+                                    "disabled (HU_DIRECTOR_TRACE unset); set =1 to "
+                                    "capture per-contact input/output");
+                    }
+                    if (trace_on) {
+                        size_t cl = combined_len > 240 ? 240 : combined_len;
+                        hu_log_info("director_trace", NULL,
+                                    "INPUT contact=%.*s entries=%zu combined=\"%.*s\"%s",
+                                    (int)key_len, batch_key, early_history_count, (int)cl, combined,
+                                    combined_len > 240 ? "..." : "");
+                    }
                     /* Call director early for meta-behavior (delay, tapback, silence) */
                     if (g_classify_provider_ok) {
                         director_result_valid =
                             hu_daemon_director_call(alloc, combined, combined_len, early_history,
                                                     early_history_count, &director_result);
+                    }
+                    if (trace_on && director_result_valid) {
+                        hu_log_info("director_trace", NULL,
+                                    "OUTPUT contact=%.*s action=%d delay_s=%u direction=\"%s\"",
+                                    (int)key_len, batch_key, (int)director_result.action,
+                                    director_result.delay_s, director_result.direction);
                     }
                     if (early_history) {
                         alloc->free(alloc->ctx, early_history,

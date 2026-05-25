@@ -145,6 +145,16 @@ typedef struct hu_agent_config {
     char *mr_on_device_model; /* model router: on-device model name (default: apple-foundationmodel)
                                */
     bool mr_on_device_enabled; /* model router: enable on-device routing (default: true on macOS) */
+    char *fallback_model;      /* Provider-degradation fallback model name. When the primary
+                                * default_model fails (HU_ERR_NETWORK / HU_ERR_TIMEOUT / etc),
+                                * hu_provider_degrade_chat retries with this model on the SAME
+                                * provider instance before emitting the honest-failure canned
+                                * message. NULL (default) preserves today's "no fallback, honest
+                                * fail" behavior. NOTE: this is a same-provider fallback. To
+                                * route to a DIFFERENT provider on MLX-down (e.g. cloud Gemini
+                                * when local mlx_local crashes), a provider-router change is
+                                * required (US-13 follow-up, scoped in
+                                * docs/plans/2026-05-26-sprint-56-gemma-as-seth/us13-followup.md). */
     bool prompt_cache_enabled; /* enable cross-turn system prompt dedup (default true) */
     bool agent_comm_enabled;
     uint32_t best_of_n;        /* best-of-N candidates (0 or 1 = disabled, max 5) */

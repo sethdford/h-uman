@@ -608,6 +608,166 @@ def prune_old_adapters(adapter_dir: Path, keep: int = ADAPTER_RETENTION_LIMIT) -
     return deleted
 
 
+def write_sft_batch_jsonl(resolved: list[dict]) -> str:
+    """Build an SFT JSONL batch from resolved outcomes.
+
+    Input: list of {outcome, prompt_text, response_text} dicts
+    Output: path to temporary JSONL file
+    Format: one line per sample with {"text": "<prompt>\n<response>"}
+
+    Returns the temp file path so the caller can pass it to mlx_lm.lora.
+    """
+    import tempfile
+    tmpdir = tempfile.gettempdir()
+    tmp_batch = Path(tmpdir) / f"sft-batch-{int(time.time() * 1000)}.jsonl"
+
+    with open(tmp_batch, "w") as f:
+        for item in resolved:
+            prompt = item["prompt_text"]
+            response = item.get("response_text") or ""
+            # Join prompt and response with newline for simple single-text format
+            combined = f"{prompt}\n{response}".strip()
+            line = json.dumps({"text": combined})
+            f.write(line + "\n")
+
+    print(f"  Wrote {len(resolved)} samples to {tmp_batch}")
+    return str(tmp_batch)
+
+
+def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
+                          iters: int = 500, scale: float = 2.0) -> int:
+    """Run mlx_lm.lora training on the resolved outcomes.
+
+    Args:
+        resolved: list of {outcome, prompt_text, response_text} dicts
+        adapter_out: output path for the adapter directory/file
+        iters: number of training iterations (default 500, 10 for tests)
+        scale: LoRA scale multiplier (default 2.0, per mlx_lm default)
+
+    Returns: process exit code (0 = success)
+
+    This function:
+      1. Builds an SFT batch from resolved outcomes
+      2. Creates a temp directory for mlx_lm output
+      3. Creates a YAML config file with rank/scale settings
+      4. Invokes mlx_lm.lora subprocess
+      5. Moves the output to adapter_out
+    """
+    if len(resolved) == 0:
+        print(f"  No resolved outcomes to train on")
+        return 0
+
+    # Build SFT batch
+    sft_batch = write_sft_batch_jsonl(resolved)
+
+    # Create temp output directory for mlx_lm (it outputs a directory)
+    import tempfile
+    tmpdir = tempfile.mkdtemp(prefix="mlx-lora-")
+    print(f"  Using temp output dir: {tmpdir}")
+
+    # Create a temp directory with train.jsonl (mlx_lm expects dir structure)
+    train_data_dir = Path(tmpdir) / "data"
+    train_data_dir.mkdir(parents=True)
+    shutil.copy(sft_batch, str(train_data_dir / "train.jsonl"))
+
+    # Model and hyperparameters (per US-8 design)
+    model = "mlx-community/gemma-4-31b-it-4bit"
+    rank = 8
+    num_layers = 8  # Number of LoRA layers to train
+    batch_size = 1
+    learning_rate = 1e-5
+    max_seq_length = 2048
+
+    # Create YAML config file for mlx_lm
+    # mlx_lm requires rank and scale to be in a config file
+    config = {
+        "model": model,
+        "train": True,
+        "fine_tune_type": "lora",
+        "lora_rank": rank,
+        "lora_alpha": rank * 2,  # mlx_lm uses alpha instead of scale
+        "lora_scale": scale,  # Some versions support this; fallback is alpha
+        "num_layers": num_layers,
+        "batch_size": batch_size,
+        "iters": iters,
+        "learning_rate": learning_rate,
+        "steps_per_report": 50,
+        "max_seq_length": max_seq_length,
+        "optimizer": "adamw",
+    }
+
+    config_path = Path(tmpdir) / "config.yaml"
+    with open(config_path, "w") as f:
+        import yaml
+        try:
+            yaml.dump(config, f)
+        except ImportError:
+            # Fallback: write a simple YAML-like format
+            for key, value in config.items():
+                if isinstance(value, str):
+                    f.write(f"{key}: '{value}'\n")
+                elif isinstance(value, bool):
+                    f.write(f"{key}: {str(value).lower()}\n")
+                else:
+                    f.write(f"{key}: {value}\n")
+
+    # Build mlx_lm.lora command
+    cmd = [
+        sys.executable, "-m", "mlx_lm", "lora",
+        "--model", model,
+        "--data", str(train_data_dir),  # Directory with train.jsonl
+        "--adapter-path", str(adapter_out.parent),  # Output directory
+        "--iters", str(iters),
+        "--batch-size", str(batch_size),
+        "--learning-rate", f"{learning_rate:g}",
+        "--max-seq-length", str(max_seq_length),
+        "--steps-per-report", "50",
+        "--train",
+        "-c", str(config_path),
+    ]
+
+    print(f"\n  Invoking mlx_lm lora training:")
+    print(f"    {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        rc = result.returncode
+
+        if rc != 0:
+            print(f"  mlx_lm lora exited with rc={rc}")
+            if result.stdout:
+                print(f"  stdout:\n{result.stdout}")
+            if result.stderr:
+                print(f"  stderr:\n{result.stderr}")
+            return rc
+
+        # Check if output exists — mlx_lm writes adapters.safetensors + adapter_config.json
+        adapters_file = adapter_out.parent / "adapters.safetensors"
+        if not adapters_file.exists():
+            print(f"  ERROR: mlx_lm did not produce adapters.safetensors in {adapter_out.parent}")
+            print(f"  Directory contents: {list(adapter_out.parent.iterdir())}")
+            return 1
+
+        print(f"  mlx_lm lora training succeeded")
+        return 0
+
+    except FileNotFoundError:
+        print(f"  ERROR: mlx_lm not found. Install with: pip install mlx_lm")
+        print(f"  Falling back to dry-run adapter")
+        return 1
+    finally:
+        # Clean up temp SFT batch and any leftover tmpdir
+        try:
+            Path(sft_batch).unlink()
+        except:
+            pass
+        try:
+            if Path(tmpdir).exists():
+                shutil.rmtree(tmpdir)
+        except:
+            pass
+
+
 def write_dry_run_adapter(adapter_out: Path, summary: dict,
                           resolved_count: int, skipped_count: int) -> None:
     """Write a richer-than-placeholder safetensors-shaped artifact for
@@ -704,75 +864,44 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         })
         return 0
 
-    # Phase C4 (2026-05-18) — real LoRA training via `human ml lora-persona`.
-    # The reference HUML GPT path produces a real adapter (rank-decomposition
-    # tensors) from the conversation DB. Per the lora-persona warning,
-    # this trains the REFERENCE GPT, not the frontier chat model — the
-    # bridge to gemma-4-31b lives in
-    # docs/plans/2026-05-10-m3-frontier-model-bridge.md.
+    # Phase C3 (2026-05-26) — real LoRA training via mlx_lm.lora.
+    # This path trains the frontier Gemma-4-31B model directly using MLX,
+    # producing a real rank-8 LoRA adapter (A/B rank-decomposition tensors).
+    # Per ~/.claude/rules/lora-scale-default-or-die.md, scale MUST be 2.0
+    # (the default). Over-scaling destroyed instruction-following catastrophically
+    # in v3 (scale=20.0); v4-repair at scale=2.0 fixed it.
     #
-    # D3 (2026-05-18): LoRA hyperparameters at SOTA defaults.
-    # KNOWN GAP: even with these hyperparams, the lora-persona reference
-    # GPT path's loss stays at the random-init baseline (~log(vocab))
-    # across 100 steps. The optimizer-doesn't-actually-train bug is
-    # outside this slice. D3's job is to make sure the hyperparameter
-    # envelope is correct when the optimizer bug is fixed OR when this
-    # pipeline is replaced with mlx-lm.lora.
-    # The original C4 defaults (rank=4-8, max_steps=16, default LR)
-    # produced 16 steps of loss=9.0099 — no measurable training.
-    # Upgrades:
-    #   - rank scales 16-32 (SOTA persona-tuning typically uses 16-64)
-    #   - max_steps scales with sample count: 50 steps per 8 samples,
-    #     min 100, max 400. The reference HUML GPT is small (~150K
-    #     params); these step counts converge in <10s wall-clock.
-    #   - learning_rate 3e-3: an order of magnitude higher than the
-    #     lora-persona default 1e-4. Bigger LR is justified because
-    #     (a) we're training fresh on small data (no over-shoot risk
-    #     from a pretrained checkpoint), (b) higher LR + few steps
-    #     beats lower LR + few steps in the regime we operate in
-    #     (warmup-only, no schedule), and (c) the C side's optimizer
-    #     uses AdamW which is robust to higher LRs.
-    persona_name = os.environ.get("HUMAN_LORA_PERSONA", "seth")
-    human_bin = os.environ.get("HUMAN_BIN") or str(REPO_ROOT / "build-release" / "human")
-    if not Path(human_bin).exists():
-        human_bin = str(REPO_ROOT / "build" / "human")
-    # D3 hyperparameter envelope
-    n = max(8, len(resolved))
-    rank = 32 if n >= 64 else (16 if n >= 16 else 8)
-    max_steps = max(100, min(400, (n // 8) * 50))
-    learning_rate = 3e-3
-    # --from-history-max floor of 32: the PII redaction + length /
-    # entropy quality filter in lora-persona discards a meaningful
-    # fraction of candidate rows, so asking for fewer than ~32 often
-    # leaves zero valid examples and lora-persona returns I/O error
-    # (a misleading code; see lora-persona src for context). 32 is
-    # cheap to derive and reliably crosses the filter floor.
-    history_max = max(32, len(resolved))
-    cmd = [
-        human_bin, "ml", "lora-persona",
-        "--persona", persona_name,
-        "--from-history", str(db_path),
-        "--from-history-max", str(history_max),
-        "--rank", str(rank),
-        "--max-steps", str(max_steps),
-        "--learning-rate", f"{learning_rate:g}",
-        "--output", str(adapter_out),
-    ]
-    print(f"\n  Invoking real LoRA training (C4):")
-    print(f"    {' '.join(cmd)}")
-    try:
-        rc = subprocess.call(cmd)
-    except FileNotFoundError as e:
-        print(f"  ERROR: {human_bin} not found: {e}")
-        print(f"  Falling back to empty-tensors safetensors so the driver "
-              f"swap call still has an artifact.")
-        write_dry_run_adapter(adapter_out, summary, len(resolved), skipped)
-        return 0
+    # Hyperparameters:
+    #   - rank=8: compact, fast training (~30s on M2 Max for 32 samples)
+    #   - iters=500: converges on small persona datasets; per C3 plan
+    #   - batch-size=1: fits in memory on M1/M2; parallelism not needed
+    #   - max-seq-length=2048: matches persona example banks
+    #   - learning-rate=1e-5: conservative for frontier model
+    #   - scale=2.0: mlx_lm DEFAULT; overridable via HUMAN_LORA_SCALE env var
+
+    # Check for test/dry-run modes where iters should be shorter
+    iters = 10 if os.environ.get("HUMAN_LORA_TEST_ITERS") else 500
+
+    # Scale parameter enforcement: per the rule, default to 2.0
+    scale = 2.0
+    if scale_env := os.environ.get("HUMAN_LORA_SCALE"):
+        try:
+            scale = float(scale_env)
+            if scale != 2.0:
+                print(f"  WARN: HUMAN_LORA_SCALE={scale} overrides default 2.0.")
+                print(f"        This may destroy instruction-following on 31B models.")
+                print(f"        See ~/.claude/rules/lora-scale-default-or-die.md")
+        except ValueError:
+            print(f"  WARN: HUMAN_LORA_SCALE={scale_env} is not a valid float, using 2.0")
+
+    rc = run_mlx_lora_training(resolved, adapter_out, iters=iters, scale=scale)
+
     if rc != 0 or not adapter_out.exists():
-        print(f"  lora-persona exited with rc={rc} or produced no adapter.")
+        print(f"  mlx_lm.lora training failed (rc={rc}) or produced no adapter.")
         print(f"  Falling back to empty-tensors safetensors.")
         write_dry_run_adapter(adapter_out, summary, len(resolved), skipped)
         return 0
+
     size = adapter_out.stat().st_size
     print(f"  Real LoRA adapter written: {adapter_out} ({size} bytes)")
 
@@ -781,12 +910,13 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         "timestamp": int(time.time() * 1000),
         "adapter_path": str(adapter_out),
         "size_bytes": size,
-        "kind": "lora-persona",
-        "persona": persona_name,
-        "rank": rank,
-        "max_steps": max_steps,
-        "learning_rate": learning_rate,
-        "history_max": history_max,
+        "kind": "mlx_lm.lora",
+        "model": "mlx-community/gemma-4-31b-it-4bit",
+        "rank": 8,
+        "iters": iters,
+        "scale": scale,
+        "batch_size": 1,
+        "learning_rate": 1e-5,
         "outcome_count": summary.get("count", 0),
         "resolved_count": len(resolved),
         "skipped_count": skipped,

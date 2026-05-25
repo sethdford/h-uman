@@ -387,6 +387,19 @@ hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_
         }
         cfg->agent.mr_on_device_enabled =
             hu_json_get_bool(mr_obj, "on_device_enabled", cfg->agent.mr_on_device_enabled);
+        /* US-13: provider-degradation fallback model. Parsed under
+         * agent.model_router because conceptually the model_router
+         * decides what model to use; degradation is the routing
+         * decision for "primary failed, what next?". Stored on
+         * cfg->agent.fallback_model; wired into
+         * agent->sota.degradation_config.fallback_model at agent init
+         * (agent.c after the existing degradation_config setup). */
+        const char *fallback = hu_json_get_string(mr_obj, "fallback_model");
+        if (fallback) {
+            if (cfg->agent.fallback_model)
+                a->free(a->ctx, cfg->agent.fallback_model, strlen(cfg->agent.fallback_model) + 1);
+            cfg->agent.fallback_model = hu_strdup(a, fallback);
+        }
     }
 
     return HU_OK;
