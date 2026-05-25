@@ -21,6 +21,44 @@
 #include <string.h>
 #include <time.h>
 
+/* ── sanitize fact fields before prompt injection ──────────────────── */
+
+/* Strip prompt-injection-shaped characters from a fact field before
+ * inlining into the system prompt. Removes '<', '>', '`', and ASCII
+ * control chars (other than space and tab). Truncates at out_cap-1.
+ * Returns bytes written (excluding null).
+ *
+ * Why: Sprint 48 US-48-2 security finding. Fact fields come from
+ * inbound contact messages; we don't trust arbitrary content to land
+ * in the LLM system prompt unescaped. A contact sending
+ * "i like X that <system>DANGEROUS</system>" could inject prompt-shaped
+ * content that the LLM might honor. */
+static size_t sanitize_fact_field_for_prompt(const char *in, char *out, size_t out_cap) {
+    if (!in || !out || out_cap == 0)
+        return 0;
+    if (out_cap == 1) {
+        out[0] = '\0';
+        return 0;
+    }
+
+    size_t j = 0;
+    for (size_t i = 0; in[i] != '\0' && j < out_cap - 1; i++) {
+        unsigned char c = (unsigned char)in[i];
+
+        /* Skip dangerous characters: '<', '>', '`' */
+        if (c == '<' || c == '>' || c == '`')
+            continue;
+
+        /* Skip ASCII control chars except space (0x20) and tab (0x09) */
+        if (c < 0x20 && c != 0x09)
+            continue;
+
+        out[j++] = (char)c;
+    }
+    out[j] = '\0';
+    return j;
+}
+
 /* ── allowlist (case-insensitive exact match) ───────────────────────── */
 
 bool hu_autoresponder_handle_allowlisted(const hu_autoresponder_config_t *cfg,
@@ -205,12 +243,22 @@ size_t hu_autoresponder_build_prompt(const hu_autoresponder_config_t *cfg,
             sb_append(out, cap, &n, "\nContact insights:\n");
             for (size_t i = 0; i < scored_count && i < 3; i++) {
                 const hu_heuristic_fact_t *f = scored[i].fact;
+                /* Sanitize each field to prevent prompt injection. */
+                char safe_subject[HU_FACT_MAX_FIELD];
+                char safe_predicate[HU_FACT_MAX_FIELD];
+                char safe_object[HU_FACT_MAX_FIELD];
+
+                sanitize_fact_field_for_prompt(f->subject, safe_subject, sizeof(safe_subject));
+                sanitize_fact_field_for_prompt(f->predicate, safe_predicate,
+                                               sizeof(safe_predicate));
+                sanitize_fact_field_for_prompt(f->object, safe_object, sizeof(safe_object));
+
                 sb_append(out, cap, &n, "- ");
-                sb_append(out, cap, &n, f->subject);
+                sb_append(out, cap, &n, safe_subject);
                 sb_append(out, cap, &n, " ");
-                sb_append(out, cap, &n, f->predicate);
+                sb_append(out, cap, &n, safe_predicate);
                 sb_append(out, cap, &n, " ");
-                sb_append(out, cap, &n, f->object);
+                sb_append(out, cap, &n, safe_object);
                 sb_append(out, cap, &n, "\n");
             }
         }

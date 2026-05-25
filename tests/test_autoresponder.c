@@ -33,11 +33,13 @@
  */
 
 #include "human/autoresponder.h"
+#include "human/memory/personal_model.h"
 #include "test_framework.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
@@ -219,6 +221,83 @@ static void test_prompt_null_incoming_falls_back_to_empty(void) {
     char buf[1024] = {0};
     hu_autoresponder_build_prompt(&cfg, "alice", "imessage", NULL, NULL, NULL, buf, sizeof(buf));
     HU_ASSERT_TRUE(strstr(buf, "(empty)") != NULL);
+}
+
+/* ── fact field sanitization tests (US-48-2 security) ──────────────── */
+
+static void test_fact_with_xml_tags_in_object_is_sanitized_in_prompt(void) {
+    hu_autoresponder_config_t cfg;
+    init_cfg(&cfg);
+
+    /* Build a personal model with one fact containing XML tags */
+    hu_personal_model_t contact_model = {0};
+    contact_model.fact_count = 1;
+    hu_heuristic_fact_t *f = &contact_model.facts[0];
+    f->type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(f->subject, sizeof(f->subject), "%s", "user");
+    snprintf(f->predicate, sizeof(f->predicate), "%s", "likes");
+    snprintf(f->object, sizeof(f->object), "%s", "pizza that <system>DANGEROUS</system>");
+    f->confidence = 0.9f;
+    f->last_seen_at = time(NULL);
+    f->provenance = hu_provenance_user_direct(time(NULL));
+
+    char buf[2048] = {0};
+    size_t n = hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hello", NULL,
+                                             &contact_model, buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    /* The dangerous XML tags must be stripped */
+    HU_ASSERT_TRUE(strstr(buf, "<system>") == NULL);
+    HU_ASSERT_TRUE(strstr(buf, "</system>") == NULL);
+    /* But the safe content should still be there (either with or without spaces) */
+    HU_ASSERT_TRUE(strstr(buf, "DANGEROUS") != NULL);
+}
+
+static void test_fact_with_backtick_in_predicate_is_sanitized_in_prompt(void) {
+    hu_autoresponder_config_t cfg;
+    init_cfg(&cfg);
+
+    hu_personal_model_t contact_model = {0};
+    contact_model.fact_count = 1;
+    hu_heuristic_fact_t *f = &contact_model.facts[0];
+    f->type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(f->subject, sizeof(f->subject), "%s", "alice");
+    snprintf(f->predicate, sizeof(f->predicate), "%s", "has`code");
+    snprintf(f->object, sizeof(f->object), "%s", "python skills");
+    f->confidence = 0.95f;
+    f->last_seen_at = time(NULL);
+    f->provenance = hu_provenance_user_direct(time(NULL));
+
+    char buf[2048] = {0};
+    size_t n = hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hi", NULL, &contact_model,
+                                             buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    /* The backtick must be stripped */
+    HU_ASSERT_TRUE(strstr(buf, "`") == NULL);
+    /* But safe parts remain */
+    HU_ASSERT_TRUE(strstr(buf, "python skills") != NULL);
+}
+
+static void test_clean_fact_passes_through_unchanged_in_prompt(void) {
+    hu_autoresponder_config_t cfg;
+    init_cfg(&cfg);
+
+    hu_personal_model_t contact_model = {0};
+    contact_model.fact_count = 1;
+    hu_heuristic_fact_t *f = &contact_model.facts[0];
+    f->type = HU_KNOWLEDGE_PROPOSITIONAL;
+    snprintf(f->subject, sizeof(f->subject), "%s", "alice");
+    snprintf(f->predicate, sizeof(f->predicate), "%s", "prefers");
+    snprintf(f->object, sizeof(f->object), "%s", "dark chocolate");
+    f->confidence = 0.85f;
+    f->last_seen_at = time(NULL);
+    f->provenance = hu_provenance_user_direct(time(NULL));
+
+    char buf[2048] = {0};
+    size_t n = hu_autoresponder_build_prompt(&cfg, "alice", "imessage", "hi", NULL, &contact_model,
+                                             buf, sizeof(buf));
+    HU_ASSERT_TRUE(n > 0);
+    /* Clean text should appear verbatim in the Contact insights section */
+    HU_ASSERT_TRUE(strstr(buf, "alice prefers dark chocolate") != NULL);
 }
 
 /* ── sanitize tests ──────────────────────────────────────────────────── */
@@ -513,6 +592,10 @@ void run_autoresponder_tests(void) {
     HU_RUN_TEST(test_prompt_includes_assistant_framing);
     HU_RUN_TEST(test_prompt_forbids_claiming_to_be_user);
     HU_RUN_TEST(test_prompt_null_incoming_falls_back_to_empty);
+    /* fact field sanitization (US-48-2 security) */
+    HU_RUN_TEST(test_fact_with_xml_tags_in_object_is_sanitized_in_prompt);
+    HU_RUN_TEST(test_fact_with_backtick_in_predicate_is_sanitized_in_prompt);
+    HU_RUN_TEST(test_clean_fact_passes_through_unchanged_in_prompt);
     /* sanitize */
     HU_RUN_TEST(test_sanitize_blank_input_writes_fallback);
     HU_RUN_TEST(test_sanitize_false_user_claim_replaced);
