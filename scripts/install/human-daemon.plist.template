@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Homebrew-installed launchd daemon for h-uman
+	     Variables substituted by Formula post_install:
+	     {{BREW_PREFIX}} = output of `brew --prefix`
+	     {{HOME}} = user's home directory
+	-->
+	<key>Label</key>
+	<string>com.human.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{BREW_PREFIX}}/bin/human</string>
+		<string>service-loop</string>
+		<string>--with-gateway</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>{{HOME}}/.human/human.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{HOME}}/.human/human.log</string>
+	<key>WorkingDirectory</key>
+	<string>{{HOME}}</string>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+</dict>
+</plist>

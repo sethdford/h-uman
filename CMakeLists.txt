@@ -2998,6 +2998,7 @@ set(HU_TEST_SOURCES
     # test_persona_encryption.c — moved to gated block below; references
     # hu_persona_crypt_* which only exists when HU_LIBSODIUM_FOUND.
     tests/test_persona_directive_channels.c
+    tests/test_homebrew_formula.c
     tests/test_filler_recency.c
     tests/integration/test_sprint3_hybrid_recall.c
     tests/test_filler_pctt.c
