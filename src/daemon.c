@@ -13855,6 +13855,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                              &init_decision, config->initiative.target_handle,
                                              config->initiative.dry_run);
             }
+
+            /* T8 v0.3 — reply detection. Walk the JSONL, find FIRED
+             * proposals older than the observation window that haven't
+             * been resolved yet, and append a resolution line based on
+             * whether the target replied via chat.db. Idempotent across
+             * ticks (skips records that already have a resolution line). */
+            size_t resolutions_written = 0;
+            (void)hu_init_outcome_resolve_pending(alloc, now_unix_init, &resolutions_written);
+            if (resolutions_written > 0) {
+                hu_log_info("init_proposer", agent ? agent->observer : NULL,
+                            "init_proposer: resolved %zu pending proposals (replied/ignored)",
+                            resolutions_written);
+            }
             /* T4 delivery wire (2026-05-25). When the proposer FIREs,
              * route init_decision.draft through the iMessage channel.
              *

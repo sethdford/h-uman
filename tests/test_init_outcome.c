@@ -312,6 +312,190 @@ static void test_aggregate_null_args_no_crash(void) {
     HU_ASSERT_EQ(s.total, (size_t)0);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Reply detection tests.
+ *
+ * hu_init_outcome_decide_resolution is a pure predicate — full truth
+ * table tested directly. hu_init_outcome_resolve_pending is tested in
+ * HU_IS_TEST mode where the chat.db query is stubbed to has_reply=false,
+ * letting us cover the pairing logic (already-resolved skip, dry-run
+ * skip, observation-window skip) without a real Messages DB. */
+
+static void test_resolve_predicate_pending_when_inside_observation_window(void) {
+    /* now == proposal_ts + 60s, observation window = 600s → PENDING */
+    HU_ASSERT_EQ(
+        (int)hu_init_outcome_decide_resolution(1779700000, 1779700060, false, 0, 600, 86400),
+        (int)HU_INIT_RESOLUTION_PENDING);
+}
+
+static void test_resolve_predicate_replied_when_reply_in_window(void) {
+    /* Reply at proposal_ts + 1000s; observation passed, window not yet expired. */
+    HU_ASSERT_EQ((int)hu_init_outcome_decide_resolution(1779700000, 1779701000, true, 1779700500,
+                                                        600, 86400),
+                 (int)HU_INIT_RESOLUTION_REPLIED);
+}
+
+static void test_resolve_predicate_ignored_when_window_elapsed_no_reply(void) {
+    /* 25h elapsed, no reply → IGNORED. */
+    HU_ASSERT_EQ((int)hu_init_outcome_decide_resolution(1779700000, 1779700000 + 90000, false, 0,
+                                                        600, 86400),
+                 (int)HU_INIT_RESOLUTION_IGNORED);
+}
+
+static void test_resolve_predicate_ignores_replies_before_proposal(void) {
+    /* Reply timestamp BEFORE proposal — irrelevant noise (must have been from
+     * an earlier conversation). Should NOT count as a reply. */
+    HU_ASSERT_EQ((int)hu_init_outcome_decide_resolution(1779700000, 1779700000 + 90000, true,
+                                                        1779699000, 600, 86400),
+                 (int)HU_INIT_RESOLUTION_IGNORED);
+}
+
+static void test_resolve_predicate_ignores_replies_after_window(void) {
+    /* Reply 48h after proposal — too late to count as a response to THIS proposal. */
+    HU_ASSERT_EQ((int)hu_init_outcome_decide_resolution(1779700000, 1779700000 + 200000, true,
+                                                        1779700000 + 180000, 600, 86400),
+                 (int)HU_INIT_RESOLUTION_IGNORED);
+}
+
+static void test_resolve_predicate_defaults_apply_when_zero(void) {
+    /* min_observation_secs=0 and max_window_secs=0 → use the macro defaults. */
+    HU_ASSERT_EQ(
+        (int)hu_init_outcome_decide_resolution(1779700000, 1779700000 + 60, false, 0, 0, 0),
+        (int)HU_INIT_RESOLUTION_PENDING);
+    /* 1 hour elapsed, default window 24h not yet exceeded, no reply → PENDING. */
+    HU_ASSERT_EQ(
+        (int)hu_init_outcome_decide_resolution(1779700000, 1779700000 + 3600, false, 0, 0, 0),
+        (int)HU_INIT_RESOLUTION_PENDING);
+}
+
+static void test_append_resolution_writes_correct_schema_line(void) {
+    use_tmp_path();
+    hu_allocator_t alloc = hu_system_allocator();
+    HU_ASSERT_EQ(hu_init_outcome_append_resolution(&alloc, 1779700000, 1779600000, "+15551234567",
+                                                   HU_INIT_RESOLUTION_REPLIED, 1779650000),
+                 HU_OK);
+    size_t len = 0;
+    char *content = read_tmp_file(&len);
+    HU_ASSERT_NOT_NULL(content);
+    HU_ASSERT(strstr(content, "\"schema\":\"init_outcome_resolution_v1\"") != NULL);
+    HU_ASSERT(strstr(content, "\"ts_unix\":1779700000") != NULL);
+    HU_ASSERT(strstr(content, "\"proposal_ts\":1779600000") != NULL);
+    HU_ASSERT(strstr(content, "\"outcome\":\"replied\"") != NULL);
+    HU_ASSERT(strstr(content, "\"reply_at\":1779650000") != NULL);
+    HU_ASSERT(strstr(content, "\"target\":\"+15551234567\"") != NULL);
+    HU_ASSERT_EQ(content[len - 1], '\n');
+    free(content);
+    cleanup_tmp_path();
+}
+
+static void test_resolve_pending_empty_file_writes_zero(void) {
+    use_tmp_path();
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t written = 999;
+    HU_ASSERT_EQ(hu_init_outcome_resolve_pending(&alloc, 1779700000, &written), HU_OK);
+    HU_ASSERT_EQ(written, (size_t)0);
+    cleanup_tmp_path();
+}
+
+static void test_resolve_pending_skips_dry_run_fired(void) {
+    /* A dry_run FIRED record was logged but no message was sent — no
+     * outcome to resolve. Resolver must skip it. */
+    use_tmp_path();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_init_decision_t d;
+    memset(&d, 0, sizeof(d));
+    d.should_propose = true;
+    d.confidence = 0.9;
+    strcpy(d.draft, "hi");
+    d.draft_len = 2;
+    /* proposal 2h ago, dry_run=true */
+    int64_t now = 1779700000;
+    HU_ASSERT_EQ(hu_init_outcome_append(&alloc, now - 7200, 1, HU_INIT_RESULT_FIRED, &d,
+                                        "+15551234567", true),
+                 HU_OK);
+    size_t written = 999;
+    HU_ASSERT_EQ(hu_init_outcome_resolve_pending(&alloc, now, &written), HU_OK);
+    HU_ASSERT_EQ(written, (size_t)0);
+    cleanup_tmp_path();
+}
+
+static void test_resolve_pending_skips_recent_fired(void) {
+    /* Proposal 60s ago — still inside the 600s observation window. */
+    use_tmp_path();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_init_decision_t d;
+    memset(&d, 0, sizeof(d));
+    d.should_propose = true;
+    d.confidence = 0.9;
+    strcpy(d.draft, "hi");
+    d.draft_len = 2;
+    int64_t now = 1779700000;
+    HU_ASSERT_EQ(hu_init_outcome_append(&alloc, now - 60, 1, HU_INIT_RESULT_FIRED, &d,
+                                        "+15551234567", false),
+                 HU_OK);
+    size_t written = 999;
+    HU_ASSERT_EQ(hu_init_outcome_resolve_pending(&alloc, now, &written), HU_OK);
+    HU_ASSERT_EQ(written, (size_t)0);
+    cleanup_tmp_path();
+}
+
+static void test_resolve_pending_marks_old_fired_as_ignored_under_test(void) {
+    /* In HU_IS_TEST builds the chat.db query stubs to has_reply=false.
+     * A non-dry-run FIRED proposal >24h old should resolve to IGNORED. */
+    use_tmp_path();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_init_decision_t d;
+    memset(&d, 0, sizeof(d));
+    d.should_propose = true;
+    d.confidence = 0.9;
+    strcpy(d.draft, "hi");
+    d.draft_len = 2;
+    int64_t now = 1779700000;
+    /* 25 hours ago */
+    HU_ASSERT_EQ(hu_init_outcome_append(&alloc, now - 90000, 1, HU_INIT_RESULT_FIRED, &d,
+                                        "+15551234567", false),
+                 HU_OK);
+    size_t written = 999;
+    HU_ASSERT_EQ(hu_init_outcome_resolve_pending(&alloc, now, &written), HU_OK);
+    HU_ASSERT_EQ(written, (size_t)1);
+    /* Verify resolution line was appended with outcome=ignored. */
+    size_t len = 0;
+    char *content = read_tmp_file(&len);
+    HU_ASSERT_NOT_NULL(content);
+    HU_ASSERT(strstr(content, "\"schema\":\"init_outcome_resolution_v1\"") != NULL);
+    HU_ASSERT(strstr(content, "\"outcome\":\"ignored\"") != NULL);
+    /* The proposal line is also still present (append-only). */
+    HU_ASSERT(strstr(content, "\"verdict\":\"FIRED\"") != NULL);
+    free(content);
+    cleanup_tmp_path();
+}
+
+static void test_resolve_pending_does_not_double_resolve(void) {
+    /* If a resolution line already exists for this proposal, don't write
+     * a second one — the resolver is idempotent across ticks. */
+    use_tmp_path();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_init_decision_t d;
+    memset(&d, 0, sizeof(d));
+    d.should_propose = true;
+    d.confidence = 0.9;
+    strcpy(d.draft, "hi");
+    d.draft_len = 2;
+    int64_t now = 1779700000;
+    int64_t proposal_ts = now - 90000;
+    HU_ASSERT_EQ(hu_init_outcome_append(&alloc, proposal_ts, 1, HU_INIT_RESULT_FIRED, &d,
+                                        "+15551234567", false),
+                 HU_OK);
+    /* Pre-write a resolution line for this proposal. */
+    HU_ASSERT_EQ(hu_init_outcome_append_resolution(&alloc, now - 100, proposal_ts, "+15551234567",
+                                                   HU_INIT_RESOLUTION_IGNORED, 0),
+                 HU_OK);
+    size_t written = 999;
+    HU_ASSERT_EQ(hu_init_outcome_resolve_pending(&alloc, now, &written), HU_OK);
+    HU_ASSERT_EQ(written, (size_t)0);
+    cleanup_tmp_path();
+}
+
 void run_init_outcome_tests(void);
 void run_init_outcome_tests(void) {
     HU_TEST_SUITE("init_outcome");
@@ -329,4 +513,18 @@ void run_init_outcome_tests(void) {
     HU_RUN_TEST(test_aggregate_unknown_verdict_caught_separately);
     HU_RUN_TEST(test_aggregate_malformed_line_is_noop);
     HU_RUN_TEST(test_aggregate_null_args_no_crash);
+    /* Reply detection — pure predicate */
+    HU_RUN_TEST(test_resolve_predicate_pending_when_inside_observation_window);
+    HU_RUN_TEST(test_resolve_predicate_replied_when_reply_in_window);
+    HU_RUN_TEST(test_resolve_predicate_ignored_when_window_elapsed_no_reply);
+    HU_RUN_TEST(test_resolve_predicate_ignores_replies_before_proposal);
+    HU_RUN_TEST(test_resolve_predicate_ignores_replies_after_window);
+    HU_RUN_TEST(test_resolve_predicate_defaults_apply_when_zero);
+    /* Reply detection — pairing/append */
+    HU_RUN_TEST(test_append_resolution_writes_correct_schema_line);
+    HU_RUN_TEST(test_resolve_pending_empty_file_writes_zero);
+    HU_RUN_TEST(test_resolve_pending_skips_dry_run_fired);
+    HU_RUN_TEST(test_resolve_pending_skips_recent_fired);
+    HU_RUN_TEST(test_resolve_pending_marks_old_fired_as_ignored_under_test);
+    HU_RUN_TEST(test_resolve_pending_does_not_double_resolve);
 }

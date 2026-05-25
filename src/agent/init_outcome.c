@@ -244,6 +244,22 @@ void hu_init_outcome_aggregate_line(hu_init_status_t *status, const char *line, 
         return;
     }
 
+    /* Resolution lines (schema=init_outcome_resolution_v1) bump the
+     * resolution counters but do NOT contribute to `total`/proposal
+     * counts. Schema-dispatch first so the verdict-string check below
+     * doesn't accidentally count resolution lines (they have no
+     * "verdict" field, so they'd no-op, but explicit is clearer). */
+    const char *schema = hu_json_get_string(root, "schema");
+    if (schema && strcmp(schema, "init_outcome_resolution_v1") == 0) {
+        const char *outcome = hu_json_get_string(root, "outcome");
+        if (outcome && strcmp(outcome, "replied") == 0)
+            status->count_resolution_replied++;
+        else if (outcome && strcmp(outcome, "ignored") == 0)
+            status->count_resolution_ignored++;
+        hu_json_free(&alloc, root);
+        return;
+    }
+
     const char *verdict = hu_json_get_string(root, "verdict");
     if (!verdict) {
         hu_json_free(&alloc, root);
@@ -488,7 +504,262 @@ static hu_error_t cmd_initiative_status(hu_allocator_t *alloc, int argc, char **
     } else {
         printf("Last FIRED:                            (none yet)\n");
     }
+    /* Reply-detection telemetry (T8 slice 3). Pending = FIRED - replied -
+     * ignored, computed inline so operators see the queue depth without
+     * a separate field. */
+    size_t resolved = status.count_resolution_replied + status.count_resolution_ignored;
+    size_t pending = (status.count_fired > resolved) ? (status.count_fired - resolved) : 0;
+    printf("\n");
+    printf("Reply outcomes (FIRED only):\n");
+    printf("  replied          %5zu\n", status.count_resolution_replied);
+    printf("  ignored          %5zu\n", status.count_resolution_ignored);
+    printf("  pending (in window OR no chat.db) %5zu\n", pending);
     alloc->free(alloc->ctx, buf, buf_len + 1);
+    return HU_OK;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Reply detection (T8 slice 3).
+ *
+ * Pure decision + sqlite query. The pure predicate is fully tested; the
+ * chat.db read is compiled out under HU_IS_TEST so the resolver walk
+ * remains testable without a real Messages DB. */
+
+#define HU_MAC_EPOCH_OFFSET_SECS 978307200LL /* unix ts of 2001-01-01 UTC */
+
+hu_init_resolution_t hu_init_outcome_decide_resolution(int64_t proposal_ts, int64_t now_unix,
+                                                       bool has_reply, int64_t reply_ts,
+                                                       int min_observation_secs,
+                                                       int max_window_secs) {
+    int obs =
+        min_observation_secs > 0 ? min_observation_secs : HU_INIT_OUTCOME_MIN_OBSERVATION_SECS;
+    int win = max_window_secs > 0 ? max_window_secs : HU_INIT_OUTCOME_REPLY_WINDOW_SECS;
+
+    /* Always require the observation window before deciding anything —
+     * Seth might just be slow to look at the message. */
+    if (now_unix - proposal_ts < obs)
+        return HU_INIT_RESOLUTION_PENDING;
+
+    /* A reply that arrived BEFORE the proposal is irrelevant noise. */
+    if (has_reply && reply_ts > proposal_ts && reply_ts <= proposal_ts + win)
+        return HU_INIT_RESOLUTION_REPLIED;
+
+    /* No valid reply within window → mark ignored once window elapses. */
+    if (now_unix - proposal_ts >= win)
+        return HU_INIT_RESOLUTION_IGNORED;
+
+    return HU_INIT_RESOLUTION_PENDING;
+}
+
+hu_error_t hu_init_outcome_append_resolution(hu_allocator_t *alloc, int64_t now_unix,
+                                             int64_t proposal_ts, const char *target,
+                                             hu_init_resolution_t outcome, int64_t reply_at) {
+    (void)alloc;
+    char path[1024];
+    if (hu_init_outcome_resolve_path(path, sizeof(path)) == 0)
+        return HU_ERR_IO;
+    ensure_parent_dir(path);
+
+    const char *outcome_str = (outcome == HU_INIT_RESOLUTION_REPLIED) ? "replied" : "ignored";
+    char line[1024];
+    int n =
+        snprintf(line, sizeof(line),
+                 "{\"schema\":\"init_outcome_resolution_v1\",\"ts_unix\":%lld,\"proposal_ts\":%lld,"
+                 "\"outcome\":\"%s\",\"reply_at\":%lld,\"target\":\"",
+                 (long long)now_unix, (long long)proposal_ts, outcome_str, (long long)reply_at);
+    if (n <= 0 || (size_t)n >= sizeof(line))
+        return HU_ERR_IO;
+    size_t pos = (size_t)n;
+    if (target)
+        pos = json_escape(line, sizeof(line), pos, target, strlen(target));
+    if (pos + 3 >= sizeof(line))
+        return HU_ERR_IO;
+    memcpy(line + pos, "\"}\n", 3);
+    pos += 3;
+
+    FILE *f = fopen(path, "a");
+    if (!f)
+        return HU_ERR_IO;
+    size_t wrote = fwrite(line, 1, pos, f);
+    int close_err = fclose(f);
+    if (wrote != pos || close_err != 0)
+        return HU_ERR_IO;
+    return HU_OK;
+}
+
+/* In-memory pairing: walk JSONL, identify FIRED proposals AND resolution
+ * lines, return a list of unresolved (proposal_ts, target, dry_run). */
+typedef struct pending_proposal {
+    int64_t proposal_ts;
+    char target[64];
+    bool dry_run;
+} pending_proposal_t;
+
+#define HU_INIT_RESOLVE_MAX_PENDING 256
+
+typedef struct pairing_state {
+    pending_proposal_t pending[HU_INIT_RESOLVE_MAX_PENDING];
+    size_t pending_count;
+    int64_t resolved_ts[HU_INIT_RESOLVE_MAX_PENDING * 2];
+    size_t resolved_count;
+} pairing_state_t;
+
+static bool is_already_resolved(const pairing_state_t *st, int64_t ts) {
+    for (size_t i = 0; i < st->resolved_count; i++)
+        if (st->resolved_ts[i] == ts)
+            return true;
+    return false;
+}
+
+static void pair_visitor(void *ctx, const char *line, size_t line_len) {
+    pairing_state_t *st = (pairing_state_t *)ctx;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_value_t *root = NULL;
+    if (hu_json_parse(&alloc, line, line_len, &root) != HU_OK || !root) {
+        if (root)
+            hu_json_free(&alloc, root);
+        return;
+    }
+    if (root->type != HU_JSON_OBJECT) {
+        hu_json_free(&alloc, root);
+        return;
+    }
+    const char *schema = hu_json_get_string(root, "schema");
+    if (!schema) {
+        hu_json_free(&alloc, root);
+        return;
+    }
+    if (strcmp(schema, "init_outcome_resolution_v1") == 0) {
+        int64_t pt = (int64_t)hu_json_get_number(root, "proposal_ts", 0.0);
+        if (pt > 0 && st->resolved_count < sizeof(st->resolved_ts) / sizeof(st->resolved_ts[0])) {
+            st->resolved_ts[st->resolved_count++] = pt;
+        }
+    } else if (strcmp(schema, "init_outcome_v1") == 0) {
+        const char *verdict = hu_json_get_string(root, "verdict");
+        bool dry_run = hu_json_get_bool(root, "dry_run", false);
+        int64_t ts = (int64_t)hu_json_get_number(root, "ts_unix", 0.0);
+        const char *target = hu_json_get_string(root, "target");
+        if (verdict && strcmp(verdict, "FIRED") == 0 && ts > 0 && target && target[0] &&
+            st->pending_count < HU_INIT_RESOLVE_MAX_PENDING) {
+            pending_proposal_t *p = &st->pending[st->pending_count++];
+            p->proposal_ts = ts;
+            p->dry_run = dry_run;
+            size_t tlen = strlen(target);
+            size_t copy = tlen < sizeof(p->target) - 1 ? tlen : sizeof(p->target) - 1;
+            memcpy(p->target, target, copy);
+            p->target[copy] = '\0';
+        }
+    }
+    hu_json_free(&alloc, root);
+}
+
+/* Query chat.db for the first inbound message from `target` after
+ * `since_unix`. Returns HU_OK and sets has_reply/reply_at on success
+ * (whether or not a row was found). HU_IS_TEST builds skip the query
+ * and return has_reply=false. */
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+#include <sqlite3.h>
+
+static hu_error_t query_chat_db_for_reply(const char *target, int64_t since_unix, bool *has_reply,
+                                          int64_t *reply_at) {
+    *has_reply = false;
+    *reply_at = 0;
+    const char *home = getenv("HOME");
+    if (!home)
+        return HU_ERR_IO;
+    char db_path[1024];
+    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    if (n <= 0 || (size_t)n >= sizeof(db_path))
+        return HU_ERR_IO;
+
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+    /* Apple ns = (unix_secs - HU_MAC_EPOCH_OFFSET_SECS) * 1e9. */
+    int64_t since_apple_ns = (since_unix - HU_MAC_EPOCH_OFFSET_SECS) * 1000000000LL;
+    const char *sql = "SELECT m.date FROM message m JOIN handle h ON m.handle_id = h.rowid "
+                      "WHERE h.id = ? AND m.is_from_me = 0 AND m.date > ? "
+                      "ORDER BY m.date ASC LIMIT 1";
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+    sqlite3_bind_text(st, 1, target, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, since_apple_ns);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        int64_t reply_apple_ns = sqlite3_column_int64(st, 0);
+        *reply_at = (reply_apple_ns / 1000000000LL) + HU_MAC_EPOCH_OFFSET_SECS;
+        *has_reply = true;
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return HU_OK;
+}
+#else
+static hu_error_t query_chat_db_for_reply(const char *target, int64_t since_unix, bool *has_reply,
+                                          int64_t *reply_at) {
+    (void)target;
+    (void)since_unix;
+    *has_reply = false;
+    *reply_at = 0;
+    return HU_OK;
+}
+#endif
+
+hu_error_t hu_init_outcome_resolve_pending(hu_allocator_t *alloc, int64_t now_unix,
+                                           size_t *out_resolutions_written) {
+    if (out_resolutions_written)
+        *out_resolutions_written = 0;
+    if (!alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    char path[1024];
+    if (hu_init_outcome_resolve_path(path, sizeof(path)) == 0)
+        return HU_OK; /* no path, no work */
+
+    size_t buf_len = 0;
+    char *buf = read_jsonl_file(alloc, path, &buf_len);
+    if (!buf)
+        return HU_OK; /* no file, no proposals to resolve */
+
+    pairing_state_t st;
+    memset(&st, 0, sizeof(st));
+    for_each_line(buf, buf_len, pair_visitor, &st);
+    alloc->free(alloc->ctx, buf, buf_len + 1);
+
+    size_t written = 0;
+    for (size_t i = 0; i < st.pending_count; i++) {
+        const pending_proposal_t *p = &st.pending[i];
+        if (p->dry_run)
+            continue; /* nothing was actually sent */
+        if (is_already_resolved(&st, p->proposal_ts))
+            continue; /* prior tick wrote a resolution */
+        /* Cheap gate: still inside observation window? */
+        if (now_unix - p->proposal_ts < HU_INIT_OUTCOME_MIN_OBSERVATION_SECS)
+            continue;
+
+        bool has_reply = false;
+        int64_t reply_at = 0;
+        (void)query_chat_db_for_reply(p->target, p->proposal_ts, &has_reply, &reply_at);
+
+        hu_init_resolution_t verdict = hu_init_outcome_decide_resolution(
+            p->proposal_ts, now_unix, has_reply, reply_at, HU_INIT_OUTCOME_MIN_OBSERVATION_SECS,
+            HU_INIT_OUTCOME_REPLY_WINDOW_SECS);
+
+        if (verdict == HU_INIT_RESOLUTION_PENDING)
+            continue;
+
+        if (hu_init_outcome_append_resolution(alloc, now_unix, p->proposal_ts, p->target, verdict,
+                                              reply_at) == HU_OK) {
+            written++;
+        }
+    }
+    if (out_resolutions_written)
+        *out_resolutions_written = written;
     return HU_OK;
 }
 

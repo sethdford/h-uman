@@ -92,11 +92,81 @@ typedef struct hu_init_status {
     size_t count_unknown_verdict; /* schema drift safety */
     double sum_confidence;        /* divided by total → mean */
     int64_t last_fired_ts_unix;   /* 0 if no FIRED seen */
+    /* Resolution telemetry (slice 3). Counts ONLY resolution lines,
+     * NOT proposal lines — `total` above still reflects proposals. */
+    size_t count_resolution_replied;
+    size_t count_resolution_ignored;
 } hu_init_status_t;
 
 /* Update `status` in place from one JSONL line. Robust to malformed
  * lines (returns without mutating on parse failure). Pure — no I/O,
  * uses the system allocator transiently for the JSON parse. */
 void hu_init_outcome_aggregate_line(hu_init_status_t *status, const char *line, size_t line_len);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Reply detection (T8 slice 3).
+ *
+ * For each FIRED proposal that was actually sent (dry_run=false), we
+ * want to know whether Seth replied within 24h. The resolver walks the
+ * JSONL, identifies unresolved FIRED records older than the
+ * observation window, queries chat.db for inbound messages from the
+ * target since the proposal's timestamp, and appends a "resolution"
+ * line to the same JSONL:
+ *
+ *   {"schema":"init_outcome_resolution_v1",
+ *    "ts_unix":<now>,
+ *    "proposal_ts":<orig_ts>,
+ *    "target":"+1xxx",
+ *    "outcome":"replied"|"ignored",
+ *    "reply_at":<unix or 0>}
+ *
+ * Resolution lines are append-only (same file as proposals) so a
+ * future Phase 3 tuner can JOIN proposals to outcomes without
+ * schema migrations.
+ */
+
+#define HU_INIT_OUTCOME_MIN_OBSERVATION_SECS 600   /* 10 min — let Seth see + react */
+#define HU_INIT_OUTCOME_REPLY_WINDOW_SECS    86400 /* 24h — after this, mark ignored */
+
+/* Resolution decision states. Returned by hu_init_outcome_decide_resolution. */
+typedef enum hu_init_resolution {
+    HU_INIT_RESOLUTION_PENDING = 0, /* still in observation window, don't write yet */
+    HU_INIT_RESOLUTION_REPLIED = 1, /* Seth replied within window */
+    HU_INIT_RESOLUTION_IGNORED = 2, /* window elapsed, no reply */
+} hu_init_resolution_t;
+
+/* Pure predicate over (proposal_ts, now, has_reply, reply_ts). No I/O,
+ * no allocation. Tests pin the full truth table:
+ *   - has_reply=true, reply_ts in window → REPLIED
+ *   - has_reply=false, now < proposal_ts + window → PENDING
+ *   - has_reply=false, now >= proposal_ts + window → IGNORED
+ *   - has_reply=true but reply_ts before proposal_ts → IGNORED (irrelevant reply)
+ *
+ * min_observation_secs defaults to HU_INIT_OUTCOME_MIN_OBSERVATION_SECS
+ * when passed as 0; same for max_window_secs and HU_INIT_OUTCOME_REPLY_WINDOW_SECS. */
+hu_init_resolution_t hu_init_outcome_decide_resolution(int64_t proposal_ts, int64_t now_unix,
+                                                       bool has_reply, int64_t reply_ts,
+                                                       int min_observation_secs,
+                                                       int max_window_secs);
+
+/* Append a resolution line to the JSONL. Called by the resolver when a
+ * proposal transitions from pending → replied/ignored. Returns HU_OK or
+ * HU_ERR_IO on filesystem failure (warn-once, same as append). */
+hu_error_t hu_init_outcome_append_resolution(hu_allocator_t *alloc, int64_t now_unix,
+                                             int64_t proposal_ts, const char *target,
+                                             hu_init_resolution_t outcome, int64_t reply_at);
+
+/* Walk the JSONL, find unresolved non-dry-run FIRED proposals older
+ * than the observation window, query chat.db for replies, append
+ * resolution lines. Returns the number of resolutions newly written.
+ *
+ * Production path: opens ~/Library/Messages/chat.db read-only.
+ * HU_IS_TEST path: skips the chat.db query — useful for testing the
+ * walk + pairing logic without needing a real Messages DB.
+ *
+ * Safe to call frequently — the unresolved-set walk is O(lines) and
+ * each chat.db query is a single indexed SELECT LIMIT 1. */
+hu_error_t hu_init_outcome_resolve_pending(hu_allocator_t *alloc, int64_t now_unix,
+                                           size_t *out_resolutions_written);
 
 #endif /* HU_AGENT_INIT_OUTCOME_H */
