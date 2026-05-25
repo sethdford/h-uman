@@ -452,6 +452,46 @@ static hu_error_t mlx_load_adapter(void *ctx, hu_allocator_t *alloc, const char 
         return HU_ERR_NOT_FOUND;
     }
 
+    /* US-6: Validate safetensors magic bytes (first 8 bytes) to reject corrupted
+     * adapters early. safetensors format: 8-byte LE length prefix followed by
+     * JSON header. Reject files that don't have enough data or have invalid magic. */
+    FILE *f = fopen(check, "rb");
+    if (!f) {
+        hu_log_warn("mlx_provider", NULL, "load_adapter: failed to open %s for validation", check);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    unsigned char magic[8] = {0};
+    size_t read_count = fread(magic, 1, 8, f);
+    fclose(f);
+
+    if (read_count < 8) {
+        hu_log_warn("mlx_provider", NULL,
+                    "load_adapter: safetensors file too small (got %zu bytes, need 8 for header)",
+                    read_count);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Safetensors format starts with a 64-bit LE integer indicating header size.
+     * Valid files have a reasonable header size (typically 100-10000 bytes).
+     * Arbitrary magic bytes like "BADBADBA" would have mismatched size fields.
+     * For a quick sanity check, verify the first 8 bytes form a plausible
+     * header size. Valid sizes are in range [0, 1MB) — allow 0 for test
+     * fixtures and empty/truncated files, but reject impossibly large sizes. */
+    uint64_t header_size = (uint64_t)magic[0] | ((uint64_t)magic[1] << 8) |
+                           ((uint64_t)magic[2] << 16) | ((uint64_t)magic[3] << 24) |
+                           ((uint64_t)magic[4] << 32) | ((uint64_t)magic[5] << 40) |
+                           ((uint64_t)magic[6] << 48) | ((uint64_t)magic[7] << 56);
+
+    /* Reasonable header sizes: 0 (fixture marker) to 1MB (max plausible JSON) */
+    if (header_size > (1024 * 1024)) {
+        hu_log_warn("mlx_provider", NULL,
+                    "load_adapter: safetensors header size implausible (%llu bytes); "
+                    "file may be corrupted",
+                    (unsigned long long)header_size);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
     mlx_ctx_t *c = (mlx_ctx_t *)ctx;
     char *new_path = dup_with_len(alloc, adapter_path, adapter_path_len);
     if (!new_path)
