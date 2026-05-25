@@ -699,6 +699,7 @@ void run_canvas_tool_tests(void);
 void run_canvas_e2e_tests(void);
 void run_canvas_persist_tests(void);
 void run_canvas_render_tests(void);
+void run_homebrew_formula_tests(void);
 void run_background_registry_tests(void);
 void run_consistency_tests(void);
 void run_mlx_provider_tests(void);
@@ -1551,6 +1552,7 @@ int main(int argc, char **argv) {
     run_canvas_e2e_tests();
     run_canvas_persist_tests();
     run_canvas_render_tests();
+    run_homebrew_formula_tests();
 #ifdef HU_ENABLE_RL_FULL
     /* Phase 5 Task 2 (RL SOTA): bootstrap CI suite — only linked when
      * the RL-full gate is ON, so default release/dev builds are byte-

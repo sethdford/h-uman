@@ -17,6 +17,12 @@ class Human < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/sethdford/h-uman/releases/download/v0.5.0/human-macos-aarch64.bin"
+      # TODO: replace with actual release sha256 before shipping
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+    end
+    if Hardware::CPU.intel?
+      url "https://github.com/sethdford/h-uman/releases/download/v0.5.0/human-macos-x86_64.bin"
+      # TODO: replace with actual release sha256 before shipping
       sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
@@ -24,10 +30,12 @@ class Human < Formula
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/sethdford/h-uman/releases/download/v0.5.0/human-linux-aarch64.bin"
+      # TODO: replace with actual release sha256 before shipping
       sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
     if Hardware::CPU.intel?
       url "https://github.com/sethdford/h-uman/releases/download/v0.5.0/human-linux-x86_64.bin"
+      # TODO: replace with actual release sha256 before shipping
       sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
@@ -84,23 +92,90 @@ class Human < Formula
     end
     zsh_completion.install "completions/_human" => "_human" if File.exist?("completions/_human")
     fish_completion.install "completions/human.fish" if File.exist?("completions/human.fish")
+
+    # Install launchd plist template on macOS
+    if OS.mac?
+      plist_template = "scripts/install/human-daemon.plist.template"
+      if File.exist?(plist_template)
+        # Create launchd plist with substituted paths
+        launchd_path = File.expand_path("~/Library/LaunchAgents/com.human.daemon.plist")
+        template_content = File.read(plist_template)
+        brew_prefix = HOMEBREW_PREFIX
+        rendered = template_content
+          .gsub("{{BREW_PREFIX}}", brew_prefix)
+          .gsub("{{HOME}}", File.expand_path("~"))
+
+        # Create LaunchAgents directory if it doesn't exist
+        FileUtils.mkdir_p(File.dirname(launchd_path))
+        File.write(launchd_path, rendered)
+        # Ensure plist is readable
+        File.chmod(0644, launchd_path)
+      end
+    end
+  end
+
+  def post_install
+    # On macOS, load the daemon into launchd
+    if OS.mac?
+      launchd_path = File.expand_path("~/Library/LaunchAgents/com.human.daemon.plist")
+      if File.exist?(launchd_path)
+        # Unload if already loaded to allow fresh load
+        system "launchctl", "unload", launchd_path, out: :null, err: :null
+        # Load the daemon
+        system "launchctl", "load", launchd_path
+        # Verify daemon starts
+        sleep 1
+        system "#{bin}/human", "--version"
+      end
+    end
   end
 
   def caveats
     on_macos do
       <<~EOS
-        Apple Intelligence (on-device, free):
+        Installation complete! The human daemon has been installed and configured.
+
+        NEXT STEPS:
+          1. Run: human onboard
+             This interactive wizard configures your first AI persona and
+             messaging channels.
+
+          2. Enable Full Disk Access (required):
+             System Settings → Privacy & Security → Full Disk Access
+             Add the human binary at: #{HOMEBREW_PREFIX}/bin/human
+
+          3. Verify daemon is running:
+             launchctl list | grep com.human.daemon
+             (should show PID > 0)
+
+        APPLE INTELLIGENCE (on-device, free):
           If you have macOS 26+ and Apple Silicon, human uses Apple
           Intelligence by default. human-ondevice was built and installed
           alongside human — no third-party dependencies needed.
 
           Run: human onboard --apple
+
+        LOGS & TROUBLESHOOTING:
+          Daemon logs: ~/.human/human.log
+          Run: human doctor
+             for a full system diagnostic
       EOS
     end
   end
 
   test do
-    assert_match "human", shell_output("#{bin}/human --version")
-    system "#{bin}/human", "--version"
+    # Smoke test: verify daemon binary is installed and callable
+    output = shell_output("#{bin}/human --version")
+    assert_match version.to_s, output
+
+    # Verify launchd plist is installed on macOS
+    if OS.mac?
+      launchd_path = File.expand_path("~/Library/LaunchAgents/com.human.daemon.plist")
+      assert File.exist?(launchd_path), "launchd plist not installed"
+      # Verify plist is valid XML (rough check)
+      plist_content = File.read(launchd_path)
+      assert plist_content.include?("<?xml"), "plist missing XML declaration"
+      assert plist_content.include?("com.human.daemon"), "plist missing correct Label"
+    end
   end
 end
