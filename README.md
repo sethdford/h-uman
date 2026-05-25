@@ -43,6 +43,20 @@ The smallest fully autonomous AI assistant infrastructure — a static C binary 
 - **Fully swappable:** core systems are vtable interfaces (providers, channels, tools, memory, tunnels, peripherals, observers, runtimes).
 - **No lock-in:** OpenAI-compatible provider support + pluggable custom endpoints.
 
+## Install (macOS)
+
+The fastest way to get running on macOS:
+
+1. **Download** the installer: [human-latest.pkg](https://github.com/sethdford/h-uman/releases/latest) (Apple Silicon or Intel)
+2. **Install** to `/Applications/Human.app` (double-click the .pkg)
+3. **Verify:** `/Applications/Human.app/Contents/MacOS/human --version`
+
+See [**Installation Guide**](docs/guides/installation.md) for:
+- Step-by-step walkthrough with screenshots
+- Gatekeeper and permission dialogs explained
+- Homebrew and source-build alternatives
+- Troubleshooting (human doctor, Full Disk Access, etc.)
+
 ## Landscape
 
 Similar projects in the autonomous AI assistant space (data sourced from each project's own documentation):
