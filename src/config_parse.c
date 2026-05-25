@@ -391,6 +391,21 @@ static hu_error_t parse_learning(hu_config_t *cfg, const hu_json_value_t *obj) {
     return HU_OK;
 }
 
+static hu_error_t parse_prompt_budget(hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->prompt_budget.enabled = hu_json_get_bool(obj, "enabled", cfg->prompt_budget.enabled);
+    int min_bytes = (int)hu_json_get_number(obj, "dead_field_min_bytes",
+                                            cfg->prompt_budget.dead_field_min_bytes);
+    if (min_bytes >= 0)
+        cfg->prompt_budget.dead_field_min_bytes = min_bytes;
+    int min_samples = (int)hu_json_get_number(obj, "min_samples_before_tag",
+                                              cfg->prompt_budget.min_samples_before_tag);
+    if (min_samples > 0)
+        cfg->prompt_budget.min_samples_before_tag = min_samples;
+    return HU_OK;
+}
+
 static hu_error_t parse_initiative(hu_allocator_t *a, hu_config_t *cfg,
                                    const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
@@ -1426,6 +1441,16 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         if (ie != HU_OK) {
             hu_json_free(a, root);
             return ie;
+        }
+    }
+
+    /* Prompt-Budget Compression — see docs/plans/2026-05-25-director-compression/. */
+    hu_json_value_t *pb_obj = hu_json_object_get(root, "prompt_budget");
+    if (pb_obj) {
+        hu_error_t pbe = parse_prompt_budget(cfg, pb_obj);
+        if (pbe != HU_OK) {
+            hu_json_free(a, root);
+            return pbe;
         }
     }
 

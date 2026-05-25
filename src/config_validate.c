@@ -79,6 +79,11 @@ static const char *const hu_config_top_keys[] = {
      * docs/plans/2026-05-25-initiative-layer/. Disabled by default — flipping
      * cfg->initiative.enabled=true in config.json starts the periodic tick. */
     "initiative",
+    /* 2026-05-25: prompt-budget compression — observability for the
+     * hu_prompt_build_system per-field byte distribution. See
+     * docs/plans/2026-05-25-director-compression/. Disabled by default;
+     * Phase 1 ships the measurement, Phase 2 wires the trim. */
+    "prompt_budget",
 };
 static const size_t hu_config_top_keys_len =
     sizeof(hu_config_top_keys) / sizeof(hu_config_top_keys[0]);

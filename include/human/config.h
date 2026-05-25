@@ -268,6 +268,18 @@ typedef struct hu_initiative_config {
     int per_contact_min_seconds; /* default 600 = 10 min; recency floor */
 } hu_initiative_config_t;
 
+/* Prompt-Budget Compression — see docs/plans/2026-05-25-director-compression/.
+ *
+ * Phase 1 is OBSERVABILITY only — the budget object accumulates per-field
+ * byte counts across turns; `enabled` defaults to false so the trim
+ * behavior stays off until operators have a week of data and decide to
+ * flip it on. Phase 2 (Task 4) wires the actual trim of DEAD fields. */
+typedef struct hu_prompt_budget_config {
+    bool enabled;               /* default false (Phase 1 ships gated OFF) */
+    int dead_field_min_bytes;   /* default 16 — fields below this mean are DEAD */
+    int min_samples_before_tag; /* default 100 — turns needed before tagging */
+} hu_prompt_budget_config_t;
+
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
@@ -707,6 +719,7 @@ typedef struct hu_config {
     hu_follow_up_watcher_config_t follow_up_watcher;
     hu_proactive_throttle_config_t proactive_throttle;
     hu_initiative_config_t initiative;
+    hu_prompt_budget_config_t prompt_budget;
     char *auto_update;                    /* "off" (default), "check", or "apply" */
     uint32_t update_check_interval_hours; /* default 24; 0 = use default */
     hu_arena_t *arena;
