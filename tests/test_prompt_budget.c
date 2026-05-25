@@ -2,6 +2,7 @@
  * — those tests come in a Task-1b slice when the wrapping in prompt.c
  * lands. This file pins the OBSERVER + DECISION logic in isolation. */
 
+#include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/core/allocator.h"
 #include "test_framework.h"
@@ -186,6 +187,137 @@ static void test_field_is_dead_null_budget_returns_false(void) {
     HU_ASSERT(!hu_prompt_budget_field_is_dead(NULL, HU_PROMPT_FIELD_MEMORY_CONTEXT, 16, 100));
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Phase 1b — live integration: hu_prompt_build_system populates stats.
+ *
+ * The builder wraps each named-field appender block with macros that
+ * record (len - _track_before) into stats[field_idx].bytes_contributed.
+ * These tests use a minimal hu_prompt_config_t fixture and verify that
+ * the stats slots reflect what was wired. They DO NOT assert exact byte
+ * counts (those depend on prompt structure — headers, separators) — only
+ * the inequalities that matter: populated fields > 0, empty fields == 0,
+ * names always set, total roughly matches sum of contributions. */
+
+static void test_build_system_stats_null_preserves_zero_overhead_path(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.memory_context = "test memory snapshot";
+    cfg.memory_context_len = 20;
+    char *out = NULL;
+    size_t out_len = 0;
+    /* Passing NULL stats MUST work (legacy callers expect it). */
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len), HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT(out_len > 0);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_build_system_stats_records_memory_context_bytes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    /* A specific, recognizable memory blob whose length is known. */
+    cfg.memory_context = "ALPHA-MEMORY-FIXTURE-1234567890";
+    cfg.memory_context_len = strlen(cfg.memory_context);
+    hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
+    memset(stats, 0, sizeof(stats));
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, &out, &out_len), HU_OK);
+    /* The memory_context slot reports AT LEAST as many bytes as the
+     * input (the wrapper also captures the "\n\n" separator). */
+    HU_ASSERT(stats[HU_PROMPT_FIELD_MEMORY_CONTEXT].bytes_contributed >= cfg.memory_context_len);
+    HU_ASSERT_STR_EQ(stats[HU_PROMPT_FIELD_MEMORY_CONTEXT].name, "memory_context");
+    /* Unwired fields (e.g. somatic) report exactly 0 — but still
+     * carry a name, so operators can tell wired-vs-missing apart. */
+    HU_ASSERT_EQ(stats[HU_PROMPT_FIELD_SOMATIC_CONTEXT].bytes_contributed, (size_t)0);
+    HU_ASSERT_STR_EQ(stats[HU_PROMPT_FIELD_SOMATIC_CONTEXT].name, "somatic_context");
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_build_system_stats_records_multiple_populated_fields(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.memory_context = "MEM";
+    cfg.memory_context_len = 3;
+    cfg.instruction_context = "INSTRUCTIONS-LONGER-STRING-HERE";
+    cfg.instruction_context_len = strlen(cfg.instruction_context);
+    cfg.stm_context = "STM-blob";
+    cfg.stm_context_len = strlen(cfg.stm_context);
+    hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
+    memset(stats, 0, sizeof(stats));
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, &out, &out_len), HU_OK);
+    /* All three populated fields report non-zero contribution. */
+    HU_ASSERT(stats[HU_PROMPT_FIELD_MEMORY_CONTEXT].bytes_contributed > 0);
+    HU_ASSERT(stats[HU_PROMPT_FIELD_INSTRUCTION_CONTEXT].bytes_contributed > 0);
+    HU_ASSERT(stats[HU_PROMPT_FIELD_STM_CONTEXT].bytes_contributed > 0);
+    /* Their relative sizes track input lengths — instruction is longest. */
+    HU_ASSERT(stats[HU_PROMPT_FIELD_INSTRUCTION_CONTEXT].bytes_contributed >
+              stats[HU_PROMPT_FIELD_MEMORY_CONTEXT].bytes_contributed);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_build_system_stats_unwired_field_stays_zero_even_when_others_populated(void) {
+    /* The audit identified somatic_context as a likely DEAD field. This
+     * test pins that signal: when the field isn't populated in cfg, its
+     * stats slot reports 0 bytes regardless of what other fields contain. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.memory_context = "some-memory";
+    cfg.memory_context_len = 11;
+    cfg.conversation_context = "alice: hey\nbob: yo";
+    cfg.conversation_context_len = 18;
+    hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
+    memset(stats, 0, sizeof(stats));
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, &out, &out_len), HU_OK);
+    HU_ASSERT_EQ(stats[HU_PROMPT_FIELD_SOMATIC_CONTEXT].bytes_contributed, (size_t)0);
+    HU_ASSERT_EQ(stats[HU_PROMPT_FIELD_RUPTURE_CONTEXT].bytes_contributed, (size_t)0);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_build_system_stats_feeds_budget_observer_round_trip(void) {
+    /* End-to-end: build prompt → observe stats with budget → query DEAD.
+     * Proves that the wrapping in prompt.c actually emits data that the
+     * budget object can act on. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    /* Input must be > threshold (16) bytes so memory_context isn't itself
+     * tagged DEAD by the same predicate. */
+    cfg.memory_context = "PERSISTENT-MEMORY-FIXTURE-BLOB-FOR-DEAD-FIELD-TEST";
+    cfg.memory_context_len = strlen(cfg.memory_context);
+
+    hu_prompt_budget_t *budget = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &budget), HU_OK);
+
+    /* Observe 100 prompt builds — somatic is never populated, so its
+     * mean stays 0 < threshold 16 → DEAD. */
+    for (int i = 0; i < 100; i++) {
+        hu_prompt_field_stat_t stats[HU_PROMPT_FIELD_COUNT];
+        memset(stats, 0, sizeof(stats));
+        char *out = NULL;
+        size_t out_len = 0;
+        HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, &out, &out_len), HU_OK);
+        hu_prompt_budget_observe(budget, stats, HU_PROMPT_FIELD_COUNT);
+        alloc.free(alloc.ctx, out, out_len + 1);
+    }
+
+    HU_ASSERT_EQ(hu_prompt_budget_observation_count(budget), (size_t)100);
+    /* somatic was never populated → DEAD. */
+    HU_ASSERT(hu_prompt_budget_field_is_dead(budget, HU_PROMPT_FIELD_SOMATIC_CONTEXT, 16, 100));
+    /* memory was always populated → NOT dead. */
+    HU_ASSERT(!hu_prompt_budget_field_is_dead(budget, HU_PROMPT_FIELD_MEMORY_CONTEXT, 16, 100));
+
+    hu_prompt_budget_free(budget);
+}
+
 void run_prompt_budget_tests(void);
 void run_prompt_budget_tests(void) {
     HU_TEST_SUITE("prompt_budget");
@@ -202,4 +334,10 @@ void run_prompt_budget_tests(void) {
     HU_RUN_TEST(test_snapshot_respects_array_cap);
     HU_RUN_TEST(test_observe_null_args_no_op);
     HU_RUN_TEST(test_field_is_dead_null_budget_returns_false);
+    /* Phase 1b — live wiring through hu_prompt_build_system */
+    HU_RUN_TEST(test_build_system_stats_null_preserves_zero_overhead_path);
+    HU_RUN_TEST(test_build_system_stats_records_memory_context_bytes);
+    HU_RUN_TEST(test_build_system_stats_records_multiple_populated_fields);
+    HU_RUN_TEST(test_build_system_stats_unwired_field_stays_zero_even_when_others_populated);
+    HU_RUN_TEST(test_build_system_stats_feeds_budget_observer_round_trip);
 }

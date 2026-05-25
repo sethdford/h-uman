@@ -153,9 +153,18 @@ typedef struct hu_prompt_config {
     size_t voice_maturity_directive_len;
 } hu_prompt_config_t;
 
-/* Build the full system prompt. Caller owns returned string; free with alloc. */
+/* Build the full system prompt. Caller owns returned string; free with alloc.
+ *
+ * `stats` is an OPTIONAL per-field byte-accounting array (NULL = legacy
+ * zero-overhead path). When non-NULL, it MUST point to an array of at
+ * least HU_PROMPT_FIELD_COUNT entries; the builder populates each
+ * entry's `name` (static string) and `bytes_contributed` (delta this
+ * field added to the prompt). Empty fields report 0 bytes — operators
+ * see WHICH slots are unwired, not just which are dead. See
+ * include/human/agent/prompt_budget.h for the field enum + accumulator. */
+struct hu_prompt_field_stat; /* forward decl — full def in prompt_budget.h */
 hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_t *config,
-                                  char **out, size_t *out_len);
+                                  struct hu_prompt_field_stat *stats, char **out, size_t *out_len);
 
 /* Build only the static parts (identity, tools, autonomy, safety, custom).
  * The result can be cached and reused across turns. Caller owns returned string. */
