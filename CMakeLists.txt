@@ -1232,6 +1232,7 @@ list(APPEND HU_CORE_SOURCES
     src/agent/process_reward.c
     src/ml/dpo.c
     src/ml/lora_export.c
+    src/ml/lora_subprocess.c
     # lora_nightly moved to if(HU_ENABLE_ML) block (2026-05-24 hotfix) —
     # references hu_mlx_admin_swap_adapter from src/ml/mlx_admin.c which
     # is itself ML-gated. Keeping it in HU_CORE_SOURCES broke local-check,
@@ -3005,6 +3006,7 @@ set(HU_TEST_SOURCES
     tests/test_style_adapter.c
     tests/test_lora_export.c
     tests/test_lora_nightly.c
+    tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_ENABLE_IMESSAGE + HU_ENABLE_TELEGRAM since it calls

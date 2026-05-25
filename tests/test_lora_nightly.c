@@ -69,6 +69,11 @@ static void test_config_defaults_fills_paths_from_home(void) {
     HU_ASSERT_TRUE(strstr(cfg.adapters_dir, "/.human/adapters") != NULL);
     HU_ASSERT_TRUE(strstr(cfg.current_symlink, "/.human/adapter-current") != NULL);
     HU_ASSERT_TRUE(strstr(cfg.mlx_base_url, "127.0.0.1:8741") != NULL);
+    /* N1: defaults now include a base_model. Verify it's a non-empty,
+     * mlx-community-shaped identifier (just sanity — exact id may
+     * change as the runbook recommends different starting models). */
+    HU_ASSERT_TRUE(cfg.base_model[0] != '\0');
+    HU_ASSERT_TRUE(strstr(cfg.base_model, "/") != NULL); /* org/model shape */
     HU_ASSERT_TRUE(!cfg.dry_run);
     if (orig_home) {
         setenv("HOME", orig_home, 1);
