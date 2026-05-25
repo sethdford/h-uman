@@ -145,8 +145,51 @@ hu_error_t hu_m3_frontier_adapter_noop_infer(hu_m3_frontier_adapter_t *adapter) 
     return hu_m3_frontier_adapter_probe_infer(adapter);
 }
 
+hu_error_t hu_m3_frontier_adapter_probe_infer_with_metadata(hu_m3_frontier_adapter_t *adapter,
+                                                            uint32_t completion_tokens,
+                                                            uint64_t latency_ms) {
+    /* Phase B3 extension: record outcome metadata (completion tokens + latency)
+     * into the ring buffer alongside incrementing the probe counter. */
+    hu_error_t err = hu_m3_frontier_adapter_probe_infer(adapter);
+    if (err != HU_OK || !adapter)
+        return err;
+
+    /* Record the outcome with the captured metrics. timestamp_unix_ms=0
+     * tells the recorder to use wall clock. */
+    return hu_m3_record_outcome_from_provider_result(adapter, /*timestamp_unix_ms=*/0,
+                                                     /*prompt_tokens=*/0, completion_tokens,
+                                                     latency_ms, /*contact_hash=*/0,
+                                                     /*turn_kind=*/0);
+}
+
 uint64_t hu_m3_frontier_adapter_probe_count(const hu_m3_frontier_adapter_t *adapter) {
     return adapter ? adapter->probe_count : 0;
+}
+
+hu_m3_probe_outcome_snapshot_t
+hu_m3_frontier_adapter_probe_outcome_at(const hu_m3_frontier_adapter_t *adapter, size_t idx) {
+    hu_m3_probe_outcome_snapshot_t snap = {0, 0};
+    if (!adapter || idx >= adapter->total_recorded)
+        return snap;
+
+    /* Ring buffer index: find the actual position of outcome[idx] in the
+     * circular buffer, accounting for wrap-around at capacity.
+     * When total_recorded < CAPACITY, the buffer hasn't wrapped yet, so
+     * the oldest record is at index 0. When full (total_recorded >= CAPACITY),
+     * the oldest is at `head` (the next write position). */
+    size_t oldest_idx;
+    if (adapter->total_recorded < HU_M3_OUTCOMES_RING_CAPACITY) {
+        /* Buffer hasn't filled yet; oldest is at 0 */
+        oldest_idx = 0;
+    } else {
+        /* Buffer is full; oldest is at current head position */
+        oldest_idx = adapter->head;
+    }
+    size_t ring_pos = (oldest_idx + idx) % HU_M3_OUTCOMES_RING_CAPACITY;
+
+    snap.completion_tokens = adapter->outcomes[ring_pos].completion_tokens;
+    snap.latency_ms = adapter->outcomes[ring_pos].latency_ms;
+    return snap;
 }
 
 void hu_m3_frontier_adapter_close(hu_allocator_t *alloc, hu_m3_frontier_adapter_t *adapter) {

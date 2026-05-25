@@ -507,6 +507,7 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
         out->usage.prompt_tokens = 10;
         out->usage.completion_tokens = 8;
         out->usage.total_tokens = 18;
+        out->latency_ms = 15;
     } else {
         const char *content = "Hello from mock Gemini";
         size_t len = strlen(content);
@@ -515,6 +516,7 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
         out->usage.prompt_tokens = 10;
         out->usage.completion_tokens = 5;
         out->usage.total_tokens = 15;
+        out->latency_ms = 12;
     }
     return HU_OK;
 #else
@@ -890,10 +892,16 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
     }
 
     hu_http_response_t hresp = {0};
+    struct timespec t_start, t_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
     err = hu_http_post_json(alloc, url_buf, auth_header, body, body_len, &hresp);
+    clock_gettime(CLOCK_MONOTONIC, &t_end);
     alloc->free(alloc->ctx, body, body_len);
     if (err != HU_OK)
         return err;
+    /* Compute latency in milliseconds */
+    uint64_t latency_ms = (uint64_t)(t_end.tv_sec - t_start.tv_sec) * 1000 +
+                          (uint64_t)(t_end.tv_nsec - t_start.tv_nsec) / 1000000;
 
     if (hresp.status_code < 200 || hresp.status_code >= 300) {
         hu_http_response_free(alloc, &hresp);
@@ -981,6 +989,8 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
         out->usage.thoughts_tokens = (uint32_t)hu_json_get_number(usage, "thoughtsTokenCount", 0);
         out->usage.total_tokens = out->usage.prompt_tokens + out->usage.completion_tokens;
     }
+    /* US-4: Capture wall-clock latency for outcome recording. */
+    out->latency_ms = latency_ms;
     /* T1b — surface finishReason for the empty-response diagnostic. The
      * 2026-05-24 reactive-iMessage regression was a Gemini 3.x thinking-
      * budget starvation: finishReason="MAX_TOKENS", thoughtsTokenCount=72,

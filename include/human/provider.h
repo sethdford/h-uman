@@ -135,6 +135,8 @@ typedef struct hu_chat_response {
     /* Mean logprob over completion tokens when provider returned logprobs (e.g. OpenAI). */
     bool logprob_mean_valid;
     float logprob_mean;
+    /* Wall-clock latency from request to response, populated by provider. 0 if not measured. */
+    uint64_t latency_ms;
 } hu_chat_response_t;
 
 typedef enum hu_stream_chunk_type {
@@ -170,6 +172,8 @@ typedef struct hu_stream_chat_result {
     size_t tool_calls_count;
     const char *reasoning_content; /* accumulated thinking deltas, NULL if none */
     size_t reasoning_content_len;
+    /* Wall-clock latency from request to response, populated by provider. 0 if not measured. */
+    uint64_t latency_ms;
 } hu_stream_chat_result_t;
 
 /* Free allocations in a stream chat result (content, model, tool_calls). */
