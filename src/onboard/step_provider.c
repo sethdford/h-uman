@@ -15,12 +15,17 @@
 
 #include "human/onboard/step_provider.h"
 
+#include "human/auth.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include "human/onboard/state.h"
 #include "human/onboard/step.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 
 /* ── Pure helpers (testable in isolation) ─────────────────────────── */
 
@@ -105,6 +110,145 @@ hu_onboard_step_result_t hu_onboard_step_provider_run_phase1(hu_onboard_step_t *
     return HU_ONBOARD_REPEAT;
 }
 
+/* ── Sprint 55 Phase 3 — API-key prompt for cloud providers ───────── */
+
+/* True iff the choice requires an API key (cloud providers). MLX local
+ * runs against a local server with a stable shared secret already in
+ * config.json, so it does NOT prompt. */
+bool hu_onboard_provider_choice_requires_api_key(hu_onboard_provider_choice_t c) {
+    return c == HU_PROVIDER_CHOICE_ANTHROPIC || c == HU_PROVIDER_CHOICE_GEMINI ||
+           c == HU_PROVIDER_CHOICE_OPENAI;
+}
+
+#if !HU_IS_TEST
+/* Read a single line from stdin with echo disabled if stdin is a TTY.
+ * Returns 0 on success (non-empty line), -1 on EOF / read error, -2 on
+ * empty line. tcgetattr/tcsetattr are best-effort: if stdin isn't a
+ * TTY we fall back to plain fgets without echo manipulation (this is
+ * the same shape `getpass(3)` historically had, minus the deprecation).
+ *
+ * On return, *out_len is the length of the trimmed line in `buf`
+ * (excluding the trailing NUL). The buffer is always NUL-terminated
+ * even on failure. Gated by !HU_IS_TEST because tests don't exercise
+ * the live tty path (the prompt_and_save_api_key short-circuits). */
+static int read_secret_line(char *buf, size_t buf_cap, size_t *out_len) {
+    if (!buf || buf_cap == 0 || !out_len)
+        return -1;
+    buf[0] = '\0';
+    *out_len = 0;
+
+    int fd = fileno(stdin);
+    struct termios old_state = {0};
+    bool tty_changed = false;
+    if (fd >= 0 && isatty(fd)) {
+        if (tcgetattr(fd, &old_state) == 0) {
+            struct termios new_state = old_state;
+            new_state.c_lflag &= ~(tcflag_t)ECHO;
+            /* TCSAFLUSH discards any input buffered before the call,
+             * matching getpass semantics — the user can't type the key
+             * before we've turned echo off. */
+            if (tcsetattr(fd, TCSAFLUSH, &new_state) == 0) {
+                tty_changed = true;
+            }
+        }
+    }
+
+    char *got = fgets(buf, (int)buf_cap, stdin);
+
+    if (tty_changed) {
+        /* Restore terminal state regardless of fgets outcome. The echoed
+         * newline the user pressed got eaten by ECHO=off, so emit one
+         * so the next prompt starts on its own line. */
+        tcsetattr(fd, TCSAFLUSH, &old_state);
+        fputc('\n', stdout);
+        fflush(stdout);
+    }
+
+    if (!got) {
+        buf[0] = '\0';
+        return -1;
+    }
+    /* Strip trailing CR/LF in-place. */
+    size_t n = strlen(buf);
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) {
+        buf[--n] = '\0';
+    }
+    *out_len = n;
+    return (n == 0) ? -2 : 0;
+}
+
+/* Securely wipe `buf[0..cap-1]`. The volatile-pointer dance prevents
+ * the compiler from eliding the write as "dead store" — a real-world
+ * hazard for secret-clearing routines. Apple platforms have
+ * memset_s but it's macOS-only; this pattern is portable. Same
+ * !HU_IS_TEST gate as read_secret_line — only used inside the live
+ * prompt_and_save_api_key branch. */
+static void secure_wipe(char *buf, size_t cap) {
+    if (!buf || cap == 0)
+        return;
+    volatile char *vp = (volatile char *)buf;
+    for (size_t i = 0; i < cap; i++) {
+        vp[i] = 0;
+    }
+}
+#endif /* !HU_IS_TEST */
+
+/* Prompt for and persist an API key for the chosen cloud provider.
+ * Returns true on success, false on any failure (the caller still
+ * advances the step; the user can re-enter the key via
+ * `human auth set <provider> <key>` later).
+ *
+ * Under HU_IS_TEST the prompt + write are skipped — tests exercise
+ * the key path via the user_data injection seam plus the auth.c
+ * unit tests' own coverage of hu_auth_set_api_key. */
+static bool prompt_and_save_api_key(const char *provider_name) {
+    if (!provider_name || !*provider_name)
+        return false;
+
+#if HU_IS_TEST
+    (void)provider_name;
+    return true;
+#else
+    fprintf(stdout, "\n  Enter your %s API key (input hidden): ", provider_name);
+    fflush(stdout);
+
+    char key[1024];
+    size_t key_len = 0;
+    int rc = read_secret_line(key, sizeof(key), &key_len);
+    if (rc == -1) {
+        fputs("  No key entered (EOF/error) — re-run to retry, "
+              "or run 'human auth set <provider> <key>' later.\n",
+              stdout);
+        secure_wipe(key, sizeof(key));
+        return false;
+    }
+    if (rc == -2) {
+        fputs("  Empty key — skipping; run 'human auth set <provider> <key>' later.\n", stdout);
+        secure_wipe(key, sizeof(key));
+        return false;
+    }
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_auth_set_api_key(&alloc, provider_name, key);
+
+    /* ALWAYS wipe before returning, even on success — the key MUST
+     * NOT linger on the stack frame. */
+    secure_wipe(key, sizeof(key));
+    (void)key_len;
+
+    if (err != HU_OK) {
+        fprintf(stdout,
+                "  API key save failed (err=%d). "
+                "You can set it later via 'human auth set %s <key>'.\n",
+                (int)err, provider_name);
+        return false;
+    }
+
+    fputs("  API key saved to ~/.human/auth.json (chmod 0600).\n", stdout);
+    return true;
+#endif
+}
+
 /* ── Sprint 55 Phase 2 — real stdin path ──────────────────────────── */
 
 /* Classify the first non-whitespace byte of a stdin line into a choice.
@@ -180,10 +324,21 @@ hu_onboard_step_result_t hu_onboard_step_provider_run(hu_onboard_step_t *self,
     case HU_PROVIDER_CHOICE_ANTHROPIC:
     case HU_PROVIDER_CHOICE_GEMINI:
     case HU_PROVIDER_CHOICE_OPENAI:
-        /* Persist BEFORE returning so a crash post-step preserves the
-         * user's selection (state-persistence-before-return pattern from
-         * Sprint 54 US-C2.2). */
+        /* Persist BEFORE prompting for the key so a crash mid-prompt
+         * preserves the user's selection (state-persistence-before-
+         * return pattern from Sprint 54 US-C2.2). */
         persist_choice(choice, state);
+
+        /* Sprint 55 Phase 3 — cloud providers need an API key. The
+         * key is read via termios echo-off (best effort on TTYs),
+         * persisted to ~/.human/auth.json via hu_auth_set_api_key,
+         * then secure-wiped from the stack buffer. Failures are
+         * non-fatal — the user can set the key later via
+         * 'human auth set <provider> <key>'. */
+        if (hu_onboard_provider_choice_requires_api_key(choice)) {
+            const char *pname = hu_onboard_provider_choice_to_name(choice);
+            prompt_and_save_api_key(pname);
+        }
         return HU_ONBOARD_NEXT;
     case HU_PROVIDER_CHOICE_INVALID:
     case HU_PROVIDER_CHOICE_NONE:

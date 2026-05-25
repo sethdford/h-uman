@@ -245,6 +245,57 @@ static void test_run_with_injected_invalid_does_not_persist_name(void) {
     step->user_data = NULL;
 }
 
+/* ── Sprint 55 Phase 3 — cloud-provider API-key requirement ──────── */
+
+static void test_requires_api_key_mlx_local_is_false(void) {
+    /* MLX runs against a local server — no key needed. */
+    HU_ASSERT_TRUE(hu_onboard_provider_choice_requires_api_key(HU_PROVIDER_CHOICE_MLX_LOCAL) ==
+                   false);
+}
+
+static void test_requires_api_key_anthropic_is_true(void) {
+    HU_ASSERT_TRUE(hu_onboard_provider_choice_requires_api_key(HU_PROVIDER_CHOICE_ANTHROPIC) ==
+                   true);
+}
+
+static void test_requires_api_key_gemini_is_true(void) {
+    HU_ASSERT_TRUE(hu_onboard_provider_choice_requires_api_key(HU_PROVIDER_CHOICE_GEMINI) == true);
+}
+
+static void test_requires_api_key_openai_is_true(void) {
+    HU_ASSERT_TRUE(hu_onboard_provider_choice_requires_api_key(HU_PROVIDER_CHOICE_OPENAI) == true);
+}
+
+static void test_requires_api_key_quit_is_false(void) {
+    /* QUIT is not a provider — must not prompt. */
+    HU_ASSERT_TRUE(hu_onboard_provider_choice_requires_api_key(HU_PROVIDER_CHOICE_QUIT) == false);
+}
+
+static void test_requires_api_key_invalid_is_false(void) {
+    HU_ASSERT_TRUE(hu_onboard_provider_choice_requires_api_key(HU_PROVIDER_CHOICE_INVALID) ==
+                   false);
+    HU_ASSERT_TRUE(hu_onboard_provider_choice_requires_api_key(HU_PROVIDER_CHOICE_NONE) == false);
+}
+
+/* Phase 3 integration: stdin path with anthropic choice still persists
+ * the provider name + returns NEXT, even though under HU_IS_TEST the
+ * key prompt is skipped. Pins the contract that the step's NEXT-on-
+ * cloud-provider behavior is unchanged. */
+static void test_run_no_user_data_stdin_anthropic_persists_name_under_test(void) {
+    hu_onboard_step_t *step = hu_onboard_step_provider_create();
+    step->user_data = NULL;
+
+    FILE *f = redirect_stdin_from_string("2\n");
+    HU_ASSERT_NOT_NULL(f);
+
+    hu_onboard_state_t state;
+    hu_onboard_state_init(&state);
+    HU_ASSERT_EQ((int)step->run(step, &state), (int)HU_ONBOARD_NEXT);
+    /* Anthropic chosen, name persisted; key prompt skipped under HU_IS_TEST. */
+    HU_ASSERT_STR_EQ(state.provider.provider_name, "anthropic");
+    HU_ASSERT_TRUE(state.provider.provider_smoke_passed == false);
+}
+
 /* ── Credential-leak defense ──────────────────────────────────────── */
 
 static void test_state_struct_has_no_api_key_field(void) {
@@ -284,6 +335,16 @@ void run_onboard_step_provider_tests(void) {
     HU_RUN_TEST(test_run_with_no_user_data_and_stdin_digit_1_persists_mlx);
     HU_RUN_TEST(test_run_with_no_user_data_and_stdin_q_returns_quit);
     HU_RUN_TEST(test_run_with_no_user_data_and_stdin_junk_returns_repeat);
+
+    /* Phase 3 — cloud-provider API-key requirement */
+    HU_RUN_TEST(test_requires_api_key_mlx_local_is_false);
+    HU_RUN_TEST(test_requires_api_key_anthropic_is_true);
+    HU_RUN_TEST(test_requires_api_key_gemini_is_true);
+    HU_RUN_TEST(test_requires_api_key_openai_is_true);
+    HU_RUN_TEST(test_requires_api_key_quit_is_false);
+    HU_RUN_TEST(test_requires_api_key_invalid_is_false);
+    HU_RUN_TEST(test_run_no_user_data_stdin_anthropic_persists_name_under_test);
+
     HU_RUN_TEST(test_run_with_injected_mlx_choice_persists_name);
     HU_RUN_TEST(test_run_with_injected_anthropic_choice_persists_name);
     HU_RUN_TEST(test_run_with_injected_quit_does_not_persist_name);

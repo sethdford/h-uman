@@ -78,4 +78,11 @@ hu_onboard_step_result_t hu_onboard_step_provider_run_phase1(hu_onboard_step_t *
 hu_onboard_step_result_t hu_onboard_step_provider_run(hu_onboard_step_t *self,
                                                       hu_onboard_state_t *state);
 
+/* Sprint 55 Phase 3 — returns true iff the choice represents a CLOUD
+ * provider that needs an API key. Local providers (MLX) and non-
+ * provider choices (NONE/QUIT/INVALID) return false. Pure function;
+ * safe to call without state. */
+#include <stdbool.h>
+bool hu_onboard_provider_choice_requires_api_key(hu_onboard_provider_choice_t c);
+
 #endif /* HU_ONBOARD_STEP_PROVIDER_H */
