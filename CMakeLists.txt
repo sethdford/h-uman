@@ -494,6 +494,7 @@ set(HU_CORE_SOURCES
     src/core/string.c
     src/core/io_secure.c
     src/core/json.c
+    src/core/time.c
     # Phase 3 of docs/plans/2026-05-18-imessage-sota.md: pure-C bplist00
     # parser. Used by imessage_ingest.c extractors for audio transcripts
     # and edit-chain history. No external deps.
@@ -3103,6 +3104,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_react_contract.c
     tests/test_follow_up.c
     tests/test_follow_up_daemon_integration.c
+    tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
     tests/test_config_getters.c
     tests/test_config_validation.c

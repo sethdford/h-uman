@@ -447,6 +447,13 @@ size_t hu_imessage_test_get_last_media_count(hu_channel_t *ch);
 /** Test hook for Tenor fallback JSON string extraction (`gif_json_extract`). */
 size_t hu_imessage_test_gif_json_extract(const char *json, size_t json_len, const char *key,
                                          char *out, size_t cap);
+
+/** Test-only: set a callback function pointer that will be invoked instead of osascript send.
+ * Callback receives (target, target_len, message, message_len) and should log the send
+ * attempt to a file or buffer for test assertions. Pass NULL to disable the stub. */
+typedef void (*hu_imessage_test_send_stub_fn)(const char *target, size_t target_len,
+                                              const char *message, size_t message_len);
+void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn);
 #endif
 
 #endif /* HU_CHANNELS_IMESSAGE_H */
