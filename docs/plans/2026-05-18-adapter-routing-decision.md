@@ -1,7 +1,7 @@
 ---
 title: "Adapter Routing — persona-v8 vs texting-llama-8b — Decision Doc"
 created: 2026-05-18
-status: decision
+status: deferred
 owner: ML subsystem
 related:
   - CLAUDE.md (M3 row in Strategic Missions)
@@ -9,6 +9,7 @@ related:
   - docs/plans/2026-05-11-init-02-molora-channels.md
   - docs/plans/2026-05-11-rl-loop-phase-2-dpo-reactions.md
 trigger: 2026-05-18 personal-onboarding audit found 5+ trained adapters across two base models; only persona-v8 over Gemma-4-26B is loaded by the daemon.
+last_audit: 2026-05-25
 ---
 
 # Adapter Routing Decision

@@ -1,7 +1,7 @@
 ---
 title: "Memory v2 Roadmap — Overview"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-roadmap-overview.md
 related:
   - 2026-05-10-master-follow-through-program.md
@@ -14,7 +14,7 @@ related:
   - 2026-05-10-w4-self-rag-provenance.md
   - 2026-05-10-w5-agent-writable-persona.md
   - 2026-05-10-w6-eval-memrl-redteam.md
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # Memory v2 Roadmap — Overview

@@ -1,11 +1,11 @@
 ---
 title: "W1 — Bitemporal Foundation: edges, write-time conflict resolver, write-trust score, LoCoMo skeleton"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-roadmap-overview.md
 risk: high
 scope: src/memory/, include/human/memory/, src/agent/, tests/, eval_suites/
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # W1 — Bitemporal Foundation

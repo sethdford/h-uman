@@ -1,6 +1,6 @@
 ---
 title: M3 Frontier Model Bridge — Honest Gap and Migration Plan
-status: planned (multi-month)
+status: closed
 owner: ML subsystem
 created: 2026-05-10
 parent: 2026-05-10-sota-roadmap-6mo.md
@@ -12,6 +12,7 @@ related:
   - 2026-05-10-sota-roadmap-6mo.md
   - adr/2026-05-11-adapter-rollback-signal.md
   - adr/2026-05-11-persona-eval-judge.md
+last_audit: 2026-05-25
 ---
 
 # M3 status, honestly

@@ -1,7 +1,7 @@
 ---
 title: "Initiative 03 — Apple FoundationModels first-class provider"
 created: 2026-05-11
-status: design
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -17,6 +17,7 @@ related:
   - ../../src/providers/apple.c
   - ../../apps/shared/HumanKit/Sources/HumanOnDevice/OnDeviceProvider.swift
   - ../../apps/shared/HumanKit/Sources/HumanOnDeviceServer/OnDeviceRouter.swift
+last_audit: 2026-05-25
 ---
 
 # Apple FoundationModels first-class provider

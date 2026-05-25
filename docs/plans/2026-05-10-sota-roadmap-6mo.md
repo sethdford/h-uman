@@ -1,7 +1,7 @@
 ---
 title: "SOTA roadmap — six-month plan to lead on personalization, performance, and UX"
 created: 2026-05-10
-status: draft
+status: deferred
 related:
   - ../../CLAUDE.md
   - ../../AGENTS.md
@@ -11,6 +11,7 @@ related:
   - 2026-05-10-memory-v2-roadmap-overview.md
   - ../standards/ai/evaluation.md
   - ../standards/quality/governance.md
+last_audit: 2026-05-25
 ---
 
 # SOTA roadmap — six-month plan to lead on personalization, performance, and UX

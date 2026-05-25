@@ -1,3 +1,10 @@
+---
+title: SOTA Round-2 Findings (2026-05-19)
+status: deferred
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # SOTA Round-2 Findings (2026-05-19)
 
 Companion to `2026-05-19-sota-first-data.md`. After the 10-item

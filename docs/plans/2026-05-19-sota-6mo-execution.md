@@ -1,3 +1,10 @@
+---
+title: 6-Month SOTA Execution Plan — h-uman as iMessage "better-than-human"
+status: closed
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # 6-Month SOTA Execution Plan — h-uman as iMessage "better-than-human"
 
 > **Status:** active

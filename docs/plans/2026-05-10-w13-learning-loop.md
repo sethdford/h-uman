@@ -1,10 +1,11 @@
 ---
 title: "W13 — Learning Loop: LoRA + DPO from W4 verifier flags + W5 deltas + W3 case outcomes"
 created: 2026-05-10
-status: proposed
+status: deferred
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: high
 scope: include/human/ml/, src/ml/, src/providers/, gated behind HU_ENABLE_LEARNING
+last_audit: 2026-05-25
 ---
 
 # W13 — Learning Loop

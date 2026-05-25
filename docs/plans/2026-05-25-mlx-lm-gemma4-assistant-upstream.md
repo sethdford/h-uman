@@ -6,6 +6,8 @@ parent: docs/plans/2026-05-24-gemma-throughput-program.md
 related:
   - scripts/check-mlx-lm-cb-upstream.sh
   - docs/guides/radix-attention-upstream-watch.md
+status: deferred
+last_audit: 2026-05-25
 ---
 
 # mlx-lm Upstream — Add `gemma4_assistant` model_type

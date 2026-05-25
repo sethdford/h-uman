@@ -1,6 +1,6 @@
 ---
 title: Gemma Throughput Program — Tier 1 + Tier 2 Execution Plan
-status: draft
+status: deferred
 owner: ML + inference subsystem
 created: 2026-05-24
 parent: docs/plans/2026-05-10-sota-roadmap-6mo.md
@@ -15,6 +15,7 @@ related:
   - scripts/mlx-server.py
   - scripts/bench-gemma-perf.py
   - include/human/persona.h
+last_audit: 2026-05-25
 ---
 
 # Why this doc exists

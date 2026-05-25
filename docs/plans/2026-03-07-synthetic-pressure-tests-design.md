@@ -1,5 +1,6 @@
 ---
-status: complete
+status: closed
+last_audit: 2026-05-25
 ---
 
 # Synthetic Pressure Tests Design

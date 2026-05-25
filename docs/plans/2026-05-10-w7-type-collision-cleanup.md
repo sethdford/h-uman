@@ -1,9 +1,9 @@
 ---
 title: W7 type collision cleanup
-status: complete
+status: closed
 owner: memory subsystem
 created: 2026-05-10
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # Background

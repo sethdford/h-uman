@@ -1,6 +1,6 @@
 ---
 title: M3 MLX Bridge — Execution Plan
-status: in-progress (B-pre + B1 + B5 shipped 2026-05-17 thru 2026-05-24; B2 wiring partial; B3 verifier-contract test + B4 streaming NOT STARTED)
+status: active
 last-status-refresh: 2026-05-25
 owner: ML subsystem
 created: 2026-05-17
@@ -11,6 +11,7 @@ related:
   - src/providers/mlx.c
   - src/providers/llamacpp.c
   - docs/plans/2026-05-11-init-04-mlx-qwen3-provider.md
+last_audit: 2026-05-25
 ---
 
 # Why this doc exists

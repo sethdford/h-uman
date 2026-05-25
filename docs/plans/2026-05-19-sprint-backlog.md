@@ -1,3 +1,10 @@
+---
+title: Sprint Backlog — Better-Than-Human Tier 2/3/4
+status: active
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # Sprint Backlog — Better-Than-Human Tier 2/3/4
 
 **Date:** 2026-05-19

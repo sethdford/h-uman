@@ -1,3 +1,10 @@
+---
+title: Story B — Thread `hu_persona_context_t` through agent_turn / agent_stream / memory_loader
+status: active
+created: 2026-05-12
+last_audit: 2026-05-25
+---
+
 # Story B — Thread `hu_persona_context_t` through agent_turn / agent_stream / memory_loader
 
 > **Plan author:** assistant

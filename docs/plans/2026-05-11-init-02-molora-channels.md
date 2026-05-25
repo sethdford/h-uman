@@ -1,7 +1,7 @@
 ---
 title: "Init #02 — MoLoRA per-channel persona routing"
 created: 2026-05-11
-status: design
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -16,6 +16,7 @@ related:
   - ../standards/security/threat-model.md
 risk: medium
 binary_budget_kb: 8
+last_audit: 2026-05-25
 ---
 
 # Init #02 — MoLoRA per-channel persona routing

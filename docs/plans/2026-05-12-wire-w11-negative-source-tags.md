@@ -1,12 +1,13 @@
 ---
 title: "Wire W11 verifier to honor negative source tags"
 created: 2026-05-12
-status: draft
+status: deferred
 sprint: 2c
 story: A
 owner: agent
 worktree: /Users/sethford/Documents/human-story-2c-A
 branch: story-2c-A-w11-negative-tags
+last_audit: 2026-05-25
 ---
 
 # Wire W11 verifier to honor negative source tags

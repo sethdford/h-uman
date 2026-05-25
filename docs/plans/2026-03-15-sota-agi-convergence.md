@@ -1,7 +1,7 @@
 ---
 title: "SOTA AGI Convergence — Closing Every Frontier Gap"
 created: 2026-03-15
-status: complete
+status: closed
 scope: eval, intelligence, memory, agent, feeds, voice, multimodal, orchestrator, tools
 phases: 6
 features:
@@ -14,6 +14,7 @@ features:
     AGI-V1 through AGI-V6,
   ]
 parent: null
+last_audit: 2026-05-25
 ---
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

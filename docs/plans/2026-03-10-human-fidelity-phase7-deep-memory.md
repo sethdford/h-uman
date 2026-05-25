@@ -1,7 +1,7 @@
 ---
 title: "Human Fidelity Phase 7 — Deep Memory & External Awareness"
 created: 2026-03-10
-status: complete
+status: closed
 scope: memory, feeds, episodic, consolidation, external APIs, Apple integrations
 phase: 7
 features:
@@ -26,7 +26,7 @@ features:
     F93,
   ]
 parent: 2026-03-10-human-fidelity-design.md
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

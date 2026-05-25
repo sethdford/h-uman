@@ -1,7 +1,8 @@
 ---
 title: "SOTA Quiet Mastery: Better Than Pixar Design System"
 date: 2026-03-22
-status: approved
+status: deferred
+last_audit: 2026-05-25
 ---
 
 # SOTA Quiet Mastery: Better Than Pixar Design System

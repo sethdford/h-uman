@@ -1,6 +1,6 @@
 ---
-status: complete
-last_audit: 2026-05-17
+status: closed
+last_audit: 2026-05-25
 ---
 
 # Adversarial API-Contract Review — SOTA-2026 Design Fleet

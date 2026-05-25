@@ -1,7 +1,7 @@
 ---
 title: "Init 05 — Verifier-Driven Test-Time Training (TTT)"
 created: 2026-05-11
-status: design
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 risk: high
 scope: include/human/ml/, include/human/agent/, src/ml/, src/agent/agent_turn.c, src/agent/scheduler runner
@@ -26,6 +26,7 @@ arxiv:
   - "2510.10223 — SyTTA: Synergistic Test-Time Adaptation for LLMs (4 extra tokens, dual-signal)"
   - "2601.19659 — KeepLoRA: Continual Learning with Residual Gradient Adaptation (ICLR 2026)"
   - "2601.03093 — ATLAS: Adaptive Test-Time Latent Steering with External Verifiers"
+last_audit: 2026-05-25
 ---
 
 # Init 05 — Verifier-Driven Test-Time Training (TTT)

@@ -1,3 +1,10 @@
+---
+title: Plan — Complete the proactive_ext subsystem (F30 / F31 / F129)
+status: deferred
+created: 2026-05-25
+last_audit: 2026-05-25
+---
+
 # Plan — Complete the proactive_ext subsystem (F30 / F31 / F129)
 
 **Drafted:** 2026-05-25 (post-audit followup)

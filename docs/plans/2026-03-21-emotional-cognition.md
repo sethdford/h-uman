@@ -1,8 +1,8 @@
 ---
 title: "Emotional cognition: runtime affect tracking and adaptive response"
 created: 2026-03-21
-status: complete
-last_audit: 2026-05-17
+status: closed
+last_audit: 2026-05-25
 ---
 
 ## Summary

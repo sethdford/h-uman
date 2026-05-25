@@ -1,9 +1,10 @@
 ---
 title: Reliable & accountable platform plan
 description: Unify “better than an informal human helper” product goals with Human stack differentiators
-status: draft
+status: deferred
 related:
   - docs/plans/2026-03-08-better-than-human.md
+last_audit: 2026-05-25
 ---
 
 # Plan: Reliable, accountable assistant + sharpened Human stack

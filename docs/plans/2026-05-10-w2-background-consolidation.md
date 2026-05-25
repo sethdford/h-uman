@@ -1,12 +1,12 @@
 ---
 title: "W2 — Background Consolidation: AutoDream subagent + community summaries + life chapters"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-roadmap-overview.md
 depends_on: 2026-05-10-w1-bitemporal-foundation.md
 risk: medium
 scope: src/agent/, src/memory/, include/human/agent/, include/human/memory/
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # W2 — Background Consolidation

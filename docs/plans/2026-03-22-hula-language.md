@@ -1,8 +1,8 @@
 ---
 title: "HuLa — Human Language for agent programs (IR, execution, emergence)"
 created: 2026-03-22
-status: complete
-last_audit: 2026-05-17
+status: closed
+last_audit: 2026-05-25
 ---
 
 ## Summary

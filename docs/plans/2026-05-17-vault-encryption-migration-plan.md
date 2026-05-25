@@ -1,7 +1,7 @@
 ---
 title: Vault Encryption Migration Plan
 date: 2026-05-17
-status: phase-1-shipped
+status: closed
 owner: security
 related:
   - docs/research/2026-05-17-plan-validation/by-plan/2026-05-16-audit-followups/02-vault-encryption-migration.md
@@ -9,6 +9,7 @@ related:
   - src/security/vault_aead.c
   - include/human/security/vault_aead.h
   - tests/test_vault_aead.c
+last_audit: 2026-05-25
 ---
 
 # Vault Encryption Migration Plan

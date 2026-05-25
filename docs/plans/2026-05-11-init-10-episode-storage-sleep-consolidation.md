@@ -1,7 +1,7 @@
 ---
 title: "Init 10 — MemMachine episode storage + SleepGate NREM/REM consolidation"
 created: 2026-05-11
-status: design done
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -16,6 +16,7 @@ related:
   - ../../include/human/memory/memory.h
 risk: medium
 binary_budget_kb: 32
+last_audit: 2026-05-25
 ---
 
 # Init 10 — MemMachine episode storage + SleepGate consolidation

@@ -1,12 +1,13 @@
 ---
 title: "Phase 5 Eval Gate — Honest Status (2026-05-18 audit)"
 created: 2026-05-18
-status: addendum
+status: closed
 parent: docs/plans/2026-05-11-rl-loop-phase-5-eval-competitive.md
 related:
   - docs/plans/2026-05-18-adapter-routing-decision.md
   - ~/.claude/rules/audit-verify-before-allege.md
 trigger: parent plan reads `status: design` (all 75+ task checkboxes unchecked) but src/eval/ ships 14 .c files / 4,776 LOC and tests/test_eval_*.c ships 11 test files. The plan-doc field is stale and should be corrected.
+last_audit: 2026-05-25
 ---
 
 # Phase 5 Eval Gate — Honest Status

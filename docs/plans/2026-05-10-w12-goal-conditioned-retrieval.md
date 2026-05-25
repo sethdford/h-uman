@@ -1,11 +1,11 @@
 ---
 title: "W12 — Goal-Conditioned Retrieval + Multi-Hop Reasoning"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: medium
 scope: include/human/agent/, src/agent/, src/memory/
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # W12 — Goal-Conditioned Retrieval

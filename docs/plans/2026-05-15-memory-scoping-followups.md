@@ -1,3 +1,10 @@
+---
+title: Memory Scoping & Continuity — Follow-ups
+status: closed
+created: 2026-05-15
+last_audit: 2026-05-25
+---
+
 # Memory Scoping & Continuity — Follow-ups
 
 > Spawned from the 2026-05-14/15 "Mindy texts are off" debugging session.

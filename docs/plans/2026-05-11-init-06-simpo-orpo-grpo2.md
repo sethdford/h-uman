@@ -2,7 +2,7 @@
 title: "Initiative 06 — SimPO + ORPO + GRPO-2 trainers behind the `hu_rl_trainer_t` vtable"
 slug: simpo-orpo-grpo2
 created: 2026-05-11
-status: design
+status: deferred
 owner: ML subsystem (sprint planning will assign)
 risk_tier: medium
 parent: 2026-05-11-sota-2026-massive-team-program.md
@@ -33,6 +33,7 @@ arxiv:
   - "2402.03300 — Shao et al., DeepSeekMath / GRPO (group-relative policy optimization)"
   - "2305.10425 — Zhao et al., SLiC-HF: Sequence Likelihood Calibration"
   - "GRPO-2 (April 2026 preprint to be cited at implementation kickoff; we lock the loss form on §3.4)"
+last_audit: 2026-05-25
 ---
 
 # Initiative 06 — SimPO + ORPO + GRPO-2 trainers behind `hu_rl_trainer_t`

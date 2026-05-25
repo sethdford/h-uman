@@ -1,3 +1,10 @@
+---
+title: Story C + Story D — Render `wm->recent_changes` and `wm->hyperedges` in the W7 bridge
+status: deferred
+created: 2026-05-12
+last_audit: 2026-05-25
+---
+
 # Story C + Story D — Render `wm->recent_changes` and `wm->hyperedges` in the W7 bridge
 
 > **Plan author:** assistant

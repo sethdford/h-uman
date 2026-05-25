@@ -3,9 +3,9 @@ title: "W0b — MCP type rename precondition (hu_mcp_server_t → hu_mcp_client_
 date: 2026-05-11
 sprint: SOTA-2026-01
 slice: W0b
-status: complete
+status: closed
 risk: low
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # W0b — MCP type rename precondition report

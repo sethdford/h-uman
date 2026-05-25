@@ -1,7 +1,7 @@
 ---
 title: "Initiative 07 — ThinkPRM trained verifier panel"
 created: 2026-05-11
-status: design done
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -18,6 +18,7 @@ related:
   - ../../include/human/agent/response_verifier.h
   - ../../include/human/ml/fidelity.h
   - ../../include/human/ml/dpo.h
+last_audit: 2026-05-25
 ---
 
 # Initiative 07 — ThinkPRM trained verifier panel

@@ -1,6 +1,6 @@
 ---
 title: M3 Personalization Loop — Phase C Plan
-status: not-started
+status: deferred
 owner: ML subsystem
 created: 2026-05-17
 parent: docs/plans/2026-05-17-m3-personalization-loop-closeout.md
@@ -10,6 +10,7 @@ related:
   - scripts/m3_outcome_driver.py
   - src/agent/agent.c (hu_agent_m3_record_chat_outcome)
   - src/ml/m3_frontier_adapter.c
+last_audit: 2026-05-25
 ---
 
 # Why this doc exists

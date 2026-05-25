@@ -1,6 +1,7 @@
 ---
 title: Palette Expansion Design
-status: complete
+status: closed
+last_audit: 2026-05-25
 ---
 
 # Palette Expansion — Unify on Ocean-Teal + Add Amber & Indigo

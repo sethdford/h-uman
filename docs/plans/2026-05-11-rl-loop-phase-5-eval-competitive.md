@@ -1,3 +1,10 @@
+---
+title: Phase 5: Eval Gate + Competitive Harness — Implementation Plan
+status: deferred
+created: 2026-05-11
+last_audit: 2026-05-25
+---
+
 # Phase 5: Eval Gate + Competitive Harness — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Every Task that ships a loss/score function paired with a behavioural claim MUST be reviewed by the `verifier` subagent before the commit (spec §7); Tasks that touch the eval gate decision logic (4, 5, 11) MUST additionally clear the `aspect-panel` end-gate at Task 14.

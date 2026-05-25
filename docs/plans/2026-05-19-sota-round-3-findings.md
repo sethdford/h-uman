@@ -1,3 +1,10 @@
+---
+title: SOTA Round-3 Findings (2026-05-19)
+status: closed
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # SOTA Round-3 Findings (2026-05-19)
 
 After rounds 1 + 2 wrapped the corpus-poison fixes and choice-rule

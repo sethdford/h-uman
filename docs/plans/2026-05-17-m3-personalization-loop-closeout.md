@@ -1,6 +1,6 @@
 ---
 title: M3 Personalization Loop — Phase B Closeout
-status: phase-b-shipped, live-fire-proven (2026-05-17)
+status: closed
 owner: ML subsystem
 created: 2026-05-17
 parent: docs/plans/2026-05-17-m3-mlx-bridge-execution-plan.md
@@ -12,6 +12,7 @@ related:
   - scripts/stub_mlx_server.py
   - scripts/live_fire_m3_loop.sh
   - .github/workflows/m3-loop-smoke.yml
+last_audit: 2026-05-25
 ---
 
 # What this doc covers

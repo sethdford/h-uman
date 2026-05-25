@@ -1,10 +1,11 @@
 ---
 title: "W10 — Neural Memory Tier: KV-cache reuse, reasoning-trace memory, multimodal blobs"
 created: 2026-05-10
-status: proposed
+status: deferred
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: medium
 scope: include/human/memory/, src/memory/, src/providers/, gated behind HU_ENABLE_NEURAL_MEMORY
+last_audit: 2026-05-25
 ---
 
 # W10 — Neural Memory Tier

@@ -1,7 +1,7 @@
 ---
 title: "Init 08 — Federated LoRA across the user's own devices"
 created: 2026-05-11
-status: design (D0–D7 proof bar)
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -14,6 +14,7 @@ related:
 risk: high
 slug: federated-lora
 binary_budget_kb: 48
+last_audit: 2026-05-25
 ---
 
 # Init 08 — Federated LoRA across the user's own devices

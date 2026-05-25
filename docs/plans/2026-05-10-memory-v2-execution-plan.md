@@ -1,7 +1,7 @@
 ---
 title: "Memory v2 — Execution plan (plan → build → prove)"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 related:
   - 2026-05-10-master-follow-through-program.md
@@ -18,7 +18,7 @@ related:
   - 2026-05-10-w14-sleep-compute.md
   - 2026-05-10-w15-crypto-privacy.md
   - 2026-05-10-w16-evaluation-suite.md
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # Memory v2 — Execution plan

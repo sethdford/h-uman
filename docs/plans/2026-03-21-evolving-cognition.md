@@ -1,7 +1,8 @@
 ---
 title: "Evolving cognition: skill feedback loops and per-user learning"
 created: 2026-03-21
-status: proposed
+status: deferred
+last_audit: 2026-05-25
 ---
 
 # Evolving cognition: skill feedback loops and per-user learning

@@ -1,10 +1,11 @@
 ---
 title: "Skills Pack — Memory Craft + Epistemic Hygiene (12 new skills)"
 created: 2026-05-10
-status: proposed
+status: deferred
 parent: 2026-05-10-memory-roadmap-overview.md
 risk: low
 scope: skill-registry/, human-skills/
+last_audit: 2026-05-25
 ---
 
 # Skills Pack — Memory Craft + Epistemic Hygiene

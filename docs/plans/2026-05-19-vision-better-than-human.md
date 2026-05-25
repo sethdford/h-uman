@@ -1,3 +1,10 @@
+---
+title: What "Better Than Human at iMessage" Actually Means
+status: closed
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # What "Better Than Human at iMessage" Actually Means
 
 > Round 4 closed the self-improvement loop. The next 10 rounds add the

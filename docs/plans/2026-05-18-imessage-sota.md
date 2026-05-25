@@ -1,3 +1,10 @@
+---
+title: iMessage SOTA — close the persona/ingest gap
+status: active
+created: 2026-05-18
+last_audit: 2026-05-25
+---
+
 # iMessage SOTA — close the persona/ingest gap
 
 **Author:** seth.ford@gmail.com (with assistant)

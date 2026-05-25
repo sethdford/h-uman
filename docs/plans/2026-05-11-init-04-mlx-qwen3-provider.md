@@ -2,7 +2,7 @@
 title: "Initiative 04 — MLX provider for Qwen3-4B-Instruct + on-device LoRA application"
 slug: mlx-qwen3-provider
 created: 2026-05-11
-status: design
+status: deferred
 owner: ML / providers subsystem (TBD at sprint planning)
 risk_tier: high
 parent: 2026-05-11-sota-2026-massive-team-program.md
@@ -16,6 +16,7 @@ related:
   - ../standards/engineering/naming.md
   - ../standards/engineering/performance.md
   - ../standards/security/threat-model.md
+last_audit: 2026-05-25
 ---
 
 # Initiative 04 — MLX provider for Qwen3-4B-Instruct + on-device LoRA application

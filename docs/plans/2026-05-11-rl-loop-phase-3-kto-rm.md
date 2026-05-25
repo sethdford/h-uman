@@ -1,3 +1,10 @@
+---
+title: Phase 3: KTO + Reward Model (Value Head) — Implementation Plan
+status: closed
+created: 2026-05-11
+last_audit: 2026-05-25
+---
+
 # Phase 3: KTO + Reward Model (Value Head) — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

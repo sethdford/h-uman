@@ -1,7 +1,7 @@
 ---
 title: "W6 — Eval Harness + MemRL Write Rewards + Memory-Poisoning Red-Team"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-roadmap-overview.md
 depends_on:
   - 2026-05-10-w1-bitemporal-foundation.md
@@ -11,7 +11,7 @@ depends_on:
   - 2026-05-10-w5-agent-writable-persona.md
 risk: medium
 scope: tests/, eval_suites/, src/ml/, scripts/
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # W6 — Eval Harness + MemRL Write Rewards + Memory-Poisoning Red-Team

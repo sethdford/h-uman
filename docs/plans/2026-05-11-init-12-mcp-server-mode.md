@@ -1,7 +1,7 @@
 ---
 title: "Init 12 — MCP Server Mode (h-uman as the persona layer for every other agent)"
 created: 2026-05-11
-status: design done
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -21,6 +21,7 @@ external_refs:
   - "Anthropic, ‘MCP for desktop and IDEs — Cursor, Claude Code, Copilot integration patterns’, March 2026"
   - "OWASP ASVS v4.0.3 §V13 (API and Web Service) for the TCP-exposed surface"
   - "RFC 6749 §1.4 (Bearer token usage) — applied to MCP `Authorization: Bearer` header"
+last_audit: 2026-05-25
 ---
 
 # Init 12 — MCP Server Mode

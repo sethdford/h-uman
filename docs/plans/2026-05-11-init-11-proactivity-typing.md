@@ -1,7 +1,7 @@
 ---
 title: "Init #11 — PRISM proactivity gate + Stephanie2 typing simulation"
 created: 2026-05-11
-status: design
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -20,6 +20,7 @@ related:
   - ../standards/engineering/principles.md
 risk: medium
 scope: include/human/agent/, src/agent/, src/feeds/awareness.c, src/main.c, src/persona/, tests/
+last_audit: 2026-05-25
 ---
 
 # Init #11 — PRISM proactivity gate + Stephanie2 typing simulation

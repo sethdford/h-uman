@@ -1,6 +1,6 @@
 ---
 title: RL Loop Phase D — Carry-Forward Closure (CF-1 through CF-7)
-status: reviewed
+status: closed
 owner: rl-sota
 parent_plan: docs/plans/2026-05-11-full-sota-rl-improvement-loop.md
 related_proofs:
@@ -12,6 +12,7 @@ created: 2026-05-17
 revision_log:
   - 2026-05-17 v1: initial draft → NEEDS-REWORK (4 blockers + 6 highs from critic + spec-verifier)
   - 2026-05-17 v2: this revision. Blockers fixed B1-B4 (phantom citations), B5 (CF-7 regex), B6 (CF-1 missing ACs); highs fixed H1 (D-2 system probe), H2 (D-4 db_path), H3 (D-5 mandatory eval_provider), H4 (CF-6 before CF-1 sequencing), H5 (D-4 deterministic test), H6 (D-7 pin n=10 + new residual CF-2-R).
+last_audit: 2026-05-25
 ---
 
 # RL Loop Phase D — Carry-Forward Closure

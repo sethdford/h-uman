@@ -1,10 +1,11 @@
 ---
 title: "W15 — Cryptographic Privacy: envelope encryption, key-deletion = forgetting, DP-SGD, audit + export"
 created: 2026-05-10
-status: keystore + audit landed; libsodium upgrade landed; DP-SGD + GDPR export pending
+status: closed
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: high
 scope: include/human/security/, src/security/, src/memory/, src/main.c (CLI subcommands)
+last_audit: 2026-05-25
 ---
 
 # W15 — Cryptographic Privacy

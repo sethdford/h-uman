@@ -1,13 +1,13 @@
 ---
 title: "Memory v2 — Evidence index (specs ↔ code ↔ tests ↔ CI)"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 related:
   - 2026-05-10-master-follow-through-program.md
   - 2026-05-10-memory-v2-execution-plan.md
   - adr/2026-05-10-w10-kv-replay-deferred.md
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # Memory v2 — Evidence index

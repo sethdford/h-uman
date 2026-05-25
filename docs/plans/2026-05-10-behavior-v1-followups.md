@@ -1,11 +1,12 @@
 ---
 title: "Behavior v1 — P1/P2 follow-up plans"
 created: 2026-05-10
-status: scoped
+status: deferred
 parent: 2026-05-10-behavior-v1-execution-plan.md
 related:
   - 2026-05-10-m3-frontier-model-bridge.md
   - ../research/2026-05-10-human-behavior-ai-sota-gap-analysis.md
+last_audit: 2026-05-25
 ---
 
 # Behavior v1 — P1/P2 follow-up plans

@@ -1,3 +1,10 @@
+---
+title: SOTA Plan — First Empirical Data (2026-05-19)
+status: deferred
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # SOTA Plan — First Empirical Data (2026-05-19)
 
 > Companion to `2026-05-19-sota-6mo-execution.md`. Captures what the first

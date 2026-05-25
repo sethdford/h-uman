@@ -1,7 +1,7 @@
 ---
 title: "Init #14 — Public benchmark suite expansion (LongMemEval / LoCoMo / KnowU-Bench / EMPA / ProAgentBench)"
 created: 2026-05-11
-status: design done
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -16,6 +16,7 @@ related:
   - ../../src/cli_evaluation.c
 risk: low
 binary_budget_kb: 8
+last_audit: 2026-05-25
 ---
 
 # Init #14 — Public benchmark suite expansion

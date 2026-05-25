@@ -1,3 +1,10 @@
+---
+title: Rounds 5-10 Execution Plan — 34 hours, every task proven empirically
+status: closed
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # Rounds 5-10 Execution Plan — 34 hours, every task proven empirically
 
 > Companion to `2026-05-19-vision-better-than-human.md`. That doc said

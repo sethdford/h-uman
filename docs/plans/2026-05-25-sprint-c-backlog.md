@@ -1,3 +1,10 @@
+---
+title: Sprint C Backlog — Distribution
+status: closed
+created: 2026-05-25
+last_audit: 2026-05-25
+---
+
 # Sprint C Backlog — Distribution
 
 **Drafted:** 2026-05-25 (post Sprint B + v2026.5.x close)

@@ -1,12 +1,12 @@
 ---
 title: "W7 Phase 1 — Direct graph bypass inventory"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-v2-execution-plan.md
 related:
   - 2026-05-10-w7-memory-facade.md
   - 2026-05-10-w7-type-collision-cleanup.md
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # W7 Phase 1 — Direct `hu_graph_*` bypass inventory

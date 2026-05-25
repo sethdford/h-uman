@@ -1,7 +1,7 @@
 ---
 title: "Persona-Eval SOTA Closeout — 2026-05-18 Audit Chain"
 created: 2026-05-18
-status: shipped
+status: closed
 related:
   - docs/plans/2026-05-11-rl-loop-phase-5-eval-competitive.md
   - docs/plans/2026-05-18-phase5-eval-honest-status.md
@@ -10,6 +10,7 @@ related:
   - scripts/persona_eval_comparison.py
   - scripts/eval_shape_classifier.py
   - scripts/eval_sota_scorecard.py
+last_audit: 2026-05-25
 ---
 
 # Persona-Eval SOTA Closeout

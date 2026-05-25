@@ -1,3 +1,10 @@
+---
+title: DPO Corpus is Inverted (2026-05-19)
+status: active
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # DPO Corpus is Inverted (2026-05-19)
 
 > Discovered while applying the PersonaEval insight as a corpus-quality

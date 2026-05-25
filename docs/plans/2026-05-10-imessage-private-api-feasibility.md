@@ -1,6 +1,6 @@
 ---
-status: obsolete
-last_audit: 2026-05-17
+status: archived
+last_audit: 2026-05-25
 ---
 
 # 2026-05-10 — iMessage Private-API Feasibility (Tier B)

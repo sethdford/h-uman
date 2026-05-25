@@ -1,3 +1,10 @@
+---
+title: Better Than Human — h-uman aspirational roadmap
+status: active
+created: 2026-05-19
+last_audit: 2026-05-25
+---
+
 # Better Than Human — h-uman aspirational roadmap
 
 **Author:** seth.ford@gmail.com (with assistant)

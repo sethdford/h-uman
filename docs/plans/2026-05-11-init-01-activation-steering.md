@@ -1,7 +1,7 @@
 ---
 title: "Init-01 — Activation steering / SAE persona control on cloud + on-device providers"
 created: 2026-05-11
-status: design done
+status: deferred
 parent: 2026-05-11-sota-2026-massive-team-program.md
 related:
   - 2026-05-11-sota-2026-massive-team-program.md
@@ -16,6 +16,7 @@ related:
   - ../../include/human/persona.h
   - ../../include/human/memory/personal_model.h
   - ../../src/agent/frontier_prompt.c
+last_audit: 2026-05-25
 ---
 
 # Init-01 — Activation steering / SAE persona control on cloud + on-device providers

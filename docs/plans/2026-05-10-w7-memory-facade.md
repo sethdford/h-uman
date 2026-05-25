@@ -1,11 +1,11 @@
 ---
 title: "W7 — Memory Facade: hu_memory_facade_t read/write/erase surface"
 created: 2026-05-10
-status: complete
+status: closed
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 risk: high
 scope: include/human/memory/, src/memory/, every consumer of graph/persona/cross_edges/cases/quarantine/deltas
-last_audit: 2026-05-17
+last_audit: 2026-05-25
 ---
 
 # W7 — Memory Facade

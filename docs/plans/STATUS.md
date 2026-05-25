@@ -1,3 +1,10 @@
+---
+title: `docs/plans/` — Plan Status Schema
+status: closed
+created: 2026-05-25
+last_audit: 2026-05-25
+---
+
 # `docs/plans/` — Plan Status Schema
 
 The 138-plan triage from 2026-05-25 found three structural problems:

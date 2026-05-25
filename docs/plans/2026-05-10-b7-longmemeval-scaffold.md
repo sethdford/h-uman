@@ -1,11 +1,12 @@
 ---
 title: "B7 — LongMemEval scaffold (memory v2 W16)"
 created: 2026-05-10
-status: scoped
+status: deferred
 parent: 2026-05-10-behavior-v1-execution-plan.md
 related:
   - 2026-05-10-memory-v2-evidence-index.md
   - 2026-05-10-memory-v2-roadmap-overview.md
+last_audit: 2026-05-25
 ---
 
 # B7 — LongMemEval scaffold
