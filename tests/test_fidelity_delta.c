@@ -12,7 +12,6 @@
 
 #ifdef HU_ENABLE_ML
 
-#include "human/core/allocator.h"
 #include "human/memory/personal_model.h"
 #include "human/ml/fidelity.h"
 
