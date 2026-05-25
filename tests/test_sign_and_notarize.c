@@ -108,12 +108,21 @@ static void test_missing_notary_profile_exits_zero(void) {
     HU_ASSERT_TRUE(strstr(output, "NOTARY_PROFILE") != NULL);
 }
 
-/* Test: non-existent .pkg returns error */
+/* Test: non-existent .pkg returns error.
+ *
+ * Forces env vars to dummy non-empty values so the script reaches the
+ * pkg-existence check (otherwise the env-var graceful-skip path exits
+ * 0 before validating the .pkg path — which would mean this test is
+ * environment-dependent: passing on a dev box with APPLE_DEV_ID set,
+ * failing on CI without). */
 static void test_missing_pkg_returns_error(void) {
     HU_SKIP_IF(!is_macos(), "macOS only");
 
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "bash %s --pkg /nonexistent/test.pkg 2>&1", SCRIPT_PATH);
+    char cmd[768];
+    snprintf(cmd, sizeof(cmd),
+             "APPLE_DEV_ID='test' APPLE_DEV_ID_INSTALLER='test' NOTARY_PROFILE='test' "
+             "bash %s --pkg /nonexistent/test.pkg 2>&1",
+             SCRIPT_PATH);
 
     char output[2048] = {0};
     int ret = run_cmd(cmd, output, sizeof(output));
