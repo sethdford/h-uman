@@ -167,6 +167,11 @@ bool hu_imessage_status_path(char *buf, size_t cap) {
     return n > 0 && (size_t)n < cap;
 }
 
+#ifdef HU_IS_TEST
+/* Test-only: stub function for send interception. When set, replaces osascript send. */
+static hu_imessage_test_send_stub_fn g_imessage_test_send_stub = NULL;
+#endif
+
 typedef struct hu_imessage_ctx {
     hu_allocator_t *alloc;
     char *default_target;
@@ -1855,14 +1860,25 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         }
 
         {
-            const char *argv[] = {"osascript", "-e", script, NULL};
-            hu_run_result_t result = {0};
-            hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
-            c->alloc->free(c->alloc->ctx, script, script_cap);
-            bool ok = (err == HU_OK && result.success && result.exit_code == 0);
-            hu_run_result_free(c->alloc, &result);
-            if (err || !ok)
-                send_err = HU_ERR_CHANNEL_SEND;
+#ifdef HU_IS_TEST
+            if (g_imessage_test_send_stub != NULL) {
+                /* Test stub: invoke callback instead of osascript */
+                (*g_imessage_test_send_stub)(tgt, tgt_len, message, message_len);
+                c->alloc->free(c->alloc->ctx, script, script_cap);
+                send_err = HU_OK;
+            } else {
+#endif
+                const char *argv[] = {"osascript", "-e", script, NULL};
+                hu_run_result_t result = {0};
+                hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
+                c->alloc->free(c->alloc->ctx, script, script_cap);
+                bool ok = (err == HU_OK && result.success && result.exit_code == 0);
+                hu_run_result_free(c->alloc, &result);
+                if (err || !ok)
+                    send_err = HU_ERR_CHANNEL_SEND;
+#ifdef HU_IS_TEST
+            }
+#endif
         }
 
         if (send_err == HU_OK)
@@ -5217,5 +5233,9 @@ bool hu_imessage_test_chatdb_busy_log_emitted(hu_channel_t *ch) {
         return false;
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     return c->chatdb_busy_log_emitted;
+}
+
+void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn) {
+    g_imessage_test_send_stub = fn;
 }
 #endif
