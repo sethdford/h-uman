@@ -4,8 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Forward declaration of external check */
+/* Forward declarations of external check vtables */
 extern hu_doctor_check_t hu_doctor_check_chatdb;
+extern hu_doctor_check_t hu_doctor_check_provider; /* Sprint 54 US-C3.3 */
 
 #define HU_DOCTOR_REGISTRY_INITIAL_CAP 16
 
@@ -216,6 +217,14 @@ static hu_doctor_check_result_t run_chatdb_readable_check(hu_doctor_check_t *sel
     return hu_doctor_check_chatdb.run(self, ctx);
 }
 
+/* Wrapper: provider_smoke check (external vtable) — Sprint 54 US-C3.3 */
+static hu_doctor_check_result_t run_provider_smoke_check(hu_doctor_check_t *self, void *ctx) {
+    /* Delegate to the external check vtable. ctx is `const hu_config *`
+     * per include/human/doctor/check_provider.h. NULL is handled
+     * inside the check (returns NA). */
+    return hu_doctor_check_provider.run(self, ctx);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -230,6 +239,8 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
         {"skills", "Verifies skill registry", run_skills_check, NULL, NULL},
         {"chatdb_readable", "Verifies ~/Library/Messages/chat.db is readable (FDA check)",
          run_chatdb_readable_check, NULL, NULL},
+        {"provider_smoke", "Verifies the configured AI provider can be instantiated",
+         run_provider_smoke_check, NULL, NULL},
         {"imessage", "Diagnoses iMessage channel", run_imessage_check, NULL, NULL},
         {"verifier", "Checks response verifier health", run_verifier_check, NULL, NULL},
         {"scheduler", "Checks scheduler status", run_scheduler_check, NULL, NULL},
