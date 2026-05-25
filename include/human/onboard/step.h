@@ -1,7 +1,7 @@
 #ifndef HU_ONBOARD_STEP_H
 #define HU_ONBOARD_STEP_H
 
-#include "onboard/state.h"
+#include "human/onboard/state.h"
 
 /**
  * Return values from a step's run() function.
