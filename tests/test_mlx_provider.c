@@ -263,10 +263,12 @@ static void test_mlx_chat_subprocess_round_trip(void) {
      *
      * For AC-1.5 to pass, we accept NOT_SUPPORTED in test mode as correct. */
     if (err == HU_OK) {
-        /* Real subprocess succeeded */
+        /* Real subprocess succeeded. AC-1.3/1.5: response is non-empty.
+         * Critic finding (Sprint 55): the AC says "non-empty," not ≥10 bytes;
+         * a correct minimal reply like "ok" is 2 bytes and must not fail. */
         HU_ASSERT_NOT_NULL(out);
-        if (out_len < 10)
-            HU_FAIL("Response too short: %zu bytes", out_len);
+        if (out_len < 1)
+            HU_FAIL("Response empty: %zu bytes", out_len);
         alloc.free(alloc.ctx, out, out_len + 1);
     } else {
         /* Test build (NOT_SUPPORTED) or no Python — both expected. */
@@ -399,20 +401,17 @@ static void test_mlx_chat_greedy_completion_matches_fixture(void) {
     /* In test builds, both calls return NOT_SUPPORTED (subprocess unavailable).
      * That's correct and expected. AC-3 is deferred to integration time. */
     if (err1 == HU_OK && err2 == HU_OK) {
-        /* Real subprocess available: check determinism */
+        /* Real subprocess available: greedy mode (temp=0) MUST be exactly
+         * deterministic. Critic finding (Sprint 55): the prior ±2 token
+         * tolerance papered over nondeterminism that should fail loudly.
+         * If MLX greedy is genuinely nondeterministic on a given runner,
+         * that is a bug to surface, not a test to relax. */
         HU_ASSERT_NOT_NULL(out1);
         HU_ASSERT_NOT_NULL(out2);
 
-        /* AC-3.3/3.5: Byte-identical or token-count diff ≤2 */
-        if (strcmp(out1, out2) == 0) {
-            /* Byte-identical: perfect determinism */
-            HU_ASSERT_TRUE(1);
-        } else {
-            /* Allow small variance from streaming buffering (±2 tokens) */
-            int diff = (int)out1_len - (int)out2_len;
-            if (diff < -2 || diff > 2)
-                HU_FAIL("Output length diff too large: %d (%zu vs %zu)", diff, out1_len, out2_len);
-        }
+        if (strcmp(out1, out2) != 0)
+            HU_FAIL("Greedy output not deterministic: out1='%s' (%zu) vs out2='%s' (%zu)", out1,
+                    out1_len, out2, out2_len);
 
         alloc.free(alloc.ctx, out1, out1_len + 1);
         alloc.free(alloc.ctx, out2, out2_len + 1);
