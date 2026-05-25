@@ -1017,6 +1017,51 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
         }
     }
 
+    /* Privacy-thesis-alignment check: the operator has a local provider
+     * registered (mlx_local / llamacpp / ollama / apple) but their
+     * default_provider points at a cloud provider. The local model is
+     * configured AND probably running, but unused. This is the EXACT
+     * shape of the 2026-05-25 reactive-iMessage situation:
+     *
+     *   providers[]: name="mlx_local" base_url=http://127.0.0.1:8741/v1
+     *   default_provider: "gemini"
+     *
+     * — gemma-4-31b-seth-v3-fused serving locally at 11.9 tok/s but
+     * the daemon routes to Gemini. Per CLAUDE.md product thesis:
+     * "Privacy by architecture, not by settings. Data never leaves
+     * the device as a structural property." A configured-but-unused
+     * local provider violates that property silently. Surface it. */
+    if (cfg->default_provider && cfg->default_provider[0] && cfg->providers &&
+        cfg->providers_len > 0 && hu_config_provider_requires_api_key(cfg->default_provider) &&
+        n < cap) {
+        const char *local_names[] = {"mlx_local", "llamacpp", "llama.cpp", "ollama", "apple"};
+        const size_t local_names_n = sizeof(local_names) / sizeof(local_names[0]);
+        const char *found_local = NULL;
+        for (size_t i = 0; i < cfg->providers_len && !found_local; i++) {
+            const hu_provider_entry_t *p = &cfg->providers[i];
+            if (!p->name)
+                continue;
+            for (size_t j = 0; j < local_names_n; j++) {
+                if (strcmp(p->name, local_names[j]) == 0) {
+                    found_local = p->name;
+                    break;
+                }
+            }
+        }
+        if (found_local) {
+            char *msg =
+                hu_sprintf(alloc,
+                           "[INFO] local provider '%s' is configured but default_provider='%s' "
+                           "(cloud). Privacy thesis: set default_provider='%s' to keep data on "
+                           "device.",
+                           found_local, cfg->default_provider, found_local);
+            if (msg) {
+                it = (hu_diag_item_t){HU_DIAG_WARN, hu_strdup(alloc, "config"), msg};
+                buf[n++] = it;
+            }
+        }
+    }
+
     if (cfg->default_temperature < 0.0 || cfg->default_temperature > 2.0) {
         char *msg = hu_sprintf(alloc, "temperature %.1f is out of range (expected 0.0-2.0)",
                                cfg->default_temperature);

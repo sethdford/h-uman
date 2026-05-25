@@ -131,10 +131,103 @@ static void test_doctor_warnings_coexist(void) {
     free_items(&a, items, n);
 }
 
+/* 2026-05-25 reactive-iMessage recovery — privacy-thesis alignment check.
+ *
+ * Operator has a local provider (mlx_local / llamacpp / ollama / apple)
+ * registered in providers[] but default_provider points at a cloud
+ * provider. The local model is configured AND probably running, but
+ * unused. Per CLAUDE.md product thesis: "Privacy by architecture, not
+ * by settings." Surface as INFO/WARN so the operator can flip the switch.
+ *
+ * Real-world instance: gemma-4-31b-seth-v3-fused serving locally at
+ * 11.9 tok/s, providers[] has mlx_local, default_provider="gemini". */
+static void test_doctor_warns_when_local_provider_configured_but_cloud_default(void) {
+    hu_allocator_t a = alloc();
+    hu_config_t cfg;
+    init_min_cfg(&cfg);
+    cfg.default_provider = (char *)"gemini";
+    hu_provider_entry_t providers[1];
+    memset(providers, 0, sizeof(providers));
+    providers[0].name = (char *)"mlx_local";
+    providers[0].base_url = (char *)"http://127.0.0.1:8741/v1";
+    cfg.providers = providers;
+    cfg.providers_len = 1;
+
+    hu_diag_item_t *items = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_doctor_check_config_semantics(&a, &cfg, &items, &n), HU_OK);
+    HU_ASSERT_TRUE(diag_contains(items, n, HU_DIAG_WARN, "local provider 'mlx_local'"));
+    HU_ASSERT_TRUE(diag_contains(items, n, HU_DIAG_WARN, "default_provider='gemini'"));
+    free_items(&a, items, n);
+}
+
+/* Negative: local provider IS the default → no warning. */
+static void test_doctor_silent_when_local_provider_is_default(void) {
+    hu_allocator_t a = alloc();
+    hu_config_t cfg;
+    init_min_cfg(&cfg);
+    cfg.default_provider = (char *)"mlx_local"; /* already using local */
+    hu_provider_entry_t providers[1];
+    memset(providers, 0, sizeof(providers));
+    providers[0].name = (char *)"mlx_local";
+    cfg.providers = providers;
+    cfg.providers_len = 1;
+
+    hu_diag_item_t *items = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_doctor_check_config_semantics(&a, &cfg, &items, &n), HU_OK);
+    HU_ASSERT_FALSE(diag_contains(items, n, HU_DIAG_WARN, "local provider"));
+    free_items(&a, items, n);
+}
+
+/* Negative: cloud default with no local providers registered → no warning. */
+static void test_doctor_silent_when_no_local_provider_registered(void) {
+    hu_allocator_t a = alloc();
+    hu_config_t cfg;
+    init_min_cfg(&cfg);
+    cfg.default_provider = (char *)"openai";
+    /* No providers[] entry at all */
+    cfg.providers = NULL;
+    cfg.providers_len = 0;
+
+    hu_diag_item_t *items = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_doctor_check_config_semantics(&a, &cfg, &items, &n), HU_OK);
+    HU_ASSERT_FALSE(diag_contains(items, n, HU_DIAG_WARN, "local provider"));
+    free_items(&a, items, n);
+}
+
+/* All four recognized local provider names trigger the warning when
+ * default_provider is cloud. Each one independently. */
+static void test_doctor_warns_for_each_recognized_local_provider_name(void) {
+    const char *local_names[] = {"mlx_local", "llamacpp", "ollama", "apple"};
+    for (size_t i = 0; i < sizeof(local_names) / sizeof(local_names[0]); i++) {
+        hu_allocator_t a = alloc();
+        hu_config_t cfg;
+        init_min_cfg(&cfg);
+        cfg.default_provider = (char *)"openai"; /* cloud */
+        hu_provider_entry_t providers[1];
+        memset(providers, 0, sizeof(providers));
+        providers[0].name = (char *)local_names[i];
+        cfg.providers = providers;
+        cfg.providers_len = 1;
+
+        hu_diag_item_t *items = NULL;
+        size_t n = 0;
+        HU_ASSERT_EQ(hu_doctor_check_config_semantics(&a, &cfg, &items, &n), HU_OK);
+        HU_ASSERT_TRUE(diag_contains(items, n, HU_DIAG_WARN, "local provider"));
+        free_items(&a, items, n);
+    }
+}
+
 void run_doctor_best_of_n_warning_tests(void) {
     HU_TEST_SUITE("DoctorBestOfNWarning (US-7.7 AC-7.7.3)");
     HU_RUN_TEST(test_doctor_warns_when_cloud_provider_has_best_of_n);
     HU_RUN_TEST(test_doctor_silent_when_local_provider);
     HU_RUN_TEST(test_doctor_silent_when_best_of_n_disabled);
     HU_RUN_TEST(test_doctor_warnings_coexist);
+    HU_RUN_TEST(test_doctor_warns_when_local_provider_configured_but_cloud_default);
+    HU_RUN_TEST(test_doctor_silent_when_local_provider_is_default);
+    HU_RUN_TEST(test_doctor_silent_when_no_local_provider_registered);
+    HU_RUN_TEST(test_doctor_warns_for_each_recognized_local_provider_name);
 }
