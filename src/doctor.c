@@ -407,6 +407,33 @@ hu_error_t hu_doctor_check_inference(hu_allocator_t *alloc, hu_diag_item_t **ite
         }
     }
 
+    /* Phase 2c — opt-in KV cache skip-decode (Phase 2b.2). STRICT
+     * on-token matching (1 / on / true) is by design: mis-enabling can
+     * silently corrupt KV in real linked-libllama builds. The doctor's
+     * job here is to make mis-enable attempts VISIBLE — operator sets
+     * "yes" thinking it'll enable; factory keeps default OFF; without
+     * this check the operator never knows the opt-in didn't take. */
+    const char *skip = getenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+    if (!skip || !*skip) {
+        e = doctor_push_line(
+            alloc, items, count, cap, HU_DIAG_OK,
+            "[doctor] HU_LLAMACPP_KVCACHE_SKIP_DECODE: unset (Phase 2b SAFE path)");
+    } else if (strcmp(skip, "1") == 0 || strcmp(skip, "on") == 0 || strcmp(skip, "true") == 0) {
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_OK,
+                            "[doctor] HU_LLAMACPP_KVCACHE_SKIP_DECODE=%s → ON "
+                            "(Phase 2b.2 opt-in active — TTFT win on warm hits)",
+                            skip);
+    } else {
+        e = doctor_push_fmt(alloc, items, count, cap, HU_DIAG_WARN,
+                            "[doctor] HU_LLAMACPP_KVCACHE_SKIP_DECODE=%s NOT a recognized "
+                            "on-token — factory keeps SAFE default OFF. To enable, "
+                            "use exactly '1', 'on', or 'true' (lowercase). "
+                            "Strict matching is intentional: mis-enabling can corrupt KV.",
+                            skip);
+    }
+    if (e != HU_OK)
+        return e;
+
     return HU_OK;
 }
 

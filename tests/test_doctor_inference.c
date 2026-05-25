@@ -202,6 +202,67 @@ static void test_doctor_inference_draft_max_tokens_out_of_range_warns(void) {
     unsetenv("HU_LLAMACPP_DRAFT_MAX_TOKENS");
 }
 
+/* Phase 2c — kvcache_skip_decode visibility. The Phase 2b.2 opt-in
+ * uses STRICT token matching (1 / on / true); the doctor surfaces
+ * mis-enable attempts so operators don't sit on stale assumptions
+ * about whether the opt-in took. */
+
+static void test_doctor_inference_kvcache_skip_unset_is_OK(void) {
+    clear_inference_env();
+    unsetenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+    hu_allocator_t a = alloc();
+    hu_diag_item_t *items = NULL;
+    size_t count = 0, cap = 0;
+    init_buf(&a, &items, &count, &cap);
+    HU_ASSERT_EQ(hu_doctor_check_inference(&a, &items, &count, &cap), HU_OK);
+    const hu_diag_item_t *ok = find_item(items, count, "KVCACHE_SKIP_DECODE: unset");
+    HU_ASSERT_NOT_NULL(ok);
+    HU_ASSERT_EQ((int)ok->severity, (int)HU_DIAG_OK);
+    free_items(&a, items, count, cap);
+}
+
+static void test_doctor_inference_kvcache_skip_on_tokens_reported_active(void) {
+    const char *on_tokens[] = {"1", "on", "true"};
+    for (size_t i = 0; i < sizeof(on_tokens) / sizeof(on_tokens[0]); i++) {
+        clear_inference_env();
+        setenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE", on_tokens[i], 1);
+        hu_allocator_t a = alloc();
+        hu_diag_item_t *items = NULL;
+        size_t count = 0, cap = 0;
+        init_buf(&a, &items, &count, &cap);
+        HU_ASSERT_EQ(hu_doctor_check_inference(&a, &items, &count, &cap), HU_OK);
+        const hu_diag_item_t *ok = find_item(items, count, "Phase 2b.2 opt-in active");
+        HU_ASSERT_NOT_NULL(ok);
+        HU_ASSERT_EQ((int)ok->severity, (int)HU_DIAG_OK);
+        HU_ASSERT_TRUE(strstr(ok->message, on_tokens[i]) != NULL);
+        free_items(&a, items, count, cap);
+        unsetenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+    }
+}
+
+static void test_doctor_inference_kvcache_skip_typo_warns_visibly(void) {
+    /* THE high-leverage check. Operator sets "yes" thinking it enables;
+     * factory silently keeps default OFF. Without this WARN they waste
+     * a bench-day. */
+    const char *typo_tokens[] = {"yes", "enable", "TRUE", "ON", "y", "off", "0", "garbage"};
+    for (size_t i = 0; i < sizeof(typo_tokens) / sizeof(typo_tokens[0]); i++) {
+        clear_inference_env();
+        setenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE", typo_tokens[i], 1);
+        hu_allocator_t a = alloc();
+        hu_diag_item_t *items = NULL;
+        size_t count = 0, cap = 0;
+        init_buf(&a, &items, &count, &cap);
+        HU_ASSERT_EQ(hu_doctor_check_inference(&a, &items, &count, &cap), HU_OK);
+        const hu_diag_item_t *warn = find_item(items, count, "NOT a recognized on-token");
+        HU_ASSERT_NOT_NULL(warn);
+        HU_ASSERT_EQ((int)warn->severity, (int)HU_DIAG_WARN);
+        HU_ASSERT_TRUE(strstr(warn->message, typo_tokens[i]) != NULL);
+        HU_ASSERT_TRUE(strstr(warn->message, "'1'") != NULL);
+        free_items(&a, items, count, cap);
+        unsetenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+    }
+}
+
 static void test_doctor_inference_rejects_null_args(void) {
     hu_allocator_t a = alloc();
     hu_diag_item_t *items = NULL;
@@ -222,4 +283,7 @@ void run_doctor_inference_tests(void) {
     HU_RUN_TEST(test_doctor_inference_draft_min_p_out_of_range_warns);
     HU_RUN_TEST(test_doctor_inference_draft_max_tokens_out_of_range_warns);
     HU_RUN_TEST(test_doctor_inference_rejects_null_args);
+    HU_RUN_TEST(test_doctor_inference_kvcache_skip_unset_is_OK);
+    HU_RUN_TEST(test_doctor_inference_kvcache_skip_on_tokens_reported_active);
+    HU_RUN_TEST(test_doctor_inference_kvcache_skip_typo_warns_visibly);
 }

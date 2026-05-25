@@ -353,6 +353,16 @@ static hu_error_t parse_inference(hu_allocator_t *a, hu_config_t *cfg, const hu_
     const char *dm = hu_json_get_string(obj, "draft_model");
     if (dm && *dm)
         setenv("HU_LLAMACPP_DRAFT_MODEL", dm, /*overwrite=*/0);
+    /* Phase 2c — bridge inference.kvcache_skip_decode → env. Same
+     * overwrite=0 posture as the other knobs: operator-set env wins.
+     * The factory's strict-token matching (1 / on / true) means we
+     * emit "1" specifically — JSON true → env "1", JSON false → env
+     * absent (factory's safe default OFF). */
+    if (hu_json_object_get(obj, "kvcache_skip_decode")) {
+        bool skip = hu_json_get_bool(obj, "kvcache_skip_decode", false);
+        if (skip)
+            setenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE", "1", /*overwrite=*/0);
+    }
     return HU_OK;
 }
 

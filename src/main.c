@@ -696,6 +696,20 @@ static hu_error_t cmd_inference_status(hu_allocator_t *alloc, int argc, char **a
             printf("      draft_max_tokens: (unset — upstream default)\n");
     }
 
+    /* Phase 2c — surface the Phase 2b.2 opt-in. STRICT on-token matching
+     * (1 / on / true) makes mis-enables silent; the inference-status CLI
+     * is the operator's one-shot way to confirm the opt-in actually took. */
+    const char *skip = getenv("HU_LLAMACPP_KVCACHE_SKIP_DECODE");
+    if (!skip || !*skip) {
+        printf("    kvcache_skip_decode: off (default — env unset; Phase 2b SAFE path)\n");
+    } else if (strcmp(skip, "1") == 0 || strcmp(skip, "on") == 0 || strcmp(skip, "true") == 0) {
+        printf("    kvcache_skip_decode: ON  (env=%s — Phase 2b.2 opt-in active)\n", skip);
+    } else {
+        printf("    kvcache_skip_decode: off (env=%s NOT a recognized on-token; "
+               "use exactly 1 / on / true)\n",
+               skip);
+    }
+
     printf("  mlx-server (HTTP):\n");
     if (mlx_draft && *mlx_draft)
         printf("    draft_model:       %s\n", mlx_draft);
@@ -703,7 +717,9 @@ static hu_error_t cmd_inference_status(hu_allocator_t *alloc, int argc, char **a
         printf("    draft_model:       (unset — spec decode disabled)\n");
 
     printf("\n  Source: getenv() — same slots src/providers/factory.c reads.\n");
-    printf("  Set via env, or via 'inference.{kv_quant,flash_attn,draft_model}' in config.json\n");
+    printf("  Set via env, or via "
+           "'inference.{kv_quant,flash_attn,draft_model,kvcache_skip_decode}' "
+           "in config.json\n");
     printf("  (Phase 1c bridge populates env from config if env is unset).\n");
     return HU_OK;
 }
