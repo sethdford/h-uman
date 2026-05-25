@@ -117,6 +117,89 @@ static void test_null_args_return_invalid(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * T2 — context bundle + summary formatting tests.
+ *
+ * The format function is a pure predicate, so we exercise it directly with
+ * synthetic bundles. Avoids spinning a stub hu_agent_t. */
+
+static void test_format_summary_empty_bundle_writes_zero_counts(void) {
+    hu_init_context_bundle_t bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    char buf[256] = {0};
+    size_t n = hu_init_proposer_format_context_summary(&bundle, buf, sizeof(buf));
+    HU_ASSERT(n > 0);
+    /* All fields zero; leader should report fields=0 total=0. */
+    HU_ASSERT(strstr(buf, "fields=0") != NULL);
+    HU_ASSERT(strstr(buf, "total=0") != NULL);
+    /* Every field must appear with =0 so operators can see the slot exists
+     * (telemetric value: an unpopulated field is a known unwired source,
+     * not a mystery). */
+    HU_ASSERT(strstr(buf, "persona=0") != NULL);
+    HU_ASSERT(strstr(buf, "conversation=0") != NULL);
+    HU_ASSERT(strstr(buf, "memory=0") != NULL);
+}
+
+static void test_format_summary_populated_bundle_counts_correctly(void) {
+    hu_init_context_bundle_t bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    bundle.content[HU_INIT_FIELD_CONTACT] = "alice@example.com";
+    bundle.bytes[HU_INIT_FIELD_CONTACT] = 17;
+    bundle.content[HU_INIT_FIELD_CONVERSATION] = "hello there";
+    bundle.bytes[HU_INIT_FIELD_CONVERSATION] = 11;
+    bundle.total_bytes = 28;
+    char buf[256] = {0};
+    size_t n = hu_init_proposer_format_context_summary(&bundle, buf, sizeof(buf));
+    HU_ASSERT(n > 0);
+    HU_ASSERT(strstr(buf, "fields=2") != NULL);
+    HU_ASSERT(strstr(buf, "total=28") != NULL);
+    HU_ASSERT(strstr(buf, "contact=17") != NULL);
+    HU_ASSERT(strstr(buf, "conversation=11") != NULL);
+}
+
+static void test_format_summary_null_args_safe(void) {
+    char buf[64] = {'x', 0};
+    /* NULL bundle returns 0 and writes empty string (defensively). */
+    HU_ASSERT_EQ(hu_init_proposer_format_context_summary(NULL, buf, sizeof(buf)), (size_t)0);
+    HU_ASSERT_EQ(buf[0], '\0');
+    /* NULL out returns 0. */
+    hu_init_context_bundle_t bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    HU_ASSERT_EQ(hu_init_proposer_format_context_summary(&bundle, NULL, 16), (size_t)0);
+    /* Zero cap returns 0. */
+    HU_ASSERT_EQ(hu_init_proposer_format_context_summary(&bundle, buf, 0), (size_t)0);
+}
+
+static void test_format_summary_tiny_buffer_truncates_safely(void) {
+    hu_init_context_bundle_t bundle;
+    memset(&bundle, 0, sizeof(bundle));
+    bundle.bytes[HU_INIT_FIELD_CONTACT] = 17;
+    bundle.total_bytes = 17;
+    char tiny[8] = {0};
+    size_t n = hu_init_proposer_format_context_summary(&bundle, tiny, sizeof(tiny));
+    /* Must NUL-terminate even when truncated; must not write past cap. */
+    HU_ASSERT(n < sizeof(tiny));
+    HU_ASSERT_EQ(tiny[sizeof(tiny) - 1], '\0');
+}
+
+static void test_assemble_context_null_out_returns_invalid(void) {
+    HU_ASSERT_EQ(hu_init_proposer_assemble_context(NULL, 0, 0, NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_assemble_context_null_agent_returns_empty_bundle(void) {
+    hu_init_context_bundle_t bundle;
+    memset(&bundle, 0x55, sizeof(bundle)); /* sentinel garbage */
+    HU_ASSERT_EQ(hu_init_proposer_assemble_context(NULL, 1779700000, 1779699000, &bundle), HU_OK);
+    /* All field bytes zero, but metadata preserved. */
+    HU_ASSERT_EQ(bundle.total_bytes, (size_t)0);
+    HU_ASSERT_EQ(bundle.now_unix, (int64_t)1779700000);
+    HU_ASSERT_EQ(bundle.last_inbound_unix, (int64_t)1779699000);
+    for (size_t i = 0; i < (size_t)HU_INIT_FIELD_COUNT; i++) {
+        HU_ASSERT_EQ(bundle.bytes[i], (size_t)0);
+        HU_ASSERT(bundle.content[i] == NULL);
+    }
+}
+
 void run_init_proposer_tests(void);
 void run_init_proposer_tests(void) {
     HU_TEST_SUITE("init_proposer");
@@ -125,4 +208,10 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(test_interval_gate_blocks_back_to_back_ticks);
     HU_RUN_TEST(test_per_contact_recency_gates_when_seth_texted_recently);
     HU_RUN_TEST(test_null_args_return_invalid);
+    HU_RUN_TEST(test_format_summary_empty_bundle_writes_zero_counts);
+    HU_RUN_TEST(test_format_summary_populated_bundle_counts_correctly);
+    HU_RUN_TEST(test_format_summary_null_args_safe);
+    HU_RUN_TEST(test_format_summary_tiny_buffer_truncates_safely);
+    HU_RUN_TEST(test_assemble_context_null_out_returns_invalid);
+    HU_RUN_TEST(test_assemble_context_null_agent_returns_empty_bundle);
 }

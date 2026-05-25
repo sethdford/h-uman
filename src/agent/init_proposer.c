@@ -10,6 +10,7 @@
  */
 
 #include "human/agent/init_proposer.h"
+#include "human/agent.h"
 #include "human/agent/governor.h"
 #include "human/autoresponder.h"
 #include "human/config.h"
@@ -17,6 +18,8 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 
 /* Per ~/.claude/rules/silent-config-gated-subsystems.md: emit ONE
  * operator-visible log line per process when the subsystem is disabled or
@@ -110,4 +113,94 @@ hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
     *last_tick_unix_inout = now_unix;
     *out_result = HU_INIT_RESULT_SKIP;
     return HU_OK;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * T2 — Context bundle assembly + summary formatting.
+ *
+ * The bundle is a thin observation view over the agent's cached per-turn
+ * context strings (memory, conversation, contact, etc.). It owns nothing —
+ * pointers are tied to agent lifetime. The companion format function is a
+ * pure predicate so the per-tick log line can be unit-tested without
+ * spinning a real agent. */
+
+/* Stable display names matching hu_init_field_t indices. Used by both
+ * assemble + format, kept here so a single source of truth controls the
+ * log-line schema. */
+static const char *const s_field_names[HU_INIT_FIELD_COUNT] = {
+    [HU_INIT_FIELD_PERSONA] = "persona",
+    [HU_INIT_FIELD_CONTACT] = "contact",
+    [HU_INIT_FIELD_CONVERSATION] = "conversation",
+    [HU_INIT_FIELD_MEMORY] = "memory",
+    [HU_INIT_FIELD_PERSONAL_MODEL] = "personal_model",
+    [HU_INIT_FIELD_AWARENESS] = "awareness",
+    [HU_INIT_FIELD_INSTRUCTION] = "instruction",
+    [HU_INIT_FIELD_STM] = "stm",
+};
+
+hu_error_t hu_init_proposer_assemble_context(const struct hu_agent *agent, int64_t now_unix,
+                                             int64_t last_inbound_unix,
+                                             hu_init_context_bundle_t *out) {
+    if (!out)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    out->now_unix = now_unix;
+    out->last_inbound_unix = last_inbound_unix;
+
+    if (!agent)
+        return HU_OK; /* empty bundle is valid — caller (T3) decides SKIP. */
+
+    /* Per agent.h: these cached strings are set by the daemon before
+     * hu_agent_turn; lifetime is tied to the agent. We borrow pointers. */
+    out->content[HU_INIT_FIELD_CONTACT] = agent->contact_context;
+    out->bytes[HU_INIT_FIELD_CONTACT] = agent->contact_context_len;
+    out->content[HU_INIT_FIELD_CONVERSATION] = agent->conversation_context;
+    out->bytes[HU_INIT_FIELD_CONVERSATION] = agent->conversation_context_len;
+    out->content[HU_INIT_FIELD_INSTRUCTION] = agent->custom_instructions;
+    out->bytes[HU_INIT_FIELD_INSTRUCTION] = agent->custom_instructions_len;
+
+    /* T2 stub: persona/memory/personal_model/awareness/stm fields land
+     * when their corresponding extractor outputs are wired into a stable
+     * agent-cached location. For now those slots stay zero — that's
+     * meaningful telemetry by itself (the proposer can see what's
+     * unwired). */
+
+    for (size_t i = 0; i < (size_t)HU_INIT_FIELD_COUNT; i++) {
+        out->total_bytes += out->bytes[i];
+    }
+    return HU_OK;
+}
+
+size_t hu_init_proposer_format_context_summary(const hu_init_context_bundle_t *bundle, char *out,
+                                               size_t out_cap) {
+    if (!out || out_cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!bundle)
+        return 0;
+
+    /* Count populated fields (>0 bytes) for the "fields=N" leader. */
+    size_t populated = 0;
+    for (size_t i = 0; i < (size_t)HU_INIT_FIELD_COUNT; i++) {
+        if (bundle->bytes[i] > 0)
+            populated++;
+    }
+
+    int written = snprintf(out, out_cap, "fields=%zu total=%zu", populated, bundle->total_bytes);
+    if (written < 0)
+        return 0;
+    size_t pos = (size_t)written < out_cap ? (size_t)written : out_cap - 1;
+
+    for (size_t i = 0; i < (size_t)HU_INIT_FIELD_COUNT && pos + 1 < out_cap; i++) {
+        int n = snprintf(out + pos, out_cap - pos, " %s=%zu", s_field_names[i], bundle->bytes[i]);
+        if (n < 0)
+            break;
+        if ((size_t)n >= out_cap - pos) {
+            pos = out_cap - 1;
+            break;
+        }
+        pos += (size_t)n;
+    }
+    out[pos] = '\0';
+    return pos;
 }

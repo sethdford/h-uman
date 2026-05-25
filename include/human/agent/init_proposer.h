@@ -80,4 +80,61 @@ hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
  * so each test starts with a clean slate. No-op outside HU_IS_TEST. */
 void hu_init_proposer_reset_warn_guards_for_test(void);
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * T2 — Context bundle assembly (AC-2 partial)
+ *
+ * The proposer needs the SAME rich context the agent_turn prompt builder
+ * uses, plus initiative-specific signals (recent messages, F30/F31/F129
+ * affordances — when those are wired by the proactive-ext-completion plan).
+ *
+ * T2 ships a thin observation struct + an assembly helper. T3 will pass
+ * this to the analytical-tier LLM as the "propose-or-skip" prompt input. */
+
+/* Per-source byte counts. Indexed by HU_INIT_FIELD_*. */
+typedef enum hu_init_field {
+    HU_INIT_FIELD_PERSONA = 0,
+    HU_INIT_FIELD_CONTACT,
+    HU_INIT_FIELD_CONVERSATION,
+    HU_INIT_FIELD_MEMORY,
+    HU_INIT_FIELD_PERSONAL_MODEL,
+    HU_INIT_FIELD_AWARENESS,
+    HU_INIT_FIELD_INSTRUCTION,
+    HU_INIT_FIELD_STM,
+    HU_INIT_FIELD_COUNT, /* sentinel */
+} hu_init_field_t;
+
+/* Lightweight bundle: pointers + byte counts into agent-owned strings.
+ * The bundle itself owns nothing — caller must not free pointers. Lifetime
+ * is tied to the calling agent_turn (don't store between ticks). */
+typedef struct hu_init_context_bundle {
+    /* Per-source content pointers (any may be NULL if the field is empty). */
+    const char *content[HU_INIT_FIELD_COUNT];
+    size_t bytes[HU_INIT_FIELD_COUNT];
+    size_t total_bytes;
+    /* Per-tick metadata. */
+    int64_t now_unix;
+    int64_t last_inbound_unix; /* 0 if never */
+} hu_init_context_bundle_t;
+
+/* Forward-declared so we don't pull include/human/agent.h into this header
+ * (avoids transitive dep cycles). Defined in include/human/agent.h. */
+struct hu_agent;
+
+/* Assemble the proposer's context bundle from the agent's current cached
+ * context strings. Cheap — no allocation, no LLM call. Caller-owned out;
+ * function memsets to zero before populating. */
+hu_error_t hu_init_proposer_assemble_context(const struct hu_agent *agent, int64_t now_unix,
+                                             int64_t last_inbound_unix,
+                                             hu_init_context_bundle_t *out);
+
+/* Format a one-line operator-visible summary of the bundle into a caller-
+ * owned buffer:
+ *
+ *   "fields=N total=X persona=A contact=B conversation=C memory=D ..."
+ *
+ * Pure predicate over the bundle — no I/O, no allocation. Returns the
+ * number of bytes written (excluding NUL). On out_cap=0, returns 0. */
+size_t hu_init_proposer_format_context_summary(const hu_init_context_bundle_t *bundle, char *out,
+                                               size_t out_cap);
+
 #endif /* HU_AGENT_INIT_PROPOSER_H */
