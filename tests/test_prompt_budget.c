@@ -207,7 +207,7 @@ static void test_build_system_stats_null_preserves_zero_overhead_path(void) {
     char *out = NULL;
     size_t out_len = 0;
     /* Passing NULL stats MUST work (legacy callers expect it). */
-    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len), HU_OK);
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len), HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT(out_len > 0);
     alloc.free(alloc.ctx, out, out_len + 1);
@@ -224,7 +224,7 @@ static void test_build_system_stats_records_memory_context_bytes(void) {
     memset(stats, 0, sizeof(stats));
     char *out = NULL;
     size_t out_len = 0;
-    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, &out, &out_len), HU_OK);
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, NULL, &out, &out_len), HU_OK);
     /* The memory_context slot reports AT LEAST as many bytes as the
      * input (the wrapper also captures the "\n\n" separator). */
     HU_ASSERT(stats[HU_PROMPT_FIELD_MEMORY_CONTEXT].bytes_contributed >= cfg.memory_context_len);
@@ -250,7 +250,7 @@ static void test_build_system_stats_records_multiple_populated_fields(void) {
     memset(stats, 0, sizeof(stats));
     char *out = NULL;
     size_t out_len = 0;
-    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, &out, &out_len), HU_OK);
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, NULL, &out, &out_len), HU_OK);
     /* All three populated fields report non-zero contribution. */
     HU_ASSERT(stats[HU_PROMPT_FIELD_MEMORY_CONTEXT].bytes_contributed > 0);
     HU_ASSERT(stats[HU_PROMPT_FIELD_INSTRUCTION_CONTEXT].bytes_contributed > 0);
@@ -276,7 +276,7 @@ static void test_build_system_stats_unwired_field_stays_zero_even_when_others_po
     memset(stats, 0, sizeof(stats));
     char *out = NULL;
     size_t out_len = 0;
-    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, &out, &out_len), HU_OK);
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, NULL, &out, &out_len), HU_OK);
     HU_ASSERT_EQ(stats[HU_PROMPT_FIELD_SOMATIC_CONTEXT].bytes_contributed, (size_t)0);
     HU_ASSERT_EQ(stats[HU_PROMPT_FIELD_RUPTURE_CONTEXT].bytes_contributed, (size_t)0);
     alloc.free(alloc.ctx, out, out_len + 1);
@@ -304,7 +304,7 @@ static void test_build_system_stats_feeds_budget_observer_round_trip(void) {
         memset(stats, 0, sizeof(stats));
         char *out = NULL;
         size_t out_len = 0;
-        HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, &out, &out_len), HU_OK);
+        HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, stats, NULL, &out, &out_len), HU_OK);
         hu_prompt_budget_observe(budget, stats, HU_PROMPT_FIELD_COUNT);
         alloc.free(alloc.ctx, out, out_len + 1);
     }
@@ -316,6 +316,109 @@ static void test_build_system_stats_feeds_budget_observer_round_trip(void) {
     HU_ASSERT(!hu_prompt_budget_field_is_dead(budget, HU_PROMPT_FIELD_MEMORY_CONTEXT, 16, 100));
 
     hu_prompt_budget_free(budget);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Phase 2 — trim gate.
+ *
+ * When cfg->prompt_budget_trim_enabled=true AND the budget has tagged a
+ * field DEAD, hu_prompt_build_system skips that field's appender block
+ * entirely. Verified by building the same prompt twice (trim off vs on)
+ * and asserting (a) the trimmed prompt is shorter and (b) the dead
+ * field's contents are absent from the trimmed output. */
+
+static void test_trim_gate_skips_dead_fields_when_enabled(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_budget_t *budget = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &budget), HU_OK);
+
+    /* Observe 100 turns where memory_context contributed 0 bytes and
+     * conversation_context contributed 2000 bytes. Memory is now DEAD
+     * per (mean=0 < 16) AND (count=100 >= 100). */
+    hu_prompt_field_stat_t obs[HU_PROMPT_FIELD_COUNT];
+    memset(obs, 0, sizeof(obs));
+    obs[HU_PROMPT_FIELD_CONVERSATION_CONTEXT].bytes_contributed = 2000;
+    for (int i = 0; i < 100; i++)
+        hu_prompt_budget_observe(budget, obs, HU_PROMPT_FIELD_COUNT);
+    HU_ASSERT(hu_prompt_budget_field_is_dead(budget, HU_PROMPT_FIELD_MEMORY_CONTEXT, 16, 100));
+
+    /* Build prompt WITH memory_context populated. */
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.memory_context = "PHASE2-TRIM-FIXTURE-MEMORY-VALUE-LONG-ENOUGH-TO-MATTER";
+    cfg.memory_context_len = strlen(cfg.memory_context);
+
+    /* Baseline: trim disabled → memory IS in the prompt. */
+    char *baseline = NULL;
+    size_t baseline_len = 0;
+    cfg.prompt_budget_trim_enabled = false;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, budget, &baseline, &baseline_len),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(baseline);
+    HU_ASSERT(strstr(baseline, "PHASE2-TRIM-FIXTURE-MEMORY-VALUE-LONG-ENOUGH-TO-MATTER") != NULL);
+
+    /* Trim enabled → memory is SKIPPED even though it's populated, because
+     * the budget tagged it DEAD over 100 prior observations. */
+    char *trimmed = NULL;
+    size_t trimmed_len = 0;
+    cfg.prompt_budget_trim_enabled = true;
+    cfg.prompt_budget_dead_field_min_bytes = 16;
+    cfg.prompt_budget_min_samples_before_tag = 100;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, budget, &trimmed, &trimmed_len), HU_OK);
+    HU_ASSERT_NOT_NULL(trimmed);
+    /* Fixture string is absent from trimmed output. */
+    HU_ASSERT(strstr(trimmed, "PHASE2-TRIM-FIXTURE-MEMORY-VALUE-LONG-ENOUGH-TO-MATTER") == NULL);
+    /* And the trimmed prompt is shorter than the baseline by at least
+     * the fixture's length (header overhead may make it slightly more). */
+    HU_ASSERT(trimmed_len < baseline_len);
+
+    alloc.free(alloc.ctx, baseline, baseline_len + 1);
+    alloc.free(alloc.ctx, trimmed, trimmed_len + 1);
+    hu_prompt_budget_free(budget);
+}
+
+static void test_trim_gate_disabled_by_default_keeps_dead_fields(void) {
+    /* Safety: if the operator hasn't flipped trim_enabled=true, we
+     * never trim, even with a budget passed. Prevents accidental
+     * trim from the daemon-wired path before a week of observations. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_budget_t *budget = NULL;
+    HU_ASSERT_EQ(hu_prompt_budget_init(&alloc, &budget), HU_OK);
+
+    hu_prompt_field_stat_t obs[HU_PROMPT_FIELD_COUNT];
+    memset(obs, 0, sizeof(obs));
+    obs[HU_PROMPT_FIELD_CONVERSATION_CONTEXT].bytes_contributed = 2000;
+    for (int i = 0; i < 100; i++)
+        hu_prompt_budget_observe(budget, obs, HU_PROMPT_FIELD_COUNT);
+
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.memory_context = "SAFETY-FIXTURE-MEMORY-SHOULD-BE-PRESENT";
+    cfg.memory_context_len = strlen(cfg.memory_context);
+    /* prompt_budget_trim_enabled left as false (default from memset). */
+
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, budget, &out, &out_len), HU_OK);
+    HU_ASSERT(strstr(out, "SAFETY-FIXTURE-MEMORY-SHOULD-BE-PRESENT") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_prompt_budget_free(budget);
+}
+
+static void test_trim_gate_null_budget_never_trims(void) {
+    /* NULL budget is the legacy path — no trim possible. */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.memory_context = "NULL-BUDGET-MEMORY-PRESENT";
+    cfg.memory_context_len = strlen(cfg.memory_context);
+    cfg.prompt_budget_trim_enabled = true; /* would trim if budget existed */
+
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len), HU_OK);
+    HU_ASSERT(strstr(out, "NULL-BUDGET-MEMORY-PRESENT") != NULL);
+    alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 void run_prompt_budget_tests(void);
@@ -340,4 +443,8 @@ void run_prompt_budget_tests(void) {
     HU_RUN_TEST(test_build_system_stats_records_multiple_populated_fields);
     HU_RUN_TEST(test_build_system_stats_unwired_field_stays_zero_even_when_others_populated);
     HU_RUN_TEST(test_build_system_stats_feeds_budget_observer_round_trip);
+    /* Phase 2 — trim gate */
+    HU_RUN_TEST(test_trim_gate_skips_dead_fields_when_enabled);
+    HU_RUN_TEST(test_trim_gate_disabled_by_default_keeps_dead_fields);
+    HU_RUN_TEST(test_trim_gate_null_budget_never_trims);
 }

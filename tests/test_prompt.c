@@ -30,7 +30,7 @@ static void test_prompt_build_basic(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
 
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
@@ -72,7 +72,7 @@ static void test_prompt_build_with_tools(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
+    err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
 
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
@@ -105,7 +105,7 @@ static void test_prompt_build_with_memory(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
 
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
@@ -139,7 +139,7 @@ static void test_prompt_build_with_stm_context(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
 
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
@@ -171,7 +171,7 @@ static void test_prompt_build_with_custom_instructions(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
 
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
@@ -195,7 +195,7 @@ static void test_prompt_build_includes_hula_protocol(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, &out, &out_len);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, &out_len);
 
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);

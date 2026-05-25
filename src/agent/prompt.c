@@ -124,8 +124,28 @@ static hu_error_t append_texting_shape_rules(hu_allocator_t *alloc, char **buf, 
         }                                                                  \
     } while (0)
 
+/* Phase 2: trim gate. Returns true iff (a) the budget trim feature is
+ * enabled in config AND (b) the budget has observed this field as DEAD
+ * (mean bytes below threshold over enough samples). NULL budget = false
+ * (no trim) so legacy callers keep current behavior. */
+static inline bool should_skip_field(const hu_prompt_config_t *config,
+                                     const struct hu_prompt_budget *budget,
+                                     hu_prompt_field_t field_idx) {
+    if (!config || !budget || !config->prompt_budget_trim_enabled)
+        return false;
+    size_t threshold = config->prompt_budget_dead_field_min_bytes > 0
+                           ? (size_t)config->prompt_budget_dead_field_min_bytes
+                           : 16;
+    size_t min_samples = config->prompt_budget_min_samples_before_tag > 0
+                             ? (size_t)config->prompt_budget_min_samples_before_tag
+                             : 100;
+    return hu_prompt_budget_field_is_dead(budget, field_idx, threshold, min_samples);
+}
+
 hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_t *config,
-                                  struct hu_prompt_field_stat *stats, char **out, size_t *out_len) {
+                                  struct hu_prompt_field_stat *stats,
+                                  const struct hu_prompt_budget *budget, char **out,
+                                  size_t *out_len) {
     if (!alloc || !config || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -619,7 +639,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     }
 
     /* Emotional context (from emotional cognition fusion) */
-    if (config->emotional_context && config->emotional_context_len > 0) {
+    if (config->emotional_context && config->emotional_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_EMOTIONAL_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, config->emotional_context,
                      config->emotional_context_len);
@@ -652,7 +673,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     err = append(alloc, &buf, &len, &cap, "## Memory Context\n\n", 19);
     if (err != HU_OK)
         goto fail;
-    if (config->memory_context && config->memory_context_len > 0) {
+    if (config->memory_context && config->memory_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_MEMORY_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, config->memory_context, config->memory_context_len);
         if (err != HU_OK)
@@ -666,7 +688,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
         if (err != HU_OK)
             goto fail;
     }
-    if (config->relational_episode_context && config->relational_episode_context_len > 0) {
+    if (config->relational_episode_context && config->relational_episode_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_RELATIONAL_EPISODE_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, config->relational_episode_context,
                      config->relational_episode_context_len);
@@ -681,7 +704,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     /* Personal model summary — what we've learned about the user (facts,
      * topics, goals, communication style). Sits next to memory context
      * because it IS memory of the person, distinct from session/STM. */
-    if (config->personal_model_context && config->personal_model_context_len > 0) {
+    if (config->personal_model_context && config->personal_model_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_PERSONAL_MODEL_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, config->personal_model_context,
                      config->personal_model_context_len);
@@ -697,7 +721,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
      * this turn (time of day, silence gap, their recent style, suggested
      * opener / brevity / defer). Distinct from personal_model_context
      * which is "who they are over time". Sits adjacent. */
-    if (config->moment_context && config->moment_context_len > 0) {
+    if (config->moment_context && config->moment_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_MOMENT_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, config->moment_context, config->moment_context_len);
         if (err != HU_OK)
@@ -711,7 +736,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     /* Self-exemplars block — recent verbatim outbound messages we've sent
      * to this contact, as in-context style anchors. Highest-leverage prompt
      * addition for personal-feeling responses; see spec §4c. */
-    if (config->self_exemplars_context && config->self_exemplars_context_len > 0) {
+    if (config->self_exemplars_context && config->self_exemplars_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_SELF_EXEMPLARS_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap,
                      "HOW YOU SOUND TO THIS PERSON (verbatim recent messages):\n", 58);
@@ -730,7 +756,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     /* W9 world-model snapshot (FIX 12) — goals, negatives, theory-of-mind,
      * recent topics. Sits between the personal model (long-term who they
      * are) and project instructions (operational rules). */
-    if (config->world_model_context && config->world_model_context_len > 0) {
+    if (config->world_model_context && config->world_model_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_WORLD_MODEL_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, config->world_model_context,
                      config->world_model_context_len);
@@ -743,7 +770,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     }
 
     /* Instruction file context (discovered .human.md / HUMAN.md) */
-    if (config->instruction_context && config->instruction_context_len > 0) {
+    if (config->instruction_context && config->instruction_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_INSTRUCTION_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, "## Project Instructions\n\n", 25);
         if (err != HU_OK)
@@ -759,7 +787,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     }
 
     /* Session context (STM) */
-    if (config->stm_context && config->stm_context_len > 0) {
+    if (config->stm_context && config->stm_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_STM_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, "\n\n### Session Context\n", 22);
         if (err != HU_OK)
@@ -771,7 +800,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     }
 
     /* Active commitments */
-    if (config->commitment_context && config->commitment_context_len > 0) {
+    if (config->commitment_context && config->commitment_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_COMMITMENT_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, "\n\n", 2);
         if (err != HU_OK)
@@ -784,7 +814,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     }
 
     /* Pattern insights */
-    if (config->pattern_context && config->pattern_context_len > 0) {
+    if (config->pattern_context && config->pattern_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_PATTERN_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, "\n\n", 2);
         if (err != HU_OK)
@@ -796,7 +827,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     }
 
     /* Adaptive persona (circadian + relationship) */
-    if (config->adaptive_persona_context && config->adaptive_persona_context_len > 0) {
+    if (config->adaptive_persona_context && config->adaptive_persona_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_ADAPTIVE_PERSONA_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, "\n\n", 2);
         if (err != HU_OK)
@@ -809,7 +841,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     }
 
     /* Proactive awareness */
-    if (config->proactive_context && config->proactive_context_len > 0) {
+    if (config->proactive_context && config->proactive_context_len > 0 &&
+        !should_skip_field(config, budget, HU_PROMPT_FIELD_PROACTIVE_CONTEXT)) {
         HU_PROMPT_TRACK_BEFORE();
         err = append(alloc, &buf, &len, &cap, "\n\n", 2);
         if (err != HU_OK)
@@ -1300,7 +1333,7 @@ hu_error_t hu_prompt_build_static(hu_allocator_t *alloc, const hu_prompt_config_
     no_mem.memory_context_len = 0;
     /* NULL stats — internal recursion through the static-only path; the
      * caller of hu_prompt_build_with_cache already passes NULL. */
-    return hu_prompt_build_system(alloc, &no_mem, NULL, out, out_len);
+    return hu_prompt_build_system(alloc, &no_mem, NULL, NULL, out, out_len);
 }
 
 hu_error_t hu_prompt_build_with_cache(hu_allocator_t *alloc, const char *static_prompt,

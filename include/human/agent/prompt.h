@@ -151,6 +151,14 @@ typedef struct hu_prompt_config {
      * NULL/empty when voice profile is uninitialised or persona is disabled. */
     const char *voice_maturity_directive;
     size_t voice_maturity_directive_len;
+    /* Phase 2 prompt-budget trim — populated from hu_config_t.prompt_budget
+     * by the caller (agent_turn.c / agent_stream.c). When trim_enabled is
+     * true AND the builder is invoked with a non-NULL budget pointer that
+     * has tagged a field DEAD, that field's appender block is skipped.
+     * Defaults (zero values) leave behavior unchanged from Phase 1b. */
+    bool prompt_budget_trim_enabled;
+    int prompt_budget_dead_field_min_bytes;   /* default 16 if 0 */
+    int prompt_budget_min_samples_before_tag; /* default 100 if 0 */
 } hu_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc.
@@ -161,10 +169,21 @@ typedef struct hu_prompt_config {
  * entry's `name` (static string) and `bytes_contributed` (delta this
  * field added to the prompt). Empty fields report 0 bytes — operators
  * see WHICH slots are unwired, not just which are dead. See
- * include/human/agent/prompt_budget.h for the field enum + accumulator. */
+ * include/human/agent/prompt_budget.h for the field enum + accumulator.
+ *
+ * `budget` is an OPTIONAL accumulated dead-field history (NULL = no trim).
+ * When non-NULL AND `config->prompt_budget.enabled` is true, the builder
+ * checks each wrapped field via hu_prompt_budget_field_is_dead and SKIPS
+ * the appender block for fields that have been observed dead. Mean bytes
+ * < cfg->prompt_budget.dead_field_min_bytes after >= cfg->prompt_budget.
+ * min_samples_before_tag observations is the dead criterion. Skipped
+ * fields contribute 0 bytes to the prompt AND to the stats array. */
 struct hu_prompt_field_stat; /* forward decl — full def in prompt_budget.h */
+struct hu_prompt_budget;     /* forward decl — opaque from prompt_budget.h */
 hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_t *config,
-                                  struct hu_prompt_field_stat *stats, char **out, size_t *out_len);
+                                  struct hu_prompt_field_stat *stats,
+                                  const struct hu_prompt_budget *budget, char **out,
+                                  size_t *out_len);
 
 /* Build only the static parts (identity, tools, autonomy, safety, custom).
  * The result can be cached and reused across turns. Caller owns returned string. */

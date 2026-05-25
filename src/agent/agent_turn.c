@@ -3847,7 +3847,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         /* NULL stats: prompt_budget instrumentation TODO — wire when the
          * spec at docs/plans/2026-05-25-director-compression/ ships its
          * accumulator. For now opt out (zero overhead). */
-        err = hu_prompt_build_system(agent->alloc, &cfg, NULL, &system_prompt, &system_prompt_len);
+        err = hu_prompt_build_system(agent->alloc, &cfg, NULL, NULL, &system_prompt,
+                                     &system_prompt_len);
         /* Prompt-size budget guard. MLX backends return empty responses
          * when the assembled prompt exceeds ~28 KB (observed 2026-05-19:
          * body_len=28291 → "Server returned nothing"). Cap at 16 KB so
