@@ -1121,6 +1121,7 @@ set(HU_CORE_SOURCES
     src/oauth.c
     src/vertex_adc.c
     src/agent/init_proposer.c
+    src/agent/init_outcome.c
     src/agent/prompt_budget.c
     src/memory/vector/math.c
     src/memory/vector/cosine.c
