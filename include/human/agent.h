@@ -222,6 +222,15 @@ struct hu_agent {
      * init time; NULL when model file absent (downstream calls degrade
      * gracefully to neutral 0.5). Owned by the agent; freed in hu_agent_deinit. */
     struct hu_persona_eval_model *persona_eval;
+    /* Sprint 55 B3 — per-agent prompt budget observer. Accumulates per-
+     * field byte stats across every hu_prompt_build_system call. When
+     * non-NULL AND cfg.prompt_budget_trim_enabled=true, the builder
+     * uses it to skip DEAD-tagged fields. Owned by the agent; init
+     * during hu_agent_init (when cfg.prompt_budget.enabled=true);
+     * freed in hu_agent_deinit. NULL on the legacy path = zero
+     * behavioral change. The doctor check inspects this pointer via
+     * the registry adapter ctx. */
+    struct hu_prompt_budget *prompt_budget;
     hu_security_policy_t *policy;      /* optional, may be NULL */
     hu_cost_tracker_t *cost_tracker;   /* optional, may be NULL */
     hu_usage_tracker_t *usage_tracker; /* optional, per-provider token tracking */

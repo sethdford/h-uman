@@ -3844,10 +3844,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .world_model_context = world_model_ctx,
             .world_model_context_len = world_model_ctx_len,
         };
-        /* NULL stats: prompt_budget instrumentation TODO — wire when the
-         * spec at docs/plans/2026-05-25-director-compression/ ships its
-         * accumulator. For now opt out (zero overhead). */
-        err = hu_prompt_build_system(agent->alloc, &cfg, NULL, NULL, &system_prompt,
+        /* Sprint 55 B3 — thread the agent's prompt-budget observer.
+         * The builder's per-field stats are fed into it; when enough
+         * observations accumulate AND cfg.prompt_budget_trim_enabled
+         * is true, the trim gate skips DEAD fields. stats out-array
+         * is NULL (we don't need a per-call snapshot — the budget
+         * accumulator is the source of truth for the doctor check). */
+        err = hu_prompt_build_system(agent->alloc, &cfg, NULL, agent->prompt_budget, &system_prompt,
                                      &system_prompt_len);
         /* Prompt-size budget guard. MLX backends return empty responses
          * when the assembled prompt exceeds ~28 KB (observed 2026-05-19:

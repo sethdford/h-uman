@@ -41,6 +41,7 @@
 #include "human/agent/planner.h"
 #include "human/agent/preferences.h"
 #include "human/agent/prompt.h"
+#include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_cache.h"
 #include "human/agent/reflection.h"
 #include "human/agent/speculative.h"
@@ -1057,6 +1058,28 @@ hu_error_t hu_agent_from_config(
                         hu_error_string(pe_err));
     }
 
+    /* Sprint 55 B3 — init per-agent prompt budget observer ONLY when
+     * the observer is per-agent state. We unconditionally init it —
+     * it's ~256 bytes and zero-cost on the legacy path (no caller
+     * threads stats unless they want the bookkeeping). The trim gate
+     * stays gated by config.prompt_budget_trim_enabled inside
+     * hu_prompt_build_system, NOT by whether this budget exists. That
+     * keeps the agent-init path simple (no cfg ptr threading) and
+     * lets the doctor check observe nonzero stats once callers opt in.
+     *
+     * Allocation failure is non-fatal: prompt_budget stays NULL, the
+     * silent-failure diagnostic in prompt.c fires on first build so
+     * the operator sees the gap. */
+    out->prompt_budget = NULL;
+    {
+        hu_error_t pb_err = hu_prompt_budget_init(out->alloc, &out->prompt_budget);
+        if (pb_err != HU_OK) {
+            hu_log_warn("agent", NULL, "prompt_budget init failed: %s (trim gate will no-op)",
+                        hu_error_string(pb_err));
+            out->prompt_budget = NULL;
+        }
+    }
+
     hu_emotional_cognition_init(&out->infra.emotional_cognition);
     hu_metacognition_init(&out->infra.metacognition);
     out->infra.current_cognition_mode = HU_COGNITION_FAST;
@@ -1595,6 +1618,14 @@ void hu_agent_deinit(hu_agent_t *agent) {
     if (agent->persona_eval) {
         hu_persona_eval_free(agent->alloc, agent->persona_eval);
         agent->persona_eval = NULL;
+    }
+
+    /* Sprint 55 B3 — free the per-agent prompt budget observer.
+     * hu_prompt_budget_free handles NULL, but the explicit guard makes
+     * the deinit order clearer for future reviewers. */
+    if (agent->prompt_budget) {
+        hu_prompt_budget_free(agent->prompt_budget);
+        agent->prompt_budget = NULL;
     }
 
     /* Sprint 37 — free director history ring buffer first (heap-owned
