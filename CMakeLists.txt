@@ -401,6 +401,10 @@ if(HU_ENABLE_IMESSAGE)
     # distribution, response latency, initiation ratio, frequency
     # aggregates per contact. Pure helpers + SQL scanner (HU_IS_TEST stub).
     list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
+    # Tier 1 Phase 2 (iMessage action surface): predicate that selects
+    # reply style per conversation (flat/threaded/tapback variants).
+    # Wired at send time before hu_imessage_send. Pure classifier.
+    list(APPEND CHANNEL_SOURCES src/channels/imessage_action.c)
 endif()
 if(HU_ENABLE_PWA)
     list(APPEND CHANNEL_SOURCES src/channels/pwa.c)
@@ -3228,6 +3232,7 @@ set(HU_TEST_SOURCES
     tests/test_channel_integration.c
     tests/test_gmail.c
     tests/test_imessage_extended.c
+    tests/test_imessage_reply_style.c
     tests/test_imessage_chatdb_fixture.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
