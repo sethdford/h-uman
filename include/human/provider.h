@@ -103,6 +103,14 @@ typedef struct hu_token_usage {
     uint32_t prompt_tokens;
     uint32_t completion_tokens;
     uint32_t total_tokens;
+    /* Gemini 3.x: tokens consumed by invisible "thinking" before the
+     * visible reply. Counts AGAINST `maxOutputTokens` even though the
+     * thoughts never reach the user. When candidatesTokenCount=0 and
+     * thoughts_tokens>0, the model burned its budget on hidden reasoning
+     * and produced an empty visible reply — the 2026-05-24 reactive-
+     * iMessage regression root cause. Other providers should leave 0.
+     * Reported in usageMetadata.thoughtsTokenCount on the Gemini wire. */
+    uint32_t thoughts_tokens;
 } hu_token_usage_t;
 
 typedef struct hu_chat_response {
@@ -115,6 +123,15 @@ typedef struct hu_chat_response {
     size_t model_len;
     const char *reasoning_content; /* optional, NULL if none */
     size_t reasoning_content_len;  /* 0 if reasoning_content is NULL */
+    /* Why the provider stopped generating ("stop", "MAX_TOKENS",
+     * "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "RECITATION", etc.).
+     * Heap-owned by alloc; NULL when the provider didn't surface a
+     * reason. Freed by hu_chat_response_free. Diagnostic — drives the
+     * empty-response log line in agent_turn.c. Added 2026-05-25 after
+     * the Gemini-3.x thinking-budget starvation bug surfaced without
+     * enough context to diagnose in production. */
+    const char *finish_reason;
+    size_t finish_reason_len;
     /* Mean logprob over completion tokens when provider returned logprobs (e.g. OpenAI). */
     bool logprob_mean_valid;
     float logprob_mean;
