@@ -127,4 +127,25 @@ bool hu_followup_dedup_seen(const hu_followup_dedup_t *d, int64_t msg_id);
  * NULL d or msg_id <= 0. */
 void hu_followup_dedup_record(hu_followup_dedup_t *d, int64_t msg_id);
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Send-now predicate — extracts the daemon's send decision into a pure
+ * predicate per .claude/rules/security-predicate-extraction.md.
+ *
+ * Returns true if the follow-up should be delivered immediately (synchronously
+ * or with minimal delay). Returns false if:
+ *   - throttle has reached per_contact_daily_max for today
+ *   - (future extension) rate limiter indicates backoff
+ *
+ * This is the gate the daemon's flush function checks BEFORE calling
+ * autoresponder and iMessage send.
+ *
+ * Thread-safe on separate throttle instances; shares throttle state across
+ * calls (tests must reset between cases).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+struct hu_proactive_throttle; /* forward decl */
+
+bool hu_follow_up_should_send_now(const char *contact_handle, uint64_t now_ms,
+                                  struct hu_proactive_throttle *throttle);
+
 #endif /* HU_FOLLOW_UP_H */

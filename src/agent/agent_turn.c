@@ -5169,6 +5169,27 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
         if (err == HU_OK) {
+            /* T1b (2026-05-25 reactive-iMessage recovery) — diagnostic
+             * on empty-response. When a successful chat returns no
+             * content and no tool_calls, the daemon used to log
+             * "empty assistant response" with zero actionable context.
+             * Emit the rich log line HERE while resp is still in scope,
+             * naming provider/model/finishReason/usage/thinking_budget
+             * so the operator can correlate against the request shape.
+             * The 2026-05-24 Gemini-3.x thinking-budget bug surfaced as
+             * exactly this pattern: finish_reason=MAX_TOKENS,
+             * thoughts_tokens>0, completion_tokens=0. */
+            if (resp.content_len == 0 && resp.tool_calls_count == 0) {
+                hu_log_warn("agent_turn", agent->observer,
+                            "empty content from provider=%s model=%.*s "
+                            "finish_reason=%.*s prompt_tokens=%u completion_tokens=%u "
+                            "thoughts_tokens=%u thinking_budget=%d latency_ms=%llu",
+                            prov_name ? prov_name : "?", (int)(turn_model_len ? turn_model_len : 0),
+                            turn_model ? turn_model : "", (int)resp.finish_reason_len,
+                            resp.finish_reason ? resp.finish_reason : "", resp.usage.prompt_tokens,
+                            resp.usage.completion_tokens, resp.usage.thoughts_tokens,
+                            req.thinking_budget, (unsigned long long)llm_duration_ms);
+            }
             /* M4 follow-up: a successful chat resets the transport-error
              * streak, so transient blips (single HU_ERR_IO followed by
              * recovery) don't accumulate toward the bail threshold. */
