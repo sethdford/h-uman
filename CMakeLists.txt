@@ -546,6 +546,7 @@ set(HU_CORE_SOURCES
     src/doctor.c
     src/doctor/registry.c
     src/doctor/check_chatdb.c
+    src/doctor/check_prompt_budget.c
     src/doctor/check_provider.c
     src/doctor/exit_code.c
     src/doctor/json_output.c

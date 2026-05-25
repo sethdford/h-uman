@@ -1,6 +1,7 @@
 #include "human/core/error.h"
 #include "human/doctor.h"
 #include "human/doctor/check.h"
+#include "human/doctor/check_prompt_budget.h"
 #include "human/doctor/check_provider.h"
 #include <stdlib.h>
 #include <string.h>
@@ -252,6 +253,17 @@ static hu_doctor_check_result_t run_provider_smoke_check(hu_doctor_check_t *self
     return hu_doctor_check_provider.run(self, &pctx);
 }
 
+/* Wrapper: prompt_budget check (external vtable) — Sprint 55 B3 Task 5.
+ * Constructs the public ctx struct {cfg} from the adapter and delegates.
+ * NULL cfg is handled inside the check (returns NA). */
+static hu_doctor_check_result_t run_prompt_budget_check(hu_doctor_check_t *self, void *ctx) {
+    hu_doctor_adapter_ctx_t *uctx = (hu_doctor_adapter_ctx_t *)ctx;
+    hu_doctor_check_prompt_budget_ctx_t pbctx = {
+        .cfg = uctx ? (const struct hu_config *)uctx->cfg : NULL,
+    };
+    return hu_doctor_check_prompt_budget.run(self, &pbctx);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -268,6 +280,8 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
          run_chatdb_readable_check, NULL, NULL},
         {"provider_smoke", "Verifies the configured AI provider can be instantiated",
          run_provider_smoke_check, NULL, NULL},
+        {"prompt_budget", "Reports prompt-budget config state (observer + trim gate)",
+         run_prompt_budget_check, NULL, NULL},
         {"imessage", "Diagnoses iMessage channel", run_imessage_check, NULL, NULL},
         {"verifier", "Checks response verifier health", run_verifier_check, NULL, NULL},
         {"scheduler", "Checks scheduler status", run_scheduler_check, NULL, NULL},
