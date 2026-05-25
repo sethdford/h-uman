@@ -21,10 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static hu_allocator_t A(void) {
-    return hu_system_allocator();
-}
-
 /* Build a "casual Seth"-shaped fingerprint — the scoring target.
  * Matches the synthetic fallback in src/ml/fidelity.c. */
 static hu_communication_style_t casual_target(void) {
