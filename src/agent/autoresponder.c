@@ -353,7 +353,7 @@ size_t hu_autoresponder_sanitize_reply(const hu_autoresponder_config_t *cfg, con
     if (!raw_text || !*raw_text) {
         int n = snprintf(out, cap, "Hey, this is %s's assistant — they'll get back to you soon.",
                          user_name);
-        return n > 0 ? (size_t)((size_t)n < cap ? n : cap - 1) : 0;
+        return n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0;
     }
 
     if (reply_falsely_claims_to_be_user(raw_text, user_name)) {
@@ -361,7 +361,7 @@ size_t hu_autoresponder_sanitize_reply(const hu_autoresponder_config_t *cfg, con
                          "Hey, this is %s's assistant — they're not reachable right now but will "
                          "get back to you when they can.",
                          user_name);
-        return n > 0 ? (size_t)((size_t)n < cap ? n : cap - 1) : 0;
+        return n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0;
     }
 
     /* Pass through but bounded: cap at HU_AUTORESPONDER_REPLY_MAX. */
