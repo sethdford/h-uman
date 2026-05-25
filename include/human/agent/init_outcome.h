@@ -66,4 +66,37 @@ size_t hu_init_outcome_resolve_path(char *out_buf, size_t out_cap);
  * revert to the default. No-op outside HU_IS_TEST. */
 void hu_init_outcome_set_path_for_test(const char *path);
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * CLI: human initiative <log|status>
+ *
+ * Read-only operations over the JSONL. Both subcommands are pure (no
+ * mutation of the file), so safe to invoke against a live daemon's
+ * working file. */
+
+/* `human initiative log [--last N]` — pretty-print last N entries
+ * (default 10). `human initiative status` — aggregate counts by
+ * verdict + mean confidence + last fire time. Returns HU_OK / non-zero
+ * on usage errors. */
+hu_error_t cmd_initiative(hu_allocator_t *alloc, int argc, char **argv);
+
+/* Aggregate counters for the status subcommand. Pure predicate over a
+ * single JSON line; testable without spinning a real CLI. The caller
+ * walks the JSONL file line-by-line and calls this once per line. */
+typedef struct hu_init_status {
+    size_t total;
+    size_t count_fired;
+    size_t count_low_confidence;
+    size_t count_negative;
+    size_t count_llm_error;
+    size_t count_parse_error;
+    size_t count_unknown_verdict; /* schema drift safety */
+    double sum_confidence;        /* divided by total → mean */
+    int64_t last_fired_ts_unix;   /* 0 if no FIRED seen */
+} hu_init_status_t;
+
+/* Update `status` in place from one JSONL line. Robust to malformed
+ * lines (returns without mutating on parse failure). Pure — no I/O,
+ * uses the system allocator transiently for the JSON parse. */
+void hu_init_outcome_aggregate_line(hu_init_status_t *status, const char *line, size_t line_len);
+
 #endif /* HU_AGENT_INIT_OUTCOME_H */

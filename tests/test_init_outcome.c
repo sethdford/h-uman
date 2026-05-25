@@ -217,6 +217,101 @@ static void test_append_writes_all_verdict_strings(void) {
     cleanup_tmp_path();
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Aggregator tests (status subcommand backbone).
+ *
+ * hu_init_outcome_aggregate_line is a pure predicate over one JSONL
+ * line — testable in isolation without spinning the CLI or reading
+ * a real file. */
+
+static void test_aggregate_fired_increments_correct_counter(void) {
+    hu_init_status_t s;
+    memset(&s, 0, sizeof(s));
+    const char *line = "{\"schema\":\"init_outcome_v1\",\"ts_unix\":1779700000,\"tick_id\":1,"
+                       "\"verdict\":\"FIRED\",\"confidence\":0.91,\"dry_run\":true,"
+                       "\"draft\":\"hi\",\"reason\":\"\",\"target\":\"+1\"}";
+    hu_init_outcome_aggregate_line(&s, line, strlen(line));
+    HU_ASSERT_EQ(s.total, (size_t)1);
+    HU_ASSERT_EQ(s.count_fired, (size_t)1);
+    HU_ASSERT_EQ(s.count_negative, (size_t)0);
+    HU_ASSERT(s.sum_confidence > 0.9 && s.sum_confidence < 0.92);
+    HU_ASSERT_EQ(s.last_fired_ts_unix, (int64_t)1779700000);
+}
+
+static void test_aggregate_tracks_latest_fired_ts(void) {
+    /* Multiple FIRED lines → last_fired_ts_unix should be MAX, not last-seen. */
+    hu_init_status_t s;
+    memset(&s, 0, sizeof(s));
+    const char *l1 = "{\"verdict\":\"FIRED\",\"ts_unix\":1779700000,\"confidence\":0.9}";
+    const char *l2 = "{\"verdict\":\"FIRED\",\"ts_unix\":1779800000,\"confidence\":0.95}";
+    const char *l3 = "{\"verdict\":\"FIRED\",\"ts_unix\":1779750000,\"confidence\":0.85}";
+    hu_init_outcome_aggregate_line(&s, l1, strlen(l1));
+    hu_init_outcome_aggregate_line(&s, l2, strlen(l2));
+    hu_init_outcome_aggregate_line(&s, l3, strlen(l3));
+    HU_ASSERT_EQ(s.count_fired, (size_t)3);
+    /* MAX of the three ts_unix values. */
+    HU_ASSERT_EQ(s.last_fired_ts_unix, (int64_t)1779800000);
+}
+
+static void test_aggregate_all_verdict_strings_route_to_distinct_counters(void) {
+    hu_init_status_t s;
+    memset(&s, 0, sizeof(s));
+    const char *lines[] = {
+        "{\"verdict\":\"FIRED\",\"confidence\":0.9,\"ts_unix\":1}",
+        "{\"verdict\":\"LOW_CONFIDENCE\",\"confidence\":0.5,\"ts_unix\":2}",
+        "{\"verdict\":\"NEGATIVE\",\"confidence\":0.0,\"ts_unix\":3}",
+        "{\"verdict\":\"LLM_ERROR\",\"confidence\":0.0,\"ts_unix\":4}",
+        "{\"verdict\":\"PARSE_ERROR\",\"confidence\":0.0,\"ts_unix\":5}",
+    };
+    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++)
+        hu_init_outcome_aggregate_line(&s, lines[i], strlen(lines[i]));
+    HU_ASSERT_EQ(s.total, (size_t)5);
+    HU_ASSERT_EQ(s.count_fired, (size_t)1);
+    HU_ASSERT_EQ(s.count_low_confidence, (size_t)1);
+    HU_ASSERT_EQ(s.count_negative, (size_t)1);
+    HU_ASSERT_EQ(s.count_llm_error, (size_t)1);
+    HU_ASSERT_EQ(s.count_parse_error, (size_t)1);
+    HU_ASSERT_EQ(s.count_unknown_verdict, (size_t)0);
+}
+
+static void test_aggregate_unknown_verdict_caught_separately(void) {
+    /* Schema drift safety: a future verdict we don't know about must
+     * bump count_unknown_verdict rather than silently miscounting. */
+    hu_init_status_t s;
+    memset(&s, 0, sizeof(s));
+    const char *line =
+        "{\"verdict\":\"WHAT_IS_THIS_NEW_VERDICT\",\"confidence\":0.5,\"ts_unix\":1}";
+    hu_init_outcome_aggregate_line(&s, line, strlen(line));
+    HU_ASSERT_EQ(s.total, (size_t)1);
+    HU_ASSERT_EQ(s.count_unknown_verdict, (size_t)1);
+    HU_ASSERT_EQ(s.count_fired, (size_t)0);
+}
+
+static void test_aggregate_malformed_line_is_noop(void) {
+    hu_init_status_t s;
+    memset(&s, 0, sizeof(s));
+    /* Truncated JSON. */
+    hu_init_outcome_aggregate_line(&s, "{\"verdict\":\"FIRE", 16);
+    /* Not JSON at all. */
+    hu_init_outcome_aggregate_line(&s, "not json", 8);
+    /* JSON array instead of object. */
+    hu_init_outcome_aggregate_line(&s, "[\"x\"]", 5);
+    /* Object without verdict field. */
+    hu_init_outcome_aggregate_line(&s, "{\"confidence\":0.5}", 18);
+    /* None should mutate state. */
+    HU_ASSERT_EQ(s.total, (size_t)0);
+    HU_ASSERT_EQ(s.count_unknown_verdict, (size_t)0);
+}
+
+static void test_aggregate_null_args_no_crash(void) {
+    hu_init_status_t s;
+    memset(&s, 0, sizeof(s));
+    hu_init_outcome_aggregate_line(NULL, "abc", 3);
+    hu_init_outcome_aggregate_line(&s, NULL, 3);
+    hu_init_outcome_aggregate_line(&s, "abc", 0);
+    HU_ASSERT_EQ(s.total, (size_t)0);
+}
+
 void run_init_outcome_tests(void);
 void run_init_outcome_tests(void) {
     HU_TEST_SUITE("init_outcome");
@@ -228,4 +323,10 @@ void run_init_outcome_tests(void) {
     HU_RUN_TEST(test_append_multiple_calls_produce_multiple_lines);
     HU_RUN_TEST(test_append_null_decision_returns_invalid_argument);
     HU_RUN_TEST(test_append_writes_all_verdict_strings);
+    HU_RUN_TEST(test_aggregate_fired_increments_correct_counter);
+    HU_RUN_TEST(test_aggregate_tracks_latest_fired_ts);
+    HU_RUN_TEST(test_aggregate_all_verdict_strings_route_to_distinct_counters);
+    HU_RUN_TEST(test_aggregate_unknown_verdict_caught_separately);
+    HU_RUN_TEST(test_aggregate_malformed_line_is_noop);
+    HU_RUN_TEST(test_aggregate_null_args_no_crash);
 }

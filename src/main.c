@@ -556,6 +556,7 @@ static const hu_command_t commands[] = {
     {"drafts", "Generate predictive draft suggestions for a contact", cmd_drafts},
     {"narrate", "Generate a long-horizon narrative for a contact from chat.db", cmd_narrate},
     {"autoresponder", "Manage the DND autoresponder (digest of recent replies)", cmd_autoresponder},
+    {"initiative", "Inspect init_proposer JSONL (log | status)", cmd_initiative},
     {"export-dpo", "Export collector dpo_pairs to JSONL for LoRA fine-tuning (M3)", cmd_export_dpo},
     {"workspace", "Workspace management", cmd_workspace},
     {"config", "Configuration reference (schema)", cmd_config},

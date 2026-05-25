@@ -21,6 +21,9 @@ hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_evaluation(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_setup(hu_allocator_t *alloc, int argc, char **argv);
+/* `human initiative <log|status>` — read-only views of the JSONL written
+ * by the init_proposer subsystem. Impl in src/agent/init_outcome.c. */
+hu_error_t cmd_initiative(hu_allocator_t *alloc, int argc, char **argv);
 /* Emits `human setup local-model` report to `out` (stdout from cmd_setup); used by tests. */
 hu_error_t hu_cli_setup_local_model_emit(FILE *out);
 #ifdef HU_ENABLE_FEEDS
