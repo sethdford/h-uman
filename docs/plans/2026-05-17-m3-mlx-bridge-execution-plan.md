@@ -187,14 +187,40 @@ What's NOT shipped:
   - Test: `test_mlx_provider.c::test_mlx_chat_greedy_completion_matches_fixture`.
   - Plus an adapter-side test: `test_ml.c::test_m3_probe_count_advances_once_per_chat`.
 
-## Phase B4 — Streaming (NOT STARTED — biggest remaining single piece)
+## Phase B4 — Streaming (SHIPPED through Sprint 55 Phase 3 — 2026-05-25 PM refresh)
 
-**Status refresh 2026-05-25:** `mlx_vtable.stream_chat` is NULL.
-`supports_streaming` returns false. This is the single biggest user-
-visible gap: chat through MLX always blocks for the full subprocess
-duration (~seconds per response on small models, many seconds on
-larger). Streaming would change the UX from "the app freezes for 8
-seconds" to "you see tokens as they arrive."
+**Status refresh 2026-05-25 (PM):** Status from the earlier 2026-05-25
+refresh below is OUTDATED. Reality:
+
+- `mlx_vtable.stream_chat = mlx_stream_chat` IS wired (src/providers/mlx.c:852).
+- `supports_streaming` returns true when HU_MLX_SUBPROCESS_ACTIVE.
+- Phase 1 shipped in Sprint 54 commit `034fb7c2` (vtable + 14 tests).
+- Phase 2 shipped in Sprint 55 commit `e86a08a2` (UTF-8 chunk-safety
+  helpers extracted to src/providers/mlx_stream_utf8.c + 16 unit tests
+  pinning the partial-codepoint contract).
+- Phase 3 shipped in Sprint 55 commits `324d6024` + `3badf6e6`
+  (env-gated live mlx_lm subprocess integration script;
+  proven locally at 109 tok/s against the 26B MoE model).
+
+The "biggest user-visible gap" claim is also outdated — daemon
+production traffic goes through mlx_local (HTTP server on port 8741),
+NOT through mlx_run_subprocess. The subprocess streaming path is now
+fully wired but exercised primarily for batch / offline use cases.
+The HTTP path is what the live daemon hits, and that path is
+streaming-capable via mlx_server.py.
+
+What remains for B4: convert the production daemon's mlx_local path
+to consume streamed tokens (latency win) rather than waiting for the
+full response. That's a different design (mlx_server SSE response
+shape) and a separate spec — not "wire streaming for the subprocess."
+
+### Original 2026-05-25 AM status (kept for history)
+
+`mlx_vtable.stream_chat` was reported NULL.
+`supports_streaming` was reported false. The "biggest user-visible gap"
+framing applied when this section was written before the Sprint 54
+US-M3-B4 Phase 1 work landed. See Sprint 54 retro + audit for the
+honest narrative.
 
 This phase is the next high-leverage M3 work after B3's verifier-
 contract tests land.
@@ -299,7 +325,7 @@ days. Reality vs the plan as written:
 | B1     | NOT STARTED            | ✅ Subprocess implementation SHIPPED; verifier-contract test owed |
 | B2     | depends on B1 (~1 week) | PARTIAL — ctx + create + path threading shipped; verifier-contract test owed |
 | B3     | depends on B2 (~2 weeks)| ✅ Inference call SHIPPED; verifier-contract test owed; probe-counter outcome metadata owed |
-| B4     | depends on B3 (~1 week) | ❌ NOT STARTED — vtable.stream_chat is NULL |
+| B4     | depends on B3 (~1 week) | ✅ Phase 1-3 SHIPPED via Sprint 54 + 55 (vtable wired + UTF-8 helpers extracted + live script proven) — see Phase B4 section above |
 | B5     | depends on B3 (~1 week) | ✅ load/active/unload adapter SHIPPED + 3 unit tests; bias-measurement verifier-contract test owed |
 
 **The narrative inversion:** the M3 plan reads as "B1 → B2 → B3 → B4 → B5"
